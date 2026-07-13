@@ -807,6 +807,29 @@ def subir_plantilla():
     return jsonify(resumen)
 
 
+def _deteccion_base_cached(pid, talle_ref):
+    """`MP.detectar_piezas` (lo CARO: get_drawings de TODO el molde, ~2.3s) CACHEADO a disco por
+    (mtime plantilla, talle). NO depende de la variable ni del diseño → un solo cálculo por
+    (molde, talle) sirve a todas. Antes se recalculaba en CADA `/api/plantilla/deteccion` (19×
+    al asignar variantes = ~85s). El caché lo baja a 1× por talle (y el pool los pre-genera)."""
+    pl = _ruta_entrada("plantilla.ai", pid)
+    try: mt = int(os.path.getmtime(pl))
+    except OSError: mt = 0
+    cdir = _ruta_datos("deteccion_cache", pid)
+    fp = os.path.join(cdir, re.sub(r"[^A-Za-z0-9_-]+", "_", f"{mt}_{talle_ref or 'auto'}") + ".json")
+    try:
+        return json.load(open(fp, encoding="utf-8"))
+    except Exception:
+        pass
+    res = MP.detectar_piezas(pl, talle_ref=talle_ref)
+    try:
+        os.makedirs(cdir, exist_ok=True)
+        json.dump(res, open(fp, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+    return res
+
+
 @app.get("/api/plantilla/deteccion")
 def plantilla_deteccion():
     """Detecta las piezas de la moldería para el etiquetador visual."""
@@ -814,22 +837,22 @@ def plantilla_deteccion():
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí la plantilla base"}), 409
     talle_ref = request.args.get("talle_ref")
+    _pid_act = _get_active_producto_id()
     if not talle_ref:
         # Sin pedido explícito → usar la variante de guía guardada en la base
         # para este molde (compartida entre todos los usuarios). Así, elija quien
         # elija M, siempre se abre en M sin importar el navegador.
-        pid = _get_active_producto_id()
-        prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+        prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == _pid_act), None)
         if prod and prod.get("variante_guia"):
             talle_ref = prod["variante_guia"]
     try:
-        res = MP.detectar_piezas(pl, talle_ref=talle_ref)
+        res = _deteccion_base_cached(_pid_act, talle_ref)
     except Exception:
         # La variante guardada puede ya no existir en la plantilla → reintentar
         # con la automática para no romper la carga.
         if talle_ref:
             try:
-                res = MP.detectar_piezas(pl, talle_ref=None)
+                res = _deteccion_base_cached(_pid_act, None)
             except Exception as e:
                 return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
         else:
@@ -1521,6 +1544,16 @@ def _render_talle_worker(args):
     except Exception:
         return None
 
+def _deteccion_talle_worker(args):
+    """WORKER de proceso: pre-genera la DETECCIÓN de piezas de UN talle → caché en disco.
+    Es lo caro del visor (get_drawings de todo el molde); en paralelo, no 19× secuencial."""
+    pid, talle = args
+    try:
+        _deteccion_base_cached(pid, talle)
+        return talle
+    except Exception:
+        return None
+
 @app.post("/api/arte/asignar_todo")
 def arte_asignar_todo():
     """Genera EN PARALELO (ProcessPool) el render de TODOS los talles de una variable → caché
@@ -1546,9 +1579,13 @@ def arte_asignar_todo():
         try:
             from concurrent.futures import as_completed
             pool = _get_render_pool()
+            # RENDERS (por variable) + DETECCIONES (por molde, para el visor) — ambos en paralelo.
             futs = [pool.submit(_render_talle_worker, (pid, diseno, variante, str(t), _mapeo_arg)) for t in talles]
+            det = [pool.submit(_deteccion_talle_worker, (pid, str(t))) for t in talles]
             for _f in as_completed(futs):
                 _ASIGNAR_JOBS[job]["hecho"] += 1
+            for _f in as_completed(det):   # esperar también las detecciones (para que el front no las recalcule)
+                pass
         except Exception as e:
             _ASIGNAR_JOBS[job]["error"] = str(e)
         finally:
@@ -1780,8 +1817,13 @@ def _editables_cfg(prod, dslug, override=None):
         else:                                                     # NUEVO: var es una VARIABLE
             out[var] = {obj: dict(v.get("transforms") or {}) for obj, v in (objs or {}).items()}
     for var, objs in (override or {}).items():                    # override = {variable: {objeto: {talle: tf}}}
+        if not objs:
+            continue                                              # override VACÍO → no cambia nada (no ensuciar
+                                                                  # la clave de caché: {v:{}} != None hacía cache MISS)
         o = out.setdefault(var, {})
         for obj, tfs in (objs or {}).items():
+            if not tfs:
+                continue
             oo = o.setdefault(obj, {})
             for talle, tf in (tfs or {}).items():
                 oo[talle] = _clamp_tf(tf)
@@ -3535,7 +3577,21 @@ if __name__ == "__main__":
         except Exception:
             pass
     threading.Thread(target=_precalentar_nido, daemon=True).start()
-    # use_reloader=True: el servidor se reinicia SOLO cuando cambia el código.
-    # Así no hay que cerrar y reabrir a mano al actualizar (se acabó el "servidor
-    # desactualizado"). Tras un único reinicio con esta versión, queda automático.
-    app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=True)
+    # ⚡ DUAL-STACK IPv4 + IPv6 — CRÍTICO para la velocidad. En Windows "localhost" resuelve a
+    # ::1 (IPv6) ANTES que a 127.0.0.1: si el server solo escucha IPv4, CADA request a
+    # http://localhost paga ~2s de retry (con ~40 requests al asignar variantes = >1 minuto de
+    # puro timeout). Escuchando también en ::1, "localhost" responde al instante. Medido:
+    # localhost 2.08s/req → 0.02s/req. (El reloader se pierde con make_server → TIZADA_RELOAD=1
+    # para volver a app.run con auto-reload en desarrollo, escuchando solo IPv4.)
+    if os.environ.get("TIZADA_RELOAD") == "1":
+        app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=True)
+    else:
+        from werkzeug.serving import make_server
+        def _serve(h, principal=False):
+            try:
+                make_server(h, port, app, threaded=True).serve_forever()
+            except Exception as e:
+                if principal: raise
+                print(f"  (aviso: no se pudo escuchar en [{h}]: {e})")
+        threading.Thread(target=lambda: _serve("::1"), daemon=True).start()   # IPv6 (localhost→::1)
+        _serve(host, principal=True)                                          # IPv4 (bloquea)
