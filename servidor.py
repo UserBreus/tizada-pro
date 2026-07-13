@@ -1464,8 +1464,10 @@ def arte_preview_piezas():
         return jsonify({"error": "falta plantilla/arte/registro"}), 409
     # PRE-WARM en background del RESTO de talles de esta variable (mismo mapeo, sin override):
     # una vez cargado el diseño, navegar entre talles es INSTANTÁNEO (todo queda en disco).
-    # Se deduplica por clave para no lanzar la misma tanda dos veces.
-    if override is None and not _es_bg:
+    # Se deduplica por clave para no lanzar la misma tanda dos veces. Se SALTA cuando el front
+    # avisa `sin_prewarm` (la ventana "Asignando…" ya recorre TODOS los talles fg → el pre-warm
+    # sería trabajo redundante compitiendo por el mismo lock y serializándolo todo).
+    if override is None and not _es_bg and not cuerpo.get("sin_prewarm"):
         try:
             _otros = [t for t in _variantes_molde(pid) if str(t) != talle]
             _pwk = (pid, str(diseno or ""), variante, _sha1_corto(_mapeo_arg))

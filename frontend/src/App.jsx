@@ -3640,7 +3640,8 @@ export default function App() {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t })
+              // sin_prewarm: esta ventana YA recorre todos los talles → el pre-warm del server sería redundante
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
           } catch (e) { /* sigue con el próximo talle */ }

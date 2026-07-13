@@ -2761,12 +2761,21 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # `generar_pieza` solo le ESTAMPA encima el nombre/número + la etiqueta (que cambian por
     # prenda). Mismo resultado que armar todo junto, sin recomputar el diseño en cada prenda.
     _base_cache = {}
+    # CACHÉ de contornos del molde por (mesa, talle): `extraer_piezas_mesa` devuelve TODAS las piezas
+    # de la mesa (135 en la Camiseta) y es caro (get_drawings del molde). Antes se llamaba una vez POR
+    # PIEZA generada (9+) con los MISMOS args → extraía las 135 N veces. Cacheado = 1 sola extracción
+    # por (mesa, talle), las piezas toman su índice. Gran ahorro en el preview/tizada (todos los talles).
+    _piezas_mesa_cache = {}
     def _armar_base(pieza, talle, variante):
         info = registro[pieza][talle]
         mesa = info["mesa"]
         _mesa_a = mesa_arte(pieza, talle, variante) if mapeo_arte else None
         if "pieza_idx" in info:                 # etiquetado visual: pieza puntual de la mesa
-            cont = extraer_piezas_mesa(base_doc, mesa, talle)[info["pieza_idx"]]
+            _pmk = (mesa, talle)
+            _pm = _piezas_mesa_cache.get(_pmk)
+            if _pm is None:
+                _pm = extraer_piezas_mesa(base_doc, mesa, talle); _piezas_mesa_cache[_pmk] = _pm
+            cont = _pm[info["pieza_idx"]]
         else:                                   # etiquetas de texto: el contorno mayor
             cont = extraer_contorno_mesa(base_doc, mesa=mesa, talle=talle)
         x0, y0, _, _ = cont["bbox_raw"]
