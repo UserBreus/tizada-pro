@@ -1490,6 +1490,78 @@ def arte_preview_piezas():
     return jsonify(res)
 
 
+# ── ASIGNAR TODAS LAS VARIANTES EN PARALELO (multiproceso) ───────────────────
+# PyMuPDF NO es thread-safe (crashea) → se generan los talles en PROCESOS separados
+# (recomendación verificada, doc oficial). Cada worker hace su pipeline completo (fitz +
+# pikepdf + SVG) sin cruzar objetos, y escribe el render al caché en disco. El ProcessPool
+# es PERSISTENTE (el spawn en Windows re-importa el módulo; crearlo una vez amortiza).
+_RENDER_POOL = None
+_RENDER_POOL_LOCK = threading.Lock()
+_ASIGNAR_JOBS = {}          # job_id -> {"hecho": n, "total": N, "done": bool}
+
+def _get_render_pool():
+    global _RENDER_POOL
+    with _RENDER_POOL_LOCK:
+        if _RENDER_POOL is None:
+            from concurrent.futures import ProcessPoolExecutor
+            _RENDER_POOL = ProcessPoolExecutor(max_workers=min((os.cpu_count() or 4), 6))
+    return _RENDER_POOL
+
+def _render_talle_worker(args):
+    """WORKER de proceso: genera UN talle → caché en disco. Recibe SOLO tipos simples
+    (spawn-safe), no cruza objetos fitz/pikepdf entre procesos. El env TIZADA_* lo hereda
+    del proceso padre (spawn hereda el entorno). Devuelve el talle (o None si falló)."""
+    pid, diseno, variante, talle, mapeo_arg = args
+    try:
+        prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+        reg = _cargar("registro_producto.json", pid)
+        if prod and reg:
+            _piezas_base(pid, diseno, variante, talle, mapeo_arg, prod, reg)
+        return talle
+    except Exception:
+        return None
+
+@app.post("/api/arte/asignar_todo")
+def arte_asignar_todo():
+    """Genera EN PARALELO (ProcessPool) el render de TODOS los talles de una variable → caché
+    en disco. Devuelve un job_id; el progreso se consulta en /api/arte/asignar_estado. Después
+    el front pide cada talle (sale del caché, instantáneo) para cargarlo a su memoria."""
+    cuerpo = request.get_json(force=True) or {}
+    diseno = cuerpo.get("diseno"); variante = str(cuerpo.get("variante") or "").strip()
+    mapeo = {k: int(v) for k, v in (cuerpo.get("mapeo") or {}).items() if v}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    reg = _cargar("registro_producto.json", pid)
+    if not prod or not reg:
+        return jsonify({"error": "falta producto/registro"}), 409
+    _b, _ = _mapeo_estructura(pid, sub=_diseno_sub(diseno))
+    _mapeo_arg = {"mapeo": (_b or mapeo), "por_variable": ({variante: mapeo} if variante else {})}
+    talles = _variantes_molde(pid)
+    job = uuid.uuid4().hex[:8]
+    _ASIGNAR_JOBS[job] = {"hecho": 0, "total": len(talles), "done": False}
+    if len(_ASIGNAR_JOBS) > 40:   # no acumular jobs viejos
+        for k in [k for k, v in list(_ASIGNAR_JOBS.items()) if v.get("done")][:20]:
+            _ASIGNAR_JOBS.pop(k, None)
+    def _run():
+        try:
+            from concurrent.futures import as_completed
+            pool = _get_render_pool()
+            futs = [pool.submit(_render_talle_worker, (pid, diseno, variante, str(t), _mapeo_arg)) for t in talles]
+            for _f in as_completed(futs):
+                _ASIGNAR_JOBS[job]["hecho"] += 1
+        except Exception as e:
+            _ASIGNAR_JOBS[job]["error"] = str(e)
+        finally:
+            _ASIGNAR_JOBS[job]["done"] = True
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"job": job, "total": len(talles)})
+
+@app.get("/api/arte/asignar_estado")
+def arte_asignar_estado():
+    st = _ASIGNAR_JOBS.get(request.args.get("job"))
+    return jsonify(st or {"error": "job desconocido", "done": True})
+
+
 # ── Diseños nombrados por molde ──────────────────────────────────────────────
 # Un molde puede tener varios DISEÑOS (artes con nombre). "Principal" es el arte
 # base del molde (carpeta raíz). Los demás viven en datos/entrada .../disenos/<slug>/.

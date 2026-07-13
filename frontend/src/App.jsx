@@ -3630,8 +3630,30 @@ export default function App() {
     const talles = etqData?.talles || estado?.talles || [];
     if (!pid || !clave || !talles.length || !mapeo || !Object.keys(mapeo).length) return;
     _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
-    setAsignando({ hecho: 0, total: talles.length, talle: String(talles[0] || '') });
+    setAsignando({ hecho: 0, total: talles.length, talle: '' });
+    const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
     try {
+      // GENERACIÓN EN PARALELO en el server (ProcessPool, ~4x): un endpoint arma TODOS los talles
+      // a la vez y el front hace polling del progreso. PyMuPDF no es thread-safe → multiproceso.
+      let usoParalelo = false;
+      try {
+        const r = await fetch('/api/arte/asignar_todo', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo })
+        });
+        if (r.ok) {
+          const { job, total } = await r.json();
+          usoParalelo = true;
+          for (let guard = 0; guard < 2000; guard++) {   // polling del progreso (hasta ~16min)
+            await _sleep(500);
+            let s; try { s = await (await fetch('/api/arte/asignar_estado?job=' + job)).json(); } catch (e) { break; }
+            setAsignando({ hecho: s.hecho || 0, total: total || talles.length, talle: '' });
+            if (s.done) break;
+          }
+        }
+      } catch (e) { usoParalelo = false; }
+      // Cargar los renders (ya en caché de disco) + geometría a la MEMORIA del navegador
+      // → el cambio entre variantes queda instantáneo. Salen del caché, es rápido.
       for (let i = 0; i < talles.length; i++) {
         const t = talles[i];
         setAsignando({ hecho: i, total: talles.length, talle: String(t) });
@@ -3640,7 +3662,6 @@ export default function App() {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              // sin_prewarm: esta ventana YA recorre todos los talles → el pre-warm del server sería redundante
               body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
@@ -3652,7 +3673,7 @@ export default function App() {
             if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
           } catch (e) { /* sigue */ }
         }
-        setAsignando({ hecho: i + 1, total: talles.length, talle: String(t) });
+        setAsignando({ hecho: talles.length, total: talles.length, talle: String(t) });
       }
     } finally { setAsignando(null); }
   };
