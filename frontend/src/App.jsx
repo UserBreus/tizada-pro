@@ -3589,18 +3589,72 @@ export default function App() {
   // el re-dibujo JS de placeholder); después es instantáneo desde el caché. El visor MUESTRA ese SVG
   // (no lo re-dibuja). Si falla o aún no está, cae al re-dibujo JS. `_pvReq` descarta respuestas viejas.
   const _pvReq = React.useRef(0);
+  // PRECARGA TOTAL DE TALLES: los renders reales de TODOS los talles se guardan en MEMORIA
+  // (además del caché en disco del server) y la geometría del molde por talle también →
+  // cambiar de talle es un intercambio instantáneo, sin fetch y sin contornos vacíos.
+  const _pvCache = React.useRef({});        // clave(pid|diseño|variable|talle|mapeo|edits) → piezas
+  const _talleDetCache = React.useRef({});  // `${pid}|${talle}` → /api/plantilla/deteccion de ese talle
+  const _prefetchTok = React.useRef(0);     // aborta una precarga vieja si cambió el contexto
+  const _pvKeyCon = (mapeo, talle) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}`;
+  const _pvKeyDe = (talle) => _pvKeyCon(mapeoValores, talle);
+  const _pvGuardar = (k, piezas) => {
+    if (Object.keys(_pvCache.current).length > 300) _pvCache.current = {};   // tope de memoria
+    _pvCache.current[k] = piezas;
+  };
+  // Precarga en background del RESTO de los talles (render + geometría). Corre tras cargar el
+  // talle actual; el server ya los tiene en disco (pre-warm) → cada pedido es rápido. Con
+  // ediciones de editables SIN guardar (override) no se precarga (cambia con cada arrastre).
+  const _prefetchTalles = (mapeo, talleActual) => {
+    const pid = productosCat.activo, clave = verVariante, dis = disenoActivo;
+    if (Object.keys(editorTfs || {}).length) return;
+    const talles = (etqData?.talles || estado?.talles || []).filter(t => String(t) !== String(talleActual || ''));
+    if (!talles.length) return;
+    const tok = ++_prefetchTok.current;
+    (async () => {
+      for (const t of talles) {
+        if (tok !== _prefetchTok.current) return;         // cambió variable/mapeo/talle → abortar
+        const k = _pvKeyCon(mapeo, t);
+        if (!_pvCache.current[k]) {
+          try {
+            const res = await fetch('/api/arte/preview_piezas', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t })
+            });
+            if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
+          } catch (e) { /* siguiente talle */ }
+        }
+        if (!_talleDetCache.current[`${pid}|${t}`]) {
+          try {
+            const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(t));
+            if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
+          } catch (e) { /* siguiente */ }
+        }
+      }
+    })();
+  };
   const cargarPreviewPiezas = async (mapeoOverride) => {
     const pid = productosCat.activo, clave = verVariante;
     if (pedidoPaso !== 'arte' || !pid || !clave) { setPreviewPiezas({}); setTalleCambiando(false); return; }
     const mapeo = mapeoOverride || mapeoValores;
+    const talle = etqData?.talle_ref;
+    const k = _pvKeyCon(mapeo, talle);
+    const hit = _pvCache.current[k];
+    if (hit) {   // EN MEMORIA → instantáneo (sincrónico: se pinta en el mismo frame, sin blanco)
+      setPreviewPiezas(hit); setTalleCambiando(false);
+      _prefetchTalles(mapeo, talle);
+      return;
+    }
     const req = ++_pvReq.current;
     try {
       const res = await fetch('/api/arte/preview_piezas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid, diseno: disenoActivo, variante: clave, mapeo, editables: { [clave || '*']: editorTfs }, talle: etqData?.talle_ref })   // override de editables POR VARIABLE (clave) + el TALLE que se ve
+        body: JSON.stringify({ pid, diseno: disenoActivo, variante: clave, mapeo, editables: { [clave || '*']: editorTfs }, talle })   // override de editables POR VARIABLE (clave) + el TALLE que se ve
       });
       if (req !== _pvReq.current) return;                 // llegó una respuesta vieja → descartar
-      if (res.ok) { const d = await res.json(); if (req === _pvReq.current) setPreviewPiezas(d.piezas || {}); }
+      if (res.ok) {
+        const d = await res.json();
+        if (req === _pvReq.current) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas); _prefetchTalles(mapeo, talle); }
+      }
     } catch (e) { /* cae al re-dibujo JS */ }
     finally { if (req === _pvReq.current) setTalleCambiando(false); }   // llegó el talle nuevo → dibujar
   };
@@ -3624,15 +3678,27 @@ export default function App() {
   }, [mapeoValores, verVariante, disenoActivo, pedidoPaso, productosCat.activo, editorTfs]);
   // Ver cómo queda el diseño en una VARIANTE (talle): re-detecta el molde a ese talle.
   const verVarianteOperario = async (talle) => {
-    // Al TOCAR un talle, el visor pasa YA a contornos neutros (nada de mostrar el diseño del
-    // talle anterior ni editables flotando mientras llega el nuevo). Se despeja cuando llega
-    // el render del talle nuevo (cargarPreviewPiezas). Solo en el flujo Pedidos→Arte y solo
-    // si el talle realmente CAMBIA (si no, no habría preview nuevo que lo despeje).
+    const pid = productosCat.activo;
     const _cambia = activoTab === 'pedidos' && pedidoPaso === 'arte' && String(talle) !== String(etqData?.talle_ref || '');
-    if (_cambia) setTalleCambiando(true);
+    // PRECARGA TOTAL: si el render del talle destino YA está en memoria, el cambio es un
+    // intercambio instantáneo (geometría + render en el MISMO frame: nada de neutro ni fetch).
+    // Solo si aún no está precargado (1ª vez) se pasa a contornos neutros hasta que llegue.
+    const _prevHit = _cambia ? _pvCache.current[_pvKeyDe(talle)] : null;
+    const _detHit = _talleDetCache.current[`${pid}|${talle}`];
+    if (_cambia && !_prevHit) setTalleCambiando(true);
+    if (_detHit) {
+      setEtqData(_detHit); setEtqNombres(_detHit.nombres_existentes || {});
+      if (_prevHit) setPreviewPiezas(_prevHit);
+      return;
+    }
     try {
       const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(talle));
-      if (r.ok) { const data = await r.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
+      if (r.ok) {
+        const data = await r.json();
+        _talleDetCache.current[`${pid}|${talle}`] = data;
+        setEtqData(data); setEtqNombres(data.nombres_existentes || {});
+        if (_prevHit) setPreviewPiezas(_prevHit);
+      }
       else if (_cambia) setTalleCambiando(false);   // no cambió nada → no dejar el visor en neutro
     } catch (e) { if (_cambia) setTalleCambiando(false); /* mantiene la variante actual */ }
   };
@@ -3739,6 +3805,7 @@ export default function App() {
       const res = await fetch('/api/arte', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al procesar el diseño');
+      _pvCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar los renders precargados (serían del arte viejo)
       setArteCargado(prev => ({ ...prev, [disenoActivo + '|' + id]: true }));
       avisarPerfilDiseno(disenoActivo, id);   // dispara YA el cartel del perfil (no espera los refrescos)
       // Si es un diseño NO principal, lo registro en el molde para que aparezca
