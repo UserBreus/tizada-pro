@@ -1268,6 +1268,8 @@ export default function App() {
   // Previsualizador Vectorial Zoom
   const [zoomPreviewUrl, setZoomPreviewUrl] = useState(null);
   const [zoomState, setZoomState] = useState({ zoom: 1.0, pan: { x: 0, y: 0 } });
+  // Espacio infinito de las MESAS de trabajo (resultado de la tizada): pan (arrastrar) + zoom (rueda).
+  const [mesasView, setMesasView] = useState({ zoom: 1, panX: 0, panY: 0 });
   const zoomLevel = zoomState.zoom;
   const panOffset = zoomState.pan;
   const [esArrastrando, setEsArrastrando] = useState(false);
@@ -5658,49 +5660,55 @@ export default function App() {
                           ))}
                         </div>
                       )}
-                      {/* LIENZO tipo espacio infinito: todas las mesas, una al lado de la otra, wrap al pasar el ancho */}
-                      <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 20, maxHeight: '74vh', overflow: 'auto',
-                        background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px' }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignContent: 'flex-start' }}>
-                          {mesas.flatMap((hoja, hi) => {
-                            // UNA tarjeta por PÁGINA física: cada página del PDF es una MESA de tela
-                            // separada (un corte de ese alto). Antes 1 tarjeta por tela mostraba solo la
-                            // 1ª página (previews[0]) → parecía que "faltaban" los modelos del resto.
-                            const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
-                            const urlPdf = `/trabajos/${job.resultado.id}/${hoja.archivo}`;
-                            return pvs.map((pv, pi) => {
-                              const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
-                              const nMesas = pvs.length;
-                              return (
-                              <div key={hi + '-' + pi} style={{ width: 244, background: 'var(--bg-secondary, #141417)', border: '1px solid var(--border-light)', borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 6px 20px rgba(0,0,0,0.35)' }}>
-                                {/* VISOR de tamaño FIJO: la mesa se escala a contener; botón descargar ADENTRO */}
-                                <div style={{ position: 'relative', height: 312, background: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: pv ? 'pointer' : 'default' }}
-                                  onClick={() => { if (pv) { setZoomPreviewUrl(`/trabajos/${job.resultado.id}/${pv}`); setZoomState({ zoom: 1, pan: { x: 0, y: 0 } }); setEsArrastrando(false); } }}>
-                                  {pv
-                                    ? <img src={`/trabajos/${job.resultado.id}/${pv}`} alt="Mesa de trabajo" title="Click para ampliar"
-                                        style={{ maxWidth: '90%', maxHeight: '92%', objectFit: 'contain', display: 'block', borderRadius: 3 }} />
-                                    : <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Sin vista previa</span>}
-                                  {nMesas > 1 && <span style={{ position: 'absolute', top: 8, left: 8, fontSize: 10.5, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: 'rgba(0,216,245,0.85)', color: '#000' }}>Mesa {pi + 1}/{nMesas}</span>}
-                                  <a className="btn" href={urlPdf} download title="Descargar PDF (todas las mesas de esta tela)" onClick={(e) => e.stopPropagation()}
-                                    style={{ position: 'absolute', top: 8, right: 8, padding: '7px 9px', fontSize: 11.5, background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 9, color: '#fff', display: 'flex', alignItems: 'center', gap: 5 }}>
-                                    <Icon name="download" style={{ width: 13, height: 13 }} />
-                                  </a>
-                                </div>
-                                {/* Rótulo de la mesa (afuera del visor, dentro de la tarjeta) */}
-                                <div style={{ padding: '10px 12px' }}>
-                                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hoja.moldes?.length ? hoja.moldes.join(' + ') : 'Mesa de trabajo'}{nMesas > 1 ? ` · Mesa ${pi + 1}` : ''}</div>
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginTop: 5 }}>
-                                    📐 {hoja.ancho_cm ? (hoja.ancho_cm / 100).toFixed(2) : '—'} × {(altoCm / 100).toFixed(2)} m
-                                    <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 10.5 }}> (ancho × largo)</span>
+                      {/* ESPACIO INFINITO (como el visor del molde): pan = arrastrar el fondo, zoom = rueda.
+                          Cada MESA a ESCALA REAL entre sí (mismo px/metro), SIN marco: solo la hoja con el
+                          botón Descargar y el nombre arriba, y el tamaño (ancho × alto) abajo. */}
+                      <div style={{ position: 'relative' }}>
+                        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
+                          <button type="button" onClick={() => setMesasView({ zoom: 1, panX: 0, panY: 0 })} title="Ver todo" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Ver todo</button>
+                          <button type="button" onClick={() => setMesasView(v => ({ ...v, zoom: Math.max(0.15, v.zoom / 1.25) }))} title="Alejar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>−</button>
+                          <button type="button" onClick={() => setMesasView(v => ({ ...v, zoom: Math.min(8, v.zoom * 1.25) }))} title="Acercar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>+</button>
+                        </div>
+                        <div
+                          onWheel={(e) => { e.preventDefault(); const b = e.currentTarget.getBoundingClientRect(); const mx = e.clientX - b.left, my = e.clientY - b.top; setMesasView(v => { const f = e.deltaY < 0 ? 1.12 : 1 / 1.12; const nz = Math.max(0.15, Math.min(8, v.zoom * f)); const k = nz / v.zoom; return { zoom: nz, panX: mx - (mx - v.panX) * k, panY: my - (my - v.panY) * k }; }); }}
+                          onMouseDown={(e) => { if (e.button !== 0 || (e.target.closest && e.target.closest('a,button,img'))) return; const sx = e.clientX, sy = e.clientY, px = mesasView.panX, py = mesasView.panY; const mv = (ev) => setMesasView(v => ({ ...v, panX: px + (ev.clientX - sx), panY: py + (ev.clientY - sy) })); const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); }}
+                          style={{ position: 'relative', height: '74vh', overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
+                          <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${mesasView.panX}px, ${mesasView.panY}px) scale(${mesasView.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
+                            {mesas.flatMap((hoja, hi) => {
+                              // Cada PÁGINA del PDF = una MESA física de tela (corte de ese alto).
+                              const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
+                              const urlPdf = `/trabajos/${job.resultado.id}/${hoja.archivo}`;
+                              return pvs.map((pv, pi) => {
+                                const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
+                                const anchoCm = hoja.ancho_cm || 180;
+                                const nMesas = pvs.length;
+                                const PXM = 46;   // px por metro: ESCALA REAL común a todas las mesas
+                                const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
+                                const nombre = (hoja.moldes?.length ? hoja.moldes.join(' + ') : 'Mesa de trabajo') + (nMesas > 1 ? ` · Mesa ${pi + 1}` : '');
+                                return (
+                                  <div key={hi + '-' + pi} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                                    {/* ARRIBA: nombre + botón descargar */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: Math.max(w, 140) }}>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</span>
+                                      <a href={urlPdf} download title="Descargar PDF" onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', fontSize: 11, fontWeight: 700, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
+                                        <Icon name="download" style={{ width: 12, height: 12 }} /> Descargar
+                                      </a>
+                                    </div>
+                                    {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
+                                    {pv
+                                      ? <img src={`/trabajos/${job.resultado.id}/${pv}`} alt={nombre} title="Click para ampliar" draggable={false}
+                                          onClick={() => { setZoomPreviewUrl(`/trabajos/${job.resultado.id}/${pv}`); setZoomState({ zoom: 1, pan: { x: 0, y: 0 } }); setEsArrastrando(false); }}
+                                          style={{ width: w, height: h, display: 'block', cursor: 'zoom-in' }} />
+                                      : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
+                                    {/* ABAJO: tamaño ancho × alto */}
+                                    <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+                                      {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
+                                    </div>
                                   </div>
-                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
-                                    Tela {hoja.tela} · {hoja.aprovechamiento}% de aprovechamiento
-                                  </div>
-                                </div>
-                              </div>
-                              );
-                            });
-                          })}
+                                );
+                              });
+                            })}
+                          </div>
                         </div>
                       </div>
                     </div>
