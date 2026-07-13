@@ -1724,6 +1724,23 @@ export default function App() {
   const irAPlanillaDesdeArte = async () => {
     if (!todasArteCargadas) return;
     if (bloqueaPorSinDiseno()) return;   // alguna pieza del molde activo sin diseño → no avanza, la marca en rojo
+    // SINCRONIZAR el diseño de las filas con lo PREPARADO: una fila cuyo diseño NO esté entre los
+    // que el usuario preparó en este pedido (`disenosPedido`) — ej. un valor viejo/vacío pegado en
+    // la planilla — se corrige al diseño activo. Así la tizada usa lo que preparaste, no otro/vacío.
+    const _disCol = cols.find(c => c.role === 'diseno');
+    if (_disCol && disenosPedido.length) {
+      const _validos = new Set(disenosPedido.map(d => d.nombre).filter(Boolean));
+      const _nomActivo = (disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre;
+      if (_nomActivo) {
+        setFilas(prev => prev.map(f => {
+          // UN solo diseño preparado → TODAS las filas usan ese (sin importar el valor viejo).
+          // Varios → se respeta el de la fila si es uno de los preparados; si no, al activo.
+          const _usar = (disenosPedido.length === 1) ? _nomActivo
+            : (_validos.has(f[_disCol.id]) ? f[_disCol.id] : _nomActivo);
+          return f[_disCol.id] === _usar ? f : { ...f, [_disCol.id]: _usar };
+        }));
+      }
+    }
     const claves = tareasArte.map(t => t.did + '|' + t.mid);
     const nombres = [...new Set(claves.map(k => perfilesArte[k]?.nombre).filter(Boolean))];
     if (nombres.length > 1) {
@@ -4316,7 +4333,7 @@ export default function App() {
     cols.forEach(c => {
       if (c.role === 'talle') newRow[c.id] = (estado?.talles?.[0] || 'M');
       else if (c.role === 'manga') newRow[c.id] = 'corta';
-      else if (c.role === 'diseno') newRow[c.id] = (disenosPedido[0]?.nombre || 'Principal');
+      else if (c.role === 'diseno') newRow[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');   // fila nueva → el diseño PREPARADO en el Arte (no el 1º de la lista, que puede ser otro/vacío)
       else newRow[c.id] = '';
     });
     setFilas([...filas, newRow]);
@@ -4337,7 +4354,7 @@ export default function App() {
       cols.forEach(c => {
         if (c.role === 'talle') newRow[c.id] = (estado?.talles?.[0] || 'M');
         else if (c.role === 'manga') newRow[c.id] = 'corta';
-        else if (c.role === 'diseno') newRow[c.id] = (disenosPedido[0]?.nombre || 'Principal');
+        else if (c.role === 'diseno') newRow[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');   // fila nueva → el diseño PREPARADO en el Arte (no el 1º de la lista, que puede ser otro/vacío)
         else newRow[c.id] = '';
       });
       setFilas([newRow]);
