@@ -1032,6 +1032,10 @@ def plantilla_etiquetas():
     if not alta["registro"]:
         return jsonify({"error": "; ".join(alta["problemas"]) or "no se registró ninguna pieza"}), 422
     json.dump(alta["registro"], open(_ruta_datos("registro_producto.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    try:  # identidad estable: al re-etiquetar/renombrar piezas, refrescar piezas.json (ids) igual
+        _regenerar_piezas_index(_get_active_producto_id(), reg=alta["registro"])  # que subir_plantilla; si no, _piezas_de_variable (mapeo POR VARIABLE) cae al fallback por idx
+    except Exception:
+        pass
     resumen = {"archivo": (_cargar("resumen_plantilla.json") or {}).get("archivo", "plantilla.ai"),
                "mesas": alta["mesas"], "piezas": alta["piezas"], "talles": alta["talles"],
                "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
@@ -1253,7 +1257,11 @@ def arte_mapeo():
         _pw_vars = [v.get("clave") for v in ((prod or {}).get("variantes") or []) if v.get("clave")] or [""]
         def _prewarm():
             for _vcl in _pw_vars:
-                try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _mapeo_efectivo(base, pv, _vcl), prod, reg, prioridad="bg")
+                # MISMA estructura que el preview interactivo (arte_preview_piezas) para compartir el
+                # caché en disco: {"mapeo": base, "por_variable": {variable: su_mapeo_efectivo}}.
+                _arg = {"mapeo": (base or _mapeo_efectivo(base, pv, _vcl)),
+                        "por_variable": ({_vcl: _mapeo_efectivo(base, pv, _vcl)} if _vcl else {})}
+                try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _arg, prod, reg, prioridad="bg")
                 except Exception: pass
         threading.Thread(target=_prewarm, daemon=True).start()
     except Exception:
@@ -1439,8 +1447,16 @@ def arte_preview_piezas():
     guia = prod.get("variante_guia") or (sorted({t for v in reg.values() for t in v})[0] if reg else "M")
     talle = str(cuerpo.get("talle") or guia)
     _es_bg = bool(cuerpo.get("bg"))   # prefetch del front → NUNCA compite con lo que pide el usuario
+    # ARTE = TIZADA: el preview pasa la MISMA estructura por-variable que la tizada (base + por_variable
+    # de disco), con el mapeo EN VIVO del front reemplazando el de la variable actual. Así el modo
+    # SEPARADO y los rótulos #rango se activan aunque el mapeo de esta variable esté vacío — sin esto,
+    # un mapeo vacío pasaba `None` al motor y caía a modo CLÁSICO (leía la mesa del molde) → el preview
+    # divergía de la tizada. El motor resuelve por `variante_clave` igual que /api/generar*.
+    _b, _ = _mapeo_estructura(pid, sub=_diseno_sub(diseno))
+    _mapeo_arg = ({"mapeo": (_b or mapeo), "por_variable": ({variante: mapeo} if variante else {})}
+                  if (_b or mapeo) else None)
     try:
-        res = _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override,
+        res = _piezas_base(pid, diseno, variante, talle, _mapeo_arg, prod, reg, override,
                            prioridad=("bg" if _es_bg else "fg"))
     except Exception as e:
         return jsonify({"error": f"no se pudo generar el preview: {e}"}), 422
@@ -1452,7 +1468,7 @@ def arte_preview_piezas():
     if override is None and not _es_bg:
         try:
             _otros = [t for t in _variantes_molde(pid) if str(t) != talle]
-            _pwk = (pid, str(diseno or ""), variante, _sha1_corto(mapeo))
+            _pwk = (pid, str(diseno or ""), variante, _sha1_corto(_mapeo_arg))
             with _PREWARM_LOCK:
                 _lanzar = _pwk not in _PREWARM_EN_CURSO
                 if _lanzar:
@@ -1461,7 +1477,7 @@ def arte_preview_piezas():
                 def _pw_talles():
                     try:
                         for _t in _otros:
-                            try: _piezas_base(pid, diseno, variante, str(_t), mapeo, prod, reg, prioridad="bg")
+                            try: _piezas_base(pid, diseno, variante, str(_t), _mapeo_arg, prod, reg, prioridad="bg")
                             except Exception: pass
                     finally:
                         with _PREWARM_LOCK:
