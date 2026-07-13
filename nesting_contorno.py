@@ -271,6 +271,7 @@ def componer_pdf_contorno(colocaciones, cfg, path_salida, etiquetas=True):
     ancho_pag = cfg["ancho_cm"] * CM
     out = fitz.open()
     consumo_cm = 0.0
+    alturas_cm = []   # alto de CADA página (cada página = una MESA física de tela)
     for hoja in colocaciones:
         if not hoja:
             continue
@@ -285,7 +286,8 @@ def componer_pdf_contorno(colocaciones, cfg, path_salida, etiquetas=True):
             if etiquetas:
                 page.insert_text(fitz.Point(x0 + 2, max(y0 - 3, 6)), c["pieza"]["etiqueta"],
                                  fontname="helvetica", fontsize=6, color=(0.4, 0.4, 0.4))
+        alturas_cm.append(round(alto_pag / CM, 1))
         consumo_cm += alto_pag / CM
     out.save(path_salida, deflate=True, garbage=3)
     out.close()
-    return consumo_cm
+    return consumo_cm, alturas_cm

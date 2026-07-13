@@ -3119,7 +3119,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         slug = (prefijo + "".join(c if c.isalnum() else "_" for c in tela))[:48] or "Tela"
         coloc, area = anidar_contorno(piezas, cfg_t)
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
-        consumo = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
+        consumo, alturas_cm = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
         for p in piezas:
             if "doc" in p and p["doc"]:
                 try:
@@ -3153,6 +3153,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         aprov = round(float(100 * area / denom), 1) if denom > 0 else 0.0
         hojas.append({"tela": tela, "archivo": f"HOJA_{slug}.pdf", "paginas": paginas,
                       "consumo_cm": round(float(consumo), 1),
+                      "alturas_cm": alturas_cm,   # alto de CADA página (cada página = una mesa física de tela)
                       "ancho_cm": round(float(cfg_t["ancho_cm"]), 1),  # ancho de la tela (la mesa mide ancho x consumo)
                       "aprovechamiento": aprov,
                       "previews": prevs})
