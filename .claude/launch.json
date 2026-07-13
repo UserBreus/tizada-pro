@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tizada",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["servidor.py"],
+      "port": 8050,
+      "autoPort": true,
+      "env": {
+        "TIZADA_DATOS": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/.preview_sandbox/datos",
+        "TIZADA_ENTRADA": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/.preview_sandbox/entrada",
+        "TIZADA_TRABAJOS": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/.preview_sandbox/trabajos",
+        "TIZADA_FUENTES": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/catalogo_fuentes"
+      }
+    }
+  ]
+}

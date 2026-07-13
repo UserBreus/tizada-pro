@@ -1,0 +1,25 @@
+# DATOS DEL USUARIO — nunca versionar ni revertir (regla dura [[no-revertir-datos-usuario]])
+datos/
+entrada/
+trabajos/
+.preview_sandbox/
+
+# Python
+__pycache__/
+*.pyc
+
+# Frontend: dependencias y build (se regeneran con npm install / npm run build)
+frontend/node_modules/
+frontend/dist/
+
+# Fuentes subidas en runtime
+catalogo_fuentes/subida_*
+
+# Respaldos pesados y logs
+respaldo*.rar
+*.log
+nul
+
+# Sistema
+Thumbs.db
+.DS_Store

@@ -1,0 +1,297 @@
+# 🧠 MAPA DEL SISTEMA — TIZADA PRO
+
+> **Cerebro de Claude.** Léelo ANTES de tocar código. Actualízalo DESPUÉS de cada cambio.
+> Es el mapa holístico del sistema: cómo funciona, qué está enlazado con qué, y qué podés
+> romper si tocás algo (con las alternativas). Complementa las memorias (`~/.claude/.../memory/*.md`),
+> que son hechos por-feature; esto es la foto completa.
+>
+> **Regla de mantenimiento:** cada vez que cambies una pieza del sistema, volvé acá y actualizá
+> la sección correspondiente + el CHANGELOG del final. Si algo de acá ya no es cierto, corregilo.
+
+---
+
+## ▶️ CASO 1 — SI VAS A EJECUTAR EL PROYECTO, HACÉ ESTO (en orden)
+
+> El usuario quiere ver la app con SUS MOLDES REALES. El preview con launch.json usa un
+> SANDBOX (datos de prueba) — NO le sirve al usuario para trabajar. Pasos verificados 2026-07-13:
+
+1. **Liberar el puerto 8050** si hay un server previo:
+   - Si fue un preview MCP: `preview_stop` con su serverId.
+   - Si es un proceso suelto: `netstat -ano | grep ':8050' | grep LISTEN | awk '{print $5}'` → `taskkill //F //PID <pid>` (NUNCA mass-kill).
+2. **Arrancar el server con DATOS REALES** (Bash, `run_in_background: true`):
+   ```
+   cd "/c/Users/user2/Documents/tincho/codigos/TIZADA PRO" && \
+   TIZADA_DATOS="$PWD/datos" TIZADA_ENTRADA="$PWD/entrada" \
+   TIZADA_TRABAJOS="$PWD/trabajos" TIZADA_FUENTES="$PWD/catalogo_fuentes" py servidor.py
+   ```
+3. **Verificar** que responde con el catálogo real: `curl -s http://localhost:8050/api/productos | head -c 600` → debe traer "Camiseta de Futbol"/"COMUNEITOR" (no "Molde 1" solo = sandbox).
+4. **Abrir/recargar el navegador** en `http://localhost:8050` (tab del Browser pane con `navigate`; los screenshots pueden timeoutear — verificar con `get_page_text`).
+5. Recordatorios: tras editar `frontend/src` → `cd frontend && npm run build`; tras editar `.py` → reiniciar el server. Con datos reales: **SOLO lectura y generar** (regla dura §0).
+
+*(El sandbox `preview_start {name:"tizada"}` queda solo para chequeos de consola/carga sin tocar datos reales.)*
+
+---
+
+## 0. Cómo trabajo yo acá (entorno + reglas duras)
+
+- **Plataforma:** Windows 11, PowerShell (primario) + Bash (POSIX). Rutas con `/`.
+- **Frontend:** React (Vite) en `frontend/src/App.jsx`. Se sirve **desde `frontend/dist`** → tras editar `src` hay que `cd frontend && npm run build`. El server sirve el `dist` fresco (no hace falta reiniciarlo por cambios de front, sí por cambios de `.py`).
+- **Server:** `py servidor.py`, puerto **8050** (env `PORT`). Flask `threaded=True` (un request lento NO bloquea otros).
+- **launch.json** (`.claude/launch.json`) apunta a un **SANDBOX** (`.preview_sandbox/datos|entrada|trabajos`, 2 moldes viejos) para **proteger los datos reales** del preview tooling. Para probar con **datos reales** corro:
+  ```
+  TIZADA_DATOS="$PWD/datos" TIZADA_ENTRADA="$PWD/entrada" TIZADA_TRABAJOS="$PWD/trabajos" \
+  TIZADA_FUENTES="$PWD/catalogo_fuentes" nohup py servidor.py > /tmp/srv8050.log 2>&1 &
+  ```
+- **REGLAS DURAS (no negociables):**
+  1. **NUNCA** borrar/sobrescribir datos del usuario (`datos/`, `entrada/`) al probar. Solo **GET** y **generar** (a `trabajos/` o a un `tempfile.mkdtemp()`). Ver [[no-revertir-datos-usuario]].
+  2. Matar servers por **PID específico**: `netstat -ano | grep ':8050' | grep LISTEN | awk '{print $5}'` → `taskkill //F //PID <pid>`. **NUNCA** mass-kill (`taskkill //IM py.exe` está prohibido y lo bloquea el sandbox).
+  3. El **caché derivado** (`piezas_cache/`, `nido_cache.json`) SÍ se puede borrar (se regenera).
+- **Cómo verifico cambios (mi caja de herramientas):**
+  - Generar a un tmp + **renderizar el PDF/SVG a PNG con `fitz`** y mirarlo (`get_pixmap` / `fitz.open(stream=svg, filetype="svg")`).
+  - Para refactors del **motor**: generar la MISMA tizada antes/después y **diff pixel a pixel** con numpy/PIL (`(A-C).max()==0`). Harness: `scratchpad/verif_tizada.py`.
+  - Endpoints: `urllib.request` contra el server, o importar `servidor as S` en un script y llamar funciones directo (setear env ANTES del import).
+  - El preview MCP (`preview_*`) usa el sandbox → sirve para chequear consola/carga, no para la Camiseta real.
+
+---
+
+## 1. Qué es el sistema (en una frase)
+
+App **local** que toma un **MOLDE** (Illustrator `.ai` / PDF / DXF) + un **ARTE** (el diseño) y produce **TIZADAS**: hojas PDF vectoriales con las piezas acomodadas para cortar e imprimir (sublimación). Todo en **medidas reales (cm)**.
+
+---
+
+## 2. Arquitectura (3 capas)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ FRONTEND  frontend/src/App.jsx (8.8k líneas, SPA única)      │  React 19 + Vite
+│   Panel de Pedidos (wizard) + Configuración del molde        │
+└───────────────┬─────────────────────────────────────────────┘
+                │ fetch /api/...
+┌───────────────▼─────────────────────────────────────────────┐
+│ SERVER  servidor.py (3.2k)  Flask, sirve dist + API + caché  │  import motor_pedido as MP
+└───────────────┬─────────────────────────────────────────────┘
+                │ MP.generar_pedido(...) etc.
+┌───────────────▼─────────────────────────────────────────────┐
+│ MOTOR  motor_pedido.py (3.1k) — orquesta la generación       │
+│   ├─ molde_real.py (563)   parsing .ai/PDF + capas OCG       │
+│   ├─ nesting_contorno.py (291)  acomodo (nesting) + compose  │
+│   ├─ texto_curvas.py (225)  texto como CURVAS (FuenteCurvas) │
+│   └─ importar_dxf.py (542)  molde desde DXF (AAMA/Optitex)   │
+└─────────────────────────────────────────────────────────────┘
+```
+Librerías clave del motor: **pymupdf (fitz)** (render/SVG/pixmap), **pikepdf** (manipular content-streams, XObjects, OCG), **numpy/scipy** (máscaras del nesting).
+
+---
+
+## 3. Los archivos y qué hace cada uno
+
+### `servidor.py` (Flask)
+- Constantes de rutas: `ENTRADA`/`TRABAJOS`/`DATOS` (env `TIZADA_*` o defaults). `FUENTES` = `catalogo_fuentes`.
+- Helpers de ruta: `_ruta_entrada(nombre, pid, sub)` → `ENTRADA/<pid>[/<sub>]/<nombre>` (acá viven `plantilla.ai`, `arte.ai`). `_ruta_datos(...)` → `DATOS/productos/<pid>[/<sub>]/...` (jsons por molde). `_diseno_sub(diseno)` → `None` (principal) o `disenos/<slug>`. `_slugify_diseno`.
+- `_cargar(nombre, pid, sub)` lee un json de datos; `_cargar_catalogo()`/`_guardar_catalogo()` el catálogo global.
+- `_get_active_producto_id()` = molde "activo" del catálogo (`cat["activo"]`).
+- **Orquesta** la generación llamando a `MP.*`, mantiene cachés (`_NIDO_CACHE`, `piezas_cache/`), y traduce filas de pedido a prendas (`_traducir_prendas`).
+- `app.run(..., threaded=True, use_reloader=True)` al final.
+
+### `motor_pedido.py` (el corazón)
+- **`generar_pedido(plantilla, arte, registro, pers, prendas, fuentes, salida, *, mapeo_arte, rotaciones, asignacion_tela, telas_cfg, solo_piezas, borde_corte, etiqueta, editables_cfg, editables_tamano)`** — el entry point. Ver §6.
+- `_armar_base(pieza, talle, variante)` + `generar_pieza(...)` (split Fase 2, §6).
+- `partes_de` / `piezas_de` (qué piezas entran por toggles + variable).
+- `detectar_arte`, `detectar_piezas`, `mapeo_por_nombre`, `mapeo_variantes_arte`, `nido_piezas`, `medidas_diseno`, `extraer_editables`, `extraer_personalizacion`, `validar_arte_separado`.
+- Etiqueta text-on-path: `_eops_borde`, `_eops_zonas`, `_eops_tramo` (ver [[etiqueta-baseline-no-romper]]).
+- `_nestear_y_componer` (agrupa por tela + llama al nesting).
+- Constantes: `CM = 28.3465` (pt/cm), `MM = CM/10`, `PIEZAS_RIB = {"Cuello","TC","Tapacostura"}` (van a tela RIB por default), `CAPAS_GUIA` (capas "guías" que se descartan), `CAPAS_NO_PERS`, `CAPAS_ARTE`.
+
+### `molde_real.py` (parsing del molde + capas)
+- `extraer_contorno_mesa(doc, mesa, talle)` / `extraer_piezas_mesa(doc, mesa, talle, ...)` → **contornos** de las piezas (segmentos, bbox_raw/bbox_mu, w/h, user_unit). Es de acá que sale la geometría real de cada pieza.
+- Manipulación OCG (capas): `limpiar_capas`, `suprimir_capas`, `aislar_capa`, `sanear_oc`, `limpiar_capas_conservando_talle`, `geometrias_base`.
+- `generar_pieza_real`, `extraer_ancla_etiqueta`, `estampar_etiqueta` (legacy/util).
+- Fuentes: `fuentes_requeridas`, `validar_fuente_subida`, `chequear_catalogo`.
+
+### `nesting_contorno.py` (acomodo)
+- `anidar_contorno(piezas, cfg)` → coloca las piezas (rasteriza a máscara con `_mascara`, prueba estrategias `bl`/`bandas`, rota según `_angulos`). Devuelve colocaciones + área.
+- `componer_pdf_contorno(colocaciones, cfg, path, etiquetas)` → arma el **HOJA_*.pdf** final.
+- cfg default: `ancho_cm=180, altura_max_cm=500, espaciado_cm=0.5, márgenes, resolucion_mm=3, estrategias=["bl","bandas"]`.
+
+### `texto_curvas.py` (`FuenteCurvas`)
+- Renderiza texto como **curvas vectoriales** (no fuentes PDF embebidas). `ops_texto` (recto), `ops_texto_curva` (sobre un arco), `ops_texto_fiel` (fiel a puntos de baseline = curva+multilínea del placeholder original), `ancho_texto`.
+- Se usa para nombre/número (personalización) y la etiqueta.
+
+### `importar_dxf.py` (BETA)
+- Importa el MOLDE desde `.dxf` (AAMA/Optitex) con `ezdxf`. Ver [[importar-molde-formatos]]. El ARTE sigue siendo solo `.ai`.
+
+### `migrar_ids.py`
+- Migración de identidad de piezas (`pieza_id` estable ↔ nombre). Ver [[identidad-pieza-id-nombre]].
+
+### `frontend/src/App.jsx` (TODA la UI)
+- SPA única. Dos grandes zonas: **Panel de Pedidos** (wizard `pedidoPaso`: `moldes → arte → planilla → generar → tizadas`) y **Configuración** del molde (tabs: `variables`, `diseno`, `etiqueta`, `planilla`, telas, editables…).
+- Componente clave: **`MapeadorArteVisual`** (~599) = el visor del molde con su diseño (paso Arte + config).
+- Estado clave: `verVariante` (variante activa), `mapeoValores` (pieza→mesa), `disenoActivo`, `arteIdx`, `editorTfs` (transforms de editables transitorias), `previewPiezas` (render real cacheado).
+
+---
+
+## 4. Modelo de datos (dónde vive cada cosa)
+
+**En disco:**
+```
+datos/
+  productos_catalogo.json         ← EL catálogo: {activo, productos:[{id,nombre,variantes,disenos,
+                                       columnas,borde_corte,etiqueta,editables,editables_config,
+                                       mapeo_arte(fijo),variante_guia,...}]}
+  productos/<pid>/
+    registro_producto.json        ← TODAS las piezas del molde: {nombre:{talle:{mesa,pieza_idx,ancla,bbox_mu,...}}}
+    piezas.json                   ← identidad estable: [{id, clave, nombre_generico}]  (id NO varía por talle)
+    correspondencia_piezas.json   ← correspondencia de índices entre talles (para el nido)
+    nido_cache.json               ← geometría nesteada cacheada {clave, nido}
+    piezas_cache/<variante>/<talle>/  ← NUEVO: render real por pieza (svg) + manifest.json (Fase 1)
+    disenos/<slug>/               ← por diseño nombrado (el "principal" va en la raíz):
+       mapeo_arte.json            ← {mapeo:{pieza:mesa} (base/compat), por_variable:{v_xxx:{pieza:mesa}}}
+                                     ⚠️ REGLA 2026-07-13: el mapeo se maneja POR VARIABLE (ver §5)
+       validacion_arte.json, registro_personalizacion.json
+    config_produccion.json, resumen_plantilla.json
+entrada/<pid>/
+    plantilla.ai                  ← EL MOLDE (contornos por talle, capas OCG por talle)
+    plantilla_fuente.dxf
+    disenos/<slug>/arte.ai        ← EL ARTE (diseño) de ese diseño
+trabajos/<tid>/                   ← salidas generadas: HOJA_*.pdf, prev_*.svg, pedido.json
+```
+- `_diseno_sub("principal")` → `None` → los archivos del diseño base viven en la RAÍZ del pid (no en `disenos/`).
+- El **mapeo** vive en DOS lados: `mapeo_arte.json` (por diseño) y `prod["mapeo_arte"]` (fijo del molde, se reusa si un diseño nuevo no tiene mapeo).
+
+---
+
+## 5. Conceptos centrales (el vocabulario — clave para no romper)
+
+- **MOLDE (producto/pid):** el conjunto completo de piezas (`plantilla.ai` + `registro_producto.json`). Tiene TODAS las piezas de TODOS los talles.
+- **PIEZA:** una parte del molde (Frente, Espalda, Cuello, Manga…). Identidad triple (ojo, [[identidad-pieza-id-nombre]]):
+  - `nombre` (ej. "Frente 18") — lo que se lee en el arte/planilla.
+  - `pieza_id` — id ESTABLE (no varía por talle). En `piezas.json`.
+  - `pieza_idx` — índice DENTRO de la mesa en UN talle (VARÍA por talle). No usar para identidad multi-talle.
+  - `clave` — la clave de la pieza en el registro.
+- ⚠️ **VARIABLE ≠ VARIANTE** (terminología del usuario — el código las CRUZA, cuidado):
+  - **VARIABLE** = la **selección de piezas / modelo** (MP1-A, MP1-A1, "con costadillo") = *qué piezas* forman la prenda. Es lo que se elige por fila en la planilla y sobre lo que trabaja el editor. En el CÓDIGO se guarda en `prod["variantes"] = [{clave:"v_xxx", label:"MP1-A", valores:[{pieza_id,pieza_idx}], juntas, grupoId, orden}]` y el estado es `verVariante` (¡mal nombrado! guarda la VARIABLE). En el motor viaja por su **clave `v_xxx`** (NO el label); `_traducir_prendas` la resuelve a `variante_piezas`+`variante_clave`.
+  - **VARIANTE** = el **TALLE** (1..16 numéricos; XS..6XL letra) = *el tamaño*. `variante_guia` (ej "M") = talle de referencia. El picker "Elegí las **variantes**" muestra TALLES; `verVarianteOperario(talle)` cambia el talle visto. El editable se puede editar para todas las variantes / un rango / una (scope de TALLES).
+- **GRUPO:** grupo de piezas (`prod["grupos"]`, ej. "MP1-A2"). Adentro viven las VARIABLES. **CONJUNTO** (`prod["conjuntos"]`) = sub-armado con nombre (ej. "cuello polo V").
+- **TOGGLE DE PIEZA** (generalización de manga corta/larga): `{clave, opcion, opciones}`. `partes_de` incluye/excluye piezas según mencionen la clave+opción. Ver [[toggle-de-pieza-generalizado]].
+- **VAN JUNTAS:** vínculo atómico entre piezas (ej. vivo ↔ manga). Si el toggle saca un miembro, se sacan TODOS. `prod["variantes"][].juntas` → `juntas_piezas` en la prenda → filtrado en `partes_de` (~2289).
+- **DISEÑO:** un arte con nombre (`arte.ai` en `disenos/<slug>/`). "Principal" = el base (raíz). Un molde tiene varios diseños. Ver [[multiples-disenos]].
+- **MESA (del arte):** una página del `arte.ai` = el diseño de una pieza. El **MAPEO** dice qué mesa va en qué pieza (`{pieza: mesa}`).
+- ⛔ **MAPEO POR VARIABLE (regla dura del usuario, 2026-07-13):** el mapeo se maneja **por VARIABLE**, nunca más por molde entero. `mapeo_arte.json = {mapeo: base, por_variable: {v_xxx: {pieza: mesa}}}`. El de la variable es **AUTORITATIVO** (quitar un diseño en una variable NO se resucita por la base); la base queda para datos viejos, filas sin variable y como semilla. Flujo: deteccion `?variante=` (devuelve `piezas_variable` = alcance), guardado con `variante` (validación acotada con `piezas_scope`), motor `mesa_arte(pieza, talle, variante)` resuelve por la `variante_clave` de cada fila, avisos de generación por variable. Al subir un arte, el auto-mapeo puebla `por_variable` con el recorte de cada variable y la completitud se mide contra la UNIÓN de las variables (`_alcance_variables`), no el molde.
+- **BORDE DE CORTE:** trazo por molde (`prod["borde_corte"] = {activo,ancho_mm,color:[c,m,y,k]}`). Ver [[borde-corte-molde]].
+- **ETIQUETA:** texto de corte (talle·pieza·#nro) sobre el borde, text-on-path. `prod["etiqueta"]`. Ver [[etiqueta-baseline-no-romper]], [[etiqueta-por-variable]].
+- **OBJETOS EDITABLES:** capas OCG "Editable …" del arte que se mueven/rotan/escalan por talle. Posición guardada **POR VARIABLE** (desde 2026-07-10): `prod["editables"][diseno_slug][VARIABLE_clave][nombre]["transforms"][talle]` (`"*"` = base compartida legacy). El motor recibe `editables_cfg = {variable:{objeto:{talle:tf}}}`. `dx/dy` = FRACCIONES del tamaño de la pieza. Tamaño en `prod["editables_config"]`. Ver [[capa-editable]].
+- **TELAS:** registro global (nombre+ancho) + grupos + telas por molde + tela por pieza en el pedido (una hoja por tela). Ver [[telas-registro-grupos-pedido]]. `PIEZAS_RIB` van a "RIB" por default.
+- **VIVOS (huérfanos):** los "Vivo espalda/fente/derecho/izquierdo" NO tienen mesa propia en el arte → son piezas **huérfanas**. Se mapean **A MANO** (el usuario los arrastra a una mesa). **NO hay auto-herencia** (se sacó, decisión del usuario 2026-07-09). Sin mapear → salen blancos en Arte Y tizada (consistente).
+
+---
+
+## 6. El pipeline de generación de la tizada (`generar_pedido`)
+
+Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personalización), `prendas` (filas ya traducidas), config (mapeo, borde, etiqueta, editables, telas). Sale: `HOJA_*.pdf` por tela (o `piezas_por_tela` si `solo_piezas=True`).
+
+**Pasos (motor_pedido.py ~2197–2832):**
+1. Por cada **prenda** (fila del pedido) → `piezas_de(prenda)` = `partes_de` (toggles + van-juntas) ∩ `variante_piezas` (la variable). Decide QUÉ piezas.
+2. Por cada **pieza** → `generar_pieza(pieza, talle, persona, nro, grupo, variante)`:
+   - **`_armar_base(pieza, talle, variante)`** (CACHEADA por `(pieza,talle,variante)` en `_base_cache`): contorno real del molde (de `extraer_*_mesa`) + diseño de la mesa (`copy_foreign` del XObject del arte, VECTORIAL) escalado con `cm_encajar` (alto manda, centrado) recortado al contorno + borde de corte + objetos editables. Devuelve `out` (pikepdf), `page`, `cstream` (stream reusable), `base_stream`, geometría. **Sin nombre/número ni etiqueta.**
+   - **Estampado por prenda** (encima de la base): personalización (nombre/número con `FuenteCurvas`, respeta curva/borde del placeholder) + etiqueta (talle·pieza·#nro, text-on-path). Se reescribe `cstream` y se guardan los bytes.
+3. Cada pieza va a `piezas_por_tela[TELA(pieza)]`.
+4. **`_nestear_y_componer`** → `anidar_contorno` (acomoda) + `componer_pdf_contorno` (arma la hoja) → una `HOJA_<tela>.pdf` + `prev_*.svg` (con fondo blanco) por tela + consumo/aprovechamiento.
+
+**Fase 2 (reuso):** la base se arma UNA vez por `(pieza,talle,variante)` y se reusa por prenda (solo cambia el texto). ⚠️ Verificado **pixel-idéntico** a la versión monolítica — cualquier cambio al split DEBE re-verificarse con diff pixel.
+
+**Preview del Arte (Fase 1):** `_piezas_base` (servidor.py) corre `generar_pedido(solo_piezas=True)` con UNA prenda de muestra (nombre "NOMBRE", número "00") y **cachea el SVG por pieza en disco** (`piezas_cache/<variante>/<talle>/`, clave = mtimes + hashes de config, `_piezas_base_clave`). El visor del Arte muestra ESE svg → **Arte = tizada, un solo motor**. Ver [[arte-wysiwyg]].
+
+---
+
+## 7. 🔗 ENLACES CRÍTICOS — "si tocás X, revisá Y" (para no romper)
+
+| Si tocás… | Revisá / puede romper… |
+|---|---|
+| **`generar_pieza` / `_armar_base` / el estampado** | La salida de la tizada. **Verificá diff pixel a pixel** (harness). El split base/overlay debe dar bytes de render idénticos. |
+| **`_piezas_base` / `_piezas_base_clave`** | El preview del Arte. Si cambiás qué entra al render, **bumpeá la versión de la clave** (`"v2"→"v3"`) para invalidar cachés viejos, y borrá `piezas_cache/`. |
+| **`partes_de` / `piezas_de` / toggles / van-juntas** | QUÉ piezas entran en la tizada. Un cambio acá puede hacer aparecer/desaparecer piezas (ej. el bug del vivo por van-juntas). |
+| **`mapeo_arte` / `mapeo_por_nombre` / `mesa_arte`** | Qué diseño va en cada pieza. El mapeo es por **nombre genérico** (una mesa "Cuello" cubre "Cuello 1..N") y **POR VARIABLE** (regla 2026-07-13): tocá el nivel correcto — `por_variable[v_xxx]` es autoritativo; la base es semilla/compat. `mesa_arte(pieza, talle, variante)` en el motor; helpers `_mapeo_estructura`/`_mapeo_efectivo`/`_piezas_de_variable` en servidor.py. |
+| **La variante (clave `v_xxx`)** | TODO lo per-variante. Pasar el **label** en vez de la **clave** NO filtra (bug clásico). El front manda `verVariante` (clave); el motor usa `variante_clave`/`variante_piezas`. |
+| **`etiqueta` (config o `_eops_*`)** | El text-on-path. **NO ROMPER la baseline** ([[etiqueta-baseline-no-romper]]). Posiciones con namespace `variante§nombre` > `grupo§nombre` > `nombre`. |
+| **`editables` (mover/persistir)** | `set_editable` guarda por `(pid, diseno_slug, nombre, talle)`. El front resuelve `pid` con `moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo` (¡ojo con `_mid` undefined → guarda en el molde activo equivocado!). El motor: editados se sacan de la base + se redibujan; no-editados quedan en el diseño. |
+| **`columnas` del producto** | La Camiseta NO tiene columnas → `_traducir_prendas` cae al fallback `pr.get("nombre"/"numero"/"talle")`. Si asumís columnas, rompés esos moldes. |
+| **El catálogo (`_guardar_catalogo`)** | Es global. Escribir desde un estado stale del front puede pisar `editables`/`mapeo_arte`/`variantes`. Los endpoints leen el catálogo FRESCO antes de modificar. |
+| **Puertos/servers** | El front nuevo contra un backend viejo (o al revés) = incoherencia. Reiniciá 8050 tras editar `.py`. Recompilá `dist` tras editar `src`. |
+
+---
+
+## 8. ⛔ INVARIANTES / NO ROMPER
+
+1. **Arte = tizada, UN solo motor.** El visor del Arte muestra el render del motor cacheado; NO re-dibujar la pieza en JS (eso causaba el "tinte teal"). El re-dibujo JS quedó SOLO como placeholder mientras carga el caché.
+2. **Salida de la tizada pixel-idéntica** ante refactors internos (Fase 2). Verificar siempre.
+3. **Etiqueta baseline** ([[etiqueta-baseline-no-romper]]): el text-on-path sobre el borde quedó fino; respaldo `respaldo29626.rar`. No reintroducir los bugs listados ahí.
+4. **Vivos = mapeo manual**, sin auto-herencia (decisión del usuario). Sin mapear = blanco consistente en Arte y tizada.
+5. **Todo en tamaño real (cm).** Nada de miniaturas como fuente de verdad; el diseño VECTORIAL sigue vectorial (`as_form_xobject`, no rasterizar).
+6. **No tocar datos del usuario al probar** (regla dura §0).
+
+---
+
+## 9. 🐛 TRAMPAS CONOCIDAS (gotchas que ya me mordieron)
+
+- **`_mid` undefined en el editor de editables** → guarda en el molde ACTIVO equivocado. Fix: fallback a `productosCat.activo` + guarda dura. (2026-07-09)
+- **`_selT` filtrado contra `editableData.talles` vacío** → pierde el rango elegido → guarda talles `[]`. Fix: no filtrar si `talles` está vacío.
+- **`_piezas_base` con `pers={}`** → el preview no mostraba textos. Fix: pasar `MP.extraer_personalizacion(arte)` + textos de muestra.
+- **Molds SIN `columnas`** → el talle no llegaba a la fila mock (usaba default "M"). Fix: `fila["talle"]=talle` directo.
+- **Variante por label vs clave** → `MP1-A` no matchea; `v_jl31t5b` sí.
+- **Caché stale** → tras cambiar el motor, `piezas_cache/` viejo puede servir render viejo (la clave no incluye versión del motor). Borrar el caché tras cambios del motor.
+- **Producto "activo" cambia** (`cat["activo"]`) → endpoints que usan `_get_active_producto_id()` (`/api/arte/deteccion`, `/api/arte/mapeo`, `get_editables`) dependen de él; `preview_piezas`/`generar` toman `pid` explícito. Inconsistencia latente: convendría que todos tomen pid explícito.
+- **launch.json = sandbox** → el preview MCP no ve la Camiseta real; para probarla, server manual con env a datos reales.
+- **Diseño sin `arte.ai`** (ej. "jugador") → fallback a otro diseño para lo principal; sus piezas huérfanas (vivos) salen sin nada.
+- **Texto = curvas** → no se puede `grep` "NOMBRE"/"00" en el SVG (son `<path>`); verificar renderizando a PNG.
+- **Parsear content streams: el color es ESTADO GRÁFICO** → cualquier lectura lineal de `k/rg/g/scn` sin trackear `q`/`Q` lee colores equivocados (Illustrator dibuja el halo en `q..Q` y el texto después del `Q`). Los parsers `_colores_personalizable`/`_trazo_personalizable` ya llevan stack — si se escribe otro parser, copiar ese patrón.
+- **Arte por rango: la "mesa de la pieza" es POR TALLE** → cualquier código que asocie mesa↔pieza con el mapeo default solo (mesas del 1er rango) se pierde las mesas `#rango` (bug de editables sin pieza y del "primero muestra el 6XL"). Usar `mapeo_variantes_arte`/`mapeo_talles`.
+- **Arte ≠ Planilla en el diseño** → el Arte edita `disenoActivo`, pero la tizada usa el diseño de la **columna "Diseño" de cada fila** de la planilla (feature multi-diseño). Si divergen — o la fila usa un diseño **sin arte** → **fallback silencioso** — la tizada NO usa lo que mapeaste. Síntoma: "mapeé pero salió en otro/un solo talle". Fix 2026-07-10 (ver changelog): la columna y el `default_diseno` arrancan con `disenoActivo`, y el fallback backend prefiere `default_diseno`.
+
+---
+
+## 10. Índice de endpoints (servidor.py) — los que más toco
+
+- `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref]` (→ `detectar_piezas`, piezas del molde) · `GET /api/plantilla/nido` (geometría nesteada).
+- `GET /api/arte/deteccion?diseno=` (→ `detectar_arte`, mesas + mapeo) · `POST /api/arte/mapeo` (guarda `mapeo_arte.json` + `prod["mapeo_arte"]` fijo; corre `validar_arte_separado`; **pre-warm** de `_piezas_base` en background).
+- `POST /api/arte/preview_piezas` (→ `_piezas_base`, render real cacheado por pieza).
+- `GET/POST /api/productos/editables` (`get_editables`/`set_editable`) · `GET/POST /api/productos/editables_config` (tamaño).
+- `GET/POST /api/productos/etiqueta*` · guía PDF (`pdf_guia`, param `piezas`=nombres de la variante).
+- `POST /api/generar` (single) · `POST /api/generar_multi` (→ `generar_pedido_grupos`, multi-molde por tela). Salida a `TRABAJOS/<tid>/`.
+
+⚠️ **Coherencia molde-vs-variable (auditoría 2026-07-09, actualizada 2026-07-13):** el MAPEO ya es POR VARIABLE (regla dura, ver §5 y changelog 2026-07-13) — el conteo "faltan diseño" al guardar quedó acotado (`piezas_scope`). Gaps pendientes (menores): lista de mapeo en Config (`App.jsx` mapeador legacy con desplegables), `get_editables`/`get_etiqueta` devuelven `piezas: reg.keys()` (el front ya filtra los editables por variante). Global A PROPÓSITO: `detectar_arte` (las MESAS del arte son las mismas para todas), descargas de base, pantallas de Configuración.
+
+---
+
+## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-13 — Cambio de TALLE sin estados sucios (2ª vuelta del flash).** El `mapeoCargando` solo cubría el cambio de VARIABLE; al cambiar de TALLE seguía el glitch (diseño del talle anterior → editables "flotando" sin fondo → recién ahí el real). FIX: estado `talleCambiando` — se prende al TOCAR un talle (`verVarianteOperario`, solo Pedidos→Arte y solo si el talle realmente cambia; se apaga si el fetch falla) y se apaga cuando LLEGA el preview del talle nuevo (`cargarPreviewPiezas` finally, con guard `_pvReq`). Mientras está prendido: `MapeadorArteVisual` (prop `cargando = mapeoCargando || talleCambiando`) y el editor de editables (fondo `_mesa.svg` + `_objsEd`) dibujan SOLO contornos neutros. Con el pre-warm de talles el neutro dura lo que tarda el caché (instantáneo). Frontend-only (dist).
+- **2026-07-13 — Editor de editables POR GRUPO del arte + fin del flash al cambiar de variable.** (a) **Editor por rango/talle**: si el arte tiene mesas `#rango`/`#talle`, el editor de editables agrupa los talles por FIRMA (qué mesa usa cada pieza en ese talle → `mapeo_talles`): chips "Rango del arte" (XS–L / XL–3XL / 4XL–6XL / 1–16); elegir uno muestra SOLO los editables de ese grupo (`_objsEd`/`_objsUnicos` — antes salían Logo/Escudo repetidos ×4 en la lista), el alcance por defecto = los talles del grupo, y "Ver talle" navega dentro del grupo. Arte de una sola mesa → 1 grupo → picker de variantes normal (sin cambios). Guardar/Volver iteran los objetos ÚNICOS del grupo. (b) **Flash "otro diseño" al cambiar de VARIABLE**: mientras cargaba la deteccion de la variable nueva, el visor dibujaba con el `mapeoValores`/`mapeoData` de la ANTERIOR. FIX: estado `mapeoCargando` (set al entrar a `cargarMapeadorOperario`, clear en finally) → prop `cargando` de `MapeadorArteVisual`: no dibuja diseño/editables/preview con datos viejos (contornos neutros hasta tener el mapeo nuevo). Frontend-only (dist).
+- **2026-07-13 — 3 FIXES para artes POR RANGO (#talle/#rango) + color de personalización.** (1) **Número BLANCO (bordes "no respetados")**: `_colores_personalizable`/`_trazo_personalizable` (motor) leían el color linealmente e IGNORABAN `q`/`Q` — Illustrator dibuja el halo dentro de `q..Q` y el texto tras el `Q` (estado restaurado) → en el frente el fill del "00" se leía CMYK blanco (el archivo pinta negro). FIX: stack q/Q en ambos parsers (el color/trazo es estado gráfico). VERIFICADO: `colorn` mesa 28 blanco→negro; render del frente talle 10 = "00" negro con borde blanco (igual a la espalda). Cache-key `v3`→`v4`. (2) **Editables "no editables" con rango**: los objetos viven en mesas por-talle (10/19/28) que no están en el mapeo default → `mesa2pieza` (get_editables) no les daba pieza → el editor no los listaba. FIX: `mesa2pieza` suma las mesas de `mapeo_variantes_arte` (setdefault). El motor ya aplicaba bien los transforms por `_mesa_a`. (3) **"Primero muestra el 6XL al navegar talles"**: el placeholder JS y el fondo del editor usaban `mapeoValores[pieza]` = mesa default = 1er rango del archivo (4XL-6XL). FIX: deteccion devuelve `mapeo_talles` ({pieza:{talle:mesa}}) y el front (MapeadorArteVisual + editor bg) resuelve la mesa del TALLE en vista; + PRE-WARM en background del resto de talles al pedir un preview (`_PREWARM_EN_CURSO` dedup) → navegar talles = caché de disco, instantáneo. VERIFICADO: talle 12 `cache:true` tras el warm. NOTA de datos: en el arte fbfdx el rango 4XL-6XL NO tiene capas Número/Nombre/Editable (mesas 1-9, gap de autoría del arte, no bug): esos talles salen sin número/editables hasta que el usuario las agregue al .ai.
+- **2026-07-13 — FIX: en el visor del Arte las piezas de un toggle NO-default (mangas largas) salían con el diseño de OTRO rango.** Síntoma (arte `#rango` fbfdx, talle 10): todo verde (#1-16) menos las mangas LARGAS celestes (#4XL-6XL). CAUSA: `_piezas_base` generaba con UNA prenda de muestra y sin valor de manga → toggle default "corta" → `partes_de` excluía las mangas largas del render real → el visor caía al re-dibujo JS de placeholder, que usa el mapeo default plano (mesa 7/9) SIN resolver `#rango`. La TIZADA real siempre estuvo bien (el motor resuelve el rango). FIX (servidor.py `_piezas_base`): una fila de muestra EXTRA por cada opción restante de cada toggle (columnas role="manga" del template, opciones de la regla/columna) → el motor arma TODAS las piezas de la variable y el visor muestra siempre el render real (invariante Arte = tizada). Cache-key `v2`→`v3`. VERIFICADO: preview v_jl31t5b talle 10 ahora trae las 9 piezas y las mangas largas dan color EXACTO al de la mesa 30 (verde, dist 1) vs celeste (dist 184).
+- **2026-07-13 — MAPEO POR VARIABLE (regla dura del usuario: "nunca más por molde").** El mapeo del arte pasa a manejarse POR VARIABLE en todo el flujo. (1) STORAGE: `mapeo_arte.json = {mapeo: base, por_variable: {v_xxx: {pieza: mesa}}}` (compat: datos viejos = solo base). (2) SERVIDOR: helpers `_piezas_de_variable` (resuelve por pieza_id estable, fallback idx@guía), `_alcance_variables` (unión), `_mapeo_estructura`, `_mapeo_efectivo` (el de la variable AUTORITATIVO, si no la base); `/api/arte/deteccion?variante=` devuelve el mapeo efectivo + `piezas_variable`; `/api/arte/mapeo` recibe `variante` (guarda en `por_variable`, base y `prod["mapeo_arte"]` fijo por MERGE semilla, validación acotada con `piezas_scope`, pre-warm con el mapeo efectivo de cada variable); subir arte puebla `por_variable` y mide completitud/faltan contra el ALCANCE de las variables (no las 135 piezas del molde); `/api/generar` y `/api/generar_multi` pasan la estructura completa y los avisos "sin diseño" se calculan con el mapeo efectivo de la variable de CADA fila. (3) MOTOR: `generar_pedido` acepta ambos formatos (plano compat / por variable), `mesa_arte(pieza, talle, variante)` resuelve por la `variante_clave` de la prenda (precedencia #talle > #rango > variable > base; sin base → unión de variables para filas sin variable); `validar_arte_separado(piezas_scope=)`. (4) FRONT: `persistirMapeo` manda `variante: verVariante`; `cargarMapeadorOperario`/`abrirMapeoOperario`/`cargarMapeoArte` piden deteccion con `variante` (el efecto del paso Arte re-corre al cambiar de variable → recarga SU mapeo). VERIFICADO: motor pixel-idéntico formato viejo vs nuevo (maxdiff 0); pv[vA] cambia solo vA (Frente 18 mesa 2→1: diff>0; vB intacta: 0); quitar pieza del pv NO se resucita por la base; endpoints en server copia 8060 (validación "8/9 — faltan Cuello 25" acotada a la variable, archivo con `por_variable`, otra variable no afectada); `generar_multi` end-to-end listo con aviso correcto por variable. Ver memoria [[mapeo-por-variable]].
+- **2026-07-13 — Nueva sección "CASO 1: cómo ejecutar el proyecto"** al inicio del mapa (pedido del usuario): pasos verificados para levantar el localhost con los moldes REALES (liberar 8050 → server con env `TIZADA_*` reales en background → verificar `/api/productos` → abrir navegador). El sandbox del launch.json queda solo para chequeos sin datos reales.
+- **2026-07-10 — FIX: arte con rótulos `#rango` no colocaba NINGÚN diseño.** Un arte "separado" con mesas rotuladas `#XS-L Frente`, `#4XL-6XL Frente`, etc. (una mesa por pieza por rango) no mapeaba nada: `mapeo_por_nombre` (el auto-mapeo que corre al SUBIR el arte y como fallback en la generación) exige que la línea ENTERA sea el nombre de pieza vía `_match_piezas`, y el prefijo `#<rango> ` rompía el match → devolvía **0 piezas** → mapeo vacío → (a) el visor no colocaba diseño (piezas en blanco) y (b) la generación se salteaba los rangos (el motor solo activa `mapeo_variantes_arte` `if mapeo_arte` NO está vacío, línea ~2703). FIX (motor_pedido.py `mapeo_por_nombre` ~2081): antes de matchear, se saca el prefijo con `re.sub(r"^\s*#\S+\s+", "", t)` ("#4XL-6XL Frente" → "Frente"). El `#` en sí lo sigue resolviendo `mapeo_variantes_arte` aparte (pieza→{talle:mesa}, precedencia exacta>rango>default). VERIFICADO con el archivo real del usuario (`rangos.ai`, 36 mesas, rangos `XS-L`/`XL-3XL`/`4XL-6XL`/`1-16`): auto-mapeo 0→**123** piezas; `mapeo_variantes_arte` correcto (Frente XS→mesa19, XL→mesa10, 4XL→mesa1, 1→mesa28). Los 12 no mapeados son piezas de OTRAS variables (costadillo) que no están en ese arte (normal). Como el mapeo ahora es no-vacío, el motor activa los rangos → visor y tizada colocan el diseño de cada rango por talle. El usuario debe RE-SUBIR el arte para que corra el auto-mapeo arreglado. Ver [[plantilla-diseno-por-variante]].
+- **2026-07-10 — "Descargar guía" ahora baja un `.ai` NATIVO con CAPAS reales.** (Reemplaza el intento OCG, que Illustrator aplanaba a "Capa 1" — confirmado.) La guía se genera como `.ai` LEGACY (AI 8 / EPS con marcadores `%AI5_BeginLayer`/`Lb`/`Ln`/`LB`), que Illustrator SÍ abre con capas nativas (confirmado por el usuario). Motor: `ai_guia_medidas(...)` (nueva) + helpers `_ai_esc/_ai_path/_ai_text/_ai_layer/_segs_bbox`; comparte la geometría con el PDF vía `_guia_capas_data()` (extraída de `pdf_guia_medidas`, PDF verificado idéntico tras el refactor). Capas: `molde` (contornos + recuadro del diseño, trazo), `guias` (nombres de pieza como TEXTO VIVO), y `diseño` + columnas de texto/número (`capasArteNombres()` en el front) creadas VACÍAS. Coord AI = PostScript y-arriba (sin flip). **EMPAQUETADO COMPACTO**: el layout real del size-run es enorme (270"+); se reacomodan las piezas en grilla a 1:1 (shelf-packing por `_segs_bbox`). GUARD: si a 1:1 excede 16000pt (≈227", máximo de Illustrator) → error 422 "elegí una VARIABLE" (el molde completo de una camiseta = 138 piezas = 865", no entra; por variable ~9 piezas = 69×89" sí). Endpoint `/api/plantilla/pdf_guia?formato=ai` (mimetype `application/postscript`, filename `guia_<molde>.ai`); el PDF sigue para "Descargar base" (limpio). Front `descargarPdfGuia` ahora hace fetch+blob (para mostrar el error de tamaño como aviso, no JSON en pestaña) y el botón dice "Descargar guía .ai". VERIFICADO end-to-end: 200 application/postscript por variable, 422 molde completo; el usuario confirmó en Illustrator las 5 capas + contornos + nombres como texto vivo. LIMITACIÓN: modo 'talle' multipágina no soportado en .ai (usa un solo talle guía). Ver §"Cómo armar el .ai" (modal capas).
+  - **DECISIÓN de formato (2026-07-10):** se evaluaron alternativas por pedidos del usuario (2023+, sin aviso de actualizar, mesas por pieza, espacio de trabajo grande). Matriz: **SVG** = moderno/limpio + grupos nombrados + texto vivo, pero UNA mesa; **PDF multipágina** = una mesa por pieza pero aplanado (sin estructura); **.ai legacy** = capas reales pero con aviso "actualizar" + espacio chico + una mesa; **.ai moderno** (tendría todo) = formato secreto de Adobe, NO generable. NO existe un formato generable con las 3 (mesas + estructura + moderno). El usuario **eligió .ai legacy (capas reales)** aceptando el aviso y el espacio chico. Pendiente OPCIONAL: intentar suavizar el aviso (versión en cabecera / texto) y el tamaño de mesa.
+- **2026-07-10 — "Descargar guía": el PDF trae las CAPAS del arte pre-creadas (OCG). [SUPERSEDED por el .ai nativo de arriba]** El PDF de guía ahora crea capas OCG con los nombres del arte: `molde` (contornos+recuadro+título), `guias` (los NOMBRES de pieza), y una por cada capa del arte (`diseño` + columnas de texto/número de la planilla: nombre, número…). Las que tienen contenido lo llevan; las vacías (diseño, nombre, numero) se crean igual con un marcador mínimo invisible (un OCG sin contenido no aparece en Illustrator). Cambios: motor `pdf_guia_medidas(..., capas=None)` (crea OCGs con `doc.add_ocg`, asigna con `oc=` en `_segmentos_vector`/`draw_rect`/`insert_text`); endpoint lee `capas` (JSON array); front `capasArteNombres()` (misma lógica que el modal "Qué va en cada capa": diseño+guias+columnas nombre/numero) y `descargarPdfGuia` lo pasa. VERIFICADO a nivel PDF: `get_ocgs()` → molde/diseño/guias/nombre/numero; diferencial de render confirma contorno↔molde y nombres↔guias. **OJO** (nota vieja del código, línea ~1889, ahora matizada): puede que Illustrator APLANE los OCG al abrir el PDF → el usuario debe confirmar que aparecen como capas. Si no, habría que ir a un .ai con capas nativas (mucho más complejo). `capas=None` = comportamiento viejo (sin capas). El "Descargar Base" (limpio) no pasa capas.
+- **2026-07-10 — Plantilla 'rango': guía SIEMPRE dentro del rango + se sacó "Cargar Arte".** (a) En "Cómo se adapta el diseño" → "Por rango", la GUÍA (base del cálculo + variante que se ve en el visor) ahora se mantiene SIEMPRE dentro del rango elegido: `toggleRango` y `cambiarConfigMedida('rango')` — si la guía actual (`etqData.talle_ref`, por defecto la `variante_guia` del molde, ej. M) queda FUERA del rango, se auto-elige la 1ª del rango por orden de archivo vía `verVarianteOperario(enOrden[0])`; si ya está dentro, no se toca. Así los cálculos (`cajaDe` usa `p.w_cm/h_cm` = la guía) y el visor (filtrado por `verVariante`) muestran las piezas de esa variante de la variable. `toggleRango` pasó de `setRangoMedida(prev=>…)` a estado directo para poder decidir la guía con el rango nuevo. VERIFICADO en navegador: rango {16} con guía previa 4 → detección `talle_ref=16`, chip "Guía del rango" = 16 resaltado. (b) Se ELIMINÓ el botón "Cargar Arte" de la pestaña Plantilla (Config→Moldería→Plantilla) y su `<input>` local (el del flujo Pedido→Arte, otro `<input ref={fileInputArteRef}>` ~4908, queda intacto). Frontend-only (solo Ctrl+F5).
+- **2026-07-10 — "Descargar Base" (Config→Plantilla) por VARIABLE.** Antes bajaba el `.ai` crudo del molde COMPLETO. Ahora: si hay una VARIABLE elegida (`verVariante`) → baja SOLO sus piezas como PDF "base limpia" (contornos del molde, SIN recuadro del diseño, SIN nombre de mesa, SIN medidas); sin variable → el `.ai` completo (como antes). Cambios: motor `pdf_guia_medidas(..., limpio=False)` (nuevo flag: salta recuadro+nombre y no extiende el bbox con la caja del diseño; título "Base (contornos)"); endpoint `/api/plantilla/pdf_guia` lee `limpio` (filename `base_molde.pdf`); front `descargarBase()` (verVariante → `pdf_guia?piezas=…&limpio=1`, si no → `descargar_plantilla`); el botón pasó de `<a>` a `<button>` con label "Descargar base (variable)". Distinto de "Descargar guía (solo esta variable)" que SÍ trae recuadro+nombres (para mapear el arte). VERIFICADO: base limpia MP1-A = 10 trazos, 0 recuadros cyan, 1 texto (título), solo sus 9 piezas; guía normal = 9 recuadros+10 textos; compat sin `limpio` intacto. Requiere REINICIAR el server (cambio Python).
+- **2026-07-10 — FIX: en Config→Etiqueta "volvía sola a la primera" variable.** Al cambiar de variable (tarjetas MP1-A…) en Config→Moldería→Etiqueta, saltaba de vuelta a la primera. CAUSA: el efecto del flujo Pedido→Arte (App.jsx ~3484) estaba guardado SOLO por `pedidoPaso!=='arte'`, pero al pasar a Configuración **`pedidoPaso` NO se resetea** (queda 'arte'); como el efecto tiene `verVariante` en sus deps y hace `setVerVariante(claveDelArte)`, cada click en Config lo pisaba con la variable del arte. Solo se dispara si venís del paso Arte (por eso costaba reproducir: entrando directo a `/admin`, `pedidoPaso` es 'moldes' y no corría). FIX: guardar el efecto también por `activoTab==='pedidos'` (`if (activoTab !== 'pedidos' || pedidoPaso !== 'arte') return;`) + `activoTab` en las deps. VERIFICADO en navegador (copia de datos, puerto 8060): con `pedidoPaso='arte'` reproducido el bounce, y tras el fix MP1-A1 y "con costadillo" quedan seleccionadas. Nota: otros efectos del arte (cargarPreviewPiezas, cargarEditablesPedido) también corren en Config con pedidoPaso='arte' pero son inofensivos ahí (no tocan `verVariante`).
+- **2026-07-10 — Panel "Diseños" (Pedido→Arte): sin desplegable, thumbnails completos y auto-guardado.** (a) **Se quitó el `<select>`** de elegir pieza (redundante: se toca la pieza en el molde); queda una guía breve. (b) **Thumbnails con el editable**: la miniatura de cada mesa ahora es un `<svg>` = mesa (editables ocultos) + los objetos editables de esa mesa (`editablesRaw.filter(o=>o.mesa===m.mesa)`) superpuestos en su posición ORIGINAL (fracción `bbox_mu`/`mesa_rect`) → se ve el diseño COMPLETO. Si la mesa no tiene editables, cae al `<img>` de antes. Nuevo prop `editablesRaw={editableData?.objetos||[]}`. (c) **Auto-guardado del mapeo**: arrastrar/tocar/quitar un diseño persiste solo (`onMapeoChange={guardarMapeoAuto}` → `setMapeoValores` + `persistirMapeo(next,{silencioso})`); se **eliminó el botón "Guardar mapeo"**. `guardarMapeo` refactorizado sobre `persistirMapeo(valores,{silencioso})`. El componente usa `aplicarMapeo = onMapeoChange || setMapeoValores` (fallback sin auto-guardado). NO se tocó el mapeador legacy con desplegables (~línea 6360, otro panel).
+- **2026-07-10 — Editor de editables: persistencia al reabrir, botones y deshacer/rehacer.** (a) **Re-entrar muestra lo editado**: `cargarEditablesPedido` ahora NO pisa `editorTfs` si se reabre el MISMO contexto (`editorCtx` = pid|diseño|variable) con ediciones en memoria; y el botón "Objetos editables" (App.jsx ~4867) pasa `verVariante` (antes iba sin variante → releía base '*' vacía → perdía lo editado). (b) **Botones nuevos**: "Volver al diseño principal" (todos los objetos → identidad en el alcance, deshacible), "Deshacer"/"Rehacer", "Cerrar" (era "Guardar como base" → ahora solo cierra) y "Guardar" (era "Listo" → ahora persiste TODOS los objetos por variable+alcance vía POST `/editables` y recién ahí cierra). (c) **Undo/redo + Ctrl+Z**: historial a nivel componente (`editorHist` ref = pila de snapshots de `editorTfs`, `histReset/histCommit/editorUndo/editorRedo`); commit al soltar el arrastre (`onUp`) y en "Volver"; keydown Ctrl+Z / Ctrl+Y|Ctrl+Shift+Z con el modal abierto. Ícono `reset` agregado a `Icon`. Frontend-only (dist). Nota: "Volver" resetea en memoria; si no se "Guarda", al cambiar de variable y volver se relee la base persistida.
+- **2026-07-10 — Editable: MOVER en COORDENADAS DEL DISEÑO + fondo real + talle guía.** El objeto editable ES una capa del diseño → su espacio natural es el del DISEÑO. La BASE ya era design-relative (`fcx/fcy`) pero el MOVIMIENTO `dx/dy` se medía contra la PIEZA (mezcla de espacios). Ahora TODO es design-coord: (1) MOTOR `_matriz_editable` (motor_pedido.py ~1655) `tdx = dx * pos.get("awf",1.0) * W` (antes `dx*W`) = ancho del DISEÑO en la pieza; `_pos_en_pieza` (~1638) devuelve `awf`. `tdy=-dy*H` sin cambio (alto-diseño=H por cm_encajar). (2) EDITOR `centerOf` (App.jsx ~4982) `cx=imgX+(fcx+tf.dx)*imgW`, helper `_imgDim` (`imgW=aspecto*p.ph`, `imgX=p.px+(p.pw-imgW)/2`); `onMove` divide por `imgW/imgH`; `start` guarda `imgW/imgH`. (3) OVERLAY del arte (~768) `cx=imgX+(o.fcx+o.dx)*imgW`. (4) FONDO del editor (~5057): dibuja el SVG de la mesa mapeada (editables ocultos) recortado al contorno + objetos draggables encima. (5) TALLE GUÍA (~5041): chips `{_selT.length>1}` → `setEditableTalle(t)+verVarianteOperario(t)` (solo para ver). VERIFICADO: no-regresión identidad = **0 px**; move dx=0.15→269.36pt=0.15·awf·W (awf=1.162); **consistencia editor↔motor** ambos en la fracción `(1-awf)/2+(fcx+dx)·awf` (WYSIWYG). **CORRIGE** el entry de abajo "colocación EXACTA": `dx/dy` YA NO es fracción de la PIEZA sino del DISEÑO (`*imgW/*imgH`).
+- **2026-07-10 — Editor de editables: colocación EXACTA (WYSIWYG).** El editor modal ubicaba el objeto con `o.pos` = `_pos_en_pieza` calculado en el talle GUÍA y en la pieza donde se REGISTRÓ el objeto (ej. "Frente 9") → corrido cuando la variable usa otra pieza ("Frente 18") o se ve otro talle (la fracción cambia por talle: escudo M=0.712, XL=0.696). FIX (App.jsx `centerOf` ~4977): usa la fracción del objeto DENTRO del diseño (`fcx/fcy` de `bbox_mu/mesa_rect`) mapeada con el encaje del diseño en la pieza ACTUAL (`imgW=aspecto*p.ph`, centrado), y `dx/dy` en fracción de la PIEZA (`*p.pw/*p.ph`), IGUAL que el motor `_matriz_editable` (`tdx=dx*W`). PROBADO en Python: `fcx`-center == `_pos_en_pieza` center EXACTO en M/1/XL. También corregido el overlay del arte (~768) para que `dx` use `p.pw` (no `imgW`). Confirmado además: re-editar una variable SÍ muestra lo guardado (`get_editables` devuelve el transform de esa variable; otra variable = vacío, no hereda). UNIDAD `dx/dy` = fracción de la PIEZA (no del diseño).
+- **2026-07-10 — TERMINOLOGÍA: VARIABLE ≠ VARIANTE.** El usuario distingue: **VARIABLE** = la selección de piezas / modelo (MP1-A, con costadillo) = qué piezas; **VARIANTE** = el TALLE (M, 1-16) = el tamaño. OJO: el código está CRUZADO — `verVariante`/`prod["variantes"]` (v_xxx) guardan en realidad la VARIABLE; y "variante" como palabra también se usa para TALLE (`variante_guia`, `verVarianteOperario(talle)`, el picker "Elegí las variantes" muestra talles). Grupo = conjunto de piezas; Conjunto = sub-armado con nombre. (Ver §5, corregido.)
+- **2026-07-10 — Posición del EDITABLE independiente POR VARIABLE.** Antes la posición se guardaba por (diseño,objeto,talle) → compartida entre todas las variables (mover el escudo en MP1-A lo movía en todas). Ahora se guarda por **(diseño, VARIABLE v_xxx, objeto, talle)**. Cambios: `editables_cfg` del motor pasa a `{variable:{objeto:{talle:tf}}}` (motor_pedido.py: `_editados_nombres` unión entre variables ~2354, `_armar_base` resuelve `_ecfg.get(variante) or _ecfg.get("*")` ~2586); `_editables_cfg` (servidor.py ~1502) produce ese formato + compat viejo→`"*"`; `set_editable`/`get_editables` con `variante`; front `guardarBase` manda `variante:verVariante`, `cargarEditablesPedido(...,verVariante)`, `cargarPreviewPiezas`/`_edoverride` envuelven `{[verVariante||'*']: editorTfs}`. Compat: formato viejo (sin nivel variable) → clave `"*"` (base compartida). VERIFICADO (motor + backend): escudo movido en v_jl31t5b (MP1-A) → dif>0; en v_emtd907 (MP1-A1) misma pieza Frente 18 → dif=0 (base, no afectado). Cache-key ya incluye variante+edit_cfg → editar una variable regenera (invalida las otras, inofensivo).
+- **2026-07-10 — El preview del Arte sigue el TALLE que se ve (no siempre M).** `cargarPreviewPiezas` no mandaba talle → el preview se renderizaba SIEMPRE en el talle guía (M). Si editabas un editable en el rango 1–16 (el editor cambia el arte a talle 1 vía `verVarianteOperario`), el preview seguía en M → M ∉ 1–16 → la edición no se veía. Fix: `cargarPreviewPiezas` manda `talle: etqData?.talle_ref` (App.jsx:3533) + `etqData?.talle_ref` en las deps del efecto (3548). VERIFICADO: en talle 1 el escudo movido SE VE; en M (no editado) queda pixel-idéntico. UNIDADES del editable: `dx/dy` son FRACCIONES del tamaño de la pieza (App.jsx:4977/4981 `*p.pw` / `/p.pw`); el motor (`_matriz_editable`) interpreta igual → fidelidad editor↔motor OK (un dx grande = varios anchos de pieza = se va de la vista). SCOPING del editor de editables: piezas y objetos SÍ acotados a la variante (`verVariante`→`varianteFiltro`→`_piezasEd`, App.jsx:4958-4961); los TALLES son los 19 del molde (la variante no define rango); la POSICIÓN se guarda por (diseño,objeto,talle) → compartida entre variantes (si se quisiera por-variante, sería cambio mayor).
+- **2026-07-10 — Editable movido se ve en el ARTE (preview) sin guardar como base.** La cadena editar→tizada YA estaba OK (el override per-pedido `_edoverride` llega a `generar_multi`), pero editar→arte estaba roto: el preview `_piezas_base` usaba `override=None` y el front no le mandaba `editorTfs`; y el visor tapa el overlay `editorTfs` cuando hay preview real (`!pv`) → el arte mostraba la posición BASE, no la edición. Fix: (1) `cargarPreviewPiezas` (App.jsx:3533) manda `editables: editorTfs` + `editorTfs` en las deps del efecto (3548); (2) `/api/arte/preview_piezas` lee `editables` (servidor.py:1276) y lo pasa a `_piezas_base(..., override)`; (3) `_piezas_base` (servidor.py:1177) usa `_editables_cfg(prod, diseno, override)`. La clave de caché ya hashea `edit_cfg` → un override distinto regenera solo. VERIFICADO: mover el escudo cambia el render del Frente (base vs override distinto, escudo reposicionado). Nota: el editor modal usa su propio `_matriz_editable` (JS); el arte-preview y la tizada usan el del motor (Python) → arte-preview = tizada garantizado; fidelidad editor-vs-motor es otra cuestión.
+- **2026-07-10 — La tizada toma el diseño del ARTE.** Antes la planilla usaba `disenosPedido[0]` como diseño default de la columna y `default_diseno`, y `generar_multi` hacía fallback al 1º diseño con arte (`_con_arte[0]`) → la tizada podía usar un diseño distinto al que editaste en el Arte (síntoma: el mapeo manual "no salía" / salía en un solo talle). Fix (3 cambios coordinados): (1) App.jsx:1467 la columna "Diseño" arranca con el nombre de `disenoActivo`; (2) App.jsx:3367 `default_diseno = disenoActivo`; (3) servidor.py:2182 el fallback prefiere `default_diseno` (el del Arte) si tiene arte, si no el 1º con arte. VERIFICADO: fallback ahora resuelve a `vfvsfd` (antes `hjn`), y `vfvsfd` genera con diseño en M/L/XL. Ver [[generar-un-solo-talle-diseno]].
+- **2026-07-09 — Arte = tizada (un solo sistema).** Fase 1: caché en disco del render del motor por pieza (`_piezas_base` + `piezas_cache/`), el visor del Arte lo muestra (se elimina el re-dibujo JS como fuente). Fase 2: `generar_pieza` partida en `_armar_base` (cacheada por pieza/talle/variante) + estampado por prenda; **verificado pixel-idéntico**. Ver [[arte-wysiwyg]].
+- **2026-07-09 — Vivos = mapeo manual.** Se eliminó la auto-herencia de vivos huérfanos en `generar_pedido` (~2520). Sin mapear = blanco consistente Arte/tizada.
+- **2026-07-09 — Preview con texto de muestra.** `_piezas_base` pasa `pers` real + nombre/número de muestra; cache-key v1→v2. Fix del talle en molds sin columnas.
+- **2026-07-09 — Fix "Guardar como base" del editable.** `_mid` con fallback a `productosCat.activo`; `_selT` no pierde el rango; `guardarBase` con guarda dura. (Bug: guardaba en el molde equivocado con talles vacíos.)
+- **2026-07-09 — Doble contorno del visor** sacado (con `pv`, pieza mapeada → strokeWidth 0).
+- **2026-07-09 — Auditoría molde-vs-variable** (ver §10).
+
+> _(Antes de esta fecha: ver git/memorias. Este archivo se creó el 2026-07-09 como cerebro consolidado.)_

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm run *)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\) and print\\('OK', f\\) for f in \\('servidor.py','motor_pedido.py'\\)]\")",
+      "Bash(py -c \"import ast; [ast.parse\\(open\\(f,encoding='utf-8'\\).read\\(\\)\\) and print\\('OK', f\\) for f in \\('servidor.py','motor_pedido.py'\\)]\")"
+    ]
+  }
+}

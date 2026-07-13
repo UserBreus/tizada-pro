@@ -1,0 +1,3428 @@
+"""
+USER · Motor de Sublimación — servidor web local.
+Correr:  python servidor.py   y abrir  http://localhost:8000
+"""
+import os, re, json, time, threading, uuid, traceback
+from collections import OrderedDict
+from flask import Flask, request, jsonify, send_from_directory, send_file
+from werkzeug.exceptions import HTTPException
+
+import motor_pedido as MP
+
+AQUI = os.path.dirname(os.path.abspath(__file__))
+# Las carpetas de datos se pueden redirigir por variable de entorno. Sirve para
+# correr una instancia de PRUEBA contra una copia aislada (sandbox) sin tocar
+# jamás los datos reales del usuario. En uso normal quedan en su lugar de siempre.
+ENTRADA = os.environ.get("TIZADA_ENTRADA") or os.path.join(AQUI, "entrada")
+FUENTES = os.environ.get("TIZADA_FUENTES") or os.path.join(AQUI, "catalogo_fuentes")
+TRABAJOS = os.environ.get("TIZADA_TRABAJOS") or os.path.join(AQUI, "trabajos")
+DATOS = os.environ.get("TIZADA_DATOS") or os.path.join(AQUI, "datos")
+for d in (ENTRADA, FUENTES, TRABAJOS, DATOS):
+    os.makedirs(d, exist_ok=True)
+
+app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
+trabajos = {}
+
+# ── Perfiles ICC (color management real) ─────────────────────────────────────
+# Se leen los .icc/.icm REALES instalados en el sistema (Adobe + Windows). Los
+# nombres NO se hardcodean: salen del tag 'desc' de cada perfil vía Pillow.
+PERFILES_DIRS = [d for d in ([os.environ.get("TIZADA_PERFILES")] + [
+    r"C:\Program Files (x86)\Common Files\Adobe\Color\Profiles\Recommended",
+    r"C:\Program Files\Common Files\Adobe\Color\Profiles\Recommended",
+    r"C:\Program Files (x86)\Common Files\Adobe\Color\Profiles",
+    r"C:\Program Files\Common Files\Adobe\Color\Profiles",
+    r"C:\Windows\System32\spool\drivers\color",
+]) if d and os.path.isdir(d)]
+PERFIL_DEFAULT_CMYK = "USWebCoatedSWOP.icc"   # U.S. Web Coated (SWOP) v2
+PERFIL_DEFAULT_RGB = "sRGB Color Space Profile.icm"
+_perfiles_cache = None
+
+
+def _colores_perfil(prof, espacio):
+    """Convierte los primarios (C,M,Y,R,G,B) a sRGB A TRAVÉS del perfil → swatch de
+    colores REALES que produce ese perfil (sirve de referencia visual). Devuelve hex[]."""
+    try:
+        from PIL import Image, ImageCms
+        srgb = ImageCms.createProfile("sRGB")
+        if espacio == "CMYK":
+            pts = [(255, 0, 0, 0), (0, 255, 0, 0), (0, 0, 255, 0), (0, 255, 255, 0), (255, 0, 255, 0), (255, 255, 0, 0)]
+            im = Image.new("CMYK", (len(pts), 1)); im.putdata(pts)
+            tr = ImageCms.buildTransform(prof, srgb, "CMYK", "RGB", renderingIntent=1)
+        elif espacio == "RGB":
+            pts = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255), (255, 255, 255)]
+            im = Image.new("RGB", (len(pts), 1)); im.putdata(pts)
+            tr = ImageCms.buildTransform(prof, srgb, "RGB", "RGB", renderingIntent=1)
+        else:
+            return []
+        out = ImageCms.applyTransform(im, tr)
+        return ["#%02x%02x%02x" % out.getpixel((i, 0))[:3] for i in range(len(pts))]
+    except Exception:
+        return []
+
+
+def _listar_perfiles():
+    """Lista los perfiles ICC reales del sistema con su NOMBRE real (tag desc),
+    espacio (RGB/CMYK) y un swatch de colores reales. Cacheado, dedup por nombre.
+    Devuelve [{archivo, nombre, espacio, ruta, colores}]."""
+    global _perfiles_cache
+    if _perfiles_cache is not None:
+        return _perfiles_cache
+    out, vistos_arch, vistos_nombre = [], set(), set()
+    try:
+        from PIL import ImageCms
+    except Exception:
+        _perfiles_cache = []
+        return _perfiles_cache
+    for d in PERFILES_DIRS:
+        for fn in sorted(os.listdir(d)):
+            if not fn.lower().endswith((".icc", ".icm")) or fn.lower() in vistos_arch:
+                continue
+            ruta = os.path.join(d, fn)
+            try:
+                p = ImageCms.ImageCmsProfile(ruta)
+                nombre = (ImageCms.getProfileName(p) or fn).strip()
+                espacio = (getattr(p.profile, "xcolor_space", None) or "").strip().upper() or "?"
+            except Exception:
+                continue
+            vistos_arch.add(fn.lower())
+            if nombre.lower() in vistos_nombre:   # mismo nombre repetido (ej. HDTV) → uno solo
+                continue
+            vistos_nombre.add(nombre.lower())
+            out.append({"archivo": fn, "nombre": nombre, "espacio": espacio, "ruta": ruta,
+                        "colores": _colores_perfil(p, espacio)})
+    _perfiles_cache = out
+    return out
+
+
+def _perfil_por_archivo(archivo):
+    return next((p for p in _listar_perfiles() if p["archivo"].lower() == str(archivo or "").lower()), None)
+
+
+def _perfil_default_cfg(cat=None):
+    cat = cat or _cargar_catalogo()
+    cfg = cat.get("perfil_cfg") or {}
+    return {"cmyk": cfg.get("cmyk") or PERFIL_DEFAULT_CMYK,
+            "rgb": cfg.get("rgb") or PERFIL_DEFAULT_RGB}
+
+
+def _detectar_perfil_incrustado(pdf_path):
+    """Detecta el perfil ICC incrustado en un .ai/PDF. Devuelve {tiene, nombre, espacio}.
+    Busca OutputIntent → ICCBased → XMP → y, si no hay perfil, el modelo de color del
+    encabezado AI (CMYK/RGB) para saber qué predeterminado corresponde."""
+    nombre, espacio = None, None
+    import tempfile
+    def _desc_de_icc(data):
+        try:
+            from PIL import ImageCms
+            import io
+            return ImageCms.getProfileName(ImageCms.ImageCmsProfile(io.BytesIO(data))).strip()
+        except Exception:
+            return None
+    try:
+        import pikepdf
+        pdf = pikepdf.open(pdf_path)
+        try:
+            ois = pdf.Root.get("/OutputIntents")
+            if ois:
+                for oi in ois:
+                    dop = oi.get("/DestOutputProfile")
+                    if dop is not None:
+                        n = _desc_de_icc(bytes(dop.read_bytes()))
+                        if n:
+                            nombre = n; break
+                    info = oi.get("/Info") or oi.get("/OutputConditionIdentifier")
+                    if info and not nombre:
+                        nombre = str(info)
+            if not nombre:
+                # ICCBased en cualquier recurso
+                vis = set()
+                def walk(obj, d=0):
+                    nonlocal nombre, espacio
+                    if d > 8 or nombre:
+                        return
+                    try:
+                        if isinstance(obj, pikepdf.Array) and len(obj) >= 2 and str(obj[0]) == "/ICCBased":
+                            n = _desc_de_icc(bytes(obj[1].read_bytes()))
+                            if n:
+                                nombre = n
+                            nn = obj[1].get("/N")
+                            espacio = {1: "GRAY", 3: "RGB", 4: "CMYK"}.get(int(nn)) if nn is not None else espacio
+                    except Exception:
+                        pass
+                    try:
+                        for k in (obj.keys() if hasattr(obj, "keys") else []):
+                            walk(obj[k], d + 1)
+                    except Exception:
+                        pass
+                for pg in pdf.pages:
+                    walk(pg.obj)
+        finally:
+            pdf.close()
+    except Exception:
+        pass
+    # Modelo de color del encabezado AI (para elegir el predeterminado correcto)
+    if espacio is None:
+        try:
+            raw = open(pdf_path, "rb").read(60000)
+            m = re.search(rb"AI9_ColorModel:\s*(\d+)", raw)
+            if m:
+                espacio = {0: "GRAY", 1: "RGB", 2: "CMYK"}.get(int(m.group(1)), "CMYK")
+        except Exception:
+            pass
+    return {"tiene": bool(nombre), "nombre": nombre, "espacio": espacio or "CMYK"}
+
+
+def _perfil_info(pdf_path, cat=None):
+    """Compara el perfil incrustado contra el predeterminado y arma el aviso."""
+    cat = cat or _cargar_catalogo()
+    det = _detectar_perfil_incrustado(pdf_path)
+    espacio = det["espacio"]
+    defs = _perfil_default_cfg(cat)
+    def_file = defs["rgb"] if espacio == "RGB" else defs["cmyk"]
+    def_prof = _perfil_por_archivo(def_file)
+    def_nombre = (def_prof or {}).get("nombre") or def_file
+    if not det["tiene"]:
+        return {"estado": "sin_perfil", "espacio": espacio, "incrustado": None,
+                "predeterminado": def_nombre,
+                "mensaje": f"Tu diseño viene SIN perfil de color. Se le asignará «{def_nombre}» ({espacio})."}
+    if det["nombre"] == def_nombre:
+        return {"estado": "ok", "espacio": espacio, "incrustado": det["nombre"],
+                "predeterminado": def_nombre,
+                "mensaje": f"Perfil correcto: «{det['nombre']}»."}
+    return {"estado": "distinto", "espacio": espacio, "incrustado": det["nombre"],
+            "predeterminado": def_nombre,
+            "mensaje": f"El perfil del diseño es «{det['nombre']}», distinto del predeterminado. Se recomienda «{def_nombre}»."}
+
+
+def _icc_para_salida(arts, cat=None, forzado=None):
+    """Decide QUÉ perfil ICC embeber en la tizada. Si `forzado` (archivo) viene
+    (el usuario unificó perfiles distintos), usa ese. Si no: el que vino incrustado
+    en el arte, o el predeterminado del sistema si no traía. Devuelve
+    (icc_bytes, nombre, n_componentes) o (None, None, None)."""
+    cat = cat or _cargar_catalogo()
+    # 1) El perfil ELEGIDO al unificar (paso 2) MANDA, sea RGB o CMYK. Se respeta su
+    #    espacio: si elegís un perfil RGB, la salida sale en RGB (no se fuerza CMYK).
+    if forzado:
+        prof = _perfil_por_archivo(forzado)
+        if prof:
+            try:
+                return open(prof["ruta"], "rb").read(), prof["nombre"], (4 if prof["espacio"] == "CMYK" else 3)
+            except Exception:
+                pass
+    # 2) El perfil INCRUSTADO en el arte (respeta su espacio).
+    espacio = None
+    for a in (arts or []):
+        if not a or not os.path.exists(a):
+            continue
+        det = _detectar_perfil_incrustado(a)
+        espacio = det.get("espacio") or espacio
+        if det.get("tiene") and det.get("nombre"):
+            prof = next((p for p in _listar_perfiles() if p["nombre"] == det["nombre"]), None)
+            if prof:
+                try:
+                    return open(prof["ruta"], "rb").read(), prof["nombre"], (4 if prof["espacio"] == "CMYK" else 3)
+                except Exception:
+                    pass
+    # 3) Predeterminado del sistema, SEGÚN el espacio detectado (CMYK si no se sabe).
+    defs = _perfil_default_cfg(cat)
+    def_file = defs["rgb"] if espacio == "RGB" else defs["cmyk"]
+    prof = _perfil_por_archivo(def_file)
+    if prof:
+        try:
+            return open(prof["ruta"], "rb").read(), prof["nombre"], (4 if prof["espacio"] == "CMYK" else 3)
+        except Exception:
+            pass
+    return None, None, None
+
+
+def _gs_exe():
+    """Ubica el ejecutable de Ghostscript (gswin64c). Cacheado en la variable."""
+    if getattr(_gs_exe, "_path", "x") != "x":
+        return _gs_exe._path
+    cands = [os.environ.get("TIZADA_GS")]
+    for base in (r"C:\Program Files\gs", r"C:\Program Files (x86)\gs"):
+        if os.path.isdir(base):
+            for v in sorted(os.listdir(base), reverse=True):
+                for exe in ("gswin64c.exe", "gswin32c.exe", "gs.exe"):
+                    cands.append(os.path.join(base, v, "bin", exe))
+    _gs_exe._path = next((c for c in cands if c and os.path.exists(c)), None)
+    return _gs_exe._path
+
+
+def _pdf_tiene_rgb(pdf_path):
+    """True si el PDF tiene algún contenido RGB (operadores rg/RG, DeviceRGB,
+    CalRGB/Lab o ICCBased N=3), RECORRIENDO los Form XObjects (el motor pone cada
+    pieza en un XObject, ahí viven los colores). Sirve para decidir si hace falta
+    convertir a CMYK: si la tizada es TODA CMYK, NO se convierte (los valores CMYK
+    quedan EXACTOS, el perfil solo se ASIGNA/tagea); solo se convierte si hay RGB."""
+    try:
+        import pikepdf
+        from pikepdf import parse_content_stream
+        pdf = pikepdf.open(pdf_path)
+    except Exception:
+        return True   # ante la duda, convertir (no romper el flujo viejo)
+
+    def _cs_es_rgb(v):
+        try:
+            if isinstance(v, pikepdf.Array):
+                base = str(v[0])
+                if base in ("/CalRGB", "/Lab", "/DeviceRGB"):
+                    return True
+                if base == "/ICCBased" and int(v[1].get("/N", 0)) == 3:
+                    return True
+                if base in ("/Indexed", "/ICCBased", "/Separation", "/DeviceN") and len(v) > 1:
+                    return _cs_es_rgb(v[1])   # base de Indexed / alternate
+            elif str(v) in ("/DeviceRGB", "/CalRGB"):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _rgb_en(obj, seen):
+        # imagen con colorspace RGB directo (no está en /Resources)
+        try:
+            if str(obj.get("/Subtype", "")) == "/Image" and _cs_es_rgb(obj.get("/ColorSpace")):
+                return True
+        except Exception:
+            pass
+        try:
+            cs = obj.get("/Resources", {}).get("/ColorSpace", {}) or {}
+        except Exception:
+            cs = {}
+        for v in (cs.values() if cs else []):
+            if _cs_es_rgb(v):
+                return True
+        try:
+            for inst in parse_content_stream(obj):
+                if str(inst.operator) in ("rg", "RG"):
+                    return True
+        except Exception:
+            pass
+        try:
+            sub = obj.get("/Resources", {}).get("/XObject", {}) or {}
+            for v in (sub.values() if sub else []):
+                oid = id(v)
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                if _rgb_en(v, seen):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    try:
+        seen = set()
+        return any(_rgb_en(pg, seen) for pg in pdf.pages)
+    finally:
+        pdf.close()
+
+
+def _pdf_tiene_cmyk(pdf_path):
+    """True si el PDF tiene algún contenido CMYK (k/K, DeviceCMYK, ICCBased N=4 o
+    Separation/DeviceN), recorriendo Form XObjects e imágenes. Espejo de
+    `_pdf_tiene_rgb`: sirve cuando el modo objetivo es RGB para decidir si hace falta
+    convertir (solo si hay CMYK que no calza)."""
+    try:
+        import pikepdf
+        from pikepdf import parse_content_stream
+        pdf = pikepdf.open(pdf_path)
+    except Exception:
+        return False
+
+    def _cs_es_cmyk(v):
+        try:
+            if isinstance(v, pikepdf.Array):
+                base = str(v[0])
+                if base in ("/Separation", "/DeviceN"):
+                    return True
+                if base == "/ICCBased" and int(v[1].get("/N", 0)) == 4:
+                    return True
+                if base in ("/Indexed",) and len(v) > 1:
+                    return _cs_es_cmyk(v[1])
+            elif str(v) == "/DeviceCMYK":
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _cmyk_en(obj, seen):
+        try:
+            if str(obj.get("/Subtype", "")) == "/Image" and _cs_es_cmyk(obj.get("/ColorSpace")):
+                return True
+        except Exception:
+            pass
+        try:
+            cs = obj.get("/Resources", {}).get("/ColorSpace", {}) or {}
+        except Exception:
+            cs = {}
+        for v in (cs.values() if cs else []):
+            if _cs_es_cmyk(v):
+                return True
+        try:
+            for inst in parse_content_stream(obj):
+                if str(inst.operator) in ("k", "K"):
+                    return True
+        except Exception:
+            pass
+        try:
+            sub = obj.get("/Resources", {}).get("/XObject", {}) or {}
+            for v in (sub.values() if sub else []):
+                oid = id(v)
+                if oid in seen:
+                    continue
+                seen.add(oid)
+                if _cmyk_en(v, seen):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    try:
+        seen = set()
+        return any(_cmyk_en(pg, seen) for pg in pdf.pages)
+    finally:
+        pdf.close()
+
+
+def _unificar_modo_gs(pdf_path, espacio):
+    """Convierte el PDF a UN SOLO modo de color (CMYK o RGB) con Ghostscript, así
+    Illustrator/Acrobat no pide elegir modo. CMYK device pasa derecho; el RGB suelto
+    (texto, contornos) se convierte. Devuelve True si convirtió."""
+    gs = _gs_exe()
+    if not gs or not os.path.exists(pdf_path):
+        return False
+    import subprocess
+    rgb = (espacio == "RGB")
+    out = pdf_path + ".cmyk.pdf"
+    cmd = [gs, "-dBATCH", "-dNOPAUSE", "-dSAFER", "-sDEVICE=pdfwrite",
+           "-dColorConversionStrategy=/" + ("RGB" if rgb else "CMYK"),
+           "-dProcessColorModel=/" + ("DeviceRGB" if rgb else "DeviceCMYK"),
+           "-dPreserveSeparation=true", "-dPreserveDeviceN=true",
+           "-dAutoRotatePages=/None", "-dPassThroughJPEGImages=true",
+           "-dDownsampleColorImages=false", "-dDownsampleGrayImages=false",
+           "-dDownsampleMonoImages=false",
+           f"-sOutputFile={out}", pdf_path]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
+            os.replace(out, pdf_path)
+            return True
+        print(f"  [!]  gs no convirtió {pdf_path}: rc={r.returncode} {r.stderr[-200:]}")
+    except Exception as e:
+        print(f"  [!]  gs error en {pdf_path}: {e}")
+    try:
+        if os.path.exists(out):
+            os.remove(out)
+    except OSError:
+        pass
+    return False
+
+
+def _embeber_perfil_pdf(pdf_path, icc_bytes, nombre, n):
+    """Incrusta el perfil ICC como OutputIntent (PDF/X) — TAGEA el destino de color
+    SIN convertir ni modificar los valores de color."""
+    if not (icc_bytes and os.path.exists(pdf_path)):
+        return False
+    try:
+        import pikepdf
+        with pikepdf.open(pdf_path, allow_overwriting_input=True) as pdf:
+            icc = pdf.make_stream(icc_bytes)
+            icc.N = n
+            oi = pdf.make_indirect(pikepdf.Dictionary({
+                "/Type": pikepdf.Name("/OutputIntent"),
+                "/S": pikepdf.Name("/GTS_PDFX"),
+                "/OutputConditionIdentifier": pikepdf.String(nombre or "Custom"),
+                "/Info": pikepdf.String(nombre or "Custom"),
+                "/DestOutputProfile": icc,
+            }))
+            pdf.Root.OutputIntents = pikepdf.Array([oi])
+            pdf.save(pdf_path)
+        return True
+    except Exception as e:
+        print(f"  [!]  no se pudo embeber el perfil en {pdf_path}: {e}")
+        return False
+
+
+def _cargar_catalogo():
+    ruta = os.path.join(DATOS, "productos_catalogo.json")
+    cat = None
+    # Intentar el archivo y, si está corrupto/vacío, el backup. NUNCA resetear a
+    # los valores por defecto si había un archivo con datos (eso borraría la
+    # config del usuario, p. ej. variante_guia). Solo se cae al default si NO
+    # existe ningún archivo válido.
+    for intento in (ruta, ruta + ".bak"):
+        if os.path.exists(intento):
+            try:
+                with open(intento, encoding="utf-8") as f:
+                    datos = json.load(f)
+                if datos and datos.get("productos"):
+                    cat = datos
+                    break
+            except Exception:
+                cat = None
+    if cat is None and os.path.exists(ruta) and os.path.getsize(ruta) > 0:
+        # El archivo existe y no está vacío pero no parseó y no hay backup útil:
+        # preservar el original corrupto para no perder datos y avisar fuerte.
+        try:
+            import shutil
+            shutil.copy2(ruta, ruta + ".corrupto")
+            print(f"\n  [!]  {ruta} no se pudo leer. Copia preservada en {ruta}.corrupto\n")
+        except Exception:
+            pass
+    if not cat:
+        cat = {"activo": "prod_default", "productos": [{"id": "prod_default", "nombre": "Molde 1", "creado": time.time()}]}
+    
+    # Ensure plantillas_planillas is present
+    if "plantillas_planillas" not in cat:
+        cat["plantillas_planillas"] = [
+            {
+                "id": "plan_default",
+                "nombre": "Planilla Estándar",
+                "columnas": [
+                    {"id": "talle", "label": "Talle", "role": "talle"},
+                    {"id": "nombre", "label": "Nombre", "role": "nombre"},
+                    {"id": "numero", "label": "Número", "role": "numero"},
+                    {"id": "manga", "label": "Manga", "role": "manga"}
+                ]
+            }
+        ]
+        _guardar_catalogo(cat)
+
+    # Biblioteca de REGLAS de planilla (campos reutilizables). Cada regla define
+    # cómo se carga en la planilla (texto/desplegable/toggle), sus opciones y qué
+    # hace (comportamiento). Las columnas de las planillas eligen una regla.
+    if "reglas_planilla" not in cat:
+        cat["reglas_planilla"] = [
+            {"id": "regla_variante", "nombre": "Variante (talle/color/…)", "tipo": "desplegable", "opciones": "", "comportamiento": "talle"},
+            {"id": "regla_nombre", "nombre": "Nombre", "tipo": "texto", "opciones": "", "comportamiento": "nombre"},
+            {"id": "regla_numero", "nombre": "Número", "tipo": "texto", "opciones": "", "comportamiento": "numero"},
+            {"id": "regla_manga", "nombre": "Manga", "tipo": "toggle", "opciones": "Corta, Larga", "comportamiento": "manga", "clave": "manga"},
+            {"id": "regla_texto", "nombre": "Texto libre", "tipo": "texto", "opciones": "", "comportamiento": "none"},
+        ]
+        _guardar_catalogo(cat)
+
+    # Migración aditiva: las reglas "toggle de pieza" (comportamiento "manga") ahora
+    # llevan palabra CLAVE. A las viejas sin clave les ponemos su nombre en minúsculas.
+    _mig_clave = False
+    for r in cat.get("reglas_planilla", []):
+        if r.get("comportamiento") == "manga" and not r.get("clave"):
+            r["clave"] = (r.get("nombre") or "manga").strip().lower()
+            _mig_clave = True
+    if _mig_clave:
+        _guardar_catalogo(cat)
+
+    # Presets de NESTING (reglas de acomodo): espaciado, margen y giro. Cada molde
+    # elige cuál usar (productos[*].nesting_preset_id). El primero es el estándar.
+    if "nesting_presets" not in cat:
+        cat["nesting_presets"] = [
+            {"id": "nesting_default", "nombre": "Estándar", "espaciado_mm": 5, "margen_mm": 10, "rotacion": "ninguna"},
+        ]
+        _guardar_catalogo(cat)
+
+    # Catálogo de piezas organizado por GRUPOS (editable y persistido). El grupo
+    # que ya existía (catálogo plano) pasa a llamarse "Prenda Superior".
+    if "catalogo_grupos" not in cat:
+        base = cat.get("catalogo_piezas") or ["Frente", "Espalda", "Manga", "Cuello", "Costadillo", "TC"]
+        cat["catalogo_grupos"] = [{"nombre": "Prenda Superior", "piezas": list(base)}]
+        _guardar_catalogo(cat)
+
+    # Map existing products to the default template and set default mapeo_columnas if missing
+    modificado = False
+    for p in cat.get("productos", []):
+        # El concepto "producto" deja de existir de cara al usuario: cada uno es
+        # un molde. Migramos el nombre por defecto histórico.
+        if p.get("nombre") in ("Producto por Defecto", "Producto por defecto"):
+            p["nombre"] = "Molde 1"
+            modificado = True
+        if "planilla_template_id" not in p:
+            p["planilla_template_id"] = "plan_default"
+            modificado = True
+        if "mapeo_columnas" not in p:
+            p["mapeo_columnas"] = {
+                "talle": "talle",
+                "nombre": "nombre",
+                "numero": "numero",
+                "manga": "manga",
+                "manga_corta_val": "corta",
+                "manga_larga_val": "larga"
+            }
+            modificado = True
+    if modificado:
+        _guardar_catalogo(cat)
+    return cat
+
+
+_lock_catalogo = threading.Lock()
+
+
+def _guardar_catalogo(cat):
+    """Escritura ATÓMICA con backup: se escribe a un temporal, se respalda el
+    archivo bueno anterior (.bak) y recién ahí se reemplaza. Así una escritura
+    interrumpida o concurrente nunca deja el catálogo corrupto ni borra datos."""
+    ruta = os.path.join(DATOS, "productos_catalogo.json")
+    with _lock_catalogo:
+        tmp = ruta + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cat, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.exists(ruta) and os.path.getsize(ruta) > 0:
+            try:
+                import shutil
+                shutil.copy2(ruta, ruta + ".bak")
+            except Exception:
+                pass
+        # os.replace puede fallar con [WinError 5] "Acceso denegado" cuando OneDrive,
+        # el antivirus o el indexador de Windows tienen el archivo tomado un instante
+        # (muy típico si el proyecto está en Documentos/OneDrive). Casi siempre es
+        # transitorio → reintentamos unas veces; el .tmp y el .bak protegen los datos.
+        ultimo = None
+        for intento in range(8):
+            try:
+                os.replace(tmp, ruta)
+                ultimo = None
+                break
+            except PermissionError as e:
+                ultimo = e
+                time.sleep(0.2 * (intento + 1))
+        if ultimo is not None:
+            raise PermissionError(
+                f"No se pudo guardar {os.path.basename(ruta)}: Windows denegó el reemplazo "
+                f"(otro programa lo tiene abierto, o OneDrive/antivirus lo bloquearon). "
+                f"Cerrá el archivo si lo tenés abierto, pausá OneDrive o mové el proyecto "
+                f"fuera de la carpeta Documentos, y reintentá. Detalle: {ultimo}"
+            )
+
+
+def _get_active_producto_id():
+    return _cargar_catalogo().get("activo", "prod_default")
+
+
+def _slugify_diseno(s):
+    """Nombre de diseño → slug. Vacío/'Principal' → 'principal' (el arte base)."""
+    s = str(s or "").strip().lower()
+    if not s or s in ("principal", "default"):
+        return "principal"
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")[:48] or "principal"
+
+
+def _diseno_sub(diseno):
+    """Subcarpeta para un diseño nombrado. El diseño por defecto ('principal' o
+    vacío) usa la carpeta raíz del producto → 100% compatible con lo de hoy."""
+    slug = _slugify_diseno(diseno)
+    return None if slug == "principal" else os.path.join("disenos", slug)
+
+
+def _ruta_datos(nombre, pid=None, sub=None):
+    pid = pid or _get_active_producto_id()
+    pdir = os.path.join(DATOS, "productos", pid)
+    if sub:
+        pdir = os.path.join(pdir, sub)
+    os.makedirs(pdir, exist_ok=True)
+    return os.path.join(pdir, nombre)
+
+
+def _ruta_entrada(nombre, pid=None, sub=None):
+    pid = pid or _get_active_producto_id()
+    pdir = os.path.join(ENTRADA, pid)
+    if sub:
+        pdir = os.path.join(pdir, sub)
+    os.makedirs(pdir, exist_ok=True)
+    return os.path.join(pdir, nombre)
+
+
+@app.errorhandler(Exception)
+def _error_no_controlado(e):
+    """Cualquier error no previsto vuelve como JSON legible (nunca una página
+    HTML de stacktrace), y el detalle queda en la ventana del servidor. Los
+    errores HTTP normales (404, etc.) se dejan pasar tal cual."""
+    if isinstance(e, HTTPException):
+        return e
+    traceback.print_exc()
+    return jsonify({"error": f"error interno del servidor: {e}"}), 500
+
+
+@app.after_request
+def _evitar_cache(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
+@app.get("/favicon.ico")
+def _favicon():
+    return ("", 204)
+
+
+def _cargar(nombre, pid=None, sub=None):
+    try:
+        return json.load(open(_ruta_datos(nombre, pid, sub=sub), encoding="utf-8"))
+    except Exception:
+        return None
+
+
+@app.get("/")
+@app.get("/admin")
+def inicio():
+    # El index.html NO se cachea: así el navegador siempre carga la última build
+    # (los assets llevan hash en el nombre, esos sí se pueden cachear).
+    resp = send_from_directory("frontend/dist", "index.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
+@app.get("/api/estado_general")
+def estado_general():
+    reg = _cargar("registro_producto.json")
+    val = _cargar("validacion_arte.json")
+    # Talles en el orden del archivo (panel de capas), no alfabético. Primero se
+    # juntan preservando la aparición y luego se ordenan según el .ai si existe.
+    talles = []
+    vistos = set()
+    for p in (reg or {}).values():
+        for t in p:
+            if t not in vistos:
+                vistos.add(t)
+                talles.append(t)
+    plantilla = _ruta_entrada("plantilla.ai")
+    if talles and os.path.exists(plantilla):
+        talles = MP.talles_orden_archivo(plantilla, talles)
+    return jsonify({
+        "plantilla": _cargar("resumen_plantilla.json"),
+        "arte": val,
+        "fuentes": list(MP.catalogo_fuentes(FUENTES).values()),
+        "talles": talles,
+        "listo_para_pedidos": bool(reg) and bool(val and val.get("aprobado")),
+    })
+
+
+@app.post("/api/plantilla")
+def subir_plantilla():
+    f = request.files.get("archivo")
+    if not f:
+        return jsonify({"error": "falta el archivo"}), 400
+    destino = _ruta_entrada("plantilla.ai")
+    nombre = (f.filename or "").lower()
+    # Si YA había un molde con piezas nombradas, sacar una FOTO de su talle guía antes
+    # de pisarlo: si el archivo nuevo es el mismo molde (re-subida, p. ej. reimportar el
+    # DXF con curvas), los nombres se transfieren solos y no se pierde el trabajo.
+    snap_nombres = None
+    try:
+        if os.path.exists(destino):
+            _reg_viejo = _cargar("registro_producto.json")
+            if _reg_viejo:
+                snap_nombres = MP.snapshot_nombres_guia(destino, _reg_viejo)
+    except Exception:
+        snap_nombres = None
+    dxf_resumen = None
+    if nombre.endswith(".dxf"):
+        # Molde en DXF (AAMA/ASTM de Optitex, Gerber, Lectra…): se CONVIERTE a un PDF
+        # con una capa por talle + los contornos de cada pieza, igual que un .ai.
+        # Las curvas del archivo (bulge/spline/elipse) se conservan EXACTAS (Bézier).
+        import importar_dxf, traceback as _tb
+        # Guardar el DXF original SIEMPRE (antes de convertir): así, aunque la conversión
+        # falle, queda el archivo para diagnosticar/reimportar y no se pierde.
+        fuente = _ruta_entrada("plantilla_fuente.dxf")
+        f.save(fuente)
+        try:
+            pdf_bytes, dxf_resumen = importar_dxf.dxf_a_pdf(fuente)
+            with open(destino, "wb") as g:
+                g.write(pdf_bytes)
+        except Exception as e:
+            _tb.print_exc()
+            return jsonify({"error": f"no se pudo importar el DXF: {e}"}), 422
+        # Correspondencia EXACTA pieza↔talle del DXF (Piece Name + Size): la usan el
+        # nido y el registro para NO adivinar el emparejado entre talles.
+        try:
+            _idx = dxf_resumen.pop("indices", None)
+            if _idx:
+                json.dump(_idx, open(_ruta_datos("correspondencia_piezas.json"), "w", encoding="utf-8"), ensure_ascii=False)
+        except Exception:
+            pass
+    else:
+        # .ai / .pdf (Illustrator, Corel, InDesign…): PyMuPDF los lee directo.
+        f.save(destino)
+    if dxf_resumen:
+        # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
+        # pone → solo genera ruido y tarda). Los talles ya vienen del DXF; las piezas se
+        # nombran en el visor. Resumen mínimo.
+        alta = {"mesas": 1, "talles": dxf_resumen.get("talles", []), "piezas": [],
+                "completos": [], "registro": {}, "problemas": [], "advertencias": [],
+                "piezas_detalle": {}}
+    else:
+        try:
+            alta = MP.alta_plantilla(destino)
+        except Exception as e:
+            return jsonify({"error": f"no se pudo procesar la plantilla: {e}"}), 422
+    # Si el DXF trajo NOMBRES de pieza, se aplican SOLOS (arma el registro con esos
+    # nombres, emparejando por posición). SOLO para moldes chicos: con muchas piezas el
+    # emparejado es carísimo (O(n²)×talles, +30s) → se saltea y se nombran en el visor/modelos.
+    _nombres = [n for n in (dxf_resumen.get("nombres") or []) if str(n).strip()] if dxf_resumen else []
+    if _nombres and len(_nombres) <= 25:
+        try:
+            det = MP.detectar_piezas(destino)
+            nombres = dxf_resumen["nombres"]
+            asign = [{"idx": i, "nombre": nombres[i]}
+                     for i in range(min(len(det["piezas"]), len(nombres))) if str(nombres[i]).strip()]
+            manual = MP.alta_plantilla_manual(destino, asign, det["mesa"], det["talle_ref"], indices=_cargar("correspondencia_piezas.json") or None) if asign else None
+            if manual and manual.get("registro"):
+                alta = manual
+                dxf_resumen["nombres_aplicados"] = sorted(manual["registro"].keys())
+        except Exception:
+            pass
+    elif _nombres:
+        # molde grande: no se auto-nombra ahora (se hace al organizar en Modelos)
+        dxf_resumen["nombres_pendientes"] = len(_nombres)
+    # Re-subida del MISMO molde: si el alta no trajo nombres propios pero había piezas
+    # nombradas, transferirlas al archivo nuevo emparejando por geometría del talle guía.
+    nombres_conservados = None
+    if snap_nombres and not alta.get("registro"):
+        try:
+            alta_remap, cobertura = MP.remapear_registro(destino, snap_nombres, indices=_cargar("correspondencia_piezas.json") or None)
+            if alta_remap and alta_remap.get("registro") and cobertura >= 0.5:
+                alta = alta_remap
+                nombres_conservados = f"{len(alta['registro'])}/{len(snap_nombres['nombres'])}"
+            elif alta_remap:
+                nombres_conservados = f"0/{len(snap_nombres['nombres'])} (el molde nuevo no coincide)"
+        except Exception:
+            pass
+    json.dump(alta["registro"], open(_ruta_datos("registro_producto.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    try:  # identidad estable: al cambiar el registro, refrescar piezas.json (ids)
+        _regenerar_piezas_index(_get_active_producto_id(), reg=alta["registro"])
+    except Exception:
+        pass
+    resumen = {"archivo": f.filename, "mesas": alta["mesas"], "piezas": alta["piezas"],
+               "talles": alta["talles"],
+               "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
+               "problemas": alta["problemas"],
+               "advertencias": alta.get("advertencias", []),
+               "piezas_detalle": alta.get("piezas_detalle", {}),
+               "nombres_conservados": nombres_conservados,
+               "dxf": dxf_resumen}
+    json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    return jsonify(resumen)
+
+
+@app.get("/api/plantilla/deteccion")
+def plantilla_deteccion():
+    """Detecta las piezas de la moldería para el etiquetador visual."""
+    pl = _ruta_entrada("plantilla.ai")
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí la plantilla base"}), 409
+    talle_ref = request.args.get("talle_ref")
+    if not talle_ref:
+        # Sin pedido explícito → usar la variante de guía guardada en la base
+        # para este molde (compartida entre todos los usuarios). Así, elija quien
+        # elija M, siempre se abre en M sin importar el navegador.
+        pid = _get_active_producto_id()
+        prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+        if prod and prod.get("variante_guia"):
+            talle_ref = prod["variante_guia"]
+    try:
+        res = MP.detectar_piezas(pl, talle_ref=talle_ref)
+    except Exception:
+        # La variante guardada puede ya no existir en la plantilla → reintentar
+        # con la automática para no romper la carga.
+        if talle_ref:
+            try:
+                res = MP.detectar_piezas(pl, talle_ref=None)
+            except Exception as e:
+                return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
+        else:
+            return jsonify({"error": "no se pudieron detectar las piezas"}), 422
+    try:
+        # Cargar etiquetas existentes si las hay para precargarlas en el frontend
+        reg = _cargar("registro_producto.json")
+        nombres_existentes = {}
+        if reg:
+            talle_ref = res.get("talle_ref")
+            mesa = res.get("mesa")
+            for nombre_pieza, por_talle in reg.items():
+                if talle_ref in por_talle:
+                    info = por_talle[talle_ref]
+                    if info.get("mesa") == mesa:
+                        idx = info.get("pieza_idx")
+                        if idx is not None:
+                            nombres_existentes[idx] = nombre_pieza
+        res["nombres_existentes"] = nombres_existentes
+        # Dimensión de referencia (alto/ancho) y medidas recomendadas del diseño
+        # por pieza, para que cubra todos los talles sin huecos.
+        pid = _get_active_producto_id()
+        prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+        ref = (prod or {}).get("referencia_medida") or "alto"
+        res["referencia_medida"] = ref
+        res["medidas_diseno"] = MP.medidas_diseno(reg, ref, talle_guia=res.get("talle_ref")) if reg else {}
+        # Identidad ESTABLE de las piezas (id ↔ clave), para que el frontend resuelva las
+        # variables por id y no por pieza_idx (que varía por talle → la pieza se caía al cambiar
+        # de talle en el visor). Es talle-independiente; viene igual en cada detección.
+        res["piezas_id"] = (_cargar("piezas.json", pid) or {}).get("piezas") or []
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
+
+
+_NIDO_CACHE = {}   # clave (path, mtime, reg_mtime) → nido (geometría estable; recalcula si cambia el archivo/registro)
+
+def _nido_clave():
+    pl = _ruta_entrada("plantilla.ai")
+    reg_path = _ruta_datos("registro_producto.json")
+    cor_path = _ruta_datos("correspondencia_piezas.json")
+    try:
+        return ["v5", pl, os.path.getmtime(pl),
+                os.path.getmtime(reg_path) if os.path.exists(reg_path) else 0,
+                os.path.getmtime(cor_path) if os.path.exists(cor_path) else 0]
+    except OSError:
+        return ["v5", pl, 0, 0, 0]
+
+def _nido_obtener():
+    """Devuelve el nido (calculándolo si hace falta) con caché en memoria + DISCO
+    (sobrevive reinicios del server: el cálculo recorre todos los talles y es lento)."""
+    clave = _nido_clave()
+    ck = tuple(clave)
+    if ck in _NIDO_CACHE:
+        return _NIDO_CACHE[ck]
+    cache_path = _ruta_datos("nido_cache.json")
+    try:                                          # ¿está en disco con la misma clave?
+        d = json.load(open(cache_path, encoding="utf-8"))
+        if d.get("clave") == clave and d.get("nido"):
+            _NIDO_CACHE[ck] = d["nido"]
+            return d["nido"]
+    except Exception:
+        pass
+    reg = _cargar("registro_producto.json")
+    if not reg:
+        raise LookupError("primero nombrá las piezas (registro vacío)")
+    talle_guia = None
+    pid = _get_active_producto_id()
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    if prod and prod.get("variante_guia"):
+        talle_guia = prod["variante_guia"]
+    nido = MP.nido_piezas(_ruta_entrada("plantilla.ai"), reg, talle_guia=talle_guia,
+                          indices=_cargar("correspondencia_piezas.json") or None)
+    _NIDO_CACHE[ck] = nido
+    try:
+        json.dump({"clave": clave, "nido": nido}, open(cache_path, "w", encoding="utf-8"))
+    except Exception:
+        pass
+    return nido
+
+@app.get("/api/plantilla/nido")
+def plantilla_nido():
+    """Geometría NESTEADA de cada pieza nombrada en TODOS los talles (para acomodar en el visor)."""
+    if not os.path.exists(_ruta_entrada("plantilla.ai")):
+        return jsonify({"error": "primero subí la plantilla base"}), 409
+    try:
+        return jsonify(_nido_obtener())
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        return jsonify({"error": f"no se pudo armar el nido: {e}"}), 422
+
+
+@app.get("/api/plantilla/medidas_variantes")
+def plantilla_medidas_variantes():
+    """Medidas reales (w_cm/h_cm) de CADA pieza en CADA variante, leídas del registro
+    (sin re-detectar). Para la visual de referencia «piezas en fila por talle» que muestra
+    cómo el diseño debe adaptarse a lo largo de los talles bajo cada modo de plantilla."""
+    reg = _cargar("registro_producto.json")
+    if not reg:
+        return jsonify({"error": "primero registrá el molde"}), 409
+    piezas = []
+    for nombre, por_talle in reg.items():
+        medidas = {t: {"w_cm": info.get("w_cm"), "h_cm": info.get("h_cm")}
+                   for t, info in por_talle.items()
+                   if info.get("w_cm") is not None and info.get("h_cm") is not None}
+        if medidas:
+            piezas.append({"nombre": nombre, "medidas": medidas})
+    return jsonify({"talles": _orden_var(reg), "piezas": piezas})
+
+
+@app.get("/api/plantilla/pdf_guia")
+def plantilla_pdf_guia():
+    """PDF imprimible con el molde de guía + el recuadro de medida y el nombre de cada
+    pieza, según el modo elegido en el visor (default / rango / talle)."""
+    pl = _ruta_entrada("plantilla.ai")
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí la plantilla base"}), 409
+    reg = _cargar("registro_producto.json") or {}
+    config = request.args.get("config", "default")
+    talle = request.args.get("talle") or None
+    rango = [t for t in (request.args.get("rango", "").split(",")) if t]
+    # Piezas a incluir (JSON array de claves de registro): solo las de la variante en curso.
+    piezas_raw = request.args.get("piezas")
+    try:
+        piezas_incluir = set(json.loads(piezas_raw)) if piezas_raw else None
+    except Exception:
+        piezas_incluir = None
+    pid = _get_active_producto_id()
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    referencia = (prod or {}).get("referencia_medida") or "alto"
+    titulo = (prod or {}).get("nombre") or "Molde"
+    # En 'rango' la guía la elige el usuario DENTRO del rango; en el resto, la guía del molde.
+    talle_guia = request.args.get("guia") or (prod or {}).get("variante_guia") or None
+    limpio = request.args.get("limpio") in ("1", "true", "True")   # BASE: solo contornos, sin recuadro/nombre/medidas
+    from flask import Response
+    # GUÍA en .ai NATIVO (capas reales en Illustrator): `formato=ai`. Trae las capas del arte
+    # (diseño, guias, número…) creadas. El PDF sigue disponible para "Descargar base" (limpio).
+    if request.args.get("formato") == "ai":
+        capas_raw = request.args.get("capas")
+        try:
+            capas = json.loads(capas_raw) if capas_raw else None
+            if capas and not isinstance(capas, list):
+                capas = None
+        except Exception:
+            capas = None
+        try:
+            ai = MP.ai_guia_medidas(pl, reg, config=config, rango=rango, referencia=referencia,
+                                    titulo=titulo, talle_guia=talle_guia,
+                                    piezas_incluir=piezas_incluir, capas=capas)
+        except Exception as e:
+            return jsonify({"error": f"no se pudo generar el .ai: {e}"}), 422
+        _slug = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in (titulo or "guia")).strip("_") or "guia"
+        return Response(ai, mimetype="application/postscript",
+                        headers={"Content-Disposition": f'attachment; filename="guia_{_slug}.ai"'})
+    try:
+        pdf = MP.pdf_guia_medidas(pl, reg, config=config, talle=talle, rango=rango,
+                                  referencia=referencia, titulo=titulo, talle_guia=talle_guia,
+                                  piezas_incluir=piezas_incluir, limpio=limpio)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo generar el PDF: {e}"}), 422
+    fname = "base_molde.pdf" if limpio else "guia_medidas.pdf"
+    return Response(pdf, mimetype="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@app.get("/api/productos/<pid>/preview")
+def producto_preview(pid):
+    """Miniatura VECTORIAL del molde (siluetas de las piezas) para las tarjetas
+    del Pedido. Liviano: solo los contornos, sin imagen rasterizada."""
+    pl = _ruta_entrada("plantilla.ai", pid)
+    if not os.path.exists(pl):
+        return jsonify({"error": "sin molde"}), 404
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    talle_ref = (prod or {}).get("variante_guia")
+    try:
+        res = MP.detectar_piezas(pl, talle_ref=talle_ref)
+    except Exception:
+        try:
+            res = MP.detectar_piezas(pl, talle_ref=None)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 422
+    return jsonify({"img_w": res.get("img_w"), "img_h": res.get("img_h"),
+                    "piezas": [{"idx": p.get("idx"), "px": p.get("px"), "py": p.get("py"),
+                                "pw": p.get("pw"), "ph": p.get("ph"), "path_svg": p.get("path_svg")}
+                               for p in res.get("piezas", []) if p.get("path_svg")]})
+
+
+@app.post("/api/plantilla/etiquetas")
+def plantilla_etiquetas():
+    """Recibe los nombres puestos a mano en el talle de referencia y arma el
+    registro propagándolos a todos los talles por posición."""
+    cuerpo = request.get_json(force=True)
+    asign = cuerpo.get("asignaciones", [])
+    mesa, talle_ref = cuerpo.get("mesa"), cuerpo.get("talle_ref")
+    pl = _ruta_entrada("plantilla.ai")
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí la plantilla base"}), 409
+    alta = MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=_cargar("correspondencia_piezas.json") or None)
+    if not alta["registro"]:
+        return jsonify({"error": "; ".join(alta["problemas"]) or "no se registró ninguna pieza"}), 422
+    json.dump(alta["registro"], open(_ruta_datos("registro_producto.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    resumen = {"archivo": (_cargar("resumen_plantilla.json") or {}).get("archivo", "plantilla.ai"),
+               "mesas": alta["mesas"], "piezas": alta["piezas"], "talles": alta["talles"],
+               "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
+               "problemas": alta["problemas"], "advertencias": alta["advertencias"],
+               "piezas_detalle": alta["piezas_detalle"], "metodo": "etiquetado visual"}
+    json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    return jsonify(resumen)
+
+
+# ── Mapeo POR VARIABLE (regla 2026-07-13) ─────────────────────────────────────
+# El mapeo del arte (pieza→mesa) se maneja POR VARIABLE, nunca más por molde entero.
+# `mapeo_arte.json` = {"mapeo": base_compat, "por_variable": {v_xxx: {pieza: mesa}}}.
+# El de la variable es AUTORITATIVO (quitar un diseño en una variable no se resucita
+# por la base); la base queda para datos viejos, filas sin variable y como semilla.
+
+def _piezas_de_variable(prod, vcl, reg=None):
+    """Nombres (claves del registro) de las piezas de una VARIABLE (clave v_xxx). Resuelve por
+    pieza_id ESTABLE (piezas.json) con fallback pieza_idx@talle guía (datos viejos, espejo de
+    _traducir_prendas). None si la variable no existe o no se puede resolver ninguna pieza."""
+    v = next((x for x in ((prod or {}).get("variantes") or []) if x.get("clave") == vcl), None)
+    if not v:
+        return None
+    _pid = (prod or {}).get("id")
+    _pz = (_cargar("piezas.json", _pid) if _pid else None) or {}
+    _id2clave = {p["id"]: p["clave"] for p in _pz.get("piezas", []) if p.get("id") and p.get("clave")}
+    nombres = [_id2clave[x["pieza_id"]] for x in (v.get("valores") or []) if x.get("pieza_id") in _id2clave]
+    if not nombres and reg:
+        _guia = (prod or {}).get("variante_guia")
+        _idx2nom = {}
+        for _nm, _pt in reg.items():
+            _info = (_pt or {}).get(_guia)
+            if isinstance(_info, dict) and _info.get("pieza_idx") is not None:
+                _idx2nom[int(_info["pieza_idx"])] = _nm
+        nombres = [_idx2nom[int(x["pieza_idx"])] for x in (v.get("valores") or [])
+                   if x.get("pieza_idx") is not None and int(x["pieza_idx"]) in _idx2nom]
+    return nombres or None
+
+
+def _alcance_variables(prod, reg):
+    """UNIÓN de las piezas de todas las variables del molde (el alcance que importa mapear).
+    Si el molde no tiene variables (o ninguna resuelve), el molde entero."""
+    todas = set()
+    for _v in ((prod or {}).get("variantes") or []):
+        _pzv = _piezas_de_variable(prod, _v.get("clave"), reg)
+        if _pzv:
+            todas |= set(_pzv)
+    return todas or set((reg or {}).keys())
+
+
+def _mapeo_estructura(pid=None, sub=None):
+    """Lee mapeo_arte.json → (base {pieza:mesa}, por_variable {v_xxx:{pieza:mesa}}).
+    Datos viejos (solo "mapeo") quedan como base compartida."""
+    mp = _cargar("mapeo_arte.json", pid, sub=sub) or {}
+    base = {k: int(v) for k, v in (mp.get("mapeo") or {}).items() if v}
+    pv = {str(c): {k: int(v) for k, v in (m or {}).items() if v}
+          for c, m in (mp.get("por_variable") or {}).items()}
+    return base, pv
+
+
+def _mapeo_efectivo(base, pv, variante):
+    """Mapeo que rige para una VARIABLE: el suyo si lo tiene (AUTORITATIVO, aunque tenga
+    menos piezas que la base), si no la base. Sin variable → base."""
+    v = str(variante or "").strip()
+    return dict(pv[v]) if v in pv else dict(base)
+
+
+@app.post("/api/arte")
+def subir_arte():
+    f = request.files.get("archivo")
+    if not f:
+        return jsonify({"error": "falta el archivo"}), 400
+    sub = _diseno_sub(request.form.get("diseno"))  # arte de un DISEÑO nombrado (o el por defecto)
+    plantilla = _ruta_entrada("plantilla.ai")      # la plantilla y el registro del molde son COMPARTIDOS
+    if not os.path.exists(plantilla):
+        return jsonify({"error": "primero subí la plantilla base"}), 409
+    destino = _ruta_entrada("arte.ai", sub=sub)
+    f.save(destino)
+    try:
+        if MP.arte_es_separado(destino, plantilla):
+            reg = _cargar("registro_producto.json")
+            if not reg:
+                return jsonify({"error": "primero registrá las piezas del molde "
+                                "(subí o etiquetá la plantilla)"}), 409
+            det = MP.detectar_arte(destino, reg)
+            det.update({"modo": "separado", "archivo": f.filename})
+            # Los NOMBRES de la capa "guías" MANDAN: cada mesa del arte que diga el
+            # nombre de una pieza se asigna a esa pieza. El mapeo fijo guardado solo
+            # rellena piezas SIN nombre detectado y NUNCA pisa una mesa ya reclamada
+            # por un nombre (así un diseño rotulado "Frente" siempre va a la pieza Frente).
+            auto = MP.mapeo_por_nombre(destino, reg)
+            _cat = _cargar_catalogo()
+            _prod = next((p for p in _cat["productos"] if p["id"] == _get_active_producto_id()), None)
+            _fijo = {k: int(v) for k, v in ((_prod or {}).get("mapeo_arte") or {}).items() if v and k in reg}
+            mapeo = dict(auto)
+            usadas = set(mapeo.values())
+            for pieza, mesa in _fijo.items():
+                if pieza not in mapeo and mesa not in usadas:
+                    mapeo[pieza] = mesa
+                    usadas.add(mesa)
+            # REGLA mapeo-por-variable: el mapeo se guarda POR VARIABLE (cada una recibe su
+            # recorte del auto-mapeo) y la completitud/faltantes se miden contra el ALCANCE
+            # de las variables (unión de sus piezas), no contra el molde entero.
+            _alcance = _alcance_variables(_prod, reg)
+            _pv_ini = {}
+            for _v in ((_prod or {}).get("variantes") or []):
+                _vcl = _v.get("clave")
+                _pzv = _piezas_de_variable(_prod, _vcl, reg)
+                if _vcl and _pzv:
+                    _pv_ini[_vcl] = {p: mapeo[p] for p in _pzv if p in mapeo}
+            if _alcance <= set(mapeo.keys()):            # quedó completo (en su alcance) → se aplica solo
+                val = MP.validar_arte_separado(destino, reg, FUENTES, mapeo, _orden_var(reg), piezas_scope=_alcance)
+                val["archivo"] = f.filename
+                json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+                json.dump(val.get("personalizacion", {}), open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
+                json.dump({"mapeo": val["mapeo"], "por_variable": _pv_ini}, open(_ruta_datos("mapeo_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+                det.update({"auto": True, "aprobado": val["aprobado"], "checks": val["checks"], "mapeo": val["mapeo"],
+                            "por_nombre": sorted(auto.keys()), "por_mapeo_fijo": sorted(set(mapeo) - set(auto)),
+                            "campos_personalizacion": sorted({c for m in val.get("personalizacion", {}).values() for c in m})})
+                return jsonify(det)
+            # Incompleto: hay piezas del alcance SIN nombre legible en la guía. Se prellena con lo
+            # detectado por nombre (no se pisa con el mapeo fijo viejo) y se pide completar.
+            faltan = sorted(_alcance - set(mapeo.keys()))
+            json.dump({"aprobado": False, "modo": "separado", "archivo": f.filename,
+                       "checks": [{"nombre": "Mapeo de arte a piezas", "ok": False,
+                                   "detalle": "faltan asignar (sin nombre en la guía): " + ", ".join(faltan)}],
+                       "personalizacion": {}},
+                      open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+            json.dump({"mapeo": mapeo, "por_variable": _pv_ini}, open(_ruta_datos("mapeo_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+            det.update({"auto": False, "mapeo": mapeo, "por_nombre": sorted(auto.keys()), "faltan": faltan})
+            return jsonify(det)
+        val = MP.validar_arte(destino, plantilla, FUENTES)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo validar el arte: {e}"}), 422
+    val["archivo"] = f.filename
+    val["modo"] = "clasico"
+    json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+    json.dump(val["personalizacion"], open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
+    return jsonify(val)
+
+
+@app.get("/api/arte/deteccion")
+def arte_deteccion():
+    sub = _diseno_sub(request.args.get("diseno"))
+    arte = _ruta_entrada("arte.ai", sub=sub)
+    reg = _cargar("registro_producto.json")
+    if not os.path.exists(arte):
+        return jsonify({"error": "primero subí el arte"}), 409
+    if not reg:
+        return jsonify({"error": "primero registrá las piezas del molde"}), 409
+    det = MP.detectar_arte(arte, reg)
+    det["modo"] = "separado"
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == _get_active_producto_id()), None)
+    # REGLA mapeo-por-variable: se devuelve el mapeo DE la variable pedida (`?variante=v_xxx`):
+    # el suyo si lo tiene (autoritativo), si no la base. Si no hay nada guardado, auto-mapear
+    # por nombre AHORA (incluye el match genérico: una mesa 'Cuello' cubre todas las 'Cuello N').
+    variante = str(request.args.get("variante") or "").strip()
+    base, pv = _mapeo_estructura(sub=sub)
+    det["mapeo"] = _mapeo_efectivo(base, pv, variante)
+    if not det["mapeo"] and variante not in pv:
+        det["mapeo"] = MP.mapeo_por_nombre(arte, reg)
+    if variante:
+        _pzv = _piezas_de_variable(prod, variante, reg)
+        if _pzv:
+            det["piezas_variable"] = sorted(_pzv)   # alcance de ESTA variable (para conteos del front)
+    # Mapeo POR TALLE (#talle/#rango en las mesas): {pieza: {talle: mesa}}. El front lo usa para
+    # que el placeholder/editor muestren el diseño del TALLE que se ve (no el default del 1er
+    # rango — bug "primero aparece el 6XL"). {} si el arte no usa rótulos #.
+    try:
+        det["mapeo_talles"] = MP.mapeo_variantes_arte(arte, reg, _orden_var(reg)) or {}
+    except Exception:
+        det["mapeo_talles"] = {}
+    # Mapeo FIJO guardado en el molde (configurado una vez, se reusa para todos
+    # los diseños de este molde). El front lo aplica si el archivo no tiene mapeo.
+    det["mapeo_fijo"] = (prod or {}).get("mapeo_arte") or {}
+    return jsonify(det)
+
+
+@app.post("/api/arte/mapeo")
+def arte_mapeo():
+    cuerpo = request.get_json(force=True)
+    sub = _diseno_sub(cuerpo.get("diseno"))
+    mapeo = {k: int(v) for k, v in (cuerpo.get("mapeo") or {}).items() if v}
+    # REGLA mapeo-por-variable: `variante` = clave v_xxx → el mapeo enviado ES el de esa
+    # variable (autoritativo). La base solo se actualiza como semilla (merge, sin borrar
+    # lo de otras variables). Sin `variante` (compat/datos viejos) → comportamiento base.
+    variante = str(cuerpo.get("variante") or "").strip()
+    arte = _ruta_entrada("arte.ai", sub=sub)
+    reg = _cargar("registro_producto.json")
+    if not os.path.exists(arte) or not reg:
+        return jsonify({"error": "falta el arte o el registro del molde"}), 409
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == _get_active_producto_id()), None)
+    _scope = _piezas_de_variable(prod, variante, reg) if variante else None
+    val = MP.validar_arte_separado(arte, reg, FUENTES, mapeo, _orden_var(reg), piezas_scope=_scope)
+    val["archivo"] = (_cargar("validacion_arte.json", sub=sub) or {}).get("archivo", "arte.ai")
+    json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+    json.dump(val.get("personalizacion", {}), open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
+    base, pv = _mapeo_estructura(sub=sub)
+    if variante:
+        pv[variante] = dict(mapeo)
+        base = {**base, **mapeo}
+    else:
+        base = dict(mapeo)
+    json.dump({"mapeo": base, "por_variable": pv}, open(_ruta_datos("mapeo_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+    # Guardar el mapeo como FIJO del molde (semilla para próximos diseños con el mismo orden
+    # de mesas). MERGE: guardar una variable no borra las piezas sembradas por otras.
+    if prod is not None:
+        prod["mapeo_arte"] = {**{k: int(v) for k, v in (prod.get("mapeo_arte") or {}).items() if v},
+                              **{k: int(v) for k, v in mapeo.items()}}
+        _guardar_catalogo(cat)
+    val["campos_personalizacion"] = sorted({c for m in val.get("personalizacion", {}).values() for c in m})
+    # Pre-warm en background: armar las piezas base de cada variable al talle guía con SU mapeo
+    # efectivo → el visor del Arte las tiene instantáneas (no espera el 1er armado). Best-effort.
+    try:
+        _pw_pid = _get_active_producto_id()
+        _pw_dis = cuerpo.get("diseno")
+        _pw_guia = (prod or {}).get("variante_guia") or (sorted({t for v in reg.values() for t in v})[0] if reg else "M")
+        _pw_vars = [v.get("clave") for v in ((prod or {}).get("variantes") or []) if v.get("clave")] or [""]
+        def _prewarm():
+            for _vcl in _pw_vars:
+                try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _mapeo_efectivo(base, pv, _vcl), prod, reg)
+                except Exception: pass
+        threading.Thread(target=_prewarm, daemon=True).start()
+    except Exception:
+        pass
+    return jsonify(val)
+
+
+# ── PIEZAS BASE: render REAL del motor por pieza, CACHEADO en disco ───────────
+# Fuente ÚNICA compartida por el visor del Arte (y a futuro la tizada): cada pieza
+# YA armada (contorno + diseño encajado + borde + etiqueta, en cm reales, sin nombre/número)
+# se genera UNA vez con el MISMO motor de la tizada (`generar_pedido(solo_piezas=True)`) y se
+# guarda en disco. Mientras la config no cambie, se REUSA (instantáneo) en vez de re-armar.
+_PIEZAS_BASE_LOCK = threading.Lock()
+_PREWARM_LOCK = threading.Lock()
+_PREWARM_EN_CURSO = set()   # claves (pid,diseno,variante,mapeo) con pre-warm de talles en curso
+
+def _sha1_corto(obj):
+    import hashlib
+    try:
+        s = json.dumps(obj, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        s = str(obj)
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]
+
+def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle):
+    """Clave de invalidación (espejo de `_nido_clave`): si cambia el molde, el arte, el mapeo,
+    el borde, la etiqueta o los editables → cambia la clave → se regenera esa base."""
+    def _mt(p):
+        try: return os.path.getmtime(p)
+        except OSError: return 0
+    return ["v4", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+            _sha1_corto(mapeo or {}), _sha1_corto((prod or {}).get("borde_corte") or {}),
+            _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
+            _sha1_corto(edit_tam or {}), str(variante or ""), str(talle or "")]
+
+def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None):
+    """Devuelve {piezas:{nombre:{svg,w_cm,h_cm}}, talle, cache:bool} — desde disco si la clave
+    coincide, si no lo genera con el motor y lo guarda. None si faltan archivos.
+    `override` = ajuste per-pedido de editables (mover sin guardar como base): entra al `edit_cfg`
+    → como `edit_cfg` está en la clave de caché, un override distinto regenera solo."""
+    import base64, tempfile, shutil
+    sub = _diseno_sub(diseno)
+    pl = _ruta_entrada("plantilla.ai", pid)
+    arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    if not (prod and os.path.exists(pl) and os.path.exists(arte) and reg):
+        return None
+    edit_cfg = _editables_cfg(prod, (diseno or "principal"), override)
+    edit_tam = _editables_tamano(prod)
+    clave = _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle)
+    vslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(variante or "todas"))[:40] or "todas"
+    tslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(talle or "guia"))[:24] or "guia"
+    cdir = _ruta_datos(os.path.join("piezas_cache", vslug, tslug), pid, sub=sub)
+    manifest_path = os.path.join(cdir, "manifest.json")
+
+    def _leer_cache():
+        man = json.load(open(manifest_path, encoding="utf-8"))
+        if man.get("clave") != clave:
+            return None
+        out = {}
+        for nom, info in (man.get("piezas") or {}).items():
+            svg = open(os.path.join(cdir, info["archivo"]), encoding="utf-8").read()
+            out[nom] = {"svg": base64.b64encode(svg.encode("utf-8")).decode("ascii"),
+                        "w_cm": info["w_cm"], "h_cm": info["h_cm"]}
+        return {"piezas": out, "talle": talle, "cache": True}
+
+    try:                                            # hit sin lock (lo común)
+        r = _leer_cache()
+        if r is not None:
+            return r
+    except Exception:
+        pass
+    with _PIEZAS_BASE_LOCK:                          # miss: generar (otro hilo pudo ganarnos)
+        try:
+            r = _leer_cache()
+            if r is not None:
+                return r
+        except Exception:
+            pass
+        cat = _cargar_catalogo()
+        # Talle DIRECTO (molds sin columnas caen al fallback de _traducir_prendas) + textos de
+        # MUESTRA para que el preview MUESTRE dónde caen nombre/número (el pedido real los
+        # reemplaza por prenda). Se setea tanto la clave directa como la columna por rol.
+        fila = {"__variante": variante, "talle": talle, "nombre": "NOMBRE", "numero": "00"}
+        for c in (prod.get("columnas") or []):
+            _role = c.get("role"); _cid = c.get("id") or c.get("label")
+            if _role == "talle": fila[_cid] = talle
+            elif _role == "nombre": fila[_cid] = "NOMBRE"
+            elif _role == "numero": fila[_cid] = "00"
+        # TOGGLES: el preview debe cubrir TODAS las piezas de la variable, no solo las de la
+        # opción default (una fila con manga "corta" excluye las mangas largas → el visor caía
+        # al re-dibujo JS con el mapeo default, SIN resolver #rango: mangas de otro color).
+        # Una fila de muestra extra por cada opción restante de cada toggle → el motor arma
+        # todas las piezas y el visor muestra SIEMPRE el render real (Arte = tizada).
+        filas = [dict(fila)]
+        _tpl = next((t for t in cat.get("plantillas_planillas", []) if t.get("id") == prod.get("planilla_template_id")), None)
+        _reglas = {r.get("id"): r for r in cat.get("reglas_planilla", [])}
+        for c in ((_tpl or {}).get("columnas") or []):
+            if c.get("role") != "manga":
+                continue
+            _rg = _reglas.get(c.get("reglaId")) or {}
+            _ops = [o.strip() for o in str(c.get("opciones") or _rg.get("opciones") or "Corta, Larga").split(",") if o.strip()]
+            _cid = c.get("id") or c.get("label")
+            for _op in _ops[1:]:
+                _f2 = dict(fila); _f2[_cid] = _op
+                filas.append(_f2)
+        prendas = _traducir_prendas(filas, prod, cat, reg=reg)
+        if not prendas:
+            return {"piezas": {}, "talle": talle, "cache": False}
+        try: _pers = MP.extraer_personalizacion(arte)   # placeholders (dónde caen nombre/número)
+        except Exception: _pers = {}
+        tmp = tempfile.mkdtemp()
+        try:
+            ppt = MP.generar_pedido(pl, arte, reg, _pers, prendas, FUENTES, tmp,
+                                    mapeo_arte=(mapeo or None), solo_piezas=True,
+                                    borde_corte=prod.get("borde_corte"), etiqueta=prod.get("etiqueta"),
+                                    editables_cfg=edit_cfg, editables_tamano=edit_tam)
+            os.makedirs(cdir, exist_ok=True)
+            for f in os.listdir(cdir):              # limpiar svgs viejos de esta variante/talle
+                if f.endswith(".svg"):
+                    try: os.remove(os.path.join(cdir, f))
+                    except OSError: pass
+            out, piezas_man, idx = {}, {}, 0
+            for _tela, piezas in (ppt or {}).items():
+                for pz in piezas:
+                    try:
+                        svg = pz["doc"][0].get_svg_image()
+                        w_cm = round(pz["w"] / MP.CM, 2); h_cm = round(pz["h"] / MP.CM, 2)
+                        fn = f"p{idx:03d}.svg"; idx += 1
+                        with open(os.path.join(cdir, fn), "w", encoding="utf-8") as fh:
+                            fh.write(svg)
+                        out[pz["pieza"]] = {"svg": base64.b64encode(svg.encode("utf-8")).decode("ascii"),
+                                            "w_cm": w_cm, "h_cm": h_cm}
+                        piezas_man[pz["pieza"]] = {"archivo": fn, "w_cm": w_cm, "h_cm": h_cm}
+                    except Exception:
+                        pass
+                    finally:
+                        try: pz["doc"].close()
+                        except Exception: pass
+            json.dump({"clave": clave, "piezas": piezas_man},
+                      open(manifest_path, "w", encoding="utf-8"), ensure_ascii=False)
+            return {"piezas": out, "talle": talle, "cache": False}
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@app.post("/api/arte/preview_piezas")
+def arte_preview_piezas():
+    """PREVIEW REAL per-pieza (CACHEADO): sirve el render del motor por pieza desde `_piezas_base`.
+    La 1ª vez por config arma y guarda; las siguientes son instantáneas. Body: {pid?, diseno,
+    variante(=clave v_xxx), mapeo:{pieza:mesa}, talle?}."""
+    cuerpo = request.get_json(force=True) or {}
+    diseno = cuerpo.get("diseno")
+    variante = str(cuerpo.get("variante") or "").strip()
+    mapeo = {k: int(v) for k, v in (cuerpo.get("mapeo") or {}).items() if v}
+    override = cuerpo.get("editables") or None   # ajuste per-pedido de editables (mover sin "Guardar como base")
+    pid = cuerpo.get("pid") or _get_active_producto_id()   # el front pasa el molde → no depende del "activo"
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    reg = _cargar("registro_producto.json", pid)
+    if not prod or not reg:
+        return jsonify({"error": "falta producto/registro"}), 409
+    guia = prod.get("variante_guia") or (sorted({t for v in reg.values() for t in v})[0] if reg else "M")
+    talle = str(cuerpo.get("talle") or guia)
+    try:
+        res = _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo generar el preview: {e}"}), 422
+    if res is None:
+        return jsonify({"error": "falta plantilla/arte/registro"}), 409
+    # PRE-WARM en background del RESTO de talles de esta variable (mismo mapeo, sin override):
+    # una vez cargado el diseño, navegar entre talles es INSTANTÁNEO (todo queda en disco).
+    # Se deduplica por clave para no lanzar la misma tanda dos veces.
+    if override is None:
+        try:
+            _otros = [t for t in _variantes_molde(pid) if str(t) != talle]
+            _pwk = (pid, str(diseno or ""), variante, _sha1_corto(mapeo))
+            with _PREWARM_LOCK:
+                _lanzar = _pwk not in _PREWARM_EN_CURSO
+                if _lanzar:
+                    _PREWARM_EN_CURSO.add(_pwk)
+            if _lanzar and _otros:
+                def _pw_talles():
+                    try:
+                        for _t in _otros:
+                            try: _piezas_base(pid, diseno, variante, str(_t), mapeo, prod, reg)
+                            except Exception: pass
+                    finally:
+                        with _PREWARM_LOCK:
+                            _PREWARM_EN_CURSO.discard(_pwk)
+                threading.Thread(target=_pw_talles, daemon=True).start()
+        except Exception:
+            pass
+    return jsonify(res)
+
+
+# ── Diseños nombrados por molde ──────────────────────────────────────────────
+# Un molde puede tener varios DISEÑOS (artes con nombre). "Principal" es el arte
+# base del molde (carpeta raíz). Los demás viven en datos/entrada .../disenos/<slug>/.
+@app.get("/api/disenos")
+def listar_disenos():
+    pids = [p for p in (request.args.get("molds", "").split(",")) if p] or [_get_active_producto_id()]
+    cat = _cargar_catalogo()
+    por_molde, nombres, seen = {}, [], set()
+    for pid in pids:
+        prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+        lst = [{"id": "principal", "nombre": "Principal"}]
+        for d in ((prod or {}).get("disenos") or []):
+            lst.append({"id": d["id"], "nombre": d["nombre"]})
+        por_molde[pid] = lst
+        for d in lst:
+            if d["nombre"] not in seen:
+                seen.add(d["nombre"]); nombres.append(d["nombre"])
+    return jsonify({"por_molde": por_molde, "nombres": nombres})
+
+
+@app.post("/api/disenos/guardar")
+def guardar_diseno():
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    nombre = (cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "falta el nombre del diseño"}), 400
+    slug = re.sub(r"[^a-z0-9]+", "-", nombre.lower()).strip("-")[:48] or "diseno"
+    if slug in ("principal", "default"):
+        return jsonify({"error": "'Principal' ya es el diseño base del molde"}), 400
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    disenos = prod.setdefault("disenos", [])
+    if not any(d["id"] == slug for d in disenos):
+        disenos.append({"id": slug, "nombre": nombre})
+        _guardar_catalogo(cat)
+    return jsonify({"id": slug, "nombre": nombre})
+
+
+@app.post("/api/disenos/eliminar")
+def eliminar_diseno():
+    import shutil
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    did = cuerpo.get("id")
+    if not did or did in ("principal", "default"):
+        return jsonify({"error": "no se puede borrar el diseño Principal"}), 400
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is not None:
+        prod["disenos"] = [d for d in (prod.get("disenos") or []) if d["id"] != did]
+        _guardar_catalogo(cat)
+    sub = _diseno_sub(did)
+    if sub:
+        for base in (os.path.join(DATOS, "productos", pid, sub), os.path.join(ENTRADA, pid, sub)):
+            shutil.rmtree(base, ignore_errors=True)
+    return jsonify({"ok": True})
+
+
+# ── Borde de corte por molde ────────────────────────────────────────────────
+_BORDE_DEFAULT = {"activo": True, "ancho_mm": 2.0, "color": [0, 0, 0, 0.85]}
+
+
+@app.get("/api/productos/borde_corte")
+def get_borde_corte():
+    pid = request.args.get("pid") or _get_active_producto_id()
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    bc = dict(_BORDE_DEFAULT, **((prod or {}).get("borde_corte") or {}))
+    return jsonify(bc)
+
+
+@app.post("/api/productos/borde_corte")
+def set_borde_corte():
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    try:
+        color = [max(0.0, min(1.0, float(x))) for x in (cuerpo.get("color") or [0, 0, 0, 0.85])][:4]
+        while len(color) < 4:
+            color.append(0.0)
+        bc = {"activo": bool(cuerpo.get("activo", True)),
+              "ancho_mm": max(0.2, min(20.0, float(cuerpo.get("ancho_mm", 2.0)))),
+              "color": color}
+    except (TypeError, ValueError):
+        return jsonify({"error": "valores de borde inválidos"}), 400
+    prod["borde_corte"] = bc
+    _guardar_catalogo(cat)
+    return jsonify(bc)
+
+
+# ── Etiqueta de identificación por molde ────────────────────────────────────
+_ETIQUETA_DEFAULT = {
+    "activo": True,
+    "mostrar": {"talle": True, "pieza": True, "numero": True},
+    "separador": "-",
+    "posicion": {"rx": 0.5, "ry": 0.92},
+    "posiciones": {},
+    "align": "centro",
+    "size_mm": 3.0,
+    "color": [0.15, 0.15, 0.15, 0.30],
+    "borde_activo": True,
+    "borde_color": [0.01, 0.01, 0.01, 0.05],
+    "borde_mm": 1.0,
+    "piezas_off": [],
+    "zonas": {},
+}
+
+
+def _clamp_color(c, fb):
+    try:
+        col = [max(0.0, min(1.0, float(x))) for x in (c or fb)][:4]
+    except (TypeError, ValueError):
+        col = list(fb)
+    while len(col) < 4:
+        col.append(0.0)
+    return col
+
+
+@app.get("/api/productos/etiqueta")
+def get_etiqueta():
+    pid = request.args.get("pid") or _get_active_producto_id()
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    et = {**_ETIQUETA_DEFAULT, **((prod or {}).get("etiqueta") or {})}
+    et["mostrar"] = {**_ETIQUETA_DEFAULT["mostrar"], **(et.get("mostrar") or {})}
+    et["posicion"] = {**_ETIQUETA_DEFAULT["posicion"], **(et.get("posicion") or {})}
+    # piezas del molde (para la lista de "en qué piezas")
+    reg = _cargar("registro_producto.json", pid) or {}
+    et["piezas"] = sorted(reg.keys())
+    return jsonify(et)
+
+
+@app.post("/api/productos/etiqueta")
+def set_etiqueta():
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    try:
+        mos = cuerpo.get("mostrar") or {}
+        pos = cuerpo.get("posicion") or {}
+        et = {
+            "activo": bool(cuerpo.get("activo", True)),
+            "mostrar": {k: bool(mos.get(k, True)) for k in ("talle", "pieza", "numero")},
+            "separador": (str(cuerpo.get("separador", "-")) or "-")[:3],
+            "posicion": {"rx": max(0.0, min(1.0, float(pos.get("rx", 0.5)))),
+                          "ry": max(0.0, min(1.0, float(pos.get("ry", 0.92))))},
+            "posiciones": {str(k): {"rx": max(0.0, min(1.0, float(v.get("rx", 0.5)))),
+                                     "ry": max(0.0, min(1.0, float(v.get("ry", 0.92)))),
+                                     "ang": float(v.get("ang", 0) or 0),
+                                     **({"t": max(0.0, min(1.0, float(v.get("t"))))} if v.get("t") is not None else {}),
+                                     **({"align": str(v.get("align"))} if v.get("align") in ("izquierda", "centro", "derecha") else {})}
+                            for k, v in (cuerpo.get("posiciones") or {}).items() if isinstance(v, dict)},
+            "align": cuerpo.get("align") if cuerpo.get("align") in ("izquierda", "centro", "derecha") else "centro",
+            "size_mm": max(1.0, min(40.0, float(cuerpo.get("size_mm", 3.0)))),
+            "color": _clamp_color(cuerpo.get("color"), [0.15, 0.15, 0.15, 0.30]),
+            "borde_activo": bool(cuerpo.get("borde_activo", True)),
+            "borde_color": _clamp_color(cuerpo.get("borde_color"), [0.01, 0.01, 0.01, 0.05]),
+            "borde_mm": max(0.0, min(10.0, float(cuerpo.get("borde_mm", 1.0)))),
+            "piezas_off": [str(p) for p in (cuerpo.get("piezas_off") or [])],
+            # ZONAS de texto por pieza (dividir el contorno en tramos eligiendo esquinas):
+            # {nombre: {puntos:[t 0-1], cont:[{mostrar:{talle,pieza,numero}, texto, align}]}}
+            "zonas": {str(k): {
+                "puntos": [max(0.0, min(1.0, float(t))) for t in (v.get("puntos") or []) if isinstance(t, (int, float))],
+                "cont": [{
+                    "mostrar": {kk: bool((c.get("mostrar") or {}).get(kk, False)) for kk in ("talle", "pieza", "numero")},
+                    "texto": str(c.get("texto", ""))[:40],
+                    "align": str(c.get("align")) if c.get("align") in ("izquierda", "centro", "derecha") else "centro",
+                } for c in (v.get("cont") or []) if isinstance(c, dict)],
+            } for k, v in (cuerpo.get("zonas") or {}).items() if isinstance(v, dict) and (v.get("puntos") or [])},
+        }
+    except (TypeError, ValueError):
+        return jsonify({"error": "valores de etiqueta inválidos"}), 400
+    prod["etiqueta"] = et
+    _guardar_catalogo(cat)
+    return jsonify(et)
+
+
+# ── Objetos editables (capa "Editable …" del arte) ───────────────────────────
+def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
+    """Posición del objeto sobre su pieza en FRACCIONES (0..1 del bbox de la pieza), con el
+    mismo encaje que el motor (cm_encajar): el arte se escala al ALTO de la pieza (manda el
+    alto) y se centra a lo ancho. Devuelve {rx,ry,rw,rh} (esquina sup-izq + tamaño) o None."""
+    try:
+        ax0, ay0, aw, ah = mesa_rect
+        ox0, oy0, ox1, oy1 = bbox_mu
+        px0, py0, px1, py1 = pieza_bbox
+        pw, ph = (px1 - px0), (py1 - py0)
+        if aw <= 0 or ah <= 0 or pw <= 0 or ph <= 0:
+            return None
+        awf = (aw * (ph / ah)) / pw                       # ancho del arte como fracción del de la pieza
+        rx = (1 - awf) / 2 + ((ox0 - ax0) / aw) * awf      # centrado a lo ancho
+        ry = (oy0 - ay0) / ah                              # vertical: el arte llena el alto (y-abajo)
+        return {"rx": round(rx, 4), "ry": round(ry, 4),
+                "rw": round(((ox1 - ox0) / aw) * awf, 4), "rh": round((oy1 - oy0) / ah, 4)}
+    except Exception:
+        return None
+
+
+def _editables_cfg(prod, dslug, override=None):
+    """Config de editables para el motor: BASE del catálogo POR VARIABLE + AJUSTE del pedido (override),
+    mergeado por (variable, objeto, talle). → {variable: {objeto: {talle: tf}}}.
+    Compat: formato VIEJO (base[objeto]={"transforms":...}, sin nivel variable) → clave "*" (base
+    legacy compartida, que el motor aplica a las variables sin config propia)."""
+    base = (((prod or {}).get("editables") or {}).get(dslug) or {})
+    out = {}
+    for var, objs in base.items():
+        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO
+            out.setdefault("*", {})[var] = dict(objs.get("transforms") or {})
+        else:                                                     # NUEVO: var es una VARIABLE
+            out[var] = {obj: dict(v.get("transforms") or {}) for obj, v in (objs or {}).items()}
+    for var, objs in (override or {}).items():                    # override = {variable: {objeto: {talle: tf}}}
+        o = out.setdefault(var, {})
+        for obj, tfs in (objs or {}).items():
+            oo = o.setdefault(obj, {})
+            for talle, tf in (tfs or {}).items():
+                oo[talle] = _clamp_tf(tf)
+    return out
+
+
+def _caja_cm(d):
+    """{ancho, alto} → [ancho_cm, alto_cm] (0 = sin límite por ese lado)."""
+    d = d or {}
+    def _f(x):
+        try:
+            return max(0.0, float(x))
+        except Exception:
+            return 0.0
+    return [_f(d.get("ancho")), _f(d.get("alto"))]
+
+
+def _editables_tamano(prod):
+    """Config de TAMAÑO por molde (general por nombre de capa) →
+    {nombre_norm: {variante: {"apaisado":[ancho,alto], "vertical":[ancho,alto]}}}.
+    Resuelve las variantes de cada rango a sus dos cajas (apaisado/vertical). Una variante
+    fuera de todo rango → no aparece (el motor escala con el diseño)."""
+    out = {}
+    for key, cfg in ((prod or {}).get("editables_config") or {}).items():
+        porvar = {}
+        for r in (cfg or {}).get("rangos", []):
+            if r.get("mantener"):
+                box = {"mantener": True}                 # tamaño original del diseño (sin escalar)
+            else:
+                ap = _caja_cm(r.get("apaisado"))
+                ve = _caja_cm(r.get("vertical"))
+                if max(ap) <= 0 and max(ve) <= 0:
+                    continue
+                box = {"apaisado": ap, "vertical": ve}
+            for v in (r.get("variantes") or []):
+                porvar[str(v)] = box
+        if porvar:
+            out[key] = porvar
+    return out
+
+
+def _orden_var(reg):
+    """Variantes (de un registro ya cargado) en orden de archivo de la plantilla activa.
+    Para resolver rangos `#v1-v2` en la validación. Si no hay plantilla, orden alfabético."""
+    vs = sorted({t for v in (reg or {}).values() for t in (v or {})})
+    try:
+        pl = _ruta_entrada("plantilla.ai")
+        if os.path.exists(pl):
+            return MP.talles_orden_archivo(pl, vs) or vs
+    except Exception:
+        pass
+    return vs
+
+
+def _variantes_molde(pid):
+    """Variantes del molde (talles/tamaños/etc.) en orden de archivo."""
+    reg = _cargar("registro_producto.json", pid) or {}
+    variantes = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    try:
+        pl = _ruta_entrada("plantilla.ai", pid)
+        if os.path.exists(pl):
+            variantes = MP.talles_orden_archivo(pl, variantes) or variantes
+    except Exception:
+        pass
+    return variantes
+
+
+def _clamp_tf(v):
+    """Saneo de la transformación de un objeto editable (mover/rotar/escalar)."""
+    v = v or {}
+    return {"dx": float(v.get("dx", 0.0) or 0.0), "dy": float(v.get("dy", 0.0) or 0.0),
+            "rot": float(v.get("rot", 0.0) or 0.0),
+            "scale": max(0.05, min(20.0, float(v.get("scale", 1.0) or 1.0)))}
+
+
+@app.get("/api/productos/editables")
+def get_editables():
+    pid = request.args.get("pid") or _get_active_producto_id()
+    diseno = request.args.get("diseno") or "principal"
+    sub = _diseno_sub(diseno)
+    arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    objetos = []
+    if os.path.exists(arte):
+        try:
+            objetos = MP.extraer_editables(arte)
+        except Exception:
+            objetos = []
+    # mesa -> pieza (a qué pieza pertenece cada objeto, vía el mapeo del arte)
+    mp = (_cargar("mapeo_arte.json", pid, sub=sub) or {}).get("mapeo", {})
+    mesa2pieza = {int(v): k for k, v in mp.items() if v}
+    reg = _cargar("registro_producto.json", pid) or {}
+    talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    try:
+        pl = _ruta_entrada("plantilla.ai", pid)
+        if os.path.exists(pl):
+            talles = MP.talles_orden_archivo(pl, talles) or talles
+    except Exception:
+        pass
+    # ARTE POR RANGO (#talle/#rango): los objetos editables pueden vivir en mesas POR TALLE
+    # (ej. "#1-16 Frente" = mesa 28), que NO figuran en el mapeo default (mesas del 1er rango).
+    # Sin esta asociación quedaban sin pieza → el editor no los mostraba ("no se pueden editar").
+    try:
+        for _pz, _pt in (MP.mapeo_variantes_arte(arte, reg, talles) or {}).items():
+            for _m in (_pt or {}).values():
+                mesa2pieza.setdefault(int(_m), _pz)
+    except Exception:
+        pass
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    # Config POR VARIABLE: los transforms de la variable pedida (v_xxx), con fallback a la base
+    # compartida "*" (legacy). El editor edita una variable a la vez.
+    variante = str(request.args.get("variante") or "*")
+    _eds = (((prod or {}).get("editables") or {}).get(_slugify_diseno(diseno)) or {})
+    cfg = _eds.get(variante) or _eds.get("*") or {}
+    ref_talle = (prod or {}).get("variante_guia")
+    for o in objetos:
+        o["pieza"] = mesa2pieza.get(o["mesa"], "")
+        o["transforms"] = (cfg.get(o["nombre"]) or {}).get("transforms", {})
+        # posición BASE del objeto sobre su pieza (cm_encajar en fracciones 0..1 del bbox de
+        # la pieza): el arte se escala al ALTO de la pieza y se centra a lo ancho.
+        rp = reg.get(o["pieza"]) or {}
+        pb = (rp.get(ref_talle) or next(iter(rp.values()), {})).get("bbox_mu")
+        o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
+    return jsonify({"objetos": objetos, "talles": talles, "piezas": sorted(reg.keys())})
+
+
+@app.post("/api/productos/editables")
+def set_editable():
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    diseno = cuerpo.get("diseno") or "principal"
+    nombre = str(cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "falta nombre del objeto"}), 400
+    # `talles` = alcance de VARIANTES/talles (una / rango / todas) ya resuelto por el front.
+    talles = [str(t) for t in (cuerpo.get("talles") or []) if str(t)]
+    # `variante` = la VARIABLE (v_xxx) sobre la que se edita → la posición se guarda POR VARIABLE.
+    # "*" = compartida (sin variable, ej. front viejo).
+    variante = str(cuerpo.get("variante") or "*").strip() or "*"
+    tf = _clamp_tf(cuerpo.get("transform"))
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    eds = prod.setdefault("editables", {}).setdefault(_slugify_diseno(diseno), {}).setdefault(variante, {})
+    obj = eds.setdefault(nombre, {"transforms": {}})
+    for t in talles:
+        obj["transforms"][t] = tf
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "nombre": nombre, "transforms": obj["transforms"]})
+
+
+@app.get("/api/productos/editables_config")
+def get_editables_config():
+    """Config de TAMAÑO de capas editables del molde (general, por nombre de capa).
+    Devuelve la lista registrada + las VARIANTES del molde (para el selector emergente)."""
+    pid = request.args.get("pid") or _get_active_producto_id()
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    cfg = ((prod or {}).get("editables_config") or {})
+    items = []
+    for key, c in cfg.items():
+        items.append({"nombre": key, "capa": (c or {}).get("capa") or key,
+                      "rangos": [{"variantes": list(r.get("variantes") or []),
+                                  "mantener": bool(r.get("mantener")),
+                                  "apaisado": r.get("apaisado") or {"ancho": "", "alto": ""},
+                                  "vertical": r.get("vertical") or {"ancho": "", "alto": ""}}
+                                 for r in ((c or {}).get("rangos") or [])]})
+    return jsonify({"config": items, "variantes": _variantes_molde(pid)})
+
+
+@app.post("/api/productos/editables_config")
+def set_editables_config():
+    """Guarda la config de tamaño del molde. Body:
+    {pid, config:[{capa, rangos:[{variantes:[...], apaisado:{ancho,alto}, vertical:{ancho,alto}}]}]}.
+    Se guarda por nombre de capa normalizado."""
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    items = cuerpo.get("config") or []
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    validas = set(_variantes_molde(pid))
+
+    def _caja(d):
+        d = d or {}
+        def _f(x):
+            try:
+                return round(max(0.0, float(x)), 3)
+            except Exception:
+                return 0.0
+        return {"ancho": _f(d.get("ancho")), "alto": _f(d.get("alto"))}
+
+    nuevo = {}
+    for it in items:
+        capa = str(it.get("capa") or "").strip()
+        if not capa:
+            continue
+        key = MP._norm_nombre(MP._nombre_editable(capa))
+        rangos = []
+        for r in (it.get("rangos") or []):
+            vs = [str(v) for v in (r.get("variantes") or []) if str(v) in validas]
+            mantener = bool(r.get("mantener"))
+            ap, ve = _caja(r.get("apaisado")), _caja(r.get("vertical"))
+            if not vs or (not mantener and max(ap.values()) <= 0 and max(ve.values()) <= 0):
+                continue
+            rangos.append({"variantes": vs, "mantener": mantener, "apaisado": ap, "vertical": ve})
+        nuevo[key] = {"capa": capa, "rangos": rangos}
+    prod["editables_config"] = nuevo
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+# ── Perfiles ICC ─────────────────────────────────────────────────────────────
+@app.get("/api/perfiles")
+def listar_perfiles():
+    perfiles = _listar_perfiles()
+    defs = _perfil_default_cfg()
+    return jsonify({
+        "perfiles": perfiles,
+        "cmyk": [p for p in perfiles if p["espacio"] == "CMYK"],
+        "rgb": [p for p in perfiles if p["espacio"] == "RGB"],
+        "otros": [p for p in perfiles if p["espacio"] not in ("CMYK", "RGB")],
+        "config": defs,
+        "hay_perfiles": bool(perfiles),
+    })
+
+
+@app.post("/api/perfiles/config")
+def guardar_perfil_config():
+    cuerpo = request.get_json(force=True)
+    cat = _cargar_catalogo()
+    cfg = cat.get("perfil_cfg") or {}
+    if cuerpo.get("cmyk"):
+        cfg["cmyk"] = cuerpo["cmyk"]
+    if cuerpo.get("rgb"):
+        cfg["rgb"] = cuerpo["rgb"]
+    cat["perfil_cfg"] = cfg
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "config": _perfil_default_cfg(cat)})
+
+
+@app.get("/api/arte/perfil")
+def arte_perfil():
+    """Detecta el perfil incrustado del arte recién subido (o de ese diseño) y
+    devuelve el aviso (sin perfil / distinto / ok)."""
+    sub = _diseno_sub(request.args.get("diseno"))
+    arte = _ruta_entrada("arte.ai", sub=sub)
+    if not os.path.exists(arte):
+        return jsonify({"error": "no hay arte"}), 409
+    return jsonify(_perfil_info(arte))
+
+
+@app.post("/api/fuente")
+def subir_fuente():
+    f = request.files.get("archivo")
+    if not f:
+        return jsonify({"error": "falta el archivo"}), 400
+    tmp = os.path.join(ENTRADA, "subida_" + f.filename)
+    f.save(tmp)
+    res = MP.alta_fuente(tmp, FUENTES)
+    if not res["ok"]:
+        return jsonify(res), 422
+    # si había un arte validado con fuentes faltantes, revalidar (según el modo)
+    prev = _cargar("validacion_arte.json") or {}
+    if os.path.exists(_ruta_entrada("arte.ai")):
+        if prev.get("modo") == "separado":
+            reg = _cargar("registro_producto.json") or {}
+            mp = (_cargar("mapeo_arte.json") or {}).get("mapeo", {})
+            if reg and mp:
+                val = MP.validar_arte_separado(_ruta_entrada("arte.ai"), reg, FUENTES,
+                                               {k: int(v) for k, v in mp.items()}, _orden_var(reg))
+                val["archivo"] = prev.get("archivo", "arte.ai")
+                json.dump(val, open(_ruta_datos("validacion_arte.json"), "w", encoding="utf-8"), ensure_ascii=False)
+        else:
+            val = MP.validar_arte(_ruta_entrada("arte.ai"),
+                                  _ruta_entrada("plantilla.ai"), FUENTES)
+            val["archivo"] = prev.get("archivo", "arte.ai")
+            json.dump(val, open(_ruta_datos("validacion_arte.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    res["catalogo"] = list(MP.catalogo_fuentes(FUENTES).values())
+    return jsonify(res)
+
+
+def _config_default():
+    # mesas de trabajo (telas): cada una con su ancho/alto. Las piezas se asignan
+    # a una tela; cada tela arma su propia hoja.
+    return {"mesas": [{"nombre": "Principal", "ancho_m": 1.8, "alto_max_m": 5.0},
+                      {"nombre": "RIB", "ancho_m": 1.0, "alto_max_m": 5.0}],
+            "asignacion": {}, "espaciado_mm": 5.0, "margen_mm": 10.0, "rotacion": "auto"}
+
+
+@app.get("/api/config")
+def get_config():
+    conf = _cargar("config_produccion.json") or _config_default()
+    conf.setdefault("asignacion", {})
+    reg = _cargar("registro_producto.json") or {}
+    conf["piezas"] = sorted(reg.keys())
+    return jsonify(conf)
+
+
+@app.post("/api/config")
+def set_config():
+    c = request.get_json(force=True) or {}
+    rot = str(c.get("rotacion", "auto") or "auto")
+    limpio = {"espaciado_mm": max(0.0, float(c.get("espaciado_mm", 5) or 0)),
+              "margen_mm": max(0.0, float(c.get("margen_mm", 10) or 0)),
+              "rotacion": rot if rot in ("auto", "ninguna", "90", "180", "libre") else "auto",
+              "mesas": [], "asignacion": {}}
+    for m in c.get("mesas", []):
+        try:
+            nom = str(m["nombre"]).strip()
+            if not nom:
+                continue
+            limpio["mesas"].append({"nombre": nom,
+                                    "ancho_m": round(float(m["ancho_m"]), 3),
+                                    "alto_max_m": round(float(m["alto_max_m"]), 3)})
+        except Exception:
+            pass
+    nombres = {m["nombre"] for m in limpio["mesas"]}
+    limpio["asignacion"] = {str(p): str(t) for p, t in (c.get("asignacion") or {}).items()
+                            if t and str(t) in nombres}
+    json.dump(limpio, open(_ruta_datos("config_produccion.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    return jsonify(limpio)
+
+
+# ═════════════════ TELAS (registro GLOBAL + grupos combinables) ═════════════════
+# Modelo nuevo: las telas se registran una sola vez (catálogo `telas` = {id, nombre, ancho_cm}).
+# Los GRUPOS combinables (`grupos_telas` = {id, nombre, telas:[id]}) dicen qué telas pueden ir
+# juntas en una misma prenda. Cada molde ELIGE cuáles tiene asignadas (`prod.telas_asignadas`).
+# El alto de la hoja lo pone la config de tizada (nesting). La asignación pieza→tela viene del
+# PEDIDO (override por pieza), ya no del config del molde.
+@app.get("/api/telas")
+def get_telas():
+    cat = _cargar_catalogo()
+    return jsonify({"telas": cat.get("telas", []), "grupos": cat.get("grupos_telas", [])})
+
+
+@app.post("/api/telas")
+def set_telas():
+    cuerpo = request.get_json(force=True) or {}
+    cat = _cargar_catalogo()
+    if isinstance(cuerpo.get("telas"), list):
+        telas = []
+        for t in cuerpo["telas"]:
+            nom = str(t.get("nombre", "")).strip()
+            if not nom:
+                continue
+            telas.append({"id": t.get("id") or ("tl_" + uuid.uuid4().hex[:8]),
+                          "nombre": nom, "ancho_cm": max(1.0, float(t.get("ancho_cm", 180) or 180))})
+        cat["telas"] = telas
+    if isinstance(cuerpo.get("grupos"), list):
+        grupos = []
+        for g in cuerpo["grupos"]:
+            grupos.append({"id": g.get("id") or ("gt_" + uuid.uuid4().hex[:8]),
+                           "nombre": str(g.get("nombre", "")).strip() or "Grupo",
+                           "telas": [str(x) for x in (g.get("telas") or [])]})
+        cat["grupos_telas"] = grupos
+    _guardar_catalogo(cat)
+    return jsonify({"telas": cat.get("telas", []), "grupos": cat.get("grupos_telas", [])})
+
+
+@app.post("/api/productos/telas_asignadas")
+def set_telas_asignadas():
+    """Telas (ids del registro global) disponibles para ESTE molde."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    prod["telas_asignadas"] = [str(t) for t in (cuerpo.get("telas") or [])]
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "telas_asignadas": prod["telas_asignadas"]})
+
+
+def _config_produccion(pid=None):
+    """Traduce la config a los parámetros del motor: (config_nesting global,
+    rotaciones por pieza, telas_cfg por tela, asignación pieza→tela).
+    TELAS: el registro es GLOBAL (catálogo `telas` = nombre + ancho). El ALTO de la
+    hoja/tizada viene de la config de nesting (`alto_max_cm` del preset). La asignación
+    pieza→tela ya NO vive en el config del molde: viene del PEDIDO (override por pieza)."""
+    conf = _cargar("config_produccion.json", pid) or _config_default()
+    espaciado_mm = conf.get("espaciado_mm", 5)
+    margen_mm = conf.get("margen_mm", 10)
+    rot = conf.get("rotacion", "auto")
+    alto_max_cm = 500.0
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p["id"] == (pid or _get_active_producto_id())), None)
+    try:
+        # Si el molde no tiene preset asignado, usa el DEFAULT (Estándar).
+        _pid = (prod or {}).get("nesting_preset_id") or "nesting_default"
+        preset = next((n for n in cat.get("nesting_presets", []) if n.get("id") == _pid), None)
+        if preset:
+            espaciado_mm = preset.get("espaciado_mm", espaciado_mm)
+            margen_mm = preset.get("margen_mm", margen_mm)
+            rot = preset.get("rotacion", rot)
+            alto_max_cm = float(preset.get("alto_max_cm", alto_max_cm) or alto_max_cm)
+    except Exception:
+        pass
+    margen_cm = float(margen_mm) / 10.0
+    base = {"espaciado_cm": float(espaciado_mm) / 10.0,
+            "margenes_cm": {"sup": margen_cm, "inf": margen_cm,
+                            "izq": margen_cm, "der": margen_cm}}
+    # TELAS del registro GLOBAL (nombre + ancho); el alto de la hoja lo pone la tizada (nesting).
+    telas_cfg = {}
+    for t in (cat.get("telas") or []):
+        nom = str(t.get("nombre", "")).strip()
+        if nom:
+            telas_cfg[nom] = {"ancho_cm": float(t.get("ancho_cm", 180) or 180), "altura_max_cm": alto_max_cm}
+    # Defaults por compatibilidad con el fallback hardcodeado del motor (Principal/RIB).
+    telas_cfg.setdefault("Principal", {"ancho_cm": 180.0, "altura_max_cm": alto_max_cm})
+    telas_cfg.setdefault("RIB", {"ancho_cm": 100.0, "altura_max_cm": alto_max_cm})
+    asignacion = {}   # la asignación pieza→tela viene del PEDIDO (ver _asignacion_tela_pedido)
+    rotaciones = {}
+    if rot and rot not in ("auto", ""):
+        reg = _cargar("registro_producto.json", pid) or {}
+        rotaciones = {p: rot for p in reg}
+    return base, rotaciones, telas_cfg, asignacion
+
+
+def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None):
+    """Traduce las filas crudas de la planilla a las prendas que entiende el motor
+    (talle/nombre/numero/manga + personalización por columna), según el template y
+    el mapeo de columnas del molde. `default_diseno` = diseño de la fila cuando no
+    hay columna "Diseño" (pedido de un solo diseño)."""
+    mapeo_columnas = {"talle": "talle", "nombre": "nombre", "numero": "numero",
+                      "manga": "manga", "manga_corta_val": "corta", "manga_larga_val": "larga"}
+    if prod and "mapeo_columnas" in prod:
+        mapeo_columnas.update(prod["mapeo_columnas"])
+    _tpl = next((t for t in cat.get("plantillas_planillas", []) if t.get("id") == (prod or {}).get("planilla_template_id")), None)
+    cols_template = (_tpl or {}).get("columnas", [])
+    talle_col = mapeo_columnas.get("talle", "talle")
+    nombre_col = mapeo_columnas.get("nombre", "nombre")
+    numero_col = mapeo_columnas.get("numero", "numero")
+    manga_col = mapeo_columnas.get("manga", "manga")
+    larga_val = str(mapeo_columnas.get("manga_larga_val", "larga")).strip().lower()
+    # TOGGLES DE PIEZA (generaliza la manga): TODAS las columnas con comportamiento
+    # "manga" (role="manga"). Cada una aporta una palabra CLAVE (ej. 'manga', 'sisa') y
+    # sus OPCIONES; el valor de la fila dice qué opción se eligió. Puede haber varias.
+    reglas_by_id = {r.get("id"): r for r in cat.get("reglas_planilla", [])}
+    def _toggle_info(c):
+        if c.get("role") != "manga":
+            return None
+        regla = reglas_by_id.get(c.get("reglaId")) or {}
+        clave = c.get("clave") or regla.get("clave") or regla.get("nombre") or c.get("label") or "manga"
+        ops_str = c.get("opciones") or regla.get("opciones") or "Corta, Larga"
+        opciones = [o.strip() for o in str(ops_str).split(",") if o.strip()]
+        return {"col": c, "clave": str(clave).strip(), "opciones": opciones}
+    toggle_cols = [t for t in (_toggle_info(c) for c in cols_template) if t]
+    # Columna que elige el DISEÑO de cada fila (comportamiento "diseno"). Si no
+    # existe, todas las filas van al diseño "principal" (el arte base de hoy).
+    diseno_col = next((c for c in cols_template if c.get("role") == "diseno"), None)
+    # VARIABLES de configuración del molde (pestaña Variables).
+    # Cada fila puede traer `__variante` = clave elegida → el motor genera SOLO esas piezas.
+    # IDENTIDAD ESTABLE: `piezas.json` mapea el `pieza_id` (que NO varía por talle) a la CLAVE
+    # de la pieza en el registro. La variable apunta al id → resolvemos a clave sin depender del
+    # talle guía. `pieza_idx` queda como fallback para moldes aún no migrados.
+    _pid = (prod or {}).get("id")
+    _pz_idx = _cargar("piezas.json", _pid) if _pid else None
+    _id2clave = {}
+    if _pz_idx:
+        for _p in _pz_idx.get("piezas", []):
+            if _p.get("id") and _p.get("clave"):
+                _id2clave[_p["id"]] = _p["clave"]
+    variantes_prod = {}      # clave -> [pieza_idx]  (compat / fallback)
+    variantes_piezas = {}    # clave -> [clave_pieza]  (ESTABLE, resuelto por pieza_id)
+    variantes_grupo = {}     # clave -> grupoId (para acotar la config de etiqueta al grupo)
+    variantes_juntas = {}    # clave -> [[clave_pieza,…], …]  vínculos "van juntas" (manga corta + su vivo)
+    for _v in ((prod or {}).get("variantes") or []):
+        _cl = _v.get("clave")
+        if not _cl:
+            continue
+        variantes_grupo[_cl] = _v.get("grupoId")
+        _idxs, _claves, _idx2cl_v = [], [], {}
+        for x in (_v.get("valores") or []):
+            _clp = _id2clave.get(x.get("pieza_id"))
+            if _clp:
+                _claves.append(_clp)
+            if x.get("pieza_idx") is not None:
+                _idxs.append(x["pieza_idx"])
+                if _clp:
+                    _idx2cl_v[int(x["pieza_idx"])] = _clp
+        # Vínculos "van juntas" de ESTA variable → sets de CLAVES de registro (el motor los trata
+        # como unidad frente al toggle: si saca la manga, saca también el vivo enlazado).
+        _js = []
+        for _b in (_v.get("juntas") or []):
+            _nm = [_idx2cl_v[int(i)] for i in (_b.get("piezas") or []) if int(i) in _idx2cl_v]
+            if len(_nm) >= 2:
+                _js.append(_nm)
+        if _js:
+            variantes_juntas[_cl] = _js
+        if _idxs:
+            variantes_prod[_cl] = _idxs
+        if _claves:
+            variantes_piezas[_cl] = _claves
+    # FALLBACK: pieza_idx → NOMBRE resuelto en el TALLE GUÍA (solo si la variable no tiene pieza_id).
+    # El pieza_idx VARÍA por talle; la variable guarda los del talle guía → resolver con otro talle
+    # da piezas equivocadas. Con pieza_id ya no hace falta, pero se conserva para datos viejos.
+    _guia = (prod or {}).get("variante_guia")
+    _idx2nom_guia = {}
+    if reg and _guia:
+        for _nm, _pt in reg.items():
+            _info = (_pt or {}).get(_guia)
+            if isinstance(_info, dict) and _info.get("pieza_idx") is not None:
+                _idx2nom_guia[int(_info["pieza_idx"])] = _nm
+    out = []
+    for pr in prendas:
+        manga_final = "larga" if str(pr.get(manga_col, "")).strip().lower() == larga_val else "corta"
+        toggles = []
+        for ti in toggle_cols:
+            c = ti["col"]
+            val = str(pr.get(c.get("id"), pr.get(c.get("label"), "")) or "").strip()
+            opcion = val or (ti["opciones"][0] if ti["opciones"] else "")   # vacío → primera opción
+            if opcion:
+                toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
+        translated_pr = {
+            "talle": pr.get(talle_col, "") or pr.get("talle", "") or pr.get("Talle", "") or "M",
+            "nombre": pr.get(nombre_col, "") or pr.get("nombre", "") or pr.get("Nombre", "") or "",
+            "numero": pr.get(numero_col, "") or pr.get("numero", "") or pr.get("Número", "") or pr.get("Numero", "") or "",
+            "manga": manga_final,
+            "toggles": toggles,
+        }
+        dval = pr.get(diseno_col.get("id"), pr.get(diseno_col.get("label"), "")) if diseno_col else ""
+        translated_pr["_diseno"] = _slugify_diseno(dval) if str(dval or "").strip() else _slugify_diseno(default_diseno)
+        _vcl = str(pr.get("__variante", "") or "").strip()
+        if _vcl and (_vcl in variantes_prod or _vcl in variantes_piezas):
+            translated_pr["variante_clave"] = _vcl
+            if _vcl in variantes_prod:
+                translated_pr["variante_idx"] = variantes_prod[_vcl]
+            # NOMBRES de las piezas: preferir el id ESTABLE (piezas.json); si no, el talle guía.
+            if _vcl in variantes_piezas:
+                translated_pr["variante_piezas"] = variantes_piezas[_vcl]
+            elif _idx2nom_guia and _vcl in variantes_prod:
+                translated_pr["variante_piezas"] = [_idx2nom_guia[int(i)] for i in variantes_prod[_vcl] if int(i) in _idx2nom_guia]
+        if _vcl and variantes_grupo.get(_vcl):
+            translated_pr["_grupo"] = variantes_grupo[_vcl]   # grupo → acota la posición de etiqueta
+        if _vcl and variantes_juntas.get(_vcl):
+            translated_pr["juntas_piezas"] = variantes_juntas[_vcl]   # vínculos "van juntas" → atómicos frente al toggle
+        persona = {"nombre": translated_pr["nombre"], "numero": translated_pr["numero"]}
+        for c in cols_template:
+            if c.get("role") == "diseno":
+                continue  # el diseño no es un dato a estampar
+            cval = pr.get(c.get("id"), pr.get(c.get("label"), ""))
+            if cval not in (None, ""):
+                persona[c.get("label") or c.get("id")] = cval
+        translated_pr["personalizacion"] = persona
+        out.append(translated_pr)
+    return out
+
+
+@app.post("/api/generar")
+def generar():
+    cuerpo = request.get_json(force=True)
+    prendas = cuerpo.get("prendas", [])
+    if not prendas:
+        return jsonify({"error": "el pedido no tiene prendas"}), 400
+    # El molde a generar: el del body (multi-molde) o, si no viene, el activo.
+    pid = cuerpo.get("producto_id") or _get_active_producto_id()
+    reg = _cargar("registro_producto.json", pid)
+    # Personalización FRESCA del arte (incluye trazo/borde + color exacto).
+    try:
+        pers = MP.extraer_personalizacion(_ruta_entrada("arte.ai", pid)) or {}
+    except Exception:
+        pers = _cargar("registro_personalizacion.json", pid) or {}
+    val = _cargar("validacion_arte.json", pid)
+    if not reg or not val or not val.get("aprobado"):
+        return jsonify({"error": "falta plantilla registrada o arte aprobado"}), 409
+
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    translated_prendas = _traducir_prendas(prendas, prod, cat, reg=reg)
+
+    mapeo = None
+    if val.get("modo") == "separado":
+        # REGLA mapeo-por-variable: se pasa la estructura completa; el motor resuelve el
+        # mapeo de cada prenda por su `variante_clave` (base para filas sin variable).
+        _b, _pv = _mapeo_estructura(pid)
+        mapeo = ({"mapeo": _b, "por_variable": _pv} if (_b or _pv) else None)
+    cfg_nesting, rotaciones, telas_cfg, asignacion = _config_produccion(pid)
+    # Override pieza→tela desde el PEDIDO (selector de tela en el Arte). {pieza_nombre: tela_nombre}.
+    _asig_ped = cuerpo.get("asignacion") or {}
+    if isinstance(_asig_ped, dict) and _asig_ped:
+        asignacion = {str(p): str(t) for p, t in _asig_ped.items() if t}
+    tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    salida = os.path.join(TRABAJOS, tid)
+    trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
+                     "producto_id": pid, "producto_nombre": (prod or {}).get("nombre", "")}
+
+    def correr():
+        try:
+            trabajos[tid]["estado"] = "generando"
+            def prog(fase, a, b):
+                trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
+            res = MP.generar_pedido(_ruta_entrada("plantilla.ai", pid),
+                                    _ruta_entrada("arte.ai", pid),
+                                    reg, pers, translated_prendas, FUENTES, salida, progreso=prog,
+                                    mapeo_arte=mapeo, config_nesting=cfg_nesting,
+                                     rotaciones=rotaciones, asignacion_tela=asignacion,
+                                     telas_cfg=telas_cfg, borde_corte=(prod or {}).get("borde_corte"),
+                                     etiqueta=(prod or {}).get("etiqueta"),
+                                     editables_cfg=_editables_cfg(prod, "principal", (cuerpo.get("editables") or {}).get("principal")),
+                                     editables_tamano=_editables_tamano(prod))
+            res["id"] = tid
+            res["producto_id"] = pid
+            res["producto_nombre"] = (prod or {}).get("nombre", "")
+            try:
+                _icc, _icc_nom, _icc_n = _icc_para_salida([_ruta_entrada("arte.ai", pid)], cat)
+                if _icc:
+                    _esp = "RGB" if _icc_n == 3 else "CMYK"   # respeta el espacio del perfil
+                    for h in res.get("hojas", []):
+                        _p = os.path.join(salida, h["archivo"])
+                        # Convertir SOLO si hay contenido en OTRO modo que el del perfil;
+                        # si ya está todo en ese modo, los valores quedan EXACTOS.
+                        _mixto = _pdf_tiene_rgb(_p) if _esp == "CMYK" else _pdf_tiene_cmyk(_p)
+                        if _mixto:
+                            _unificar_modo_gs(_p, _esp)
+                        _embeber_perfil_pdf(_p, _icc, _icc_nom, _icc_n)
+                    res["perfil_icc"] = _icc_nom
+            except Exception as _e:
+                print("  [!]  perfil ICC en salida:", _e)
+            json.dump({"prendas": prendas, "resultado": {k: v for k, v in res.items() if k != "hojas"} |
+                       {"hojas": res["hojas"]}}, open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"),
+                       ensure_ascii=False)
+            trabajos[tid]["resultado"] = res
+            trabajos[tid]["estado"] = "listo"
+        except Exception as e:
+            trabajos[tid]["estado"] = "error"
+            trabajos[tid]["error"] = f"{e}"
+            traceback.print_exc()
+
+    threading.Thread(target=correr, daemon=True).start()
+    return jsonify({"id": tid})
+
+
+@app.post("/api/generar_multi")
+def generar_multi():
+    """Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA.
+    Body: {molds: [pid, ...], prendas: [...]}."""
+    cuerpo = request.get_json(force=True)
+    prendas = cuerpo.get("prendas", [])
+    pids = cuerpo.get("molds") or cuerpo.get("productos") or []
+    default_diseno = cuerpo.get("default_diseno") or "principal"  # diseño de la fila si no hay columna
+    perfil_forzado = cuerpo.get("perfil_forzado")  # archivo ICC para unificar perfiles distintos (o None)
+    _ed_override = cuerpo.get("editables") or {}  # ajuste por pedido de objetos editables: {diseno_slug: {nombre: {talle: tf}}}
+    if not prendas:
+        return jsonify({"error": "el pedido no tiene prendas"}), 400
+    if not pids:
+        return jsonify({"error": "no hay moldes elegidos"}), 400
+    cat = _cargar_catalogo()
+    grupos_cfg = cat.get("grupos_tizada", [])
+    def _grupo_de(_pid):
+        for g in grupos_cfg:
+            if _pid in (g.get("moldes") or []):
+                return g
+        return None
+    molds_data, nombres, avisos = [], [], []
+    for pid in pids:
+        reg = _cargar("registro_producto.json", pid)
+        prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+        nombre = (prod or {}).get("nombre", pid)
+        if not reg:
+            return jsonify({"error": f"falta el molde «{nombre}»"}), 409
+        _cfg_n, rot, _telas, asig = _config_produccion(pid)
+        # Tela del PEDIDO: una tela BASE para todo el molde + overrides por pieza.
+        #   tela_base:   {pid: tela_nombre}
+        #   asignaciones:{pid: {pieza_nombre: tela_nombre}}
+        _base = (cuerpo.get("tela_base") or {}).get(pid)
+        _ovr = (cuerpo.get("asignaciones") or {}).get(pid) or {}
+        if _base or _ovr:
+            asig = {}
+            if _base:
+                for _p in reg.keys():
+                    asig[str(_p)] = str(_base)
+            # Los overrides vienen por nombre GENÉRICO ("Cuello") → se aplican a TODAS las piezas
+            # de ese genérico ("Cuello 25", "Cuello 12", …).
+            _gen = lambda s: re.sub(r"\s+\d+\s*$", "", str(s)).strip().lower()
+            for _p, _t in (_ovr.items() if isinstance(_ovr, dict) else []):
+                if not _t:
+                    continue
+                _pg = _gen(_p)
+                _match = [full for full in reg if _gen(full) == _pg]
+                for full in (_match or [_p]):
+                    asig[str(full)] = str(_t)
+        gconf = _grupo_de(pid)
+        # Filas traducidas (cada una con su _diseno). Se separan por diseño: cada
+        # subgrupo se genera con el ARTE de ese diseño (carpeta del molde para
+        # 'principal', o disenos/<slug>/ para los demás).
+        translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg)
+        por_diseno = OrderedDict()
+        for pr in translated:
+            por_diseno.setdefault(pr.get("_diseno") or "principal", []).append(pr)
+        # Diseños de ESTE molde que tienen arte cargado (validacion existe). Si una fila trae un
+        # diseño SIN arte (ej. un diseño viejo del desplegable), se usa el arte de uno que SÍ →
+        # la prenda NO se descarta (antes se salteaba en silencio → la tizada quedaba con 1 talle).
+        _con_arte = [d["id"] for d in ([{"id": "principal"}] + list((prod or {}).get("disenos") or []))
+                     if _cargar("validacion_arte.json", pid, sub=_diseno_sub(d["id"]))]
+        # El fallback es el diseño que se EDITÓ en el Arte (`default_diseno`) si tiene arte; así la
+        # tizada usa lo que preparaste, no un diseño cualquiera. Si ese no tiene arte, el 1º que sí.
+        _dd = _slugify_diseno(default_diseno)
+        _fallback = _dd if _dd in _con_arte else (_con_arte[0] if _con_arte else None)
+        for dslug, subset in por_diseno.items():
+            sub = _diseno_sub(dslug)
+            val = _cargar("validacion_arte.json", pid, sub=sub)
+            if not val and _fallback and _fallback != dslug:
+                # ese diseño no tiene arte → usar el arte de un diseño que SÍ (no descartar la prenda)
+                dslug = _fallback
+                sub = _diseno_sub(dslug)
+                val = _cargar("validacion_arte.json", pid, sub=sub)
+            dnom = "Principal" if dslug == "principal" else next((d["nombre"] for d in ((prod or {}).get("disenos") or []) if d["id"] == dslug), dslug)
+            if not val:
+                # ningún diseño del molde tiene arte cargado → no hay nada que aplicar.
+                continue
+            if not val.get("aprobado"):
+                # El diseño EXISTE pero no está 100% mapeado. Se genera IGUAL: las piezas SIN
+                # diseño salen en blanco (con su borde de corte + etiqueta). Solo se AVISA cuáles.
+                # REGLA mapeo-por-variable: la cobertura se mide con el mapeo EFECTIVO de la
+                # VARIABLE de cada fila (el suyo si lo tiene; si no la base/auto por nombre).
+                _b0, _pv0 = _mapeo_estructura(pid, sub=sub)
+                if not _b0 and not _pv0:
+                    _b0 = MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}
+                # Solo importan las piezas que REALMENTE se generan (las de las VARIABLES de estas
+                # filas), NO todo el molde. Una pieza sin diseño que no esté en ninguna variable
+                # (ej. los Vivos, si la variable no los usa) NO se avisa.
+                # Se prefieren las CLAVES estables (`variante_piezas`, resueltas por pieza_id); el
+                # mapa idx→nombre por talle queda como fallback para variables sin pieza_id.
+                _idx2nom = {}
+                for _nm, _pt in reg.items():
+                    for _info in (_pt or {}).values():
+                        if isinstance(_info, dict) and _info.get("pieza_idx") is not None:
+                            _idx2nom.setdefault(int(_info["pieza_idx"]), _nm); break
+                _faltan_set = set()
+                for _pr in subset:
+                    _vp = _pr.get("variante_piezas")
+                    _vi = _pr.get("variante_idx")
+                    if _vp:
+                        _usa = set(_vp)
+                    elif _vi:
+                        _usa = {_idx2nom[int(_i)] for _i in _vi if int(_i) in _idx2nom}
+                    else:
+                        _usa = set(reg.keys())
+                    _eff = _mapeo_efectivo(_b0, _pv0, _pr.get("variante_clave"))
+                    _faltan_set |= (_usa - set(_eff.keys()))
+                _faltan = sorted(_faltan_set)
+                if _faltan:
+                    _lista = ", ".join(_faltan[:6]) + ("…" if len(_faltan) > 6 else "")
+                    avisos.append(f"«{nombre}» · diseño «{dnom}»: {len(_faltan)} pieza(s) sin diseño saldrán en blanco ({_lista}).")
+                # (no se saltea: sigue y genera con lo que haya mapeado)
+            # Re-extraer la personalización FRESCA del arte (trazo/borde + color exacto)
+            # para no depender del registro guardado al subir (que puede ser viejo).
+            _artp = _ruta_entrada("arte.ai", pid, sub=sub)
+            try:
+                pers = MP.extraer_personalizacion(_artp)
+            except Exception:
+                pers = _cargar("registro_personalizacion.json", pid, sub=sub) or {}
+            mapeo = None
+            if val.get("modo") == "separado":
+                # REGLA mapeo-por-variable: estructura completa al motor (cada prenda resuelve
+                # por su `variante_clave`). Sin nada guardado → auto por nombre como base.
+                _b, _pv = _mapeo_estructura(pid, sub=sub)
+                if not _b and not _pv:
+                    _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}).items() if v}
+                mapeo = ({"mapeo": _b, "por_variable": _pv} if (_b or _pv) else None)
+            molds_data.append({
+                "plantilla": _ruta_entrada("plantilla.ai", pid),
+                "arte": _ruta_entrada("arte.ai", pid, sub=sub),
+                "registro": reg, "pers": pers, "prendas": subset,
+                "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": asig,
+                "borde_corte": (prod or {}).get("borde_corte"),
+                "etiqueta": (prod or {}).get("etiqueta"),
+                "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
+                "editables_tamano": _editables_tamano(prod),
+                "_cfg_n": _cfg_n, "_telas": _telas, "_nombre": nombre,
+                # Clave del grupo: el id del grupo configurado, o "solo" el molde si no
+                # está en ningún grupo. Las piezas de distintos diseños del MISMO grupo
+                # se mezclan en la misma mesa (el diseño solo cambia el arte estampado).
+                "_gkey": (gconf or {}).get("id") or ("__solo_" + pid),
+                "_gnombre": (gconf or {}).get("nombre") or nombre})
+        if nombre not in nombres:
+            nombres.append(nombre)
+    if not molds_data:
+        return jsonify({"error": "ninguna fila tiene un diseño con arte aprobado"}), 409
+    # Nesting y telas: del primer molde (espaciado/margen son a nivel de hoja; el
+    # giro y la tela de cada pieza ya van por-molde).
+    cfg_nesting = molds_data[0]["_cfg_n"]
+    telas_cfg = molds_data[0]["_telas"]
+    # Agrupar por GRUPO DE TIZADA (config en Reglas de Nesting): mismo grupo =
+    # comparten mesa; sin grupo o grupos distintos = tizadas separadas.
+    grupos_map = OrderedDict()
+    for md in molds_data:
+        grupos_map.setdefault(md["_gkey"], []).append(md)
+    grupos = [{"nombre": lst[0]["_gnombre"], "nombres": list(dict.fromkeys(m["_nombre"] for m in lst)), "moldes": lst}
+              for g, lst in grupos_map.items()]
+    tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    salida = os.path.join(TRABAJOS, tid)
+    trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
+                     "producto_id": ",".join(pids), "producto_nombre": " + ".join(nombres)}
+
+    def correr():
+        try:
+            trabajos[tid]["estado"] = "generando"
+            def prog(fase, a, b):
+                trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
+            res = MP.generar_pedido_grupos(grupos, FUENTES, salida,
+                                           config_nesting=cfg_nesting, telas_cfg=telas_cfg, progreso=prog)
+            res["id"] = tid
+            res["moldes"] = nombres
+            res["avisos"] = avisos   # combos (molde,diseño) que no se generaron por mapeo sin aprobar
+            # Embeber el perfil ICC en cada hoja: el que vino en el arte, o el
+            # predeterminado del sistema si el arte no traía. Tagea (OutputIntent),
+            # NO convierte los colores.
+            try:
+                arts = list({m.get("arte") for g in grupos for m in g.get("moldes", []) if m.get("arte")})
+                _icc, _icc_nom, _icc_n = _icc_para_salida(arts, cat, forzado=perfil_forzado)
+                if _icc:
+                    _esp = "RGB" if _icc_n == 3 else "CMYK"   # modo del perfil ELEGIDO (respeta RGB/CMYK)
+                    for h in res.get("hojas", []):
+                        try:
+                            _p = os.path.join(salida, h["archivo"])
+                            # Se convierte SOLO si la hoja tiene contenido en OTRO modo que
+                            # el del perfil elegido (RGB en salida CMYK, o CMYK en salida
+                            # RGB). Si ya está todo en ese modo, NO se toca: los valores
+                            # quedan EXACTOS y solo se ASIGNA el perfil (OutputIntent).
+                            _mixto = _pdf_tiene_rgb(_p) if _esp == "CMYK" else _pdf_tiene_cmyk(_p)
+                            if _mixto:
+                                prog("perfil", "unificando color " + h["archivo"], None)
+                                _unificar_modo_gs(_p, _esp)       # a un solo modo (sin diálogo de Illustrator)
+                            _embeber_perfil_pdf(_p, _icc, _icc_nom, _icc_n)  # perfil incrustado (OutputIntent)
+                        except Exception as _eh:
+                            print("[!] perfil/color en hoja:", repr(_eh))
+                    res["perfil_icc"] = _icc_nom
+            except Exception as _e:
+                print("  [!]  perfil ICC en salida:", _e)
+            json.dump({"prendas": prendas, "moldes": nombres,
+                       "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res["hojas"]}},
+                      open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)
+            trabajos[tid]["resultado"] = res
+            trabajos[tid]["estado"] = "listo"
+        except Exception as e:
+            trabajos[tid]["estado"] = "error"
+            trabajos[tid]["error"] = f"{e}"
+            traceback.print_exc()
+
+    threading.Thread(target=correr, daemon=True).start()
+    return jsonify({"id": tid})
+
+
+@app.get("/api/trabajo/<tid>")
+def estado_trabajo(tid):
+    t = trabajos.get(tid)
+    if not t:
+        return jsonify({"error": "trabajo inexistente"}), 404
+    return jsonify(t)
+
+
+@app.get("/trabajos/<tid>/<archivo>")
+def descargar(tid, archivo):
+    return send_from_directory(os.path.join(TRABAJOS, tid), archivo)
+
+
+@app.get("/api/trabajos/zip")
+def descargar_zip():
+    """Arma un ZIP con los PDF de todas las mesas de los trabajos pedidos
+    (ids separados por coma), una carpeta por molde."""
+    import io
+    import zipfile
+    ids = [t for t in request.args.get("ids", "").split(",") if t]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for tid in ids:
+            t = trabajos.get(tid) or {}
+            hojas = ((t.get("resultado") or {}).get("hojas")) or []
+            nombre = t.get("producto_nombre") or tid
+            slug = "".join(c if c.isalnum() else "_" for c in nombre)[:30] or "molde"
+            carpeta = os.path.join(TRABAJOS, tid)
+            for h in hojas:
+                arch = h.get("archivo")
+                ruta = os.path.join(carpeta, arch) if arch else None
+                if ruta and os.path.exists(ruta):
+                    zf.write(ruta, f"{slug}/{arch}")
+    buf.seek(0)
+    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="tizadas.zip")
+
+
+# ════════════════ PRODUCT CATALOG ENDPOINTS (CRM) ════════════════
+@app.get("/api/productos")
+def get_productos():
+    cat = _cargar_catalogo()
+    res_prods = []
+    templates = cat.get("plantillas_planillas", [])
+    
+    for p in cat["productos"]:
+        pid = p["id"]
+        reg_path = os.path.join(DATOS, "productos", pid, "registro_producto.json")
+        has_plantilla = os.path.exists(reg_path)
+        val_path = os.path.join(DATOS, "productos", pid, "validacion_arte.json")
+        has_arte = False
+        if os.path.exists(val_path):
+            try:
+                has_arte = json.load(open(val_path, encoding="utf-8")).get("aprobado", False)
+            except Exception:
+                pass
+        
+        # Resolve columns from template if assigned
+        cols = None
+        tid = p.get("planilla_template_id")
+        if tid:
+            template = next((t for t in templates if t["id"] == tid), None)
+            if template:
+                cols = template.get("columnas")
+        if not cols:
+            cols = p.get("columnas", [
+                {"id": "talle", "label": "Talle", "role": "talle"},
+                {"id": "nombre", "label": "Nombre", "role": "nombre"},
+                {"id": "numero", "label": "Número", "role": "numero"},
+                {"id": "manga", "label": "Manga", "role": "manga"}
+            ])
+        
+        res_prods.append({
+            "id": pid,
+            "nombre": p["nombre"],
+            "creado": p.get("creado", 0),
+            "plantilla": has_plantilla,
+            "arte": has_arte,
+            "planilla_template_id": tid or "plan_default",
+            "nesting_preset_id": p.get("nesting_preset_id") or "nesting_default",
+            "grupo_tizada": p.get("grupo_tizada") or "General",
+            "columnas": cols,
+            "mapeo_columnas": p.get("mapeo_columnas", {
+                "talle": "talle",
+                "nombre": "nombre",
+                "numero": "numero",
+                "manga": "manga",
+                "manga_corta_val": "corta",
+                "manga_larga_val": "larga"
+            }),
+            # Terminología configurable: cómo se llaman, de cara al usuario, los
+            # conceptos del sistema. El funcionamiento NO cambia, solo las etiquetas.
+            "terminologia": {**{"variante": "Talle", "molde": "Molde"},
+                             **(p.get("terminologia") or {})},
+            # Variante (talle) elegida como guía del visor. Persistida en la base
+            # → todos los usuarios ven la misma.
+            "variante_guia": p.get("variante_guia"),
+            # Dimensión de referencia del diseño: 'alto' o 'ancho'.
+            "referencia_medida": p.get("referencia_medida") or "alto",
+            # Arquitectura Modelos/Variables (genérica). `variantes` = los TIPOS de
+            # pieza y sus valores (Frente→[Manga pegada, Ranglan…]); `modelos` = los
+            # modelos del molde, cada uno con sus Variables (combinaciones). El TALLE
+            # queda aparte (columnas/variante_guia), esto no lo toca.
+            "variantes": p.get("variantes") or [],
+            "modelos": p.get("modelos") or [],
+            # `conjuntos` = piezas que "van juntas" (una pieza de varias partes, p.ej.
+            # cuello de 3 piezas). Para la generación automática de variables.
+            "conjuntos": p.get("conjuntos") or [],
+            # `grupos` = grupos de piezas elegidos por el usuario; la generación de
+            # variables corre DENTRO de cada grupo (una pieza puede estar en varios).
+            "grupos": p.get("grupos") or [],
+            # Telas (ids del registro global) asignadas a este molde → habilitan el
+            # selector de tela por pieza en el pedido.
+            "telas_asignadas": p.get("telas_asignadas") or [],
+        })
+    return jsonify({
+        "activo": cat["activo"],
+        "productos": res_prods
+    })
+
+
+@app.post("/api/productos/crear")
+def crear_producto():
+    cuerpo = request.get_json(force=True) or {}
+    nombre = cuerpo.get("nombre", "").strip()
+    if not nombre:
+        return jsonify({"error": "Falta el nombre del producto"}), 400
+    
+    cat = _cargar_catalogo()
+    pid = "prod_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
+    
+    os.makedirs(os.path.join(DATOS, "productos", pid), exist_ok=True)
+    os.makedirs(os.path.join(ENTRADA, pid), exist_ok=True)
+    
+    conf_base = _config_default()
+    json.dump(conf_base, open(os.path.join(DATOS, "productos", pid, "config_produccion.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    
+    cat["productos"].append({
+        "id": pid,
+        "nombre": nombre,
+        "creado": time.time(),
+        "planilla_template_id": "plan_default",
+        "mapeo_columnas": {
+            "talle": "talle",
+            "nombre": "nombre",
+            "numero": "numero",
+            "manga": "manga",
+            "manga_corta_val": "corta",
+            "manga_larga_val": "larga"
+        }
+    })
+    cat["activo"] = pid
+    _guardar_catalogo(cat)
+    return jsonify({"id": pid, "nombre": nombre})
+
+
+@app.post("/api/productos/activar")
+def activar_producto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    cat = _cargar_catalogo()
+    exists = any(p["id"] == pid for p in cat["productos"])
+    if not exists:
+        return jsonify({"error": "Producto inexistente"}), 404
+    cat["activo"] = pid
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "activo": pid})
+
+
+@app.post("/api/productos/eliminar")
+def eliminar_producto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    if pid == "prod_default":
+        return jsonify({"error": "No se puede eliminar el producto por defecto"}), 400
+    
+    cat = _cargar_catalogo()
+    p_index = -1
+    for i, p in enumerate(cat["productos"]):
+        if p["id"] == pid:
+            p_index = i
+            break
+            
+    if p_index == -1:
+        return jsonify({"error": "Producto inexistente"}), 404
+        
+    cat["productos"].pop(p_index)
+    if cat["activo"] == pid:
+        cat["activo"] = "prod_default"
+        
+    _guardar_catalogo(cat)
+    
+    import shutil
+    try:
+        shutil.rmtree(os.path.join(DATOS, "productos", pid), ignore_errors=True)
+        shutil.rmtree(os.path.join(ENTRADA, pid), ignore_errors=True)
+    except Exception:
+        pass
+        
+    return jsonify({"ok": True})
+
+
+@app.post("/api/productos/renombrar")
+def renombrar_producto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    nombre = cuerpo.get("nombre", "").strip()
+    if not nombre:
+        return jsonify({"error": "Nombre vacío"}), 400
+        
+    cat = _cargar_catalogo()
+    encontrado = False
+    for p in cat["productos"]:
+        if p["id"] == pid:
+            p["nombre"] = nombre
+            encontrado = True
+            break
+            
+    if not encontrado:
+        return jsonify({"error": "Producto no encontrado"}), 404
+        
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/productos/config_columnas")
+def config_columnas_producto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    columnas = cuerpo.get("columnas", [])
+    
+    if not any(c.get("role") == "talle" for c in columnas):
+        return jsonify({"error": "Debe haber al menos una columna con el rol 'Talle'"}), 400
+        
+    cat = _cargar_catalogo()
+    encontrado = False
+    for p in cat["productos"]:
+        if p["id"] == pid:
+            p["columnas"] = columnas
+            encontrado = True
+            break
+            
+    if not encontrado:
+        return jsonify({"error": "Producto no encontrado"}), 404
+        
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/productos/terminologia")
+def config_terminologia():
+    """Guarda los nombres configurables (variante/molde) de un producto. Solo
+    afecta las etiquetas que ve el usuario; el funcionamiento es el mismo."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    term = cuerpo.get("terminologia") or {}
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    actual = prod.get("terminologia") or {}
+    for clave in ("variante", "molde"):
+        val = str(term.get(clave, "")).strip()
+        if val:
+            actual[clave] = val
+    prod["terminologia"] = actual
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "terminologia": actual})
+
+
+@app.post("/api/productos/variante_guia")
+def set_variante_guia():
+    """Guarda en la base la variante (talle) usada como guía del visor del molde.
+    Al estar en el servidor, todos los usuarios ven la misma."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    variante = str(cuerpo.get("variante", "")).strip()
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    prod["variante_guia"] = variante
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "variante_guia": variante})
+
+
+def _grupo_por_nombre(grupos, nombre, crear=False):
+    g = next((x for x in grupos if x.get("nombre", "").lower() == nombre.lower()), None)
+    if g is None and crear:
+        g = {"nombre": nombre, "piezas": []}
+        grupos.append(g)
+    return g
+
+
+@app.post("/api/productos/referencia_medida")
+def set_referencia_medida():
+    """Guarda la dimensión de referencia del diseño ('alto' o 'ancho') del molde."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    ref = "ancho" if str(cuerpo.get("referencia", "")).lower().startswith("anch") else "alto"
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    prod["referencia_medida"] = ref
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "referencia_medida": ref})
+
+
+_RE_PZ_NUM = re.compile(r"\s+(\d+)\s*$")
+
+
+def _regenerar_piezas_index(pid, reg=None, guia=None):
+    """Genera/actualiza `piezas.json` del producto: identidad ESTABLE de cada pieza
+    (`id` opaco + `nombre` genérico + `numero`), con la `clave` del registro como puente
+    a la geometría. Preserva los id↔clave ya asignados (los id no se mueven al re-correr).
+    Devuelve (id2clave, clave2id, idx_guia2id)."""
+    if reg is None:
+        reg = _cargar("registro_producto.json", pid) or {}
+    if guia is None:
+        cat = _cargar_catalogo()
+        prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+        guia = (prod or {}).get("variante_guia")
+    prev = _cargar("piezas.json", pid) or {"version": 1, "piezas": []}
+    id_por_clave = {p["clave"]: p["id"] for p in prev.get("piezas", []) if p.get("clave")}
+    usados = set(id_por_clave.values())
+
+    def _nuevo_id():
+        n = 1
+        while ("pz_%04d" % n) in usados:
+            n += 1
+        _id = "pz_%04d" % n
+        usados.add(_id)
+        return _id
+
+    piezas, id2clave, clave2id, idx_guia2id = [], {}, {}, {}
+    for clave in reg.keys():
+        _id = id_por_clave.get(clave) or _nuevo_id()
+        m = _RE_PZ_NUM.search(clave)
+        nombre = clave[:m.start()].rstrip() if m else clave
+        numero = int(m.group(1)) if m else None
+        piezas.append({"id": _id, "nombre": nombre, "numero": numero, "clave": clave})
+        id2clave[_id] = clave
+        clave2id[clave] = _id
+        info = (reg[clave] or {}).get(guia)
+        if isinstance(info, dict) and info.get("pieza_idx") is not None:
+            idx_guia2id[int(info["pieza_idx"])] = _id
+    ruta = _ruta_datos("piezas.json", pid)
+    with open(ruta, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "piezas": piezas}, f, ensure_ascii=False, indent=2)
+    return id2clave, clave2id, idx_guia2id
+
+
+@app.post("/api/productos/variantes")
+def set_variantes():
+    """Guarda los TIPOS de pieza (variantes) y sus valores del molde. Estructura:
+    [{clave, label, valores:[{id, label, pieza_idx?, pieza_id?}]}]. Es genérico (sirve
+    para cualquier producto). NO toca los talles. Cada valor recibe su `pieza_id` ESTABLE
+    (resuelto del pieza_idx@talle-guía vía piezas.json) para no depender del talle guía."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    variantes = cuerpo.get("variantes")
+    if not isinstance(variantes, list):
+        return jsonify({"error": "Faltan las variantes"}), 400
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    # Identidad estable: cada valor (pieza_idx@guía) → pieza_id.
+    try:
+        _, _, _idx2id = _regenerar_piezas_index(pid, guia=prod.get("variante_guia"))
+        for _v in variantes:
+            for _val in (_v.get("valores") or []):
+                if _val.get("pieza_idx") is not None and int(_val["pieza_idx"]) in _idx2id:
+                    _val["pieza_id"] = _idx2id[int(_val["pieza_idx"])]
+    except Exception:
+        pass  # si algo falla, se guarda igual con pieza_idx (fallback por talle guía)
+    prod["variantes"] = variantes
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "variantes": variantes})
+
+
+@app.post("/api/productos/modelos")
+def set_modelos():
+    """Guarda los MODELOS del molde y sus Variables. Estructura:
+    [{id, nombre, variables:[{id, nombre, build:{clave→valor_id}}]}]. El nombre de
+    modelo no se puede repetir (se valida acá)."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    modelos = cuerpo.get("modelos")
+    if not isinstance(modelos, list):
+        return jsonify({"error": "Faltan los modelos"}), 400
+    vistos = set()
+    for m in modelos:
+        nom = str(m.get("nombre", "")).strip().lower()
+        if nom and nom in vistos:
+            return jsonify({"error": f"El nombre de modelo «{m.get('nombre')}» está repetido"}), 400
+        if nom:
+            vistos.add(nom)
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    prod["modelos"] = modelos
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "modelos": modelos})
+
+
+@app.post("/api/productos/grupos")
+def set_grupos():
+    """Guarda los GRUPOS de piezas del molde: [{id, nombre, piezas:[idx]}]. La
+    generación de variables corre dentro de cada grupo; las piezas pueden repetirse
+    entre grupos."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    grupos = cuerpo.get("grupos")
+    if not isinstance(grupos, list):
+        return jsonify({"error": "Faltan los grupos"}), 400
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    prod["grupos"] = grupos
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "grupos": grupos})
+
+
+@app.post("/api/productos/conjuntos")
+def set_conjuntos():
+    """Guarda los CONJUNTOS "van juntas" (piezas de varias partes que forman una sola).
+    Estructura: [{id, nombre, piezas:[idx]}]. Para la generación automática de variables."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    conjuntos = cuerpo.get("conjuntos")
+    if not isinstance(conjuntos, list):
+        return jsonify({"error": "Faltan los conjuntos"}), 400
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    prod["conjuntos"] = conjuntos
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "conjuntos": conjuntos})
+
+
+@app.get("/api/catalogo_piezas")
+def get_catalogo_piezas():
+    cat = _cargar_catalogo()
+    grupos = cat.setdefault("catalogo_grupos", [])
+    sup = _grupo_por_nombre(grupos, "Prenda Superior", crear=True)
+    # Sumar a "Prenda Superior" las piezas ya registradas en el molde del
+    # producto activo (los nombres reales que vienen del .ai).
+    reg = _cargar("registro_producto.json") or {}
+    existentes = {p.lower() for g in grupos for p in g.get("piezas", [])}
+    cambiado = False
+    for nombre in reg.keys():
+        if nombre and nombre.lower() not in existentes:
+            sup["piezas"].append(nombre)
+            existentes.add(nombre.lower())
+            cambiado = True
+    if cambiado:
+        _guardar_catalogo(cat)
+    return jsonify(grupos)
+
+
+@app.post("/api/catalogo_piezas/agregar")
+def agregar_pieza_catalogo():
+    cuerpo = request.get_json(force=True) or {}
+    nombre = str(cuerpo.get("nombre", "")).strip()
+    grupo = str(cuerpo.get("grupo", "")).strip() or "Prenda Superior"
+    if not nombre:
+        return jsonify({"error": "El nombre de la pieza no puede estar vacío"}), 400
+    cat = _cargar_catalogo()
+    grupos = cat.setdefault("catalogo_grupos", [])
+    g = _grupo_por_nombre(grupos, grupo, crear=True)
+    if not any(p.lower() == nombre.lower() for p in g["piezas"]):
+        g["piezas"].append(nombre)
+        _guardar_catalogo(cat)
+    return jsonify({"ok": True, "catalogo_grupos": grupos})
+
+
+@app.post("/api/catalogo_piezas/eliminar")
+def eliminar_pieza_catalogo():
+    cuerpo = request.get_json(force=True) or {}
+    nombre = str(cuerpo.get("nombre", "")).strip()
+    grupo = str(cuerpo.get("grupo", "")).strip()
+    cat = _cargar_catalogo()
+    for g in cat.get("catalogo_grupos", []):
+        if not grupo or g.get("nombre", "").lower() == grupo.lower():
+            g["piezas"] = [p for p in g.get("piezas", []) if p.lower() != nombre.lower()]
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "catalogo_grupos": cat.get("catalogo_grupos", [])})
+
+
+@app.post("/api/catalogo_grupos/agregar")
+def agregar_grupo_catalogo():
+    cuerpo = request.get_json(force=True) or {}
+    nombre = str(cuerpo.get("nombre", "")).strip()
+    if not nombre:
+        return jsonify({"error": "El nombre del grupo no puede estar vacío"}), 400
+    cat = _cargar_catalogo()
+    grupos = cat.setdefault("catalogo_grupos", [])
+    if not any(g.get("nombre", "").lower() == nombre.lower() for g in grupos):
+        grupos.append({"nombre": nombre, "piezas": []})
+        _guardar_catalogo(cat)
+    return jsonify({"ok": True, "catalogo_grupos": grupos})
+
+
+@app.post("/api/catalogo_grupos/eliminar")
+def eliminar_grupo_catalogo():
+    cuerpo = request.get_json(force=True) or {}
+    nombre = str(cuerpo.get("nombre", "")).strip()
+    if nombre.lower() == "prenda superior":
+        return jsonify({"error": "No se puede eliminar el grupo base 'Prenda Superior'"}), 400
+    cat = _cargar_catalogo()
+    cat["catalogo_grupos"] = [g for g in cat.get("catalogo_grupos", []) if g.get("nombre", "").lower() != nombre.lower()]
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "catalogo_grupos": cat["catalogo_grupos"]})
+
+
+@app.post("/api/productos/config_mapeo")
+def config_mapeo():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    tid = cuerpo.get("planilla_template_id")
+    mapeo = cuerpo.get("mapeo_columnas")
+    
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+        
+    if tid:
+        prod["planilla_template_id"] = tid
+    if mapeo is not None:
+        prod["mapeo_columnas"] = mapeo
+        
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/productos/<pid>/descargar_plantilla")
+def descargar_plantilla_producto(pid):
+    pdir = os.path.join(ENTRADA, pid)
+    ruta_plantilla = os.path.join(pdir, "plantilla.ai")
+    if not os.path.exists(ruta_plantilla):
+        return jsonify({"error": "El producto no tiene una plantilla base subida"}), 404
+    return send_from_directory(pdir, "plantilla.ai", as_attachment=True, download_name="plantilla.ai")
+
+
+# ════════════════ SPREADSHEET TEMPLATES ENDPOINTS (CRM) ════════════════
+@app.get("/api/plantillas_planillas")
+def get_plantillas_planillas():
+    cat = _cargar_catalogo()
+    # Already initialized in _cargar_catalogo()
+    return jsonify(cat.get("plantillas_planillas", []))
+
+
+@app.post("/api/plantillas_planillas/guardar")
+def guardar_plantilla_planilla():
+    cuerpo = request.get_json(force=True) or {}
+    tid = cuerpo.get("id")
+    nombre = cuerpo.get("nombre", "").strip()
+    columnas = cuerpo.get("columnas", [])
+    
+    if not nombre:
+        return jsonify({"error": "El nombre de la planilla no puede estar vacío"}), 400
+    if not any(c.get("role") == "talle" for c in columnas):
+        return jsonify({"error": "Debe haber al menos una columna con el rol 'Talle'"}), 400
+        
+    cat = _cargar_catalogo()
+    if "plantillas_planillas" not in cat:
+        cat["plantillas_planillas"] = []
+        
+    if not tid:
+        # Create a new template ID
+        tid = "plan_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
+        cat["plantillas_planillas"].append({
+            "id": tid,
+            "nombre": nombre,
+            "columnas": columnas
+        })
+    else:
+        encontrado = False
+        for p in cat["plantillas_planillas"]:
+            if p["id"] == tid:
+                p["nombre"] = nombre
+                p["columnas"] = columnas
+                encontrado = True
+                break
+        if not encontrado:
+            cat["plantillas_planillas"].append({
+                "id": tid,
+                "nombre": nombre,
+                "columnas": columnas
+            })
+            
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "id": tid, "nombre": nombre, "columnas": columnas})
+
+
+@app.post("/api/plantillas_planillas/eliminar")
+def eliminar_plantilla_planilla():
+    cuerpo = request.get_json(force=True) or {}
+    tid = cuerpo.get("id")
+    if tid == "plan_default":
+        return jsonify({"error": "No se puede eliminar la planilla por defecto"}), 400
+        
+    cat = _cargar_catalogo()
+    templates = cat.get("plantillas_planillas", [])
+    p_index = -1
+    for i, t in enumerate(templates):
+        if t["id"] == tid:
+            p_index = i
+            break
+    if p_index == -1:
+        return jsonify({"error": "Plantilla no encontrada"}), 404
+        
+    templates.pop(p_index)
+    
+    # Reset any products pointing to deleted template
+    for p in cat["productos"]:
+        if p.get("planilla_template_id") == tid:
+            p["planilla_template_id"] = "plan_default"
+            
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Biblioteca de REGLAS de planilla (campos reutilizables)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/api/reglas_planilla")
+def get_reglas_planilla():
+    cat = _cargar_catalogo()
+    return jsonify(cat.get("reglas_planilla", []))
+
+
+@app.post("/api/reglas_planilla/guardar")
+def guardar_regla_planilla():
+    cuerpo = request.get_json(force=True) or {}
+    rid = cuerpo.get("id")
+    nombre = (cuerpo.get("nombre") or "").strip()
+    tipo = cuerpo.get("tipo") or "texto"
+    opciones = cuerpo.get("opciones") or ""
+    comportamiento = cuerpo.get("comportamiento") or "none"
+    clave = (cuerpo.get("clave") or "").strip()
+
+    if not nombre:
+        return jsonify({"error": "El nombre de la regla no puede estar vacío"}), 400
+    if tipo not in ("texto", "desplegable", "toggle"):
+        return jsonify({"error": "Tipo inválido"}), 400
+    # Toggle de pieza (como Manga) → necesita la palabra clave que agrupa las piezas.
+    if comportamiento == "manga" and not clave:
+        return jsonify({"error": "Escribí la palabra clave (ej. «manga», «sisa») para el toggle de pieza"}), 400
+
+    cat = _cargar_catalogo()
+    reglas = cat.setdefault("reglas_planilla", [])
+    regla = {"nombre": nombre, "tipo": tipo, "opciones": opciones, "comportamiento": comportamiento, "clave": clave}
+
+    if not rid:
+        rid = "regla_" + uuid.uuid4().hex[:8]
+        regla["id"] = rid
+        reglas.append(regla)
+    else:
+        encontrada = False
+        for r in reglas:
+            if r.get("id") == rid:
+                r.update(regla)
+                encontrada = True
+                break
+        if not encontrada:
+            regla["id"] = rid
+            reglas.append(regla)
+
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "id": rid})
+
+
+@app.post("/api/reglas_planilla/eliminar")
+def eliminar_regla_planilla():
+    cuerpo = request.get_json(force=True) or {}
+    rid = cuerpo.get("id")
+    cat = _cargar_catalogo()
+    reglas = cat.get("reglas_planilla", [])
+    idx = next((i for i, r in enumerate(reglas) if r.get("id") == rid), -1)
+    if idx == -1:
+        return jsonify({"error": "Regla no encontrada"}), 404
+    reglas.pop(idx)
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Presets de NESTING (reglas de acomodo reutilizables). Cada molde elige cuál usa.
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/api/nesting_presets")
+def get_nesting_presets():
+    cat = _cargar_catalogo()
+    return jsonify(cat.get("nesting_presets", []))
+
+
+@app.post("/api/nesting_presets/guardar")
+def guardar_nesting_preset():
+    cuerpo = request.get_json(force=True) or {}
+    nid = cuerpo.get("id")
+    nombre = (cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "El nombre del nesting no puede estar vacío"}), 400
+    try:
+        espaciado = float(cuerpo.get("espaciado_mm", 5))
+        margen = float(cuerpo.get("margen_mm", 10))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Espaciado y margen deben ser números"}), 400
+    rotacion = cuerpo.get("rotacion") or "auto"
+    cat = _cargar_catalogo()
+    presets = cat.setdefault("nesting_presets", [])
+    preset = {"nombre": nombre, "espaciado_mm": espaciado, "margen_mm": margen, "rotacion": rotacion}
+    if not nid:
+        nid = "nesting_" + uuid.uuid4().hex[:8]
+        preset["id"] = nid
+        presets.append(preset)
+    else:
+        encontrado = False
+        for p in presets:
+            if p.get("id") == nid:
+                p.update(preset); encontrado = True; break
+        if not encontrado:
+            preset["id"] = nid
+            presets.append(preset)
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "id": nid})
+
+
+@app.post("/api/nesting_presets/eliminar")
+def eliminar_nesting_preset():
+    cuerpo = request.get_json(force=True) or {}
+    nid = cuerpo.get("id")
+    if nid == "nesting_default":
+        return jsonify({"error": "No se puede eliminar el nesting por defecto"}), 400
+    cat = _cargar_catalogo()
+    presets = cat.get("nesting_presets", [])
+    idx = next((i for i, p in enumerate(presets) if p.get("id") == nid), -1)
+    if idx == -1:
+        return jsonify({"error": "Nesting no encontrado"}), 404
+    presets.pop(idx)
+    for p in cat.get("productos", []):     # los moldes que lo usaban vuelven al estándar
+        if p.get("nesting_preset_id") == nid:
+            p["nesting_preset_id"] = "nesting_default"
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grupos de TIZADA: conjuntos de moldes que se arman JUNTOS en la misma mesa.
+# Un molde pertenece a lo sumo a un grupo; los que no están en ninguno van solos.
+# ─────────────────────────────────────────────────────────────────────────────
+@app.get("/api/grupos_tizada")
+def get_grupos_tizada():
+    cat = _cargar_catalogo()
+    return jsonify(cat.get("grupos_tizada", []))
+
+
+@app.post("/api/grupos_tizada/guardar")
+def guardar_grupo_tizada():
+    cuerpo = request.get_json(force=True) or {}
+    gid = cuerpo.get("id")
+    nombre = (cuerpo.get("nombre") or "").strip()
+    moldes = [m for m in (cuerpo.get("moldes") or []) if m]
+    if not nombre:
+        return jsonify({"error": "El grupo necesita un nombre"}), 400
+    cat = _cargar_catalogo()
+    grupos = cat.setdefault("grupos_tizada", [])
+    grupo = {"nombre": nombre, "moldes": moldes}
+    if not gid:
+        gid = "gt_" + uuid.uuid4().hex[:8]
+        grupo["id"] = gid
+        grupos.append(grupo)
+    else:
+        enc = False
+        for g in grupos:
+            if g.get("id") == gid:
+                g.update(grupo); enc = True; break
+        if not enc:
+            grupo["id"] = gid; grupos.append(grupo)
+    # Un molde solo puede estar en UN grupo: sacarlo de los demás.
+    for g in grupos:
+        if g.get("id") != gid:
+            g["moldes"] = [m for m in (g.get("moldes") or []) if m not in moldes]
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "id": gid})
+
+
+@app.post("/api/grupos_tizada/eliminar")
+def eliminar_grupo_tizada():
+    cuerpo = request.get_json(force=True) or {}
+    gid = cuerpo.get("id")
+    cat = _cargar_catalogo()
+    grupos = cat.get("grupos_tizada", [])
+    idx = next((i for i, g in enumerate(grupos) if g.get("id") == gid), -1)
+    if idx == -1:
+        return jsonify({"error": "Grupo no encontrado"}), 404
+    grupos.pop(idx)
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/productos/nesting_preset")
+def asignar_nesting_a_producto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("producto_id") or cuerpo.get("id")
+    nid = cuerpo.get("nesting_preset_id")
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "Molde no encontrado"}), 404
+    prod["nesting_preset_id"] = nid
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/productos/grupo_tizada")
+def asignar_grupo_tizada():
+    """Grupo de tizada del molde: los moldes con el MISMO grupo comparten mesa de
+    trabajo; grupos distintos se arman en tizadas separadas."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("producto_id") or cuerpo.get("id")
+    grupo = (cuerpo.get("grupo_tizada") or "General").strip() or "General"
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "Molde no encontrado"}), 404
+    prod["grupo_tizada"] = grupo
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/productos/asignar_planilla")
+def asignar_planilla_a_producto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("producto_id")
+    tid = cuerpo.get("planilla_template_id")
+    
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+        
+    prod["planilla_template_id"] = tid
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
+def _liberar_puerto(port):
+    """En Windows, cierra cualquier servidor anterior que esté escuchando en
+    `port` para que este (el código nuevo) pueda tomarlo. Así, con solo abrir
+    iniciar.bat siempre queda corriendo la última versión, sin depender del
+    idioma de Windows ni de matar el proceso a mano."""
+    if os.name != "nt":
+        return
+    try:
+        import subprocess
+        # netstat + taskkill: siempre disponibles, sin depender de PowerShell ni
+        # del idioma de Windows (no parseamos el estado "LISTENING/ESCUCHANDO";
+        # identificamos al servidor por su dirección LOCAL terminada en :PORT).
+        salida = subprocess.run(["netstat", "-ano", "-p", "tcp"],
+                                capture_output=True, text=True, timeout=10).stdout
+        suf = ":" + str(int(port))
+        pids = set()
+        for linea in salida.splitlines():
+            parts = linea.split()
+            if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(suf):
+                pid = parts[-1]
+                if pid.isdigit() and pid != "0":
+                    pids.add(pid)
+        for pid in pids:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", pid],
+                           capture_output=True, timeout=10)
+        if pids:
+            time.sleep(0.7)  # darle tiempo al SO a liberar el socket
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    # Puerto y host configurables por variable de entorno (sin tocar el código).
+    #   PORT=8001 py servidor.py     → cambia el puerto si el 8050 está ocupado
+    host = os.environ.get("HOST", "0.0.0.0")
+    try:
+        port = int(os.environ.get("PORT", "8050"))
+    except ValueError:
+        port = 8050
+    debug = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+    # El reloader corre en un proceso hijo (WERKZEUG_RUN_MAIN=true). Solo el
+    # proceso inicial libera el puerto e imprime; el hijo no.
+    es_reload = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    if not es_reload:
+        _liberar_puerto(port)
+        print("\n  USER · Motor de Sublimación")
+        print(f"  Abrí el navegador en:  http://localhost:{port}\n")
+    # Precalentar el nido (todos los talles nesteados) en segundo plano: si no está
+    # cacheado en disco, el primer cálculo tarda varios segundos — mejor hacerlo ya.
+    def _precalentar_nido():
+        try:
+            if os.path.exists(_ruta_entrada("plantilla.ai")):
+                _nido_obtener()
+        except Exception:
+            pass
+    threading.Thread(target=_precalentar_nido, daemon=True).start()
+    # use_reloader=True: el servidor se reinicia SOLO cuando cambia el código.
+    # Así no hay que cerrar y reabrir a mano al actualizar (se acabó el "servidor
+    # desactualizado"). Tras un único reinicio con esta versión, queda automático.
+    app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=True)
