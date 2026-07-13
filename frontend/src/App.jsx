@@ -1110,8 +1110,7 @@ export default function App() {
   const dragInfo = useRef({ idx: null, startX: 0, startY: 0, initialX: 0, initialY: 0, hasMoved: false });
   const [modalMapeoOpen, setModalMapeoOpen] = useState(false);
   const [mapeoData, setMapeoData] = useState(null);
-  const [mapeoCargando, setMapeoCargando] = useState(false);   // cargando el mapeo de OTRA variable → no dibujar diseños viejos
-  const [talleCambiando, setTalleCambiando] = useState(false); // cambiando de TALLE → contornos neutros hasta el render del talle nuevo
+  const [mapeoCargando, setMapeoCargando] = useState(false);   // cargando el mapeo de OTRA variable (1ª vez) → no dibujar diseños viejos
   const [mapeandoDiseno, setMapeandoDiseno] = useState(false); // tab Plantilla: false=medidas (default), true=mapear diseño sobre el molde
   const [mapeoValores, setMapeoValores] = useState({});
   const [previewPiezas, setPreviewPiezas] = useState({});   // {pieza: {svg, w_cm, h_cm}} = render REAL del motor por pieza (fuente única, WYSIWYG)
@@ -2440,6 +2439,10 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+      // Mantener FRESCO el caché de deteccion de esta variable (para que revisitarla no pise
+      // lo recién guardado con un mapeo viejo).
+      const _dk = `${productosCat.activo}|${disenoActivo}|${verVariante || ''}`;
+      if (_detArteCache.current[_dk]) _detArteCache.current[_dk] = { ..._detArteCache.current[_dk], mapeo };
       showMsg(silencioso ? "Mapeo guardado ✓" : "Mapeo de arte guardado ✓");
       if (!silencioso && data.campos_personalizacion) avisarCapasFaltantes(data.campos_personalizacion);
       fetchEstado();
@@ -3557,27 +3560,41 @@ export default function App() {
 
   // Carga el mapeador (diseño sobre el molde) del molde ACTIVO, inline en el paso
   // de Diseños — sin pantalla completa. Igual que abrirMapeoOperario pero embebido.
+  // Aplica una deteccion del arte al estado del mapeador (mapeoData + valores iniciales).
+  const _aplicarDetArte = (det) => {
+    setMapeoData(det);
+    const prev = det.mapeo || {};
+    const inicial = { ...prev };
+    if (Object.keys(prev).length === 0) {
+      if (det.mapeo_fijo && Object.keys(det.mapeo_fijo).length) Object.assign(inicial, det.mapeo_fijo);
+      else det.mesas?.forEach(m => { if (m.sugerencia) inicial[m.sugerencia] = m.mesa; });
+    }
+    setMapeoValores(inicial);
+    setSelectedPiezaMapeo(det.piezas?.[0] || '');
+  };
   const cargarMapeadorOperario = async () => {
+    // CACHÉ por (molde, diseño, variable): una variable ya visitada carga INSTANTÁNEO desde
+    // memoria (sin neutro). El neutro (mapeoCargando) queda SOLO para la primerísima vez.
+    const _dk = `${productosCat.activo}|${disenoActivo}|${verVariante || ''}`;
+    const _hit = _detArteCache.current[_dk];
+    if (_hit) _aplicarDetArte(_hit);
     try {
-      // Mientras carga el mapeo de la variable nueva NO se dibujan los diseños con el mapeo
-      // VIEJO (el flash de "otro diseño" al cambiar de variable): contornos neutros hasta tener el suyo.
-      setMapeoCargando(true);
+      if (!_hit) setMapeoCargando(true);
       // REGLA mapeo-por-variable: se pide el mapeo DE la variable activa (autoritativo si tiene
       // el suyo; si no, la base). Al cambiar de variable el efecto re-corre y recarga el suyo.
       const res = await fetch('/api/arte/deteccion?diseno=' + encodeURIComponent(disenoActivo) + '&variante=' + encodeURIComponent(verVariante || ''));
-      if (!res.ok) { setMapeoData(null); return; }
+      if (!res.ok) { if (!_hit) setMapeoData(null); return; }
       const det = await res.json();
-      setMapeoData(det);
-      const prev = det.mapeo || {};
-      const inicial = { ...prev };
-      if (Object.keys(prev).length === 0) {
-        if (det.mapeo_fijo && Object.keys(det.mapeo_fijo).length) Object.assign(inicial, det.mapeo_fijo);
-        else det.mesas?.forEach(m => { if (m.sugerencia) inicial[m.sugerencia] = m.mesa; });
+      _detArteCache.current[_dk] = det;
+      if (!_hit) _aplicarDetArte(det);   // con caché ya aplicado, solo refrescamos el caché (sin re-pintar)
+      // Geometría del molde al talle guía: también cacheada → revisitar variable = instantáneo.
+      const _k2 = `${productosCat.activo}|__guia__`;
+      const _det2 = _talleDetCache.current[_k2];
+      if (_det2) { setEtqData(_det2); setEtqNombres(_det2.nombres_existentes || {}); }
+      else {
+        const r2 = await fetch('/api/plantilla/deteccion');
+        if (r2.ok) { const data = await r2.json(); _talleDetCache.current[_k2] = data; setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
       }
-      setMapeoValores(inicial);
-      setSelectedPiezaMapeo(det.piezas?.[0] || '');
-      const r2 = await fetch('/api/plantilla/deteccion');
-      if (r2.ok) { const data = await r2.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
       // WYSIWYG: cargar el BORDE de corte + la ETIQUETA REALES del molde para mostrarlos en el visor
       // del arte tal cual saldrán en la tizada (no solo el diseño).
       cargarBorde(); cargarEtiqueta();
@@ -3594,6 +3611,7 @@ export default function App() {
   // cambiar de talle es un intercambio instantáneo, sin fetch y sin contornos vacíos.
   const _pvCache = React.useRef({});        // clave(pid|diseño|variable|talle|mapeo|edits) → piezas
   const _talleDetCache = React.useRef({});  // `${pid}|${talle}` → /api/plantilla/deteccion de ese talle
+  const _detArteCache = React.useRef({});   // `${pid}|${diseño}|${variable}` → /api/arte/deteccion (mapeador)
   const _prefetchTok = React.useRef(0);     // aborta una precarga vieja si cambió el contexto
   const _pvKeyCon = (mapeo, talle) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}`;
   const _pvKeyDe = (talle) => _pvKeyCon(mapeoValores, talle);
@@ -3642,13 +3660,13 @@ export default function App() {
   };
   const cargarPreviewPiezas = async (mapeoOverride) => {
     const pid = productosCat.activo, clave = verVariante;
-    if (pedidoPaso !== 'arte' || !pid || !clave) { setPreviewPiezas({}); setTalleCambiando(false); return; }
+    if (pedidoPaso !== 'arte' || !pid || !clave) { setPreviewPiezas({}); return; }
     const mapeo = mapeoOverride || mapeoValores;
     const talle = etqData?.talle_ref;
     const k = _pvKeyCon(mapeo, talle);
     const hit = _pvCache.current[k];
     if (hit) {   // EN MEMORIA → instantáneo (sincrónico: se pinta en el mismo frame, sin blanco)
-      setPreviewPiezas(hit); setTalleCambiando(false);
+      setPreviewPiezas(hit);
       _prefetchTalles(mapeo, talle);
       return;
     }
@@ -3664,7 +3682,6 @@ export default function App() {
         if (req === _pvReq.current) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas); _prefetchTalles(mapeo, talle); }
       }
     } catch (e) { /* cae al re-dibujo JS */ }
-    finally { if (req === _pvReq.current) setTalleCambiando(false); }   // llegó el talle nuevo → dibujar
   };
   // Al cambiar de variante/diseño: limpiar YA (se ve el re-dibujo JS de la nueva variante) para no
   // mostrar por un instante las piezas de la anterior.
@@ -3685,15 +3702,14 @@ export default function App() {
     return () => clearTimeout(id);
   }, [mapeoValores, verVariante, disenoActivo, pedidoPaso, productosCat.activo, editorTfs]);
   // Ver cómo queda el diseño en una VARIANTE (talle): re-detecta el molde a ese talle.
+  // PRECARGA TOTAL: si geometría y render del talle destino YA están en memoria, el cambio es
+  // un intercambio en el MISMO frame (sin fetch). Si no, el visor sigue mostrando el diseño
+  // correcto del talle vía `mapeo_talles` (placeholder) hasta que llegue el render real —
+  // NUNCA contornos vacíos ni diseños de otro talle.
   const verVarianteOperario = async (talle) => {
     const pid = productosCat.activo;
-    const _cambia = activoTab === 'pedidos' && pedidoPaso === 'arte' && String(talle) !== String(etqData?.talle_ref || '');
-    // PRECARGA TOTAL: si el render del talle destino YA está en memoria, el cambio es un
-    // intercambio instantáneo (geometría + render en el MISMO frame: nada de neutro ni fetch).
-    // Solo si aún no está precargado (1ª vez) se pasa a contornos neutros hasta que llegue.
-    const _prevHit = _cambia ? _pvCache.current[_pvKeyDe(talle)] : null;
+    const _prevHit = _pvCache.current[_pvKeyDe(talle)];
     const _detHit = _talleDetCache.current[`${pid}|${talle}`];
-    if (_cambia && !_prevHit) setTalleCambiando(true);
     if (_detHit) {
       setEtqData(_detHit); setEtqNombres(_detHit.nombres_existentes || {});
       if (_prevHit) setPreviewPiezas(_prevHit);
@@ -3707,8 +3723,7 @@ export default function App() {
         setEtqData(data); setEtqNombres(data.nombres_existentes || {});
         if (_prevHit) setPreviewPiezas(_prevHit);
       }
-      else if (_cambia) setTalleCambiando(false);   // no cambió nada → no dejar el visor en neutro
-    } catch (e) { if (_cambia) setTalleCambiando(false); /* mantiene la variante actual */ }
+    } catch (e) { /* mantiene la variante actual */ }
   };
 
   // Medidas de todas las variantes (para el modo 'rango': cubrir el talle más grande del rango).
@@ -3813,7 +3828,7 @@ export default function App() {
       const res = await fetch('/api/arte', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al procesar el diseño');
-      _pvCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar los renders precargados (serían del arte viejo)
+      _pvCache.current = {}; _detArteCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar precargas (serían del arte viejo)
       setArteCargado(prev => ({ ...prev, [disenoActivo + '|' + id]: true }));
       avisarPerfilDiseno(disenoActivo, id);   // dispara YA el cartel del perfil (no espera los refrescos)
       // Si es un diseño NO principal, lo registro en el molde para que aparezca
@@ -4778,7 +4793,7 @@ export default function App() {
                 <MapeadorArteVisual
                   canvasLayout={canvasLayout}
                   mapeoData={mapeoData}
-                  cargando={mapeoCargando || talleCambiando}
+                  cargando={mapeoCargando}
                   mapeoValores={mapeoValores}
                   setMapeoValores={setMapeoValores}
                   onMapeoChange={guardarMapeoAuto}
@@ -5052,7 +5067,7 @@ export default function App() {
                       <MapeadorArteVisual
                         canvasLayout={canvasLayout}
                         mapeoData={mapeoData}
-                        cargando={mapeoCargando || talleCambiando}
+                        cargando={mapeoCargando}
                         mapeoValores={mapeoValores}
                         setMapeoValores={setMapeoValores}
                         onMapeoChange={guardarMapeoAuto}
@@ -5362,11 +5377,11 @@ export default function App() {
                             return (
                             <g key={p.idx} transform={(vo.dx || vo.dy) ? `translate(${vo.dx} ${vo.dy})` : undefined}>
                               <defs><clipPath id={`edclip-${p.idx}`}><path d={p.path_svg} /></clipPath></defs>
-                              {_mesa?.svg && !talleCambiando && <image href={`data:image/svg+xml;base64,${_mesa.svg}`} x={_iX} y={_iY} width={_iW} height={_iH} preserveAspectRatio="none" clipPath={`url(#edclip-${p.idx})`} opacity={0.92} />}
+                              {_mesa?.svg && <image href={`data:image/svg+xml;base64,${_mesa.svg}`} x={_iX} y={_iY} width={_iW} height={_iH} preserveAspectRatio="none" clipPath={`url(#edclip-${p.idx})`} opacity={0.92} />}
                               <path d={p.path_svg} vectorEffect="non-scaling-stroke" fill={_mesa?.svg ? 'none' : 'rgba(0,243,255,0.04)'} stroke="rgba(0,243,255,0.5)" strokeWidth="1.1" />
                             </g>
                           ); })}
-                          {!talleCambiando && _objsEd.map(o => {
+                          {_objsEd.map(o => {
                             const p = piezaDe(o.pieza); if (!p || !o.mesa_rect || !o.bbox_mu) return null;
                             const vo = _voDe(p);
                             const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel === o.nombre;
