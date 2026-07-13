@@ -883,6 +883,20 @@ def plantilla_deteccion():
         # variables por id y no por pieza_idx (que varía por talle → la pieza se caía al cambiar
         # de talle en el visor). Es talle-independiente; viene igual en cada detección.
         res["piezas_id"] = (_cargar("piezas.json", pid) or {}).get("piezas") or []
+        # ACOTAR A LA VARIABLE: si el cliente (paso Arte) pasa `?variante=v_xxx`, se devuelven SOLO
+        # las piezas de esa variable (no las ~135 del molde) → la respuesta baja ~15× (el visor usa
+        # ~9). El caché en disco sigue siendo full (compartido); el filtro es post-caché, sobre un
+        # objeto fresco (json.load). SIN `variante` → molde completo (etiquetador visual / renombrado).
+        _var = request.args.get("variante")
+        if _var and reg:
+            _nombres = set(_piezas_de_variable(prod, _var, reg) or [])
+            if _nombres:
+                _tref, _mesa = res.get("talle_ref"), res.get("mesa")
+                _idxs = {int((reg[_nm][_tref])["pieza_idx"]) for _nm in _nombres
+                         if _tref in (reg.get(_nm) or {}) and reg[_nm][_tref].get("mesa") == _mesa
+                         and reg[_nm][_tref].get("pieza_idx") is not None}
+                res["piezas"] = [p for p in (res.get("piezas") or []) if p.get("idx") in _idxs]
+                res["medidas_diseno"] = {k: v for k, v in (res.get("medidas_diseno") or {}).items() if k in _nombres}
         return jsonify(res)
     except Exception as e:
         return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422

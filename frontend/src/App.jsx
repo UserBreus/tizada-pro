@@ -2424,7 +2424,7 @@ export default function App() {
     }
     
     setMapeoValores(inicial);
-    setSelectedPiezaMapeo(det.piezas?.[0] || '');
+    setSelectedPiezaMapeo(det.piezas_variable?.[0] || det.piezas?.[0] || '');   // 1ª de la VARIABLE, no del molde
     setTabAjustesMolde('diseno');
     
     // Cargar moldería vectorial para la previsualización interactiva
@@ -2489,7 +2489,7 @@ export default function App() {
         else det.mesas?.forEach(m => { if (m.sugerencia) inicial[m.sugerencia] = m.mesa; });
       }
       setMapeoValores(inicial);
-      setSelectedPiezaMapeo(det.piezas?.[0] || '');
+      setSelectedPiezaMapeo(det.piezas_variable?.[0] || det.piezas?.[0] || '');   // 1ª de la VARIABLE, no del molde
       const r2 = await fetch('/api/plantilla/deteccion');
       if (r2.ok) { const data = await r2.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
       setMapeandoOperario(true);
@@ -3589,7 +3589,7 @@ export default function App() {
       else det.mesas?.forEach(m => { if (m.sugerencia) inicial[m.sugerencia] = m.mesa; });
     }
     setMapeoValores(inicial);
-    setSelectedPiezaMapeo(det.piezas?.[0] || '');
+    setSelectedPiezaMapeo(det.piezas_variable?.[0] || det.piezas?.[0] || '');   // 1ª de la VARIABLE, no del molde
     return inicial;
   };
   const cargarMapeadorOperario = async () => {
@@ -5062,7 +5062,10 @@ export default function App() {
                 // VER VARIANTE en el pedido: las variantes del sistema (las de Variables) CON piezas. Al elegir
                 // una en las tarjetas, el visor muestra SOLO sus piezas acomodadas (mismo acomodo que en Variables).
                 const _varsPieza = (variantesEdit || []).filter(v => (v.valores || []).some(x => x.pieza_idx != null));
-                const vfArte = (verVariante && _varsPieza.some(v => v.clave === verVariante)) ? varianteFiltro(verVariante) : null;
+                // VARIABLE-FIRST estricto: si hay una variable activa NUNCA se cae a dibujar el molde
+                // entero (135). Si `varianteFiltro` aún no resuelve (canvasLayout no listo / variable sin
+                // piezas), se usa un filtro VACÍO como piso — antes caía a `null` = las 135 del molde.
+                const vfArte = verVariante ? (varianteFiltro(verVariante) || { show: new Set(), pos: new Map(), vb: null }) : null;
                 // ── TELA del pedido para este molde ──
                 const _molProd = productosCat.productos.find(p => p.id === _id) || {};
                 const _telasMol = (telasReg.telas || []).filter(t => (_molProd.telas_asignadas || []).includes(t.id));

@@ -1462,6 +1462,8 @@ def _color_op(pl):
     return f"{c:.4f} {m:.4f} {y:.4f} {k:.4f} k"
 
 
+_PERS_CACHE = {}   # memoización por (arte, mtime): extraer_personalizacion es talle/variable-INDEP
+                   # y CARA (parsea el content-stream de todo el arte); se llamaba 1× POR TALLE (×19)
 def extraer_personalizacion(path_arte, campos=None):
     """Lee los placeholders de personalización SOLO por CAPA: si hay una capa llamada
     como un campo (`nombre`, `numero`, `palabra`, `numero 2`, …) TODO el texto de esa
@@ -1469,6 +1471,12 @@ def extraer_personalizacion(path_arte, campos=None):
     de campo a buscar (de las reglas que se estampan); si es None se auto-descubren las
     capas que no son de sistema. La clave de cada placeholder es el NOMBRE del campo.
     (El modo viejo "por texto en Personalizable" fue quitado.)"""
+    try: _mt = os.path.getmtime(path_arte)
+    except OSError: _mt = 0
+    _ck = (path_arte, _mt, tuple(sorted(campos)) if campos else None)
+    _hit = _PERS_CACHE.get(_ck)
+    if _hit is not None:
+        return _hit
     if campos is None:
         # AUTO-DESCUBRIR: cualquier capa que NO sea del sistema es un campo de
         # personalización (nombre, numero, palabra, numero 2, …). El nombre del
@@ -1561,6 +1569,9 @@ def extraer_personalizacion(path_arte, campos=None):
                 _pl["trazo"] = _match_texto(trazos.get(_mk) or {}, _tn) or _pl.get("trazo")
                 _pl["colorn"] = _match_texto(nativos.get(_mk) or {}, _tn) or _pl.get("colorn")
             _pl.pop("_txt", None)
+    if len(_PERS_CACHE) > 24:
+        _PERS_CACHE.clear()
+    _PERS_CACHE[_ck] = pers
     return pers
 
 
@@ -1595,17 +1606,20 @@ def _nombre_editable(capa):
     return (s[m.end():].strip() if m else s) or "Editable"
 
 
-def extraer_editables(path_arte):
+def extraer_editables(path_arte, con_thumb=True):
     """Detecta los OBJETOS EDITABLES del arte: cada capa OCG de primer nivel cuyo nombre
     empieza con 'editable' (ej. 'Editable Escudo'). Cada capa = un objeto independiente
     (mover/rotar/escalar por el usuario). El nombre de la capa de Illustrator de primer
     nivel SÍ se conserva como OCG aislable (las sub-capas NO → por eso 1 capa por objeto).
-    Devuelve [{mesa, capa, nombre, bbox_mu, w_cm, h_cm, thumb}] (bbox_mu en coords MuPDF
+    Devuelve [{mesa, capa, nombre, bbox_mu, w_cm, h_cm, thumb, svg}] (bbox_mu en coords MuPDF
     y-abajo; thumb = PNG base64 del objeto aislado). Las formas se ubican por `get_drawings`
-    (campo `layer`); el thumbnail se saca aislando la capa (apaga el resto)."""
+    (campo `layer`); el thumbnail se saca aislando la capa (apaga el resto).
+    `con_thumb=False` SALTA el thumb/svg (get_pixmap/get_svg_image + toggles de capa) — eso solo
+    lo usa el VISOR del front; el MOTOR (generar_pedido) usa únicamente la geometría, y esto se
+    llama por cada talle → generar imágenes ahí es puro desperdicio (×19 en asignar_todo)."""
     import base64
     doc = fitz.open(path_arte)
-    cfgs = doc.layer_ui_configs()
+    cfgs = doc.layer_ui_configs() if con_thumb else None
     objs = []
     for pno in range(len(doc)):
         pg = doc[pno]
@@ -1618,27 +1632,28 @@ def extraer_editables(path_arte):
             b[0] = min(b[0], r.x0); b[1] = min(b[1], r.y0)
             b[2] = max(b[2], r.x1); b[3] = max(b[3], r.y1)
         for capa, b in cajas.items():
-            tgt = _norm_nombre(capa)
-            for c in cfgs:                                   # aislar: apagar todas…
-                doc.set_layer_ui_config(c["number"], action=1)
-            for c in cfgs:                                   # …mostrar solo la editable
-                if _norm_nombre(c["text"]) == tgt:
+            thumb = _svg = None
+            if con_thumb:                                    # SOLO para el visor del front (caro)
+                tgt = _norm_nombre(capa)
+                for c in cfgs:                               # aislar: apagar todas…
+                    doc.set_layer_ui_config(c["number"], action=1)
+                for c in cfgs:                               # …mostrar solo la editable
+                    if _norm_nombre(c["text"]) == tgt:
+                        doc.set_layer_ui_config(c["number"], action=0)
+                clip = fitz.Rect(b[0]-2, b[1]-2, b[2]+2, b[3]+2)
+                pix = pg.get_pixmap(matrix=fitz.Matrix(1.2, 1.2), clip=clip, alpha=True)
+                thumb = base64.b64encode(pix.tobytes("png")).decode("ascii")
+                # SVG VECTORIAL del objeto (recortado a su bbox con cropbox): para verlo NÍTIDO en el
+                # visor del arte (la miniatura raster queda de fallback). El objeto es vector puro.
+                try:
+                    _oc = pg.cropbox
+                    pg.set_cropbox(clip)
+                    _svg = base64.b64encode(pg.get_svg_image().encode("utf-8")).decode("ascii")
+                    pg.set_cropbox(_oc)
+                except Exception:
+                    _svg = None
+                for c in cfgs:                               # restaurar (todas visibles)
                     doc.set_layer_ui_config(c["number"], action=0)
-            clip = fitz.Rect(b[0]-2, b[1]-2, b[2]+2, b[3]+2)
-            pix = pg.get_pixmap(matrix=fitz.Matrix(1.2, 1.2), clip=clip, alpha=True)
-            thumb = base64.b64encode(pix.tobytes("png")).decode("ascii")
-            # SVG VECTORIAL del objeto (recortado a su bbox con cropbox): para verlo NÍTIDO en el visor
-            # del arte (la miniatura raster queda de fallback). El objeto es vector puro.
-            _svg = None
-            try:
-                _oc = pg.cropbox
-                pg.set_cropbox(clip)
-                _svg = base64.b64encode(pg.get_svg_image().encode("utf-8")).decode("ascii")
-                pg.set_cropbox(_oc)
-            except Exception:
-                _svg = None
-            for c in cfgs:                                   # restaurar (todas visibles)
-                doc.set_layer_ui_config(c["number"], action=0)
             pr = pg.rect
             objs.append({
                 "mesa": pno + 1, "capa": capa, "nombre": _nombre_editable(capa),
@@ -2188,10 +2203,18 @@ def _parse_pieza_hash(linea, piezas, variantes_orden):
     return piezas_match, variantes, es_exacta
 
 
+_MAPEO_VAR_CACHE = {}   # memoización por (arte, mtime, piezas, orden): talle/variable-INDEP, escanea
+                        # TODAS las mesas del arte; se recomputaba 1× POR TALLE dentro de generar_pedido
 def mapeo_variantes_arte(path_arte, registro_molde, variantes_orden):
     """Mapeo por VARIANTE leído de mesas nombradas `#variante PIEZA` o `#v1-v2 PIEZA`:
     {pieza: {variante: mesa}}. Precedencia: la variante EXACTA pisa al RANGO. {} si no hay
     ninguna mesa con `#` (→ todo funciona como hoy, por nombre pelado)."""
+    try: _mt = os.path.getmtime(path_arte)
+    except OSError: _mt = 0
+    _ck = (path_arte, _mt, tuple(sorted(registro_molde.keys())), tuple(variantes_orden or ()))
+    _hit = _MAPEO_VAR_CACHE.get(_ck)
+    if _hit is not None:
+        return _hit
     doc = fitz.open(path_arte)
     piezas = sorted(registro_molde.keys())
     rango, exacta = {}, {}
@@ -2210,6 +2233,9 @@ def mapeo_variantes_arte(path_arte, registro_molde, variantes_orden):
         d = dict(rango.get(pieza, {}))
         d.update(exacta.get(pieza, {}))               # exacta pisa rango
         out[pieza] = d
+    if len(_MAPEO_VAR_CACHE) > 24:
+        _MAPEO_VAR_CACHE.clear()
+    _MAPEO_VAR_CACHE[_ck] = out
     return out
 
 
@@ -2649,7 +2675,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _ecfg = editables_cfg or {}
     if mapeo_arte and editables_cfg is not None:
         try:
-            for _o in extraer_editables(arte):
+            for _o in extraer_editables(arte, con_thumb=False):   # el motor usa solo geometría (no thumb/svg)
                 _edit_por_mesa.setdefault(_o["mesa"], []).append(_o)
         except Exception:
             _edit_por_mesa = {}
