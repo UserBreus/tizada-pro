@@ -1253,7 +1253,7 @@ def arte_mapeo():
         _pw_vars = [v.get("clave") for v in ((prod or {}).get("variantes") or []) if v.get("clave")] or [""]
         def _prewarm():
             for _vcl in _pw_vars:
-                try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _mapeo_efectivo(base, pv, _vcl), prod, reg)
+                try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _mapeo_efectivo(base, pv, _vcl), prod, reg, prioridad="bg")
                 except Exception: pass
         threading.Thread(target=_prewarm, daemon=True).start()
     except Exception:
@@ -1269,6 +1269,10 @@ def arte_mapeo():
 _PIEZAS_BASE_LOCK = threading.Lock()
 _PREWARM_LOCK = threading.Lock()
 _PREWARM_EN_CURSO = set()   # claves (pid,diseno,variante,mapeo) con pre-warm de talles en curso
+# PRIORIDAD: lo que pide el USUARIO (primer plano) NUNCA espera detrás de la precarga.
+# Los pedidos "bg" (pre-warm/prefetch) ceden el paso mientras haya un "fg" esperando el lock.
+_PB_FG_LOCK = threading.Lock()
+_PB_FG_ESPERANDO = 0
 
 def _sha1_corto(obj):
     import hashlib
@@ -1289,11 +1293,13 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
             _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
             _sha1_corto(edit_tam or {}), str(variante or ""), str(talle or "")]
 
-def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None):
+def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, prioridad="fg"):
     """Devuelve {piezas:{nombre:{svg,w_cm,h_cm}}, talle, cache:bool} — desde disco si la clave
     coincide, si no lo genera con el motor y lo guarda. None si faltan archivos.
     `override` = ajuste per-pedido de editables (mover sin guardar como base): entra al `edit_cfg`
-    → como `edit_cfg` está en la clave de caché, un override distinto regenera solo."""
+    → como `edit_cfg` está en la clave de caché, un override distinto regenera solo.
+    `prioridad`: "fg" = lo pidió el usuario (pasa primero); "bg" = pre-warm/prefetch (cede el
+    paso: espera a que no haya ningún fg esperando antes de tomar el lock de generación)."""
     import base64, tempfile, shutil
     sub = _diseno_sub(diseno)
     pl = _ruta_entrada("plantilla.ai", pid)
@@ -1325,7 +1331,22 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None):
             return r
     except Exception:
         pass
+    global _PB_FG_ESPERANDO
+    if prioridad == "bg":
+        # La precarga CEDE EL PASO: si el usuario está esperando una generación, el bg no
+        # compite por el lock (antes el click del usuario quedaba en cola detrás del warm).
+        while True:
+            with _PB_FG_LOCK:
+                if _PB_FG_ESPERANDO == 0:
+                    break
+            time.sleep(0.05)
+    else:
+        with _PB_FG_LOCK:
+            _PB_FG_ESPERANDO += 1
     with _PIEZAS_BASE_LOCK:                          # miss: generar (otro hilo pudo ganarnos)
+        if prioridad != "bg":
+            with _PB_FG_LOCK:
+                _PB_FG_ESPERANDO -= 1
         try:
             r = _leer_cache()
             if r is not None:
@@ -1417,8 +1438,10 @@ def arte_preview_piezas():
         return jsonify({"error": "falta producto/registro"}), 409
     guia = prod.get("variante_guia") or (sorted({t for v in reg.values() for t in v})[0] if reg else "M")
     talle = str(cuerpo.get("talle") or guia)
+    _es_bg = bool(cuerpo.get("bg"))   # prefetch del front → NUNCA compite con lo que pide el usuario
     try:
-        res = _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override)
+        res = _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override,
+                           prioridad=("bg" if _es_bg else "fg"))
     except Exception as e:
         return jsonify({"error": f"no se pudo generar el preview: {e}"}), 422
     if res is None:
@@ -1426,7 +1449,7 @@ def arte_preview_piezas():
     # PRE-WARM en background del RESTO de talles de esta variable (mismo mapeo, sin override):
     # una vez cargado el diseño, navegar entre talles es INSTANTÁNEO (todo queda en disco).
     # Se deduplica por clave para no lanzar la misma tanda dos veces.
-    if override is None:
+    if override is None and not _es_bg:
         try:
             _otros = [t for t in _variantes_molde(pid) if str(t) != talle]
             _pwk = (pid, str(diseno or ""), variante, _sha1_corto(mapeo))
@@ -1438,7 +1461,7 @@ def arte_preview_piezas():
                 def _pw_talles():
                     try:
                         for _t in _otros:
-                            try: _piezas_base(pid, diseno, variante, str(_t), mapeo, prod, reg)
+                            try: _piezas_base(pid, diseno, variante, str(_t), mapeo, prod, reg, prioridad="bg")
                             except Exception: pass
                     finally:
                         with _PREWARM_LOCK:

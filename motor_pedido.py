@@ -2873,6 +2873,11 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         # molde; en arte separado, en la mesa del arte mapeada a la pieza.
         clave_pers = str(_mesa_a) if (mapeo_arte and _mesa_a) else str(mesa)
         ph = pers.get(clave_pers, {})
+        if mapeo_arte and not _mesa_a:
+            # Pieza SIN diseño en esta variable/talle → no hay mesa de arte: nada que estampar.
+            # Sin esta guarda, la clave caía a la mesa del MOLDE y podía chocar de casualidad
+            # con una mesa del ARTE (pers['1']) → UnboundLocalError de `sp` (escala sin definir).
+            ph = {}
         persona_n = {_norm_nombre(k): v for k, v in (persona or {}).items()}
         if ph and persona_n:                     # cualquier pieza con placeholders (espalda, frente, …)
             if mapeo_arte and _mesa_a:

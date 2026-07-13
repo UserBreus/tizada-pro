@@ -3607,7 +3607,13 @@ export default function App() {
   const _prefetchTalles = (mapeo, talleActual) => {
     const pid = productosCat.activo, clave = verVariante, dis = disenoActivo;
     if (Object.keys(editorTfs || {}).length) return;
-    const talles = (etqData?.talles || estado?.talles || []).filter(t => String(t) !== String(talleActual || ''));
+    const todos = etqData?.talles || estado?.talles || [];
+    const iAct = todos.findIndex(t => String(t) === String(talleActual || ''));
+    // ORDEN: primero los talles VECINOS del actual (los más probables de tocar) y de ahí se abre.
+    const talles = todos
+      .map((t, i) => ({ t, d: iAct >= 0 ? Math.abs(i - iAct) : i }))
+      .filter(x => String(x.t) !== String(talleActual || ''))
+      .sort((a, b) => a.d - b.d).map(x => x.t);
     if (!talles.length) return;
     const tok = ++_prefetchTok.current;
     (async () => {
@@ -3616,13 +3622,15 @@ export default function App() {
         const k = _pvKeyCon(mapeo, t);
         if (!_pvCache.current[k]) {
           try {
+            // `bg: true` → el server le CEDE EL PASO a lo que pida el usuario (nunca compite)
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t })
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
           } catch (e) { /* siguiente talle */ }
         }
+        if (tok !== _prefetchTok.current) return;
         if (!_talleDetCache.current[`${pid}|${t}`]) {
           try {
             const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(t));
