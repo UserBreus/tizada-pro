@@ -1111,6 +1111,7 @@ export default function App() {
   const [modalMapeoOpen, setModalMapeoOpen] = useState(false);
   const [mapeoData, setMapeoData] = useState(null);
   const [mapeoCargando, setMapeoCargando] = useState(false);   // cargando el mapeo de OTRA variable (1ª vez) → no dibujar diseños viejos
+  const [asignando, setAsignando] = useState(null);            // ventana "Asignando el diseño a cada variante… {hecho,total,talle}" al cargar el arte
   const [mapeandoDiseno, setMapeandoDiseno] = useState(false); // tab Plantilla: false=medidas (default), true=mapear diseño sobre el molde
   const [mapeoValores, setMapeoValores] = useState({});
   const [previewPiezas, setPreviewPiezas] = useState({});   // {pieza: {svg, w_cm, h_cm}} = render REAL del motor por pieza (fuente única, WYSIWYG)
@@ -3561,6 +3562,7 @@ export default function App() {
   // Carga el mapeador (diseño sobre el molde) del molde ACTIVO, inline en el paso
   // de Diseños — sin pantalla completa. Igual que abrirMapeoOperario pero embebido.
   // Aplica una deteccion del arte al estado del mapeador (mapeoData + valores iniciales).
+  // Devuelve el mapeo aplicado (para usarlo YA, sin esperar el re-render del estado).
   const _aplicarDetArte = (det) => {
     setMapeoData(det);
     const prev = det.mapeo || {};
@@ -3571,22 +3573,23 @@ export default function App() {
     }
     setMapeoValores(inicial);
     setSelectedPiezaMapeo(det.piezas?.[0] || '');
+    return inicial;
   };
   const cargarMapeadorOperario = async () => {
     // CACHÉ por (molde, diseño, variable): una variable ya visitada carga INSTANTÁNEO desde
     // memoria (sin neutro). El neutro (mapeoCargando) queda SOLO para la primerísima vez.
     const _dk = `${productosCat.activo}|${disenoActivo}|${verVariante || ''}`;
     const _hit = _detArteCache.current[_dk];
-    if (_hit) _aplicarDetArte(_hit);
+    let _mapa = _hit ? _aplicarDetArte(_hit) : null;
     try {
       if (!_hit) setMapeoCargando(true);
       // REGLA mapeo-por-variable: se pide el mapeo DE la variable activa (autoritativo si tiene
       // el suyo; si no, la base). Al cambiar de variable el efecto re-corre y recarga el suyo.
       const res = await fetch('/api/arte/deteccion?diseno=' + encodeURIComponent(disenoActivo) + '&variante=' + encodeURIComponent(verVariante || ''));
-      if (!res.ok) { if (!_hit) setMapeoData(null); return; }
+      if (!res.ok) { if (!_hit) setMapeoData(null); return null; }
       const det = await res.json();
       _detArteCache.current[_dk] = det;
-      if (!_hit) _aplicarDetArte(det);   // con caché ya aplicado, solo refrescamos el caché (sin re-pintar)
+      if (!_hit) _mapa = _aplicarDetArte(det);   // con caché ya aplicado, solo refrescamos el caché (sin re-pintar)
       // Geometría del molde al talle guía: también cacheada → revisitar variable = instantáneo.
       const _k2 = `${productosCat.activo}|__guia__`;
       const _det2 = _talleDetCache.current[_k2];
@@ -3600,6 +3603,40 @@ export default function App() {
       cargarBorde(); cargarEtiqueta();
     } catch (e) { /* sin mapeo */ }
     finally { setMapeoCargando(false); }
+    return _mapa;
+  };
+  // "ASIGNANDO EL DISEÑO A CADA VARIANTE…": al CARGAR el arte se arma YA el render real de
+  // TODOS los talles (una sola espera, visible, con progreso) → después navegar es instantáneo
+  // desde memoria. Cada (diseño, variable, talle) guarda lo suyo; re-subir el arte lo renueva.
+  const asignarTodasLasVariantes = async (mapeo) => {
+    const pid = productosCat.activo, clave = verVariante, dis = disenoActivo;
+    const talles = etqData?.talles || estado?.talles || [];
+    if (!pid || !clave || !talles.length || !mapeo || !Object.keys(mapeo).length) return;
+    _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
+    setAsignando({ hecho: 0, total: talles.length, talle: String(talles[0] || '') });
+    try {
+      for (let i = 0; i < talles.length; i++) {
+        const t = talles[i];
+        setAsignando({ hecho: i, total: talles.length, talle: String(t) });
+        const k = _pvKeyCon(mapeo, t);
+        if (!_pvCache.current[k]) {
+          try {
+            const res = await fetch('/api/arte/preview_piezas', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t })
+            });
+            if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
+          } catch (e) { /* sigue con el próximo talle */ }
+        }
+        if (!_talleDetCache.current[`${pid}|${t}`]) {
+          try {
+            const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(t));
+            if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
+          } catch (e) { /* sigue */ }
+        }
+        setAsignando({ hecho: i + 1, total: talles.length, talle: String(t) });
+      }
+    } finally { setAsignando(null); }
   };
   // RENDER REAL del motor por pieza, CACHEADO en disco (/api/arte/preview_piezas): una sola fuente
   // de verdad con la tizada. La 1ª vez por config arma+guarda (unos segundos; mientras tanto se ve
@@ -3839,9 +3876,12 @@ export default function App() {
       }
       await fetchEstado();
       await fetchProductos();
-      await cargarMapeadorOperario();
+      const _mapa = await cargarMapeadorOperario();
       if (data.campos_personalizacion) avisarCapasFaltantes(data.campos_personalizacion);
       showMsg('Diseño cargado ✓');
+      // Una sola espera, VISIBLE: se asigna el diseño a todos los talles ahora (ventana con
+      // progreso) → después navegar entre variantes es instantáneo desde memoria.
+      await asignarTodasLasVariantes(_mapa || {});
     } catch (e) { showError(e.message); }
   };
 
@@ -5409,6 +5449,22 @@ export default function App() {
                   </div>
                 );
               })()}
+
+              {/* Ventana "Asignando el diseño a cada variante…" (al cargar el arte, una sola vez) */}
+              {asignando && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(2,6,12,0.82)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340 }}>
+                    <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 8 }}>Asignando el diseño a cada variante…</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
+                      {asignando.talle ? `Variante ${asignando.talle}` : ''} · {asignando.hecho}/{asignando.total}
+                    </div>
+                    <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.round(100 * asignando.hecho / Math.max(1, asignando.total))}%`, background: 'var(--accent)', borderRadius: 999, transition: 'width .3s' }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12 }}>Es una sola vez por diseño: después el cambio de variante es instantáneo.</div>
+                  </div>
+                </div>
+              )}
 
               {/* Paso 4 · Revisar y generar */}
               {pedidoPaso === 'generar' && (
