@@ -234,17 +234,23 @@ function ComboCell({ value, options, onChange, onFocusCell }) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
   const cs = { width: '100%', padding: '4px 22px 4px 8px', border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', fontSize: 12.5, height: 30, boxSizing: 'border-box' };
+  // Filtro tipo autocompletar: al escribir, muestra solo las opciones que se asemejan (sin acentos/mayúsc).
+  // Si el texto coincide EXACTO con una opción (o está vacío), muestra todas para poder re-elegir.
+  const _norm = (s) => (s == null ? '' : String(s)).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const _nv = _norm(value);
+  const _exacto = options.some(o => _norm(o) === _nv);
+  const filtradas = (!_nv || _exacto) ? options : options.filter(o => _norm(o).includes(_nv));
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <input ref={inputRef} value={value} placeholder="escribí o elegí…"
         onFocus={() => { onFocusCell?.(); abrir(); }}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => { onChange(e.target.value); if (!open) abrir(); }}
         style={cs} />
       <span onMouseDown={(e) => { e.preventDefault(); open ? setOpen(false) : abrir(); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
-      {open && pos && options.length > 0 && createPortal(
+      {open && pos && filtradas.length > 0 && createPortal(
         <div style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
-          {options.map(o => (
+          {filtradas.map(o => (
             <div key={o} onMouseDown={(e) => { e.preventDefault(); onChange(o); setOpen(false); }}
               style={{ padding: '5px 10px', fontSize: 12.5, cursor: 'pointer', color: o === value ? 'var(--accent)' : 'var(--text-secondary)', background: o === value ? 'rgba(0,216,245,0.10)' : 'transparent' }}
               onMouseEnter={e => { if (o !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
@@ -1159,6 +1165,7 @@ export default function App() {
   const [csvImport, setCsvImport] = useState(null);   // { filas:[{valores, issues:[{colId,label,raw,opciones}]}] } al importar CSV con valores inválidos
   const [csvFix, setCsvFix] = useState({});           // `${i}:${colId}` -> valor elegido para la celda inválida
   const [csvOmit, setCsvOmit] = useState({});         // i -> true si esa fila no se carga
+  const [nFilasAgregar, setNFilasAgregar] = useState(1);   // cuántas filas agrega el botón "Agregar Fila"
   const [plSel, setPlSel] = useState(null);     // planilla pedido: {r,c} celda seleccionada
   const [plFill, setPlFill] = useState(null);   // {r,c} destino del arrastre del fill-handle
   const plDragRef = useRef(null);               // {r,c} origen del arrastre (fill-handle)
@@ -4477,6 +4484,13 @@ export default function App() {
     setFilas([...filas, newRow]);
   };
 
+  // Agrega N filas de una (N = campo al lado del botón; default 1)
+  const agregarFilas = () => {
+    const n = Math.max(1, Math.min(500, parseInt(nFilasAgregar, 10) || 1));
+    const nuevas = Array.from({ length: n }, () => _defaultRow());
+    setFilas([...filas, ...nuevas]);
+  };
+
   // ── Importar un archivo CSV a la planilla ────────────────────────────────
   // Vuelca las filas del CSV. En las columnas con opciones FIJAS (talle, diseño,
   // manga, desplegables) solo acepta valores que coincidan con lo predefinido;
@@ -5282,9 +5296,17 @@ export default function App() {
                   </div>
 
                   <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                    <button className="btn" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={addPrenda}>
-                      <Icon name="plus" style={{ width: 13, height: 13 }} /> Agregar Fila
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
+                      <button className="btn" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={agregarFilas}>
+                        <Icon name="plus" style={{ width: 13, height: 13 }} /> Agregar {(parseInt(nFilasAgregar, 10) || 1) > 1 ? `${parseInt(nFilasAgregar, 10)} filas` : 'Fila'}
+                      </button>
+                      <input type="number" min="1" max="500" value={nFilasAgregar}
+                        onChange={(e) => setNFilasAgregar(e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                        onKeyDown={(e) => { if (e.key === 'Enter') agregarFilas(); }}
+                        title="Cuántas filas agregar"
+                        style={{ width: 54, textAlign: 'center', padding: '0 6px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, fontWeight: 700, outline: 'none' }} />
+                    </div>
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={loadExample}>
                       Cargar Ejemplo
                     </button>
