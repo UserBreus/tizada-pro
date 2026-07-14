@@ -220,11 +220,13 @@ async function leerJson(res) {
 function ComboCell({ value, options, onChange, onFocusCell }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
+  const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
-  const abrir = () => {
+  const abrir = (todas) => {
     const r = inputRef.current?.getBoundingClientRect();
     if (r) setPos({ left: r.left, top: r.bottom + 2, width: r.width });
+    setVerTodas(!!todas);
     setOpen(true);
   };
   useEffect(() => {
@@ -238,15 +240,16 @@ function ComboCell({ value, options, onChange, onFocusCell }) {
   // Si el texto coincide EXACTO con una opción (o está vacío), muestra todas para poder re-elegir.
   const _norm = (s) => (s == null ? '' : String(s)).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const _nv = _norm(value);
-  const _exacto = options.some(o => _norm(o) === _nv);
-  const filtradas = (!_nv || _exacto) ? options : options.filter(o => _norm(o).includes(_nv));
+  // Al ESCRIBIR siempre filtra por lo tipeado (aunque sea un valor exacto). Muestra TODAS solo
+  // cuando se abre por foco o por la flecha ▾ (verTodas), o si el campo está vacío.
+  const filtradas = (verTodas || !_nv) ? options : options.filter(o => _norm(o).includes(_nv));
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <input ref={inputRef} value={value} placeholder="escribí o elegí…"
-        onFocus={() => { onFocusCell?.(); abrir(); }}
-        onChange={e => { onChange(e.target.value); if (!open) abrir(); }}
+        onFocus={() => { onFocusCell?.(); abrir(true); }}
+        onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
         style={cs} />
-      <span onMouseDown={(e) => { e.preventDefault(); open ? setOpen(false) : abrir(); }}
+      <span onMouseDown={(e) => { e.preventDefault(); open ? setOpen(false) : abrir(true); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
       {open && pos && filtradas.length > 0 && createPortal(
         <div style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
