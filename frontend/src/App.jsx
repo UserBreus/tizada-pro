@@ -566,8 +566,16 @@ function EditableTamanoModal({ inicial, variantes, esNueva, onGuardar, onElimina
 // descarga con ese nombre. Botón de descarga = solo el ícono, arriba a la izq.
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
-  const [nombres, setNombres] = useState({});      // key -> nombre editado por el usuario
+  // Nombres editados: PERSISTEN ligados a ESTE pedido (clave = id del trabajo). Un pedido NUEVO
+  // tiene otro id → arranca con los nombres por defecto ("Mesa N"). Se guardan en localStorage.
+  const LS_KEY = 'tizada_mesas_nombres_' + (job?.resultado?.id || '');
+  const [nombres, setNombres] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_e) { return {}; }
+  });
   const [editando, setEditando] = useState(null);  // key de la mesa en edición
+  useEffect(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(nombres)); } catch (_e) { /* storage lleno/bloqueado */ }
+  }, [LS_KEY, nombres]);
   const wrapRef = useRef(null);
   const viewRef = useRef(view); viewRef.current = view;
 
@@ -612,17 +620,17 @@ function MesasInfinito({ mesas, job }) {
       <div ref={wrapRef} onMouseDown={startPan} onContextMenu={(e) => e.preventDefault()}
         style={{ position: 'relative', height: '74vh', overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
-          {mesas.flatMap((hoja, hi) => {
+          {(() => { let gi = 0; return mesas.flatMap((hoja, hi) => {
             const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
             const urlPdf = `/trabajos/${job.resultado.id}/${hoja.archivo}`;
             return pvs.map((pv, pi) => {
+              const gidx = gi++;                        // índice global en orden de aparición
               const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
               const anchoCm = hoja.ancho_cm || 180;
-              const nMesas = pvs.length;
               const PXM = 240;   // px por metro: ESCALA REAL común a todas las mesas
               const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
-              const key = hi + '-' + pi;
-              const nombreDef = (hoja.moldes?.length ? hoja.moldes.join(' + ') : 'Mesa de trabajo') + (nMesas > 1 ? ` · Mesa ${pi + 1}` : '');
+              const key = hoja.archivo + '::' + pi;     // ESTABLE por trabajo → el nombre persiste a esta mesa
+              const nombreDef = 'Mesa ' + (gidx + 1);   // por defecto: Mesa 1, Mesa 2, ...
               const nombre = nombres[key] != null ? nombres[key] : nombreDef;
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
@@ -655,7 +663,7 @@ function MesasInfinito({ mesas, job }) {
                 </div>
               );
             });
-          })}
+          }); })()}
         </div>
       </div>
     </div>
