@@ -248,10 +248,12 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey }) 
       <input ref={inputRef} value={value} placeholder="escribí o elegí…" data-plc={cellId}
         onFocus={() => { onFocusCell?.(); abrir(true); }}
         onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
+        onBlur={() => { const ex = options.find(o => _norm(o) === _nv); if (ex && ex !== value) onChange(ex); }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === 'Tab') {
-            // Si estás escribiendo un valor parcial, al saltar lo autocompleta al 1º que coincide.
-            if (open && filtradas.length && _nv && !options.some(o => _norm(o) === _nv)) onChange(filtradas[0]);
+            const ex = options.find(o => _norm(o) === _nv);   // coincide sin importar mayús/minús
+            if (ex) { if (ex !== value) onChange(ex); }        // → guarda el valor canónico
+            else if (open && filtradas.length && _nv) onChange(filtradas[0]);   // parcial → autocompleta
             setOpen(false);
           }
           onNavKey?.(e);
@@ -1177,9 +1179,13 @@ export default function App() {
   const [csvFix, setCsvFix] = useState({});           // `${i}:${colId}` -> valor elegido para la celda inválida
   const [csvOmit, setCsvOmit] = useState({});         // i -> true si esa fila no se carga
   const [nFilasAgregar, setNFilasAgregar] = useState(1);   // cuántas filas agrega el botón "Agregar Fila"
-  const [plSel, setPlSel] = useState(null);     // planilla pedido: {r,c} celda seleccionada
-  const [plFill, setPlFill] = useState(null);   // {r,c} destino del arrastre del fill-handle
-  const plDragRef = useRef(null);               // {r,c} origen del arrastre (fill-handle)
+  const [plSel, setPlSel] = useState(null);       // planilla pedido: ANCLA del rango {r,c}
+  const [plSelEnd, setPlSelEnd] = useState(null); // OTRA esquina del rango seleccionado {r,c}
+  const [plFill, setPlFill] = useState(null);     // {r,c} destino del arrastre del fill-handle
+  const [plSelDrag, setPlSelDrag] = useState(false); // true mientras se arrastra (corta userSelect)
+  const plDragRef = useRef(null);                 // {r,c} esquina origen del fill-handle
+  const plFillSrcRef = useRef(null);              // rango origen {r0,c0,r1,c1} al empezar a llenar
+  const plSelDragRef = useRef(false);             // true mientras se selecciona un rango arrastrando
   const [modoDisenador, setModoDisenador] = useState(() => {
     return window.location.pathname === '/admin';
   });
@@ -4655,34 +4661,66 @@ export default function App() {
   // Fill-handle de la planilla del pedido (estilo Excel/Sheets): al soltar el arrastre, copia el
   // valor de la celda origen a TODO el rectángulo seleccionado (vertical y horizontal), sea cual
   // sea el tipo de cada celda (texto, desplegable o botón). Ver [[PlanillaTester]].
+  // Rango seleccionado (normalizado) y pertenencia de una celda.
+  const plRango = () => {
+    if (!plSel) return null;
+    const e = plSelEnd || plSel;
+    return { r0: Math.min(plSel.r, e.r), r1: Math.max(plSel.r, e.r), c0: Math.min(plSel.c, e.c), c1: Math.max(plSel.c, e.c) };
+  };
+  const plEnFill = (r, c) => {   // preview del rectángulo que se va a llenar mientras arrastrás
+    const s = plFillSrcRef.current; if (!s || !plFill) return false;
+    const R0 = Math.min(s.r0, plFill.r), R1 = Math.max(s.r1, plFill.r);
+    const C0 = Math.min(s.c0, plFill.c), C1 = Math.max(s.c1, plFill.c);
+    return r >= R0 && r <= R1 && c >= C0 && c <= C1;
+  };
+  // Relleno estilo Excel: si el origen es una progresión de NÚMEROS la continúa; si no,
+  // repite los valores en el mismo orden hacia donde se arrastra.
+  const _esNum = (s) => { const t = String(s).trim(); return t !== '' && Number.isFinite(Number(t)); };
+  const _seq = (vals) => {   // {nums,d} si es progresión aritmética (len>=2 y todos números); si no null
+    if (vals.length < 2 || !vals.every(_esNum)) return null;
+    const nums = vals.map(v => Number(String(v).trim()));
+    const d = nums[1] - nums[0];
+    for (let i = 2; i < nums.length; i++) if (nums[i] - nums[i - 1] !== d) return null;
+    return { nums, d };
+  };
+  const _valFill = (srcVals, j) => {   // valor para el offset j (0 = primer origen)
+    const seq = _seq(srcVals);
+    if (seq) { const raw = seq.nums[0] + seq.d * j; return Number.isInteger(raw) ? String(raw) : String(Math.round(raw * 1e6) / 1e6); }
+    const len = srcVals.length, idx = ((j % len) + len) % len;
+    return srcVals[idx];
+  };
+  const aplicarFill = (prev, src, target) => {
+    const rows = prev.map(r => ({ ...r }));
+    const vertical = target.r > src.r1 || target.r < src.r0;
+    if (vertical) {
+      const R0 = Math.min(src.r0, target.r), R1 = Math.max(src.r1, target.r);
+      for (let c = src.c0; c <= src.c1; c++) {
+        const col = cols[c]; if (!col) continue;
+        const srcVals = []; for (let rr = src.r0; rr <= src.r1; rr++) srcVals.push(String(rows[rr]?.[col.id] ?? ''));
+        for (let r = R0; r <= R1; r++) { if (r >= src.r0 && r <= src.r1) continue; if (rows[r]) rows[r][col.id] = _valFill(srcVals, r - src.r0); }
+      }
+    } else {
+      const C0 = Math.min(src.c0, target.c), C1 = Math.max(src.c1, target.c);
+      for (let r = src.r0; r <= src.r1; r++) {
+        if (!rows[r]) continue;
+        const srcVals = []; for (let cc = src.c0; cc <= src.c1; cc++) srcVals.push(String(rows[r]?.[cols[cc]?.id] ?? ''));
+        for (let c = C0; c <= C1; c++) { if (c >= src.c0 && c <= src.c1) continue; if (cols[c]) rows[r][cols[c].id] = _valFill(srcVals, c - src.c0); }
+      }
+    }
+    return rows;
+  };
   useEffect(() => {
     const onUp = () => {
-      const start = plDragRef.current;
-      if (start && plFill) {
-        const sc = cols[start.c];
-        const val = sc ? (filas[start.r]?.[sc.id] ?? '') : '';
-        const r0 = Math.min(start.r, plFill.r), r1 = Math.max(start.r, plFill.r);
-        const c0 = Math.min(start.c, plFill.c), c1 = Math.max(start.c, plFill.c);
-        setFilas(prev => prev.map((row, ri) => {
-          if (ri < r0 || ri > r1) return row;
-          const nr = { ...row };
-          for (let ci = c0; ci <= c1; ci++) { if (cols[ci]) nr[cols[ci].id] = val; }
-          return nr;
-        }));
+      if (plDragRef.current && plFill && plFillSrcRef.current) {
+        const src = plFillSrcRef.current, target = plFill;
+        setFilas(prev => aplicarFill(prev, src, target));
       }
-      plDragRef.current = null;
-      setPlFill(null);
+      plDragRef.current = null; plFillSrcRef.current = null; plSelDragRef.current = false;
+      setPlFill(null); setPlSelDrag(false);
     };
     window.addEventListener('mouseup', onUp);
     return () => window.removeEventListener('mouseup', onUp);
-  }, [plFill, filas, cols]);
-  const plEnRango = (r, c) => {
-    const start = plDragRef.current;
-    if (!start || !plFill) return false;
-    const r0 = Math.min(start.r, plFill.r), r1 = Math.max(start.r, plFill.r);
-    const c0 = Math.min(start.c, plFill.c), c1 = Math.max(start.c, plFill.c);
-    return r >= r0 && r <= r1 && c >= c0 && c <= c1;
-  };
+  }, [plFill, filas, cols, plSel, plSelEnd]);
 
   const loadExample = () => {
     const tallesDisponibles = estado?.talles?.length ? estado.talles : ["S", "M", "L", "XL"];
@@ -5239,7 +5277,7 @@ export default function App() {
                   <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
                   
                   <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.15)', marginTop: 12 }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', margin: 0, userSelect: plFill ? 'none' : 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
                       <thead>
                         <tr style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderBottom: '2px solid var(--border-light)' }}>
                           <th style={{ width: 45, padding: '8px 10px', borderRight: '1px solid var(--border-light)', textAlign: 'center', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>#</th>
@@ -5262,9 +5300,11 @@ export default function App() {
                               const tipo = c.tipo || (c.role === 'manga' ? 'toggle' : 'texto');
                               const opts = (c.opciones || '').split(',').map(s => s.trim()).filter(Boolean);
                               const toggleOpts = opts.length >= 2 ? opts : (c.role === 'manga' ? ['corta', 'larga'] : ['A', 'B']);
-                              const selCell = plSel && plSel.r === i && plSel.c === ci;
-                              const inRange = plEnRango(i, ci);
-                              const foco = () => setPlSel({ r: i, c: ci });
+                              const _rg = plRango();
+                              const enSel = !!_rg && i >= _rg.r0 && i <= _rg.r1 && ci >= _rg.c0 && ci <= _rg.c1;
+                              const esHandle = !!_rg && i === _rg.r1 && ci === _rg.c1;   // esquina inf-der del rango
+                              const enFill = plEnFill(i, ci);
+                              const foco = () => { setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); };
                               let control;
                               const plc = `${i}-${ci}`;
                               if (c.role === 'talle') {
@@ -5304,17 +5344,28 @@ export default function App() {
                                   />
                                 );
                               }
+                              // Borde accent SOLO en los lados externos del rango → recuadro único.
+                              const bs = [];
+                              if (enSel && _rg) {
+                                if (i === _rg.r0) bs.push('inset 0 2px 0 var(--accent)');
+                                if (i === _rg.r1) bs.push('inset 0 -2px 0 var(--accent)');
+                                if (ci === _rg.c0) bs.push('inset 2px 0 0 var(--accent)');
+                                if (ci === _rg.c1) bs.push('inset -2px 0 0 var(--accent)');
+                              }
                               return (
                                 <td key={c.id}
-                                  onMouseDown={foco}
-                                  onMouseOver={() => { if (plDragRef.current) setPlFill({ r: i, c: ci }); }}
+                                  onMouseDown={() => { setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); plSelDragRef.current = true; }}
+                                  onMouseOver={() => {
+                                    if (plDragRef.current) setPlFill({ r: i, c: ci });
+                                    else if (plSelDragRef.current) { setPlSelEnd({ r: i, c: ci }); if (!(plSel && plSel.r === i && plSel.c === ci)) setPlSelDrag(true); }
+                                  }}
                                   style={{ position: 'relative', padding: 0, borderRight: '1px solid var(--border-light)',
-                                    boxShadow: selCell ? 'inset 0 0 0 2px var(--accent)' : 'none',
-                                    background: inRange ? 'rgba(0,216,245,0.12)' : 'transparent' }}>
+                                    boxShadow: bs.length ? bs.join(', ') : 'none',
+                                    background: enFill ? 'rgba(0,216,245,0.20)' : (enSel ? 'rgba(0,216,245,0.10)' : 'transparent') }}>
                                   {control}
-                                  {selCell && (
-                                    <span onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); plDragRef.current = { r: i, c: ci }; setPlFill({ r: i, c: ci }); }}
-                                      title="Arrastrá para copiar el valor (vertical y horizontal)"
+                                  {esHandle && (
+                                    <span onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); plFillSrcRef.current = plRango(); plDragRef.current = { r: i, c: ci }; setPlFill({ r: i, c: ci }); setPlSelDrag(true); }}
+                                      title="Arrastrá para copiar/seguir la secuencia (vertical u horizontal)"
                                       style={{ position: 'absolute', right: -1, bottom: -1, width: 9, height: 9, background: 'var(--accent)', border: '1.5px solid var(--bg-primary)', borderRadius: 1, cursor: 'crosshair', zIndex: 3, boxShadow: '0 0 4px var(--accent)' }} />
                                   )}
                                 </td>
