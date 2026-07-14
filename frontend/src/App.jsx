@@ -630,7 +630,8 @@ function MesasInfinito({ mesas, job }) {
               const PXM = 240;   // px por metro: ESCALA REAL común a todas las mesas
               const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
               const key = hoja.archivo + '::' + pi;     // ESTABLE por trabajo → el nombre persiste a esta mesa
-              const nombreDef = 'Mesa ' + (gidx + 1);   // por defecto: Mesa 1, Mesa 2, ...
+              const tela = hoja.tela || '';
+              const nombreDef = 'Mesa ' + (gidx + 1) + (tela ? ' - ' + tela : '');   // secuencial + guión + tela
               const nombre = nombres[key] != null ? nombres[key] : nombreDef;
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
