@@ -119,6 +119,48 @@ def _limpiar_huerfanos(page):
             del xo[nm]
 
 
+def _sanear_texto(pdf, page):
+    """Quita los bloques de texto BT..ET que referencian una FUENTE INEXISTENTE (o que no muestran
+    ningún glifo). El arte trae bloques de texto 'fantasma' — prenden una fuente `/T1_0`/`/TT0` que
+    no está declarada y no dibujan nada — y muchos RIPs los rechazan como 'recurso indefinido' →
+    error RIP. gs los convierte a curvas e Illustrator declara la fuente; el sistema los arrastraba.
+    Como no marcan nada, borrarlos NO cambia un solo píxel."""
+    res = page.get("/Resources")
+    fonts = set(str(k) for k in (res.get("/Font", {}) or {}).keys()) if res else set()
+    try:
+        ops = list(parse_content_stream(page))
+    except Exception:
+        return 0, 0
+    out, block, in_bt = [], [], False
+    falta_fuente = tiene_texto = False
+    quitados = perdidos = 0
+    for operands, op in ops:
+        o = str(op)
+        if o == "BT":
+            in_bt = True; block = [(operands, op)]; falta_fuente = tiene_texto = False
+            continue
+        if in_bt:
+            block.append((operands, op))
+            if o == "Tf" and operands and isinstance(operands[0], Name) and str(operands[0]) not in fonts:
+                falta_fuente = True
+            elif o in ("Tj", "TJ", "'", '"'):
+                tiene_texto = True
+            if o == "ET":
+                in_bt = False
+                if falta_fuente or not tiene_texto:
+                    quitados += 1
+                    if tiene_texto:
+                        perdidos += 1   # texto REAL con fuente inexistente (no debería pasar en la tizada)
+                else:
+                    out.extend(block)
+                block = []
+            continue
+        out.append((operands, op))
+    if quitados:
+        page.Contents = pdf.make_stream(unparse_content_stream(out))
+    return quitados, perdidos
+
+
 def _consolidar_iccbased(pdf, page):
     import hashlib
     res = page.get("/Resources"); cs = res.get("/ColorSpace") if res else None
@@ -164,6 +206,9 @@ def aplanar_para_rip(path):
         for page in pdf.pages:
             _flatten(pdf, page, es_pagina=True)
             _limpiar_huerfanos(page)
+            quitados, perdidos = _sanear_texto(pdf, page)
+            if perdidos:
+                print(f"  [aplanar_rip] OJO: {perdidos} bloque(s) con texto REAL y fuente inexistente")
             _consolidar_iccbased(pdf, page)
             _declarar_estado_grafico(pdf, page)
         if "/OutputIntents" in pdf.Root:
