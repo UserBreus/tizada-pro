@@ -5682,7 +5682,7 @@ export default function App() {
                                 const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
                                 const anchoCm = hoja.ancho_cm || 180;
                                 const nMesas = pvs.length;
-                                const PXM = 46;   // px por metro: ESCALA REAL común a todas las mesas
+                                const PXM = 240;   // px por metro: ESCALA REAL común a todas las mesas (grande para que la mesa domine al botón/texto; se ajusta con el zoom)
                                 const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
                                 const nombre = (hoja.moldes?.length ? hoja.moldes.join(' + ') : 'Mesa de trabajo') + (nMesas > 1 ? ` · Mesa ${pi + 1}` : '');
                                 return (
