@@ -4474,6 +4474,86 @@ export default function App() {
     setFilas([...filas, newRow]);
   };
 
+  // ── Importar un archivo CSV a la planilla ────────────────────────────────
+  // Vuelca las filas del CSV. En las columnas con opciones FIJAS (talle, diseño,
+  // manga, desplegables) solo acepta valores que coincidan con lo predefinido;
+  // si el valor no coincide, deja la celda VACÍA. Mapea columnas por encabezado
+  // (nombre/rol) o, si no hay encabezado reconocible, por posición.
+  const _parseCSV = (text) => {
+    text = String(text || '').replace(/^﻿/, '');   // saca el BOM
+    const primera = (text.split(/\r?\n/)[0] || '');
+    const cnt = { ',': 0, ';': 0, '\t': 0 }; let qq = false;
+    for (const ch of primera) { if (ch === '"') qq = !qq; else if (!qq && cnt[ch] != null) cnt[ch]++; }
+    const delim = (cnt[';'] > cnt[','] && cnt[';'] >= cnt['\t']) ? ';' : (cnt['\t'] > cnt[','] ? '\t' : ',');
+    const rows = []; let row = [], field = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; } else field += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === delim) { row.push(field); field = ''; }
+      else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (ch === '\r') { /* nada */ }
+      else field += ch;
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(x => (x || '').trim() !== ''));
+  };
+  const _normTxt = (s) => (s == null ? '' : String(s)).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const _opcionesDeCol = (c) => {   // devuelve la lista de valores válidos, o null si la columna es libre
+    if (c.role === 'talle') { const t = estado?.talles || []; return t.length ? t : null; }
+    if (c.role === 'diseno') { const d = disenosPedido.map(x => x.nombre); return d.length ? d : null; }
+    const tipo = c.tipo || (c.role === 'manga' ? 'toggle' : 'texto');
+    const opts = (c.opciones || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (tipo === 'desplegable') return opts.length ? opts : null;
+    if (tipo === 'toggle' || c.role === 'manga') return opts.length >= 2 ? opts : (c.role === 'manga' ? ['corta', 'larga'] : ['A', 'B']);
+    return null;   // nombre / número / texto: valor libre
+  };
+  const _defaultRow = () => { const r = {}; cols.forEach(c => {
+    if (c.role === 'talle') r[c.id] = (estado?.talles?.[0] || 'M');
+    else if (c.role === 'manga') r[c.id] = 'corta';
+    else if (c.role === 'diseno') r[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');
+    else r[c.id] = '';
+  }); return r; };
+  const importarCSVTexto = (texto) => {
+    const rows = _parseCSV(texto);
+    if (!rows.length) { alert('El CSV está vacío.'); return; }
+    const matchCol = (h) => cols.find(c => [c.label, c.id, c.role, (c.role === 'diseno' ? 'diseño' : null), (c.role === 'numero' ? 'número' : null)]
+      .some(x => x && _normTxt(x) === _normTxt(h)));
+    const headerMap = rows[0].map(h => matchCol(h) || null);
+    const tieneHeader = headerMap.some(Boolean);
+    const mapping = tieneHeader ? headerMap : rows[0].map((_, i) => cols[i] || null);
+    const dataRows = tieneHeader ? rows.slice(1) : rows;
+    let descartados = 0;
+    const nuevas = dataRows.map(r => {
+      const row = _defaultRow();
+      mapping.forEach((c, ci) => {
+        if (!c) return;
+        const raw = (r[ci] != null ? String(r[ci]) : '').trim();
+        if (raw === '') return;
+        const opts = _opcionesDeCol(c);
+        if (opts) {   // columna con opciones fijas → validar
+          const m = opts.find(o => _normTxt(o) === _normTxt(raw));
+          if (m != null) row[c.id] = m; else { row[c.id] = ''; descartados++; }   // no coincide → vacío
+        } else row[c.id] = raw;
+      });
+      return row;
+    });
+    if (!nuevas.length) { alert('El CSV no tenía filas de datos.'); return; }
+    const hayDatos = filas.some(f => cols.some(c => (f[c.id] || '').toString().trim() !== ''));
+    if (hayDatos && !window.confirm(`Se importarán ${nuevas.length} fila(s) y se REEMPLAZARÁN las filas actuales de la planilla. ¿Continuar?`)) return;
+    setFilas(nuevas);
+    alert(`Importadas ${nuevas.length} fila(s).` + (descartados ? ` ${descartados} valor(es) no coincidían con las opciones y quedaron vacíos.` : ''));
+  };
+  const onImportCSVFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';   // permite volver a importar el mismo archivo
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { try { importarCSVTexto(String(reader.result || '')); } catch (err) { alert('No se pudo leer el CSV: ' + (err.message || err)); } };
+    reader.onerror = () => alert('No se pudo leer el archivo.');
+    reader.readAsText(file);
+  };
+
   const updateFila = (i, field, val) => {
     const next = [...filas];
     next[i][field] = val;
@@ -5110,6 +5190,11 @@ export default function App() {
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={loadExample}>
                       Cargar Ejemplo
                     </button>
+                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => document.getElementById('csvPedidoInput')?.click()}
+                      title="Cargar filas desde un archivo CSV (Excel). En talle/diseño/manga solo acepta valores válidos; si no coinciden, deja la celda vacía.">
+                      ⬆ Importar CSV
+                    </button>
+                    <input id="csvPedidoInput" type="file" accept=".csv,text/csv,text/plain" style={{ display: 'none' }} onChange={onImportCSVFile} />
                   </div>
                 </div>
                 </div>
