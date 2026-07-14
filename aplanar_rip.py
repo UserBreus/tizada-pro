@@ -168,6 +168,17 @@ def aplanar_para_rip(path):
             _declarar_estado_grafico(pdf, page)
         if "/OutputIntents" in pdf.Root:
             del pdf.Root["/OutputIntents"]   # Illustrator no lo tiene; el ICCBased de la página alcanza
+        # DECLARAR Creator/Producer: los PDFs que pasan el RIP (Illustrator, Ghostscript) lo declaran;
+        # el original (que falla) queda "no declarado". Algunos RIPs desconfían de un PDF sin Producer.
+        try:
+            with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+                meta["dc:creator"] = ["TIZADA PRO"]
+                meta["xmp:CreatorTool"] = "TIZADA PRO"
+                meta["pdf:Producer"] = "TIZADA PRO"
+        except Exception:
+            pass
+        pdf.docinfo["/Creator"] = "TIZADA PRO"
+        pdf.docinfo["/Producer"] = "TIZADA PRO"
         pdf.remove_unreferenced_resources()
         pdf.save(path, force_version="1.6")   # PDF 1.6 como Illustrator (máx. compat. RIP)
         pdf.close()
