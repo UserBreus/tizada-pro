@@ -2457,6 +2457,12 @@ def generar():
                     res["perfil_icc"] = _icc_nom
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
+            try:   # aplanar cada hoja para el RIP (ver generar_multi)
+                from aplanar_rip import aplanar_para_rip
+                for h in res.get("hojas", []):
+                    aplanar_para_rip(os.path.join(salida, h["archivo"]))
+            except Exception as _ea:
+                print("  [!] aplanar RIP:", _ea)
             json.dump({"prendas": prendas, "resultado": {k: v for k, v in res.items() if k != "hojas"} |
                        {"hojas": res["hojas"]}}, open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"),
                        ensure_ascii=False)
@@ -2669,6 +2675,15 @@ def generar_multi():
                     res["perfil_icc"] = _icc_nom
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
+            # APLANAR cada hoja para el RIP: la deja como el PDF de Illustrator (des-anida las piezas,
+            # 1 solo perfil ICC, estado gráfico declarado, PDF 1.6) preservando el CMYK EXACTO. Sin
+            # esto, los XObjects anidados + perfiles repetidos daban "error RIP". Best-effort.
+            try:
+                from aplanar_rip import aplanar_para_rip
+                for h in res.get("hojas", []):
+                    aplanar_para_rip(os.path.join(salida, h["archivo"]))
+            except Exception as _ea:
+                print("  [!] aplanar RIP:", _ea)
             json.dump({"prendas": prendas, "moldes": nombres,
                        "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res["hojas"]}},
                       open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)
