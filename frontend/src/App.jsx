@@ -217,7 +217,7 @@ async function leerJson(res) {
 }
 
 // ── Combo: casilla editable + lista desplegable propia (scrolleable, compacta) ──
-function ComboCell({ value, options, onChange, onFocusCell }) {
+function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
@@ -245,9 +245,17 @@ function ComboCell({ value, options, onChange, onFocusCell }) {
   const filtradas = (verTodas || !_nv) ? options : options.filter(o => _norm(o).includes(_nv));
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
-      <input ref={inputRef} value={value} placeholder="escribí o elegí…"
+      <input ref={inputRef} value={value} placeholder="escribí o elegí…" data-plc={cellId}
         onFocus={() => { onFocusCell?.(); abrir(true); }}
         onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === 'Tab') {
+            // Si estás escribiendo un valor parcial, al saltar lo autocompleta al 1º que coincide.
+            if (open && filtradas.length && _nv && !options.some(o => _norm(o) === _nv)) onChange(filtradas[0]);
+            setOpen(false);
+          }
+          onNavKey?.(e);
+        }}
         style={cs} />
       <span onMouseDown={(e) => { e.preventDefault(); open ? setOpen(false) : abrir(true); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
@@ -4603,6 +4611,31 @@ export default function App() {
     setFilas(next);
   };
 
+  // Navegación tipo planilla: Enter = baja (misma columna), Tab = derecha (misma fila,
+  // salta a la fila siguiente al pasar la última columna). Shift+Tab = izquierda.
+  const _focusCelda = (r, c) => {
+    const el = document.querySelector(`[data-plc="${r}-${c}"]`);
+    if (el) { el.focus(); try { el.select && el.select(); } catch (_e) { /* no-op */ } }
+  };
+  const navKeyPlanilla = (e, r, c) => {
+    const nCols = cols.length, nFil = filas.length;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (r + 1 < nFil) _focusCelda(r + 1, c);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        let nc = c - 1, nr = r;
+        if (nc < 0) { nc = nCols - 1; nr = r - 1; }
+        if (nr >= 0) _focusCelda(nr, nc);
+      } else {
+        let nc = c + 1, nr = r;
+        if (nc >= nCols) { nc = 0; nr = r + 1; }
+        if (nr < nFil) _focusCelda(nr, nc);
+      }
+    }
+  };
+
   const removeFila = (i) => {
     const next = filas.filter((_, idx) => idx !== i);
     if (next.length) {
@@ -5233,21 +5266,23 @@ export default function App() {
                               const inRange = plEnRango(i, ci);
                               const foco = () => setPlSel({ r: i, c: ci });
                               let control;
+                              const plc = `${i}-${ci}`;
                               if (c.role === 'talle') {
                                 /* variante: opciones = variantes del molde (escribible: podés tipear o elegir) */
-                                control = <ComboCell value={cellValue} options={estado?.talles || []} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} />;
+                                control = <ComboCell value={cellValue} options={estado?.talles || []} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} />;
                               } else if (c.role === 'diseno') {
                                 /* diseño: opciones = los diseños del pedido */
-                                control = <ComboCell value={cellValue} options={disenosPedido.map(d => d.nombre)} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} />;
+                                control = <ComboCell value={cellValue} options={disenosPedido.map(d => d.nombre)} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} />;
                               } else if (tipo === 'desplegable') {
-                                control = <ComboCell value={cellValue} options={opts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} />;
+                                control = <ComboCell value={cellValue} options={opts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} />;
                               } else if (tipo === 'toggle') {
                                 control = (
-                                  <div style={{ display: 'flex', height: 32 }}>
+                                  <div data-plc={plc} tabIndex={0} onFocus={foco} onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
+                                    style={{ display: 'flex', height: 32, outline: 'none' }}>
                                     {toggleOpts.map(o => {
                                       const on = cellValue ? cellValue === o : o === toggleOpts[0];
                                       return (
-                                        <button key={o} type="button" onClick={() => { updateFila(i, c.id, o); foco(); }}
+                                        <button key={o} type="button" tabIndex={-1} onClick={() => { updateFila(i, c.id, o); foco(); }}
                                           style={{ flex: 1, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--bg-primary)' : 'var(--text-secondary)', transition: 'background 0.15s' }}>
                                           {o}
                                         </button>
@@ -5261,7 +5296,9 @@ export default function App() {
                                     type={c.role === 'numero' ? 'number' : 'text'}
                                     value={cellValue}
                                     placeholder="..."
+                                    data-plc={plc}
                                     onFocus={foco}
+                                    onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
                                     style={{ width: '100%', padding: '6px 8px', border: 'none', background: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: 13, height: 32, fontFamily: c.role === 'numero' ? 'monospace' : 'inherit', textTransform: c.role === 'nombre' ? 'uppercase' : 'none', fontWeight: c.role === 'nombre' ? 600 : 'normal' }}
                                     onChange={(e) => updateFila(i, c.id, e.target.value)}
                                   />
