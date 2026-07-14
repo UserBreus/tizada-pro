@@ -245,8 +245,11 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   // Al ESCRIBIR siempre filtra por lo tipeado (aunque sea un valor exacto). Muestra TODAS solo
   // cuando se abre por foco o por la flecha ▾ (verTodas), o si el campo está vacío.
   const filtradas = (verTodas || !_nv) ? options : options.filter(o => _norm(o).includes(_nv));
+  // Valor INVÁLIDO: hay opciones fijas, la celda tiene texto y no coincide con ninguna.
+  const invalido = options.length > 0 && _nv !== '' && !options.some(o => _norm(o) === _nv);
   return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
+    <div ref={wrapRef} title={invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
+      style={{ position: 'relative', boxShadow: invalido ? 'inset 0 0 0 1.5px rgba(255,90,90,0.8)' : 'none', background: invalido ? 'rgba(255,70,70,0.08)' : 'transparent' }}>
       <input ref={inputRef} value={value} placeholder="escribí o elegí…" data-plc={cellId}
         onFocus={() => { onFocusCell?.(); abrir(true); }}
         onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
@@ -260,7 +263,7 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
           }
           onNavKey?.(e);
         }}
-        style={cs} />
+        style={invalido ? { ...cs, color: '#ff8a8a', fontWeight: 700 } : cs} />
       <span onMouseDown={(e) => { e.preventDefault(); open ? setOpen(false) : abrir(true); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
       {open && pos && filtradas.length > 0 && createPortal(
@@ -4644,6 +4647,22 @@ export default function App() {
     }
   };
 
+  // Celdas con valor INVÁLIDO: columna con opciones fijas + valor que no coincide con ninguna.
+  // Se usa para bloquear el paso siguiente (no se puede continuar con valores inexistentes).
+  const _normV = (s) => (s == null ? '' : String(s)).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const planillaInvalidos = () => {
+    const bad = [];
+    filas.forEach((f, i) => {
+      cols.forEach(c => {
+        const opts = _opcionesDeCol(c);
+        if (!opts || !opts.length) return;   // columna libre → no valida
+        const v = String(f[c.id] ?? '').trim();
+        if (v !== '' && !opts.some(o => _normV(o) === _normV(v))) bad.push({ i, label: c.label || c.id, v });
+      });
+    });
+    return bad;
+  };
+
   const removeFila = (i) => {
     const next = filas.filter((_, idx) => idx !== i);
     if (next.length) {
@@ -5419,12 +5438,24 @@ export default function App() {
                 <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
                   <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }}>← Arte</button>
                   <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>{filas.length} fila{filas.length === 1 ? '' : 's'}</span>
-                  <button onClick={() => setPedidoPaso('generar')} disabled={!filas.length}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none', cursor: filas.length ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
-                      background: filas.length ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: filas.length ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
-                    Continuar <span style={{ fontSize: 16 }}>→</span>
-                  </button>
+                  {(() => {
+                    const invalidos = planillaInvalidos();
+                    const bloq = !filas.length || invalidos.length > 0;
+                    const cols_inv = [...new Set(invalidos.map(x => x.label))];
+                    return (
+                      <>
+                        <span style={{ marginLeft: 'auto', fontSize: 12, color: invalidos.length ? '#ff8a8a' : 'var(--text-muted)', fontWeight: invalidos.length ? 700 : 400 }}>
+                          {invalidos.length ? `⚠ ${invalidos.length} valor(es) inválido(s) en ${cols_inv.join(', ')}` : `${filas.length} fila${filas.length === 1 ? '' : 's'}`}
+                        </span>
+                        <button onClick={() => { if (!bloq) setPedidoPaso('generar'); }} disabled={bloq}
+                          title={invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')}) para continuar` : ''}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none', cursor: bloq ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
+                            background: bloq ? 'rgba(255,255,255,0.07)' : 'var(--accent)', color: bloq ? 'var(--text-muted)' : '#001016', transition: 'all .2s' }}>
+                          Continuar <span style={{ fontSize: 16 }}>→</span>
+                        </button>
+                      </>
+                    );
+                  })()}
                 </div>
                 </div>
               )}
