@@ -1156,6 +1156,9 @@ export default function App() {
   const [estado, setEstado] = useState(null);
   const [productosCat, setProductosCat] = useState({ activo: 'prod_default', productos: [] });
   const [filas, setFilas] = useState([]);
+  const [csvImport, setCsvImport] = useState(null);   // { filas:[{valores, issues:[{colId,label,raw,opciones}]}] } al importar CSV con valores inválidos
+  const [csvFix, setCsvFix] = useState({});           // `${i}:${colId}` -> valor elegido para la celda inválida
+  const [csvOmit, setCsvOmit] = useState({});         // i -> true si esa fila no se carga
   const [plSel, setPlSel] = useState(null);     // planilla pedido: {r,c} celda seleccionada
   const [plFill, setPlFill] = useState(null);   // {r,c} destino del arrastre del fill-handle
   const plDragRef = useRef(null);               // {r,c} origen del arrastre (fill-handle)
@@ -4516,16 +4519,17 @@ export default function App() {
   }); return r; };
   const importarCSVTexto = (texto) => {
     const rows = _parseCSV(texto);
-    if (!rows.length) { alert('El CSV está vacío.'); return; }
+    if (!rows.length) { showError('El CSV está vacío.'); return; }
     const matchCol = (h) => cols.find(c => [c.label, c.id, c.role, (c.role === 'diseno' ? 'diseño' : null), (c.role === 'numero' ? 'número' : null)]
       .some(x => x && _normTxt(x) === _normTxt(h)));
     const headerMap = rows[0].map(h => matchCol(h) || null);
     const tieneHeader = headerMap.some(Boolean);
     const mapping = tieneHeader ? headerMap : rows[0].map((_, i) => cols[i] || null);
     const dataRows = tieneHeader ? rows.slice(1) : rows;
-    let descartados = 0;
-    const nuevas = dataRows.map(r => {
-      const row = _defaultRow();
+    // Armo cada fila; marco las celdas cuyo valor NO coincide con las opciones fijas (issues).
+    const preview = dataRows.map(r => {
+      const valores = _defaultRow();
+      const issues = [];
       mapping.forEach((c, ci) => {
         if (!c) return;
         const raw = (r[ci] != null ? String(r[ci]) : '').trim();
@@ -4533,24 +4537,46 @@ export default function App() {
         const opts = _opcionesDeCol(c);
         if (opts) {   // columna con opciones fijas → validar
           const m = opts.find(o => _normTxt(o) === _normTxt(raw));
-          if (m != null) row[c.id] = m; else { row[c.id] = ''; descartados++; }   // no coincide → vacío
-        } else row[c.id] = raw;
+          if (m != null) valores[c.id] = m;
+          else issues.push({ colId: c.id, label: c.label || c.id, raw, opciones: opts });   // no coincide → a resolver
+        } else valores[c.id] = raw;
       });
-      return row;
+      return { valores, issues };
     });
-    if (!nuevas.length) { alert('El CSV no tenía filas de datos.'); return; }
-    const hayDatos = filas.some(f => cols.some(c => (f[c.id] || '').toString().trim() !== ''));
-    if (hayDatos && !window.confirm(`Se importarán ${nuevas.length} fila(s) y se REEMPLAZARÁN las filas actuales de la planilla. ¿Continuar?`)) return;
-    setFilas(nuevas);
-    alert(`Importadas ${nuevas.length} fila(s).` + (descartados ? ` ${descartados} valor(es) no coincidían con las opciones y quedaron vacíos.` : ''));
+    if (!preview.length) { showError('El CSV no tenía filas de datos.'); return; }
+    const conProblemas = preview.some(f => f.issues.length);
+    if (conProblemas) {
+      // Abro el modal de resolución (mostrar filas con valor incorrecto, elegir valor o no cargarla)
+      setCsvFix({}); setCsvOmit({});
+      setCsvImport({ filas: preview });
+      return;
+    }
+    // Sin problemas → importar directo (reemplaza la planilla) con aviso in-app
+    setFilas(preview.map(f => f.valores));
+    showMsg(`Importadas ${preview.length} fila(s) del CSV.`);
+  };
+  // Confirmar la importación desde el modal de resolución de valores inválidos
+  const aplicarImportCSV = () => {
+    if (!csvImport) return;
+    const finales = [];
+    csvImport.filas.forEach((f, i) => {
+      if (csvOmit[i]) return;                       // fila que el usuario decidió NO cargar
+      const row = { ...f.valores };
+      f.issues.forEach(iss => { row[iss.colId] = csvFix[`${i}:${iss.colId}`] || ''; });   // valor elegido (o vacío)
+      finales.push(row);
+    });
+    setCsvImport(null); setCsvFix({}); setCsvOmit({});
+    if (!finales.length) { showError('No se cargó ninguna fila (todas se omitieron).'); return; }
+    setFilas(finales);
+    showMsg(`Importadas ${finales.length} fila(s) del CSV.`);
   };
   const onImportCSVFile = (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';   // permite volver a importar el mismo archivo
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => { try { importarCSVTexto(String(reader.result || '')); } catch (err) { alert('No se pudo leer el CSV: ' + (err.message || err)); } };
-    reader.onerror = () => alert('No se pudo leer el archivo.');
+    reader.onload = () => { try { importarCSVTexto(String(reader.result || '')); } catch (err) { showError('No se pudo leer el CSV: ' + (err.message || err)); } };
+    reader.onerror = () => showError('No se pudo leer el archivo.');
     reader.readAsText(file);
   };
 
@@ -4842,6 +4868,65 @@ export default function App() {
           </div>,
           document.body
         )}
+
+        {/* Resolver valores del CSV que no coinciden con las opciones (importación de planilla) */}
+        <Modal open={!!csvImport} onClose={() => { setCsvImport(null); setCsvFix({}); setCsvOmit({}); }}
+          titulo="Revisá los valores del CSV"
+          subtitulo="Estas filas traen valores que no coinciden con las opciones. Elegí el valor correcto o marcá que no se cargue esa fila."
+          maxWidth={720}>
+          {csvImport && (() => {
+            const problemRows = csvImport.filas.map((f, i) => ({ f, i })).filter(x => x.f.issues.length);
+            const totalCargar = csvImport.filas.filter((_, i) => !csvOmit[i]).length;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                  {problemRows.length} fila(s) con valores a revisar. Se importarán <b style={{ color: 'var(--accent)' }}>{totalCargar}</b> de {csvImport.filas.length} fila(s) y se reemplazará la planilla actual.
+                </div>
+                {problemRows.map(({ f, i }) => {
+                  const omit = !!csvOmit[i];
+                  return (
+                    <div key={i} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, opacity: omit ? 0.5 : 1, background: 'rgba(255,255,255,0.02)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontWeight: 700, fontSize: 13 }}>Fila {i + 1}</span>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={omit} onChange={e => setCsvOmit(o => ({ ...o, [i]: e.target.checked }))} /> No cargar esta fila
+                        </label>
+                      </div>
+                      {/* contexto: el resto de los datos de la fila (los válidos) */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: f.issues.length ? 10 : 0 }}>
+                        {cols.map(c => {
+                          if (f.issues.some(iss => iss.colId === c.id)) return null;
+                          const v = f.valores[c.id];
+                          return v ? <span key={c.id} style={{ fontSize: 11.5, color: 'var(--text-muted)' }}><b style={{ color: 'var(--text-secondary)' }}>{c.label}:</b> {v}</span> : null;
+                        })}
+                      </div>
+                      {/* celdas inválidas: valor incorrecto marcado + selector de valor válido */}
+                      {f.issues.map(iss => {
+                        const k = `${i}:${iss.colId}`;
+                        return (
+                          <div key={iss.colId} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 12.5, minWidth: 82, fontWeight: 700 }}>{iss.label}</span>
+                            <span style={{ fontSize: 12, color: '#ff8a8a', background: 'rgba(255,80,80,0.12)', border: '1px solid rgba(255,80,80,0.45)', borderRadius: 6, padding: '2px 8px', whiteSpace: 'nowrap' }}>«{iss.raw}» no es válido</span>
+                            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>→</span>
+                            <select value={csvFix[k] || ''} disabled={omit} onChange={e => setCsvFix(fx => ({ ...fx, [k]: e.target.value }))}
+                              style={{ padding: '5px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, cursor: 'pointer' }}>
+                              <option value="">(dejar vacío)</option>
+                              {iss.opciones.map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+                  <button className="btn ghost" style={{ padding: '8px 16px', fontSize: 12.5 }} onClick={() => { setCsvImport(null); setCsvFix({}); setCsvOmit({}); }}>Cancelar</button>
+                  <button className="btn primary" style={{ padding: '8px 16px', fontSize: 12.5 }} onClick={aplicarImportCSV}>Importar {totalCargar} fila(s)</button>
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
 
         {/* Aviso de perfil de color al cargar un diseño (ventana emergente centrada) */}
         <Modal open={!!perfilAviso} onClose={() => setPerfilAviso(null)} titulo="Perfil de color del diseño" maxWidth={460} centrado>
