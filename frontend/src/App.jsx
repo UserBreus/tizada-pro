@@ -634,22 +634,23 @@ function MesasInfinito({ mesas, job }) {
               const nombre = nombres[key] != null ? nombres[key] : nombreDef;
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
-                  {/* ARRIBA A LA IZQUIERDA: ícono de descarga + nombre (doble-click para renombrar) */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: w }}>
-                    <a href={urlPdf} download={sanit(nombre) + '.pdf'} title="Descargar PDF"
-                      onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
-                      style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
-                      <Icon name="download" style={{ width: 14, height: 14 }} />
-                    </a>
+                  {/* ARRIBA: nombre a la IZQUIERDA (doble-click para renombrar) y el ícono de
+                      descarga al lado CONTRARIO (derecha), en la misma línea. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: w, justifyContent: 'space-between' }}>
                     {editando === key
                       ? <input autoFocus value={nombre}
                           onChange={(e) => setNombres(n => ({ ...n, [key]: e.target.value }))}
                           onBlur={() => setEditando(null)}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditando(null); }}
                           onMouseDown={(e) => e.stopPropagation()}
-                          style={{ fontSize: 12, fontWeight: 700, color: '#000', background: '#fff', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', maxWidth: Math.max(w - 40, 90), outline: 'none' }} />
+                          style={{ fontSize: 12, fontWeight: 700, color: '#000', background: '#fff', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', flex: 1, minWidth: 0, marginRight: 8, outline: 'none' }} />
                       : <span onDoubleClick={() => setEditando(key)} title="Doble-click para renombrar"
                           style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text', userSelect: 'none' }}>{nombre}</span>}
+                    <a href={urlPdf} download={sanit(nombre) + '.pdf'} title="Descargar PDF"
+                      onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
+                      style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
+                      <Icon name="download" style={{ width: 14, height: 14 }} />
+                    </a>
                   </div>
                   {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
                   {pv
