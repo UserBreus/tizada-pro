@@ -161,6 +161,30 @@ def _sanear_texto(pdf, page):
     return quitados, perdidos
 
 
+def _quitar_ocg(pdf, page):
+    """Elimina las CAPAS OPCIONALES (OCG) del molde/arte (Diseño, molde, Nombre, guías, ...). El
+    motor las arrastra desde el .ai y quedan como OCG SIN registrar en /OCProperties → 'capas
+    huérfanas' que PhotoPRINT rechaza (error RIP). gs las aplana (0 OCG). Se quitan los marcadores
+    de contenido (BMC/BDC/EMC/MP/DP), el /Properties de recursos y el /OCProperties del catálogo;
+    los OCG quedan sin referencia y qpdf los limpia al guardar. NO producen marcas → 0 cambio visual."""
+    try:
+        ops = list(parse_content_stream(page))
+        nuevos = [(o, op) for (o, op) in ops if str(op) not in ("BDC", "BMC", "EMC", "MP", "DP")]
+        if len(nuevos) != len(ops):
+            page.Contents = pdf.make_stream(unparse_content_stream(nuevos))
+    except Exception:
+        pass
+    res = page.get("/Resources")
+    if res is not None and "/Properties" in res:
+        del res["/Properties"]
+    if res is not None:
+        for k, v in list((res.get("/XObject", {}) or {}).items()):
+            if "/OC" in v:
+                del v["/OC"]
+    if "/OCProperties" in pdf.Root:
+        del pdf.Root["/OCProperties"]
+
+
 def _consolidar_iccbased(pdf, page):
     import hashlib
     res = page.get("/Resources"); cs = res.get("/ColorSpace") if res else None
@@ -184,14 +208,29 @@ def _consolidar_iccbased(pdf, page):
 
 
 def _declarar_estado_grafico(pdf, page):
-    """Agrega y APLICA un ExtGState 'normal' (overprint/SMask=None) al inicio del content, como
-    hace Illustrator. Sin esto el RIP no sabe cómo tratar color/transparencia."""
+    """Deja los ExtGState 'opacos como gs': overprint off (OP/op=False, OPM=1), stroke adjust on
+    (SA=True). QUITA de los ExtGState existentes las claves que un preflight lee como transparencia
+    (SMask, BM, CA, ca, AIS) SÓLO cuando su valor ya es el opaco por defecto (/None, /Normal, 1,
+    False) → 0 cambio visual pero sin 'transparencia detectada'. Agrega y aplica /GSflat al inicio."""
     res = page.Resources
     if "/ExtGState" not in res:
         res.ExtGState = pikepdf.Dictionary()
+    for k, v in list(res.ExtGState.items()):
+        if v.get("/SMask") == Name("/None"):
+            del v["/SMask"]
+        if v.get("/BM") == Name("/Normal"):
+            del v["/BM"]
+        try:
+            if "/CA" in v and float(v["/CA"]) == 1:
+                del v["/CA"]
+            if "/ca" in v and float(v["/ca"]) == 1:
+                del v["/ca"]
+        except Exception:
+            pass
+        if "/AIS" in v and v["/AIS"] == False:  # noqa: E712 (pikepdf Boolean)
+            del v["/AIS"]
     res.ExtGState["/GSflat"] = pdf.make_indirect(pikepdf.Dictionary(
-        Type=Name("/ExtGState"), OP=False, op=False, OPM=1, SA=True,
-        SMask=Name("/None"), BM=Name("/Normal"), CA=1, ca=1))
+        Type=Name("/ExtGState"), OP=False, op=False, OPM=1, SA=True))
     cont = page.Contents
     if isinstance(cont, pikepdf.Array):
         cont = cont[0]
@@ -209,6 +248,7 @@ def aplanar_para_rip(path):
             quitados, perdidos = _sanear_texto(pdf, page)
             if perdidos:
                 print(f"  [aplanar_rip] OJO: {perdidos} bloque(s) con texto REAL y fuente inexistente")
+            _quitar_ocg(pdf, page)
             _consolidar_iccbased(pdf, page)
             _declarar_estado_grafico(pdf, page)
         if "/OutputIntents" in pdf.Root:
