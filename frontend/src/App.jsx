@@ -4887,32 +4887,45 @@ export default function App() {
                   return (
                     <div key={i} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, opacity: omit ? 0.5 : 1, background: 'rgba(255,255,255,0.02)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <span style={{ fontWeight: 700, fontSize: 13 }}>Fila {i + 1}</span>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={omit} onChange={e => setCsvOmit(o => ({ ...o, [i]: e.target.checked }))} /> No cargar esta fila
-                        </label>
+                        <span style={{ fontWeight: 800, fontSize: 13.5, letterSpacing: 0.2 }}>Fila {i + 1}</span>
+                        <button type="button" onClick={() => setCsvOmit(o => ({ ...o, [i]: !omit }))}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', color: omit ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 12, fontWeight: 600, padding: 0 }}>
+                          <span style={{ width: 34, height: 20, borderRadius: 999, background: omit ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'background .15s', flexShrink: 0 }}>
+                            <span style={{ position: 'absolute', top: 2, left: omit ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .15s', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }} />
+                          </span>
+                          No cargar esta fila
+                        </button>
                       </div>
                       {/* contexto: el resto de los datos de la fila (los válidos) */}
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: f.issues.length ? 10 : 0 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: f.issues.length ? 12 : 0 }}>
                         {cols.map(c => {
                           if (f.issues.some(iss => iss.colId === c.id)) return null;
                           const v = f.valores[c.id];
-                          return v ? <span key={c.id} style={{ fontSize: 11.5, color: 'var(--text-muted)' }}><b style={{ color: 'var(--text-secondary)' }}>{c.label}:</b> {v}</span> : null;
+                          return v ? <span key={c.id} style={{ fontSize: 11.5, color: '#fff', background: 'rgba(255,255,255,0.045)', border: '1px solid var(--border-light)', borderRadius: 999, padding: '3px 11px', display: 'inline-flex', gap: 6 }}><span style={{ color: 'var(--text-muted)' }}>{c.label}</span>{v}</span> : null;
                         })}
                       </div>
                       {/* celdas inválidas: valor incorrecto marcado + selector de valor válido */}
                       {f.issues.map(iss => {
                         const k = `${i}:${iss.colId}`;
                         return (
-                          <div key={iss.colId} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 12.5, minWidth: 82, fontWeight: 700 }}>{iss.label}</span>
-                            <span style={{ fontSize: 12, color: '#ff8a8a', background: 'rgba(255,80,80,0.12)', border: '1px solid rgba(255,80,80,0.45)', borderRadius: 6, padding: '2px 8px', whiteSpace: 'nowrap' }}>«{iss.raw}» no es válido</span>
-                            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>→</span>
-                            <select value={csvFix[k] || ''} disabled={omit} onChange={e => setCsvFix(fx => ({ ...fx, [k]: e.target.value }))}
-                              style={{ padding: '5px 8px', borderRadius: 6, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, cursor: 'pointer' }}>
-                              <option value="">(dejar vacío)</option>
-                              {iss.opciones.map(o => <option key={o} value={o}>{o}</option>)}
-                            </select>
+                          <div key={iss.colId} style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 12.5, minWidth: 78, fontWeight: 700 }}>{iss.label}</span>
+                            <span style={{ fontSize: 11.5, fontWeight: 700, color: '#ff9a9a', background: 'rgba(255,70,70,0.13)', border: '1px solid rgba(255,70,70,0.4)', borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>«{iss.raw}» ✕</span>
+                            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>→</span>
+                            {[...iss.opciones, ''].map(o => {
+                              const sel = (csvFix[k] || '') === o;
+                              const vacio = o === '';
+                              return (
+                                <button key={o || '__vacio'} type="button" disabled={omit} onClick={() => setCsvFix(fx => ({ ...fx, [k]: o }))}
+                                  style={{ padding: '5px 13px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: omit ? 'default' : 'pointer', transition: 'all .15s',
+                                    border: sel ? '1px solid var(--accent)' : '1px solid var(--border-light)',
+                                    background: sel ? 'var(--accent)' : 'rgba(255,255,255,0.03)',
+                                    color: sel ? '#000' : (vacio ? 'var(--text-muted)' : 'var(--text-secondary)'),
+                                    fontStyle: vacio ? 'italic' : 'normal', opacity: omit ? 0.5 : 1 }}>
+                                  {vacio ? 'vacío' : o}
+                                </button>
+                              );
+                            })}
                           </div>
                         );
                       })}
