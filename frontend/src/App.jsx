@@ -217,18 +217,20 @@ async function leerJson(res) {
 }
 
 // ── Combo: casilla editable + lista desplegable propia (scrolleable, compacta) ──
-function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey }) {
+function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
   const abrir = (todas) => {
+    if (noAbrir) return;   // hay varias celdas seleccionadas → no abrir el desplegable
     const r = inputRef.current?.getBoundingClientRect();
     if (r) setPos({ left: r.left, top: r.bottom + 2, width: r.width });
     setVerTodas(!!todas);
     setOpen(true);
   };
+  useEffect(() => { if (noAbrir) setOpen(false); }, [noAbrir]);   // al pasar a multi-selección, cerrar
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
@@ -5303,18 +5305,19 @@ export default function App() {
                               const _rg = plRango();
                               const enSel = !!_rg && i >= _rg.r0 && i <= _rg.r1 && ci >= _rg.c0 && ci <= _rg.c1;
                               const esHandle = !!_rg && i === _rg.r1 && ci === _rg.c1;   // esquina inf-der del rango
+                              const plMulti = !!_rg && (_rg.r0 !== _rg.r1 || _rg.c0 !== _rg.c1);   // hay más de una celda seleccionada
                               const enFill = plEnFill(i, ci);
                               const foco = () => { setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); };
                               let control;
                               const plc = `${i}-${ci}`;
                               if (c.role === 'talle') {
                                 /* variante: opciones = variantes del molde (escribible: podés tipear o elegir) */
-                                control = <ComboCell value={cellValue} options={estado?.talles || []} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} />;
+                                control = <ComboCell value={cellValue} options={estado?.talles || []} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} noAbrir={plMulti} />;
                               } else if (c.role === 'diseno') {
                                 /* diseño: opciones = los diseños del pedido */
-                                control = <ComboCell value={cellValue} options={disenosPedido.map(d => d.nombre)} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} />;
+                                control = <ComboCell value={cellValue} options={disenosPedido.map(d => d.nombre)} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} noAbrir={plMulti} />;
                               } else if (tipo === 'desplegable') {
-                                control = <ComboCell value={cellValue} options={opts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} />;
+                                control = <ComboCell value={cellValue} options={opts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} noAbrir={plMulti} />;
                               } else if (tipo === 'toggle') {
                                 control = (
                                   <div data-plc={plc} tabIndex={0} onFocus={foco} onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
@@ -5354,7 +5357,10 @@ export default function App() {
                               }
                               return (
                                 <td key={c.id}
-                                  onMouseDown={() => { setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); plSelDragRef.current = true; }}
+                                  onMouseDown={(e) => {
+                                    if (e.shiftKey && plSel) { e.preventDefault(); setPlSelEnd({ r: i, c: ci }); return; }   // Shift+click: extiende el rango desde el ancla
+                                    setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); plSelDragRef.current = true;
+                                  }}
                                   onMouseOver={() => {
                                     if (plDragRef.current) setPlFill({ r: i, c: ci });
                                     else if (plSelDragRef.current) { setPlSelEnd({ r: i, c: ci }); if (!(plSel && plSel.r === i && plSel.c === ci)) setPlSelDrag(true); }
