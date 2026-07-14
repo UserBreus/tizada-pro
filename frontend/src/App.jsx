@@ -559,6 +559,109 @@ function EditableTamanoModal({ inicial, variantes, esNueva, onGuardar, onElimina
   );
 }
 
+// ── Espacio INFINITO de las mesas de tizada ───────────────────────────────
+// Zoom con la rueda SOLO sobre este espacio (no scrollea la página). Pan con
+// el CLICK DERECHO arrastrando. Cada mesa a ESCALA REAL entre sí. El nombre se
+// renombra con doble-click (se guarda al clickear afuera) y el archivo se
+// descarga con ese nombre. Botón de descarga = solo el ícono, arriba a la izq.
+function MesasInfinito({ mesas, job }) {
+  const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
+  const [nombres, setNombres] = useState({});      // key -> nombre editado por el usuario
+  const [editando, setEditando] = useState(null);  // key de la mesa en edición
+  const wrapRef = useRef(null);
+  const viewRef = useRef(view); viewRef.current = view;
+
+  // ZOOM con la rueda: listener nativo NO pasivo → preventDefault corta el scroll de la página
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const b = el.getBoundingClientRect();
+      const mx = e.clientX - b.left, my = e.clientY - b.top;
+      setView(v => {
+        const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+        const nz = Math.max(0.15, Math.min(8, v.zoom * f));
+        const k = nz / v.zoom;
+        return { zoom: nz, panX: mx - (mx - v.panX) * k, panY: my - (my - v.panY) * k };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // PAN arrastrando con el CLICK DERECHO (izquierdo queda libre para editar el nombre)
+  const startPan = (e) => {
+    if (e.button !== 2) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, px = viewRef.current.panX, py = viewRef.current.panY;
+    const mv = (ev) => setView(v => ({ ...v, panX: px + (ev.clientX - sx), panY: py + (ev.clientY - sy) }));
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  };
+
+  const sanit = (s) => ((s || 'mesa').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa');
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
+        <button type="button" onClick={() => setView({ zoom: 1, panX: 0, panY: 0 })} title="Ver todo" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Ver todo</button>
+        <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.max(0.15, v.zoom / 1.25) }))} title="Alejar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>−</button>
+        <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.min(8, v.zoom * 1.25) }))} title="Acercar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>+</button>
+      </div>
+      <div ref={wrapRef} onMouseDown={startPan} onContextMenu={(e) => e.preventDefault()}
+        style={{ position: 'relative', height: '74vh', overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
+          {mesas.flatMap((hoja, hi) => {
+            const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
+            const urlPdf = `/trabajos/${job.resultado.id}/${hoja.archivo}`;
+            return pvs.map((pv, pi) => {
+              const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
+              const anchoCm = hoja.ancho_cm || 180;
+              const nMesas = pvs.length;
+              const PXM = 240;   // px por metro: ESCALA REAL común a todas las mesas
+              const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
+              const key = hi + '-' + pi;
+              const nombreDef = (hoja.moldes?.length ? hoja.moldes.join(' + ') : 'Mesa de trabajo') + (nMesas > 1 ? ` · Mesa ${pi + 1}` : '');
+              const nombre = nombres[key] != null ? nombres[key] : nombreDef;
+              return (
+                <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                  {/* ARRIBA A LA IZQUIERDA: ícono de descarga + nombre (doble-click para renombrar) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: w }}>
+                    <a href={urlPdf} download={sanit(nombre) + '.pdf'} title="Descargar PDF"
+                      onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
+                      style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
+                      <Icon name="download" style={{ width: 14, height: 14 }} />
+                    </a>
+                    {editando === key
+                      ? <input autoFocus value={nombre}
+                          onChange={(e) => setNombres(n => ({ ...n, [key]: e.target.value }))}
+                          onBlur={() => setEditando(null)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditando(null); }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          style={{ fontSize: 12, fontWeight: 700, color: '#000', background: '#fff', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', maxWidth: Math.max(w - 40, 90), outline: 'none' }} />
+                      : <span onDoubleClick={() => setEditando(key)} title="Doble-click para renombrar"
+                          style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text', userSelect: 'none' }}>{nombre}</span>}
+                  </div>
+                  {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
+                  {pv
+                    ? <img src={`/trabajos/${job.resultado.id}/${pv}`} alt={nombre} draggable={false}
+                        style={{ width: w, height: h, display: 'block' }} />
+                    : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
+                  {/* ABAJO: tamaño ancho × alto */}
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+                    {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
+                  </div>
+                </div>
+              );
+            });
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Mapeador de arte VISUAL (reutilizable: operario y ajuste interno) ──────
 // Muestra el molde con el diseño encima (a escala, sin deformar). Se toca una
 // pieza y se elige en qué mesa del diseño está. Mismo mapeador en los dos lados.
@@ -1268,8 +1371,6 @@ export default function App() {
   // Previsualizador Vectorial Zoom
   const [zoomPreviewUrl, setZoomPreviewUrl] = useState(null);
   const [zoomState, setZoomState] = useState({ zoom: 1.0, pan: { x: 0, y: 0 } });
-  // Espacio infinito de las MESAS de trabajo (resultado de la tizada): pan (arrastrar) + zoom (rueda).
-  const [mesasView, setMesasView] = useState({ zoom: 1, panX: 0, panY: 0 });
   const zoomLevel = zoomState.zoom;
   const panOffset = zoomState.pan;
   const [esArrastrando, setEsArrastrando] = useState(false);
@@ -5598,11 +5699,12 @@ export default function App() {
                       return hojas.length > 0 ? (
                         <button className="btn primary" style={{ padding: '8px 14px', fontSize: 12.5 }}
                           onClick={async () => {
-                            // Descarga TODAS las mesas, un archivo por uno (sin ZIP)
+                            // Descarga TODAS las mesas, un archivo por uno (sin ZIP), con el NOMBRE de la mesa
                             for (const h of hojas) {
+                              const nom = (h.moldes?.length ? h.moldes.join(' + ') : 'Mesa de trabajo').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa';
                               const a = document.createElement('a');
                               a.href = `/trabajos/${j.resultado.id}/${h.archivo}`;
-                              a.download = h.archivo;
+                              a.download = nom + '.pdf';
                               document.body.appendChild(a); a.click(); a.remove();
                               await new Promise(r => setTimeout(r, 450));
                             }
@@ -5660,57 +5762,9 @@ export default function App() {
                           ))}
                         </div>
                       )}
-                      {/* ESPACIO INFINITO (como el visor del molde): pan = arrastrar el fondo, zoom = rueda.
-                          Cada MESA a ESCALA REAL entre sí (mismo px/metro), SIN marco: solo la hoja con el
-                          botón Descargar y el nombre arriba, y el tamaño (ancho × alto) abajo. */}
-                      <div style={{ position: 'relative' }}>
-                        <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
-                          <button type="button" onClick={() => setMesasView({ zoom: 1, panX: 0, panY: 0 })} title="Ver todo" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Ver todo</button>
-                          <button type="button" onClick={() => setMesasView(v => ({ ...v, zoom: Math.max(0.15, v.zoom / 1.25) }))} title="Alejar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>−</button>
-                          <button type="button" onClick={() => setMesasView(v => ({ ...v, zoom: Math.min(8, v.zoom * 1.25) }))} title="Acercar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>+</button>
-                        </div>
-                        <div
-                          onWheel={(e) => { e.preventDefault(); const b = e.currentTarget.getBoundingClientRect(); const mx = e.clientX - b.left, my = e.clientY - b.top; setMesasView(v => { const f = e.deltaY < 0 ? 1.12 : 1 / 1.12; const nz = Math.max(0.15, Math.min(8, v.zoom * f)); const k = nz / v.zoom; return { zoom: nz, panX: mx - (mx - v.panX) * k, panY: my - (my - v.panY) * k }; }); }}
-                          onMouseDown={(e) => { if (e.button !== 0 || (e.target.closest && e.target.closest('a,button,img'))) return; const sx = e.clientX, sy = e.clientY, px = mesasView.panX, py = mesasView.panY; const mv = (ev) => setMesasView(v => ({ ...v, panX: px + (ev.clientX - sx), panY: py + (ev.clientY - sy) })); const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); }}
-                          style={{ position: 'relative', height: '74vh', overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
-                          <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${mesasView.panX}px, ${mesasView.panY}px) scale(${mesasView.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
-                            {mesas.flatMap((hoja, hi) => {
-                              // Cada PÁGINA del PDF = una MESA física de tela (corte de ese alto).
-                              const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
-                              const urlPdf = `/trabajos/${job.resultado.id}/${hoja.archivo}`;
-                              return pvs.map((pv, pi) => {
-                                const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
-                                const anchoCm = hoja.ancho_cm || 180;
-                                const nMesas = pvs.length;
-                                const PXM = 240;   // px por metro: ESCALA REAL común a todas las mesas (grande para que la mesa domine al botón/texto; se ajusta con el zoom)
-                                const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
-                                const nombre = (hoja.moldes?.length ? hoja.moldes.join(' + ') : 'Mesa de trabajo') + (nMesas > 1 ? ` · Mesa ${pi + 1}` : '');
-                                return (
-                                  <div key={hi + '-' + pi} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                                    {/* ARRIBA: nombre + botón descargar */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: Math.max(w, 140) }}>
-                                      <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</span>
-                                      <a href={urlPdf} download title="Descargar PDF" onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', fontSize: 11, fontWeight: 700, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
-                                        <Icon name="download" style={{ width: 12, height: 12 }} /> Descargar
-                                      </a>
-                                    </div>
-                                    {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
-                                    {pv
-                                      ? <img src={`/trabajos/${job.resultado.id}/${pv}`} alt={nombre} title="Click para ampliar" draggable={false}
-                                          onClick={() => { setZoomPreviewUrl(`/trabajos/${job.resultado.id}/${pv}`); setZoomState({ zoom: 1, pan: { x: 0, y: 0 } }); setEsArrastrando(false); }}
-                                          style={{ width: w, height: h, display: 'block', cursor: 'zoom-in' }} />
-                                      : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
-                                    {/* ABAJO: tamaño ancho × alto */}
-                                    <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
-                                      {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
-                                    </div>
-                                  </div>
-                                );
-                              });
-                            })}
-                          </div>
-                        </div>
-                      </div>
+                      {/* ESPACIO INFINITO de las mesas (componente propio: zoom con rueda sin scrollear
+                          la página, pan con click DERECHO, nombre renombrable, descarga con ese nombre). */}
+                      <MesasInfinito mesas={mesas} job={job} />
                     </div>
                   );
                 })()}
