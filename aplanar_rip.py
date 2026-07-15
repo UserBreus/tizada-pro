@@ -357,6 +357,12 @@ def aplanar_para_rip(path):
     cada página es independiente y ya se aplanaba por separado → MISMO resultado, mucho más rápido
     en hojas con muchas piezas. Best-effort con fallback SERIAL si algo del paralelo falla."""
     try:
+        # SERIAL por defecto (garantiza el mismo resultado que siempre, sin riesgo de perder
+        # contenido al partir/reensamblar según la estructura del arte). El paralelo por página
+        # (más rápido en hojas con muchas páginas) es OPT-IN con TIZADA_APLANADO_PARALELO=1.
+        if not os.environ.get("TIZADA_APLANADO_PARALELO"):
+            _aplanar_archivo(path)
+            return True
         src = pikepdf.open(path)
         npag = len(src.pages)
         if npag <= 1:
@@ -379,15 +385,23 @@ def aplanar_para_rip(path):
             oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial
         if not all(oks):
             raise RuntimeError("una página no se aplanó en paralelo")
-        # 3) reensamblar las páginas ya aplanadas
+        # 3) reensamblar las páginas ya aplanadas. IMPORTANTE: mantener CADA PDF fuente ABIERTO
+        # hasta después de out.save() — pikepdf copia perezoso y cerrar antes deja referencias
+        # colgadas → se pierde contenido en algunas páginas.
         out = pikepdf.new()
+        abiertos = []
         for tmp in tmps:
-            s = pikepdf.open(tmp); out.pages.extend(s.pages); s.close()
+            s = pikepdf.open(tmp)
+            out.pages.extend(s.pages)
+            abiertos.append(s)
         out.docinfo["/Creator"] = "TIZADA PRO"
         out.docinfo["/Producer"] = "TIZADA PRO"
         out.remove_unreferenced_resources()
         out.save(path, force_version="1.6")
         out.close()
+        for s in abiertos:
+            try: s.close()
+            except Exception: pass
         for tmp in tmps:
             try: os.remove(tmp)
             except Exception: pass
