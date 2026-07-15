@@ -202,6 +202,62 @@ const getProgresoDetalle = (progresoStr, estado) => {
   return { pct: 50, texto: progresoStr };
 };
 
+// ── Animación de carga de la tizada: camiseta trazándose + cronómetro mm:ss + fase ──
+const _SHIRT_PATH = "M50 10 C44 10 41 15 33 16 L13 27 L22 46 L33 41 L33 110 L67 110 L67 41 L78 46 L87 27 L67 16 C59 15 56 10 50 10 Z";
+function TizadaLoader({ det }) {
+  const [seg, setSeg] = useState(0);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => setSeg(Math.floor((Date.now() - t0) / 1000)), 250);
+    return () => clearInterval(id);
+  }, []);
+  const mm = String(Math.floor(seg / 60)).padStart(2, '0');
+  const ss = String(seg % 60).padStart(2, '0');
+  const pct = det?.pct ?? 0;
+  return (
+    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '18px 12px' }}>
+      <style>{`
+        @keyframes tzTrace { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+        @keyframes tzScan  { 0% { transform: translateY(-28px); } 100% { transform: translateY(118px); } }
+        @keyframes tzFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @keyframes tzDots  { 0%,20% { opacity:.2 } 50% { opacity:1 } 80%,100% { opacity:.2 } }
+      `}</style>
+      <div style={{ position: 'relative', width: 128, height: 150, animation: 'tzFloat 2.8s ease-in-out infinite' }}>
+        <svg viewBox="0 0 100 120" width="128" height="150" style={{ overflow: 'visible' }}>
+          <defs>
+            <clipPath id="tzShirtClip"><path d={_SHIRT_PATH} /></clipPath>
+            <linearGradient id="tzScanGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="var(--accent)" stopOpacity="0" />
+              <stop offset="0.5" stopColor="var(--accent)" stopOpacity="0.6" />
+              <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={_SHIRT_PATH} fill="var(--accent)" fillOpacity="0.07" />
+          <g clipPath="url(#tzShirtClip)">
+            <rect x="0" width="100" height="28" fill="url(#tzScanGrad)" style={{ animation: 'tzScan 1.9s ease-in-out infinite' }} />
+          </g>
+          <path d={_SHIRT_PATH} pathLength="100" fill="none" stroke="var(--accent)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round"
+            style={{ strokeDasharray: 100, strokeDashoffset: 100, animation: 'tzTrace 2.4s ease-in-out infinite alternate', filter: 'drop-shadow(0 0 5px var(--accent))' }} />
+        </svg>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span style={{ fontSize: 32, fontWeight: 800, fontFamily: 'monospace', letterSpacing: 1.5, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{mm}:{ss}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>transcurrido</span>
+      </div>
+      <div style={{ width: '100%', maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 7 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{det?.texto || 'Preparando…'}</span>
+          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--accent)' }}>{pct}%</span>
+        </div>
+        <div className="progress-bar-container"><div className="progress-bar shimmer" style={{ width: `${pct}%`, transition: 'width .4s ease' }}></div></div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        Armando la tizada<span style={{ animation: 'tzDots 1.4s infinite' }}>…</span> no cierres esta ventana
+      </div>
+    </div>
+  );
+}
+
 // Parseo seguro de respuestas JSON. Si el servidor devuelve HTML (típico cuando
 // un endpoint no existe porque el Python en memoria está desactualizado), en vez
 // de un críptico "Unexpected token '<'" damos un mensaje claro y accionable.
@@ -6066,15 +6122,7 @@ export default function App() {
                   if (job.estado === 'error') return <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 14 }}>{job.error}</div>;
                   if (job.estado !== 'listo') {
                     const det = getProgresoDetalle(job.progreso, job.estado);
-                    return (
-                      <div style={{ marginTop: 16 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{det.texto}</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--accent)' }}>{det.pct}%</span>
-                        </div>
-                        <div className="progress-bar-container"><div className="progress-bar shimmer" style={{ width: `${det.pct}%`, transition: 'width .4s ease' }}></div></div>
-                      </div>
-                    );
+                    return <TizadaLoader det={det} />;
                   }
                   const hojas = job.resultado?.hojas || [];
                   const telas = [...new Set(hojas.map(h => h.tela))];
@@ -6124,17 +6172,7 @@ export default function App() {
                 
                 {trabajoEstado.estado === 'generando' || trabajoEstado.estado === 'en cola' ? (() => {
                   const det = getProgresoDetalle(trabajoEstado.progreso, trabajoEstado.estado);
-                  return (
-                    <div style={{ marginTop: 12 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-secondary)' }}>
-                        <span>{det.texto}</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{det.pct}%</span>
-                      </div>
-                      <div className="progress-bar-container">
-                        <div className="progress-bar shimmer" style={{ width: `${det.pct}%` }}></div>
-                      </div>
-                    </div>
-                  );
+                  return <TizadaLoader det={det} />;
                 })() : trabajoEstado.estado === 'error' ? (
                   <div style={{ color: 'var(--error)', marginTop: 8, display: 'flex', gap: 10, alignItems: 'center' }}>
                     <Icon name="alert" style={{ width: 18, height: 18 }} />
