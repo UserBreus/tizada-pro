@@ -243,6 +243,8 @@ const _LOGO_INNER = `
 <path d="M78.3,194.7c-3.1,3.1-5.1-2.5-5.2-4.9s.7-2.5.8-3.8c.2-2.5-1-7.1,2.7-7.4s2.7,3.1,2.7,5.1.6,9.5-.9,11.1Z"/>
 <path d="M358.6,630.6h17.4c1.7,1.3,1.7,3.4,0,4.6h-17c-1.7,0-.9-3.5-.4-4.6Z"/>
 `;
+// Cada pieza del logo por separado (para resaltarlas de a una, en orden).
+const _LOGO_PATHS = (_LOGO_INNER.match(/d="[^"]+"/g) || []).map(s => s.slice(3, -1)).concat(["M505.6,437.8h7.8v79.1h-7.8Z"]);
 function TizadaLoader({ det }) {
   const [seg, setSeg] = useState(0);
   useEffect(() => {
@@ -257,19 +259,13 @@ function TizadaLoader({ det }) {
     <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 12px' }}>
       <style>{`
         @keyframes tzFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-        @keyframes tzPa { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-17px) rotate(3.5deg); } }
-        @keyframes tzPb { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(15px) rotate(-3deg); } }
-        @keyframes tzPc { 0%,100% { transform: translate(0,0) rotate(0); } 50% { transform: translate(14px,-6px) rotate(2deg); } }
-        @keyframes tzPd { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-12px,8px) scale(1.06); } }
-        /* cada OBJETO del logo se mueve por separado (dirección, velocidad y fase distintas) */
-        .tzAnim > * { transform-box: fill-box; transform-origin: center; }
-        .tzAnim > *:nth-child(4n)   { animation: tzPa 2.7s ease-in-out infinite; }
-        .tzAnim > *:nth-child(4n+1) { animation: tzPb 3.3s ease-in-out infinite; }
-        .tzAnim > *:nth-child(4n+2) { animation: tzPc 2.9s ease-in-out infinite; }
-        .tzAnim > *:nth-child(4n+3) { animation: tzPd 3.1s ease-in-out infinite; }
-        .tzAnim > *:nth-child(5n)   { animation-delay: -1.4s; }
-        .tzAnim > *:nth-child(5n+2) { animation-delay: -0.7s; }
-        .tzAnim > *:nth-child(5n+3) { animation-delay: -2.1s; }
+        /* Resaltar UNA pieza HACIA ADELANTE (se agranda + brilla + sombra = se acerca), y vuelve.
+           Con el delay escalonado, el resalte RECORRE las piezas en orden, una tras otra. */
+        @keyframes tzPop {
+          0%, 18%, 100% { transform: scale(1); filter: brightness(1); }
+          9% { transform: scale(1.28); filter: brightness(1.7) drop-shadow(0 6px 10px rgba(0,0,0,0.55)); }
+        }
+        .tzAnim > path { transform-box: fill-box; transform-origin: center; animation: tzPop 2.8s ease-in-out infinite; }
         @keyframes tzDots { 0%,20% { opacity:.2 } 50% { opacity:1 } 80%,100% { opacity:.2 } }
       `}</style>
       <div style={{ position: 'relative', width: 150, height: 145, animation: 'tzFloat 3s ease-in-out infinite', filter: 'drop-shadow(0 0 7px rgba(0,150,255,0.5))' }}>
@@ -281,8 +277,12 @@ function TizadaLoader({ det }) {
               <stop offset="1" stopColor="#ff4db8" />
             </linearGradient>
           </defs>
-          {/* cada path del logo = un objeto que se anima solo (ver reglas .tzAnim de arriba) */}
-          <g className="tzAnim" fill="url(#tzGrad)" dangerouslySetInnerHTML={{ __html: _LOGO_INNER }} />
+          {/* cada pieza del logo, con su delay en orden → el resalte hacia adelante las recorre */}
+          <g className="tzAnim" fill="url(#tzGrad)">
+            {_LOGO_PATHS.map((d, i) => (
+              <path key={i} d={d} style={{ animationDelay: (i * (2.8 / _LOGO_PATHS.length)).toFixed(3) + 's' }} />
+            ))}
+          </g>
         </svg>
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
