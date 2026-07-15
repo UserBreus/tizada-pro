@@ -243,9 +243,6 @@ const _LOGO_INNER = `
 <path d="M78.3,194.7c-3.1,3.1-5.1-2.5-5.2-4.9s.7-2.5.8-3.8c.2-2.5-1-7.1,2.7-7.4s2.7,3.1,2.7,5.1.6,9.5-.9,11.1Z"/>
 <path d="M358.6,630.6h17.4c1.7,1.3,1.7,3.4,0,4.6h-17c-1.7,0-.9-3.5-.4-4.6Z"/>
 `;
-// El logo como MÁSCARA (silueta opaca) → detrás va un gradiente CSS que fluye (100% CSS, sin SMIL).
-const _LOGO_MASK = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 118 596 560">' + _LOGO_INNER + '</svg>') + '")';
-const _MASK_STYLE = { WebkitMaskImage: _LOGO_MASK, maskImage: _LOGO_MASK, WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskPosition: 'center', maskPosition: 'center' };
 function TizadaLoader({ det }) {
   const [seg, setSeg] = useState(0);
   useEffect(() => {
@@ -259,16 +256,34 @@ function TizadaLoader({ det }) {
   return (
     <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 12px' }}>
       <style>{`
-        @keyframes tzFloat    { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-        @keyframes tzFlow     { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
-        @keyframes tzShineBg  { 0% { background-position: 135% 0; } 55%,100% { background-position: -55% 0; } }
-        @keyframes tzDots     { 0%,20% { opacity:.2 } 50% { opacity:1 } 80%,100% { opacity:.2 } }
+        @keyframes tzFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+        @keyframes tzPa { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-17px) rotate(3.5deg); } }
+        @keyframes tzPb { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(15px) rotate(-3deg); } }
+        @keyframes tzPc { 0%,100% { transform: translate(0,0) rotate(0); } 50% { transform: translate(14px,-6px) rotate(2deg); } }
+        @keyframes tzPd { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-12px,8px) scale(1.06); } }
+        /* cada OBJETO del logo se mueve por separado (dirección, velocidad y fase distintas) */
+        .tzAnim > * { transform-box: fill-box; transform-origin: center; }
+        .tzAnim > *:nth-child(4n)   { animation: tzPa 2.7s ease-in-out infinite; }
+        .tzAnim > *:nth-child(4n+1) { animation: tzPb 3.3s ease-in-out infinite; }
+        .tzAnim > *:nth-child(4n+2) { animation: tzPc 2.9s ease-in-out infinite; }
+        .tzAnim > *:nth-child(4n+3) { animation: tzPd 3.1s ease-in-out infinite; }
+        .tzAnim > *:nth-child(5n)   { animation-delay: -1.4s; }
+        .tzAnim > *:nth-child(5n+2) { animation-delay: -0.7s; }
+        .tzAnim > *:nth-child(5n+3) { animation-delay: -2.1s; }
+        @keyframes tzDots { 0%,20% { opacity:.2 } 50% { opacity:1 } 80%,100% { opacity:.2 } }
       `}</style>
       <div style={{ position: 'relative', width: 150, height: 145, animation: 'tzFloat 3s ease-in-out infinite', filter: 'drop-shadow(0 0 7px rgba(0,150,255,0.5))' }}>
-        {/* color que FLUYE por el logo (gradiente CSS enmascarado con la silueta) */}
-        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(115deg,#00d8f5,#6a5cff,#ff4db8,#00d8f5)', backgroundSize: '220% 220%', animation: 'tzFlow 4s ease infinite', ..._MASK_STYLE }} />
-        {/* brillo que RECORRE el logo en diagonal */}
-        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(115deg, transparent 43%, rgba(255,255,255,0.85) 50%, transparent 57%)', backgroundSize: '300% 100%', animation: 'tzShineBg 2.9s ease-in-out infinite', ..._MASK_STYLE }} />
+        <svg viewBox="8 118 596 560" width="150" height="145" style={{ overflow: 'visible' }}>
+          <defs>
+            <linearGradient id="tzGrad" gradientUnits="userSpaceOnUse" x1="20" y1="130" x2="560" y2="660">
+              <stop offset="0" stopColor="#00d8f5" />
+              <stop offset="0.5" stopColor="#6a5cff" />
+              <stop offset="1" stopColor="#ff4db8" />
+            </linearGradient>
+          </defs>
+          {/* cada path del logo = un objeto que se anima solo (ver reglas .tzAnim de arriba) */}
+          <g className="tzAnim" fill="url(#tzGrad)" dangerouslySetInnerHTML={{ __html: _LOGO_INNER }} />
+        </svg>
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span style={{ fontSize: 32, fontWeight: 800, fontFamily: 'monospace', letterSpacing: 1.5, color: '#fff', fontVariantNumeric: 'tabular-nums' }}>{mm}:{ss}</span>
