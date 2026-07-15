@@ -3105,7 +3105,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
     Todas las piezas de una misma tela van JUNTAS (sin importar de qué molde son)."""
     cfg = {"ancho_cm": 180, "altura_max_cm": 500, "espaciado_cm": 0.5,
            "margenes_cm": {"sup": 1, "inf": 1, "izq": 1, "der": 1},
-           "resolucion_mm": 3, "estrategias": ["bl", "bandas"]}
+           "resolucion_mm": float(os.environ.get("TIZADA_RES_MM", 4)), "estrategias": ["bl", "bandas"]}
     if config_nesting:
         cfg.update(config_nesting)
     hojas = []
