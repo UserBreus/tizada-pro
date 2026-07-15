@@ -3087,6 +3087,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             r = doc[0].rect
             piezas_por_tela.setdefault(TELA(pieza), []).append(
                 {"doc": doc, "w": r.width, "h": r.height, "pieza": pieza, "talle": pr["talle"],
+                 "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
                  "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
             hechas += 1
             if progreso:

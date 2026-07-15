@@ -103,34 +103,52 @@ def _preparar(piezas, cfg):
     alto_c = int((min(cfg["altura_max_cm"] * CM, 14400) - (m["sup"] + m["inf"]) * CM) / cell_pt)
     esp_c = max(1, ceil(cfg["espaciado_cm"] * CM / cell_pt))  # respeta la separación, sin la celda extra de antes
     paso = cfg.get("paso_libre_grados", 15)
+    # DEDUP por GEOMETRÍA: muchas piezas comparten silueta (mismo (pieza,talle,variante,
+    # rotación,borde,grilla)). La máscara sale SOLO del contorno de corte exterior
+    # (umbral + fill_holes; el estampado interior no la cambia) → misma clave = máscara y
+    # candidatos IDÉNTICOS. Se computan UNA vez y se comparten (solo lectura en la colocación),
+    # evitando N rasterizaciones/dilataciones. No afecta la salida (solo posiciona; se dibuja
+    # el `doc` propio de cada pieza). Base cacheada por (pieza,talle,variante) en el motor.
+    _geo = {}
     for p in piezas:
         cache_key = (cell_pt, esp_c, paso, p["rotacion"], p.get("borde_cm", 0))
-        if p.get("_cache_key") != cache_key:               # no recomputar entre órdenes
-            p["_mask"] = _mascara(p["doc"], cell_pt)
-            p["_borde_c"] = ceil(p.get("borde_cm", 0) * CM / cell_pt)
-            p["_cell_pt"] = cell_pt
-            
-            # Precalcular candidatos por ángulo (rotación y dilataciones)
-            candidatos_angulo = []
-            for ang in _angulos(p["rotacion"], paso):
-                mr = _rotar(p["_mask"], ang)
-                pad = p["_borde_c"] + esp_c
-                mr_p = np.pad(mr, pad)
-                if p["_borde_c"]:
-                    mr_col = ndimage.binary_dilation(mr_p, _disco(p["_borde_c"]))
-                else:
-                    mr_col = mr_p
-                d = _disco(esp_c)
-                mr_test = ndimage.binary_dilation(mr_col, d) if d is not None else mr_col
-                
-                # Si mr_test es más alto que la hoja o más ancho, no sirve
-                if mr_test.shape[0] > alto_c or mr_test.shape[1] > ancho_c:
-                    continue
-                candidatos_angulo.append((ang, mr_col, mr_test))
-                
-            p["_candidatos_angulo"] = candidatos_angulo
+        if p.get("_cache_key") == cache_key:               # ya computada (mismo objeto, otra orden)
+            continue
+        geo_key = (p.get("pieza"), p.get("talle"), p.get("variante"), p["rotacion"],
+                   p.get("borde_cm", 0), cell_pt, esp_c, paso)
+        hit = _geo.get(geo_key)
+        if hit is not None:                                # otra instancia con MISMA geometría
+            p["_mask"] = hit["_mask"]; p["_borde_c"] = hit["_borde_c"]
+            p["_cell_pt"] = hit["_cell_pt"]; p["_candidatos_angulo"] = hit["_candidatos_angulo"]
             p["_cache_key"] = cache_key
-            
+            continue
+        p["_mask"] = _mascara(p["doc"], cell_pt)
+        p["_borde_c"] = ceil(p.get("borde_cm", 0) * CM / cell_pt)
+        p["_cell_pt"] = cell_pt
+
+        # Precalcular candidatos por ángulo (rotación y dilataciones)
+        candidatos_angulo = []
+        for ang in _angulos(p["rotacion"], paso):
+            mr = _rotar(p["_mask"], ang)
+            pad = p["_borde_c"] + esp_c
+            mr_p = np.pad(mr, pad)
+            if p["_borde_c"]:
+                mr_col = ndimage.binary_dilation(mr_p, _disco(p["_borde_c"]))
+            else:
+                mr_col = mr_p
+            d = _disco(esp_c)
+            mr_test = ndimage.binary_dilation(mr_col, d) if d is not None else mr_col
+
+            # Si mr_test es más alto que la hoja o más ancho, no sirve
+            if mr_test.shape[0] > alto_c or mr_test.shape[1] > ancho_c:
+                continue
+            candidatos_angulo.append((ang, mr_col, mr_test))
+
+        p["_candidatos_angulo"] = candidatos_angulo
+        p["_cache_key"] = cache_key
+        _geo[geo_key] = {"_mask": p["_mask"], "_borde_c": p["_borde_c"],
+                         "_cell_pt": p["_cell_pt"], "_candidatos_angulo": p["_candidatos_angulo"]}
+
     return cell_pt, ancho_c, alto_c, esp_c, paso
 
 

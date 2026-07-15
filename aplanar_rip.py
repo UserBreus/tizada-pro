@@ -237,20 +237,95 @@ def _declarar_estado_grafico(pdf, page):
     page.Contents = pdf.make_stream(b"/GSflat gs\n" + cont.read_bytes())
 
 
+def _procesar_contenido(pdf, page):
+    """UNA sola pasada por el content-stream de la página (ya aplanada) que hace lo que antes eran
+    4 pasadas separadas (cada una re-parseaba el stream GIGANTE): (1) saca los bloques de texto
+    fantasma (fuente inexistente / sin glifos), (2) saca los marcadores de capa OCG (BMC/BDC/EMC/
+    MP/DP), (3) remapea los ColorSpace ICCBased duplicados a uno canónico, (4) junta los XObjects
+    realmente usados para borrar los huérfanos. Mismo resultado byte a byte que las 4 pasadas, pero
+    parseando el stream una vez → ~4× menos parse/unparse en hojas con muchas piezas."""
+    import hashlib
+    res = page.get("/Resources")
+    # ICC: dedup por contenido → remap {nombre_dup: canónico}
+    remap = {}
+    cs = res.get("/ColorSpace") if res else None
+    if cs:
+        by_hash = {}
+        for nm in [str(k) for k in cs.keys()]:
+            v = cs[nm]
+            try:
+                if isinstance(v, pikepdf.Array) and str(v[0]) == "/ICCBased":
+                    h = hashlib.sha1(bytes(v[1].read_raw_bytes())).hexdigest()
+                    if h in by_hash:
+                        remap[nm] = by_hash[h]; del cs[nm]
+                    else:
+                        by_hash[h] = nm
+            except Exception:
+                pass
+    fonts = set(str(k) for k in (res.get("/Font", {}) or {}).keys()) if res else set()
+    _CS_OPS = ("cs", "CS", "scn", "SCN")   # operadores que referencian un ColorSpace por Name
+    def _rmp(operands, op):
+        if remap and str(op) in _CS_OPS:
+            operands = [pikepdf.Name(remap.get(str(o), str(o))) if isinstance(o, pikepdf.Name) else o for o in operands]
+        return (operands, op)
+    try:
+        ops = list(parse_content_stream(page))
+    except Exception:
+        ops = None
+    usados = set()
+    if ops is not None:
+        out, block, in_bt = [], [], False
+        falta_fuente = tiene_texto = False
+        _MC = ("BDC", "BMC", "EMC", "MP", "DP")
+        for operands, op in ops:
+            o = str(op)
+            if o in _MC:
+                continue                                   # marcador de capa/estructura → fuera (no marca nada)
+            if o == "BT":
+                in_bt = True; block = [(operands, op)]; falta_fuente = tiene_texto = False
+                continue
+            if in_bt:
+                block.append(_rmp(operands, op))
+                if o == "Tf" and operands and isinstance(operands[0], Name) and str(operands[0]) not in fonts:
+                    falta_fuente = True
+                elif o in ("Tj", "TJ", "'", '"'):
+                    tiene_texto = True
+                if o == "ET":
+                    in_bt = False
+                    if not (falta_fuente or not tiene_texto):
+                        out.extend(block)                  # bloque de texto válido → se conserva
+                    block = []
+                continue
+            if o == "Do" and operands and isinstance(operands[0], Name):
+                usados.add(str(operands[0]))
+            out.append(_rmp(operands, op))
+        page.Contents = pdf.make_stream(unparse_content_stream(out))
+    # huérfanos: quitar los XObjects que ya no se referencian con Do
+    xo = res.get("/XObject") if res else None
+    if xo is not None and ops is not None:
+        for nm in [str(k) for k in xo.keys()]:
+            if nm not in usados:
+                del xo[nm]
+    # limpiar residuo de OCG (capas opcionales)
+    if res is not None and "/Properties" in res:
+        del res["/Properties"]
+    if res is not None:
+        for k, v in list((res.get("/XObject", {}) or {}).items()):
+            if "/OC" in v:
+                del v["/OC"]
+    if "/OCProperties" in pdf.Root:
+        del pdf.Root["/OCProperties"]
+
+
 def aplanar_para_rip(path):
     """Aplana la HOJA in-place: des-anida + consolida ICC + declara estado gráfico + PDF 1.6, con
     los colores CMYK EXACTOS. Best-effort: si algo falla, deja el PDF como estaba (no rompe la tizada)."""
     try:
         pdf = pikepdf.open(path, allow_overwriting_input=True)
         for page in pdf.pages:
-            _flatten(pdf, page, es_pagina=True)
-            _limpiar_huerfanos(page)
-            quitados, perdidos = _sanear_texto(pdf, page)
-            if perdidos:
-                print(f"  [aplanar_rip] OJO: {perdidos} bloque(s) con texto REAL y fuente inexistente")
-            _quitar_ocg(pdf, page)
-            _consolidar_iccbased(pdf, page)
-            _declarar_estado_grafico(pdf, page)
+            _flatten(pdf, page, es_pagina=True)      # des-anida los Form XObjects (inline byte a byte)
+            _procesar_contenido(pdf, page)           # 1 pasada: sanea texto + saca OCG + consolida ICC + huérfanos
+            _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
         if "/OutputIntents" in pdf.Root:
             del pdf.Root["/OutputIntents"]   # Illustrator no lo tiene; el ICCBased de la página alcanza
         # DECLARAR Creator/Producer: los PDFs que pasan el RIP (Illustrator, Ghostscript) lo declaran;
