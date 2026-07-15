@@ -202,8 +202,47 @@ const getProgresoDetalle = (progresoStr, estado) => {
   return { pct: 50, texto: progresoStr };
 };
 
-// ── Animación de carga de la tizada: camiseta trazándose + cronómetro mm:ss + fase ──
-const _SHIRT_PATH = "M50 10 C44 10 41 15 33 16 L13 27 L22 46 L33 41 L33 110 L67 110 L67 41 L78 46 L87 27 L67 16 C59 15 56 10 50 10 Z";
+// ── Animación de carga: LOGO con registro CMYK (fantasmas C/M/Y que se desalinean y "registran"
+//    como una impresora) + barrido del cabezal + cronómetro mm:ss + fase. Moderno/futurista. ──
+const _LOGO_INNER = `
+<g>
+<path d="M274.5,419.1c3.2,3.2,7.7,5.4,11.8,7.2s1.4-.4,1.1,1.6c-7.4,1.4-13.8,7.6-17.4,13.9-1.2,2.1-1.6,5-3.5,6.2-1.6-8.3-10.6-18.7-19-20.1s-1.3.4-1.2-1.5c9.4-1.7,18-11,20.1-20.1,1.1,0,1.2,1.2,1.6,1.9,1.8,3.8,3.4,7.9,6.4,11Z"/>
+<path d="M485.5,415.1c-.2.9-2.4,2.2-3.4,2-56.9,1.3-114.2-1.9-171.1,0-1.7,0-3.4.9-4.6.8s-11.2-5.2-12.6-6.1c-8.1-4.9-16.7-17.4-18-26.9-2.2-17,1.3-38.8,0-56.5-.5-6-4.6-11.7-10.2-13.7s-9.3-.5-9.9-4v-95.5c11.7-2.4,23.3-3.3,34.8-6.7,23-6.7,35.8-16.6,46-38.3,1.1-2.4.7-5.4,4-6.1l122.5,23.4c1.2.8.8,11.2.7,13.2-.7,18.4-1.1,36.5,1.6,54.8.9,6,2.3,12.1,3.8,18l-.3,1.9-82.4,39.4,98.2-10c0,.7.9,1.6.9,1.8v108.3Z"/>
+<path d="M514.2,537.7c.3.1,2.8,3.3,2.4,4.2l-.4,61.6c-1.5,3.7-4,7.1-7.4,9.3s-.9,1-1.7,1l-229.7.2-1.2-1.2-.4-144.4c4.1-14.7,14.3-27.5,29.9-30.5h173.2c1.4.5,1.9,2.8,2.1,4.2,3.3,32.1-13,80.9,27.1,94.4,1.9.6,5.1.7,6.2,1.2Z"/>
+<g>
+<path d="M98.1,524c.7-.7,9-4.5,10.6-5.2,14.5-6,31.5-9.7,47.2-10.5-.3-1.6-1.6-1.3-2.7-1.5-17.2-3.8-35.8-4.9-53.4-6.2l-2-1.1c-.7-.7-.7-1.5-.8-2.3-1.9-17.4,1.5-38,0-55.8l1.6-3.1,125.8-.3c1.5.3,2.6-1.6,3.8-1.6,1.9,0,12.7,6.1,14.7,7.7,3.8,3.1,13.3,14.3,13.6,19s-.8,2.9-.8,4.6c-1.2,52.1,1,104.3,0,156.4l-1.6,3.1H98.6l-1.2-1.2-.4-97.9c0-1.3.1-3,1-4Z"/>
+<path d="M168,188.8c8.8,4.7,16.5,11.4,25.3,16.3s10.6,5.5,15.5,7.7,14.5,4.9,20.1,7.8,2.3,2.5,2.1,4.9c-1.7,22.7-4.5,48.4-3.2,71.2s4.3,23.6,17.1,28.6c2.8,1.1,10,1.7,10.7,4,.6,18.8-.4,37.6,0,56.4,0,2.1,1.1,3.8.7,6-1.5,7.2-12.2,18.3-18.7,21.6s-4.3,1.4-6.2,2.3c-2.8,1.3-2.5,3-7.1,1.3h-122.9c0,0-1.7-1.5-1.7-1.5l-.3-183.7c1.9-3,5.7-1.7,8.7-2.1,24.3-3.4,42.4-14.2,55.7-34.8,1.3-2.1,1.8-4.7,4-6.1Z"/>
+</g>
+</g>
+<path d="M294.4,132.2v12.4H93.6c-1.6,0-11,3.7-13,4.8-10.1,5.4-18.3,17-20.5,28.3s-1,5.6-1,6v233.3h-12.4v-237.9c0-1.9,3.5-12.5,4.5-14.8,5.6-13.1,17.6-24.6,31.1-29.2s8.6-2.7,9.7-2.7h202.4Z"/>
+<path d="M566.8,428.6v179.1c0,10.3-9.5,27.1-16.6,34.5s-25,18.6-35.6,18.6h-222.5v-12l1.3-1.1,220.4-.2c19.5-1.6,40.7-23.2,40.7-42.9v-176h12.4Z"/>
+<path d="M304.5,144.6v-12l1.3-1.1h174c18.4.4,34,13.8,36.8,32l-.4,247.3c-2.8,3.5-11.6,3-12-1.9v-239.9c-.8-8-3.6-15.7-10.5-20.4-1.3-.9-8-4-9.2-4h-179.9Z"/>
+<path d="M282,647.6v13.2H90.5c-10.4,0-26-11.5-32.5-19.3-4.7-5.6-11.2-19.5-11.2-26.7v-186.1h12l1.1,1.3.2,185.5c1.3,12.7,13.1,26.9,25.3,30.4.9.3,7.2,1.7,7.5,1.7h189.2Z"/>
+<path d="M514.2,537.7c2-1.8,4.2-2,6.2-4.3s3.9-6.6,3.9-7.7v-97.1h17.8v149c0,.8-2.7,8.5-3.3,9.9-4.9,12.1-16.8,23.6-30,25.3,3.4-2.2,5.8-5.6,7.4-9.3l.4-61.6c.5-.9-2.1-4.1-2.4-4.2Z"/>
+<path d="M566.8,417h-12.4v-172.9c0-6.7-5.7-20.2-9.7-25.9-5.4-7.7-12.2-12.4-20.4-16.7v-25.9c16.8,4.4,31.8,18.8,38.3,34.8,1.2,3.1,4.3,12.2,4.3,15.1v191.5Z"/>
+<path d="M542,417h-17.8v-199.6c3.5.8,7.4,5,9.6,7.8s8.2,13.7,8.2,16.6v175.3Z"/>
+<rect x="505.6" y="437.8" width="7.8" height="79.1"/>
+<path d="M513,425.5c-2.6.7,1.2,9.8-5.7,6.1,1-8.9-3.3-4.8-9-6.8-1.7-7.5,4.4-4.8,8.5-4.7,17.1.5,33.8-.4,51.1,0,10.8.2,21.7-.2,32.5,0l1.6.7c.7,1.6.7,3.6-.8,4.7h-78.2Z"/>
+<path d="M20.9,425.5c-1.5-1.1-1.5-3-.8-4.7l1.6-.7,52.2-.8c-.2-2.2-.4-7,2.7-7s2.5,5.4,2.9,7.2,2.1,2.4,1,4.4-1.5,1.5-1.6,1.5H20.9Z"/>
+<path d="M290.5,636v40.6c0,2.4-6.2,2.4-6.2,0v-47.2c0-.1,1.2-1.4,1.5-1.6,2.8-1.5,3.2.8,4.7,1.5s2.9.3,3.9,1.5l.4,3.6-4.3,1.5Z"/>
+<path d="M302.1,165.1c-2.3,2.9-4.2.3-6-.2s-4.9.9-4.9-2.9,2-2.7,4.6-2.8c2-5.2-.2-9.9,0-15.1s.8-3.5.8-5.3c.2-8-.3-16,0-23.9.9-2.8,5.3-.5,5.3.7v49.5Z"/>
+<path d="M73.9,359.6c.4-2-.7-4.1-.8-5.8s.7-2.5.8-3.8c0-2.5-.3-5.5,0-7.8s4.9-2.4,5.4.8.4,12.4,0,14.7-3,3.1-5.3,1.8Z"/>
+<path d="M239.8,159.3c2,1.3,1.7,5.4-.8,5.4h-16.3c-.3,0-2.1-1.9-2-2.7-.1-.8,1.7-2.7,2-2.7h17Z"/>
+<path d="M73.9,235.9v-18.2c1.4-2.1,4.7-1.2,5.3.9s.4,15.3-.2,16.5-1.1,1.3-1.7,1.5l-3.3-.7Z"/>
+<path d="M181,159.3h17c1.7,1.3,1.7,4.1,0,5.4h-17c-1.7-1.3-1.7-4.1,0-5.4Z"/>
+<path d="M99,159.3h16.3c.3,0,2.1,1.9,2,2.7.1.8-1.7,2.7-2,2.7h-16.3c-.3,0-2.1-1.9-2-2.7l2-2.7Z"/>
+<path d="M264.6,159.3h16.3c.3,0,2.1,1.9,2,2.7.1.8-1.7,2.7-2,2.7h-16.3c-.3,0-2.1-1.9-2-2.7l2-2.7Z"/>
+<path d="M400.8,635.2c-2-.6-2.5-3.9-.2-4.9s15.2-1,16.9-.2,2.2,3.9.4,5c-4.5-.8-13.1,1.1-17,0Z"/>
+<path d="M140,159.3h16.3c.3,0,2.1,1.9,2,2.7.1.8-1.7,2.7-2,2.7h-16.3l-1.8-3.4,1.8-2Z"/>
+<path d="M73.9,300.5c1.1-1.8,4.1-1.5,5,.4s.6,15.4-.3,17.4-4.1.6-4.7-.7v-17Z"/>
+<path d="M73.9,259.5c.3-1.2,4.2-1.8,4.7-.7,1,2,1.2,15.6.3,17.3s-1.1,1.3-1.7,1.5l-3.3-.7v-17.4Z"/>
+<path d="M73.9,383.3c1.1-1.8,4.1-1.5,5,.4s.7,14.1.2,15.7-3.9,3.1-5.3.9v-17Z"/>
+<path d="M441.4,635.2c-.3-1.4-1.1-3.2.2-4.5s16-1.4,17.9-.2.6,4.7-.7,4.7h-17.4Z"/>
+<path d="M483.6,635.2c-2.2-1.8-1.5-4.2,1.1-5.1s14-.7,15.5,0,2.2,3.9.4,5h-17Z"/>
+<path d="M318,635.2c-1.6-.9-1.8-4,0-4.5,4.9,0,9.7-1.4,14.6-.9s4.8,3.1,2.3,5.5h-17Z"/>
+<path d="M78.3,194.7c-3.1,3.1-5.1-2.5-5.2-4.9s.7-2.5.8-3.8c.2-2.5-1-7.1,2.7-7.4s2.7,3.1,2.7,5.1.6,9.5-.9,11.1Z"/>
+<path d="M358.6,630.6h17.4c1.7,1.3,1.7,3.4,0,4.6h-17c-1.7,0-.9-3.5-.4-4.6Z"/>
+`;
 function TizadaLoader({ det }) {
   const [seg, setSeg] = useState(0);
   useEffect(() => {
@@ -215,29 +254,35 @@ function TizadaLoader({ det }) {
   const ss = String(seg % 60).padStart(2, '0');
   const pct = det?.pct ?? 0;
   return (
-    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '18px 12px' }}>
+    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 12px' }}>
       <style>{`
-        @keyframes tzTrace { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
-        @keyframes tzScan  { 0% { transform: translateY(-28px); } 100% { transform: translateY(118px); } }
-        @keyframes tzFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @keyframes tzFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+        @keyframes tzRegC  { 0%,100% { transform: translate(-20px,-13px); } 46%,54% { transform: translate(0,0); } }
+        @keyframes tzRegM  { 0%,100% { transform: translate(19px,7px); }   46%,54% { transform: translate(0,0); } }
+        @keyframes tzRegY  { 0%,100% { transform: translate(4px,20px); }   46%,54% { transform: translate(0,0); } }
+        @keyframes tzScanX { 0% { transform: translateX(0); } 100% { transform: translateX(720px); } }
         @keyframes tzDots  { 0%,20% { opacity:.2 } 50% { opacity:1 } 80%,100% { opacity:.2 } }
       `}</style>
-      <div style={{ position: 'relative', width: 128, height: 150, animation: 'tzFloat 2.8s ease-in-out infinite' }}>
-        <svg viewBox="0 0 100 120" width="128" height="150" style={{ overflow: 'visible' }}>
+      <div style={{ position: 'relative', width: 150, height: 145, animation: 'tzFloat 3s ease-in-out infinite' }}>
+        <svg viewBox="8 118 596 560" width="150" height="145" style={{ overflow: 'visible' }}>
           <defs>
-            <clipPath id="tzShirtClip"><path d={_SHIRT_PATH} /></clipPath>
-            <linearGradient id="tzScanGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="var(--accent)" stopOpacity="0" />
-              <stop offset="0.5" stopColor="var(--accent)" stopOpacity="0.6" />
-              <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+            <g id="tzLogo" dangerouslySetInnerHTML={{ __html: _LOGO_INNER }} />
+            <clipPath id="tzLogoClip"><use href="#tzLogo" /></clipPath>
+            <linearGradient id="tzScanCMYK" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#00AEEF" /><stop offset="0.34" stopColor="#EC008C" />
+              <stop offset="0.67" stopColor="#FFF200" /><stop offset="1" stopColor="#ffffff" />
             </linearGradient>
           </defs>
-          <path d={_SHIRT_PATH} fill="var(--accent)" fillOpacity="0.07" />
-          <g clipPath="url(#tzShirtClip)">
-            <rect x="0" width="100" height="28" fill="url(#tzScanGrad)" style={{ animation: 'tzScan 1.9s ease-in-out infinite' }} />
+          {/* Fantasmas CMYK que se desalinean y "registran" (impresión) */}
+          <use href="#tzLogo" fill="#00AEEF" style={{ mixBlendMode: 'screen', animation: 'tzRegC 2.6s ease-in-out infinite' }} />
+          <use href="#tzLogo" fill="#EC008C" style={{ mixBlendMode: 'screen', animation: 'tzRegM 2.6s ease-in-out infinite' }} />
+          <use href="#tzLogo" fill="#FFF200" style={{ mixBlendMode: 'screen', animation: 'tzRegY 2.6s ease-in-out infinite' }} />
+          {/* Placa nítida encima + glow */}
+          <use href="#tzLogo" fill="#eef3f6" style={{ filter: 'drop-shadow(0 0 4px rgba(0,174,239,0.55))' }} />
+          {/* Barrido del cabezal CMYK (clip a la silueta del logo) */}
+          <g clipPath="url(#tzLogoClip)">
+            <rect x="-140" y="100" width="140" height="600" fill="url(#tzScanCMYK)" opacity="0.5" style={{ animation: 'tzScanX 2.1s linear infinite' }} />
           </g>
-          <path d={_SHIRT_PATH} pathLength="100" fill="none" stroke="var(--accent)" strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round"
-            style={{ strokeDasharray: 100, strokeDashoffset: 100, animation: 'tzTrace 2.4s ease-in-out infinite alternate', filter: 'drop-shadow(0 0 5px var(--accent))' }} />
         </svg>
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
