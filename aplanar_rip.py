@@ -12,6 +12,7 @@ TODO preservando los valores CMYK EXACTOS byte a byte (NO usa Ghostscript, que r
 colores: 0.9 → 0.90039). Verificado pixel-idéntico a la salida original.
 """
 import io
+import os
 import pikepdf
 from pikepdf import Name, parse_content_stream, unparse_content_stream
 
@@ -317,35 +318,91 @@ def _procesar_contenido(pdf, page):
         del pdf.Root["/OCProperties"]
 
 
-def aplanar_para_rip(path):
-    """Aplana la HOJA in-place: des-anida + consolida ICC + declara estado gráfico + PDF 1.6, con
-    los colores CMYK EXACTOS. Best-effort: si algo falla, deja el PDF como estaba (no rompe la tizada)."""
+def _aplanar_archivo(path):
+    """Núcleo SERIAL: aplana TODAS las páginas del PDF in-place (des-anida + 1 pasada de saneo +
+    estado gráfico + Creator/Producer + PDF 1.6, colores CMYK EXACTOS). Lanza si algo falla."""
+    pdf = pikepdf.open(path, allow_overwriting_input=True)
+    for page in pdf.pages:
+        _flatten(pdf, page, es_pagina=True)      # des-anida los Form XObjects (inline byte a byte)
+        _procesar_contenido(pdf, page)           # 1 pasada: sanea texto + saca OCG + consolida ICC + huérfanos
+        _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
+    if "/OutputIntents" in pdf.Root:
+        del pdf.Root["/OutputIntents"]           # Illustrator no lo tiene; el ICCBased de la página alcanza
     try:
-        pdf = pikepdf.open(path, allow_overwriting_input=True)
-        for page in pdf.pages:
-            _flatten(pdf, page, es_pagina=True)      # des-anida los Form XObjects (inline byte a byte)
-            _procesar_contenido(pdf, page)           # 1 pasada: sanea texto + saca OCG + consolida ICC + huérfanos
-            _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
-        if "/OutputIntents" in pdf.Root:
-            del pdf.Root["/OutputIntents"]   # Illustrator no lo tiene; el ICCBased de la página alcanza
-        # DECLARAR Creator/Producer: los PDFs que pasan el RIP (Illustrator, Ghostscript) lo declaran;
-        # el original (que falla) queda "no declarado". Algunos RIPs desconfían de un PDF sin Producer.
+        with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+            meta["dc:creator"] = ["TIZADA PRO"]
+            meta["xmp:CreatorTool"] = "TIZADA PRO"
+            meta["pdf:Producer"] = "TIZADA PRO"
+    except Exception:
+        pass
+    pdf.docinfo["/Creator"] = "TIZADA PRO"
+    pdf.docinfo["/Producer"] = "TIZADA PRO"
+    pdf.remove_unreferenced_resources()
+    pdf.save(path, force_version="1.6")          # PDF 1.6 como Illustrator (máx. compat. RIP)
+    pdf.close()
+
+
+def _aplanar_una_pagina(path):
+    """Worker de ProcessPool (spawn-safe: recibe una RUTA). Aplana un PDF de 1 página."""
+    try:
+        _aplanar_archivo(path)
+        return True
+    except Exception:
+        return False
+
+
+def aplanar_para_rip(path):
+    """Aplana la HOJA in-place para el RIP. Con >1 página, aplana cada página EN PARALELO
+    (ProcessPool — pikepdf/fitz NO son thread-safe → procesos, nunca hilos) y las reensambla:
+    cada página es independiente y ya se aplanaba por separado → MISMO resultado, mucho más rápido
+    en hojas con muchas piezas. Best-effort con fallback SERIAL si algo del paralelo falla."""
+    try:
+        src = pikepdf.open(path)
+        npag = len(src.pages)
+        if npag <= 1:
+            src.close()
+            _aplanar_archivo(path)
+            return True
+        # 1) partir en 1 PDF por página (aún SIN aplanar)
+        tmps = []
+        for i, pg in enumerate(src.pages):
+            d = pikepdf.new(); d.pages.append(pg)
+            tmp = f"{path}.__p{i}.pdf"
+            d.save(tmp); d.close(); tmps.append(tmp)
+        src.close()
+        # 2) aplanar cada página en PARALELO
+        from concurrent.futures import ProcessPoolExecutor
         try:
-            with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
-                meta["dc:creator"] = ["TIZADA PRO"]
-                meta["xmp:CreatorTool"] = "TIZADA PRO"
-                meta["pdf:Producer"] = "TIZADA PRO"
+            with ProcessPoolExecutor(max_workers=min(len(tmps), max(2, (os.cpu_count() or 4) - 1))) as ex:
+                oks = list(ex.map(_aplanar_una_pagina, tmps))
         except Exception:
-            pass
-        pdf.docinfo["/Creator"] = "TIZADA PRO"
-        pdf.docinfo["/Producer"] = "TIZADA PRO"
-        pdf.remove_unreferenced_resources()
-        pdf.save(path, force_version="1.6")   # PDF 1.6 como Illustrator (máx. compat. RIP)
-        pdf.close()
+            oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial
+        if not all(oks):
+            raise RuntimeError("una página no se aplanó en paralelo")
+        # 3) reensamblar las páginas ya aplanadas
+        out = pikepdf.new()
+        for tmp in tmps:
+            s = pikepdf.open(tmp); out.pages.extend(s.pages); s.close()
+        out.docinfo["/Creator"] = "TIZADA PRO"
+        out.docinfo["/Producer"] = "TIZADA PRO"
+        out.remove_unreferenced_resources()
+        out.save(path, force_version="1.6")
+        out.close()
+        for tmp in tmps:
+            try: os.remove(tmp)
+            except Exception: pass
         return True
     except Exception as e:
         try:
-            print(f"  [aplanar_rip] no se pudo aplanar {path}: {e}")
+            print(f"  [aplanar_rip] paralelo falló ({e}); aplano serial")
         except Exception:
             pass
-        return False
+        try:
+            _aplanar_archivo(path)
+            return True
+        except Exception as e2:
+            try:
+                print(f"  [aplanar_rip] no se pudo aplanar {path}: {e2}")
+            except Exception:
+                pass
+            return False
