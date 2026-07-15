@@ -727,7 +727,7 @@ function MesasInfinito({ mesas, job }) {
                           style={{ fontSize: 12, fontWeight: 700, color: '#000', background: '#fff', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', flex: 1, minWidth: 0, marginRight: 8, outline: 'none' }} />
                       : <span onDoubleClick={() => setEditando(key)} title="Doble-click para renombrar"
                           style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text', userSelect: 'none' }}>{nombre}</span>}
-                    <a href={urlPdf} download={sanit(nombre) + '.pdf'} title="Descargar PDF"
+                    <a href={`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`} download={sanit(nombre) + '.pdf'} title="Descargar esta mesa"
                       onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
                       style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
                       <Icon name="download" style={{ width: 14, height: 14 }} />
@@ -6095,22 +6095,34 @@ export default function App() {
                     {(() => {
                       const j = trabajosMulti[0];
                       const hojas = (j?.estado === 'listo' && j?.resultado?.hojas) || [];
-                      return hojas.length > 0 ? (
+                      if (!hojas.length) return null;
+                      const totalMesas = hojas.reduce((s, h) => s + ((h.previews && h.previews.length) ? h.previews.length : 1), 0);
+                      const sanit = (s) => ((s || 'mesa').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa');
+                      return (
                         <button className="btn primary" style={{ padding: '8px 14px', fontSize: 12.5 }}
                           onClick={async () => {
-                            // Descarga TODAS las mesas, un archivo por uno (sin ZIP), con el NOMBRE de la mesa
-                            for (const h of hojas) {
-                              const nom = (h.moldes?.length ? h.moldes.join(' + ') : 'Mesa de trabajo').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa';
-                              const a = document.createElement('a');
-                              a.href = `/trabajos/${j.resultado.id}/${h.archivo}`;
-                              a.download = nom + '.pdf';
-                              document.body.appendChild(a); a.click(); a.remove();
-                              await new Promise(r => setTimeout(r, 450));
+                            // Descarga CADA MESA por separado (una página = un archivo), con su NOMBRE,
+                            // aunque varias sean del mismo PDF/tela. Usa los nombres editados (localStorage).
+                            const nombres = (() => { try { return JSON.parse(localStorage.getItem('tizada_mesas_nombres_' + j.resultado.id) || '{}'); } catch (_e) { return {}; } })();
+                            for (const tl of [...new Set(hojas.map(h => h.tela))]) {
+                              let gi = 0;
+                              for (const h of hojas.filter(x => x.tela === tl)) {
+                                const pvs = (h.previews && h.previews.length) ? h.previews : [null];
+                                for (let pi = 0; pi < pvs.length; pi++) {
+                                  const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : ('Mesa ' + (gi + 1) + (tl ? ' - ' + tl : ''));
+                                  gi++;
+                                  const a = document.createElement('a');
+                                  a.href = `/api/trabajos/${j.resultado.id}/mesa/${h.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`;
+                                  a.download = sanit(nombre) + '.pdf';
+                                  document.body.appendChild(a); a.click(); a.remove();
+                                  await new Promise(r => setTimeout(r, 500));
+                                }
+                              }
                             }
                           }}>
-                          <Icon name="download" style={{ width: 13, height: 13 }} /> Descargar todo ({hojas.length})
+                          <Icon name="download" style={{ width: 13, height: 13 }} /> Descargar todo ({totalMesas})
                         </button>
-                      ) : null;
+                      );
                     })()}
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={reiniciarPedido} title="Empezar un pedido nuevo desde 0">↺ Nuevo pedido</button>
                   </div>

@@ -2711,6 +2711,46 @@ def descargar(tid, archivo):
     return send_from_directory(os.path.join(TRABAJOS, tid), archivo)
 
 
+@app.get("/api/trabajos/<tid>/mesa/<archivo>")
+def descargar_mesa(tid, archivo):
+    """Descarga UNA mesa (la página `pi` de la hoja) como PDF PROPIO, con el NOMBRE que se ve en la
+    tizada. Así cada mesa baja SEPARADA aunque varias sean páginas del mismo PDF (misma tela). La
+    página ya viene aplanada (RIP-safe) desde la generación; se copia tal cual a un PDF de 1 página."""
+    import io as _io
+    import pikepdf
+    try:
+        pi = int(request.args.get("pi", 0))
+    except Exception:
+        pi = 0
+    nombre = request.args.get("nombre") or "mesa"
+    fn = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", nombre).strip() or "mesa"
+    ruta = os.path.join(TRABAJOS, tid, archivo)
+    if not os.path.exists(ruta):
+        return jsonify({"error": "la mesa no existe"}), 404
+    try:
+        src = pikepdf.open(ruta)
+        n = len(src.pages)
+        if pi < 0 or pi >= n:
+            pi = 0
+        if n == 1:                    # hoja de 1 sola página → el archivo TAL CUAL (RIP-safe garantizado)
+            src.close()
+            return send_file(ruta, mimetype="application/pdf", as_attachment=True, download_name=fn + ".pdf")
+        dst = pikepdf.new()
+        dst.pages.append(src.pages[pi])   # copia la página (ya aplanada) a su propio PDF
+        try:
+            dst.docinfo["/Creator"] = "TIZADA PRO"
+            dst.docinfo["/Producer"] = "TIZADA PRO"
+        except Exception:
+            pass
+        buf = _io.BytesIO()
+        dst.save(buf, force_version="1.6")
+        dst.close(); src.close()
+        buf.seek(0)
+        return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=fn + ".pdf")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.get("/api/trabajos/zip")
 def descargar_zip():
     """Arma un ZIP con los PDF de todas las mesas de los trabajos pedidos
