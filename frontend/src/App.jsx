@@ -695,6 +695,13 @@ function EditableTamanoModal({ inicial, variantes, esNueva, onGuardar, onElimina
 // constante, no la resolución del archivo.
 const ZMAX = 300;
 
+// ── Catálogo de fuentes: vista previa con la tipografía REAL ──
+// Familia CSS única por fuente (el hash del archivo). El nombre interno no sirve como familia:
+// puede repetirse, traer espacios/comillas y chocar con una fuente instalada en la PC.
+const _famFuente = (f) => 'tzf_' + String(f.hash || f.archivo || '').replace(/[^a-zA-Z0-9]/g, '');
+// Muestra por defecto: lo que este sistema estampa de verdad (nombre + número).
+const MUESTRA_DEF = 'CAMPEON 10';
+
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   // Nombres editados: PERSISTEN ligados a ESTE pedido (clave = id del trabajo). Un pedido NUEVO
@@ -1595,6 +1602,7 @@ export default function App() {
   const fileInputPlantillaRef = useRef(null);
   const fileInputArteRef = useRef(null);
   const fileInputFuenteRef = useRef(null);
+  const [fuenteMuestra, setFuenteMuestra] = useState({});   // texto de prueba por fuente del catálogo ({archivo: texto})
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -9716,19 +9724,34 @@ export default function App() {
                   <div className="card-title">Tipografías Registradas en el Servidor</div>
                   <div className="card-subtitle" style={{ marginBottom: 20 }}>Las fuentes cargadas aquí deben coincidir exactamente con el nombre de fuente configurado en el archivo Illustrator del arte.</div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 20 }}>
+                  {/* Cada fuente del catálogo se declara con @font-face apuntando al archivo REAL
+                      del servidor → la tarjeta la dibuja de verdad, no una tipografía cualquiera. */}
+                  <style>{(estado?.fuentes || []).map(f => `@font-face{font-family:'${_famFuente(f)}';src:url('/api/fuente/archivo/${encodeURIComponent(f.archivo)}');font-display:swap;}`).join('')}</style>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 20 }}>
                     {estado?.fuentes?.length ? (
-                      estado.fuentes.map((f, idx) => (
-                        <div key={idx} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.1)' }}>
-                          <div>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{f.interno}</div>
-                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{f.archivo}</div>
+                      estado.fuentes.map((f, idx) => {
+                        const fam = _famFuente(f);
+                        const txt = fuenteMuestra[f.archivo] != null ? fuenteMuestra[f.archivo] : MUESTRA_DEF;
+                        return (
+                          <div key={idx} style={{ border: '1px solid var(--border-light)', borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                            {/* encabezado: nombre interno (el que debe coincidir con el arte) + archivo */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)' }}>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.interno}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.archivo}</div>
+                              </div>
+                              <span className="badge success" style={{ fontSize: 9, flexShrink: 0 }}>Catálogo</span>
+                            </div>
+                            {/* MUESTRA editable: se escribe acá y se ve en la tipografía real */}
+                            <input value={txt} onChange={(e) => setFuenteMuestra(m => ({ ...m, [f.archivo]: e.target.value }))}
+                              spellCheck={false} placeholder="Escribí para probar…" title="Escribí para ver la fuente"
+                              style={{ fontFamily: `'${fam}', system-ui`, fontSize: 34, lineHeight: 1.25, width: '100%', padding: '14px 14px 16px',
+                                background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary, #fff)' }} />
                           </div>
-                          <span className="badge success" style={{ fontSize: 9 }}>Catálogo</span>
-                        </div>
-                      ))
+                        );
+                      })
                     ) : (
-                      <div style={{ gridColumn: 'span 3', color: 'var(--text-secondary)', fontSize: 13, padding: '12px 0' }}>No hay fuentes cargadas. Sube tipografías TrueType (.ttf/.otf) como Impact o Arial Bold.</div>
+                      <div style={{ gridColumn: 'span 2', color: 'var(--text-secondary)', fontSize: 13, padding: '12px 0' }}>No hay fuentes cargadas. Sube tipografías TrueType (.ttf/.otf) como Impact o Arial Bold.</div>
                     )}
                   </div>
 

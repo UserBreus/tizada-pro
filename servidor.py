@@ -2130,6 +2130,22 @@ def subir_fuente():
     return jsonify(res)
 
 
+@app.get("/api/fuente/archivo/<path:nombre>")
+def fuente_archivo(nombre):
+    """Sirve el .ttf/.otf del catálogo para que el navegador lo dibuje (@font-face) en las
+    tarjetas del catálogo. Sin esto la vista previa mostraría una tipografía cualquiera."""
+    # Solo un archivo de fuente DENTRO del catálogo: basename corta cualquier "../" y después
+    # se compara la ruta ya resuelta contra FUENTES (defensa por si el nombre trae symlinks).
+    base = os.path.basename(nombre or "")
+    if not base.lower().endswith((".ttf", ".otf")):
+        return jsonify({"error": "no es una fuente"}), 400
+    ruta = os.path.realpath(os.path.join(FUENTES, base))
+    if os.path.dirname(ruta) != os.path.realpath(FUENTES) or not os.path.exists(ruta):
+        return jsonify({"error": "no existe"}), 404
+    return send_file(ruta, mimetype="font/ttf" if base.lower().endswith(".ttf") else "font/otf",
+                     max_age=86400)   # el archivo no cambia (mismo nombre = misma fuente)
+
+
 def _config_default():
     # mesas de trabajo (telas): cada una con su ancho/alto. Las piezas se asignan
     # a una tela; cada tela arma su propia hoja.
