@@ -6087,31 +6087,6 @@ export default function App() {
                       <Icon name="distribucion" style={{ width: 18, height: 18, color: 'var(--accent)' }} />
                       <h3 style={{ margin: 0, fontSize: 16 }}>Objetos editables</h3>
                       <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{moldeById(_mid)?.nombre} · {(disenosPedido.find(d => d.id === disenoActivo) || {}).nombre || disenoActivo}</span>
-                      {/* ARTE POR RANGO/TALLE: el espacio de edición es POR GRUPO del arte (un chip
-                          por rango #XS-L / por talle #M); elegirlo muestra SUS editables y el ajuste
-                          se aplica a sus talles. Arte de una sola mesa → picker de variantes normal. */}
-                      {_porGrupos ? (<>
-                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginLeft: 10 }}>{_grupos.some(g => g.talles.length > 1) ? 'Rango del arte:' : 'Talle del arte:'}</span>
-                        {_grupos.map(g => {
-                          const on = _grpAct === g;
-                          return (
-                            <button key={g.label} type="button" onClick={() => { setEditableVarsSel(g.talles); setEditableTalle(g.talles[0]); verVarianteOperario(g.talles[0]); }}
-                              style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{g.label}</button>
-                          );
-                        })}
-                      </>) : (<>
-                        {/* Variantes: popup de tarjetas (elegís 1, varias o todas; Shift entre 2 = el rango).
-                            Lo elegido es el ALCANCE (a qué variantes se aplica); el visor muestra la 1ª. */}
-                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginLeft: 10 }}>Variantes:</span>
-                        <button type="button" onClick={() => setEditVarPickerOpen(true)} style={{ ...selStyle, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-                          {_selResumen} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>▾</span>
-                        </button>
-                        {editVarPickerOpen && (
-                          <VariantesPicker variantes={talles} seleccion={_selT} bloqueadas={[]}
-                            onChange={(ns) => { setEditableVarsSel(ns); const f = ns[0]; if (f && f !== T) { setEditableTalle(f); verVarianteOperario(f); } }}
-                            onClose={() => setEditVarPickerOpen(false)} />
-                        )}
-                      </>)}
                       <button className="btn ghost" style={{ marginLeft: 'auto', padding: '8px 12px' }} onClick={volverPrincipal} title="Volver a como viene el diseño (sin ediciones), en el alcance elegido"><Icon name="reset" style={{ width: 13, height: 13 }} /> Volver al diseño principal</button>
                       <button className="btn ghost" style={{ padding: '8px 12px', opacity: _canUndo ? 1 : 0.4 }} onClick={editorUndo} disabled={!_canUndo} title="Deshacer (Ctrl+Z)">↶ Deshacer</button>
                       <button className="btn ghost" style={{ padding: '8px 12px', opacity: _canRedo ? 1 : 0.4 }} onClick={editorRedo} disabled={!_canRedo} title="Rehacer (Ctrl+Y)">↷ Rehacer</button>
@@ -6184,6 +6159,33 @@ export default function App() {
                       </div>
                       {/* ── PANEL DERECHO: herramientas de edición (estilo Illustrator) ── */}
                       <div style={{ width: 208, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {/* ARTE POR RANGO/TALLE: el espacio de edición es POR GRUPO del arte (un chip
+                          por rango #XS-L / por talle #M); elegirlo muestra SUS editables y el ajuste
+                          se aplica a sus talles. Arte de una sola mesa → picker de variantes normal. */}
+                      {_porGrupos ? (<>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginLeft: 10 }}>{_grupos.some(g => g.talles.length > 1) ? 'Rango del arte:' : 'Talle del arte:'}</span>
+                        {_grupos.map(g => {
+                          const on = _grpAct === g;
+                          return (
+                            <button key={g.label} type="button" onClick={() => { setEditableVarsSel(g.talles); setEditableTalle(g.talles[0]); verVarianteOperario(g.talles[0]); }}
+                              style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{g.label}</button>
+                          );
+                        })}
+                      </>) : (<>
+                        {/* Variantes: popup de tarjetas (elegís 1, varias o todas; Shift entre 2 = el rango).
+                            Lo elegido es el ALCANCE (a qué variantes se aplica); el visor muestra la 1ª. */}
+                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginLeft: 10 }}>Variantes:</span>
+                        <button type="button" onClick={() => setEditVarPickerOpen(true)} style={{ ...selStyle, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
+                          {_selResumen} <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>▾</span>
+                        </button>
+                        {editVarPickerOpen && (
+                          <VariantesPicker variantes={talles} seleccion={_selT} bloqueadas={[]}
+                            onChange={(ns) => { setEditableVarsSel(ns); const f = ns[0]; if (f && f !== T) { setEditableTalle(f); verVarianteOperario(f); } }}
+                            onClose={() => setEditVarPickerOpen(false)} />
+                        )}
+                      </>)}
+                        </div>
                     {/* TALLE en vista + ALCANCE del ajuste: por defecto va a TODO el rango; se puede
                         elegir aplicarlo SOLO al talle que estás viendo (excepción puntual). */}
                     {_rangoTalles.length > 1 && (
