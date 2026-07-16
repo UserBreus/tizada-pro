@@ -1408,7 +1408,8 @@ export default function App() {
   const [editableData, setEditableData] = useState(null);      // {objetos, talles, piezas} del diseño activo
   const [editableDisenos, setEditableDisenos] = useState([]);  // diseños del molde que tienen objetos editables
   const [editableDiseno, setEditableDiseno] = useState('principal');  // diseño (id) en edición
-  const [editableSel, setEditableSel] = useState(null);        // nombre del objeto seleccionado
+  const [editableSel, setEditableSel] = useState([]);          // nombres de los objetos seleccionados (multi: Ctrl/Shift+click)
+  const [edAlinearMesa, setEdAlinearMesa] = useState(false);   // false = alinear entre la SELECCIÓN; true = con la MESA DE TRABAJO
   const [edSoloTalle, setEdSoloTalle] = useState(false);       // true = el ajuste va SOLO al talle en vista (no a todo el rango)
   const [edLink, setEdLink] = useState(true);                  // enlace An./Al.: true = escala proporcional
   const [editableTalle, setEditableTalle] = useState(null);    // talle/variante en edición
@@ -5992,10 +5993,15 @@ export default function App() {
                 // Mapear pantalla→viewBox con una CTM YA CACHEADA (no llamar getScreenCTM en cada
                 // movimiento: es una lectura de layout sincrónica que hace el arrastre pesado).
                 const _cToVB = (cx, cy, ictm) => { const svg = editorSvgRef.current; if (!svg || !ictm) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(ictm); return { x: q.x, y: q.y }; };
-                const onMove = (e) => { const d = editorDrag.current; if (!d) return; const m = _cToVB(e.clientX, e.clientY, d.ictm); if (d.tipo === 'move') setTfScoped(d.nm, { dx: d.tf0.dx + (m.x - d.start.x) / d.imgW, dy: d.tf0.dy + (m.y - d.start.y) / d.imgH }); else if (d.tipo === 'scale') { const _f = Math.hypot(m.x - d.cx, m.y - d.cy) / (d.dist0 || 1); const _c = (v) => Math.max(0.1, Math.min(8, v)); setTfScoped(d.nm, { scale: _c(d.scale0 * _f), sx: _c(d.sx0 * _f), sy: _c(d.sy0 * _f) }); } else if (d.tipo === 'rot') setTfScoped(d.nm, { rot: Math.round(d.rot0 + (Math.atan2(m.y - d.cy, m.x - d.cx) * 180 / Math.PI - d.ang0)) }); };
+                const onMove = (e) => { const d = editorDrag.current; if (!d) return; const m = _cToVB(e.clientX, e.clientY, d.ictm); if (d.tipo === 'move') { const _ddx = m.x - d.start.x, _ddy = m.y - d.start.y; (d.grupo && d.grupo.length ? d.grupo : [{ nm: d.nm, imgW: d.imgW, imgH: d.imgH, tf0: d.tf0 }]).forEach(g => setTfScoped(g.nm, { dx: g.tf0.dx + _ddx / g.imgW, dy: g.tf0.dy + _ddy / g.imgH })); } else if (d.tipo === 'scale') { const _f = Math.hypot(m.x - d.cx, m.y - d.cy) / (d.dist0 || 1); const _c = (v) => Math.max(0.1, Math.min(8, v)); setTfScoped(d.nm, { scale: _c(d.scale0 * _f), sx: _c(d.sx0 * _f), sy: _c(d.sy0 * _f) }); } else if (d.tipo === 'rot') setTfScoped(d.nm, { rot: Math.round(d.rot0 + (Math.atan2(m.y - d.cy, m.x - d.cx) * 180 / Math.PI - d.ang0)) }); };
                 const onUp = () => { if (editorDrag.current) { editorDrag.current = null; histCommit(editorTfsRef.current); } };
                 const start = (e, tipo, o, p) => {
-                  e.stopPropagation(); e.preventDefault(); setEditableSel(o.nombre);
+                  e.stopPropagation(); e.preventDefault();
+                  // Selección: si el objeto ya está en la selección se respeta (para mover en grupo);
+                  // si no, pasa a ser la selección (Ctrl/Shift lo SUMA en vez de reemplazar).
+                  const _add = e.ctrlKey || e.metaKey || e.shiftKey;
+                  const _selNow = editableSel.includes(o.nombre) ? editableSel : (_add ? [...editableSel, o.nombre] : [o.nombre]);
+                  setEditableSel(_selNow);
                   const svg = editorSvgRef.current; const ictm = (svg && svg.getScreenCTM()) ? svg.getScreenCTM().inverse() : null;
                   const m = _cToVB(e.clientX, e.clientY, ictm);
                   const tf = curTfOf(o.nombre, T); const vo = _voDe(p); const c = centerOf(o, p, tf);
@@ -6003,7 +6009,16 @@ export default function App() {
                   // PIVOTE = centro del objeto YA con el acomodo de la variante (vo). Sin esto el
                   // giro/escala se hacían alrededor de un punto corrido → "al reves"/pesado.
                   const cx = c.cx + vo.dx, cy = c.cy + vo.dy;
-                  editorDrag.current = { tipo, nm: o.nombre, p, imgW, imgH, ictm, start: m, tf0: tf, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, sx0: _SX(tf), sy0: _SY(tf), ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
+                  // GRUPO a mover: cada objeto seleccionado con SU tf inicial y SUS dimensiones de diseño
+                  // (pueden estar en piezas distintas → el mismo desplazamiento en pantalla se convierte
+                  // a la fracción que le corresponde a cada uno).
+                  const _grupo = _selNow.map(nm => {
+                    const oo = _objsUnicos.find(x => x.nombre === nm); if (!oo) return null;
+                    const pp = piezaDe(oo.pieza); if (!pp) return null;
+                    const dd = _imgDim(oo, pp);
+                    return { nm, imgW: dd.imgW, imgH: dd.imgH, tf0: curTfOf(nm, T) };
+                  }).filter(Boolean);
+                  editorDrag.current = { tipo, nm: o.nombre, p, imgW, imgH, ictm, start: m, tf0: tf, grupo: _grupo, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, sx0: _SX(tf), sy0: _SY(tf), ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
                 };
                 const chip = (txt, on, fn) => (<button type="button" onClick={fn} style={{ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{txt}</button>);
                 const selStyle = { padding: '5px 8px', borderRadius: 8, fontSize: 12, background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)' };
@@ -6022,6 +6037,40 @@ export default function App() {
                     showMsg(`Objetos editables guardados (${ts.length} talle/s).`);
                     return true;
                   } catch { showError('No se pudo guardar.'); return false; }
+                };
+                // ALINEAR (estilo Illustrator). `modo`: 'sel' = entre los objetos seleccionados (según el
+                // bbox de la selección) · 'mesa' = contra la MESA DE TRABAJO (el diseño colocado en la
+                // pieza). `eje`: izq|ch|der (horizontal) · arr|cv|aba (vertical). Trabaja en coords del
+                // canvas y convierte el desplazamiento a la fracción de diseño de CADA objeto.
+                const _alinear = (eje) => {
+                  const objs = editableSel.map(nm => {
+                    const o = _objsUnicos.find(x => x.nombre === nm); if (!o) return null;
+                    const p = piezaDe(o.pieza); if (!p) return null;
+                    const tf = curTfOf(nm, T);
+                    return { nm, c: centerOf(o, p, tf), d: _imgDim(o, p), tf };
+                  }).filter(Boolean);
+                  if (!objs.length) return;
+                  const mesa = edAlinearMesa;
+                  if (!mesa && objs.length < 2) { showError('Elegí 2 o más objetos (Ctrl+click) para alinearlos entre sí.'); return; }
+                  let R;
+                  if (mesa) {   // la "mesa de trabajo" = el DISEÑO colocado sobre la pieza
+                    const d0 = objs[0].d;
+                    R = { x0: d0.imgX, x1: d0.imgX + d0.imgW, y0: d0.imgY, y1: d0.imgY + d0.imgH };
+                  } else {      // bbox de la SELECCIÓN
+                    R = { x0: Math.min(...objs.map(a => a.c.cx - a.c.w / 2)), x1: Math.max(...objs.map(a => a.c.cx + a.c.w / 2)),
+                          y0: Math.min(...objs.map(a => a.c.cy - a.c.h / 2)), y1: Math.max(...objs.map(a => a.c.cy + a.c.h / 2)) };
+                  }
+                  objs.forEach(a => {
+                    let ncx = a.c.cx, ncy = a.c.cy;
+                    if (eje === 'izq') ncx = R.x0 + a.c.w / 2;
+                    else if (eje === 'ch') ncx = (R.x0 + R.x1) / 2;
+                    else if (eje === 'der') ncx = R.x1 - a.c.w / 2;
+                    else if (eje === 'arr') ncy = R.y0 + a.c.h / 2;
+                    else if (eje === 'cv') ncy = (R.y0 + R.y1) / 2;
+                    else if (eje === 'aba') ncy = R.y1 - a.c.h / 2;
+                    setTfScoped(a.nm, { dx: a.tf.dx + (ncx - a.c.cx) / a.d.imgW, dy: a.tf.dy + (ncy - a.c.cy) / a.d.imgH });
+                  });
+                  setTimeout(() => histCommit(editorTfsRef.current), 0);
                 };
                 // VOLVER AL DISEÑO PRINCIPAL: todos los objetos vuelven a como carga el diseño (sin mover/
                 // rotar/escalar) en el alcance elegido. Es deshacible (queda en el historial).
@@ -6099,7 +6148,7 @@ export default function App() {
                         proporción (como Illustrator). Con el enlace ON escala proporcional; OFF deja
                         ancho y alto libres (sx/sy independientes → el motor deforma igual). */}
                     {(() => {
-                      const _o = _objsUnicos.find(o => o.nombre === editableSel);
+                      const _o = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0]) : null;
                       if (!_o || !(_o.w_cm > 0) || !(_o.h_cm > 0)) return null;
                       const _tf = curTfOf(_o.nombre, T);
                       const _wCm = _o.w_cm * _SX(_tf), _hCm = _o.h_cm * _SY(_tf);
@@ -6138,7 +6187,11 @@ export default function App() {
                       {/* lista de objetos */}
                       <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
                         {_objsUnicos.map(o => (
-                          <button key={o.nombre} type="button" onClick={() => setEditableSel(o.nombre)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel === o.nombre ? 'var(--accent)' : 'var(--border-light)'), background: editableSel === o.nombre ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
+                          <button key={o.nombre} type="button" title="Click = seleccionar · Ctrl/Shift+click = sumar a la selección"
+                            onClick={(e) => setEditableSel(prev => (e.ctrlKey || e.metaKey || e.shiftKey)
+                              ? (prev.includes(o.nombre) ? prev.filter(n => n !== o.nombre) : [...prev, o.nombre])
+                              : [o.nombre])}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.nombre) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.nombre) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
                             <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={`data:image/png;base64,${o.thumb}`} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
                             <span style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
                           </button>
@@ -6170,7 +6223,7 @@ export default function App() {
                           {_objsEd.map(o => {
                             const p = piezaDe(o.pieza); if (!p || !o.mesa_rect || !o.bbox_mu) return null;
                             const vo = _voDe(p);
-                            const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel === o.nombre;
+                            const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel.includes(o.nombre); const solo = sel && editableSel.length === 1;
                             return (
                               <g key={o.nombre} transform={(vo.dx || vo.dy) ? `translate(${vo.dx} ${vo.dy})` : undefined}>
                                 <g clipPath={`url(#edclip-${p.idx})`}>
@@ -6180,16 +6233,61 @@ export default function App() {
                                 </g>
                                 {sel && (
                                   <g transform={`rotate(${tf.rot} ${c.cx} ${c.cy})`}>
-                                    <rect x={c.cx - c.w / 2} y={c.cy - c.h / 2} width={c.w} height={c.h} fill="none" stroke="var(--accent)" strokeWidth={1.6} />
-                                    <line x1={c.cx} y1={c.cy - c.h / 2} x2={c.cx} y2={c.cy - c.h / 2 - 26} stroke="var(--accent)" strokeWidth={1.6} />
-                                    <circle cx={c.cx} cy={c.cy - c.h / 2 - 26} r={7} fill="#fff" stroke="var(--accent)" strokeWidth={2.5} onMouseDown={(e) => start(e, 'rot', o, p)} style={{ cursor: 'grab' }} />
-                                    <circle cx={c.cx + c.w / 2} cy={c.cy + c.h / 2} r={7} fill="var(--accent)" onMouseDown={(e) => start(e, 'scale', o, p)} style={{ cursor: 'nwse-resize' }} />
+                                    <rect x={c.cx - c.w / 2} y={c.cy - c.h / 2} width={c.w} height={c.h} fill="none" stroke="var(--accent)" strokeWidth={1.6} strokeDasharray={solo ? undefined : '5 4'} />
+                                    {/* manijas SOLO con un objeto seleccionado (con varios se alinea desde el panel) */}
+                                    {solo && <>
+                                      <line x1={c.cx} y1={c.cy - c.h / 2} x2={c.cx} y2={c.cy - c.h / 2 - 26} stroke="var(--accent)" strokeWidth={1.6} />
+                                      <circle cx={c.cx} cy={c.cy - c.h / 2 - 26} r={7} fill="#fff" stroke="var(--accent)" strokeWidth={2.5} onMouseDown={(e) => start(e, 'rot', o, p)} style={{ cursor: 'grab' }} />
+                                      <circle cx={c.cx + c.w / 2} cy={c.cy + c.h / 2} r={7} fill="var(--accent)" onMouseDown={(e) => start(e, 'scale', o, p)} style={{ cursor: 'nwse-resize' }} />
+                                    </>}
                                   </g>
                                 )}
                               </g>
                             );
                           })}
                         </svg>
+                      </div>
+                      {/* ── PANEL DERECHO: herramientas de edición (estilo Illustrator) ── */}
+                      <div style={{ width: 208, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>ALINEAR</div>
+                          {/* Modo: entre la SELECCIÓN o contra la MESA DE TRABAJO */}
+                          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                            {[{ k: false, l: 'Con selección' }, { k: true, l: 'Con mesa' }].map(op => (
+                              <button key={String(op.k)} type="button" onClick={() => setEdAlinearMesa(op.k)}
+                                title={op.k ? 'Alinear respecto del diseño (mesa de trabajo)' : 'Alinear los objetos seleccionados ENTRE SÍ'}
+                                style={{ flex: 1, padding: '4px 6px', borderRadius: 7, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
+                                  border: '1px solid ' + (edAlinearMesa === op.k ? 'var(--accent)' : 'var(--border-light)'),
+                                  background: edAlinearMesa === op.k ? 'var(--accent)' : 'transparent', color: edAlinearMesa === op.k ? '#001016' : 'var(--text-muted)' }}>{op.l}</button>
+                            ))}
+                          </div>
+                          {[[['izq', 'Alinear a la izquierda', 'M3 2v20 M7 7h10v4H7z'], ['ch', 'Centrar horizontal', 'M12 2v20 M6 7h12v4H6z'], ['der', 'Alinear a la derecha', 'M21 2v20 M7 7h10v4H7z']],
+                            [['arr', 'Alinear arriba', 'M2 3h20 M7 7h4v10H7z'], ['cv', 'Centrar vertical', 'M2 12h20 M7 6h4v12H7z'], ['aba', 'Alinear abajo', 'M2 21h20 M7 7h4v10H7z']]].map((fila, fi) => (
+                            <div key={fi} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                              {fila.map(([eje, tit, d]) => (
+                                <button key={eje} type="button" onClick={() => _alinear(eje)} title={tit}
+                                  disabled={editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)}
+                                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, borderRadius: 7,
+                                    border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)',
+                                    color: (editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)) ? 'var(--text-muted)' : '#fff',
+                                    cursor: (editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)) ? 'not-allowed' : 'pointer', opacity: (editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)) ? 0.45 : 1 }}>
+                                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d={d} /></svg>
+                                </button>
+                              ))}
+                            </div>
+                          ))}
+                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.4 }}>
+                            {editableSel.length === 0 ? 'Elegí un objeto.'
+                              : !edAlinearMesa && editableSel.length < 2 ? 'Para alinear entre sí elegí 2 o más (Ctrl+click).'
+                                : edAlinearMesa ? `${editableSel.length} objeto/s → se alinean con la mesa.`
+                                  : `${editableSel.length} objetos → se alinean entre sí.`}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', borderTop: '1px solid var(--border-light)', paddingTop: 9, lineHeight: 1.45 }}>
+                          <b style={{ color: 'var(--text-secondary)' }}>Selección</b><br />
+                          Click = uno · <b>Ctrl/Shift+click</b> = sumar varios.<br />
+                          Con varios, arrastrar los mueve <b>juntos</b>.
+                        </div>
                       </div>
                     </div>
                   </div>
