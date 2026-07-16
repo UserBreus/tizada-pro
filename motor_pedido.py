@@ -2966,12 +2966,14 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 if _tz:                                # el placeholder tenía BORDE → se respeta
                     _sw = _tz[2] * (sp if mapeo_arte else 1.0)   # ancho a la misma escala que el texto
                     _scol = " ".join(f"{v:g}" for v in _tz[1]) + " " + _tz[0].upper()  # color de TRAZO (mayúsculas)
-                    # Igual que el diseño: el trazo va DETRÁS y el relleno ENCIMA, así el
-                    # borde queda SOLO por fuera (la mitad interna del trazo la tapa el
-                    # relleno) y no se come el texto. Trazo centrado de ancho W → borde
-                    # visible = la mitad externa.
-                    bloques.append(f"q {_scol}\n{_sw:.3f} w 1 j 1 J\n{_ops}\nS\nQ\n")   # borde (atrás)
-                    bloques.append(f"q {_color_op(pl)}\n{_ops}\nf\nQ\n")                # relleno (encima)
+                    # MISMO ORDEN QUE EL ARTE: la Apariencia de Illustrator dibuja el relleno
+                    # y ENCIMA el trazo (así se exporta al PDF, y así se detecta acá: el borde
+                    # solo se asocia al relleno ANTERIOR — ver `_trazo_personalizable`). Con el
+                    # trazo encima, su mitad interna muerde el relleno y la letra se ve más fina:
+                    # eso NO es un defecto, es lo que el diseñador ve en Illustrator. Ponerlo
+                    # detrás daba la letra llena con un halo por fuera = otra apariencia.
+                    bloques.append(f"q {_color_op(pl)}\n{_ops}\nf\nQ\n")                # relleno (abajo)
+                    bloques.append(f"q {_scol}\n{_sw:.3f} w 1 j 1 J\n{_ops}\nS\nQ\n")   # borde (encima)
                 else:
                     bloques.append(f"q {_color_op(pl)}\n{_ops}\nf\nQ\n")
         # ── Etiqueta de identificación/corte (configurable por molde) ──
