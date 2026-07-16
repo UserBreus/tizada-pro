@@ -2146,6 +2146,61 @@ def fuente_archivo(nombre):
                      max_age=86400)   # el archivo no cambia (mismo nombre = misma fuente)
 
 
+# Juegos de caracteres de REFERENCIA: lo que una fuente debería tener para este sistema
+# (nombres y números de camiseta). Lo que falte de acá se marca como faltante.
+_SETS_REF = [
+    ("Mayúsculas", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    ("Minúsculas", "abcdefghijklmnopqrstuvwxyz"),
+    ("Números", "0123456789"),
+    ("Español", "ÁÉÍÓÚÜÑáéíóúüñ¿¡"),
+    ("Signos", ".,;:!?'\"/%&()@#-+=*_"),
+]
+
+
+@app.get("/api/fuente/glifos/<path:nombre>")
+def fuente_glifos(nombre):
+    """Qué caracteres TIENE y cuáles le FALTAN a una fuente del catálogo.
+    'Tiene' = el contorno se puede dibujar de verdad (estar en el cmap no alcanza: puede estar
+    mapeado y tener los datos corruptos, como el '#' de la Hawken)."""
+    base = os.path.basename(nombre or "")
+    if not base.lower().endswith((".ttf", ".otf")):
+        return jsonify({"error": "no es una fuente"}), 400
+    ruta = os.path.realpath(os.path.join(FUENTES, base))
+    if os.path.dirname(ruta) != os.path.realpath(FUENTES) or not os.path.exists(ruta):
+        return jsonify({"error": "no existe"}), 404
+    try:
+        from texto_curvas import FuenteCurvas
+        with open(ruta, "rb") as fh:
+            fc = FuenteCurvas(fh.read())
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer la fuente: {e}"}), 422
+
+    usados = set()
+    grupos = []
+    for titulo, chars in _SETS_REF:
+        celdas = []
+        for ch in chars:
+            usados.add(ch)
+            celdas.append({"ch": ch, "tiene": _dibuja(fc, ord(ch))})
+        grupos.append({"titulo": titulo, "celdas": celdas,
+                       "faltan": sum(1 for c in celdas if not c["tiene"])})
+    # Todo lo demás que la fuente trae y no está en los juegos de referencia (bonus).
+    otros = []
+    for cp in sorted(fc.cmap.keys()):
+        ch = chr(cp)
+        if ch in usados or not ch.isprintable() or ch.isspace():
+            continue
+        if _dibuja(fc, cp):
+            otros.append({"ch": ch, "tiene": True})
+    if otros:
+        grupos.append({"titulo": "Otros que trae", "celdas": otros, "faltan": 0})
+
+    interno = (MP.catalogo_fuentes(FUENTES).get(ruta) or {}).get("interno", "")
+    faltan_total = sum(g["faltan"] for g in grupos)
+    return jsonify({"ok": True, "archivo": base, "interno": interno, "grupos": grupos,
+                    "total_cmap": len(fc.cmap), "faltan": faltan_total})
+
+
 @app.delete("/api/fuente/archivo/<path:nombre>")
 def borrar_fuente(nombre):
     """Saca una tipografía del catálogo. Ojo: si algún arte la usa, ese arte va a quedar sin

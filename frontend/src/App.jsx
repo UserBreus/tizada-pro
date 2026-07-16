@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 // --- Inline SVG Icons Component for clean, dependency-free icons ---
@@ -701,6 +701,157 @@ const ZMAX = 300;
 const _famFuente = (f) => 'tzf_' + String(f.hash || f.archivo || '').replace(/[^a-zA-Z0-9]/g, '');
 // Muestra por defecto (cuando el campo de prueba está vacío).
 const MUESTRA_DEF = 'USER PRO 10';
+
+// ── Detalle de UNA fuente: tabla de glifos (lo que tiene y lo que le falta) + laboratorio ──
+function DetalleFuente({ f, onVolver }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  // laboratorio
+  const [txt, setTxt] = useState(MUESTRA_DEF);
+  const [size, setSize] = useState(64);
+  const [color, setColor] = useState('#ffffff');
+  const [borde, setBorde] = useState(0);
+  const [colorBorde, setColorBorde] = useState('#00f3ff');
+  const [fondo, setFondo] = useState('#111417');
+  const [esp, setEsp] = useState(0);
+  const fam = _famFuente(f);
+
+  useEffect(() => {
+    let vivo = true;
+    fetch('/api/fuente/glifos/' + encodeURIComponent(f.archivo))
+      .then(r => r.json())
+      .then(d => { if (vivo) { if (d.error) setErr(d.error); else setData(d); } })
+      .catch(e => { if (vivo) setErr(String(e)); });
+    return () => { vivo = false; };
+  }, [f.archivo]);
+
+  // CHEQUEO del texto de prueba: qué caracteres escritos NO tiene esta fuente. Se calcula con
+  // los glifos que informó el servidor (dibujables de verdad), no con lo que muestre el navegador
+  // — si la fuente no tiene el glifo, Chrome lo suple con otra tipografía y engaña.
+  const tiene = useMemo(() => {
+    const s = new Set();
+    (data?.grupos || []).forEach(g => g.celdas.forEach(c => { if (c.tiene) s.add(c.ch); }));
+    return s;
+  }, [data]);
+  const faltantes = useMemo(() => {
+    if (!data) return [];
+    return [...new Set([...txt].filter(c => !c.trim() ? false : !tiene.has(c)))];
+  }, [txt, tiene, data]);
+
+  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, display: 'block' };
+  const box = { border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.1)', padding: 16 };
+
+  return (
+    <div className="panel animate-fade">
+      <style>{`@font-face{font-family:'${fam}';src:url('/api/fuente/archivo/${encodeURIComponent(f.archivo)}');font-display:swap;}`}</style>
+      <div style={{ marginBottom: 20 }}>
+        <button className="btn ghost" onClick={onVolver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
+          ⬅ Volver al Catálogo de Fuentes
+        </button>
+      </div>
+      <div className="panel-header">
+        <h2>{data?.interno || f.interno}</h2>
+        <p>{f.archivo}{data ? ` · ${data.total_cmap} caracteres en la fuente` : ''}</p>
+      </div>
+
+      {err && <div className="card" style={{ margin: '20px 0', padding: 16, color: 'var(--danger, #ff4d4f)', fontSize: 13 }}>No se pudieron leer los glifos: {err}</div>}
+
+      {/* ── TABLA DE CARACTERES ── */}
+      <div className="card" style={{ margin: '20px 0', padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <div className="card-title" style={{ margin: 0 }}>Caracteres de la fuente</div>
+          {data && (
+            <span className={'badge ' + (data.faltan ? 'warning' : 'success')} style={{ fontSize: 10, flexShrink: 0 }}>
+              {data.faltan ? `Le faltan ${data.faltan}` : 'Están todos'}
+            </span>
+          )}
+        </div>
+        <div className="card-subtitle" style={{ marginBottom: 18 }}>Gris = la fuente lo tiene · Rojo tachado = NO lo tiene (ese carácter no se puede estampar).</div>
+        {!data && !err && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Leyendo la fuente…</div>}
+        {(data?.grupos || []).map((g, gi) => (
+          <div key={gi} style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>{g.titulo}</span>
+              {!!g.faltan && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--danger, #ff4d4f)' }}>faltan {g.faltan}</span>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(58px, 1fr))', gap: 6 }}>
+              {g.celdas.map((c, ci) => (
+                <div key={ci} title={c.tiene ? c.ch : `La fuente no tiene "${c.ch}"`}
+                  style={{ position: 'relative', height: 64, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: '1px solid ' + (c.tiene ? 'var(--border-light)' : 'rgba(255,77,79,0.5)'),
+                    background: c.tiene ? 'rgba(255,255,255,0.03)' : 'rgba(255,77,79,0.07)' }}>
+                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: 8.5, color: 'var(--text-muted)', opacity: 0.7 }}>{c.ch}</span>
+                  {/* el glifo, en la tipografía REAL; si no lo tiene se muestra tachado */}
+                  <span style={{ fontFamily: c.tiene ? `'${fam}'` : 'system-ui', fontSize: c.tiene ? 30 : 20,
+                    color: c.tiene ? 'var(--text-primary, #fff)' : 'var(--danger, #ff4d4f)',
+                    textDecoration: c.tiene ? 'none' : 'line-through', opacity: c.tiene ? 1 : 0.75 }}>{c.ch}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── LABORATORIO ── */}
+      <div className="card" style={{ margin: '20px 0', padding: 24 }}>
+        <div className="card-title">Probar la fuente</div>
+        <div className="card-subtitle" style={{ marginBottom: 18 }}>Escribí, cambiá el tamaño, los colores y el borde para ver cómo se comporta.</div>
+
+        <input value={txt} onChange={(e) => setTxt(e.target.value)} spellCheck={false} placeholder={MUESTRA_DEF}
+          style={{ width: '100%', padding: '10px 12px', fontSize: 13.5, borderRadius: 8, marginBottom: 14,
+            background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' }} />
+
+        {/* aviso de chequeo: caracteres escritos que la fuente NO tiene */}
+        {!!faltantes.length && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, padding: '9px 12px', borderRadius: 8,
+            border: '1px solid rgba(255,77,79,0.5)', background: 'rgba(255,77,79,0.08)', fontSize: 12, color: 'var(--danger, #ff4d4f)', fontWeight: 600 }}>
+            <span>Esta fuente NO tiene: {faltantes.map(c => `"${c}"`).join(' · ')} — no se van a poder estampar.</span>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 18 }}>
+          <div style={box}>
+            <label style={lbl}>Tamaño · {size} px</label>
+            <input type="range" min={12} max={220} value={size} onChange={(e) => setSize(+e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div style={box}>
+            <label style={lbl}>Borde · {borde} px</label>
+            <input type="range" min={0} max={12} step={0.5} value={borde} onChange={(e) => setBorde(+e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div style={box}>
+            <label style={lbl}>Espaciado · {esp} px</label>
+            <input type="range" min={-10} max={40} value={esp} onChange={(e) => setEsp(+e.target.value)} style={{ width: '100%' }} />
+          </div>
+          <div style={box}>
+            <label style={lbl}>Relleno</label>
+            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} style={{ width: '100%', height: 30, background: 'none', border: 'none', cursor: 'pointer' }} />
+          </div>
+          <div style={box}>
+            <label style={lbl}>Color del borde</label>
+            <input type="color" value={colorBorde} onChange={(e) => setColorBorde(e.target.value)} style={{ width: '100%', height: 30, background: 'none', border: 'none', cursor: 'pointer' }} />
+          </div>
+          <div style={box}>
+            <label style={lbl}>Fondo</label>
+            <input type="color" value={fondo} onChange={(e) => setFondo(e.target.value)} style={{ width: '100%', height: 30, background: 'none', border: 'none', cursor: 'pointer' }} />
+          </div>
+        </div>
+
+        {/* lienzo */}
+        <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, background: fondo, padding: 24, minHeight: 140,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
+          <div style={{ fontFamily: `'${fam}', system-ui`, fontSize: size, lineHeight: 1.25, color, letterSpacing: esp,
+            WebkitTextStrokeWidth: borde ? borde + 'px' : 0, WebkitTextStrokeColor: colorBorde,
+            paintOrder: 'stroke fill', whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>
+            {txt || MUESTRA_DEF}
+          </div>
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 8 }}>
+          Vista de referencia del navegador. La tizada estampa el contorno REAL de la fuente (texto a curvas) — el borde de acá es solo para probar la forma.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
@@ -1604,6 +1755,7 @@ export default function App() {
   const fileInputFuenteRef = useRef(null);
   const [muestraGlobal, setMuestraGlobal] = useState('');   // texto de prueba: se ve en TODAS las tarjetas del catálogo
   const [fuenteABorrar, setFuenteABorrar] = useState(null); // archivo con la confirmación de borrado abierta
+  const [fuenteDetalle, setFuenteDetalle] = useState(null); // fuente abierta en su pantalla de detalle (null = la lista)
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -9721,7 +9873,12 @@ export default function App() {
               </div>
             )}
 
-            {adminSubView === 'fuentes' && (
+            {/* DETALLE de una fuente: tabla de glifos + laboratorio. Tiene su propio "Volver". */}
+            {adminSubView === 'fuentes' && fuenteDetalle && (
+              <DetalleFuente f={fuenteDetalle} onVolver={() => setFuenteDetalle(null)} />
+            )}
+
+            {adminSubView === 'fuentes' && !fuenteDetalle && (
               <div className="panel animate-fade">
                 <div style={{ marginBottom: 20 }}>
                   <button className="btn ghost" onClick={() => setAdminSubView('dashboard')} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
@@ -9759,7 +9916,9 @@ export default function App() {
                         const txt = muestraGlobal.trim() ? muestraGlobal : MUESTRA_DEF;   // vacío = muestra por defecto
                         const porBorrar = fuenteABorrar === f.archivo;
                         return (
-                          <div key={idx} style={{ border: '1px solid ' + (porBorrar ? 'var(--danger, #ff4d4f)' : 'var(--border-light)'), borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                          <div key={idx} onClick={() => { if (!porBorrar) setFuenteDetalle(f); }}
+                            title="Ver todos los glifos y probar la fuente"
+                            style={{ border: '1px solid ' + (porBorrar ? 'var(--danger, #ff4d4f)' : 'var(--border-light)'), borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden', cursor: porBorrar ? 'default' : 'pointer' }}>
                             {/* encabezado: nombre interno (el que debe coincidir con el arte) + archivo */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)' }}>
                               <div style={{ minWidth: 0 }}>
@@ -9769,7 +9928,7 @@ export default function App() {
                               {/* ELIMINAR: confirmación EN LA TARJETA (nada de diálogos del navegador).
                                   Borrar una fuente que un arte usa lo deja sin tipografía → se pregunta. */}
                               {porBorrar ? (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                                   <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>¿Eliminar?</span>
                                   <button type="button" onClick={() => eliminarFuente(f.archivo)} title="Confirmar"
                                     style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 6, cursor: 'pointer', border: 'none', background: 'var(--danger, #ff4d4f)', color: '#fff' }}>Sí</button>
@@ -9777,7 +9936,7 @@ export default function App() {
                                     style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>No</button>
                                 </div>
                               ) : (
-                                <button type="button" onClick={() => setFuenteABorrar(f.archivo)} title="Eliminar esta fuente del catálogo"
+                                <button type="button" onClick={(e) => { e.stopPropagation(); setFuenteABorrar(f.archivo); }} title="Eliminar esta fuente del catálogo"
                                   style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
                                   <Icon name="trash" style={{ width: 12, height: 12 }} />
                                 </button>
