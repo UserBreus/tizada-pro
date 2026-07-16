@@ -699,8 +699,8 @@ const ZMAX = 300;
 // Familia CSS única por fuente (el hash del archivo). El nombre interno no sirve como familia:
 // puede repetirse, traer espacios/comillas y chocar con una fuente instalada en la PC.
 const _famFuente = (f) => 'tzf_' + String(f.hash || f.archivo || '').replace(/[^a-zA-Z0-9]/g, '');
-// Muestra por defecto: lo que este sistema estampa de verdad (nombre + número).
-const MUESTRA_DEF = 'CAMPEON 10';
+// Muestra por defecto (cuando el campo de prueba está vacío).
+const MUESTRA_DEF = 'USER PRO 10';
 
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
@@ -1602,7 +1602,8 @@ export default function App() {
   const fileInputPlantillaRef = useRef(null);
   const fileInputArteRef = useRef(null);
   const fileInputFuenteRef = useRef(null);
-  const [fuenteMuestra, setFuenteMuestra] = useState({});   // texto de prueba por fuente del catálogo ({archivo: texto})
+  const [muestraGlobal, setMuestraGlobal] = useState('');   // texto de prueba: se ve en TODAS las tarjetas del catálogo
+  const [fuenteABorrar, setFuenteABorrar] = useState(null); // archivo con la confirmación de borrado abierta
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -2066,6 +2067,18 @@ export default function App() {
       const data = await leerJson(res);
       if (!res.ok) { showError(data.error || 'No se pudo eliminar'); return; }
       await fetchGruposTizada();
+    } catch (e) { showError('Error al eliminar: ' + e.message); }
+  };
+
+  // Saca una tipografía del catálogo (ya confirmada EN la tarjeta, no hay diálogo del navegador).
+  const eliminarFuente = async (archivo) => {
+    try {
+      const res = await fetch('/api/fuente/archivo/' + encodeURIComponent(archivo), { method: 'DELETE' });
+      const data = await leerJson(res);
+      if (!res.ok) { showError(data.error || 'No se pudo eliminar la fuente'); return; }
+      setFuenteABorrar(null);
+      await fetchEstado();
+      showMsg('Fuente eliminada del catálogo.');
     } catch (e) { showError('Error al eliminar: ' + e.message); }
   };
 
@@ -9721,32 +9734,58 @@ export default function App() {
                 </div>
 
                 <div className="card" style={{ margin: '20px 0', padding: 24 }}>
-                  <div className="card-title">Tipografías Registradas en el Servidor</div>
-                  <div className="card-subtitle" style={{ marginBottom: 20 }}>Las fuentes cargadas aquí deben coincidir exactamente con el nombre de fuente configurado en el archivo Illustrator del arte.</div>
+                  {/* título + SUBIR a la derecha, en la misma línea */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <div className="card-title" style={{ margin: 0 }}>Tipografías Registradas en el Servidor</div>
+                    <input type="file" ref={fileInputFuenteRef} accept=".ttf,.otf" onChange={(e) => handleUploadFile('fuente', e.target.files[0])} hidden />
+                    <button className="btn primary" onClick={() => fileInputFuenteRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      <Icon name="plus" style={{ width: 14, height: 14 }} /> Subir Nueva Fuente (.ttf / .otf)
+                    </button>
+                  </div>
+                  {/* MUESTRA GLOBAL: lo que se escribe acá se ve al instante en TODAS las tarjetas,
+                      con la tipografía real de cada una → comparar fuentes con el mismo texto. */}
+                  <input value={muestraGlobal} onChange={(e) => setMuestraGlobal(e.target.value)}
+                    spellCheck={false} placeholder={`Escribí para probar todas las fuentes… (${MUESTRA_DEF})`}
+                    style={{ width: '100%', margin: '14px 0 20px', padding: '10px 12px', fontSize: 13.5, borderRadius: 8,
+                      background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' }} />
 
                   {/* Cada fuente del catálogo se declara con @font-face apuntando al archivo REAL
                       del servidor → la tarjeta la dibuja de verdad, no una tipografía cualquiera. */}
                   <style>{(estado?.fuentes || []).map(f => `@font-face{font-family:'${_famFuente(f)}';src:url('/api/fuente/archivo/${encodeURIComponent(f.archivo)}');font-display:swap;}`).join('')}</style>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                     {estado?.fuentes?.length ? (
                       estado.fuentes.map((f, idx) => {
                         const fam = _famFuente(f);
-                        const txt = fuenteMuestra[f.archivo] != null ? fuenteMuestra[f.archivo] : MUESTRA_DEF;
+                        const txt = muestraGlobal.trim() ? muestraGlobal : MUESTRA_DEF;   // vacío = muestra por defecto
+                        const porBorrar = fuenteABorrar === f.archivo;
                         return (
-                          <div key={idx} style={{ border: '1px solid var(--border-light)', borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                          <div key={idx} style={{ border: '1px solid ' + (porBorrar ? 'var(--danger, #ff4d4f)' : 'var(--border-light)'), borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
                             {/* encabezado: nombre interno (el que debe coincidir con el arte) + archivo */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)' }}>
                               <div style={{ minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.interno}</div>
                                 <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.archivo}</div>
                               </div>
-                              <span className="badge success" style={{ fontSize: 9, flexShrink: 0 }}>Catálogo</span>
+                              {/* ELIMINAR: confirmación EN LA TARJETA (nada de diálogos del navegador).
+                                  Borrar una fuente que un arte usa lo deja sin tipografía → se pregunta. */}
+                              {porBorrar ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                  <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>¿Eliminar?</span>
+                                  <button type="button" onClick={() => eliminarFuente(f.archivo)} title="Confirmar"
+                                    style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 6, cursor: 'pointer', border: 'none', background: 'var(--danger, #ff4d4f)', color: '#fff' }}>Sí</button>
+                                  <button type="button" onClick={() => setFuenteABorrar(null)} title="Cancelar"
+                                    style={{ fontSize: 10.5, fontWeight: 700, padding: '3px 9px', borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>No</button>
+                                </div>
+                              ) : (
+                                <button type="button" onClick={() => setFuenteABorrar(f.archivo)} title="Eliminar esta fuente del catálogo"
+                                  style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                                  <Icon name="trash" style={{ width: 12, height: 12 }} />
+                                </button>
+                              )}
                             </div>
-                            {/* MUESTRA editable: se escribe acá y se ve en la tipografía real */}
-                            <input value={txt} onChange={(e) => setFuenteMuestra(m => ({ ...m, [f.archivo]: e.target.value }))}
-                              spellCheck={false} placeholder="Escribí para probar…" title="Escribí para ver la fuente"
-                              style={{ fontFamily: `'${fam}', system-ui`, fontSize: 34, lineHeight: 1.25, width: '100%', padding: '14px 14px 16px',
-                                background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-primary, #fff)' }} />
+                            {/* la muestra, en la tipografía REAL de esta fuente */}
+                            <div style={{ fontFamily: `'${fam}', system-ui`, fontSize: 34, lineHeight: 1.25, padding: '14px 14px 16px',
+                              color: 'var(--text-primary, #fff)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{txt}</div>
                           </div>
                         );
                       })
@@ -9754,17 +9793,6 @@ export default function App() {
                       <div style={{ gridColumn: 'span 2', color: 'var(--text-secondary)', fontSize: 13, padding: '12px 0' }}>No hay fuentes cargadas. Sube tipografías TrueType (.ttf/.otf) como Impact o Arial Bold.</div>
                     )}
                   </div>
-
-                  <input 
-                    type="file" 
-                    ref={fileInputFuenteRef} 
-                    accept=".ttf,.otf" 
-                    onChange={(e) => handleUploadFile('fuente', e.target.files[0])} 
-                    hidden 
-                  />
-                  <button className="btn primary" onClick={() => fileInputFuenteRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Icon name="plus" style={{ width: 14, height: 14 }} /> Subir Nueva Fuente (.ttf / .otf)
-                  </button>
                 </div>
               </div>
             )}

@@ -2146,6 +2146,23 @@ def fuente_archivo(nombre):
                      max_age=86400)   # el archivo no cambia (mismo nombre = misma fuente)
 
 
+@app.delete("/api/fuente/archivo/<path:nombre>")
+def borrar_fuente(nombre):
+    """Saca una tipografía del catálogo. Ojo: si algún arte la usa, ese arte va a quedar sin
+    fuente (se avisa al validar) — por eso el front pide confirmación antes."""
+    base = os.path.basename(nombre or "")
+    if not base.lower().endswith((".ttf", ".otf")):
+        return jsonify({"error": "no es una fuente"}), 400
+    ruta = os.path.realpath(os.path.join(FUENTES, base))
+    if os.path.dirname(ruta) != os.path.realpath(FUENTES) or not os.path.exists(ruta):
+        return jsonify({"error": "no existe"}), 404
+    try:
+        os.remove(ruta)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo eliminar: {e}"}), 500
+    return jsonify({"ok": True, "catalogo": list(MP.catalogo_fuentes(FUENTES).values())})
+
+
 def _config_default():
     # mesas de trabajo (telas): cada una con su ancho/alto. Las piezas se asignan
     # a una tela; cada tela arma su propia hoja.
