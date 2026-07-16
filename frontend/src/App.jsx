@@ -1715,8 +1715,21 @@ export default function App() {
   // refs para evitar closures obsoletas en el listener de teclado (deps [])
   const deshacerRef = useRef(() => {});
   const rehacerRef = useRef(() => {});
-  deshacerRef.current = deshacer;
-  rehacerRef.current = rehacer;
+  // Con el editor de EDITABLES abierto, Ctrl+Z/Ctrl+Y van a SU historial (el mismo que los botones
+  // ↶/↷ del editor). El global restaura filas/etqNombres/pzOffsets/mapeoValores — estado del que
+  // depende el editor para dibujar — así que ahí dentro dejaba el visor en negro en vez de deshacer.
+  deshacerRef.current = () => {
+    if (!editorEditOpen) return deshacer();
+    const h = editorHist.current;
+    if (h.idx <= 0) { showMsg('Nada para deshacer'); return; }
+    editorUndo(); showMsg('Deshecho ↶  (Ctrl+Y para rehacer)');
+  };
+  rehacerRef.current = () => {
+    if (!editorEditOpen) return rehacer();
+    const h = editorHist.current;
+    if (h.idx >= h.stack.length - 1) { showMsg('Nada para rehacer'); return; }
+    editorRedo(); showMsg('Rehecho ↷');
+  };
 
   useEffect(() => {
     const onKey = (e) => {
