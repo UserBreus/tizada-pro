@@ -6099,11 +6099,30 @@ export default function App() {
                 const _piezaDeSel = () => { const p0 = _objsUnicos.find(x => x.nombre === editableSel[0]); return p0 ? p0.pieza : null; };
                 const _mismaPieza = (o) => !editableSel.length || _piezaDeSel() === o.pieza;
                 const _rotarSel = (deg) => aplicarTf(editableSel, (nm, cur) => ({ rot: Math.round(((cur.rot || 0) + deg) % 360) }));
-                const _espejarSel = (eje) => aplicarTf(editableSel, (nm, cur) => {
-                  const sx = cur.sx != null ? cur.sx : (cur.scale ?? 1);
-                  const sy = cur.sy != null ? cur.sy : (cur.scale ?? 1);
-                  return eje === 'h' ? { sx: -sx, sy } : { sx, sy: -sy };   // signo negativo = espejo
-                });
+                // ESPEJAR = reflejar la SELECCIÓN COMPLETA como una unidad (igual que Illustrator): no
+                // alcanza con dar vuelta cada objeto en su lugar, sus POSICIONES también se reflejan
+                // contra el bbox de la selección (el de más a la izquierda queda a la derecha). Con un
+                // solo objeto el bbox es el suyo → se refleja en el lugar, sin moverse.
+                const _espejarSel = (eje) => {
+                  const objs = editableSel.map(nm => {
+                    const o = _objsUnicos.find(x => x.nombre === nm); if (!o) return null;
+                    const p = piezaDe(o.pieza); if (!p) return null;
+                    const tf = curTfOf(nm, T);
+                    return { nm, c: centerOf(o, p, tf), d: _imgDim(o, p), tf };
+                  }).filter(Boolean);
+                  if (!objs.length) return;
+                  const R = { x0: Math.min(...objs.map(a => a.c.cx - a.c.w / 2)), x1: Math.max(...objs.map(a => a.c.cx + a.c.w / 2)),
+                              y0: Math.min(...objs.map(a => a.c.cy - a.c.h / 2)), y1: Math.max(...objs.map(a => a.c.cy + a.c.h / 2)) };
+                  const Sx = (R.x0 + R.x1) / 2, Sy = (R.y0 + R.y1) / 2;   // eje del espejo
+                  aplicarTf(objs.map(a => a.nm), (nm, cur) => {
+                    const a = objs.find(x => x.nm === nm);
+                    const sx = cur.sx != null ? cur.sx : (cur.scale ?? 1);
+                    const sy = cur.sy != null ? cur.sy : (cur.scale ?? 1);
+                    // el objeto se da vuelta (signo negativo) Y su centro se refleja contra el eje
+                    if (eje === 'h') return { sx: -sx, sy, dx: a.tf.dx + (2 * Sx - 2 * a.c.cx) / a.d.imgW };
+                    return { sx, sy: -sy, dy: a.tf.dy + (2 * Sy - 2 * a.c.cy) / a.d.imgH };
+                  });
+                };
                 // VOLVER AL DISEÑO PRINCIPAL: todos los objetos vuelven a como carga el diseño (sin mover/
                 // rotar/escalar) en el alcance elegido. Es deshacible (queda en el historial).
                 const volverPrincipal = () => {
