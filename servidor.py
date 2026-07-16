@@ -2716,6 +2716,15 @@ def estado_trabajo(tid):
     return jsonify(t)
 
 
+def _dibuja(fc, cp):
+    """¿El glifo de este code point se puede dibujar? (cmap OK pero datos rotos = False)"""
+    try:
+        fc._glifo(chr(cp))
+        return True
+    except Exception:
+        return False
+
+
 @app.get("/api/pedido/fuente_chars")
 def fuente_chars():
     """Caracteres que SOPORTA la tipografía de personalización del diseño (la que estampa
@@ -2736,7 +2745,11 @@ def fuente_chars():
             from texto_curvas import FuenteCurvas
             with open(ruta, "rb") as fh:
                 fc = FuenteCurvas(fh.read())
-            sets.append({chr(cp) for cp in fc.cmap.keys()})
+            # Estar en el cmap NO alcanza: un glifo puede estar mapeado y tener los datos
+            # corruptos (revienta recién al estamparlo). Se acepta el carácter solo si el
+            # contorno se puede DIBUJAR de verdad → la planilla lo pinta en rojo antes de
+            # generar, en vez de fallar la tizada.
+            sets.append({chr(cp) for cp in fc.cmap.keys() if _dibuja(fc, cp)})
             ok_f.append(f)
         except Exception:
             falta_f.append(f)

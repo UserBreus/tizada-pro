@@ -23,7 +23,16 @@ class FuenteCurvas:
         if gname is None:
             raise ValueError(f"glifo faltante: {ch!r}")
         pen = DecomposingRecordingPen(self.glyphset)
-        self.glyphset[gname].draw(pen)
+        # Un glifo puede estar en el cmap pero tener los datos CORRUPTOS (p. ej. `loca` con un
+        # offset imposible → fontTools lee fuera del buffer: "bytearray index out of range").
+        # Se normaliza a ValueError, igual que el glifo faltante: para quien llama el resultado
+        # es el mismo (ese carácter no se puede dibujar) y un solo glifo roto no tumba la fuente.
+        try:
+            self.glyphset[gname].draw(pen)
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"glifo corrupto: {ch!r} ({gname}): {e}") from e
         ancho = self.glyphset[gname].width
         self._cache[ch] = (pen.value, ancho)
         return self._cache[ch]

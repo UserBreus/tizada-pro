@@ -94,10 +94,12 @@ def alta_fuente(ruta_subida, carpeta):
 
 
 def _tiene_contorno(fc, ch):
+    # Falta en el cmap, datos corruptos o cualquier otra rotura de la fuente = ese carácter no se
+    # puede estampar. Se informa (`sin_contorno`), NO se rechaza la fuente entera por un glifo.
     try:
         regs, _ = fc._glifo(ch)
         return bool(regs)
-    except ValueError:
+    except Exception:
         return False
 
 
