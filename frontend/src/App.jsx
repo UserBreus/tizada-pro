@@ -6083,7 +6083,14 @@ export default function App() {
                   </div>
 
 
-                  <input type="file" ref={fileInputArteRef} accept=".ai" onChange={(e) => cargarDisenoWizard(e.target.files[0])} hidden />
+                  {/* .ai Y .pdf: un .ai YA es un PDF (Illustrator guarda con compat. PDF) y todo el
+                      motor lo lee con PyMuPDF/pikepdf como PDF — nunca hubo nada "de Illustrator".
+                      Habilitar .pdf permite probar exportaciones de Corel/Affinity. OJO: que ENTRE no
+                      garantiza que se lea TODO; depende de que el exportador conserve las capas OCG y
+                      el texto VIVO, y de que su forma de aplanar la apariencia sea la que el parser
+                      entiende (Affinity: capas OK y texto OK, pero la PILA sale vacía → colores/bordes
+                      mal). Ver MAPA changelog 2026-07-16. */}
+                  <input type="file" ref={fileInputArteRef} accept=".ai,.pdf" onChange={(e) => cargarDisenoWizard(e.target.files[0])} hidden />
                   {/* La navegación de arriba YA es por variable → el visor muestra solo sus piezas (vfArte). */}
                   {_moldeListo ? (
                     /* Tarjeta única: cabecera (nombre del molde + cargar) + [ talles | molde | diseños ] */
