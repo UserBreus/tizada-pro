@@ -689,6 +689,11 @@ function EditableTamanoModal({ inicial, variantes, esNueva, onGuardar, onElimina
 // el CLICK DERECHO arrastrando. Cada mesa a ESCALA REAL entre sí. El nombre se
 // renombra con doble-click (se guarda al clickear afuera) y el archivo se
 // descarga con ese nombre. Botón de descarga = solo el ícono, arriba a la izq.
+// Zoom MÁXIMO del espacio de mesas. A zoom 1 la escala real es PXM=240 px/m; con 40 se llega a
+// ~9600 px/m (≈96 px/cm), suficiente para leer en grande la letra chica de una etiqueta. Las mesas
+// son SVG (vectorial, sin límite de resolución) → el techo lo pone esta constante, no el archivo.
+const ZMAX = 40;
+
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   // Nombres editados: PERSISTEN ligados a ESTE pedido (clave = id del trabajo). Un pedido NUEVO
@@ -714,7 +719,7 @@ function MesasInfinito({ mesas, job }) {
       const mx = e.clientX - b.left, my = e.clientY - b.top;
       setView(v => {
         const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-        const nz = Math.max(0.15, Math.min(8, v.zoom * f));
+        const nz = Math.max(0.15, Math.min(ZMAX, v.zoom * f));
         const k = nz / v.zoom;
         return { zoom: nz, panX: mx - (mx - v.panX) * k, panY: my - (my - v.panY) * k };
       });
@@ -740,7 +745,7 @@ function MesasInfinito({ mesas, job }) {
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
         <button type="button" onClick={() => setView({ zoom: 1, panX: 0, panY: 0 })} title="Ver todo" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Ver todo</button>
         <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.max(0.15, v.zoom / 1.25) }))} title="Alejar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>−</button>
-        <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.min(8, v.zoom * 1.25) }))} title="Acercar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>+</button>
+        <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.min(ZMAX, v.zoom * 1.25) }))} title="Acercar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>+</button>
       </div>
       <div ref={wrapRef} onMouseDown={startPan} onContextMenu={(e) => e.preventDefault()}
         style={{ position: 'relative', height: '74vh', overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
