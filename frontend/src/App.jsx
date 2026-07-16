@@ -1409,6 +1409,7 @@ export default function App() {
   const [editableDisenos, setEditableDisenos] = useState([]);  // diseños del molde que tienen objetos editables
   const [editableDiseno, setEditableDiseno] = useState('principal');  // diseño (id) en edición
   const [editableSel, setEditableSel] = useState(null);        // nombre del objeto seleccionado
+  const [edSoloTalle, setEdSoloTalle] = useState(false);       // true = el ajuste va SOLO al talle en vista (no a todo el rango)
   const [editableTalle, setEditableTalle] = useState(null);    // talle/variante en edición
   const [editableScope, setEditableScope] = useState('todas'); // alcance: 'una' | 'rango' | 'todas'
   const [editableVarsSel, setEditableVarsSel] = useState([]);  // talles/variantes ELEGIDOS (scope) — popup de tarjetas
@@ -5949,7 +5950,12 @@ export default function App() {
                 // diseño es el mismo en todos sus talles).
                 const _grpAct = _porGrupos ? (_grupos.find(g => g.talles.includes(T)) || _grupos[0]) : null;
                 const curTfOf = (nm, t) => (editorTfs[nm] || {})[t] || { dx: 0, dy: 0, rot: 0, scale: 1 };
-                const scopeTalles = () => (_selT.length ? _selT : (_grpAct ? _grpAct.talles : [T]));
+                // RANGO en edición (todos sus talles) — independiente del alcance elegido.
+                const _rangoTalles = (_selT.length ? _selT : (_grpAct ? _grpAct.talles : [T])).filter(Boolean);
+                // Alcance del ajuste: por DEFECTO todo el rango (lo natural: el diseño es el mismo en
+                // todos sus talles). Con `edSoloTalle` el cambio va SOLO al talle en vista (excepción
+                // puntual): el motor ya resuelve por talle, así que el resto del rango queda como estaba.
+                const scopeTalles = () => (edSoloTalle ? [T].filter(Boolean) : _rangoTalles);
                 const _selResumen = _selT.length === 0 ? (_grpAct ? _grpAct.label : (T || '—')) : _selT.length === talles.length ? 'Todas' : _selT.length === 1 ? _selT[0] : `${_selT.length} variantes`;
                 // Editables DEL GRUPO en vista: solo los objetos cuya mesa está activa en el talle T
                 // (con una mesa por rango, saca los duplicados de los otros rangos de la lista).
@@ -6058,16 +6064,30 @@ export default function App() {
                       <button className="btn ghost" style={{ padding: '8px 14px' }} onClick={() => setEditorEditOpen(false)}>Cerrar</button>
                       <button className="btn primary" style={{ padding: '8px 16px' }} onClick={async () => { if (await guardarTodo()) setEditorEditOpen(false); }}><Icon name="check" style={{ width: 13, height: 13 }} /> Guardar</button>
                     </div>
-                    {/* TALLE GUÍA: cuando el alcance es un rango, elegís qué talle VER (el ajuste igual se
-                        aplica a todo el rango; esto solo redibuja el diseño a ese talle). */}
-                    {scopeTalles().length > 1 && (
+                    {/* TALLE en vista + ALCANCE del ajuste: por defecto va a TODO el rango; se puede
+                        elegir aplicarlo SOLO al talle que estás viendo (excepción puntual). */}
+                    {_rangoTalles.length > 1 && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Ver talle:</span>
-                        {scopeTalles().map(t => (
+                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{edSoloTalle ? 'Editar talle:' : 'Ver talle:'}</span>
+                        {_rangoTalles.map(t => (
                           <button key={t} type="button" onClick={() => { setEditableTalle(t); verVarianteOperario(t); }}
                             style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (T === t ? 'var(--accent)' : 'var(--border-light)'), background: T === t ? 'rgba(0,243,255,0.12)' : 'transparent', color: T === t ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>
                         ))}
-                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>· solo para ver; el ajuste va a todo el rango</span>
+                        {/* Aplicar a: TODO EL RANGO (default) | SOLO ESTE TALLE */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 10, paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Aplicar a:</span>
+                          {[{ k: false, l: `Todo el rango (${_rangoTalles.length})` }, { k: true, l: `Solo ${T || 'este talle'}` }].map(op => (
+                            <button key={String(op.k)} type="button" onClick={() => setEdSoloTalle(op.k)}
+                              title={op.k ? 'El cambio se guarda SOLO en este talle; el resto del rango queda como está' : 'El cambio se guarda en todos los talles del rango'}
+                              style={{ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
+                                border: '1px solid ' + (edSoloTalle === op.k ? 'var(--accent)' : 'var(--border-light)'),
+                                background: edSoloTalle === op.k ? 'var(--accent)' : 'transparent',
+                                color: edSoloTalle === op.k ? '#001016' : 'var(--text-muted)' }}>{op.l}</button>
+                          ))}
+                        </div>
+                        <span style={{ fontSize: 10.5, color: edSoloTalle ? 'var(--accent)' : 'var(--text-muted)' }}>
+                          {edSoloTalle ? `· el ajuste va SOLO a ${T}` : '· el ajuste va a todo el rango'}
+                        </span>
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
