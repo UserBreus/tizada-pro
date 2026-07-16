@@ -702,12 +702,101 @@ const _famFuente = (f) => 'tzf_' + String(f.hash || f.archivo || '').replace(/[^
 // Muestra por defecto (cuando el campo de prueba está vacío).
 const MUESTRA_DEF = 'USER PRO 10';
 
+// ── Controles del laboratorio de fuentes (estilo programa de diseño) ──
+// Paleta de la muestra: colores planos + el acento del sistema.
+const _PALETA = ['#ffffff', '#000000', '#111417', '#e11d2e', '#f5a524', '#f7e733', '#17c964',
+  '#00f3ff', '#1d4ed8', '#7c3aed', '#ec4899', '#9ca3af'];
+
+// Botón de color con paleta propia (nada de <input type=color> pelado).
+function SwatchColor({ value, onChange, titulo }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const fuera = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', fuera);
+    return () => document.removeEventListener('mousedown', fuera);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setOpen(o => !o)} title={titulo}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, height: 30, padding: '0 8px', borderRadius: 7, cursor: 'pointer',
+          border: '1px solid ' + (open ? 'var(--accent)' : 'var(--border-light)'), background: 'rgba(255,255,255,0.04)' }}>
+        <span style={{ width: 16, height: 16, borderRadius: 4, background: value, border: '1px solid rgba(255,255,255,0.25)' }} />
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>{titulo}</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 36, left: 0, zIndex: 20, padding: 10, borderRadius: 10, width: 172,
+          border: '1px solid var(--border-light)', background: 'var(--bg-card, #14181c)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 9 }}>
+            {_PALETA.map(c => (
+              <button key={c} type="button" onClick={() => { onChange(c); setOpen(false); }} title={c}
+                style={{ width: 20, height: 20, borderRadius: 5, cursor: 'pointer', background: c,
+                  border: '2px solid ' + (value.toLowerCase() === c ? 'var(--accent)' : 'rgba(255,255,255,0.2)') }} />
+            ))}
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+            <input type="color" value={value} onChange={(e) => onChange(e.target.value)}
+              style={{ width: 22, height: 22, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }} />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Personalizado</span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Campo numérico con desplegable de valores típicos (el <select> nativo queda fuera de estilo).
+function NumeroConMenu({ value, onChange, opciones, min, max, step = 1, sufijo = '', ancho = 52 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const fuera = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', fuera);
+    return () => document.removeEventListener('mousedown', fuera);
+  }, [open]);
+  const cl = (v) => Math.max(min, Math.min(max, v));
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+      <input type="number" value={value} min={min} max={max} step={step}
+        onChange={(e) => onChange(cl(parseFloat(e.target.value) || 0))}
+        style={{ width: ancho, height: 30, padding: '0 4px 0 7px', fontSize: 12, fontWeight: 700, textAlign: 'left',
+          borderRadius: '7px 0 0 7px', borderRight: 'none', border: '1px solid var(--border-light)',
+          background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)', outline: 'none' }} />
+      <button type="button" onClick={() => setOpen(o => !o)} title="Valores típicos"
+        style={{ height: 30, width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          borderRadius: '0 7px 7px 0', fontSize: 8, color: 'var(--text-muted)',
+          border: '1px solid ' + (open ? 'var(--accent)' : 'var(--border-light)'), background: 'rgba(255,255,255,0.04)' }}>▼</button>
+      {open && (
+        <div style={{ position: 'absolute', top: 34, left: 0, zIndex: 20, minWidth: 74, padding: 4, borderRadius: 9, maxHeight: 210, overflowY: 'auto',
+          border: '1px solid var(--border-light)', background: 'var(--bg-card, #14181c)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+          {opciones.map(o => (
+            <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', borderRadius: 6, cursor: 'pointer', border: 'none',
+                fontSize: 11.5, fontWeight: 700, background: value === o ? 'rgba(0,243,255,0.12)' : 'transparent',
+                color: value === o ? 'var(--accent)' : 'var(--text-secondary)' }}>{o}{sufijo}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// piezas de la barra de herramientas
+const _grp = { display: 'flex', alignItems: 'center', gap: 6 };
+const _sep = { width: 1, height: 20, background: 'var(--border-light)' };
+const IcoLab = ({ d }) => (
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7"
+    strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><path d={d} /></svg>
+);
+
 // ── Detalle de UNA fuente: tabla de glifos (lo que tiene y lo que le falta) + laboratorio ──
 function DetalleFuente({ f, onVolver }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
-  // laboratorio
-  const [txt, setTxt] = useState(MUESTRA_DEF);
+  // laboratorio ('' = el lienzo muestra MUESTRA_DEF como marca de agua)
+  const [txt, setTxt] = useState('');
   const [size, setSize] = useState(64);
   const [color, setColor] = useState('#ffffff');
   const [borde, setBorde] = useState(0);
@@ -735,11 +824,9 @@ function DetalleFuente({ f, onVolver }) {
   }, [data]);
   const faltantes = useMemo(() => {
     if (!data) return [];
-    return [...new Set([...txt].filter(c => !c.trim() ? false : !tiene.has(c)))];
+    const efectivo = txt.trim() ? txt : MUESTRA_DEF;   // vacío = lo que se ve es la muestra por defecto
+    return [...new Set([...efectivo].filter(c => !c.trim() ? false : !tiene.has(c)))];
   }, [txt, tiene, data]);
-
-  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6, display: 'block' };
-  const box = { border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.1)', padding: 16 };
 
   return (
     <div className="panel animate-fade">
@@ -795,56 +882,60 @@ function DetalleFuente({ f, onVolver }) {
       {/* ── LABORATORIO ── */}
       <div className="card" style={{ margin: '20px 0', padding: 24 }}>
         <div className="card-title">Probar la fuente</div>
-        <div className="card-subtitle" style={{ marginBottom: 18 }}>Escribí, cambiá el tamaño, los colores y el borde para ver cómo se comporta.</div>
+        <div className="card-subtitle" style={{ marginBottom: 14 }}>Escribí directamente sobre la muestra.</div>
 
-        <input value={txt} onChange={(e) => setTxt(e.target.value)} spellCheck={false} placeholder={MUESTRA_DEF}
-          style={{ width: '100%', padding: '10px 12px', fontSize: 13.5, borderRadius: 8, marginBottom: 14,
-            background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' }} />
+        {/* BARRA DE HERRAMIENTAS */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: 8, marginBottom: -1,
+          border: '1px solid var(--border-light)', borderRadius: '10px 10px 0 0', background: 'rgba(255,255,255,0.03)' }}>
+          {/* tamaño */}
+          <div style={_grp} title="Tamaño de la letra">
+            <IcoLab d="M3 17V5h6M6 5v12M12 17V9h5M14.5 9v8" />
+            <NumeroConMenu value={size} onChange={setSize} min={8} max={400} opciones={[24, 36, 48, 64, 96, 128, 180, 240]} />
+          </div>
+          <div style={_sep} />
+          {/* borde */}
+          <div style={_grp} title="Grosor del borde">
+            <IcoLab d="M12 3a9 9 0 100 18 9 9 0 000-18zm0 4a5 5 0 110 10 5 5 0 010-10z" />
+            <NumeroConMenu value={borde} onChange={setBorde} min={0} max={20} step={0.5} opciones={[0, 1, 2, 3, 4, 6, 8, 12]} ancho={46} />
+            <SwatchColor value={colorBorde} onChange={setColorBorde} titulo="Borde" />
+          </div>
+          <div style={_sep} />
+          {/* espaciado */}
+          <div style={_grp} title="Espaciado entre letras">
+            <IcoLab d="M4 5v14M20 5v14M8 12h8M8 12l2-2M8 12l2 2M16 12l-2-2M16 12l-2 2" />
+            <NumeroConMenu value={esp} onChange={setEsp} min={-20} max={60} opciones={[-4, 0, 2, 4, 8, 16, 24]} ancho={46} />
+          </div>
+          <div style={_sep} />
+          {/* colores */}
+          <div style={_grp}>
+            <SwatchColor value={color} onChange={setColor} titulo="Relleno" />
+            <SwatchColor value={fondo} onChange={setFondo} titulo="Fondo" />
+          </div>
+          <div style={{ flex: 1 }} />
+          <button type="button" onClick={() => { setSize(64); setBorde(0); setEsp(0); setColor('#ffffff'); setColorBorde('#00f3ff'); setFondo('#111417'); }}
+            title="Volver a los valores iniciales"
+            style={{ height: 30, padding: '0 10px', borderRadius: 7, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+              border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>↺ Reiniciar</button>
+        </div>
+
+        {/* LIENZO EDITABLE: se escribe acá mismo, con la fuente y los colores aplicados */}
+        <style>{`.tzLab:empty:before{content:attr(data-ph);opacity:.35}`}</style>
+        <div className="tzLab" contentEditable suppressContentEditableWarning spellCheck={false}
+          data-ph={MUESTRA_DEF} onInput={(e) => setTxt(e.currentTarget.textContent)}
+          title="Escribí acá"
+          style={{ border: '1px solid var(--border-light)', borderRadius: '0 0 10px 10px', background: fondo, padding: 24, minHeight: 150,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto', outline: 'none', cursor: 'text',
+            fontFamily: `'${fam}', system-ui`, fontSize: size, lineHeight: 1.25, color, letterSpacing: esp,
+            WebkitTextStrokeWidth: borde ? borde + 'px' : 0, WebkitTextStrokeColor: colorBorde,
+            paintOrder: 'stroke fill', whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }} />
 
         {/* aviso de chequeo: caracteres escritos que la fuente NO tiene */}
         {!!faltantes.length && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, padding: '9px 12px', borderRadius: 8,
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, padding: '9px 12px', borderRadius: 8,
             border: '1px solid rgba(255,77,79,0.5)', background: 'rgba(255,77,79,0.08)', fontSize: 12, color: 'var(--danger, #ff4d4f)', fontWeight: 600 }}>
             <span>Esta fuente NO tiene: {faltantes.map(c => `"${c}"`).join(' · ')} — no se van a poder estampar.</span>
           </div>
         )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 14, marginBottom: 18 }}>
-          <div style={box}>
-            <label style={lbl}>Tamaño · {size} px</label>
-            <input type="range" min={12} max={220} value={size} onChange={(e) => setSize(+e.target.value)} style={{ width: '100%' }} />
-          </div>
-          <div style={box}>
-            <label style={lbl}>Borde · {borde} px</label>
-            <input type="range" min={0} max={12} step={0.5} value={borde} onChange={(e) => setBorde(+e.target.value)} style={{ width: '100%' }} />
-          </div>
-          <div style={box}>
-            <label style={lbl}>Espaciado · {esp} px</label>
-            <input type="range" min={-10} max={40} value={esp} onChange={(e) => setEsp(+e.target.value)} style={{ width: '100%' }} />
-          </div>
-          <div style={box}>
-            <label style={lbl}>Relleno</label>
-            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} style={{ width: '100%', height: 30, background: 'none', border: 'none', cursor: 'pointer' }} />
-          </div>
-          <div style={box}>
-            <label style={lbl}>Color del borde</label>
-            <input type="color" value={colorBorde} onChange={(e) => setColorBorde(e.target.value)} style={{ width: '100%', height: 30, background: 'none', border: 'none', cursor: 'pointer' }} />
-          </div>
-          <div style={box}>
-            <label style={lbl}>Fondo</label>
-            <input type="color" value={fondo} onChange={(e) => setFondo(e.target.value)} style={{ width: '100%', height: 30, background: 'none', border: 'none', cursor: 'pointer' }} />
-          </div>
-        </div>
-
-        {/* lienzo */}
-        <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, background: fondo, padding: 24, minHeight: 140,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-          <div style={{ fontFamily: `'${fam}', system-ui`, fontSize: size, lineHeight: 1.25, color, letterSpacing: esp,
-            WebkitTextStrokeWidth: borde ? borde + 'px' : 0, WebkitTextStrokeColor: colorBorde,
-            paintOrder: 'stroke fill', whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>
-            {txt || MUESTRA_DEF}
-          </div>
-        </div>
         <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 8 }}>
           Vista de referencia del navegador. La tizada estampa el contorno REAL de la fuente (texto a curvas) — el borde de acá es solo para probar la forma.
         </div>
