@@ -6118,71 +6118,6 @@ export default function App() {
                       <button className="btn ghost" style={{ padding: '8px 14px' }} onClick={() => setEditorEditOpen(false)}>Cerrar</button>
                       <button className="btn primary" style={{ padding: '8px 16px' }} onClick={async () => { if (await guardarTodo()) setEditorEditOpen(false); }}><Icon name="check" style={{ width: 13, height: 13 }} /> Guardar</button>
                     </div>
-                    {/* TALLE en vista + ALCANCE del ajuste: por defecto va a TODO el rango; se puede
-                        elegir aplicarlo SOLO al talle que estás viendo (excepción puntual). */}
-                    {_rangoTalles.length > 1 && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{edSoloTalle ? 'Editar talle:' : 'Ver talle:'}</span>
-                        {_rangoTalles.map(t => (
-                          <button key={t} type="button" onClick={() => { setEditableTalle(t); verVarianteOperario(t); }}
-                            style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (T === t ? 'var(--accent)' : 'var(--border-light)'), background: T === t ? 'rgba(0,243,255,0.12)' : 'transparent', color: T === t ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>
-                        ))}
-                        {/* Aplicar a: TODO EL RANGO (default) | SOLO ESTE TALLE */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 10, paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
-                          <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Aplicar a:</span>
-                          {[{ k: false, l: `Todo el rango (${_rangoTalles.length})` }, { k: true, l: `Solo ${T || 'este talle'}` }].map(op => (
-                            <button key={String(op.k)} type="button" onClick={() => setEdSoloTalle(op.k)}
-                              title={op.k ? 'El cambio se guarda SOLO en este talle; el resto del rango queda como está' : 'El cambio se guarda en todos los talles del rango'}
-                              style={{ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
-                                border: '1px solid ' + (edSoloTalle === op.k ? 'var(--accent)' : 'var(--border-light)'),
-                                background: edSoloTalle === op.k ? 'var(--accent)' : 'transparent',
-                                color: edSoloTalle === op.k ? '#001016' : 'var(--text-muted)' }}>{op.l}</button>
-                          ))}
-                        </div>
-                        <span style={{ fontSize: 10.5, color: edSoloTalle ? 'var(--accent)' : 'var(--text-muted)' }}>
-                          {edSoloTalle ? `· el ajuste va SOLO a ${T}` : '· el ajuste va a todo el rango'}
-                        </span>
-                      </div>
-                    )}
-                    {/* MEDIDAS del objeto seleccionado: An./Al. REALES en cm (del diseño) + enlace de
-                        proporción (como Illustrator). Con el enlace ON escala proporcional; OFF deja
-                        ancho y alto libres (sx/sy independientes → el motor deforma igual). */}
-                    {(() => {
-                      const _o = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0]) : null;
-                      if (!_o || !(_o.w_cm > 0) || !(_o.h_cm > 0)) return null;
-                      const _tf = curTfOf(_o.nombre, T);
-                      const _wCm = _o.w_cm * _SX(_tf), _hCm = _o.h_cm * _SY(_tf);
-                      const _aplicar = (patch) => { setTfScoped(_o.nombre, patch); setTimeout(() => histCommit(editorTfsRef.current), 0); };
-                      const _setW = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.w_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sx: f }); };
-                      const _setH = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.h_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sy: f }); };
-                      const _inp = { width: 74, padding: '5px 7px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, fontWeight: 700, textAlign: 'right', outline: 'none' };
-                      const _lbl = { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-secondary)' };
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)' }}>{_o.nombre}</span>
-                          <label style={_lbl}>An.
-                            <input key={`w|${_o.nombre}|${T}|${_wCm.toFixed(2)}`} defaultValue={_wCm.toFixed(2)}
-                              onBlur={(e) => _setW(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
-                          </label>
-                          <button type="button" onClick={() => setEdLink(v => !v)}
-                            title={edLink ? 'Proporción ENLAZADA: al cambiar uno, el otro acompaña' : 'Proporción LIBRE: ancho y alto independientes (deforma)'}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 26, borderRadius: 7, cursor: 'pointer', transition: 'all .15s',
-                              border: '1px solid ' + (edLink ? 'var(--accent)' : 'var(--border-light)'),
-                              background: edLink ? 'var(--accent)' : 'rgba(255,255,255,0.04)', color: edLink ? '#001016' : 'var(--text-muted)' }}>
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                              <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
-                              <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
-                              {!edLink && <line x1="3" y1="21" x2="21" y2="3" stroke="#ff6b6b" strokeWidth="2.2" />}
-                            </svg>
-                          </button>
-                          <label style={_lbl}>Al.
-                            <input key={`h|${_o.nombre}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
-                              onBlur={(e) => _setH(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
-                          </label>
-                          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>· medida en el diseño ({_o.w_cm}×{_o.h_cm} cm al 100%)</span>
-                        </div>
-                      );
-                    })()}
                     <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
                       {/* lista de objetos */}
                       <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
@@ -6249,6 +6184,71 @@ export default function App() {
                       </div>
                       {/* ── PANEL DERECHO: herramientas de edición (estilo Illustrator) ── */}
                       <div style={{ width: 208, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
+                    {/* TALLE en vista + ALCANCE del ajuste: por defecto va a TODO el rango; se puede
+                        elegir aplicarlo SOLO al talle que estás viendo (excepción puntual). */}
+                    {_rangoTalles.length > 1 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{edSoloTalle ? 'Editar talle:' : 'Ver talle:'}</span>
+                        {_rangoTalles.map(t => (
+                          <button key={t} type="button" onClick={() => { setEditableTalle(t); verVarianteOperario(t); }}
+                            style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (T === t ? 'var(--accent)' : 'var(--border-light)'), background: T === t ? 'rgba(0,243,255,0.12)' : 'transparent', color: T === t ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>
+                        ))}
+                        {/* Aplicar a: TODO EL RANGO (default) | SOLO ESTE TALLE */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 10, paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Aplicar a:</span>
+                          {[{ k: false, l: `Todo el rango (${_rangoTalles.length})` }, { k: true, l: `Solo ${T || 'este talle'}` }].map(op => (
+                            <button key={String(op.k)} type="button" onClick={() => setEdSoloTalle(op.k)}
+                              title={op.k ? 'El cambio se guarda SOLO en este talle; el resto del rango queda como está' : 'El cambio se guarda en todos los talles del rango'}
+                              style={{ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
+                                border: '1px solid ' + (edSoloTalle === op.k ? 'var(--accent)' : 'var(--border-light)'),
+                                background: edSoloTalle === op.k ? 'var(--accent)' : 'transparent',
+                                color: edSoloTalle === op.k ? '#001016' : 'var(--text-muted)' }}>{op.l}</button>
+                          ))}
+                        </div>
+                        <span style={{ fontSize: 10.5, color: edSoloTalle ? 'var(--accent)' : 'var(--text-muted)' }}>
+                          {edSoloTalle ? `· el ajuste va SOLO a ${T}` : '· el ajuste va a todo el rango'}
+                        </span>
+                      </div>
+                    )}
+                    {/* MEDIDAS del objeto seleccionado: An./Al. REALES en cm (del diseño) + enlace de
+                        proporción (como Illustrator). Con el enlace ON escala proporcional; OFF deja
+                        ancho y alto libres (sx/sy independientes → el motor deforma igual). */}
+                    {(() => {
+                      const _o = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0]) : null;
+                      if (!_o || !(_o.w_cm > 0) || !(_o.h_cm > 0)) return null;
+                      const _tf = curTfOf(_o.nombre, T);
+                      const _wCm = _o.w_cm * _SX(_tf), _hCm = _o.h_cm * _SY(_tf);
+                      const _aplicar = (patch) => { setTfScoped(_o.nombre, patch); setTimeout(() => histCommit(editorTfsRef.current), 0); };
+                      const _setW = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.w_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sx: f }); };
+                      const _setH = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.h_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sy: f }); };
+                      const _inp = { width: 74, padding: '5px 7px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, fontWeight: 700, textAlign: 'right', outline: 'none' };
+                      const _lbl = { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-secondary)' };
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)' }}>{_o.nombre}</span>
+                          <label style={_lbl}>An.
+                            <input key={`w|${_o.nombre}|${T}|${_wCm.toFixed(2)}`} defaultValue={_wCm.toFixed(2)}
+                              onBlur={(e) => _setW(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
+                          </label>
+                          <button type="button" onClick={() => setEdLink(v => !v)}
+                            title={edLink ? 'Proporción ENLAZADA: al cambiar uno, el otro acompaña' : 'Proporción LIBRE: ancho y alto independientes (deforma)'}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 26, borderRadius: 7, cursor: 'pointer', transition: 'all .15s',
+                              border: '1px solid ' + (edLink ? 'var(--accent)' : 'var(--border-light)'),
+                              background: edLink ? 'var(--accent)' : 'rgba(255,255,255,0.04)', color: edLink ? '#001016' : 'var(--text-muted)' }}>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                              <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+                              <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+                              {!edLink && <line x1="3" y1="21" x2="21" y2="3" stroke="#ff6b6b" strokeWidth="2.2" />}
+                            </svg>
+                          </button>
+                          <label style={_lbl}>Al.
+                            <input key={`h|${_o.nombre}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
+                              onBlur={(e) => _setH(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
+                          </label>
+                          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>· medida en el diseño ({_o.w_cm}×{_o.h_cm} cm al 100%)</span>
+                        </div>
+                      );
+                    })()}
                         <div>
                           <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>ALINEAR</div>
                           {/* Modo: entre la SELECCIÓN o contra la MESA DE TRABAJO */}
@@ -6261,17 +6261,23 @@ export default function App() {
                                   background: edAlinearMesa === op.k ? 'var(--accent)' : 'transparent', color: edAlinearMesa === op.k ? '#001016' : 'var(--text-muted)' }}>{op.l}</button>
                             ))}
                           </div>
-                          {[[['izq', 'Alinear a la izquierda', 'M3 2v20 M7 7h10v4H7z'], ['ch', 'Centrar horizontal', 'M12 2v20 M6 7h12v4H6z'], ['der', 'Alinear a la derecha', 'M21 2v20 M7 7h10v4H7z']],
-                            [['arr', 'Alinear arriba', 'M2 3h20 M7 7h4v10H7z'], ['cv', 'Centrar vertical', 'M2 12h20 M7 6h4v12H7z'], ['aba', 'Alinear abajo', 'M2 21h20 M7 7h4v10H7z']]].map((fila, fi) => (
+                          {/* Íconos de alineación estándar: la LÍNEA es la referencia y las dos BARRAS
+                              (una larga y una corta) muestran cómo quedan los objetos respecto de ella. */}
+                          {[[['izq', 'Alinear a la izquierda', <><line x1="3" y1="3" x2="3" y2="21" /><rect x="6" y="6" width="14" height="4.6" rx="1" /><rect x="6" y="13.4" width="8.5" height="4.6" rx="1" /></>],
+                             ['ch', 'Centrar horizontal', <><line x1="12" y1="3" x2="12" y2="21" /><rect x="5" y="6" width="14" height="4.6" rx="1" /><rect x="7.75" y="13.4" width="8.5" height="4.6" rx="1" /></>],
+                             ['der', 'Alinear a la derecha', <><line x1="21" y1="3" x2="21" y2="21" /><rect x="4" y="6" width="14" height="4.6" rx="1" /><rect x="9.5" y="13.4" width="8.5" height="4.6" rx="1" /></>]],
+                            [['arr', 'Alinear arriba', <><line x1="3" y1="3" x2="21" y2="3" /><rect x="6" y="6" width="4.6" height="14" rx="1" /><rect x="13.4" y="6" width="4.6" height="8.5" rx="1" /></>],
+                             ['cv', 'Centrar vertical', <><line x1="3" y1="12" x2="21" y2="12" /><rect x="6" y="5" width="4.6" height="14" rx="1" /><rect x="13.4" y="7.75" width="4.6" height="8.5" rx="1" /></>],
+                             ['aba', 'Alinear abajo', <><line x1="3" y1="21" x2="21" y2="21" /><rect x="6" y="4" width="4.6" height="14" rx="1" /><rect x="13.4" y="9.5" width="4.6" height="8.5" rx="1" /></>]]].map((fila, fi) => (
                             <div key={fi} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
-                              {fila.map(([eje, tit, d]) => (
+                              {fila.map(([eje, tit, ico]) => (
                                 <button key={eje} type="button" onClick={() => _alinear(eje)} title={tit}
                                   disabled={editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)}
                                   style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: 30, borderRadius: 7,
                                     border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)',
                                     color: (editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)) ? 'var(--text-muted)' : '#fff',
                                     cursor: (editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)) ? 'not-allowed' : 'pointer', opacity: (editableSel.length === 0 || (!edAlinearMesa && editableSel.length < 2)) ? 0.45 : 1 }}>
-                                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d={d} /></svg>
+                                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round">{ico}</svg>
                                 </button>
                               ))}
                             </div>
