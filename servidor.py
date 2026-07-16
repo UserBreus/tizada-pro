@@ -1906,11 +1906,16 @@ def _variantes_molde(pid):
 
 
 def _clamp_tf(v):
-    """Saneo de la transformación de un objeto editable (mover/rotar/escalar)."""
+    """Saneo de la transformación de un objeto editable (mover/rotar/escalar).
+    `scale` = escala UNIFORME (legacy). `sx`/`sy` = ancho/alto por separado (enlace de
+    proporción desactivado en el editor); si no vienen, valen `scale`."""
     v = v or {}
+    _cl = lambda x: max(0.05, min(20.0, float(x)))
+    sc = _cl(v.get("scale", 1.0) or 1.0)
+    sx = _cl(v.get("sx") if v.get("sx") is not None else sc)
+    sy = _cl(v.get("sy") if v.get("sy") is not None else sc)
     return {"dx": float(v.get("dx", 0.0) or 0.0), "dy": float(v.get("dy", 0.0) or 0.0),
-            "rot": float(v.get("rot", 0.0) or 0.0),
-            "scale": max(0.05, min(20.0, float(v.get("scale", 1.0) or 1.0)))}
+            "rot": float(v.get("rot", 0.0) or 0.0), "scale": sc, "sx": sx, "sy": sy}
 
 
 @app.get("/api/productos/editables")

@@ -1687,11 +1687,15 @@ def _matriz_editable(tf, obj, cont, W, H, B):
     """Matriz `cm` del transform del usuario (mover/rotar/escalar) de un objeto editable,
     alrededor de su centro sobre la pieza. Devuelve "" si es identidad. `dx,dy` en fracciones
     de la pieza (dy hacia abajo, y-down del editor); `rot` en grados (horario del editor);
-    `scale` factor. La pieza está en coords de página y-arriba."""
+    `scale` factor UNIFORME (legacy); `sx`/`sy` (opcionales) permiten escala NO uniforme
+    (ancho y alto por separado, con el enlace de proporción desactivado en el editor): si
+    vienen, mandan sobre `scale`. La pieza está en coords de página y-arriba."""
     import math
     dx = float(tf.get("dx", 0) or 0); dy = float(tf.get("dy", 0) or 0)
     rot = float(tf.get("rot", 0) or 0); sc = float(tf.get("scale", 1) or 1)
-    if abs(dx) < 1e-6 and abs(dy) < 1e-6 and abs(rot) < 1e-6 and abs(sc - 1) < 1e-6:
+    sx = float(tf.get("sx") if tf.get("sx") is not None else sc)
+    sy = float(tf.get("sy") if tf.get("sy") is not None else sc)
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6 and abs(rot) < 1e-6 and abs(sx - 1) < 1e-6 and abs(sy - 1) < 1e-6:
         return ""
     pos = _pos_en_pieza(obj.get("mesa_rect"), obj.get("bbox_mu"), cont.get("bbox_mu"))
     if not pos:
@@ -1700,7 +1704,7 @@ def _matriz_editable(tf, obj, cont, W, H, B):
     Cy = B + (1 - (pos["ry"] + pos["rh"] / 2)) * H      # ry es desde ARRIBA → y-arriba de página
     r = math.radians(-rot)                              # editor horario → PDF antihorario
     cs, sn = math.cos(r), math.sin(r)
-    a, b, c, d = sc * cs, sc * sn, -sc * sn, sc * cs
+    a, b, c, d = sx * cs, sx * sn, -sy * sn, sy * cs   # escala (sx,sy) y después rotación
     # COORDS DEL DISEÑO: el objeto vive en el diseño → el mover se mide contra el ancho del DISEÑO en la
     # pieza (awf*W), no el ancho de la pieza. El alto del diseño = alto de la pieza (cm_encajar) → dy*H.
     tdx, tdy = dx * pos.get("awf", 1.0) * W, -dy * H    # dy hacia abajo → y-arriba: negativo

@@ -1410,6 +1410,7 @@ export default function App() {
   const [editableDiseno, setEditableDiseno] = useState('principal');  // diseño (id) en edición
   const [editableSel, setEditableSel] = useState(null);        // nombre del objeto seleccionado
   const [edSoloTalle, setEdSoloTalle] = useState(false);       // true = el ajuste va SOLO al talle en vista (no a todo el rango)
+  const [edLink, setEdLink] = useState(true);                  // enlace An./Al.: true = escala proporcional
   const [editableTalle, setEditableTalle] = useState(null);    // talle/variante en edición
   const [editableScope, setEditableScope] = useState('todas'); // alcance: 'una' | 'rango' | 'todas'
   const [editableVarsSel, setEditableVarsSel] = useState([]);  // talles/variantes ELEGIDOS (scope) — popup de tarjetas
@@ -5950,6 +5951,10 @@ export default function App() {
                 // diseño es el mismo en todos sus talles).
                 const _grpAct = _porGrupos ? (_grupos.find(g => g.talles.includes(T)) || _grupos[0]) : null;
                 const curTfOf = (nm, t) => (editorTfs[nm] || {})[t] || { dx: 0, dy: 0, rot: 0, scale: 1 };
+                // Escala por eje: `sx`/`sy` mandan (enlace desactivado = ancho y alto libres);
+                // si no están, valen `scale` (uniforme, legacy). Igual que el motor.
+                const _SX = (tf) => (tf && tf.sx != null ? tf.sx : ((tf && tf.scale) ?? 1));
+                const _SY = (tf) => (tf && tf.sy != null ? tf.sy : ((tf && tf.scale) ?? 1));
                 // RANGO en edición (todos sus talles) — independiente del alcance elegido.
                 const _rangoTalles = (_selT.length ? _selT : (_grpAct ? _grpAct.talles : [T])).filter(Boolean);
                 // Alcance del ajuste: por DEFECTO todo el rango (lo natural: el diseño es el mismo en
@@ -5982,12 +5987,12 @@ export default function App() {
                   const fcy = (mr && bb) ? ((bb[1] + bb[3]) / 2 - mr[1]) / mr[3] : 0.5;
                   const fw = (mr && bb) ? (bb[2] - bb[0]) / mr[2] : 0.3;
                   const fh = (mr && bb) ? (bb[3] - bb[1]) / mr[3] : 0.3;
-                  return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH, w: fw * imgW * tf.scale, h: fh * imgH * tf.scale };
+                  return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH, w: fw * imgW * _SX(tf), h: fh * imgH * _SY(tf) };
                 };
                 // Mapear pantalla→viewBox con una CTM YA CACHEADA (no llamar getScreenCTM en cada
                 // movimiento: es una lectura de layout sincrónica que hace el arrastre pesado).
                 const _cToVB = (cx, cy, ictm) => { const svg = editorSvgRef.current; if (!svg || !ictm) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(ictm); return { x: q.x, y: q.y }; };
-                const onMove = (e) => { const d = editorDrag.current; if (!d) return; const m = _cToVB(e.clientX, e.clientY, d.ictm); if (d.tipo === 'move') setTfScoped(d.nm, { dx: d.tf0.dx + (m.x - d.start.x) / d.imgW, dy: d.tf0.dy + (m.y - d.start.y) / d.imgH }); else if (d.tipo === 'scale') setTfScoped(d.nm, { scale: Math.max(0.1, Math.min(8, d.scale0 * Math.hypot(m.x - d.cx, m.y - d.cy) / (d.dist0 || 1))) }); else if (d.tipo === 'rot') setTfScoped(d.nm, { rot: Math.round(d.rot0 + (Math.atan2(m.y - d.cy, m.x - d.cx) * 180 / Math.PI - d.ang0)) }); };
+                const onMove = (e) => { const d = editorDrag.current; if (!d) return; const m = _cToVB(e.clientX, e.clientY, d.ictm); if (d.tipo === 'move') setTfScoped(d.nm, { dx: d.tf0.dx + (m.x - d.start.x) / d.imgW, dy: d.tf0.dy + (m.y - d.start.y) / d.imgH }); else if (d.tipo === 'scale') { const _f = Math.hypot(m.x - d.cx, m.y - d.cy) / (d.dist0 || 1); const _c = (v) => Math.max(0.1, Math.min(8, v)); setTfScoped(d.nm, { scale: _c(d.scale0 * _f), sx: _c(d.sx0 * _f), sy: _c(d.sy0 * _f) }); } else if (d.tipo === 'rot') setTfScoped(d.nm, { rot: Math.round(d.rot0 + (Math.atan2(m.y - d.cy, m.x - d.cx) * 180 / Math.PI - d.ang0)) }); };
                 const onUp = () => { if (editorDrag.current) { editorDrag.current = null; histCommit(editorTfsRef.current); } };
                 const start = (e, tipo, o, p) => {
                   e.stopPropagation(); e.preventDefault(); setEditableSel(o.nombre);
@@ -5998,7 +6003,7 @@ export default function App() {
                   // PIVOTE = centro del objeto YA con el acomodo de la variante (vo). Sin esto el
                   // giro/escala se hacían alrededor de un punto corrido → "al reves"/pesado.
                   const cx = c.cx + vo.dx, cy = c.cy + vo.dy;
-                  editorDrag.current = { tipo, nm: o.nombre, p, imgW, imgH, ictm, start: m, tf0: tf, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
+                  editorDrag.current = { tipo, nm: o.nombre, p, imgW, imgH, ictm, start: m, tf0: tf, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, sx0: _SX(tf), sy0: _SY(tf), ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
                 };
                 const chip = (txt, on, fn) => (<button type="button" onClick={fn} style={{ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{txt}</button>);
                 const selStyle = { padding: '5px 8px', borderRadius: 8, fontSize: 12, background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)' };
@@ -6090,6 +6095,45 @@ export default function App() {
                         </span>
                       </div>
                     )}
+                    {/* MEDIDAS del objeto seleccionado: An./Al. REALES en cm (del diseño) + enlace de
+                        proporción (como Illustrator). Con el enlace ON escala proporcional; OFF deja
+                        ancho y alto libres (sx/sy independientes → el motor deforma igual). */}
+                    {(() => {
+                      const _o = _objsUnicos.find(o => o.nombre === editableSel);
+                      if (!_o || !(_o.w_cm > 0) || !(_o.h_cm > 0)) return null;
+                      const _tf = curTfOf(_o.nombre, T);
+                      const _wCm = _o.w_cm * _SX(_tf), _hCm = _o.h_cm * _SY(_tf);
+                      const _aplicar = (patch) => { setTfScoped(_o.nombre, patch); setTimeout(() => histCommit(editorTfsRef.current), 0); };
+                      const _setW = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.w_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sx: f }); };
+                      const _setH = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.h_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sy: f }); };
+                      const _inp = { width: 74, padding: '5px 7px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, fontWeight: 700, textAlign: 'right', outline: 'none' };
+                      const _lbl = { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-secondary)' };
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)' }}>{_o.nombre}</span>
+                          <label style={_lbl}>An.
+                            <input key={`w|${_o.nombre}|${T}|${_wCm.toFixed(2)}`} defaultValue={_wCm.toFixed(2)}
+                              onBlur={(e) => _setW(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
+                          </label>
+                          <button type="button" onClick={() => setEdLink(v => !v)}
+                            title={edLink ? 'Proporción ENLAZADA: al cambiar uno, el otro acompaña' : 'Proporción LIBRE: ancho y alto independientes (deforma)'}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 26, borderRadius: 7, cursor: 'pointer', transition: 'all .15s',
+                              border: '1px solid ' + (edLink ? 'var(--accent)' : 'var(--border-light)'),
+                              background: edLink ? 'var(--accent)' : 'rgba(255,255,255,0.04)', color: edLink ? '#001016' : 'var(--text-muted)' }}>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                              <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+                              <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+                              {!edLink && <line x1="3" y1="21" x2="21" y2="3" stroke="#ff6b6b" strokeWidth="2.2" />}
+                            </svg>
+                          </button>
+                          <label style={_lbl}>Al.
+                            <input key={`h|${_o.nombre}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
+                              onBlur={(e) => _setH(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
+                          </label>
+                          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>· medida en el diseño ({_o.w_cm}×{_o.h_cm} cm al 100%)</span>
+                        </div>
+                      );
+                    })()}
                     <div style={{ display: 'flex', gap: 10, flex: 1, minHeight: 0 }}>
                       {/* lista de objetos */}
                       <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
