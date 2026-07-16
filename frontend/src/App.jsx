@@ -1848,6 +1848,7 @@ export default function App() {
   const [muestraGlobal, setMuestraGlobal] = useState('');   // texto de prueba: se ve en TODAS las tarjetas del catálogo
   const [fuenteABorrar, setFuenteABorrar] = useState(null); // archivo con la confirmación de borrado abierta
   const [fuenteDetalle, setFuenteDetalle] = useState(null); // fuente abierta en su pantalla de detalle (null = la lista)
+  const [buscarFuente, setBuscarFuente] = useState('');     // filtro del catálogo (nombre interno o archivo)
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -2313,6 +2314,19 @@ export default function App() {
       await fetchGruposTizada();
     } catch (e) { showError('Error al eliminar: ' + e.message); }
   };
+
+  // Catálogo filtrado por el buscador: matchea el nombre interno O el archivo, sin distinguir
+  // mayúsculas ni acentos (buscar "espanol" tiene que encontrar "Español").
+  // marcas combinantes de NFD. Se arma desde string con escapes \u para no depender de que los
+  // caracteres literales sobrevivan la codificación del archivo.
+  const _ACENTOS = new RegExp('[\\u0300-\\u036f]', 'g');
+  const _sinTildes = (s) => (s || '').normalize('NFD').replace(_ACENTOS, '').toLowerCase();
+  const _fuentesFiltradas = useMemo(() => {
+    const q = _sinTildes(buscarFuente).trim();
+    const todas = estado?.fuentes || [];
+    if (!q) return todas;
+    return todas.filter(f => _sinTildes(f.interno).includes(q) || _sinTildes(f.archivo).includes(q));
+  }, [estado?.fuentes, buscarFuente]);
 
   // Saca una tipografía del catálogo (ya confirmada EN la tarjeta, no hay diálogo del navegador).
   const eliminarFuente = async (archivo) => {
@@ -9977,9 +9991,27 @@ export default function App() {
                     ⬅ Volver al Panel de Configuración
                   </button>
                 </div>
-                <div className="panel-header">
-                  <h2>Catálogo de Fuentes</h2>
-                  <p>Sube y gestiona tipografías TTF/OTF para el redibujado de textos del Excel.</p>
+                <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+                  <div>
+                    <h2>Catálogo de Fuentes</h2>
+                    <p>Sube y gestiona tipografías TTF/OTF para el redibujado de textos del Excel.</p>
+                  </div>
+                  {/* BUSCADOR: filtra en tiempo real por nombre interno o archivo */}
+                  <div style={{ position: 'relative', flexShrink: 0, width: 260 }}>
+                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', display: 'flex', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                      <Icon name="search" style={{ width: 13, height: 13 }} />
+                    </span>
+                    <input value={buscarFuente} onChange={(e) => setBuscarFuente(e.target.value)} spellCheck={false}
+                      placeholder="Buscar fuente…"
+                      style={{ width: '100%', height: 34, padding: '0 28px 0 30px', fontSize: 12.5, borderRadius: 8,
+                        background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' }} />
+                    {!!buscarFuente && (
+                      <button type="button" onClick={() => setBuscarFuente('')} title="Limpiar"
+                        style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', width: 18, height: 18, borderRadius: 5,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none',
+                          background: 'transparent', color: 'var(--text-muted)', fontSize: 11 }}>✕</button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="card" style={{ margin: '20px 0', padding: 24 }}>
@@ -10002,8 +10034,12 @@ export default function App() {
                       del servidor → la tarjeta la dibuja de verdad, no una tipografía cualquiera. */}
                   <style>{(estado?.fuentes || []).map(f => `@font-face{font-family:'${_famFuente(f)}';src:url('/api/fuente/archivo/${encodeURIComponent(f.archivo)}');font-display:swap;}`).join('')}</style>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                    {estado?.fuentes?.length ? (
-                      estado.fuentes.map((f, idx) => {
+                    {!estado?.fuentes?.length ? (
+                      <div style={{ gridColumn: 'span 2', color: 'var(--text-secondary)', fontSize: 13, padding: '12px 0' }}>No hay fuentes cargadas. Sube tipografías TrueType (.ttf/.otf) como Impact o Arial Bold.</div>
+                    ) : !_fuentesFiltradas.length ? (
+                      <div style={{ gridColumn: 'span 2', color: 'var(--text-secondary)', fontSize: 13, padding: '12px 0' }}>Ninguna fuente coincide con “{buscarFuente}”.</div>
+                    ) : (
+                      _fuentesFiltradas.map((f, idx) => {
                         const fam = _famFuente(f);
                         const txt = muestraGlobal.trim() ? muestraGlobal : MUESTRA_DEF;   // vacío = muestra por defecto
                         const porBorrar = fuenteABorrar === f.archivo;
@@ -10040,8 +10076,6 @@ export default function App() {
                           </div>
                         );
                       })
-                    ) : (
-                      <div style={{ gridColumn: 'span 2', color: 'var(--text-secondary)', fontSize: 13, padding: '12px 0' }}>No hay fuentes cargadas. Sube tipografías TrueType (.ttf/.otf) como Impact o Arial Bold.</div>
                     )}
                   </div>
                 </div>
