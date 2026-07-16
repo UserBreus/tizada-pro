@@ -1446,6 +1446,144 @@ def _trazo_personalizable(path_arte):
     return res
 
 
+def _pasadas_personalizable(path_arte):
+    """PILA DE APARIENCIAS: la lista ORDENADA de pasadas de pintado de cada texto de
+    personalización — {mesa: {texto_norm: [{"t": "f"|"S", "color": (op, [vals]), "w": float}]}}.
+
+    Illustrator aplana la Apariencia de un texto así: primero el texto con su color ORIGINAL y,
+    ENCIMA, cada capa de la apariencia (los contornos TRAZADOS con `S`, y/o el texto re-dibujado
+    con el relleno de esa capa). Lo que SE VE es lo de arriba de la pila; el color original queda
+    tapado. Por eso `_colores_personalizable` (se queda con el PRIMER relleno) devolvía el color
+    tapado: p. ej. un número azul con borde blanco salía negro. Acá se guarda TODO en orden y el
+    motor lo re-dibuja igual. Ver MAPA_DEL_SISTEMA.md → changelog 2026-07-16.
+    """
+    try:
+        pdf = pikepdf.open(path_arte)
+    except Exception:
+        return {}
+    res = {}
+    for i, pg in enumerate(pdf.pages):
+        try:
+            insts = parse_content_stream(pg)
+        except Exception:
+            continue
+        try:
+            csres = pg.get("/Resources", {}).get("/ColorSpace", {}) or {}
+        except Exception:
+            csres = {}
+
+        def _n_de_cs(name):
+            try:
+                o = csres.get(name)
+                if o is None:
+                    return None
+                if isinstance(o, pikepdf.Array):
+                    base = str(o[0])
+                    if base == "/ICCBased" and len(o) > 1:
+                        return int(o[1].get("/N", 0)) or None
+                    if base == "/DeviceN" and len(o) > 1:
+                        try: return len(o[1])
+                        except Exception: return None
+                    return {"/CalRGB": 3, "/CalGray": 1, "/Separation": 1}.get(base)
+                return {"/DeviceCMYK": 4, "/DeviceRGB": 3, "/DeviceGray": 1}.get(str(o))
+            except Exception:
+                return None
+
+        _op_n = {4: "k", 3: "rg", 1: "g"}
+        # relleno y trazo son ESTADO GRÁFICO: `q` guarda y `Q` restaura (gotcha ya documentado).
+        fcol, fcs_n, scol, scs_n, sw = None, None, None, None, None
+        dentro, per, _ult_txt, _hay_texto, _acum = 0, {}, "", False, ""
+        _gstack = []
+
+        def _add(txt, pasada):
+            if not txt:
+                return
+            l = per.setdefault(txt, [])
+            # Un texto se dibuja glifo a glifo (6 `S` seguidos = UN borde, no seis): las pasadas
+            # consecutivas idénticas son la misma capa de la apariencia.
+            if l and l[-1] == pasada:
+                return
+            l.append(pasada)
+
+        for inst in insts:
+            op = str(inst.operator)
+            if op == "q":
+                _gstack.append((fcol, fcs_n, scol, scs_n, sw)); continue
+            if op == "Q":
+                if _gstack: fcol, fcs_n, scol, scs_n, sw = _gstack.pop()
+                continue
+            if op == "cs":
+                fcs_n = _n_de_cs(str(inst.operands[0])) if inst.operands else None
+            elif op == "CS":
+                scs_n = _n_de_cs(str(inst.operands[0])) if inst.operands else None
+            elif op in ("k", "rg", "g"):
+                try: fcol = (op, tuple(round(float(x), 4) for x in inst.operands))
+                except Exception: fcol = None
+            elif op in ("K", "RG", "G"):
+                try: scol = (op.lower(), tuple(round(float(x), 4) for x in inst.operands))
+                except Exception: scol = None
+            elif op in ("scn", "sc"):
+                try:
+                    vals = [float(x) for x in inst.operands]
+                    o2 = _op_n.get(fcs_n or len(vals))
+                    if o2 and len(vals) == {"k": 4, "rg": 3, "g": 1}[o2]:
+                        fcol = (o2, tuple(round(v, 4) for v in vals))
+                except Exception:
+                    pass
+            elif op in ("SCN", "SC"):
+                try:
+                    vals = [float(x) for x in inst.operands]
+                    o2 = _op_n.get(scs_n or len(vals))
+                    if o2 and len(vals) == {"k": 4, "rg": 3, "g": 1}[o2]:
+                        scol = (o2, tuple(round(v, 4) for v in vals))
+                except Exception:
+                    pass
+            elif op == "w":
+                try: sw = float(inst.operands[0])
+                except Exception: pass
+
+            if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
+                if any(_norm_nombre(n) not in CAPAS_GRAFICAS for n in _nombres_oc(inst.operands[1], pg)):
+                    if dentro == 0:
+                        scol, sw = None, None    # sin arrastrar el estado de trazo de afuera
+                    dentro += 1; continue
+                elif dentro:
+                    dentro += 1
+            elif op in ("BDC", "BMC") and dentro:
+                dentro += 1
+            elif op == "EMC" and dentro:
+                dentro -= 1; continue
+            if not dentro:
+                continue
+
+            if op == "BT":
+                _acum = ""       # un nombre llega GLIFO A GLIFO ("n","o","m"…): hay que juntarlo
+            elif op in ("Tj", "TJ", "'", '"'):
+                _acum += _texto_de_tj(inst) or ""
+                _hay_texto = True
+            elif op == "ET":
+                # Recién acá se conoce el texto COMPLETO del bloque (la clave). Si se usara el
+                # último Tj, un "nombre" quedaría bajo la clave "e" y no matchearía nunca.
+                if _hay_texto:
+                    t = _norm_nombre(_acum)
+                    if t:
+                        _ult_txt = t     # los trazos que vengan DESPUÉS son de este texto
+                    if fcol is not None:
+                        _add(_ult_txt, {"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
+                _hay_texto = False
+            elif op in ("S", "s") and scol is not None and sw and sw > 0:
+                _add(_ult_txt, {"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
+            elif op in ("B", "B*", "b", "b*"):
+                # trazado con relleno Y trazo: PDF pinta primero el relleno y encima el trazo
+                if fcol is not None:
+                    _add(_ult_txt, {"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
+                if scol is not None and sw and sw > 0:
+                    _add(_ult_txt, {"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
+        if per:
+            res[str(i + 1)] = per
+    return res
+
+
 def _color_op(pl):
     """Operador PDF de color para el texto de personalización, en el espacio
     NATIVO del placeholder (CMYK/RGB/gris exactos, sin convertir). Si no se pudo
@@ -1491,7 +1629,8 @@ def extraer_personalizacion(path_arte, campos=None):
                   if _norm_nombre(c["text"]) not in _sys and not _es_capa_editable(c["text"])]
         _d.close()
     nativos = _colores_personalizable(path_arte)   # color exacto por mesa y por texto
-    trazos = _trazo_personalizable(path_arte)       # borde/trazo por mesa y por texto
+    trazos = _trazo_personalizable(path_arte)       # borde/trazo por mesa y por texto (compat)
+    pasadas = _pasadas_personalizable(path_arte)    # PILA de apariencias ORDENADA (manda ésta)
     pers = {}
 
     def _match_texto(dmesa, tn):
@@ -1518,7 +1657,9 @@ def extraer_personalizacion(path_arte, campos=None):
             "cx": round((bb.x0 + bb.x1) / 2, 1), "baseline_y": round(s0["origin"][1], 1),
             "size": round(s0["size"], 1), "fuente": s0["font"].split("+")[-1],
             "ancho": round(bb.width, 1), "color": s0.get("color", 0),
-            "colorn": colorn, "trazo": tz, "baseline_pts": [], "_txt": ""})
+            "colorn": colorn, "trazo": tz,
+            "pasadas": _match_texto(pasadas.get(str(mesa)) or {}, tn),   # pila de apariencias
+            "baseline_pts": [], "_txt": ""})
         # Acumular la LÍNEA BASE de cada glifo/renglón (origin x,y + bordes x0,x1 del bbox del
         # renglón). Si el placeholder viene sobre una CURVA/ARCO, sus glifos trazan la curva; si
         # es un PÁRRAFO de varias líneas, cada renglón trae su ancho → sirve para la ALINEACIÓN.
@@ -2962,6 +3103,20 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                         cx_final = pl["cx"] - x0m + B
                         ty = Hp - (pl["baseline_y"] - y0m + B)
                     _ops = fnom.ops_texto(texto, size, cx_final - fnom.ancho_texto(texto, size) / 2, ty)
+                _pas = pl.get("pasadas")
+                if _pas:
+                    # PILA DE APARIENCIAS: se re-dibuja el texto una vez por cada pasada del arte,
+                    # EN EL MISMO ORDEN → el color original queda atrás y cada capa de la apariencia
+                    # (relleno y/o borde) encima, igual que Illustrator. Ver changelog 2026-07-16.
+                    for _p in _pas:
+                        _c = _p["color"]
+                        _vals = " ".join(f"{v:g}" for v in _c[1])
+                        if _p["t"] == "f":
+                            bloques.append(f"q {_vals} {_c[0]}\n{_ops}\nf\nQ\n")
+                        else:
+                            _w = _p["w"] * (sp if mapeo_arte else 1.0)   # a la escala del texto
+                            bloques.append(f"q {_vals} {_c[0].upper()}\n{_w:.3f} w 1 j 1 J\n{_ops}\nS\nQ\n")
+                    continue
                 _tz = pl.get("trazo")
                 if _tz:                                # el placeholder tenía BORDE → se respeta
                     _sw = _tz[2] * (sp if mapeo_arte else 1.0)   # ancho a la misma escala que el texto
