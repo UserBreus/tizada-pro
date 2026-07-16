@@ -6041,6 +6041,10 @@ export default function App() {
                   }).filter(Boolean);
                   editorDrag.current = { tipo, nm: o.nombre, p, imgW, imgH, ictm, start: m, tf0: tf, grupo: _grupo, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, sx0: _SX(tf), sy0: _SY(tf), ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
                 };
+                // Click en el FONDO del visor = deseleccionar. Los objetos cortan la propagación al
+                // arrancar su arrastre (`start`), así que todo mousedown que llega acá es espacio vacío.
+                // El botón derecho no toca la selección: sigue siendo el pan del espacio.
+                const edFondo = (e) => { if (e.button === 0) setEditableSel([]); edPan(e); };
                 const chip = (txt, on, fn) => (<button type="button" onClick={fn} style={{ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{txt}</button>);
                 const selStyle = { padding: '5px 8px', borderRadius: 8, fontSize: 12, background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)' };
                 // GUARDAR: persiste TODOS los objetos del diseño (con su transform actual) por VARIABLE +
@@ -6164,7 +6168,7 @@ export default function App() {
                         <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>Arrastrá para mover · manija de arriba rota · esquina escala.</div>
                       </div>
                       {/* visor — rueda = zoom · click derecho arrastrado = mover el espacio */}
-                      <div onWheel={edWheel} onMouseDown={edPan} onContextMenu={(e) => e.preventDefault()}
+                      <div onWheel={edWheel} onMouseDown={edFondo} onContextMenu={(e) => e.preventDefault()}
                         style={{ flex: 1, minHeight: 0, background: 'rgba(0,0,0,0.35)', borderRadius: 12, border: '1px solid var(--border-light)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <svg ref={editorSvgRef} viewBox={`${_edVBnow.x} ${_edVBnow.y} ${_edVBnow.w} ${_edVBnow.h}`} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: '100%', display: 'block', userSelect: 'none' }}>
                           {_piezasEd.map(p => {
