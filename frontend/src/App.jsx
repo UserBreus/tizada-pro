@@ -689,10 +689,11 @@ function EditableTamanoModal({ inicial, variantes, esNueva, onGuardar, onElimina
 // el CLICK DERECHO arrastrando. Cada mesa a ESCALA REAL entre sí. El nombre se
 // renombra con doble-click (se guarda al clickear afuera) y el archivo se
 // descarga con ese nombre. Botón de descarga = solo el ícono, arriba a la izq.
-// Zoom MÁXIMO del espacio de mesas. A zoom 1 la escala real es PXM=240 px/m; con 40 se llega a
-// ~9600 px/m (≈96 px/cm), suficiente para leer en grande la letra chica de una etiqueta. Las mesas
-// son SVG (vectorial, sin límite de resolución) → el techo lo pone esta constante, no el archivo.
-const ZMAX = 40;
+// Zoom MÁXIMO del espacio de mesas. A zoom 1 la escala real es PXM=240 px/m; con 300 se llega a
+// ~72000 px/m (≈720 px/cm) → una etiqueta de ~3 cm cubre toda la pantalla. Las mesas son SVG
+// (vectorial: el navegador lo repinta a cualquier escala, no se pixela) → el techo lo pone esta
+// constante, no la resolución del archivo.
+const ZMAX = 300;
 
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
