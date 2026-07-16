@@ -853,7 +853,7 @@ function DetalleFuente({ f, onVolver }) {
             </span>
           )}
         </div>
-        <div className="card-subtitle" style={{ marginBottom: 18 }}>Gris = la fuente lo tiene · Rojo tachado = NO lo tiene (ese carácter no se puede estampar).</div>
+        <div className="card-subtitle" style={{ marginBottom: 18 }}>Cada celda muestra el carácter en esta tipografía · Celda vacía en rojo = la fuente NO lo tiene (no se puede estampar).</div>
         {!data && !err && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Leyendo la fuente…</div>}
         {(data?.grupos || []).map((g, gi) => (
           <div key={gi} style={{ marginBottom: 18 }}>
@@ -865,13 +865,14 @@ function DetalleFuente({ f, onVolver }) {
               {g.celdas.map((c, ci) => (
                 <div key={ci} title={c.tiene ? c.ch : `La fuente no tiene "${c.ch}"`}
                   style={{ position: 'relative', height: 64, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    border: '1px solid ' + (c.tiene ? 'var(--border-light)' : 'rgba(255,77,79,0.5)'),
-                    background: c.tiene ? 'rgba(255,255,255,0.03)' : 'rgba(255,77,79,0.07)' }}>
-                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: 8.5, color: 'var(--text-muted)', opacity: 0.7 }}>{c.ch}</span>
-                  {/* el glifo, en la tipografía REAL; si no lo tiene se muestra tachado */}
-                  <span style={{ fontFamily: c.tiene ? `'${fam}'` : 'system-ui', fontSize: c.tiene ? 30 : 20,
-                    color: c.tiene ? 'var(--text-primary, #fff)' : 'var(--danger, #ff4d4f)',
-                    textDecoration: c.tiene ? 'none' : 'line-through', opacity: c.tiene ? 1 : 0.75 }}>{c.ch}</span>
+                    border: '1px solid ' + (c.tiene ? 'var(--border-light)' : 'rgba(255,77,79,0.65)'),
+                    background: c.tiene ? 'rgba(255,255,255,0.03)' : 'rgba(255,77,79,0.18)' }}>
+                  {/* la etiqueta chica identifica la celda (sin ella no se sabe cuál falta) */}
+                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: 8.5, opacity: 0.7,
+                    color: c.tiene ? 'var(--text-muted)' : 'var(--danger, #ff4d4f)' }}>{c.ch}</span>
+                  {/* el glifo, en la tipografía REAL. Si la fuente NO lo tiene, la celda va VACÍA y
+                      en rojo: dibujarlo sería mentira (lo pintaría otra tipografía, no ésta). */}
+                  {c.tiene && <span style={{ fontFamily: `'${fam}'`, fontSize: 30, color: 'var(--text-primary, #fff)' }}>{c.ch}</span>}
                 </div>
               ))}
             </div>
