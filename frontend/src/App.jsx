@@ -6019,7 +6019,8 @@ export default function App() {
                   e.stopPropagation(); e.preventDefault();
                   // Selección: si el objeto ya está en la selección se respeta (para mover en grupo);
                   // si no, pasa a ser la selección (Ctrl/Shift lo SUMA en vez de reemplazar).
-                  const _add = e.ctrlKey || e.metaKey || e.shiftKey;
+                  // Ctrl/Shift SUMA, pero solo si es de la MISMA pieza (si no, arranca selección nueva).
+                  const _add = (e.ctrlKey || e.metaKey || e.shiftKey) && _mismaPieza(o);
                   const _selNow = editableSel.includes(o.nombre) ? editableSel : (_add ? [...editableSel, o.nombre] : [o.nombre]);
                   setEditableSel(_selNow);
                   const svg = editorSvgRef.current; const ictm = (svg && svg.getScreenCTM()) ? svg.getScreenCTM().inverse() : null;
@@ -6093,6 +6094,10 @@ export default function App() {
                   });
                 };
                 // ROTAR y ESPEJAR: funcionan sobre TODOS los objetos seleccionados a la vez.
+                // La selección MÚLTIPLE nunca cruza piezas: espejar/alinear/mover en grupo solo tiene
+                // sentido entre objetos de la MISMA pieza (cada pieza tiene su propio espacio).
+                const _piezaDeSel = () => { const p0 = _objsUnicos.find(x => x.nombre === editableSel[0]); return p0 ? p0.pieza : null; };
+                const _mismaPieza = (o) => !editableSel.length || _piezaDeSel() === o.pieza;
                 const _rotarSel = (deg) => aplicarTf(editableSel, (nm, cur) => ({ rot: Math.round(((cur.rot || 0) + deg) % 360) }));
                 const _espejarSel = (eje) => aplicarTf(editableSel, (nm, cur) => {
                   const sx = cur.sx != null ? cur.sx : (cur.scale ?? 1);
@@ -6124,10 +6129,14 @@ export default function App() {
                       {/* lista de objetos */}
                       <div style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
                         {_objsUnicos.map(o => (
-                          <button key={o.nombre} type="button" title="Click = seleccionar · Ctrl/Shift+click = sumar a la selección"
-                            onClick={(e) => setEditableSel(prev => (e.ctrlKey || e.metaKey || e.shiftKey)
-                              ? (prev.includes(o.nombre) ? prev.filter(n => n !== o.nombre) : [...prev, o.nombre])
-                              : [o.nombre])}
+                          <button key={o.nombre} type="button" title="Click = seleccionar · Ctrl/Shift+click = sumar (solo objetos de la MISMA pieza)"
+                            onClick={(e) => {
+                              const add = e.ctrlKey || e.metaKey || e.shiftKey;
+                              if (!add) { setEditableSel([o.nombre]); return; }
+                              if (editableSel.includes(o.nombre)) { setEditableSel(editableSel.filter(n => n !== o.nombre)); return; }
+                              if (!_mismaPieza(o)) { showError('Solo podés seleccionar objetos de la MISMA pieza.'); return; }
+                              setEditableSel([...editableSel, o.nombre]);
+                            }}
                             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.nombre) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.nombre) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
                             <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={`data:image/png;base64,${o.thumb}`} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
                             <span style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
