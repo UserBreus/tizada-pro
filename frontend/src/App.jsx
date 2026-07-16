@@ -1285,6 +1285,7 @@ export default function App() {
   const [csvFix, setCsvFix] = useState({});           // `${i}:${colId}` -> valor elegido para la celda inválida
   const [csvOmit, setCsvOmit] = useState({});         // i -> true si esa fila no se carga
   const [nFilasAgregar, setNFilasAgregar] = useState(1);   // cuántas filas agrega el botón "Agregar Fila"
+  const [fuenteChars, setFuenteChars] = useState(null);    // Set de caracteres que SOPORTA la fuente del diseño (null = sin dato)
   const [plSel, setPlSel] = useState(null);       // planilla pedido: ANCLA del rango {r,c}
   const [plSelEnd, setPlSelEnd] = useState(null); // OTRA esquina del rango seleccionado {r,c}
   const [plFill, setPlFill] = useState(null);     // {r,c} destino del arrastre del fill-handle
@@ -4750,6 +4751,51 @@ export default function App() {
 
   // Celdas con valor INVÁLIDO: columna con opciones fijas + valor que no coincide con ninguna.
   // Se usa para bloquear el paso siguiente (no se puede continuar con valores inexistentes).
+  // Caracteres que SOPORTA la tipografía de personalización del/los diseño(s) del pedido.
+  // Si el pedido tiene varios moldes, se intersecan (un caracter sirve si TODAS las fuentes lo tienen).
+  useEffect(() => {
+    if (pedidoPaso !== 'planilla') return;
+    const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
+    if (!ids.length) { setFuenteChars(null); return; }
+    let cancelado = false;
+    (async () => {
+      try {
+        const sets = [];
+        for (const id of ids) {
+          const r = await fetch(`/api/pedido/fuente_chars?producto_id=${encodeURIComponent(id)}`);
+          const d = await r.json();
+          if (d && d.ok && d.chars) sets.push(new Set([...d.chars]));
+        }
+        if (cancelado) return;
+        if (!sets.length) { setFuenteChars(null); return; }
+        let inter = sets[0];
+        for (const s of sets.slice(1)) inter = new Set([...inter].filter(c => s.has(c)));
+        setFuenteChars(inter);
+      } catch (_e) { if (!cancelado) setFuenteChars(null); }
+    })();
+    return () => { cancelado = true; };
+  }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo]);
+
+  // ¿La fuente NO tiene este caracter? (los espacios nunca se marcan)
+  const faltaEnFuente = (ch) => !!fuenteChars && fuenteChars.size > 0 && String(ch).trim() !== '' && !fuenteChars.has(ch);
+  // Texto TAL CUAL se ve/estampa en esa columna (el nombre se muestra en mayúsculas)
+  const _textoCol = (c, v) => (c.role === 'nombre' ? String(v ?? '').toUpperCase() : String(v ?? ''));
+  // ¿Es una columna de TEXTO LIBRE que se estampa? (talle/diseño/desplegables/toggles no)
+  const _colEsTexto = (c) => {
+    const tipo = c.tipo || (c.role === 'manga' ? 'toggle' : 'texto');
+    return !(c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable' || tipo === 'toggle');
+  };
+  // Caracteres de TODA la planilla que la fuente no tiene (para el aviso de arriba)
+  const faltantesFuente = (() => {
+    if (!fuenteChars || !fuenteChars.size) return [];
+    const out = new Set();
+    filas.forEach(f => cols.forEach(c => {
+      if (!_colEsTexto(c)) return;
+      [..._textoCol(c, f[c.id])].forEach(ch => { if (faltaEnFuente(ch)) out.add(ch); });
+    }));
+    return [...out];
+  })();
+
   const _normV = (s) => (s == null ? '' : String(s)).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const planillaInvalidos = () => {
     const bad = [];
@@ -5395,7 +5441,26 @@ export default function App() {
                 <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                 <div className="card" style={{ padding: 16 }}>
-                  <div className="card-title">3 · Cargá la planilla (una sola vez)</div>
+                  {/* Título + (al lado contrario) aviso de caracteres que la fuente NO tiene */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+                    <div className="card-title">3 · Cargá la planilla (una sola vez)</div>
+                    {faltantesFuente.length > 0 && (
+                      <div style={{ flexShrink: 0, maxWidth: 460, display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 13px', borderRadius: 10,
+                        background: 'rgba(255,60,60,0.12)', border: '1.5px solid #ff4d4d', boxShadow: '0 0 14px rgba(255,60,60,0.25)' }}>
+                        <span style={{ fontSize: 17, lineHeight: 1.1 }}>⚠</span>
+                        <div style={{ fontSize: 12, lineHeight: 1.45 }}>
+                          <b style={{ color: '#ff8a8a' }}>Los caracteres marcados en rojo no los tiene la fuente cargada.</b>
+                          <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>Revisá la fuente, eliminá los caracteres o reemplazá la fuente del diseño.</div>
+                          <div style={{ marginTop: 5, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Faltan:</span>
+                            {faltantesFuente.map((ch, k) => (
+                              <span key={k} style={{ fontFamily: 'monospace', fontWeight: 800, color: '#ff4d4d', background: 'rgba(255,60,60,0.2)', border: '1px solid rgba(255,80,80,0.5)', borderRadius: 4, padding: '0 5px' }}>{ch}</span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
                   
                   <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.15)', marginTop: 12 }}>
@@ -5454,17 +5519,39 @@ export default function App() {
                                   </div>
                                 );
                               } else {
+                                // Texto libre. Si la FUENTE del diseño no tiene algún caracter, se pinta
+                                // de ROJO: el input queda con texto transparente y debajo una capa espejo
+                                // (misma tipografía/tamaño/padding) que dibuja letra por letra.
+                                const _esNum = c.role === 'numero';
+                                const _chars = _colEsTexto(c) ? [..._textoCol(c, cellValue)] : [];
+                                const _hayFalta = _chars.some(faltaEnFuente);
+                                const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
+                                  fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };
                                 control = (
-                                  <input
-                                    type={c.role === 'numero' ? 'number' : 'text'}
-                                    value={cellValue}
-                                    placeholder="..."
-                                    data-plc={plc}
-                                    onFocus={foco}
-                                    onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
-                                    style={{ width: '100%', padding: '6px 8px', border: 'none', background: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: 13, height: 32, fontFamily: c.role === 'numero' ? 'monospace' : 'inherit', textTransform: c.role === 'nombre' ? 'uppercase' : 'none', fontWeight: c.role === 'nombre' ? 600 : 'normal' }}
-                                    onChange={(e) => updateFila(i, c.id, e.target.value)}
-                                  />
+                                  <div style={{ position: 'relative' }}>
+                                    {_hayFalta && (
+                                      <div aria-hidden style={{ ..._fBase, position: 'absolute', inset: 0, whiteSpace: 'pre', overflow: 'hidden', pointerEvents: 'none' }}>
+                                        {_chars.map((ch, k) => (
+                                          <span key={k} style={faltaEnFuente(ch)
+                                            ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 }
+                                            : { color: 'var(--text-primary)' }}>{ch}</span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <input
+                                      type={_esNum ? 'number' : 'text'}
+                                      value={cellValue}
+                                      placeholder="..."
+                                      data-plc={plc}
+                                      onFocus={foco}
+                                      onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
+                                      title={_hayFalta ? 'La fuente del diseño no tiene los caracteres en rojo' : undefined}
+                                      style={{ ..._fBase, width: '100%', border: 'none', background: 'none', outline: 'none', position: 'relative',
+                                        color: _hayFalta ? 'transparent' : 'var(--text-primary)', caretColor: 'var(--text-primary)',
+                                        textTransform: c.role === 'nombre' ? 'uppercase' : 'none' }}
+                                      onChange={(e) => updateFila(i, c.id, e.target.value)}
+                                    />
+                                  </div>
                                 );
                               }
                               // Borde accent SOLO en los lados externos del rango → recuadro único.

@@ -2706,6 +2706,37 @@ def estado_trabajo(tid):
     return jsonify(t)
 
 
+@app.get("/api/pedido/fuente_chars")
+def fuente_chars():
+    """Caracteres que SOPORTA la tipografía de personalización del diseño (la que estampa
+    nombre/número). La planilla los usa para pintar en ROJO lo que la fuente no tiene.
+    Devuelve la INTERSECCIÓN de los cmap de todas las fuentes de personalización del arte."""
+    pid = request.args.get("producto_id") or _get_active_producto_id()
+    try:
+        pers = MP.extraer_personalizacion(_ruta_entrada("arte.ai", pid)) or {}
+    except Exception:
+        return jsonify({"ok": False, "chars": "", "fuentes": [], "faltantes": []})
+    fuentes = sorted({c.get("fuente") for m in pers.values() for c in (m or {}).values() if c.get("fuente")})
+    sets, ok_f, falta_f = [], [], []
+    for f in fuentes:
+        ruta = MP.resolver_fuente(f, FUENTES)
+        if not ruta:
+            falta_f.append(f); continue
+        try:
+            from texto_curvas import FuenteCurvas
+            with open(ruta, "rb") as fh:
+                fc = FuenteCurvas(fh.read())
+            sets.append({chr(cp) for cp in fc.cmap.keys()})
+            ok_f.append(f)
+        except Exception:
+            falta_f.append(f)
+    if not sets:
+        return jsonify({"ok": False, "chars": "", "fuentes": fuentes, "faltantes": falta_f})
+    inter = set.intersection(*sets) if len(sets) > 1 else sets[0]
+    chars = "".join(sorted(c for c in inter if c.isprintable()))
+    return jsonify({"ok": True, "chars": chars, "fuentes": ok_f, "faltantes": falta_f})
+
+
 @app.get("/trabajos/<tid>/<archivo>")
 def descargar(tid, archivo):
     return send_from_directory(os.path.join(TRABAJOS, tid), archivo)
