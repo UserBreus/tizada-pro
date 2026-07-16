@@ -1410,6 +1410,7 @@ export default function App() {
   const [editableDiseno, setEditableDiseno] = useState('principal');  // diseño (id) en edición
   const [editableSel, setEditableSel] = useState([]);          // nombres de los objetos seleccionados (multi: Ctrl/Shift+click)
   const [edAlinearMesa, setEdAlinearMesa] = useState(false);   // false = alinear entre la SELECCIÓN; true = con la MESA DE TRABAJO
+  const [edRotOpen, setEdRotOpen] = useState(false);           // desplegable de ángulos de rotación
   const [edSoloTalle, setEdSoloTalle] = useState(false);       // true = el ajuste va SOLO al talle en vista (no a todo el rango)
   const [edLink, setEdLink] = useState(true);                  // enlace An./Al.: true = escala proporcional
   const [editableTalle, setEditableTalle] = useState(null);    // talle/variante en edición
@@ -5975,6 +5976,21 @@ export default function App() {
                 const edWheel = (e) => { const r = e.currentTarget.getBoundingClientRect(); const mx = (e.clientX - r.left) / r.width, my = (e.clientY - r.top) / r.height; const f = e.deltaY < 0 ? 1 / 1.15 : 1.15; setEdVB(prev => { const b = prev || _edFullVB(); const nw = Math.max(1, b.w * f), nh = Math.max(1, b.h * f); return { x: b.x + (b.w - nw) * mx, y: b.y + (b.h - nh) * my, w: nw, h: nh }; }); };
                 const edPan = (e) => { if (e.button !== 2) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); const base = edVB || _edFullVB(); const sx = e.clientX, sy = e.clientY; const mv = (ev) => setEdVB({ ...base, x: base.x - (ev.clientX - sx) / r.width * base.w, y: base.y - (ev.clientY - sy) / r.height * base.h }); const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); };
                 const setTfScoped = (nm, patch) => setEditorTfs(prev => { const cur = (prev[nm] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 }; const tf = { ...cur, ...patch }; const o = { ...(prev[nm] || {}) }; scopeTalles().forEach(t => { o[t] = tf; }); return { ...prev, [nm]: o }; });
+                // Aplica un cambio a VARIOS objetos y registra el historial con el valor NUEVO en el mismo
+                // paso. (No usar setTimeout+ref: el ref se sincroniza en un efecto que puede correr después
+                // → se guardaba el estado viejo y Ctrl+Z quedaba desfasado.)
+                const aplicarTf = (nombres, patchDe) => setEditorTfs(prev => {
+                  const next = { ...prev };
+                  (nombres || []).forEach(nm => {
+                    const cur = (prev[nm] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 };
+                    const tf = { ...cur, ...(patchDe(nm, cur) || {}) };
+                    const o = { ...(prev[nm] || {}) };
+                    scopeTalles().forEach(t => { o[t] = tf; });
+                    next[nm] = o;
+                  });
+                  histCommit(next);   // el historial guarda EXACTAMENTE lo que queda aplicado
+                  return next;
+                });
                 // Colocación en COORDENADAS DEL DISEÑO: el objeto vive dentro del diseño → su posición
                 // base (`fcx/fcy` del bbox_mu) Y su movimiento (`dx/dy`) se miden en fracción del DISEÑO
                 // colocado en la pieza (`imgW/imgH` = encaje: alto manda, ancho centrado). Igual que el
@@ -5988,7 +6004,11 @@ export default function App() {
                   const fcy = (mr && bb) ? ((bb[1] + bb[3]) / 2 - mr[1]) / mr[3] : 0.5;
                   const fw = (mr && bb) ? (bb[2] - bb[0]) / mr[2] : 0.3;
                   const fh = (mr && bb) ? (bb[3] - bb[1]) / mr[3] : 0.3;
-                  return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH, w: fw * imgW * _SX(tf), h: fh * imgH * _SY(tf) };
+                  // w/h SIEMPRE positivos (un <image> con ancho negativo no dibuja); el signo de
+                  // sx/sy es el ESPEJO y se aplica como transform (sgx/sgy).
+                  return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH,
+                    w: fw * imgW * Math.abs(_SX(tf)), h: fh * imgH * Math.abs(_SY(tf)),
+                    sgx: _SX(tf) < 0 ? -1 : 1, sgy: _SY(tf) < 0 ? -1 : 1 };
                 };
                 // Mapear pantalla→viewBox con una CTM YA CACHEADA (no llamar getScreenCTM en cada
                 // movimiento: es una lectura de layout sincrónica que hace el arrastre pesado).
@@ -6060,7 +6080,8 @@ export default function App() {
                     R = { x0: Math.min(...objs.map(a => a.c.cx - a.c.w / 2)), x1: Math.max(...objs.map(a => a.c.cx + a.c.w / 2)),
                           y0: Math.min(...objs.map(a => a.c.cy - a.c.h / 2)), y1: Math.max(...objs.map(a => a.c.cy + a.c.h / 2)) };
                   }
-                  objs.forEach(a => {
+                  aplicarTf(objs.map(a => a.nm), (nm) => {
+                    const a = objs.find(x => x.nm === nm);
                     let ncx = a.c.cx, ncy = a.c.cy;
                     if (eje === 'izq') ncx = R.x0 + a.c.w / 2;
                     else if (eje === 'ch') ncx = (R.x0 + R.x1) / 2;
@@ -6068,10 +6089,16 @@ export default function App() {
                     else if (eje === 'arr') ncy = R.y0 + a.c.h / 2;
                     else if (eje === 'cv') ncy = (R.y0 + R.y1) / 2;
                     else if (eje === 'aba') ncy = R.y1 - a.c.h / 2;
-                    setTfScoped(a.nm, { dx: a.tf.dx + (ncx - a.c.cx) / a.d.imgW, dy: a.tf.dy + (ncy - a.c.cy) / a.d.imgH });
+                    return { dx: a.tf.dx + (ncx - a.c.cx) / a.d.imgW, dy: a.tf.dy + (ncy - a.c.cy) / a.d.imgH };
                   });
-                  setTimeout(() => histCommit(editorTfsRef.current), 0);
                 };
+                // ROTAR y ESPEJAR: funcionan sobre TODOS los objetos seleccionados a la vez.
+                const _rotarSel = (deg) => aplicarTf(editableSel, (nm, cur) => ({ rot: Math.round(((cur.rot || 0) + deg) % 360) }));
+                const _espejarSel = (eje) => aplicarTf(editableSel, (nm, cur) => {
+                  const sx = cur.sx != null ? cur.sx : (cur.scale ?? 1);
+                  const sy = cur.sy != null ? cur.sy : (cur.scale ?? 1);
+                  return eje === 'h' ? { sx: -sx, sy } : { sx, sy: -sy };   // signo negativo = espejo
+                });
                 // VOLVER AL DISEÑO PRINCIPAL: todos los objetos vuelven a como carga el diseño (sin mover/
                 // rotar/escalar) en el alcance elegido. Es deshacible (queda en el historial).
                 const volverPrincipal = () => {
@@ -6137,7 +6164,7 @@ export default function App() {
                             return (
                               <g key={o.nombre} transform={(vo.dx || vo.dy) ? `translate(${vo.dx} ${vo.dy})` : undefined}>
                                 <g clipPath={`url(#edclip-${p.idx})`}>
-                                  <g transform={`rotate(${tf.rot} ${c.cx} ${c.cy})`}>
+                                  <g transform={`rotate(${tf.rot} ${c.cx} ${c.cy})` + ((c.sgx < 0 || c.sgy < 0) ? ` translate(${c.cx} ${c.cy}) scale(${c.sgx} ${c.sgy}) translate(${-c.cx} ${-c.cy})` : '')}>
                                     <image href={o.svg ? `data:image/svg+xml;base64,${o.svg}` : `data:image/png;base64,${o.thumb}`} x={c.cx - c.w / 2} y={c.cy - c.h / 2} width={c.w} height={c.h} preserveAspectRatio="none" onMouseDown={(e) => start(e, 'move', o, p)} style={{ cursor: 'move' }} />
                                   </g>
                                 </g>
@@ -6226,12 +6253,19 @@ export default function App() {
                       const _inp = { width: 74, padding: '5px 7px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, fontWeight: 700, textAlign: 'right', outline: 'none' };
                       const _lbl = { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-secondary)' };
                       return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)' }}>{_o.nombre}</span>
-                          <label style={_lbl}>An.
+                        <div style={{ marginBottom: 4, flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>TAMAÑO</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
+                          <label style={_lbl}><span style={{ width: 20 }}>An.</span>
                             <input key={`w|${_o.nombre}|${T}|${_wCm.toFixed(2)}`} defaultValue={_wCm.toFixed(2)}
                               onBlur={(e) => _setW(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
                           </label>
+                          <label style={_lbl}><span style={{ width: 20 }}>Al.</span>
+                            <input key={`h|${_o.nombre}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
+                              onBlur={(e) => _setH(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
+                          </label>
+                          </div>
                           <button type="button" onClick={() => setEdLink(v => !v)}
                             title={edLink ? 'Proporción ENLAZADA: al cambiar uno, el otro acompaña' : 'Proporción LIBRE: ancho y alto independientes (deforma)'}
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 26, borderRadius: 7, cursor: 'pointer', transition: 'all .15s',
@@ -6243,11 +6277,55 @@ export default function App() {
                               {!edLink && <line x1="3" y1="21" x2="21" y2="3" stroke="#ff6b6b" strokeWidth="2.2" />}
                             </svg>
                           </button>
-                          <label style={_lbl}>Al.
-                            <input key={`h|${_o.nombre}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
-                              onBlur={(e) => _setH(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
-                          </label>
-                          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>· medida en el diseño ({_o.w_cm}×{_o.h_cm} cm al 100%)</span>
+                          </div>
+                          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
+                            <b style={{ color: 'var(--accent)' }}>{_o.nombre}</b> · {_o.w_cm}×{_o.h_cm} cm al 100%
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {/* ── ROTAR y ESPEJAR: aplican a TODOS los objetos seleccionados ── */}
+                    {editableSel.length > 0 && (() => {
+                      const _bt = { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 28, borderRadius: 7, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700 };
+                      return (
+                        <div style={{ flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>
+                            ROTAR {editableSel.length > 1 && <span style={{ color: 'var(--accent)' }}>({editableSel.length})</span>}
+                          </div>
+                          {/* Desplegable propio (no <select> nativo) con varios ángulos; rota lo elegido */}
+                          <div style={{ position: 'relative', marginBottom: 6 }}>
+                            <button type="button" onClick={() => setEdRotOpen(v => !v)} style={{ ..._bt, width: '100%', justifyContent: 'space-between', padding: '0 9px' }}>
+                              <span>Rotar por ángulo…</span><span style={{ fontSize: 9, color: 'var(--text-muted)' }}>▾</span>
+                            </button>
+                            {edRotOpen && (
+                              <div style={{ position: 'absolute', top: 31, left: 0, right: 0, zIndex: 30, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 8, maxHeight: 190, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
+                                {[-180, -135, -120, -90, -60, -45, -30, -22.5, -15, -10, -5, 5, 10, 15, 22.5, 30, 45, 60, 90, 120, 135, 180].map(a => (
+                                  <div key={a} onClick={() => { _rotarSel(a); setEdRotOpen(false); }}
+                                    style={{ padding: '5px 10px', fontSize: 12, cursor: 'pointer', color: a < 0 ? '#ffb36b' : 'var(--text-secondary)' }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.07)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                                    {a > 0 ? `↻ +${a}°` : `↺ ${a}°`}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                            <button type="button" style={_bt} onClick={() => _rotarSel(-90)} title="Rotar 90° antihorario">↺ 90°</button>
+                            <button type="button" style={_bt} onClick={() => _rotarSel(90)} title="Rotar 90° horario">↻ 90°</button>
+                            <button type="button" style={_bt} onClick={() => aplicarTf(editableSel, () => ({ rot: 0 }))} title="Volver a 0°">0°</button>
+                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, margin: '10px 0 7px' }}>ESPEJAR</div>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button type="button" style={_bt} onClick={() => _espejarSel('h')} title="Espejar horizontal (izquierda ↔ derecha)">
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M12 3v18" strokeDasharray="3 3" /><path d="M9 7 4 12l5 5z" fill="currentColor" /><path d="M15 7l5 5-5 5z" /></svg>
+                              Horiz.
+                            </button>
+                            <button type="button" style={_bt} onClick={() => _espejarSel('v')} title="Espejar vertical (arriba ↔ abajo)">
+                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 12h18" strokeDasharray="3 3" /><path d="M7 9l5-5 5 5z" fill="currentColor" /><path d="M7 15l5 5 5-5z" /></svg>
+                              Vert.
+                            </button>
+                          </div>
                         </div>
                       );
                     })()}

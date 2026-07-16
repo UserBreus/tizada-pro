@@ -1910,7 +1910,12 @@ def _clamp_tf(v):
     `scale` = escala UNIFORME (legacy). `sx`/`sy` = ancho/alto por separado (enlace de
     proporción desactivado en el editor); si no vienen, valen `scale`."""
     v = v or {}
-    _cl = lambda x: max(0.05, min(20.0, float(x)))
+    # El SIGNO se conserva: negativo = ESPEJO (horizontal en sx, vertical en sy). Solo se
+    # clampea la magnitud.
+    def _cl(x):
+        x = float(x)
+        s = -1.0 if x < 0 else 1.0
+        return s * max(0.05, min(20.0, abs(x)))
     sc = _cl(v.get("scale", 1.0) or 1.0)
     sx = _cl(v.get("sx") if v.get("sx") is not None else sc)
     sy = _cl(v.get("sy") if v.get("sy") is not None else sc)
