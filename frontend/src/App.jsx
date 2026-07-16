@@ -5222,12 +5222,12 @@ export default function App() {
 
         {/* Tab 1: Pedidos */}
         {activoTab === 'pedidos' && (
-          <div className="panel animate-fade" style={['moldes', 'arte', 'planilla', 'generar'].includes(pedidoPaso) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}}>
+          <div className="panel animate-fade" style={['moldes', 'arte', 'planilla'].includes(pedidoPaso) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}}>
             {/* Título + pasos en UNA fila */}
             {(() => {
               const pasos = [
                 { k: 'moldes', label: 'Diseños' }, { k: 'arte', label: 'Arte' },
-                { k: 'planilla', label: 'Planilla' }, { k: 'generar', label: 'Generar' }, { k: 'resultados', label: 'Tizadas' },
+                { k: 'planilla', label: 'Planilla' }, { k: 'resultados', label: 'Tizadas' },
               ];
               const idx = pasos.findIndex(p => p.k === pedidoPaso);
               return (
@@ -5390,7 +5390,7 @@ export default function App() {
                 />
               </div>
             ) : (
-            <div style={['arte', 'planilla', 'generar'].includes(pedidoPaso) ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}}>
+            <div style={['arte', 'planilla'].includes(pedidoPaso) ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}}>
               {pedidoPaso === 'planilla' && (
                 <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -5540,19 +5540,25 @@ export default function App() {
                   <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }}>← Arte</button>
                   <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
                   {(() => {
+                    // De la planilla se ENVÍA directo a generar la tizada (no hay paso de revisión).
                     const invalidos = planillaInvalidos();
-                    const bloq = !filas.length || invalidos.length > 0;
                     const cols_inv = [...new Set(invalidos.map(x => x.label))];
+                    const sinArte = moldesSeleccionados.filter(id => !arteEnPedido(id));
+                    const bloq = !filas.length || invalidos.length > 0 || !moldesSeleccionados.length || sinArte.length > 0;
+                    const motivo = invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')})`
+                      : sinArte.length ? `Falta el diseño en el paso Arte para: ${sinArte.map(id => moldeById(id)?.nombre).join(', ')}`
+                        : !filas.length ? 'Agregá al menos una fila' : '';
                     return (
                       <>
-                        <span style={{ marginLeft: 'auto', fontSize: 12, color: invalidos.length ? '#ff8a8a' : 'var(--text-muted)', fontWeight: invalidos.length ? 700 : 400 }}>
-                          {invalidos.length ? `⚠ ${invalidos.length} valor(es) inválido(s) en ${cols_inv.join(', ')}` : `${filas.length} fila${filas.length === 1 ? '' : 's'}`}
+                        <span style={{ marginLeft: 'auto', fontSize: 12, color: (invalidos.length || sinArte.length) ? '#ff8a8a' : 'var(--text-muted)', fontWeight: (invalidos.length || sinArte.length) ? 700 : 400 }}>
+                          {invalidos.length ? `⚠ ${invalidos.length} valor(es) inválido(s) en ${cols_inv.join(', ')}`
+                            : sinArte.length ? `⚠ Falta el diseño de ${sinArte.map(id => moldeById(id)?.nombre).join(', ')}`
+                              : `${filas.length} fila${filas.length === 1 ? '' : 's'}`}
                         </span>
-                        <button onClick={() => { if (!bloq) setPedidoPaso('generar'); }} disabled={bloq}
-                          title={invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')}) para continuar` : ''}
-                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none', cursor: bloq ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
+                        <button onClick={() => { if (!bloq) generarMulti(); }} disabled={bloq} title={motivo}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 22px', borderRadius: 10, border: 'none', cursor: bloq ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
                             background: bloq ? 'rgba(255,255,255,0.07)' : 'var(--accent)', color: bloq ? 'var(--text-muted)' : '#001016', transition: 'all .2s' }}>
-                          Continuar <span style={{ fontSize: 16 }}>→</span>
+                          Enviar <span style={{ fontSize: 16 }}>→</span>
                         </button>
                       </>
                     );
@@ -6055,65 +6061,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Paso 4 · Revisar y generar */}
-              {pedidoPaso === 'generar' && (
-                <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                <div style={{ maxWidth: 560, margin: '0 auto' }}>
-                <div className="card">
-                  <div className="card-title">4 · Revisá y generá</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14, margin: '20px 0' }}>
-                    <div className="dato" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--border-light)', paddingBottom: 8 }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Moldes elegidos</span>
-                      <b style={{ fontFamily: 'monospace' }}>{moldesSeleccionados.length}</b>
-                    </div>
-                    <div className="dato" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--border-light)', paddingBottom: 8 }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Prendas (filas)</span>
-                      <b style={{ fontFamily: 'monospace' }}>{filas.length}</b>
-                    </div>
-                    <div className="dato" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed var(--border-light)', paddingBottom: 8 }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Mesas de tizada</span>
-                      <b style={{ fontFamily: 'monospace' }}>{moldesSeleccionados.length}</b>
-                    </div>
-                  </div>
-
-                  {moldesSeleccionados.length > 0 && (
-                    <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {moldesSeleccionados.map(id => {
-                        const m = moldeById(id);
-                        return (
-                          <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-                            <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m?.nombre}</span>
-                            <span className={`badge ${arteEnPedido(id) ? 'success' : 'error'}`} style={{ fontSize: 10, flexShrink: 0 }}>{arteEnPedido(id) ? 'Diseño ✓' : 'Falta diseño'}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {moldesSeleccionados.some(id => !arteEnPedido(id))
-                    ? <div style={{ fontSize: 12, color: 'var(--warning, #e0a020)', textAlign: 'center' }}>Cargá el diseño en el paso Arte para poder generar.</div>
-                    : <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', textAlign: 'center' }}>Todo listo. Tocá <b>«Generar»</b> abajo.</div>}
-                </div>
-                </div>
-                </div>
-                {/* Barra inferior fija (igual que en los otros pasos) */}
-                {(() => {
-                  const puedeGen = moldesSeleccionados.length && !moldesSeleccionados.some(id => !arteEnPedido(id)) && filas.length;
-                  return (
-                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
-                      <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('planilla')}>← Planilla</button>
-                      <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
-                      <button onClick={() => generarMulti()} disabled={!puedeGen}
-                        style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '11px 22px', borderRadius: 10, border: 'none', cursor: puedeGen ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
-                          background: puedeGen ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: puedeGen ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
-                        Generar {moldesSeleccionados.length > 1 ? `${moldesSeleccionados.length} Tizadas` : 'Sublimación'} <span style={{ fontSize: 16 }}>→</span>
-                      </button>
-                    </div>
-                  );
-                })()}
-                </div>
-              )}
             </div>
             )}
 
@@ -6123,7 +6070,7 @@ export default function App() {
                 <div className="card-title" style={{ margin: 0 }}>5 · Tizadas</div>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '14px 0' }}>No hay ninguna tizada en curso.</div>
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('generar')}>← Volver a generar</button>
+                  <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('planilla')}>← Volver a la planilla</button>
                   <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido}>↺ Nuevo pedido</button>
                 </div>
               </div>
@@ -6136,7 +6083,7 @@ export default function App() {
                     {trabajosMulti.some(t => t.estado === 'generando' || t.estado === 'en cola') && <span className="badge warning" style={{ marginLeft: 10 }}>Procesando</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('generar')}>← Atrás</button>
+                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('planilla')}>← Atrás</button>
                     {(() => {
                       const j = trabajosMulti[0];
                       const hojas = (j?.estado === 'listo' && j?.resultado?.hojas) || [];
