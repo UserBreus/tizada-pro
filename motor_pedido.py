@@ -1495,15 +1495,14 @@ def _pasadas_personalizable(path_arte):
         dentro, per, _ult_txt, _hay_texto, _acum = 0, {}, "", False, ""
         _gstack = []
 
-        def _add(txt, pasada):
-            if not txt:
+        _acum, _pl = "", []      # texto y pasadas de la capa que se está recorriendo
+
+        def _add(pasada):
+            # Un texto se dibuja glifo a glifo (6 `Tj`/`S` seguidos = UNA capa, no seis): las
+            # pasadas consecutivas idénticas son la misma capa de la apariencia.
+            if _pl and _pl[-1] == pasada:
                 return
-            l = per.setdefault(txt, [])
-            # Un texto se dibuja glifo a glifo (6 `S` seguidos = UN borde, no seis): las pasadas
-            # consecutivas idénticas son la misma capa de la apariencia.
-            if l and l[-1] == pasada:
-                return
-            l.append(pasada)
+            _pl.append(pasada)
 
         for inst in insts:
             op = str(inst.operator)
@@ -1546,39 +1545,42 @@ def _pasadas_personalizable(path_arte):
                 if any(_norm_nombre(n) not in CAPAS_GRAFICAS for n in _nombres_oc(inst.operands[1], pg)):
                     if dentro == 0:
                         scol, sw = None, None    # sin arrastrar el estado de trazo de afuera
+                        _acum, _pl = "", []      # arranca la capa
                     dentro += 1; continue
                 elif dentro:
                     dentro += 1
             elif op in ("BDC", "BMC") and dentro:
                 dentro += 1
             elif op == "EMC" and dentro:
-                dentro -= 1; continue
+                dentro -= 1
+                if not dentro:
+                    # AL SALIR DE LA CAPA se vuelca todo. NO se puede depender del `ET`: hay artes
+                    # donde el `BT..ET` envuelve a la capa (el texto empieza AFUERA) y adentro sólo
+                    # están los `scn`+`Tj` → el `ET` nunca cae dentro y no se guardaba nada.
+                    # La clave es el texto acumulado; si el arte lo dibuja 2 veces queda
+                    # "nombrenombre", y `_match_texto` igual lo encuentra (matchea por contención).
+                    t = _norm_nombre(_acum)
+                    if t and _pl:
+                        per.setdefault(t, list(_pl))
+                    _acum, _pl = "", []
+                continue
             if not dentro:
                 continue
 
-            if op == "BT":
-                _acum = ""       # un nombre llega GLIFO A GLIFO ("n","o","m"…): hay que juntarlo
-            elif op in ("Tj", "TJ", "'", '"'):
+            if op in ("Tj", "TJ", "'", '"'):
                 _acum += _texto_de_tj(inst) or ""
-                _hay_texto = True
-            elif op == "ET":
-                # Recién acá se conoce el texto COMPLETO del bloque (la clave). Si se usara el
-                # último Tj, un "nombre" quedaría bajo la clave "e" y no matchearía nunca.
-                if _hay_texto:
-                    t = _norm_nombre(_acum)
-                    if t:
-                        _ult_txt = t     # los trazos que vengan DESPUÉS son de este texto
-                    if fcol is not None:
-                        _add(_ult_txt, {"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
-                _hay_texto = False
+                # El relleno vigente en este glifo es una capa de la apariencia. Si cambió respecto
+                # de la pasada anterior, es una capa NUEVA (p.ej. negro original → azul de arriba).
+                if fcol is not None:
+                    _add({"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
             elif op in ("S", "s") and scol is not None and sw and sw > 0:
-                _add(_ult_txt, {"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
+                _add({"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
             elif op in ("B", "B*", "b", "b*"):
                 # trazado con relleno Y trazo: PDF pinta primero el relleno y encima el trazo
                 if fcol is not None:
-                    _add(_ult_txt, {"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
+                    _add({"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
                 if scol is not None and sw and sw > 0:
-                    _add(_ult_txt, {"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
+                    _add({"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
         if per:
             res[str(i + 1)] = per
     return res
