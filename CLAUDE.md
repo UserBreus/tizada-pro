@@ -29,6 +29,10 @@ el changelog con los pendientes.
 
 ## 2. REGLAS DURAS (no negociables)
 
+- **NADA A MEDIAS.** Si una feature entra, entra COMPLETA: backend + endpoints + **la pantalla para
+  usarla y configurarla**. No entregar la mitad y dejar el resto "para después". Si no entra en una
+  sesión, partirla en entregas que **funcionen** cada una — pero nunca a medio hacer.
+
 - **NUNCA borrar ni sobrescribir datos del usuario** (`datos/`, `entrada/`, `catalogo_fuentes/`) al
   probar. Solo GET y generar. Para verificar algo destructivo, usar una copia propia y descartable.
 - **Matar servers por PID específico. NUNCA mass-kill** (`taskkill //IM py.exe` está prohibido).

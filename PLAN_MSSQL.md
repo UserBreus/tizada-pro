@@ -34,6 +34,14 @@ quedaron como ids permanentes).
 
 ## 4. REGLAS DURAS DEL USUARIO (no negociables)
 
+- **NADA A MEDIAS. Si una feature entra, entra COMPLETA** (regla explícita del usuario 2026-07-17:
+  *"no me des nada por la mitad, debe de hacer todo"*). Concretamente para USUARIOS/ROLES: no
+  alcanza con las tablas — va **todo el circuito**: esquema + endpoints + **PANTALLA de gestión**
+  para crear/editar/borrar **usuarios**, **roles** y **permisos**, asignar roles a usuarios y
+  permisos a roles, y que esos permisos **se apliquen de verdad** (backend Y frontend). Login y
+  contraseñas **hasheadas** (nunca en claro). Si no entra completo en una sesión, se parte en
+  entregas que **funcionen** cada una, y el estado queda en §6 — pero NO se entrega a medio hacer.
+
 - **La pieza se identifica por ID NUMÉRICO, NUNCA por nombre.** Número pelado y secuencial
   (`1`, `2`, `3`…), arranca en 1. Sin prefijo `pz_`, sin ceros a la izquierda, sin strings.
 - **Cada pieza NUEVA tiene su propio id.** No se reusa ni se recicla.
