@@ -4808,8 +4808,16 @@ export default function App() {
   // Toggle de una variante en el rango (con soporte shift+click para seleccionar un tramo).
   const toggleRango = (t, idx, e) => {
     const set = new Set(rangoMedida);
-    if (e.shiftKey && rangoLastRef.current != null && etqData?.talles) {
-      const a = Math.min(rangoLastRef.current, idx), b = Math.max(rangoLastRef.current, idx);
+    // Ancla del shift+click: la del último click de ESTA sesión; si no hay (p. ej. el rango vino
+    // guardado y es el 1er click), se usa la ÚLTIMA pieza YA seleccionada, en orden del archivo.
+    // Sin esto, shift+click como primera acción no tenía desde dónde arrancar y solo agregaba una.
+    let ancla = rangoLastRef.current;
+    if (e.shiftKey && ancla == null && rangoMedida.length && etqData?.talles) {
+      const sel = etqData.talles.map((x, i) => (set.has(x) ? i : -1)).filter(i => i >= 0);
+      if (sel.length) ancla = sel[sel.length - 1];
+    }
+    if (e.shiftKey && ancla != null && etqData?.talles) {
+      const a = Math.min(ancla, idx), b = Math.max(ancla, idx);
       etqData.talles.slice(a, b + 1).forEach(x => set.add(x));
     } else { if (set.has(t)) set.delete(t); else set.add(t); }
     rangoLastRef.current = idx;
