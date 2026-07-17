@@ -51,12 +51,21 @@ se ve DESPUÉS. Ahora: una base **propia, limpia y robusta**, bien normalizada, 
 encima se puedan exponer **APIs** y compartir los datos. Motor: **MSSQL** (decidido). El esquema se
 diseña por las necesidades de TIZADA PRO, sin condicionarlo a tablas ajenas.
 
-**Fase 0 — lo único que hace falta preguntar antes de codear:**
-1. Instancia MSSQL: ¿cuál/dónde y con qué credenciales? (o ¿levanto una local para desarrollar?)
-2. Driver: `pyodbc` (ODBC Driver 18) o `pymssql`.
-3. **Multi-cliente:** si va a ser app web con clientes, ¿los datos se separan por cliente? Eso mete
-   `cliente_id` en TODAS las tablas → **definir ANTES** de diseñar el esquema, no después. Es la
-   pregunta más cara de contestar tarde.
+**Fase 0 — RESPONDIDA por el usuario (2026-07-17). Ya se puede codear:**
+1. **Instancia:** levantar una **MSSQL LOCAL para desarrollo**. (Preferir **Docker**
+   `mcr.microsoft.com/mssql/server:2022-latest`; si no hay Docker, SQL Server **Developer Edition**.
+   Guardar la cadena de conexión en **env** — `TIZADA_DB_*` —, NUNCA credenciales en el código.)
+2. **Driver: `pyodbc`** (decidido por mí; el usuario no tenía preferencia). Es el estándar que
+   Microsoft documenta/soporta y el que se usa en producción; `pymssql` está más relegado.
+   Necesita **ODBC Driver 18 for SQL Server** instalado.
+3. **Multi-cliente: NO.** "Los clientes van a hacer pedidos nomás" → **NO hay `cliente_id`/tenant**
+   en el esquema. **PERO SÍ hay USUARIOS Y PERMISOS**: quién usa el sistema y qué puede hacer.
+   → Agregar al esquema: `usuario`, `rol`, `permiso` (+ `usuario_rol`, `rol_permiso`), y auditoría
+   mínima (`creado_por` / `creado_en` / `modificado_por` / `modificado_en`) en las tablas que se
+   editan. Diseñar los permisos por ACCIÓN (ej. `pedido.crear`, `molde.editar`, `config.editar`),
+   no por pantalla: las pantallas cambian, las acciones no. **NO inventar roles**: proponerlos y
+   que el usuario los apruebe (candidatos observados en el sistema: **operario** = Pedidos, y
+   **diseñador/admin** = Configuración — hoy la app ya separa esas dos vistas).
 
 **Fase 1 — esquema.** Entidades del sistema (ver MAPA §4 "Modelo de datos"): producto/molde,
 pieza, diseño, variable, grupo, tela, pedido, trabajo, fuente. Claves numéricas `IDENTITY`,
@@ -75,4 +84,5 @@ mantener esa firma y cambiar la implementación reduce el blast radius.
 
 ## 6. ESTADO
 
-- 2026-07-17: plan creado. **Nada codeado.** Próximo paso: **Fase 0** (las 3 preguntas de arriba).
+- 2026-07-17: plan creado. **Nada codeado.** **Fase 0 YA RESPONDIDA** (MSSQL local en Docker, driver `pyodbc`, sin multi-cliente pero CON usuarios+permisos).
+- **PRÓXIMO PASO: Fase 1 — el esquema.** Arrancar por ahí; incluir `usuario`/`rol`/`permiso` y proponer los roles al usuario antes de fijarlos.
