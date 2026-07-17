@@ -27,3 +27,6 @@ Thumbs.db
 # base de datos local (no se versiona)
 *.mdf
 *.ldf
+
+# respaldos de moldes viejos (no versionar)
+respaldo_moldes_*/
