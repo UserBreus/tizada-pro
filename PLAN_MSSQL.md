@@ -92,5 +92,17 @@ mantener esa firma y cambiar la implementación reduce el blast radius.
 
 ## 6. ESTADO
 
-- 2026-07-17: plan creado. **Nada codeado.** **Fase 0 YA RESPONDIDA** (MSSQL local en Docker, driver `pyodbc`, sin multi-cliente pero CON usuarios+permisos).
-- **PRÓXIMO PASO: Fase 1 — el esquema.** Arrancar por ahí; incluir `usuario`/`rol`/`permiso` y proponer los roles al usuario antes de fijarlos.
+- 2026-07-17: **Fase 1 HECHA y verificada.** Base `TizadaPro` en el SQL Server Express que YA estaba
+  instalado (no hizo falta Docker). Driver ODBC 17 (se elige el más nuevo en runtime). Creado:
+  `db/schema.sql` (26 tablas), `db.py` (acceso + transacciones), `auth.py` (PBKDF2 + roles/permisos),
+  `api_usuarios.py` (Blueprint), pantalla `PantallaUsuarios` en Config. Reglas duras verificadas
+  contra la base real (id IDENTITY desde 1, id_en_molde único, dos "Manga" conviven). Usuarios/roles/
+  permisos probados end-to-end incluido el navegador. **Admin inicial: usuario `admin`, password se
+  mostró UNA vez al hacer bootstrap** (si se perdió: correr `py -c "import auth,db; print(auth.bootstrap())"`
+  con la base vacía de usuarios, o resetear desde `db.py`).
+- **PRÓXIMO PASO: Fase 2-3 — migrar los DATOS.** Las tablas del DOMINIO (producto, pieza, diseño,
+  variable, telas, mapeo, editables, pedidos) están CREADAS pero VACÍAS: `servidor.py`/`motor_pedido.py`
+  siguen leyendo los JSON. Falta: (a) script que lea los 860 JSON y los cargue a MSSQL mapeando los
+  ids viejos (`pz_0001`→id nuevo) y guardando la equivalencia; (b) mover `_cargar`/`_guardar` a `db.py`
+  sin cambiar su firma; (c) verificar tizada pixel-idéntica antes/después. Recién ahí se puede matar
+  el JSON. Retomar: "seguimos con la migración a MSSQL, fase de datos".
