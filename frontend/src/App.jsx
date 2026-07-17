@@ -4817,8 +4817,11 @@ export default function App() {
       if (sel.length) ancla = sel[sel.length - 1];
     }
     if (e.shiftKey && ancla != null && etqData?.talles) {
+      // El shift+click AGREGA o QUITA el rango según el estado de la pieza clickeada: si ya estaba
+      // seleccionada, deselecciona todo el rango; si no, lo selecciona. Mismo gesto, las dos cosas.
       const a = Math.min(ancla, idx), b = Math.max(ancla, idx);
-      etqData.talles.slice(a, b + 1).forEach(x => set.add(x));
+      const quitar = set.has(t);
+      etqData.talles.slice(a, b + 1).forEach(x => (quitar ? set.delete(x) : set.add(x)));
     } else { if (set.has(t)) set.delete(t); else set.add(t); }
     rangoLastRef.current = idx;
     const nuevo = [...set];
