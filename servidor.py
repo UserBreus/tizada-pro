@@ -2099,6 +2099,96 @@ def set_editables_config():
     return jsonify({"ok": True})
 
 
+# ── OBJETOS AGREGADOS (PNG/SVG/PDF/AI que el usuario suma al editor) ──────────
+# Cada objeto se normaliza a un PDF de 1 página + su tamaño en cm, y se guarda por producto+diseño.
+# Aparece en el editor como un editable más y (etapa motor) se estampa en la tizada. El manifiesto
+# vive en `objetos_agregados.json` del producto/diseño.
+import objetos_agregados as OA
+
+
+def _oa_manifest_path(pid, sub):
+    return os.path.join(OA.carpeta(DATOS, pid, sub), "objetos_agregados.json")
+
+
+def _oa_cargar(pid, sub):
+    try:
+        with open(_oa_manifest_path(pid, sub), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"objetos": []}
+
+
+def _oa_guardar(pid, sub, data):
+    with open(_oa_manifest_path(pid, sub), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+@app.post("/api/productos/objeto_agregar")
+def objeto_agregar():
+    f = request.files.get("archivo")
+    if not f:
+        return jsonify({"error": "falta el archivo"}), 400
+    pid = request.form.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(request.form.get("diseno"))
+    nombre_vis = (request.form.get("nombre") or "").strip() or os.path.splitext(f.filename or "Objeto")[0]
+    try:
+        pdf_bytes, w_cm, h_cm, tipo = OA.normalizar_a_pdf(f.read(), f.filename or "")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer el archivo: {e}"}), 422
+    data = _oa_cargar(pid, sub)
+    # id incremental estable dentro del producto/diseño
+    oid = "oa_%d" % (1 + max([int(o["id"].split("_")[-1]) for o in data["objetos"] if o.get("id", "").startswith("oa_")] + [0]))
+    carp = OA.carpeta(DATOS, pid, sub)
+    with open(os.path.join(carp, oid + ".pdf"), "wb") as g:
+        g.write(pdf_bytes)
+    try:
+        svg = OA.preview_svg(pdf_bytes)
+    except Exception:
+        svg = ""
+    obj = {"id": oid, "nombre": nombre_vis, "archivo": oid + ".pdf",
+           "w_cm": round(w_cm, 2), "h_cm": round(h_cm, 2), "tipo": tipo}
+    data["objetos"].append(obj)
+    _oa_guardar(pid, sub, data)
+    return jsonify({"ok": True, "objeto": {**obj, "svg": svg}})
+
+
+@app.get("/api/productos/objetos_agregados")
+def objetos_agregados_listar():
+    pid = request.args.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(request.args.get("diseno"))
+    data = _oa_cargar(pid, sub)
+    carp = OA.carpeta(DATOS, pid, sub)
+    salida = []
+    for o in data.get("objetos", []):
+        svg = ""
+        try:
+            with open(os.path.join(carp, o["archivo"]), "rb") as fh:
+                svg = OA.preview_svg(fh.read())
+        except Exception:
+            pass
+        salida.append({**o, "svg": svg})
+    return jsonify({"ok": True, "objetos": salida})
+
+
+@app.delete("/api/productos/objeto_agregado/<oid>")
+def objeto_agregado_borrar(oid):
+    pid = request.args.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(request.args.get("diseno"))
+    data = _oa_cargar(pid, sub)
+    obj = next((o for o in data["objetos"] if o["id"] == oid), None)
+    if not obj:
+        return jsonify({"error": "no existe"}), 404
+    try:
+        os.remove(os.path.join(OA.carpeta(DATOS, pid, sub), obj["archivo"]))
+    except OSError:
+        pass
+    data["objetos"] = [o for o in data["objetos"] if o["id"] != oid]
+    _oa_guardar(pid, sub, data)
+    return jsonify({"ok": True})
+
+
 # ── Perfiles ICC ─────────────────────────────────────────────────────────────
 @app.get("/api/perfiles")
 def listar_perfiles():
