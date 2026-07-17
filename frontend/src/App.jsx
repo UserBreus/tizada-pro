@@ -6540,9 +6540,12 @@ export default function App() {
                         acciones={(<>
                           {_tieneDiseno && estado?.arte && <span className={`badge ${estado.arte.aprobado ? 'success' : 'error'}`}>{estado.arte.aprobado ? 'Aprobado ✓' : 'Observado ✗'}</span>}
                           {cargadoActual && (
-                            <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
-                              onClick={async () => { const d = await cargarEditablesPedido(_id, disenoActivo, verVariante); if ((d.objetos || []).length) setEditorEditOpen(true); else showError('Este diseño no tiene objetos editables (capas «Editable …»).'); }}>
-                              <Icon name="distribucion" style={{ width: 13, height: 13 }} /> Objetos editables
+                            <button style={{ padding: '8px 16px', fontSize: 12.5, fontWeight: 800, borderRadius: 9, cursor: 'pointer',
+                              display: 'flex', alignItems: 'center', gap: 7, border: 'none', color: '#001016',
+                              background: 'linear-gradient(90deg, var(--accent), #7c5cff)', boxShadow: '0 2px 10px rgba(0,243,255,0.35)' }}
+                              title="Editar el diseño: mover, rotar, escalar y espejar lo que sea editable"
+                              onClick={async () => { const d = await cargarEditablesPedido(_id, disenoActivo, verVariante); if ((d.objetos || []).length) setEditorEditOpen(true); else showError('Este diseño no tiene nada editable (capas «Editable …»).'); }}>
+                              <Icon name="edit" style={{ width: 14, height: 14 }} /> Editar diseño
                             </button>
                           )}
                           <button className="btn primary" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
@@ -6859,8 +6862,8 @@ export default function App() {
                   <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(2,6,12,0.93)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', padding: 16 }}
                     onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
-                      <Icon name="distribucion" style={{ width: 18, height: 18, color: 'var(--accent)' }} />
-                      <h3 style={{ margin: 0, fontSize: 16 }}>Objetos editables</h3>
+                      <Icon name="edit" style={{ width: 18, height: 18, color: 'var(--accent)' }} />
+                      <h3 style={{ margin: 0, fontSize: 16 }}>Editar diseño</h3>
                       <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{moldeById(_mid)?.nombre} · {(disenosPedido.find(d => d.id === disenoActivo) || {}).nombre || disenoActivo}</span>
                       <button className="btn ghost" style={{ marginLeft: 'auto', padding: '8px 12px' }} onClick={volverPrincipal} title="Volver a como viene el diseño (sin ediciones), en el alcance elegido"><Icon name="reset" style={{ width: 13, height: 13 }} /> Volver al diseño principal</button>
                       <button className="btn ghost" style={{ padding: '8px 12px', opacity: _canUndo ? 1 : 0.4 }} onClick={editorUndo} disabled={!_canUndo} title="Deshacer (Ctrl+Z)">↶ Deshacer</button>
