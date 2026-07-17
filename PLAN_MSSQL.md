@@ -46,12 +46,17 @@ quedaron como ids permanentes).
 
 ## 5. PLAN
 
-**Fase 0 — decisiones (ANTES de codear).** Preguntar al usuario:
-1. Instancia MSSQL: ¿cuál, dónde, credenciales? ¿Es la del sistema con el que se integra o una
-   propia? ¿Comparte esquema/tablas con ese sistema o va en base aparte?
-2. Driver: `pyodbc` (necesita ODBC Driver 18) vs `pymssql`. ¿Hay restricción del otro sistema?
-3. Multi-cliente: si es app web con clientes, ¿los datos se separan por cliente/tenant? Eso cambia
-   TODO el esquema (`cliente_id` en cada tabla) → **definir ANTES**, no después.
+**ALCANCE (aclarado por el usuario 2026-07-17):** **NO diseñar para el otro sistema.** La asociación
+se ve DESPUÉS. Ahora: una base **propia, limpia y robusta**, bien normalizada, pensada para que
+encima se puedan exponer **APIs** y compartir los datos. Motor: **MSSQL** (decidido). El esquema se
+diseña por las necesidades de TIZADA PRO, sin condicionarlo a tablas ajenas.
+
+**Fase 0 — lo único que hace falta preguntar antes de codear:**
+1. Instancia MSSQL: ¿cuál/dónde y con qué credenciales? (o ¿levanto una local para desarrollar?)
+2. Driver: `pyodbc` (ODBC Driver 18) o `pymssql`.
+3. **Multi-cliente:** si va a ser app web con clientes, ¿los datos se separan por cliente? Eso mete
+   `cliente_id` en TODAS las tablas → **definir ANTES** de diseñar el esquema, no después. Es la
+   pregunta más cara de contestar tarde.
 
 **Fase 1 — esquema.** Entidades del sistema (ver MAPA §4 "Modelo de datos"): producto/molde,
 pieza, diseño, variable, grupo, tela, pedido, trabajo, fuente. Claves numéricas `IDENTITY`,
