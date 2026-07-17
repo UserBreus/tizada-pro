@@ -23,3 +23,7 @@ nul
 # Sistema
 Thumbs.db
 .DS_Store
+
+# base de datos local (no se versiona)
+*.mdf
+*.ldf
