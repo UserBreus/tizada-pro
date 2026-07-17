@@ -4108,34 +4108,18 @@ export default function App() {
   // ── Paso 1: Nombrar piezas (selección con clic + recuadro) ──
   // Nombre genérico = sin el número final ("Espalda 8" → "Espalda"). Agrupa las piezas por familia.
   const nombreGenerico = (nom) => (nom || '').replace(/\s+\d+\s*$/, '').trim();
-  // REGLA de variable: un solo SLOT por NOMBRE (no pueden convivir dos "Frente", dos
-  // "Cuello"…). Un slot lo llena UNA pieza suelta O un vínculo "van juntas" (manga corta +
-  // su vivo) — el vínculo comparte nombre y ocupa un solo slot con TODAS sus piezas.
-  const _genDeValor = (v) => nombreGenerico(((etqNombres[v.pieza_idx] != null ? etqNombres[v.pieza_idx] : (v.label || '')) || '').toString().trim());
   // El vínculo "van juntas" que contiene esta pieza dentro de la variable (o null).
   const _juntaDeIdx = (juntas, idx) => (juntas || []).find(b => (b.piezas || []).includes(idx)) || null;
-  // Nombre de slot de un valor: el del vínculo si está vinculado, sino su nombre genérico.
-  const _slotDeValor = (v, juntas) => { const b = _juntaDeIdx(juntas, v.pieza_idx); return b ? ('#' + (b.id || (b.nombre || '').trim())) : _genDeValor(v); };
-  // Dedup por slot: las piezas SIN nombre y sin vínculo entran siempre; por cada slot con
-  // nombre queda lo ÚLTIMO agregado — si es un vínculo, quedan TODAS sus piezas juntas.
-  const dedupePorNombre = (vals, juntas) => {
-    const grupos = new Map(); const orden = [];
+  // Dedup por PIEZA, no por nombre. Cada pieza es única (su `pieza_idx`), y la base la guarda con
+  // su id propio → DOS piezas del mismo nombre ("Manga" y "Manga") CONVIVEN en la misma variable.
+  // Lo único que se saca es la MISMA pieza agregada dos veces. (Antes había una regla "un solo
+  // slot por nombre" que dejaba solo la última — impedía elegir 2 piezas iguales.)
+  const dedupePorNombre = (vals) => {
+    const vistos = new Set(); const out = [];
     (vals || []).forEach(v => {
-      const s = _slotDeValor(v, juntas);
-      if (!s) { orden.push({ solo: v }); return; }
-      if (!grupos.has(s)) { grupos.set(s, []); orden.push({ slot: s }); }
-      grupos.get(s).push(v);
-    });
-    const out = []; const hecho = new Set();
-    orden.forEach(o => {
-      if (o.solo) { out.push(o.solo); return; }
-      if (hecho.has(o.slot)) return; hecho.add(o.slot);
-      const arr = grupos.get(o.slot);
-      const conJunta = arr.filter(v => _juntaDeIdx(juntas, v.pieza_idx));
-      if (conJunta.length) {                              // el slot es un vínculo → quedan TODAS las piezas del último vínculo nombrado
-        const ult = _juntaDeIdx(juntas, conJunta[conJunta.length - 1].pieza_idx);
-        arr.filter(v => { const b = _juntaDeIdx(juntas, v.pieza_idx); return b && b.id === ult.id; }).forEach(v => out.push(v));
-      } else { out.push(arr[arr.length - 1]); }            // pieza suelta → la última
+      if (v.pieza_idx == null) { out.push(v); return; }
+      if (vistos.has(v.pieza_idx)) return;               // la misma pieza ya está
+      vistos.add(v.pieza_idx); out.push(v);
     });
     return out;
   };
