@@ -5053,6 +5053,17 @@ export default function App() {
       const r = await fetch(`/api/productos/editables?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}&variante=${encodeURIComponent(variante || '*')}`);   // transforms POR VARIABLE
       if (r.ok) {
         const d = await r.json();
+        // OBJETOS AGREGADOS: se traen y se suman como editables más (se muestran/transforman igual).
+        try {
+          const ra = await fetch(`/api/productos/objetos_agregados?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}`);
+          if (ra.ok) {
+            const agg = (await ra.json()).objetos || [];
+            const pz0 = d.piezas?.[0] || '';
+            const _vc = variante || '*';
+            d.objetos = [...(d.objetos || []), ...agg.map(o => _objAgregadoAEditable(
+              { ...o, transforms: (o.transforms || {})[_vc] || (o.transforms || {})['*'] || {} }, o.pieza || pz0))];
+          }
+        } catch { }
         setEditableData(d); setEditableDiseno(diseno || 'principal');
         // Al reabrir el MISMO contexto (mismo molde+diseño+variable) con ediciones en memoria, NO pisar:
         // el usuario debe seguir viendo lo que editó. Solo se recarga la base al cambiar de contexto.
@@ -5070,6 +5081,51 @@ export default function App() {
       }
     } catch { }
     return { objetos: [] };
+  };
+  // ── OBJETOS AGREGADOS: subir un PNG/SVG/PDF/AI y sumarlo al editor como un editable más ──
+  const fileInputObjetoRef = React.useRef(null);
+  const [subiendoObjeto, setSubiendoObjeto] = React.useState(false);
+  // Convierte el objeto que devuelve el backend a la FORMA de un editable del arte, para que el
+  // editor lo dibuje y lo transforme igual. Sin mesa_rect/bbox_mu → centerOf lo pone centrado en
+  // la pieza (0.5, 0.5) al 30% (default razonable); el usuario lo mueve/escala con las herramientas.
+  const _objAgregadoAEditable = (o, piezaDefault) => ({
+    nombre: o.nombre || o.id,
+    _oid: o.id, _agregado: true,
+    pieza: piezaDefault || '',
+    mesa: 0,
+    // el backend manda el svg CRUDO → el editor lo dibuja como data-uri base64
+    svg: o.svg ? btoa(unescape(encodeURIComponent(o.svg))) : '',
+    thumb: null, w_cm: o.w_cm, h_cm: o.h_cm, tipo: o.tipo,
+    transforms: o.transforms || {},
+  });
+  const agregarObjeto = async (file) => {
+    if (!file) return;
+    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    setSubiendoObjeto(true);
+    try {
+      const fd = new FormData();
+      fd.append('archivo', file); fd.append('pid', _mid); fd.append('diseno', editableDiseno);
+      const r = await fetch('/api/productos/objeto_agregar', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo agregar el objeto'); return; }
+      // pieza destino: la del objeto seleccionado, o la 1ª pieza del diseño
+      const piezaDefault = (() => {
+        const sel = (editableData?.objetos || []).find(o => o.nombre === editableSel[0]);
+        return sel?.pieza || editableData?.piezas?.[0] || '';
+      })();
+      const nuevo = _objAgregadoAEditable(d.objeto, piezaDefault);
+      setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), nuevo] }));
+      setEditableSel([nuevo.nombre]);
+      showMsg(`Objeto "${nuevo.nombre}" agregado. Movelo y escalalo como cualquier editable.`);
+    } catch (e) { showError('No se pudo subir: ' + e.message); }
+    finally { setSubiendoObjeto(false); }
+  };
+  const borrarObjetoAgregado = async (oid) => {
+    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    try {
+      await fetch(`/api/productos/objeto_agregado/${oid}?pid=${encodeURIComponent(_mid)}&diseno=${encodeURIComponent(editableDiseno)}`, { method: 'DELETE' });
+      setEditableData(prev => ({ ...(prev || {}), objetos: ((prev || {}).objetos || []).filter(o => o._oid !== oid) }));
+    } catch (e) { showError('No se pudo borrar: ' + e.message); }
   };
   // Al ver el paso Arte (con el molde+arte cargado), cargar sus objetos editables para
   // mostrarlos POSICIONADOS sobre la pieza (reflejando la base + ajustes del pedido).
@@ -6689,7 +6745,9 @@ export default function App() {
                 // Editables DEL GRUPO en vista: solo los objetos cuya mesa está activa en el talle T
                 // (con una mesa por rango, saca los duplicados de los otros rangos de la lista).
                 const _mesasActT = new Set((mapeoData?.piezas || []).map(pz => parseInt(_mesaDeEd(pz, T))).filter(Boolean));
-                const _objsEd = (ed.objetos || []).filter(o => piezaDe(o.pieza) && (!_hayMt || _mesasActT.has(o.mesa)));
+                // Los objetos AGREGADOS por el usuario siempre se muestran para su pieza (no
+                // pasan por el filtro de mesa del arte: no tienen mesa del arte).
+                const _objsEd = (ed.objetos || []).filter(o => piezaDe(o.pieza) && (o._agregado || !_hayMt || _mesasActT.has(o.mesa)));
                 const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.nombre === o.nombre) === i);
                 const toVB = (cx, cy) => { const svg = editorSvgRef.current; if (!svg) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: q.x, y: q.y }; };
                 // Pan/zoom del visor del editor: rueda = zoom (al cursor); CLICK DERECHO arrastrado = mover el espacio.
@@ -6779,7 +6837,11 @@ export default function App() {
                   try {
                     for (const o of _objsUnicos) {   // solo los del grupo/rango en vista, sin duplicados
                       const tf = curTfOf(o.nombre, T);
-                      await fetch('/api/productos/editables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre: o.nombre, talles: ts, transform: tf, variante: verVariante || '*' }) });   // POR VARIABLE
+                      if (o._agregado) {   // objeto AGREGADO: su transform va al manifiesto (+ su pieza)
+                        await fetch(`/api/productos/objeto_agregado/${o._oid}/transform`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: ts, transform: tf, variante: verVariante || '*', pieza: o.pieza }) });
+                      } else {
+                        await fetch('/api/productos/editables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre: o.nombre, talles: ts, transform: tf, variante: verVariante || '*' }) });   // POR VARIABLE
+                      }
                     }
                     showMsg(`Objetos editables guardados (${ts.length} talle/s).`);
                     return true;
@@ -6883,11 +6945,21 @@ export default function App() {
                               setEditableSel([...editableSel, o.nombre]);
                             }}
                             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.nombre) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.nombre) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
-                            <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={`data:image/png;base64,${o.thumb}`} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
-                            <span style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
+                            <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={o.thumb ? `data:image/png;base64,${o.thumb}` : (o.svg ? `data:image/svg+xml;base64,${o.svg}` : '')} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{o.nombre}</span>
+                            {o._agregado && <span onClick={(e) => { e.stopPropagation(); borrarObjetoAgregado(o._oid); }} title="Quitar objeto agregado"
+                              style={{ flexShrink: 0, fontSize: 12, color: 'var(--text-muted)', padding: '2px 4px', cursor: 'pointer' }}>✕</span>}
                           </button>
                         ))}
-                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>Arrastrá para mover · manija de arriba rota · esquina escala.</div>
+                        {/* AGREGAR OBJETO: PNG/SVG/PDF/AI → entra como un editable más */}
+                        <input type="file" ref={fileInputObjetoRef} accept=".png,.svg,.pdf,.ai,.jpg,.jpeg" hidden
+                          onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; agregarObjeto(f); }} />
+                        <button type="button" onClick={() => fileInputObjetoRef.current && fileInputObjetoRef.current.click()} disabled={subiendoObjeto}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '9px 8px', borderRadius: 9, cursor: subiendoObjeto ? 'wait' : 'pointer',
+                            fontSize: 12.5, fontWeight: 800, border: '1px dashed var(--accent)', background: 'rgba(0,243,255,0.06)', color: 'var(--accent)' }}>
+                          <Icon name="plus" style={{ width: 13, height: 13 }} /> {subiendoObjeto ? 'Subiendo…' : 'Agregar objeto'}
+                        </button>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>Arrastrá para mover · manija de arriba rota · esquina escala. Agregá PNG/SVG/PDF/AI.</div>
                       </div>
                       {/* visor — rueda = zoom · click derecho arrastrado = mover el espacio */}
                       <div onWheel={edWheel} onMouseDown={edFondo} onContextMenu={(e) => e.preventDefault()}

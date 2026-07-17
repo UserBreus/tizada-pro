@@ -2172,6 +2172,31 @@ def objetos_agregados_listar():
     return jsonify({"ok": True, "objetos": salida})
 
 
+@app.post("/api/productos/objeto_agregado/<oid>/transform")
+def objeto_agregado_transform(oid):
+    """Guarda el transform (mover/rotar/escalar/espejar) del objeto agregado, POR VARIABLE y talle.
+    Estructura en el manifiesto: obj['transforms'][variante][talle] = {dx,dy,rot,scale,sx,sy}."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(cuerpo.get("diseno"))
+    variante = str(cuerpo.get("variante") or "*")
+    talles = cuerpo.get("talles") or []
+    tf = _clamp_tf(cuerpo.get("transform") or {})
+    pieza = cuerpo.get("pieza")
+    data = _oa_cargar(pid, sub)
+    obj = next((o for o in data["objetos"] if o["id"] == oid), None)
+    if not obj:
+        return jsonify({"error": "no existe"}), 404
+    tfs = obj.setdefault("transforms", {})
+    porv = tfs.setdefault(variante, {})
+    for t in (talles or ["*"]):
+        porv[str(t)] = tf
+    if pieza:
+        obj["pieza"] = pieza          # a qué pieza quedó asignado el objeto
+    _oa_guardar(pid, sub, data)
+    return jsonify({"ok": True})
+
+
 @app.delete("/api/productos/objeto_agregado/<oid>")
 def objeto_agregado_borrar(oid):
     pid = request.args.get("pid") or _get_active_producto_id()
