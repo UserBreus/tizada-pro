@@ -21,6 +21,18 @@ for d in (ENTRADA, FUENTES, TRABAJOS, DATOS):
     os.makedirs(d, exist_ok=True)
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
+
+# ── SESIÓN + API de usuarios/roles/permisos (base MSSQL, ver PLAN_MSSQL.md) ──
+# La clave de sesión va por ENV. El fallback aleatorio es a propósito: sin `TIZADA_SECRET`
+# cada arranque invalida las sesiones (molesto pero seguro) en vez de usar una clave fija
+# y conocida, que permitiría falsificar la cookie de sesión.
+app.secret_key = os.environ.get("TIZADA_SECRET") or __import__("secrets").token_hex(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+try:
+    from api_usuarios import bp as _bp_usuarios
+    app.register_blueprint(_bp_usuarios)
+except Exception as _e:   # sin base, el resto del sistema tiene que seguir andando
+    print(f"[usuarios] API deshabilitada (¿base MSSQL sin levantar?): {_e}")
 trabajos = {}
 
 # ── Perfiles ICC (color management real) ─────────────────────────────────────

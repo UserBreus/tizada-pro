@@ -32,6 +32,17 @@ function Icon({ name, className = "", style }) {
         <line x1="5" y1="12" x2="19" y2="12"/>
       </svg>
     ),
+    user: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+        <circle cx="12" cy="7" r="4"/>
+      </svg>
+    ),
+    shield: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+    ),
     trash: (
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
         <polyline points="3 6 5 6 21 6"/>
@@ -790,6 +801,323 @@ const IcoLab = ({ d }) => (
   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7"
     strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><path d={d} /></svg>
 );
+
+// ── USUARIOS / ROLES / PERMISOS ──────────────────────────────────────────────
+// Los permisos se resuelven en el SERVIDOR. Acá se pinta la UI: ocultar un botón NO es
+// proteger nada (la API igual rechaza), es sólo no mostrarle a alguien lo que no puede usar.
+function PantallaUsuarios({ onVolver, showMsg, showError, yo }) {
+  const [tab, setTab] = useState('usuarios');
+  const [usuarios, setUsuarios] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [permisos, setPermisos] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [editUsr, setEditUsr] = useState(null);   // usuario en edición (null = cerrado; {} = nuevo)
+  const [editRol, setEditRol] = useState(null);
+  const [confirmar, setConfirmar] = useState(null);  // {tipo:'usuario'|'rol', id, label}
+
+  const recargar = async () => {
+    setCargando(true);
+    try {
+      const [u, r, p] = await Promise.all([
+        fetch('/api/usuarios').then(x => x.json()),
+        fetch('/api/roles').then(x => x.json()),
+        fetch('/api/permisos').then(x => x.json()),
+      ]);
+      if (u.usuarios) setUsuarios(u.usuarios);
+      if (r.roles) setRoles(r.roles);
+      if (p.permisos) setPermisos(p.permisos);
+      if (u.error) showError(u.error);
+    } catch (e) { showError('No se pudo leer usuarios: ' + e.message); }
+    setCargando(false);
+  };
+  useEffect(() => { recargar(); }, []);
+
+  const puedeGestionar = (yo?.permisos || []).includes('usuario.gestionar');
+
+  const guardarUsuario = async () => {
+    const u = editUsr;
+    if (!u.usuario?.trim()) { showError('Falta el usuario'); return; }
+    if (!u.id && (u.password || '').length < 8) { showError('La contraseña tiene que tener al menos 8 caracteres'); return; }
+    const body = { usuario: u.usuario.trim(), nombre: u.nombre || u.usuario, email: u.email || '', roles: u.roles || [] };
+    if (u.password) body.password = u.password;
+    if (u.id) body.activo = u.activo !== false;
+    const r = await fetch(u.id ? `/api/usuarios/${u.id}` : '/api/usuarios',
+      { method: u.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { showError(d.error || 'No se pudo guardar'); return; }
+    setEditUsr(null); showMsg(u.id ? 'Usuario actualizado.' : 'Usuario creado.'); recargar();
+  };
+
+  const guardarRol = async () => {
+    const g = editRol;
+    if (!g.id && !g.clave?.trim()) { showError('Falta la clave del rol'); return; }
+    const body = { nombre: g.nombre || g.clave, descripcion: g.descripcion || '' };
+    if (!g.id) body.clave = g.clave.trim();
+    if (!g.es_sistema) body.permisos = g.permisos || [];   // el rol de sistema no cambia permisos
+    const r = await fetch(g.id ? `/api/roles/${g.id}` : '/api/roles',
+      { method: g.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { showError(d.error || 'No se pudo guardar'); return; }
+    setEditRol(null); showMsg(g.id ? 'Rol actualizado.' : 'Rol creado.'); recargar();
+  };
+
+  const borrar = async () => {
+    const c = confirmar;
+    const r = await fetch(`/api/${c.tipo === 'usuario' ? 'usuarios' : 'roles'}/${c.id}`, { method: 'DELETE' });
+    const d = await r.json();
+    setConfirmar(null);
+    if (!r.ok) { showError(d.error || 'No se pudo eliminar'); return; }
+    showMsg((c.tipo === 'usuario' ? 'Usuario' : 'Rol') + ' eliminado.'); recargar();
+  };
+
+  const inp = { width: '100%', padding: '9px 11px', fontSize: 13, borderRadius: 8, background: 'rgba(255,255,255,0.04)',
+    color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' };
+  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 5 };
+  const chipRol = (clave, on, fn) => (
+    <button key={clave} type="button" onClick={fn} style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700,
+      cursor: fn ? 'pointer' : 'default', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+      background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{clave}</button>
+  );
+  const porModulo = {};
+  permisos.forEach(p => { (porModulo[p.modulo] = porModulo[p.modulo] || []).push(p); });
+
+  return (
+    <div className="panel animate-fade">
+      <div style={{ marginBottom: 20 }}>
+        <button className="btn ghost" onClick={onVolver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
+          ⬅ Volver al Panel de Configuración
+        </button>
+      </div>
+      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+        <div>
+          <h2>Usuarios y permisos</h2>
+          <p>Quién usa el sistema y qué puede hacer. Los permisos se aplican en el servidor.</p>
+        </div>
+        {puedeGestionar && (
+          <button className="btn primary" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
+            onClick={() => tab === 'usuarios' ? setEditUsr({ roles: [], activo: true }) : setEditRol({ permisos: [] })}>
+            <Icon name="plus" style={{ width: 14, height: 14 }} /> {tab === 'usuarios' ? 'Nuevo usuario' : 'Nuevo rol'}
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, margin: '16px 0' }}>
+        {[['usuarios', 'Usuarios', usuarios.length], ['roles', 'Roles', roles.length], ['permisos', 'Permisos', permisos.length]].map(([k, t, n]) => (
+          <button key={k} type="button" onClick={() => setTab(k)} style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+            border: '1px solid ' + (tab === k ? 'var(--accent)' : 'var(--border-light)'),
+            background: tab === k ? 'rgba(0,243,255,0.12)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)' }}>{t} ({n})</button>
+        ))}
+      </div>
+
+      {cargando && <div className="card" style={{ padding: 20, fontSize: 13, color: 'var(--text-muted)' }}>Cargando…</div>}
+
+      {/* ── USUARIOS ── */}
+      {!cargando && tab === 'usuarios' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          {usuarios.map((u, i) => (
+            <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+              borderTop: i ? '1px solid var(--border-light)' : 'none', opacity: u.activo ? 1 : 0.5 }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(0,243,255,0.12)', color: 'var(--accent)', fontWeight: 800, fontSize: 13 }}>
+                {(u.nombre || u.usuario).slice(0, 1).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+                  {u.nombre} <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>· {u.usuario}</span>
+                  {u.id === yo?.id && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)' }}>(vos)</span>}
+                  {!u.activo && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text-muted)' }}>inactivo</span>}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {u.ultimo_acceso ? 'Último acceso: ' + u.ultimo_acceso.slice(0, 16).replace('T', ' ') : 'Nunca entró'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>{(u.roles || []).map(r => chipRol(r, true, null))}</div>
+              {puedeGestionar && (
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  <button type="button" onClick={() => setEditUsr({ ...u, password: '' })} title="Editar"
+                    style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                    <Icon name="edit" style={{ width: 12, height: 12 }} />
+                  </button>
+                  <button type="button" onClick={() => setConfirmar({ tipo: 'usuario', id: u.id, label: u.usuario })} title="Eliminar"
+                    style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                    <Icon name="trash" style={{ width: 12, height: 12 }} />
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── ROLES ── */}
+      {!cargando && tab === 'roles' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+          {roles.map(r => (
+            <div key={r.id} className="card" style={{ padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <Icon name="shield" style={{ width: 13, height: 13, color: 'var(--accent)' }} /> {r.nombre}
+                    {r.es_sistema && <span className="badge success" style={{ fontSize: 9 }}>sistema</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{r.clave} · {r.usuarios} usuario/s</div>
+                </div>
+                {puedeGestionar && (
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button type="button" onClick={() => setEditRol({ ...r })} title="Editar"
+                      style={{ width: 24, height: 24, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                      <Icon name="edit" style={{ width: 11, height: 11 }} />
+                    </button>
+                    {!r.es_sistema && (
+                      <button type="button" onClick={() => setConfirmar({ tipo: 'rol', id: r.id, label: r.nombre })} title="Eliminar"
+                        style={{ width: 24, height: 24, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                        <Icon name="trash" style={{ width: 11, height: 11 }} />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {r.descripcion && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>{r.descripcion}</div>}
+              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{r.permisos.length} permiso/s</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                {r.permisos.slice(0, 6).map(p => (
+                  <span key={p} style={{ fontSize: 9.5, padding: '2px 6px', borderRadius: 5, background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>{p}</span>
+                ))}
+                {r.permisos.length > 6 && <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>+{r.permisos.length - 6}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── PERMISOS (catálogo, sólo lectura: los define el código) ── */}
+      {!cargando && tab === 'permisos' && (
+        <div className="card" style={{ padding: 24 }}>
+          <div className="card-subtitle" style={{ marginBottom: 16 }}>
+            Los permisos son por ACCIÓN, no por pantalla (las pantallas cambian, las acciones no). Los define el sistema; acá se ven para saber qué se le puede dar a cada rol.
+          </div>
+          {Object.entries(porModulo).map(([mod, ps]) => (
+            <div key={mod} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase' }}>{mod}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                {ps.map(p => (
+                  <div key={p.id} style={{ border: '1px solid var(--border-light)', borderRadius: 8, padding: '9px 12px', background: 'rgba(0,0,0,0.1)' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{p.nombre}</div>
+                    <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'monospace' }}>{p.clave}</div>
+                    {p.descripcion && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{p.descripcion}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── MODAL usuario ── */}
+      <Modal open={!!editUsr} onClose={() => setEditUsr(null)} titulo={editUsr?.id ? 'Editar usuario' : 'Nuevo usuario'}
+        subtitulo={editUsr?.id ? 'Dejá la contraseña vacía para no cambiarla.' : 'Mínimo 8 caracteres de contraseña.'} maxWidth={520}>
+        {editUsr && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Usuario</label>
+                <input style={inp} value={editUsr.usuario || ''} disabled={!!editUsr.id}
+                  onChange={e => setEditUsr(u => ({ ...u, usuario: e.target.value }))} /></div>
+              <div><label style={lbl}>Nombre</label>
+                <input style={inp} value={editUsr.nombre || ''} onChange={e => setEditUsr(u => ({ ...u, nombre: e.target.value }))} /></div>
+            </div>
+            <div><label style={lbl}>Email (opcional)</label>
+              <input style={inp} value={editUsr.email || ''} onChange={e => setEditUsr(u => ({ ...u, email: e.target.value }))} /></div>
+            <div><label style={lbl}>Contraseña {editUsr.id ? '(vacío = no cambiar)' : ''}</label>
+              <input style={inp} type="password" value={editUsr.password || ''} autoComplete="new-password"
+                onChange={e => setEditUsr(u => ({ ...u, password: e.target.value }))} /></div>
+            <div>
+              <label style={lbl}>Roles</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {roles.map(r => chipRol(r.clave, (editUsr.roles || []).includes(r.clave), () => setEditUsr(u => {
+                  const s = new Set(u.roles || []); s.has(r.clave) ? s.delete(r.clave) : s.add(r.clave);
+                  return { ...u, roles: [...s] };
+                })))}
+              </div>
+            </div>
+            {editUsr.id && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={editUsr.activo !== false} onChange={e => setEditUsr(u => ({ ...u, activo: e.target.checked }))} />
+                Activo (si lo desactivás no puede entrar, pero su historial queda)
+              </label>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>
+              <button className="btn ghost" onClick={() => setEditUsr(null)}>Cancelar</button>
+              <button className="btn primary" onClick={guardarUsuario}>Guardar</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── MODAL rol ── */}
+      <Modal open={!!editRol} onClose={() => setEditRol(null)} titulo={editRol?.id ? 'Editar rol' : 'Nuevo rol'}
+        subtitulo="Elegí qué acciones puede hacer este rol." maxWidth={640}>
+        {editRol && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={lbl}>Clave</label>
+                <input style={inp} value={editRol.clave || ''} disabled={!!editRol.id} placeholder="ej: supervisor"
+                  onChange={e => setEditRol(g => ({ ...g, clave: e.target.value }))} /></div>
+              <div><label style={lbl}>Nombre</label>
+                <input style={inp} value={editRol.nombre || ''} onChange={e => setEditRol(g => ({ ...g, nombre: e.target.value }))} /></div>
+            </div>
+            <div><label style={lbl}>Descripción</label>
+              <input style={inp} value={editRol.descripcion || ''} onChange={e => setEditRol(g => ({ ...g, descripcion: e.target.value }))} /></div>
+            <div>
+              <label style={lbl}>Permisos {editRol.es_sistema && <span style={{ color: 'var(--text-muted)' }}>— el rol de sistema no los puede cambiar (si se los sacan, nadie podría volver a dárselos)</span>}</label>
+              <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: 8, padding: 10 }}>
+                {Object.entries(porModulo).map(([mod, ps]) => (
+                  <div key={mod} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 5 }}>{mod}</div>
+                    {ps.map(p => (
+                      <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '3px 0',
+                        cursor: editRol.es_sistema ? 'not-allowed' : 'pointer', opacity: editRol.es_sistema ? 0.5 : 1 }}>
+                        <input type="checkbox" disabled={editRol.es_sistema} checked={(editRol.permisos || []).includes(p.clave)}
+                          onChange={() => setEditRol(g => {
+                            const s = new Set(g.permisos || []); s.has(p.clave) ? s.delete(p.clave) : s.add(p.clave);
+                            return { ...g, permisos: [...s] };
+                          })} />
+                        <span style={{ fontWeight: 600 }}>{p.nombre}</span>
+                        <span style={{ fontSize: 9.5, color: 'var(--accent)', fontFamily: 'monospace' }}>{p.clave}</span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={() => setEditRol(null)}>Cancelar</button>
+              <button className="btn primary" onClick={guardarRol}>Guardar</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── MODAL confirmar borrado (nada de diálogos del navegador) ── */}
+      <Modal open={!!confirmar} onClose={() => setConfirmar(null)} titulo="¿Eliminar?" maxWidth={420} centrado>
+        {confirmar && (
+          <div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Se va a eliminar {confirmar.tipo === 'usuario' ? 'el usuario' : 'el rol'} <b style={{ color: '#fff' }}>{confirmar.label}</b>. No se puede deshacer.
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={() => setConfirmar(null)}>Cancelar</button>
+              <button className="btn" style={{ background: 'var(--danger, #ff4d4f)', color: '#fff' }} onClick={borrar}>Eliminar</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
 
 // ── Detalle de UNA fuente: tabla de glifos (lo que tiene y lo que le falta) + laboratorio ──
 function DetalleFuente({ f, onVolver }) {
@@ -1849,6 +2177,11 @@ export default function App() {
   const [fuenteABorrar, setFuenteABorrar] = useState(null); // archivo con la confirmación de borrado abierta
   const [fuenteDetalle, setFuenteDetalle] = useState(null); // fuente abierta en su pantalla de detalle (null = la lista)
   const [buscarFuente, setBuscarFuente] = useState('');     // filtro del catálogo (nombre interno o archivo)
+  // SESIÓN: quién soy y qué puedo. Sirve para pintar la UI; quien PROTEGE es el backend.
+  const [yo, setYo] = useState(null);
+  useEffect(() => {
+    fetch('/api/auth/yo').then(r => r.json()).then(d => setYo(d.usuario || null)).catch(() => setYo(null));
+  }, []);
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -7034,6 +7367,19 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Card: Usuarios y permisos */}
+                  <div className="crm-config-card cyan" onClick={() => setAdminSubView('usuarios')}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="user" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Usuarios y permisos</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        Quién usa el sistema y qué puede hacer: usuarios, roles y permisos.
+                      </p>
+                    </div>
+                  </div>
+
                   {/* Card: Perfil de color (ICC) */}
                   <div className="crm-config-card magenta" onClick={() => { fetchPerfiles(); setAdminSubView('perfil'); }}>
                     <div>
@@ -9984,6 +10330,10 @@ export default function App() {
                   })
                 )}
               </div>
+            )}
+
+            {adminSubView === 'usuarios' && (
+              <PantallaUsuarios onVolver={() => setAdminSubView('dashboard')} showMsg={showMsg} showError={showError} yo={yo} />
             )}
 
             {/* DETALLE de una fuente: tabla de glifos + laboratorio. Tiene su propio "Volver". */}
