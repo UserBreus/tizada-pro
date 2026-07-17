@@ -154,3 +154,54 @@ def aplicar_schema(path=None):
 def tablas():
     return [r["name"] for r in filas(
         "SELECT t.name FROM sys.tables t WHERE t.is_ms_shipped=0 ORDER BY t.name")]
+
+
+# ════════════════ DOCUMENTOS (config global clave→JSON) ════════════════
+# Los documentos ricos y muy anidados (el catálogo entero, con reglas de planilla, presets de
+# nesting, plantillas…) viven en `config` con producto_id NULL. Esto ya NO es un archivo JSON:
+# es la base la fuente de verdad (transaccional, respaldada con la base). La IDENTIDAD de cada
+# producto SÍ se normaliza aparte en la tabla `producto` (id numérico) — ver sync_productos.
+import json as _json
+
+
+def get_doc(clave, default=None):
+    v = valor("SELECT valor FROM config WHERE producto_id IS NULL AND clave=?", clave)
+    if v is None:
+        return default
+    try:
+        return _json.loads(v)
+    except Exception:
+        return default
+
+
+def set_doc(clave, obj):
+    txt = _json.dumps(obj, ensure_ascii=False)
+    with cursor() as cur:
+        # UPSERT: un solo documento por clave (producto_id NULL).
+        cur.execute("UPDATE config SET valor=? WHERE producto_id IS NULL AND clave=?", txt, clave)
+        if cur.rowcount == 0:
+            cur.execute("INSERT INTO config (producto_id, clave, valor) VALUES (NULL, ?, ?)", clave, txt)
+
+
+def doc_existe(clave):
+    return valor("SELECT COUNT(*) FROM config WHERE producto_id IS NULL AND clave=?", clave) > 0
+
+
+def sync_productos(cat):
+    """Refleja la IDENTIDAD de cada producto del catálogo en la tabla `producto` (id numérico).
+    El id viejo del JSON ('prod_…') se guarda en legacy_id para poder cruzarlo; el id que manda
+    de acá en más es el numérico. Idempotente: por legacy_id, inserta o actualiza."""
+    for p in (cat.get("productos") or []):
+        leg = p.get("id")
+        if not leg:
+            continue
+        pid = valor("SELECT id FROM producto WHERE legacy_id=?", leg)
+        nombre = p.get("nombre") or "Molde"
+        activo = 0 if p.get("archivado") else 1
+        vguia = p.get("variante_guia")
+        if pid is None:
+            insertar("INSERT INTO producto (nombre, legacy_id, variante_guia, activo) VALUES (?,?,?,?)",
+                     nombre, leg, vguia, activo)
+        else:
+            ejecutar("UPDATE producto SET nombre=?, variante_guia=?, activo=? WHERE id=?",
+                     nombre, vguia, activo, pid)

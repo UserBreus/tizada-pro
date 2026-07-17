@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify, send_from_directory, send_file
 from werkzeug.exceptions import HTTPException
 
 import motor_pedido as MP
+import db
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 # Las carpetas de datos se pueden redirigir por variable de entorno. Sirve para
@@ -456,13 +457,11 @@ def _embeber_perfil_pdf(pdf_path, icc_bytes, nombre, n):
         return False
 
 
-def _cargar_catalogo():
+def _catalogo_desde_json():
+    """Sólo para la PRIMERA carga: lee el productos_catalogo.json histórico (con backup y
+    preservación de corruptos) para sembrar la base UNA vez. Después la base es la fuente."""
     ruta = os.path.join(DATOS, "productos_catalogo.json")
     cat = None
-    # Intentar el archivo y, si está corrupto/vacío, el backup. NUNCA resetear a
-    # los valores por defecto si había un archivo con datos (eso borraría la
-    # config del usuario, p. ej. variante_guia). Solo se cae al default si NO
-    # existe ningún archivo válido.
     for intento in (ruta, ruta + ".bak"):
         if os.path.exists(intento):
             try:
@@ -474,14 +473,32 @@ def _cargar_catalogo():
             except Exception:
                 cat = None
     if cat is None and os.path.exists(ruta) and os.path.getsize(ruta) > 0:
-        # El archivo existe y no está vacío pero no parseó y no hay backup útil:
-        # preservar el original corrupto para no perder datos y avisar fuerte.
         try:
             import shutil
             shutil.copy2(ruta, ruta + ".corrupto")
             print(f"\n  [!]  {ruta} no se pudo leer. Copia preservada en {ruta}.corrupto\n")
         except Exception:
             pass
+    return cat
+
+
+def _cargar_catalogo():
+    # FUENTE DE VERDAD: la base (MSSQL). Ya NO se lee del JSON en cada request.
+    cat = None
+    try:
+        cat = db.get_doc("catalogo")
+        if cat is None:
+            # Primera vez: sembrar la base con el JSON histórico (o el default) y no volver a
+            # depender del archivo. Esto NO es "migrar los datos de piezas": es traer la config
+            # base (reglas de planilla, presets de nesting, plantillas) para no arrancar en cero.
+            cat = _catalogo_desde_json()
+            if cat:
+                db.set_doc("catalogo", cat)
+                db.sync_productos(cat)
+    except Exception as e:
+        # Si la base no está, se cae al JSON para no dejar el sistema muerto (y se avisa).
+        print(f"[catalogo] sin base, uso JSON: {e}")
+        cat = _catalogo_desde_json()
     if not cat:
         cat = {"activo": "prod_default", "productos": [{"id": "prod_default", "nombre": "Molde 1", "creado": time.time()}]}
     
@@ -569,6 +586,19 @@ _lock_catalogo = threading.Lock()
 
 
 def _guardar_catalogo(cat):
+    """Guarda el catálogo en la BASE (fuente de verdad) + sincroniza la identidad de los
+    productos a la tabla `producto`. Además deja un espejo en JSON como respaldo (no se lee de
+    ahí): si algún día se apaga la base, el archivo sigue teniendo el último estado bueno."""
+    try:
+        db.set_doc("catalogo", cat)
+        db.sync_productos(cat)
+    except Exception as e:
+        print(f"[catalogo] no se pudo guardar en la base: {e}")
+        raise
+    _guardar_catalogo_json_espejo(cat)
+
+
+def _guardar_catalogo_json_espejo(cat):
     """Escritura ATÓMICA con backup: se escribe a un temporal, se respalda el
     archivo bueno anterior (.bak) y recién ahí se reemplaza. Así una escritura
     interrumpida o concurrente nunca deja el catálogo corrupto ni borra datos."""
@@ -599,12 +629,9 @@ def _guardar_catalogo(cat):
                 ultimo = e
                 time.sleep(0.2 * (intento + 1))
         if ultimo is not None:
-            raise PermissionError(
-                f"No se pudo guardar {os.path.basename(ruta)}: Windows denegó el reemplazo "
-                f"(otro programa lo tiene abierto, o OneDrive/antivirus lo bloquearon). "
-                f"Cerrá el archivo si lo tenés abierto, pausá OneDrive o mové el proyecto "
-                f"fuera de la carpeta Documentos, y reintentá. Detalle: {ultimo}"
-            )
+            # El espejo es SOLO respaldo (la base ya guardó): si Windows bloquea el archivo,
+            # se avisa pero NO se rompe el guardado.
+            print(f"[catalogo] no se pudo escribir el espejo JSON (la base ya guardó): {ultimo}")
 
 
 def _get_active_producto_id():
