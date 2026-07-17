@@ -14,7 +14,7 @@
 
 ## 2. POR QUÉ (el dolor real que esto resuelve)
 
-Hoy NO hay base de datos: **860 archivos `.json` sueltos** en `datos/`, escritos a mano. Sin claves
+Hoy NO hay base de datos: archivos `.json` sueltos en `datos/`, escritos a mano. **OJO con el número 860:** ~616 son `manifest.json` = **CACHÉ de render** (piezas_cache), descartables y NO se migran; otros ~30 son cachés de nido por talle (`1784…_M.json`). La **data real** son ~200 y de pocos tipos: `productos_catalogo.json` (1, el catálogo maestro), `registro_producto.json` (piezas por molde), `mapeo_arte.json` (71), `registro_personalizacion.json` (34), `validacion_arte.json` (71), `config_produccion.json`. **Solo 4 moldes reales cargados** → volumen chico. Sin claves
 primarias, sin UNIQUE, sin integridad referencial. Consecuencia concreta y ya diagnosticada: el
 registro se guarda como **dict POR NOMBRE** → dos piezas homónimas colisionan y **se pierde una en
 silencio**. De ahí salen los parches que rompen cosas (`_renumerar`, `dedupePorNombre`).
