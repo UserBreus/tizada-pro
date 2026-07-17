@@ -6540,9 +6540,8 @@ export default function App() {
                         acciones={(<>
                           {_tieneDiseno && estado?.arte && <span className={`badge ${estado.arte.aprobado ? 'success' : 'error'}`}>{estado.arte.aprobado ? 'Aprobado ✓' : 'Observado ✗'}</span>}
                           {cargadoActual && (
-                            <button style={{ padding: '8px 16px', fontSize: 12.5, fontWeight: 800, borderRadius: 9, cursor: 'pointer',
-                              display: 'flex', alignItems: 'center', gap: 7, border: 'none', color: '#001016',
-                              background: 'linear-gradient(90deg, var(--accent), #7c5cff)', boxShadow: '0 2px 10px rgba(0,243,255,0.35)' }}
+                            <button className="btn" style={{ padding: '8px 16px', fontSize: 12.5, fontWeight: 800, borderRadius: 9, gap: 7,
+                              background: 'var(--cmyk-magenta)', color: 'var(--bg-primary)', borderColor: 'var(--cmyk-magenta)' }}
                               title="Editar el diseño: mover, rotar, escalar y espejar lo que sea editable"
                               onClick={async () => { const d = await cargarEditablesPedido(_id, disenoActivo, verVariante); if ((d.objetos || []).length) setEditorEditOpen(true); else showError('Este diseño no tiene nada editable (capas «Editable …»).'); }}>
                               <Icon name="edit" style={{ width: 14, height: 14 }} /> Editar diseño
