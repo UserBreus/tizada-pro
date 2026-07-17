@@ -100,9 +100,5 @@ mantener esa firma y cambiar la implementación reduce el blast radius.
   permisos probados end-to-end incluido el navegador. **Admin inicial: usuario `admin`, password se
   mostró UNA vez al hacer bootstrap** (si se perdió: correr `py -c "import auth,db; print(auth.bootstrap())"`
   con la base vacía de usuarios, o resetear desde `db.py`).
-- **PRÓXIMO PASO: Fase 2-3 — migrar los DATOS.** Las tablas del DOMINIO (producto, pieza, diseño,
-  variable, telas, mapeo, editables, pedidos) están CREADAS pero VACÍAS: `servidor.py`/`motor_pedido.py`
-  siguen leyendo los JSON. Falta: (a) script que lea los 860 JSON y los cargue a MSSQL mapeando los
-  ids viejos (`pz_0001`→id nuevo) y guardando la equivalencia; (b) mover `_cargar`/`_guardar` a `db.py`
-  sin cambiar su firma; (c) verificar tizada pixel-idéntica antes/después. Recién ahí se puede matar
-  el JSON. Retomar: "seguimos con la migración a MSSQL, fase de datos".
+- **DECISIÓN 2026-07-17 (usuario): NO migrar. Crear los moldes de CERO por el sistema.** Sólo hay 4 moldes → rehacerlos a mano es más rápido y SIN RIESGO que escribir un migrador que mapee `pz_0001`→id nuevo sin romper referencias. Los datos entran limpios, por el camino correcto, con id numérico desde el inicio. **El bug de nombres de piezas se cae solo** (al escribir por id, muere el dict-por-nombre).
+- **PRÓXIMO PASO: Fase 2 — conectar CREAR/EDITAR/LEER del dominio a MSSQL.** Hoy `servidor.py` escribe a `productos_catalogo.json` (líneas ~460/575/3016) y lee de JSON; NADA del dominio toca la base (verificado: no hay `db.insertar` para producto/pieza). Falta: portar los endpoints de molde/pieza/variable/diseño/tela/mapeo/editable/pedido a `db.py` (crear→INSERT, editar→UPDATE, leer→SELECT), y que el motor lea de la base. Se hace por entidad, cada una funcionando de punta a punta antes de la siguiente (regla NADA A MEDIAS). Los JSON viejos quedan como respaldo hasta validar. Retomar: "seguimos con MSSQL: conectar el dominio".
