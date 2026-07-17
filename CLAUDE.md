@@ -1,5 +1,15 @@
 # TIZADA PRO — instrucciones del proyecto
 
+## 0. QUÉ ES ESTE PROYECTO (no inferirlo de cómo se ejecuta)
+
+**Proyecto GRANDE que va a ser una APP WEB usada por CLIENTES**, y se va a asociar a un sistema que
+usa **MSSQL** (por eso la base es MSSQL — decidido, ver `PLAN_MSSQL.md`). Que hoy arranque con
+`py servidor.py` en localhost es el **estado actual**, NO el objetivo ni el alcance.
+
+⚠️ **NO inferir el alcance del proyecto de cómo corre hoy. Si el alcance importa para una decisión,
+PREGUNTAR.** (Ya pasó: se asumió "app local de un solo usuario" mirando el localhost y se recomendó
+SQLite sobre MSSQL — mal.)
+
 ## 1. EL MAPA ES OBLIGATORIO
 
 **`MAPA_DEL_SISTEMA.md` (raíz del repo) es el cerebro del sistema.** Contiene: arquitectura, modelo de
