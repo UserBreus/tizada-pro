@@ -3268,6 +3268,13 @@ def _regenerar_piezas_index(pid, reg=None, guia=None):
     ruta = _ruta_datos("piezas.json", pid)
     with open(ruta, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "piezas": piezas}, f, ensure_ascii=False, indent=2)
+    # A LA BASE: las piezas del molde se guardan acá mismo — este punto corre al CARGAR el molde
+    # (subir_plantilla) y al re-etiquetar. Así cada pieza tiene su id en la tabla `pieza` y su
+    # pertenencia al molde desde que el molde entra, sin esperar a las variables.
+    try:
+        db.sync_piezas_molde(pid, piezas)
+    except Exception as e:
+        print(f"[piezas] no se pudieron sincronizar a la base: {e}")
     return id2clave, clave2id, idx_guia2id
 
 

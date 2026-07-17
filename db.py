@@ -211,6 +211,62 @@ def sync_productos(cat):
     return ids
 
 
+def sync_piezas_molde(legacy_pid, piezas):
+    """Guarda las PIEZAS de un molde en la tabla `pieza` — se llama AL CARGAR el molde (y al
+    re-etiquetar). Cada pieza queda con su id numérico propio y su pertenencia al molde
+    (producto_id). El nombre es DATO editable; la identidad es el id.
+
+    `piezas` = lista de {id: 'pz_0001' (id estable del molde), nombre, numero, clave}.
+    Idempotente: por (producto_id, legacy_id 'pz_xxxx') inserta o actualiza. Las piezas del
+    molde que ya no están se borran (con lo suyo derivado)."""
+    pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
+    if pid is None:
+        pid = insertar("INSERT INTO producto (nombre, legacy_id, activo) VALUES (?,?,1)",
+                       legacy_pid, legacy_pid)
+    with cursor() as cur:
+        vivos = []
+        for i, pz in enumerate(piezas, start=1):
+            leg = pz.get("id")                       # 'pz_0001' (estable dentro del molde)
+            if not leg:
+                continue
+            vivos.append(leg)
+            nombre = pz.get("nombre") or None
+            gen, num = _norm_generico(pz.get("nombre") or "")
+            if pz.get("numero") is not None:
+                num = pz.get("numero")
+            cur.execute("SELECT id FROM pieza WHERE producto_id=? AND legacy_id=?", pid, leg)
+            row = cur.fetchone()
+            if row:
+                cur.execute("UPDATE pieza SET id_en_molde=?, nombre=?, nombre_generico=?, numero=? "
+                            "WHERE id=?", i, nombre, gen or None, num, row[0])
+            else:
+                cur.execute("INSERT INTO pieza (producto_id, id_en_molde, nombre, nombre_generico, "
+                            "numero, legacy_id) VALUES (?,?,?,?,?,?)", pid, i, nombre, gen or None, num, leg)
+        # sacar las que ya no vienen en el molde (junto con lo derivado)
+        if vivos:
+            placeholders = ",".join("?" * len(vivos))
+            cur.execute(f"SELECT id FROM pieza WHERE producto_id=? AND legacy_id NOT IN ({placeholders})",
+                        pid, *vivos)
+            muertas = [r[0] for r in cur.fetchall()]
+        else:
+            cur.execute("SELECT id FROM pieza WHERE producto_id=?", pid)
+            muertas = [r[0] for r in cur.fetchall()]
+        for mid in muertas:
+            cur.execute("DELETE FROM variable_pieza WHERE pieza_id=?", mid)
+            cur.execute("DELETE FROM pieza_talle WHERE pieza_id=?", mid)
+            cur.execute("DELETE FROM pieza WHERE id=?", mid)
+    return pid
+
+
+def piezas_de_molde(legacy_pid):
+    """Las piezas de un molde tal como están en la base (para leer por id)."""
+    pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
+    if pid is None:
+        return []
+    return filas("SELECT id, id_en_molde, nombre, nombre_generico, numero, legacy_id "
+                 "FROM pieza WHERE producto_id=? ORDER BY id_en_molde", pid)
+
+
 def _norm_generico(nombre):
     """'Manga 2' -> ('Manga', 2). Para separar el nombre de uso del número."""
     import re
@@ -240,58 +296,39 @@ def proyectar_catalogo(cat):
 
 def _proyectar_un_producto(pid, p):
     with cursor() as cur:
-        # Limpieza de lo derivado de ESTE producto (en orden hijo→padre).
+        # Las PIEZAS ya NO se tocan acá: son propiedad del molde (sync_piezas_molde, al cargar el
+        # molde). Acá sólo se rehacen las cosas DERIVADAS de la config: talles, diseños, variables
+        # y su relación con piezas EXISTENTES (por id). No se borra ni se crea ninguna pieza.
         cur.execute("DELETE FROM variable_pieza WHERE variable_id IN (SELECT id FROM variable WHERE producto_id=?)", pid)
         cur.execute("DELETE FROM variable WHERE producto_id=?", pid)
-        cur.execute("DELETE FROM pieza_talle WHERE pieza_id IN (SELECT id FROM pieza WHERE producto_id=?)", pid)
-        cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)
         cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
         cur.execute("DELETE FROM diseno WHERE producto_id=?", pid)
 
         # TALLES (variantes de tamaño)
-        talle_id = {}
         for i, t in enumerate(p.get("talles") or p.get("variantes_talles") or []):
             nom = t if isinstance(t, str) else t.get("nombre")
-            if not nom:
-                continue
-            cur.execute("INSERT INTO talle (producto_id, nombre, orden) OUTPUT INSERTED.id VALUES (?,?,?)", pid, nom, i)
-            talle_id[nom] = int(cur.fetchone()[0])
+            if nom:
+                cur.execute("INSERT INTO talle (producto_id, nombre, orden) VALUES (?,?,?)", pid, nom, i)
 
-        # PIEZAS: se juntan de todos los `valores` de las variables. Cada valor trae su
-        # pieza_id legacy (estable) o su pieza_idx. Clave de dedup dentro del molde: ese legacy.
-        piezas_leg = {}   # legacy pieza id/idx -> id numérico nuevo
-        n_molde = 0
-        def _asegurar_pieza(legacy, nombre):
-            nonlocal n_molde
-            if legacy in piezas_leg:
-                return piezas_leg[legacy]
-            n_molde += 1
-            gen, num = _norm_generico(nombre)
-            cur.execute("INSERT INTO pieza (producto_id, id_en_molde, nombre, nombre_generico, numero, legacy_id) "
-                        "OUTPUT INSERTED.id VALUES (?,?,?,?,?,?)", pid, n_molde, nombre or None, gen or None, num, str(legacy))
-            nid = int(cur.fetchone()[0])
-            piezas_leg[legacy] = nid
-            return nid
+        # piezas existentes del molde, indexadas por su legacy_id ('pz_0001') para vincular.
+        cur.execute("SELECT id, legacy_id FROM pieza WHERE producto_id=?", pid)
+        pieza_por_leg = {r[1]: r[0] for r in cur.fetchall()}
 
-        # VARIABLES + su relación con piezas (POR ID)
+        # VARIABLES + su relación con piezas (POR ID, referenciando las existentes)
+        import json as _j
         for v in (p.get("variantes") or []):
             clave = v.get("clave")
             if not clave:
                 continue
-            import json as _j
             cur.execute("INSERT INTO variable (producto_id, clave, label, acomodo, orden) OUTPUT INSERTED.id VALUES (?,?,?,?,?)",
                         pid, clave, v.get("label") or clave,
                         _j.dumps(v.get("acomodo")) if v.get("acomodo") is not None else None,
                         _j.dumps(v.get("orden")) if v.get("orden") is not None else None)
             vid = int(cur.fetchone()[0])
             for val in (v.get("valores") or []):
-                legacy = val.get("pieza_id")
-                if legacy is None and val.get("pieza_idx") is not None:
-                    legacy = "idx_" + str(val["pieza_idx"])
-                if legacy is None:
-                    legacy = "lbl_" + str(val.get("label") or "")
-                nid = _asegurar_pieza(legacy, val.get("label"))
-                # variable_pieza: por ID. Dos piezas del mismo nombre entran las dos.
+                nid = pieza_por_leg.get(val.get("pieza_id"))   # la pieza YA existe (del molde)
+                if nid is None:
+                    continue   # la variable referencia una pieza que no está en el molde: se ignora
                 cur.execute("IF NOT EXISTS (SELECT 1 FROM variable_pieza WHERE variable_id=? AND pieza_id=?) "
                             "INSERT INTO variable_pieza (variable_id, pieza_id) VALUES (?,?)", vid, nid, vid, nid)
 
