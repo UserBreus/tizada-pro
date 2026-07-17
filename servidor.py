@@ -2123,6 +2123,16 @@ def _oa_guardar(pid, sub, data):
         json.dump(data, f, ensure_ascii=False)
 
 
+def _objetos_agregados_motor(pid, sub):
+    """Para el motor: {dir, objetos:[...]} con los objetos agregados de este producto/diseño
+    (id, archivo, pieza, w_cm, h_cm, transforms). None si no hay ninguno."""
+    data = _oa_cargar(pid, sub)
+    objs = data.get("objetos") or []
+    if not objs:
+        return None
+    return {"dir": OA.carpeta(DATOS, pid, sub), "objetos": objs}
+
+
 @app.post("/api/productos/objeto_agregar")
 def objeto_agregar():
     f = request.files.get("archivo")
@@ -2866,6 +2876,7 @@ def generar_multi():
                 "etiqueta": (prod or {}).get("etiqueta"),
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
                 "editables_tamano": _editables_tamano(prod),
+                "objetos_agregados": _objetos_agregados_motor(pid, sub),   # objetos que sumó el usuario (PNG/SVG/PDF/AI)
                 "_cfg_n": _cfg_n, "_telas": _telas, "_nombre": nombre,
                 # Clave del grupo: el id del grupo configurado, o "solo" el molde si no
                 # está en ningún grupo. Las piezas de distintos diseños del MISMO grupo

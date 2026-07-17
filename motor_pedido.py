@@ -1828,13 +1828,14 @@ def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
         return None
 
 
-def _matriz_editable(tf, obj, cont, W, H, B):
+def _matriz_editable(tf, obj, cont, W, H, B, pos_override=None):
     """Matriz `cm` del transform del usuario (mover/rotar/escalar) de un objeto editable,
     alrededor de su centro sobre la pieza. Devuelve "" si es identidad. `dx,dy` en fracciones
     de la pieza (dy hacia abajo, y-down del editor); `rot` en grados (horario del editor);
     `scale` factor UNIFORME (legacy); `sx`/`sy` (opcionales) permiten escala NO uniforme
     (ancho y alto por separado, con el enlace de proporción desactivado en el editor): si
-    vienen, mandan sobre `scale`. La pieza está en coords de página y-arriba."""
+    vienen, mandan sobre `scale`. La pieza está en coords de página y-arriba.
+    `pos_override`: posición base ya calculada (objetos AGREGADOS, que no vienen del arte)."""
     import math
     dx = float(tf.get("dx", 0) or 0); dy = float(tf.get("dy", 0) or 0)
     rot = float(tf.get("rot", 0) or 0); sc = float(tf.get("scale", 1) or 1)
@@ -1842,7 +1843,7 @@ def _matriz_editable(tf, obj, cont, W, H, B):
     sy = float(tf.get("sy") if tf.get("sy") is not None else sc)
     if abs(dx) < 1e-6 and abs(dy) < 1e-6 and abs(rot) < 1e-6 and abs(sx - 1) < 1e-6 and abs(sy - 1) < 1e-6:
         return ""
-    pos = _pos_en_pieza(obj.get("mesa_rect"), obj.get("bbox_mu"), cont.get("bbox_mu"))
+    pos = pos_override or _pos_en_pieza(obj.get("mesa_rect"), obj.get("bbox_mu"), cont.get("bbox_mu"))
     if not pos:
         return ""
     Cx = B + (pos["rx"] + pos["rw"] / 2) * W
@@ -1856,6 +1857,59 @@ def _matriz_editable(tf, obj, cont, W, H, B):
     e = Cx + tdx - (a * Cx + c * Cy)
     f = Cy + tdy - (b * Cx + d * Cy)
     return f"{a:.6f} {b:.6f} {c:.6f} {d:.6f} {e:.3f} {f:.3f} cm\n"
+
+
+def _bbox_de_xo(xo):
+    """BBox de un Form XObject (pikepdf) ya con su Matrix aplicada. → (x0,x1,y0,y1)."""
+    bx = [float(v) for v in xo.BBox]
+    M = [float(v) for v in xo.Matrix] if "/Matrix" in xo else [1, 0, 0, 1, 0, 0]
+    a, b, c, d, e, f = M
+    xs, ys = [], []
+    for (px, py) in ((bx[0], bx[1]), (bx[2], bx[1]), (bx[2], bx[3]), (bx[0], bx[3])):
+        xs.append(a * px + c * py + e); ys.append(b * px + d * py + f)
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+# Posición base sintética de un objeto AGREGADO sobre la pieza: centrado, 30% (idéntico al
+# default del editor cuando el objeto no tiene mesa_rect/bbox_mu) → garantiza editor = tizada.
+_POS_AGREGADO = {"rx": 0.35, "ry": 0.35, "rw": 0.3, "rh": 0.3, "awf": 1.0}
+
+
+def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page):
+    """Content-stream que dibuja los objetos AGREGADOS asignados a `pieza`, con su transform.
+    Cada objeto es un PDF suelto (datos/.../objetos_agregados/<oid>.pdf). Base = 30% centrado
+    (como el editor); encima, el transform del usuario (mover/rotar/escalar/espejar)."""
+    if not oa or not oa.get("objetos"):
+        return ""
+    import pikepdf as _pk
+    cache = oa.setdefault("_cache", {})
+    draw = ""
+    for o in oa["objetos"]:
+        if (o.get("pieza") or "") != pieza:
+            continue
+        tf = ((o.get("transforms") or {}).get(str(variante)) or (o.get("transforms") or {}).get("*") or {}).get(str(talle)) or {}
+        try:
+            ruta = os.path.join(oa["dir"], o["archivo"])
+            src = cache.get(ruta)
+            if src is None:
+                src = _pk.open(ruta); cache[ruta] = src
+            xo = out.copy_foreign(src.pages[0].as_form_xobject())
+            if "/OC" in xo:
+                del xo["/OC"]
+            nom = page.add_resource(xo, Name.XObject, prefix="OA")
+            # BASE: escala la BBox del objeto a un recuadro de 30%W × 30%H centrado en la pieza.
+            tx0, tx1, ty0, ty1 = _bbox_de_xo(xo)
+            sxb = (0.3 * W) / (tx1 - tx0) if tx1 != tx0 else 1.0
+            syb = (0.3 * H) / (ty1 - ty0) if ty1 != ty0 else 1.0
+            cxo, cyo = (tx0 + tx1) / 2.0, (ty0 + ty1) / 2.0
+            ex = B + 0.5 * W - sxb * cxo
+            ey = B + 0.5 * H - syb * cyo
+            base = f"{sxb:.6f} 0 0 {syb:.6f} {ex:.3f} {ey:.3f} cm\n"
+            utf = _matriz_editable(tf, None, cont, W, H, B, pos_override=_POS_AGREGADO)   # "" si identidad
+            draw += f"q\n{clip}\nW n\n{utf}{base}\n{nom} Do\nQ\n"
+        except Exception:
+            pass
+    return draw
 
 
 def _texto_mesa(doc, mesa):
@@ -2565,7 +2619,7 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
 def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, salida,
                    config_nesting=None, progreso=None, mapeo_arte=None, rotaciones=None,
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
-                   etiqueta=None, editables_cfg=None, editables_tamano=None):
+                   etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -3012,6 +3066,11 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     arte_draw += f"q\n{clip}\nW n\n{_utf}{_tds}\n{_noms} Do\nQ\n"
                 except Exception:
                     pass
+            # ── OBJETOS AGREGADOS por el usuario (PNG/SVG/PDF/AI): NO vienen del arte, son PDFs
+            #    sueltos. Se componen sobre ESTA pieza con su transform, igual que un editable.
+            #    Base = centrado 30% de la pieza (idéntico al default del editor) → editor = tizada.
+            arte_draw += _dibujar_objetos_agregados(
+                objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page)
         else:                                   # ARTE CLÁSICO: diseño sobre la misma mesa del molde
             pag = pagina_arte(mesa, talle)
             xo = out.copy_foreign(pag.as_form_xobject())
@@ -3374,7 +3433,8 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                                 asignacion_tela=md.get("asignacion_tela"), telas_cfg=telas_cfg,
                                 solo_piezas=True, borde_corte=md.get("borde_corte"),
                                 etiqueta=md.get("etiqueta"), editables_cfg=md.get("editables_cfg"),
-                                editables_tamano=md.get("editables_tamano"))
+                                editables_tamano=md.get("editables_tamano"),
+                                objetos_agregados=md.get("objetos_agregados"))
             for tela, lst in pt.items():
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)
