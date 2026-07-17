@@ -802,6 +802,49 @@ const IcoLab = ({ d }) => (
     strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)', flexShrink: 0 }}><path d={d} /></svg>
 );
 
+// ── LOGIN: la puerta del sistema. Sin sesión no se ve nada más. ──────────────
+function LoginScreen({ onLogin }) {
+  const [usuario, setUsuario] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const entrar = async (e) => {
+    e?.preventDefault();
+    setError(''); setCargando(true);
+    try {
+      const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario: usuario.trim(), password }) });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'No se pudo entrar'); setCargando(false); return; }
+      onLogin(d.usuario);
+    } catch (err) { setError('No hay conexión con el servidor.'); setCargando(false); }
+  };
+  const inp = { width: '100%', padding: '12px 14px', fontSize: 14, borderRadius: 10, marginBottom: 12,
+    background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)', outline: 'none' };
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg, #0a0d0f)', padding: 20 }}>
+      <form onSubmit={entrar} style={{ width: '100%', maxWidth: 380, padding: 32, borderRadius: 16,
+        background: 'var(--bg-card, #14181c)', border: '1px solid var(--border-light)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <img src="/logo.svg" alt="" style={{ width: 42, height: 42 }} />
+          <div><h1 style={{ margin: 0, fontSize: 22 }}><span style={{ color: 'var(--accent)' }}>USER</span> PRO</h1></div>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 22px' }}>Iniciá sesión para continuar.</p>
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Usuario</label>
+        <input style={inp} value={usuario} onChange={e => setUsuario(e.target.value)} autoFocus autoComplete="username" />
+        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Contraseña</label>
+        <input style={inp} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+        {error && <div style={{ fontSize: 12.5, color: 'var(--danger, #ff4d4f)', fontWeight: 600, margin: '2px 0 14px' }}>{error}</div>}
+        <button type="submit" className="btn primary" disabled={cargando}
+          style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 700, marginTop: 6, opacity: cargando ? 0.6 : 1 }}>
+          {cargando ? 'Entrando…' : 'Entrar'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // ── USUARIOS / ROLES / PERMISOS ──────────────────────────────────────────────
 // Los permisos se resuelven en el SERVIDOR. Acá se pinta la UI: ocultar un botón NO es
 // proteger nada (la API igual rechaza), es sólo no mostrarle a alguien lo que no puede usar.
@@ -2179,9 +2222,14 @@ export default function App() {
   const [buscarFuente, setBuscarFuente] = useState('');     // filtro del catálogo (nombre interno o archivo)
   // SESIÓN: quién soy y qué puedo. Sirve para pintar la UI; quien PROTEGE es el backend.
   const [yo, setYo] = useState(null);
-  useEffect(() => {
-    fetch('/api/auth/yo').then(r => r.json()).then(d => setYo(d.usuario || null)).catch(() => setYo(null));
-  }, []);
+  const [authListo, setAuthListo] = useState(false);   // ya se consultó /yo (evita parpadeo del login)
+  const [authOn, setAuthOn] = useState(true);          // ¿la API de usuarios está viva? (si no, no se exige login)
+  const recargarYo = () => fetch('/api/auth/yo').then(r => r.json())
+    .then(d => { setYo(d.usuario || null); setAuthOn(true); })
+    .catch(() => { setYo(null); setAuthOn(false); })
+    .finally(() => setAuthListo(true));
+  useEffect(() => { recargarYo(); }, []);
+  const cerrarSesion = () => fetch('/api/auth/logout', { method: 'POST' }).then(() => setYo(null));
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -5549,6 +5597,12 @@ export default function App() {
     setFilas(examples);
   };
 
+  // PUERTA DE LOGIN: si el sistema de usuarios está activo y no hay sesión, se muestra el login y
+  // NADA más. Mientras se consulta /yo no se pinta nada (evita el parpadeo login→app). Si la API
+  // de usuarios no está viva (base caída), NO se traba el sistema: se deja pasar.
+  if (!authListo) return <div style={{ minHeight: '100vh', background: 'var(--bg, #0a0d0f)' }} />;
+  if (authOn && !yo) return <LoginScreen onLogin={(u) => { setYo(u); }} />;
+
   return (
     <div className="app-container">
       {/* Sidebar Panel */}
@@ -5588,6 +5642,22 @@ export default function App() {
           </nav>
 
           <div className="sidebar-footer">
+            {/* usuario logueado + cerrar sesión */}
+            {yo && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12, padding: '8px 10px',
+                borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+                <div style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', background: 'rgba(0,243,255,0.12)', color: 'var(--accent)', fontWeight: 800, fontSize: 13 }}>
+                  {(yo.nombre || yo.usuario).slice(0, 1).toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{yo.nombre}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{(yo.roles || []).join(', ') || yo.usuario}</div>
+                </div>
+                <button type="button" onClick={cerrarSesion} title="Cerrar sesión"
+                  style={{ flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 15, padding: 4 }}>⏻</button>
+              </div>
+            )}
             <button
               className="btn ghost"
               style={{
