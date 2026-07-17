@@ -591,7 +591,7 @@ def _guardar_catalogo(cat):
     ahí): si algún día se apaga la base, el archivo sigue teniendo el último estado bueno."""
     try:
         db.set_doc("catalogo", cat)
-        db.sync_productos(cat)
+        db.proyectar_catalogo(cat)   # identidad + piezas/variables/talles/diseños NORMALIZADOS (por id)
     except Exception as e:
         print(f"[catalogo] no se pudo guardar en la base: {e}")
         raise

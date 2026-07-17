@@ -190,7 +190,9 @@ def doc_existe(clave):
 def sync_productos(cat):
     """Refleja la IDENTIDAD de cada producto del catálogo en la tabla `producto` (id numérico).
     El id viejo del JSON ('prod_…') se guarda en legacy_id para poder cruzarlo; el id que manda
-    de acá en más es el numérico. Idempotente: por legacy_id, inserta o actualiza."""
+    de acá en más es el numérico. Idempotente: por legacy_id, inserta o actualiza.
+    Devuelve {legacy_id: id_numérico}."""
+    ids = {}
     for p in (cat.get("productos") or []):
         leg = p.get("id")
         if not leg:
@@ -200,8 +202,106 @@ def sync_productos(cat):
         activo = 0 if p.get("archivado") else 1
         vguia = p.get("variante_guia")
         if pid is None:
-            insertar("INSERT INTO producto (nombre, legacy_id, variante_guia, activo) VALUES (?,?,?,?)",
-                     nombre, leg, vguia, activo)
+            pid = insertar("INSERT INTO producto (nombre, legacy_id, variante_guia, activo) VALUES (?,?,?,?)",
+                           nombre, leg, vguia, activo)
         else:
             ejecutar("UPDATE producto SET nombre=?, variante_guia=?, activo=? WHERE id=?",
                      nombre, vguia, activo, pid)
+        ids[leg] = pid
+    return ids
+
+
+def _norm_generico(nombre):
+    """'Manga 2' -> ('Manga', 2). Para separar el nombre de uso del número."""
+    import re
+    m = re.match(r"^(.*?)[\s]*(\d+)\s*$", (nombre or "").strip())
+    if m and m.group(1).strip():
+        return m.group(1).strip(), int(m.group(2))
+    return (nombre or "").strip(), None
+
+
+def proyectar_catalogo(cat):
+    """Proyecta el catálogo a las TABLAS NORMALIZADAS (id numérico) — la verdad real de la base.
+
+    El documento JSON sigue siendo la estructura de trabajo que lee la app; ESTA función deja
+    además cada entidad en su tabla con id propio: pieza, variable, variable_pieza, talle, diseno.
+    Acá muere la identidad-por-nombre: cada pieza es una FILA con id, dos 'Manga' conviven, y la
+    membresía de la variable es por pieza_id (no por nombre → adiós al 'un solo slot por nombre').
+
+    Derivado: se reconstruye por producto (borrar hijos + reinsertar). Idempotente y sin residuos.
+    """
+    prod_ids = sync_productos(cat)
+    for p in (cat.get("productos") or []):
+        pid = prod_ids.get(p.get("id"))
+        if pid is None:
+            continue
+        _proyectar_un_producto(pid, p)
+
+
+def _proyectar_un_producto(pid, p):
+    with cursor() as cur:
+        # Limpieza de lo derivado de ESTE producto (en orden hijo→padre).
+        cur.execute("DELETE FROM variable_pieza WHERE variable_id IN (SELECT id FROM variable WHERE producto_id=?)", pid)
+        cur.execute("DELETE FROM variable WHERE producto_id=?", pid)
+        cur.execute("DELETE FROM pieza_talle WHERE pieza_id IN (SELECT id FROM pieza WHERE producto_id=?)", pid)
+        cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)
+        cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
+        cur.execute("DELETE FROM diseno WHERE producto_id=?", pid)
+
+        # TALLES (variantes de tamaño)
+        talle_id = {}
+        for i, t in enumerate(p.get("talles") or p.get("variantes_talles") or []):
+            nom = t if isinstance(t, str) else t.get("nombre")
+            if not nom:
+                continue
+            cur.execute("INSERT INTO talle (producto_id, nombre, orden) OUTPUT INSERTED.id VALUES (?,?,?)", pid, nom, i)
+            talle_id[nom] = int(cur.fetchone()[0])
+
+        # PIEZAS: se juntan de todos los `valores` de las variables. Cada valor trae su
+        # pieza_id legacy (estable) o su pieza_idx. Clave de dedup dentro del molde: ese legacy.
+        piezas_leg = {}   # legacy pieza id/idx -> id numérico nuevo
+        n_molde = 0
+        def _asegurar_pieza(legacy, nombre):
+            nonlocal n_molde
+            if legacy in piezas_leg:
+                return piezas_leg[legacy]
+            n_molde += 1
+            gen, num = _norm_generico(nombre)
+            cur.execute("INSERT INTO pieza (producto_id, id_en_molde, nombre, nombre_generico, numero, legacy_id) "
+                        "OUTPUT INSERTED.id VALUES (?,?,?,?,?,?)", pid, n_molde, nombre or None, gen or None, num, str(legacy))
+            nid = int(cur.fetchone()[0])
+            piezas_leg[legacy] = nid
+            return nid
+
+        # VARIABLES + su relación con piezas (POR ID)
+        for v in (p.get("variantes") or []):
+            clave = v.get("clave")
+            if not clave:
+                continue
+            import json as _j
+            cur.execute("INSERT INTO variable (producto_id, clave, label, acomodo, orden) OUTPUT INSERTED.id VALUES (?,?,?,?,?)",
+                        pid, clave, v.get("label") or clave,
+                        _j.dumps(v.get("acomodo")) if v.get("acomodo") is not None else None,
+                        _j.dumps(v.get("orden")) if v.get("orden") is not None else None)
+            vid = int(cur.fetchone()[0])
+            for val in (v.get("valores") or []):
+                legacy = val.get("pieza_id")
+                if legacy is None and val.get("pieza_idx") is not None:
+                    legacy = "idx_" + str(val["pieza_idx"])
+                if legacy is None:
+                    legacy = "lbl_" + str(val.get("label") or "")
+                nid = _asegurar_pieza(legacy, val.get("label"))
+                # variable_pieza: por ID. Dos piezas del mismo nombre entran las dos.
+                cur.execute("IF NOT EXISTS (SELECT 1 FROM variable_pieza WHERE variable_id=? AND pieza_id=?) "
+                            "INSERT INTO variable_pieza (variable_id, pieza_id) VALUES (?,?)", vid, nid, vid, nid)
+
+        # DISEÑOS
+        disenos = p.get("disenos") or []
+        if isinstance(disenos, list):
+            for d in disenos:
+                nom = d if isinstance(d, str) else (d.get("nombre") or d.get("id"))
+                if not nom:
+                    continue
+                slug = None if isinstance(d, str) else d.get("slug")
+                cur.execute("INSERT INTO diseno (producto_id, nombre, slug, es_principal) VALUES (?,?,?,?)",
+                            pid, nom, slug, 1 if (isinstance(d, dict) and d.get("principal")) else 0)
