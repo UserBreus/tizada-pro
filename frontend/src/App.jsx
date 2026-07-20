@@ -6842,7 +6842,14 @@ export default function App() {
                 const _SX = (tf) => (tf && tf.sx != null ? tf.sx : ((tf && tf.scale) ?? 1));
                 const _SY = (tf) => (tf && tf.sy != null ? tf.sy : ((tf && tf.scale) ?? 1));
                 // RANGO en edición (todos sus talles) — independiente del alcance elegido.
-                const _rangoTalles = (_selT.length ? _selT : (_grpAct ? _grpAct.talles : [T])).filter(Boolean);
+                // RANGO al que se aplica el ajuste. El talle EN VISTA (T) siempre forma parte: es
+                // sobre el que el usuario está moviendo el objeto. Si quedaba afuera del cálculo
+                // (p. ej. porque el arte le da una mesa propia y cae en otro grupo), el cambio se
+                // guardaba en todo el rango MENOS en el talle que se estaba mirando.
+                const _rangoTalles = (() => {
+                  const base = (_selT.length ? _selT : (_grpAct ? _grpAct.talles : [T])).filter(Boolean);
+                  return (T && !base.includes(T)) ? [...base, T] : base;
+                })();
                 // Alcance del ajuste: por DEFECTO todo el rango (lo natural: el diseño es el mismo en
                 // todos sus talles). Con `edSoloTalle` el cambio va SOLO al talle en vista (excepción
                 // puntual): el motor ya resuelve por talle, así que el resto del rango queda como estaba.
