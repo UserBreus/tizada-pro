@@ -2244,6 +2244,86 @@ def objeto_agregado_transform(oid):
     return jsonify({"ok": True})
 
 
+@app.post("/api/productos/objeto_agregado/<oid>/colocar")
+def objeto_agregado_colocar(oid):
+    """COLOCA el objeto en el diseño: lo INYECTA en el arte como capa `Editable <nombre>` en la
+    mesa de esa pieza — en TODOS los rangos que use (igual que el arte trae el escudo repetido en
+    la mesa de cada rango). Desde ahí es un editable del arte más: el editor, el visor y el motor
+    lo tratan igual, sin código especial.
+
+    Body: {pid, diseno, pieza, fx, fy} — `fx/fy` = punto clickeado en fracciones de la PIEZA
+    (0..1, y hacia abajo), que se traduce a la posición equivalente dentro de cada mesa.
+    """
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    diseno = cuerpo.get("diseno") or "principal"
+    sub = _diseno_sub(diseno)
+    pieza = str(cuerpo.get("pieza") or "")
+    fx = float(cuerpo.get("fx", 0.5)); fy = float(cuerpo.get("fy", 0.5))
+    arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    reg = _cargar("registro_producto.json", pid) or {}
+    if not os.path.exists(arte) or pieza not in reg:
+        return jsonify({"error": "falta el arte o la pieza"}), 409
+    data = _oa_cargar(pid, sub)
+    obj = next((o for o in data["objetos"] if o["id"] == oid), None)
+    if not obj:
+        return jsonify({"error": "no existe"}), 404
+
+    # Mesas donde vive esa pieza: la del mapeo base + las de cada rango (arte por rango).
+    mp = (_cargar("mapeo_arte.json", pid, sub=sub) or {}).get("mapeo", {})
+    mesas = set()
+    if mp.get(pieza):
+        mesas.add(int(mp[pieza]))
+    try:
+        talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
+        for _m in ((MP.mapeo_variantes_arte(arte, reg, talles) or {}).get(pieza) or {}).values():
+            mesas.add(int(_m))
+    except Exception:
+        pass
+    if not mesas:
+        return jsonify({"error": "esa pieza no tiene mesa de arte asignada"}), 409
+
+    ruta_obj = os.path.join(OA.carpeta(DATOS, pid, sub), obj["archivo"])
+    with open(ruta_obj, "rb") as fh:
+        pdf_obj = fh.read()
+    ow, oh = float(obj.get("w_cm") or 0), float(obj.get("h_cm") or 0)
+    capas = []
+    for mesa in sorted(mesas):
+        try:
+            _mr = MP.mesa_rect_arte(arte, mesa)
+            if not _mr:
+                continue
+            ax0, ay0, aw, ah = _mr
+            # La pieza para el talle de referencia de ESA mesa: su alto en cm fija la escala
+            # (el diseño se coloca escalando al ALTO de la pieza).
+            _inf = next(iter((reg.get(pieza) or {}).values()), {}) or {}
+            ph_cm = float(_inf.get("h_cm") or 0)
+            if ph_cm <= 0:
+                continue
+            # tamaño del objeto DENTRO de la mesa, conservando su medida real
+            bw = (ow / ((aw / ah) * ph_cm)) * aw if ow > 0 else aw * 0.3
+            bh = (oh / ph_cm) * ah if oh > 0 else ah * 0.3
+            # el click viene en fracción de la PIEZA; el diseño ocupa todo el alto y va centrado
+            cx = ax0 + aw * 0.5 + (fx - 0.5) * aw
+            cy_top = ay0 + ah * fy
+            cy = (ay0 + ah) - cy_top + ay0          # y de página (hacia ARRIBA)
+            capa = OA.inyectar_editable(arte, mesa, pdf_obj, obj.get("nombre") or oid,
+                                        (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2))
+            capas.append({"mesa": mesa, "capa": capa})
+        except Exception as e:
+            print(f"[objeto] no se pudo inyectar en la mesa {mesa}: {e}")
+    if not capas:
+        return jsonify({"error": "no se pudo inyectar en el arte"}), 500
+    # Ya vive DENTRO del arte: se saca del sistema paralelo (y su archivo suelto).
+    data["objetos"] = [o for o in data["objetos"] if o["id"] != oid]
+    _oa_guardar(pid, sub, data)
+    try:
+        os.remove(ruta_obj)
+    except OSError:
+        pass
+    return jsonify({"ok": True, "capas": capas, "nombre": obj.get("nombre")})
+
+
 @app.post("/api/productos/objeto_agregado/<oid>/pieza")
 def objeto_agregado_pieza(oid):
     """Asigna el objeto a una pieza, o lo DESASIGNA (`pieza` vacía): sigue en la barra, listo

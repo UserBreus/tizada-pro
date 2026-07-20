@@ -5158,34 +5158,26 @@ export default function App() {
   const asignarObjetoAPieza = async (pieza, tf0, talles) => {
     if (!objPendiente || !pieza) return;
     const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
-    const nuevo = { ...objPendiente, pieza };
-    delete nuevo._nuevo;
-    const tf = { dx: 0, dy: 0, rot: 0, scale: 1, sx: 1, sy: 1, ...(tf0 || {}) };
-    const ts = (talles || []).filter(Boolean);
-    // Si el objeto YA estaba en la lista (se estaba recolocando), se ACTUALIZA; si no, se agrega.
-    setEditableData(prev => {
-      const objs = (prev || {}).objetos || [];
-      const existe = objs.some(o => o._oid === nuevo._oid);
-      return { ...(prev || {}), objetos: existe ? objs.map(o => (o._oid === nuevo._oid ? nuevo : o)) : [...objs, nuevo] };
-    });
-    setEditorTfs(prev => ({ ...prev, [nuevo.nombre]: Object.fromEntries((ts.length ? ts : ['*']).map(t => [t, tf])) }));
-    setEditableSel([nuevo.nombre]);
+    const nombre = objPendiente.nombre, _oid = objPendiente._oid;
     setObjPendiente(null);
-    // Persistir YA la pieza + la posición del click (si cierra sin guardar, no se pierde).
+    // COLOCAR = INYECTAR el objeto en el arte como una capa `Editable <nombre>`, en la mesa de esa
+    // pieza (en cada rango que use). Desde ahí ES un editable del diseño: no hay sistema paralelo
+    // ni datos que sincronizar — el editor, el visor del Arte y el motor lo tratan igual.
+    const tf = { dx: 0, dy: 0, ...(tf0 || {}) };
     try {
-      await fetch(`/api/productos/objeto_agregado/${nuevo._oid}/transform`, {
+      const r = await fetch(`/api/productos/objeto_agregado/${_oid}/colocar`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: ts, transform: tf, variante: verVariante || '*', pieza }),
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, pieza,
+                               fx: 0.5 + (tf.dx || 0), fy: 0.5 + (tf.dy || 0) }),
       });
-      // RELEER del backend: la respuesta de la subida NO trae la forma completa (mesa_rect/
-      // bbox_mu/pos los sintetiza /api/productos/editables). Sin esto el objeto recién colocado
-      // no se dibujaba hasta salir y volver a entrar al editor.
-      // El re-fetch NO pisa lo editado en memoria: `cargarEditablesPedido` conserva `editorTfs`
-      // cuando el contexto (molde|diseño|variable) es el mismo.
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo colocar el objeto'); return; }
+      // El arte cambió → se relee todo desde el diseño (única fuente de verdad).
+      editorCtx.current = null;                 // fuerza recargar la base
       await cargarEditablesPedido(_mid, editableDiseno, verVariante);
-      setEditableSel([nuevo.nombre]);
-    } catch { }
-    showMsg(`"${nuevo.nombre}" colocado en ${pieza}. Arrastralo o escalalo como cualquier editable.`);
+      setEditableSel([nombre]);
+      showMsg(`"${nombre}" agregado al diseño en ${pieza}. Ya es un objeto editable más.`);
+    } catch (e) { showError('No se pudo colocar: ' + e.message); }
   };
   // QUITAR de la pieza: el objeto NO se borra — queda en la barra, sin pieza, listo para colocarlo
   // en otra. (Un objeto vive en UNA sola pieza; para tenerlo en dos, se duplica.)
