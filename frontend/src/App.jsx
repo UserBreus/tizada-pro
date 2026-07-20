@@ -724,20 +724,28 @@ const MUESTRA_DEF = 'USER PRO 10';
 //  · marco "pieza" → el objeto lo AGREGÓ el usuario: se mide contra la PIEZA (cm reales). No
 //                    depende de la mesa del arte, que cambia de tamaño según el rango — atarlo a
 //                    ella provocaba que se viera corrido al cambiar de rango.
-const marcoDeObjeto = (o, p) => {
-  if (o.marco === 'pieza' || o._agregado) {
+// `aspMesa` = aspecto (ancho/alto) de la mesa del arte que ESA vista está dibujando para esa
+// pieza y ese talle. Es un parámetro y no un dato del objeto porque las mesas cambian de tamaño
+// según el rango: fijar una sola era lo que hacía que el objeto se viera corrido al cambiar de
+// rango. El motor hace la misma cuenta en `pos_agregado_en_diseno`.
+const marcoDeObjeto = (o, p, aspMesa) => {
+  const mr = o.mesa_rect, bb = o.bbox_mu;
+  // El diseño se coloca escalando al ALTO de la pieza y centrando el ancho.
+  const aspecto = aspMesa || ((mr && mr[3]) ? mr[2] / mr[3] : (p.pw / p.ph));
+  const h = p.ph, w = aspecto * h;
+  const marco = { x: p.px + (p.pw - w) / 2, y: p.py, w, h };
+  if (o._agregado) {
+    // AGREGADO: vive DENTRO del diseño (como un editable del arte) → escala con él. Su tamaño
+    // sale de sus cm reales contra el tamaño del DISEÑO sobre la pieza.
+    const anchoDisenoCm = aspecto * (p.h_cm || 0);
     return {
-      x: p.px, y: p.py, w: p.pw, h: p.ph,
-      fcx: 0.5, fcy: 0.5,
-      fw: (o.w_cm > 0 && p.w_cm > 0) ? o.w_cm / p.w_cm : 0.3,
+      ...marco, fcx: 0.5, fcy: 0.5,
+      fw: (o.w_cm > 0 && anchoDisenoCm > 0) ? o.w_cm / anchoDisenoCm : 0.3,
       fh: (o.h_cm > 0 && p.h_cm > 0) ? o.h_cm / p.h_cm : 0.3,
     };
   }
-  const mr = o.mesa_rect, bb = o.bbox_mu;
-  const aspecto = (mr && mr[3]) ? mr[2] / mr[3] : (p.pw / p.ph);
-  const h = p.ph, w = aspecto * h;
   return {
-    x: p.px + (p.pw - w) / 2, y: p.py, w, h,
+    ...marco,
     fcx: (mr && bb) ? ((bb[0] + bb[2]) / 2 - mr[0]) / mr[2] : 0.5,
     fcy: (mr && bb) ? ((bb[1] + bb[3]) / 2 - mr[1]) / mr[3] : 0.5,
     fw: (mr && bb) ? (bb[2] - bb[0]) / mr[2] : 0.3,
@@ -1676,15 +1684,10 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       })()}
                       {/* objetos editables, ubicados con la MISMA colocación que el diseño y recortados al contorno */}
                       {!pv && edis.map((o) => {
-                        // MARCO declarado por el objeto: "pieza" (agregados) se mide contra la
-                        // PIEZA; el resto, contra el DISEÑO. Mismo criterio que el editor y el
-                        // motor — sin esto, con arte POR RANGO (mesas de distinto tamaño) el
-                        // objeto se veía corrido respecto del editor.
-                        const _pz = (o.marco === 'pieza' || o._agregado);
-                        const _fx = _pz ? ox : imgX, _fy = _pz ? oy : imgY;
-                        const _fW = _pz ? p.pw : imgW, _fH = _pz ? p.ph : imgH;
-                        const cx = _fx + (o.fcx + o.dx) * _fW, cy = _fy + (o.fcy + o.dy) * _fH;   // dx/dy en fracción del marco
-                        const w = o.fw * _fW * o.scale, h = o.fh * _fH * o.scale;
+                        // TODO objeto (del arte o agregado) se ubica DENTRO DEL DISEÑO: sus
+                        // fracciones ya vienen calculadas contra la mesa del talle en vista.
+                        const cx = imgX + (o.fcx + o.dx) * imgW, cy = imgY + (o.fcy + o.dy) * imgH;
+                        const w = o.fw * imgW * o.scale, h = o.fh * imgH * o.scale;
                         return (
                           <g key={'edov-' + o.nombre} clipPath={`url(#clipmapv-${p.idx})`}>
                             <g transform={`rotate(${o.rot} ${cx} ${cy})`}>
@@ -5243,8 +5246,7 @@ export default function App() {
       // el overlay para TODAS las piezas de ese genérico (el visor solo dibuja las de la variante,
       // filtradas por vf) → si tomáramos solo la 1ª ("Frente 1") su idx no estaría en la variante.
       const _og = nombreGenerico(o.pieza || '');
-      const _esPieza = (o.marco === 'pieza' || o._agregado);
-      if (!_esPieza && (!o.mesa_rect || !o.bbox_mu)) return [];
+      if (!o._agregado && (!o.mesa_rect || !o.bbox_mu)) return [];
       // Transform del talle en vista; si ese talle no tiene el suyo se usa cualquiera guardado
       // (mismo criterio que el motor) → el objeto se ve donde se puso, no en la posición base.
       const _tfs = editorTfs[o.nombre] || {};
@@ -5252,10 +5254,15 @@ export default function App() {
       return canvasLayout.layout
         .filter(q => nombreGenerico(etqNombres[q.idx] || q.name || '') === _og)
         .map(p => {
-          // MISMO resolvedor que el editor → las dos vistas colocan igual, por construcción.
-          const m = marcoDeObjeto(o, p);
+          // MISMO resolvedor que el editor, con la mesa del TALLE en vista → las dos vistas
+          // colocan igual, por construcción, aunque cada rango use una mesa de otro tamaño.
+          const _pn = etqNombres[p.idx] || p.name || '';
+          const _mi = (mapeoData?.mapeo_talles?.[_pn]?.[T]) || mapeoValores[_pn];
+          const _me = _mi ? (mapeoData?.mesas || []).find(x => x.mesa === parseInt(_mi)) : null;
+          const _asp = _me ? (_me.aspecto || (_me.w_cm && _me.h_cm ? _me.w_cm / _me.h_cm : null)) : null;
+          const m = marcoDeObjeto(o, p, _asp);
           return {
-            nombre: o.nombre, thumb: o.thumb, svg: o.svg, idx: p.idx, marco: o.marco, _agregado: o._agregado,
+            nombre: o.nombre, thumb: o.thumb, svg: o.svg, idx: p.idx, _agregado: o._agregado,
             rot: tf.rot, scale: tf.scale, dx: tf.dx, dy: tf.dy,
             fcx: m.fcx, fcy: m.fcy, fw: m.fw, fh: m.fh,
           };
@@ -6878,10 +6885,19 @@ export default function App() {
                 // colocado en la pieza (`imgW/imgH` = encaje: alto manda, ancho centrado). Igual que el
                 // motor (`_matriz_editable` con `dx*awf*W` = ancho del diseño). No depende del talle guía
                 // ni de la pieza donde se registró el objeto. `imgH = p.ph` (el alto del diseño = alto pieza).
+                // Aspecto de la MESA DEL ARTE de esta pieza para el TALLE en vista (T). Es lo que
+                // define dónde y con qué tamaño se coloca el diseño sobre la pieza; cambia por
+                // rango, por eso se resuelve acá y no se toma un valor fijo.
+                const _aspMesaDe = (p) => {
+                  const _pn = etqNombres[p.idx] || p.name || '';
+                  const _mi = (mapeoData?.mapeo_talles?.[_pn]?.[T]) || mapeoValores[_pn];
+                  const _m = _mi ? (mapeoData?.mesas || []).find(x => x.mesa === parseInt(_mi)) : null;
+                  return _m ? (_m.aspecto || (_m.w_cm && _m.h_cm ? _m.w_cm / _m.h_cm : null)) : null;
+                };
                 // El marco (y con él imgW/imgH) sale del resolvedor ÚNICO `marcoDeObjeto`.
-                const _imgDim = (o, p) => { const m = marcoDeObjeto(o, p); return { imgW: m.w, imgH: m.h, imgX: m.x, imgY: m.y }; };
+                const _imgDim = (o, p) => { const m = marcoDeObjeto(o, p, _aspMesaDe(p)); return { imgW: m.w, imgH: m.h, imgX: m.x, imgY: m.y }; };
                 const centerOf = (o, p, tf) => {
-                  const { x: imgX, y: imgY, w: imgW, h: imgH, fcx, fcy, fw, fh } = marcoDeObjeto(o, p);
+                  const { x: imgX, y: imgY, w: imgW, h: imgH, fcx, fcy, fw, fh } = marcoDeObjeto(o, p, _aspMesaDe(p));
                   // w/h SIEMPRE positivos (un <image> con ancho negativo no dibuja); el signo de
                   // sx/sy es el ESPEJO y se aplica como transform (sgx/sgy).
                   return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH,
@@ -7173,7 +7189,7 @@ export default function App() {
                           {_objsEd.map(o => {
                             // marco "pieza" (agregados) no usa mesa_rect/bbox_mu: los resuelve `marcoDeObjeto`.
                             const p = piezaDe(o.pieza);
-                            if (!p || (!(o.marco === 'pieza' || o._agregado) && (!o.mesa_rect || !o.bbox_mu))) return null;
+                            if (!p || (!o._agregado && (!o.mesa_rect || !o.bbox_mu))) return null;
                             const vo = _voDe(p);
                             const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel.includes(o.nombre); const solo = sel && editableSel.length === 1;
                             return (

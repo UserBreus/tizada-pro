@@ -2039,11 +2039,11 @@ def get_editables():
             "nombre": _o.get("nombre") or _o["id"], "capa": _o.get("nombre") or _o["id"],
             "pieza": _pz, "mesa": 0, "svg": _svg, "thumb": None,
             "w_cm": _o.get("w_cm"), "h_cm": _o.get("h_cm"),
-            # MARCO = PIEZA. El objeto agregado no vive dentro del diseño: se mide contra la
-            # PIEZA (cm reales, estables) y NO contra la mesa del arte, que cambia de tamaño
-            # por rango. Así cae igual en el editor, el visor del Arte y la tizada sin resolver
-            # ninguna mesa, y sobrevive a "Cambiar arte". Ver `pos_marco_pieza` (motor).
-            "marco": "pieza", "mesa_rect": None, "bbox_mu": None, "pos": None,
+            # El objeto se ubica DENTRO DEL DISEÑO (como cualquier editable del arte). NO se manda
+            # `mesa_rect`: la mesa cambia por rango, así que la resuelve CADA VISTA con la del
+            # talle que está mostrando (el editor con la suya, el visor del Arte con `mappedMesa`,
+            # el motor con `arte_rect(_mesa_a)`). Mandar una mesa fija era la causa del corrimiento.
+            "mesa_rect": None, "bbox_mu": None, "pos": None,
             "transforms": _tf, "agregado": True, "oid": _o["id"],
         })
     return jsonify({"objetos": objetos, "talles": talles, "piezas": sorted(reg.keys())})

@@ -1818,29 +1818,35 @@ def extraer_editables(path_arte, con_thumb=True):
     return objs
 
 
-def pos_marco_pieza(obj, cont):
-    """Posición base de un objeto cuyo MARCO es la PIEZA (los objetos AGREGADOS por el usuario).
+def pos_agregado_en_diseno(obj, cont, mesa_rect):
+    """Posición base de un objeto AGREGADO, medida **DENTRO DEL DISEÑO** — igual que un editable
+    que viene del arte: escala y se mueve CON el diseño, y el ajuste por rango/talle usa la misma
+    ruta que los demás editables.
 
-    Por qué el marco es la pieza y no la mesa del arte: el objeto agregado NO vive dentro del
-    diseño — lo coloca el usuario, sobrevive a "Cambiar arte", y la pieza tiene medidas reales en
-    cm que son estables. Las mesas del arte, en cambio, cambian de tamaño según el rango (en un
-    arte real: 1233x1843 el rango chico y 2353x2608 el grande). Atar el objeto a la mesa lo hace
-    depender de un detalle del archivo y produce corrimientos al cambiar de rango.
+    `mesa_rect` = rect de la mesa del arte de ESTA pieza y ESTE talle. Se resuelve POR TALLE
+    porque las mesas cambian de tamaño según el rango (en un arte real: 1233x1842 el rango chico
+    y 2352x2607 el grande); tomar una mesa fija es lo que producía el corrimiento entre rangos.
 
-    Con la pieza como marco: `awf`=1 (dx/dy son fracción de la PIEZA), el tamaño sale de los cm
-    reales, y el resultado es idéntico en el editor, el visor del Arte y la tizada, sin resolver
-    ninguna mesa. Devuelve el mismo dict que `_pos_en_pieza`.
+    El diseño se coloca sobre la pieza escalando al ALTO y centrando el ancho (`cm_encajar`):
+        alto del diseño sobre la pieza = alto de la pieza  -> fh = h_cm / ph_cm
+        ancho del diseño en cm         = (aw/ah) * ph_cm   -> fw = w_cm / ese ancho
+    Devuelve el mismo dict que `_pos_en_pieza` (fracciones de la PIEZA), centrado en el diseño.
     """
-    fw = fh = 0.3                                   # sin medidas: 30% (no debería pasar)
     try:
-        pw_cm = float(cont["w"]) / CM
+        ax0, ay0, aw, ah = [float(v) for v in mesa_rect]
+        px0, py0, px1, py1 = [float(v) for v in cont["bbox_mu"]]
+        pw, ph = (px1 - px0), (py1 - py0)
         ph_cm = float(cont["h"]) / CM
         ow = float(obj.get("w_cm") or 0); oh = float(obj.get("h_cm") or 0)
-        if pw_cm > 0 and ph_cm > 0 and ow > 0 and oh > 0:
-            fw, fh = ow / pw_cm, oh / ph_cm
+        if min(aw, ah, pw, ph, ph_cm, ow, oh) <= 0:
+            return None
+        awf = (aw * (ph / ah)) / pw          # ancho del DISEÑO como fracción de la pieza
+        fw = ow / ((aw / ah) * ph_cm)        # ancho del objeto como fracción del DISEÑO
+        fh = oh / ph_cm                      # alto  del objeto como fracción del DISEÑO
+        rw, rh = fw * awf, fh                # -> fracciones de la PIEZA
+        return {"rx": 0.5 - rw / 2, "ry": 0.5 - rh / 2, "rw": rw, "rh": rh, "awf": awf}
     except Exception:
-        pass
-    return {"rx": (1 - fw) / 2, "ry": (1 - fh) / 2, "rw": fw, "rh": fh, "awf": 1.0}
+        return None
 
 
 def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
@@ -1903,7 +1909,7 @@ def _bbox_de_xo(xo):
     return min(xs), max(xs), min(ys), max(ys)
 
 
-def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page):
+def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page, mesa_rect):
     """Content-stream que dibuja los objetos AGREGADOS asignados a `pieza`, con su transform.
     Cada objeto es un PDF suelto (datos/.../objetos_agregados/<oid>.pdf). Base = 30% centrado
     (como el editor); encima, el transform del usuario (mover/rotar/escalar/espejar)."""
@@ -1933,8 +1939,10 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
             nom = page.add_resource(xo, Name.XObject, prefix="OA")
             # BASE: la BBox del objeto se escala a su MEDIDA REAL sobre la pieza (fw×fh), centrada
             # → misma proporción que el archivo (no se estira) y mismo tamaño que muestra el editor.
-            # MARCO = PIEZA (ver `pos_marco_pieza`): independiente de qué mesa use cada rango.
-            pos = pos_marco_pieza(o, cont)
+            # DENTRO DEL DISEÑO, con la mesa de ESTE talle (ver `pos_agregado_en_diseno`).
+            pos = pos_agregado_en_diseno(o, cont, mesa_rect)
+            if not pos:
+                continue
             # BASE: la BBox del objeto se escala al rectangulo que le toca sobre la pieza
             # (rx, ry, rw, rh de `pos`), en coords de pagina (y-arriba).
             tx0, tx1, ty0, ty1 = _bbox_de_xo(xo)
@@ -3111,8 +3119,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             # ── OBJETOS AGREGADOS por el usuario (PNG/SVG/PDF/AI): NO vienen del arte, son PDFs
             #    sueltos. Se componen sobre ESTA pieza con su transform, igual que un editable.
             #    Base = centrado 30% de la pieza (idéntico al default del editor) → editor = tizada.
+            _ar = arte_rect(_mesa_a)      # mesa del arte de ESTA pieza y ESTE talle
             arte_draw += _dibujar_objetos_agregados(
-                objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page)
+                objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page,
+                [_ar.x0, _ar.y0, _ar.width, _ar.height])
         else:                                   # ARTE CLÁSICO: diseño sobre la misma mesa del molde
             pag = pagina_arte(mesa, talle)
             xo = out.copy_foreign(pag.as_form_xobject())
