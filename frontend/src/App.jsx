@@ -5117,22 +5117,26 @@ export default function App() {
     } catch (e) { showError('No se pudo subir: ' + e.message); }
     finally { setSubiendoObjeto(false); }
   };
-  // El usuario eligió la pieza destino: se agrega al editor y se persiste esa asignación.
-  const asignarObjetoAPieza = async (pieza) => {
+  // El objeto se coloca EN EL PUNTO donde el usuario clickeó sobre el diseño: `tf0` trae el
+  // dx/dy (fracción de la pieza) de ese punto, y `talles` el alcance en el que se aplica.
+  const asignarObjetoAPieza = async (pieza, tf0, talles) => {
     if (!objPendiente || !pieza) return;
     const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
     const nuevo = { ...objPendiente, pieza };
+    const tf = { dx: 0, dy: 0, rot: 0, scale: 1, sx: 1, sy: 1, ...(tf0 || {}) };
+    const ts = (talles || []).filter(Boolean);
     setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), nuevo] }));
+    setEditorTfs(prev => ({ ...prev, [nuevo.nombre]: Object.fromEntries((ts.length ? ts : ['*']).map(t => [t, tf])) }));
     setEditableSel([nuevo.nombre]);
     setObjPendiente(null);
-    // Persistir YA la pieza (si el usuario cierra sin guardar, el objeto igual sabe dónde va).
+    // Persistir YA la pieza + la posición del click (si cierra sin guardar, no se pierde).
     try {
       await fetch(`/api/productos/objeto_agregado/${nuevo._oid}/transform`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: [], transform: {}, variante: verVariante || '*', pieza }),
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: ts, transform: tf, variante: verVariante || '*', pieza }),
       });
     } catch { }
-    showMsg(`"${nuevo.nombre}" agregado en ${pieza}. Movelo y escalalo como cualquier editable.`);
+    showMsg(`"${nuevo.nombre}" colocado en ${pieza}. Arrastralo o escalalo como cualquier editable.`);
   };
   const borrarObjetoAgregado = async (oid) => {
     const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
@@ -6810,6 +6814,9 @@ export default function App() {
                 const onMove = (e) => { const d = editorDrag.current; if (!d) return; const m = _cToVB(e.clientX, e.clientY, d.ictm); if (d.tipo === 'move') { const _ddx = m.x - d.start.x, _ddy = m.y - d.start.y; (d.grupo && d.grupo.length ? d.grupo : [{ nm: d.nm, imgW: d.imgW, imgH: d.imgH, tf0: d.tf0 }]).forEach(g => setTfScoped(g.nm, { dx: g.tf0.dx + _ddx / g.imgW, dy: g.tf0.dy + _ddy / g.imgH })); } else if (d.tipo === 'scale') { const _f = Math.hypot(m.x - d.cx, m.y - d.cy) / (d.dist0 || 1); const _c = (v) => Math.max(0.1, Math.min(8, v)); setTfScoped(d.nm, { scale: _c(d.scale0 * _f), sx: _c(d.sx0 * _f), sy: _c(d.sy0 * _f) }); } else if (d.tipo === 'rot') setTfScoped(d.nm, { rot: Math.round(d.rot0 + (Math.atan2(m.y - d.cy, m.x - d.cx) * 180 / Math.PI - d.ang0)) }); };
                 const onUp = () => { if (editorDrag.current) { editorDrag.current = null; histCommit(editorTfsRef.current); } };
                 const start = (e, tipo, o, p) => {
+                  // Colocando un objeto nuevo: el click debe llegar al lienzo (no arrastrar el de
+                  // abajo), así se puede colocar ENCIMA de otro objeto.
+                  if (objPendiente) return;
                   e.stopPropagation(); e.preventDefault();
                   // Selección: si el objeto ya está en la selección se respeta (para mover en grupo);
                   // si no, pasa a ser la selección (Ctrl/Shift lo SUMA en vez de reemplazar).
@@ -6838,7 +6845,30 @@ export default function App() {
                 // Click en el FONDO del visor = deseleccionar. Los objetos cortan la propagación al
                 // arrancar su arrastre (`start`), así que todo mousedown que llega acá es espacio vacío.
                 // El botón derecho no toca la selección: sigue siendo el pan del espacio.
-                const edFondo = (e) => { if (e.button === 0) setEditableSel([]); edPan(e); };
+                // COLOCAR un objeto recién subido EN EL PUNTO clickeado: se busca la pieza bajo el
+                // cursor y se calcula el dx/dy (fracción de esa pieza) para que el CENTRO del objeto
+                // caiga exactamente ahí. La base del objeto es el centro de la pieza (0.5, 0.5).
+                const colocarObjetoEnClick = (e) => {
+                  const svg = editorSvgRef.current;
+                  const ictm = (svg && svg.getScreenCTM()) ? svg.getScreenCTM().inverse() : null;
+                  const m = _cToVB(e.clientX, e.clientY, ictm);
+                  const hit = _piezasEd.find(p => {
+                    const vo = _voDe(p);
+                    return m.x >= p.px + vo.dx && m.x <= p.px + vo.dx + p.pw
+                        && m.y >= p.py + vo.dy && m.y <= p.py + vo.dy + p.ph;
+                  });
+                  if (!hit) { showError('Tocá sobre una pieza del diseño para colocar el objeto ahí.'); return; }
+                  const vo = _voDe(hit);
+                  const dx = (m.x - (hit.px + vo.dx)) / hit.pw - 0.5;   // 0.5 = centro (base del objeto)
+                  const dy = (m.y - (hit.py + vo.dy)) / hit.ph - 0.5;
+                  const nm = (etqNombres[hit.idx] || hit.name || '').trim();
+                  asignarObjetoAPieza(nm, { dx, dy }, scopeTalles());
+                };
+                const edFondo = (e) => {
+                  if (e.button === 0 && objPendiente) { e.preventDefault(); colocarObjetoEnClick(e); return; }
+                  if (e.button === 0) setEditableSel([]);
+                  edPan(e);
+                };
                 const chip = (txt, on, fn) => (<button type="button" onClick={fn} style={{ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{txt}</button>);
                 const selStyle = { padding: '5px 8px', borderRadius: 8, fontSize: 12, background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)' };
                 // GUARDAR: persiste TODOS los objetos del diseño (con su transform actual) por VARIABLE +
@@ -6936,38 +6966,21 @@ export default function App() {
                 return (
                   <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(2,6,12,0.93)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', padding: 16 }}
                     onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}>
-                    {/* ELEGIR PIEZA para el objeto recién subido: sin esto no se agrega (el objeto
-                        vive SOBRE una pieza; ahí lo posiciona el editor y lo estampa el motor). */}
-                    {objPendiente && (() => {
-                      // piezas visibles de la variable en curso, sin repetir por nombre
-                      const _cands = []; const _vistos = new Set();
-                      _piezasEd.forEach(p => {
-                        const nm = (etqNombres[p.idx] || p.name || '').trim();
-                        if (!nm || _vistos.has(nombreGenerico(nm))) return;
-                        _vistos.add(nombreGenerico(nm)); _cands.push({ nm, p });
-                      });
-                      return (
-                        <div style={{ position: 'fixed', inset: 0, zIndex: 2200, background: 'rgba(2,6,12,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-                          <div style={{ width: '100%', maxWidth: 520, maxHeight: '80vh', display: 'flex', flexDirection: 'column', borderRadius: 14, border: '1px solid var(--border-light)', background: 'var(--bg-card, #14181c)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
-                            <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border-light)' }}>
-                              <h3 style={{ margin: 0, fontSize: 15.5 }}>¿En qué pieza va «{objPendiente.nombre}»?</h3>
-                              <p style={{ margin: '5px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Elegí la pieza del diseño donde se va a colocar. Después lo movés y escalás como cualquier editable.</p>
-                            </div>
-                            <div style={{ padding: 14, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
-                              {_cands.length ? _cands.map(({ nm }) => (
-                                <button key={nm} type="button" onClick={() => asignarObjetoAPieza(nm)}
-                                  style={{ padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left', fontSize: 13, fontWeight: 700,
-                                    border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: '#fff' }}>{nm}</button>
-                              )) : <div style={{ gridColumn: '1/-1', fontSize: 13, color: 'var(--text-muted)' }}>No hay piezas visibles en esta variable.</div>}
-                            </div>
-                            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                              <button type="button" className="btn ghost" style={{ padding: '8px 14px' }}
-                                onClick={() => { borrarObjetoAgregado(objPendiente._oid); setObjPendiente(null); }}>Cancelar</button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+                    {/* COLOCAR el objeto recién subido: aviso NO bloqueante — el usuario toca
+                        sobre el diseño y el objeto se coloca justo en ese punto de esa pieza. */}
+                    {objPendiente && (
+                      <div style={{ position: 'absolute', top: 62, left: '50%', transform: 'translateX(-50%)', zIndex: 2200,
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderRadius: 999,
+                        border: '1px solid var(--accent)', background: 'rgba(0,243,255,0.12)', backdropFilter: 'blur(4px)',
+                        boxShadow: '0 6px 24px rgba(0,0,0,0.45)' }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)' }}>
+                          Tocá sobre el diseño dónde va «{objPendiente.nombre}»
+                        </span>
+                        <button type="button" onClick={() => { borrarObjetoAgregado(objPendiente._oid); setObjPendiente(null); }}
+                          style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+                            border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>Cancelar</button>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
                       <Icon name="edit" style={{ width: 18, height: 18, color: 'var(--accent)' }} />
                       <h3 style={{ margin: 0, fontSize: 16 }}>Editar diseño</h3>
@@ -7012,7 +7025,7 @@ export default function App() {
                       </div>
                       {/* visor — rueda = zoom · click derecho arrastrado = mover el espacio */}
                       <div onWheel={edWheel} onMouseDown={edFondo} onContextMenu={(e) => e.preventDefault()}
-                        style={{ flex: 1, minHeight: 0, background: 'rgba(0,0,0,0.35)', borderRadius: 12, border: '1px solid var(--border-light)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        style={{ flex: 1, minHeight: 0, background: 'rgba(0,0,0,0.35)', borderRadius: 12, border: '1px solid var(--border-light)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: objPendiente ? 'crosshair' : undefined }}>
                         <svg ref={editorSvgRef} viewBox={`${_edVBnow.x} ${_edVBnow.y} ${_edVBnow.w} ${_edVBnow.h}`} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: '100%', display: 'block', userSelect: 'none' }}>
                           {_piezasEd.map(p => {
                             const vo = _voDe(p);
