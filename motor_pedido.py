@@ -1818,6 +1818,15 @@ def extraer_editables(path_arte, con_thumb=True):
     return objs
 
 
+def mesa_rect_arte(path_arte, mesa):
+    """Rect [x0, y0, w, h] de una MESA del arte — el marco donde viven los editables."""
+    try:
+        pr = fitz.open(path_arte)[int(mesa) - 1].rect
+        return [round(pr.x0, 2), round(pr.y0, 2), round(pr.width, 2), round(pr.height, 2)]
+    except Exception:
+        return None
+
+
 def pos_agregado_en_diseno(obj, cont, mesa_rect):
     """Posición base de un objeto AGREGADO, medida **DENTRO DEL DISEÑO** — igual que un editable
     que viene del arte: escala y se mueve CON el diseño, y el ajuste por rango/talle usa la misma

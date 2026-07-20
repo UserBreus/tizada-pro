@@ -2271,15 +2271,22 @@ def objeto_agregado_colocar(oid):
 
     # Mesas donde vive esa pieza: la del mapeo base + las de cada rango (arte por rango).
     mp = (_cargar("mapeo_arte.json", pid, sub=sub) or {}).get("mapeo", {})
-    mesas = set()
-    if mp.get(pieza):
-        mesas.add(int(mp[pieza]))
+    talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    # mesa -> talles de ESA mesa. Hace falta el talle para saber el ALTO de la pieza en ese rango:
+    # el diseño se escala al alto de la pieza, así que el tamaño del objeto dentro de cada mesa
+    # depende del rango. Usar un solo talle para todas daba el objeto de distinto tamaño por rango.
+    mesa_talles = {}
     try:
-        talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
-        for _m in ((MP.mapeo_variantes_arte(arte, reg, talles) or {}).get(pieza) or {}).values():
-            mesas.add(int(_m))
+        for _t, _m in ((MP.mapeo_variantes_arte(arte, reg, talles) or {}).get(pieza) or {}).items():
+            mesa_talles.setdefault(int(_m), []).append(_t)
     except Exception:
         pass
+    if mp.get(pieza):
+        _mb = int(mp[pieza])
+        # los talles que no tienen mesa propia caen a la del mapeo base
+        _sin = [t for t in talles if t not in ((MP.mapeo_variantes_arte(arte, reg, talles) or {}).get(pieza) or {})]
+        mesa_talles.setdefault(_mb, []).extend(_sin or [talles[0]] if talles else [])
+    mesas = set(mesa_talles)
     if not mesas:
         return jsonify({"error": "esa pieza no tiene mesa de arte asignada"}), 409
 
@@ -2294,9 +2301,10 @@ def objeto_agregado_colocar(oid):
             if not _mr:
                 continue
             ax0, ay0, aw, ah = _mr
-            # La pieza para el talle de referencia de ESA mesa: su alto en cm fija la escala
-            # (el diseño se coloca escalando al ALTO de la pieza).
-            _inf = next(iter((reg.get(pieza) or {}).values()), {}) or {}
+            # ALTO de la pieza EN UN TALLE DE ESTA MESA: el diseño se escala al alto de la pieza,
+            # así que este valor es el que hace que el objeto mida sus cm reales en ese rango.
+            _tm = next((t for t in (mesa_talles.get(mesa) or []) if (reg.get(pieza) or {}).get(t)), None)
+            _inf = ((reg.get(pieza) or {}).get(_tm) or next(iter((reg.get(pieza) or {}).values()), {})) or {}
             ph_cm = float(_inf.get("h_cm") or 0)
             if ph_cm <= 0:
                 continue
