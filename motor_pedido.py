@@ -1870,9 +1870,20 @@ def _bbox_de_xo(xo):
     return min(xs), max(xs), min(ys), max(ys)
 
 
-# Posición base sintética de un objeto AGREGADO sobre la pieza: centrado, 30% (idéntico al
-# default del editor cuando el objeto no tiene mesa_rect/bbox_mu) → garantiza editor = tizada.
-_POS_AGREGADO = {"rx": 0.35, "ry": 0.35, "rw": 0.3, "rh": 0.3, "awf": 1.0}
+def _pos_agregado(obj, cont):
+    """Posición/tamaño base de un objeto AGREGADO sobre la pieza: CENTRADO y con su MEDIDA REAL
+    (su cm contra el cm de la pieza) → entra con la proporción del archivo, sin deformarse.
+    Idéntico a lo que hace el editor (`centerOf`) → garantiza editor = tizada."""
+    fw = fh = 0.3                                   # fallback si no hay medidas
+    try:
+        pw_cm = float(cont["w"]) / CM
+        ph_cm = float(cont["h"]) / CM
+        ow = float(obj.get("w_cm") or 0); oh = float(obj.get("h_cm") or 0)
+        if pw_cm > 0 and ph_cm > 0 and ow > 0 and oh > 0:
+            fw, fh = ow / pw_cm, oh / ph_cm
+    except Exception:
+        pass
+    return {"rx": (1 - fw) / 2, "ry": (1 - fh) / 2, "rw": fw, "rh": fh, "awf": 1.0}
 
 
 def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page):
@@ -1897,15 +1908,17 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
             if "/OC" in xo:
                 del xo["/OC"]
             nom = page.add_resource(xo, Name.XObject, prefix="OA")
-            # BASE: escala la BBox del objeto a un recuadro de 30%W × 30%H centrado en la pieza.
+            # BASE: la BBox del objeto se escala a su MEDIDA REAL sobre la pieza (fw×fh), centrada
+            # → misma proporción que el archivo (no se estira) y mismo tamaño que muestra el editor.
+            pos = _pos_agregado(o, cont)
             tx0, tx1, ty0, ty1 = _bbox_de_xo(xo)
-            sxb = (0.3 * W) / (tx1 - tx0) if tx1 != tx0 else 1.0
-            syb = (0.3 * H) / (ty1 - ty0) if ty1 != ty0 else 1.0
+            sxb = (pos["rw"] * W) / (tx1 - tx0) if tx1 != tx0 else 1.0
+            syb = (pos["rh"] * H) / (ty1 - ty0) if ty1 != ty0 else 1.0
             cxo, cyo = (tx0 + tx1) / 2.0, (ty0 + ty1) / 2.0
             ex = B + 0.5 * W - sxb * cxo
             ey = B + 0.5 * H - syb * cyo
             base = f"{sxb:.6f} 0 0 {syb:.6f} {ex:.3f} {ey:.3f} cm\n"
-            utf = _matriz_editable(tf, None, cont, W, H, B, pos_override=_POS_AGREGADO)   # "" si identidad
+            utf = _matriz_editable(tf, None, cont, W, H, B, pos_override=pos)   # "" si identidad
             draw += f"q\n{clip}\nW n\n{utf}{base}\n{nom} Do\nQ\n"
         except Exception:
             pass

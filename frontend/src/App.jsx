@@ -6800,8 +6800,13 @@ export default function App() {
                   const { imgW, imgH, imgX, imgY } = _imgDim(o, p);
                   const fcx = (mr && bb) ? ((bb[0] + bb[2]) / 2 - mr[0]) / mr[2] : 0.5;
                   const fcy = (mr && bb) ? ((bb[1] + bb[3]) / 2 - mr[1]) / mr[3] : 0.5;
-                  const fw = (mr && bb) ? (bb[2] - bb[0]) / mr[2] : 0.3;
-                  const fh = (mr && bb) ? (bb[3] - bb[1]) / mr[3] : 0.3;
+                  // TAMAÑO del objeto sobre la pieza. Los AGREGADOS entran con su MEDIDA REAL
+                  // (su cm contra el cm de la pieza) → NO se deforman: la proporción es la del
+                  // archivo. (Antes caían a 0.3×0.3 = 30% del ancho Y del alto → estirados.)
+                  const _fAg = (o._agregado && o.w_cm > 0 && o.h_cm > 0 && p.w_cm > 0 && p.h_cm > 0)
+                    ? { w: o.w_cm / p.w_cm, h: o.h_cm / p.h_cm } : null;
+                  const fw = (mr && bb) ? (bb[2] - bb[0]) / mr[2] : (_fAg ? _fAg.w : 0.3);
+                  const fh = (mr && bb) ? (bb[3] - bb[1]) / mr[3] : (_fAg ? _fAg.h : 0.3);
                   // w/h SIEMPRE positivos (un <image> con ancho negativo no dibuja); el signo de
                   // sx/sy es el ESPEJO y se aplica como transform (sgx/sgy).
                   return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH,
