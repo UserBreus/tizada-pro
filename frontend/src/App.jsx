@@ -5135,6 +5135,13 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: ts, transform: tf, variante: verVariante || '*', pieza }),
       });
+      // RELEER del backend: la respuesta de la subida NO trae la forma completa (mesa_rect/
+      // bbox_mu/pos los sintetiza /api/productos/editables). Sin esto el objeto recién colocado
+      // no se dibujaba hasta salir y volver a entrar al editor.
+      // El re-fetch NO pisa lo editado en memoria: `cargarEditablesPedido` conserva `editorTfs`
+      // cuando el contexto (molde|diseño|variable) es el mismo.
+      await cargarEditablesPedido(_mid, editableDiseno, verVariante);
+      setEditableSel([nuevo.nombre]);
     } catch { }
     showMsg(`"${nuevo.nombre}" colocado en ${pieza}. Arrastralo o escalalo como cualquier editable.`);
   };
