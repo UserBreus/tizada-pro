@@ -1644,8 +1644,12 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       })()}
                       {/* objetos editables, ubicados con la MISMA colocación que el diseño y recortados al contorno */}
                       {!pv && edis.map((o) => {
-                        const cx = imgX + (o.fcx + o.dx) * imgW, cy = imgY + (o.fcy + o.dy) * imgH;   // dx/dy en fracción del DISEÑO (como el motor)
-                        const w = o.fw * imgW * o.scale, h = o.fh * imgH * o.scale;
+                        // Los AGREGADOS se miden contra la PIEZA (no contra el diseño): mismo marco
+                        // que usa el editor y que usa el motor (awf=1) → caen en el mismo lugar.
+                        const _fx = o._agregado ? p.px : imgX, _fy = o._agregado ? p.py : imgY;
+                        const _fW = o._agregado ? p.pw : imgW, _fH = o._agregado ? p.ph : imgH;
+                        const cx = _fx + (o.fcx + o.dx) * _fW, cy = _fy + (o.fcy + o.dy) * _fH;   // dx/dy en fracción del DISEÑO (como el motor)
+                        const w = o.fw * _fW * o.scale, h = o.fh * _fH * o.scale;
                         return (
                           <g key={'edov-' + o.nombre} clipPath={`url(#clipmapv-${p.idx})`}>
                             <g transform={`rotate(${o.rot} ${cx} ${cy})`}>
@@ -5112,8 +5116,9 @@ export default function App() {
       const r = await fetch('/api/productos/objeto_agregar', { method: 'POST', body: fd });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo agregar el objeto'); return; }
-      // Subido: ahora el usuario ELIGE en qué pieza va (no se asigna solo).
-      setObjPendiente(_objAgregadoAEditable(d.objeto, ''));
+      // Subido: ahora el usuario ELIGE en qué pieza va (no se asigna solo). `_nuevo` = si cancela,
+      // se borra (no quedan huérfanos); un objeto YA existente que se recoloca no se borra.
+      setObjPendiente({ ..._objAgregadoAEditable(d.objeto, ''), _nuevo: true });
     } catch (e) { showError('No se pudo subir: ' + e.message); }
     finally { setSubiendoObjeto(false); }
   };
@@ -5123,9 +5128,15 @@ export default function App() {
     if (!objPendiente || !pieza) return;
     const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
     const nuevo = { ...objPendiente, pieza };
+    delete nuevo._nuevo;
     const tf = { dx: 0, dy: 0, rot: 0, scale: 1, sx: 1, sy: 1, ...(tf0 || {}) };
     const ts = (talles || []).filter(Boolean);
-    setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), nuevo] }));
+    // Si el objeto YA estaba en la lista (se estaba recolocando), se ACTUALIZA; si no, se agrega.
+    setEditableData(prev => {
+      const objs = (prev || {}).objetos || [];
+      const existe = objs.some(o => o._oid === nuevo._oid);
+      return { ...(prev || {}), objetos: existe ? objs.map(o => (o._oid === nuevo._oid ? nuevo : o)) : [...objs, nuevo] };
+    });
     setEditorTfs(prev => ({ ...prev, [nuevo.nombre]: Object.fromEntries((ts.length ? ts : ['*']).map(t => [t, tf])) }));
     setEditableSel([nuevo.nombre]);
     setObjPendiente(null);
@@ -5138,6 +5149,35 @@ export default function App() {
     } catch { }
     showMsg(`"${nuevo.nombre}" colocado en ${pieza}. Arrastralo o escalalo como cualquier editable.`);
   };
+  // QUITAR de la pieza: el objeto NO se borra — queda en la barra, sin pieza, listo para colocarlo
+  // en otra. (Un objeto vive en UNA sola pieza; para tenerlo en dos, se duplica.)
+  const quitarObjetoDePieza = async (oid) => {
+    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    setEditableData(prev => ({ ...(prev || {}), objetos: ((prev || {}).objetos || []).map(o => (o._oid === oid ? { ...o, pieza: '' } : o)) }));
+    try {
+      await fetch(`/api/productos/objeto_agregado/${oid}/pieza`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, pieza: '' }),
+      });
+    } catch { }
+  };
+  // DUPLICAR: copia el objeto para poder ponerlo TAMBIÉN en otra pieza. La copia nace sin pieza.
+  const duplicarObjetoAgregado = async (oid) => {
+    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    try {
+      const r = await fetch(`/api/productos/objeto_agregado/${oid}/duplicar`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo duplicar'); return; }
+      const copia = _objAgregadoAEditable(d.objeto, '');
+      setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), copia] }));
+      showMsg(`"${copia.nombre}" creado. Tocá "Colocar" y elegí la pieza.`);
+    } catch (e) { showError('No se pudo duplicar: ' + e.message); }
+  };
+  // RECOLOCAR un objeto que ya existe (sin pieza): reusa el flujo de "tocá sobre el diseño".
+  const recolocarObjeto = (o) => setObjPendiente({ ...o, _nuevo: false });
   const borrarObjetoAgregado = async (oid) => {
     const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
     try {
@@ -5169,6 +5209,21 @@ export default function App() {
       // filtradas por vf) → si tomáramos solo la 1ª ("Frente 1") su idx no estaría en la variante.
       const _og = nombreGenerico(o.pieza || '');
       const mr = o.mesa_rect, bb = o.bbox_mu;
+      // OBJETOS AGREGADOS: no vienen del arte (sin mesa_rect/bbox_mu). Se posicionan en fracciones
+      // de la PIEZA (centro 0.5 + su medida real), igual que en el editor, y se marcan `_agregado`
+      // para que el visor use el marco de la PIEZA y no el del diseño → cae en el mismo lugar.
+      if (o._agregado) {
+        const tfa = (editorTfs[o.nombre] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 };
+        return canvasLayout.layout
+          .filter(q => nombreGenerico(etqNombres[q.idx] || q.name || '') === _og)
+          .map(p => ({
+            nombre: o.nombre, thumb: o.thumb, svg: o.svg, idx: p.idx, _agregado: true,
+            rot: tfa.rot, scale: tfa.scale, dx: tfa.dx, dy: tfa.dy,
+            fcx: 0.5, fcy: 0.5,
+            fw: (o.w_cm > 0 && p.w_cm > 0) ? o.w_cm / p.w_cm : 0.3,
+            fh: (o.h_cm > 0 && p.h_cm > 0) ? o.h_cm / p.h_cm : 0.3,
+          }));
+      }
       if (!mr || !bb) return [];
       const ax = mr[0], ay = mr[1], aw = mr[2], ah = mr[3];   // rect del diseño (MuPDF, y-abajo)
       const tf = (editorTfs[o.nombre] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 };
@@ -6765,7 +6820,10 @@ export default function App() {
                 const _mesasActT = new Set((mapeoData?.piezas || []).map(pz => parseInt(_mesaDeEd(pz, T))).filter(Boolean));
                 // Los objetos AGREGADOS por el usuario siempre se muestran para su pieza (no
                 // pasan por el filtro de mesa del arte: no tienen mesa del arte).
-                const _objsEd = (ed.objetos || []).filter(o => piezaDe(o.pieza) && (o._agregado || !_hayMt || _mesasActT.has(o.mesa)));
+                // Los AGREGADOS siempre están en la BARRA (con o sin pieza asignada): sin pieza
+                // quedan disponibles para colocarlos. El lienzo igual solo dibuja los que tienen
+                // pieza (el render corta con `piezaDe`).
+                const _objsEd = (ed.objetos || []).filter(o => o._agregado || (piezaDe(o.pieza) && (!_hayMt || _mesasActT.has(o.mesa))));
                 const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.nombre === o.nombre) === i);
                 const toVB = (cx, cy) => { const svg = editorSvgRef.current; if (!svg) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: q.x, y: q.y }; };
                 // Pan/zoom del visor del editor: rueda = zoom (al cursor); CLICK DERECHO arrastrado = mover el espacio.
@@ -6981,7 +7039,7 @@ export default function App() {
                         <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)' }}>
                           Tocá sobre el diseño dónde va «{objPendiente.nombre}»
                         </span>
-                        <button type="button" onClick={() => { borrarObjetoAgregado(objPendiente._oid); setObjPendiente(null); }}
+                        <button type="button" onClick={() => { if (objPendiente._nuevo) borrarObjetoAgregado(objPendiente._oid); setObjPendiente(null); }}
                           style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
                             border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>Cancelar</button>
                       </div>
@@ -7012,12 +7070,33 @@ export default function App() {
                             <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={o.thumb ? `data:image/png;base64,${o.thumb}` : (o.svg ? `data:image/svg+xml;base64,${o.svg}` : '')} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
                             <span style={{ minWidth: 0, flex: 1 }}>
                               <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
-                              {o._agregado && <span style={{ display: 'block', fontSize: 9.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>en {o.pieza || '—'}</span>}
+                              {o._agregado && <span style={{ display: 'block', fontSize: 9.5, color: o.pieza ? 'var(--text-muted)' : 'var(--warning, #f5a524)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {o.pieza ? `en ${o.pieza}` : 'sin pieza'}
+                              </span>}
                             </span>
-                            {o._agregado && <span onClick={(e) => { e.stopPropagation(); borrarObjetoAgregado(o._oid); }} title="Quitar objeto agregado"
+                            {o._agregado && <span onClick={(e) => { e.stopPropagation(); borrarObjetoAgregado(o._oid); }} title="Borrar este objeto"
                               style={{ flexShrink: 0, fontSize: 12, color: 'var(--text-muted)', padding: '2px 4px', cursor: 'pointer' }}>✕</span>}
                           </button>
                         ))}
+                        {/* Acciones del objeto AGREGADO seleccionado: un objeto vive en UNA pieza.
+                            Para ponerlo en otra: se quita de la actual (y se recoloca), o se DUPLICA. */}
+                        {(() => {
+                          const _sel = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0] && o._agregado) : null;
+                          if (!_sel) return null;
+                          const _bs = { flex: 1, padding: '6px 6px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
+                            border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' };
+                          return (
+                            <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
+                              {_sel.pieza
+                                ? <button type="button" style={_bs} title="Lo saca de la pieza pero queda acá para colocarlo en otra"
+                                    onClick={() => quitarObjetoDePieza(_sel._oid)}>Quitar de pieza</button>
+                                : <button type="button" style={{ ..._bs, borderColor: 'var(--accent)', color: 'var(--accent)' }} title="Tocá el diseño para colocarlo"
+                                    onClick={() => recolocarObjeto(_sel)}>Colocar</button>}
+                              <button type="button" style={_bs} title="Una copia para poder usarlo TAMBIÉN en otra pieza"
+                                onClick={() => duplicarObjetoAgregado(_sel._oid)}>Duplicar</button>
+                            </div>
+                          );
+                        })()}
                         {/* AGREGAR OBJETO: PNG/SVG/PDF/AI → entra como un editable más */}
                         <input type="file" ref={fileInputObjetoRef} accept=".png,.svg,.pdf,.ai,.jpg,.jpeg" hidden
                           onChange={(e) => { const f = e.target.files[0]; e.target.value = ''; agregarObjeto(f); }} />

@@ -2207,6 +2207,59 @@ def objeto_agregado_transform(oid):
     return jsonify({"ok": True})
 
 
+@app.post("/api/productos/objeto_agregado/<oid>/pieza")
+def objeto_agregado_pieza(oid):
+    """Asigna el objeto a una pieza, o lo DESASIGNA (`pieza` vacía): sigue en la barra, listo
+    para colocarlo en otra. Un objeto vive en UNA sola pieza — para tenerlo en dos, se duplica."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(cuerpo.get("diseno"))
+    data = _oa_cargar(pid, sub)
+    obj = next((o for o in data["objetos"] if o["id"] == oid), None)
+    if not obj:
+        return jsonify({"error": "no existe"}), 404
+    obj["pieza"] = str(cuerpo.get("pieza") or "")
+    _oa_guardar(pid, sub, data)
+    return jsonify({"ok": True, "pieza": obj["pieza"]})
+
+
+@app.post("/api/productos/objeto_agregado/<oid>/duplicar")
+def objeto_agregado_duplicar(oid):
+    """Copia el objeto (archivo + entrada) para poder ponerlo en OTRA pieza. La copia nace SIN
+    pieza (hay que colocarla) y conserva el transform del original como punto de partida."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(cuerpo.get("diseno"))
+    data = _oa_cargar(pid, sub)
+    obj = next((o for o in data["objetos"] if o["id"] == oid), None)
+    if not obj:
+        return jsonify({"error": "no existe"}), 404
+    carp = OA.carpeta(DATOS, pid, sub)
+    nid = "oa_%d" % (1 + max([int(o["id"].split("_")[-1]) for o in data["objetos"] if o.get("id", "").startswith("oa_")] + [0]))
+    try:
+        import shutil
+        shutil.copy2(os.path.join(carp, obj["archivo"]), os.path.join(carp, nid + ".pdf"))
+    except Exception as e:
+        return jsonify({"error": f"no se pudo duplicar: {e}"}), 500
+    # nombre con sufijo para distinguirlo en la barra
+    base = obj.get("nombre") or nid
+    usados = {o.get("nombre") for o in data["objetos"]}
+    nombre = base + " (copia)"
+    k = 2
+    while nombre in usados:
+        nombre = f"{base} (copia {k})"; k += 1
+    nuevo = {**obj, "id": nid, "archivo": nid + ".pdf", "nombre": nombre, "pieza": ""}
+    data["objetos"].append(nuevo)
+    _oa_guardar(pid, sub, data)
+    svg = ""
+    try:
+        with open(os.path.join(carp, nuevo["archivo"]), "rb") as fh:
+            svg = OA.preview_svg(fh.read())
+    except Exception:
+        pass
+    return jsonify({"ok": True, "objeto": {**nuevo, "svg": svg}})
+
+
 @app.delete("/api/productos/objeto_agregado/<oid>")
 def objeto_agregado_borrar(oid):
     pid = request.args.get("pid") or _get_active_producto_id()
