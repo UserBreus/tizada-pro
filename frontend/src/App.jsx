@@ -7046,7 +7046,9 @@ export default function App() {
                             </g>
                           ); })}
                           {_objsEd.map(o => {
-                            const p = piezaDe(o.pieza); if (!p || !o.mesa_rect || !o.bbox_mu) return null;
+                            // Los AGREGADOS no tienen mesa_rect/bbox_mu (no vienen del arte): `centerOf`
+                            // los resuelve centrados al 30% de la pieza. Sin esta excepción no se dibujaban.
+                            const p = piezaDe(o.pieza); if (!p || (!o._agregado && (!o.mesa_rect || !o.bbox_mu))) return null;
                             const vo = _voDe(p);
                             const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel.includes(o.nombre); const solo = sel && editableSel.length === 1;
                             return (
