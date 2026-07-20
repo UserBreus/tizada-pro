@@ -2026,21 +2026,34 @@ def get_editables():
     # y su bbox va CENTRADO con su medida real (w_cm/h_cm contra los cm de la pieza), que es
     # exactamente lo que calcula el motor (`_pos_agregado`).
     import base64 as _b64
+    _pieza2mesa = {}                      # pieza -> mesa del arte (inverso de mesa2pieza)
+    for _mm, _pp in mesa2pieza.items():
+        _pieza2mesa.setdefault(_pp, _mm)
     for _o in (_oa_cargar(pid, sub).get("objetos") or []):
         _pz = _o.get("pieza") or ""
         _rp = reg.get(_pz) or {}
         _info = (_rp.get(ref_talle) or next(iter(_rp.values()), {})) or {}
         _pb = _info.get("bbox_mu")
+        # mesa_rect = rect de la MESA DEL ARTE de esta pieza (igual que un editable del arte);
+        # el bbox se sintetiza en ESE marco (`bbox_agregado_en_arte`). Con el marco de la pieza
+        # coincidía en el editor pero quedaba DESFASADO en el visor del Arte.
         _mesa_rect = _bbox = None
-        if _pb:
+        _m = mp.get(_pz) or _pieza2mesa.get(_pz)
+        if _pb and _m:
+            _mesa_rect = MP.mesa_rect_arte(arte, _m)
+            if _mesa_rect:
+                _bbox = MP.bbox_agregado_en_arte(_o, _mesa_rect, float(_info.get("h_cm") or 0))
+        if _pb and not _bbox:
+            # SIN arte mapeado para esta pieza: el marco pasa a ser la PIEZA (no hay diseño
+            # detrás). Es consistente porque, sin arte, el visor tampoco dibuja el diseño.
             _pw, _ph = (_pb[2] - _pb[0]), (_pb[3] - _pb[1])
             _pw_cm = float(_info.get("w_cm") or 0); _ph_cm = float(_info.get("h_cm") or 0)
             _ow = float(_o.get("w_cm") or 0); _oh = float(_o.get("h_cm") or 0)
-            _fw = (_ow / _pw_cm) if (_pw_cm > 0 and _ow > 0) else 0.3
-            _fh = (_oh / _ph_cm) if (_ph_cm > 0 and _oh > 0) else 0.3
             if _pw > 0 and _ph > 0:
-                _mesa_rect = [0, 0, _pw, _ph]                       # mismo aspecto que la pieza → awf = 1
-                _bbox = [_pw * (1 - _fw) / 2, _ph * (1 - _fh) / 2,  # centrado, tamaño real
+                _fw = (_ow / _pw_cm) if (_pw_cm > 0 and _ow > 0) else 0.3
+                _fh = (_oh / _ph_cm) if (_ph_cm > 0 and _oh > 0) else 0.3
+                _mesa_rect = [0, 0, _pw, _ph]
+                _bbox = [_pw * (1 - _fw) / 2, _ph * (1 - _fh) / 2,
                          _pw * (1 + _fw) / 2, _ph * (1 + _fh) / 2]
         _svg = ""
         try:
