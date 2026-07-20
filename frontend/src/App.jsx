@@ -6871,7 +6871,23 @@ export default function App() {
                 const _edVBnow = edVB || _edFullVB();
                 const edWheel = (e) => { const r = e.currentTarget.getBoundingClientRect(); const mx = (e.clientX - r.left) / r.width, my = (e.clientY - r.top) / r.height; const f = e.deltaY < 0 ? 1 / 1.15 : 1.15; setEdVB(prev => { const b = prev || _edFullVB(); const nw = Math.max(1, b.w * f), nh = Math.max(1, b.h * f); return { x: b.x + (b.w - nw) * mx, y: b.y + (b.h - nh) * my, w: nw, h: nh }; }); };
                 const edPan = (e) => { if (e.button !== 2) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); const base = edVB || _edFullVB(); const sx = e.clientX, sy = e.clientY; const mv = (ev) => setEdVB({ ...base, x: base.x - (ev.clientX - sx) / r.width * base.w, y: base.y - (ev.clientY - sy) / r.height * base.h }); const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); };
-                const setTfScoped = (nm, patch) => setEditorTfs(prev => { const cur = (prev[nm] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 }; const tf = { ...cur, ...patch }; const o = { ...(prev[nm] || {}) }; scopeTalles().forEach(t => { o[t] = tf; }); return { ...prev, [nm]: o }; });
+                // TALLES a los que se aplica el ajuste de UN objeto: aquellos donde SU PIEZA usa la
+                // MISMA mesa del arte que en el talle en vista, es decir donde se ve EXACTAMENTE el
+                // mismo diseño. NO se usa el "grupo" global porque ese se arma con la firma de TODAS
+                // las piezas: dos talles pueden mostrar el mismo diseño PARA ESTA PIEZA y caer en
+                // grupos distintos → el objeto se movía en unos y en otros no. (Caso real: para
+                // 'Frente 1' la mesa 12 cubre 2XL,3XL,4,4XL,5XL,6,6XL; los talles 4 y 6 quedaban
+                // fuera del rango 2XL–6XL y no se actualizaban.)
+                const tallesDeObjeto = (nm) => {
+                  if (edSoloTalle) return [T].filter(Boolean);
+                  const o = _objsUnicos.find(x => x.nombre === nm);
+                  const pz = o && o.pieza;
+                  if (!pz || !talles.length) return _rangoTalles;
+                  const mT = String(_mesaDeEd(pz, T) ?? '');
+                  const ts = talles.filter(t => String(_mesaDeEd(pz, t) ?? '') === mT);
+                  return ts.length ? ts : _rangoTalles;
+                };
+                const setTfScoped = (nm, patch) => setEditorTfs(prev => { const cur = (prev[nm] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 }; const tf = { ...cur, ...patch }; const o = { ...(prev[nm] || {}) }; tallesDeObjeto(nm).forEach(t => { o[t] = tf; }); return { ...prev, [nm]: o }; });
                 // Aplica un cambio a VARIOS objetos y registra el historial con el valor NUEVO en el mismo
                 // paso. (No usar setTimeout+ref: el ref se sincroniza en un efecto que puede correr después
                 // → se guardaba el estado viejo y Ctrl+Z quedaba desfasado.)
@@ -6881,7 +6897,7 @@ export default function App() {
                     const cur = (prev[nm] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 };
                     const tf = { ...cur, ...(patchDe(nm, cur) || {}) };
                     const o = { ...(prev[nm] || {}) };
-                    scopeTalles().forEach(t => { o[t] = tf; });
+                    tallesDeObjeto(nm).forEach(t => { o[t] = tf; });
                     next[nm] = o;
                   });
                   histCommit(next);   // el historial guarda EXACTAMENTE lo que queda aplicado
@@ -7263,7 +7279,9 @@ export default function App() {
                         {/* Aplicar a: TODO EL RANGO (default) | SOLO ESTE TALLE */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 10, paddingLeft: 10, borderLeft: '1px solid var(--border-light)' }}>
                           <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>Aplicar a:</span>
-                          {[{ k: false, l: `Todo el rango (${_rangoTalles.length})` }, { k: true, l: `Solo ${T || 'este talle'}` }].map(op => (
+                          {/* El conteo es el ALCANCE REAL del objeto seleccionado (los talles que
+                              muestran el mismo diseño para SU pieza), no el del grupo global. */}
+                          {[{ k: false, l: `Todo el rango (${(editableSel.length === 1 ? tallesDeObjeto(editableSel[0]) : _rangoTalles).length})` }, { k: true, l: `Solo ${T || 'este talle'}` }].map(op => (
                             <button key={String(op.k)} type="button" onClick={() => setEdSoloTalle(op.k)}
                               title={op.k ? 'El cambio se guarda SOLO en este talle; el resto del rango queda como está' : 'El cambio se guarda en todos los talles del rango'}
                               style={{ padding: '4px 11px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', transition: 'all .15s',
