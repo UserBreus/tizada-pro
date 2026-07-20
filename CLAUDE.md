@@ -29,6 +29,15 @@ el changelog con los pendientes.
 
 ## 2. REGLAS DURAS (no negociables)
 
+- **CUANDO SE PIDE ALGO, VA COMPLETO Y COHERENTE EN TODO EL SISTEMA.** No alcanza con el lugar
+  obvio: hay que **INVESTIGAR EL PROYECTO ENTERO** y aplicar la mejora en **todos** los apartados,
+  campos, vistas, cachés y configuraciones que la hagan funcional y coherente. Antes de decir
+  "listo": buscar TODAS las rutas que tocan esa feature (previews, cachés y sus CLAVES de
+  invalidación, overlays, el motor, el guardado por rango/variante/talle) y verificarlas. Media
+  feature aplicada en un solo lugar NO es una entrega.
+- **Responder con el tiempo que haga falta, no rápido.** Investigar a fondo antes de tocar; usar
+  el MAPA y las memorias (para eso existen). Una respuesta rápida y superficial es un error.
+
 - **NADA A MEDIAS.** Si una feature entra, entra COMPLETA: backend + endpoints + **la pantalla para
   usarla y configurarla**. No entregar la mitad y dejar el resto "para después". Si no entra en una
   sesión, partirla en entregas que **funcionen** cada una — pero nunca a medio hacer.

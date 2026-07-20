@@ -1478,7 +1478,10 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
             ppt = MP.generar_pedido(pl, arte, reg, _pers, prendas, FUENTES, tmp,
                                     mapeo_arte=(mapeo or None), solo_piezas=True,
                                     borde_corte=prod.get("borde_corte"), etiqueta=prod.get("etiqueta"),
-                                    editables_cfg=edit_cfg, editables_tamano=edit_tam)
+                                    editables_cfg=edit_cfg, editables_tamano=edit_tam,
+                                    # el PREVIEW debe mostrar lo MISMO que la tizada (LEY arte=tizada):
+                                    # sin esto los objetos agregados no aparecían en el paso Arte.
+                                    objetos_agregados=_objetos_agregados_motor(pid, sub))
             os.makedirs(cdir, exist_ok=True)
             for f in os.listdir(cdir):              # limpiar svgs viejos de esta variante/talle
                 if f.endswith(".svg"):
@@ -2757,7 +2760,8 @@ def generar():
                                      telas_cfg=telas_cfg, borde_corte=(prod or {}).get("borde_corte"),
                                      etiqueta=(prod or {}).get("etiqueta"),
                                      editables_cfg=_editables_cfg(prod, "principal", (cuerpo.get("editables") or {}).get("principal")),
-                                     editables_tamano=_editables_tamano(prod))
+                                     editables_tamano=_editables_tamano(prod),
+                                     objetos_agregados=_objetos_agregados_motor(pid, _diseno_sub("principal")))
             res["id"] = tid
             res["producto_id"] = pid
             res["producto_nombre"] = (prod or {}).get("nombre", "")

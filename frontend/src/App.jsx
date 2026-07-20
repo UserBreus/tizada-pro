@@ -6942,20 +6942,44 @@ export default function App() {
                 // GUARDAR: persiste TODOS los objetos del diseño (con su transform actual) por VARIABLE +
                 // alcance de variantes → sobrevive al recargar y al reabrir (se relee de la base). Devuelve
                 // true si guardó (para poder cerrar recién ahí).
+                // GUARDA **TODO** LO EDITADO, en TODOS los rangos/talles de la sesión — no solo el
+                // rango que está en vista. `editorTfs` = {nombre: {talle: tf}} y acumula lo de cada
+                // rango que el usuario visitó; antes se persistía sólo `scopeTalles()` del rango en
+                // pantalla y los otros rangos SE PERDÍAN al guardar.
                 const guardarTodo = async () => {
-                  let ts = (scopeTalles() || []).filter(Boolean);           // talles reales del alcance
-                  if (!ts.length && T) ts = [T];                            // fallback: al menos el talle en vista
-                  if (!_mid || !ts.length) { showError('No pude determinar el molde o los talles — reabrí el editor.'); return false; }
+                  if (!_mid) { showError('No pude determinar el molde — reabrí el editor.'); return false; }
+                  // Todos los objetos del diseño (de cualquier rango), por nombre.
+                  const porNombre = new Map();
+                  (ed.objetos || []).forEach(o => { if (!porNombre.has(o.nombre)) porNombre.set(o.nombre, o); });
+                  // Por objeto: agrupar los talles que comparten el MISMO transform (1 request por grupo).
+                  const envios = [];
+                  Object.entries(editorTfs || {}).forEach(([nombre, porTalle]) => {
+                    const o = porNombre.get(nombre);
+                    if (!o || !porTalle) return;
+                    const grupos = new Map();
+                    Object.entries(porTalle).forEach(([talle, tf]) => {
+                      if (!talle || !tf) return;
+                      const k = JSON.stringify(tf);
+                      if (!grupos.has(k)) grupos.set(k, { tf, talles: [] });
+                      grupos.get(k).talles.push(talle);
+                    });
+                    grupos.forEach(g => envios.push({ o, tf: g.tf, talles: g.talles }));
+                  });
+                  if (!envios.length) {   // nada tocado: al menos persistir el alcance en vista
+                    const ts0 = (scopeTalles() || []).filter(Boolean);
+                    _objsUnicos.forEach(o => envios.push({ o, tf: curTfOf(o.nombre, T), talles: ts0.length ? ts0 : [T].filter(Boolean) }));
+                  }
                   try {
-                    for (const o of _objsUnicos) {   // solo los del grupo/rango en vista, sin duplicados
-                      const tf = curTfOf(o.nombre, T);
-                      if (o._agregado) {   // objeto AGREGADO: su transform va al manifiesto (+ su pieza)
-                        await fetch(`/api/productos/objeto_agregado/${o._oid}/transform`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: ts, transform: tf, variante: verVariante || '*', pieza: o.pieza }) });
+                    for (const e of envios) {
+                      if (!e.talles.length) continue;
+                      if (e.o._agregado) {   // objeto AGREGADO: su transform va al manifiesto (+ su pieza)
+                        await fetch(`/api/productos/objeto_agregado/${e.o._oid}/transform`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: e.talles, transform: e.tf, variante: verVariante || '*', pieza: e.o.pieza }) });
                       } else {
-                        await fetch('/api/productos/editables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre: o.nombre, talles: ts, transform: tf, variante: verVariante || '*' }) });   // POR VARIABLE
+                        await fetch('/api/productos/editables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre: e.o.nombre, talles: e.talles, transform: e.tf, variante: verVariante || '*' }) });   // POR VARIABLE
                       }
                     }
-                    showMsg(`Objetos editables guardados (${ts.length} talle/s).`);
+                    const _nT = new Set(envios.flatMap(e => e.talles)).size;
+                    showMsg(`Guardado: ${porNombre.size} objeto/s en ${_nT} talle/s (todos los rangos editados).`);
                     return true;
                   } catch { showError('No se pudo guardar.'); return false; }
                 };
