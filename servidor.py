@@ -1372,10 +1372,14 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
     def _mt(p):
         try: return os.path.getmtime(p)
         except OSError: return 0
-    return ["v4", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+    # v5: la clave incluye los OBJETOS AGREGADOS (su lista y su posición). Sin esto, agregar o
+    # mover un objeto NO invalidaba la caché → el visor del Arte seguía mostrando el render viejo,
+    # sin el objeto (o con la posición anterior).
+    return ["v5", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
             _sha1_corto(mapeo or {}), _sha1_corto((prod or {}).get("borde_corte") or {}),
             _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
-            _sha1_corto(edit_tam or {}), str(variante or ""), str(talle or "")]
+            _sha1_corto(edit_tam or {}), _sha1_corto(_oa_cargar(pid, sub) or {}),
+            str(variante or ""), str(talle or "")]
 
 def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, prioridad="fg"):
     """Devuelve {piezas:{nombre:{svg,w_cm,h_cm}}, talle, cache:bool} — desde disco si la clave

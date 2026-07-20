@@ -1906,7 +1906,13 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
     for o in oa["objetos"]:
         if (o.get("pieza") or "") != pieza:
             continue
-        tf = ((o.get("transforms") or {}).get(str(variante)) or (o.get("transforms") or {}).get("*") or {}).get(str(talle)) or {}
+        # Transform de ESTE talle. Si el talle no tiene uno propio (el usuario lo posicionó con
+        # otro alcance), se usa CUALQUIERA de los guardados de esa variable en vez de caer a
+        # identidad: si no, el objeto aparecía CENTRADO (“donde se le antoja”) y no donde se puso.
+        _pv = (o.get("transforms") or {}).get(str(variante)) or (o.get("transforms") or {}).get("*") or {}
+        tf = _pv.get(str(talle))
+        if not tf:
+            tf = next((v for v in _pv.values() if v), {})
         try:
             ruta = os.path.join(oa["dir"], o["archivo"])
             src = cache.get(ruta)

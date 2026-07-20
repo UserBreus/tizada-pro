@@ -5213,9 +5213,14 @@ export default function App() {
       // de la PIEZA (centro 0.5 + su medida real), igual que en el editor, y se marcan `_agregado`
       // para que el visor use el marco de la PIEZA y no el del diseño → cae en el mismo lugar.
       if (o._agregado) {
-        const tfa = (editorTfs[o.nombre] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 };
+        // Transform del talle en vista; si ese talle no tiene, se usa cualquiera guardado
+        // (mismo criterio que el motor) → el objeto se ve donde se puso, no centrado.
+        const _tfs = editorTfs[o.nombre] || {};
+        const tfa = _tfs[T] || Object.values(_tfs).find(Boolean) || { dx: 0, dy: 0, rot: 0, scale: 1 };
+        // Pieza EXACTA (no genérica): el objeto se asignó a UNA pieza y el motor la matchea exacta.
+        // Con el match genérico se veía en todas las del mismo nombre y no coincidía con la tizada.
         return canvasLayout.layout
-          .filter(q => nombreGenerico(etqNombres[q.idx] || q.name || '') === _og)
+          .filter(q => (etqNombres[q.idx] || q.name || '').trim() === (o.pieza || '').trim())
           .map(p => ({
             nombre: o.nombre, thumb: o.thumb, svg: o.svg, idx: p.idx, _agregado: true,
             rot: tfa.rot, scale: tfa.scale, dx: tfa.dx, dy: tfa.dy,
