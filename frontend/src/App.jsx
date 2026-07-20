@@ -5085,6 +5085,10 @@ export default function App() {
   // ── OBJETOS AGREGADOS: subir un PNG/SVG/PDF/AI y sumarlo al editor como un editable más ──
   const fileInputObjetoRef = React.useRef(null);
   const [subiendoObjeto, setSubiendoObjeto] = React.useState(false);
+  // Objeto recién subido que ESPERA que el usuario elija EN QUÉ PIEZA va. Sin pieza no se
+  // agrega: el objeto vive sobre una pieza concreta (ahí lo posiciona el editor y lo estampa
+  // el motor), así que la elegís vos — no se adivina.
+  const [objPendiente, setObjPendiente] = React.useState(null);
   // Convierte el objeto que devuelve el backend a la FORMA de un editable del arte, para que el
   // editor lo dibuje y lo transforme igual. Sin mesa_rect/bbox_mu → centerOf lo pone centrado en
   // la pieza (0.5, 0.5) al 30% (default razonable); el usuario lo mueve/escala con las herramientas.
@@ -5108,17 +5112,27 @@ export default function App() {
       const r = await fetch('/api/productos/objeto_agregar', { method: 'POST', body: fd });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo agregar el objeto'); return; }
-      // pieza destino: la del objeto seleccionado, o la 1ª pieza del diseño
-      const piezaDefault = (() => {
-        const sel = (editableData?.objetos || []).find(o => o.nombre === editableSel[0]);
-        return sel?.pieza || editableData?.piezas?.[0] || '';
-      })();
-      const nuevo = _objAgregadoAEditable(d.objeto, piezaDefault);
-      setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), nuevo] }));
-      setEditableSel([nuevo.nombre]);
-      showMsg(`Objeto "${nuevo.nombre}" agregado. Movelo y escalalo como cualquier editable.`);
+      // Subido: ahora el usuario ELIGE en qué pieza va (no se asigna solo).
+      setObjPendiente(_objAgregadoAEditable(d.objeto, ''));
     } catch (e) { showError('No se pudo subir: ' + e.message); }
     finally { setSubiendoObjeto(false); }
+  };
+  // El usuario eligió la pieza destino: se agrega al editor y se persiste esa asignación.
+  const asignarObjetoAPieza = async (pieza) => {
+    if (!objPendiente || !pieza) return;
+    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const nuevo = { ...objPendiente, pieza };
+    setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), nuevo] }));
+    setEditableSel([nuevo.nombre]);
+    setObjPendiente(null);
+    // Persistir YA la pieza (si el usuario cierra sin guardar, el objeto igual sabe dónde va).
+    try {
+      await fetch(`/api/productos/objeto_agregado/${nuevo._oid}/transform`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: [], transform: {}, variante: verVariante || '*', pieza }),
+      });
+    } catch { }
+    showMsg(`"${nuevo.nombre}" agregado en ${pieza}. Movelo y escalalo como cualquier editable.`);
   };
   const borrarObjetoAgregado = async (oid) => {
     const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
@@ -6922,6 +6936,38 @@ export default function App() {
                 return (
                   <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(2,6,12,0.93)', backdropFilter: 'blur(3px)', display: 'flex', flexDirection: 'column', padding: 16 }}
                     onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}>
+                    {/* ELEGIR PIEZA para el objeto recién subido: sin esto no se agrega (el objeto
+                        vive SOBRE una pieza; ahí lo posiciona el editor y lo estampa el motor). */}
+                    {objPendiente && (() => {
+                      // piezas visibles de la variable en curso, sin repetir por nombre
+                      const _cands = []; const _vistos = new Set();
+                      _piezasEd.forEach(p => {
+                        const nm = (etqNombres[p.idx] || p.name || '').trim();
+                        if (!nm || _vistos.has(nombreGenerico(nm))) return;
+                        _vistos.add(nombreGenerico(nm)); _cands.push({ nm, p });
+                      });
+                      return (
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 2200, background: 'rgba(2,6,12,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+                          <div style={{ width: '100%', maxWidth: 520, maxHeight: '80vh', display: 'flex', flexDirection: 'column', borderRadius: 14, border: '1px solid var(--border-light)', background: 'var(--bg-card, #14181c)', boxShadow: '0 20px 60px rgba(0,0,0,0.6)', overflow: 'hidden' }}>
+                            <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border-light)' }}>
+                              <h3 style={{ margin: 0, fontSize: 15.5 }}>¿En qué pieza va «{objPendiente.nombre}»?</h3>
+                              <p style={{ margin: '5px 0 0', fontSize: 12.5, color: 'var(--text-muted)' }}>Elegí la pieza del diseño donde se va a colocar. Después lo movés y escalás como cualquier editable.</p>
+                            </div>
+                            <div style={{ padding: 14, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
+                              {_cands.length ? _cands.map(({ nm }) => (
+                                <button key={nm} type="button" onClick={() => asignarObjetoAPieza(nm)}
+                                  style={{ padding: '11px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left', fontSize: 13, fontWeight: 700,
+                                    border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: '#fff' }}>{nm}</button>
+                              )) : <div style={{ gridColumn: '1/-1', fontSize: 13, color: 'var(--text-muted)' }}>No hay piezas visibles en esta variable.</div>}
+                            </div>
+                            <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-light)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                              <button type="button" className="btn ghost" style={{ padding: '8px 14px' }}
+                                onClick={() => { borrarObjetoAgregado(objPendiente._oid); setObjPendiente(null); }}>Cancelar</button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexShrink: 0, flexWrap: 'wrap' }}>
                       <Icon name="edit" style={{ width: 18, height: 18, color: 'var(--accent)' }} />
                       <h3 style={{ margin: 0, fontSize: 16 }}>Editar diseño</h3>
@@ -6946,7 +6992,10 @@ export default function App() {
                             }}
                             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.nombre) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.nombre) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
                             <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={o.thumb ? `data:image/png;base64,${o.thumb}` : (o.svg ? `data:image/svg+xml;base64,${o.svg}` : '')} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
-                            <span style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{o.nombre}</span>
+                            <span style={{ minWidth: 0, flex: 1 }}>
+                              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
+                              {o._agregado && <span style={{ display: 'block', fontSize: 9.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>en {o.pieza || '—'}</span>}
+                            </span>
                             {o._agregado && <span onClick={(e) => { e.stopPropagation(); borrarObjetoAgregado(o._oid); }} title="Quitar objeto agregado"
                               style={{ flexShrink: 0, fontSize: 12, color: 'var(--text-muted)', padding: '2px 4px', cursor: 'pointer' }}>✕</span>}
                           </button>
