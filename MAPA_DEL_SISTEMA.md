@@ -269,6 +269,52 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 
 ---
 
+## 10.b OBJETOS EDITABLES — cómo se manejan (verificado 2026-07-20)
+
+**DOS ORÍGENES, UN SOLO COMPORTAMIENTO.**
+1. **Del arte**: cada capa OCG del .ai cuyo nombre empieza con `editable` (ej. "Editable Escudo").
+   Las detecta `extraer_editables` → `{mesa, capa, nombre, bbox_mu, mesa_rect, w_cm, h_cm, thumb, svg}`.
+2. **Agregados por el usuario**: PNG/SVG/PDF/AI que se suben desde "Editar diseño". `objetos_agregados.py`
+   los normaliza a **un PDF de 1 página + su tamaño en cm**; viven en
+   `datos/productos/<pid>/objetos_agregados/<sub>/` con `objetos_agregados.json` (id, archivo, nombre,
+   **pieza**, w_cm/h_cm, transforms). Endpoints: `objeto_agregar`, `objetos_agregados`,
+   `objeto_agregado/<id>/{pieza,transform,duplicar}` (DELETE para borrar).
+
+**A QUÉ PIEZA PERTENECE.** Los del arte, por la mesa donde viven (`mesa2pieza`, vía el mapeo).
+Los agregados, por la pieza que **elige el usuario clickeando sobre el diseño** (se guarda `pieza`).
+Un objeto agregado vive en UNA sola pieza: para tenerlo en dos se **duplica** (la copia nace sin pieza).
+
+**POSICIÓN (transform).** `{dx, dy, rot, scale, sx, sy}` — `dx/dy` en fracciones **del diseño**,
+`rot` horario, `sx/sy` negativos = espejo. Se guarda **por diseño → variable → objeto → talle**:
+los del arte en `prod["editables"]`, los agregados en su manifiesto. La posición base es el centro
+del diseño; el tamaño sale de los cm reales del objeto contra el diseño colocado sobre la pieza.
+
+**ALCANCE del ajuste (clave, y fuente de un bug real).** Al mover un objeto, el cambio se aplica a
+**todos los talles donde SU PIEZA usa la misma mesa del arte** que el talle en vista — es decir,
+donde se ve exactamente el mismo diseño (`tallesDeObjeto`). **NO** se usa el "grupo" del editor,
+que se arma con la firma de TODAS las piezas: dos talles pueden mostrar el mismo diseño para esa
+pieza y caer en grupos distintos (caso real: para 'Frente 1' la mesa 12 cubre 2XL,3XL,**4**,4XL,
+5XL,**6**,6XL → 4 y 6 no se actualizaban). Con "Solo este talle" el cambio va únicamente a ése.
+
+**CÓMO SE DIBUJAN (las 3 vistas deben coincidir — LEY arte = tizada).** El diseño se coloca sobre la
+pieza escalando al **ALTO** y centrando el ancho (`cm_encajar`). Todos ubican el objeto como
+fracciones de la **mesa del arte del talle que se está dibujando** (las mesas cambian de tamaño por
+rango: en un arte real 1233x1842 el chico y 2352x2607 el grande — tomar una mesa fija produce
+corrimiento):
+- **Editor**: `marcoDeObjeto(o, p, aspMesa)` con `_aspMesaDe(p)` (usa `mapeo_talles`).
+- **Visor del Arte**: el mismo `marcoDeObjeto` con la mesa de su `mappedMesa`. OJO: si existe el
+  render del motor (`pv`) se muestra ESE y no se dibuja overlay.
+- **Motor**: `pos_agregado_en_diseno(obj, cont, mesa_rect)` con `arte_rect(_mesa_a)` + `_matriz_editable`.
+  Los del arte se aíslan de la capa y se redibujan con `cm_encajar`/`cm_tamano_editable`.
+
+**TAMAÑO.** Config por molde `editables_config` (caja máx. por rango, apaisado/vertical, o
+"mantener"). Los agregados hoy conservan su **tamaño real en cm** en todos los talles.
+
+**CACHÉ.** El preview por pieza (`_piezas_base`) se cachea en disco; su clave
+(`_piezas_base_clave`, v5) incluye plantilla, arte, mapeo, borde, etiqueta, editables_cfg,
+editables_tamano **y el manifiesto de objetos agregados** — sin esto, agregar/mover un objeto no
+regeneraba el render y "no se veía".
+
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
 - **2026-07-17 — BUG ABIERTO: "nombro una pieza y quedan otras nombradas" (diagnosticado, NO resuelto).** Reporte del usuario. **NO se nombran solas: se RENUMERAN.** `_renumerar(obj, gen)` (`App.jsx`, ~3798) filtra **TODAS** las piezas cuyo `nombreGenerico` == `gen` y las reescribe `gen 1..N`. Lo llama `nombrarSeleccionadas` (~3770), `renombrarGrupoNombres` y `toggleNombreEnPieza`. Efecto: al nombrar una pieza "Manga", una que ya se llamaba "Manga 3" pasa a "Manga 1" sin que el usuario la toque. **NO es un descuido: es un PARCHE de un bug peor** (comentario en `renombrarGrupoNombres`): el registro se guarda como **dict POR NOMBRE** → dos piezas con el mismo nombre **colisionan y se PIERDE una**; por eso renumeran todo para forzar unicidad. **CAUSA RAÍZ = la identidad por nombre** → esto es exactamente el síntoma de [[identidad-pieza-id-nombre]] (id estable + nombre genérico separados; **fases 1-2 backend HECHAS, falta la FASE 3: frontend + renombrar-por-id**). Arreglar el renumerado sin hacer la fase 3 reintroduce la pérdida de piezas por colisión. **Respuestas a lo que preguntó el usuario:** (a) entre MOLDES distintos NO colisiona (`etqNombres` es del molde en edición); (b) a las piezas ya nombradas SÍ se les cambia el nombre (el número) — ése es el bug. **Ver también** el hermano de este problema: `dedupePorNombre` (~3740) + `_genDeValor`/`_slotDeValor` — regla deliberada "un solo SLOT por NOMBRE" en las VARIABLES; como `nombreGenerico` borra el número final, "Manga 1" y "Manga 2" caen en el mismo slot y queda solo la última → síntoma "no me deja elegir más de una pieza para la variable" (reportado 2026-07-16; para 2 piezas que van juntas el camino previsto es el vínculo `juntas`). Ambos salen del mismo nudo: **identidad por nombre**.
