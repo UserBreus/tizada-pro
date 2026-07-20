@@ -1818,46 +1818,29 @@ def extraer_editables(path_arte, con_thumb=True):
     return objs
 
 
-def mesa_rect_arte(path_arte, mesa):
-    """Rect [x0, y0, w, h] de una MESA del arte — el marco donde viven los editables."""
-    try:
-        pr = fitz.open(path_arte)[int(mesa) - 1].rect
-        return [round(pr.x0, 2), round(pr.y0, 2), round(pr.width, 2), round(pr.height, 2)]
-    except Exception:
-        return None
+def pos_marco_pieza(obj, cont):
+    """Posición base de un objeto cuyo MARCO es la PIEZA (los objetos AGREGADOS por el usuario).
 
+    Por qué el marco es la pieza y no la mesa del arte: el objeto agregado NO vive dentro del
+    diseño — lo coloca el usuario, sobrevive a "Cambiar arte", y la pieza tiene medidas reales en
+    cm que son estables. Las mesas del arte, en cambio, cambian de tamaño según el rango (en un
+    arte real: 1233x1843 el rango chico y 2353x2608 el grande). Atar el objeto a la mesa lo hace
+    depender de un detalle del archivo y produce corrimientos al cambiar de rango.
 
-def bbox_agregado_en_arte(obj, mesa_rect, ph_cm):
-    """`bbox_mu` de un objeto AGREGADO expresado en el MARCO DEL ARTE (la mesa del diseño),
-    para que se comporte EXACTAMENTE como un editable que viene del arte.
-
-    Por qué el marco del arte y no el de la pieza: todo el sistema (editor, visor del Arte y
-    motor) ubica los editables como fracciones de la MESA DEL ARTE, y el diseño se coloca sobre
-    la pieza escalando al ALTO y centrando el ancho (`cm_encajar`). Si el objeto se expresara en
-    el marco de la PIEZA, coincidiría en el editor pero quedaría DESFASADO en el visor del Arte
-    (que usa el aspecto del arte) — que es el bug que se veía.
-
-    El objeto queda CENTRADO en el diseño y con su MEDIDA REAL (w_cm/h_cm):
-      alto del diseño sobre la pieza = alto de la pieza (`ph_cm`)  → fh = h_cm / ph_cm
-      ancho del diseño en cm         = aw * (ph_cm / ah)           → fw = w_cm / ese ancho
+    Con la pieza como marco: `awf`=1 (dx/dy son fracción de la PIEZA), el tamaño sale de los cm
+    reales, y el resultado es idéntico en el editor, el visor del Arte y la tizada, sin resolver
+    ninguna mesa. Devuelve el mismo dict que `_pos_en_pieza`.
     """
+    fw = fh = 0.3                                   # sin medidas: 30% (no debería pasar)
     try:
-        ax0, ay0, aw, ah = [float(v) for v in mesa_rect]
+        pw_cm = float(cont["w"]) / CM
+        ph_cm = float(cont["h"]) / CM
         ow = float(obj.get("w_cm") or 0); oh = float(obj.get("h_cm") or 0)
-        ph_cm = float(ph_cm or 0)
-        if aw <= 0 or ah <= 0 or ph_cm <= 0 or ow <= 0 or oh <= 0:
-            return None
-        ancho_diseno_cm = aw * (ph_cm / ah)
-        if ancho_diseno_cm <= 0:
-            return None
-        # (si no hubiera mesa de arte, quien llama pasa el rect de la PIEZA como marco: la
-        #  fórmula es la misma y queda consistente — ver el fallback del endpoint de editables)
-        bw = (ow / ancho_diseno_cm) * aw          # ancho del objeto en unidades del arte
-        bh = (oh / ph_cm) * ah                    # alto  del objeto en unidades del arte
-        cx, cy = ax0 + aw / 2.0, ay0 + ah / 2.0   # centrado en el diseño
-        return [cx - bw / 2.0, cy - bh / 2.0, cx + bw / 2.0, cy + bh / 2.0]
+        if pw_cm > 0 and ph_cm > 0 and ow > 0 and oh > 0:
+            fw, fh = ow / pw_cm, oh / ph_cm
     except Exception:
-        return None
+        pass
+    return {"rx": (1 - fw) / 2, "ry": (1 - fh) / 2, "rw": fw, "rh": fh, "awf": 1.0}
 
 
 def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
@@ -1920,7 +1903,7 @@ def _bbox_de_xo(xo):
     return min(xs), max(xs), min(ys), max(ys)
 
 
-def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page, mesa_rect):
+def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page):
     """Content-stream que dibuja los objetos AGREGADOS asignados a `pieza`, con su transform.
     Cada objeto es un PDF suelto (datos/.../objetos_agregados/<oid>.pdf). Base = 30% centrado
     (como el editor); encima, el transform del usuario (mover/rotar/escalar/espejar)."""
@@ -1950,11 +1933,8 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
             nom = page.add_resource(xo, Name.XObject, prefix="OA")
             # BASE: la BBox del objeto se escala a su MEDIDA REAL sobre la pieza (fw×fh), centrada
             # → misma proporción que el archivo (no se estira) y mismo tamaño que muestra el editor.
-            # MISMO camino que un editable del arte: bbox en el marco del ARTE -> _pos_en_pieza.
-            _bb = bbox_agregado_en_arte(o, mesa_rect, float(cont["h"]) / CM)
-            pos = _pos_en_pieza(mesa_rect, _bb, cont.get("bbox_mu")) if _bb else None
-            if not pos:
-                continue
+            # MARCO = PIEZA (ver `pos_marco_pieza`): independiente de qué mesa use cada rango.
+            pos = pos_marco_pieza(o, cont)
             # BASE: la BBox del objeto se escala al rectangulo que le toca sobre la pieza
             # (rx, ry, rw, rh de `pos`), en coords de pagina (y-arriba).
             tx0, tx1, ty0, ty1 = _bbox_de_xo(xo)
@@ -3131,10 +3111,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             # ── OBJETOS AGREGADOS por el usuario (PNG/SVG/PDF/AI): NO vienen del arte, son PDFs
             #    sueltos. Se componen sobre ESTA pieza con su transform, igual que un editable.
             #    Base = centrado 30% de la pieza (idéntico al default del editor) → editor = tizada.
-            _ar = arte_rect(_mesa_a)
             arte_draw += _dibujar_objetos_agregados(
-                objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page,
-                [_ar.x0, _ar.y0, _ar.width, _ar.height])
+                objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page)
         else:                                   # ARTE CLÁSICO: diseño sobre la misma mesa del molde
             pag = pagina_arte(mesa, talle)
             xo = out.copy_foreign(pag.as_form_xobject())
