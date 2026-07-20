@@ -1644,12 +1644,8 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       })()}
                       {/* objetos editables, ubicados con la MISMA colocación que el diseño y recortados al contorno */}
                       {!pv && edis.map((o) => {
-                        // Los AGREGADOS se miden contra la PIEZA (no contra el diseño): mismo marco
-                        // que usa el editor y que usa el motor (awf=1) → caen en el mismo lugar.
-                        const _fx = o._agregado ? p.px : imgX, _fy = o._agregado ? p.py : imgY;
-                        const _fW = o._agregado ? p.pw : imgW, _fH = o._agregado ? p.ph : imgH;
-                        const cx = _fx + (o.fcx + o.dx) * _fW, cy = _fy + (o.fcy + o.dy) * _fH;   // dx/dy en fracción del DISEÑO (como el motor)
-                        const w = o.fw * _fW * o.scale, h = o.fh * _fH * o.scale;
+                        const cx = imgX + (o.fcx + o.dx) * imgW, cy = imgY + (o.fcy + o.dy) * imgH;   // dx/dy en fracción del DISEÑO (como el motor)
+                        const w = o.fw * imgW * o.scale, h = o.fh * imgH * o.scale;
                         return (
                           <g key={'edov-' + o.nombre} clipPath={`url(#clipmapv-${p.idx})`}>
                             <g transform={`rotate(${o.rot} ${cx} ${cy})`}>
@@ -5057,17 +5053,9 @@ export default function App() {
       const r = await fetch(`/api/productos/editables?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}&variante=${encodeURIComponent(variante || '*')}`);   // transforms POR VARIABLE
       if (r.ok) {
         const d = await r.json();
-        // OBJETOS AGREGADOS: se traen y se suman como editables más (se muestran/transforman igual).
-        try {
-          const ra = await fetch(`/api/productos/objetos_agregados?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}`);
-          if (ra.ok) {
-            const agg = (await ra.json()).objetos || [];
-            const pz0 = d.piezas?.[0] || '';
-            const _vc = variante || '*';
-            d.objetos = [...(d.objetos || []), ...agg.map(o => _objAgregadoAEditable(
-              { ...o, transforms: (o.transforms || {})[_vc] || (o.transforms || {})['*'] || {} }, o.pieza || pz0))];
-          }
-        } catch { }
+        // Los OBJETOS AGREGADOS ya vienen en `d.objetos` desde /api/productos/editables, con la
+        // MISMA forma que los del arte. Sólo se marcan para las acciones de la barra.
+        d.objetos = (d.objetos || []).map(o => (o.agregado ? _objAgregadoAEditable(o, '') : o));
         setEditableData(d); setEditableDiseno(diseno || 'principal');
         // Al reabrir el MISMO contexto (mismo molde+diseño+variable) con ediciones en memoria, NO pisar:
         // el usuario debe seguir viendo lo que editó. Solo se recarga la base al cambiar de contexto.
@@ -5096,14 +5084,15 @@ export default function App() {
   // Convierte el objeto que devuelve el backend a la FORMA de un editable del arte, para que el
   // editor lo dibuje y lo transforme igual. Sin mesa_rect/bbox_mu → centerOf lo pone centrado en
   // la pieza (0.5, 0.5) al 30% (default razonable); el usuario lo mueve/escala con las herramientas.
+  // El objeto AGREGADO viene del backend con la MISMA forma que uno del arte (mesa_rect,
+  // bbox_mu, pos, svg base64…): no necesita ningún trato especial para dibujarse. Sólo se
+  // marcan `_agregado`/`_oid` para las acciones de la barra (quitar de pieza / duplicar / borrar).
   const _objAgregadoAEditable = (o, piezaDefault) => ({
+    ...o,
     nombre: o.nombre || o.id,
-    _oid: o.id, _agregado: true,
-    pieza: piezaDefault || '',
-    mesa: 0,
-    // el backend manda el svg CRUDO → el editor lo dibuja como data-uri base64
-    svg: o.svg ? btoa(unescape(encodeURIComponent(o.svg))) : '',
-    thumb: null, w_cm: o.w_cm, h_cm: o.h_cm, tipo: o.tipo,
+    _oid: o.oid || o.id, _agregado: true,
+    pieza: o.pieza || piezaDefault || '',
+    svg: o.svg && !o.oid ? btoa(unescape(encodeURIComponent(o.svg))) : (o.svg || ''),
     transforms: o.transforms || {},
   });
   const agregarObjeto = async (file) => {
@@ -5209,26 +5198,6 @@ export default function App() {
       // filtradas por vf) → si tomáramos solo la 1ª ("Frente 1") su idx no estaría en la variante.
       const _og = nombreGenerico(o.pieza || '');
       const mr = o.mesa_rect, bb = o.bbox_mu;
-      // OBJETOS AGREGADOS: no vienen del arte (sin mesa_rect/bbox_mu). Se posicionan en fracciones
-      // de la PIEZA (centro 0.5 + su medida real), igual que en el editor, y se marcan `_agregado`
-      // para que el visor use el marco de la PIEZA y no el del diseño → cae en el mismo lugar.
-      if (o._agregado) {
-        // Transform del talle en vista; si ese talle no tiene, se usa cualquiera guardado
-        // (mismo criterio que el motor) → el objeto se ve donde se puso, no centrado.
-        const _tfs = editorTfs[o.nombre] || {};
-        const tfa = _tfs[T] || Object.values(_tfs).find(Boolean) || { dx: 0, dy: 0, rot: 0, scale: 1 };
-        // Pieza EXACTA (no genérica): el objeto se asignó a UNA pieza y el motor la matchea exacta.
-        // Con el match genérico se veía en todas las del mismo nombre y no coincidía con la tizada.
-        return canvasLayout.layout
-          .filter(q => (etqNombres[q.idx] || q.name || '').trim() === (o.pieza || '').trim())
-          .map(p => ({
-            nombre: o.nombre, thumb: o.thumb, svg: o.svg, idx: p.idx, _agregado: true,
-            rot: tfa.rot, scale: tfa.scale, dx: tfa.dx, dy: tfa.dy,
-            fcx: 0.5, fcy: 0.5,
-            fw: (o.w_cm > 0 && p.w_cm > 0) ? o.w_cm / p.w_cm : 0.3,
-            fh: (o.h_cm > 0 && p.h_cm > 0) ? o.h_cm / p.h_cm : 0.3,
-          }));
-      }
       if (!mr || !bb) return [];
       const ax = mr[0], ay = mr[1], aw = mr[2], ah = mr[3];   // rect del diseño (MuPDF, y-abajo)
       const tf = (editorTfs[o.nombre] || {})[T] || { dx: 0, dy: 0, rot: 0, scale: 1 };
@@ -6863,13 +6832,8 @@ export default function App() {
                   const { imgW, imgH, imgX, imgY } = _imgDim(o, p);
                   const fcx = (mr && bb) ? ((bb[0] + bb[2]) / 2 - mr[0]) / mr[2] : 0.5;
                   const fcy = (mr && bb) ? ((bb[1] + bb[3]) / 2 - mr[1]) / mr[3] : 0.5;
-                  // TAMAÑO del objeto sobre la pieza. Los AGREGADOS entran con su MEDIDA REAL
-                  // (su cm contra el cm de la pieza) → NO se deforman: la proporción es la del
-                  // archivo. (Antes caían a 0.3×0.3 = 30% del ancho Y del alto → estirados.)
-                  const _fAg = (o._agregado && o.w_cm > 0 && o.h_cm > 0 && p.w_cm > 0 && p.h_cm > 0)
-                    ? { w: o.w_cm / p.w_cm, h: o.h_cm / p.h_cm } : null;
-                  const fw = (mr && bb) ? (bb[2] - bb[0]) / mr[2] : (_fAg ? _fAg.w : 0.3);
-                  const fh = (mr && bb) ? (bb[3] - bb[1]) / mr[3] : (_fAg ? _fAg.h : 0.3);
+                  const fw = (mr && bb) ? (bb[2] - bb[0]) / mr[2] : 0.3;
+                  const fh = (mr && bb) ? (bb[3] - bb[1]) / mr[3] : 0.3;
                   // w/h SIEMPRE positivos (un <image> con ancho negativo no dibuja); el signo de
                   // sx/sy es el ESPEJO y se aplica como transform (sgx/sgy).
                   return { cx: imgX + (fcx + tf.dx) * imgW, cy: imgY + (fcy + tf.dy) * imgH,
@@ -7159,9 +7123,7 @@ export default function App() {
                             </g>
                           ); })}
                           {_objsEd.map(o => {
-                            // Los AGREGADOS no tienen mesa_rect/bbox_mu (no vienen del arte): `centerOf`
-                            // los resuelve centrados al 30% de la pieza. Sin esta excepción no se dibujaban.
-                            const p = piezaDe(o.pieza); if (!p || (!o._agregado && (!o.mesa_rect || !o.bbox_mu))) return null;
+                            const p = piezaDe(o.pieza); if (!p || !o.mesa_rect || !o.bbox_mu) return null;
                             const vo = _voDe(p);
                             const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel.includes(o.nombre); const solo = sel && editableSel.length === 1;
                             return (

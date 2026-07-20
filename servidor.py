@@ -2016,6 +2016,47 @@ def get_editables():
         rp = reg.get(o["pieza"]) or {}
         pb = (rp.get(ref_talle) or next(iter(rp.values()), {})).get("bbox_mu")
         o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
+    # ── OBJETOS AGREGADOS: se devuelven con la MISMA FORMA que uno del arte ──────────────
+    # (mesa_rect, bbox_mu, pos, w_cm/h_cm, svg base64, transforms). Así NINGUNA pantalla
+    # necesita un caso especial: el editor, el overlay del Arte, el mapeador y el motor los
+    # tratan igual que al escudo o al logo que ya vienen en el diseño. Antes se devolvían
+    # incompletos y había que parchar vista por vista (y siempre faltaba alguna).
+    #
+    # Síntesis: el marco del objeto ES la pieza (mesa_rect con el aspecto de la pieza → awf=1)
+    # y su bbox va CENTRADO con su medida real (w_cm/h_cm contra los cm de la pieza), que es
+    # exactamente lo que calcula el motor (`_pos_agregado`).
+    import base64 as _b64
+    for _o in (_oa_cargar(pid, sub).get("objetos") or []):
+        _pz = _o.get("pieza") or ""
+        _rp = reg.get(_pz) or {}
+        _info = (_rp.get(ref_talle) or next(iter(_rp.values()), {})) or {}
+        _pb = _info.get("bbox_mu")
+        _mesa_rect = _bbox = None
+        if _pb:
+            _pw, _ph = (_pb[2] - _pb[0]), (_pb[3] - _pb[1])
+            _pw_cm = float(_info.get("w_cm") or 0); _ph_cm = float(_info.get("h_cm") or 0)
+            _ow = float(_o.get("w_cm") or 0); _oh = float(_o.get("h_cm") or 0)
+            _fw = (_ow / _pw_cm) if (_pw_cm > 0 and _ow > 0) else 0.3
+            _fh = (_oh / _ph_cm) if (_ph_cm > 0 and _oh > 0) else 0.3
+            if _pw > 0 and _ph > 0:
+                _mesa_rect = [0, 0, _pw, _ph]                       # mismo aspecto que la pieza → awf = 1
+                _bbox = [_pw * (1 - _fw) / 2, _ph * (1 - _fh) / 2,  # centrado, tamaño real
+                         _pw * (1 + _fw) / 2, _ph * (1 + _fh) / 2]
+        _svg = ""
+        try:
+            with open(os.path.join(OA.carpeta(DATOS, pid, sub), _o["archivo"]), "rb") as _fh:
+                _svg = _b64.b64encode(OA.preview_svg(_fh.read()).encode("utf-8")).decode("ascii")
+        except Exception:
+            pass
+        _tf = (_o.get("transforms") or {}).get(variante) or (_o.get("transforms") or {}).get("*") or {}
+        objetos.append({
+            "nombre": _o.get("nombre") or _o["id"], "capa": _o.get("nombre") or _o["id"],
+            "pieza": _pz, "mesa": 0, "svg": _svg, "thumb": None,
+            "w_cm": _o.get("w_cm"), "h_cm": _o.get("h_cm"),
+            "mesa_rect": _mesa_rect, "bbox_mu": _bbox,
+            "pos": _pos_en_pieza(_mesa_rect, _bbox, _pb) if (_mesa_rect and _bbox and _pb) else None,
+            "transforms": _tf, "agregado": True, "oid": _o["id"],
+        })
     return jsonify({"objetos": objetos, "talles": talles, "piezas": sorted(reg.keys())})
 
 
