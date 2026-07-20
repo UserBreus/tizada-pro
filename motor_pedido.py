@@ -37,6 +37,14 @@ PIEZA_PERSONALIZABLE = "Espalda"                       # lleva nombre + número
 MARGEN_MESA_CM = 2.0                                   # margen sugerido por lado
 CAPAS_GUIA = {"guias", "guías", "guides", "Guides", "guia", "guía"}  # se descartan
 
+
+def _es_capa_guia(nombre):
+    """¿Es la capa GUÍA del arte? (texto que orienta al sistema: piezas, rangos… NUNCA se
+    muestra ni se imprime). Compara NORMALIZADO: "Guías", "GUIAS", "Guia" son la misma capa.
+    Con la comparación exacta anterior, un nombre con mayúscula/acento se colaba: se veía en
+    el editor y —peor— se ESTAMPABA en la tizada."""
+    return _norm_nombre(nombre) in {"guias", "guia", "guides"}
+
 # Capas que NO son campos de personalización (nombres normalizados). Todo lo demás
 # que traiga el arte (nombre, numero, palabra, numero 2, …) ES un placeholder de
 # personalización: se lee su posición y se ESTAMPA con los datos, y la capa original
@@ -2487,7 +2495,7 @@ def detectar_arte(path_arte, registro_molde, ancho_thumb=240):
         for c in doc.layer_ui_configs():
             # Ocultar guías Y objetos editables (estos se muestran APARTE, posicionados,
             # en el paso Arte / la tizada; no deben salir en su lugar original del thumbnail).
-            if c.get("text") in CAPAS_GUIA or _es_capa_editable(c.get("text")):
+            if _es_capa_guia(c.get("text")) or _es_capa_editable(c.get("text")):
                 doc.set_layer_ui_config(c["number"], action=2)  # ocultar para la miniatura
     except Exception:
         pass
@@ -2824,7 +2832,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             # Quitar del arte TODOS los placeholders de personalización (Personalizable
             # y las capas nombre/numero/palabra/…) y las guías; el dato se estampa aparte.
             # Si no, el placeholder original (ej. "00") sale igual, encima del valor.
-            _quitar = (CAPAS_ARTE & CAPAS_GUIA) | (CAPAS_ARTE & {"Personalizable"}) | {
+            _quitar = {c for c in CAPAS_ARTE if _es_capa_guia(c)} | (CAPAS_ARTE & {"Personalizable"}) | {
                 c for c in CAPAS_ARTE if _norm_nombre(c) not in CAPAS_NO_PERS}
             # Los objetos editables se MANTIENEN dentro del diseño (vectorial, exactos),
             # SALVO los que el usuario transformó Y cuyo aislamiento es válido (esos se
