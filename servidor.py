@@ -1036,8 +1036,12 @@ def plantilla_deteccion():
             try:
                 res = _deteccion_base_cached(_pid_act, None)
             except Exception as e:
+                if _falta_nombrar_variantes(_pid_act):
+                    return jsonify(_deteccion_pendiente())
                 return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
         else:
+            if _falta_nombrar_variantes(_pid_act):
+                return jsonify(_deteccion_pendiente())
             return jsonify({"error": "no se pudieron detectar las piezas"}), 422
     try:
         # Cargar etiquetas existentes si las hay para precargarlas en el frontend
@@ -1215,6 +1219,33 @@ def plantilla_pdf_guia():
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
+
+def _deteccion_pendiente():
+    """Misma FORMA que una detección normal pero vacía: el front la consume sin casos especiales."""
+    return {"mesa": None, "talle_ref": None, "talles": [], "unidad": "mm", "img_w": 0, "img_h": 0,
+            "piezas": [], "falta_nombrar_variantes": True,
+            "aviso": "Falta nombrar las variantes (talles) del molde: sin eso no se pueden "
+                     "detectar las piezas."}
+
+
+def _falta_nombrar_variantes(pid=None):
+    """¿El molde todavía no tiene NINGÚN talle reconocido? Pasa cuando el archivo viene con las
+    capas sin nombrar (o con todo en «Capa 1»). NO es un error: es un paso pendiente del alta, y
+    tratarlo como error dejaba la pantalla vacía y la consola llena de 422 en rojo."""
+    try:
+        import fitz
+        pl = _ruta_entrada("plantilla.ai", pid)
+        if not os.path.exists(pl):
+            return False
+        d = fitz.open(pl)
+        try:
+            return not MP._talles_de_plantilla(d)
+        finally:
+            d.close()
+    except Exception:
+        return False
+
+
 @app.get("/api/productos/<pid>/preview")
 def producto_preview(pid):
     """Miniatura VECTORIAL del molde (siluetas de las piezas) para las tarjetas
@@ -1230,6 +1261,12 @@ def producto_preview(pid):
         try:
             res = MP.detectar_piezas(pl, talle_ref=None)
         except Exception as e:
+            # Molde recién subido al que le falta nombrar las variantes: es un PASO PENDIENTE, no
+            # un error. Se devuelve 200 con la miniatura vacía y el estado, así la tarjeta se
+            # dibuja "en preparación" en vez de tirar 422 en la consola.
+            if _falta_nombrar_variantes(pid):
+                return jsonify({"img_w": 0, "img_h": 0, "piezas": [],
+                                "falta_nombrar_variantes": True})
             return jsonify({"error": str(e)}), 422
     return jsonify({"img_w": res.get("img_w"), "img_h": res.get("img_h"),
                     "piezas": [{"idx": p.get("idx"), "px": p.get("px"), "py": p.get("py"),

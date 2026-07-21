@@ -8604,6 +8604,17 @@ export default function App() {
                                 </button>
                               </div>
 
+                              {/* Molde recién subido al que le falta nombrar los talles: no es un
+                                  error, es el paso que sigue. Se dice explícitamente porque si no
+                                  el visor queda vacío y parece que el molde no cargó. */}
+                              {etqData?.falta_nombrar_variantes && (
+                                <div style={{ fontSize: 12, lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--warning, #f5a524)', background: 'rgba(245,165,36,0.10)', color: 'var(--text-secondary)' }}>
+                                  <b style={{ color: 'var(--warning, #f5a524)' }}>El molde se cargó, pero todavía no se puede usar.</b><br />
+                                  Vino sin los nombres de {term.variante.toLowerCase()} en las capas, así que no se pueden
+                                  detectar las piezas. Nombralas acá abajo y aparecen solas.
+                                </div>
+                              )}
+
                               {/* Nombrar variantes: sólo hace falta si el molde vino con las capas
                                   sin nombre, pero se deja siempre disponible para corregirlas. */}
                               <NombrarVariantes
