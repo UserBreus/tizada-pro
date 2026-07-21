@@ -201,13 +201,28 @@ def sync_productos(cat):
         nombre = p.get("nombre") or "Molde"
         activo = 0 if p.get("archivado") else 1
         vguia = p.get("variante_guia")
+        # DUEÑO del molde: los que sube un usuario son suyos ("Mis artículos"). Se persiste acá
+        # porque el catálogo JSON es un documento y la tabla es la identidad: si el dueño vive
+        # sólo en el JSON, se pierde en cuanto la base pase a ser la fuente de verdad.
+        dueno = p.get("creado_por")
         if pid is None:
-            pid = insertar("INSERT INTO producto (nombre, legacy_id, variante_guia, activo) VALUES (?,?,?,?)",
-                           nombre, leg, vguia, activo)
+            pid = insertar("INSERT INTO producto (nombre, legacy_id, variante_guia, activo, creado_por) "
+                           "VALUES (?,?,?,?,?)", nombre, leg, vguia, activo, dueno)
         else:
             ejecutar("UPDATE producto SET nombre=?, variante_guia=?, activo=? WHERE id=?",
                      nombre, vguia, activo, pid)
+            # el dueño se escribe una sola vez y no se pisa: quién lo creó no cambia
+            if dueno:
+                ejecutar("UPDATE producto SET creado_por=? WHERE id=? AND creado_por IS NULL",
+                         dueno, pid)
         ids[leg] = pid
+    # BORRADO LÓGICO: un molde borrado del catálogo dejaba su fila viva para siempre (quedaban
+    # decenas de moldes de prueba). No se borra la fila —hay pedidos y piezas que la referencian—
+    # pero se marca inactiva para que no aparezca como si existiera.
+    if ids:
+        marcas = ",".join("?" * len(ids))
+        ejecutar(f"UPDATE producto SET activo=0 WHERE legacy_id NOT IN ({marcas}) AND activo=1",
+                 *list(ids.keys()))
     return ids
 
 
