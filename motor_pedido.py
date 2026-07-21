@@ -45,26 +45,39 @@ CAPAS_GUIA = {"guias", "guías", "guides", "Guides", "guia", "guía"}  # se desc
 # documento: el handle sobrevive hasta que el GC pase, y mientras tanto el archivo queda trabado
 # (subir un arte nuevo encima fallaba por esto). Se registran y el server los cierra al terminar
 # cada request (`cerrar_abiertos`).
-_ABIERTOS = []
+#
+# El registro es POR HILO (`threading.local`) y NO global: el server atiende varios requests a la
+# vez, y con una lista compartida el `teardown` de un request cerraba los documentos que otro
+# request estaba usando en ese mismo momento → "ValueError: document closed" en `detectar_arte`.
+import threading as _threading
+
+_LOCAL = _threading.local()
+
+
+def _pendientes():
+    l = getattr(_LOCAL, "abiertos", None)
+    if l is None:
+        l = _LOCAL.abiertos = []
+    return l
 
 
 def _abrir(path, *a, **k):
     d = fitz.open(path, *a, **k)
-    _ABIERTOS.append(d)
+    _pendientes().append(d)
     return d
 
 
 def _abrir_pike(path, *a, **k):
     import pikepdf
     d = pikepdf.open(path, *a, **k)
-    _ABIERTOS.append(d)
+    _pendientes().append(d)
     return d
 
 
 def cerrar_abiertos():
-    """Cierra todo PDF abierto desde archivo que haya quedado colgado. Idempotente."""
-    global _ABIERTOS
-    pend, _ABIERTOS = _ABIERTOS, []
+    """Cierra los PDFs que abrió ESTE hilo y quedaron colgados. Idempotente."""
+    pend = _pendientes()
+    _LOCAL.abiertos = []
     for d in pend:
         try:
             d.close()
@@ -1811,13 +1824,29 @@ def extraer_editables(path_arte, con_thumb=True):
     for pno in range(len(doc)):
         pg = doc[pno]
         cajas = {}
+        def _sumar(lay, x0, y0, x1, y1):
+            if not lay or not _es_capa_editable(lay):
+                return
+            b = cajas.setdefault(lay, [x0, y0, x1, y1])
+            b[0] = min(b[0], x0); b[1] = min(b[1], y0)
+            b[2] = max(b[2], x1); b[3] = max(b[3], y1)
+
         for dr in pg.get_drawings():
-            lay = dr.get("layer"); r = dr.get("rect")
-            if not lay or not r or not _es_capa_editable(lay):
-                continue
-            b = cajas.setdefault(lay, [r.x0, r.y0, r.x1, r.y1])
-            b[0] = min(b[0], r.x0); b[1] = min(b[1], r.y0)
-            b[2] = max(b[2], r.x1); b[3] = max(b[3], r.y1)
+            r = dr.get("rect")
+            if r:
+                _sumar(dr.get("layer"), r.x0, r.y0, r.x1, r.y1)
+        # `get_drawings` SOLO ve vectores: una capa editable hecha con una IMAGEN (un PNG que
+        # agregó el usuario, o un logo rasterizado del arte) o con TEXTO quedaba sin bbox y el
+        # objeto NO aparecía en ningún lado. `get_bboxlog(layers=True)` sí los reporta con su capa.
+        try:
+            for it in pg.get_bboxlog(layers=True):
+                if len(it) < 3 or "path" in it[0]:      # los paths ya los cubrió get_drawings
+                    continue
+                r = fitz.Rect(it[1])
+                if not r.is_empty:
+                    _sumar(it[2], r.x0, r.y0, r.x1, r.y1)
+        except Exception:
+            pass                                        # PyMuPDF viejo: queda el comportamiento anterior
         for capa, b in cajas.items():
             thumb = _svg = None
             if con_thumb:                                    # SOLO para el visor del front (caro)

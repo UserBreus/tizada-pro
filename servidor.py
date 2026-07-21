@@ -677,6 +677,21 @@ def _ruta_entrada(nombre, pid=None, sub=None, original=False):
     return p
 
 
+def _en_hilo(fn):
+    """Corre `fn` en un hilo de fondo cerrando al final los PDFs que haya abierto. El
+    `teardown_request` de Flask sólo alcanza a los hilos de request; sin esto un pre-warm dejaba
+    el arte/la plantilla trabados (en Windows no se pueden reemplazar ni borrar)."""
+    def _envuelto():
+        try:
+            fn()
+        finally:
+            try:
+                MP.cerrar_abiertos()
+            except Exception:
+                pass
+    threading.Thread(target=_envuelto, daemon=True).start()
+
+
 @app.teardown_request
 def _cerrar_pdfs(_exc=None):
     """Al terminar CADA request se cierran los PDFs que quedaron abiertos. Sin esto, en Windows el
@@ -1356,7 +1371,7 @@ def arte_mapeo():
                         "por_variable": ({_vcl: _mapeo_efectivo(base, pv, _vcl)} if _vcl else {})}
                 try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _arg, prod, reg, prioridad="bg")
                 except Exception: pass
-        threading.Thread(target=_prewarm, daemon=True).start()
+        _en_hilo(_prewarm)
     except Exception:
         pass
     return jsonify(val)
@@ -1584,7 +1599,7 @@ def arte_preview_piezas():
                     finally:
                         with _PREWARM_LOCK:
                             _PREWARM_EN_CURSO.discard(_pwk)
-                threading.Thread(target=_pw_talles, daemon=True).start()
+                _en_hilo(_pw_talles)
         except Exception:
             pass
     return jsonify(res)
@@ -1667,7 +1682,7 @@ def arte_asignar_todo():
             _ASIGNAR_JOBS[job]["error"] = str(e)
         finally:
             _ASIGNAR_JOBS[job]["done"] = True
-    threading.Thread(target=_run, daemon=True).start()
+    _en_hilo(_run)
     return jsonify({"job": job, "total": len(talles)})
 
 @app.get("/api/arte/asignar_estado")
@@ -2025,8 +2040,15 @@ def get_editables():
     _eds = (((prod or {}).get("editables") or {}).get(_slugify_diseno(diseno)) or {})
     cfg = _eds.get(variante) or _eds.get("*") or {}
     ref_talle = (prod or {}).get("variante_guia")
+    # capas que agregó el usuario: son las únicas que se pueden volver a SACAR del arte. Se
+    # calculan contra el arte ORIGINAL (no contra un registro, que puede desincronizarse).
+    try:
+        _inyectadas = OA.capas_agregadas(_ruta_entrada("arte.ai", pid, sub=sub, original=True))
+    except Exception:
+        _inyectadas = set()
     for o in objetos:
         o["pieza"] = mesa2pieza.get(o["mesa"], "")
+        o["quitable"] = o.get("capa") in _inyectadas
         o["transforms"] = (cfg.get(o["nombre"]) or {}).get("transforms", {})
         # posición BASE del objeto sobre su pieza (cm_encajar en fracciones 0..1 del bbox de
         # la pieza): el arte se escala al ALTO de la pieza y se centra a lo ancho.
@@ -2348,6 +2370,10 @@ def objeto_agregado_colocar(oid):
     except Exception as e:
         return jsonify({"error": f"No se pudo agregar al diseño: {e}"}), 500
     capas = [{"mesa": m, "capa": capa} for m in _mesas_ok]
+    # queda registrado que ESA capa la agregó el usuario: es la única que se puede volver a quitar
+    # del arte (las que trae el .ai original no se tocan)
+    data.setdefault("inyectadas", []).append(
+        {"capa": capa, "nombre": obj.get("nombre"), "pieza": pieza, "mesas": _mesas_ok})
     # Ya vive DENTRO del arte: se saca del sistema paralelo (y su archivo suelto).
     data["objetos"] = [o for o in data["objetos"] if o["id"] != oid]
     _oa_guardar(pid, sub, data)
@@ -2356,6 +2382,30 @@ def objeto_agregado_colocar(oid):
     except OSError:
         pass
     return jsonify({"ok": True, "capas": capas, "nombre": obj.get("nombre")})
+
+
+@app.post("/api/productos/editable_quitar")
+def editable_quitar():
+    """SACA del arte un objeto que había agregado el usuario (contraparte de `colocar`): borra la
+    capa `Editable <nombre>` y su contenido, escribiendo una versión nueva del arte.
+
+    Sólo se pueden quitar las capas que agregó el usuario (registro `inyectadas`): las que trae el
+    .ai original NO se tocan. Body: {pid, diseno, capa}."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(cuerpo.get("diseno"))
+    capa = str(cuerpo.get("capa") or "").strip()
+    data = _oa_cargar(pid, sub)
+    _base = _ruta_entrada("arte.ai", pid, sub=sub, original=True)
+    if capa not in OA.capas_agregadas(_base):
+        return jsonify({"error": "esa capa vino con el arte original: no se puede quitar desde acá"}), 409
+    try:
+        _, borrados = OA.quitar_editable(_base, capa)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo quitar del diseño: {e}"}), 500
+    data["inyectadas"] = [i for i in (data.get("inyectadas") or []) if i.get("capa") != capa]
+    _oa_guardar(pid, sub, data)
+    return jsonify({"ok": True, "capa": capa, "bloques": borrados})
 
 
 @app.post("/api/productos/objeto_agregado/<oid>/pieza")
@@ -2940,7 +2990,7 @@ def generar():
             trabajos[tid]["error"] = f"{e}"
             traceback.print_exc()
 
-    threading.Thread(target=correr, daemon=True).start()
+    _en_hilo(correr)
     return jsonify({"id": tid})
 
 
@@ -3162,7 +3212,7 @@ def generar_multi():
             trabajos[tid]["error"] = f"{e}"
             traceback.print_exc()
 
-    threading.Thread(target=correr, daemon=True).start()
+    _en_hilo(correr)
     return jsonify({"id": tid})
 
 
@@ -4164,7 +4214,7 @@ if __name__ == "__main__":
                 _nido_obtener()
         except Exception:
             pass
-    threading.Thread(target=_precalentar_nido, daemon=True).start()
+    _en_hilo(_precalentar_nido)
     # ⚡ DUAL-STACK IPv4 + IPv6 — CRÍTICO para la velocidad. En Windows "localhost" resuelve a
     # ::1 (IPv6) ANTES que a 127.0.0.1: si el server solo escucha IPv4, CADA request a
     # http://localhost paga ~2s de retry (con ~40 requests al asignar variantes = >1 minuto de

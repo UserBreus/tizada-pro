@@ -49,8 +49,17 @@ def normalizar_a_pdf(datos, filename):
 
     if _es(filename, "png", "jpg", "jpeg"):
         pix = fitz.Pixmap(io.BytesIO(datos))
-        # tamaño en cm asumiendo 96 DPI (estándar web) si la imagen no trae DPI real
+        # DPI REAL de la imagen si lo trae (un PNG exportado a 300 dpi para sublimar debe entrar
+        # con su medida física, no 3 veces más grande); 96 dpi (estándar web) sólo como fallback.
         dpi = 96.0
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(datos)) as _im:
+                _d = (_im.info or {}).get("dpi")
+                if _d and float(_d[1] or 0) > 1:
+                    dpi = float(_d[1])
+        except Exception:
+            pass
         w_cm = pix.width / dpi * 2.54
         h_cm = pix.height / dpi * 2.54
         doc = fitz.open()
@@ -156,6 +165,20 @@ def inyectar_editable(arte_path, colocaciones, pdf_obj, nombre):
     hechas = []
     pdf = pikepdf.open(vigente)
     try:
+        # NOMBRE ÚNICO: el nombre de la capa es la identidad del editable en todo el sistema. Si ya
+        # hay una "Editable Escudo" y se agrega otra igual, quedan dos capas indistinguibles y el
+        # editor no puede saber a cuál mover. Se desambigua con un sufijo.
+        _usados = set()
+        try:
+            for _o in (pdf.Root.get("/OCProperties") or {}).get("/OCGs") or []:
+                _usados.add(str(_o.get("/Name") or ""))
+        except Exception:
+            pass
+        if capa in _usados:
+            _i = 2
+            while f"{capa} {_i}" in _usados:
+                _i += 1
+            capa = f"{capa} {_i}"
         # la CAPA (OCG) es UNA sola para todas las mesas + su registro en el catálogo, o el visor
         # no la reconoce como capa
         ocg = pdf.make_indirect(Dictionary(Type=Name.OCG, Name=String(capa),
@@ -211,6 +234,105 @@ def inyectar_editable(arte_path, colocaciones, pdf_obj, nombre):
     # sigue usando la versión anterior y no queda nada a medias.
     fijar_version(arte_path, _ver_actual(arte_path) + 1)
     return capa, destino, hechas
+
+
+def capas_agregadas(arte_path):
+    """Capas que agregó el USUARIO = las que tiene la versión vigente y NO tiene el arte original.
+
+    Se calcula comparando los dos archivos en vez de leer un registro aparte: el original es la
+    referencia y no puede desincronizarse (un JSON sí — de hecho los objetos colocados antes de
+    existir el registro quedaban sin poder quitarse).
+    """
+    vig = ruta_arte_vigente(arte_path)
+    if vig == arte_path or not os.path.exists(arte_path):
+        return set()
+
+    def _capas(p):
+        d = fitz.open(p)
+        try:
+            return [c["text"] for c in d.layer_ui_configs()]
+        finally:
+            d.close()
+
+    orig = _capas(arte_path)
+    fuera = []
+    for n in _capas(vig):
+        if n in orig:
+            orig.remove(n)      # por posición: si el original ya traía 2 con ese nombre, sólo
+        else:                   # cuenta como agregada la que sobra
+            fuera.append(n)
+    return set(fuera)
+
+
+def quitar_editable(arte_path, capa):
+    """Saca del arte una capa inyectada (`Editable <nombre>`): escribe una versión nueva sin el OCG
+    ni el contenido que dibujaba. Es la contraparte de `inyectar_editable` — sin esto, un objeto
+    colocado no se podía sacar nunca.
+
+    Sólo borra los bloques que escribió `inyectar_editable` (un stream propio por colocación), así
+    que no puede romper el contenido original del arte. Devuelve (ruta_nueva, streams_borrados).
+    """
+    import pikepdf
+    from pikepdf import Name
+
+    vigente = ruta_arte_vigente(arte_path)
+    destino = _ver_path(arte_path, _ver_actual(arte_path) + 1)
+    borrados = 0
+    pdf = pikepdf.open(vigente)
+    try:
+        # 1) ubicar el/los OCG con ese nombre
+        ocp = pdf.Root.get("/OCProperties")
+        if ocp is None:
+            raise ValueError("el arte no tiene capas")
+        objetivo = [o for o in (ocp.get("/OCGs") or []) if str(o.get("/Name") or "") == capa]
+        if not objetivo:
+            raise ValueError(f"no existe la capa «{capa}» en el arte")
+        ids = {o.objgen for o in objetivo}
+
+        # 2) sacarlo del catálogo de capas (OCGs + D.ON/OFF/Order)
+        ocp["/OCGs"] = pikepdf.Array([o for o in ocp["/OCGs"] if o.objgen not in ids])
+        d = ocp.get("/D")
+        if d is not None:
+            for k in ("/ON", "/OFF", "/Order"):
+                if k in d:
+                    d[k] = pikepdf.Array([o for o in d[k]
+                                          if not (hasattr(o, "objgen") and o.objgen in ids)])
+
+        # 3) sacar el CONTENIDO: por página, el nombre de Properties que apunta al OCG y luego el
+        #    stream que lo usa (el que agregamos con `/OC /Pn BDC … EMC`).
+        for page in pdf.pages:
+            props = (page.get("/Resources") or {}).get("/Properties")
+            nombres = [str(k)[1:] for k, v in (props or {}).items()
+                       if hasattr(v, "objgen") and v.objgen in ids]
+            if not nombres:
+                continue
+            cont = page.get("/Contents")
+            if cont is None:
+                continue
+            streams = list(cont) if isinstance(cont, pikepdf.Array) else [cont]
+            quedan = []
+            for st in streams:
+                try:
+                    txt = bytes(st.read_bytes())
+                except Exception:
+                    quedan.append(st); continue
+                # sólo se descarta un stream que EMPIEZA con nuestro bloque de capa: los streams
+                # originales del arte nunca tienen esa forma, así que no se puede borrar de más
+                if any(f"/OC /{n} BDC".encode() in txt for n in nombres) and txt.strip().startswith(b"q /OC"):
+                    borrados += 1
+                    continue
+                quedan.append(st)
+            page["/Contents"] = pikepdf.Array(quedan) if len(quedan) != 1 else quedan[0]
+            for n in nombres:
+                try:
+                    del page["/Resources"]["/Properties"][Name("/" + n)]
+                except Exception:
+                    pass
+        pdf.save(destino)
+    finally:
+        pdf.close()
+    fijar_version(arte_path, _ver_actual(arte_path) + 1)
+    return destino, borrados
 
 
 def carpeta(datos_dir, pid, sub=None):

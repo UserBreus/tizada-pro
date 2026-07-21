@@ -5179,6 +5179,23 @@ export default function App() {
       showMsg(`"${nombre}" agregado al diseño en ${pieza}. Ya es un objeto editable más.`);
     } catch (e) { showError('No se pudo colocar: ' + e.message); }
   };
+  // QUITAR DEL DISEÑO un objeto ya inyectado: borra su capa del arte (contraparte de "colocar").
+  // Sólo alcanza a las capas que agregó el usuario; las que trae el .ai original no se tocan.
+  const quitarObjetoDelArte = async (capa) => {
+    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    try {
+      const r = await fetch('/api/productos/editable_quitar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, capa }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo quitar del diseño'); return; }
+      editorCtx.current = null;                 // el arte cambió → se relee todo
+      await cargarEditablesPedido(_mid, editableDiseno, verVariante);
+      setEditableSel([]);
+      showMsg(`"${capa.replace(/^Editable\s+/i, '')}" se quitó del diseño.`);
+    } catch (e) { showError('No se pudo quitar: ' + e.message); }
+  };
   // QUITAR de la pieza: el objeto NO se borra — queda en la barra, sin pieza, listo para colocarlo
   // en otra. (Un objeto vive en UNA sola pieza; para tenerlo en dos, se duplica.)
   const quitarObjetoDePieza = async (oid) => {
@@ -7153,6 +7170,21 @@ export default function App() {
                         {/* Acciones del objeto AGREGADO seleccionado: un objeto vive en UNA pieza.
                             Para ponerlo en otra: se quita de la actual (y se recoloca), o se DUPLICA. */}
                         {(() => {
+                          // Objeto YA INYECTADO en el arte (es una capa del diseño): la única acción
+                          // propia es SACARLO del arte — el resto (mover/rotar/escalar) es igual que
+                          // cualquier editable, y de la pieza no se lo puede "quitar" sin borrar la capa.
+                          const _iny = editableSel.length === 1
+                            ? _objsUnicos.find(o => o.nombre === editableSel[0] && o.quitable) : null;
+                          if (_iny) return (
+                            <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
+                              <button type="button" title="Saca este objeto del diseño (borra su capa del arte)"
+                                onClick={() => quitarObjetoDelArte(_iny.capa || _iny.nombre)}
+                                style={{ flex: 1, padding: '6px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
+                                  border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
+                                Quitar del diseño
+                              </button>
+                            </div>
+                          );
                           const _sel = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0] && o._agregado) : null;
                           if (!_sel) return null;
                           const _bs = { flex: 1, padding: '6px 6px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 700,

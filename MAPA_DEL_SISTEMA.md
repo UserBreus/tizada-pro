@@ -291,10 +291,36 @@ archivo del usuario y el original queda intacto como respaldo; (b) en Windows `o
 **WinError 5** si cualquier proceso tiene el archivo abierto — crear un archivo nuevo no puede
 fallar por eso. **Todas las mesas de un objeto se inyectan en UNA pasada = una sola versión.**
 
+**QUITAR un objeto agregado.** `quitar_editable(arte, capa)` → escribe otra versión SIN esa capa
+(saca el OCG de `/OCProperties` y borra los content streams que empiezan con `q /OC … BDC`, que son
+exactamente los que escribió la inyección: no puede tocar contenido original). Endpoint
+`POST /api/productos/editable_quitar`. **Sólo se pueden quitar las capas que agregó el usuario**, y
+eso se decide comparando la versión vigente contra el arte ORIGINAL (`capas_agregadas`), no con un
+registro aparte que se puede desincronizar. `/api/productos/editables` marca cada objeto con
+`quitable`. Verificado: tras quitar, el arte queda **pixel-idéntico** al original.
+
+**NOMBRE ÚNICO DE CAPA.** El nombre de la capa ES la identidad del editable en todo el sistema. Al
+inyectar, si ya existe una con ese nombre se desambigua (`Editable Logo 2`); si no, quedan dos capas
+indistinguibles y el bbox que se calcula es la UNIÓN de las dos (objeto gigante y no se lo puede
+mover por separado).
+
 **HANDLES DE PDF.** `motor_pedido` abre PDFs desde archivo con `_abrir`/`_abrir_pike`, que los
-registran, y `@app.teardown_request` llama `MP.cerrar_abiertos()` al terminar cada request. Sin esto
-los documentos quedaban abiertos y **trababan el arte y la plantilla** (no se podían reemplazar ni
-borrar). Fue la causa real del "error al cargar una imagen": 4 de 5 artes estaban trabados.
+registran **por hilo** (`threading.local`), y `@app.teardown_request` llama `MP.cerrar_abiertos()` al
+terminar cada request; los hilos de fondo (pre-warm) van envueltos en `_en_hilo`, que cierra al
+terminar. Sin esto los documentos quedaban abiertos y **trababan el arte y la plantilla** (no se
+podían reemplazar ni borrar): fue la causa real del "error al cargar una imagen" — 4 de 5 artes
+estaban trabados. **El registro NO puede ser global**: el server atiende varios requests a la vez y
+el teardown de uno cerraba los documentos de otro → `ValueError: document closed` en `detectar_arte`.
+
+**DETECCIÓN DEL CONTENIDO DE UNA CAPA (gotcha caro).** `extraer_editables` ubicaba los objetos sólo
+con `get_drawings()`, que **ve vectores y nada más**: una capa editable hecha con una IMAGEN (un PNG
+agregado, un logo rasterizado del arte) o con TEXTO no tenía bbox y el objeto **no aparecía en
+ninguna pantalla**. Se complementa con `pg.get_bboxlog(layers=True)`, que sí reporta `fill-image` /
+`fill-text` con su capa. Verificado que los bboxes de los editables que ya funcionaban NO cambian.
+
+**TAMAÑO DE UNA IMAGEN AGREGADA.** `normalizar_a_pdf` usa el **DPI real** del PNG/JPG si lo trae
+(Pillow, `info["dpi"]`) y 96 dpi sólo como fallback: un PNG exportado a 300 dpi debe entrar con su
+medida física, no 3 veces más grande.
 
 **A QUÉ PIEZA PERTENECE.** Los del arte, por la mesa donde viven (`mesa2pieza`, vía el mapeo).
 Los agregados, por la pieza que **elige el usuario clickeando sobre el diseño** (se guarda `pieza`).
@@ -334,6 +360,8 @@ regeneraba el render y "no se veía".
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
 - **2026-07-21 — RESUELTO: "al cargar una imagen da error" (colocar objeto = 500). Causa real: archivos TRABADOS, no el código de inyección.** Síntoma: `POST /api/productos/objeto_agregado/<id>/colocar` devolvía 500 genérico. Traza real: `PermissionError [WinError 5]` al `os.replace` del temporal sobre `arte.ai`. **Diagnóstico (lo que costó):** primero se asumió que el server tenía el arte abierto y se cerraron `mesa_rect_arte` y `mapeo_variantes_arte` → **seguía fallando**. La prueba que lo destrabó fue empírica: intentar el `os.replace` **desde un proceso externo y con el server muerto** → seguía denegado ⇒ el lock **no era del server**. Sondeando todos los artes: **4 de 5 trabados** (`dcvd`, `hgvbn`, `t5y6rt`, `tht`; libre sólo `nhgnhg`), con 24 procesos python zombis de sesiones viejas y sus handles de PyMuPDF colgados. **NO era OneDrive ni la ACL** (el `replace` entre archivos nuevos en la misma carpeta funciona). **Arreglo en dos capas:** (1) **el arte se versiona** — `inyectar_editable` lee la versión vigente y escribe `arte.v<N+1>.ai` + puntero `arte.ver`, sin `os.replace`, así que ningún lock puede romper la edición y **el archivo original del usuario nunca se toca**; `_ruta_entrada("arte.ai")` resuelve la vigente para todo el sistema y la subida de arte (`original=True`) hace `reset_versiones`. (2) **fin de las fugas de handles** — `motor_pedido` abre con `_abrir`/`_abrir_pike` (registran el documento) y `@app.teardown_request` → `MP.cerrar_abiertos()`; 29 llamadas migradas en 16 funciones que abrían el arte/la plantilla y nunca cerraban. Verificado: tras un request el archivo queda **libre**. **Además:** el endpoint ahora inyecta **todas las mesas en una sola pasada** (una versión, una capa OCG compartida) y **devuelve el motivo real** del fallo en vez de "no se pudo inyectar" (el `print` al log estaba bufferizado y ocultaba la causa). **Gotcha para la próxima:** si algo "no se puede guardar" en Windows, probarlo **desde afuera del server** antes de tocar código — el lock puede ser de otro proceso.
+
+- **2026-07-21 (2) — Lo que rompió el arreglo anterior y lo que faltaba de la feature.** Tres cosas salieron a la luz al probar la app de verdad: **(a) `ValueError: document closed` (500 en `/api/arte/deteccion`).** El registro de handles era **global** y el server es multi-thread: el `teardown` de un request cerraba los PDFs que otro request estaba usando. Ahora es **por hilo** (`threading.local`) y los hilos de fondo (pre-warm, generación) van envueltos en `_en_hilo`, que cierra al terminar. Verificado con 12 requests concurrentes: 0 errores, y el arte queda libre igual. **(b) No se podía SACAR un objeto ya inyectado** — los botones "Quitar de pieza"/"Borrar" apuntaban al manifiesto, del que el objeto sale al colocarse: quedaba pegado para siempre. Se agregó `quitar_editable` + `POST /api/productos/editable_quitar` + botón "Quitar del diseño" (sólo para capas agregadas por el usuario, decidido comparando contra el arte original). Verificado: el arte vuelve **pixel-idéntico** (0 px de diferencia en las 3 mesas). **(c) Un objeto PNG se inyectaba pero NO aparecía en ninguna pantalla**: `extraer_editables` medía las capas sólo con `get_drawings()` (vectores). Se complementó con `get_bboxlog(layers=True)` (imágenes y texto), comprobando que los bboxes de los editables que ya andaban no cambian. Además: **nombre de capa único** al inyectar (dos capas homónimas dan un bbox unión y no se pueden mover por separado) y **DPI real** de la imagen al calcular su medida. **Error mío en el camino:** intenté "reparar" nombres duplicados renombrando OCGs y renombré capas legítimas del arte del usuario —incluida `Guia`, que si se rompe **se imprime**—; el versionado permitió revertirlo sin daño. El arte trae entradas OCG repetidas de forma legítima: **no tocar los nombres de capas existentes.**
 
 - **2026-07-17 — BUG ABIERTO: "nombro una pieza y quedan otras nombradas" (diagnosticado, NO resuelto).** Reporte del usuario. **NO se nombran solas: se RENUMERAN.** `_renumerar(obj, gen)` (`App.jsx`, ~3798) filtra **TODAS** las piezas cuyo `nombreGenerico` == `gen` y las reescribe `gen 1..N`. Lo llama `nombrarSeleccionadas` (~3770), `renombrarGrupoNombres` y `toggleNombreEnPieza`. Efecto: al nombrar una pieza "Manga", una que ya se llamaba "Manga 3" pasa a "Manga 1" sin que el usuario la toque. **NO es un descuido: es un PARCHE de un bug peor** (comentario en `renombrarGrupoNombres`): el registro se guarda como **dict POR NOMBRE** → dos piezas con el mismo nombre **colisionan y se PIERDE una**; por eso renumeran todo para forzar unicidad. **CAUSA RAÍZ = la identidad por nombre** → esto es exactamente el síntoma de [[identidad-pieza-id-nombre]] (id estable + nombre genérico separados; **fases 1-2 backend HECHAS, falta la FASE 3: frontend + renombrar-por-id**). Arreglar el renumerado sin hacer la fase 3 reintroduce la pérdida de piezas por colisión. **Respuestas a lo que preguntó el usuario:** (a) entre MOLDES distintos NO colisiona (`etqNombres` es del molde en edición); (b) a las piezas ya nombradas SÍ se les cambia el nombre (el número) — ése es el bug. **Ver también** el hermano de este problema: `dedupePorNombre` (~3740) + `_genDeValor`/`_slotDeValor` — regla deliberada "un solo SLOT por NOMBRE" en las VARIABLES; como `nombreGenerico` borra el número final, "Manga 1" y "Manga 2" caen en el mismo slot y queda solo la última → síntoma "no me deja elegir más de una pieza para la variable" (reportado 2026-07-16; para 2 piezas que van juntas el camino previsto es el vínculo `juntas`). Ambos salen del mismo nudo: **identidad por nombre**.
 
