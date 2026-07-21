@@ -421,6 +421,29 @@ Caso real (`Molde short`): 36 piezas en «Capa 1». Ahí **no hay capas que nomb
 - **Endpoints**: `POST /api/plantilla/variantes_piezas {pid?, asignaciones:{idx: nombre}}` y
   `GET /api/plantilla/deteccion?candidatas=1`. La asignación cruda queda en
   `datos/productos/<pid>/variantes_piezas.json` para poder reabrir y corregir.
+- 🟢 **GUARDADO AUTOMÁTICO del borrador (2026-07-21)** — antes la asignación **sólo** se escribía
+  dentro del POST caro: el usuario asignaba piezas, salía sin apretar «Aplicar» y **perdía todo**
+  (y encima el botón le quedaba al final de una lista larga, así que no lo encontraba).
+  - **`POST /api/plantilla/variantes_piezas_borrador {pid?, asignaciones}`** persiste **sólo** la
+    asignación cruda (escribe un JSON, ~10 ms medidos): NO parte el PDF ni rehace el registro.
+    El front lo dispara **en cada cambio** de `varPzAsig`, con 500 ms de respiro (debounce).
+  - **`variantes_piezas.json` ahora tiene dos campos**: `asignaciones` = lo que el usuario viene
+    armando (borrador) y **`aplicadas`** = copia de lo que EFECTIVAMENTE se partió. Distintos ⇒
+    queda trabajo **pendiente de aplicar**. ⚠️ Los archivos **viejos** no tienen `aplicadas`: ahí
+    lo guardado **es** lo aplicado (antes sólo se escribía al aplicar) — tanto el GET como el
+    endpoint de borrador siembran `aplicadas` desde `asignaciones` en ese caso, si no un molde ya
+    partido figuraría como pendiente para siempre.
+  - `GET /api/plantilla/variantes` devuelve **`asignacion_piezas`** (borrador) y
+    **`asignacion_piezas_aplicada`**; el front carga las dos (`varPzAsig` / `varPzAplicado`).
+  - **UI**: barra **`position: sticky`** arriba del panel con el estado del guardado
+    (`varPzEstado`: guardando / ✓ guardado / ⚠ error) y el botón **Aplicar al molde**, que ya no
+    vive al final de la lista. Deshabilitado si no hay pendiente («Aplicado al molde ✓»).
+    El acordeón de `NombrarVariantes` **se abre solo** si hay borrador sin aplicar (`pzPend`) y
+    muestra el chip «guardado · falta aplicar» en el encabezado.
+  - ⚠️ El autoguardado compara con `varPzUltimo` (ref, serialización con claves ordenadas) y se
+    **resetea a `null` al cambiar de molde**: si no, el borrador del molde nuevo se compararía con
+    el del anterior. Al CARGAR desde el server también se siembra esa ref, para que abrir la
+    herramienta no dispare un POST inútil.
 - ⚠️ **`candidatas=1` lee el molde ORIGINAL** (`_ruta_entrada(..., original=True)`) y acepta capas
   que todavía no son talle. Leer el original es lo que mantiene **estables los índices de pieza**:
   si leyera la versión ya partida, la segunda vez mostraría sólo las piezas de un talle y la
@@ -480,6 +503,16 @@ número de pieza, fue **rechazado por el usuario por difícil**; sigue existiend
   **pre-selección**: el sistema ya propone la homóloga en cada talle y el usuario sólo confirma.
 - **Fix de paso**: el marquee (`iniciarRubber`) NO se disparaba en este panel — su condición sólo
   contemplaba la pestaña Variables. Ahora incluye `empModo`.
+- 🟢 **LO YA HECHO SE VE SIN ENTRAR AL MODO (2026-07-21)** — los grupos **siempre** se guardaron en
+  el momento (cada confirmación pega contra `POST /api/plantilla/grupo_pieza`), pero al volver a la
+  Moldería el panel arrancaba plegado y **vacío**: el usuario creía que había perdido el trabajo.
+  Ahora, al abrir la pestaña **Moldería** de un molde con >1 talle se **precarga**
+  `GET /api/plantilla/emparejado` en silencio (`cargarEmparejado(true)`, sin `showError`) y el panel
+  cerrado muestra **«✓ N piezas ya agrupadas (guardado)»** con los chips de cada nombre.
+  Precargar `empData` con `empModo === false` es seguro: todo lo que lo consume en el visor está
+  detrás de `if (empModo && empTalle)`.
+- Los fetch de emparejado/grupo ahora mandan **`pid` explícito** (antes iban sin él y dependían del
+  activo de la sesión).
 
 ### Ajuste AVANZADO (reacomodar / corregir por índice) — escondido, no borrado
 
@@ -558,6 +591,8 @@ El cliente puede traer **su** molde y usarlo en el pedido sin pasar por el setup
   cualquier variable los borraba).
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (9) — FIX: el trabajo de «asignar variantes por piezas» se PERDÍA al salir; ahora se guarda solo.** Reportado por el usuario: «cargás los talles y les asignás las piezas, si vuelvo atrás y vuelvo a entrar se pierde y no veo botón de guardar». Ver §10.c. **Causa exacta (verificada en el código):** `variantes_piezas.json` se escribía **únicamente dentro de `POST /api/plantilla/variantes_piezas`**, el endpoint caro que **parte el PDF** y rehace el registro. Todo lo que el usuario asignaba vivía sólo en el estado de React (`varPzAsig`); salir del panel = perder todo. El GET y la recarga del front **ya estaban bien** (`asignacion_piezas` → `varPzAsig` en `activarVarPz`): lo que faltaba era que hubiera algo guardado. Y el botón «Aplicar» estaba **al final** del panel, debajo de la lista de variantes (scroll) — por eso «no lo veo». **Arreglo:** endpoint nuevo **`POST /api/plantilla/variantes_piezas_borrador`** que persiste **sólo** la asignación cruda (medido: **0,01 s**, contra 0,28 s del aplicar en un molde de 36 piezas — en moldes grandes la diferencia es de segundos), disparado por el front **en cada cambio** con 500 ms de debounce; `variantes_piezas.json` gana el campo **`aplicadas`** (lo que realmente se partió) para poder distinguir «guardado» de «aplicado» — los archivos viejos, que no lo tienen, se siembran desde `asignaciones` para que un molde ya partido no figure como pendiente. UI: barra **sticky** arriba del panel con «✓ Guardado automático» y el botón **Aplicar al molde** (ya no al final de la lista), el acordeón **se abre solo** si hay borrador sin aplicar y el encabezado muestra el chip «guardado · falta aplicar». **Grupos de piezas homólogas:** el backend **ya guardaba** cada confirmación en el momento (verificado), pero al volver el panel arrancaba plegado y vacío → ahora se **precarga** `GET /api/plantilla/emparejado` al abrir Moldería y el panel cerrado muestra «✓ N piezas ya agrupadas (guardado)» con los chips; además los fetch de emparejado/grupo mandan `pid` explícito. **VERIFICADO por API sobre un molde de prueba propio** (copia de la plantilla del usuario, 36 piezas en «Capa 1»): asignar 10 piezas → borrador 200 en 0,01 s → **nuevo GET devuelve las 10 idénticas**; completar a 36 → GET devuelve 36 con `pendiente=True`; **aplicar** (0,28 s, 6 variantes / 6 piezas, sin problemas) → GET 36 asignadas = 36 aplicadas, `pendiente=False`; **corregir una pieza sin aplicar** → vuelve a `pendiente=True` con `borrador=2XL` vs `aplicada=XS`. Grupos: crear «ZZ Frente Test» → salir y volver → el nombre y la correspondencia en los 6 talles siguen; confirmar a mano un talle → `manual={"L":{"ZZ Frente Test":5}}` persistido. `npm run build` OK; server reiniciado por PID (36424 → 9376). Molde de prueba **borrado** (`entrada/` y `datos/productos/` quedan con los 5 directorios del usuario, catálogo con `prod_default` + `prod_20260721_143551_3261`, activo restaurado a ese mismo). **NO verificado:** la UI a mano dentro de la app (hay login y no se intentó pasarlo) — la consola del navegador queda **limpia** en la pantalla de login; y el comportamiento del sticky/indicador no se pudo ver renderizado.
 
 - **2026-07-21 (8) — HECHO: AGRUPAR PIEZAS HOMÓLOGAS = el camino principal (el de (7) queda como «ajuste avanzado»).** Ver §10.c. El usuario **rechazó** el panel de (7): «el emparejar talles no es muy intuitivo, debe ser más fácil: seleccionando todas las piezas e indicar que son las mismas y así». Ahora el gesto es UNO: **tocá la pieza en el talle guía → escribí qué es → confirmá**, y con eso queda definido a la vez el **nombre** y la **correspondencia entre talles**. Nada de «emparejar», offsets ni «#7». Endpoint nuevo **`POST /api/plantilla/grupo_pieza`** `{nombre, guia_idx, piezas?:{talle:idx}, renombrar_de?, eliminar?}`: el nombre entra al nombrado de la guía (heurística propaga) y lo que el usuario confirma se guarda en el mecanismo que YA existía (`emparejado_talles.json → manual` + `_aplicar_fijos`) — **no se inventó otro almacenamiento**. **Ayuda, no imposición:** lo no confirmado queda como *propuesta* del sistema y la UI lo distingue (chip gris «propuesto» vs violeta «✓ confirmado» vs naranja «! ninguna pieza le tocó»); cada grupo se pinta con **su color** (mismo color en todos los talles) y el nombre encima de la pieza. Backend refactor: `_guardar_y_repropagar()` (compartido con el POST viejo) y **`MP.nombres_normalizados()`** extraída de `alta_plantilla_manual` — hacía falta porque la clave de `manual` es el nombre **FINAL** (el registro renumera genéricos duplicados) y una corrección guardada con el nombre tipeado quedaba huérfana; al crear/renombrar/deshacer un grupo las claves se **remapean**. Nombre repetido → **409** en vez de renumerar por atrás. **De a un talle a la vez y no todos juntos a propósito:** el formato `anidado` dibuja los talles UNO ENCIMA DEL OTRO y el visor renderiza la detección de UN talle — todos juntos es ilegible; se compensa con la pre-selección. **Fix de paso:** el marquee (`iniciarRubber`) nunca se disparaba en este panel (su condición sólo miraba la pestaña Variables) → ahora incluye `empModo`. **VERIFICADO con datos** (mismo molde de prueba propio de (7): 3 talles × 4 piezas casi idénticas, M acomodado al revés): nombrando sólo en la guía, la propuesta da **0/4 en M** (`A→0,B→2,C→1,D→3` vs. lo correcto `A→3,B→1,C→2,D→0`) y **4/4 en L** (control); **agrupando a mano las 4 en M: 4/4** en `registro_producto.json` (`A@M` queda en `pieza_idx=3, 7.4×7.4 cm` — la pieza correcta, contra 8.1×8.1 de la equivocada) y `emparejado_talles.json` guarda `{"M":{"A":3,"B":1,"C":2,"D":0}}`; **re-propagar no lo pisa** (sigue 4/4); L intacto en automático; nombre duplicado → 409; **renombrar** `A→Frente` arrastra la corrección (`Frente@M = 3`); **deshacer** un grupo lo saca del registro y se lleva sus fijos; `/api/plantilla/nido` 200. Moldes de prueba borrados (3), catálogo con `prod_default`, `prod_20260721_111945_7593` y `prod_20260721_130716_6eb6` (el que subió el usuario a las 13:07) intactos. **NO verificado:** la UI a mano dentro de la app (hay login y no se intentó pasarlo) — la consola del navegador queda limpia en la pantalla de login; no se generó una tizada (el molde de prueba no tiene arte); y el «activo» del catálogo se restauró a `prod_20260721_130716_6eb6` por deducción (crear un producto lo activa; era el último del usuario), no había registro del valor previo.
 

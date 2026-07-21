@@ -1598,8 +1598,42 @@ def plantilla_variantes():
     prev = _cargar("variantes_piezas.json") or {}
     info["modo_sugerido"] = "piezas" if (prev or info.get("total_talles", 0) < 2) else "capas"
     info["asignacion_piezas"] = prev.get("asignaciones") or {}
+    # Lo que se APLICÓ de verdad (se partió el archivo). Sin esto no se puede distinguir "lo que
+    # el usuario viene armando" de "lo que ya está en el molde", y no hay forma de avisarle que le
+    # queda trabajo sin aplicar. Los archivos VIEJOS no tienen `aplicadas`: ahí lo guardado ES lo
+    # aplicado (antes sólo se escribía al aplicar), así que no queda nada pendiente.
+    info["asignacion_piezas_aplicada"] = (prev.get("aplicadas") if "aplicadas" in prev
+                                          else prev.get("asignaciones")) or {}
     info["variantes_piezas"] = prev.get("orden") or []
     return jsonify(info)
+
+
+@app.post("/api/plantilla/variantes_piezas_borrador")
+def plantilla_variantes_piezas_borrador():
+    """Guarda el BORRADOR de la asignación pieza→variante, sin tocar el molde.
+
+    Por qué existe aparte de `/api/plantilla/variantes_piezas`: aplicar PARTE el PDF y rehace el
+    registro (segundos), así que no se puede hacer en cada clic. Pero el trabajo del usuario
+    («estas 6 piezas son la M») se perdía entero si salía sin apretar Aplicar. Esto persiste la
+    asignación cruda en cada cambio — barato, sólo escribe un JSON — y el partido queda para
+    cuando el usuario termina.
+    """
+    cuerpo = request.get_json(force=True) or {}
+    asign = cuerpo.get("asignaciones") or {}
+    pid = _get_active_producto_id()
+    prev = _cargar("variantes_piezas.json", pid) or {}
+    # Archivo VIEJO (escrito sólo al aplicar): lo que tiene guardado ES lo aplicado. Hay que
+    # sembrarlo ANTES de pisar `asignaciones` o el molde ya partido figuraría como pendiente.
+    if "aplicadas" not in prev:
+        prev["aplicadas"] = prev.get("asignaciones") or {}
+    # `mesa`/`capa_origen`/`orden`/`aplicadas` son del último APLICADO: el borrador no los cambia.
+    prev["asignaciones"] = {str(k): str(v) for k, v in asign.items() if str(v or "").strip()}
+    prev["borrador_ts"] = time.time()
+    os.makedirs(os.path.dirname(_ruta_datos("variantes_piezas.json", pid)), exist_ok=True)
+    json.dump(prev, open(_ruta_datos("variantes_piezas.json", pid), "w", encoding="utf-8"),
+              ensure_ascii=False)
+    pendiente = prev["asignaciones"] != (prev.get("aplicadas") or {})
+    return jsonify({"ok": True, "asignadas": len(prev["asignaciones"]), "pendiente": pendiente})
 
 
 @app.post("/api/plantilla/variantes_piezas")
@@ -1676,8 +1710,11 @@ def plantilla_variantes_piezas():
                                 f"rehacer solo: {e}"]
 
     # La asignación CRUDA queda guardada para poder reabrir la herramienta y corregirla.
+    # `aplicadas` = copia de lo que EFECTIVAMENTE se partió: es contra esto que se compara el
+    # borrador para saber si al usuario le queda trabajo sin aplicar.
+    _crudas = {str(k): str(v) for k, v in asign.items()}
     json.dump({"mesa": mesa, "capa_origen": capa_origen, "orden": orden,
-               "asignaciones": {str(k): str(v) for k, v in asign.items()}},
+               "asignaciones": _crudas, "aplicadas": dict(_crudas), "aplicado_ts": time.time()},
               open(_ruta_datos("variantes_piezas.json", pid), "w", encoding="utf-8"),
               ensure_ascii=False)
     return jsonify({"ok": True, **resumen})

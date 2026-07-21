@@ -606,7 +606,14 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
   // (y sugiriendo su modo), porque `info` sólo se cargaba una vez.
   React.useEffect(() => { setInfo(null); modoAuto.current = false; }, [pid]);
   React.useEffect(() => { if (!info) cargar(); }, [info, cargar]);
-  React.useEffect(() => { if (info?.sin_talles) setAbierto(true); }, [info]);
+  // Se abre sola también cuando hay TRABAJO GUARDADO sin aplicar: si el panel arranca plegado, el
+  // usuario vuelve, no ve nada y cree que perdió lo que había hecho (y no encuentra el botón).
+  const pzPend = React.useMemo(() => {
+    const a = info?.asignacion_piezas || {}, b = info?.asignacion_piezas_aplicada || {};
+    const ks = Object.keys(a);
+    return ks.length > 0 && (ks.length !== Object.keys(b).length || ks.some(k => a[k] !== b[k]));
+  }, [info]);
+  React.useEffect(() => { if (info?.sin_talles || pzPend) setAbierto(true); }, [info, pzPend]);
   // El modo lo decide el MOLDE: con 2+ capas de talle se nombra por capa; con una sola capa que
   // trae todas las piezas hay que repartirlas a mano. Se sugiere una sola vez (el usuario manda).
   React.useEffect(() => {
@@ -669,7 +676,10 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
               : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`}
           </span>
         </span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{abierto ? '▲' : '▾'}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          {pzPend && <span style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: 'rgba(245,165,36,0.18)', color: 'var(--warning, #f5a524)', whiteSpace: 'nowrap' }}>guardado · falta aplicar</span>}
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{abierto ? '▲' : '▾'}</span>
+        </span>
       </button>
 
       {abierto && (
@@ -2294,6 +2304,12 @@ export default function App() {
   const [varPzAsig, setVarPzAsig] = useState({});          // {pieza_idx: "nombre de variante"}
   const [varPzInput, setVarPzInput] = useState('');        // texto libre: una letra, un número o palabras
   const [varPzGuardando, setVarPzGuardando] = useState(false);
+  // GUARDADO AUTOMÁTICO del borrador: el trabajo («estas 6 piezas son la M») se perdía entero si
+  // el usuario salía sin apretar Aplicar. Aplicar PARTE el PDF (caro) → no se puede hacer en cada
+  // clic; lo que se persiste solo es la asignación cruda, y aplicar queda para cuando termina.
+  const [varPzAplicado, setVarPzAplicado] = useState({});  // lo que YA está partido en el molde
+  const [varPzEstado, setVarPzEstado] = useState('');       // '', 'guardando', 'guardado', 'error'
+  const varPzUltimo = useRef(null);                         // última asignación persistida (JSON)
   // ── EMPAREJAR TALLES (§10.c): cuando el molde NO trae las piezas dispuestas parecido en cada
   // talle, la heurística de propagación de nombres no tiene señal. Acá el usuario SELECCIONA
   // piezas y las REACOMODA (virtual, solo para emparejar) y/o corrige a mano la pieza homóloga.
@@ -4509,7 +4525,14 @@ export default function App() {
 
   // ── VARIANTES POR PIEZAS ────────────────────────────────────────────────────────────────────
   // Cambiar de molde corta el modo: la asignación pertenece a ESE molde y sus índices de pieza.
-  useEffect(() => { setVarPzModo(false); setVarPzAsig({}); setVarPzInput(''); setEmpModo(false); setEmpData(null); setEmpTalle(null); setEmpFijar(null); }, [activoProdDetalle?.id]);
+  useEffect(() => {
+    setVarPzModo(false); setVarPzAsig({}); setVarPzInput(''); setVarPzAplicado({}); setVarPzEstado('');
+    varPzUltimo.current = null;   // sin esto el autoguardado del molde nuevo compararía con el viejo
+    setEmpModo(false); setEmpData(null); setEmpTalle(null); setEmpFijar(null);
+  }, [activoProdDetalle?.id]);
+  // Serialización ESTABLE (claves ordenadas) para comparar sin depender del orden de las claves.
+  const _varPzSerial = (obj) => JSON.stringify(Object.keys(obj || {})
+    .map(k => parseInt(k, 10)).sort((a, b) => a - b).map(k => [k, obj[k]]));
   // El visor tiene que mostrar TODAS las piezas del molde (no las de un talle): por eso la
   // detección se pide con `candidatas=1`, que además lee el molde ORIGINAL — así los índices de
   // pieza no se mueven y la asignación guardada se puede volver a abrir y corregir.
@@ -4530,10 +4553,42 @@ export default function App() {
           const a = {};
           Object.entries(d.asignacion_piezas || {}).forEach(([k, v]) => { a[parseInt(k, 10)] = v; });
           setVarPzAsig(a);
+          const ap = {};
+          Object.entries(d.asignacion_piezas_aplicada || {}).forEach(([k, v]) => { ap[parseInt(k, 10)] = v; });
+          setVarPzAplicado(ap);
+          // lo recién LEÍDO ya está en el server: se marca como persistido para que el
+          // autoguardado no dispare un POST al abrir la herramienta
+          varPzUltimo.current = _varPzSerial(a);
+          setVarPzEstado(Object.keys(a).length ? 'guardado' : '');
         }
       } catch { }
+    } else {
+      varPzUltimo.current = null; setVarPzEstado('');
     }
   }, [activoProdDetalle?.id, productosCat.activo]);
+
+  // AUTOGUARDADO: cada cambio de la asignación se persiste solo (con un respiro de 500 ms para no
+  // pegarle al server en cada clic). Sólo guarda el BORRADOR: partir el PDF sigue siendo manual.
+  useEffect(() => {
+    if (!varPzModo) return;
+    const s = _varPzSerial(varPzAsig);
+    if (varPzUltimo.current === null) { varPzUltimo.current = s; return; }  // primer render tras cargar
+    if (s === varPzUltimo.current) return;
+    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    setVarPzEstado('guardando');
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/plantilla/variantes_piezas_borrador', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid, asignaciones: varPzAsig }),
+        });
+        if (!r.ok) { setVarPzEstado('error'); return; }
+        varPzUltimo.current = s;
+        setVarPzEstado('guardado');
+      } catch { setVarPzEstado('error'); }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [varPzAsig, varPzModo, activoProdDetalle?.id, productosCat.activo]);
 
   const asignarVariantePz = () => {
     const nom = (varPzInput || '').trim();
@@ -4559,6 +4614,10 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudieron aplicar las variantes'); return; }
       showMsg(`${(d.variantes || []).length} ${term.variante.toLowerCase()}s listas (${(d.piezas || []).length} piezas). Ahora indicá qué es cada pieza.`);
+      // lo aplicado pasa a ser lo que había en el borrador → deja de haber pendiente
+      setVarPzAplicado({ ...varPzAsig });
+      varPzUltimo.current = _varPzSerial(varPzAsig);
+      setVarPzEstado('guardado');
       await fetchProductos();
       // salir del modo: el visor vuelve a la vista normal, que ya muestra los talles nuevos
       await activarVarPz(false);
@@ -5169,15 +5228,29 @@ export default function App() {
   //   1) REACOMODAR — seleccionar piezas (clic / recuadro) y arrastrarlas hasta que el talle
   //      quede dispuesto como el guía. Es virtual: solo mueve la caja con la que se empareja.
   //   2) CORREGIR — decir a mano «esta pieza en este talle es la #N». Manda sobre todo.
-  const cargarEmparejado = async () => {
+  // `silencioso` = precarga para poder MOSTRAR los grupos ya hechos sin entrar al modo (el usuario
+  // volvía, veía el panel vacío y creía que había perdido el trabajo). No molesta con errores.
+  const cargarEmparejado = async (silencioso) => {
+    const pid = activoProdDetalle?.id || productosCat.activo || '';
     try {
-      const r = await fetch('/api/plantilla/emparejado');
+      const r = await fetch(`/api/plantilla/emparejado?pid=${encodeURIComponent(pid)}`);
       const d = await r.json();
-      if (!r.ok) { showError(d.error || 'No se pudo leer el emparejado'); return null; }
+      if (!r.ok) { if (!silencioso) showError(d.error || 'No se pudo leer el emparejado'); return null; }
       setEmpData(d);
       return d;
-    } catch (e) { showError('No se pudo leer el emparejado: ' + e.message); return null; }
+    } catch (e) { if (!silencioso) showError('No se pudo leer el emparejado: ' + e.message); return null; }
   };
+
+  // Precarga al abrir la Moldería de un molde con varios talles: así el panel plegado ya puede
+  // decir «N piezas agrupadas» y el trabajo hecho antes se VE sin tener que entrar al modo.
+  useEffect(() => {
+    if (tabAjustesMolde !== 'molderia') return;
+    if (!((etqData?.talles || []).length > 1) || empData || empModo) return;
+    let vivo = true;
+    (async () => { const d = await cargarEmparejado(true); if (!vivo && d) { /* descartado */ } })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminSubView, tabAjustesMolde, etqData?.talles?.length, activoProdDetalle?.id]);
 
   const abrirTalleEmp = async (t) => {
     setEmpTalle(t); setEmpFijar(null); setSelNombrar(new Set());
@@ -5225,7 +5298,7 @@ export default function App() {
     try {
       const r = await fetch('/api/plantilla/emparejado', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ talle: empTalle, acomodo: _empAcomodoPayload(), ...extra }),
+        body: JSON.stringify({ pid: activoProdDetalle?.id || productosCat.activo || '', talle: empTalle, acomodo: _empAcomodoPayload(), ...extra }),
       });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo aplicar el emparejado'); return; }
@@ -5252,7 +5325,8 @@ export default function App() {
     setEmpGuardando(true);
     try {
       const r = await fetch('/api/plantilla/grupo_pieza', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: activoProdDetalle?.id || productosCat.activo || '', ...body }),
       });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo guardar el grupo'); return false; }
@@ -8984,8 +9058,37 @@ export default function App() {
                                   const porVar = {};
                                   Object.entries(varPzAsig).forEach(([k, v]) => { (porVar[v] = porVar[v] || []).push(parseInt(k, 10)); });
                                   const nombresVar = Object.keys(porVar);
+                                  // ¿queda trabajo sin aplicar? El borrador se guarda solo, pero
+                                  // partir el molde (lo caro) lo dispara el usuario: hay que
+                                  // decírselo con todas las letras y con el botón A LA VISTA.
+                                  const pendiente = _varPzSerial(varPzAsig) !== _varPzSerial(varPzAplicado);
                                   return (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                                      {/* Barra PEGADA arriba: el botón de aplicar no puede quedar al
+                                          final de una lista larga (el usuario no lo encontraba). */}
+                                      <div style={{ position: 'sticky', top: 0, zIndex: 3, display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 8px 9px', margin: '-4px -4px 0', borderRadius: 9, background: 'rgba(12,14,18,0.94)', backdropFilter: 'blur(4px)', border: '1px solid ' + (pendiente ? 'var(--warning, #f5a524)' : 'var(--border-light)') }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 10.5 }}>
+                                          <span style={{ color: 'var(--text-muted)' }}>
+                                            Asignadas <b style={{ color: 'var(--success)' }}>{asignadas}</b> de {total}
+                                          </span>
+                                          <span style={{ color: varPzEstado === 'error' ? 'var(--danger, #ef4444)' : 'var(--text-muted)' }}>
+                                            {varPzEstado === 'guardando' ? 'Guardando…'
+                                              : varPzEstado === 'guardado' ? '✓ Guardado automático'
+                                                : varPzEstado === 'error' ? '⚠ No se pudo guardar' : ''}
+                                          </span>
+                                        </div>
+                                        <button type="button" className="btn success" style={{ width: '100%', fontSize: 12 }}
+                                          disabled={varPzGuardando || !asignadas || !pendiente} onClick={guardarVariantesPz}>
+                                          {varPzGuardando ? 'Aplicando…'
+                                            : !pendiente ? 'Aplicado al molde ✓'
+                                              : `Aplicar al molde (${nombresVar.length} ${term.variante.toLowerCase()}${nombresVar.length === 1 ? '' : 's'})`}
+                                        </button>
+                                        <div style={{ fontSize: 10, lineHeight: 1.35, color: pendiente ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
+                                          {pendiente
+                                            ? 'Lo que asignás se guarda solo: si salís y volvés está todo acá. Falta aplicarlo al molde (tarda unos segundos).'
+                                            : 'El molde ya está partido con estas ' + term.variante.toLowerCase() + 's.'}
+                                        </div>
+                                      </div>
                                       <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                                         Seleccioná en el visor las piezas de una {term.variante.toLowerCase()} (clic, o
                                         arrastrá un recuadro) y escribile el nombre. Después repetí con la siguiente.
@@ -9027,10 +9130,6 @@ export default function App() {
                                           Faltan {total - asignadas} piezas sin {term.variante.toLowerCase()}: van a quedar fuera del molde utilizable.
                                         </div>
                                       )}
-                                      <button type="button" className="btn success" style={{ width: '100%', fontSize: 12 }}
-                                        disabled={varPzGuardando || !asignadas} onClick={guardarVariantesPz}>
-                                        {varPzGuardando ? 'Aplicando…' : `Aplicar ${nombresVar.length} ${term.variante.toLowerCase()}${nombresVar.length === 1 ? '' : 's'}`}
-                                      </button>
                                       <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                                         El archivo original no se toca: se guarda una versión nueva del molde con una capa por {term.variante.toLowerCase()}.
                                       </div>
@@ -9054,10 +9153,32 @@ export default function App() {
                                     </button>
                                   </div>
                                   {!empModo ? (
-                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                                      Cada pieza existe en todos los {term.variante.toLowerCase()}s. Acá <b>seleccionás la pieza</b>,
-                                      le escribís <b>qué es</b> («Frente») y con eso queda definido su nombre <i>y</i> cuál es
-                                      la misma pieza en cada {term.variante.toLowerCase()}.
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      {/* Lo YA hecho se ve SIN entrar al modo: los grupos se guardan en
+                                          el momento (cada uno pega contra el backend), pero al volver el
+                                          panel arrancaba vacío y parecía que se había perdido todo. */}
+                                      {(() => {
+                                        const hechos = Object.values(empData?.nombres_guia || {});
+                                        if (!hechos.length) return null;
+                                        return (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 9, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                                            <span style={{ fontSize: 11, color: 'var(--success)', fontWeight: 700 }}>
+                                              ✓ {hechos.length} pieza{hechos.length === 1 ? '' : 's'} ya agrupada{hechos.length === 1 ? '' : 's'} (guardado)
+                                            </span>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                              {hechos.slice(0, 12).map(n => (
+                                                <span key={n} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', border: `1px solid ${colorGrupo(n)}55` }}>{n}</span>
+                                              ))}
+                                              {hechos.length > 12 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>+{hechos.length - 12}</span>}
+                                            </div>
+                                          </div>
+                                        );
+                                      })()}
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                                        Cada pieza existe en todos los {term.variante.toLowerCase()}s. Acá <b>seleccionás la pieza</b>,
+                                        le escribís <b>qué es</b> («Frente») y con eso queda definido su nombre <i>y</i> cuál es
+                                        la misma pieza en cada {term.variante.toLowerCase()}. Se guarda solo, en el momento.
+                                      </div>
                                     </div>
                                   ) : empVista === 'simple' ? (
                                     <>
@@ -9103,6 +9224,9 @@ export default function App() {
                                               onClick={crearGrupoPieza}>
                                               {empGuardando ? 'Guardando…' : (selNombrar.size === 1 && etqNombres[Array.from(selNombrar)[0]] ? 'Renombrar' : 'Es esta pieza ✓')}
                                             </button>
+                                          </div>
+                                          <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                                            Cada grupo se <b>guarda al confirmarlo</b>: podés salir y volver, queda todo.
                                           </div>
                                         </>
                                       ) : (
