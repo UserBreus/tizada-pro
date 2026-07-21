@@ -1245,6 +1245,23 @@ def plantilla_pdf_guia():
 
 
 
+
+def _ajustar_variante_guia(pid, talles):
+    """La VARIANTE DE GUÍA tiene que ser una que exista. Al nombrar las variantes, la guía seguía
+    apuntando al nombre viejo de la capa («Capa 1»), que ya no existe: la pantalla mostraba esa
+    capa como guía y la detección trabajaba sobre una variante inexistente."""
+    if not talles:
+        return
+    cat = _cargar_catalogo()
+    prod = next((x for x in cat.get("productos", []) if x.get("id") == pid), None)
+    if prod is None:
+        return
+    if prod.get("variante_guia") in talles:
+        return
+    prod["variante_guia"] = talles[0]
+    _guardar_catalogo(cat)
+
+
 def _deteccion_pendiente():
     """Misma FORMA que una detección normal pero vacía: el front la consume sin casos especiales."""
     return {"mesa": None, "talle_ref": None, "talles": [], "unidad": "mm", "img_w": 0, "img_h": 0,
@@ -1638,6 +1655,7 @@ def plantilla_variantes_piezas():
         _regenerar_piezas_index(pid, reg=alta["registro"])
         resumen.update({"talles": alta.get("talles") or [], "piezas": alta.get("piezas") or [],
                         "talle_ref": ref, "problemas": alta.get("problemas") or []})
+        _ajustar_variante_guia(pid, alta.get("talles") or [])
         json.dump({"archivo": (_cargar("resumen_plantilla.json", pid) or {}).get("archivo", "plantilla.ai"),
                    "mesas": alta.get("mesas"), "piezas": alta.get("piezas"),
                    "talles": alta.get("talles"),
@@ -1688,6 +1706,7 @@ def plantilla_variantes_nombrar():
             _regenerar_piezas_index(pid, reg=alta["registro"])
         resumen.update({"talles": alta.get("talles") or [], "piezas": alta.get("piezas") or [],
                         "problemas": alta.get("problemas") or []})
+        _ajustar_variante_guia(pid, alta.get("talles") or [])
     except Exception as e:
         resumen["problemas"] = [f"las variantes quedaron nombradas, pero el registro no se pudo "
                                 f"rehacer solo: {e}"]

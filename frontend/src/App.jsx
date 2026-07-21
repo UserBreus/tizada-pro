@@ -3445,10 +3445,16 @@ export default function App() {
     setProcesando(grande ? 'Procesando tu molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando tu molde…');
     let pid = null;
     try {
-      const r = await fetch('/api/productos/crear', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, propio: true })
-      });
+      // Si ya tenés un artículo con ese nombre, se RE-SUBE el molde ahí en vez de crear otro:
+      // cada reintento creaba un artículo nuevo y quedaban tres "Molde short" iguales.
+      const yaExiste = (productosCat.productos || []).find(
+        p => p.propio && (p.nombre || '').trim().toLowerCase() === nombre.toLowerCase());
+      const r = yaExiste
+        ? { ok: true, json: async () => ({ id: yaExiste.id }) }
+        : await fetch('/api/productos/crear', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre, propio: true })
+          });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'No se pudo crear el artículo');
       pid = d.id;
@@ -3818,6 +3824,16 @@ export default function App() {
           if (!res.ok && guia) {
             // La variante guardada ya no existe en esta plantilla → cargar la por defecto.
             res = await fetch('/api/plantilla/deteccion');
+          } else if (res.ok && guia) {
+            // La guía puede haber quedado apuntando al nombre VIEJO de la capa («Capa 1») después
+            // de nombrar las variantes: el server ya no falla (responde 200 con el estado), así
+            // que hay que validarla contra las variantes reales o se sigue mostrando la vieja.
+            const _d = await res.clone().json().catch(() => null);
+            const _t = _d?.talles || [];
+            if (_t.length && !_t.includes(guia)) {
+              localStorage.removeItem('tizada_talleguia_' + productosCat.activo);
+              res = await fetch('/api/plantilla/deteccion');
+            }
           }
           if (res.ok) {
             const data = await res.json();
