@@ -386,7 +386,37 @@ campo compartido: dos usuarios subiendo su molde a la vez **se pisaban los archi
 todos los endpoints que usaban el activo aceptan `?pid=` sin tocarlos uno por uno. `_pid_de_request`
 acepta `pid`/`producto_id` y **no** `id` (en varios endpoints `id` es otra cosa).
 
+## 10.d MI PROPIO MOLDE / "Mis artículos" (espacio del cliente dentro del pedido)
+
+El cliente puede traer **su** molde y usarlo en el pedido sin pasar por el setup del catálogo.
+
+- **Paso «Diseños» del pedido** (`App.jsx`, `pedidoPaso === 'moldes'`): dos pestañas
+  (`pedidoTabMoldes`) — **Catálogo** (las VARIABLES de los moldes compartidos, `varsCatalogo`) y
+  **Mis artículos** (los productos con `propio === true`, como tarjetas de MOLDE + tarjeta «+»).
+  Botón **«Subir mi propio molde»** también en la barra inferior.
+- **Alta**: modal → `POST /api/productos/crear {nombre, propio:true}` → `POST /api/plantilla`
+  multipart con `archivo` + **`pid`** (nunca depende del molde activo) → entra a la config.
+- **`propio` en `GET /api/productos`** sale del DUEÑO (`creado_por`). **Sin sesión** (modo de un
+  solo usuario) no hay dueño que sellar → se usa la marca `propio` que dejó el alta; sin esto
+  "Mis artículos" quedaba SIEMPRE vacío al correr sin login.
+- **La config NO se duplica**: se entra a la MISMA pantalla de Config → Moldería por deep-link
+  (`setActivoTab('config')` + `setAdminSubView('productos')` + `handleActivarProducto(pid)` +
+  `setMolderiaAbierta(pid)`), con el estado **`modoMiMolde`** = pid. Ese modo: (a) saca **Variables**
+  del menú de "Ajustes de la moldería" (quedan los otros 9), (b) cambia «⬅ Molderías» por
+  **«← Volver al pedido»**, (c) en **Moldería** agrega **«Indicar qué es cada pieza →»**, que abre el
+  MISMO editor de nombrado (que vive en `tabAjustesMolde === 'variables'` + `varStep === 'nombrar'`)
+  con el selector de pasos 1/2/3 oculto. **Se reusa todo: no hay pantallas nuevas de config.**
+- **Un molde propio NO tiene variables** (ese paso se le recorta) → en el pedido se elige **ENTERO**
+  y el motor genera **todas** sus piezas (fila sin `__variante`, camino que ya existía).
+  ⚠️ Por eso el paso **Arte** dejó de navegarse sólo por variable: `itemsArteDe(did)` devuelve
+  `[…variables elegidas, …moldes elegidos sin variable]` y **`arteIdx` recorre ESA lista**
+  (antes `disenoVars[did][arteIdx]` → un molde sin variable no tenía pantalla de arte).
+  `toggleVarEnDiseno` **conserva** los moldes enteros al recalcular `disenoMoldes` (si no, tocar
+  cualquier variable los borraba).
+
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (4) — HECHO: «Mis artículos» + subir mi propio molde desde el pedido (UI).** Ver §10.d. Frontend (`App.jsx`): pestañas Catálogo/Mis artículos en el paso Diseños, botón + modal de subida (crear con `propio:true` → `POST /api/plantilla` con `pid`), y la config del molde propio **reusando** Config→Moldería en modo `modoMiMolde` (sin Variables, con «← Volver al pedido» y «Indicar qué es cada pieza →» que abre el editor de nombrado que ya existía). **Cambio de fondo que no era obvio:** el paso **Arte** navegaba sólo por VARIABLE (`disenoVars[did][arteIdx]`), así que un molde SIN variables —que es exactamente el caso del molde propio— no tenía pantalla de arte; ahora hay `itemsArteDe(did)` (variables + moldes enteros) y `arteIdx` recorre eso; los 8 lugares que resolvían el molde del paso Arte (`moldesDeDiseno(disenoActivo)[arteIdx]`) pasan por ahí. **BUG REAL ENCONTRADO en el backend:** `GET /api/productos` derivaba `propio` sólo del dueño (`creado_por`) y **sin sesión no hay dueño** → corriendo sin login "Mis artículos" quedaba SIEMPRE vacío (feature muerta); ahora, sólo cuando no hay usuario ni dueño, vale la marca `propio` que dejó el alta. **Verificado por API** (crear propio → subir plantilla con `pid` → `propio:true`, 20 talles / 19 piezas por `?pid=`, molde de prueba borrado y activo restaurado a `prod_default`) y `npm run build` OK; la consola del navegador queda limpia en la pantalla de login. **NO verificado:** la UI adentro de la app (hay login y no se intentó pasarlo) — falta la prueba a mano del flujo completo subir → nombrar variantes → nombrar piezas → generar la tizada de un molde propio.
 
 - **2026-07-21 (3) — Nombrar variantes + el molde activo deja de ser global + BUG del talle «0».** (a) Herramienta `variantes_molde.py` + `GET/POST /api/plantilla/variantes` + UI `NombrarVariantes` (Config→Moldería): ver §10.c. Verificado end-to-end con un fixture real (el molde del usuario con las capas renombradas a `Layer N`): 20/20 nombradas, registro rehecho, piezas detectadas (19), original intacto. (b) **`_get_active_producto_id` ya no depende del activo global** (pid de la request → sesión → global); verificado que se puede subir una plantilla a un `pid` puntual **sin activarlo** y que el molde del otro usuario no se toca. (c) **BUG REAL ENCONTRADO Y ARREGLADO: el talle «0» se perdía.** `CAPAS_SISTEMA` incluye `"0"` (por la capa por defecto de AutoCAD en los DXF), así que a un molde con curva de niños (0,1,2,4…) se le borraba un talle entero: el molde del usuario tiene **20 capas de talle y su registro tenía 19**. Ahora se decide por CONTENIDO (si la capa "0" tiene tantas formas como los otros talles, es un talle) y la regla vive en un solo lugar: `_talles_con_molde` la reusa de `_talles_de_plantilla` — estaban duplicadas y por eso el talle aparecía en el alta y desaparecía en la detección. **Pendiente para el usuario:** su registro sigue con 19 talles hasta que se rehaga (re-subir el molde o re-guardar las etiquetas); su `deteccion_cache` también quedó viejo (no se tocó por ser dato suyo).
 

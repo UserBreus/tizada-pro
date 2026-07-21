@@ -3538,7 +3538,11 @@ def get_productos():
             "id": pid,
             "nombre": p["nombre"],
             "creado": p.get("creado", 0),
-            "propio": bool(p.get("creado_por")) and (not _u or p.get("creado_por") == _u.get("id")),
+            # `propio` = va a la pestaña "Mis artículos" del pedido. Normalmente sale del DUEÑO;
+            # sin sesión (modo de un solo usuario) no hay dueño que sellar, así que vale la
+            # marca que dejó el alta — si no, "Mis artículos" quedaría SIEMPRE vacío sin login.
+            "propio": (bool(p.get("creado_por")) and (not _u or p.get("creado_por") == _u.get("id")))
+                      or (not p.get("creado_por") and not _u and bool(p.get("propio"))),
             "de_otro": bool(p.get("creado_por")) and bool(_u) and p.get("creado_por") != _u.get("id"),
             "plantilla": has_plantilla,
             "arte": has_arte,

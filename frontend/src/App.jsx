@@ -2192,6 +2192,17 @@ export default function App() {
   const [tabAjustesMolde, setTabAjustesMolde] = useState('menu');
   // molderiaAbierta: id de la moldería en la que entramos a configurar (null = grilla)
   const [molderiaAbierta, setMolderiaAbierta] = useState(null);
+  // modoMiMolde: pid del molde PROPIO que el usuario está configurando DESDE el pedido. No es
+  // otra pantalla: es la misma config de Moldería en modo RECORTADO (sin el paso Variables, que
+  // es de setup del catálogo) + salida directa de vuelta al pedido.
+  const [modoMiMolde, setModoMiMolde] = useState(null);
+  // Pestaña de la grilla del paso "Diseños": el catálogo compartido o lo que subió el usuario.
+  const [pedidoTabMoldes, setPedidoTabMoldes] = useState('catalogo'); // 'catalogo' | 'mios'
+  // Modal "Subir mi propio molde" (nombre + archivo).
+  const [subirMoldeOpen, setSubirMoldeOpen] = useState(false);
+  const [subirMoldeNombre, setSubirMoldeNombre] = useState('');
+  const [subirMoldeFile, setSubirMoldeFile] = useState(null);
+  const [subirMoldeBusy, setSubirMoldeBusy] = useState(false);
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
   const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0, 0, 0, 0.85] });  // borde de corte del molde
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
@@ -2378,6 +2389,7 @@ export default function App() {
   const [advertenciaInformativa, setAdvertenciaInformativa] = useState('');
   
   const fileInputPlantillaRef = useRef(null);
+  const fileInputMiMoldeRef = useRef(null);   // molde propio subido desde el pedido
   const fileInputArteRef = useRef(null);
   const fileInputFuenteRef = useRef(null);
   const [muestraGlobal, setMuestraGlobal] = useState('');   // texto de prueba: se ve en TODAS las tarjetas del catálogo
@@ -3346,6 +3358,57 @@ export default function App() {
       showError(err.message);
     } finally {
       setProcesando(null);
+    }
+  };
+
+  // ── MI PROPIO MOLDE (desde el pedido) ──────────────────────────────────────
+  // Abre la config de un molde propio REUSANDO las pantallas de Configuración → Moldería
+  // (deep-link), pero en modo recortado: ver `modoMiMolde`.
+  const abrirConfigMiMolde = async (pid) => {
+    if (!pid) return;
+    setModoMiMolde(pid);
+    setActivoTab('config');
+    setAdminSubView('productos');
+    await handleActivarProducto(pid);   // la config lee el molde ACTIVO → activarlo primero
+    setMolderiaAbierta(pid);
+    setTabAjustesMolde('molderia');
+  };
+
+  // Crear el molde propio + subirle el archivo. Se hace con `pid` explícito para NO depender
+  // del molde activo (dos usuarios subiendo a la vez se pisaban los archivos).
+  const subirMiMolde = async () => {
+    const nombre = subirMoldeNombre.trim();
+    if (!nombre || !subirMoldeFile) return;
+    setSubirMoldeBusy(true);
+    const grande = subirMoldeFile.size > 3 * 1024 * 1024 || /\.dxf$/i.test(subirMoldeFile.name || '');
+    setProcesando(grande ? 'Procesando tu molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando tu molde…');
+    let pid = null;
+    try {
+      const r = await fetch('/api/productos/crear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, propio: true })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo crear el artículo');
+      pid = d.id;
+      const fd = new FormData();
+      fd.append('archivo', subirMoldeFile);
+      fd.append('pid', pid);
+      const r2 = await fetch('/api/plantilla', { method: 'POST', body: fd });
+      const d2 = await r2.json();
+      if (!r2.ok) throw new Error(d2.error || 'No se pudo procesar el molde');
+      showMsg('Molde subido ✓ — ahora indicá qué es cada pieza');
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setSubirMoldeBusy(false);
+      setProcesando(null);
+      await fetchProductos();
+      setMoldeReload(v => v + 1);
+      setSubirMoldeOpen(false); setSubirMoldeNombre(''); setSubirMoldeFile(null);
+      // Aunque el archivo haya fallado, el artículo ya existe: se entra igual a su config
+      // para poder re-subirlo desde ahí (si no, quedaría un molde huérfano inalcanzable).
+      if (pid) await abrirConfigMiMolde(pid);
     }
   };
 
@@ -4604,6 +4667,23 @@ export default function App() {
     }
   }, [activoTab, adminSubView, productosCat.productos.length]);
 
+  // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
+  // molde por detrás, MÁS cada molde elegido ENTERO. Los moldes propios que sube el usuario no
+  // tienen Variables (ese paso se les recorta) → sin esto no tendrían pantalla de arte.
+  const itemsArteDe = (did) => {
+    const vs = ((disenoVars || {})[did] || []).map(cl => {
+      const p = productosCat.productos.find(x => (x.variantes || []).some(v => v.clave === cl));
+      const vo = p && (p.variantes || []).find(v => v.clave === cl);
+      return { clave: cl, moldeId: p && p.id, label: (vo && vo.label) || 'Variable' };
+    }).filter(x => x.moldeId);
+    const conVar = new Set(vs.map(x => x.moldeId));
+    const ms = ((disenoMoldes || {})[did] || []).filter(m => !conVar.has(m)).map(m => {
+      const p = productosCat.productos.find(x => x.id === m);
+      return { clave: null, moldeId: m, label: (p && p.nombre) || 'Molde' };
+    });
+    return [...vs, ...ms];
+  };
+
   // En el paso de DISEÑOS, el molde mostrado debe estar activo (para que "Cargar
   // diseño" suba a ese molde y el estado de arte sea el suyo).
   useEffect(() => {
@@ -4613,13 +4693,14 @@ export default function App() {
     // sola a la primera" (la del arte). Ver [[operario-vs-config]].
     if (activoTab !== 'pedidos' || pedidoPaso !== 'arte') { return; }
     // VARIABLE-FIRST: se navega por VARIABLE. El molde es el de la variable (por detrás).
-    const clave = (disenoVars[disenoActivo] || [])[arteIdx];
-    const id = clave
-      ? (productosCat.productos.find(p => (p.variantes || []).some(v => v.clave === clave)) || {}).id
-      : (disenoMoldes[disenoActivo] || [])[arteIdx];
+    // Los moldes elegidos ENTEROS (propios, sin variables) entran como ítem sin clave.
+    const it = itemsArteDe(disenoActivo)[arteIdx] || {};
+    const clave = it.clave;
+    const id = it.moldeId;
     if (!id) return;
     if (id !== productosCat.activo) { handleActivarProducto(id); return; } // al activar, el efecto vuelve a correr
     if (clave && verVariante !== clave) setVerVariante(clave);   // el visor de arte muestra SOLO las piezas de la variable
+    if (!clave && verVariante) setVerVariante(null);             // molde entero → sin filtro de variable
     // Siempre se ve el MOLDE (vacío). El DISEÑO solo si en ESTE pedido ya se subió (para ESTE diseño).
     if (arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(); else { setMapeoData(null); cargarMoldeOperario(); }
   }, [activoTab, pedidoPaso, arteIdx, productosCat.activo, arteCargado, disenoActivo, disenoVars, disenoMoldes, verVariante]);
@@ -5002,8 +5083,7 @@ export default function App() {
   // Subir el diseño del cliente DENTRO del wizard (inline, sin pantalla completa).
   const cargarDisenoWizard = async (file) => {
     if (!file) return;
-    const _cl = (disenoVars[disenoActivo] || [])[arteIdx];   // VARIABLE-FIRST: el molde es el de la variable actual
-    const id = (_cl ? (productosCat.productos.find(p => (p.variantes || []).some(v => v.clave === _cl)) || {}).id : null) || (disenoMoldes[disenoActivo] || [])[arteIdx];
+    const id = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId;   // VARIABLE-FIRST: el molde es el del ítem actual
     const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo);
     showMsg('Subiendo y procesando el diseño…');
     try {
@@ -5042,6 +5122,10 @@ export default function App() {
   const variablesDisponibles = productosCat.productos.flatMap(p =>
     (p.variantes || []).filter(v => (v.valores || []).some(x => x.pieza_idx != null))
       .map(v => ({ ...v, moldeId: p.id, moldeNombre: p.nombre, planilla: p.planilla_template_id })));
+  // Grilla del paso "Diseños": en «Catálogo» van las variables de los moldes COMPARTIDOS; los
+  // moldes propios del usuario tienen su propia pestaña («Mis artículos»).
+  const _moldePropio = (mid) => !!(productosCat.productos.find(p => p.id === mid) || {}).propio;
+  const varsCatalogo = variablesDisponibles.filter(v => !_moldePropio(v.moldeId));
   const varByClave = (clave) => variablesDisponibles.find(v => v.clave === clave) || null;
   const varsDeDiseno = (did) => disenoVars[did] || [];
   // Pool de variables ELEGIDAS en el pedido (unión de todos los diseños) → lo que ofrece la planilla.
@@ -5059,9 +5143,18 @@ export default function App() {
     targets.forEach(did => { const s = new Set(nv[did] || []); if (enTodos) s.delete(clave); else s.add(clave); nv[did] = [...s]; });
     setDisenoVars(nv);
     const nm = { ...disenoMoldes };
-    disenosPedido.forEach(d => { nm[d.id] = [...new Set((nv[d.id] || []).map(cl => varByClave(cl)?.moldeId).filter(Boolean))]; });
+    // Los moldes elegidos ENTEROS (los propios, que no tienen variables) NO salen de `nv`:
+    // hay que conservarlos o este recálculo los borraría al tocar cualquier variable.
+    disenosPedido.forEach(d => {
+      const enteros = (disenoMoldes[d.id] || []).filter(m => moldeSinVariables(m));
+      nm[d.id] = [...new Set([...(nv[d.id] || []).map(cl => varByClave(cl)?.moldeId).filter(Boolean), ...enteros])];
+    });
     setDisenoMoldes(nm);
   };
+  // ¿Este molde no ofrece variables? (los propios del usuario: se eligen ENTEROS y el motor
+  // genera todas sus piezas, que es justo lo que se quiere para un artículo propio).
+  const moldeSinVariables = (mid) => !variablesDisponibles.some(v => v.moldeId === mid);
+  // (elegir/soltar un MOLDE ENTERO en el diseño → `toggleMoldeEnDiseno`, más abajo: ya existía)
   // Si el molde tiene variables, cada fila DEBE tener una (si no, el motor generaría
   // TODAS las piezas). La variable de cada fila sale de su DISEÑO (como antes el molde) —
   // NO hay columna de variable: el Diseño de la fila define la variable a generar.
@@ -5261,7 +5354,7 @@ export default function App() {
   });
   const agregarObjeto = async (file) => {
     if (!file) return;
-    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     setSubiendoObjeto(true);
     try {
       const fd = new FormData();
@@ -5279,7 +5372,7 @@ export default function App() {
   // dx/dy (fracción de la pieza) de ese punto, y `talles` el alcance en el que se aplica.
   const asignarObjetoAPieza = async (pieza, tf0, talles) => {
     if (!objPendiente || !pieza) return;
-    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     const nombre = objPendiente.nombre, _oid = objPendiente._oid;
     setObjPendiente(null);
     // COLOCAR = INYECTAR el objeto en el arte como una capa `Editable <nombre>`, en la mesa de esa
@@ -5304,7 +5397,7 @@ export default function App() {
   // QUITAR DEL DISEÑO un objeto ya inyectado: borra su capa del arte (contraparte de "colocar").
   // Sólo alcanza a las capas que agregó el usuario; las que trae el .ai original no se tocan.
   const quitarObjetoDelArte = async (capa) => {
-    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     try {
       const r = await fetch('/api/productos/editable_quitar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5321,7 +5414,7 @@ export default function App() {
   // QUITAR de la pieza: el objeto NO se borra — queda en la barra, sin pieza, listo para colocarlo
   // en otra. (Un objeto vive en UNA sola pieza; para tenerlo en dos, se duplica.)
   const quitarObjetoDePieza = async (oid) => {
-    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     setEditableData(prev => ({ ...(prev || {}), objetos: ((prev || {}).objetos || []).map(o => (o._oid === oid ? { ...o, pieza: '' } : o)) }));
     try {
       await fetch(`/api/productos/objeto_agregado/${oid}/pieza`, {
@@ -5332,7 +5425,7 @@ export default function App() {
   };
   // DUPLICAR: copia el objeto para poder ponerlo TAMBIÉN en otra pieza. La copia nace sin pieza.
   const duplicarObjetoAgregado = async (oid) => {
-    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     try {
       const r = await fetch(`/api/productos/objeto_agregado/${oid}/duplicar`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5348,7 +5441,7 @@ export default function App() {
   // RECOLOCAR un objeto que ya existe (sin pieza): reusa el flujo de "tocá sobre el diseño".
   const recolocarObjeto = (o) => setObjPendiente({ ...o, _nuevo: false });
   const borrarObjetoAgregado = async (oid) => {
-    const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     try {
       await fetch(`/api/productos/objeto_agregado/${oid}?pid=${encodeURIComponent(_mid)}&diseno=${encodeURIComponent(editableDiseno)}`, { method: 'DELETE' });
       setEditableData(prev => ({ ...(prev || {}), objetos: ((prev || {}).objetos || []).filter(o => o._oid !== oid) }));
@@ -5358,7 +5451,7 @@ export default function App() {
   // mostrarlos POSICIONADOS sobre la pieza (reflejando la base + ajustes del pedido).
   React.useEffect(() => {
     if (pedidoPaso !== 'arte') return;
-    const mid = moldesDeDiseno(disenoActivo)[arteIdx];
+    const mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId;
     if (mid && arteCargado[disenoActivo + '|' + mid]) cargarEditablesPedido(mid, disenoActivo, verVariante);   // POR VARIABLE: recarga al cambiar de variable
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidoPaso, disenoActivo, arteIdx, arteCargado, verVariante]);
@@ -5521,11 +5614,11 @@ export default function App() {
   };
   const arteSiguiente = () => {
     if (bloqueaPorSinDiseno()) return;
-    const varsDis = disenoVars[disenoActivo] || [];   // VARIABLE-FIRST: se avanza por variable
-    if (arteIdx < varsDis.length - 1) { setArteIdx(arteIdx + 1); return; }
-    // siguiente diseño que tenga variables
+    const itemsDis = itemsArteDe(disenoActivo);   // se avanza por variable (o por molde entero)
+    if (arteIdx < itemsDis.length - 1) { setArteIdx(arteIdx + 1); return; }
+    // siguiente diseño que tenga algo que cargar
     const idx = disenosPedido.findIndex(d => d.id === disenoActivo);
-    const siguiente = disenosPedido.slice(idx + 1).find(d => (disenoVars[d.id] || []).length);
+    const siguiente = disenosPedido.slice(idx + 1).find(d => itemsArteDe(d.id).length);
     if (siguiente) { setDisenoActivo(siguiente.id); setArteIdx(0); }
     else if (todasArteCargadas) irAPlanillaDesdeArte();
   };
@@ -5929,6 +6022,7 @@ export default function App() {
               onClick={() => {
                 setActivoTab('pedidos');
                 setAdminSubView('dashboard');
+                setModoMiMolde(null);   // salir por el menú también sale del modo «mi molde»
               }}
             >
               <Icon name="pedidos" />
@@ -5939,6 +6033,7 @@ export default function App() {
               onClick={() => {
                 setActivoTab('config');
                 setAdminSubView('dashboard');
+                setModoMiMolde(null);   // salir por el menú también sale del modo «mi molde»
               }}
             >
               <Icon name="config" />
@@ -6352,19 +6447,94 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Pestañas: el catálogo compartido vs. lo que subió este usuario */}
+                {(() => {
+                  const nMios = productosCat.productos.filter(p => p.propio).length;
+                  const tabs = [{ k: 'catalogo', n: 'Catálogo', c: varsCatalogo.length }, { k: 'mios', n: 'Mis artículos', c: nMios }];
+                  return (
+                    <div style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
+                      {tabs.map(t => (
+                        <button key={t.k} type="button" onClick={() => setPedidoTabMoldes(t.k)}
+                          style={{ padding: '7px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', gap: 7,
+                            background: pedidoTabMoldes === t.k ? 'var(--accent)' : 'transparent', color: pedidoTabMoldes === t.k ? '#04222b' : 'var(--text-secondary)' }}>
+                          {t.n}
+                          <span style={{ fontSize: 10.5, fontWeight: 800, opacity: 0.75 }}>{t.c}</span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+
                 {/* Cuerpo: grilla de moldes (SIEMPRE visible, aunque no haya diseños) */}
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 14, paddingRight: 2 }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 12, paddingRight: 2 }}>
                   {disenosPedido.length === 0 && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.02)', border: '1px dashed var(--border-light)', borderRadius: 10, padding: '9px 12px', marginBottom: 12 }}>
                       <Icon name="edit" style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
                       Escribí un diseño arriba y después tocá las variables que van en él.
                     </div>
                   )}
-                  {variablesDisponibles.length === 0 && (
+                  {pedidoTabMoldes === 'catalogo' && varsCatalogo.length === 0 && (
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '12px 0' }}>No hay variables creadas. Armalas en <b>Configuración › Variables</b>.</div>
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
-                      {variablesDisponibles.map(v => {
+
+                  {/* ── MIS ARTÍCULOS: los moldes que subió este usuario. No tienen Variables
+                      (ese paso se les recorta), así que se eligen ENTEROS: el motor genera
+                      todas sus piezas. ── */}
+                  {pedidoTabMoldes === 'mios' && (() => {
+                    const mios = productosCat.productos.filter(p => p.propio);
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
+                        {mios.map(p => {
+                          const susDisenos = disenosPedido.filter(d => (disenoMoldes[d.id] || []).includes(p.id));
+                          const enActivo = asignDiseno === 'todos'
+                            ? (disenosPedido.length > 0 && disenosPedido.every(d => (disenoMoldes[d.id] || []).includes(p.id)))
+                            : (disenoMoldes[asignDiseno] || []).includes(p.id);
+                          const colAct = asignDiseno === 'todos' ? 'var(--accent)' : colorDeDiseno(asignDiseno);
+                          return (
+                            <div key={p.id}
+                              style={{ position: 'relative', textAlign: 'left', padding: 10, borderRadius: 12, transition: 'all .18s',
+                                border: enActivo ? `1.5px solid ${colAct}` : '1px solid var(--border-light)',
+                                background: enActivo ? `${colAct === 'var(--accent)' ? 'rgba(0,216,245,0.08)' : colAct + '14'}` : 'rgba(255,255,255,0.02)',
+                                boxShadow: enActivo ? `0 0 16px ${colAct === 'var(--accent)' ? 'rgba(0,216,245,0.16)' : colAct + '2e'}` : 'none' }}>
+                              <button type="button" onClick={() => toggleMoldeEnDiseno(p.id)} title={p.plantilla ? 'Usar este artículo en el diseño' : 'Todavía no tiene el molde procesado'}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 7 }}>
+                                  <span style={{ fontWeight: 700, fontSize: 12.5, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
+                                  <span style={{ width: 19, height: 19, borderRadius: '50%', border: enActivo ? 'none' : '1.5px solid var(--border-light)', background: enActivo ? colAct : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .18s' }}>
+                                    {enActivo && <Icon name="check" style={{ width: 11, height: 11, color: '#000', strokeWidth: 3 }} />}
+                                  </span>
+                                </div>
+                                <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 8, padding: 6 }}>
+                                  <MoldePreviewSVG id={p.id} height={64} color={enActivo ? colAct : 'rgba(255,255,255,0.5)'} />
+                                </div>
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 7, minHeight: 15, alignItems: 'center' }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: p.plantilla ? 'var(--success)' : 'var(--warning)' }}>{p.plantilla ? 'Molde OK' : 'Sin molde'}</span>
+                                  {susDisenos.map(d => (
+                                    <span key={d.id} title={d.nombre} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: colorDeDiseno(d.id), background: colorDeDiseno(d.id) + '1c', padding: '1px 6px', borderRadius: 999 }}>
+                                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: colorDeDiseno(d.id) }} />{d.nombre}
+                                    </span>
+                                  ))}
+                                </div>
+                              </button>
+                              <button type="button" className="btn ghost" style={{ width: '100%', marginTop: 8, fontSize: 11, padding: '5px 8px' }}
+                                onClick={() => abrirConfigMiMolde(p.id)}>
+                                ⚙ Configurar
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {/* Tarjeta "+" para sumar otro artículo propio */}
+                        <button type="button" onClick={() => { setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                          style={{ minHeight: 150, borderRadius: 12, border: '1.5px dashed var(--border-light)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 12.5, fontWeight: 700 }}>
+                          <Icon name="plus" style={{ width: 18, height: 18 }} />
+                          Subir mi propio molde
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  <div style={{ display: pedidoTabMoldes === 'catalogo' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
+                      {varsCatalogo.map(v => {
                         const susDisenos = disenosPedido.filter(d => varsDeDiseno(d.id).includes(v.clave));
                         const enActivo = asignDiseno === 'todos' ? (disenosPedido.length > 0 && disenosPedido.every(d => varsDeDiseno(d.id).includes(v.clave))) : varsDeDiseno(asignDiseno).includes(v.clave);
                         const tplBase = variablesPlanilla.length ? variablesPlanilla[0].planilla : v.planilla;
@@ -6407,6 +6577,12 @@ export default function App() {
                   {(moldesUnion.length > 0 || disenosPedido.length > 0) && (
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
                   )}
+                  {/* El cliente puede traer SU molde: se sube acá mismo y queda en «Mis artículos». */}
+                  <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
+                    onClick={() => { setPedidoTabMoldes('mios'); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                    title="Subir un molde propio (.ai · .pdf · .dxf)">
+                    <Icon name="upload" style={{ width: 13, height: 13 }} /> Subir mi propio molde
+                  </button>
                   <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
                     {disenosPedido.length > 0 && disenosSinMolde.length > 0 && (
                       <span style={{ fontSize: 11.5, color: 'var(--warning)', maxWidth: 280, textAlign: 'right', lineHeight: 1.35 }}>
@@ -6700,10 +6876,12 @@ export default function App() {
               {/* Paso 2 · Diseño por molde (uno a uno) */}
               {pedidoPaso === 'arte' && !mapeandoOperario && (() => {
                 // VARIABLE-FIRST: se navega por VARIABLE (cada una con su molde por detrás).
-                const varsDis = varsDeDiseno(disenoActivo);
-                const varClaveActual = varsDis[arteIdx];
-                const vObjActual = varByClave(varClaveActual);
-                const _id = vObjActual?.moldeId;
+                // Cada ítem es una VARIABLE elegida o un MOLDE entero (los propios no tienen variables).
+                const itemsDis = itemsArteDe(disenoActivo);
+                const itActual = itemsDis[arteIdx] || {};
+                const varClaveActual = itActual.clave;
+                const vObjActual = varClaveActual ? varByClave(varClaveActual) : { label: itActual.label };
+                const _id = itActual.moldeId;
                 const _m = moldeById(_id);
                 const _moldeListo = !!canvasLayout?.layout?.length;
                 const _tieneDiseno = !!mapeoData?.mesas?.length;
@@ -6771,17 +6949,19 @@ export default function App() {
 
                   {/* Navegación por VARIABLE (miniaturas con estado) del diseño activo */}
                   <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexShrink: 0 }}>
-                    {varsDis.map((cl, idx) => {
-                      const vo = varByClave(cl); if (!vo) return null;
-                      const on = idx === arteIdx, loaded = !!arteCargado[disenoActivo + '|' + vo.moldeId];
+                    {itemsDis.map((it, idx) => {
+                      const vo = it.clave ? varByClave(it.clave) : null;
+                      const on = idx === arteIdx, loaded = !!arteCargado[disenoActivo + '|' + it.moldeId];
                       return (
-                        <button key={cl} type="button" onClick={() => setArteIdx(idx)}
+                        <button key={it.clave || 'm:' + it.moldeId} type="button" onClick={() => setArteIdx(idx)}
                           style={{ position: 'relative', flexShrink: 0, width: 92, padding: 8, borderRadius: 12, cursor: 'pointer', transition: 'all .18s',
                             border: on ? `1.5px solid ${colAct}` : '1px solid var(--border-light)', background: on ? `${colAct}14` : 'rgba(255,255,255,0.02)' }}>
                           <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 8, padding: 4 }}>
-                            <VariantePreviewSVG pid={vo.moldeId} variante={vo} height={46} color={on ? colAct : 'rgba(255,255,255,0.45)'} />
+                            {vo
+                              ? <VariantePreviewSVG pid={vo.moldeId} variante={vo} height={46} color={on ? colAct : 'rgba(255,255,255,0.45)'} />
+                              : <MoldePreviewSVG id={it.moldeId} height={46} color={on ? colAct : 'rgba(255,255,255,0.45)'} />}
                           </div>
-                          <div style={{ fontSize: 10.5, fontWeight: 600, color: on ? '#fff' : 'var(--text-secondary)', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vo.label || 'Variable'}</div>
+                          <div style={{ fontSize: 10.5, fontWeight: 600, color: on ? '#fff' : 'var(--text-secondary)', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(vo && vo.label) || it.label || 'Variable'}</div>
                           <span style={{ position: 'absolute', top: 6, right: 6, width: 16, height: 16, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: loaded ? '#34d399' : 'rgba(255,255,255,0.12)', color: '#001016' }}>
                             {loaded && <Icon name="check" style={{ width: 9, height: 9, strokeWidth: 3.5 }} />}
                           </span>
@@ -6931,7 +7111,7 @@ export default function App() {
               {/* Editor de OBJETOS EDITABLES (modal) — mover/rotar/escalar sobre la silueta del molde */}
               {editorEditOpen && (() => {
                 const ed = editableData || { objetos: [], talles: [] };
-                const _mid = moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo;   // fallback: nunca undefined (evita guardar en el molde equivocado)
+                const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;   // fallback: nunca undefined (evita guardar en el molde equivocado)
                 // El editor trabaja sobre la VARIANTE elegida (no todo el molde): filtra sus piezas
                 // y matchea los objetos por nombre GENÉRICO (el objeto está en "Frente 9" y la
                 // variante usa "Frente 18", ambos "Frente").
@@ -8006,12 +8186,20 @@ export default function App() {
                   <>
                     <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        <button className="btn ghost" onClick={() => { setMolderiaAbierta(null); setTabAjustesMolde('menu'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 12px' }}>
-                          ⬅ Molderías
-                        </button>
+                        {modoMiMolde ? (
+                          /* Vino desde el PEDIDO: la salida natural es volver al pedido, no a la
+                             grilla de molderías (que es pantalla de configuración/catálogo). */
+                          <button className="btn primary" onClick={() => { setModoMiMolde(null); setMolderiaAbierta(null); setTabAjustesMolde('menu'); setAdminSubView('dashboard'); setActivoTab('pedidos'); setPedidoPaso('moldes'); setPedidoTabMoldes('mios'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 14px' }}>
+                            ← Volver al pedido
+                          </button>
+                        ) : (
+                          <button className="btn ghost" onClick={() => { setMolderiaAbierta(null); setTabAjustesMolde('menu'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 12px' }}>
+                            ⬅ Molderías
+                          </button>
+                        )}
                         <div>
-                          <h2 style={{ margin: 0 }}>{activoProdDetalle.nombre}</h2>
-                          <p style={{ margin: 0 }}>Configurá el molde, el diseño y la planilla de esta moldería.</p>
+                          <h2 style={{ margin: 0 }}>{activoProdDetalle.nombre}{modoMiMolde ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 10, padding: '2px 8px', borderRadius: 999, background: 'rgba(0,216,245,0.14)', color: 'var(--accent)', verticalAlign: 'middle' }}>MI ARTÍCULO</span> : null}</h2>
+                          <p style={{ margin: 0 }}>{modoMiMolde ? 'Cargá los talles del molde e indicá qué es cada pieza. Después volvé al pedido.' : 'Configurá el molde, el diseño y la planilla de esta moldería.'}</p>
                         </div>
                       </div>
                     </div>
@@ -8022,6 +8210,8 @@ export default function App() {
                         {tabAjustesMolde === 'menu' ? (
                           <div className="settings-drawer" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 2 }}>Ajustes de la moldería</div>
+                            {/* En «mi molde» se saca Variables: el usuario no arma modelos/combinaciones
+                                de un artículo propio — carga sus talles e indica qué es cada pieza. */}
                             {[
                               { id: 'molderia', icon: 'productos', label: 'Moldería', desc: 'Etiquetá las piezas del molde', disabled: false },
                               { id: 'variables', icon: 'columnas', label: 'Variables', desc: 'Modelos y combinaciones de piezas (el talle va aparte)', disabled: false },
@@ -8033,7 +8223,7 @@ export default function App() {
                               { id: 'etiqueta', icon: 'columnas', label: 'Etiqueta', desc: 'Qué muestra, dónde, en qué piezas, color y tamaño', disabled: false },
                               { id: 'editable', icon: 'distribucion', label: 'Editable', desc: 'Mover, rotar y escalar los objetos de la capa «Editable» del diseño', disabled: false },
                               { id: 'terminologia', icon: 'config', label: 'Nombres', desc: `Cómo se llaman ${term.variante.toLowerCase()} y ${term.molde.toLowerCase()}`, disabled: false },
-                            ].map(item => (
+                            ].filter(item => !(modoMiMolde && item.id === 'variables')).map(item => (
                               <button
                                 key={item.id}
                                 className="setting-nav-btn"
@@ -8423,9 +8613,23 @@ export default function App() {
                                 }}
                               />
 
-                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
-                                Acá cargás y acomodás las piezas del molde. Para <b>nombrar cada pieza</b> (y armar variables), andá a la pestaña <b>Variables</b>.
-                              </div>
+                              {/* En «mi molde» no hay pestaña Variables: el nombrado de piezas (que vive
+                                  DENTRO de ese paso) se alcanza desde acá — es el mismo editor. */}
+                              {modoMiMolde ? (
+                                <>
+                                  <button type="button" className="btn primary" style={{ width: '100%' }}
+                                    onClick={() => { setTabAjustesMolde('variables'); setVarStep('nombrar'); setAsignandoTipo(null); setGrupoAislado(null); setModeloAbierto(null); setGrupoPzAbierto(null); setEditandoNombre(null); }}>
+                                    Indicar qué es cada pieza →
+                                  </button>
+                                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                                    Dos cosas para que tu molde sirva: que cada {term.variante.toLowerCase()} tenga su nombre (arriba) y que <b>cada pieza</b> diga qué es (Frente, Espalda, Manga…).
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                                  Acá cargás y acomodás las piezas del molde. Para <b>nombrar cada pieza</b> (y armar variables), andá a la pestaña <b>Variables</b>.
+                                </div>
+                              )}
                             </>
                           ) : activoProdDetalle?.plantilla ? (
                             <div style={{ color: 'var(--text-muted)', fontSize: 12.5, textAlign: 'center', padding: 28 }}>Cargando el molde…</div>
@@ -8846,7 +9050,8 @@ export default function App() {
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                             {/* Selector de pasos (se oculta al entrar al detalle de un grupo) */}
-                            {!grupoAislado && !modeloAbierto && !grupoPzAbierto && (
+                            {/* En «mi molde» sólo existe el paso Nombrar (Grupos/Modelos son del catálogo). */}
+                            {!grupoAislado && !modeloAbierto && !grupoPzAbierto && !modoMiMolde && (
                             <div style={{ display: 'flex', gap: 6, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10 }}>
                               {[{ k: 'nombrar', n: '1. Nombrar' }, { k: 'grupos', n: '2. Grupos' }, { k: 'combinar', n: '3. Modelos' }].map(s => (
                                 <button key={s.k} type="button" onClick={() => { setVarStep(s.k); setAsignandoTipo(null); setGrupoAislado(null); setModeloAbierto(null); setComboVisor(null); setModoAcomodar(false); setAsignandoConjunto(null); setGrupoPzAbierto(null); setAsignandoGrupoPz(null); setEditandoNombre(null); }} style={{ flex: 1, padding: '8px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', background: varStep === s.k ? 'var(--accent)' : 'transparent', color: varStep === s.k ? '#04222b' : 'var(--text-secondary)' }}>{s.n}</button>
@@ -8888,7 +9093,9 @@ export default function App() {
                                       Nombres puestos ({Object.values(etqNombres).filter(Boolean).length}) — ver / editar
                                     </button>
                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
-                                      Cuando termines, pasá a <b>Grupos</b> (arriba) para revisar cómo quedaron agrupadas.
+                                      {modoMiMolde
+                                        ? <>Cuando termines, guardá los nombres y volvé al pedido con el botón de arriba.</>
+                                        : <>Cuando termines, pasá a <b>Grupos</b> (arriba) para revisar cómo quedaron agrupadas.</>}
                                     </div>
                                   </>
                                 )}
@@ -10991,6 +11198,40 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* --- MODAL: Subir MI PROPIO MOLDE (desde el pedido) --- */}
+      <Modal open={subirMoldeOpen} onClose={() => { if (!subirMoldeBusy) setSubirMoldeOpen(false); }} centrado maxWidth={520}
+        titulo="Subir mi propio molde"
+        subtitulo="Queda en «Mis artículos», sólo para vos. Después indicás qué es cada pieza.">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' }}>Nombre del artículo</label>
+            <input value={subirMoldeNombre} onChange={(e) => setSubirMoldeNombre(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter' && subirMoldeNombre.trim() && subirMoldeFile && !subirMoldeBusy) subirMiMolde(); }}
+              placeholder="Ej. Remera de mi club"
+              style={{ width: '100%', padding: '9px 11px', fontSize: 13.5, borderRadius: 9, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' }}>Archivo del molde</label>
+            <div className="upload-zone" onClick={() => !subirMoldeBusy && fileInputMiMoldeRef.current?.click()} style={{ padding: '22px 16px', cursor: subirMoldeBusy ? 'default' : 'pointer' }}>
+              <Icon name="upload" className="upload-icon" />
+              <div style={{ fontSize: 12.5, fontWeight: 600 }}>{subirMoldeFile ? subirMoldeFile.name : 'Elegí el molde (.ai · .pdf · .dxf)'}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Illustrator, Corel/PDF o DXF (Optitex, Gerber…)</div>
+            </div>
+            <input type="file" ref={fileInputMiMoldeRef} accept=".ai,.pdf,.dxf" hidden
+              onChange={(e) => { const f = e.target.files[0]; setSubirMoldeFile(f || null); if (f && !subirMoldeNombre.trim()) setSubirMoldeNombre((f.name || '').replace(/\.(ai|pdf|dxf)$/i, '')); e.target.value = ''; }} />
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Al subirlo se abre su configuración: ahí les ponés nombre a los {term.variante.toLowerCase()}s (si vinieron sin nombre) e indicás qué es cada pieza. Con eso ya se puede usar en el pedido.
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn ghost" disabled={subirMoldeBusy} onClick={() => setSubirMoldeOpen(false)}>Cancelar</button>
+            <button type="button" className="btn primary" disabled={subirMoldeBusy || !subirMoldeNombre.trim() || !subirMoldeFile} onClick={subirMiMolde}>
+              {subirMoldeBusy ? 'Subiendo…' : 'Subir y configurar'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* --- MODAL 1: Crear nuevo producto --- */}
       {creandoProducto && (
