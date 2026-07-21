@@ -361,6 +361,119 @@ def _capas_con_dibujo(doc):
     return capas
 
 
+def _item_visor(cont, idx, clip, cb, U, zoom):
+    """Un contorno del molde → el dict que consume el visor (coords en mm, y hacia abajo).
+
+    Vive aparte de `detectar_piezas` porque hay DOS vistas que dibujan las mismas piezas
+    (una variante sola, y todas las variantes juntas): si cada una armara el path por su
+    cuenta, la misma pieza se vería distinta según desde dónde se la mire."""
+    x0, y0, x1, y1 = cont["bbox_mu"]
+    path_svg = []
+    for s in cont["segmentos"]:
+        op = s[0]
+        if op in ("m", "l"):
+            cx, cy = s[1], s[2]
+            px = ((cx - cb.x0) * U - clip.x0) * zoom
+            py = ((cb.y1 - cy) * U - clip.y0) * zoom
+            path_svg.append(f"{op.upper()} {px:.1f} {py:.1f}")
+        elif op == "c":
+            cx1, cy1, cx2, cy2, cx3, cy3 = s[1], s[2], s[3], s[4], s[5], s[6]
+            px1 = ((cx1 - cb.x0) * U - clip.x0) * zoom
+            py1 = ((cb.y1 - cy1) * U - clip.y0) * zoom
+            px2 = ((cx2 - cb.x0) * U - clip.x0) * zoom
+            py2 = ((cb.y1 - cy2) * U - clip.y0) * zoom
+            px3 = ((cx3 - cb.x0) * U - clip.x0) * zoom
+            py3 = ((cb.y1 - cy3) * U - clip.y0) * zoom
+            path_svg.append(f"C {px1:.1f} {py1:.1f} {px2:.1f} {py2:.1f} {px3:.1f} {py3:.1f}")
+        elif op == "re":
+            cx, cy, cw, ch = s[1], s[2], s[3], s[4]
+            px = ((cx - cb.x0) * U - clip.x0) * zoom
+            py = ((cb.y1 - cy) * U - clip.y0) * zoom
+            pw = cw * U * zoom
+            ph = ch * U * zoom
+            path_svg.append(f"M {px:.1f} {py:.1f} h {pw:.1f} v {-ph:.1f} h {-pw:.1f} Z")
+        elif op == "h":
+            path_svg.append("Z")
+    return {
+        "idx": idx,
+        "px": round((x0 - clip.x0) * zoom, 1), "py": round((y0 - clip.y0) * zoom, 1),
+        "pw": round((x1 - x0) * zoom, 1), "ph": round((y1 - y0) * zoom, 1),
+        "w_cm": round(cont["w"] / CM, 1), "h_cm": round(cont["h"] / CM, 1),
+        "path_svg": " ".join(path_svg),
+    }
+
+
+def _mesa_principal(doc, talles):
+    """La mesa (página) donde está el bloque de molde: la que más trazos de talle concentra.
+
+    Mismo criterio que usa `detectar_piezas` para elegir su (mesa, talle) de referencia — si
+    difirieran, el visor de "todas las variantes" y el de una sola mostrarían páginas distintas."""
+    import collections
+    ranking = []
+    for m in range(1, len(doc) + 1):
+        cnt = collections.Counter(str(d.get("layer")) for d in doc[m - 1].get_drawings() if d.get("layer"))
+        n = sum(cnt.get(t, 0) for t in talles)
+        if n:
+            ranking.append((n, m))
+    if not ranking:
+        return None
+    ranking.sort(reverse=True)
+    return ranking[0][1]
+
+
+def detectar_piezas_todas(path):
+    """TODAS las piezas de TODAS las variantes en UN solo lienzo (mismo sistema de coordenadas).
+
+    Es la vista del AGRUPADO por selección: el usuario ve el frente del S, el del M, el del L…
+    a la vez y los selecciona juntos. Sólo tiene sentido en moldes `extendido` (cada talle en su
+    bloque); en un molde `anidado` los talles están dibujados uno encima del otro y esto sería
+    un amasijo — de eso se ocupa quien llama (ver §10.c del mapa).
+
+    Cada pieza trae `talle` + `t_idx` = su índice DENTRO de ese talle, que es exactamente el
+    `pieza_idx` del registro: sin eso la selección no se podría traducir a correspondencia.
+    `idx` es un correlativo global, único, que sólo sirve como identificador en el visor."""
+    doc = _abrir(path)
+    talles_mesas = _talles_con_molde(doc)
+    if not talles_mesas:
+        raise ValueError("La plantilla no tiene capas de talle con molde dibujado.")
+    talles = _ordenar_por_archivo(doc, talles_mesas.keys())
+    mesa = _mesa_principal(doc, talles)
+    if mesa is None:
+        raise ValueError("La plantilla no tiene capas de talle con molde dibujado.")
+
+    por_talle = {}
+    for t in talles:
+        pzs = extraer_piezas_mesa(doc, mesa, t)
+        if pzs:
+            por_talle[t] = pzs
+    if not por_talle:
+        raise ValueError(f"No se detectaron piezas en la mesa {mesa}.")
+    talles = [t for t in talles if t in por_talle]
+
+    todas = [c for t in talles for c in por_talle[t]]
+    union = _union_bbox(todas)
+    mx = max(20.0, (union[2] - union[0]) * 0.04)
+    clip = fitz.Rect(union[0] - mx, union[1] - mx, union[2] + mx, union[3] + mx)
+    zoom = 1.0 / MM                      # escala REAL: 1 unidad = 1 mm (igual que `detectar_piezas`)
+
+    page = doc[mesa - 1]
+    cb = page.cropbox
+    U = page.rect.width / cb.width if cb.width else 1.0
+
+    items, g = [], 0
+    for t in talles:
+        for i, cont in enumerate(por_talle[t]):
+            it = _item_visor(cont, g, clip, cb, U, zoom)
+            it["talle"] = t
+            it["t_idx"] = i
+            items.append(it)
+            g += 1
+    return {"mesa": mesa, "talles": talles, "unidad": "mm",
+            "img_w": round(clip.width * zoom, 1), "img_h": round(clip.height * zoom, 1),
+            "piezas": items,
+            "por_talle": {t: len(por_talle[t]) for t in talles}}
+
+
 def detectar_piezas(path, talle_ref=None, ancho_preview=1100, capas_candidatas=False):
     """Detecta las piezas de la moldería para el etiquetado visual. Elige un talle
     de referencia (el de más piezas), las extrae y arma una imagen de la mesa con
@@ -430,45 +543,7 @@ def detectar_piezas(path, talle_ref=None, ancho_preview=1100, capas_candidatas=F
     cb = page.cropbox
     U = page.rect.width / cb.width if cb.width else 1.0
 
-    items = []
-    for cont in piezas:
-        x0, y0, x1, y1 = cont["bbox_mu"]
-        
-        path_svg = []
-        for s in cont["segmentos"]:
-            op = s[0]
-            if op in ("m", "l"):
-                cx, cy = s[1], s[2]
-                px = ((cx - cb.x0) * U - clip.x0) * zoom
-                py = ((cb.y1 - cy) * U - clip.y0) * zoom
-                path_svg.append(f"{op.upper()} {px:.1f} {py:.1f}")
-            elif op == "c":
-                cx1, cy1, cx2, cy2, cx3, cy3 = s[1], s[2], s[3], s[4], s[5], s[6]
-                px1 = ((cx1 - cb.x0) * U - clip.x0) * zoom
-                py1 = ((cb.y1 - cy1) * U - clip.y0) * zoom
-                px2 = ((cx2 - cb.x0) * U - clip.x0) * zoom
-                py2 = ((cb.y1 - cy2) * U - clip.y0) * zoom
-                px3 = ((cx3 - cb.x0) * U - clip.x0) * zoom
-                py3 = ((cb.y1 - cy3) * U - clip.y0) * zoom
-                path_svg.append(f"C {px1:.1f} {py1:.1f} {px2:.1f} {py2:.1f} {px3:.1f} {py3:.1f}")
-            elif op == "re":
-                cx, cy, cw, ch = s[1], s[2], s[3], s[4]
-                px = ((cx - cb.x0) * U - clip.x0) * zoom
-                py = ((cb.y1 - cy) * U - clip.y0) * zoom
-                pw = cw * U * zoom
-                ph = ch * U * zoom
-                path_svg.append(f"M {px:.1f} {py:.1f} h {pw:.1f} v {-ph:.1f} h {-pw:.1f} Z")
-            elif op == "h":
-                path_svg.append("Z")
-        svg_path_str = " ".join(path_svg)
-
-        items.append({
-            "idx": piezas.index(cont),
-            "px": round((x0 - clip.x0) * zoom, 1), "py": round((y0 - clip.y0) * zoom, 1),
-            "pw": round((x1 - x0) * zoom, 1), "ph": round((y1 - y0) * zoom, 1),
-            "w_cm": round(cont["w"] / CM, 1), "h_cm": round(cont["h"] / CM, 1),
-            "path_svg": svg_path_str
-        })
+    items = [_item_visor(cont, i, clip, cb, U, zoom) for i, cont in enumerate(piezas)]
     # Orden de los talles tal como vienen en el archivo (orden del panel de
     # capas), no alfabético ni por orden de dibujo.
     talles_orden = _ordenar_por_archivo(doc, talles_mesas.keys())

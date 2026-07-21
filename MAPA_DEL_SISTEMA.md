@@ -259,6 +259,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 ## 10. Índice de endpoints (servidor.py) — los que más toco
 
 - `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref][&candidatas=1]` (→ `detectar_piezas`, piezas del molde; `candidatas=1` = molde ORIGINAL + capas que aún no son talle, para la herramienta de variantes por piezas) · `GET /api/plantilla/nido` (geometría nesteada).
+- `GET /api/plantilla/deteccion_todas` (→ `detectar_piezas_todas`: TODAS las piezas de TODOS los talles en un lienzo + `formato`; es la vista del agrupado por selección — ver §10.c).
 - `GET/POST /api/plantilla/variantes` (variantes POR CAPA) · `POST /api/plantilla/variantes_piezas` (variantes POR PIEZAS) — ver §10.c.
 - `POST /api/plantilla/grupo_pieza` (**agrupar piezas homólogas**: nombre + correspondencia entre talles en UN gesto) · `GET/POST /api/plantilla/emparejado` (el ajuste avanzado: acomodo virtual + corrección por índice) — ver §10.c.
 - `GET /api/arte/deteccion?diseno=` (→ `detectar_arte`, mesas + mapeo) · `POST /api/arte/mapeo` (guarda `mapeo_arte.json` + `prod["mapeo_arte"]` fijo; corre `validar_arte_separado`; **pre-warm** de `_piezas_base` en background).
@@ -463,11 +464,53 @@ El nombre de una pieza se pone UNA vez, en el talle guía, y se **propaga** al r
 umbral 1.6). Si el molde no viene acomodado parecido entre talles, esa comparación **no tiene
 señal** y el nombre cae en la pieza equivocada.
 
-**El gesto que ve el usuario es UNO solo: «tocá la pieza, escribí qué es, confirmá».** Con eso
-queda definido a la vez **cómo se llama** y **cuál es la misma pieza en cada talle** — no hay
+**El gesto que ve el usuario es UNO solo: «seleccioná las que son la misma pieza, escribí qué es».**
+Con eso queda definido a la vez **cómo se llama** y **cuál es la misma pieza en cada talle** — no hay
 «emparejar», ni offsets, ni índices. (El panel anterior, que pedía reacomodar y corregir por
 número de pieza, fue **rechazado por el usuario por difícil**; sigue existiendo escondido como
 «Ajuste avanzado ▸» — funciona y está verificado, no se borra.)
+
+🟢 **TODAS LAS VARIANTES JUNTAS (2026-07-21) — el flujo principal de hoy.** El paso intermedio
+(elegir un talle con chips, tocar una pieza, nombrarla, y después confirmar la homóloga talle por
+talle) **también fue rechazado**: «no es intuitivo; es más fácil mostrar las piezas de TODOS los
+talles y seleccionar las que son la misma y ponerle el nombre — es la misma función que nombrar».
+Se hizo literal:
+
+- **`MP.detectar_piezas_todas(path)`** (motor_pedido) — las piezas de **todos** los talles en UN
+  lienzo, mismo sistema de coordenadas (mm) y **misma geometría** que la vista de a un talle: el
+  armado del path salió a **`_item_visor(cont, idx, clip, cb, U, zoom)`**, compartido por las dos
+  (si cada una lo armara por su cuenta, la misma pieza se vería distinta según desde dónde se mire).
+  La mesa la elige **`_mesa_principal`** (la que más trazos de talle concentra — mismo criterio que
+  `detectar_piezas`, si difirieran las dos vistas mirarían páginas distintas).
+  Cada pieza trae **`talle`** + **`t_idx` = su índice DENTRO de ese talle, que ES el `pieza_idx` del
+  registro**; `idx` es un correlativo global que sólo sirve como identidad en el visor.
+- **`GET /api/plantilla/deteccion_todas`** (acepta `pid`). Devuelve además **`formato`**. Caché en
+  disco `deteccion_cache/<mtime>_TODAS.json` (medido: 3.0 s la 1ª vez con 6 talles, **17 ms**
+  después). ⚠️ El `formato` se mira **ANTES** de extraer: en un molde `anidado` esta vista no se usa
+  y sacar las piezas de los 20 talles para tirarlas costaba segundos (`prod_default`: ahora **90 ms**).
+- **Molde `anidado` → NO se muestra junto** (los talles están dibujados uno encima del otro: sería
+  ilegible). El front cae al flujo de a un talle y **lo dice en una línea** (`empTodasMotivo`).
+  Mismo camino si la vista junta cayera en **otra mesa** que el emparejado (los `pieza_idx` son
+  relativos a la mesa: apuntarían a piezas que no son).
+- **El backend NO cambió**: el gesto entero ya entraba por `POST /api/plantilla/grupo_pieza`
+  (`nombre` + `guia_idx` + `piezas {talle: idx}`). Lo que cambió es que ahora el usuario los elige
+  **todos de una** y quedan **confirmados a mano** (en `manual`) en el mismo POST.
+- **UI** (`App.jsx`): estados `empTodas` / `empTodasData` / `empTodasMotivo`. **Reusa el visor**:
+  `canvasLayout` toma `empTodasData` en lugar de `etqData` cuando el modo está activo (única línea
+  que cambia la fuente), y la selección sigue siendo `selNombrar` + `toggleSelNombrar` +
+  `iniciarRubber` (el marquee anda porque filtra por el atributo `data-piece`, que es el idx global).
+  - El nombre de cada pieza **no puede salir de `etqNombres`** (es el de UN talle): se arma
+    `empTodasInfo` = `{nom, fijo}` por `(talle|t_idx)` desde `empData.asignacion`/`manual`, **una vez
+    por render**. Cada pieza muestra su **variante** encima del número y el nombre del grupo debajo,
+    con el color del grupo (mismo color = misma pieza en todos los talles).
+  - `crearGrupoTodas()` valida **antes** de guardar y lo dice en el panel: **2 piezas del mismo
+    talle** (rojo, bloquea), **falta la pieza del talle guía** (bloquea: el nombre se guarda ahí),
+    **faltan talles** (naranja, NO bloquea: ahí queda la propuesta del sistema).
+  - `revisarPiezaEnTalle` en esta vista **no cambia de talle** (están todos): deja `empFijar` y el
+    clic se resuelve por `(talle, t_idx)` con **`fijarPiezaTodas`** (usar `fijarPiezaEmp` acá
+    guardaría el índice GLOBAL como si fuera el del talle → correspondencia rota).
+  - `seleccionarGrupoTodas(nombre)` marca en el visor las N piezas de un grupo ya hecho.
+  - Al cambiar de molde se limpian `empTodas/empTodasData/empTodasMotivo` (es geometría de ESE molde).
 
 - **Endpoint único: `POST /api/plantilla/grupo_pieza`**
   `{pid?, nombre, guia_idx, piezas?: {talle: idx|null}, renombrar_de?, eliminar?}`.
@@ -619,6 +662,8 @@ El cliente puede traer **su** molde y usarlo en el pedido sin pasar por el setup
   cualquier variable los borraba).
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (11) — HECHO: agrupar piezas viendo TODAS LAS VARIANTES JUNTAS (el flujo de (8)/(10) se reemplaza).** Ver §10.c. El usuario **rechazó** el flujo de a un talle, textual: «el indicar la misma pieza en cada talle no es intuitivo. Es más fácil: mostrar las piezas de TODOS los talles y seleccionar las piezas y ponerle el nombre, así como se hace el nombrar — es la misma función. O sea decir: todo esto es Frente, esto es Espalda». Se hizo **literal**: el visor muestra las 36 piezas de las 6 variantes a la vez, el usuario las selecciona (clic o recuadro) y escribe «Frente» — un solo gesto define el **nombre** y la **correspondencia**. **Backend:** `MP.detectar_piezas_todas(path)` (piezas de todos los talles en un lienzo, con `talle` + `t_idx` = el `pieza_idx` del registro) + `_item_visor()` extraída de `detectar_piezas` (las DOS vistas arman el path con la misma función: si no, la misma pieza se vería distinta según de dónde se mire) + `_mesa_principal()`; endpoint `GET /api/plantilla/deteccion_todas` con caché en disco. **El endpoint de guardado NO cambió**: `POST /api/plantilla/grupo_pieza` ya aceptaba `nombre` + `guia_idx` + `piezas {talle: idx}` — lo que cambió es que ahora el usuario los elige todos de una y quedan **confirmados a mano** (en `manual`, que `_aplicar_fijos` respeta) en el mismo POST. **Frontend:** `canvasLayout` toma `empTodasData` en vez de `etqData` cuando el modo está activo (una línea) — **el visor, `selNombrar`, `toggleSelNombrar` e `iniciarRubber` se reusan tal cual**; `empTodasInfo` resuelve nombre/confirmado por `(talle|t_idx)` porque `etqNombres` es de UN talle; validaciones **antes** de guardar (2 piezas del mismo talle = rojo y bloquea, falta la del talle guía = bloquea, faltan talles = naranja y NO bloquea); `fijarPiezaTodas` para corregir sin cambiar de talle. **Molde `anidado` (talles dibujados uno encima del otro, p.ej. `prod_default`): NO se muestra junto** — se cae al flujo de a un talle y se explica en una línea; el `formato` se consulta **antes** de extraer (90 ms contra segundos). **«Ajuste avanzado ▸» intacto**, escondido. **VERIFICADO con datos**, contra el server real y sobre una **copia descartable** del molde del usuario (36 piezas, 6 variantes, `formato=extendido`): `deteccion_todas` devuelve **36 piezas / 6 talles × 6** (3,0 s la 1ª vez, **17 ms** cacheado); se crearon 3 grupos eligiendo a mano una pieza por talle y **cruzando a propósito XS** (Frente=XS#1, Espalda=XS#0, al revés de lo que propone la heurística) → `registro_producto.json` queda con **Frente = XS#1 47,0×52,7 · S#0 43,4×58,0 · M#0 45,2×60,5 · L#0 47,0×63,0 · XL#0 48,8×65,5 · 2XL#0 51,2×68,0 cm** y Espalda con el cruce inverso (XS#0 41,5×55,5); **las 18 entradas del registro coinciden con la geometría del visor** (w_cm/h_cm, tolerancia 0,15 cm); `emparejado_talles.json → manual` guarda los 5 talles; **reiniciando el server (salir y volver) queda idéntico**; nombre repetido → **409**; grupo **parcial** (sólo S y M) → 200, esos dos en `manual` y el resto con la propuesta. Molde de prueba **borrado**: `entrada/` y `datos/productos/` con los 7 directorios del usuario, catálogo restaurado y la BASE (fuente de verdad real del catálogo, no el JSON) **nunca se tocó**. `npm run build` OK; server reiniciado por PID y **dejado corriendo**. **NO verificado:** la pantalla a mano — hay login, no se intentó pasarlo; la consola del navegador queda **sin errores** en la pantalla de login y el **screenshot no funciona** en este entorno (timeout), así que no hay captura del panel nuevo. **Trampa que costó tiempo:** el catálogo de productos **ya no se lee de `datos/productos_catalogo.json`** sino de la base (`db.get_doc("catalogo")`) — agregar el molde de prueba al JSON no lo registra, y por eso su `variante_guia` no se aplicó (la guía cayó en la automática, `XS`). Para pruebas alcanza con los directorios + `?pid=`.
 
 - **2026-07-21 (10) — HECHO: usabilidad del panel «La misma pieza en cada talle» («mejorá esto para que sea mejor»).** Ver §10.c. Lo que se veía en la pantalla del usuario: grupos llamados «Pieza 2/3/4…», «0/5 confirmadas» + un «Confirmar todo» **en cada fila** (36 piezas = 36 clics y 36 re-armados del registro), los **mismos chips de talle repetidos** en todas las filas ocupando la pantalla entera, **ningún número global** (¿cuánto falta? ¿ya puedo seguir?) y ninguna forma de saber **qué pieza es** cada fila. **Cambios (todos en `frontend/src/App.jsx`, `empVista==='simple'`):** (1) **encabezado de progreso** — «N de TOTAL piezas agrupadas · M confirmadas», barra de dos capas y una sola línea con el **primer obstáculo real**; los números salen de `empStats`, que también alimenta el resumen del panel **plegado** (antes decía sólo «✓ N piezas agrupadas», ahora dice de cuántas y qué falta). (2) **«Confirmar todo» global** — un único `POST /api/plantilla/emparejado` **sin `talle`** con el `manual` completo (ese modo del endpoint ya existía y reemplaza el diccionario entero) → **una** re-propagación en vez de N. (3) **Miniatura de la pieza** en cada fila (`miniPieza`, el `path_svg` del talle guía recortado a su bbox; geometría vía `cargarPzsGuia`, cacheada en `_talleDetCache`). (4) **Filas compactas**: los chips por talle y las acciones se abren **sólo en la fila que se mira** (`empAbierto`), con filtro **Pendientes/Listas/Todas** (arranca en pendientes) y buscador si hay >8 grupos. (5) **Renombrar desde la propia fila** (`renombrarGrupo`, mismo endpoint `grupo_pieza` con `guia_idx`+`renombrar_de`), con el provisorio (`Pieza N`) marcado en itálica y «✎ poner nombre». (6) Estado por fila legible: `✓ listo` / `falta en N` / `propuesta` (el críptico «0/5» ya no aparece). **Bug encontrado y arreglado de paso:** `colorGrupo` devuelve **`hsl(...)`, no hex** → el `${color}55` que ya usaba el resumen plegado era un color **inválido** (borde invisible); ahora hay `colorGrupoA()` (hsla) y la miniatura usa `fillOpacity`. **VERIFICADO:** `npm run build` OK (bundle nuevo servido: `index-BW23BhQR.js`); server reiniciado por PID (9376 → 34812); **render real del bloque nuevo** con `react-dom/server` sobre el JSX **extraído literalmente de `App.jsx`** (`scratchpad/armar_panel_test.py` + `render_panel.mjs`) → sale «5 de 6 piezas agrupadas · 1 confirmadas / Falta 1 pieza por agrupar / Pendientes 4 · Listas 1 · Todas 5», 4 miniaturas con su `viewBox`, 0 colores inválidos (ese render fue el que destapó el bug del `hsl`+alfa y los plurales «Faltan 1 piezas»); **prueba de API punta a punta** contra el server real con **molde de prueba propio** (`prueba_panel.py`, S/M/L × 4 piezas): crear 4 grupos → confirmar **todo de una pasada** (`manual` idéntico al enviado y `asignacion` **sin moverse**) → renombrar A→Frente (**la confirmación a mano sigue al nombre nuevo**) → salir y volver (idéntico) → deshacer «D» (se va con sus fijos, sin huérfanos). Molde de prueba **borrado** y catálogo **byte-idéntico** al de antes (incluido el `activo`). **NO verificado:** la pantalla a mano dentro de la app — hay login y no se intentó pasarlo; además el screenshot del navegador **no funciona** en este entorno (timeout), así que **no hay captura**; la consola queda sin errores en la pantalla de login.
 

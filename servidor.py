@@ -1116,6 +1116,55 @@ def plantilla_deteccion():
         return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
 
 
+@app.get("/api/plantilla/deteccion_todas")
+def plantilla_deteccion_todas():
+    """TODAS las piezas de TODAS las variantes en un solo lienzo, para AGRUPAR por selección.
+
+    El gesto que pidió el usuario es el mismo del nombrado: ver todo junto, seleccionar «esto,
+    esto y esto son el Frente» y escribirlo. Para eso el visor necesita las piezas de todos los
+    talles a la vez, cosa que `/api/plantilla/deteccion` (una capa) no puede dar.
+
+    Devuelve además `formato` (`extendido` / `anidado`): en un molde ANIDADO los talles están
+    dibujados uno encima del otro y esta vista es ilegible → el front cae al flujo de a un talle."""
+    pid = _get_active_producto_id()
+    pl = _ruta_entrada("plantilla.ai", pid)
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí el molde"}), 409
+    try:
+        mt = int(os.path.getmtime(pl))
+    except OSError:
+        mt = 0
+    # Es CARO (una extracción por talle: ~3 s con 6 talles) y la geometría no cambia si no
+    # cambia el archivo → caché en disco con el mtime en la clave, igual que la detección normal.
+    cdir = _ruta_datos("deteccion_cache", pid)
+    fp = os.path.join(cdir, f"{mt}_TODAS.json")
+    try:
+        return jsonify(json.load(open(fp, encoding="utf-8")))
+    except Exception:
+        pass
+    # El FORMATO se mira PRIMERO (es barato): en un molde anidado esta vista no se va a usar, y
+    # extraer las piezas de los 20 talles para tirarlas es regalar varios segundos por request.
+    try:
+        import variantes_molde as VM
+        formato = VM.analizar(pl).get("formato") or "extendido"
+    except Exception:
+        formato = "extendido"
+    if formato == "anidado":
+        res = {"formato": "anidado", "piezas": [], "talles": []}
+    else:
+        try:
+            res = MP.detectar_piezas_todas(pl)
+        except Exception as e:
+            return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
+        res["formato"] = formato
+    try:
+        os.makedirs(cdir, exist_ok=True)
+        json.dump(res, open(fp, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+    return jsonify(res)
+
+
 _NIDO_CACHE = {}   # clave (path, mtime, reg_mtime) → nido (geometría estable; recalcula si cambia el archivo/registro)
 
 def _nido_clave():
