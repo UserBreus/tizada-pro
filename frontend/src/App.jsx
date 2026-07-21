@@ -11974,8 +11974,15 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button type="button" className="btn ghost" disabled={subirMoldeBusy} onClick={() => setSubirMoldeOpen(false)}>Cancelar</button>
-            <button type="button" className="btn primary" disabled={subirMoldeBusy || !subirMoldeNombre.trim() || !subirMoldeFile} onClick={subirMiMolde}>
-              {subirMoldeBusy ? 'Subiendo…' : 'Subir y configurar'}
+            {/* El botón se PINTA cuando ya está todo listo (archivo elegido + nombre): es la
+                confirmación visual de que el archivo se cargó y se puede continuar. Apagado
+                mientras falte algo, para que se vea qué falta en vez de un botón muerto. */}
+            <button type="button" className={`btn ${subirMoldeFile && subirMoldeNombre.trim() ? 'success' : 'ghost'}`}
+              disabled={subirMoldeBusy || !subirMoldeNombre.trim() || !subirMoldeFile}
+              style={subirMoldeFile && subirMoldeNombre.trim() && !subirMoldeBusy
+                ? { fontWeight: 700, boxShadow: '0 0 0 3px rgba(46,204,113,0.18)' } : { opacity: 0.55 }}
+              onClick={subirMiMolde}>
+              {subirMoldeBusy ? 'Subiendo…' : (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir y configurar' : 'Subir y configurar')}
             </button>
           </div>
         </div>
