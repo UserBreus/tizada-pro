@@ -717,14 +717,20 @@ def _get_active_producto_id():
     pid = _pid_de_request()
     if pid:
         return pid
+    cat = _cargar_catalogo()
     if has_request_context():
         try:
             s = session.get("pid_activo")
-            if s:
+            # El molde de la sesión puede haber sido BORRADO (o ser de otro): si ya no está en el
+            # catálogo se ignora, o todo el sistema queda trabajando contra un molde inexistente
+            # (404 al activarlo, 409 al detectarlo) hasta cerrar sesión.
+            if s and any(x.get("id") == s for x in cat.get("productos", [])):
                 return s
+            if s:
+                session.pop("pid_activo", None)
         except Exception:
             pass
-    return _cargar_catalogo().get("activo", "prod_default")
+    return cat.get("activo", "prod_default")
 
 
 def _slugify_diseno(s):
@@ -4053,6 +4059,18 @@ def activar_producto():
     return jsonify({"ok": True, "activo": pid})
 
 
+def _limpiar_activo_si_borrado(cat, pid):
+    """Tras borrar un molde, el 'activo' no puede seguir apuntando a él."""
+    try:
+        if session.get("pid_activo") == pid:
+            session.pop("pid_activo", None)
+    except Exception:
+        pass
+    if cat.get("activo") == pid:
+        otros = [p["id"] for p in cat.get("productos", []) if p.get("id") != pid]
+        cat["activo"] = otros[0] if otros else "prod_default"
+
+
 @app.post("/api/productos/eliminar")
 def eliminar_producto():
     cuerpo = request.get_json(force=True) or {}
@@ -4071,9 +4089,8 @@ def eliminar_producto():
         return jsonify({"error": "Producto inexistente"}), 404
         
     cat["productos"].pop(p_index)
-    if cat["activo"] == pid:
-        cat["activo"] = "prod_default"
-        
+    # el activo (global Y el de la sesión) no puede quedar apuntando al molde borrado
+    _limpiar_activo_si_borrado(cat, pid)
     _guardar_catalogo(cat)
     
     import shutil
