@@ -24,6 +24,7 @@ PERMISOS = [
     ("molde.crear",      "molde",   "Crear moldes",                "Dar de alta un molde nuevo (.ai/.pdf/.dxf)."),
     ("molde.editar",     "molde",   "Editar moldes",               "Nombrar piezas, variables, grupos, telas."),
     ("molde.borrar",     "molde",   "Borrar moldes",               "Eliminar un molde del catálogo."),
+    ("molde.ver_todos",  "molde",   "Ver los moldes de todos",     "Ver también los moldes propios que subió cada usuario."),
     ("arte.cargar",      "arte",    "Cargar arte",                 "Subir el arte de un diseño y mapearlo."),
     ("arte.editar",      "arte",    "Editar objetos editables",    "Mover/rotar/escalar los editables del arte."),
     ("config.ver",       "config",  "Ver configuración",           "Entrar al Panel de Configuración."),

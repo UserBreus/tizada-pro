@@ -634,6 +634,50 @@ def _guardar_catalogo_json_espejo(cat):
             print(f"[catalogo] no se pudo escribir el espejo JSON (la base ya guardó): {ultimo}")
 
 
+# ── PROPIEDAD DE UN MOLDE (Mis artículos) ─────────────────────────────────────────────────────
+# Un molde que sube un usuario desde el pedido es SUYO: sólo lo ve él. Los moldes del catálogo
+# (los que arma la configuración, sin dueño) los ven todos. Sin esto "Mis artículos" sería privado
+# sólo de apariencia: con saber el id, cualquiera lee o edita el molde de otro.
+
+def _usuario_actual():
+    """Usuario logueado, o None si no hay sesión/base. Nunca revienta: si la API de usuarios no
+    está disponible, el sistema sigue funcionando en modo de un solo usuario (como antes)."""
+    try:
+        from api_usuarios import usuario_actual
+        return usuario_actual()
+    except Exception:
+        return None
+
+
+def _uid_actual():
+    u = _usuario_actual()
+    return (u or {}).get("id")
+
+
+def _puede_ver_molde(prod, u=None):
+    """¿Este usuario puede ver/tocar este molde? Sin dueño = del catálogo, lo ve cualquiera.
+    Con dueño = sólo él (o quien tenga el permiso `molde.ver_todos`, p. ej. un admin)."""
+    dueno = (prod or {}).get("creado_por")
+    if not dueno:
+        return True
+    if u is None:
+        u = _usuario_actual()
+    if not u:
+        return False
+    return u.get("id") == dueno or "molde.ver_todos" in (u.get("permisos") or [])
+
+
+def _guard_molde(pid):
+    """Corta la request si el molde es de otro. Devuelve None si está permitido."""
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if prod is None:
+        return None                      # no existe: lo maneja cada endpoint como ya lo hacía
+    if not _puede_ver_molde(prod):
+        return jsonify({"error": "Ese molde es de otro usuario"}), 403
+    return None
+
+
 def _pid_de_request():
     """`pid` explícito que venga en la request (query, form o JSON). Sólo se aceptan los nombres
     `pid`/`producto_id`: `id` NO, porque en varios endpoints significa otra cosa (un preset, un
@@ -731,6 +775,24 @@ def _en_hilo(fn):
             except Exception:
                 pass
     threading.Thread(target=_envuelto, daemon=True).start()
+
+
+@app.before_request
+def _guardia_moldes():
+    """Corta cualquier request de API que trabaje sobre un molde de OTRO usuario.
+
+    Va acá y no endpoint por endpoint a propósito: son ~30 rutas que reciben un molde y alcanza
+    con que se olvide UNA para que el molde ajeno quede accesible. El molde se resuelve igual que
+    en el resto del sistema (`pid` de la request → activo de la sesión)."""
+    if not request.path.startswith("/api/") or request.path.startswith("/api/auth/"):
+        return None
+    try:
+        pid = _pid_de_request()
+        if not pid:
+            return None            # sin molde explícito no hay nada que proteger acá
+        return _guard_molde(pid)
+    except Exception:
+        return None                # la seguridad no puede tumbar el sistema
 
 
 @app.teardown_request
@@ -3441,8 +3503,11 @@ def get_productos():
     cat = _cargar_catalogo()
     res_prods = []
     templates = cat.get("plantillas_planillas", [])
-    
+    _u = _usuario_actual()
+
     for p in cat["productos"]:
+        if not _puede_ver_molde(p, _u):
+            continue                     # molde de otro usuario: no existe para éste
         pid = p["id"]
         reg_path = os.path.join(DATOS, "productos", pid, "registro_producto.json")
         has_plantilla = os.path.exists(reg_path)
@@ -3473,6 +3538,8 @@ def get_productos():
             "id": pid,
             "nombre": p["nombre"],
             "creado": p.get("creado", 0),
+            "propio": bool(p.get("creado_por")) and (not _u or p.get("creado_por") == _u.get("id")),
+            "de_otro": bool(p.get("creado_por")) and bool(_u) and p.get("creado_por") != _u.get("id"),
             "plantilla": has_plantilla,
             "arte": has_arte,
             "planilla_template_id": tid or "plan_default",
@@ -3538,6 +3605,10 @@ def crear_producto():
         "id": pid,
         "nombre": nombre,
         "creado": time.time(),
+        # DUEÑO: los moldes que sube un usuario desde el pedido son suyos y sólo los ve él.
+        # Los del catálogo (creados sin sesión) quedan sin dueño = visibles para todos.
+        "creado_por": _uid_actual(),
+        "propio": bool(request.get_json(silent=True) and (request.get_json(silent=True) or {}).get("propio")),
         "planilla_template_id": "plan_default",
         "mapeo_columnas": {
             "talle": "talle",
