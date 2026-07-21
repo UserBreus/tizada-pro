@@ -513,18 +513,81 @@ def _segs_a_svg(segs, dx, dy, to_px):
     return " ".join(out)
 
 
-def _feats_conts(conts):
-    """Rasgos por contorno para emparejar piezas entre talles: centroide NORMALIZADO
-    a la unión del talle (posición relativa), log-aspecto y log-área relativa."""
-    u = _union_bbox(conts)
-    uw = max(1e-6, u[2] - u[0]); uh = max(1e-6, u[3] - u[1])
+def _bboxes_acomodadas(conts, offsets=None):
+    """bbox_mu de cada contorno, con el ACOMODO A MANO aplicado (solo para emparejar).
+
+    El acomodo es VIRTUAL: no mueve nada del archivo ni de la tizada — solo corre la caja
+    con la que se calculan los rasgos, que es lo único que mira el emparejado. Así el
+    usuario puede reordenar las piezas de un talle desprolijo hasta que su disposición se
+    parezca a la del talle guía, sin tocar el molde (la LEY «el arte se ve igual que la
+    tizada» queda intacta). `offsets` = {idx: (dx_mm, dy_mm)}."""
     out = []
-    for c in conts:
+    for i, c in enumerate(conts):
         x0, y0, x1, y1 = c["bbox_mu"]
+        d = (offsets or {}).get(i)
+        if d:
+            dx, dy = float(d[0]) * MM, float(d[1]) * MM
+            x0 += dx; x1 += dx; y0 += dy; y1 += dy
+        out.append((x0, y0, x1, y1))
+    return out
+
+
+def _feats_conts(conts, offsets=None):
+    """Rasgos por contorno para emparejar piezas entre talles: centroide NORMALIZADO
+    a la unión del talle (posición relativa), log-aspecto y log-área relativa.
+    `offsets` = acomodo a mano {idx: (dx_mm, dy_mm)} (ver `_bboxes_acomodadas`)."""
+    cajas = _bboxes_acomodadas(conts, offsets)
+    ux0 = min(b[0] for b in cajas); uy0 = min(b[1] for b in cajas)
+    ux1 = max(b[2] for b in cajas); uy1 = max(b[3] for b in cajas)
+    uw = max(1e-6, ux1 - ux0); uh = max(1e-6, uy1 - uy0)
+    out = []
+    for x0, y0, x1, y1 in cajas:
         w = max(1e-6, x1 - x0); h = max(1e-6, y1 - y0)
-        out.append({"cx": ((x0 + x1) / 2 - u[0]) / uw, "cy": ((y0 + y1) / 2 - u[1]) / uh,
+        out.append({"cx": ((x0 + x1) / 2 - ux0) / uw, "cy": ((y0 + y1) / 2 - uy0) / uh,
                     "lar": math.log(w / h), "larea": math.log((w * h) / (uw * uh))})
     return out
+
+
+def emp_offsets(emparejado, talle):
+    """Acomodo a mano guardado para un talle → {idx:int: (dx_mm, dy_mm)} (o None)."""
+    d = ((emparejado or {}).get("acomodo") or {}).get(talle) or {}
+    out = {}
+    for k, v in d.items():
+        try:
+            out[int(k)] = (float(v[0]), float(v[1]))
+        except Exception:
+            continue
+    return out or None
+
+
+def emp_fijos(emparejado, talle):
+    """Correcciones MANUALES de un talle → {nombre_de_pieza: idx_en_ese_talle} (o None).
+    Mandan sobre la heurística Y sobre la correspondencia del DXF: si el usuario dijo
+    que la pieza «Frente» es la #7, es la #7."""
+    d = ((emparejado or {}).get("manual") or {}).get(talle) or {}
+    out = {}
+    for nom, idx in d.items():
+        try:
+            out[str(nom)] = int(idx)
+        except Exception:
+            continue
+    return out or None
+
+
+def _aplicar_fijos(eleccion, fijos, n_piezas):
+    """Mete las correcciones manuales en la elección ya calculada, pisando lo automático
+    y liberando el índice que ese idx tuviera asignado en otra pieza (no puede haber dos
+    nombres apuntando a la misma pieza del talle)."""
+    if not fijos:
+        return eleccion
+    for nom, j in fijos.items():
+        if j is None or j < 0 or j >= n_piezas:
+            continue
+        for otro, (jj, _r) in list(eleccion.items()):
+            if jj == j and otro != nom:
+                del eleccion[otro]
+        eleccion[nom] = (j, False)
+    return eleccion
 
 
 def _emparejar_por_forma(f_ref, nombres_ref, f_cand, umbral=1.6):
@@ -638,7 +701,7 @@ def snapshot_nombres_guia(path, registro):
     return {"feats": _feats_conts(conts), "nombres": nombres, "talle": talle}
 
 
-def remapear_registro(path_nuevo, snap, indices=None):
+def remapear_registro(path_nuevo, snap, indices=None, emparejado=None):
     """Transfiere los nombres del molde VIEJO al archivo NUEVO emparejando el talle
     guía por posición + forma + tamaño, y reconstruye el registro completo (con la
     correspondencia exacta del DXF para los demás talles, si está disponible).
@@ -660,11 +723,11 @@ def remapear_registro(path_nuevo, snap, indices=None):
         return None, 0.0
     asign = [{"idx": j, "nombre": nom} for nom, (j, _rot) in eleccion.items()]
     cobertura = len(asign) / max(1, len(snap["nombres"]))
-    alta = alta_plantilla_manual(path_nuevo, asign, mesa, talle, indices=indices)
+    alta = alta_plantilla_manual(path_nuevo, asign, mesa, talle, indices=indices, emparejado=emparejado)
     return alta, cobertura
 
 
-def nido_piezas(path, registro, talle_guia=None, ancho_preview=1100, indices=None):
+def nido_piezas(path, registro, talle_guia=None, ancho_preview=1100, indices=None, emparejado=None):
     """Para cada pieza NOMBRADA del registro, devuelve su contorno en TODOS los talles,
     NESTEADO (todas las tallas alineadas por su centroide) en un marco común de px.
     Es la data para el visor de "acomodar": una pieza = su pila de tallas, que se
@@ -691,7 +754,7 @@ def nido_piezas(path, registro, talle_guia=None, ancho_preview=1100, indices=Non
             nombres_guia[nom] = info["pieza_idx"]
     if not nombres_guia:
         raise ValueError("no hay piezas nombradas para nestear")
-    f_guia = _feats_conts(conts_por_talle[guia])
+    f_guia = _feats_conts(conts_por_talle[guia], emp_offsets(emparejado, guia))
     mapa_exacto = _mapa_indices(indices, guia)   # correspondencia EXACTA del DXF (si existe)
     por_nombre = {}   # {nombre: {talle: {segs, cx, cy}}} (coords crudas y-arriba, marco común)
     for t, conts in conts_por_talle.items():
@@ -700,7 +763,7 @@ def nido_piezas(path, registro, talle_guia=None, ancho_preview=1100, indices=Non
         elif mapa_exacto and t in mapa_exacto:
             # el archivo dice exactamente qué pieza es cuál en este talle — sin adivinar
             mt = mapa_exacto[t]
-            f_t = _feats_conts(conts)
+            f_t = _feats_conts(conts, emp_offsets(emparejado, t))
             eleccion = {}
             for nom, gi in nombres_guia.items():
                 j = mt.get(gi)
@@ -712,7 +775,11 @@ def nido_piezas(path, registro, talle_guia=None, ancho_preview=1100, indices=Non
                     rot = (abs(-fc["lar"] - fr["lar"]) + 0.25) < abs(fc["lar"] - fr["lar"])
                 eleccion[nom] = (j, rot)
         else:
-            eleccion = _emparejar_por_forma(f_guia, nombres_guia, _feats_conts(conts))
+            eleccion = _emparejar_por_forma(f_guia, nombres_guia,
+                                            _feats_conts(conts, emp_offsets(emparejado, t)))
+        # el ajuste a mano manda sobre cualquier heuristica (mismo criterio que el registro)
+        if t != guia:
+            eleccion = _aplicar_fijos(eleccion, emp_fijos(emparejado, t), len(conts))
         for nom, (j, rot) in eleccion.items():
             c = conts[j]
             x0, y0, x1, y1 = c["bbox_raw"]
@@ -1146,11 +1213,14 @@ def _eops_zonas(cont, S, x0, y0, B, puntos, conts, size, align_def, fetq, talle,
     return "\n".join(out) if out else None
 
 
-def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None):
+def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emparejado=None):
     """Construye el registro a partir de nombres puestos a mano en el talle de
     referencia. `asignaciones` = [{"idx": i, "nombre": "Frente"}, ...]. El nombre
     de cada pieza se propaga a TODOS los talles emparejando por posición
-    (centroide normalizado), sin pedir etiquetas de texto en el .ai."""
+    (centroide normalizado), sin pedir etiquetas de texto en el .ai.
+    `emparejado` = {"acomodo": {talle:{idx:[dx_mm,dy_mm]}}, "manual": {talle:{nombre:idx}}}:
+    el ajuste a mano del usuario cuando el molde no tiene las piezas dispuestas parecido
+    entre talles (ver §10.c del mapa)."""
     doc = _abrir(path)
     _raw = {a["idx"]: a["nombre"].strip() for a in asignaciones if a.get("nombre", "").strip()}
     # SEGURIDAD: dos piezas con el MISMO nombre colisionan en el registro (dict por nombre) y
@@ -1179,7 +1249,7 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None):
                 "advertencias": [], "piezas_detalle": {}}
 
     piezas_ref = extraer_piezas_mesa(doc, mesa, talle_ref)
-    f_ref = _feats_conts(piezas_ref)
+    f_ref = _feats_conts(piezas_ref, emp_offsets(emparejado, talle_ref))
     nombres_ref = {nombres[i]: i for i in nombres if i < len(piezas_ref)}
     mapa_exacto = _mapa_indices(indices, talle_ref)   # correspondencia EXACTA del DXF (si existe)
 
@@ -1200,7 +1270,12 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None):
             eleccion = {nom: (mt[ir], False) for nom, ir in nombres_ref.items()
                         if ir in mt and mt[ir] < len(piezas)}
         else:
-            eleccion = _emparejar_por_forma(f_ref, nombres_ref, _feats_conts(piezas))
+            eleccion = _emparejar_por_forma(f_ref, nombres_ref,
+                                            _feats_conts(piezas, emp_offsets(emparejado, talle)))
+        # Una corrección MANUAL nunca se pisa con lo automático (ni con el DXF): va última.
+        # En el talle GUÍA no se toca: ahí la asignación ES el nombrado del usuario.
+        if talle != talle_ref:
+            eleccion = _aplicar_fijos(eleccion, emp_fijos(emparejado, talle), len(piezas))
         for nom, (j, _rot) in eleccion.items():
             cont = piezas[j]
             registro.setdefault(nom, {})[talle] = {

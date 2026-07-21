@@ -842,6 +842,17 @@ def _cargar(nombre, pid=None, sub=None):
         return None
 
 
+# ── AJUSTE DEL EMPAREJADO ENTRE TALLES (ver §10.c del mapa) ───────────────────────────
+# Cuando el molde NO trae las piezas dispuestas de forma parecida en cada talle, la
+# heurística (`_emparejar_por_forma`) no tiene señal y propaga el nombre a la pieza
+# equivocada. El usuario lo arregla a mano y eso vive acá:
+#   {"acomodo": {talle: {idx: [dx_mm, dy_mm]}},   ← reacomodo VIRTUAL (solo para emparejar)
+#    "manual":  {talle: {nombre_pieza: idx}}}     ← corrección directa, MANDA sobre todo
+def _emparejado_cfg(pid=None):
+    d = _cargar("emparejado_talles.json", pid) or {}
+    return {"acomodo": d.get("acomodo") or {}, "manual": d.get("manual") or {}}
+
+
 @app.get("/")
 @app.get("/admin")
 def inicio():
@@ -950,7 +961,7 @@ def subir_plantilla():
             nombres = dxf_resumen["nombres"]
             asign = [{"idx": i, "nombre": nombres[i]}
                      for i in range(min(len(det["piezas"]), len(nombres))) if str(nombres[i]).strip()]
-            manual = MP.alta_plantilla_manual(destino, asign, det["mesa"], det["talle_ref"], indices=_cargar("correspondencia_piezas.json") or None) if asign else None
+            manual = MP.alta_plantilla_manual(destino, asign, det["mesa"], det["talle_ref"], indices=_cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg()) if asign else None
             if manual and manual.get("registro"):
                 alta = manual
                 dxf_resumen["nombres_aplicados"] = sorted(manual["registro"].keys())
@@ -964,7 +975,7 @@ def subir_plantilla():
     nombres_conservados = None
     if snap_nombres and not alta.get("registro"):
         try:
-            alta_remap, cobertura = MP.remapear_registro(destino, snap_nombres, indices=_cargar("correspondencia_piezas.json") or None)
+            alta_remap, cobertura = MP.remapear_registro(destino, snap_nombres, indices=_cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg())
             if alta_remap and alta_remap.get("registro") and cobertura >= 0.5:
                 alta = alta_remap
                 nombres_conservados = f"{len(alta['registro'])}/{len(snap_nombres['nombres'])}"
@@ -1105,12 +1116,14 @@ def _nido_clave():
     pl = _ruta_entrada("plantilla.ai")
     reg_path = _ruta_datos("registro_producto.json")
     cor_path = _ruta_datos("correspondencia_piezas.json")
+    emp_path = _ruta_datos("emparejado_talles.json")
     try:
-        return ["v5", pl, os.path.getmtime(pl),
+        return ["v6", pl, os.path.getmtime(pl),
                 os.path.getmtime(reg_path) if os.path.exists(reg_path) else 0,
-                os.path.getmtime(cor_path) if os.path.exists(cor_path) else 0]
+                os.path.getmtime(cor_path) if os.path.exists(cor_path) else 0,
+                os.path.getmtime(emp_path) if os.path.exists(emp_path) else 0]
     except OSError:
-        return ["v5", pl, 0, 0, 0]
+        return ["v6", pl, 0, 0, 0, 0]
 
 def _nido_obtener():
     """Devuelve el nido (calculándolo si hace falta) con caché en memoria + DISCO
@@ -1136,7 +1149,8 @@ def _nido_obtener():
     if prod and prod.get("variante_guia"):
         talle_guia = prod["variante_guia"]
     nido = MP.nido_piezas(_ruta_entrada("plantilla.ai"), reg, talle_guia=talle_guia,
-                          indices=_cargar("correspondencia_piezas.json") or None)
+                          indices=_cargar("correspondencia_piezas.json") or None,
+                          emparejado=_emparejado_cfg())
     _NIDO_CACHE[ck] = nido
     try:
         json.dump({"clave": clave, "nido": nido}, open(cache_path, "w", encoding="utf-8"))
@@ -1295,7 +1309,8 @@ def plantilla_etiquetas():
     pl = _ruta_entrada("plantilla.ai")
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí la plantilla base"}), 409
-    alta = MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=_cargar("correspondencia_piezas.json") or None)
+    alta = MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=_cargar("correspondencia_piezas.json") or None,
+                                    emparejado=_emparejado_cfg())
     if not alta["registro"]:
         return jsonify({"error": "; ".join(alta["problemas"]) or "no se registró ninguna pieza"}), 422
     json.dump(alta["registro"], open(_ruta_datos("registro_producto.json"), "w", encoding="utf-8"), ensure_ascii=False)
@@ -1310,6 +1325,141 @@ def plantilla_etiquetas():
                "piezas_detalle": alta["piezas_detalle"], "metodo": "etiquetado visual"}
     json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
     return jsonify(resumen)
+
+
+# ── EMPAREJADO ENTRE TALLES: reacomodar a mano + corregir la pieza homóloga ────────────
+def _guia_y_asignaciones(pid=None):
+    """(det, mesa, talle_guía, [{idx,nombre}], registro) del molde activo.
+
+    Los nombres NO se vuelven a pedir: se releen del registro en el talle guía, que es
+    exactamente la entrada de `alta_plantilla_manual`. Así re-propagar el nombrado con el
+    ajuste nuevo es idempotente (misma guía, mismos nombres, otro emparejado)."""
+    pid = pid or _get_active_producto_id()
+    pl = _ruta_entrada("plantilla.ai", pid)
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    det = MP.detectar_piezas(pl, talle_ref=(prod or {}).get("variante_guia") or None)
+    mesa, guia = det["mesa"], det["talle_ref"]
+    reg = _cargar("registro_producto.json", pid) or {}
+    asign = []
+    for nom, por_t in reg.items():
+        inf = (por_t or {}).get(guia) or {}
+        if inf.get("mesa") == mesa and inf.get("pieza_idx") is not None:
+            asign.append({"idx": int(inf["pieza_idx"]), "nombre": nom})
+    return pl, det, mesa, guia, asign, reg
+
+
+def _asignacion_actual(reg, mesa):
+    """{talle: {nombre_pieza: pieza_idx}} tal como quedó el registro — es lo que la UI
+    muestra para poder decir «esta pieza en el talle X está mal, es la otra»."""
+    out = {}
+    for nom, por_t in (reg or {}).items():
+        for t, inf in (por_t or {}).items():
+            if (inf or {}).get("mesa") == mesa and inf.get("pieza_idx") is not None:
+                out.setdefault(t, {})[nom] = int(inf["pieza_idx"])
+    return out
+
+
+@app.get("/api/plantilla/emparejado")
+def plantilla_emparejado_get():
+    """Estado del emparejado entre talles: guía, talles, qué pieza le tocó a cada nombre
+    en cada talle, y el ajuste a mano guardado (acomodo + correcciones)."""
+    pid = _get_active_producto_id()
+    if not os.path.exists(_ruta_entrada("plantilla.ai", pid)):
+        return jsonify({"error": "primero subí el molde"}), 409
+    try:
+        _pl, det, mesa, guia, asign, reg = _guia_y_asignaciones(pid)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
+    cfg = _emparejado_cfg(pid)
+    return jsonify({"guia": guia, "mesa": mesa, "talles": det.get("talles") or [],
+                    "nombres_guia": {str(a["idx"]): a["nombre"] for a in asign},
+                    "asignacion": _asignacion_actual(reg, mesa),
+                    "acomodo": cfg["acomodo"], "manual": cfg["manual"]})
+
+
+@app.post("/api/plantilla/emparejado")
+def plantilla_emparejado_post():
+    """Guarda el ajuste a mano del emparejado y RE-PROPAGA el nombrado con él.
+
+    Body: `{pid?, talle, acomodo?: {idx:[dx_mm,dy_mm]}, manual?: {nombre: idx|null},
+             reset?: 'acomodo'|'manual'|'todo'}`. Sin `talle` se aceptan los diccionarios
+    completos `{talle: {...}}`. Guardar SIN re-armar el registro no serviría de nada: el
+    emparejado se resuelve al construirlo, así que acá mismo se rehace."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = _get_active_producto_id()
+    if not os.path.exists(_ruta_entrada("plantilla.ai", pid)):
+        return jsonify({"error": "primero subí el molde"}), 409
+    cfg = _emparejado_cfg(pid)
+    talle = cuerpo.get("talle")
+    reset = cuerpo.get("reset")
+    if reset in ("acomodo", "todo"):
+        if talle:
+            cfg["acomodo"].pop(talle, None)
+        else:
+            cfg["acomodo"] = {}
+    if reset in ("manual", "todo"):
+        if talle:
+            cfg["manual"].pop(talle, None)
+        else:
+            cfg["manual"] = {}
+    if talle:
+        if "acomodo" in cuerpo:
+            ac = {str(k): [float(v[0]), float(v[1])] for k, v in (cuerpo.get("acomodo") or {}).items()
+                  if v and (abs(float(v[0])) > 0.01 or abs(float(v[1])) > 0.01)}
+            if ac:
+                cfg["acomodo"][talle] = ac
+            else:
+                cfg["acomodo"].pop(talle, None)
+        for nom, idx in (cuerpo.get("manual") or {}).items():
+            d = cfg["manual"].setdefault(talle, {})
+            if idx is None:
+                d.pop(nom, None)          # quitar la corrección → vuelve a mandar la heurística
+            else:
+                d[nom] = int(idx)
+            if not d:
+                cfg["manual"].pop(talle, None)
+    else:
+        if isinstance(cuerpo.get("acomodo"), dict):
+            cfg["acomodo"] = cuerpo["acomodo"]
+        if isinstance(cuerpo.get("manual"), dict):
+            cfg["manual"] = cuerpo["manual"]
+
+    json.dump(cfg, open(_ruta_datos("emparejado_talles.json", pid), "w", encoding="utf-8"),
+              ensure_ascii=False)
+
+    try:
+        pl, det, mesa, guia, asign, _reg = _guia_y_asignaciones(pid)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
+    if not asign:
+        # Sin nombres todavía no hay nada que propagar, pero el ajuste queda guardado
+        # y se va a aplicar solo la primera vez que se nombren las piezas.
+        return jsonify({"ok": True, "guia": guia, "talles": det.get("talles") or [],
+                        "asignacion": {}, "acomodo": cfg["acomodo"], "manual": cfg["manual"],
+                        "aviso": "todavía no hay piezas nombradas: el ajuste queda guardado"})
+    alta = MP.alta_plantilla_manual(pl, asign, mesa, guia,
+                                    indices=_cargar("correspondencia_piezas.json", pid) or None,
+                                    emparejado=cfg)
+    if not alta.get("registro"):
+        return jsonify({"error": "; ".join(alta.get("problemas") or []) or "no se registró ninguna pieza"}), 422
+    json.dump(alta["registro"], open(_ruta_datos("registro_producto.json", pid), "w",
+                                     encoding="utf-8"), ensure_ascii=False)
+    try:
+        _regenerar_piezas_index(pid, reg=alta["registro"])
+    except Exception:
+        pass
+    _res = _cargar("resumen_plantilla.json", pid) or {}
+    _res.update({"mesas": alta["mesas"], "piezas": alta["piezas"], "talles": alta["talles"],
+                 "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
+                 "problemas": alta["problemas"], "advertencias": alta["advertencias"],
+                 "piezas_detalle": alta["piezas_detalle"]})
+    json.dump(_res, open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"),
+              ensure_ascii=False)
+    return jsonify({"ok": True, "guia": guia, "talles": alta["talles"],
+                    "nombres_guia": {str(a["idx"]): a["nombre"] for a in asign},
+                    "asignacion": _asignacion_actual(alta["registro"], mesa),
+                    "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
+                    "acomodo": cfg["acomodo"], "manual": cfg["manual"]})
 
 
 @app.get("/api/plantilla/variantes")
@@ -1389,7 +1539,7 @@ def plantilla_variantes_piezas():
         # (paso siguiente del flujo) los reemplaza.
         asign_nombres = [{"idx": i, "nombre": por_bbox.get(_k(p["bbox_mu"]), f"Pieza {i + 1}")}
                          for i, p in enumerate(piezas_ref)]
-        alta = MP.alta_plantilla_manual(ruta, asign_nombres, mesa, ref)
+        alta = MP.alta_plantilla_manual(ruta, asign_nombres, mesa, ref, emparejado=_emparejado_cfg(pid))
         if not alta.get("registro"):
             raise ValueError("; ".join(alta.get("problemas") or []) or "no se registró ninguna pieza")
         json.dump(alta["registro"], open(_ruta_datos("registro_producto.json", pid), "w",
@@ -1708,7 +1858,11 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
     # v5: la clave incluye los OBJETOS AGREGADOS (su lista y su posición). Sin esto, agregar o
     # mover un objeto NO invalidaba la caché → el visor del Arte seguía mostrando el render viejo,
     # sin el objeto (o con la posición anterior).
-    return ["v5", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+    # v6: entra el REGISTRO. Una pieza es un NOMBRE, y qué geometría tiene ese nombre en cada
+    # talle sale del registro: re-emparejar (o re-nombrar) cambia la pieza sin tocar el archivo
+    # → sin esto el visor del Arte seguía mostrando el render de la pieza vieja.
+    return ["v6", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+            _mt(_ruta_datos("registro_producto.json", pid)),
             _sha1_corto(mapeo or {}), _sha1_corto((prod or {}).get("borde_corte") or {}),
             _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
             _sha1_corto(edit_tam or {}), _sha1_corto(_oa_cargar(pid, sub) or {}),

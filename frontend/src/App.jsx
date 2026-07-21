@@ -2293,6 +2293,14 @@ export default function App() {
   const [varPzAsig, setVarPzAsig] = useState({});          // {pieza_idx: "nombre de variante"}
   const [varPzInput, setVarPzInput] = useState('');        // texto libre: una letra, un número o palabras
   const [varPzGuardando, setVarPzGuardando] = useState(false);
+  // ── EMPAREJAR TALLES (§10.c): cuando el molde NO trae las piezas dispuestas parecido en cada
+  // talle, la heurística de propagación de nombres no tiene señal. Acá el usuario SELECCIONA
+  // piezas y las REACOMODA (virtual, solo para emparejar) y/o corrige a mano la pieza homóloga.
+  const [empModo, setEmpModo] = useState(false);
+  const [empData, setEmpData] = useState(null);      // GET /api/plantilla/emparejado
+  const [empTalle, setEmpTalle] = useState(null);    // talle que se está corrigiendo (≠ guía)
+  const [empFijar, setEmpFijar] = useState(null);    // nombre de pieza esperando "tocá la correcta"
+  const [empGuardando, setEmpGuardando] = useState(false);
   const [resaltarNombre, setResaltarNombre] = useState(null); // nombre genérico resaltado en el visor (lista de piezas agrupada)
   const [grupoAislado, setGrupoAislado] = useState(null);   // clave del grupo abierto en DETALLE (visor aislado + edición); null = lista de grupos
   const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState(''); // nombre para crear una VARIABLE nueva (Paso 2)
@@ -3486,11 +3494,35 @@ export default function App() {
     setPzOffsets({});
   }, [etqData]);
 
+  // EMPAREJAR TALLES: el visor tiene que arrancar con el acomodo a mano YA guardado de ese
+  // talle. Va DESPUÉS del reset de arriba a propósito (los efectos corren en orden de
+  // declaración): si no, cada recarga de la detección borraría el reacomodo del usuario.
+  useEffect(() => {
+    if (!empModo || !empTalle) return;
+    const g = (empData?.acomodo || {})[empTalle] || {};
+    const o = {};
+    Object.entries(g).forEach(([k, v]) => { o[k] = { x: Number(v[0]) || 0, y: Number(v[1]) || 0 }; });
+    setPzOffsets(o);
+  }, [etqData, empModo, empTalle, empData]);
+
   const startDrag = (e, idx) => {
     if (e.button !== 0) return; // solo click izquierdo
     // Asignando variantes POR PIEZAS: tocar una pieza la selecciona/deselecciona (mismo gesto
     // que el nombrado de piezas, para que se aprenda una sola vez).
     if (varPzModo) { toggleSelNombrar(idx); e.preventDefault(); return; }
+    // EMPAREJAR TALLES: si hay una pieza esperando corrección, tocar en el visor la fija;
+    // si no, se arrastra para reacomodar (y el clic sin movimiento selecciona/deselecciona).
+    if (empModo) {
+      if (empFijar) { const nom = empFijar; setEmpFijar(null); fijarPiezaEmp(nom, idx); e.preventDefault(); return; }
+      // arrastrar una pieza YA seleccionada mueve todas las seleccionadas juntas
+      const grupo = selNombrar.has(idx) ? Array.from(selNombrar) : [idx];
+      const inis = {};
+      grupo.forEach(i => { inis[i] = pzOffsets[i] || { x: 0, y: 0 }; });
+      dragInfo.current = { idx, startX: e.clientX, startY: e.clientY, initialX: 0, initialY: 0,
+                           hasMoved: false, emp: true, inis };
+      e.preventDefault();
+      return;
+    }
     // Pestaña Variables, paso Nombrar: tocar una pieza la selecciona/deselecciona.
     if (tabAjustesMolde === 'variables' && varStep === 'nombrar') {
       // Editando un nombre existente: tocar suma/quita la pieza de ese nombre.
@@ -3542,20 +3574,31 @@ export default function App() {
 
   const handleDrag = (e) => {
     const { idx, startX, startY, initialX, initialY } = dragInfo.current;
-    if (idx === null || !modoAcomodar) return;
-    
+    if (idx === null || (!modoAcomodar && !dragInfo.current.emp)) return;
+
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    
+
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
       dragInfo.current.hasMoved = true;
     }
-    
+
     const svgEl = e.currentTarget;
     const rect = svgEl.getBoundingClientRect();
-    const viewBoxWidth = canvasLayout.width;
-    const scale = viewBoxWidth / (rect.width || 1);
-    
+    // px de pantalla → unidades del viewBox. Se usa el ANCHO DEL VIEWBOX, no `img_w`: las
+    // piezas pueden exceder la página (por eso el viewBox se agranda) y con img_w la pieza
+    // se corría más/menos que el mouse.
+    const scale = (canvasLayout.vbW || canvasLayout.width) / (rect.width || 1);
+
+    const inis = dragInfo.current.inis;
+    if (inis) {   // arrastre en grupo (emparejar talles): todas las seleccionadas juntas
+      setPzOffsets((prev) => {
+        const n = { ...prev };
+        Object.entries(inis).forEach(([k, v]) => { n[k] = { x: v.x + dx * scale, y: v.y + dy * scale }; });
+        return n;
+      });
+      return;
+    }
     setPzOffsets((prev) => ({
       ...prev,
       [idx]: {
@@ -3566,7 +3609,13 @@ export default function App() {
   };
 
   const endDrag = () => {
+    const d = dragInfo.current;
+    // En "emparejar talles" el mismo gesto sirve para las dos cosas: si no hubo movimiento
+    // fue un clic → selecciona/deselecciona la pieza (mismo gesto que el resto del visor).
+    if (d.idx !== null && d.emp && !d.hasMoved) toggleSelNombrar(d.idx);
     dragInfo.current.idx = null;
+    dragInfo.current.inis = null;
+    dragInfo.current.emp = false;
   };
 
   const asignarNombresEtq = () => {
@@ -4434,7 +4483,7 @@ export default function App() {
 
   // ── VARIANTES POR PIEZAS ────────────────────────────────────────────────────────────────────
   // Cambiar de molde corta el modo: la asignación pertenece a ESE molde y sus índices de pieza.
-  useEffect(() => { setVarPzModo(false); setVarPzAsig({}); setVarPzInput(''); }, [activoProdDetalle?.id]);
+  useEffect(() => { setVarPzModo(false); setVarPzAsig({}); setVarPzInput(''); setEmpModo(false); setEmpData(null); setEmpTalle(null); setEmpFijar(null); }, [activoProdDetalle?.id]);
   // El visor tiene que mostrar TODAS las piezas del molde (no las de un talle): por eso la
   // detección se pide con `candidatas=1`, que además lee el molde ORIGINAL — así los índices de
   // pieza no se mueven y la asignación guardada se puede volver a abrir y corregir.
@@ -4545,7 +4594,7 @@ export default function App() {
     const modoNombrar = tabAjustesMolde === 'variables' && varStep === 'nombrar';
     const modoConj = tabAjustesMolde === 'variables' && asignandoConjunto;
     const modoGrupoPz = tabAjustesMolde === 'variables' && asignandoGrupoPz;
-    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo)) return;
+    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo && !empModo)) return;
     const clave = asignandoTipo;
     e.preventDefault();
     const x0 = e.clientX, y0 = e.clientY;
@@ -4561,7 +4610,7 @@ export default function App() {
           const b = g.getBoundingClientRect();
           if (b.right >= rx0 && b.left <= rx1 && b.bottom >= ry0 && b.top <= ry1) idxs.push(parseInt(g.getAttribute('data-piece'), 10));
         });
-        if (idxs.length) { if (varPzModo) { addSelNombrar(idxs); } else if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
+        if (idxs.length) { if (empModo) { addSelNombrar(idxs); } else if (varPzModo) { addSelNombrar(idxs); } else if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
       }
       setRubber(null);
     };
@@ -5086,6 +5135,83 @@ export default function App() {
       }
     } catch (e) { /* mantiene la variante actual */ }
   };
+
+  // ── EMPAREJAR TALLES (§10.c) ──────────────────────────────────────────────────────────
+  // Herramienta para el molde que NO trae las piezas dispuestas parecido en cada talle: el
+  // emparejado automático (posición relativa + forma + área) se queda sin señal y propaga el
+  // nombre a la pieza equivocada. Dos salidas, en el MISMO visor de siempre:
+  //   1) REACOMODAR — seleccionar piezas (clic / recuadro) y arrastrarlas hasta que el talle
+  //      quede dispuesto como el guía. Es virtual: solo mueve la caja con la que se empareja.
+  //   2) CORREGIR — decir a mano «esta pieza en este talle es la #N». Manda sobre todo.
+  const cargarEmparejado = async () => {
+    try {
+      const r = await fetch('/api/plantilla/emparejado');
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo leer el emparejado'); return null; }
+      setEmpData(d);
+      return d;
+    } catch (e) { showError('No se pudo leer el emparejado: ' + e.message); return null; }
+  };
+
+  const abrirTalleEmp = async (t) => {
+    setEmpTalle(t); setEmpFijar(null); setSelNombrar(new Set());
+    await verVarianteOperario(t);
+  };
+
+  const activarEmparejar = async (on) => {
+    setEmpFijar(null); setSelNombrar(new Set());
+    setEmpModo(on);
+    if (!on) {
+      setEmpTalle(null); setPzOffsets({});
+      const g = empData?.guia;
+      if (g) await verVarianteOperario(g);
+      return;
+    }
+    setModoAcomodar(false);
+    const d = await cargarEmparejado();
+    if (!d) { setEmpModo(false); return; }
+    const otros = (d.talles || []).filter(t => t !== d.guia);
+    if (!otros.length) { showError('El molde tiene un solo talle: no hay nada que emparejar'); setEmpModo(false); return; }
+    setEmpTalle(otros[0]); setEmpFijar(null);
+    await verVarianteOperario(otros[0]);
+  };
+
+  // Offsets del visor (unidades del viewBox = mm) → payload {idx: [dx_mm, dy_mm]}.
+  const _empAcomodoPayload = () => {
+    const out = {};
+    Object.entries(pzOffsets || {}).forEach(([k, v]) => {
+      if (v && (Math.abs(v.x) > 0.01 || Math.abs(v.y) > 0.01)) {
+        out[k] = [Math.round(v.x * 100) / 100, Math.round(v.y * 100) / 100];
+      }
+    });
+    return out;
+  };
+
+  // Guarda el ajuste y RE-PROPAGA el nombrado con él (el backend rehace el registro).
+  const _postEmparejado = async (extra = {}, msg = 'Emparejado aplicado ✓') => {
+    if (!empTalle) return;
+    setEmpGuardando(true);
+    try {
+      const r = await fetch('/api/plantilla/emparejado', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ talle: empTalle, acomodo: _empAcomodoPayload(), ...extra }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo aplicar el emparejado'); return; }
+      setEmpData(prev => ({ ...(prev || {}), ...d }));
+      _talleDetCache.current = {};      // el registro cambió → los nombres por talle quedaron viejos
+      setNidoData(null); setNidoError(null);   // el nido se arma con el emparejado: hay que rearmarlo
+      await verVarianteOperario(empTalle);
+      await fetchProductos();
+      showMsg(msg);
+    } catch (e) { showError('No se pudo aplicar: ' + e.message); }
+    finally { setEmpGuardando(false); }
+  };
+
+  const aplicarEmparejado = () => _postEmparejado({});
+  const fijarPiezaEmp = (nombre, idx) => _postEmparejado({ manual: { [nombre]: idx } }, `«${nombre}» fijada a la pieza #${idx + 1} ✓`);
+  const soltarPiezaEmp = (nombre) => _postEmparejado({ manual: { [nombre]: null } }, `«${nombre}» vuelve al emparejado automático`);
+  const resetAcomodoEmp = () => { setPzOffsets({}); _postEmparejado({ reset: 'acomodo', acomodo: {} }, 'Posiciones restablecidas'); };
 
   // Medidas de todas las variantes (para el modo 'rango': cubrir el talle más grande del rango).
   const cargarMedidasVar = async () => {
@@ -8800,6 +8926,111 @@ export default function App() {
                                 })()}
                               </NombrarVariantes>
 
+                              {/* EMPAREJAR TALLES (§10.c). El nombre de una pieza se propaga al resto de
+                                  los talles comparando cómo están dispuestas. Si el molde NO viene
+                                  acomodado de forma parecida en cada talle, esa comparación no tiene
+                                  señal → acá el usuario reacomoda a mano y/o corrige la pieza homóloga. */}
+                              {(etqData?.talles?.length > 1) && (
+                                <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: empModo ? 'rgba(245,158,11,0.06)' : 'transparent' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>Emparejar {term.variante.toLowerCase()}s</span>
+                                    <button type="button" className={`btn ${empModo ? 'success' : 'ghost'}`}
+                                      style={{ padding: '4px 10px', fontSize: 11 }}
+                                      onClick={() => activarEmparejar(!empModo)}>
+                                      {empModo ? 'Salir' : 'Ajustar a mano'}
+                                    </button>
+                                  </div>
+                                  {!empModo ? (
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                                      El nombre que le pusiste a cada pieza en <b>{empData?.guia || etqData?.talle_ref}</b> se
+                                      propaga al resto comparando cómo están acomodadas. Si el molde no las trae
+                                      acomodadas parecido, abrí esto y <b>reacomodá</b> o <b>corregí</b> pieza por pieza.
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                        Guía: <b style={{ color: 'var(--accent)' }}>{empData?.guia}</b>. Elegí abajo
+                                        el {term.variante.toLowerCase()} a corregir: el visor lo muestra a él.
+                                      </div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                                        {(empData?.talles || []).filter(t => t !== empData?.guia).map(t => {
+                                          const on = empTalle === t;
+                                          const tieneAjuste = !!(empData?.acomodo || {})[t] || !!(empData?.manual || {})[t];
+                                          return (
+                                            <button key={t} type="button" onClick={() => abrirTalleEmp(t)}
+                                              style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>
+                                              {t}{tieneAjuste ? ' •' : ''}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, padding: '9px 11px', borderRadius: 9, background: 'rgba(255,255,255,0.03)' }}>
+                                        <b style={{ color: 'var(--text-secondary)' }}>1 · Reacomodar.</b> Tocá una pieza para
+                                        seleccionarla (o arrastrá un recuadro) y <b>arrastrala</b> hasta dejar
+                                        este {term.variante.toLowerCase()} acomodado como el de guía. No mueve el molde:
+                                        solo la referencia con la que se emparejan las piezas.
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1 }}>
+                                          Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b> ·
+                                          Movidas: <b style={{ color: 'var(--warning, #f5a524)' }}>{Object.keys(_empAcomodoPayload()).length}</b>
+                                        </span>
+                                        {selNombrar.size > 0 && <button type="button" className="btn ghost" style={{ fontSize: 11 }} onClick={() => setSelNombrar(new Set())}>Limpiar sel.</button>}
+                                        <button type="button" className="btn ghost" style={{ fontSize: 11 }} disabled={empGuardando} onClick={resetAcomodoEmp}>Restablecer</button>
+                                      </div>
+                                      <button type="button" className="btn primary" style={{ width: '100%', fontSize: 12 }}
+                                        disabled={empGuardando} onClick={aplicarEmparejado}>
+                                        {empGuardando ? 'Aplicando…' : 'Aplicar y re-emparejar'}
+                                      </button>
+
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, padding: '9px 11px', borderRadius: 9, background: 'rgba(255,255,255,0.03)' }}>
+                                        <b style={{ color: 'var(--text-secondary)' }}>2 · Corregir a mano.</b> Si ni así queda,
+                                        tocá «Cambiar» en la pieza mal emparejada y después la pieza correcta en el
+                                        visor. Una corrección a mano <b>nunca</b> se pisa con lo automático.
+                                      </div>
+                                      {empFijar && (
+                                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#18181b', background: '#f5a524', borderRadius: 8, padding: '7px 10px' }}>
+                                          Tocá en el visor la pieza que es «{empFijar}» en {empTalle}
+                                          <button type="button" onClick={() => setEmpFijar(null)} style={{ float: 'right', background: 'none', border: 0, cursor: 'pointer', fontWeight: 900 }}>×</button>
+                                        </div>
+                                      )}
+                                      {(() => {
+                                        const ng = empData?.nombres_guia || {};
+                                        const asig = (empData?.asignacion || {})[empTalle] || {};
+                                        const fijos = (empData?.manual || {})[empTalle] || {};
+                                        const filas = Object.entries(ng).map(([i, n]) => ({ idxGuia: parseInt(i, 10), nombre: n }))
+                                          .sort((a, b) => a.idxGuia - b.idxGuia);
+                                        if (!filas.length) return <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Todavía no hay piezas nombradas.</div>;
+                                        return (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 260, overflowY: 'auto' }}>
+                                            {filas.map(f => {
+                                              const j = asig[f.nombre];
+                                              const fijo = fijos[f.nombre] != null;
+                                              return (
+                                                <div key={f.nombre} onMouseEnter={() => setResaltarNombre(nombreGenerico(f.nombre))} onMouseLeave={() => setResaltarNombre(null)}
+                                                  style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 8px', borderRadius: 7, background: fijo ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+                                                  <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nombre}</span>
+                                                  <span style={{ fontSize: 11, color: j == null ? 'var(--warning, #f5a524)' : (fijo ? '#c4b5fd' : 'var(--text-muted)'), fontWeight: 700 }}>
+                                                    {j == null ? 'sin emparejar' : `#${j + 1}`}{fijo ? ' ✋' : ''}
+                                                  </span>
+                                                  <button type="button" disabled={empGuardando}
+                                                    onClick={() => setEmpFijar(empFijar === f.nombre ? null : f.nombre)}
+                                                    style={{ background: 'none', border: '1px solid var(--border-light)', color: empFijar === f.nombre ? 'var(--accent)' : 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, padding: '1px 6px' }}>Cambiar</button>
+                                                  {fijo && <button type="button" title="Volver al emparejado automático" disabled={empGuardando}
+                                                    onClick={() => soltarPiezaEmp(f.nombre)}
+                                                    style={{ background: 'none', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>}
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        );
+                                      })()}
+                                    </>
+                                  )}
+                                </div>
+                              )}
+
                               {/* En «mi molde» no hay pestaña Variables: el nombrado de piezas (que vive
                                   DENTRO de ese paso) se alcanza desde acá — es el mismo editor. */}
                               {modoMiMolde ? (
@@ -10355,7 +10586,22 @@ export default function App() {
                                   else if (varPzNom) { fillCol = 'rgba(16,185,129,0.28)'; badgeFill = '#10b981'; textFill = '#18181b'; }
                                   else { fillCol = 'rgba(255,255,255,0.04)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
                                 }
-                                const strokeCol = (destacada || resaltada || varPzSel) ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)';
+                                // EMPAREJAR TALLES: este coloreo MANDA (el visor esta dedicado a eso).
+                                // cyan = seleccionada para reacomodar · violeta = corregida a mano ·
+                                // verde = emparejada sola · ambar = sin emparejar (ninguna pieza le toco).
+                                let empSel = false;
+                                if (empModo && empTalle) {
+                                  const _asig = (empData?.asignacion || {})[empTalle] || {};
+                                  const _fij = (empData?.manual || {})[empTalle] || {};
+                                  const _nomAqui = Object.keys(_asig).find(n => _asig[n] === p.idx);
+                                  empSel = selNombrar.has(p.idx);
+                                  if (empSel) { fillCol = 'rgba(0,243,255,0.26)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
+                                  else if (_nomAqui && _fij[_nomAqui] != null) { fillCol = 'rgba(167,139,250,0.30)'; badgeFill = '#a78bfa'; textFill = '#18181b'; }
+                                  else if (_nomAqui) { fillCol = 'rgba(16,185,129,0.26)'; badgeFill = '#10b981'; textFill = '#18181b'; }
+                                  else { fillCol = 'rgba(245,165,36,0.18)'; badgeFill = '#f5a524'; textFill = '#18181b'; }
+                                  if (empFijar) { badgeFill = '#f5a524'; textFill = '#18181b'; }
+                                }
+                                const strokeCol = (destacada || resaltada || varPzSel || empSel) ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)';
 
                                 const offset = pzOffsets[p.idx] || { x: 0, y: 0 };
                                 const tx = p.tx + offset.x;
@@ -10366,7 +10612,7 @@ export default function App() {
                                     key={p.idx}
                                     data-piece={p.idx}
                                     transform={`translate(${tx}, ${ty})`}
-                                    style={{ cursor: modoAcomodar ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : 'pointer' }}
+                                    style={{ cursor: (modoAcomodar || (empModo && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
                                     onMouseDown={(e) => startDrag(e, p.idx)}
                                   >
                                     <title>{nombrePz ? `${nombrePz} (Pieza #${p.idx + 1})` : `Pieza #${p.idx + 1} (sin asignar)`}</title>
@@ -10388,6 +10634,13 @@ export default function App() {
                                         <text y={spx(24)} fill="#34d399" fontSize={spx(12.5)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
                                           style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
                                           {varPzNom}
+                                        </text>
+                                      )}
+                                      {/* Emparejando: que pieza del talle GUIA le toco a esta, escrito encima */}
+                                      {empModo && nombrePz && (
+                                        <text y={spx(24)} fill="#e4e4e7" fontSize={spx(12)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
+                                          style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
+                                          {nombrePz}
                                         </text>
                                       )}
                                     </g>
