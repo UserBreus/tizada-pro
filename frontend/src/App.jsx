@@ -2241,6 +2241,7 @@ export default function App() {
   const [pedidoTabMoldes, setPedidoTabMoldes] = useState('catalogo'); // 'catalogo' | 'mios'
   // Modal "Subir mi propio molde" (nombre + archivo).
   const [subirMoldeOpen, setSubirMoldeOpen] = useState(false);
+  const [borrarArt, setBorrarArt] = useState(null);   // artículo propio a eliminar (modal de confirmación)
   const [subirMoldeNombre, setSubirMoldeNombre] = useState('');
   const [subirMoldeFile, setSubirMoldeFile] = useState(null);
   const [subirMoldeBusy, setSubirMoldeBusy] = useState(false);
@@ -6854,10 +6855,19 @@ export default function App() {
                                   ))}
                                 </div>
                               </button>
-                              <button type="button" className="btn ghost" style={{ width: '100%', marginTop: 8, fontSize: 11, padding: '5px 8px' }}
-                                onClick={() => abrirConfigMiMolde(p.id)}>
-                                ⚙ Configurar
-                              </button>
+                              <div style={{ display: 'flex', gap: 5, marginTop: 8 }}>
+                                <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 11, padding: '5px 8px' }}
+                                  onClick={() => abrirConfigMiMolde(p.id)}>
+                                  ⚙ Configurar
+                                </button>
+                                {/* Eliminar el artículo propio: con modal propio, nunca `confirm()`
+                                    del navegador (el sistema usa sus propios avisos). */}
+                                <button type="button" className="btn ghost" title="Eliminar este artículo"
+                                  style={{ fontSize: 11, padding: '5px 9px', color: 'var(--danger, #ff5a6e)' }}
+                                  onClick={(e) => { e.stopPropagation(); setBorrarArt(p); }}>
+                                  🗑
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -11908,6 +11918,36 @@ export default function App() {
       </main>
 
       {/* --- MODAL: Subir MI PROPIO MOLDE (desde el pedido) --- */}
+      {/* Confirmar la eliminación de un artículo propio: borra el molde Y sus archivos, así que
+          se pide confirmación explícita y se avisa que no se puede deshacer. */}
+      <Modal open={!!borrarArt} onClose={() => setBorrarArt(null)} centrado maxWidth={430}
+        titulo="Eliminar artículo">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+            Se va a eliminar <b style={{ color: '#fff' }}>{borrarArt?.nombre}</b> y todos sus
+            archivos (molde, diseños y configuración). <b>No se puede deshacer.</b>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn ghost" style={{ flex: 1 }}
+              onClick={() => setBorrarArt(null)}>Cancelar</button>
+            <button type="button" className="btn" style={{ flex: 1, background: 'var(--danger, #ff5a6e)', color: '#fff' }}
+              onClick={async () => {
+                const id = borrarArt?.id; setBorrarArt(null);
+                try {
+                  const r = await fetch('/api/productos/eliminar', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id }),
+                  });
+                  const d = await r.json();
+                  if (!r.ok) { showError(d.error || 'No se pudo eliminar'); return; }
+                  await fetchProductos();
+                  showMsg('Artículo eliminado ✓');
+                } catch (e) { showError('No se pudo eliminar: ' + e.message); }
+              }}>Eliminar</button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={subirMoldeOpen} onClose={() => { if (!subirMoldeBusy) setSubirMoldeOpen(false); }} centrado maxWidth={520}
         titulo="Subir mi propio molde"
         subtitulo="Queda en «Mis artículos», sólo para vos. Después indicás qué es cada pieza.">
