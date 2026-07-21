@@ -38,6 +38,40 @@ MARGEN_MESA_CM = 2.0                                   # margen sugerido por lad
 CAPAS_GUIA = {"guias", "guías", "guides", "Guides", "guia", "guía"}  # se descartan
 
 
+
+# --- Handles de PDF: cierre garantizado -------------------------------------------------------
+# En Windows un archivo que quedó abierto NO se puede reemplazar ni borrar (WinError 5). Varias
+# funciones de acá abren el arte/la plantilla y devuelven datos ya extraídos, sin cerrar el
+# documento: el handle sobrevive hasta que el GC pase, y mientras tanto el archivo queda trabado
+# (subir un arte nuevo encima fallaba por esto). Se registran y el server los cierra al terminar
+# cada request (`cerrar_abiertos`).
+_ABIERTOS = []
+
+
+def _abrir(path, *a, **k):
+    d = fitz.open(path, *a, **k)
+    _ABIERTOS.append(d)
+    return d
+
+
+def _abrir_pike(path, *a, **k):
+    import pikepdf
+    d = pikepdf.open(path, *a, **k)
+    _ABIERTOS.append(d)
+    return d
+
+
+def cerrar_abiertos():
+    """Cierra todo PDF abierto desde archivo que haya quedado colgado. Idempotente."""
+    global _ABIERTOS
+    pend, _ABIERTOS = _ABIERTOS, []
+    for d in pend:
+        try:
+            d.close()
+        except Exception:
+            pass
+
+
 def _es_capa_guia(nombre):
     """¿Es la capa GUÍA del arte? (texto que orienta al sistema: piezas, rangos… NUNCA se
     muestra ni se imprime). Compara NORMALIZADO: "Guías", "GUIAS", "Guia" son la misma capa.
@@ -168,7 +202,7 @@ def alta_plantilla(path):
     motor más un diagnóstico legible: `problemas` (bloqueantes), `advertencias`
     (no bloquean pero conviene corregir) y `piezas_detalle` (qué detectó por
     pieza, con la medida de mesa sugerida)."""
-    doc = fitz.open(path)
+    doc = _abrir(path)
     talles = _talles_de_plantilla(doc)
     registro, problemas, advertencias = {}, [], []
     mesas_por_pieza = {}   # pieza -> set de mesas donde apareció
@@ -178,7 +212,7 @@ def alta_plantilla(path):
                          "ser una capa con su nombre exacto (M, 3XL, 16, …).")
 
     for talle in talles:
-        d2 = fitz.open(path)
+        d2 = _abrir(path)
         for c in d2.layer_ui_configs():
             if c["text"] != talle:
                 d2.set_layer_ui_config(c["number"], action=2)
@@ -284,7 +318,7 @@ def detectar_piezas(path, talle_ref=None, ancho_preview=1100):
     Devuelve {mesa, talle_ref, talles, unidad:"mm", img_w, img_h (extensión en mm),
     piezas:[{idx, px,py,pw,ph (en MILÍMETROS reales), w_cm, h_cm, path_svg(en mm)}]}.
     La escala es REAL y fija (1 unidad = 1 mm), no depende de la cantidad de piezas."""
-    doc = fitz.open(path)
+    doc = _abrir(path)
     talles_mesas = _talles_con_molde(doc)
     
     # Buscar si existe una capa de referencia (caso insensible)
@@ -578,7 +612,7 @@ def nido_piezas(path, registro, talle_guia=None, ancho_preview=1100, indices=Non
     arrastra junta. Devuelve {vb,w,h,guia,talles,piezas:[{nombre,cx,cy,talles:[{talle,d}]}]}."""
     base = detectar_piezas(path, talle_ref=talle_guia, ancho_preview=300)
     mesa = base["mesa"]; guia = base["talle_ref"]; talles = base.get("talles") or [guia]
-    doc = fitz.open(path)
+    doc = _abrir(path)
     # Contornos de cada talle (una sola extracción por talle).
     conts_por_talle = {}
     for t in talles:
@@ -1058,7 +1092,7 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None):
     referencia. `asignaciones` = [{"idx": i, "nombre": "Frente"}, ...]. El nombre
     de cada pieza se propaga a TODOS los talles emparejando por posición
     (centroide normalizado), sin pedir etiquetas de texto en el .ai."""
-    doc = fitz.open(path)
+    doc = _abrir(path)
     _raw = {a["idx"]: a["nombre"].strip() for a in asignaciones if a.get("nombre", "").strip()}
     # SEGURIDAD: dos piezas con el MISMO nombre colisionan en el registro (dict por nombre) y
     # se pierde una. Si un genérico trae nombres duplicados, se renumera TODO ese genérico
@@ -1166,7 +1200,7 @@ def _separaciones(pg_obj, vistos):
 
 
 def validar_arte(path_arte, path_plantilla, carpeta_fuentes):
-    db, da = fitz.open(path_plantilla), fitz.open(path_arte)
+    db, da = _abrir(path_plantilla), _abrir(path_arte)
     checks, ok = [], True
 
     coincide = len(db) == len(da) and all(
@@ -1183,7 +1217,7 @@ def validar_arte(path_arte, path_plantilla, carpeta_fuentes):
                    "detalle": f"{len(ca & cb)}/{len(cb)}" + (f" — faltan {faltan_capas}" if faltan_capas else "")})
     ok &= not faltan_capas
 
-    p = pikepdf.open(path_arte)
+    p = _abrir_pike(path_arte)
     tintas = {}
     for i, pg in enumerate(p.pages):
         for t in _separaciones(pg.obj, set()):
@@ -1193,7 +1227,7 @@ def validar_arte(path_arte, path_plantilla, carpeta_fuentes):
     checks.append({"nombre": "Tintas planas en el PDF", "ok": True,
                    "detalle": ", ".join(f"{t} ({n} mesas)" for t, n in tintas.items()) or "ninguna (solo proceso)"})
 
-    d2 = fitz.open(path_arte)
+    d2 = _abrir(path_arte)
     for c in d2.layer_ui_configs():
         if c["text"] != "Fondo":
             d2.set_layer_ui_config(c["number"], action=2)
@@ -1225,7 +1259,7 @@ def validar_arte(path_arte, path_plantilla, carpeta_fuentes):
 def fuentes_requeridas_arte(path_arte):
     requeridas = {}
     for capa in ("Personalizable", None):
-        doc = fitz.open(path_arte)
+        doc = _abrir(path_arte)
         for c in doc.layer_ui_configs():
             if capa:
                 on = (c["text"] == capa)
@@ -1258,7 +1292,7 @@ def _colores_personalizable(path_arte):
     (Personalizable o la capa de campo: Nombre, Número, Palabra…), NO en la gráfica/
     guías. Así conserva EXACTO el CMYK/color de cada campo, sin pasar a RGB."""
     try:
-        pdf = pikepdf.open(path_arte)
+        pdf = _abrir_pike(path_arte)
     except Exception:
         return {}
     res = {}
@@ -1367,7 +1401,7 @@ def _trazo_personalizable(path_arte):
     MAYÚSCULAS + ancho `w`). Se captura ese borde para respetarlo al re-estampar.
     El ancho difiere por campo (numero ≠ nombre), por eso se guarda por texto."""
     try:
-        pdf = pikepdf.open(path_arte)
+        pdf = _abrir_pike(path_arte)
     except Exception:
         return {}
     res = {}
@@ -1466,7 +1500,7 @@ def _pasadas_personalizable(path_arte):
     motor lo re-dibuja igual. Ver MAPA_DEL_SISTEMA.md → changelog 2026-07-16.
     """
     try:
-        pdf = pikepdf.open(path_arte)
+        pdf = _abrir_pike(path_arte)
     except Exception:
         return {}
     res = {}
@@ -1771,7 +1805,7 @@ def extraer_editables(path_arte, con_thumb=True):
     lo usa el VISOR del front; el MOTOR (generar_pedido) usa únicamente la geometría, y esto se
     llama por cada talle → generar imágenes ahí es puro desperdicio (×19 en asignar_todo)."""
     import base64
-    doc = fitz.open(path_arte)
+    doc = _abrir(path_arte)
     cfgs = doc.layer_ui_configs() if con_thumb else None
     objs = []
     for pno in range(len(doc)):
@@ -1819,12 +1853,23 @@ def extraer_editables(path_arte, con_thumb=True):
 
 
 def mesa_rect_arte(path_arte, mesa):
-    """Rect [x0, y0, w, h] de una MESA del arte — el marco donde viven los editables."""
+    """Rect [x0, y0, w, h] de una MESA del arte — el marco donde viven los editables.
+
+    CIERRA el documento: en Windows un archivo abierto NO se puede reemplazar (WinError 5), y
+    esta función se llama justo antes de inyectar una capa en el arte — dejarlo abierto hacía
+    fallar el guardado.
+    """
+    d = None
     try:
-        pr = fitz.open(path_arte)[int(mesa) - 1].rect
+        d = fitz.open(path_arte)
+        pr = d[int(mesa) - 1].rect
         return [round(pr.x0, 2), round(pr.y0, 2), round(pr.width, 2), round(pr.height, 2)]
     except Exception:
         return None
+    finally:
+        if d is not None:
+            try: d.close()
+            except Exception: pass
 
 
 def pos_agregado_en_diseno(obj, cont, mesa_rect):
@@ -2107,7 +2152,7 @@ def _guia_capas_data(path_plantilla, registro, config, talle_guia, rango, refere
         talles_inc = base.get("talles", []) or [base["talle_ref"]]
     else:
         talles_inc = [talle_guia or base["talle_ref"]]
-    doc_src = fitz.open(path_plantilla)
+    doc_src = _abrir(path_plantilla)
     capas_data = []   # [{talle, items:[{segs,nombre,ccx,ccy,wC,hC}], minX,minY,maxX,maxY}]
     for t in talles_inc:
         conts = extraer_piezas_mesa(doc_src, mesa, t)
@@ -2373,7 +2418,7 @@ def ai_guia_medidas(path_plantilla, registro, config="default", rango=None, refe
 def mapeo_por_nombre(path_arte, registro_molde):
     """Mapeo {pieza: mesa} leído de los rótulos de texto o de las capas del arte."""
     import re as _re
-    doc = fitz.open(path_arte)
+    doc = _abrir(path_arte)
     piezas = sorted(registro_molde.keys())
     mapeo = {}
     exactos = set()   # piezas fijadas por match EXACTO: un genérico posterior NO las pisa
@@ -2477,19 +2522,26 @@ def mapeo_variantes_arte(path_arte, registro_molde, variantes_orden):
     _hit = _MAPEO_VAR_CACHE.get(_ck)
     if _hit is not None:
         return _hit
+    # CERRAR el documento al terminar: en Windows un archivo abierto no se puede reemplazar
+    # (WinError 5). Esta función corre antes de inyectar capas en el arte y, si quedaba abierta,
+    # el guardado del arte fallaba con "Acceso denegado".
     doc = fitz.open(path_arte)
-    piezas = sorted(registro_molde.keys())
-    rango, exacta = {}, {}
-    for i in range(len(doc)):
-        for ln in (_texto_mesa(doc, i + 1) + _capas_mesa(doc, i + 1)):
-            r = _parse_pieza_hash(ln, piezas, variantes_orden)
-            if r:
-                piezas_match, variantes, es_exacta = r
-                target = exacta if es_exacta else rango
-                for pieza in piezas_match:             # genérico → TODAS las piezas de ese nombre
-                    for v in variantes:                # rango → TODOS los talles del tramo
-                        target.setdefault(pieza, {}).setdefault(v, i + 1)
-                break                                  # una mesa = un rótulo
+    try:
+        piezas = sorted(registro_molde.keys())
+        rango, exacta = {}, {}
+        for i in range(len(doc)):
+            for ln in (_texto_mesa(doc, i + 1) + _capas_mesa(doc, i + 1)):
+                r = _parse_pieza_hash(ln, piezas, variantes_orden)
+                if r:
+                    piezas_match, variantes, es_exacta = r
+                    target = exacta if es_exacta else rango
+                    for pieza in piezas_match:         # genérico → TODAS las piezas de ese nombre
+                        for v in variantes:            # rango → TODOS los talles del tramo
+                            target.setdefault(pieza, {}).setdefault(v, i + 1)
+                    break                              # una mesa = un rótulo
+    finally:
+        try: doc.close()
+        except Exception: pass
     out = {}
     for pieza in set(rango) | set(exacta):
         d = dict(rango.get(pieza, {}))
@@ -2510,7 +2562,7 @@ def _mesa_tiene_diseno(doc, mesa):
 def arte_es_separado(path_arte, path_plantilla):
     """True si el arte NO comparte la estructura del molde (mesas/talles): se
     trata como arte separado (una mesa de diseño por pieza)."""
-    da, db = fitz.open(path_arte), fitz.open(path_plantilla)
+    da, db = _abrir(path_arte), _abrir(path_plantilla)
     if len(da) == len(db):
         cb = set(i["name"] for i in db.get_ocgs().values())
         ca = set(i["name"] for i in da.get_ocgs().values())
@@ -2524,8 +2576,8 @@ def detectar_arte(path_arte, registro_molde, ancho_thumb=240):
     """Para el mapeo visual del arte separado: una miniatura por mesa del arte,
     con una sugerencia de pieza por proporción. Devuelve {mesas:[{mesa, thumb,
     w_cm, h_cm, tiene_diseno, sugerencia}], piezas:[nombres del molde]}."""
-    doc = fitz.open(path_arte)       # para MINIATURAS (ocultamos la capa de guías)
-    doc_txt = fitz.open(path_arte)   # para LEER nombres (guías visibles)
+    doc = _abrir(path_arte)       # para MINIATURAS (ocultamos la capa de guías)
+    doc_txt = _abrir(path_arte)   # para LEER nombres (guías visibles)
     # La miniatura muestra el diseño REAL (lo que se imprime), no las guías/nombres
     # que el motor descarta. La lectura de nombres se hace en doc_txt (guías
     # visibles), porque get_pixmap y get_text respetan la visibilidad de la capa.
@@ -2601,7 +2653,7 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
     cubierta solo por mesas `#` NO se marca sin asignar, y se AVISA si una variante quedó
     sin diseño en esa pieza. `piezas_scope` (opcional) acota los checks de cobertura a ESAS
     piezas (las de la VARIABLE en uso) en vez del molde entero — regla mapeo-por-variable."""
-    doc = fitz.open(path_arte)
+    doc = _abrir(path_arte)
     if piezas_scope is not None:
         _sc = set(piezas_scope)
         piezas = sorted(p for p in registro_molde.keys() if p in _sc)
@@ -2696,9 +2748,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _bc_mm = max(0.2, float(_bc.get("ancho_mm", 2.0) or 2.0))
     _bc_color = (_bc.get("color") or [0, 0, 0, 0.85])[:4]
     B = (_bc_mm if _bc_activo else 2.0) * MM
-    base_doc = fitz.open(plantilla)
+    base_doc = _abrir(plantilla)
     TODAS = set(i["name"] for i in base_doc.get_ocgs().values())
-    CAPAS_ARTE = set(i["name"] for i in fitz.open(arte).get_ocgs().values())
+    CAPAS_ARTE = set(i["name"] for i in _abrir(arte).get_ocgs().values())
 
     fuentes_cache = {}
     def fuente(nombre_ps):
@@ -2814,7 +2866,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _arte_por_talle, _limpias = {}, set()
     def pagina_arte(mesa, talle):
         if talle not in _arte_por_talle:
-            _arte_por_talle[talle] = pikepdf.open(arte)
+            _arte_por_talle[talle] = _abrir_pike(arte)
         pdf = _arte_por_talle[talle]
         if (talle, mesa) not in _limpias:
             pag = pdf.pages[mesa - 1]
@@ -2863,7 +2915,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         """Modo arte separado: la mesa del arte con SOLO el diseño (sin guías ni
         los placeholders de personalización, que se estampan aparte con datos)."""
         if _arte_pieza["pdf"] is None:
-            _arte_pieza["pdf"] = pikepdf.open(arte)
+            _arte_pieza["pdf"] = _abrir_pike(arte)
         pdf = _arte_pieza["pdf"]
         if arte_mesa not in _arte_pieza["limpias"]:
             pag = pdf.pages[arte_mesa - 1]
@@ -2892,7 +2944,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     def pagina_arte_solo(arte_mesa, capa):
         key = (arte_mesa, _norm_nombre(capa))
         if key not in _arte_solo:
-            pdf = pikepdf.open(arte)
+            pdf = _abrir_pike(arte)
             pag = pdf.pages[arte_mesa - 1]
             aislar_capa(pdf, pag, _norm_nombre(capa))
             sanear_oc(pdf, pag)
@@ -2909,7 +2961,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         key = _norm_nombre(capa)
         if key not in _edit_img:
             if _arte_fitz["doc"] is None:
-                _arte_fitz["doc"] = fitz.open(arte)
+                _arte_fitz["doc"] = _abrir(arte)
             fd = _arte_fitz["doc"]; cfgs = fd.layer_ui_configs()
             for c in cfgs:
                 fd.set_layer_ui_config(c["number"], action=1)              # apagar todas
@@ -2923,7 +2975,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             for c in cfgs:
                 fd.set_layer_ui_config(c["number"], action=0)              # restaurar
             ow, oh = (ox1 - ox0), (oy1 - oy0)                              # tamaño del objeto en puntos
-            tmp = fitz.open(); pg2 = tmp.new_page(width=ow, height=oh)
+            tmp = _abrir(); pg2 = tmp.new_page(width=ow, height=oh)
             pg2.insert_image(fitz.Rect(0, 0, ow, oh), pixmap=pix)
             ep = pikepdf.open(io.BytesIO(tmp.tobytes()))
             _edit_eps.append(ep)                                          # NO liberar (lo usa copy_foreign)
@@ -2952,7 +3004,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 try:
                     pagina_arte_solo(_mesa, _o["capa"])
                     _bf = io.BytesIO(); _arte_solo[(_mesa, _norm_nombre(_o["capa"]))].save(_bf)
-                    _pg = fitz.open("pdf", _bf.getvalue())[_mesa - 1]
+                    _pg = _abrir("pdf", _bf.getvalue())[_mesa - 1]
                     if _pg.get_drawings() or _pg.get_images() or _pg.get_text().strip():
                         _redibujar_validos.add(_nm)
                 except Exception:
@@ -2961,7 +3013,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _arte_rects = {}
     def arte_rect(arte_mesa):
         if arte_mesa not in _arte_rects:
-            _arte_rects[arte_mesa] = fitz.open(arte)[arte_mesa - 1].rect
+            _arte_rects[arte_mesa] = _abrir(arte)[arte_mesa - 1].rect
         return _arte_rects[arte_mesa]
 
     def _bbox_arte(xo):
@@ -3366,7 +3418,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             persona = pr.get("personalizacion") or {"nombre": pr.get("nombre", ""), "numero": pr.get("numero", "")}
             datos = generar_pieza(pieza, pr["talle"], persona, nro, grupo=(pr.get("_grupo") if isinstance(pr, dict) else None),
                                   variante=(pr.get("variante_clave") if isinstance(pr, dict) else None))
-            doc = fitz.open("pdf", datos)
+            doc = _abrir("pdf", datos)
             r = doc[0].rect
             piezas_por_tela.setdefault(TELA(pieza), []).append(
                 {"doc": doc, "w": r.width, "h": r.height, "pieza": pieza, "talle": pr["talle"],

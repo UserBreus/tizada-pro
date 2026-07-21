@@ -271,14 +271,30 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 
 ## 10.b OBJETOS EDITABLES — cómo se manejan (verificado 2026-07-20)
 
-**DOS ORÍGENES, UN SOLO COMPORTAMIENTO.**
-1. **Del arte**: cada capa OCG del .ai cuyo nombre empieza con `editable` (ej. "Editable Escudo").
-   Las detecta `extraer_editables` → `{mesa, capa, nombre, bbox_mu, mesa_rect, w_cm, h_cm, thumb, svg}`.
-2. **Agregados por el usuario**: PNG/SVG/PDF/AI que se suben desde "Editar diseño". `objetos_agregados.py`
-   los normaliza a **un PDF de 1 página + su tamaño en cm**; viven en
-   `datos/productos/<pid>/objetos_agregados/<sub>/` con `objetos_agregados.json` (id, archivo, nombre,
-   **pieza**, w_cm/h_cm, transforms). Endpoints: `objeto_agregar`, `objetos_agregados`,
-   `objeto_agregado/<id>/{pieza,transform,duplicar}` (DELETE para borrar).
+**UN SOLO ORIGEN REAL: el ARTE.** Un objeto editable es una capa OCG del .ai cuyo nombre empieza con
+`editable` (ej. "Editable Escudo"). Las detecta `extraer_editables` →
+`{mesa, capa, nombre, bbox_mu, mesa_rect, w_cm, h_cm, thumb, svg}`.
+
+Los objetos que **agrega el usuario** (PNG/SVG/PDF/AI desde "Editar diseño") NO son un sistema
+paralelo: entran a una **sala de espera** y al COLOCARLOS se **INYECTAN en el arte como una capa
+OCG más**, y desde ahí son editables del arte comunes (editor, visor, motor, tizada: sin código
+especial). `objetos_agregados.py` los normaliza a **un PDF de 1 página + su tamaño en cm** (viven en
+`datos/productos/<pid>/objetos_agregados/<sub>/` con `objetos_agregados.json`) y `inyectar_editable`
+los escribe en el arte. Endpoints: `objeto_agregar`, `objetos_agregados`,
+`objeto_agregado/<id>/{colocar,pieza,transform,duplicar}` (DELETE para borrar).
+
+**VERSIONES DEL ARTE (importante).** Inyectar **NO sobrescribe** el archivo que subió el usuario:
+escribe `arte.v<N>.ai` al lado y un puntero `arte.ver` con la versión vigente. `_ruta_entrada(
+"arte.ai")` devuelve **la vigente** para TODO el sistema (`original=True` fuerza el base, sólo lo
+usa la subida, que además hace `reset_versiones`). Dos motivos, los dos reales: (a) el arte es un
+archivo del usuario y el original queda intacto como respaldo; (b) en Windows `os.replace` falla con
+**WinError 5** si cualquier proceso tiene el archivo abierto — crear un archivo nuevo no puede
+fallar por eso. **Todas las mesas de un objeto se inyectan en UNA pasada = una sola versión.**
+
+**HANDLES DE PDF.** `motor_pedido` abre PDFs desde archivo con `_abrir`/`_abrir_pike`, que los
+registran, y `@app.teardown_request` llama `MP.cerrar_abiertos()` al terminar cada request. Sin esto
+los documentos quedaban abiertos y **trababan el arte y la plantilla** (no se podían reemplazar ni
+borrar). Fue la causa real del "error al cargar una imagen": 4 de 5 artes estaban trabados.
 
 **A QUÉ PIEZA PERTENECE.** Los del arte, por la mesa donde viven (`mesa2pieza`, vía el mapeo).
 Los agregados, por la pieza que **elige el usuario clickeando sobre el diseño** (se guarda `pieza`).
@@ -316,6 +332,8 @@ editables_tamano **y el manifiesto de objetos agregados** — sin esto, agregar/
 regeneraba el render y "no se veía".
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 — RESUELTO: "al cargar una imagen da error" (colocar objeto = 500). Causa real: archivos TRABADOS, no el código de inyección.** Síntoma: `POST /api/productos/objeto_agregado/<id>/colocar` devolvía 500 genérico. Traza real: `PermissionError [WinError 5]` al `os.replace` del temporal sobre `arte.ai`. **Diagnóstico (lo que costó):** primero se asumió que el server tenía el arte abierto y se cerraron `mesa_rect_arte` y `mapeo_variantes_arte` → **seguía fallando**. La prueba que lo destrabó fue empírica: intentar el `os.replace` **desde un proceso externo y con el server muerto** → seguía denegado ⇒ el lock **no era del server**. Sondeando todos los artes: **4 de 5 trabados** (`dcvd`, `hgvbn`, `t5y6rt`, `tht`; libre sólo `nhgnhg`), con 24 procesos python zombis de sesiones viejas y sus handles de PyMuPDF colgados. **NO era OneDrive ni la ACL** (el `replace` entre archivos nuevos en la misma carpeta funciona). **Arreglo en dos capas:** (1) **el arte se versiona** — `inyectar_editable` lee la versión vigente y escribe `arte.v<N+1>.ai` + puntero `arte.ver`, sin `os.replace`, así que ningún lock puede romper la edición y **el archivo original del usuario nunca se toca**; `_ruta_entrada("arte.ai")` resuelve la vigente para todo el sistema y la subida de arte (`original=True`) hace `reset_versiones`. (2) **fin de las fugas de handles** — `motor_pedido` abre con `_abrir`/`_abrir_pike` (registran el documento) y `@app.teardown_request` → `MP.cerrar_abiertos()`; 29 llamadas migradas en 16 funciones que abrían el arte/la plantilla y nunca cerraban. Verificado: tras un request el archivo queda **libre**. **Además:** el endpoint ahora inyecta **todas las mesas en una sola pasada** (una versión, una capa OCG compartida) y **devuelve el motivo real** del fallo en vez de "no se pudo inyectar" (el `print` al log estaba bufferizado y ocultaba la causa). **Gotcha para la próxima:** si algo "no se puede guardar" en Windows, probarlo **desde afuera del server** antes de tocar código — el lock puede ser de otro proceso.
 
 - **2026-07-17 — BUG ABIERTO: "nombro una pieza y quedan otras nombradas" (diagnosticado, NO resuelto).** Reporte del usuario. **NO se nombran solas: se RENUMERAN.** `_renumerar(obj, gen)` (`App.jsx`, ~3798) filtra **TODAS** las piezas cuyo `nombreGenerico` == `gen` y las reescribe `gen 1..N`. Lo llama `nombrarSeleccionadas` (~3770), `renombrarGrupoNombres` y `toggleNombreEnPieza`. Efecto: al nombrar una pieza "Manga", una que ya se llamaba "Manga 3" pasa a "Manga 1" sin que el usuario la toque. **NO es un descuido: es un PARCHE de un bug peor** (comentario en `renombrarGrupoNombres`): el registro se guarda como **dict POR NOMBRE** → dos piezas con el mismo nombre **colisionan y se PIERDE una**; por eso renumeran todo para forzar unicidad. **CAUSA RAÍZ = la identidad por nombre** → esto es exactamente el síntoma de [[identidad-pieza-id-nombre]] (id estable + nombre genérico separados; **fases 1-2 backend HECHAS, falta la FASE 3: frontend + renombrar-por-id**). Arreglar el renumerado sin hacer la fase 3 reintroduce la pérdida de piezas por colisión. **Respuestas a lo que preguntó el usuario:** (a) entre MOLDES distintos NO colisiona (`etqNombres` es del molde en edición); (b) a las piezas ya nombradas SÍ se les cambia el nombre (el número) — ése es el bug. **Ver también** el hermano de este problema: `dedupePorNombre` (~3740) + `_genDeValor`/`_slotDeValor` — regla deliberada "un solo SLOT por NOMBRE" en las VARIABLES; como `nombreGenerico` borra el número final, "Manga 1" y "Manga 2" caen en el mismo slot y queda solo la última → síntoma "no me deja elegir más de una pieza para la variable" (reportado 2026-07-16; para 2 piezas que van juntas el camino previsto es el vínculo `juntas`). Ambos salen del mismo nudo: **identidad por nombre**.
 

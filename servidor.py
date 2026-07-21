@@ -662,13 +662,29 @@ def _ruta_datos(nombre, pid=None, sub=None):
     return os.path.join(pdir, nombre)
 
 
-def _ruta_entrada(nombre, pid=None, sub=None):
+def _ruta_entrada(nombre, pid=None, sub=None, original=False):
+    """Ruta de un archivo de entrada. Para el ARTE devuelve la VERSIÓN VIGENTE (editar el diseño
+    crea versiones nuevas y no toca el archivo que subió el usuario) — ver `objetos_agregados`.
+    `original=True` fuerza el archivo base: sólo lo usa la subida del arte."""
     pid = pid or _get_active_producto_id()
     pdir = os.path.join(ENTRADA, pid)
     if sub:
         pdir = os.path.join(pdir, sub)
     os.makedirs(pdir, exist_ok=True)
-    return os.path.join(pdir, nombre)
+    p = os.path.join(pdir, nombre)
+    if nombre == "arte.ai" and not original:
+        return OA.ruta_arte_vigente(p)
+    return p
+
+
+@app.teardown_request
+def _cerrar_pdfs(_exc=None):
+    """Al terminar CADA request se cierran los PDFs que quedaron abiertos. Sin esto, en Windows el
+    arte/la plantilla quedan trabados y no se pueden reemplazar ni borrar (WinError 5)."""
+    try:
+        MP.cerrar_abiertos()
+    except Exception:
+        pass
 
 
 @app.errorhandler(Exception)
@@ -1187,8 +1203,9 @@ def subir_arte():
     plantilla = _ruta_entrada("plantilla.ai")      # la plantilla y el registro del molde son COMPARTIDOS
     if not os.path.exists(plantilla):
         return jsonify({"error": "primero subí la plantilla base"}), 409
-    destino = _ruta_entrada("arte.ai", sub=sub)
+    destino = _ruta_entrada("arte.ai", sub=sub, original=True)
     f.save(destino)
+    OA.reset_versiones(destino)   # arte nuevo = se descartan las ediciones (versiones) del anterior
     try:
         if MP.arte_es_separado(destino, plantilla):
             reg = _cargar("registro_producto.json")
@@ -2290,11 +2307,12 @@ def objeto_agregado_colocar(oid):
     if not mesas:
         return jsonify({"error": "esa pieza no tiene mesa de arte asignada"}), 409
 
+    _errores = []
     ruta_obj = os.path.join(OA.carpeta(DATOS, pid, sub), obj["archivo"])
     with open(ruta_obj, "rb") as fh:
         pdf_obj = fh.read()
     ow, oh = float(obj.get("w_cm") or 0), float(obj.get("h_cm") or 0)
-    capas = []
+    colocaciones = []
     for mesa in sorted(mesas):
         try:
             _mr = MP.mesa_rect_arte(arte, mesa)
@@ -2315,13 +2333,21 @@ def objeto_agregado_colocar(oid):
             cx = ax0 + aw * 0.5 + (fx - 0.5) * aw
             cy_top = ay0 + ah * fy
             cy = (ay0 + ah) - cy_top + ay0          # y de página (hacia ARRIBA)
-            capa = OA.inyectar_editable(arte, mesa, pdf_obj, obj.get("nombre") or oid,
-                                        (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2))
-            capas.append({"mesa": mesa, "capa": capa})
+            colocaciones.append((mesa, (cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)))
         except Exception as e:
-            print(f"[objeto] no se pudo inyectar en la mesa {mesa}: {e}")
-    if not capas:
-        return jsonify({"error": "no se pudo inyectar en el arte"}), 500
+            _errores.append(f"mesa {mesa}: {e}")
+    if not colocaciones:
+        # Se devuelve el motivo REAL (no un genérico): así el usuario ve qué pasó y no hay que
+        # ir a buscarlo al log (que además puede estar bufferizado).
+        return jsonify({"error": "No se pudo agregar al diseño. " + (" · ".join(_errores) or "sin detalle")}), 500
+    # UNA sola pasada para todas las mesas → una sola versión nueva del arte
+    try:
+        capa, _nueva, _mesas_ok = OA.inyectar_editable(
+            _ruta_entrada("arte.ai", pid, sub=sub, original=True),
+            colocaciones, pdf_obj, obj.get("nombre") or oid)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo agregar al diseño: {e}"}), 500
+    capas = [{"mesa": m, "capa": capa} for m in _mesas_ok]
     # Ya vive DENTRO del arte: se saca del sistema paralelo (y su archivo suelto).
     data["objetos"] = [o for o in data["objetos"] if o["id"] != oid]
     _oa_guardar(pid, sub, data)
