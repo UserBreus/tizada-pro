@@ -613,7 +613,10 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
     const ks = Object.keys(a);
     return ks.length > 0 && (ks.length !== Object.keys(b).length || ks.some(k => a[k] !== b[k]));
   }, [info]);
-  React.useEffect(() => { if (info?.sin_talles || pzPend) setAbierto(true); }, [info, pzPend]);
+  // «Falta nombrar» es del ARCHIVO (`sin_talles`), no del MOLDE: un molde ya resuelto POR PIEZAS
+  // tiene el archivo original con una sola capa para siempre y seguía anunciando que falta todo.
+  const faltaNombrar = !!info?.sin_talles && !info?.resuelto;
+  React.useEffect(() => { if (faltaNombrar || pzPend) setAbierto(true); }, [faltaNombrar, pzPend]);
   // El modo lo decide el MOLDE: con 2+ capas de talle se nombra por capa; con una sola capa que
   // trae todas las piezas hay que repartirlas a mano. Se sugiere una sola vez (el usuario manda).
   React.useEffect(() => {
@@ -624,12 +627,19 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
     // las capas que él mismo acababa de definir.
     const yaPorPiezas = Object.keys(info.asignacion_piezas || {}).length > 0
       || Object.keys(info.asignacion_piezas_aplicada || {}).length > 0;
-    if (onModo && (yaPorPiezas || info.modo_sugerido === 'piezas')) { onModo(true); return; }
+    // …pero el VISOR sólo se pone en «elegir piezas» si la herramienta está a la vista o si de
+    // verdad falta hacer algo. Antes se activaba siempre: al abrir la Moldería de un molde ya
+    // terminado, el visor pasaba a la vista del archivo ORIGINAL (36 piezas de «Capa 1», rótulos
+    // encimados) con el panel PLEGADO — el usuario nunca lo pidió y no tenía cómo salir.
+    if (onModo && (yaPorPiezas || info.modo_sugerido === 'piezas')) {
+      onModo(abierto || faltaNombrar || pzPend);
+      return;
+    }
     // para el resto, la sugerencia corre una sola vez (el modo por capa ya es el de por defecto):
     // así un molde normal no dispara una recarga del visor cada vez que se abre la Moldería
     if (modoAuto.current) return;
     modoAuto.current = true;
-  }, [info, onModo]);
+  }, [info, onModo, abierto, faltaNombrar, pzPend]);
 
   // ¿parece que las capas NO están nombradas? (nombres tipo "Layer 3", "Capa 2", "Path 7")
   const sinNombrar = (info?.sugerencia || []).filter(c => /^(layer|capa|path|group|grupo)[\s_-]*\d*$/i.test(String(c).trim())).length;
@@ -670,17 +680,19 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
   return (
     <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
       <button type="button" onClick={() => setAbierto(a => !a)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: info?.sin_talles ? 'rgba(245,165,36,0.10)' : 'rgba(255,255,255,0.02)', border: 0, color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: faltaNombrar ? 'rgba(245,165,36,0.10)' : 'rgba(255,255,255,0.02)', border: 0, color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
         <span>
           <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>
-            {info?.sin_talles ? `⚠ Falta nombrar las ${term.variante.toLowerCase()}s` : `Nombrar ${term.variante.toLowerCase()}s`}
+            {faltaNombrar ? `⚠ Falta nombrar las ${term.variante.toLowerCase()}s` : `Nombrar ${term.variante.toLowerCase()}s`}
           </span>
-          <span style={{ display: 'block', fontSize: 10.5, color: info?.sin_talles ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
-            {info?.sin_talles
+          <span style={{ display: 'block', fontSize: 10.5, color: faltaNombrar ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
+            {faltaNombrar
               ? (info?.una_sola_capa
                   ? 'El molde vino con todo en una sola capa: seleccioná las piezas de cada variante y escribile el nombre'
                   : `El molde no tiene ninguna capa con nombre de ${term.variante.toLowerCase()}: hasta que las nombres no se puede usar`)
-              : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`}
+              : (info?.resuelto
+                  ? `✓ ${(info.talles_registrados || []).length} ${term.variante.toLowerCase()}s definidas: ${(info.variantes_piezas?.length ? info.variantes_piezas : info.talles_registrados || []).join(' · ')}. Abrí sólo si querés corregirlas.`
+                  : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`)}
           </span>
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -2606,8 +2618,63 @@ export default function App() {
     });
     const cmPerUnit = nCm ? sumCm / nCm : 0;
 
-    return { layout, width: W, height: H, vb, vbW, vbH, cmPerUnit };
+    // ── LUGAR PARA EL RÓTULO ──────────────────────────────────────────────────
+    // Cada pieza dibuja su chapita (número + nombre) en su CENTRO. Cuando las piezas se
+    // superponen —36 piezas de 6 variantes, o el molde sin separar— esos centros caen casi
+    // encima y los rótulos se pisan («2XL 2XL» ilegible). `sep` = distancia (en unidades del
+    // viewBox) al centro más cercano: multiplicada por el zoom da los PÍXELES DE PANTALLA
+    // disponibles, que es lo único que decide si el rótulo se lee o no.
+    const cen = layout.map(p => [p.px + p.pw / 2, p.py + p.ph / 2]);
+    const sep = new Map();
+    layout.forEach((p, i) => {
+      let d2 = Infinity;
+      for (let j = 0; j < cen.length; j++) {
+        if (j === i) continue;
+        const dx = cen[i][0] - cen[j][0], dy = cen[i][1] - cen[j][1];
+        const v = dx * dx + dy * dy;
+        if (v < d2) d2 = v;
+      }
+      sep.set(p.idx, Math.sqrt(d2));
+    });
+
+    // Vista de TODAS las variantes juntas: cada variante es un bloque de piezas. El nombre de la
+    // variante va UNA vez por bloque (antes iba en cada pieza: 36 rótulos encimados).
+    let clusters = null;
+    if (layout.length && layout[0].talle != null) {
+      const cajas = new Map();
+      layout.forEach(p => {
+        const c = cajas.get(p.talle) || { talle: p.talle, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, n: 0 };
+        c.x0 = Math.min(c.x0, p.px); c.y0 = Math.min(c.y0, p.py);
+        c.x1 = Math.max(c.x1, p.px + p.pw); c.y1 = Math.max(c.y1, p.py + p.ph);
+        c.n++;
+        cajas.set(p.talle, c);
+      });
+      clusters = [...cajas.values()];
+    }
+
+    return { layout, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
   }, [etqData, empModo, empTodas, empTodasData]);
+
+  // Las variantes del MOLDE. `etqData.talles` es de la DETECCIÓN que se está mostrando: en la
+  // vista «asignar variantes por piezas» son las capas del archivo original (una sola, «Capa 1»).
+  // Todo lo que hable de las variantes del molde tiene que salir de acá.
+  const tallesMolde = React.useMemo(
+    () => (etqData?.talles_reales?.length ? etqData.talles_reales : (etqData?.talles || [])), [etqData]);
+
+  // Píxeles de PANTALLA que necesita una chapita para leerse: el círculo mide 22 px, así que con
+  // menos de 24 px hasta la otra pieza los números se pisan → se deja sólo un punto (el rótulo
+  // vuelve acercando el zoom o tocando la pieza). Los TEXTOS de arriba/abajo (variante, nombre de
+  // la pieza) son mucho más anchos que el círculo y necesitan bastante más aire: TXT_MIN_PX.
+  const LBL_MIN_PX = 24;
+  const TXT_MIN_PX = 60;
+  const rotulosOcultos = React.useMemo(() => {
+    const s = canvasLayout.sep;
+    if (!s) return 0;
+    const k = visorView.k || 1;
+    let n = 0;
+    s.forEach(v => { if (v * k < LBL_MIN_PX) n++; });
+    return n;
+  }, [canvasLayout, visorView.k]);
 
   // ───────── Deshacer / Rehacer (Ctrl+Z / Ctrl+Y) ─────────
   // Historial de los estados editables del cliente. Cada cambio guarda una
@@ -5103,7 +5170,7 @@ export default function App() {
   // desde memoria. Cada (diseño, variable, talle) guarda lo suyo; re-subir el arte lo renueva.
   const asignarTodasLasVariantes = async (mapeo) => {
     const pid = pidCfg, clave = verVariante, dis = disenoActivo;
-    const talles = etqData?.talles || estado?.talles || [];
+    const talles = tallesMolde.length ? tallesMolde : (estado?.talles || []);
     if (!pid || !clave || !talles.length || !mapeo || !Object.keys(mapeo).length) return;
     _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
     setAsignando({ hecho: 0, total: talles.length, talle: '' });
@@ -5177,7 +5244,7 @@ export default function App() {
   const _prefetchTalles = (mapeo, talleActual) => {
     const pid = pidCfg, clave = verVariante, dis = disenoActivo;
     if (Object.keys(editorTfs || {}).length) return;
-    const todos = etqData?.talles || estado?.talles || [];
+    const todos = tallesMolde.length ? tallesMolde : (estado?.talles || []);
     const iAct = todos.findIndex(t => String(t) === String(talleActual || ''));
     // ORDEN: primero los talles VECINOS del actual (los más probables de tocar) y de ahí se abre.
     const talles = todos
@@ -5352,12 +5419,12 @@ export default function App() {
   // decir «N piezas agrupadas» y el trabajo hecho antes se VE sin tener que entrar al modo.
   useEffect(() => {
     if (tabAjustesMolde !== 'molderia') return;
-    if (!((etqData?.talles || []).length > 1) || empData || empModo) return;
+    if (!((tallesMolde || []).length > 1) || empData || empModo) return;
     let vivo = true;
     (async () => { const d = await cargarEmparejado(true); if (!vivo && d) { /* descartado */ } })();
     return () => { vivo = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminSubView, tabAjustesMolde, etqData?.talles?.length, activoProdDetalle?.id]);
+  }, [adminSubView, tabAjustesMolde, tallesMolde.length, activoProdDetalle?.id]);
 
   const abrirTalleEmp = async (t) => {
     setEmpTalle(t); setEmpFijar(null); setSelNombrar(new Set());
@@ -5686,8 +5753,8 @@ export default function App() {
     if (k === 'talle') return;   // 'talle' maneja su propia detección por chip
     // GUÍA: en 'rango' con un rango ya elegido, la guía debe estar DENTRO del rango; si ya lo está,
     // no se toca. En 'default' (o rango sin talles), se vuelve a la guía del molde.
-    const enRango = (k === 'rango' && rangoMedida.length && etqData?.talles)
-      ? etqData.talles.filter(x => rangoMedida.includes(x)) : [];
+    const enRango = (k === 'rango' && rangoMedida.length && tallesMolde)
+      ? tallesMolde.filter(x => rangoMedida.includes(x)) : [];
     if (enRango.length) {
       if (!enRango.includes(etqData?.talle_ref)) verVarianteOperario(enRango[0]);
       return;
@@ -5755,16 +5822,16 @@ export default function App() {
     // guardado y es el 1er click), se usa la ÚLTIMA pieza YA seleccionada, en orden del archivo.
     // Sin esto, shift+click como primera acción no tenía desde dónde arrancar y solo agregaba una.
     let ancla = rangoLastRef.current;
-    if (e.shiftKey && ancla == null && rangoMedida.length && etqData?.talles) {
-      const sel = etqData.talles.map((x, i) => (set.has(x) ? i : -1)).filter(i => i >= 0);
+    if (e.shiftKey && ancla == null && rangoMedida.length && tallesMolde) {
+      const sel = tallesMolde.map((x, i) => (set.has(x) ? i : -1)).filter(i => i >= 0);
       if (sel.length) ancla = sel[sel.length - 1];
     }
-    if (e.shiftKey && ancla != null && etqData?.talles) {
+    if (e.shiftKey && ancla != null && tallesMolde) {
       // El shift+click AGREGA o QUITA el rango según el estado de la pieza clickeada: si ya estaba
       // seleccionada, deselecciona todo el rango; si no, lo selecciona. Mismo gesto, las dos cosas.
       const a = Math.min(ancla, idx), b = Math.max(ancla, idx);
       const quitar = set.has(t);
-      etqData.talles.slice(a, b + 1).forEach(x => (quitar ? set.delete(x) : set.add(x)));
+      tallesMolde.slice(a, b + 1).forEach(x => (quitar ? set.delete(x) : set.add(x)));
     } else { if (set.has(t)) set.delete(t); else set.add(t); }
     rangoLastRef.current = idx;
     const nuevo = [...set];
@@ -5772,8 +5839,8 @@ export default function App() {
     // La GUÍA del rango (base del cálculo + variante que se ve) debe estar SIEMPRE DENTRO del rango.
     // Si la guía actual quedó fuera (o no hay), se elige la 1ª del rango (por orden de archivo) → el
     // visor muestra las piezas de ESA variante y los cálculos se basan en ella.
-    if (nuevo.length && etqData?.talles) {
-      const enOrden = etqData.talles.filter(x => nuevo.includes(x));
+    if (nuevo.length && tallesMolde) {
+      const enOrden = tallesMolde.filter(x => nuevo.includes(x));
       if (enOrden.length && !enOrden.includes(etqData.talle_ref)) verVarianteOperario(enOrden[0]);
     }
   };
@@ -9296,24 +9363,31 @@ export default function App() {
                                     {modoAcomodar ? 'Guardando pos.' : 'Acomodar piezas'}
                                   </button>
                                 </div>
+                                {/* La guía es del MOLDE, no de la vista: en el modo «asignar variantes
+                                    por piezas» el visor muestra el archivo ORIGINAL (una sola capa) y acá
+                                    salía el nombre de esa capa («Capa 1») como si fuera el talle de guía.
+                                    Mientras dura ese modo se muestra, pero no se cambia (los índices de
+                                    pieza son los del original: recargar el visor rompería la asignación). */}
                                 <button
                                   type="button"
                                   className="btn"
-                                  style={{ width: '100%', justifyContent: 'space-between', padding: '10px 14px', fontSize: 13 }}
-                                  onClick={() => setModalTalleGuiaOpen(true)}
+                                  disabled={varPzModo}
+                                  title={varPzModo ? 'Terminá de asignar las piezas para cambiar la guía' : ''}
+                                  style={{ width: '100%', justifyContent: 'space-between', padding: '10px 14px', fontSize: 13, opacity: varPzModo ? 0.65 : 1, cursor: varPzModo ? 'not-allowed' : 'pointer' }}
+                                  onClick={() => { if (!varPzModo) setModalTalleGuiaOpen(true); }}
                                 >
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <span style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600 }}>Actual:</span>
-                                    <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 14 }}>{etqData.talle_ref}</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 14 }}>{etqData.guia || etqData.talle_ref}</span>
                                   </span>
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cambiar ▾</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{varPzModo ? '' : 'Cambiar ▾'}</span>
                                 </button>
                               </div>
 
                               {/* Molde recién subido al que le falta nombrar los talles: no es un
                                   error, es el paso que sigue. Se dice explícitamente porque si no
                                   el visor queda vacío y parece que el molde no cargó. */}
-                              {(etqData?.falta_nombrar_variantes || etqData?.sin_variantes) && (
+                              {(etqData?.falta_nombrar_variantes || etqData?.sin_variantes) && !etqData?.resuelto && (
                                 <div style={{ fontSize: 12, lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--warning, #f5a524)', background: 'rgba(245,165,36,0.10)', color: 'var(--text-secondary)' }}>
                                   <b style={{ color: 'var(--warning, #f5a524)' }}>El molde se cargó, pero todavía no se puede usar.</b><br />
                                   {etqData?.sin_variantes
@@ -9435,7 +9509,7 @@ export default function App() {
                                   los talles comparando cómo están dispuestas. Si el molde NO viene
                                   acomodado de forma parecida en cada talle, esa comparación no tiene
                                   señal → acá el usuario reacomoda a mano y/o corrige la pieza homóloga. */}
-                              {(etqData?.talles?.length > 1) && (
+                              {(tallesMolde.length > 1) && (
                                 <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: empModo ? 'rgba(245,158,11,0.06)' : 'transparent' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                     <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>La misma pieza en cada {term.variante.toLowerCase()}</span>
@@ -9968,7 +10042,7 @@ export default function App() {
                             </small>
                           </div>
 
-                          {etqData?.talles?.length > 0 && (
+                          {tallesMolde.length > 0 && (
                             <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 12 }}>
                               <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 7, color: 'var(--text-secondary)' }}>Cómo se adapta el diseño</label>
                               <div style={{ display: 'flex', gap: 6 }}>
@@ -9983,7 +10057,7 @@ export default function App() {
                               {configMedida === 'talle' && (
                                 <div style={{ marginTop: 9 }}>
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                    {etqData.talles.map(t => (
+                                    {tallesMolde.map(t => (
                                       <button key={t} type="button" onClick={() => verVarianteOperario(t)}
                                         className={`chip ${etqData.talle_ref === t ? 'active' : ''}`} style={{ padding: '5px 11px' }}>{t}</button>
                                     ))}
@@ -9994,7 +10068,7 @@ export default function App() {
                               {configMedida === 'rango' && (
                                 <div style={{ marginTop: 9 }}>
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                    {etqData.talles.map((t, idx) => {
+                                    {tallesMolde.map((t, idx) => {
                                       const on = rangoMedida.includes(t);
                                       return <button key={t} type="button" onClick={(e) => toggleRango(t, idx, e)}
                                         style={{ padding: '5px 11px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', userSelect: 'none', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.15)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>;
@@ -10684,7 +10758,15 @@ export default function App() {
                         </div>
                         {etqData && tabAjustesMolde !== 'planilla' && (
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            Mesa: {etqData.mesa} · Capa: {etqData.talle_ref}
+                            {/* Qué está mostrando el visor. En las vistas especiales NO es una capa
+                                de talle: con «por piezas» es el archivo sin separar y en la vista
+                                junta son todas las variantes a la vez — decir «Capa: Capa 1» ahí
+                                hacía creer que el molde había perdido sus variantes. */}
+                            {varPzModo
+                              ? `Mesa: ${etqData.mesa} · todas las piezas, sin separar`
+                              : (empModo && empTodas && empTodasData?.piezas?.length)
+                                ? `Mesa: ${etqData.mesa} · todas las ${term.variante.toLowerCase()}s juntas`
+                                : `Mesa: ${etqData.mesa} · ${term.variante}: ${etqData.talle_ref}`}
                           </div>
                         )}
                       </div>
@@ -10729,6 +10811,14 @@ export default function App() {
                                 return (pct >= 100 ? Math.round(pct) : pct.toFixed(pct < 10 ? 1 : 0)) + '%';
                               })()}
                             </span>
+                            {/* Se dice cuántas piezas quedaron sin rótulo: si no, «faltan números»
+                                parece un error del sistema en vez de falta de lugar en pantalla. */}
+                            {rotulosOcultos > 0 && (
+                              <span title="Hay piezas encimadas: sus rótulos no entran sin pisarse. Acercá el zoom (rueda) o tocá una pieza para ver el suyo."
+                                style={{ color: 'var(--warning, #f5a524)', whiteSpace: 'nowrap' }}>
+                                {rotulosOcultos} sin rótulo · acercá el zoom
+                              </span>
+                            )}
                             <button type="button" onClick={verTodoVisor} title="Ver todo el molde" style={{ background: 'none', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '1px 7px' }}>Ver todo</button>
                             <button type="button" onClick={visor100} title="Tamaño real 1:1" style={{ background: 'none', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '1px 7px' }}>100%</button>
                           </div>
@@ -10752,7 +10842,7 @@ export default function App() {
                             <PlanillaTester
                               columnas={(plantillasPlanillas.find(t => t.id === selectedPlanillaTemplateId)?.columnas || []).filter(c => { const role = c.role || 'none'; if (['talle', 'nombre', 'numero', 'manga'].includes(role)) return mapeoColumnas[role] === c.id; return true; })}
                               reglas={reglasPlanilla}
-                              variantes={etqData?.talles || []}
+                              variantes={tallesMolde || []}
                               onClose={() => setProbandoPlanilla(false)}
                             />
                           ) : (
@@ -11406,7 +11496,41 @@ export default function App() {
                                     return false;
                                   }).map(p => p.idx));
                                 })();
-                                return canvasLayout.layout.map((p) => {
+                                // TODAS LAS VARIANTES JUNTAS: el nombre de la variante va UNA vez por
+                                // bloque (arriba a la izquierda de sus piezas), no en cada pieza. Con 6
+                                // variantes × 6 piezas encimadas, repetirlo 36 veces daba «2XL 2XL».
+                                // Lo mismo mientras se ASIGNAN las variantes por piezas: el bloque se
+                                // arma con lo que el usuario lleva asignado, así ve de un vistazo qué
+                                // quedó en cada variante aunque los nombres por pieza no entren.
+                                const bloquesVarPz = (() => {
+                                  if (!varPzModo) return [];
+                                  const cajas = new Map();
+                                  canvasLayout.layout.forEach(p => {
+                                    const v = (varPzAsig[p.idx] || '').trim();
+                                    if (!v) return;
+                                    const c = cajas.get(v) || { talle: v, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, n: 0 };
+                                    c.x0 = Math.min(c.x0, p.px); c.y0 = Math.min(c.y0, p.py);
+                                    c.x1 = Math.max(c.x1, p.px + p.pw); c.y1 = Math.max(c.y1, p.py + p.ph);
+                                    c.n++; cajas.set(v, c);
+                                  });
+                                  return [...cajas.values()];
+                                })();
+                                const colChip = varPzModo ? '#34d399' : '#93c5fd';
+                                const chipsVariante = (empTodasInfo ? (canvasLayout.clusters || []) : bloquesVarPz).map(c => (
+                                  <g key={'clv_' + c.talle} pointerEvents="none">
+                                    <text x={c.x0 + spx(7)} y={c.y0 + spx(7)} fill={colChip} fontSize={spx(17)} fontWeight={900}
+                                      textAnchor="start" dominantBaseline="hanging"
+                                      style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.9)', strokeWidth: spx(4.5) }}>
+                                      {c.talle}
+                                    </text>
+                                    <text x={c.x0 + spx(7)} y={c.y0 + spx(27)} fill={colChip} opacity={0.65} fontSize={spx(10.5)} fontWeight={700}
+                                      textAnchor="start" dominantBaseline="hanging"
+                                      style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.9)', strokeWidth: spx(3.5) }}>
+                                      {c.n} pza{c.n === 1 ? '' : 's'}
+                                    </text>
+                                  </g>
+                                ));
+                                return (<>{chipsVariante}{canvasLayout.layout.map((p) => {
                                 if (aisladoSet && !aisladoSet.has(p.idx)) return null;
                                 const esSeleccionado = etqSeleccion === p.idx;
                                 // En la vista junta el nombre NO puede salir de `etqNombres` (es el de UN
@@ -11526,15 +11650,35 @@ export default function App() {
                                       style={{ fill: fillCol, stroke: strokeCol, strokeWidth: spx((destacada || resaltada) ? 2 : 1.3), transition: 'fill 0.2s' }}
                                     />
 
+                                    {/* RÓTULO: sólo si hay lugar en PANTALLA para que se lea (o si la
+                                        pieza está elegida/resaltada, que siempre tiene que verse).
+                                        Con las piezas encimadas —el molde sin separar, o las 6
+                                        variantes juntas— los centros caen a milímetros y antes se
+                                        dibujaban igual: dos círculos y dos nombres pisados. */}
+                                    {(() => {
+                                      const room = (canvasLayout.sep?.get(p.idx) ?? Infinity) * k;
+                                      const forzado = destacada || resaltada || varPzSel || empSel;
+                                      if (room < LBL_MIN_PX && !forzado) {
+                                        // Apretada: un punto del color de su estado. La pieza sigue
+                                        // clicable y el nombre está en el tooltip; el rótulo vuelve
+                                        // acercando el zoom o tocándola.
+                                        return (
+                                          <circle cx={p.px + p.pw / 2} cy={p.py + p.ph / 2} r={spx(3.2)}
+                                            fill={badgeFill} stroke="rgba(0,0,0,0.55)" strokeWidth={spx(1)} pointerEvents="none" />
+                                        );
+                                      }
+                                      const holgado = room >= TXT_MIN_PX || forzado;   // ¿entra también el texto de arriba/abajo?
+                                      return (
                                     <g transform={`translate(${p.px + p.pw / 2}, ${p.py + p.ph / 2})`}>
                                       <circle r={spx(11)} fill="rgba(0,0,0,0.5)" transform={`translate(${spx(1)}, ${spx(1.5)})`} />
                                       <circle r={spx(11)} fill={badgeFill} stroke="#ffffff" strokeWidth={spx(1.5)} style={{ transition: 'fill 0.2s' }} />
                                       <text fill={textFill} fontSize={spx(11.5)} fontWeight={900} textAnchor="middle" dominantBaseline="central" pointerEvents="none">
                                         {(empTodasInfo ? p.t_idx : p.idx) + 1}
                                       </text>
-                                      {/* De qué variante es esta pieza: en la vista junta hay 36 piezas de 6
-                                          talles y sin esto no se sabe cuál es cuál. */}
-                                      {empTodasInfo && (
+                                      {/* De qué variante es esta pieza. En la vista junta el nombre de la
+                                          variante ya va UNA vez por bloque: acá sólo se repite si sobra
+                                          lugar (zoom cerca) o si la pieza está elegida. */}
+                                      {empTodasInfo && holgado && (
                                         <text y={spx(-20)} fill="#93c5fd" fontSize={spx(12)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
                                           style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
                                           {p.talle}
@@ -11542,23 +11686,25 @@ export default function App() {
                                       )}
                                       {/* el nombre de la variante va DEBAJO del número: puede ser
                                           "S" o "Talle único", no entra dentro del círculo */}
-                                      {varPzNom && (
+                                      {varPzNom && holgado && (
                                         <text y={spx(24)} fill="#34d399" fontSize={spx(12.5)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
                                           style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
                                           {varPzNom}
                                         </text>
                                       )}
                                       {/* Emparejando: que pieza del talle GUIA le toco a esta, escrito encima */}
-                                      {empModo && nombrePz && (
+                                      {empModo && nombrePz && holgado && (
                                         <text y={spx(24)} fill={empVista === 'simple' ? colorGrupo(nombrePz) : '#e4e4e7'} fontSize={spx(12)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
                                           style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
                                           {nombrePz}{empVista === 'simple' && empEsFijo ? ' ✓' : ''}
                                         </text>
                                       )}
                                     </g>
+                                      );
+                                    })()}
                                   </g>
                                 );
-                                });
+                                })}</>);
                               })()}
                             </svg>
                             );
@@ -12784,11 +12930,13 @@ export default function App() {
               Elegí con qué {term.variante.toLowerCase()} querés ver y etiquetar el molde.
             </p>
             <div className="talle-grid">
-              {etqData.talles?.map(t => (
+              {/* las variantes REALES del molde: `talles` puede ser el de la vista «por piezas»
+                  (las capas del archivo original), donde la única opción sería «Capa 1» */}
+              {tallesMolde.map(t => (
                 <button
                   key={t}
                   type="button"
-                  className={`talle-square ${etqData.talle_ref === t ? 'active' : ''}`}
+                  className={`talle-square ${(etqData.guia || etqData.talle_ref) === t ? 'active' : ''}`}
                   onClick={() => { cambiarTalleGuia(t); setModalTalleGuiaOpen(false); }}
                 >
                   {t}

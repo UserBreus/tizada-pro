@@ -457,6 +457,48 @@ Caso real (`Molde short`): 36 piezas en «Capa 1». Ahí **no hay capas que nomb
 - **Límite conocido**: se trabaja sobre **una** mesa+capa (la que concentra más piezas). Un molde
   con el bloque repartido en varias mesas no está contemplado.
 
+#### 🔴 EL ESTADO DEL MOLDE NO SE LEE DE LA DETECCIÓN QUE MUESTRA EL VISOR (2026-07-21)
+
+La vista `candidatas=1` lee el **archivo original**, que **siempre** va a tener una sola capa
+llamada «Capa 1» (partir escribe una versión nueva; el original no se toca nunca). De ahí salían
+tres cosas que **no son del molde sino de esa vista**, y por eso un molde ya terminado se mostraba
+como recién subido:
+
+- `talle_ref = "Capa 1"` → el panel **«{Variante} de guía · Actual: Capa 1»** y el encabezado del
+  visor **«Mesa: 1 · Capa: Capa 1»**.
+- `sin_variantes = true` → el cartel naranja **«El molde se cargó, pero todavía no se puede usar…
+  vino con todas las piezas en una sola capa»**.
+- `talles = ["Capa 1"]` → el modal de talle de guía y todo lo que lista variantes.
+
+**Y encima el modo se activaba solo**: `NombrarVariantes` hacía `onModo(true)` con sólo existir una
+asignación guardada (`yaPorPiezas`) — o sea **siempre**, para todo molde definido por piezas —, y
+`activarVarPz` recarga `etqData` con `candidatas=1`. Resultado: al abrir la Moldería de un molde
+terminado el visor pasaba a la vista del archivo sin separar **con el panel plegado**, sin que el
+usuario pidiera nada.
+
+**Cómo quedó:**
+- `GET /api/plantilla/deteccion` devuelve, además de la detección, el **estado del MOLDE**:
+  **`talles_reales`** (los del registro, en orden de archivo, vía **`_talles_reales(pid)`** — sale
+  de los JSON y no del PDF: `_talles_de_plantilla` hace un `get_drawings()` entero), **`resuelto`**
+  (bool) y **`guia`** (la variante de guía que hay que mostrar). Si `resuelto`, se fuerzan
+  `sin_variantes = False` y `falta_nombrar_variantes = False`.
+- **Auto-corrección de los moldes ya guardados con la guía mal**: si `variante_guia` está puesta y
+  ya no existe entre las reales, el propio GET la corrige (`_ajustar_variante_guia`) — se arregla
+  sola al abrir el molde. ⚠️ **Sólo si está puesta**: con `variante_guia = None` («automática») el
+  sistema elige solo, y escribirle una acá le cambiaría el talle de apertura a moldes que andan bien
+  (`prod_default` es ese caso).
+- `GET /api/plantilla/variantes` devuelve **`resuelto`**; el encabezado del acordeón usa
+  `sin_talles && !resuelto` (`faltaNombrar` en `NombrarVariantes`), y cuando está resuelto muestra
+  «✓ N variantes definidas: XS · S · M…».
+- En `App.jsx`: **`tallesMolde`** (= `talles_reales` si vienen, si no `talles`) reemplazó a
+  `etqData.talles` en **todo** lo que habla de las variantes del molde (rangos de medida, planilla,
+  modal de guía, precarga del emparejado…). El botón de guía muestra `etqData.guia` y queda
+  **deshabilitado mientras dura el modo por piezas** (cambiarla recargaría el visor con los índices
+  de la versión partida y rompería la asignación en curso). El encabezado del visor dice qué está
+  mostrando: «todas las piezas, sin separar» / «todas las variantes juntas» / «Talle: M».
+- `onModo(true)` ahora sólo se dispara si **el acordeón está abierto** o si de verdad falta algo
+  (`faltaNombrar || pzPend`).
+
 ### AGRUPAR PIEZAS HOMÓLOGAS — el camino principal (Config → Moldería, «La misma pieza en cada talle»)
 
 El nombre de una pieza se pone UNA vez, en el talle guía, y se **propaga** al resto con
@@ -511,6 +553,32 @@ Se hizo literal:
     guardaría el índice GLOBAL como si fuera el del talle → correspondencia rota).
   - `seleccionarGrupoTodas(nombre)` marca en el visor las N piezas de un grupo ya hecho.
   - Al cambiar de molde se limpian `empTodas/empTodasData/empTodasMotivo` (es geometría de ESE molde).
+
+- 🟢 **RÓTULOS QUE NO SE PISAN (2026-07-21).** Cada pieza dibujaba su chapita (círculo con el número
+  + la variante arriba + el nombre abajo) **en su centro**, siempre. En este molde las piezas de una
+  misma fila están **encimadas**: los centros quedan a 115 mm, que a «Ver todo» son **14 px** — dos
+  círculos de 22 px y dos textos uno sobre otro («2XL 2XL», «XL XL»). Medido sobre el molde real:
+  **12 pares de círculos a menos de 24 px y 36 pares de textos a menos de 60 px**.
+  - `canvasLayout` calcula **`sep`** = distancia de cada pieza al centro más cercano (unidades del
+    viewBox). `sep × visorView.k` = **píxeles de pantalla disponibles**, que es lo único que decide
+    si un rótulo se lee. Umbrales: **`LBL_MIN_PX = 24`** (el círculo mide 22) y **`TXT_MIN_PX = 60`**
+    (los textos son mucho más anchos que el círculo).
+  - Debajo de `LBL_MIN_PX` la pieza queda con un **punto** de su color de estado (sigue clicable, con
+    su tooltip); entre `LBL_MIN_PX` y `TXT_MIN_PX` va el círculo con el número, sin textos. La pieza
+    **elegida/resaltada muestra siempre todo** (`forzado`). Acercando el zoom vuelven solos.
+  - El **nombre de la variante va UNA vez por bloque** (`canvasLayout.clusters`, bbox de las piezas
+    de cada talle; en el modo «por piezas» el bloque se arma con lo que el usuario lleva asignado):
+    36 rótulos de talle → **6**.
+  - Aviso en la esquina del visor: «N sin rótulo · acercá el zoom» (`rotulosOcultos`), para que la
+    falta de números no parezca un error del sistema.
+  - **Por qué esta salida y no otra**: mover la etiqueta al borde de cada pieza no alcanza (las
+    piezas se solapan casi enteras, los bordes también se tocan) y esconder todo detrás del hover
+    deja la pantalla muda. Ocultar **por falta de lugar real** es el criterio de los mapas: al zoom
+    de «ver todo» se lee el bloque (la variante), al acercarse aparecen las piezas — y **la vista de
+    UN talle no cambia en nada** (ahí siempre hay lugar).
+  - Verificado renderizando el bloque **recortado literalmente de `App.jsx`** con `react-dom/server`
+    (`scratchpad/armar_visor_test.py` + `scratchpad/verif_visor.mjs`, geometría real del molde):
+    ver el CHANGELOG para los números.
 
 - **Endpoint único: `POST /api/plantilla/grupo_pieza`**
   `{pid?, nombre, guia_idx, piezas?: {talle: idx|null}, renombrar_de?, eliminar?}`.
@@ -701,6 +769,8 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   mismo nombre** (si no, son idénticas y no hay forma de saber en cuál se venía trabajando).
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (13) — FIX de los tres problemas de Config → Moldería: guía «Capa 1», cartel naranja obsoleto y rótulos encimados.** Ver §10.c («EL ESTADO DEL MOLDE NO SE LEE DE LA DETECCIÓN QUE MUESTRA EL VISOR» + «RÓTULOS QUE NO SE PISAN»). **LOS TRES SALÍAN DE LA MISMA CAUSA, y no era la que parecía.** `_ajustar_variante_guia` **funcionaba bien** (verificado: partiendo un molde de 36 piezas en 6 variantes deja `variante_guia = XS`, una variante real) y el `variante_guia` guardado tampoco estaba mal. Lo que pasaba es que la pantalla mostraba **la detección `?candidatas=1`**, que lee el **archivo ORIGINAL** — donde siempre va a haber una sola capa «Capa 1», porque partir escribe una versión nueva y el original no se toca nunca. De ahí salían `talle_ref="Capa 1"` (el panel «Actual:» y el encabezado «Mesa: 1 · Capa: Capa 1»), `sin_variantes=true` (el cartel naranja, con el texto exacto que vio el usuario: «vino con todas las piezas en una sola capa») y las **36 piezas del bloque sin separar** (los rótulos encimados). **Y esa vista se activaba SOLA**: `NombrarVariantes` llamaba `onModo(true)` con sólo existir una asignación guardada (`yaPorPiezas`) — o sea siempre, para cualquier molde definido por piezas — y `activarVarPz` recarga `etqData` con `candidatas=1`; el acordeón, en cambio, arrancaba **plegado**. El usuario abría la Moldería y el visor ya estaba en una herramienta que él no pidió y que no veía. **Arreglos.** *Backend*: `GET /api/plantilla/deteccion` devuelve el estado del MOLDE aparte de la vista — **`talles_reales`** (nuevo `_talles_reales(pid)`, sale del registro + `resumen_plantilla.json`, **no** del PDF: `_talles_de_plantilla` hace un `get_drawings()` entero y esto se llama en cada detección), **`resuelto`** y **`guia`**; con `resuelto` se fuerzan `sin_variantes=False` y `falta_nombrar_variantes=False`. **Auto-corrección de los moldes que YA quedaron con la guía mal**: si `variante_guia` está puesta y ya no existe entre las reales, el propio GET la corrige — se arregla sola al abrir el molde, sin pedir nada. ⚠️ **Sólo si está puesta**: con `None` («automática») el sistema elige solo y escribirle una le cambiaría el talle de apertura a moldes sanos (`prod_default`). `GET /api/plantilla/variantes` devuelve **`resuelto`**. *Frontend*: `faltaNombrar = sin_talles && !resuelto` en el acordeón (+ resumen «✓ 6 variantes definidas: XS · S · M…»), el cartel naranja pide `!resuelto`, el botón de guía muestra `etqData.guia` y queda **deshabilitado mientras dura el modo por piezas** (cambiarla ahí recargaría el visor con los índices de la versión partida y rompería la asignación en curso), el encabezado del visor dice **qué** está mostrando («todas las piezas, sin separar» / «todas las variantes juntas» / «Talle: M»), **`tallesMolde`** reemplazó a `etqData.talles` en las 19 líneas que hablan de las variantes del molde, y `onModo(true)` sólo se dispara si el acordeón está **abierto** o falta algo de verdad. **Rótulos**: `canvasLayout` calcula **`sep`** (distancia al centro más cercano) → `sep × zoom` = píxeles de pantalla; con menos de **`LBL_MIN_PX`=24** queda un punto, con menos de **`TXT_MIN_PX`=60** el círculo sin textos, y la pieza elegida siempre completa; el **nombre de la variante va una vez por bloque** (`clusters`, y en el modo por piezas por variante asignada); aviso «N sin rótulo · acercá el zoom». **VERIFICADO con datos** sobre una **copia descartable** del molde del usuario (36 piezas → 6 variantes × 6, `formato=extendido`): (1) *guía* — sembrando a propósito `variante_guia="Capa 1"` en la base, un solo `GET /api/plantilla/deteccion?candidatas=1` la deja en **`XS`** en la base y devuelve `guia=XS`, `talles_reales=[XS,S,M,L,XL,2XL]`, y **los otros moldes no se tocan** (`prod_default` sigue en `None`, el del usuario en `M`); (2) *cartel* — en la MISMA vista `candidatas=1` (la que rompía) ahora `resuelto=true`, `sin_variantes=false`, `falta_nombrar_variantes=false`, y `GET /api/plantilla/variantes` da `sin_talles=false, resuelto=true`; (3) *rótulos* — **render real** del bloque **recortado literalmente de `App.jsx`** con `react-dom/server` (`scratchpad/armar_visor_test.py` genera el harness con el JSX y los umbrales del propio archivo; `scratchpad/verif_visor.mjs` mide sobre el SVG generado, con la geometría real que devuelve `deteccion_todas`): a «Ver todo» (k=0,124 px/mm) **ANTES 36 rótulos con 12 pares de círculos a <24 px (11,0 y 14,3 px: los «2XL 2XL») y 36 pares de textos a <60 px; AHORA 12 círculos + 24 puntos + 6 chips de variante y 0 pares encimados**; a 4× de zoom (k=0,5) vuelven **los 36, también con 0 encimados**; y la vista normal de **UN talle sigue igual** (6 piezas, **6 rótulos completos, 0 puntos, 0 encimados**) — o sea que el cambio sólo actúa donde había amontonamiento. Lo mismo en el modo «por piezas» (6 chips, 0 encimados). Molde de prueba **borrado**: `entrada/` y `datos/productos/` quedan con los **5 directorios del usuario**, catálogo con `prod_default` + `prod_20260721_143551_3261` y `activo` **restaurado** a ese mismo (borrar el de prueba lo había dejado en `prod_default`). `npm run build` OK (`index-xgpUceUC.js`, servido); server reiniciado por PID (19064 → **30080**) y **dejado corriendo**. **NO verificado:** la pantalla a mano — hay login y no se intentó pasarlo; el molde `prod_20260721_155921_d32c` que menciona el reporte **ya no existe en este entorno** (ni en el catálogo de la base ni en disco: quedan 5 directorios y 2 productos), así que se reprodujo todo sobre una copia con la MISMA forma (mismo archivo, mismas 36 piezas y las mismas 6 variantes que tenía guardadas el molde del usuario); y el molde del usuario **no se pudo consultar por API** (`GET` con su `pid` devuelve **403 «Ese molde es de otro usuario»** sin sesión iniciada), así que su auto-corrección de guía está probada sobre la copia, no sobre él.
 
 - **2026-07-21 (12) — FIX de los dos bugs reportados: «una sola subida me creó 4 artículos» y «nombré las piezas y al volver no estaba nombrado».** Ver §10.d («DOS TRAMPAS QUE YA COSTARON»). **Causa del bug 1 (verificada con datos, no deducida):** la guarda que evitaba el duplicado vivía **sólo en el front** y trabajaba sobre un `productosCat` **trunco**. `app.secret_key` es aleatoria (no hay `TIZADA_SECRET`) → cada reinicio del server invalida la sesión; `GET /api/productos` oculta los moldes con dueño a quien no está identificado; y **`App` se monta antes del login**, así que el `fetchProductos()` del arranque salía sin sesión y devolvía **1 producto** — y **nadie lo volvía a pedir al loguearse** (`useEffect(…, [])`). Con la lista vacía de propios, «Mis artículos» se veía vacío (por eso el usuario volvía a subir) y la guarda no encontraba nada. Los 4 «Molde short» del catálogo tienen `propio=True` y `creado_por=1` → **los 4 salieron de `subirMiMolde`**, y sus horas (14:35, 14:53, 15:31, 15:59) caen **justo después de cada reinicio del server** de la sesión anterior; el `index.html` se sirve `no-store`, así que el navegador tenía la build **con** la guarda: la guarda corrió y falló. **Arreglo:** (a) `useEffect(…, [yo?.id])` que re-pide catálogo/estado/piezas al iniciar sesión; (b) **`POST /api/productos/crear` idempotente** para `propio:true` (mismo dueño + mismo nombre ⇒ devuelve el existente con `reusado:true` y lo activa) — una guarda de cliente no es una guarda; (c) `crear_producto` deja el activo **también en la sesión** (`_activar_en_sesion`), que `_get_active_producto_id` mira ANTES que el global. **Causa del bug 2:** `guardarEtiquetas` (y ~20 fetches más del flujo de config) iban **sin `pid`** → el server escribía en el molde **activo**, que no es necesariamente el que se está configurando (`handleActivarProducto` es async y no se espera; la sesión se resetea sola). **Reproducido con el server real:** el mismo `POST /api/plantilla/etiquetas` sin `pid` escribió en el molde ACTIVO (B) **reemplazándole el registro entero** mientras el molde que se estaba configurando (A) quedaba sin tocar. **Arreglo:** `pidCfg` (= `molderiaAbierta || modoMiMolde || activo`) + `qPid()` en TODO el flujo (detección, etiquetas, nido, medidas, pdf_guia, variantes, variantes_piezas y su borrador, emparejado, grupo_pieza, config GET/POST, arte: mapeo/detección/perfil/preview/asignar_todo, subidas de plantilla y arte con `pid` en el FormData, `variante_guia` y la clave de localStorage del talle guía) — y las **claves de caché del front** (`_talleDetCache`, `_pvCache`) salen del mismo pid que la URL. **De paso:** la tarjeta de «Mis artículos» muestra la **fecha** cuando hay dos artículos con el mismo nombre. **VERIFICADO por API contra el server real con DOS moldes de prueba propios** (36 piezas, copia descartable del molde del usuario): crear 3 veces «ZZ Prueba A» ⇒ **el mismo id las 3 veces** (`reusado:true`) y el catálogo pasa de 5 a 7 productos (2, no 4); con el **activo puesto en B** se configuró **A** (partir en 2 variantes, nombrar 3 piezas, agrupar una más) y el nombrado quedó **en A** (`ZZ Frente/ZZ Espalda/ZZ Manga/ZZ Cuello`) con **B intacto**; releer devuelve lo mismo; **reiniciar el server y releer: idéntico** (`nombres_existentes` = las 4 en A). Control explícito del bug viejo: el POST **sin** `pid` cayó en B. **Estado del molde del usuario:** su nombrado **NO se perdió** — está en `prod_20260721_155921_d32c` (Costadillo/Espalda/Frente izq. y der.); los otros tres «Molde short» tienen nombres provisorios («Pieza 1…6»), así que lo más probable es que haya abierto una tarjeta distinta (los 4 se ven iguales). Moldes de prueba **borrados**; catálogo final: los **mismos 5** productos y `activo` restaurado a `prod_20260721_155921_d32c`; los registros del usuario quedaron con su mtime original. `npm run build` OK (`index-CrQss3kg.js`, con `pid:Xe` en el POST de etiquetas y el efecto de re-carga por login); server reiniciado por PID (29836 → 33096 → el actual) y **dejado corriendo**. **NO verificado:** la UI a mano (hay login y no se intentó pasarlo; la app carga y la **consola queda sin un solo mensaje** en la pantalla de login); tampoco se pudo probar el escenario exacto **con sesión iniciada** (no hay contraseña) — la cadena está probada por código + por el comportamiento de `GET /api/productos` sin sesión (devuelve 1 de 5 productos).
 

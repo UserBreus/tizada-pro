@@ -1111,6 +1111,30 @@ def plantilla_deteccion():
                          and reg[_nm][_tref].get("pieza_idx") is not None}
                 res["piezas"] = [p for p in (res.get("piezas") or []) if p.get("idx") in _idxs]
                 res["medidas_diseno"] = {k: v for k, v in (res.get("medidas_diseno") or {}).items() if k in _nombres}
+        # ── ESTADO DEL MOLDE (no de esta vista) ────────────────────────────────
+        # `talle_ref`/`talles` son de la detección que se está mostrando: con `candidatas=1` salen
+        # del archivo ORIGINAL («Capa 1»). La pantalla necesita el estado del MOLDE: cuáles son sus
+        # variantes de verdad, cuál es la de guía y si todavía falta algo. Sin esto, un molde ya
+        # resuelto mostraba «Guía: Capa 1» y el cartel de «todavía no se puede usar».
+        _reales = _talles_reales(pid)
+        res["talles_reales"] = _reales
+        res["resuelto"] = bool(_reales)
+        if _reales:
+            res["sin_variantes"] = False
+            res["falta_nombrar_variantes"] = False
+            # AUTO-CORRECCIÓN de los moldes que ya quedaron con la guía apuntando al nombre viejo
+            # de la capa: se arregla sola al abrirlos, sin pedirle nada al usuario. Sólo si la
+            # guía está PUESTA y ya no existe — sin guía ("automática") el sistema elige solo, y
+            # escribirle una acá le cambiaría el talle con el que abre a moldes que andan bien.
+            _g = (prod or {}).get("variante_guia")
+            if _g and _g not in _reales and _ajustar_variante_guia(pid, _reales):
+                prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+        # La guía que MUESTRA la pantalla: la guardada si sigue existiendo; si no, la de esta
+        # detección (cuando es una variante de verdad) y, en última instancia, la primera real.
+        _g2 = (prod or {}).get("variante_guia")
+        _tr = res.get("talle_ref")
+        res["guia"] = (_g2 if _g2 in _reales else None) or (_tr if _tr in _reales else None) \
+            or (_reales[0] if _reales else _tr)
         return jsonify(res)
     except Exception as e:
         return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
@@ -1315,6 +1339,25 @@ def _ajustar_variante_guia(pid, talles):
         return
     prod["variante_guia"] = talles[0]
     _guardar_catalogo(cat)
+    return prod["variante_guia"]
+
+
+def _talles_reales(pid=None):
+    """Las variantes que el molde YA tiene RESUELTAS, en el orden del archivo.
+
+    Existe porque el estado del molde NO se puede leer de la detección que el visor esté
+    mostrando: la vista de «asignar variantes por piezas» (`?candidatas=1`) lee el archivo
+    ORIGINAL, donde sigue habiendo una sola capa «Capa 1» para siempre. Tomando el talle de guía
+    y el «falta nombrar variantes» de ahí, un molde ya terminado se mostraba como recién subido.
+
+    Sale de los JSON (registro + resumen) y no del PDF a propósito: `_talles_de_plantilla` hace un
+    `get_drawings()` de todo el molde (~segundos) y esto se consulta en cada detección."""
+    reg = _cargar("registro_producto.json", pid) or {}
+    del_reg = {t for v in reg.values() for t in (v or {}).keys() if t}
+    if not del_reg:
+        return []
+    orden = (_cargar("resumen_plantilla.json", pid) or {}).get("talles") or []
+    return [t for t in orden if t in del_reg] + sorted(del_reg - set(orden))
 
 
 def _deteccion_pendiente():
@@ -1641,6 +1684,10 @@ def plantilla_variantes():
     # los talles que YA están nombrados (el registro vigente), para saber si hace falta la herramienta
     reg = _cargar("registro_producto.json") or {}
     info["talles_registrados"] = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    # ¿El molde ya está RESUELTO? (tiene registro con variantes). El encabezado del acordeón se
+    # calculaba con `sin_talles`, que mira el ARCHIVO: un molde ya terminado seguía anunciando
+    # «⚠ Falta nombrar las variantes».
+    info["resuelto"] = bool(info["talles_registrados"])
     # MODO de la herramienta (ver §10.c): con 2+ capas de talle candidatas se nombra POR CAPA; con
     # una sola capa que trae TODAS las piezas no hay capas que nombrar → hay que repartir POR
     # PIEZAS. Es una SUGERENCIA: el front deja cambiarlo a mano.

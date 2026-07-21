@@ -44,6 +44,13 @@ el changelog con los pendientes.
 
 - **NUNCA borrar ni sobrescribir datos del usuario** (`datos/`, `entrada/`, `catalogo_fuentes/`) al
   probar. Solo GET y generar. Para verificar algo destructivo, usar una copia propia y descartable.
+- **NUNCA borrar un producto/molde que tenga `creado_por`** (dueño): es del usuario, aunque el
+  nombre parezca de prueba y aunque haya varios iguales. Los moldes de prueba se crean SIN sesión
+  (quedan sin dueño) y se borran SOLO por el id que devolvió el `crear` de esta misma corrida —
+  nunca "los que sobran" ni por nombre. **Ya pasó: se borraron 3 moldes del usuario, con su
+  nombrado de piezas adentro, confundiéndolos con moldes de prueba. No se pudo recuperar.**
+- Antes de borrar CUALQUIER cosa en `datos/` o `entrada/`, listar qué se va a borrar y verificar
+  que ninguno tenga dueño.
 - **Matar servers por PID específico. NUNCA mass-kill** (`taskkill //IM py.exe` está prohibido).
 - **LEY: el arte se ve igual que la tizada.** Lo que se ve en el Arte es exactamente lo que sale
   estampado (vectorial, pixel-idéntico). Si un cambio rompe esa igualdad, está mal.
