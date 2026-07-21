@@ -4086,6 +4086,15 @@ def get_productos():
     })
 
 
+def _activar_en_sesion(pid):
+    """Deja `pid` como molde activo DE ESTA SESIÓN (el global lo escribe cada llamador)."""
+    try:
+        session["pid_activo"] = pid
+        session.permanent = True
+    except Exception:
+        pass
+
+
 @app.post("/api/productos/crear")
 def crear_producto():
     cuerpo = request.get_json(force=True) or {}
@@ -4094,8 +4103,27 @@ def crear_producto():
         return jsonify({"error": "Falta el nombre del producto"}), 400
     
     cat = _cargar_catalogo()
+    propio = bool(cuerpo.get("propio"))
+
+    # IDEMPOTENTE para "Mis artículos": subir DE NUEVO el mismo molde (mismo dueño, mismo nombre)
+    # RE-USA el artículo que ya existe en vez de crear otro. La guarda equivalente vivía sólo en el
+    # front y se caía sola: si el catálogo del navegador se había pedido sin sesión, la lista venía
+    # sin los moldes propios (el server los oculta a quien no está identificado) y cada intento
+    # creaba un artículo nuevo — así aparecieron cuatro «Molde short» iguales.
+    if propio:
+        dueno = _uid_actual()
+        ya = next((p for p in cat["productos"]
+                   if p.get("propio")
+                   and (p.get("nombre") or "").strip().lower() == nombre.lower()
+                   and p.get("creado_por") == dueno), None)
+        if ya:
+            cat["activo"] = ya["id"]
+            _guardar_catalogo(cat)
+            _activar_en_sesion(ya["id"])
+            return jsonify({"id": ya["id"], "nombre": ya["nombre"], "reusado": True})
+
     pid = "prod_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
-    
+
     os.makedirs(os.path.join(DATOS, "productos", pid), exist_ok=True)
     os.makedirs(os.path.join(ENTRADA, pid), exist_ok=True)
     
@@ -4109,7 +4137,7 @@ def crear_producto():
         # DUEÑO: los moldes que sube un usuario desde el pedido son suyos y sólo los ve él.
         # Los del catálogo (creados sin sesión) quedan sin dueño = visibles para todos.
         "creado_por": _uid_actual(),
-        "propio": bool(request.get_json(silent=True) and (request.get_json(silent=True) or {}).get("propio")),
+        "propio": propio,
         "planilla_template_id": "plan_default",
         "mapeo_columnas": {
             "talle": "talle",
@@ -4122,6 +4150,10 @@ def crear_producto():
     })
     cat["activo"] = pid
     _guardar_catalogo(cat)
+    # El activo va TAMBIÉN a la sesión: `_get_active_producto_id` mira la sesión ANTES que el
+    # global, así que dejarla apuntando al molde anterior mandaba los guardados que no llevan
+    # `pid` al molde equivocado.
+    _activar_en_sesion(pid)
     return jsonify({"id": pid, "nombre": nombre})
 
 

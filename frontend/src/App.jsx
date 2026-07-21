@@ -2507,11 +2507,31 @@ export default function App() {
     .finally(() => setAuthListo(true));
   useEffect(() => { recargarYo(); }, []);
   const cerrarSesion = () => fetch('/api/auth/logout', { method: 'POST' }).then(() => setYo(null));
+  // AL INICIAR SESIÓN hay que volver a pedir el catálogo. La app se monta ANTES del login (la
+  // pantalla de login se dibuja recién al final del render), así que el fetch del arranque sale
+  // SIN sesión y el server oculta los moldes propios de quien no está identificado: la lista
+  // quedaba con un solo molde para toda la sesión → "Mis artículos" vacío y subir el mismo molde
+  // creaba OTRO artículo cada vez (así aparecieron 4 «Molde short»).
+  useEffect(() => {
+    if (!yo?.id) return;
+    fetchProductos();
+    fetchEstado();
+    fetchCatalogoPiezas();
+  }, [yo?.id]);
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
   // se produce un ReferenceError de "Temporal Dead Zone" al iniciar la app.
   const activoProdDetalle = productosCat.productos.find(p => p.id === productosCat.activo);
+
+  // EL MOLDE QUE SE ESTÁ CONFIGURANDO. Todo guardado del flujo de configuración tiene que ir
+  // contra ESTE pid y mandarlo explícito: si no, el endpoint escribe en el molde "activo" del
+  // server, que llega TARDE (`handleActivarProducto` es async y no se espera al abrir la moldería)
+  // y que además se resetea cuando la sesión se cae. Con varios artículos con el MISMO nombre,
+  // eso terminaba guardando el nombrado de piezas en el molde equivocado.
+  const pidCfg = molderiaAbierta || modoMiMolde || productosCat.activo || '';
+  // Sufijo `?pid=`/`&pid=` listo para pegar en una URL de GET.
+  const qPid = (sep = '?') => (pidCfg ? `${sep}pid=${encodeURIComponent(pidCfg)}` : '');
 
   const cols = activoProdDetalle?.columnas || [
     { id: 'talle', label: 'Talle', role: 'talle' },
@@ -2811,7 +2831,7 @@ export default function App() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch(`/api/config${qPid()}`);
       const data = await res.json();
       setConfig(data);
     } catch (e) {
@@ -2892,7 +2912,7 @@ export default function App() {
   const avisarPerfilDiseno = async (diseno, moldId) => {
     setPerfilAviso({ estado: 'detectando' });
     try {
-      const r = await fetch('/api/arte/perfil?diseno=' + encodeURIComponent(diseno || 'principal'));
+      const r = await fetch(`/api/arte/perfil?diseno=${encodeURIComponent(diseno || 'principal')}${qPid('&')}`);
       if (!r.ok) { setPerfilAviso(null); return; }
       const p = await r.json();
       setPerfilAviso(p);
@@ -3429,6 +3449,8 @@ export default function App() {
     if (!file) return;
     const formData = new FormData();
     formData.append('archivo', file);
+    // el archivo entra al molde que se está configurando, no al "activo" del server
+    if (pidCfg) formData.append('pid', pidCfg);
     
     let url = '';
     if (type === 'plantilla') url = '/api/plantilla';
@@ -3529,8 +3551,8 @@ export default function App() {
     showMsg("Cargando moldería...");
     try {
       const url = ref 
-        ? `/api/plantilla/deteccion?talle_ref=${encodeURIComponent(ref)}`
-        : '/api/plantilla/deteccion';
+        ? `/api/plantilla/deteccion?talle_ref=${encodeURIComponent(ref)}${qPid('&')}`
+        : `/api/plantilla/deteccion${qPid()}`;
       const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -3708,6 +3730,10 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // `pid` EXPLÍCITO: sin él el server escribe el registro del molde "activo" — con varios
+          // artículos iguales dando vueltas, el nombrado terminaba en el molde equivocado y el
+          // que el usuario estaba mirando quedaba sin nombrar.
+          pid: pidCfg,
           asignaciones: asign,
           mesa: etqData.mesa,
           talle_ref: etqData.talle_ref
@@ -3745,7 +3771,7 @@ export default function App() {
     
     // Cargar moldería vectorial para la previsualización interactiva
     try {
-      const res = await fetch('/api/plantilla/deteccion');
+      const res = await fetch(`/api/plantilla/deteccion${qPid()}`);
       if (res.ok) {
         const data = await res.json();
         setEtqData(data);
@@ -3769,7 +3795,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         // REGLA mapeo-por-variable: el mapeo se guarda PARA la variable activa (v_xxx);
         // sin variable (molde sin variables) va a la base compartida.
-        body: JSON.stringify({ mapeo, diseno: disenoActivo, variante: verVariante || '' })
+        body: JSON.stringify({ pid: pidCfg, mapeo, diseno: disenoActivo, variante: verVariante || '' })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -3794,7 +3820,7 @@ export default function App() {
   const abrirMapeoOperario = async () => {
     showMsg("Cargando diseño y molde...");
     try {
-      const res = await fetch('/api/arte/deteccion?variante=' + encodeURIComponent(verVariante || ''));
+      const res = await fetch(`/api/arte/deteccion?variante=${encodeURIComponent(verVariante || '')}${qPid('&')}`);
       if (!res.ok) { const e = await leerJson(res); showError(e.error || 'No se pudo cargar el diseño'); return; }
       const det = await res.json();
       setMapeoData(det);
@@ -3806,7 +3832,7 @@ export default function App() {
       }
       setMapeoValores(inicial);
       setSelectedPiezaMapeo(det.piezas_variable?.[0] || det.piezas?.[0] || '');   // 1ª de la VARIABLE, no del molde
-      const r2 = await fetch('/api/plantilla/deteccion');
+      const r2 = await fetch(`/api/plantilla/deteccion${qPid()}`);
       if (r2.ok) { const data = await r2.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
       setMapeandoOperario(true);
       showMsg("");
@@ -3864,11 +3890,11 @@ export default function App() {
           // (compartida entre usuarios); si el server aún no la devuelve, el caché
           // del navegador. Así al recargar NO se pierde y no vuelve al talle 1.
           const guia = activoProdDetalle?.variante_guia
-            || localStorage.getItem('tizada_talleguia_' + productosCat.activo) || '';
-          let res = await fetch('/api/plantilla/deteccion' + (guia ? `?talle_ref=${encodeURIComponent(guia)}` : ''));
+            || localStorage.getItem('tizada_talleguia_' + pidCfg) || '';
+          let res = await fetch(`/api/plantilla/deteccion${guia ? `?talle_ref=${encodeURIComponent(guia)}${qPid('&')}` : qPid()}`);
           if (!res.ok && guia) {
             // La variante guardada ya no existe en esta plantilla → cargar la por defecto.
-            res = await fetch('/api/plantilla/deteccion');
+            res = await fetch(`/api/plantilla/deteccion${qPid()}`);
           } else if (res.ok && guia) {
             // La guía puede haber quedado apuntando al nombre VIEJO de la capa («Capa 1») después
             // de nombrar las variantes: el server ya no falla (responde 200 con el estado), así
@@ -3876,8 +3902,8 @@ export default function App() {
             const _d = await res.clone().json().catch(() => null);
             const _t = _d?.talles || [];
             if (_t.length && !_t.includes(guia)) {
-              localStorage.removeItem('tizada_talleguia_' + productosCat.activo);
-              res = await fetch('/api/plantilla/deteccion');
+              localStorage.removeItem('tizada_talleguia_' + pidCfg);
+              res = await fetch(`/api/plantilla/deteccion${qPid()}`);
             }
           }
           if (res.ok) {
@@ -3903,7 +3929,7 @@ export default function App() {
           return;
         }
         try {
-          const res = await fetch('/api/arte/deteccion?variante=' + encodeURIComponent(verVariante || ''));
+          const res = await fetch(`/api/arte/deteccion?variante=${encodeURIComponent(verVariante || '')}${qPid('&')}`);
           if (res.ok) {
             const data = await res.json();
             setMapeoData(data);
@@ -3921,28 +3947,28 @@ export default function App() {
       cargarDeteccionMolde();
       cargarMapeoArte();
     }
-  }, [adminSubView, productosCat.activo, moldeReload]);
+  }, [adminSubView, pidCfg, moldeReload]);
 
   const cambiarTalleGuia = async (talleRef) => {
     showMsg("Actualizando talle de guía...");
     try {
-      const url = `/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talleRef)}`;
+      const url = `/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talleRef)}${qPid('&')}`;
       const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
       setEtqData(data);
       setEtqNombres(data.nombres_existentes || {});
-      if (productosCat.activo) {
+      if (pidCfg) {
         // 1) Caché del navegador: hace que al RECARGAR no se pierda (anda con
         //    cualquier versión del servidor).
-        localStorage.setItem('tizada_talleguia_' + productosCat.activo, talleRef);
+        localStorage.setItem('tizada_talleguia_' + pidCfg, talleRef);
         // 2) Base de datos: compartido entre todos los usuarios (server al día).
         try {
           await fetch('/api/productos/variante_guia', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: productosCat.activo, variante: talleRef })
+            body: JSON.stringify({ id: pidCfg, variante: talleRef })
           });
           fetchProductos();
         } catch (e) { /* el cambio visual y el caché ya se aplicaron */ }
@@ -3965,7 +3991,7 @@ export default function App() {
       if (!r.ok) throw new Error(d.error);
       // Recalcular las medidas con la nueva referencia (vuelve a pedir la detección).
       const guia = activoProdDetalle?.variante_guia;
-      const res = await fetch('/api/plantilla/deteccion' + (guia ? `?talle_ref=${encodeURIComponent(guia)}` : ''));
+      const res = await fetch(`/api/plantilla/deteccion${guia ? `?talle_ref=${encodeURIComponent(guia)}${qPid('&')}` : qPid()}`);
       if (res.ok) {
         const data = await leerJson(res);
         setEtqData(data);
@@ -4135,7 +4161,7 @@ export default function App() {
       const ctrl = new AbortController();
       const to = setTimeout(() => ctrl.abort(), 240000);   // 4 min: la 1ª vez (cache fría) puede tardar
       let r;
-      try { r = await fetch('/api/plantilla/nido', { signal: ctrl.signal }); }
+      try { r = await fetch(`/api/plantilla/nido${qPid()}`, { signal: ctrl.signal }); }
       finally { clearTimeout(to); }
       const d = await leerJson(r);
       if (!r.ok) throw new Error(d.error || 'No se pudo armar el nido');
@@ -4571,7 +4597,7 @@ export default function App() {
     setVarPzModo(on);
     setSelNombrar(new Set());
     setVarPzInput('');
-    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    const pid = pidCfg;
     try {
       const r = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}${on ? '&candidatas=1' : ''}`);
       if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); }
@@ -4596,7 +4622,7 @@ export default function App() {
     } else {
       varPzUltimo.current = null; setVarPzEstado('');
     }
-  }, [activoProdDetalle?.id, productosCat.activo]);
+  }, [pidCfg]);
 
   // AUTOGUARDADO: cada cambio de la asignación se persiste solo (con un respiro de 500 ms para no
   // pegarle al server en cada clic). Sólo guarda el BORRADOR: partir el PDF sigue siendo manual.
@@ -4605,7 +4631,7 @@ export default function App() {
     const s = _varPzSerial(varPzAsig);
     if (varPzUltimo.current === null) { varPzUltimo.current = s; return; }  // primer render tras cargar
     if (s === varPzUltimo.current) return;
-    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    const pid = pidCfg;
     setVarPzEstado('guardando');
     const t = setTimeout(async () => {
       try {
@@ -4619,7 +4645,7 @@ export default function App() {
       } catch { setVarPzEstado('error'); }
     }, 500);
     return () => clearTimeout(t);
-  }, [varPzAsig, varPzModo, activoProdDetalle?.id, productosCat.activo]);
+  }, [varPzAsig, varPzModo, pidCfg]);
 
   const asignarVariantePz = () => {
     const nom = (varPzInput || '').trim();
@@ -4634,7 +4660,7 @@ export default function App() {
     const n = {}; Object.entries(prev).forEach(([k, v]) => { if (v !== nom) n[k] = v; }); return n;
   });
   const guardarVariantesPz = async () => {
-    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    const pid = pidCfg;
     if (!Object.keys(varPzAsig).length) { showError('Todavía no asignaste ninguna pieza'); return; }
     setVarPzGuardando(true);
     try {
@@ -4739,7 +4765,7 @@ export default function App() {
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(targetConfig)
+        body: JSON.stringify({ ...targetConfig, pid: pidCfg })
       });
       const data = await res.json();
       if (!res.ok) throw new Error("No se pudo guardar la configuración");
@@ -5021,7 +5047,7 @@ export default function App() {
   // todavía no haya diseño cargado.
   const cargarMoldeOperario = async () => {
     try {
-      const r = await fetch('/api/plantilla/deteccion');
+      const r = await fetch(`/api/plantilla/deteccion${qPid()}`);
       if (r.ok) { const data = await r.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
     } catch (e) { /* sin molde */ }
   };
@@ -5052,7 +5078,7 @@ export default function App() {
       if (!_hit) setMapeoCargando(true);
       // REGLA mapeo-por-variable: se pide el mapeo DE la variable activa (autoritativo si tiene
       // el suyo; si no, la base). Al cambiar de variable el efecto re-corre y recarga el suyo.
-      const res = await fetch('/api/arte/deteccion?diseno=' + encodeURIComponent(disenoActivo) + '&variante=' + encodeURIComponent(verVariante || ''));
+      const res = await fetch(`/api/arte/deteccion?diseno=${encodeURIComponent(disenoActivo)}&variante=${encodeURIComponent(verVariante || '')}${qPid('&')}`);
       if (!res.ok) { if (!_hit) setMapeoData(null); return null; }
       const det = await res.json();
       _detArteCache.current[_dk] = det;
@@ -5062,7 +5088,7 @@ export default function App() {
       const _det2 = _talleDetCache.current[_k2];
       if (_det2) { setEtqData(_det2); setEtqNombres(_det2.nombres_existentes || {}); }
       else {
-        const r2 = await fetch('/api/plantilla/deteccion');
+        const r2 = await fetch(`/api/plantilla/deteccion${qPid()}`);
         if (r2.ok) { const data = await r2.json(); _talleDetCache.current[_k2] = data; setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
       }
       // WYSIWYG: cargar el BORDE de corte + la ETIQUETA REALES del molde para mostrarlos en el visor
@@ -5076,7 +5102,7 @@ export default function App() {
   // TODOS los talles (una sola espera, visible, con progreso) → después navegar es instantáneo
   // desde memoria. Cada (diseño, variable, talle) guarda lo suyo; re-subir el arte lo renueva.
   const asignarTodasLasVariantes = async (mapeo) => {
-    const pid = productosCat.activo, clave = verVariante, dis = disenoActivo;
+    const pid = pidCfg, clave = verVariante, dis = disenoActivo;
     const talles = etqData?.talles || estado?.talles || [];
     if (!pid || !clave || !talles.length || !mapeo || !Object.keys(mapeo).length) return;
     _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
@@ -5119,7 +5145,7 @@ export default function App() {
         }
         if (!_talleDetCache.current[`${pid}|${t}`]) {
           try {
-            const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(t));
+            const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(t)}${qPid('&')}`);
             if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
           } catch (e) { /* sigue */ }
         }
@@ -5149,7 +5175,7 @@ export default function App() {
   // talle actual; el server ya los tiene en disco (pre-warm) → cada pedido es rápido. Con
   // ediciones de editables SIN guardar (override) no se precarga (cambia con cada arrastre).
   const _prefetchTalles = (mapeo, talleActual) => {
-    const pid = productosCat.activo, clave = verVariante, dis = disenoActivo;
+    const pid = pidCfg, clave = verVariante, dis = disenoActivo;
     if (Object.keys(editorTfs || {}).length) return;
     const todos = etqData?.talles || estado?.talles || [];
     const iAct = todos.findIndex(t => String(t) === String(talleActual || ''));
@@ -5177,7 +5203,7 @@ export default function App() {
         if (tok !== _prefetchTok.current) return;
         if (!_talleDetCache.current[`${pid}|${t}`]) {
           try {
-            const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(t));
+            const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(t)}${qPid('&')}`);
             if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
           } catch (e) { /* siguiente */ }
         }
@@ -5185,7 +5211,7 @@ export default function App() {
     })();
   };
   const cargarPreviewPiezas = async (mapeoOverride) => {
-    const pid = productosCat.activo, clave = verVariante;
+    const pid = pidCfg, clave = verVariante;
     if (pedidoPaso !== 'arte' || !pid || !clave) { setPreviewPiezas({}); return; }
     const mapeo = mapeoOverride || mapeoValores;
     const talle = etqData?.talle_ref;
@@ -5233,7 +5259,7 @@ export default function App() {
   // correcto del talle vía `mapeo_talles` (placeholder) hasta que llegue el render real —
   // NUNCA contornos vacíos ni diseños de otro talle.
   const verVarianteOperario = async (talle) => {
-    const pid = productosCat.activo;
+    const pid = pidCfg;
     const _prevHit = _pvCache.current[_pvKeyDe(talle)];
     const _detHit = _talleDetCache.current[`${pid}|${talle}`];
     if (_detHit) {
@@ -5242,7 +5268,7 @@ export default function App() {
       return;
     }
     try {
-      const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(talle));
+      const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talle)}${qPid('&')}`);
       if (r.ok) {
         const data = await r.json();
         _talleDetCache.current[`${pid}|${talle}`] = data;
@@ -5262,7 +5288,7 @@ export default function App() {
   // `silencioso` = precarga para poder MOSTRAR los grupos ya hechos sin entrar al modo (el usuario
   // volvía, veía el panel vacío y creía que había perdido el trabajo). No molesta con errores.
   const cargarEmparejado = async (silencioso) => {
-    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    const pid = pidCfg;
     try {
       const r = await fetch(`/api/plantilla/emparejado?pid=${encodeURIComponent(pid)}`);
       const d = await r.json();
@@ -5293,7 +5319,7 @@ export default function App() {
   // gesto sea el mismo que nombrar («esto, esto y esto son el Frente») y no haya que ir talle
   // por talle. Devuelve la vista si se pudo, o `null` con el motivo cargado en `empTodasMotivo`.
   const cargarTodasVariantes = async (empd) => {
-    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    const pid = pidCfg;
     try {
       const r = await fetch(`/api/plantilla/deteccion_todas?pid=${encodeURIComponent(pid)}`);
       const d = await r.json();
@@ -5386,7 +5412,7 @@ export default function App() {
     try {
       const r = await fetch('/api/plantilla/emparejado', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: activoProdDetalle?.id || productosCat.activo || '', talle: empTalle, acomodo: _empAcomodoPayload(), ...extra }),
+        body: JSON.stringify({ pid: pidCfg, talle: empTalle, acomodo: _empAcomodoPayload(), ...extra }),
       });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo aplicar el emparejado'); return; }
@@ -5414,7 +5440,7 @@ export default function App() {
     try {
       const r = await fetch('/api/plantilla/grupo_pieza', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: activoProdDetalle?.id || productosCat.activo || '', ...body }),
+        body: JSON.stringify({ pid: pidCfg, ...body }),
       });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo guardar el grupo'); return false; }
@@ -5568,7 +5594,7 @@ export default function App() {
     try {
       const r = await fetch('/api/plantilla/emparejado', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: activoProdDetalle?.id || productosCat.activo || '', manual }),
+        body: JSON.stringify({ pid: pidCfg, manual }),
       });
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo confirmar'); return; }
@@ -5651,7 +5677,7 @@ export default function App() {
   // Medidas de todas las variantes (para el modo 'rango': cubrir el talle más grande del rango).
   const cargarMedidasVar = async () => {
     if (medidasVar) return;
-    try { const r = await fetch('/api/plantilla/medidas_variantes'); if (r.ok) setMedidasVar(await r.json()); } catch (e) { /* sin datos */ }
+    try { const r = await fetch(`/api/plantilla/medidas_variantes${qPid()}`); if (r.ok) setMedidasVar(await r.json()); } catch (e) { /* sin datos */ }
   };
   // Cambiar la configuración de medida del visor (default / rango / talle).
   const cambiarConfigMedida = (k) => {
@@ -5666,7 +5692,7 @@ export default function App() {
       if (!enRango.includes(etqData?.talle_ref)) verVarianteOperario(enRango[0]);
       return;
     }
-    fetch('/api/plantilla/deteccion').then(r => r.ok ? r.json() : null)
+    fetch(`/api/plantilla/deteccion${qPid()}`).then(r => r.ok ? r.json() : null)
       .then(d => { if (d) { setEtqData(d); setEtqNombres(d.nombres_existentes || {}); } }).catch(() => { });
   };
   // Capas del ARTE que el .ai debe tener (para pre-crearlas como OCG en la guía): «diseño», «guias»
@@ -5690,6 +5716,7 @@ export default function App() {
   // variable en curso + el modo (default/rango) para el nombre de mesa.
   const descargarPdfGuia = async () => {
     const params = new URLSearchParams({ config: configMedida, formato: 'ai' });
+    if (pidCfg) params.set('pid', pidCfg);
     params.set('capas', JSON.stringify(capasArteNombres()));
     if (configMedida === 'rango' && rangoMedida.length) {
       params.set('rango', rangoMedida.join(','));
@@ -5713,11 +5740,12 @@ export default function App() {
   const descargarBase = () => {
     if (verVariante) {
       const params = new URLSearchParams({ config: configMedida, limpio: '1' });
+      if (pidCfg) params.set('pid', pidCfg);
       if (configMedida === 'rango' && rangoMedida.length) { params.set('rango', rangoMedida.join(',')); if (etqData?.talle_ref) params.set('guia', etqData.talle_ref); }
       const keys = nombresDeVariante(verVariante); if (keys.length) params.set('piezas', JSON.stringify(keys));
       window.open('/api/plantilla/pdf_guia?' + params.toString(), '_blank');
     } else {
-      window.open(`/api/productos/${activoProdDetalle.id}/descargar_plantilla`, '_blank');
+      window.open(`/api/productos/${pidCfg}/descargar_plantilla`, '_blank');
     }
   };
   // Toggle de una variante en el rango (con soporte shift+click para seleccionar un tramo).
@@ -5754,7 +5782,7 @@ export default function App() {
   const cargarDisenoWizard = async (file) => {
     if (!file) return;
     const id = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId;   // VARIABLE-FIRST: el molde es el del ítem actual
-    const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo);
+    const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo); if (id) fd.append('pid', id);
     showMsg('Subiendo y procesando el diseño…');
     try {
       const res = await fetch('/api/arte', { method: 'POST', body: fd });
@@ -5912,11 +5940,11 @@ export default function App() {
   };
   // Borde de corte del molde: cargar / guardar.
   const cargarBorde = async () => {
-    const pid = activoProdDetalle?.id; if (!pid) return;
+    const pid = pidCfg; if (!pid) return;
     try { const r = await fetch(`/api/productos/borde_corte?pid=${pid}`); if (r.ok) setBordeConfig(await r.json()); } catch { }
   };
   const guardarBorde = async (next) => {
-    const pid = activoProdDetalle?.id; if (!pid) return;
+    const pid = pidCfg; if (!pid) return;
     const cfg = next || bordeConfig;
     setBordeConfig(cfg);
     try {
@@ -5926,18 +5954,18 @@ export default function App() {
   };
   // Etiqueta de identificación del molde: cargar / guardar.
   const cargarEtiqueta = async () => {
-    const pid = activoProdDetalle?.id; if (!pid) return;
+    const pid = pidCfg; if (!pid) return;
     try { const r = await fetch(`/api/productos/etiqueta?pid=${pid}`); if (r.ok) setEtiquetaConfig(await r.json()); } catch { }
   };
   const cargarTalleEtq = async (talle) => {
     // Re-detecta el molde al talle elegido. IMPORTANTE: actualizar TAMBIÉN etqNombres (idx→nombre)
     // al mismo talle, si no canvasLayout queda en ese talle y los nombres en el guía → el visor
     // no matchea la pieza y desaparece al cambiar de talle.
-    try { const r = await fetch('/api/plantilla/deteccion?talle_ref=' + encodeURIComponent(talle)); if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); } } catch { }
+    try { const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talle)}${qPid('&')}`); if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); } } catch { }
   };
   // Carga los objetos editables: recorre los diseños del molde y deja los que TIENEN objetos.
   const cargarEditables = async (preferido) => {
-    const pid = activoProdDetalle?.id; if (!pid) return;
+    const pid = pidCfg; if (!pid) return;
     let lista = [{ id: 'principal', nombre: 'Principal' }];
     try { const rd = await fetch('/api/disenos?molds=' + encodeURIComponent(pid)); if (rd.ok) { const dd = await rd.json(); lista = (dd.por_molde || {})[pid] || lista; } } catch { }
     const conObj = [];
@@ -5958,14 +5986,14 @@ export default function App() {
   // Config de TAMAÑO de capas editables (del molde, por nombre de capa). Sin gráficos: el
   // usuario escribe el nombre de la capa y define rangos de talles con su tamaño máximo (cm).
   const cargarEditConfig = async () => {
-    const pid = activoProdDetalle?.id; if (!pid) return;
+    const pid = pidCfg; if (!pid) return;
     try {
       const r = await fetch(`/api/productos/editables_config?pid=${pid}`);
       if (r.ok) { const d = await r.json(); setEditConfig(d.config || []); setEditConfigVariantes(d.variantes || []); }
     } catch { }
   };
   const guardarEditConfig = async (cfg) => {
-    const pid = activoProdDetalle?.id; if (!pid) return;
+    const pid = pidCfg; if (!pid) return;
     const lista = (cfg || editConfig || []).filter(c => (c.capa || '').trim());
     setEditConfig(lista);
     try {
@@ -6233,7 +6261,7 @@ export default function App() {
     }
   }, [tabAjustesMolde, verVariante, varsConPiezas.length]);
   const guardarEtiqueta = async () => {
-    const pid = activoProdDetalle?.id; if (!pid || !etiquetaConfig) return;
+    const pid = pidCfg; if (!pid || !etiquetaConfig) return;
     try {
       const r = await fetch('/api/productos/etiqueta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, ...etiquetaConfig }) });
       if (r.ok) { setEtiquetaConfig(await r.json()); showMsg('Etiqueta guardada ✓'); } else showError('No se pudo guardar la etiqueta');
@@ -7179,6 +7207,14 @@ export default function App() {
                                 </div>
                                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 7, minHeight: 15, alignItems: 'center' }}>
                                   <span style={{ fontSize: 10, fontWeight: 700, color: p.plantilla ? 'var(--success)' : 'var(--warning)' }}>{p.plantilla ? 'Molde OK' : 'Sin molde'}</span>
+                                  {/* Con dos artículos del MISMO nombre la tarjeta es idéntica y no
+                                      hay forma de saber en cuál se venía trabajando: se muestra la
+                                      fecha sólo en ese caso (si no, es ruido). */}
+                                  {mios.filter(x => (x.nombre || '') === (p.nombre || '')).length > 1 && p.creado ? (
+                                    <span title="Fecha en que se creó este artículo" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                      {new Date(p.creado * 1000).toLocaleString('es-UY', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  ) : null}
                                   {susDisenos.map(d => (
                                     <span key={d.id} title={d.nombre} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: colorDeDiseno(d.id), background: colorDeDiseno(d.id) + '1c', padding: '1px 6px', borderRadius: 999 }}>
                                       <span style={{ width: 5, height: 5, borderRadius: '50%', background: colorDeDiseno(d.id) }} />{d.nombre}
