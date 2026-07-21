@@ -617,11 +617,18 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
   // El modo lo decide el MOLDE: con 2+ capas de talle se nombra por capa; con una sola capa que
   // trae todas las piezas hay que repartirlas a mano. Se sugiere una sola vez (el usuario manda).
   React.useEffect(() => {
-    if (!info || modoAuto.current) return;
+    if (!info) return;
+    // Un molde que YA se definió POR PIEZAS se queda por piezas, siempre. Después de aplicar, sus
+    // capas son LAS QUE CREAMOS NOSOTROS (una por variante), así que "tiene 2+ capas de talle" ya
+    // no significa que sea un molde por capas: volver a modo capa mandaba al usuario a renombrar
+    // las capas que él mismo acababa de definir.
+    const yaPorPiezas = Object.keys(info.asignacion_piezas || {}).length > 0
+      || Object.keys(info.asignacion_piezas_aplicada || {}).length > 0;
+    if (onModo && (yaPorPiezas || info.modo_sugerido === 'piezas')) { onModo(true); return; }
+    // para el resto, la sugerencia corre una sola vez (el modo por capa ya es el de por defecto):
+    // así un molde normal no dispara una recarga del visor cada vez que se abre la Moldería
+    if (modoAuto.current) return;
     modoAuto.current = true;
-    // sólo se fuerza el modo POR PIEZAS (el otro ya es el estado por defecto): así un molde normal
-    // no dispara una recarga del visor cada vez que se abre la Moldería
-    if (onModo && info.modo_sugerido === 'piezas') onModo(true);
   }, [info, onModo]);
 
   // ¿parece que las capas NO están nombradas? (nombres tipo "Layer 3", "Capa 2", "Path 7")
