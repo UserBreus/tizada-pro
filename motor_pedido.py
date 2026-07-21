@@ -1213,19 +1213,16 @@ def _eops_zonas(cont, S, x0, y0, B, puntos, conts, size, align_def, fetq, talle,
     return "\n".join(out) if out else None
 
 
-def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emparejado=None):
-    """Construye el registro a partir de nombres puestos a mano en el talle de
-    referencia. `asignaciones` = [{"idx": i, "nombre": "Frente"}, ...]. El nombre
-    de cada pieza se propaga a TODOS los talles emparejando por posición
-    (centroide normalizado), sin pedir etiquetas de texto en el .ai.
-    `emparejado` = {"acomodo": {talle:{idx:[dx_mm,dy_mm]}}, "manual": {talle:{nombre:idx}}}:
-    el ajuste a mano del usuario cuando el molde no tiene las piezas dispuestas parecido
-    entre talles (ver §10.c del mapa)."""
-    doc = _abrir(path)
-    _raw = {a["idx"]: a["nombre"].strip() for a in asignaciones if a.get("nombre", "").strip()}
-    # SEGURIDAD: dos piezas con el MISMO nombre colisionan en el registro (dict por nombre) y
-    # se pierde una. Si un genérico trae nombres duplicados, se renumera TODO ese genérico
-    # 1..N (por idx); los genéricos ya únicos se respetan tal cual (no se toca la numeración).
+def nombres_normalizados(asignaciones):
+    """`[{"idx":i,"nombre":"Frente"}]` → `{idx: nombre_final}` con la MISMA regla que usa el
+    registro. Vive suelta (y no adentro de `alta_plantilla_manual`) porque quien guarda una
+    correspondencia a mano necesita saber con qué nombre va a quedar la pieza: la clave de
+    `emparejado_talles.json["manual"]` es el nombre FINAL, no el que se tipeó.
+
+    SEGURIDAD: dos piezas con el MISMO nombre colisionan en el registro (dict por nombre) y se
+    pierde una. Si un genérico trae nombres duplicados se renumera TODO ese genérico 1..N (por
+    idx); los genéricos ya únicos se respetan tal cual (no se toca la numeración)."""
+    _raw = {a["idx"]: a["nombre"].strip() for a in (asignaciones or []) if (a.get("nombre") or "").strip()}
     import re as _re2, collections as _c2
     def _gen_pz(n):
         return _re2.sub(r"\s+\d+\s*$", "", n).strip()
@@ -1243,6 +1240,19 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emp
         else:
             for _k, _i in enumerate(_idxs, 1):
                 nombres[_i] = f"{_g} {_k}"
+    return nombres
+
+
+def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emparejado=None):
+    """Construye el registro a partir de nombres puestos a mano en el talle de
+    referencia. `asignaciones` = [{"idx": i, "nombre": "Frente"}, ...]. El nombre
+    de cada pieza se propaga a TODOS los talles emparejando por posición
+    (centroide normalizado), sin pedir etiquetas de texto en el .ai.
+    `emparejado` = {"acomodo": {talle:{idx:[dx_mm,dy_mm]}}, "manual": {talle:{nombre:idx}}}:
+    el ajuste a mano del usuario cuando el molde no tiene las piezas dispuestas parecido
+    entre talles (ver §10.c del mapa)."""
+    doc = _abrir(path)
+    nombres = nombres_normalizados(asignaciones)
     if not nombres:
         return {"mesas": len(doc), "registro": {}, "piezas": [], "talles": [],
                 "completos": [], "problemas": ["No se asignó ningún nombre de pieza."],

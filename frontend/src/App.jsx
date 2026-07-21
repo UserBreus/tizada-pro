@@ -2301,6 +2301,12 @@ export default function App() {
   const [empTalle, setEmpTalle] = useState(null);    // talle que se está corrigiendo (≠ guía)
   const [empFijar, setEmpFijar] = useState(null);    // nombre de pieza esperando "tocá la correcta"
   const [empGuardando, setEmpGuardando] = useState(false);
+  // Camino PRINCIPAL (§10.c): agrupar piezas homólogas. Un solo gesto — tocar la pieza en el
+  // talle guía, escribirle el nombre y confirmar: eso define a la vez CÓMO SE LLAMA y CUÁL ES
+  // en cada talle. El panel viejo (reacomodar/corregir por índice) queda como 'avanzado'.
+  const [empVista, setEmpVista] = useState('simple');   // 'simple' (agrupar) | 'avanzado'
+  const [empNombreInput, setEmpNombreInput] = useState('');
+  const [empGrupoSel, setEmpGrupoSel] = useState('');    // grupo elegido para decir «esta pieza es esa»
   const [resaltarNombre, setResaltarNombre] = useState(null); // nombre genérico resaltado en el visor (lista de piezas agrupada)
   const [grupoAislado, setGrupoAislado] = useState(null);   // clave del grupo abierto en DETALLE (visor aislado + edición); null = lista de grupos
   const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState(''); // nombre para crear una VARIABLE nueva (Paso 2)
@@ -3514,6 +3520,9 @@ export default function App() {
     // si no, se arrastra para reacomodar (y el clic sin movimiento selecciona/deselecciona).
     if (empModo) {
       if (empFijar) { const nom = empFijar; setEmpFijar(null); fijarPiezaEmp(nom, idx); e.preventDefault(); return; }
+      // AGRUPAR (camino principal): el gesto es SOLO seleccionar. Arrastrar piezas es del
+      // ajuste avanzado — acá confundiría (el usuario cree que mueve el molde).
+      if (empVista === 'simple') { toggleSelNombrar(idx); e.preventDefault(); return; }
       // arrastrar una pieza YA seleccionada mueve todas las seleccionadas juntas
       const grupo = selNombrar.has(idx) ? Array.from(selNombrar) : [idx];
       const inis = {};
@@ -5158,9 +5167,11 @@ export default function App() {
     await verVarianteOperario(t);
   };
 
-  const activarEmparejar = async (on) => {
-    setEmpFijar(null); setSelNombrar(new Set());
+  const activarEmparejar = async (on, vista) => {
+    setEmpFijar(null); setSelNombrar(new Set()); setEmpNombreInput('');
     setEmpModo(on);
+    const v = vista || empVista;
+    if (vista) setEmpVista(vista);
     if (!on) {
       setEmpTalle(null); setPzOffsets({});
       const g = empData?.guia;
@@ -5171,9 +5182,12 @@ export default function App() {
     const d = await cargarEmparejado();
     if (!d) { setEmpModo(false); return; }
     const otros = (d.talles || []).filter(t => t !== d.guia);
-    if (!otros.length) { showError('El molde tiene un solo talle: no hay nada que emparejar'); setEmpModo(false); return; }
-    setEmpTalle(otros[0]); setEmpFijar(null);
-    await verVarianteOperario(otros[0]);
+    // AGRUPAR arranca SIEMPRE en el talle guía: es ahí donde se elige la pieza y se le pone
+    // el nombre. El modo avanzado arranca en otro talle (ahí se corrige, la guía no se toca).
+    const t0 = v === 'simple' ? d.guia : otros[0];
+    if (!t0) { showError(`El molde tiene un solo ${term.variante.toLowerCase()}: no hay nada que emparejar`); setEmpModo(false); return; }
+    setEmpTalle(t0); setEmpFijar(null);
+    await verVarianteOperario(t0);
   };
 
   // Offsets del visor (unidades del viewBox = mm) → payload {idx: [dx_mm, dy_mm]}.
@@ -5212,6 +5226,79 @@ export default function App() {
   const fijarPiezaEmp = (nombre, idx) => _postEmparejado({ manual: { [nombre]: idx } }, `«${nombre}» fijada a la pieza #${idx + 1} ✓`);
   const soltarPiezaEmp = (nombre) => _postEmparejado({ manual: { [nombre]: null } }, `«${nombre}» vuelve al emparejado automático`);
   const resetAcomodoEmp = () => { setPzOffsets({}); _postEmparejado({ reset: 'acomodo', acomodo: {} }, 'Posiciones restablecidas'); };
+
+  // ── AGRUPAR PIEZAS HOMÓLOGAS (camino principal) ───────────────────────────────────────
+  // «Estas piezas son la misma y se llama Frente»: un gesto define el NOMBRE y la
+  // CORRESPONDENCIA entre talles. Backend: POST /api/plantilla/grupo_pieza (guarda el nombre
+  // en la guía + las confirmaciones en `manual`, que la heurística no pisa nunca).
+  const _postGrupo = async (body, msg) => {
+    setEmpGuardando(true);
+    try {
+      const r = await fetch('/api/plantilla/grupo_pieza', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo guardar el grupo'); return false; }
+      setEmpData(prev => ({ ...(prev || {}), ...d }));
+      _talleDetCache.current = {};              // el registro cambió → los nombres por talle quedaron viejos
+      setNidoData(null); setNidoError(null);    // el nido se arma con el emparejado: hay que rearmarlo
+      if (empTalle) await verVarianteOperario(empTalle);
+      await fetchProductos();
+      if (msg) showMsg(msg);
+      return true;
+    } catch (e) { showError('No se pudo guardar: ' + e.message); return false; }
+    finally { setEmpGuardando(false); }
+  };
+
+  // Color estable por nombre de grupo: la MISMA pieza se pinta igual en todos los talles.
+  const colorGrupo = (nombre) => {
+    let h = 0;
+    for (let i = 0; i < (nombre || '').length; i++) h = (h * 31 + nombre.charCodeAt(i)) % 360;
+    return `hsl(${h}, 72%, 58%)`;
+  };
+
+  const crearGrupoPieza = async () => {
+    const idxs = Array.from(selNombrar);
+    if (idxs.length !== 1) { showError(`Tocá UNA pieza en ${empData?.guia}: el grupo es esa misma pieza en todos los ${term.variante.toLowerCase()}s`); return; }
+    const nom = (empNombreInput || '').trim();
+    if (!nom) { showError('Escribí qué es la pieza (Frente, Espalda, Manga…)'); return; }
+    const viejo = (etqNombres[idxs[0]] || '').trim();
+    const ok = await _postGrupo({ nombre: nom, guia_idx: idxs[0], renombrar_de: viejo && viejo !== nom ? viejo : '' },
+      viejo && viejo !== nom ? `«${viejo}» ahora se llama «${nom}» ✓` : `«${nom}» agrupada en todos los ${term.variante.toLowerCase()}s ✓`);
+    if (ok) { setEmpNombreInput(''); setSelNombrar(new Set()); }
+  };
+
+  const borrarGrupoPieza = (nombre) => _postGrupo({ nombre, eliminar: true }, `«${nombre}» deshecha`);
+
+  // Confirmar en bloque lo que propuso el sistema: pasa de «propuesto» a FIJO en todos los talles.
+  const confirmarTodoGrupo = (nombre) => {
+    const piezas = {};
+    (empData?.talles || []).forEach(t => {
+      if (t === empData?.guia) return;
+      const j = ((empData?.asignacion || {})[t] || {})[nombre];
+      if (j != null) piezas[t] = j;
+    });
+    if (!Object.keys(piezas).length) { showError('Todavía no hay ninguna propuesta que confirmar'); return; }
+    return _postGrupo({ nombre, guia_idx: parseInt(Object.keys(empData?.nombres_guia || {}).find(k => empData.nombres_guia[k] === nombre), 10), piezas },
+      `«${nombre}» confirmada en ${Object.keys(piezas).length} ${term.variante.toLowerCase()}s ✓`);
+  };
+
+  // Ir a un talle a revisar/corregir una pieza: abre ese talle y queda esperando el clic.
+  const cambiarVistaEmp = async (v) => {
+    setEmpVista(v); setEmpFijar(null); setSelNombrar(new Set()); setEmpNombreInput('');
+    const otros = (empData?.talles || []).filter(t => t !== empData?.guia);
+    // Cada vista trabaja sobre un talle distinto: agrupar se hace en la GUÍA (ahí se nombra),
+    // el ajuste avanzado en OTRO talle (la guía no se corrige contra sí misma).
+    const t = v === 'simple' ? empData?.guia : (empTalle && empTalle !== empData?.guia ? empTalle : otros[0]);
+    if (t && t !== empTalle) { setEmpTalle(t); await verVarianteOperario(t); }
+  };
+
+  const revisarPiezaEnTalle = async (nombre, talle) => {
+    if (talle === empData?.guia) { await abrirTalleEmp(talle); setEmpFijar(null); return; }
+    setEmpTalle(talle); setSelNombrar(new Set()); setEmpGrupoSel(nombre);
+    await verVarianteOperario(talle);
+    setEmpFijar(nombre);
+  };
 
   // Medidas de todas las variantes (para el modo 'rango': cubrir el talle más grande del rango).
   const cargarMedidasVar = async () => {
@@ -8933,21 +9020,157 @@ export default function App() {
                               {(etqData?.talles?.length > 1) && (
                                 <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: empModo ? 'rgba(245,158,11,0.06)' : 'transparent' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>Emparejar {term.variante.toLowerCase()}s</span>
+                                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>La misma pieza en cada {term.variante.toLowerCase()}</span>
                                     <button type="button" className={`btn ${empModo ? 'success' : 'ghost'}`}
                                       style={{ padding: '4px 10px', fontSize: 11 }}
-                                      onClick={() => activarEmparejar(!empModo)}>
-                                      {empModo ? 'Salir' : 'Ajustar a mano'}
+                                      onClick={() => activarEmparejar(!empModo, 'simple')}>
+                                      {empModo ? 'Salir' : 'Agrupar piezas'}
                                     </button>
                                   </div>
                                   {!empModo ? (
                                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                                      El nombre que le pusiste a cada pieza en <b>{empData?.guia || etqData?.talle_ref}</b> se
-                                      propaga al resto comparando cómo están acomodadas. Si el molde no las trae
-                                      acomodadas parecido, abrí esto y <b>reacomodá</b> o <b>corregí</b> pieza por pieza.
+                                      Cada pieza existe en todos los {term.variante.toLowerCase()}s. Acá <b>seleccionás la pieza</b>,
+                                      le escribís <b>qué es</b> («Frente») y con eso queda definido su nombre <i>y</i> cuál es
+                                      la misma pieza en cada {term.variante.toLowerCase()}.
                                     </div>
+                                  ) : empVista === 'simple' ? (
+                                    <>
+                                      {/* CAMINO PRINCIPAL: un gesto = nombre + correspondencia. */}
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.55, padding: '9px 11px', borderRadius: 9, background: 'rgba(255,255,255,0.03)' }}>
+                                        Tocá la pieza en <b style={{ color: 'var(--accent)' }}>{empData?.guia}</b>, escribí qué es y
+                                        confirmá: queda con ese nombre en <b>todos</b> los {term.variante.toLowerCase()}s. El sistema
+                                        <b> propone</b> cuál es la misma en cada uno — lo que confirmes vos queda fijo y no se
+                                        vuelve a mover.
+                                      </div>
+
+                                      {/* Qué talle está mostrando el visor (la guía primero: es donde se nombra). */}
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                                        <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Viendo</span>
+                                        {(empData?.talles || []).map(t => {
+                                          const on = empTalle === t;
+                                          const esGuia = t === empData?.guia;
+                                          return (
+                                            <button key={t} type="button" onClick={() => { setEmpFijar(null); setSelNombrar(new Set()); abrirTalleEmp(t); }}
+                                              style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>
+                                              {esGuia ? '★ ' : ''}{t}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+
+                                      {empTalle === empData?.guia ? (
+                                        <>
+                                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1 }}>
+                                              Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b>
+                                              {selNombrar.size === 1 && etqNombres[Array.from(selNombrar)[0]] ? <> · ya es «<b>{etqNombres[Array.from(selNombrar)[0]]}</b>»</> : null}
+                                            </span>
+                                            {selNombrar.size > 0 && <button type="button" className="btn ghost" style={{ fontSize: 11 }} onClick={() => setSelNombrar(new Set())}>Limpiar</button>}
+                                          </div>
+                                          <div style={{ display: 'flex', gap: 6 }}>
+                                            <input value={empNombreInput} onChange={e => setEmpNombreInput(e.target.value)}
+                                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); crearGrupoPieza(); } }}
+                                              placeholder="¿Qué es esta pieza? (Frente, Espalda, Manga…)"
+                                              style={{ flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', fontSize: 12 }} />
+                                            <button type="button" className="btn primary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                                              disabled={empGuardando || selNombrar.size !== 1 || !empNombreInput.trim()}
+                                              onClick={crearGrupoPieza}>
+                                              {empGuardando ? 'Guardando…' : (selNombrar.size === 1 && etqNombres[Array.from(selNombrar)[0]] ? 'Renombrar' : 'Es esta pieza ✓')}
+                                            </button>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                                            Estás viendo <b style={{ color: 'var(--accent)' }}>{empTalle}</b>: cada pieza muestra el
+                                            nombre que le tocó (✓ = confirmado por vos). ¿Alguna está mal? Tocá la pieza correcta
+                                            y decí cuál es.
+                                          </div>
+                                          {selNombrar.size === 1 && (
+                                            <div style={{ display: 'flex', gap: 6 }}>
+                                              <select value={empGrupoSel} onChange={e => setEmpGrupoSel(e.target.value)}
+                                                style={{ flex: 1, minWidth: 0, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', fontSize: 12 }}>
+                                                <option value="">Esta pieza es…</option>
+                                                {Object.values(empData?.nombres_guia || {}).map(n => <option key={n} value={n}>{n}</option>)}
+                                              </select>
+                                              <button type="button" className="btn primary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                                                disabled={empGuardando || !empGrupoSel}
+                                                onClick={() => { const i = Array.from(selNombrar)[0]; setSelNombrar(new Set()); fijarPiezaEmp(empGrupoSel, i); }}>
+                                                Es la misma ✓
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {empFijar && (
+                                        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#18181b', background: '#f5a524', borderRadius: 8, padding: '7px 10px' }}>
+                                          Tocá en el visor la pieza que es «{empFijar}» en {empTalle}
+                                          <button type="button" onClick={() => setEmpFijar(null)} style={{ float: 'right', background: 'none', border: 0, cursor: 'pointer', fontWeight: 900 }}>×</button>
+                                        </div>
+                                      )}
+
+                                      {/* GRUPOS ARMADOS: una fila por pieza, con su color y en qué talles está resuelta. */}
+                                      {(() => {
+                                        const ng = empData?.nombres_guia || {};
+                                        const filas = Object.entries(ng).map(([i, n]) => ({ idxGuia: parseInt(i, 10), nombre: n })).sort((a, b) => a.idxGuia - b.idxGuia);
+                                        const otros = (empData?.talles || []).filter(t => t !== empData?.guia);
+                                        if (!filas.length) return <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Todavía no agrupaste ninguna pieza.</div>;
+                                        return (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 300, overflowY: 'auto' }}>
+                                            {filas.map(f => {
+                                              const col = colorGrupo(f.nombre);
+                                              const fijos = otros.filter(t => ((empData?.manual || {})[t] || {})[f.nombre] != null).length;
+                                              const faltan = otros.filter(t => ((empData?.asignacion || {})[t] || {})[f.nombre] == null).length;
+                                              return (
+                                                <div key={f.nombre} onMouseEnter={() => setResaltarNombre(nombreGenerico(f.nombre))} onMouseLeave={() => setResaltarNombre(null)}
+                                                  style={{ padding: '6px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)', borderLeft: `3px solid ${col}` }}>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                                    <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 800, color: col, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nombre}</span>
+                                                    <span style={{ fontSize: 10.5, color: faltan ? 'var(--warning, #f5a524)' : 'var(--text-muted)', fontWeight: 700 }}>
+                                                      {faltan ? `falta en ${faltan}` : `${fijos}/${otros.length} confirmadas`}
+                                                    </span>
+                                                    <button type="button" title="Dar por buena la propuesta del sistema en todos" disabled={empGuardando || fijos === otros.length}
+                                                      onClick={() => confirmarTodoGrupo(f.nombre)}
+                                                      style={{ background: 'none', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, padding: '1px 6px' }}>Confirmar todo</button>
+                                                    <button type="button" title="Deshacer este grupo" disabled={empGuardando}
+                                                      onClick={() => borrarGrupoPieza(f.nombre)}
+                                                      style={{ background: 'none', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
+                                                  </div>
+                                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                                    {(empData?.talles || []).map(t => {
+                                                      const esGuia = t === empData?.guia;
+                                                      const j = ((empData?.asignacion || {})[t] || {})[f.nombre];
+                                                      const fijo = ((empData?.manual || {})[t] || {})[f.nombre] != null;
+                                                      const estado = esGuia ? 'guia' : (j == null ? 'falta' : (fijo ? 'fijo' : 'prop'));
+                                                      const est = { guia: { bg: 'rgba(0,243,255,0.14)', bd: 'var(--accent)', fg: 'var(--accent)', t: '★ ' },
+                                                                    fijo: { bg: 'rgba(167,139,250,0.18)', bd: '#a78bfa', fg: '#c4b5fd', t: '✓ ' },
+                                                                    prop: { bg: 'rgba(255,255,255,0.04)', bd: 'var(--border-light)', fg: 'var(--text-muted)', t: '' },
+                                                                    falta: { bg: 'rgba(245,165,36,0.16)', bd: '#f5a524', fg: '#f5a524', t: '! ' } }[estado];
+                                                      return (
+                                                        <button key={t} type="button" disabled={empGuardando}
+                                                          title={esGuia ? `${t}: acá le pusiste el nombre` : (j == null ? `${t}: ninguna pieza le tocó — tocá acá y elegila` : (fijo ? `${t}: confirmada por vos` : `${t}: propuesta del sistema — tocá acá para corregirla`))}
+                                                          onClick={() => revisarPiezaEnTalle(f.nombre, t)}
+                                                          style={{ padding: '2px 7px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: `1px solid ${est.bd}`, background: est.bg, color: est.fg }}>
+                                                          {est.t}{t}
+                                                        </button>
+                                                      );
+                                                    })}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        );
+                                      })()}
+
+                                      <button type="button" className="btn ghost" style={{ fontSize: 11, alignSelf: 'flex-start' }}
+                                        onClick={() => cambiarVistaEmp('avanzado')}>Ajuste avanzado ▸</button>
+                                    </>
                                   ) : (
                                     <>
+                                      <button type="button" className="btn ghost" style={{ fontSize: 11, alignSelf: 'flex-start' }}
+                                        onClick={() => cambiarVistaEmp('simple')}>◂ Volver a agrupar piezas</button>
                                       <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                                         Guía: <b style={{ color: 'var(--accent)' }}>{empData?.guia}</b>. Elegí abajo
                                         el {term.variante.toLowerCase()} a corregir: el visor lo muestra a él.
@@ -9843,7 +10066,9 @@ export default function App() {
                         ref={setVisorEl}
                         onMouseDown={(e) => {
                           if (e.button === 2 && etqData && tabAjustesMolde !== 'planilla') { panVisor(e); return; }
-                          if (e.button === 0 && (varPzModo || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
+                          // `empModo` va acá o el recuadro NO se dibuja al agrupar piezas: este panel
+                          // vive fuera de la pestaña Variables (el gesto quedaba sólo con el clic).
+                          if (e.button === 0 && (varPzModo || empModo || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
                           /* nota: en modo editar-nombre el recuadro también aplica (varStep==='nombrar') */
                         }}
                         onContextMenu={(e) => { if (etqData && tabAjustesMolde !== 'planilla') e.preventDefault(); }}>
@@ -10590,12 +10815,22 @@ export default function App() {
                                 // cyan = seleccionada para reacomodar · violeta = corregida a mano ·
                                 // verde = emparejada sola · ambar = sin emparejar (ninguna pieza le toco).
                                 let empSel = false;
+                                let empEsFijo = false;
                                 if (empModo && empTalle) {
                                   const _asig = (empData?.asignacion || {})[empTalle] || {};
                                   const _fij = (empData?.manual || {})[empTalle] || {};
                                   const _nomAqui = Object.keys(_asig).find(n => _asig[n] === p.idx);
                                   empSel = selNombrar.has(p.idx);
-                                  if (empSel) { fillCol = 'rgba(0,243,255,0.26)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
+                                  empEsFijo = !!(_nomAqui && _fij[_nomAqui] != null);
+                                  // AGRUPAR: cada grupo con SU color (el mismo en todos los talles), para que
+                                  // se vea de un vistazo que «esta de acá» y «esta de allá» son la misma pieza.
+                                  if (empVista === 'simple') {
+                                    if (empSel) { fillCol = 'rgba(0,243,255,0.30)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
+                                    else if (_nomAqui) { const c = colorGrupo(_nomAqui); fillCol = c.replace('hsl(', 'hsla(').replace(')', `, ${empEsFijo ? 0.42 : 0.20})`); badgeFill = c; textFill = '#18181b'; }
+                                    else { fillCol = 'rgba(255,255,255,0.04)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
+                                    if (empFijar) { badgeFill = '#f5a524'; textFill = '#18181b'; }
+                                  }
+                                  else if (empSel) { fillCol = 'rgba(0,243,255,0.26)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
                                   else if (_nomAqui && _fij[_nomAqui] != null) { fillCol = 'rgba(167,139,250,0.30)'; badgeFill = '#a78bfa'; textFill = '#18181b'; }
                                   else if (_nomAqui) { fillCol = 'rgba(16,185,129,0.26)'; badgeFill = '#10b981'; textFill = '#18181b'; }
                                   else { fillCol = 'rgba(245,165,36,0.18)'; badgeFill = '#f5a524'; textFill = '#18181b'; }
@@ -10612,7 +10847,7 @@ export default function App() {
                                     key={p.idx}
                                     data-piece={p.idx}
                                     transform={`translate(${tx}, ${ty})`}
-                                    style={{ cursor: (modoAcomodar || (empModo && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
+                                    style={{ cursor: (modoAcomodar || (empModo && empVista !== 'simple' && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
                                     onMouseDown={(e) => startDrag(e, p.idx)}
                                   >
                                     <title>{nombrePz ? `${nombrePz} (Pieza #${p.idx + 1})` : `Pieza #${p.idx + 1} (sin asignar)`}</title>
@@ -10638,9 +10873,9 @@ export default function App() {
                                       )}
                                       {/* Emparejando: que pieza del talle GUIA le toco a esta, escrito encima */}
                                       {empModo && nombrePz && (
-                                        <text y={spx(24)} fill="#e4e4e7" fontSize={spx(12)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
+                                        <text y={spx(24)} fill={empVista === 'simple' ? colorGrupo(nombrePz) : '#e4e4e7'} fontSize={spx(12)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
                                           style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
-                                          {nombrePz}
+                                          {nombrePz}{empVista === 'simple' && empEsFijo ? ' ✓' : ''}
                                         </text>
                                       )}
                                     </g>

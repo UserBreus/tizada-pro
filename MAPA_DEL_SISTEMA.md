@@ -260,6 +260,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 
 - `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref][&candidatas=1]` (→ `detectar_piezas`, piezas del molde; `candidatas=1` = molde ORIGINAL + capas que aún no son talle, para la herramienta de variantes por piezas) · `GET /api/plantilla/nido` (geometría nesteada).
 - `GET/POST /api/plantilla/variantes` (variantes POR CAPA) · `POST /api/plantilla/variantes_piezas` (variantes POR PIEZAS) — ver §10.c.
+- `POST /api/plantilla/grupo_pieza` (**agrupar piezas homólogas**: nombre + correspondencia entre talles en UN gesto) · `GET/POST /api/plantilla/emparejado` (el ajuste avanzado: acomodo virtual + corrección por índice) — ver §10.c.
 - `GET /api/arte/deteccion?diseno=` (→ `detectar_arte`, mesas + mapeo) · `POST /api/arte/mapeo` (guarda `mapeo_arte.json` + `prod["mapeo_arte"]` fijo; corre `validar_arte_separado`; **pre-warm** de `_piezas_base` en background).
 - `POST /api/arte/preview_piezas` (→ `_piezas_base`, render real cacheado por pieza).
 - `GET/POST /api/productos/editables` (`get_editables`/`set_editable`) · `GET/POST /api/productos/editables_config` (tamaño).
@@ -432,14 +433,57 @@ Caso real (`Molde short`): 36 piezas en «Capa 1». Ahí **no hay capas que nomb
 - **Límite conocido**: se trabaja sobre **una** mesa+capa (la que concentra más piezas). Un molde
   con el bloque repartido en varias mesas no está contemplado.
 
-### EMPAREJAR TALLES a mano (cuando el molde no viene acomodado parecido)
+### AGRUPAR PIEZAS HOMÓLOGAS — el camino principal (Config → Moldería, «La misma pieza en cada talle»)
 
 El nombre de una pieza se pone UNA vez, en el talle guía, y se **propaga** al resto con
 `_emparejar_por_forma` (posición relativa normalizada + log-aspecto + log-área, greedy global,
-umbral 1.6). Eso funciona porque las piezas de cada talle suelen estar acomodadas parecido.
-**Si el molde no viene así, esa comparación no tiene señal y el nombre cae en la pieza
-equivocada** (o no cae en ninguna). Para eso está el ajuste a mano — dos salidas, en el MISMO
-visor de siempre (Config → Moldería, panel «Emparejar variantes»):
+umbral 1.6). Si el molde no viene acomodado parecido entre talles, esa comparación **no tiene
+señal** y el nombre cae en la pieza equivocada.
+
+**El gesto que ve el usuario es UNO solo: «tocá la pieza, escribí qué es, confirmá».** Con eso
+queda definido a la vez **cómo se llama** y **cuál es la misma pieza en cada talle** — no hay
+«emparejar», ni offsets, ni índices. (El panel anterior, que pedía reacomodar y corregir por
+número de pieza, fue **rechazado por el usuario por difícil**; sigue existiendo escondido como
+«Ajuste avanzado ▸» — funciona y está verificado, no se borra.)
+
+- **Endpoint único: `POST /api/plantilla/grupo_pieza`**
+  `{pid?, nombre, guia_idx, piezas?: {talle: idx|null}, renombrar_de?, eliminar?}`.
+  - `nombre` + `guia_idx` → entra al **nombrado del talle guía** (la misma entrada de
+    `alta_plantilla_manual`) → la heurística propaga el resto.
+  - `piezas` → lo que el usuario **confirmó a mano**: se guarda en `emparejado_talles.json`
+    → `manual` (el mecanismo que ya existía; `_aplicar_fijos` corre **después** de todo).
+    Lo que NO confirma queda con la **propuesta** automática, y la UI los distingue.
+  - `eliminar` deshace el grupo (le saca el nombre a la pieza guía **y** sus fijos).
+  - **Nombre repetido → 409**, no se renumera por atrás: el usuario cree que puso «Frente» y
+    el registro le dejaba «Frente 2» (colisión de nombres, ver `nombres_normalizados`).
+  - ⚠️ La clave de `manual` es el nombre **FINAL** (el que va a quedar en el registro), no el
+    tipeado: por eso `alta_plantilla_manual` delegó su renumerado en
+    **`MP.nombres_normalizados(asignaciones)`**, que ahora se puede llamar aparte. Al
+    agregar/quitar/renombrar un grupo, las claves de `manual` se **remapean** (viejo→nuevo) o
+    la corrección a mano quedaría huérfana en silencio.
+- **Backend compartido**: `_guardar_y_repropagar(pid, cfg, asign=)` — persiste el ajuste y
+  **re-arma el registro** (+ `resumen_plantilla.json` + `piezas.json`). Lo usan el endpoint
+  nuevo y el viejo `POST /api/plantilla/emparejado`; guardar sin re-armar no sirve (el
+  emparejado se resuelve al CONSTRUIR el registro).
+- **UI** (`App.jsx`, `empVista === 'simple'`, el mismo visor y la misma selección de siempre):
+  chips de talle para elegir **qué muestra el visor** (la guía primero, con ★); en la guía va el
+  input de nombre; en otro talle, seleccionar una pieza + desplegable «Esta pieza es…».
+  Cada grupo se pinta con **su color** (`colorGrupo`, hash del nombre → mismo color en todos los
+  talles) con el nombre encima y **✓ = confirmado por el usuario**. La lista de grupos muestra
+  una fila de chips por talle: **★ guía · ✓ violeta = confirmado · gris = propuesto por el
+  sistema · ! naranja = ninguna pieza le tocó**; tocar un chip abre ese talle esperando el clic
+  (`revisarPiezaEnTalle` → `empFijar`). «Confirmar todo» fija la propuesta de todos los talles.
+- **Por qué de a UN talle y no todos juntos**: el formato más común es **`anidado`** (los talles
+  dibujados uno ENCIMA del otro, §10.c) → mostrarlos a la vez es un amasijo ilegible; y el visor
+  renderiza la detección de **un** talle (`etqData`). Mostrar de a uno con las ya resueltas
+  pintadas es lo único que se lee. El costo (no ver todos juntos) se compensa con la
+  **pre-selección**: el sistema ya propone la homóloga en cada talle y el usuario sólo confirma.
+- **Fix de paso**: el marquee (`iniciarRubber`) NO se disparaba en este panel — su condición sólo
+  contemplaba la pestaña Variables. Ahora incluye `empModo`.
+
+### Ajuste AVANZADO (reacomodar / corregir por índice) — escondido, no borrado
+
+Dos salidas más, en el MISMO visor (botón «Ajuste avanzado ▸» dentro del panel):
 
 1. **REACOMODAR.** El usuario selecciona piezas (clic, o recuadro con `iniciarRubber`) y las
    **arrastra** hasta dejar ese talle dispuesto como el guía. Es **virtual**: `_bboxes_acomodadas`
@@ -468,9 +512,11 @@ visor de siempre (Config → Moldería, panel «Emparejar variantes»):
   **registro** — una pieza es un NOMBRE y qué geometría tiene ese nombre en cada talle sale del
   registro, así que re-emparejar (o re-nombrar) dejaba el render cacheado del Arte apuntando a la
   pieza vieja. Ese agujero ya existía para `/api/plantilla/etiquetas`.
-- **UI**: `App.jsx`, estados `empModo/empData/empTalle/empFijar`. Reusa el visor entero: `startDrag`
-  (arrastre en grupo con `dragInfo.inis`; clic sin movimiento = `toggleSelNombrar`), `iniciarRubber`
-  y `pzOffsets`. ⚠️ `pzOffsets` se **borra en cada cambio de `etqData`**: el efecto que lo re-siembra
+- **UI**: `App.jsx`, estados `empModo/empVista/empData/empTalle/empFijar` (+ `empNombreInput`,
+  `empGrupoSel` del modo agrupar). Reusa el visor entero: `startDrag`
+  (arrastre en grupo con `dragInfo.inis`; clic sin movimiento = `toggleSelNombrar`; **en
+  `empVista==='simple'` el arrastre está apagado**: ahí el gesto es sólo seleccionar),
+  `iniciarRubber` y `pzOffsets`. ⚠️ `pzOffsets` se **borra en cada cambio de `etqData`**: el efecto que lo re-siembra
   desde `empData.acomodo` va declarado **después** de ese reset (los efectos corren en orden de
   declaración) — al revés, cada recarga perdería el reacomodo.
 - **Límite conocido**: las correcciones se guardan por `(talle, idx)`. Si el molde se vuelve a
@@ -512,6 +558,8 @@ El cliente puede traer **su** molde y usarlo en el pedido sin pasar por el setup
   cualquier variable los borraba).
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (8) — HECHO: AGRUPAR PIEZAS HOMÓLOGAS = el camino principal (el de (7) queda como «ajuste avanzado»).** Ver §10.c. El usuario **rechazó** el panel de (7): «el emparejar talles no es muy intuitivo, debe ser más fácil: seleccionando todas las piezas e indicar que son las mismas y así». Ahora el gesto es UNO: **tocá la pieza en el talle guía → escribí qué es → confirmá**, y con eso queda definido a la vez el **nombre** y la **correspondencia entre talles**. Nada de «emparejar», offsets ni «#7». Endpoint nuevo **`POST /api/plantilla/grupo_pieza`** `{nombre, guia_idx, piezas?:{talle:idx}, renombrar_de?, eliminar?}`: el nombre entra al nombrado de la guía (heurística propaga) y lo que el usuario confirma se guarda en el mecanismo que YA existía (`emparejado_talles.json → manual` + `_aplicar_fijos`) — **no se inventó otro almacenamiento**. **Ayuda, no imposición:** lo no confirmado queda como *propuesta* del sistema y la UI lo distingue (chip gris «propuesto» vs violeta «✓ confirmado» vs naranja «! ninguna pieza le tocó»); cada grupo se pinta con **su color** (mismo color en todos los talles) y el nombre encima de la pieza. Backend refactor: `_guardar_y_repropagar()` (compartido con el POST viejo) y **`MP.nombres_normalizados()`** extraída de `alta_plantilla_manual` — hacía falta porque la clave de `manual` es el nombre **FINAL** (el registro renumera genéricos duplicados) y una corrección guardada con el nombre tipeado quedaba huérfana; al crear/renombrar/deshacer un grupo las claves se **remapean**. Nombre repetido → **409** en vez de renumerar por atrás. **De a un talle a la vez y no todos juntos a propósito:** el formato `anidado` dibuja los talles UNO ENCIMA DEL OTRO y el visor renderiza la detección de UN talle — todos juntos es ilegible; se compensa con la pre-selección. **Fix de paso:** el marquee (`iniciarRubber`) nunca se disparaba en este panel (su condición sólo miraba la pestaña Variables) → ahora incluye `empModo`. **VERIFICADO con datos** (mismo molde de prueba propio de (7): 3 talles × 4 piezas casi idénticas, M acomodado al revés): nombrando sólo en la guía, la propuesta da **0/4 en M** (`A→0,B→2,C→1,D→3` vs. lo correcto `A→3,B→1,C→2,D→0`) y **4/4 en L** (control); **agrupando a mano las 4 en M: 4/4** en `registro_producto.json` (`A@M` queda en `pieza_idx=3, 7.4×7.4 cm` — la pieza correcta, contra 8.1×8.1 de la equivocada) y `emparejado_talles.json` guarda `{"M":{"A":3,"B":1,"C":2,"D":0}}`; **re-propagar no lo pisa** (sigue 4/4); L intacto en automático; nombre duplicado → 409; **renombrar** `A→Frente` arrastra la corrección (`Frente@M = 3`); **deshacer** un grupo lo saca del registro y se lleva sus fijos; `/api/plantilla/nido` 200. Moldes de prueba borrados (3), catálogo con `prod_default`, `prod_20260721_111945_7593` y `prod_20260721_130716_6eb6` (el que subió el usuario a las 13:07) intactos. **NO verificado:** la UI a mano dentro de la app (hay login y no se intentó pasarlo) — la consola del navegador queda limpia en la pantalla de login; no se generó una tizada (el molde de prueba no tiene arte); y el «activo» del catálogo se restauró a `prod_20260721_130716_6eb6` por deducción (crear un producto lo activa; era el último del usuario), no había registro del valor previo.
 
 - **2026-07-21 (7) — HECHO: emparejar talles A MANO (seleccionar + reacomodar + corregir).** Ver §10.c. Pedido del usuario: «agregale una opción para seleccionar y reacomodar; para los moldes que no vienen uno sobre el otro el sistema no sabrá». Efectivamente: el nombre de pieza se propaga con `_emparejar_por_forma` comparando **cómo está acomodado cada talle**, y con un molde desprolijo esa comparación **no tiene señal**. Ahora hay dos salidas, las dos en el visor que ya existía: **(1) reacomodar** — seleccionar piezas (clic/recuadro) y arrastrarlas; el desplazamiento es **virtual** (`_bboxes_acomodadas` corre la caja **sólo** para los rasgos del emparejado, el archivo y la tizada no se tocan); **(2) corregir** — decir a mano qué pieza es cuál en ese talle (`_aplicar_fijos`, va **después** de la heurística y del DXF, y le saca el índice a quien lo tuviera). Persistencia en `emparejado_talles.json`; `GET/POST /api/plantilla/emparejado`. **Guardar no alcanzaba:** el emparejado se decide al CONSTRUIR el registro, así que el POST guarda y **re-arma el registro** (`_guia_y_asignaciones` + `alta_plantilla_manual`) — y los 3 caminos que emparejan (`alta_plantilla_manual`, `nido_piezas`, `remapear_registro`) reciben el ajuste en sus 5 llamados. **Dos cachés que había que tocar o quedaba media feature:** `_nido_clave` → v6 (mtime del ajuste) y **`_piezas_base_clave` → v6 con el mtime del REGISTRO** — no estaba, así que re-emparejar (o simplemente re-nombrar piezas, agujero que ya existía) dejaba el render cacheado del Arte apuntando a la pieza vieja. **VERIFICADO con datos, sobre un molde de prueba propio** (3 talles × 4 piezas casi idénticas —el aspecto/área no distinguen, manda la posición— con el talle **M acomodado al revés**): automático **0/4** en M (`A→0, B→2, C→1, D→3` cuando lo correcto es `A→3, B→1, C→2, D→0`) y **4/4** en el talle de control L; **tras reacomodar los 4 offsets: 4/4** sin ninguna corrección manual; **corrección manual** `A→3` deja `pieza_idx=3, w_cm=7.4` (la pieza correcta, contra 8.1 de la equivocada) y la manual **gana** sobre un acomodo que daba otra cosa (`A→0` forzado; `D` queda sin emparejar, no hay dos nombres en la misma pieza); quitar la corrección devuelve el automático. `/api/plantilla/nido` 200. Molde de prueba borrado; catálogo con `prod_default` + `prod_20260721_111945_7593` y activo restaurado. **De paso:** el arrastre del visor usaba `img_w` como ancho de viewBox — el viewBox se agranda para abarcar piezas que exceden la página, así que la pieza se corría **más/menos que el mouse**; ahora usa `vbW` (arregla también «Acomodar piezas»). **NO verificado:** la UI a mano dentro de la app (hay login y no se intentó pasarlo) — la consola del navegador queda limpia en la pantalla de login; y no se probó sobre un molde con arte (no se generó tizada).
 
