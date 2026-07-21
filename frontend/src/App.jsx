@@ -2324,6 +2324,15 @@ export default function App() {
   const [empVista, setEmpVista] = useState('simple');   // 'simple' (agrupar) | 'avanzado'
   const [empNombreInput, setEmpNombreInput] = useState('');
   const [empGrupoSel, setEmpGrupoSel] = useState('');    // grupo elegido para decir «esta pieza es esa»
+  // Lista de grupos: con 36 piezas la lista cruda es ilegible (36 filas idénticas con los mismos
+  // chips y el mismo botón). Se muestra POR MINIATURA, filtrada por lo que falta, y una sola fila
+  // abierta a la vez — el detalle (chips por talle) sólo aparece en la fila que se está mirando.
+  const [empGuiaPzs, setEmpGuiaPzs] = useState([]);      // piezas del talle GUÍA (para las miniaturas)
+  const [empFiltro, setEmpFiltro] = useState('pend');    // 'pend' | 'listas' | 'todas'
+  const [empAbierto, setEmpAbierto] = useState(null);    // nombre del grupo expandido (uno solo)
+  const [empBuscar, setEmpBuscar] = useState('');
+  const [empRenombrar, setEmpRenombrar] = useState(null); // {nombre, valor} edición en línea del nombre
+  const empRenomCancel = React.useRef(false);            // Escape: el blur que viene después NO debe guardar
   const [resaltarNombre, setResaltarNombre] = useState(null); // nombre genérico resaltado en el visor (lista de piezas agrupada)
   const [grupoAislado, setGrupoAislado] = useState(null);   // clave del grupo abierto en DETALLE (visor aislado + edición); null = lista de grupos
   const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState(''); // nombre para crear una VARIABLE nueva (Paso 2)
@@ -5237,8 +5246,25 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) { if (!silencioso) showError(d.error || 'No se pudo leer el emparejado'); return null; }
       setEmpData(d);
+      cargarPzsGuia(d.guia, pid);
       return d;
     } catch (e) { if (!silencioso) showError('No se pudo leer el emparejado: ' + e.message); return null; }
+  };
+
+  // Geometría del talle GUÍA: la lista de grupos muestra la SILUETA de cada pieza (el nombre solo
+  // no alcanza para saber cuál es). Es la misma detección que ya usa el visor → sale del caché.
+  const cargarPzsGuia = async (guia, pid) => {
+    if (!guia) return;
+    const k = `${pid}|${guia}`;
+    const hit = _talleDetCache.current[k];
+    if (hit) { setEmpGuiaPzs(hit.piezas || []); return; }
+    try {
+      const r = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}&talle_ref=${encodeURIComponent(guia)}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      _talleDetCache.current[k] = d;
+      setEmpGuiaPzs(d.piezas || []);
+    } catch (e) { /* sin miniaturas: la lista funciona igual */ }
   };
 
   // Precarga al abrir la Moldería de un molde con varios talles: así el panel plegado ya puede
@@ -5259,6 +5285,9 @@ export default function App() {
 
   const activarEmparejar = async (on, vista) => {
     setEmpFijar(null); setSelNombrar(new Set()); setEmpNombreInput('');
+    // La lista arranca limpia (filtro en «pendientes», nada abierto ni a medio renombrar):
+    // el foco tiene que estar en lo que falta, no en el estado de la sesión anterior.
+    setEmpAbierto(null); setEmpBuscar(''); setEmpRenombrar(null); setEmpFiltro('pend');
     setEmpModo(on);
     const v = vista || empVista;
     if (vista) setEmpVista(vista);
@@ -5341,12 +5370,32 @@ export default function App() {
     finally { setEmpGuardando(false); }
   };
 
+  // Miniatura de la pieza del talle guía: en una lista de 36 filas el nombre solo no alcanza
+  // para saber CUÁL es (y menos si todavía se llama «Pieza 7»). Es el mismo `path_svg` que
+  // dibuja el visor, recortado al bbox de la pieza.
+  const miniPieza = (idx, col, tam = 30) => {
+    const p = (empGuiaPzs || []).find(x => x.idx === idx);
+    if (!p || !p.path_svg || !(p.pw > 0) || !(p.ph > 0)) {
+      return <div style={{ width: tam, height: tam, flex: '0 0 auto', borderRadius: 6, background: 'rgba(255,255,255,0.05)' }} />;
+    }
+    const pad = Math.max(p.pw, p.ph) * 0.05 + 0.5;
+    return (
+      <svg width={tam} height={tam} style={{ flex: '0 0 auto', display: 'block' }}
+        viewBox={`${p.px - pad} ${p.py - pad} ${p.pw + 2 * pad} ${p.ph + 2 * pad}`} preserveAspectRatio="xMidYMid meet">
+        <path d={p.path_svg} fill={col} fillOpacity={0.18} stroke={col} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+      </svg>
+    );
+  };
+
   // Color estable por nombre de grupo: la MISMA pieza se pinta igual en todos los talles.
   const colorGrupo = (nombre) => {
     let h = 0;
     for (let i = 0; i < (nombre || '').length; i++) h = (h * 31 + nombre.charCodeAt(i)) % 360;
     return `hsl(${h}, 72%, 58%)`;
   };
+  // El color de grupo es `hsl(...)`, NO hex: pegarle un sufijo de alfa («…55») da un color
+  // INVÁLIDO y el borde se pierde. Para transparencia hay que pasar por `hsla`.
+  const colorGrupoA = (nombre, a) => colorGrupo(nombre).replace('hsl(', 'hsla(').replace(')', `, ${a})`);
 
   const crearGrupoPieza = async () => {
     const idxs = Array.from(selNombrar);
@@ -5373,6 +5422,83 @@ export default function App() {
     return _postGrupo({ nombre, guia_idx: parseInt(Object.keys(empData?.nombres_guia || {}).find(k => empData.nombres_guia[k] === nombre), 10), piezas },
       `«${nombre}» confirmada en ${Object.keys(piezas).length} ${term.variante.toLowerCase()}s ✓`);
   };
+
+  // CONFIRMAR TODO DE UNA VEZ. Fila por fila eran 36 clics y 36 re-propagaciones del registro
+  // (cada POST rehace el registro entero). Acá va UN solo POST a /api/plantilla/emparejado SIN
+  // `talle`: en ese modo el endpoint acepta el diccionario COMPLETO de `manual` y re-propaga una
+  // sola vez. `asignacion` ya trae lo que hay hoy (propuesto + lo confirmado antes), así que
+  // congelarla es exactamente «dar por buena la propuesta».
+  const confirmarTodasLasPropuestas = async () => {
+    const ng = empData?.nombres_guia || {};
+    const nombres = Object.values(ng);
+    const manual = {};
+    (empData?.talles || []).forEach(t => {
+      if (t === empData?.guia) return;
+      const asig = (empData?.asignacion || {})[t] || {};
+      const d = {};
+      nombres.forEach(n => { if (asig[n] != null) d[n] = asig[n]; });
+      if (Object.keys(d).length) manual[t] = d;
+    });
+    if (!Object.keys(manual).length) { showError('Todavía no hay ninguna propuesta que confirmar'); return; }
+    setEmpGuardando(true);
+    try {
+      const r = await fetch('/api/plantilla/emparejado', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: activoProdDetalle?.id || productosCat.activo || '', manual }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo confirmar'); return; }
+      setEmpData(prev => ({ ...(prev || {}), ...d }));
+      _talleDetCache.current = {};      // el registro cambió → los nombres por talle quedaron viejos
+      setNidoData(null); setNidoError(null);
+      if (empTalle) await verVarianteOperario(empTalle);
+      await fetchProductos();
+      showMsg(`Confirmadas ${nombres.length} piezas en todos los ${term.variante.toLowerCase()}s ✓`);
+    } catch (e) { showError('No se pudo confirmar: ' + e.message); }
+    finally { setEmpGuardando(false); }
+  };
+
+  // Renombrar SIN tener que ir a buscar la pieza en el visor: la fila ya sabe cuál es (`idxGuia`).
+  // Es el camino natural para reemplazar los provisorios «Pieza 3».
+  const renombrarGrupo = async (idxGuia, viejo, nuevo) => {
+    const nom = (nuevo || '').trim();
+    if (!nom || nom === viejo) { setEmpRenombrar(null); return; }
+    const ok = await _postGrupo({ nombre: nom, guia_idx: idxGuia, renombrar_de: viejo || '' },
+      `«${viejo}» ahora se llama «${nom}» ✓`);
+    if (ok) { setEmpRenombrar(null); setEmpAbierto(a => (a === viejo ? nom : a)); }
+  };
+
+  // Nombre puesto por el sistema para que el registro exista (§10.c): no dice nada y hay que
+  // reemplazarlo. Se marca distinto en la lista para que se note que es provisorio.
+  const esNombreProvisorio = (n) => /^pieza\s*\d+$/i.test((n || '').trim());
+
+  // ESTADO GLOBAL del agrupado (una sola pasada, se usa en el encabezado y en la lista). Antes
+  // cada fila cantaba su «0/5 confirmadas» y no había forma de saber cuánto faltaba EN TOTAL ni
+  // si ya se podía seguir; eso es lo que se contesta acá arriba.
+  const empStats = (() => {
+    const ng = empData?.nombres_guia || {};
+    const otros = (empData?.talles || []).filter(t => t !== empData?.guia);
+    const asigT = empData?.asignacion || {}, manT = empData?.manual || {};
+    const filas = Object.entries(ng).map(([i, n]) => {
+      const nombre = n, idxGuia = parseInt(i, 10);
+      const fijos = otros.filter(t => (manT[t] || {})[nombre] != null).length;
+      const faltan = otros.filter(t => (asigT[t] || {})[nombre] == null).length;
+      return { idxGuia, nombre, fijos, faltan, listo: faltan === 0 && fijos === otros.length,
+               provisorio: esNombreProvisorio(nombre) };
+    }).sort((a, b) => a.idxGuia - b.idxGuia);
+    const total = (empGuiaPzs || []).length || filas.length;
+    const provisorias = filas.filter(f => f.provisorio).length;
+    return {
+      filas, otros, total,
+      agrupadas: filas.length,
+      conNombrePropio: filas.length - provisorias,
+      provisorias,
+      confirmadas: filas.filter(f => f.listo).length,
+      conFalta: filas.filter(f => f.faltan > 0).length,
+      sinAgrupar: Math.max(0, total - filas.length),
+      porConfirmar: filas.filter(f => !f.listo && f.faltan === 0).length,
+    };
+  })();
 
   // Ir a un talle a revisar/corregir una pieza: abre ese talle y queda esperando el clic.
   const cambiarVistaEmp = async (v) => {
@@ -9158,18 +9284,28 @@ export default function App() {
                                           el momento (cada uno pega contra el backend), pero al volver el
                                           panel arrancaba vacío y parecía que se había perdido todo. */}
                                       {(() => {
-                                        const hechos = Object.values(empData?.nombres_guia || {});
-                                        if (!hechos.length) return null;
+                                        const s = empStats;
+                                        if (!s.agrupadas) return null;
+                                        // Mismo resumen que adentro (agrupadas / total / confirmadas): así el
+                                        // estado real se lee SIN entrar al modo y se sabe si falta algo.
+                                        const falta = s.sinAgrupar || s.conFalta || s.provisorias;
                                         return (
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 9, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
-                                            <span style={{ fontSize: 11, color: 'var(--success)', fontWeight: 700 }}>
-                                              ✓ {hechos.length} pieza{hechos.length === 1 ? '' : 's'} ya agrupada{hechos.length === 1 ? '' : 's'} (guardado)
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 9, background: falta ? 'rgba(245,165,36,0.07)' : 'rgba(16,185,129,0.08)', border: `1px solid ${falta ? 'rgba(245,165,36,0.28)' : 'rgba(16,185,129,0.25)'}` }}>
+                                            <span style={{ fontSize: 11, color: falta ? '#f5a524' : 'var(--success)', fontWeight: 700 }}>
+                                              {falta ? '●' : '✓'} {s.agrupadas} de {s.total} piezas agrupadas · {s.confirmadas} confirmadas (guardado)
                                             </span>
+                                            {!!(s.sinAgrupar || s.conFalta || s.provisorias) && (
+                                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                                                {s.sinAgrupar ? `Faltan ${s.sinAgrupar} por agrupar. ` : ''}
+                                                {s.conFalta ? `${s.conFalta} sin correspondencia en algún ${term.variante.toLowerCase()}. ` : ''}
+                                                {s.provisorias ? `${s.provisorias} con nombre provisorio.` : ''}
+                                              </span>
+                                            )}
                                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                              {hechos.slice(0, 12).map(n => (
-                                                <span key={n} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: 'rgba(255,255,255,0.06)', color: 'var(--text-secondary)', border: `1px solid ${colorGrupo(n)}55` }}>{n}</span>
+                                              {s.filas.slice(0, 12).map(f => (
+                                                <span key={f.nombre} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 20, background: 'rgba(255,255,255,0.06)', color: f.provisorio ? 'var(--text-muted)' : 'var(--text-secondary)', fontStyle: f.provisorio ? 'italic' : 'normal', border: `1px solid ${colorGrupoA(f.nombre, 0.4)}` }}>{f.nombre}</span>
                                               ))}
-                                              {hechos.length > 12 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>+{hechos.length - 12}</span>}
+                                              {s.filas.length > 12 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>+{s.filas.length - 12}</span>}
                                             </div>
                                           </div>
                                         );
@@ -9189,6 +9325,48 @@ export default function App() {
                                         <b> propone</b> cuál es la misma en cada uno — lo que confirmes vos queda fijo y no se
                                         vuelve a mover.
                                       </div>
+
+                                      {/* PROGRESO GLOBAL + QUÉ FALTA PARA SEGUIR. Antes cada fila cantaba su
+                                          «0/5 confirmadas» y no había ningún número del conjunto: con 36 piezas
+                                          era imposible saber cuánto quedaba ni si ya se podía avanzar. */}
+                                      {(() => {
+                                        const s = empStats;
+                                        const pctN = s.total ? Math.round(100 * s.agrupadas / s.total) : 0;
+                                        const pctC = s.total ? Math.round(100 * s.confirmadas / s.total) : 0;
+                                        // Un solo mensaje, el del primer obstáculo REAL: agrupar → cubrir todos
+                                        // los talles → sacarse los provisorios de encima → listo.
+                                        const pl = (n, uno, varios) => (n === 1 ? uno : varios);
+                                        const est = s.sinAgrupar > 0
+                                          ? { c: '#f5a524', t: <>{pl(s.sinAgrupar, 'Falta', 'Faltan')} <b>{s.sinAgrupar}</b> {pl(s.sinAgrupar, 'pieza', 'piezas')} por agrupar: {pl(s.sinAgrupar, 'tocala', 'tocalas')} en el visor (estás viendo {empTalle}{empTalle !== empData?.guia ? ` — el nombrado se hace en ${empData?.guia}` : ''}).</> }
+                                          : s.conFalta > 0
+                                            ? { c: '#f5a524', t: <><b>{s.conFalta}</b> {pl(s.conFalta, 'pieza no tiene', 'piezas no tienen')} correspondencia en algún {term.variante.toLowerCase()}: abrí la fila y tocá el chip naranja.</> }
+                                            : s.provisorias > 0
+                                              ? { c: 'var(--text-secondary)', t: <>Todas agrupadas. <b>{s.provisorias}</b> {pl(s.provisorias, 'sigue', 'siguen')} con nombre provisorio («Pieza 3»): conviene ponerle{pl(s.provisorias, '', 's')} el de verdad.</> }
+                                              : { c: 'var(--success)', t: <>✓ Todo agrupado{s.confirmadas === s.agrupadas ? ' y confirmado' : ''}: ya podés seguir.</> };
+                                        return (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '9px 11px', borderRadius: 9, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                                              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>{s.agrupadas} de {s.total}</span>
+                                              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>piezas agrupadas</span>
+                                              <span style={{ fontSize: 11.5, color: '#c4b5fd', marginLeft: 'auto', fontWeight: 700 }}>{s.confirmadas} confirmadas</span>
+                                            </div>
+                                            {/* Dos capas en la misma barra: agrupado (accent) y, adentro, confirmado (violeta) */}
+                                            <div style={{ position: 'relative', height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                                              <div style={{ position: 'absolute', inset: 0, width: `${pctN}%`, background: 'var(--accent)', opacity: 0.45 }} />
+                                              <div style={{ position: 'absolute', inset: 0, width: `${pctC}%`, background: '#a78bfa' }} />
+                                            </div>
+                                            <div style={{ fontSize: 11, lineHeight: 1.45, color: est.c }}>{est.t}</div>
+                                            {s.agrupadas > 0 && s.confirmadas < s.agrupadas && (
+                                              <button type="button" className="btn ghost" style={{ fontSize: 11, alignSelf: 'flex-start' }}
+                                                disabled={empGuardando}
+                                                title="Da por buena la propuesta del sistema para TODAS las piezas, en todos los talles (queda fija: la heurística no la vuelve a mover)"
+                                                onClick={confirmarTodasLasPropuestas}>
+                                                {empGuardando ? 'Confirmando…' : `✓ Confirmar todo (${s.agrupadas - s.confirmadas} ${pl(s.agrupadas - s.confirmadas, 'pieza', 'piezas')})`}
+                                              </button>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
 
                                       {/* Qué talle está mostrando el visor (la guía primero: es donde se nombra). */}
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
@@ -9260,56 +9438,112 @@ export default function App() {
                                         </div>
                                       )}
 
-                                      {/* GRUPOS ARMADOS: una fila por pieza, con su color y en qué talles está resuelta. */}
+                                      {/* GRUPOS ARMADOS. Con 36 piezas la lista plana (chips de todos los
+                                          talles + «Confirmar todo» repetidos en CADA fila) es puro ruido:
+                                          acá la fila es una línea con MINIATURA y estado, y el detalle
+                                          (chips por talle, confirmar, deshacer) se abre sólo en la fila
+                                          que se está mirando. El filtro deja a la vista lo que falta. */}
                                       {(() => {
-                                        const ng = empData?.nombres_guia || {};
-                                        const filas = Object.entries(ng).map(([i, n]) => ({ idxGuia: parseInt(i, 10), nombre: n })).sort((a, b) => a.idxGuia - b.idxGuia);
-                                        const otros = (empData?.talles || []).filter(t => t !== empData?.guia);
-                                        if (!filas.length) return <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Todavía no agrupaste ninguna pieza.</div>;
+                                        const s = empStats;
+                                        if (!s.filas.length) return <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Todavía no agrupaste ninguna pieza: tocá una en el visor y escribí qué es.</div>;
+                                        const q = empBuscar.trim().toLowerCase();
+                                        const pend = s.filas.filter(f => !f.listo || f.provisorio);
+                                        const listas = s.filas.filter(f => f.listo && !f.provisorio);
+                                        const base = empFiltro === 'pend' ? pend : empFiltro === 'listas' ? listas : s.filas;
+                                        const vista = q ? base.filter(f => f.nombre.toLowerCase().includes(q)) : base;
+                                        const tabs = [['pend', 'Pendientes', pend.length], ['listas', 'Listas', listas.length], ['todas', 'Todas', s.filas.length]];
                                         return (
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 300, overflowY: 'auto' }}>
-                                            {filas.map(f => {
-                                              const col = colorGrupo(f.nombre);
-                                              const fijos = otros.filter(t => ((empData?.manual || {})[t] || {})[f.nombre] != null).length;
-                                              const faltan = otros.filter(t => ((empData?.asignacion || {})[t] || {})[f.nombre] == null).length;
-                                              return (
-                                                <div key={f.nombre} onMouseEnter={() => setResaltarNombre(nombreGenerico(f.nombre))} onMouseLeave={() => setResaltarNombre(null)}
-                                                  style={{ padding: '6px 8px', borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)', borderLeft: `3px solid ${col}` }}>
-                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                                                    <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 800, color: col, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.nombre}</span>
-                                                    <span style={{ fontSize: 10.5, color: faltan ? 'var(--warning, #f5a524)' : 'var(--text-muted)', fontWeight: 700 }}>
-                                                      {faltan ? `falta en ${faltan}` : `${fijos}/${otros.length} confirmadas`}
-                                                    </span>
-                                                    <button type="button" title="Dar por buena la propuesta del sistema en todos" disabled={empGuardando || fijos === otros.length}
-                                                      onClick={() => confirmarTodoGrupo(f.nombre)}
-                                                      style={{ background: 'none', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, padding: '1px 6px' }}>Confirmar todo</button>
-                                                    <button type="button" title="Deshacer este grupo" disabled={empGuardando}
-                                                      onClick={() => borrarGrupoPieza(f.nombre)}
-                                                      style={{ background: 'none', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
-                                                  </div>
-                                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                                                    {(empData?.talles || []).map(t => {
-                                                      const esGuia = t === empData?.guia;
-                                                      const j = ((empData?.asignacion || {})[t] || {})[f.nombre];
-                                                      const fijo = ((empData?.manual || {})[t] || {})[f.nombre] != null;
-                                                      const estado = esGuia ? 'guia' : (j == null ? 'falta' : (fijo ? 'fijo' : 'prop'));
-                                                      const est = { guia: { bg: 'rgba(0,243,255,0.14)', bd: 'var(--accent)', fg: 'var(--accent)', t: '★ ' },
-                                                                    fijo: { bg: 'rgba(167,139,250,0.18)', bd: '#a78bfa', fg: '#c4b5fd', t: '✓ ' },
-                                                                    prop: { bg: 'rgba(255,255,255,0.04)', bd: 'var(--border-light)', fg: 'var(--text-muted)', t: '' },
-                                                                    falta: { bg: 'rgba(245,165,36,0.16)', bd: '#f5a524', fg: '#f5a524', t: '! ' } }[estado];
-                                                      return (
-                                                        <button key={t} type="button" disabled={empGuardando}
-                                                          title={esGuia ? `${t}: acá le pusiste el nombre` : (j == null ? `${t}: ninguna pieza le tocó — tocá acá y elegila` : (fijo ? `${t}: confirmada por vos` : `${t}: propuesta del sistema — tocá acá para corregirla`))}
-                                                          onClick={() => revisarPiezaEnTalle(f.nombre, t)}
-                                                          style={{ padding: '2px 7px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: `1px solid ${est.bd}`, background: est.bg, color: est.fg }}>
-                                                          {est.t}{t}
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                            <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+                                              {tabs.map(([k, lbl, n]) => (
+                                                <button key={k} type="button" onClick={() => setEmpFiltro(k)}
+                                                  style={{ padding: '3px 9px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (empFiltro === k ? 'var(--accent)' : 'var(--border-light)'), background: empFiltro === k ? 'rgba(0,243,255,0.12)' : 'transparent', color: empFiltro === k ? 'var(--accent)' : 'var(--text-muted)' }}>
+                                                  {lbl} {n}
+                                                </button>
+                                              ))}
+                                              {s.filas.length > 8 && (
+                                                <input value={empBuscar} onChange={e => setEmpBuscar(e.target.value)} placeholder="Buscar…"
+                                                  style={{ marginLeft: 'auto', width: 110, padding: '3px 8px', borderRadius: 7, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary)', fontSize: 11 }} />
+                                              )}
+                                            </div>
+                                            {!vista.length ? (
+                                              <div style={{ fontSize: 11.5, color: empFiltro === 'pend' ? 'var(--success)' : 'var(--text-muted)', padding: '6px 2px' }}>
+                                                {empFiltro === 'pend' ? '✓ No queda ninguna pendiente.' : 'Nada para mostrar acá.'}
+                                              </div>
+                                            ) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 320, overflowY: 'auto' }}>
+                                              {vista.map(f => {
+                                                const col = colorGrupo(f.nombre);
+                                                const abierta = empAbierto === f.nombre;
+                                                const editando = empRenombrar?.nombre === f.nombre;
+                                                // «0/5» no decía nada: lo que importa es si está lista, si le
+                                                // falta algún talle, o si sigue siendo sólo una propuesta.
+                                                const estado = f.faltan ? { c: '#f5a524', t: `falta en ${f.faltan}` }
+                                                  : f.listo ? { c: '#c4b5fd', t: '✓ listo' }
+                                                    : f.fijos === 0 ? { c: 'var(--text-muted)', t: 'propuesta' }
+                                                      : { c: 'var(--text-muted)', t: `${f.fijos}/${s.otros.length} confirmadas` };
+                                                return (
+                                                  <div key={f.nombre} onMouseEnter={() => setResaltarNombre(nombreGenerico(f.nombre))} onMouseLeave={() => setResaltarNombre(null)}
+                                                    style={{ borderRadius: 8, background: abierta ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)', border: '1px solid var(--border-light)', borderLeft: `3px solid ${col}` }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px' }}>
+                                                      {miniPieza(f.idxGuia, col)}
+                                                      {editando ? (
+                                                        <input autoFocus value={empRenombrar.valor}
+                                                          onChange={e => setEmpRenombrar({ nombre: f.nombre, valor: e.target.value })}
+                                                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); empRenomCancel.current = true; renombrarGrupo(f.idxGuia, f.nombre, empRenombrar.valor); } if (e.key === 'Escape') { empRenomCancel.current = true; setEmpRenombrar(null); } }}
+                                                          onBlur={() => { if (empRenomCancel.current) { empRenomCancel.current = false; return; } renombrarGrupo(f.idxGuia, f.nombre, empRenombrar.valor); }}
+                                                          placeholder="Frente, Espalda, Manga…"
+                                                          style={{ flex: 1, minWidth: 0, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--accent)', background: 'rgba(0,0,0,0.35)', color: 'var(--text-primary)', fontSize: 12 }} />
+                                                      ) : (
+                                                        // El nombre ES el botón de renombrar: el provisorio se ve como tal
+                                                        // (itálica, gris, «poner nombre») e invita a reemplazarlo ahí mismo.
+                                                        <button type="button" title="Tocá para cambiarle el nombre"
+                                                          onClick={() => { empRenomCancel.current = false; setEmpRenombrar({ nombre: f.nombre, valor: f.provisorio ? '' : f.nombre }); if (empTalle === empData?.guia) setSelNombrar(new Set([f.idxGuia])); }}
+                                                          style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 0, cursor: 'text', padding: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, fontWeight: f.provisorio ? 500 : 800, fontStyle: f.provisorio ? 'italic' : 'normal', color: f.provisorio ? 'var(--text-muted)' : col }}>
+                                                          {f.nombre}{f.provisorio ? <span style={{ fontSize: 10, fontStyle: 'normal', marginLeft: 6, color: 'var(--accent)' }}>✎ poner nombre</span> : null}
                                                         </button>
-                                                      );
-                                                    })}
+                                                      )}
+                                                      <span style={{ fontSize: 10.5, color: estado.c, fontWeight: 700, whiteSpace: 'nowrap' }}>{estado.t}</span>
+                                                      <button type="button" title={abierta ? 'Cerrar' : `Ver ${term.variante.toLowerCase()} por ${term.variante.toLowerCase()}`}
+                                                        onClick={() => setEmpAbierto(abierta ? null : f.nombre)}
+                                                        style={{ background: 'none', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '2px 3px' }}>{abierta ? '▲' : '▼'}</button>
+                                                    </div>
+                                                    {abierta && (
+                                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 8px 7px 8px' }}>
+                                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                                          {(empData?.talles || []).map(t => {
+                                                            const esGuia = t === empData?.guia;
+                                                            const j = ((empData?.asignacion || {})[t] || {})[f.nombre];
+                                                            const fijo = ((empData?.manual || {})[t] || {})[f.nombre] != null;
+                                                            const est = { guia: { bg: 'rgba(0,243,255,0.14)', bd: 'var(--accent)', fg: 'var(--accent)', t: '★ ' },
+                                                                          fijo: { bg: 'rgba(167,139,250,0.18)', bd: '#a78bfa', fg: '#c4b5fd', t: '✓ ' },
+                                                                          prop: { bg: 'rgba(255,255,255,0.04)', bd: 'var(--border-light)', fg: 'var(--text-muted)', t: '' },
+                                                                          falta: { bg: 'rgba(245,165,36,0.16)', bd: '#f5a524', fg: '#f5a524', t: '! ' } }[esGuia ? 'guia' : (j == null ? 'falta' : (fijo ? 'fijo' : 'prop'))];
+                                                            return (
+                                                              <button key={t} type="button" disabled={empGuardando}
+                                                                title={esGuia ? `${t}: acá le pusiste el nombre` : (j == null ? `${t}: ninguna pieza le tocó — tocá acá y elegila` : (fijo ? `${t}: confirmada por vos` : `${t}: propuesta del sistema — tocá acá para corregirla`))}
+                                                                onClick={() => revisarPiezaEnTalle(f.nombre, t)}
+                                                                style={{ padding: '2px 7px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', border: `1px solid ${est.bd}`, background: est.bg, color: est.fg }}>
+                                                                {est.t}{t}
+                                                              </button>
+                                                            );
+                                                          })}
+                                                        </div>
+                                                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                          <button type="button" title="Dar por buena la propuesta del sistema en todos" disabled={empGuardando || f.fijos === s.otros.length}
+                                                            onClick={() => confirmarTodoGrupo(f.nombre)}
+                                                            style={{ background: 'none', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, padding: '2px 7px' }}>Confirmar esta pieza</button>
+                                                          <button type="button" title="Deshacer este grupo (le saca el nombre y sus confirmaciones)" disabled={empGuardando}
+                                                            onClick={() => { setEmpAbierto(null); borrarGrupoPieza(f.nombre); }}
+                                                            style={{ marginLeft: 'auto', background: 'none', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 10.5 }}>Deshacer ×</button>
+                                                        </div>
+                                                      </div>
+                                                    )}
                                                   </div>
-                                                </div>
-                                              );
-                                            })}
+                                                );
+                                              })}
+                                            </div>
+                                            )}
                                           </div>
                                         );
                                       })()}
