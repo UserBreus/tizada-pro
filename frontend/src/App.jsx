@@ -593,7 +593,10 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
     } catch (e) { showError('No se pudo leer el molde: ' + e.message); }
   }, [pid, showError]);
 
-  React.useEffect(() => { if (abierto && !info) cargar(); }, [abierto, info, cargar]);
+  // Si el molde NO tiene ni un talle reconocido no se puede usar (la detección falla y no se ve
+  // nada): en ese caso la herramienta se abre sola, que es lo único que lo destraba.
+  React.useEffect(() => { if (!info) cargar(); }, [info, cargar]);
+  React.useEffect(() => { if (info?.sin_talles) setAbierto(true); }, [info]);
 
   // ¿parece que las capas NO están nombradas? (nombres tipo "Layer 3", "Capa 2", "Path 7")
   const sinNombrar = (info?.sugerencia || []).filter(c => /^(layer|capa|path|group|grupo)[\s_-]*\d*$/i.test(String(c).trim())).length;
@@ -634,11 +637,17 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
   return (
     <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
       <button type="button" onClick={() => setAbierto(a => !a)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: 'rgba(255,255,255,0.02)', border: 0, color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: info?.sin_talles ? 'rgba(245,165,36,0.10)' : 'rgba(255,255,255,0.02)', border: 0, color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
         <span>
-          <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>Nombrar {term.variante.toLowerCase()}s</span>
-          <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)' }}>
-            Si el molde vino con las capas sin nombre, decile cuál es cada talle
+          <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>
+            {info?.sin_talles ? `⚠ Falta nombrar las ${term.variante.toLowerCase()}s` : `Nombrar ${term.variante.toLowerCase()}s`}
+          </span>
+          <span style={{ display: 'block', fontSize: 10.5, color: info?.sin_talles ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
+            {info?.sin_talles
+              ? (info?.una_sola_capa
+                  ? 'El molde vino con todo en una sola capa: decile qué talle es y ya queda utilizable'
+                  : 'El molde no tiene ninguna capa con nombre de talle: hasta que las nombres no se puede usar')
+              : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`}
           </span>
         </span>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{abierto ? '▲' : '▾'}</span>

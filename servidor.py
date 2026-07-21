@@ -685,6 +685,12 @@ def _pid_de_request():
     if not has_request_context():
         return None
     try:
+        # 1) el pid en la RUTA (`/api/productos/<pid>/preview`, `/descargar_plantilla`…). Iba
+        #    primero porque si no, esas rutas se salteaban la guardia de moldes ajenos: el id no
+        #    viaja ni en la query ni en el body.
+        m = re.match(r"^/api/productos/(prod_[^/]+)/", request.path or "")
+        if m:
+            return m.group(1)
         v = request.args.get("pid") or request.args.get("producto_id")
         if not v and request.method in ("POST", "PUT", "PATCH", "DELETE"):
             d = request.get_json(silent=True)

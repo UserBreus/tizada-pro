@@ -82,10 +82,17 @@ def analizar(path_plantilla):
                 "area": round(area, 1),
                 "bbox": [round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1)],
                 "es_talle": nom in es_talle,
+                # CANDIDATA a variante: tiene molde dibujado, aunque el sistema todavía no la
+                # cuente como talle. Son justamente las que hay que nombrar — si sólo se
+                # ofrecieran las que YA son talle, un molde con todo en «Capa 1» (que es capa de
+                # sistema) no tendría ninguna capa para nombrar y quedaría inusable para siempre.
+                "candidata": len(rects) > 1,
             })
         capas.sort(key=lambda c: orden.index(c["capa"]) if c["capa"] in orden else 9999)
 
-        talles = [c for c in capas if c["es_talle"]]
+        # Se trabaja sobre las CANDIDATAS (no sólo las que ya son talle): incluye las capas de
+        # sistema con molde dibujado, que son el caso típico del molde que hay que nombrar.
+        talles = [c for c in capas if c["candidata"]]
         # ¿anidado o extendido? Si los bloques de dos talles se pisan casi por completo, están
         # dibujados uno sobre otro y NO se pueden separar con el mouse.
         formato = "extendido"
@@ -102,7 +109,11 @@ def analizar(path_plantilla):
         # empatan (en un molde real, «16» y «XS» tienen el mismo ancho medio y distinta área).
         sugerencia = [c["capa"] for c in sorted(talles, key=lambda c: c["area"])]
         return {"formato": formato, "capas": capas, "sugerencia": sugerencia,
-                "total_talles": len(talles)}
+                "total_talles": len(talles),
+                # el molde NO tiene ni un talle reconocido: sin nombrar las variantes no se puede
+                # usar (es lo que hacía que después de subirlo no se mostrara nada)
+                "sin_talles": not any(c["es_talle"] for c in capas),
+                "una_sola_capa": len(talles) == 1}
     finally:
         doc.close()
 
@@ -148,6 +159,9 @@ def curva_sugerida(nombres_capas, estilo="letras"):
     """Nombres propuestos para una curva de N talles, del más chico al más grande. Es sólo una
     ayuda de tipeo: el usuario los edita."""
     n = len(nombres_capas)
+    if n == 1:
+        # molde de un solo talle: proponer una letra del medio de la curva no tiene sentido
+        return ["Único"]
     letras = ["XXS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "7XL"]
     if estilo == "numeros":
         return [str(i) for i in range(1, n + 1)]
