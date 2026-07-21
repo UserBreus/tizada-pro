@@ -11961,10 +11961,20 @@ export default function App() {
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' }}>Archivo del molde</label>
-            <div className="upload-zone" onClick={() => !subirMoldeBusy && fileInputMiMoldeRef.current?.click()} style={{ padding: '22px 16px', cursor: subirMoldeBusy ? 'default' : 'pointer' }}>
-              <Icon name="upload" className="upload-icon" />
-              <div style={{ fontSize: 12.5, fontWeight: 600 }}>{subirMoldeFile ? subirMoldeFile.name : 'Elegí el molde (.ai · .pdf · .dxf)'}</div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Illustrator, Corel/PDF o DXF (Optitex, Gerber…)</div>
+            {/* La zona se PINTA en verde cuando el archivo ya está elegido: sin eso, con archivo
+                y sin archivo se veían casi igual y no quedaba claro que ya estaba cargado. */}
+            <div className="upload-zone" onClick={() => !subirMoldeBusy && fileInputMiMoldeRef.current?.click()}
+              style={{ padding: '22px 16px', cursor: subirMoldeBusy ? 'default' : 'pointer',
+                       ...(subirMoldeFile ? { borderColor: 'var(--success, #2ecc71)', background: 'rgba(46,204,113,0.08)' } : {}) }}>
+              {subirMoldeFile
+                ? <div style={{ fontSize: 22, lineHeight: 1, color: 'var(--success, #2ecc71)' }}>✓</div>
+                : <Icon name="upload" className="upload-icon" />}
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: subirMoldeFile ? 'var(--success, #2ecc71)' : undefined }}>
+                {subirMoldeFile ? subirMoldeFile.name : 'Elegí el molde (.ai · .pdf · .dxf)'}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                {subirMoldeFile ? 'Archivo cargado · tocá para cambiarlo' : 'Illustrator, Corel/PDF o DXF (Optitex, Gerber…)'}
+              </div>
             </div>
             <input type="file" ref={fileInputMiMoldeRef} accept=".ai,.pdf,.dxf" hidden
               onChange={(e) => { const f = e.target.files[0]; setSubirMoldeFile(f || null); if (f && !subirMoldeNombre.trim()) setSubirMoldeNombre((f.name || '').replace(/\.(ai|pdf|dxf)$/i, '')); e.target.value = ''; }} />
