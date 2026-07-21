@@ -989,21 +989,29 @@ def subir_plantilla():
     return jsonify(resumen)
 
 
-def _deteccion_base_cached(pid, talle_ref):
+def _deteccion_base_cached(pid, talle_ref, candidatas=False):
+    """`candidatas=True` = universo de piezas de la herramienta «variantes POR PIEZAS»: se lee el
+    molde ORIGINAL (no la versión ya partida en capas) y se aceptan capas que todavía no son
+    talle. Leer el original es lo que hace que los índices de pieza NO cambien: si se leyera la
+    versión partida, después de asignar una vez la herramienta mostraría sólo las piezas de un
+    talle y no habría forma de corregir la asignación guardada."""
     """`MP.detectar_piezas` (lo CARO: get_drawings de TODO el molde, ~2.3s) CACHEADO a disco por
     (mtime plantilla, talle). NO depende de la variable ni del diseño → un solo cálculo por
     (molde, talle) sirve a todas. Antes se recalculaba en CADA `/api/plantilla/deteccion` (19×
     al asignar variantes = ~85s). El caché lo baja a 1× por talle (y el pool los pre-genera)."""
-    pl = _ruta_entrada("plantilla.ai", pid)
+    pl = _ruta_entrada("plantilla.ai", pid, original=candidatas)
     try: mt = int(os.path.getmtime(pl))
     except OSError: mt = 0
     cdir = _ruta_datos("deteccion_cache", pid)
-    fp = os.path.join(cdir, re.sub(r"[^A-Za-z0-9_-]+", "_", f"{mt}_{talle_ref or 'auto'}") + ".json")
+    # el flag entra en la CLAVE: la detección "con candidatas" da otras piezas que la normal y
+    # servir una por la otra dejaría el visor mostrando cualquier cosa
+    fp = os.path.join(cdir, re.sub(r"[^A-Za-z0-9_-]+", "_",
+                                   f"{mt}_{talle_ref or 'auto'}{'_cand' if candidatas else ''}") + ".json")
     try:
         return json.load(open(fp, encoding="utf-8"))
     except Exception:
         pass
-    res = MP.detectar_piezas(pl, talle_ref=talle_ref)
+    res = MP.detectar_piezas(pl, talle_ref=talle_ref, capas_candidatas=candidatas)
     try:
         os.makedirs(cdir, exist_ok=True)
         json.dump(res, open(fp, "w", encoding="utf-8"), ensure_ascii=False)
@@ -1019,6 +1027,9 @@ def plantilla_deteccion():
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí la plantilla base"}), 409
     talle_ref = request.args.get("talle_ref")
+    # `?candidatas=1` = herramienta de VARIANTES POR PIEZAS: si el molde no tiene ni un talle,
+    # igual devolvé las piezas de la capa que las tenga (si no, no hay nada que seleccionar).
+    _cand = str(request.args.get("candidatas") or "") in ("1", "true", "si", "sí")
     _pid_act = _get_active_producto_id()
     if not talle_ref:
         # Sin pedido explícito → usar la variante de guía guardada en la base
@@ -1028,13 +1039,13 @@ def plantilla_deteccion():
         if prod and prod.get("variante_guia"):
             talle_ref = prod["variante_guia"]
     try:
-        res = _deteccion_base_cached(_pid_act, talle_ref)
+        res = _deteccion_base_cached(_pid_act, talle_ref, _cand)
     except Exception:
         # La variante guardada puede ya no existir en la plantilla → reintentar
         # con la automática para no romper la carga.
         if talle_ref:
             try:
-                res = _deteccion_base_cached(_pid_act, None)
+                res = _deteccion_base_cached(_pid_act, None, _cand)
             except Exception as e:
                 if _falta_nombrar_variantes(_pid_act):
                     return jsonify(_deteccion_pendiente())
@@ -1317,7 +1328,94 @@ def plantilla_variantes():
     # los talles que YA están nombrados (el registro vigente), para saber si hace falta la herramienta
     reg = _cargar("registro_producto.json") or {}
     info["talles_registrados"] = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    # MODO de la herramienta (ver §10.c): con 2+ capas de talle candidatas se nombra POR CAPA; con
+    # una sola capa que trae TODAS las piezas no hay capas que nombrar → hay que repartir POR
+    # PIEZAS. Es una SUGERENCIA: el front deja cambiarlo a mano.
+    prev = _cargar("variantes_piezas.json") or {}
+    info["modo_sugerido"] = "piezas" if (prev or info.get("total_talles", 0) < 2) else "capas"
+    info["asignacion_piezas"] = prev.get("asignaciones") or {}
+    info["variantes_piezas"] = prev.get("orden") or []
     return jsonify(info)
+
+
+@app.post("/api/plantilla/variantes_piezas")
+def plantilla_variantes_piezas():
+    """Asigna las variantes SELECCIONANDO PIEZAS (molde con todo en una sola capa).
+
+    Body: `{pid?, asignaciones: {pieza_idx: "nombre_variante"}}` con los índices de
+    `/api/plantilla/deteccion?candidatas=1`.
+
+    Parte la capa única en una capa (OCG) REAL por variante — escribiendo una VERSIÓN nueva, el
+    archivo del usuario queda intacto — y rehace el registro. Sin partir el archivo el molde no
+    serviría: todo el sistema resuelve el talle de una pieza por el NOMBRE DE LA CAPA.
+    """
+    import variantes_molde as VM
+    from molde_real import extraer_piezas_mesa
+    cuerpo = request.get_json(force=True) or {}
+    asign = cuerpo.get("asignaciones") or {}
+    pid = _get_active_producto_id()
+    pl = _ruta_entrada("plantilla.ai", pid, original=True)
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí el molde"}), 409
+
+    # Los NOMBRES que ya tengan las piezas se recuperan por su bbox: la geometría no cambia al
+    # partir el archivo, así que corregir la asignación no borra el nombrado hecho antes.
+    def _k(b):
+        return tuple(round(float(v), 1) for v in b)
+    por_bbox = {}
+    for _nom, _por_t in (_cargar("registro_producto.json", pid) or {}).items():
+        for _inf in (_por_t or {}).values():
+            if _inf.get("bbox_mu"):
+                por_bbox.setdefault(_k(_inf["bbox_mu"]), _nom)
+
+    # Siempre se parte desde el ORIGINAL: re-asignar tiene que dar el mismo resultado que la
+    # primera vez (partir una versión ya partida acumularía capas viejas).
+    OA.reset_versiones(pl)
+    try:
+        ruta, mesa, capa_origen, orden = VM.separar_por_piezas(pl, asign)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 422
+
+    resumen = {"variantes": orden, "mesa": mesa, "capa_origen": capa_origen}
+    try:
+        doc = MP._abrir(ruta)
+        try:
+            ref = max(orden, key=lambda t: len(extraer_piezas_mesa(doc, mesa, t)))
+            piezas_ref = extraer_piezas_mesa(doc, mesa, ref)
+        finally:
+            doc.close()
+        # Nombres PROVISORIOS estables si la pieza todavía no tiene nombre: el registro tiene que
+        # existir igual para que el molde se pueda seguir configurando; el editor de nombrado
+        # (paso siguiente del flujo) los reemplaza.
+        asign_nombres = [{"idx": i, "nombre": por_bbox.get(_k(p["bbox_mu"]), f"Pieza {i + 1}")}
+                         for i, p in enumerate(piezas_ref)]
+        alta = MP.alta_plantilla_manual(ruta, asign_nombres, mesa, ref)
+        if not alta.get("registro"):
+            raise ValueError("; ".join(alta.get("problemas") or []) or "no se registró ninguna pieza")
+        json.dump(alta["registro"], open(_ruta_datos("registro_producto.json", pid), "w",
+                                         encoding="utf-8"), ensure_ascii=False)
+        _regenerar_piezas_index(pid, reg=alta["registro"])
+        resumen.update({"talles": alta.get("talles") or [], "piezas": alta.get("piezas") or [],
+                        "talle_ref": ref, "problemas": alta.get("problemas") or []})
+        json.dump({"archivo": (_cargar("resumen_plantilla.json", pid) or {}).get("archivo", "plantilla.ai"),
+                   "mesas": alta.get("mesas"), "piezas": alta.get("piezas"),
+                   "talles": alta.get("talles"),
+                   "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
+                   "problemas": alta.get("problemas") or [], "advertencias": alta.get("advertencias") or [],
+                   "piezas_detalle": alta.get("piezas_detalle") or {},
+                   "metodo": "variantes por piezas"},
+                  open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"),
+                  ensure_ascii=False)
+    except Exception as e:
+        resumen["problemas"] = [f"las variantes quedaron asignadas, pero el registro no se pudo "
+                                f"rehacer solo: {e}"]
+
+    # La asignación CRUDA queda guardada para poder reabrir la herramienta y corregirla.
+    json.dump({"mesa": mesa, "capa_origen": capa_origen, "orden": orden,
+               "asignaciones": {str(k): str(v) for k, v in asign.items()}},
+              open(_ruta_datos("variantes_piezas.json", pid), "w", encoding="utf-8"),
+              ensure_ascii=False)
+    return jsonify({"ok": True, **resumen})
 
 
 @app.post("/api/plantilla/variantes")

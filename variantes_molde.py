@@ -155,6 +155,251 @@ def renombrar_capas(path_plantilla, mapa):
     return destino, n
 
 
+# ════════════════════════════════════════════════════════════════════════════════
+# MODO «POR PIEZAS» — el molde trae TODAS las piezas en UNA sola capa
+# ════════════════════════════════════════════════════════════════════════════════
+# Caso real (molde «Molde short»): 36 piezas en «Capa 1», sin ninguna capa de talle. Ahí no hay
+# capas que nombrar: el usuario selecciona las piezas de cada talle en el visor y les escribe el
+# nombre de la variante.
+#
+# ⚠️ NO alcanza con guardar «la pieza 3 es del talle S» en el registro. En TODO el sistema el talle
+# de una pieza sale del NOMBRE DE LA CAPA (`molde_real._candidatos_mesa` compara `d["layer"] ==
+# talle`): un registro con talles que no existen como capa deja al motor SIN piezas al generar la
+# tizada. Por eso, igual que `renombrar_capas`, acá se ESCRIBE EL ARCHIVO: se parte la capa única en
+# capas (OCG) reales, una por variante, y el resto del sistema no se entera de nada.
+#
+# Cómo se parte: el content stream se recorre instrucción por instrucción y se agrupa en «unidades
+# de trazado» (construcción m/l/c/v/y/re/h + el operador de pintado). Cada unidad se ubica por su
+# bbox en coordenadas del lienzo y se empareja con la pieza que detectó `extraer_piezas_mesa`
+# (mismo trazado → misma bbox: en el molde real la distancia dio 0.00). Después cada unidad se
+# envuelve en su propio `/OC /MCx BDC … EMC`.
+#
+# Dos detalles que importan:
+# - El BDC se mete PEGADO al trazado (después del `q … cm`, antes del `Q`), así el marcado nunca se
+#   cruza con el anidado q/Q y el estado gráfico compartido (clip, ancho de línea, /GS) queda FUERA
+#   de toda capa → se aplica siempre, aunque el usuario apague una variante.
+# - Las piezas SIN asignar se vuelven a marcar con la capa ORIGINAL: no se pierde nada del archivo.
+
+_CONSTRUCCION = {"m", "l", "c", "v", "y", "re", "h"}
+_PINTADO = {"S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n"}
+
+
+def _mul(a, b):
+    """Composición de matrices PDF (a aplicada ANTES que b, que es lo que hace `cm`)."""
+    return (a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3],
+            a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3],
+            a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5])
+
+
+def _aplicar(m, x, y):
+    return (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+
+
+def _unidades_de_trazado(instrucciones):
+    """[(i_ini, i_fin, bbox_lienzo, es_clip)] — un ítem por trazado pintado del content stream.
+
+    `bbox` sale de los puntos del trazado transformados por la CTM vigente (incluye los puntos de
+    control de las curvas: sobra un poco, pero alcanza y sobra para emparejar por centro).
+    `es_clip` marca los trazados que sólo definen un recorte (`W n`): esos NO son piezas y no se
+    tocan (si se los metiera en una capa, apagar esa variante rompería el clip de todo el resto).
+    """
+    ctm, pila = (1, 0, 0, 1, 0, 0), []
+    unidades, ini, pts, clip = [], None, [], False
+    for i, it in enumerate(instrucciones):
+        op = str(it.operator)
+        if op == "q":
+            pila.append(ctm)
+        elif op == "Q":
+            ctm = pila.pop() if pila else ctm
+        elif op == "cm":
+            try:
+                ctm = _mul(tuple(float(v) for v in it.operands), ctm)
+            except Exception:
+                pass
+        elif op in _CONSTRUCCION:
+            if ini is None:
+                ini, pts, clip = i, [], False
+            try:
+                f = [float(v) for v in it.operands]
+            except Exception:
+                f = []
+            if op == "re" and len(f) == 4:
+                x, y, w, h = f
+                for px, py in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
+                    pts.append(_aplicar(ctm, px, py))
+            else:
+                for k in range(0, len(f) - 1, 2):
+                    pts.append(_aplicar(ctm, f[k], f[k + 1]))
+        elif op in ("W", "W*"):
+            clip = True
+        elif op in _PINTADO:
+            if ini is not None and pts:
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                unidades.append((ini, i, (min(xs), min(ys), max(xs), max(ys)), clip))
+            ini, pts, clip = None, [], False
+    return unidades
+
+
+def piezas_para_asignar(path_plantilla):
+    """(mesa, capa, piezas) del bloque de molde a repartir en variantes: la mesa+capa con MÁS
+    piezas dibujadas. En el caso que motiva esto hay una sola capa y una sola mesa; si hubiera
+    varias, se trabaja sobre la que concentra el molde (y el llamador lo informa)."""
+    import motor_pedido as MP
+    from molde_real import extraer_piezas_mesa
+    doc = fitz.open(ruta_vigente(path_plantilla))
+    try:
+        mejor = (0, None, None)
+        for m in range(1, len(doc) + 1):
+            capas = {d.get("layer") for d in doc[m - 1].get_drawings() if d.get("layer")}
+            for c in capas:
+                n = len(extraer_piezas_mesa(doc, m, c))
+                if n > mejor[0]:
+                    mejor = (n, m, c)
+        if not mejor[1]:
+            raise ValueError("el molde no tiene piezas dibujadas en ninguna capa")
+        return mejor[1], mejor[2], extraer_piezas_mesa(doc, mejor[1], mejor[2])
+    finally:
+        doc.close()
+
+
+def separar_por_piezas(path_plantilla, asignaciones):
+    """Parte la capa única del molde en una capa (OCG) REAL por variante.
+
+    `asignaciones` = {pieza_idx: "nombre_variante"} sobre las piezas que devuelve
+    `piezas_para_asignar` (los mismos índices que `/api/plantilla/deteccion`).
+    Devuelve (ruta_nueva, mesa, capa_origen, orden_de_variantes).
+
+    El orden de las variantes es de MENOR a MAYOR ÁREA total — el mismo criterio que ya usa
+    `analizar` para proponer la curva (verificado contra un molde real de 20 talles). Ese orden es
+    el que queda en el panel de capas y el que después lee `_ordenar_por_archivo`.
+    """
+    import pikepdf
+    from pikepdf import Array, Dictionary, Name, String, parse_content_stream, unparse_content_stream
+
+    asig = {int(k): str(v).strip() for k, v in (asignaciones or {}).items() if str(v or "").strip()}
+    if not asig:
+        raise ValueError("no hay ninguna pieza asignada a una variante")
+    mesa, capa_origen, piezas = piezas_para_asignar(path_plantilla)
+    fuera = [i for i in asig if i < 0 or i >= len(piezas)]
+    if fuera:
+        raise ValueError(f"hay piezas que no existen en el molde: {sorted(fuera)}")
+    for nom in set(asig.values()):
+        if nom in CAPAS_SISTEMA and nom != "0":
+            raise ValueError(f"«{nom}» es un nombre reservado del sistema: elegí otro")
+
+    # Orden de la curva: por área total de las piezas de cada variante (menor → mayor).
+    area = {}
+    for i, nom in asig.items():
+        b = piezas[i]["bbox_mu"]
+        area[nom] = area.get(nom, 0.0) + abs(b[2] - b[0]) * abs(b[3] - b[1])
+    orden = sorted(area, key=lambda n: area[n])
+
+    vigente = ruta_vigente(path_plantilla)
+    destino = _ver_path(path_plantilla, _ver_actual(path_plantilla) + 1)
+    pdf = pikepdf.open(vigente)
+    try:
+        pg = pdf.pages[mesa - 1]
+        instrucciones = list(parse_content_stream(pg))
+        unidades = [u for u in _unidades_de_trazado(instrucciones) if not u[3]]
+
+        # Emparejar cada trazado del content stream con la pieza detectada (por centro). Las
+        # coordenadas de `bbox_raw` son las del lienzo PDF (y arriba), las mismas que la CTM.
+        libres = list(range(len(unidades)))
+        de_pieza = {}
+        for k, pz in enumerate(piezas):
+            x0, y0, x1, y1 = pz["bbox_raw"]
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            tol = 0.15 * min(abs(x1 - x0), abs(y1 - y0)) or 1.0
+            mejor = None
+            for u in libres:
+                b = unidades[u][2]
+                d = ((b[0] + b[2]) / 2 - cx) ** 2 + ((b[1] + b[3]) / 2 - cy) ** 2
+                if mejor is None or d < mejor[0]:
+                    mejor = (d, u)
+            if mejor is None or mejor[0] ** 0.5 > tol:
+                raise ValueError(f"no se pudo ubicar la pieza {k + 1} dentro del molde: "
+                                 f"este molde no se puede separar por piezas")
+            de_pieza[k] = unidades[mejor[1]]
+            libres.remove(mejor[1])
+
+        # OCG por variante + su nombre de recurso en la página
+        ocp = pdf.Root.get("/OCProperties")
+        if ocp is None:
+            ocp = pdf.Root["/OCProperties"] = Dictionary(OCGs=Array(), D=Dictionary(Order=Array(), ON=Array()))
+        props = pg.Resources.get("/Properties")
+        if props is None:
+            props = pg.Resources["/Properties"] = Dictionary()
+        ocg_origen = None
+        for nom_res in props.keys():
+            try:
+                if str(props[nom_res].get("/Name")) == capa_origen:
+                    ocg_origen = Name(nom_res)
+            except Exception:
+                pass
+        usados = {str(k) for k in props.keys()}
+        res_de = {}
+        for j, nom in enumerate(orden):
+            ocg = pdf.make_indirect(Dictionary(
+                Type=Name.OCG, Name=String(nom), Intent=Array([Name("/View"), Name("/Design")])))
+            ocp["/OCGs"].append(ocg)
+            d = ocp.get("/D")
+            if d is None:
+                d = ocp["/D"] = Dictionary(Order=Array(), ON=Array())
+            for clave in ("/Order", "/ON"):
+                if clave not in d:
+                    d[clave] = Array()
+                d[clave].append(ocg)
+            k = f"/MCv{j}"
+            while k in usados:
+                k += "x"
+            usados.add(k)
+            props[k] = ocg
+            res_de[nom] = Name(k)
+
+        # Reconstruir el stream: fuera el marcado /OC viejo, y cada trazado en su capa.
+        abre = {}          # índice de instrucción → nombre de recurso de la capa que la envuelve
+        cierra = set()
+        for k, u in de_pieza.items():
+            nom = asig.get(k)
+            destino_res = res_de.get(nom) if nom else ocg_origen
+            if destino_res is None:
+                continue   # pieza sin asignar y sin capa original que preservar: se deja suelta
+            abre[u[0]] = destino_res
+            cierra.add(u[1])
+
+        # El marcado /OC que traía el archivo se saca (si no, todo quedaría además dentro de la
+        # capa vieja y las variantes serían inútiles). Se respeta cualquier OTRO marcado (texto,
+        # accesibilidad): sólo se descartan los BDC de /OC y su EMC pareja.
+        nivel, quitar = [], set()
+        for i, it in enumerate(instrucciones):
+            op = str(it.operator)
+            if op in ("BDC", "BMC"):
+                es_oc = bool(it.operands) and str(it.operands[0]) == "/OC"
+                nivel.append(es_oc)
+                if es_oc:
+                    quitar.add(i)
+            elif op == "EMC":
+                if nivel and nivel.pop():
+                    quitar.add(i)
+
+        nuevo = []
+        for i, it in enumerate(instrucciones):
+            if i in quitar:
+                continue
+            if i in abre:
+                nuevo.append(([Name("/OC"), abre[i]], pikepdf.Operator("BDC")))
+            nuevo.append((it.operands, it.operator))
+            if i in cierra:
+                nuevo.append(([], pikepdf.Operator("EMC")))
+        pg.Contents = pdf.make_stream(unparse_content_stream(nuevo))
+        pdf.save(destino)
+    finally:
+        pdf.close()
+    fijar_version(path_plantilla, _ver_actual(path_plantilla) + 1)
+    return destino, mesa, capa_origen, orden
+
+
 def curva_sugerida(nombres_capas, estilo="letras"):
     """Nombres propuestos para una curva de N talles, del más chico al más grande. Es sólo una
     ayuda de tipeo: el usuario los edita."""

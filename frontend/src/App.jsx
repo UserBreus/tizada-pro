@@ -575,11 +575,18 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
    molde utilizable. Acá el usuario les pone nombre. El sistema PROPONE la curva ordenando por
    tamaño (de la más chica a la más grande) y el usuario corrige: el tamaño dice cuál es menor,
    pero no si la menor se llama «0» o «XS». */
-function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
+// Herramienta de VARIANTES (talles). Dos modos, porque hay dos moldes reales (ver §10.c del mapa):
+//  · POR CAPA   — el molde trae una capa por talle (sin nombrar o mal nombrada): se le pone nombre
+//                 a cada capa. Es lo que hace este componente.
+//  · POR PIEZAS — el molde trae TODAS las piezas en una sola capa: no hay capas que nombrar, hay
+//                 que seleccionar piezas en el visor. Ese panel vive en App (necesita el visor) y
+//                 entra acá como `children`; este componente sólo aporta el marco y el selector.
+function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, onModo, children }) {
   const [info, setInfo] = React.useState(null);
   const [nombres, setNombres] = React.useState({});
   const [guardando, setGuardando] = React.useState(false);
   const [abierto, setAbierto] = React.useState(false);
+  const modoAuto = React.useRef(false);   // el modo se sugiere UNA vez; después manda el usuario
 
   const cargar = React.useCallback(async () => {
     try {
@@ -595,8 +602,20 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
 
   // Si el molde NO tiene ni un talle reconocido no se puede usar (la detección falla y no se ve
   // nada): en ese caso la herramienta se abre sola, que es lo único que lo destraba.
+  // Otro molde = otra radiografía: sin esto la herramienta seguía mostrando la del molde anterior
+  // (y sugiriendo su modo), porque `info` sólo se cargaba una vez.
+  React.useEffect(() => { setInfo(null); modoAuto.current = false; }, [pid]);
   React.useEffect(() => { if (!info) cargar(); }, [info, cargar]);
   React.useEffect(() => { if (info?.sin_talles) setAbierto(true); }, [info]);
+  // El modo lo decide el MOLDE: con 2+ capas de talle se nombra por capa; con una sola capa que
+  // trae todas las piezas hay que repartirlas a mano. Se sugiere una sola vez (el usuario manda).
+  React.useEffect(() => {
+    if (!info || modoAuto.current) return;
+    modoAuto.current = true;
+    // sólo se fuerza el modo POR PIEZAS (el otro ya es el estado por defecto): así un molde normal
+    // no dispara una recarga del visor cada vez que se abre la Moldería
+    if (onModo && info.modo_sugerido === 'piezas') onModo(true);
+  }, [info, onModo]);
 
   // ¿parece que las capas NO están nombradas? (nombres tipo "Layer 3", "Capa 2", "Path 7")
   const sinNombrar = (info?.sugerencia || []).filter(c => /^(layer|capa|path|group|grupo)[\s_-]*\d*$/i.test(String(c).trim())).length;
@@ -645,7 +664,7 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
           <span style={{ display: 'block', fontSize: 10.5, color: info?.sin_talles ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
             {info?.sin_talles
               ? (info?.una_sola_capa
-                  ? 'El molde vino con todo en una sola capa: decile qué talle es y ya queda utilizable'
+                  ? 'El molde vino con todo en una sola capa: seleccioná las piezas de cada variante y escribile el nombre'
                   : 'El molde no tiene ninguna capa con nombre de talle: hasta que las nombres no se puede usar')
               : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`}
           </span>
@@ -656,6 +675,19 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
       {abierto && (
         <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-light)' }}>
           {!info ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Leyendo el molde…</div> : (
+            <>
+              <div style={{ display: 'flex', gap: 6, padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.25)' }}>
+                {[[false, 'Por capa', 'cada talle en su capa'], [true, 'Por piezas', 'todo en una capa']].map(([m, lbl, sub]) => (
+                  <button key={String(m)} type="button" onClick={() => onModo && onModo(m)} title={sub}
+                    style={{ flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, borderRadius: 7, cursor: 'pointer', border: '1px solid ' + (modoPiezas === m ? 'var(--accent)' : 'transparent'), background: modoPiezas === m ? 'rgba(0,243,255,0.12)' : 'transparent', color: modoPiezas === m ? 'var(--accent)' : 'var(--text-muted)' }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {info && modoPiezas ? children : null}
+          {!info || modoPiezas ? null : (
             <>
               <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                 Encontré <b>{info.total_talles}</b> {term.variante.toLowerCase()}s, ordenadas de la más
@@ -2255,6 +2287,12 @@ export default function App() {
   const [rubber, setRubber] = useState(null); // recuadro de selección (marquee) en el visor: {x0,y0,x1,y1} en px de pantalla
   const [varStep, setVarStep] = useState('nombrar'); // paso del flujo Variables: 'nombrar' | 'organizar'
   const [selNombrar, setSelNombrar] = useState(() => new Set()); // piezas seleccionadas en el paso "Nombrar"
+  // ── Variantes POR PIEZAS (molde con TODO en una sola capa): se seleccionan piezas en el visor y
+  // se les escribe el nombre de la variante. Reusa `selNombrar` + el marquee (`iniciarRubber`).
+  const [varPzModo, setVarPzModo] = useState(false);      // herramienta activa (el visor pasa a modo selección)
+  const [varPzAsig, setVarPzAsig] = useState({});          // {pieza_idx: "nombre de variante"}
+  const [varPzInput, setVarPzInput] = useState('');        // texto libre: una letra, un número o palabras
+  const [varPzGuardando, setVarPzGuardando] = useState(false);
   const [resaltarNombre, setResaltarNombre] = useState(null); // nombre genérico resaltado en el visor (lista de piezas agrupada)
   const [grupoAislado, setGrupoAislado] = useState(null);   // clave del grupo abierto en DETALLE (visor aislado + edición); null = lista de grupos
   const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState(''); // nombre para crear una VARIABLE nueva (Paso 2)
@@ -3450,6 +3488,9 @@ export default function App() {
 
   const startDrag = (e, idx) => {
     if (e.button !== 0) return; // solo click izquierdo
+    // Asignando variantes POR PIEZAS: tocar una pieza la selecciona/deselecciona (mismo gesto
+    // que el nombrado de piezas, para que se aprenda una sola vez).
+    if (varPzModo) { toggleSelNombrar(idx); e.preventDefault(); return; }
     // Pestaña Variables, paso Nombrar: tocar una pieza la selecciona/deselecciona.
     if (tabAjustesMolde === 'variables' && varStep === 'nombrar') {
       // Editando un nombre existente: tocar suma/quita la pieza de ese nombre.
@@ -4391,6 +4432,65 @@ export default function App() {
     setEtqNombreInput('');
   };
 
+  // ── VARIANTES POR PIEZAS ────────────────────────────────────────────────────────────────────
+  // Cambiar de molde corta el modo: la asignación pertenece a ESE molde y sus índices de pieza.
+  useEffect(() => { setVarPzModo(false); setVarPzAsig({}); setVarPzInput(''); }, [activoProdDetalle?.id]);
+  // El visor tiene que mostrar TODAS las piezas del molde (no las de un talle): por eso la
+  // detección se pide con `candidatas=1`, que además lee el molde ORIGINAL — así los índices de
+  // pieza no se mueven y la asignación guardada se puede volver a abrir y corregir.
+  const activarVarPz = React.useCallback(async (on) => {
+    setVarPzModo(on);
+    setSelNombrar(new Set());
+    setVarPzInput('');
+    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    try {
+      const r = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}${on ? '&candidatas=1' : ''}`);
+      if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); }
+    } catch { }
+    if (on) {
+      try {
+        const r = await fetch(`/api/plantilla/variantes?pid=${encodeURIComponent(pid)}`);
+        if (r.ok) {
+          const d = await r.json();
+          const a = {};
+          Object.entries(d.asignacion_piezas || {}).forEach(([k, v]) => { a[parseInt(k, 10)] = v; });
+          setVarPzAsig(a);
+        }
+      } catch { }
+    }
+  }, [activoProdDetalle?.id, productosCat.activo]);
+
+  const asignarVariantePz = () => {
+    const nom = (varPzInput || '').trim();
+    if (!nom) { showError(`Escribí el nombre de la ${term.variante.toLowerCase()} (una letra, un número o palabras)`); return; }
+    const idxs = Array.from(selNombrar);
+    if (!idxs.length) { showError('Seleccioná al menos una pieza (clic o recuadro)'); return; }
+    setVarPzAsig(prev => { const n = { ...prev }; idxs.forEach(i => { n[i] = nom; }); return n; });
+    setSelNombrar(new Set());
+    setVarPzInput('');
+  };
+  const quitarVariantePz = (nom) => setVarPzAsig(prev => {
+    const n = {}; Object.entries(prev).forEach(([k, v]) => { if (v !== nom) n[k] = v; }); return n;
+  });
+  const guardarVariantesPz = async () => {
+    const pid = activoProdDetalle?.id || productosCat.activo || '';
+    if (!Object.keys(varPzAsig).length) { showError('Todavía no asignaste ninguna pieza'); return; }
+    setVarPzGuardando(true);
+    try {
+      const r = await fetch('/api/plantilla/variantes_piezas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, asignaciones: varPzAsig }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudieron aplicar las variantes'); return; }
+      showMsg(`${(d.variantes || []).length} ${term.variante.toLowerCase()}s listas (${(d.piezas || []).length} piezas). Ahora indicá qué es cada pieza.`);
+      await fetchProductos();
+      // salir del modo: el visor vuelve a la vista normal, que ya muestra los talles nuevos
+      await activarVarPz(false);
+    } catch (e) { showError('No se pudo guardar: ' + e.message); }
+    finally { setVarPzGuardando(false); }
+  };
+
   // ── Gestión de nombres puestos (ventana emergente): renombrar / eliminar / quitar piezas ──
   const renombrarGrupoNombres = (gen, nuevoBase) => {
     const base = (nuevoBase || '').trim();
@@ -4445,7 +4545,7 @@ export default function App() {
     const modoNombrar = tabAjustesMolde === 'variables' && varStep === 'nombrar';
     const modoConj = tabAjustesMolde === 'variables' && asignandoConjunto;
     const modoGrupoPz = tabAjustesMolde === 'variables' && asignandoGrupoPz;
-    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz)) return;
+    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo)) return;
     const clave = asignandoTipo;
     e.preventDefault();
     const x0 = e.clientX, y0 = e.clientY;
@@ -4461,7 +4561,7 @@ export default function App() {
           const b = g.getBoundingClientRect();
           if (b.right >= rx0 && b.left <= rx1 && b.bottom >= ry0 && b.top <= ry1) idxs.push(parseInt(g.getAttribute('data-piece'), 10));
         });
-        if (idxs.length) { if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
+        if (idxs.length) { if (varPzModo) { addSelNombrar(idxs); } else if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
       }
       setRubber(null);
     };
@@ -8607,11 +8707,14 @@ export default function App() {
                               {/* Molde recién subido al que le falta nombrar los talles: no es un
                                   error, es el paso que sigue. Se dice explícitamente porque si no
                                   el visor queda vacío y parece que el molde no cargó. */}
-                              {etqData?.falta_nombrar_variantes && (
+                              {(etqData?.falta_nombrar_variantes || etqData?.sin_variantes) && (
                                 <div style={{ fontSize: 12, lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--warning, #f5a524)', background: 'rgba(245,165,36,0.10)', color: 'var(--text-secondary)' }}>
                                   <b style={{ color: 'var(--warning, #f5a524)' }}>El molde se cargó, pero todavía no se puede usar.</b><br />
-                                  Vino sin los nombres de {term.variante.toLowerCase()} en las capas, así que no se pueden
-                                  detectar las piezas. Nombralas acá abajo y aparecen solas.
+                                  {etqData?.sin_variantes
+                                    ? <>Vino con <b>todas las piezas en una sola capa</b>: en el visor están las {(etqData?.piezas || []).length} piezas.
+                                      Seleccioná las de cada {term.variante.toLowerCase()} y escribile el nombre acá abajo.</>
+                                    : <>Vino sin los nombres de {term.variante.toLowerCase()} en las capas, así que no se pueden
+                                      detectar las piezas. Nombralas acá abajo y aparecen solas.</>}
                                 </div>
                               )}
 
@@ -8622,6 +8725,8 @@ export default function App() {
                                 term={term}
                                 showError={showError}
                                 showMsg={showMsg}
+                                modoPiezas={varPzModo}
+                                onModo={activarVarPz}
                                 onListo={async () => {
                                   // el molde cambió (capas nombradas + registro rehecho): recargar
                                   // la detección para ver las piezas y los talles nuevos
@@ -8631,7 +8736,69 @@ export default function App() {
                                     if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); }
                                   } catch { }
                                 }}
-                              />
+                              >
+                                {/* MODO POR PIEZAS: el molde trae todo en una capa → se seleccionan
+                                    piezas en el visor (clic o recuadro) y se les escribe el nombre. */}
+                                {(() => {
+                                  const total = (etqData?.piezas || []).length;
+                                  const asignadas = Object.keys(varPzAsig).length;
+                                  const porVar = {};
+                                  Object.entries(varPzAsig).forEach(([k, v]) => { (porVar[v] = porVar[v] || []).push(parseInt(k, 10)); });
+                                  const nombresVar = Object.keys(porVar);
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                        Seleccioná en el visor las piezas de una {term.variante.toLowerCase()} (clic, o
+                                        arrastrá un recuadro) y escribile el nombre. Después repetí con la siguiente.
+                                      </div>
+                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                        Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b> ·
+                                        Asignadas: <b style={{ color: 'var(--success)' }}>{asignadas}</b> de {total}
+                                      </div>
+                                      <input value={varPzInput} onChange={e => setVarPzInput(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); asignarVariantePz(); } }}
+                                        placeholder={`Nombre de la ${term.variante.toLowerCase()} (S, 38, Talle único…)`}
+                                        style={{ width: '100%', padding: '7px 9px', fontSize: 12.5, fontWeight: 700, borderRadius: 7, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.25)', color: '#fff' }} />
+                                      <div style={{ display: 'flex', gap: 6 }}>
+                                        <button type="button" className="btn primary" style={{ flex: 1, fontSize: 12 }}
+                                          disabled={!selNombrar.size} onClick={asignarVariantePz}>
+                                          Asignar {selNombrar.size || ''} pieza{selNombrar.size === 1 ? '' : 's'}
+                                        </button>
+                                        {selNombrar.size > 0 && <button type="button" className="btn ghost" style={{ fontSize: 12 }} onClick={() => setSelNombrar(new Set())}>Limpiar</button>}
+                                      </div>
+
+                                      {nombresVar.length > 0 && (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                                          {nombresVar.map(nom => (
+                                            <div key={nom} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', borderRadius: 7, background: 'rgba(16,185,129,0.10)', border: '1px solid var(--border-light)' }}>
+                                              <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nom}</span>
+                                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{porVar[nom].length} pieza{porVar[nom].length === 1 ? '' : 's'}</span>
+                                              <button type="button" title="Seleccionar sus piezas para corregir"
+                                                onClick={() => setSelNombrar(new Set(porVar[nom]))}
+                                                style={{ background: 'none', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 10.5, padding: '1px 6px' }}>Ver</button>
+                                              <button type="button" title="Quitar esta variante" onClick={() => quitarVariantePz(nom)}
+                                                style={{ background: 'none', border: 0, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {asignadas < total && (
+                                        <div style={{ fontSize: 10.5, color: 'var(--warning, #f5a524)', lineHeight: 1.4 }}>
+                                          Faltan {total - asignadas} piezas sin {term.variante.toLowerCase()}: van a quedar fuera del molde utilizable.
+                                        </div>
+                                      )}
+                                      <button type="button" className="btn success" style={{ width: '100%', fontSize: 12 }}
+                                        disabled={varPzGuardando || !asignadas} onClick={guardarVariantesPz}>
+                                        {varPzGuardando ? 'Aplicando…' : `Aplicar ${nombresVar.length} ${term.variante.toLowerCase()}${nombresVar.length === 1 ? '' : 's'}`}
+                                      </button>
+                                      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                                        El archivo original no se toca: se guarda una versión nueva del molde con una capa por {term.variante.toLowerCase()}.
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+                              </NombrarVariantes>
 
                               {/* En «mi molde» no hay pestaña Variables: el nombrado de piezas (que vive
                                   DENTRO de ese paso) se alcanza desde acá — es el mismo editor. */}
@@ -9445,7 +9612,7 @@ export default function App() {
                         ref={setVisorEl}
                         onMouseDown={(e) => {
                           if (e.button === 2 && etqData && tabAjustesMolde !== 'planilla') { panVisor(e); return; }
-                          if (e.button === 0 && tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar') && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
+                          if (e.button === 0 && (varPzModo || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
                           /* nota: en modo editar-nombre el recuadro también aplica (varStep==='nombrar') */
                         }}
                         onContextMenu={(e) => { if (etqData && tabAjustesMolde !== 'planilla') e.preventDefault(); }}>
@@ -10179,7 +10346,16 @@ export default function App() {
                                 // Resaltado por nombre genérico (hover en la lista agrupada de piezas).
                                 const resaltada = resaltarNombre != null && ((nombrePz && nombreGenerico(nombrePz) === resaltarNombre) || (resaltarNombre === '(sin asignar)' && !nombrePz));
                                 if (resaltada) { fillCol = 'rgba(0,243,255,0.34)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
-                                const strokeCol = (destacada || resaltada) ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)';
+                                // Asignando variantes POR PIEZAS: este coloreo MANDA sobre el resto (el visor
+                                // está dedicado a eso). Cyan = seleccionada, verde = ya tiene variante.
+                                const varPzNom = varPzModo ? (varPzAsig[p.idx] || '') : '';
+                                const varPzSel = varPzModo && selNombrar.has(p.idx);
+                                if (varPzModo) {
+                                  if (varPzSel) { fillCol = 'rgba(0,243,255,0.24)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
+                                  else if (varPzNom) { fillCol = 'rgba(16,185,129,0.28)'; badgeFill = '#10b981'; textFill = '#18181b'; }
+                                  else { fillCol = 'rgba(255,255,255,0.04)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
+                                }
+                                const strokeCol = (destacada || resaltada || varPzSel) ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)';
 
                                 const offset = pzOffsets[p.idx] || { x: 0, y: 0 };
                                 const tx = p.tx + offset.x;
@@ -10206,6 +10382,14 @@ export default function App() {
                                       <text fill={textFill} fontSize={spx(11.5)} fontWeight={900} textAnchor="middle" dominantBaseline="central" pointerEvents="none">
                                         {p.idx + 1}
                                       </text>
+                                      {/* el nombre de la variante va DEBAJO del número: puede ser
+                                          "S" o "Talle único", no entra dentro del círculo */}
+                                      {varPzNom && (
+                                        <text y={spx(24)} fill="#34d399" fontSize={spx(12.5)} fontWeight={800} textAnchor="middle" dominantBaseline="middle" pointerEvents="none"
+                                          style={{ paintOrder: 'stroke', stroke: 'rgba(2,6,12,0.85)', strokeWidth: spx(3) }}>
+                                          {varPzNom}
+                                        </text>
+                                      )}
                                     </g>
                                   </g>
                                 );

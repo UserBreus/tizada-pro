@@ -346,7 +346,22 @@ def _talles_con_molde(doc):
     return talles
 
 
-def detectar_piezas(path, talle_ref=None, ancho_preview=1100):
+def _capas_con_dibujo(doc):
+    """{capa: {mesas}} de TODA capa con trazados, sea o no un talle reconocido.
+
+    Es el universo que necesita el modo «asignar variantes POR PIEZAS»: un molde que trae todo en
+    «Capa 1» no tiene ni un talle (`_talles_con_molde` devuelve {}) y sin esto no habría forma de
+    listarle las piezas al usuario para que las reparta."""
+    capas = {}
+    for i in range(len(doc)):
+        for d in doc[i].get_drawings():
+            lay = d.get("layer")
+            if lay:
+                capas.setdefault(lay, set()).add(i + 1)
+    return capas
+
+
+def detectar_piezas(path, talle_ref=None, ancho_preview=1100, capas_candidatas=False):
     """Detecta las piezas de la moldería para el etiquetado visual. Elige un talle
     de referencia (el de más piezas), las extrae y arma una imagen de la mesa con
     las piezas mapeadas a píxeles para superponer cajas clicables en la web.
@@ -355,7 +370,13 @@ def detectar_piezas(path, talle_ref=None, ancho_preview=1100):
     La escala es REAL y fija (1 unidad = 1 mm), no depende de la cantidad de piezas."""
     doc = _abrir(path)
     talles_mesas = _talles_con_molde(doc)
-    
+    sin_variantes = False
+    if capas_candidatas and not talles_mesas:
+        sin_variantes = True
+        # Sin ningún talle reconocido, el visor igual tiene que poder MOSTRAR las piezas: es
+        # justo el molde que hay que repartir a mano en variantes.
+        talles_mesas = _capas_con_dibujo(doc)
+
     # Buscar si existe una capa de referencia (caso insensible)
     capas_doc = {c["text"].lower(): c["text"] for c in doc.layer_ui_configs() if c.get("text")}
     capa_ref = capas_doc.get("referencia")
@@ -453,7 +474,10 @@ def detectar_piezas(path, talle_ref=None, ancho_preview=1100):
     talles_orden = _ordenar_por_archivo(doc, talles_mesas.keys())
     return {"mesa": mesa, "talle_ref": talle_ref, "talles": talles_orden, "unidad": "mm",
             "img_w": round(clip.width * zoom, 1), "img_h": round(clip.height * zoom, 1),
-            "piezas": items}
+            "piezas": items,
+            # las piezas NO salen de una capa de talle: son todas las del molde, listas para
+            # repartir a mano en variantes (el front lo usa para abrir esa herramienta)
+            "sin_variantes": sin_variantes}
 
 
 def _bbox_segs(segs):

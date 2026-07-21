@@ -258,7 +258,8 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 
 ## 10. Índice de endpoints (servidor.py) — los que más toco
 
-- `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref]` (→ `detectar_piezas`, piezas del molde) · `GET /api/plantilla/nido` (geometría nesteada).
+- `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref][&candidatas=1]` (→ `detectar_piezas`, piezas del molde; `candidatas=1` = molde ORIGINAL + capas que aún no son talle, para la herramienta de variantes por piezas) · `GET /api/plantilla/nido` (geometría nesteada).
+- `GET/POST /api/plantilla/variantes` (variantes POR CAPA) · `POST /api/plantilla/variantes_piezas` (variantes POR PIEZAS) — ver §10.c.
 - `GET /api/arte/deteccion?diseno=` (→ `detectar_arte`, mesas + mapeo) · `POST /api/arte/mapeo` (guarda `mapeo_arte.json` + `prod["mapeo_arte"]` fijo; corre `validar_arte_separado`; **pre-warm** de `_piezas_base` en background).
 - `POST /api/arte/preview_piezas` (→ `_piezas_base`, render real cacheado por pieza).
 - `GET/POST /api/productos/editables` (`get_editables`/`set_editable`) · `GET/POST /api/productos/editables_config` (tamaño).
@@ -357,11 +358,19 @@ corrimiento):
 editables_tamano **y el manifiesto de objetos agregados** — sin esto, agregar/mover un objeto no
 regeneraba el render y "no se veía".
 
-## 10.c NOMBRAR VARIANTES (talles) — molde con las capas sin nombre
+## 10.c NOMBRAR VARIANTES (talles) — DOS MODOS: por capa y por piezas
 
-**El talle de una pieza sale del NOMBRE DE LA CAPA** (`_talles_de_plantilla`). Un molde exportado de
+**El talle de una pieza sale del NOMBRE DE LA CAPA** (`_talles_de_plantilla`). Hay dos moldes rotos
+distintos y la herramienta (`variantes_molde.py`, UI `NombrarVariantes` en Config → Moldería) tiene
+**un modo para cada uno**; el modo se sugiere solo (`modo_sugerido` del `GET /api/plantilla/variantes`:
+`piezas` si hay <2 capas candidatas o si ya existe una asignación guardada) y el usuario lo puede
+cambiar a mano con el selector **Por capa / Por piezas**.
+
+### Modo POR CAPA (el molde trae una capa por talle, sin nombrar)
+
+Un molde exportado de
 un CAD puede venir con capas `Layer 1`, `Capa 3`: el sistema detecta 20 "talles" con esos nombres y
-**0 piezas**, y el molde es inusable. `variantes_molde.py` resuelve eso:
+**0 piezas**, y el molde es inusable. Se resuelve así:
 
 - `analizar(plantilla)` → `{formato, capas[], sugerencia, total_talles}`. **`formato`**: `anidado`
   (los talles están dibujados UNO ENCIMA DEL OTRO — gradación de Optitex, el caso más común: no se
@@ -379,6 +388,49 @@ un CAD puede venir con capas `Layer 1`, `Capa 3`: el sistema detecta 20 "talles"
 aplicado en la lectura, y hay que traducir en CADA punto que compara capas por nombre — incluido
 `molde_real._candidatos_mesa` (compara `d["layer"] == talle`), que de olvidarse deja al motor **sin
 piezas al generar la tizada**. Renombrando, el resto del sistema no se entera de nada.
+
+### Modo POR PIEZAS (el molde trae TODAS las piezas en UNA capa)
+
+Caso real (`Molde short`): 36 piezas en «Capa 1». Ahí **no hay capas que nombrar**: el usuario
+**selecciona piezas en el visor** (clic o recuadro) y les escribe el nombre de la variante en
+**texto libre** (`S`, `38`, `Talle único`, `Niño 4`).
+
+- **El archivo SE PARTE, no se anota.** `VM.separar_por_piezas(plantilla, {pieza_idx: variante})`
+  escribe una **versión nueva** con **una capa (OCG) REAL por variante**. Guardar sólo "la pieza 3
+  es del talle S" en el registro **no sirve**: el talle se resuelve por nombre de capa (mismo
+  motivo que arriba) y el motor se quedaría sin piezas.
+- **Cómo parte el content stream** (`_unidades_de_trazado`): se recorre instrucción por
+  instrucción llevando la CTM, se agrupa en unidades `construcción… + operador de pintado`, cada
+  unidad se empareja por **centro de bbox** con la pieza de `extraer_piezas_mesa` (en el molde real
+  la distancia dio **0.00**) y se envuelve en su propio `/OC /MCx BDC … EMC`.
+  - El `BDC` va **pegado al trazado** (después del `q … cm`, antes del `Q`) → nunca se cruza con el
+    anidado `q/Q`, y el estado gráfico compartido (clip `W n`, ancho de línea, `/GS`) queda **fuera
+    de toda capa**: apagar una variante no rompe el dibujo del resto.
+  - Los trazados de **clip** (`W n`) NO se meten en ninguna capa. Las piezas **sin asignar** se
+    re-marcan con la capa **original** (no se pierde nada del archivo).
+  - Verificado: render del PDF partido **pixel-idéntico** al original (0 de 20.5M px).
+- **Orden de la curva**: las capas nuevas se crean de **menor a mayor área** (mismo criterio ya
+  verificado del modo por capa) → ese es el orden que después lee `_ordenar_por_archivo`.
+- **El registro se rehace con `alta_plantilla_manual`** sobre el archivo partido: talle de
+  referencia = la variante con más piezas, y las homólogas de los otros talles salen de
+  `_emparejar_por_forma`. Si las piezas todavía no tienen nombre se usan **provisorios estables**
+  (`Pieza 1`…) para que el registro exista y el molde se pueda seguir configurando; el editor de
+  nombrado los reemplaza después. Los nombres que YA existían se recuperan **por `bbox_mu`** (la
+  geometría no cambia al partir), así corregir la asignación no borra el nombrado.
+- **Endpoints**: `POST /api/plantilla/variantes_piezas {pid?, asignaciones:{idx: nombre}}` y
+  `GET /api/plantilla/deteccion?candidatas=1`. La asignación cruda queda en
+  `datos/productos/<pid>/variantes_piezas.json` para poder reabrir y corregir.
+- ⚠️ **`candidatas=1` lee el molde ORIGINAL** (`_ruta_entrada(..., original=True)`) y acepta capas
+  que todavía no son talle. Leer el original es lo que mantiene **estables los índices de pieza**:
+  si leyera la versión ya partida, la segunda vez mostraría sólo las piezas de un talle y la
+  asignación guardada no se podría corregir nunca. Y `POST` siempre parte **desde el original**
+  (`OA.reset_versiones`), si no se acumularían capas de intentos anteriores.
+- **UI**: el panel vive dentro de `NombrarVariantes` como `children` (necesita el visor, que vive en
+  `App`). **Reusa el visor y el gesto del nombrado de piezas**: `startDrag` → `toggleSelNombrar`,
+  marquee `iniciarRubber` → `addSelNombrar`, todo condicionado por el estado `varPzModo`
+  (`varPzAsig`, `varPzInput`). Al activar el modo se recarga `etqData` con `candidatas=1`.
+- **Límite conocido**: se trabaja sobre **una** mesa+capa (la que concentra más piezas). Un molde
+  con el bloque repartido en varias mesas no está contemplado.
 
 **MOLDE ACTIVO — ya no es global.** `_get_active_producto_id()` resuelve por orden: (1) `pid` de la
 request, (2) el activo **de la sesión**, (3) el global del catálogo. Antes era sólo (3), un único
@@ -415,6 +467,8 @@ El cliente puede traer **su** molde y usarlo en el pedido sin pasar por el setup
   cualquier variable los borraba).
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (6) — HECHO: asignar variantes SELECCIONANDO PIEZAS (2º modo de la herramienta).** Ver §10.c. Reportado por el usuario: «el asignar variante no está correcto, debe mostrar todas las piezas, se selecciona 1 o varias y se escribe el nombre». Su molde trae **36 piezas en una sola capa**: no hay capas que nombrar. **Lo que NO alcanzaba:** guardar la variante de cada pieza en el registro — el talle se resuelve por NOMBRE DE CAPA en todo el sistema (`molde_real._candidatos_mesa`), así que el motor se quedaría sin piezas. Por eso `variantes_molde.separar_por_piezas` **parte el content stream** y crea **una capa (OCG) real por variante** en una versión nueva del molde (el original intacto), y recién ahí se rehace el registro con `alta_plantilla_manual` + `_emparejar_por_forma` (nombres provisorios `Pieza N` si todavía no están nombradas; los ya existentes se recuperan por `bbox_mu`). Backend: `POST /api/plantilla/variantes_piezas`, `GET /api/plantilla/deteccion?candidatas=1` (lee el **original** → índices de pieza estables para poder corregir), `MP.detectar_piezas(capas_candidatas=)` + `_capas_con_dibujo`, flag `sin_variantes` en la detección. UI: selector **Por capa / Por piezas** dentro de `NombrarVariantes` (modo sugerido por el molde, cambiable a mano) y panel de asignación que **reusa el visor y el gesto del nombrado de piezas** (`varPzModo`/`varPzAsig`, `startDrag`+`iniciarRubber`). **Verificado por API sobre una COPIA del molde del usuario:** 36 piezas listadas → 6 variantes de 6 piezas → registro de 6 piezas × 6 talles, todos completos y con gradación monótona; **re-asignación** a 3 variantes de 12 (con acentos y espacios: `Niño 4`) volvió a leer las 36 y rehizo todo; `falta_nombrar_variantes` desapareció; `pdf_guia` (camino vectorial del motor) y `nido` responden 200; **render del PDF partido pixel-idéntico al original (0/20.5M px)**; `prod_default` sin cambios (20 capas, 19 piezas). Molde de prueba borrado y activo restaurado a `prod_20260721_111945_7593`. **NO verificado:** la UI a mano dentro de la app (hay login y no se intentó pasarlo) — la consola del navegador queda limpia en la pantalla de login; y no se generó una tizada real (el molde de prueba no tiene arte).
 
 - **2026-07-21 (5) — FIX: un molde con TODO en una sola capa quedaba inusable y sin aviso.** Reportado por el usuario: sube el molde desde "Mis artículos", queda cargado y **no se muestra nada** (422 en `/api/plantilla/deteccion`). **Causa:** su molde trae las 36 piezas en una única capa llamada **«Capa 1»**, que está en `CAPAS_SISTEMA` → 0 talles → la detección falla. Y **la herramienta de nombrar variantes tampoco la ofrecía**, porque sólo listaba capas que YA contaban como talle: el molde no tenía forma de arreglarse nunca. Ahora `analizar` ofrece las capas **candidatas** (con molde dibujado, aunque el sistema todavía no las cuente como talle) y devuelve `sin_talles`/`una_sola_capa`; la herramienta **se abre sola y avisa en naranja** cuando no hay ningún talle; con un solo talle propone «Único» en vez de una letra del medio de la curva. **Verificado sobre una COPIA del molde del usuario: antes 422 y 0 piezas; después de nombrar la capa, 36 piezas.** **Agujero de seguridad encontrado en el camino:** la guardia de moldes ajenos no cubría las rutas con el id **en la URL** (`/api/productos/<pid>/preview`, `/descargar_plantilla`) porque sólo miraba query y body — `_pid_de_request` ahora lee primero el pid del path (403 verificado). **Gotcha de diagnóstico:** el id que mostraba la consola del navegador (`prod 2.1945 7593`) era el id real truncado por el visor, no un id mal formado; y un `curl` de bash con acentos rompe el JSON (el navegador manda UTF-8 bien) — no confundir eso con un bug del sistema.
 
