@@ -188,9 +188,27 @@ def talles_orden_archivo(path, talles):
 
 
 def _talles_de_plantilla(doc):
-    """Capas con dibujo que NO son de sistema → talles, en el orden del archivo."""
-    con_dibujo = set(d.get("layer") for i in range(len(doc)) for d in doc[i].get_drawings()
-                     if d.get("layer") and d.get("layer") not in CAPAS_SISTEMA)
+    """Capas con dibujo que NO son de sistema → talles, en el orden del archivo.
+
+    Excepción del talle «0»: `CAPAS_SISTEMA` lo descarta porque en un DXF la capa "0" es la capa
+    por defecto de AutoCAD y suele traer basura. Pero «0» también es un TALLE legítimo en la curva
+    de niños (0, 1, 2, 4, …), y descartarlo por el nombre le borraba un talle entero al usuario
+    (caso real: molde con 20 capas de talle del que el registro se quedaba con 19). Se decide por
+    CONTENIDO: si la capa "0" tiene tantas formas como los otros talles, es un talle.
+    """
+    import collections as _c
+    cnt = _c.Counter()
+    for i in range(len(doc)):
+        for d in doc[i].get_drawings():
+            lay = d.get("layer")
+            if lay:
+                cnt[lay] += 1
+    con_dibujo = {n for n in cnt if n not in CAPAS_SISTEMA}
+    if "0" in cnt and con_dibujo:
+        formas = sorted(cnt[n] for n in con_dibujo)
+        mediana = formas[len(formas) // 2]
+        if cnt["0"] >= mediana * 0.5:          # tiene contenido de talle, no basura de CAD
+            con_dibujo.add("0")
     return _ordenar_por_archivo(doc, con_dibujo)
 
 
@@ -315,11 +333,15 @@ def _union_bbox(piezas):
 
 
 def _talles_con_molde(doc):
+    """{talle: {mesas donde tiene molde}}. Qué capa ES un talle lo decide `_talles_de_plantilla`
+    (una sola regla en todo el sistema): si acá se filtrara distinto, un talle válido aparecería
+    en el alta y desaparecería en la detección — que es justo lo que pasaba con el talle «0»."""
+    validos = set(_talles_de_plantilla(doc))
     talles = {}
     for i in range(len(doc)):
         for d in doc[i].get_drawings():
             lay = d.get("layer")
-            if lay and lay not in CAPAS_SISTEMA:
+            if lay and lay in validos:
                 talles.setdefault(lay, set()).add(i + 1)
     return talles
 

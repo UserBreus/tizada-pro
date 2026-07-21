@@ -113,6 +113,12 @@ def _ver_path(base, n):
     return base if n <= 0 else f"{raiz}.v{n}{ext}"
 
 
+def ruta_vigente(base):
+    """Igual que `ruta_arte_vigente`, con nombre genérico: el versionado no es exclusivo del arte,
+    la PLANTILLA lo usa para nombrar variantes sin tocar el archivo original del usuario."""
+    return ruta_arte_vigente(base)
+
+
 def ruta_arte_vigente(base):
     """Ruta del arte que el sistema debe usar hoy. Si la versión apuntada no existe (borrada a
     mano), cae a la anterior hasta llegar al original: nunca devuelve una ruta inexistente."""

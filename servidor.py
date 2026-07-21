@@ -4,7 +4,7 @@ Correr:  python servidor.py   y abrir  http://localhost:8000
 """
 import os, re, json, time, threading, uuid, traceback
 from collections import OrderedDict
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, session, has_request_context
 from werkzeug.exceptions import HTTPException
 
 import motor_pedido as MP
@@ -634,7 +634,46 @@ def _guardar_catalogo_json_espejo(cat):
             print(f"[catalogo] no se pudo escribir el espejo JSON (la base ya guardó): {ultimo}")
 
 
+def _pid_de_request():
+    """`pid` explícito que venga en la request (query, form o JSON). Sólo se aceptan los nombres
+    `pid`/`producto_id`: `id` NO, porque en varios endpoints significa otra cosa (un preset, un
+    grupo) y tomarlo como molde llevaría a escribir en el producto equivocado."""
+    if not has_request_context():
+        return None
+    try:
+        v = request.args.get("pid") or request.args.get("producto_id")
+        if not v and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            d = request.get_json(silent=True)
+            if isinstance(d, dict):
+                v = d.get("pid") or d.get("producto_id")
+            if not v:
+                v = request.form.get("pid") or request.form.get("producto_id")
+        v = str(v or "").strip()
+        return v or None
+    except Exception:
+        return None
+
+
 def _get_active_producto_id():
+    """Con qué MOLDE trabaja esta llamada, por orden de prioridad:
+
+    1. el `pid` explícito de la request — permite trabajar sobre un molde puntual sin "activarlo";
+    2. el molde activo DE ESTA SESIÓN — cada usuario trabaja el suyo sin pisar al de al lado;
+    3. el activo global del catálogo (compatibilidad con el modo de un solo usuario).
+
+    El punto 3 solo era un campo ÚNICO y compartido: dos personas subiendo su molde a la vez se
+    pisaban los archivos. Por eso 1 y 2 van primero.
+    """
+    pid = _pid_de_request()
+    if pid:
+        return pid
+    if has_request_context():
+        try:
+            s = session.get("pid_activo")
+            if s:
+                return s
+        except Exception:
+            pass
     return _cargar_catalogo().get("activo", "prod_default")
 
 
@@ -672,8 +711,10 @@ def _ruta_entrada(nombre, pid=None, sub=None, original=False):
         pdir = os.path.join(pdir, sub)
     os.makedirs(pdir, exist_ok=True)
     p = os.path.join(pdir, nombre)
-    if nombre == "arte.ai" and not original:
-        return OA.ruta_arte_vigente(p)
+    # Archivos VERSIONADOS: el arte (al inyectar objetos) y la plantilla (al nombrar variantes).
+    # En los dos casos el original del usuario queda intacto y el sistema usa la versión vigente.
+    if nombre in ("arte.ai", "plantilla.ai") and not original:
+        return OA.ruta_vigente(p)
     return p
 
 
@@ -775,7 +816,10 @@ def subir_plantilla():
     f = request.files.get("archivo")
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
-    destino = _ruta_entrada("plantilla.ai")
+    destino = _ruta_entrada("plantilla.ai", original=True)
+    # molde nuevo = se descartan las versiones del anterior (p. ej. el renombrado de variantes),
+    # o quedaría vigente una versión que ya no corresponde a este archivo
+    OA.reset_versiones(destino)
     nombre = (f.filename or "").lower()
     # Si YA había un molde con piezas nombradas, sacar una FOTO de su talle guía antes
     # de pisarlo: si el archivo nuevo es el mismo molde (re-subida, p. ej. reimportar el
@@ -1150,6 +1194,60 @@ def plantilla_etiquetas():
                "piezas_detalle": alta["piezas_detalle"], "metodo": "etiquetado visual"}
     json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
     return jsonify(resumen)
+
+
+@app.get("/api/plantilla/variantes")
+def plantilla_variantes():
+    """Radiografía del molde para la herramienta de NOMBRAR VARIANTES: qué capas hay, cuáles son
+    talles, y la curva propuesta (de menor a mayor por área). Acepta `?pid=`."""
+    import variantes_molde as VM
+    pl = _ruta_entrada("plantilla.ai")
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí el molde"}), 409
+    try:
+        info = VM.analizar(pl)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
+    info["sugerencia_nombres"] = VM.curva_sugerida(info["sugerencia"])
+    # los talles que YA están nombrados (el registro vigente), para saber si hace falta la herramienta
+    reg = _cargar("registro_producto.json") or {}
+    info["talles_registrados"] = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    return jsonify(info)
+
+
+@app.post("/api/plantilla/variantes")
+def plantilla_variantes_nombrar():
+    """Aplica los nombres de variante (talle) a las capas del molde.
+
+    Body: `{pid?, nombres: {capa_actual: nombre_nuevo}}`. Escribe una VERSIÓN nueva del molde (el
+    archivo original del usuario queda intacto) y RE-ARMA el registro con los nombres nuevos, para
+    que el molde quede utilizable de una: sin esto quedaría renombrado pero sin piezas.
+    """
+    import variantes_molde as VM
+    cuerpo = request.get_json(force=True) or {}
+    nombres = cuerpo.get("nombres") or {}
+    pid = _get_active_producto_id()
+    pl = _ruta_entrada("plantilla.ai", pid, original=True)
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí el molde"}), 409
+    try:
+        ruta, n = VM.renombrar_capas(pl, nombres)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 422
+    # el registro se rehace leyendo la versión nueva (ahí las capas ya se llaman como corresponde)
+    resumen = {"renombradas": n}
+    try:
+        alta = MP.alta_plantilla(_ruta_entrada("plantilla.ai", pid))
+        if alta.get("registro"):
+            json.dump(alta["registro"], open(_ruta_datos("registro_producto.json", pid), "w",
+                                             encoding="utf-8"), ensure_ascii=False)
+            _regenerar_piezas_index(pid, reg=alta["registro"])
+        resumen.update({"talles": alta.get("talles") or [], "piezas": alta.get("piezas") or [],
+                        "problemas": alta.get("problemas") or []})
+    except Exception as e:
+        resumen["problemas"] = [f"las variantes quedaron nombradas, pero el registro no se pudo "
+                                f"rehacer solo: {e}"]
+    return jsonify({"ok": True, **resumen})
 
 
 # ── Mapeo POR VARIABLE (regla 2026-07-13) ─────────────────────────────────────
@@ -3463,6 +3561,13 @@ def activar_producto():
     exists = any(p["id"] == pid for p in cat["productos"])
     if not exists:
         return jsonify({"error": "Producto inexistente"}), 404
+    # El activo se recuerda POR SESIÓN (cada usuario el suyo). Se sigue escribiendo el global
+    # para no romper el modo de un solo usuario ni los procesos que corren fuera de un request.
+    try:
+        session["pid_activo"] = pid
+        session.permanent = True
+    except Exception:
+        pass
     cat["activo"] = pid
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "activo": pid})

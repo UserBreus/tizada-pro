@@ -357,7 +357,38 @@ corrimiento):
 editables_tamano **y el manifiesto de objetos agregados** — sin esto, agregar/mover un objeto no
 regeneraba el render y "no se veía".
 
+## 10.c NOMBRAR VARIANTES (talles) — molde con las capas sin nombre
+
+**El talle de una pieza sale del NOMBRE DE LA CAPA** (`_talles_de_plantilla`). Un molde exportado de
+un CAD puede venir con capas `Layer 1`, `Capa 3`: el sistema detecta 20 "talles" con esos nombres y
+**0 piezas**, y el molde es inusable. `variantes_molde.py` resuelve eso:
+
+- `analizar(plantilla)` → `{formato, capas[], sugerencia, total_talles}`. **`formato`**: `anidado`
+  (los talles están dibujados UNO ENCIMA DEL OTRO — gradación de Optitex, el caso más común: no se
+  pueden separar con el mouse, se nombran POR CAPA) o `extendido` (cada talle en su bloque). Se
+  decide midiendo cuánto se solapan los bbox de dos talles.
+- **La curva se propone ordenando por ÁREA** — verificado contra un molde real de 20 talles:
+  reproduce el orden exacto. Por *ancho medio* NO sirve: `16` y `XS` empatan (1127.3 los dos, son
+  dos curvas distintas que se tocan); por área se separan sin ambigüedad.
+- `renombrar_capas(plantilla, mapa)` escribe una **VERSIÓN nueva** (`plantilla.v1.ai` + puntero
+  `plantilla.ver`, la misma maquinaria que el arte): el archivo del usuario queda intacto.
+- Endpoints `GET/POST /api/plantilla/variantes` (aceptan `pid`); el POST además **rehace el
+  registro** leyendo la versión nueva. UI: componente `NombrarVariantes` en Config → Moldería.
+
+**Por qué se renombra el archivo y no se traduce al vuelo:** se probó un alias `{capa: talle}`
+aplicado en la lectura, y hay que traducir en CADA punto que compara capas por nombre — incluido
+`molde_real._candidatos_mesa` (compara `d["layer"] == talle`), que de olvidarse deja al motor **sin
+piezas al generar la tizada**. Renombrando, el resto del sistema no se entera de nada.
+
+**MOLDE ACTIVO — ya no es global.** `_get_active_producto_id()` resuelve por orden: (1) `pid` de la
+request, (2) el activo **de la sesión**, (3) el global del catálogo. Antes era sólo (3), un único
+campo compartido: dos usuarios subiendo su molde a la vez **se pisaban los archivos**. Con esto
+todos los endpoints que usaban el activo aceptan `?pid=` sin tocarlos uno por uno. `_pid_de_request`
+acepta `pid`/`producto_id` y **no** `id` (en varios endpoints `id` es otra cosa).
+
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-07-21 (3) — Nombrar variantes + el molde activo deja de ser global + BUG del talle «0».** (a) Herramienta `variantes_molde.py` + `GET/POST /api/plantilla/variantes` + UI `NombrarVariantes` (Config→Moldería): ver §10.c. Verificado end-to-end con un fixture real (el molde del usuario con las capas renombradas a `Layer N`): 20/20 nombradas, registro rehecho, piezas detectadas (19), original intacto. (b) **`_get_active_producto_id` ya no depende del activo global** (pid de la request → sesión → global); verificado que se puede subir una plantilla a un `pid` puntual **sin activarlo** y que el molde del otro usuario no se toca. (c) **BUG REAL ENCONTRADO Y ARREGLADO: el talle «0» se perdía.** `CAPAS_SISTEMA` incluye `"0"` (por la capa por defecto de AutoCAD en los DXF), así que a un molde con curva de niños (0,1,2,4…) se le borraba un talle entero: el molde del usuario tiene **20 capas de talle y su registro tenía 19**. Ahora se decide por CONTENIDO (si la capa "0" tiene tantas formas como los otros talles, es un talle) y la regla vive en un solo lugar: `_talles_con_molde` la reusa de `_talles_de_plantilla` — estaban duplicadas y por eso el talle aparecía en el alta y desaparecía en la detección. **Pendiente para el usuario:** su registro sigue con 19 talles hasta que se rehaga (re-subir el molde o re-guardar las etiquetas); su `deteccion_cache` también quedó viejo (no se tocó por ser dato suyo).
 
 - **2026-07-21 — RESUELTO: "al cargar una imagen da error" (colocar objeto = 500). Causa real: archivos TRABADOS, no el código de inyección.** Síntoma: `POST /api/productos/objeto_agregado/<id>/colocar` devolvía 500 genérico. Traza real: `PermissionError [WinError 5]` al `os.replace` del temporal sobre `arte.ai`. **Diagnóstico (lo que costó):** primero se asumió que el server tenía el arte abierto y se cerraron `mesa_rect_arte` y `mapeo_variantes_arte` → **seguía fallando**. La prueba que lo destrabó fue empírica: intentar el `os.replace` **desde un proceso externo y con el server muerto** → seguía denegado ⇒ el lock **no era del server**. Sondeando todos los artes: **4 de 5 trabados** (`dcvd`, `hgvbn`, `t5y6rt`, `tht`; libre sólo `nhgnhg`), con 24 procesos python zombis de sesiones viejas y sus handles de PyMuPDF colgados. **NO era OneDrive ni la ACL** (el `replace` entre archivos nuevos en la misma carpeta funciona). **Arreglo en dos capas:** (1) **el arte se versiona** — `inyectar_editable` lee la versión vigente y escribe `arte.v<N+1>.ai` + puntero `arte.ver`, sin `os.replace`, así que ningún lock puede romper la edición y **el archivo original del usuario nunca se toca**; `_ruta_entrada("arte.ai")` resuelve la vigente para todo el sistema y la subida de arte (`original=True`) hace `reset_versiones`. (2) **fin de las fugas de handles** — `motor_pedido` abre con `_abrir`/`_abrir_pike` (registran el documento) y `@app.teardown_request` → `MP.cerrar_abiertos()`; 29 llamadas migradas en 16 funciones que abrían el arte/la plantilla y nunca cerraban. Verificado: tras un request el archivo queda **libre**. **Además:** el endpoint ahora inyecta **todas las mesas en una sola pasada** (una versión, una capa OCG compartida) y **devuelve el motivo real** del fallo en vez de "no se pudo inyectar" (el `print` al log estaba bufferizado y ocultaba la causa). **Gotcha para la próxima:** si algo "no se puede guardar" en Windows, probarlo **desde afuera del server** antes de tocar código — el lock puede ser de otro proceso.
 

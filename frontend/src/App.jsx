@@ -570,6 +570,128 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
 }
 
 // ── Guía: cómo exportar el molde desde cada programa (AI / Corel-PDF / DXF) ──
+/* NOMBRAR VARIANTES (talles).
+   Un molde puede venir con las capas sin nombrar ("Layer 1", "Capa 3"): sin nombre de talle no hay
+   molde utilizable. Acá el usuario les pone nombre. El sistema PROPONE la curva ordenando por
+   tamaño (de la más chica a la más grande) y el usuario corrige: el tamaño dice cuál es menor,
+   pero no si la menor se llama «0» o «XS». */
+function NombrarVariantes({ pid, term, onListo, showError, showMsg }) {
+  const [info, setInfo] = React.useState(null);
+  const [nombres, setNombres] = React.useState({});
+  const [guardando, setGuardando] = React.useState(false);
+  const [abierto, setAbierto] = React.useState(false);
+
+  const cargar = React.useCallback(async () => {
+    try {
+      const r = await fetch(`/api/plantilla/variantes?pid=${encodeURIComponent(pid)}`);
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudo leer el molde'); return; }
+      setInfo(d);
+      const ini = {};
+      (d.sugerencia || []).forEach((capa, i) => { ini[capa] = (d.sugerencia_nombres || [])[i] || capa; });
+      setNombres(ini);
+    } catch (e) { showError('No se pudo leer el molde: ' + e.message); }
+  }, [pid, showError]);
+
+  React.useEffect(() => { if (abierto && !info) cargar(); }, [abierto, info, cargar]);
+
+  // ¿parece que las capas NO están nombradas? (nombres tipo "Layer 3", "Capa 2", "Path 7")
+  const sinNombrar = (info?.sugerencia || []).filter(c => /^(layer|capa|path|group|grupo)[\s_-]*\d*$/i.test(String(c).trim())).length;
+
+  const aplicarCurva = (estilo) => {
+    const capas = info?.sugerencia || [];
+    const letras = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL', '6XL', '7XL'];
+    const ninos = ['0', '1', '2', '4', '6', '8', '10', '12', '14', '16'];
+    let vals;
+    if (estilo === 'numeros') vals = capas.map((_, i) => String(i + 1));
+    else if (estilo === 'ninos') vals = capas.map((_, i) => ninos[i] ?? String(18 + (i - ninos.length) * 2));
+    else {
+      const i0 = Math.max(0, Math.floor((letras.length - capas.length) / 2) - 1);
+      vals = capas.map((_, i) => letras[i0 + i] ?? `${i0 + i - 5}XL`);
+    }
+    const n = {}; capas.forEach((c, i) => { n[c] = vals[i]; }); setNombres(n);
+  };
+
+  const guardar = async () => {
+    const vals = Object.values(nombres).map(v => String(v || '').trim());
+    if (vals.some(v => !v)) { showError('Faltan nombres: cada variante tiene que tener el suyo'); return; }
+    if (new Set(vals).size !== vals.length) { showError('Hay dos variantes con el mismo nombre'); return; }
+    setGuardando(true);
+    try {
+      const r = await fetch('/api/plantilla/variantes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, nombres }),
+      });
+      const d = await r.json();
+      if (!r.ok) { showError(d.error || 'No se pudieron aplicar los nombres'); return; }
+      showMsg(`${d.renombradas} ${term.variante.toLowerCase()}s nombradas. Ahora indicá qué es cada pieza.`);
+      setInfo(null); setAbierto(false);
+      onListo && onListo();
+    } catch (e) { showError('No se pudo guardar: ' + e.message); }
+    finally { setGuardando(false); }
+  };
+
+  return (
+    <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
+      <button type="button" onClick={() => setAbierto(a => !a)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: 'rgba(255,255,255,0.02)', border: 0, color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
+        <span>
+          <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>Nombrar {term.variante.toLowerCase()}s</span>
+          <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)' }}>
+            Si el molde vino con las capas sin nombre, decile cuál es cada talle
+          </span>
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{abierto ? '▲' : '▾'}</span>
+      </button>
+
+      {abierto && (
+        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-light)' }}>
+          {!info ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Leyendo el molde…</div> : (
+            <>
+              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Encontré <b>{info.total_talles}</b> {term.variante.toLowerCase()}s, ordenadas de la más
+                chica a la más grande. {info.formato === 'anidado'
+                  ? 'Están dibujadas una encima de otra (molde anidado), así que se nombran por capa.'
+                  : 'Cada una ocupa su propio bloque.'}
+                {sinNombrar > 0 && <> <b style={{ color: 'var(--warning, #f5a524)' }}>{sinNombrar} sin nombrar.</b></>}
+              </div>
+
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['letras', 'S · M · L'], ['numeros', '1 · 2 · 3'], ['ninos', '0 · 2 · 4']].map(([k, lbl]) => (
+                  <button key={k} type="button" onClick={() => aplicarCurva(k)}
+                    style={{ flex: 1, padding: '5px 4px', fontSize: 10.5, fontWeight: 700, borderRadius: 7, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' }}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, maxHeight: 300, overflowY: 'auto' }}>
+                {(info.sugerencia || []).map((capa, i) => (
+                  <div key={capa} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 20, fontSize: 10, color: 'var(--text-muted)', textAlign: 'right' }}>{i + 1}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`capa del archivo: ${capa}`}>{capa}</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>→</span>
+                    <input value={nombres[capa] ?? ''} onChange={e => setNombres(n => ({ ...n, [capa]: e.target.value }))}
+                      style={{ width: 84, padding: '4px 7px', fontSize: 12, fontWeight: 700, borderRadius: 6, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.25)', color: '#fff' }} />
+                  </div>
+                ))}
+              </div>
+
+              <button type="button" className="btn success" disabled={guardando} onClick={guardar}
+                style={{ width: '100%', fontSize: 12 }}>
+                {guardando ? 'Aplicando…' : `Aplicar a ${(info.sugerencia || []).length} ${term.variante.toLowerCase()}s`}
+              </button>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                El archivo original no se toca: se guarda una versión nueva del molde con las capas nombradas.
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AyudaExportMolde({ term }) {
   const V = (term?.variante || 'talle').toLowerCase();
   const secc = {
@@ -8282,6 +8404,24 @@ export default function App() {
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cambiar ▾</span>
                                 </button>
                               </div>
+
+                              {/* Nombrar variantes: sólo hace falta si el molde vino con las capas
+                                  sin nombre, pero se deja siempre disponible para corregirlas. */}
+                              <NombrarVariantes
+                                pid={activoProdDetalle?.id}
+                                term={term}
+                                showError={showError}
+                                showMsg={showMsg}
+                                onListo={async () => {
+                                  // el molde cambió (capas nombradas + registro rehecho): recargar
+                                  // la detección para ver las piezas y los talles nuevos
+                                  await fetchProductos();
+                                  try {
+                                    const r = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(activoProdDetalle?.id || '')}`);
+                                    if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); }
+                                  } catch { }
+                                }}
+                              />
 
                               <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
                                 Acá cargás y acomodás las piezas del molde. Para <b>nombrar cada pieza</b> (y armar variables), andá a la pestaña <b>Variables</b>.
