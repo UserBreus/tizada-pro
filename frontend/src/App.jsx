@@ -571,7 +571,7 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
 
 // ── Guía: cómo exportar el molde desde cada programa (AI / Corel-PDF / DXF) ──
 /* NOMBRAR VARIANTES (talles).
-   Un molde puede venir con las capas sin nombrar ("Layer 1", "Capa 3"): sin nombre de talle no hay
+   Un molde puede venir con las capas sin nombrar ("Layer 1", "Capa 3"): sin nombre de variante no hay
    molde utilizable. Acá el usuario les pone nombre. El sistema PROPONE la curva ordenando por
    tamaño (de la más chica a la más grande) y el usuario corrige: el tamaño dice cuál es menor,
    pero no si la menor se llama «0» o «XS». */
@@ -665,7 +665,7 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
             {info?.sin_talles
               ? (info?.una_sola_capa
                   ? 'El molde vino con todo en una sola capa: seleccioná las piezas de cada variante y escribile el nombre'
-                  : 'El molde no tiene ninguna capa con nombre de talle: hasta que las nombres no se puede usar')
+                  : `El molde no tiene ninguna capa con nombre de ${term.variante.toLowerCase()}: hasta que las nombres no se puede usar`)
               : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`}
           </span>
         </span>
@@ -677,7 +677,7 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
           {!info ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Leyendo el molde…</div> : (
             <>
               <div style={{ display: 'flex', gap: 6, padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.25)' }}>
-                {[[false, 'Por capa', 'cada talle en su capa'], [true, 'Por piezas', 'todo en una capa']].map(([m, lbl, sub]) => (
+                {[[false, 'Por capa', `cada ${term.variante.toLowerCase()} en su capa`], [true, 'Por piezas', 'todo en una capa']].map(([m, lbl, sub]) => (
                   <button key={String(m)} type="button" onClick={() => onModo && onModo(m)} title={sub}
                     style={{ flex: 1, padding: '6px 4px', fontSize: 11, fontWeight: 700, borderRadius: 7, cursor: 'pointer', border: '1px solid ' + (modoPiezas === m ? 'var(--accent)' : 'transparent'), background: modoPiezas === m ? 'rgba(0,243,255,0.12)' : 'transparent', color: modoPiezas === m ? 'var(--accent)' : 'var(--text-muted)' }}>
                     {lbl}

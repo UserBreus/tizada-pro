@@ -1235,7 +1235,7 @@ def _deteccion_pendiente():
     """Misma FORMA que una detección normal pero vacía: el front la consume sin casos especiales."""
     return {"mesa": None, "talle_ref": None, "talles": [], "unidad": "mm", "img_w": 0, "img_h": 0,
             "piezas": [], "falta_nombrar_variantes": True,
-            "aviso": "Falta nombrar las variantes (talles) del molde: sin eso no se pueden "
+            "aviso": "Falta nombrar las variantes del molde: sin eso no se pueden "
                      "detectar las piezas."}
 
 

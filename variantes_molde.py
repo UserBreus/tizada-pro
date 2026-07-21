@@ -131,7 +131,7 @@ def renombrar_capas(path_plantilla, mapa):
         raise ValueError("no hay nombres para aplicar")
     nuevos = [v for v in mapa.values()]
     if len(set(nuevos)) != len(nuevos):
-        raise ValueError("hay dos variantes con el mismo nombre: cada talle tiene que ser único")
+        raise ValueError("hay dos variantes con el mismo nombre: cada una tiene que ser única")
 
     vigente = ruta_vigente(path_plantilla)
     destino = _ver_path(path_plantilla, _ver_actual(path_plantilla) + 1)
