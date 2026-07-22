@@ -575,6 +575,59 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
    molde utilizable. Acá el usuario les pone nombre. El sistema PROPONE la curva ordenando por
    tamaño (de la más chica a la más grande) y el usuario corrige: el tamaño dice cuál es menor,
    pero no si la menor se llama «0» o «XS». */
+// ── Botón de ayuda reusable (§10.d) ────────────────────────────────────────
+// PORQUÉ: el panel de Moldería se había llenado de párrafos de explicación que
+// tapaban las herramientas. Cada explicación ahora vive detrás de este «?», al
+// lado del título de su herramienta: el panel muestra sólo controles y el texto
+// aparece en un globo SÓLO cuando el usuario lo pide. Posición FIJA por portal
+// (getBoundingClientRect) para que ningún contenedor con overflow lo recorte —
+// mismo criterio que el desplegable de ComboCell.
+function Ayuda({ children, ancho = 260 }) {
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState(null);            // {top,left} abierto · null cerrado
+  const toggle = (e) => {
+    e.stopPropagation();                            // no dispares el click del título/acordeón de atrás
+    e.preventDefault();
+    if (pos) { setPos(null); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    // Debajo del «?»; si no entra a la derecha, se corre para no salirse de la pantalla.
+    const left = Math.min(r.left, window.innerWidth - ancho - 10);
+    setPos({ top: r.bottom + 6, left: Math.max(8, left) });
+  };
+  // Al hacer scroll el globo quedaría flotando lejos del botón → se cierra (y al redimensionar).
+  useEffect(() => {
+    if (!pos) return;
+    const cerrar = () => setPos(null);
+    window.addEventListener('scroll', cerrar, true);
+    window.addEventListener('resize', cerrar);
+    return () => { window.removeEventListener('scroll', cerrar, true); window.removeEventListener('resize', cerrar); };
+  }, [pos]);
+  return (
+    <>
+      <button ref={btnRef} type="button" onClick={toggle} aria-label="Ayuda" title="Ayuda"
+        style={{ width: 16, height: 16, flexShrink: 0, padding: 0, borderRadius: 999, lineHeight: 1,
+          fontSize: 10.5, fontWeight: 800, fontFamily: 'inherit', cursor: 'pointer', verticalAlign: 'middle',
+          border: '1px solid ' + (pos ? 'var(--accent)' : 'var(--border-light)'),
+          background: pos ? 'rgba(0,243,255,0.15)' : 'transparent',
+          color: pos ? 'var(--accent)' : 'var(--text-muted)' }}>?</button>
+      {pos && createPortal(
+        <>
+          {/* clic afuera cierra el globo */}
+          <div onClick={() => setPos(null)} style={{ position: 'fixed', inset: 0, zIndex: 4000 }} />
+          <div style={{ position: 'fixed', top: pos.top, left: pos.left, width: ancho, maxWidth: 'calc(100vw - 16px)',
+            zIndex: 4001, padding: '10px 12px', borderRadius: 9, background: '#15151a',
+            border: '1px solid var(--border-light)', boxShadow: '0 10px 26px rgba(0,0,0,0.55)',
+            fontSize: 11.5, fontWeight: 400, lineHeight: 1.5, color: 'var(--text-secondary)',
+            textAlign: 'left', textTransform: 'none', letterSpacing: 'normal', whiteSpace: 'normal' }}>
+            {children}
+          </div>
+        </>,
+        document.getElementById('root') || document.body
+      )}
+    </>
+  );
+}
+
 // Herramienta de VARIANTES (talles). Dos modos, porque hay dos moldes reales (ver §10.c del mapa):
 //  · POR CAPA   — el molde trae una capa por talle (sin nombrar o mal nombrada): se le pone nombre
 //                 a cada capa. Es lo que hace este componente.
@@ -679,27 +732,32 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
 
   return (
     <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
-      <button type="button" onClick={() => setAbierto(a => !a)}
+      {/* Header como div (no button): así el «?» de ayuda puede ir anidado sin
+          botón dentro de botón, y su stopPropagation evita abrir/cerrar el acordeón. */}
+      <div role="button" tabIndex={0} onClick={() => setAbierto(a => !a)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAbierto(a => !a); } }}
         style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: faltaNombrar ? 'rgba(245,165,36,0.10)' : 'rgba(255,255,255,0.02)', border: 0, color: '#fff', cursor: 'pointer', textAlign: 'left' }}>
         <span>
-          <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 700 }}>
             {faltaNombrar ? `⚠ Falta nombrar las ${term.variante.toLowerCase()}s` : `Nombrar ${term.variante.toLowerCase()}s`}
+            <Ayuda ancho={250}>Si el molde vino con las capas sin nombre, decile cuál es cada {term.variante.toLowerCase()}</Ayuda>
           </span>
-          <span style={{ display: 'block', fontSize: 10.5, color: faltaNombrar ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
-            {faltaNombrar
-              ? (info?.una_sola_capa
-                  ? 'El molde vino con todo en una sola capa: seleccioná las piezas de cada variante y escribile el nombre'
-                  : `El molde no tiene ninguna capa con nombre de ${term.variante.toLowerCase()}: hasta que las nombres no se puede usar`)
-              : (info?.resuelto
-                  ? `✓ ${(info.talles_registrados || []).length} ${term.variante.toLowerCase()}s definidas: ${(info.variantes_piezas?.length ? info.variantes_piezas : info.talles_registrados || []).join(' · ')}. Abrí sólo si querés corregirlas.`
-                  : `Si el molde vino con las capas sin nombre, decile cuál es cada ${term.variante.toLowerCase()}`)}
-          </span>
+          {/* Sólo el ESTADO queda a la vista (aviso/✓ resuelto); la explicación se fue al «?». */}
+          {(faltaNombrar || info?.resuelto) && (
+            <span style={{ display: 'block', fontSize: 10.5, color: faltaNombrar ? 'var(--warning, #f5a524)' : 'var(--text-muted)' }}>
+              {faltaNombrar
+                ? (info?.una_sola_capa
+                    ? 'El molde vino con todo en una sola capa: seleccioná las piezas de cada variante y escribile el nombre'
+                    : `El molde no tiene ninguna capa con nombre de ${term.variante.toLowerCase()}: hasta que las nombres no se puede usar`)
+                : `✓ ${(info.talles_registrados || []).length} ${term.variante.toLowerCase()}s definidas: ${(info.variantes_piezas?.length ? info.variantes_piezas : info.talles_registrados || []).join(' · ')}. Abrí sólo si querés corregirlas.`}
+            </span>
+          )}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           {pzPend && <span style={{ fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: 'rgba(245,165,36,0.18)', color: 'var(--warning, #f5a524)', whiteSpace: 'nowrap' }}>guardado · falta aplicar</span>}
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{abierto ? '▲' : '▾'}</span>
         </span>
-      </button>
+      </div>
 
       {abierto && (
         <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-light)' }}>
@@ -747,12 +805,12 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
                 ))}
               </div>
 
-              <button type="button" className="btn success" disabled={guardando} onClick={guardar}
-                style={{ width: '100%', fontSize: 12 }}>
-                {guardando ? 'Aplicando…' : `Aplicar a ${(info.sugerencia || []).length} ${term.variante.toLowerCase()}s`}
-              </button>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                El archivo original no se toca: se guarda una versión nueva del molde con las capas nombradas.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button type="button" className="btn success" disabled={guardando} onClick={guardar}
+                  style={{ flex: 1, fontSize: 12 }}>
+                  {guardando ? 'Aplicando…' : `Aplicar a ${(info.sugerencia || []).length} ${term.variante.toLowerCase()}s`}
+                </button>
+                <Ayuda ancho={240}>El archivo original no se toca: se guarda una versión nueva del molde con las capas nombradas.</Ayuda>
               </div>
             </>
           )}
@@ -9330,15 +9388,12 @@ export default function App() {
 
                       {tabAjustesMolde === 'molderia' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                            Carga y registra las piezas vectoriales del molde `.ai`.
-                          </div>
-                          
-                          {/* Botones de Carga */}
-                          <div style={{ display: 'flex', gap: 8 }}>
+                          {/* Botones de Carga (la explicación de qué hace este panel vive en el «?») */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <button className="btn ghost" onClick={() => fileInputPlantillaRef.current.click()} style={{ fontSize: 11.5, flex: 1 }}>
                               <Icon name="upload" style={{ width: 12, height: 12, marginRight: 6 }} /> Re-subir Plantilla
                             </button>
+                            <Ayuda ancho={240}>Carga y registra las piezas vectoriales del molde `.ai`.</Ayuda>
                             <input
                               type="file"
                               ref={fileInputPlantillaRef}
@@ -9456,13 +9511,10 @@ export default function App() {
                                             : 'El molde ya está partido con estas ' + term.variante.toLowerCase() + 's.'}
                                         </div>
                                       </div>
-                                      <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                                        Seleccioná en el visor las piezas de una {term.variante.toLowerCase()} (clic, o
-                                        arrastrá un recuadro) y escribile el nombre. Después repetí con la siguiente.
-                                      </div>
-                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                                        Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b> ·
-                                        Asignadas: <b style={{ color: 'var(--success)' }}>{asignadas}</b> de {total}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                                        <span>Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b> ·
+                                        Asignadas: <b style={{ color: 'var(--success)' }}>{asignadas}</b> de {total}</span>
+                                        <Ayuda ancho={260}>Seleccioná en el visor las piezas de una {term.variante.toLowerCase()} (clic, o arrastrá un recuadro) y escribile el nombre. Después repetí con la siguiente. El archivo original no se toca: se guarda una versión nueva del molde con una capa por {term.variante.toLowerCase()}.</Ayuda>
                                       </div>
                                       <input value={varPzInput} onChange={e => setVarPzInput(e.target.value)}
                                         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); asignarVariantePz(); } }}
@@ -9497,9 +9549,6 @@ export default function App() {
                                           Faltan {total - asignadas} piezas sin {term.variante.toLowerCase()}: van a quedar fuera del molde utilizable.
                                         </div>
                                       )}
-                                      <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                                        El archivo original no se toca: se guarda una versión nueva del molde con una capa por {term.variante.toLowerCase()}.
-                                      </div>
                                     </div>
                                   );
                                 })()}
@@ -9512,7 +9561,26 @@ export default function App() {
                               {(tallesMolde.length > 1) && (
                                 <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: empModo ? 'rgba(245,158,11,0.06)' : 'transparent' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>La misma pieza en cada {term.variante.toLowerCase()}</span>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>La misma pieza en cada {term.variante.toLowerCase()}</span>
+                                      {/* La explicación (colapsada o en-modo) se movió acá: cambia según el modo. */}
+                                      <Ayuda ancho={280}>{!empModo ? (
+                                        <>Cada pieza existe en todos los {term.variante.toLowerCase()}s. Acá se ven <b>todas juntas</b>:
+                                          <b> seleccionás las que son la misma</b> (la de cada {term.variante.toLowerCase()}) y escribís
+                                          <b> qué es</b> («Frente»). Con eso queda definido su nombre <i>y</i> la correspondencia entre
+                                          {' '}{term.variante.toLowerCase()}s. Se guarda solo, en el momento.</>
+                                      ) : empTodas ? (
+                                        <>En el visor están <b>todas las piezas de todos los {term.variante.toLowerCase()}s</b>.
+                                          Seleccioná las que son <b>la misma pieza</b> (la de {(empData?.talles || []).slice(0, 3).join(', ')}…)
+                                          y escribí qué es: «Frente». Es el mismo gesto que nombrar — con eso queda el
+                                          nombre <i>y</i> la correspondencia entre {term.variante.toLowerCase()}s.</>
+                                      ) : (
+                                        <>Tocá la pieza en <b style={{ color: 'var(--accent)' }}>{empData?.guia}</b>, escribí qué es y
+                                          confirmá: queda con ese nombre en <b>todos</b> los {term.variante.toLowerCase()}s. El sistema
+                                          <b> propone</b> cuál es la misma en cada uno — lo que confirmes vos queda fijo y no se
+                                          vuelve a mover.</>
+                                      )}</Ayuda>
+                                    </span>
                                     <button type="button" className={`btn ${empModo ? 'success' : 'ghost'}`}
                                       style={{ padding: '4px 10px', fontSize: 11 }}
                                       onClick={() => activarEmparejar(!empModo, 'simple')}>
@@ -9551,29 +9619,11 @@ export default function App() {
                                           </div>
                                         );
                                       })()}
-                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                                        Cada pieza existe en todos los {term.variante.toLowerCase()}s. Acá se ven <b>todas juntas</b>:
-                                        <b> seleccionás las que son la misma</b> (la de cada {term.variante.toLowerCase()}) y escribís
-                                        <b> qué es</b> («Frente»). Con eso queda definido su nombre <i>y</i> la correspondencia entre
-                                        {' '}{term.variante.toLowerCase()}s. Se guarda solo, en el momento.
-                                      </div>
                                     </div>
                                   ) : empVista === 'simple' ? (
                                     <>
-                                      {/* CAMINO PRINCIPAL: un gesto = nombre + correspondencia. */}
-                                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.55, padding: '9px 11px', borderRadius: 9, background: 'rgba(255,255,255,0.03)' }}>
-                                        {empTodas ? (
-                                          <>En el visor están <b>todas las piezas de todos los {term.variante.toLowerCase()}s</b>.
-                                            Seleccioná las que son <b>la misma pieza</b> (la de {(empData?.talles || []).slice(0, 3).join(', ')}…)
-                                            y escribí qué es: «Frente». Es el mismo gesto que nombrar — con eso queda el
-                                            nombre <i>y</i> la correspondencia entre {term.variante.toLowerCase()}s.</>
-                                        ) : (
-                                          <>Tocá la pieza en <b style={{ color: 'var(--accent)' }}>{empData?.guia}</b>, escribí qué es y
-                                            confirmá: queda con ese nombre en <b>todos</b> los {term.variante.toLowerCase()}s. El sistema
-                                            <b> propone</b> cuál es la misma en cada uno — lo que confirmes vos queda fijo y no se
-                                            vuelve a mover.</>
-                                        )}
-                                      </div>
+                                      {/* CAMINO PRINCIPAL: un gesto = nombre + correspondencia. La explicación
+                                          (empTodas / por-talle) se movió al «?» del título de la sección. */}
                                       {/* Por qué NO se puede mostrar todo junto (molde anidado / varias mesas): se dice
                                           en una línea, no se deja al usuario adivinando por qué ve un talle solo. */}
                                       {!empTodas && empTodasMotivo && (
@@ -9647,6 +9697,7 @@ export default function App() {
                                             {/* Un chip por variante: se ve de un vistazo cuáles ya elegiste y cuál falta. */}
                                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
                                               <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Selección</span>
+                                              <Ayuda ancho={250}>Clic para elegir una pieza, o arrastrá un recuadro para varias. Se <b>guarda al confirmar</b>: podés salir y volver.</Ayuda>
                                               {talles.map(t => {
                                                 const n = cuenta[t] || 0;
                                                 const col = n > 1 ? '#ef4444' : n === 1 ? 'var(--accent)' : 'var(--border-light)';
@@ -9686,9 +9737,6 @@ export default function App() {
                                                 {empGuardando ? 'Guardando…' : `Es esta pieza ✓${sel.length ? ` (${sel.length})` : ''}`}
                                               </button>
                                             </div>
-                                            <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                                              Clic para elegir una pieza, o arrastrá un recuadro para varias. Se <b>guarda al confirmar</b>: podés salir y volver.
-                                            </div>
                                           </div>
                                         );
                                       })()}
@@ -9697,6 +9745,8 @@ export default function App() {
                                       {!empTodas && (<>
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
                                         <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Viendo</span>
+                                        {/* En modo corregir (viendo un {variante} que no es la guía) la explicación va acá. */}
+                                        {empTalle !== empData?.guia && <Ayuda ancho={260}>Estás viendo <b style={{ color: 'var(--accent)' }}>{empTalle}</b>: cada pieza muestra el nombre que le tocó (✓ = confirmado por vos). ¿Alguna está mal? Tocá la pieza correcta y decí cuál es.</Ayuda>}
                                         {(empData?.talles || []).map(t => {
                                           const on = empTalle === t;
                                           const esGuia = t === empData?.guia;
@@ -9716,6 +9766,7 @@ export default function App() {
                                               Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b>
                                               {selNombrar.size === 1 && etqNombres[Array.from(selNombrar)[0]] ? <> · ya es «<b>{etqNombres[Array.from(selNombrar)[0]]}</b>»</> : null}
                                             </span>
+                                            <Ayuda ancho={250}>Cada grupo se <b>guarda al confirmarlo</b>: podés salir y volver, queda todo.</Ayuda>
                                             {selNombrar.size > 0 && <button type="button" className="btn ghost" style={{ fontSize: 11 }} onClick={() => setSelNombrar(new Set())}>Limpiar</button>}
                                           </div>
                                           <div style={{ display: 'flex', gap: 6 }}>
@@ -9729,17 +9780,9 @@ export default function App() {
                                               {empGuardando ? 'Guardando…' : (selNombrar.size === 1 && etqNombres[Array.from(selNombrar)[0]] ? 'Renombrar' : 'Es esta pieza ✓')}
                                             </button>
                                           </div>
-                                          <div style={{ fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                                            Cada grupo se <b>guarda al confirmarlo</b>: podés salir y volver, queda todo.
-                                          </div>
                                         </>
                                       ) : (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                                            Estás viendo <b style={{ color: 'var(--accent)' }}>{empTalle}</b>: cada pieza muestra el
-                                            nombre que le tocó (✓ = confirmado por vos). ¿Alguna está mal? Tocá la pieza correcta
-                                            y decí cuál es.
-                                          </div>
                                           {selNombrar.size === 1 && (
                                             <div style={{ display: 'flex', gap: 6 }}>
                                               <select value={empGrupoSel} onChange={e => setEmpGrupoSel(e.target.value)}
@@ -9973,19 +10016,15 @@ export default function App() {
                               {/* En «mi molde» no hay pestaña Variables: el nombrado de piezas (que vive
                                   DENTRO de ese paso) se alcanza desde acá — es el mismo editor. */}
                               {modoMiMolde ? (
-                                <>
-                                  <button type="button" className="btn ghost" style={{ width: '100%', fontSize: 12.5 }}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 12.5 }}
                                     onClick={() => { setTabAjustesMolde('variables'); setVarStep('nombrar'); setAsignandoTipo(null); setGrupoAislado(null); setModeloAbierto(null); setGrupoPzAbierto(null); setEditandoNombre(null); }}>
                                     Indicar qué es cada pieza →
                                   </button>
-                                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
-                                    Dos cosas para que tu molde sirva: que cada {term.variante.toLowerCase()} tenga su nombre (arriba) y que <b>cada pieza</b> diga qué es (Frente, Espalda, Manga…).
-                                  </div>
-                                </>
-                              ) : (
-                                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
-                                  Acá cargás y acomodás las piezas del molde. Para <b>nombrar cada pieza</b> (y armar variables), andá a la pestaña <b>Variables</b>.
+                                  <Ayuda ancho={270}>Dos cosas para que tu molde sirva: que cada {term.variante.toLowerCase()} tenga su nombre (arriba) y que <b>cada pieza</b> diga qué es (Frente, Espalda, Manga…).</Ayuda>
                                 </div>
+                              ) : (
+                                <Ayuda ancho={270}>Acá cargás y acomodás las piezas del molde. Para <b>nombrar cada pieza</b> (y armar variables), andá a la pestaña <b>Variables</b>.</Ayuda>
                               )}
                             </>
                           ) : activoProdDetalle?.plantilla ? (
