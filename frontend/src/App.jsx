@@ -6104,7 +6104,9 @@ export default function App() {
     const elegido = conObj.find(c => c.id === preferido) || conObj[0];
     if (elegido) {
       setEditableDiseno(elegido.id); setEditableData(elegido);
-      setEditableSel(elegido.objetos[0]?.nombre || null);
+      // editableSel es SIEMPRE un array (multi-selección): un string o null rompía todo el editor
+      // (`.length`/`.map`/`.includes` sobre null) al abrir un diseño sin objetos editables.
+      setEditableSel(elegido.objetos?.[0]?.nombre ? [elegido.objetos[0].nombre] : []);
       setEditableTalle(elegido.talles?.[Math.floor((elegido.talles.length - 1) / 2)] || elegido.talles?.[0] || null);
     } else { setEditableData({ objetos: [], talles: [], piezas: [] }); }
   };
@@ -6142,7 +6144,7 @@ export default function App() {
         const ctxKey = `${pid}|${diseno || 'principal'}|${variante || '*'}`;
         const keep = ctxKey === editorCtx.current && Object.keys(editorTfsRef.current || {}).length > 0;
         if (!keep) {
-          setEditableSel(d.objetos?.[0]?.nombre || null);
+          setEditableSel(d.objetos?.[0]?.nombre ? [d.objetos[0].nombre] : []);   // SIEMPRE array (ver arriba)
           const _t0 = d.talles?.[Math.floor((d.talles.length - 1) / 2)] || d.talles?.[0] || null; setEditableTalle(_t0); setEditableVarsSel(_t0 ? [_t0] : []);
           // arranca desde la BASE guardada por diseño (los ajustes del pedido se hacen encima)
           const base = Object.fromEntries((d.objetos || []).map(o => [o.nombre, { ...(o.transforms || {}) }]));
