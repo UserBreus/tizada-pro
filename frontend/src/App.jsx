@@ -7856,7 +7856,7 @@ export default function App() {
                             <button className="btn" style={{ padding: '8px 16px', fontSize: 12.5, fontWeight: 800, borderRadius: 9, gap: 7,
                               background: 'var(--cmyk-magenta)', color: 'var(--bg-primary)', borderColor: 'var(--cmyk-magenta)' }}
                               title="Editar el diseño: mover, rotar, escalar y espejar lo que sea editable"
-                              onClick={async () => { const d = await cargarEditablesPedido(_id, disenoActivo, verVariante); if ((d.objetos || []).length) setEditorEditOpen(true); else showError('Este diseño no tiene nada editable (capas «Editable …»).'); }}>
+                              onClick={async () => { await cargarEditablesPedido(_id, disenoActivo, verVariante); setEditorEditOpen(true); }}>
                               <Icon name="edit" style={{ width: 14, height: 14 }} /> Editar diseño
                             </button>
                           )}
