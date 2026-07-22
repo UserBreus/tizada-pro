@@ -6156,6 +6156,24 @@ export default function App() {
     } catch { }
     return { objetos: [] };
   };
+  // COLOR de un editable (CMYK, POR VARIABLE, a nivel objeto): guarda `color` (o lo LIMPIA con null =
+  // volver al color original), recarga los editables (para ver el color nuevo) y refresca el preview.
+  // El color NO está en la clave de memoria (`_pvKeyCon`) → hay que invalidar `_pvCache` a mano, si no
+  // el visor seguiría mostrando el render viejo (el server sí lo regenera: `_piezas_base_clave` v7).
+  const guardarColorEditable = async (nombre, color) => {
+    const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
+    if (!_mid || !nombre) { showError('No pude determinar el molde — reabrí el editor.'); return; }
+    try {
+      const r = await fetch('/api/productos/editable_color', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre, variante: verVariante || '*', color }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); showError(d.error || 'No se pudo guardar el color.'); return; }
+      _pvCache.current = {};                                   // color fuera de la clave de memoria → invalidar todo
+      await cargarEditablesPedido(_mid, editableDiseno, verVariante);   // recarga _o.color
+      cargarPreviewPiezas();                                   // re-render con el color nuevo (LEY arte=tizada)
+    } catch { showError('No se pudo guardar el color.'); }
+  };
   // ── OBJETOS AGREGADOS: subir un PNG/SVG/PDF/AI y sumarlo al editor como un editable más ──
   const fileInputObjetoRef = React.useRef(null);
   const [subiendoObjeto, setSubiendoObjeto] = React.useState(false);
@@ -8505,6 +8523,86 @@ export default function App() {
                           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
                             <b style={{ color: 'var(--accent)' }}>{_o.nombre}</b> · {_o.w_cm}×{_o.h_cm} cm al 100%
                           </div>
+                        </div>
+                      );
+                    })()}
+                    {/* ── COLOR del objeto (CMYK, POR VARIABLE): recolorea el editable sin tocar su
+                        forma. Sólo para 1 seleccionado. Los objetos no recoloreables (XObject/imagen)
+                        muestran el control deshabilitado con una nota (§10.b). ── */}
+                    {editableSel.length === 1 && (() => {
+                      const _o = _objsUnicos.find(o => o.nombre === editableSel[0]);
+                      if (!_o) return null;
+                      const _recolor = _o.recolorable === true && !_o._agregado;
+                      const _fill = (_o.color && _o.color.fill) || null;   // [c,m,y,k] 0..1 o null (= original)
+                      const _cmyk = _fill || [0, 0, 0, 0];
+                      const _stroke = (_o.color && _o.color.stroke) || null;
+                      const _rgb = ([c, m, y, k]) => `rgb(${Math.round(255 * (1 - c) * (1 - k))},${Math.round(255 * (1 - m) * (1 - k))},${Math.round(255 * (1 - y) * (1 - k))})`;
+                      const _setFill = (arr) => guardarColorEditable(_o.nombre, { fill: arr, stroke: _stroke });
+                      const _commitCh = (i, val) => {
+                        const n = Math.max(0, Math.min(100, parseFloat(String(val).replace(',', '.')) || 0)) / 100;
+                        const nc = [..._cmyk]; nc[i] = n; _setFill(nc);
+                      };
+                      const _inp = { width: 46, padding: '4px 5px', borderRadius: 6, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12, fontWeight: 700, textAlign: 'right', outline: 'none' };
+                      // Presets CMYK exactos (lo que se guarda es este CMYK, sin re-cuantizar).
+                      const _presets = [
+                        ['Rojo', [0, 0.9, 0.8, 0]], ['Naranja', [0, 0.5, 0.9, 0]], ['Amarillo', [0, 0.1, 0.9, 0]],
+                        ['Verde', [0.7, 0, 0.9, 0]], ['Cian', [0.85, 0, 0, 0]], ['Azul', [1, 0.7, 0, 0]],
+                        ['Violeta', [0.6, 0.7, 0, 0]], ['Magenta', [0, 0.9, 0, 0]], ['Negro', [0, 0, 0, 1]],
+                        ['Gris', [0, 0, 0, 0.5]], ['Blanco', [0, 0, 0, 0]],
+                      ];
+                      return (
+                        <div style={{ marginBottom: 6, flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>COLOR</div>
+                          {!_recolor ? (
+                            <div style={{ fontSize: 10.8, color: 'var(--text-muted)', lineHeight: 1.45, padding: '7px 9px', borderRadius: 8, border: '1px dashed var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                              Este objeto <b>no admite cambio de color</b>: es una imagen o gráfico incrustado
+                              {_o._agregado ? ' (objeto agregado)' : ' (XObject)'} — el color vive adentro del objeto.
+                            </div>
+                          ) : (
+                            <>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                <div title={_fill ? 'Color personalizado' : 'Color original del diseño'}
+                                  style={{ width: 30, height: 30, borderRadius: 7, flexShrink: 0, border: '1px solid var(--border-light)',
+                                    background: _fill ? _rgb(_cmyk) : 'repeating-conic-gradient(#888 0% 25%, #ccc 0% 50%) 50% / 12px 12px' }} />
+                                <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.35 }}>
+                                  {_fill ? <>Color <b style={{ color: 'var(--accent)' }}>personalizado</b> · CMYK {_cmyk.map(v => Math.round(v * 100)).join(' ')}</> : 'Usa su color original.'}
+                                </div>
+                              </div>
+                              {/* Presets rápidos (CMYK exacto) */}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+                                {_presets.map(([nm, cm]) => (
+                                  <button key={nm} type="button" title={`${nm} · CMYK ${cm.map(v => Math.round(v * 100)).join(' ')}`}
+                                    onClick={() => _setFill(cm)}
+                                    style={{ width: 22, height: 22, borderRadius: 6, cursor: 'pointer', padding: 0,
+                                      border: '1px solid ' + (_fill && cm.every((v, i) => Math.abs(v - _cmyk[i]) < 0.02) ? 'var(--accent)' : 'var(--border-light)'),
+                                      background: _rgb(cm) }} />
+                                ))}
+                              </div>
+                              {/* CMYK exacto (0–100) — lo que se guarda y se manda es este CMYK */}
+                              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                                {['C', 'M', 'Y', 'K'].map((lb, i) => (
+                                  <label key={lb} style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', flex: 1 }}>
+                                    <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)' }}>{lb}</span>
+                                    <input key={`${lb}|${_o.nombre}|${verVariante}|${Math.round(_cmyk[i] * 100)}`}
+                                      defaultValue={Math.round(_cmyk[i] * 100)} inputMode="numeric"
+                                      onBlur={(e) => _commitCh(i, e.target.value)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                      style={{ ..._inp, width: '100%' }} />
+                                  </label>
+                                ))}
+                              </div>
+                              <button type="button" onClick={() => guardarColorEditable(_o.nombre, null)}
+                                disabled={!_fill && !_stroke}
+                                style={{ width: '100%', height: 28, borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: (_fill || _stroke) ? 'pointer' : 'not-allowed',
+                                  border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)',
+                                  color: (_fill || _stroke) ? '#fff' : 'var(--text-muted)', opacity: (_fill || _stroke) ? 1 : 0.5 }}>
+                                ↺ Volver al color original
+                              </button>
+                              <div style={{ fontSize: 10.2, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.4 }}>
+                                El color va <b>por variable</b> ({_selResumen}) y se ve igual en la tizada.
+                              </div>
+                            </>
+                          )}
                         </div>
                       );
                     })()}

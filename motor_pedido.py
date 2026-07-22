@@ -12,6 +12,7 @@ from scipy import ndimage
 
 from molde_real import (extraer_contorno_mesa, extraer_piezas_mesa,
                         limpiar_capas, limpiar_capas_conservando_talle, aislar_capa, suprimir_capas,
+                        recolorar_capa, capa_admite_color,
                         geometrias_base, sanear_oc, _nombres_oc, MM)
 from nesting_contorno import anidar_contorno, componer_pdf_contorno
 from texto_curvas import FuenteCurvas
@@ -2087,6 +2088,24 @@ def extraer_editables(path_arte, con_thumb=True):
     return objs
 
 
+def editables_recolorables(path_arte):
+    """{nombre_capa: bool} — para cada capa editable del arte, si admite cambio de color.
+    Recolorable = tiene relleno/trazo DIRECTO en su content-stream (`recolorar_capa` puede
+    inyectar el CMYK). Los que sólo pintan vía XObject/imagen NO (color adentro, §10.b).
+    Lo usa el editor (front) para deshabilitar el control de color en esos objetos."""
+    out = {}
+    try:
+        pdf = _abrir_pike(path_arte)
+        for o in extraer_editables(path_arte, con_thumb=False):
+            try:
+                out[o["capa"]] = capa_admite_color(pdf.pages[o["mesa"] - 1], _norm_nombre(o["capa"]))
+            except Exception:
+                out[o["capa"]] = False
+    except Exception:
+        pass
+    return out
+
+
 def mesa_rect_arte(path_arte, mesa):
     """Rect [x0, y0, w, h] de una MESA del arte — el marco donde viven los editables.
 
@@ -2965,7 +2984,8 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
 def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, salida,
                    config_nesting=None, progreso=None, mapeo_arte=None, rotaciones=None,
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
-                   etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None):
+                   etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None,
+                   editables_color=None):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -3138,8 +3158,30 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         if _pv:
             _tamano[_norm_nombre(_n)] = _pv
     _tamano_nombres = set(_tamano.keys())
-    # Conjunto a redibujar fuera del diseño base = editados ∪ con-tamaño-configurado.
-    _redibujar_nombres = _editados_nombres | _tamano_nombres
+    # COLOR OVERRIDE por editable, POR VARIABLE: {variable: {objeto: {"fill":[cmyk]|None,"stroke":...}}}.
+    # La clave "*" = compartida (legacy). Un objeto con color en CUALQUIER variable se saca del diseño
+    # base y se redibuja RECOLOREADO (mismo camino que los editados). En las variables sin color, cae
+    # a color original. El color se resuelve por variable al armar la base (`_color_de`).
+    _ecolor = editables_color or {}
+    def _cmyk4(v):
+        try:
+            return tuple(float(x) for x in v)[:4] if (v and len(v) >= 4) else None
+        except Exception:
+            return None
+    def _color_de(nombre, variante):
+        """(fill, stroke) CMYK del objeto para esta VARIABLE (fallback a "*"), o None si no hay
+        override. Cada canal en 0..1; None en un canal = no tocar ese relleno/trazo."""
+        c = ((_ecolor.get(variante) or _ecolor.get("*") or {}).get(nombre)) or {}
+        f, s = _cmyk4(c.get("fill")), _cmyk4(c.get("stroke"))
+        return (f, s) if (f or s) else None
+    _coloreados_nombres = set()
+    for _objs in _ecolor.values():
+        for _nom, _c in (_objs or {}).items():
+            _cc = _c or {}
+            if _cmyk4(_cc.get("fill")) or _cmyk4(_cc.get("stroke")):
+                _coloreados_nombres.add(_norm_nombre(_nom))
+    # Conjunto a redibujar fuera del diseño base = editados ∪ con-tamaño-configurado ∪ recoloreados.
+    _redibujar_nombres = _editados_nombres | _tamano_nombres | _coloreados_nombres
     # GARANTÍA anti-desaparición: un objeto a redibujar (editado o fijo) solo se SACA del
     # diseño base si su aislamiento produce contenido real. Si fallara, se DEJA en el diseño
     # tal cual (presente) — nunca desaparece. Se valida más abajo (necesita _edit_por_mesa).
@@ -3175,12 +3217,25 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # Capa de UN objeto editable, AISLADA como vector (mismo lienzo del arte, con SOLO esa
     # capa pintada). Preserva el estado gráfico → color/CMYK/spot EXACTO del diseño (no se
     # rasteriza ni se arrastra lo que tenga encima). Cacheada por (mesa, capa).
-    _arte_solo = {}                       # (mesa, capa_norm) -> pikepdf Pdf aislado
-    def pagina_arte_solo(arte_mesa, capa):
-        key = (arte_mesa, _norm_nombre(capa))
+    _arte_solo = {}                       # (mesa, capa_norm, color_key) -> pikepdf Pdf aislado
+    def pagina_arte_solo(arte_mesa, capa, color=None):
+        # `color` = (fill_cmyk|None, stroke_cmyk|None) o None. Se cachea por color porque el
+        # mismo objeto puede tener colores distintos según la VARIABLE.
+        _ck = None if not color else ((tuple(color[0]) if color[0] else None),
+                                      (tuple(color[1]) if color[1] else None))
+        if _ck == (None, None):
+            _ck = None
+        key = (arte_mesa, _norm_nombre(capa), _ck)
         if key not in _arte_solo:
             pdf = _abrir_pike(arte)
             pag = pdf.pages[arte_mesa - 1]
+            # COLOR OVERRIDE: recolorar ANTES de aislar. `aislar_capa` (vía `_raspar_pintado`)
+            # BORRA los marcadores BDC/EMC que `recolorar_capa` necesita para ubicar el frame de
+            # la capa → recolorar después no encontraría la capa (gotcha §10.b). Con la página
+            # fresca los marcadores están presentes; el color inyectado (op `k`/`K` antes del
+            # pintado) sobrevive al aislado (se conserva el contenido de la capa objetivo).
+            if _ck is not None:
+                recolorar_capa(pdf, pag, _norm_nombre(capa), cmyk_fill=_ck[0], cmyk_stroke=_ck[1])
             aislar_capa(pdf, pag, _norm_nombre(capa))
             sanear_oc(pdf, pag)
             _arte_solo[key] = pdf
@@ -3237,8 +3292,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 if _nm not in _redibujar_nombres or _nm in _redibujar_validos:
                     continue
                 try:
-                    pagina_arte_solo(_mesa, _o["capa"])
-                    _bf = io.BytesIO(); _arte_solo[(_mesa, _norm_nombre(_o["capa"]))].save(_bf)
+                    pagina_arte_solo(_mesa, _o["capa"])   # validación de aislamiento: sin color
+                    _bf = io.BytesIO(); _arte_solo[(_mesa, _norm_nombre(_o["capa"]), None)].save(_bf)
                     _pg = _abrir("pdf", _bf.getvalue())[_mesa - 1]
                     if _pg.get_drawings() or _pg.get_images() or _pg.get_text().strip():
                         _redibujar_validos.add(_nm)
@@ -3387,7 +3442,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 _box = _tamano.get(_norm_nombre(_nombre_editable(_o["capa"])), {}).get(str(talle))
                 try:
                     # Capa del objeto AISLADA como vector (color/CMYK/spot exacto del diseño).
-                    _ps = pagina_arte_solo(_mesa_a, _o["capa"])
+                    # Si esta VARIABLE tiene color override para el objeto, se recolorea al aislar.
+                    _ps = pagina_arte_solo(_mesa_a, _o["capa"], color=_color_de(_o["nombre"], variante))
                     _xs = out.copy_foreign(_ps.as_form_xobject())
                     if "/OC" in _xs:
                         del _xs["/OC"]
@@ -3782,7 +3838,8 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                                 solo_piezas=True, borde_corte=md.get("borde_corte"),
                                 etiqueta=md.get("etiqueta"), editables_cfg=md.get("editables_cfg"),
                                 editables_tamano=md.get("editables_tamano"),
-                                objetos_agregados=md.get("objetos_agregados"))
+                                objetos_agregados=md.get("objetos_agregados"),
+                                editables_color=md.get("editables_color"))
             for tela, lst in pt.items():
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)

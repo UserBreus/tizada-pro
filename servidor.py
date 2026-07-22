@@ -2098,7 +2098,7 @@ def _sha1_corto(obj):
         s = str(obj)
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]
 
-def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle):
+def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle, edit_color=None):
     """Clave de invalidación (espejo de `_nido_clave`): si cambia el molde, el arte, el mapeo,
     el borde, la etiqueta o los editables → cambia la clave → se regenera esa base."""
     def _mt(p):
@@ -2110,11 +2110,14 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
     # v6: entra el REGISTRO. Una pieza es un NOMBRE, y qué geometría tiene ese nombre en cada
     # talle sale del registro: re-emparejar (o re-nombrar) cambia la pieza sin tocar el archivo
     # → sin esto el visor del Arte seguía mostrando el render de la pieza vieja.
-    return ["v6", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+    # v7: entra el COLOR override de editables. Sin esto, cambiar el color de un editable NO
+    # invalidaba la caché → el preview del Arte seguía mostrando el color viejo (LEY arte=tizada).
+    return ["v7", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
             _mt(_ruta_datos("registro_producto.json", pid)),
             _sha1_corto(mapeo or {}), _sha1_corto((prod or {}).get("borde_corte") or {}),
             _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
             _sha1_corto(edit_tam or {}), _sha1_corto(_oa_cargar(pid, sub) or {}),
+            _sha1_corto(edit_color or {}),
             str(variante or ""), str(talle or "")]
 
 def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, prioridad="fg"):
@@ -2132,7 +2135,8 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
         return None
     edit_cfg = _editables_cfg(prod, (diseno or "principal"), override)
     edit_tam = _editables_tamano(prod)
-    clave = _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle)
+    edit_color = _editables_color(prod, (diseno or "principal"))
+    clave = _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle, edit_color)
     vslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(variante or "todas"))[:40] or "todas"
     tslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(talle or "guia"))[:24] or "guia"
     cdir = _ruta_datos(os.path.join("piezas_cache", vslug, tslug), pid, sub=sub)
@@ -2215,6 +2219,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
                                     mapeo_arte=(mapeo or None), solo_piezas=True,
                                     borde_corte=prod.get("borde_corte"), etiqueta=prod.get("etiqueta"),
                                     editables_cfg=edit_cfg, editables_tamano=edit_tam,
+                                    editables_color=edit_color,   # color override (LEY arte=tizada)
                                     # el PREVIEW debe mostrar lo MISMO que la tizada (LEY arte=tizada):
                                     # sin esto los objetos agregados no aparecían en el paso Arte.
                                     objetos_agregados=_objetos_agregados_motor(pid, sub))
@@ -2626,6 +2631,46 @@ def _editables_cfg(prod, dslug, override=None):
     return out
 
 
+def _clamp_color(color):
+    """Sanea un color override CMYK de un editable. Devuelve {"fill":[c,m,y,k]|None,
+    "stroke":[c,m,y,k]|None} o None si no hay NINGÚN canal (= sin override / volver al original).
+    Cada canal en 0..1 (se guarda y se manda CMYK EXACTO, sin re-cuantizar — sublimación)."""
+    if not color:
+        return None
+    def _cmyk(v):
+        if not v:
+            return None
+        try:
+            vals = [max(0.0, min(1.0, float(x))) for x in v][:4]
+        except Exception:
+            return None
+        return vals if len(vals) == 4 else None
+    f = _cmyk((color or {}).get("fill"))
+    s = _cmyk((color or {}).get("stroke"))
+    if f is None and s is None:
+        return None
+    return {"fill": f, "stroke": s}
+
+
+def _editables_color(prod, dslug):
+    """Color override de editables para el motor: {variable: {objeto: {"fill":[cmyk]|None,
+    "stroke":[cmyk]|None}}}. Espejo de `_editables_cfg` pero para el COLOR (a nivel objeto, no
+    por talle). Compat: formato VIEJO (base[objeto]={"transforms":...}) → clave "*"."""
+    base = (((prod or {}).get("editables") or {}).get(dslug) or {})
+    out = {}
+    for var, objs in base.items():
+        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO
+            c = _clamp_color(objs.get("color"))
+            if c:
+                out.setdefault("*", {})[var] = c
+        else:                                                     # NUEVO: var es una VARIABLE
+            for obj, v in (objs or {}).items():
+                c = _clamp_color((v or {}).get("color"))
+                if c:
+                    out.setdefault(var, {})[obj] = c
+    return out
+
+
 def _caja_cm(d):
     """{ancho, alto} → [ancho_cm, alto_cm] (0 = sin límite por ese lado)."""
     d = d or {}
@@ -2750,10 +2795,18 @@ def get_editables():
         _inyectadas = OA.capas_agregadas(_ruta_entrada("arte.ai", pid, sub=sub, original=True))
     except Exception:
         _inyectadas = set()
+    # ¿Cada capa admite cambio de COLOR? (relleno/trazo directo sí; XObject/imagen no, §10.b).
+    try:
+        _recol = MP.editables_recolorables(arte) if os.path.exists(arte) else {}
+    except Exception:
+        _recol = {}
     for o in objetos:
         o["pieza"] = mesa2pieza.get(o["mesa"], "")
         o["quitable"] = o.get("capa") in _inyectadas
         o["transforms"] = (cfg.get(o["nombre"]) or {}).get("transforms", {})
+        # Color override guardado de ESTA variable (a nivel objeto) + si la capa es recoloreable.
+        o["color"] = (cfg.get(o["nombre"]) or {}).get("color")
+        o["recolorable"] = bool(_recol.get(o.get("capa"), False))
         # posición BASE del objeto sobre su pieza (cm_encajar en fracciones 0..1 del bbox de
         # la pieza): el arte se escala al ALTO de la pieza y se centra a lo ancho.
         rp = reg.get(o["pieza"]) or {}
@@ -2788,6 +2841,8 @@ def get_editables():
             # el motor con `arte_rect(_mesa_a)`). Mandar una mesa fija era la causa del corrimiento.
             "mesa_rect": None, "bbox_mu": None, "pos": None,
             "transforms": _tf, "agregado": True, "oid": _o["id"],
+            # los agregados se componen como XObject (Do) → el color vive adentro, no recoloreable (§10.b)
+            "color": None, "recolorable": False,
         })
     return jsonify({"objetos": objetos, "talles": talles, "piezas": sorted(reg.keys())})
 
@@ -2816,6 +2871,34 @@ def set_editable():
         obj["transforms"][t] = tf
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "nombre": nombre, "transforms": obj["transforms"]})
+
+
+@app.post("/api/productos/editable_color")
+def set_editable_color():
+    """Setea (o LIMPIA) el color override de un editable, POR VARIABLE, a NIVEL OBJETO (no por
+    talle: el color es del objeto). Body: {pid?, diseno, nombre, variante, color}.
+    `color` = {"fill":[c,m,y,k]|null, "stroke":[c,m,y,k]|null}; null/vacío = volver al color original.
+    Se guarda junto a los transforms en prod["editables"][diseno][variable][nombre]["color"]."""
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    diseno = cuerpo.get("diseno") or "principal"
+    nombre = str(cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "falta nombre del objeto"}), 400
+    variante = str(cuerpo.get("variante") or "*").strip() or "*"
+    color = _clamp_color(cuerpo.get("color"))
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    eds = prod.setdefault("editables", {}).setdefault(_slugify_diseno(diseno), {}).setdefault(variante, {})
+    obj = eds.setdefault(nombre, {"transforms": {}})
+    if color is None:
+        obj.pop("color", None)                    # sin override = color original del diseño
+    else:
+        obj["color"] = color
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "nombre": nombre, "color": obj.get("color")})
 
 
 @app.get("/api/productos/editables_config")
@@ -3659,6 +3742,7 @@ def generar():
                                      etiqueta=(prod or {}).get("etiqueta"),
                                      editables_cfg=_editables_cfg(prod, "principal", (cuerpo.get("editables") or {}).get("principal")),
                                      editables_tamano=_editables_tamano(prod),
+                                     editables_color=_editables_color(prod, "principal"),
                                      objetos_agregados=_objetos_agregados_motor(pid, _diseno_sub("principal")))
             res["id"] = tid
             res["producto_id"] = pid
@@ -3835,6 +3919,7 @@ def generar_multi():
                 "etiqueta": (prod or {}).get("etiqueta"),
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
                 "editables_tamano": _editables_tamano(prod),
+                "editables_color": _editables_color(prod, dslug),
                 "objetos_agregados": _objetos_agregados_motor(pid, sub),   # objetos que sumó el usuario (PNG/SVG/PDF/AI)
                 "_cfg_n": _cfg_n, "_telas": _telas, "_nombre": nombre,
                 # Clave del grupo: el id del grupo configurado, o "solo" el molde si no

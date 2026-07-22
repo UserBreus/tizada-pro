@@ -242,6 +242,80 @@ def aislar_capa(pdf, page, objetivo):
     _raspar_pintado(pdf, page, lambda pila: not any(frame and (obj & frame) for frame in pila))
 
 
+_FILL_PATH = {"f", "F", "f*", "b", "b*", "B", "B*"}   # ops que RELLENAN (llevan color de fill)
+_STROKE_PATH = {"S", "s", "b", "b*", "B", "B*"}       # ops que TRAZAN (llevan color de stroke)
+
+
+def recolorar_capa(pdf, page, objetivo, cmyk_fill=None, cmyk_stroke=None):
+    """Cambia el COLOR de una capa OCG editable sin tocar su forma ni el resto del arte.
+
+    Recorre el content-stream y, DENTRO del frame de la capa objetivo, antes de cada operación
+    que rellena/traza inyecta el color CMYK pedido (`k` para relleno, `K` para trazo). No borra
+    ninguna orden del stream: sólo agrega la orden de color justo antes de pintar, así el estado
+    gráfico queda intacto (mismo criterio que `_raspar_pintado`: no desbalancear q/Q ni heredar
+    colores a otras capas). CMYK directo = exacto para sublimación (sin re-cuantizar).
+
+    `cmyk_fill` / `cmyk_stroke` = tupla (c, m, y, k) en 0..1, o None para no tocar ese canal.
+    OJO: sólo alcanza al contenido dibujado DENTRO de la capa; si el objeto es un XObject (`Do`),
+    el color vive adentro del XObject y esto no lo cambia (limitación conocida, ver §10.b)."""
+    obj = {_norm_capa(objetivo)} if isinstance(objetivo, str) else {_norm_capa(o) for o in objetivo}
+    dentro = lambda pila: any(frame and (obj & frame) for frame in pila)
+
+    def _op_color(vals, letra):
+        return pikepdf.ContentStreamInstruction(
+            [pikepdf.Object.parse(f"{v:.6f}".encode()) for v in vals], pikepdf.Operator(letra))
+
+    instrucciones = parse_content_stream(page)
+    salida, pila = [], []
+    for inst in instrucciones:
+        op = str(inst.operator)
+        if op in ("BDC", "BMC"):
+            nombres = set()
+            if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
+                nombres = {_norm_capa(x) for x in _nombres_oc(inst.operands[1], page)}
+            pila.append(nombres)
+            salida.append(inst)
+            continue
+        if op == "EMC":
+            if pila:
+                pila.pop()
+            salida.append(inst)
+            continue
+        # Justo antes de PINTAR dentro de la capa objetivo, fijar el color pedido.
+        if dentro(pila):
+            if cmyk_fill is not None and op in _FILL_PATH:
+                salida.append(_op_color(cmyk_fill, "k"))
+            if cmyk_stroke is not None and op in _STROKE_PATH:
+                salida.append(_op_color(cmyk_stroke, "K"))
+        salida.append(inst)
+    page.Contents = pdf.make_stream(unparse_content_stream(salida))
+
+
+def capa_admite_color(page, objetivo):
+    """True si la capa OCG `objetivo` puede RECOLOREARSE con `recolorar_capa`: tiene al menos
+    una operación de relleno/trazo (f/S/b…) DENTRO de su frame. Si sólo pinta vía XObject (`Do`)
+    o imagen, el color vive adentro del XObject y NO se puede cambiar (limitación §10.b) → False.
+    Se usa para deshabilitar el control de color en el editor para esos objetos."""
+    obj = {_norm_capa(objetivo)} if isinstance(objetivo, str) else {_norm_capa(o) for o in objetivo}
+    dentro = lambda pila: any(frame and (obj & frame) for frame in pila)
+    pila = []
+    for inst in parse_content_stream(page):
+        op = str(inst.operator)
+        if op in ("BDC", "BMC"):
+            nombres = set()
+            if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
+                nombres = {_norm_capa(x) for x in _nombres_oc(inst.operands[1], page)}
+            pila.append(nombres)
+            continue
+        if op == "EMC":
+            if pila:
+                pila.pop()
+            continue
+        if dentro(pila) and op in (_FILL_PATH | _STROKE_PATH):
+            return True
+    return False
+
+
 def suprimir_capas(pdf, page, capas):
     """QUITA capas (guías, personalización…) SIN romper el estado gráfico: suprime SOLO su
     pintado pero conserva todas las órdenes de color/estado en orden → las demás capas
