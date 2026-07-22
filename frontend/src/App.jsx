@@ -8035,6 +8035,13 @@ export default function App() {
                 // quedan disponibles para colocarlos. El lienzo igual solo dibuja los que tienen
                 // pieza (el render corta con `piezaDe`).
                 const _objsEd = (ed.objetos || []).filter(o => o._agregado || (piezaDe(o.pieza) && (!_hayMt || _mesasActT.has(o.mesa))));
+                // IDENTIDAD POR OBJETO: `o.nombre` YA es la identidad única de CADA objeto — el backend
+                // devuelve el IDENT "capa␟obj_id" (U+001F) cuando una capa trae varios objetos, y el
+                // nombre de capa pelado cuando trae uno solo (§10.b). Por eso todo el editor (esta
+                // dedup, `editableSel`, `editorTfs`, guardado y color) clavea por `o.nombre` sin
+                // colisionar: dos objetos de la MISMA capa tienen `nombre` distinto. NO reconstruir el
+                // IDENT acá (duplicaría el obj_id y rompería el ida-y-vuelta con el backend). Para
+                // MOSTRAR se usa `o.label` ("Escudo (1)", "Escudo (2)"), nunca el `nombre` con el ␟.
                 const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.nombre === o.nombre) === i);
                 const toVB = (cx, cy) => { const svg = editorSvgRef.current; if (!svg) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: q.x, y: q.y }; };
                 // Pan/zoom del visor del editor: rueda = zoom (al cursor); CLICK DERECHO arrastrado = mover el espacio.
