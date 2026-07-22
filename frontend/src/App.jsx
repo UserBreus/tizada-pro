@@ -9974,7 +9974,7 @@ export default function App() {
                                   DENTRO de ese paso) se alcanza desde acá — es el mismo editor. */}
                               {modoMiMolde ? (
                                 <>
-                                  <button type="button" className="btn primary" style={{ width: '100%' }}
+                                  <button type="button" className="btn ghost" style={{ width: '100%', fontSize: 12.5 }}
                                     onClick={() => { setTabAjustesMolde('variables'); setVarStep('nombrar'); setAsignandoTipo(null); setGrupoAislado(null); setModeloAbierto(null); setGrupoPzAbierto(null); setEditandoNombre(null); }}>
                                     Indicar qué es cada pieza →
                                   </button>
