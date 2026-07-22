@@ -8560,36 +8560,21 @@ export default function App() {
                             </div>
                           ) : (
                             <>
+                              {/* Swatch que abre el SELECTOR DE COLOR completo (tipo Illustrator), el
+                                  mismo `ColorPickerModal` que usa el resto del sistema — no campos
+                                  sueltos. Al aceptar guarda el CMYK exacto. */}
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                <div title={_fill ? 'Color personalizado' : 'Color original del diseño'}
-                                  style={{ width: 30, height: 30, borderRadius: 7, flexShrink: 0, border: '1px solid var(--border-light)',
+                                <button type="button" title="Elegir color…"
+                                  onClick={() => setPicker({ titulo: `Color de ${_o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
+                                  style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, cursor: 'pointer', padding: 0,
+                                    border: '1px solid var(--border-light)',
                                     background: _fill ? _rgb(_cmyk) : 'repeating-conic-gradient(#888 0% 25%, #ccc 0% 50%) 50% / 12px 12px' }} />
-                                <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.35 }}>
-                                  {_fill ? <>Color <b style={{ color: 'var(--accent)' }}>personalizado</b> · CMYK {_cmyk.map(v => Math.round(v * 100)).join(' ')}</> : 'Usa su color original.'}
-                                </div>
-                              </div>
-                              {/* Presets rápidos (CMYK exacto) */}
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
-                                {_presets.map(([nm, cm]) => (
-                                  <button key={nm} type="button" title={`${nm} · CMYK ${cm.map(v => Math.round(v * 100)).join(' ')}`}
-                                    onClick={() => _setFill(cm)}
-                                    style={{ width: 22, height: 22, borderRadius: 6, cursor: 'pointer', padding: 0,
-                                      border: '1px solid ' + (_fill && cm.every((v, i) => Math.abs(v - _cmyk[i]) < 0.02) ? 'var(--accent)' : 'var(--border-light)'),
-                                      background: _rgb(cm) }} />
-                                ))}
-                              </div>
-                              {/* CMYK exacto (0–100) — lo que se guarda y se manda es este CMYK */}
-                              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                                {['C', 'M', 'Y', 'K'].map((lb, i) => (
-                                  <label key={lb} style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center', flex: 1 }}>
-                                    <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-muted)' }}>{lb}</span>
-                                    <input key={`${lb}|${_o.nombre}|${verVariante}|${Math.round(_cmyk[i] * 100)}`}
-                                      defaultValue={Math.round(_cmyk[i] * 100)} inputMode="numeric"
-                                      onBlur={(e) => _commitCh(i, e.target.value)}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                                      style={{ ..._inp, width: '100%' }} />
-                                  </label>
-                                ))}
+                                <button type="button"
+                                  onClick={() => setPicker({ titulo: `Color de ${_o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
+                                  style={{ flex: 1, textAlign: 'left', padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
+                                    border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 11.5, fontWeight: 700 }}>
+                                  {_fill ? <>CMYK {_cmyk.map(v => Math.round(v * 100)).join(' ')}</> : 'Elegir color…'}
+                                </button>
                               </div>
                               <button type="button" onClick={() => guardarColorEditable(_o.nombre, null)}
                                 disabled={!_fill && !_stroke}
