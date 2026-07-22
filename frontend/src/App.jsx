@@ -8320,7 +8320,7 @@ export default function App() {
                             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.nombre) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.nombre) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
                             <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={o.thumb ? `data:image/png;base64,${o.thumb}` : (o.svg ? `data:image/svg+xml;base64,${o.svg}` : '')} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
                             <span style={{ minWidth: 0, flex: 1 }}>
-                              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.nombre}</span>
+                              <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label || o.nombre}</span>
                               {o._agregado && <span style={{ display: 'block', fontSize: 9.5, color: o.pieza ? 'var(--text-muted)' : 'var(--warning, #f5a524)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {o.pieza ? `en ${o.pieza}` : 'sin pieza'}
                               </span>}
@@ -8521,7 +8521,7 @@ export default function App() {
                           </button>
                           </div>
                           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
-                            <b style={{ color: 'var(--accent)' }}>{_o.nombre}</b> · {_o.w_cm}×{_o.h_cm} cm al 100%
+                            <b style={{ color: 'var(--accent)' }}>{_o.label || _o.nombre}</b> · {_o.w_cm}×{_o.h_cm} cm al 100%
                           </div>
                         </div>
                       );
@@ -8565,12 +8565,12 @@ export default function App() {
                                   sueltos. Al aceptar guarda el CMYK exacto. */}
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                 <button type="button" title="Elegir color…"
-                                  onClick={() => setPicker({ titulo: `Color de ${_o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
+                                  onClick={() => setPicker({ titulo: `Color de ${_o.label || _o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
                                   style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, cursor: 'pointer', padding: 0,
                                     border: '1px solid var(--border-light)',
                                     background: _fill ? _rgb(_cmyk) : 'repeating-conic-gradient(#888 0% 25%, #ccc 0% 50%) 50% / 12px 12px' }} />
                                 <button type="button"
-                                  onClick={() => setPicker({ titulo: `Color de ${_o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
+                                  onClick={() => setPicker({ titulo: `Color de ${_o.label || _o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
                                   style={{ flex: 1, textAlign: 'left', padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
                                     border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 11.5, fontWeight: 700 }}>
                                   {_fill ? <>CMYK {_cmyk.map(v => Math.round(v * 100)).join(' ')}</> : 'Elegir color…'}

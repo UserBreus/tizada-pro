@@ -328,6 +328,284 @@ def suprimir_capas(pdf, page, capas):
 
 
 # ─────────────────────────────────────────────────────────────────
+# 2.b OBJETOS DENTRO DE UNA CAPA — partir una capa «Editable …» en objetos
+#     INDEPENDIENTES (mover/color/aislar por separado). Una capa OCG puede traer
+#     VARIOS objetos pintados; el frame OCG es UNO solo, así que `aislar_capa` los
+#     deja a TODOS. Para tratar cada objeto por su cuenta se recorre el content-stream
+#     llevando la CTM (q/Q/cm) y el frame OCG, se agrupan construcción+pintado en
+#     UNIDADES, y se opera por índice de instrucción (no por frame). Reusa el mismo
+#     criterio que `variantes_molde._unidades_de_trazado` (que parte el molde en piezas).
+# ─────────────────────────────────────────────────────────────────
+import hashlib as _hashlib
+
+_CONSTRUCCION = {"m", "l", "c", "v", "y", "re", "h"}
+_TERMINADORES = _PAINT_PATH | {"n"}                 # cierran un trazado (pintado o clip/descarte)
+
+
+def _mmul(a, b):
+    """Composición de matrices PDF: `a` aplicada ANTES que `b` (lo que hace el operador `cm`)."""
+    return (a[0]*b[0] + a[1]*b[2], a[0]*b[1] + a[1]*b[3],
+            a[2]*b[0] + a[3]*b[2], a[2]*b[1] + a[3]*b[3],
+            a[4]*b[0] + a[5]*b[2] + b[4], a[4]*b[1] + a[5]*b[3] + b[5])
+
+
+def _mpt(m, x, y):
+    return (m[0]*x + m[2]*y + m[4], m[1]*x + m[3]*y + m[5])
+
+
+def _bbox_xobject(page, nombre, ctm):
+    """BBox (coords PDF de la página) de un Form XObject `nombre Do` con la CTM vigente.
+    None si no se puede resolver (imagen inline, recurso ausente…): el llamador usa un punto."""
+    try:
+        xo = page.Resources.XObject[nombre]
+        bx = [float(v) for v in xo.BBox]
+        M = [float(v) for v in xo.Matrix] if "/Matrix" in xo else [1, 0, 0, 1, 0, 0]
+        m = _mmul(tuple(M), ctm)
+        xs, ys = [], []
+        for (px, py) in ((bx[0], bx[1]), (bx[2], bx[1]), (bx[2], bx[3]), (bx[0], bx[3])):
+            qx, qy = _mpt(m, px, py)
+            xs.append(qx); ys.append(qy)
+        return (min(xs), min(ys), max(xs), max(ys))
+    except Exception:
+        return None
+
+
+def _analizar_capa(page, objetivo):
+    """Recorre el content-stream UNA vez y devuelve, para la capa OCG `objetivo`:
+      • `instrucciones`: la lista parseada (para reescribir sin re-parsear → índices alineados).
+      • `objetos`: [{obj_id, kind, bbox(PDF y-arriba), fill(cmyk|None), recolorable, i_paints:set}]
+        — un objeto por trazado pintado / XObject de la capa. Se agrupa relleno+trazo del MISMO
+        trazado (misma firma de puntos) en un solo objeto, pero se dejan SEPARADOS trazados
+        distintos aunque compartan centro (ej. dos elipses CONCÉNTRICAS de un escudo — cada una es
+        su propio objeto editable). `obj_id` = hash de la geometría (puntos de construcción) →
+        ESTABLE ante reordenamiento del stream. Los clips (`W n`) NO son objetos.
+      • `clips_capa_idx`: índices de instrucción de los clips que viven DENTRO de la capa (hay
+        que conservarlos al aislar un objeto: recortan el dibujo).
+      • `paint_idx_todos`: índices de TODAS las instrucciones de pintado real (cualquier capa)."""
+    obj = _norm_capa(objetivo)
+    instrucciones = list(parse_content_stream(page))
+    ctm = (1, 0, 0, 1, 0, 0)
+    pila_ctm, pila_oc = [], []
+    ini = None; pts = []; clip = False
+    fill = None
+    unidades = []            # dicts: i, bbox, es_clip, capas, kind, fill_op, stroke_op, fill, sig
+    paint_idx_todos = set()
+
+    def _frame_capas():
+        s = set()
+        for f in pila_oc:
+            s |= f
+        return frozenset(s)
+
+    for i, it in enumerate(instrucciones):
+        op = str(it.operator)
+        if op == "q":
+            pila_ctm.append(ctm)
+        elif op == "Q":
+            ctm = pila_ctm.pop() if pila_ctm else ctm
+        elif op == "cm":
+            try:
+                ctm = _mmul(tuple(float(v) for v in it.operands), ctm)
+            except Exception:
+                pass
+        elif op == "k":                                   # color de RELLENO (device CMYK)
+            try:
+                fill = tuple(float(v) for v in it.operands)[:4]
+            except Exception:
+                fill = None
+        elif op in ("BDC", "BMC"):
+            nombres = set()
+            if op == "BDC" and len(it.operands) == 2 and str(it.operands[0]) == "/OC":
+                nombres = {_norm_capa(x) for x in _nombres_oc(it.operands[1], page)}
+            pila_oc.append(nombres)
+        elif op == "EMC":
+            if pila_oc:
+                pila_oc.pop()
+        elif op in _CONSTRUCCION:
+            if ini is None:
+                ini, pts, clip = i, [], False
+            try:
+                f = [float(v) for v in it.operands]
+            except Exception:
+                f = []
+            if op == "re" and len(f) == 4:
+                x, y, w, h = f
+                for px, py in ((x, y), (x+w, y), (x, y+h), (x+w, y+h)):
+                    pts.append(_mpt(ctm, px, py))
+            else:
+                for k in range(0, len(f) - 1, 2):
+                    pts.append(_mpt(ctm, f[k], f[k+1]))
+        elif op in ("W", "W*"):
+            clip = True
+        elif op in _TERMINADORES:
+            if pts:
+                xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+                bbox = (min(xs), min(ys), max(xs), max(ys))
+                es_clip = clip or op == "n"
+                fill_op = op in _FILL_PATH
+                stroke_op = op in _STROKE_PATH
+                if not es_clip:
+                    paint_idx_todos.add(i)
+                # FIRMA de geometría = puntos de construcción redondeados: dos ops que pintan el
+                # MISMO trazado (relleno y trazo del mismo path) comparten firma → un solo objeto;
+                # trazados distintos (aunque concéntricos) tienen firma distinta → objetos aparte.
+                sig = ("v",) + tuple((round(px, 1), round(py, 1)) for px, py in pts)
+                unidades.append({"i": i, "bbox": bbox, "es_clip": es_clip, "capas": _frame_capas(),
+                                 "kind": "vector", "fill_op": fill_op, "stroke_op": stroke_op,
+                                 "fill": (fill if fill_op else None), "sig": sig})
+            ini, pts, clip = None, [], False
+        elif op == "Do":
+            nom = str(it.operands[0]) if it.operands else ""
+            bbox = _bbox_xobject(page, nom, ctm)
+            if bbox is None:
+                bbox = (ctm[4], ctm[5], ctm[4], ctm[5])
+            paint_idx_todos.add(i)
+            sig = ("do", nom, round(ctm[0], 3), round(ctm[3], 3), round(ctm[4], 1), round(ctm[5], 1))
+            unidades.append({"i": i, "bbox": bbox, "es_clip": False, "capas": _frame_capas(),
+                             "kind": "xobject", "fill_op": False, "stroke_op": False, "fill": None, "sig": sig})
+        elif op == "sh":
+            bbox = (ctm[4], ctm[5], ctm[4], ctm[5])
+            paint_idx_todos.add(i)
+            sig = ("sh", round(ctm[4], 1), round(ctm[5], 1), i)
+            unidades.append({"i": i, "bbox": bbox, "es_clip": False, "capas": _frame_capas(),
+                             "kind": "shading", "fill_op": False, "stroke_op": False, "fill": None, "sig": sig})
+
+    # Unidades de la capa objetivo (las que llevan la capa en su frame OCG).
+    de_capa = [u for u in unidades if obj in u["capas"]]
+    clips_capa_idx = {u["i"] for u in de_capa if u["es_clip"]}   # clips de la capa → conservar al aislar
+    pintadas = [u for u in de_capa if not u["es_clip"]]
+
+    # Agrupar por FIRMA de geometría: relleno+trazo del mismo trazado juntos; trazados distintos
+    # (incluidas figuras concéntricas) separados. Cada firma = un objeto editable.
+    por_sig = {}
+    orden_sig = []
+    for u in pintadas:
+        s = u["sig"]
+        if s not in por_sig:
+            por_sig[s] = []; orden_sig.append(s)
+        por_sig[s].append(u)
+
+    objetos = []
+    for s in orden_sig:
+        us = por_sig[s]
+        b = [min(u["bbox"][0] for u in us), min(u["bbox"][1] for u in us),
+             max(u["bbox"][2] for u in us), max(u["bbox"][3] for u in us)]
+        oid = _hashlib.sha1(repr(s).encode()).hexdigest()[:8]      # id ESTABLE por la geometría
+        i_paints = {u["i"] for u in us}
+        fill_op = any(u["fill_op"] for u in us)
+        stroke_op = any(u["stroke_op"] for u in us)
+        fillc = next((list(u["fill"]) for u in us if u["fill"] is not None), None)
+        objetos.append({
+            "obj_id": oid, "kind": us[0]["kind"], "bbox": tuple(b),
+            "fill": fillc, "recolorable": bool(fill_op or stroke_op),
+            "fill_op": fill_op, "stroke_op": stroke_op, "i_paints": i_paints,
+        })
+    # Orden de dibujo estable (por la 1ª instrucción de cada objeto): así el redibujo respeta
+    # el apilado original cuando dos objetos se solapan.
+    objetos.sort(key=lambda o: min(o["i_paints"]))
+    return {"instrucciones": instrucciones, "objetos": objetos,
+            "clips_capa_idx": clips_capa_idx, "paint_idx_todos": paint_idx_todos}
+
+
+def objetos_de_capa(page, objetivo):
+    """Objetos editables INDEPENDIENTES de la capa OCG `objetivo` (para la detección). Cada uno
+    = un trazado pintado o un XObject de la capa. `bbox` en coords PDF (y-arriba)."""
+    return _analizar_capa(page, objetivo)["objetos"]
+
+
+def _cmyk_op(vals, letra):
+    return pikepdf.ContentStreamInstruction(
+        [pikepdf.Object.parse(f"{v:.6f}".encode()) for v in vals], pikepdf.Operator(letra))
+
+
+def _reescribir_por_indice(pdf, page, instrucciones, suprimir_idx, recolor_idx=None,
+                           conservar_marcadores=False):
+    """Reescribe el content-stream a partir de `instrucciones` (ya parseadas): para cada
+    instrucción de PINTADO cuyo índice está en `suprimir_idx`, SUPRIME el pintado (misma mecánica
+    que `_raspar_pintado`: trazos→`n`, glifos/imágenes/XObjects se omiten, clips se descartan);
+    conserva el resto del estado gráfico intacto. `recolor_idx` = {idx: (cmyk_fill|None,
+    cmyk_stroke|None)} inyecta el color justo antes de esa instrucción de relleno/trazo.
+    `conservar_marcadores`: si False (aislar) los marcadores /OC se descartan (`sanear_oc` corre
+    después); si True (suprimir un objeto en la base) se CONSERVAN → una `suprimir_capas` posterior
+    todavía encuentra los frames OCG (un raspado consume los marcadores: por eso el orden importa)."""
+    recolor_idx = recolor_idx or {}
+    salida = []
+    for i, inst in enumerate(instrucciones):
+        op = str(inst.operator)
+        if op in ("BDC", "BMC", "EMC", "MP", "DP"):
+            if conservar_marcadores:
+                salida.append(inst)
+            continue                                      # marcadores de contenido opcional
+        if i in suprimir_idx:
+            if op in _PAINT_PATH:
+                salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
+                continue
+            if op in _PAINT_TEXT:
+                if op == "'":
+                    salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("T*")))
+                elif op == '"' and len(inst.operands) == 3:
+                    salida.append(pikepdf.ContentStreamInstruction([inst.operands[0]], pikepdf.Operator("Tw")))
+                    salida.append(pikepdf.ContentStreamInstruction([inst.operands[1]], pikepdf.Operator("Tc")))
+                    salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("T*")))
+                continue
+            if op in _PAINT_DROP or op.upper().replace("_", " ") == "INLINE IMAGE":
+                continue
+            if op in _CLIP_OPS:
+                continue
+        cr = recolor_idx.get(i)
+        if cr:
+            if cr[0] is not None and op in _FILL_PATH:
+                salida.append(_cmyk_op(cr[0], "k"))
+            if cr[1] is not None and op in _STROKE_PATH:
+                salida.append(_cmyk_op(cr[1], "K"))
+        salida.append(inst)
+    page.Contents = pdf.make_stream(unparse_content_stream(salida))
+
+
+def aislar_objeto(pdf, page, objetivo, obj_id, cmyk_fill=None, cmyk_stroke=None):
+    """AÍSLA UN objeto (por su `obj_id` de geometría) dentro de la capa OCG `objetivo`: deja SOLO
+    su pintado (suprime el de los DEMÁS objetos de la capa y el del resto del arte), conservando
+    los clips de la capa. Opcionalmente lo RECOLOREA (CMYK, sin tocar los otros). Espejo de
+    `aislar_capa` pero a nivel objeto. Si `obj_id` no aparece → no deja nada de la capa (seguro)."""
+    a = _analizar_capa(page, objetivo)
+    tgt = next((o for o in a["objetos"] if o["obj_id"] == obj_id), None)
+    keep = set(tgt["i_paints"]) if tgt else set()
+    keep |= a["clips_capa_idx"]                           # conservar los recortes de la capa
+    suprimir = a["paint_idx_todos"] - keep
+    recolor = {}
+    if tgt and (cmyk_fill is not None or cmyk_stroke is not None):
+        for i in tgt["i_paints"]:
+            recolor[i] = (cmyk_fill, cmyk_stroke)
+    _reescribir_por_indice(pdf, page, a["instrucciones"], suprimir, recolor)
+
+
+def suprimir_objetos(pdf, page, objetivo, obj_ids, conservar_marcadores=False):
+    """QUITA del arte SOLO los objetos indicados (por `obj_id`) de la capa OCG `objetivo`,
+    dejando el resto de la capa (y del arte) intacto. `obj_ids=None` → suprime la capa ENTERA
+    (equivale a `suprimir_capas({objetivo})`, para las capas de un solo objeto = compat).
+    `conservar_marcadores=True` (base): mantiene los marcadores OCG para que una `suprimir_capas`
+    POSTERIOR (guías/personalización) todavía encuentre sus frames."""
+    if obj_ids is None:
+        return suprimir_capas(pdf, page, {objetivo})
+    ids = set(obj_ids)
+    if not ids:
+        return
+    a = _analizar_capa(page, objetivo)
+    suprimir = set()
+    for o in a["objetos"]:
+        if o["obj_id"] in ids:
+            suprimir |= o["i_paints"]
+    _reescribir_por_indice(pdf, page, a["instrucciones"], suprimir, None, conservar_marcadores)
+
+
+def capa_admite_color_objeto(page, objetivo, obj_id):
+    """True si el objeto `obj_id` de la capa `objetivo` puede recolorearse (tiene relleno/trazo
+    DIRECTO; XObject/imagen no). Espejo de `capa_admite_color` a nivel objeto."""
+    o = next((o for o in objetos_de_capa(page, objetivo) if o["obj_id"] == obj_id), None)
+    return bool(o and o["recolorable"])
+
+
+# ─────────────────────────────────────────────────────────────────
 # 3. GENERACIÓN DE LA PIEZA
 # ─────────────────────────────────────────────────────────────────
 def generar_pieza_real(contorno, path_arte, capas_molde, path_salida=None,

@@ -2605,27 +2605,53 @@ def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
         return None
 
 
+# Separador del IDENT de un objeto editable: "nombre_capa<SEP>obj_id". Debe coincidir con `SEP` del
+# motor. La config multi-objeto se GUARDA anidada (…[capa]["objetos"][obj_id]); al motor y al front
+# viaja PLANA con el IDENT (el motor identifica cada objeto por su IDENT). Control-char (US): válido
+# en JSON, no aparece en nombres de capa de Illustrator.
+_EDIT_SEP = ""
+
+
+def _ident_obj(nombre, obj_id):
+    return f"{nombre}{_EDIT_SEP}{obj_id}" if obj_id else nombre
+
+
+def _split_ident(ident):
+    """IDENT → (nombre_capa, obj_id|None). rsplit por si el nombre de capa trajera el separador."""
+    if _EDIT_SEP in str(ident):
+        n, o = str(ident).rsplit(_EDIT_SEP, 1)
+        return n, o
+    return str(ident), None
+
+
 def _editables_cfg(prod, dslug, override=None):
     """Config de editables para el motor: BASE del catálogo POR VARIABLE + AJUSTE del pedido (override),
-    mergeado por (variable, objeto, talle). → {variable: {objeto: {talle: tf}}}.
-    Compat: formato VIEJO (base[objeto]={"transforms":...}, sin nivel variable) → clave "*" (base
-    legacy compartida, que el motor aplica a las variables sin config propia)."""
+    mergeado por (variable, IDENT, talle). → {variable: {IDENT: {talle: tf}}}.
+    Una capa de 1 objeto → IDENT = nombre de capa (compat). Una capa multi-objeto guarda
+    …[capa]["objetos"][obj_id] y se aplana a IDENT = "capa<SEP>obj_id".
+    Compat: formato VIEJO (base[objeto]={"transforms":...}, sin nivel variable) → clave "*"."""
     base = (((prod or {}).get("editables") or {}).get(dslug) or {})
     out = {}
     for var, objs in base.items():
-        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO
+        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO (capa)
             out.setdefault("*", {})[var] = dict(objs.get("transforms") or {})
         else:                                                     # NUEVO: var es una VARIABLE
-            out[var] = {obj: dict(v.get("transforms") or {}) for obj, v in (objs or {}).items()}
-    for var, objs in (override or {}).items():                    # override = {variable: {objeto: {talle: tf}}}
+            for capa, entry in (objs or {}).items():
+                entry = entry or {}
+                if "objetos" in entry:                            # capa MULTI-objeto
+                    for oid, sub in (entry.get("objetos") or {}).items():
+                        out.setdefault(var, {})[_ident_obj(capa, oid)] = dict((sub or {}).get("transforms") or {})
+                else:                                             # capa de 1 objeto (compat)
+                    out.setdefault(var, {})[capa] = dict(entry.get("transforms") or {})
+    for var, objs in (override or {}).items():                    # override = {variable: {IDENT: {talle: tf}}}
         if not objs:
             continue                                              # override VACÍO → no cambia nada (no ensuciar
                                                                   # la clave de caché: {v:{}} != None hacía cache MISS)
         o = out.setdefault(var, {})
-        for obj, tfs in (objs or {}).items():
+        for ident, tfs in (objs or {}).items():
             if not tfs:
                 continue
-            oo = o.setdefault(obj, {})
+            oo = o.setdefault(ident, {})
             for talle, tf in (tfs or {}).items():
                 oo[talle] = _clamp_tf(tf)
     return out
@@ -2653,21 +2679,28 @@ def _clamp_color(color):
 
 
 def _editables_color(prod, dslug):
-    """Color override de editables para el motor: {variable: {objeto: {"fill":[cmyk]|None,
+    """Color override de editables para el motor: {variable: {IDENT: {"fill":[cmyk]|None,
     "stroke":[cmyk]|None}}}. Espejo de `_editables_cfg` pero para el COLOR (a nivel objeto, no
     por talle). Compat: formato VIEJO (base[objeto]={"transforms":...}) → clave "*"."""
     base = (((prod or {}).get("editables") or {}).get(dslug) or {})
     out = {}
     for var, objs in base.items():
-        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO
+        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO (capa)
             c = _clamp_color(objs.get("color"))
             if c:
                 out.setdefault("*", {})[var] = c
         else:                                                     # NUEVO: var es una VARIABLE
-            for obj, v in (objs or {}).items():
-                c = _clamp_color((v or {}).get("color"))
-                if c:
-                    out.setdefault(var, {})[obj] = c
+            for capa, entry in (objs or {}).items():
+                entry = entry or {}
+                if "objetos" in entry:                            # capa MULTI-objeto
+                    for oid, sub in (entry.get("objetos") or {}).items():
+                        c = _clamp_color((sub or {}).get("color"))
+                        if c:
+                            out.setdefault(var, {})[_ident_obj(capa, oid)] = c
+                else:                                             # capa de 1 objeto (compat)
+                    c = _clamp_color(entry.get("color"))
+                    if c:
+                        out.setdefault(var, {})[capa] = c
     return out
 
 
@@ -2800,18 +2833,42 @@ def get_editables():
         _recol = MP.editables_recolorables(arte) if os.path.exists(arte) else {}
     except Exception:
         _recol = {}
+    # EXPANSIÓN POR OBJETO: una capa con VARIOS objetos se abre en un ítem por objeto (cada uno se
+    # edita/recolorea por separado). Identidad del ítem = `nombre` = IDENT ("capa<SEP>obj_id" en
+    # multi; el nombre de capa en 1-objeto = compat). `label` = etiqueta amigable para mostrar.
+    _expandido = []
     for o in objetos:
-        o["pieza"] = mesa2pieza.get(o["mesa"], "")
-        o["quitable"] = o.get("capa") in _inyectadas
-        o["transforms"] = (cfg.get(o["nombre"]) or {}).get("transforms", {})
-        # Color override guardado de ESTA variable (a nivel objeto) + si la capa es recoloreable.
-        o["color"] = (cfg.get(o["nombre"]) or {}).get("color")
-        o["recolorable"] = bool(_recol.get(o.get("capa"), False))
-        # posición BASE del objeto sobre su pieza (cm_encajar en fracciones 0..1 del bbox de
-        # la pieza): el arte se escala al ALTO de la pieza y se centra a lo ancho.
-        rp = reg.get(o["pieza"]) or {}
+        pieza = mesa2pieza.get(o["mesa"], "")
+        rp = reg.get(pieza) or {}
         pb = (rp.get(ref_talle) or next(iter(rp.values()), {})).get("bbox_mu")
-        o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
+        _obs = o.get("objetos") or []
+        if len(_obs) >= 2:                                        # capa MULTI-objeto → N ítems
+            _cfg_capa = (cfg.get(o["nombre"]) or {}).get("objetos", {})
+            for _i, _ob in enumerate(_obs):
+                _ec = _cfg_capa.get(_ob["obj_id"], {})
+                _expandido.append({
+                    "mesa": o["mesa"], "capa": o["capa"],
+                    "nombre": _ident_obj(o["nombre"], _ob["obj_id"]),    # IDENTIDAD
+                    "label": f"{o['nombre']} ({_i + 1})", "obj_id": _ob["obj_id"],
+                    "pieza": pieza, "quitable": False,
+                    "transforms": _ec.get("transforms", {}), "color": _ec.get("color"),
+                    "recolorable": bool(_ob.get("recolorable")),
+                    "bbox_mu": _ob["bbox_mu"], "mesa_rect": _ob["mesa_rect"],
+                    "w_cm": _ob["w_cm"], "h_cm": _ob["h_cm"],
+                    "thumb": _ob.get("thumb"), "svg": _ob.get("svg") or o.get("svg"),
+                    "pos": _pos_en_pieza(_ob.get("mesa_rect"), _ob.get("bbox_mu"), pb),
+                })
+        else:                                                    # capa de 1 objeto → compat (obj_id None)
+            o["pieza"] = pieza
+            o["label"] = o["nombre"]; o["obj_id"] = None
+            o["quitable"] = o.get("capa") in _inyectadas
+            o["transforms"] = (cfg.get(o["nombre"]) or {}).get("transforms", {})
+            o["color"] = (cfg.get(o["nombre"]) or {}).get("color")
+            o["recolorable"] = bool(_recol.get(o.get("capa"), False))
+            o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
+            o.pop("objetos", None)                               # el front no necesita el detalle interno
+            _expandido.append(o)
+    objetos = _expandido
     # ── OBJETOS AGREGADOS: se devuelven con la MISMA FORMA que uno del arte ──────────────
     # (mesa_rect, bbox_mu, pos, w_cm/h_cm, svg base64, transforms). Así NINGUNA pantalla
     # necesita un caso especial: el editor, el overlay del Arte, el mapeador y el motor los
@@ -2861,14 +2918,21 @@ def set_editable():
     # "*" = compartida (sin variable, ej. front viejo).
     variante = str(cuerpo.get("variante") or "*").strip() or "*"
     tf = _clamp_tf(cuerpo.get("transform"))
+    # `nombre` puede venir como IDENT ("capa<SEP>obj_id"): una capa multi-objeto edita CADA objeto
+    # por separado y se guarda ANIDADO en …[capa]["objetos"][obj_id]. `obj_id` explícito también vale.
+    capa_n, oid = _split_ident(nombre)
+    oid = str(cuerpo.get("obj_id") or oid or "").strip() or None
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if prod is None:
         return jsonify({"error": "molde no encontrado"}), 404
     eds = prod.setdefault("editables", {}).setdefault(_slugify_diseno(diseno), {}).setdefault(variante, {})
-    obj = eds.setdefault(nombre, {"transforms": {}})
+    if oid:
+        obj = eds.setdefault(capa_n, {}).setdefault("objetos", {}).setdefault(oid, {"transforms": {}})
+    else:
+        obj = eds.setdefault(nombre, {"transforms": {}})
     for t in talles:
-        obj["transforms"][t] = tf
+        obj.setdefault("transforms", {})[t] = tf
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "nombre": nombre, "transforms": obj["transforms"]})
 
@@ -2887,12 +2951,17 @@ def set_editable_color():
         return jsonify({"error": "falta nombre del objeto"}), 400
     variante = str(cuerpo.get("variante") or "*").strip() or "*"
     color = _clamp_color(cuerpo.get("color"))
+    capa_n, oid = _split_ident(nombre)
+    oid = str(cuerpo.get("obj_id") or oid or "").strip() or None
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if prod is None:
         return jsonify({"error": "molde no encontrado"}), 404
     eds = prod.setdefault("editables", {}).setdefault(_slugify_diseno(diseno), {}).setdefault(variante, {})
-    obj = eds.setdefault(nombre, {"transforms": {}})
+    if oid:                                       # capa multi-objeto: color POR OBJETO (anidado)
+        obj = eds.setdefault(capa_n, {}).setdefault("objetos", {}).setdefault(oid, {"transforms": {}})
+    else:
+        obj = eds.setdefault(nombre, {"transforms": {}})
     if color is None:
         obj.pop("color", None)                    # sin override = color original del diseño
     else:
