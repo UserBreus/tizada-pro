@@ -2237,7 +2237,10 @@ function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
           <span style={{ position: 'absolute', left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%`, width: 14, height: 14, borderRadius: '50%', border: '2px solid #fff', boxShadow: '0 0 0 1px rgba(0,0,0,0.5)', transform: 'translate(-50%,-50%)', pointerEvents: 'none' }} />
         </div>
         {/* Barra de tono */}
-        <div ref={hueRef} onMouseDown={(e) => startDrag('hue', e)} style={{ position: 'relative', width: 22, height: 230, borderRadius: 6, cursor: 'ns-resize', flexShrink: 0, background: 'linear-gradient(to bottom, #f00 0%, #f0f 17%, #00f 33%, #0ff 50%, #0f0 67%, #ff0 83%, #f00 100%)' }}>
+        {/* El degradado DEBE seguir el mismo orden que el tono HSV que calcula `onHue`
+            (0°=rojo arriba → amarillo → verde → cian → azul → magenta → rojo). Antes estaba al
+            REVÉS: mostraba verde donde el código leía azul → «pongo verde y pinta azul». */}
+        <div ref={hueRef} onMouseDown={(e) => startDrag('hue', e)} style={{ position: 'relative', width: 22, height: 230, borderRadius: 6, cursor: 'ns-resize', flexShrink: 0, background: 'linear-gradient(to bottom, #f00 0%, #ff0 16.67%, #0f0 33.33%, #0ff 50%, #00f 66.67%, #f0f 83.33%, #f00 100%)' }}>
           <span style={{ position: 'absolute', top: `${(hsv.h / 360) * 100}%`, left: -3, right: -3, height: 4, background: '#fff', border: '1px solid rgba(0,0,0,0.5)', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
         </div>
         {/* Valores */}
