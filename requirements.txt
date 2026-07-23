@@ -4,3 +4,10 @@ pikepdf>=8.0
 numpy>=1.26
 scipy>=1.11
 fonttools>=4.50
+# Faltaban en la lista aunque el código ya los usaba: se descubrió al preparar el servidor
+# publicado (una máquina limpia no arrancaba). Pillow = perfiles ICC (color); ezdxf = importar
+# moldes .dxf; pyodbc = base MSSQL; waitress = servidor WSGI del modo publicado.
+pillow>=10.0
+ezdxf>=1.1
+pyodbc>=5.0
+waitress>=3.0

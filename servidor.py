@@ -2,7 +2,7 @@
 USER · Motor de Sublimación — servidor web local.
 Correr:  python servidor.py   y abrir  http://localhost:8000
 """
-import os, re, json, time, threading, uuid, traceback
+import os, re, sys, json, time, threading, uuid, traceback
 from collections import OrderedDict
 from flask import Flask, request, jsonify, send_from_directory, send_file, session, has_request_context
 from werkzeug.exceptions import HTTPException
@@ -23,12 +23,64 @@ for d in (ENTRADA, FUENTES, TRABAJOS, DATOS):
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
 
+# ── MODO: taller (la máquina del usuario, como siempre) o PUBLICADO (el servidor de
+#    internet). Ver `PLAN_PUBLICACION.md`. El default es "taller": nada cambia para quien
+#    corre `py servidor.py` como hasta hoy. ────────────────────────────────────────────
+MODO = (os.environ.get("TIZADA_MODO") or "taller").strip().lower()
+PUBLICADO = MODO == "publicado"
+ARRANQUE = time.time()
+_PUERTO = [int(os.environ.get("PORT") or 8050)]   # lo usa el actualizador para volver a chequear
+
+
+def _version():
+    """Versión del programa: el archivo VERSION + el commit corto si el repo está a mano.
+    Es lo que compara el circuito de actualización (taller vs publicado)."""
+    if getattr(_version, "_v", None):
+        return _version._v
+    v = "0.0.0"
+    try:
+        with open(os.path.join(AQUI, "VERSION"), encoding="utf-8") as fh:
+            v = (fh.read().strip() or v)
+    except OSError:
+        pass
+    commit = ""
+    try:
+        import subprocess
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=AQUI,
+                                capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        pass
+    _version._v = {"version": v, "commit": commit}
+    return _version._v
+
+
 # ── SESIÓN + API de usuarios/roles/permisos (base MSSQL, ver PLAN_MSSQL.md) ──
-# La clave de sesión va por ENV. El fallback aleatorio es a propósito: sin `TIZADA_SECRET`
-# cada arranque invalida las sesiones (molesto pero seguro) en vez de usar una clave fija
-# y conocida, que permitiría falsificar la cookie de sesión.
-app.secret_key = os.environ.get("TIZADA_SECRET") or __import__("secrets").token_hex(32)
+# La clave de sesión va por ENV. En TALLER, si falta, se genera una al azar: cada arranque
+# invalida las sesiones (molesto pero seguro) en vez de usar una clave fija y conocida, que
+# permitiría falsificar la cookie. En PUBLICADO eso NO sirve — cada reinicio (y toda
+# actualización lo implica) desloguearía a todos → ahí `TIZADA_SECRET` es OBLIGATORIO.
+_secret = os.environ.get("TIZADA_SECRET")
+if PUBLICADO and not _secret:
+    raise SystemExit(
+        "\n[ERROR] Falta TIZADA_SECRET y el modo es 'publicado'.\n"
+        "        Sin una clave fija, cada reinicio del servidor cierra la sesión de todos.\n"
+        "        Generá una y dejala en la configuración del servicio, por ejemplo:\n"
+        "        py -c \"import secrets;print(secrets.token_hex(32))\"\n")
+app.secret_key = _secret or __import__("secrets").token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+# HTTPS: la cookie de sesión sólo viaja por conexión segura. Se prende solo en publicado
+# (en el taller es http://localhost y con SECURE el navegador NO guardaría la sesión).
+# `TIZADA_HTTPS=0` lo apaga para probar el modo publicado sin certificado todavía.
+if PUBLICADO and os.environ.get("TIZADA_HTTPS", "1") != "0":
+    app.config.update(SESSION_COOKIE_SECURE=True)
+# Detrás de un proxy inverso (el que termina el HTTPS) Flask ve http:// y la IP del proxy;
+# ProxyFix le hace leer los X-Forwarded-* para que los redirects y la IP real sean correctos.
+if PUBLICADO:
+    try:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    except Exception as _e:
+        print(f"[publicado] ProxyFix no disponible: {_e}")
 try:
     from api_usuarios import bp as _bp_usuarios
     app.register_blueprint(_bp_usuarios)
@@ -71,6 +123,293 @@ def _colores_perfil(prof, espacio):
         return ["#%02x%02x%02x" % out.getpixel((i, 0))[:3] for i in range(len(pts))]
     except Exception:
         return []
+
+
+# ── CMYK ↔ RGB por el PERFIL ICC configurado (para que la pantalla muestre el MISMO color
+#    que Illustrator). La fórmula ingenua R=255(1-C)(1-K) da un verde fosforescente donde
+#    Illustrator muestra un verde apagado: no es redondeo, es que esa fórmula ignora el perfil.
+#    Intent PERCEPTUAL (0) — es el que reproduce EXACTO lo que muestra Illustrator (verificado:
+#    CMYK 95/0/91/15 → #009550, idéntico al panel Color de Illustrator; con relativo daba #00985a).
+_cms_cache = {}
+
+
+def _cms_tr(sentido):
+    """Transformada ICC cacheada entre el perfil CMYK configurado y sRGB.
+    `sentido` = "cmyk2rgb" | "rgb2cmyk". None si no hay perfil/Pillow."""
+    arch = (_perfil_default_cfg().get("cmyk") or PERFIL_DEFAULT_CMYK)
+    key = (sentido, arch)
+    if key in _cms_cache:
+        return _cms_cache[key]
+    tr = None
+    try:
+        from PIL import ImageCms
+        p = _perfil_por_archivo(arch)
+        if p:
+            prof = ImageCms.ImageCmsProfile(p["ruta"])
+            srgb = ImageCms.createProfile("sRGB")
+            if sentido == "cmyk2rgb":
+                tr = ImageCms.buildTransform(prof, srgb, "CMYK", "RGB", renderingIntent=0)
+            else:
+                tr = ImageCms.buildTransform(srgb, prof, "RGB", "CMYK", renderingIntent=0)
+    except Exception:
+        tr = None
+    _cms_cache[key] = tr
+    return tr
+
+
+@app.post("/api/color/convertir")
+def color_convertir():
+    """CMYK ↔ RGB a través del perfil ICC configurado (el mismo con el que se ve en Illustrator).
+    Body: {cmyk:[[c,m,y,k],…]} (canales 0..1) → {rgb:[[r,g,b],…], hex:[…]}
+       o  {rgb:[[r,g,b],…]}   (0..255)       → {cmyk:[[c,m,y,k],…]} (0..1).
+    Si no hay perfil disponible cae a la fórmula simple (mejor eso que romper la pantalla)."""
+    from PIL import Image, ImageCms
+    cuerpo = request.get_json(force=True) or {}
+    def _f(v, lo, hi):
+        try: return max(lo, min(hi, float(v)))
+        except Exception: return lo
+    if cuerpo.get("cmyk") is not None:
+        ent = [[_f(x, 0, 1) for x in (c or [])][:4] for c in (cuerpo.get("cmyk") or [])]
+        ent = [(c + [0, 0, 0, 0])[:4] for c in ent]
+        tr = _cms_tr("cmyk2rgb")
+        if not ent:
+            return jsonify({"rgb": [], "hex": []})
+        if tr is None:
+            rgb = [[round(255*(1-c[0])*(1-c[3])), round(255*(1-c[1])*(1-c[3])), round(255*(1-c[2])*(1-c[3]))] for c in ent]
+        else:
+            im = Image.new("CMYK", (len(ent), 1))
+            im.putdata([tuple(round(x*255) for x in c) for c in ent])
+            out = ImageCms.applyTransform(im, tr)
+            rgb = [list(out.getpixel((i, 0))[:3]) for i in range(len(ent))]
+        return jsonify({"rgb": rgb, "hex": ["#%02x%02x%02x" % tuple(v) for v in rgb]})
+    ent = [[int(_f(x, 0, 255)) for x in (c or [])][:3] for c in (cuerpo.get("rgb") or [])]
+    ent = [(c + [0, 0, 0])[:3] for c in ent]
+    if not ent:
+        return jsonify({"cmyk": []})
+    tr = _cms_tr("rgb2cmyk")
+    if tr is None:
+        out = []
+        for r, g, b in ent:
+            r, g, b = r/255., g/255., b/255.
+            k = 1 - max(r, g, b)
+            out.append([0, 0, 0, 1] if k >= 0.9999 else
+                       [round((1-r-k)/(1-k), 4), round((1-g-k)/(1-k), 4), round((1-b-k)/(1-k), 4), round(k, 4)])
+        return jsonify({"cmyk": out})
+    im = Image.new("RGB", (len(ent), 1)); im.putdata([tuple(c) for c in ent])
+    o = ImageCms.applyTransform(im, tr)
+    return jsonify({"cmyk": [[round(v/255., 4) for v in o.getpixel((i, 0))[:4]] for i in range(len(ent))]})
+
+
+@app.get("/api/salud")
+def salud():
+    """Estado del servidor — LO MIRA EL ACTUALIZADOR para decidir si una publicación salió bien
+    (si esto no responde `ok`, vuelve sola a la versión anterior). También sirve para saber al toque
+    por qué una máquina nueva no genera igual: casi siempre es Ghostscript o los perfiles ICC.
+    NO pide sesión a propósito: tiene que contestar aunque la base de usuarios esté caída, y no
+    expone nada sensible (versión, si encuentra las herramientas, y cuánto hace que arrancó)."""
+    chequeos, fallas = {}, []
+
+    def _chk(nombre, fn, critico=True):
+        try:
+            ok, det = fn()
+        except Exception as e:
+            ok, det = False, str(e)[:200]
+        chequeos[nombre] = {"ok": bool(ok), "detalle": det}
+        if not ok and critico:
+            fallas.append(nombre)
+
+    def _gs():
+        exe = _gs_exe()
+        return bool(exe), (exe or "no encontrado (se instala Ghostscript y/o se apunta TIZADA_GS)")
+
+    def _icc():
+        ps = _listar_perfiles()
+        cfg = _perfil_default_cfg()
+        hay = _perfil_por_archivo(cfg.get("cmyk"))
+        return bool(hay), (f"{len(ps)} perfiles · CMYK por defecto: "
+                           f"{hay['nombre'] if hay else (str(cfg.get('cmyk')) + ' NO ESTÁ')}")
+
+    def _escribible():
+        p = os.path.join(DATOS, ".salud.tmp")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(p)
+        return True, DATOS
+
+    def _base():
+        # La base es opcional mientras la migración a MSSQL esté en curso (PLAN_MSSQL.md):
+        # si no hay driver, no es una falla — el sistema sigue andando con los archivos.
+        if not db.driver_disponible():
+            return True, "sin driver ODBC (el sistema corre con archivos)"
+        return bool(db.valor("SELECT 1")), "responde"
+
+    # Ghostscript NO es crítico: sólo se usa para unificar el modo de color cuando la hoja trae
+    # contenido RGB. Con arte CMYK (lo normal) la tizada sale igual sin él.
+    _chk("ghostscript", _gs, critico=False)
+    _chk("perfiles_icc", _icc)
+    _chk("datos_escribible", _escribible)
+    _chk("base", _base, critico=False)
+    _chk("frontend", lambda: (os.path.exists(os.path.join(AQUI, "frontend", "dist", "index.html")),
+                              "frontend/dist"), critico=True)
+    v = _version()
+    return jsonify({
+        "ok": not fallas, "fallas": fallas, "modo": MODO,
+        "version": v["version"], "commit": v["commit"],
+        "uptime_s": round(time.time() - ARRANQUE, 1),
+        # cada proceso de render pesa ~200 MB → sirve para entender un servidor lento o sin memoria
+        "procesos_render": procesos_render(),
+        "chequeos": chequeos,
+    }), (200 if not fallas else 503)
+
+
+# ── ACTUALIZACIONES (sólo tienen sentido en el servidor publicado) ───────────
+# El taller sube el paquete acá y el servidor se actualiza solo a la hora indicada.
+# Ver `actualizaciones.py`, `actualizador.py` y PLAN_PUBLICACION.md §Etapa 2.
+import actualizaciones as ACT
+
+
+def _apagarme():
+    """Apaga este proceso para que el ayudante pueda reemplazar los archivos. La tarea de Windows
+    lo vuelve a levantar (y el ayudante también lo arranca explícitamente)."""
+    def _fin():
+        time.sleep(1)
+        os._exit(0)
+    _en_hilo(_fin)
+
+
+# ── PUBLICAR (lado TALLER): arma el paquete y se lo manda al servidor publicado ──
+def _pub_cfg():
+    import empaquetar as _EMP
+    return _EMP.config_publicacion()
+
+
+# Cloudflare (que está delante del servidor publicado) RECHAZA con 403 al `User-Agent` por defecto
+# de Python (`Python-urllib/3.x`): lo toma por un bot. Verificado: con cualquier otro agente da 200.
+# Sin esto, publicar fallaba siempre con un "403 Forbidden" imposible de entender.
+_UA_PUB = "TIZADAPRO-publicador/1.0"
+
+
+@app.get("/api/publicacion/estado")
+def publicacion_estado():
+    """Para la pantalla de Publicación: qué versión hay acá, qué versión hay publicada y si hay
+    algo pendiente allá. Si el servidor publicado no contesta, se dice y listo."""
+    cfg = _pub_cfg()
+    out = {"local": _version(), "url": cfg.get("url"), "remoto": None, "error": None}
+    try:
+        import urllib.request
+        _rq = urllib.request.Request(cfg["url"].rstrip("/") + "/api/actualizacion/estado",
+                                     headers={"User-Agent": _UA_PUB})
+        with urllib.request.urlopen(_rq, timeout=20) as r:
+            out["remoto"] = json.loads(r.read())
+    except Exception as e:
+        # 404 = el servidor publicado corre una versión VIEJA, sin el receptor de actualizaciones:
+        # no es un error de red, es que todavía le falta la instalación que lo incluye. Se distingue
+        # para poder decírselo al usuario con esas palabras y no con un "404" pelado.
+        out["sin_receptor"] = "404" in str(e)
+        out["error"] = str(e)[:200]
+    return jsonify(out)
+
+
+@app.post("/api/publicacion/publicar")
+def publicacion_publicar():
+    """Arma el paquete y lo SUBE. `cuando` = 0 (ya) o marca de tiempo. Es lo que hace el botón."""
+    cuerpo = request.get_json(force=True) or {}
+    cfg = _pub_cfg()
+    if cuerpo.get("url"):
+        cfg["url"] = cuerpo["url"]
+        with open(os.path.join(AQUI, "datos", "publicacion.json"), "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, ensure_ascii=False, indent=1)
+    try:
+        import subprocess as _sp, hashlib as _hl, urllib.request as _ur
+        # 1) armar el paquete de ACTUALIZACIÓN (sin datos: nunca pisa moldes ni pedidos)
+        r = _sp.run([sys.executable, os.path.join(AQUI, "empaquetar.py")],
+                    cwd=AQUI, capture_output=True, text=True, timeout=900)
+        if r.returncode != 0:
+            return jsonify({"error": "no se pudo armar el paquete: " + (r.stdout or r.stderr)[-400:]}), 500
+        import glob as _g
+        v = _version()["version"]
+        zips = [z for z in _g.glob(os.path.join(AQUI, "dist", "*.zip")) if "COMPLETO" not in z]
+        if not zips:
+            return jsonify({"error": "no apareció el paquete"}), 500
+        paq = max(zips, key=os.path.getmtime)
+        datos = open(paq, "rb").read()
+        # 2) subirlo
+        req = _ur.Request(cfg["url"].rstrip("/") + "/api/actualizacion/subir", data=datos,
+                          method="POST", headers={
+                              "Content-Type": "application/zip",
+                              "User-Agent": _UA_PUB,
+                              "X-Token-Act": cfg["token"],
+                              "X-Version": v,
+                              "X-Sha256": _hl.sha256(datos).hexdigest(),
+                              "X-Cuando": str(float(cuerpo.get("cuando") or 0) or time.time())})
+        with _ur.urlopen(req, timeout=300) as resp:
+            return jsonify({"ok": True, "paquete": os.path.basename(paq),
+                            "mb": round(len(datos) / 2**20, 2), **json.loads(resp.read())})
+    except Exception as e:
+        return jsonify({"error": str(e)[:300]}), 502
+
+
+@app.post("/api/publicacion/cancelar")
+def publicacion_cancelar():
+    cfg = _pub_cfg()
+    try:
+        import urllib.request as _ur
+        req = _ur.Request(cfg["url"].rstrip("/") + "/api/actualizacion/cancelar", data=b"{}",
+                          method="POST", headers={"X-Token-Act": cfg["token"],
+                                                  "User-Agent": _UA_PUB,
+                                                  "Content-Type": "application/json"})
+        with _ur.urlopen(req, timeout=60) as r:
+            return jsonify(json.loads(r.read()))
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 502
+
+
+@app.get("/api/actualizacion/estado")
+def actualizacion_estado():
+    """Lo consulta la PANTALLA para mostrar la cuenta regresiva. Sin clave a propósito: no revela
+    nada sensible (qué versión corre y cuánto falta para el corte) y lo necesita cualquiera que
+    esté trabajando para enterarse de que el sistema se va a reiniciar."""
+    return jsonify(ACT.estado(_version()["version"]))
+
+
+@app.post("/api/actualizacion/subir")
+def actualizacion_subir():
+    """Recibe el paquete del taller. `X-Token-Act` (clave), `X-Version`, `X-Sha256` y `X-Cuando`
+    (marca de tiempo; 0 = ya). El cuerpo es el .zip crudo."""
+    if not ACT.token_ok(request.headers.get("X-Token-Act")):
+        return jsonify({"error": "no autorizado"}), 401
+    datos = request.get_data()
+    if not datos:
+        return jsonify({"error": "no llegó ningún archivo"}), 400
+    try:
+        cuando = float(request.headers.get("X-Cuando") or 0)
+    except ValueError:
+        cuando = 0
+    ok, det = ACT.guardar(datos, request.headers.get("X-Version") or "",
+                          request.headers.get("X-Sha256") or "", cuando or time.time())
+    if not ok:
+        return jsonify({"error": det}), 400
+    return jsonify({"ok": True, "version": det, "cuando": cuando or time.time()})
+
+
+@app.post("/api/actualizacion/aplicar")
+def actualizacion_aplicar():
+    """Aplica la pendiente YA (el botón «actualizar ahora»). Contesta ANTES de apagarse."""
+    if not ACT.token_ok(request.headers.get("X-Token-Act")):
+        return jsonify({"error": "no autorizado"}), 401
+    ok, det = ACT.aplicar(_PUERTO[0], _version()["version"])
+    if not ok:
+        return jsonify({"error": det}), 409
+    _apagarme()
+    return jsonify({"ok": True, "version": det})
+
+
+@app.post("/api/actualizacion/cancelar")
+def actualizacion_cancelar():
+    if not ACT.token_ok(request.headers.get("X-Token-Act")):
+        return jsonify({"error": "no autorizado"}), 401
+    ACT.cancelar()
+    return jsonify({"ok": True})
 
 
 def _listar_perfiles():
@@ -2323,12 +2662,24 @@ _RENDER_POOL = None
 _RENDER_POOL_LOCK = threading.Lock()
 _ASIGNAR_JOBS = {}          # job_id -> {"hecho": n, "total": N, "done": bool}
 
+def procesos_render():
+    """Cuántos procesos de render en paralelo. **CADA UNO PESA ~200 MB** (medido: 170 MB un talle
+    en frío, 194 MB una tizada completa) → en un servidor con poca RAM hay que bajarlo o el sistema
+    se queda sin memoria. `TIZADA_PROCESOS=2` es lo recomendado para ~1 GB libre.
+    Sin la variable: el comportamiento de siempre (hasta 6, según los núcleos)."""
+    try:
+        n = int(os.environ.get("TIZADA_PROCESOS") or 0)
+    except ValueError:
+        n = 0
+    return max(1, n) if n else min((os.cpu_count() or 4), 6)
+
+
 def _get_render_pool():
     global _RENDER_POOL
     with _RENDER_POOL_LOCK:
         if _RENDER_POOL is None:
             from concurrent.futures import ProcessPoolExecutor
-            _RENDER_POOL = ProcessPoolExecutor(max_workers=min((os.cpu_count() or 4), 6))
+            _RENDER_POOL = ProcessPoolExecutor(max_workers=procesos_render())
     return _RENDER_POOL
 
 def _render_talle_worker(args):
@@ -2624,11 +2975,28 @@ def _split_ident(ident):
     return str(ident), None
 
 
+def _tf_de_capa(entry):
+    """Transform de UNA capa editable (la capa es el objeto: todo lo de adentro se mueve junto).
+    Si la entrada trae la config VIEJA por figura (…["objetos"][oid]["transforms"]) y la capa no
+    tiene transform propio, se adopta el de la primera figura que tenga uno → lo que el usuario
+    ya había movido no se pierde ni queda a medias entre figuras."""
+    entry = entry or {}
+    tf = dict(entry.get("transforms") or {})
+    if not tf:
+        for sub in (entry.get("objetos") or {}).values():
+            tf = dict((sub or {}).get("transforms") or {})
+            if tf:
+                break
+    return tf
+
+
 def _editables_cfg(prod, dslug, override=None):
     """Config de editables para el motor: BASE del catálogo POR VARIABLE + AJUSTE del pedido (override),
     mergeado por (variable, IDENT, talle). → {variable: {IDENT: {talle: tf}}}.
-    Una capa de 1 objeto → IDENT = nombre de capa (compat). Una capa multi-objeto guarda
-    …[capa]["objetos"][obj_id] y se aplana a IDENT = "capa<SEP>obj_id".
+    El IDENT del TRANSFORM es SIEMPRE el nombre de la CAPA: la capa es UN objeto editable y todo lo
+    que tenga adentro se transforma junto. Compat: config vieja guardada por figura
+    (…[capa]["objetos"][obj_id]["transforms"]) → se toma como transform DE LA CAPA (la primera con
+    valor), para no perder lo que el usuario ya había movido.
     Compat: formato VIEJO (base[objeto]={"transforms":...}, sin nivel variable) → clave "*"."""
     base = (((prod or {}).get("editables") or {}).get(dslug) or {})
     out = {}
@@ -2638,11 +3006,7 @@ def _editables_cfg(prod, dslug, override=None):
         else:                                                     # NUEVO: var es una VARIABLE
             for capa, entry in (objs or {}).items():
                 entry = entry or {}
-                if "objetos" in entry:                            # capa MULTI-objeto
-                    for oid, sub in (entry.get("objetos") or {}).items():
-                        out.setdefault(var, {})[_ident_obj(capa, oid)] = dict((sub or {}).get("transforms") or {})
-                else:                                             # capa de 1 objeto (compat)
-                    out.setdefault(var, {})[capa] = dict(entry.get("transforms") or {})
+                out.setdefault(var, {})[capa] = _tf_de_capa(entry)
     for var, objs in (override or {}).items():                    # override = {variable: {IDENT: {talle: tf}}}
         if not objs:
             continue                                              # override VACÍO → no cambia nada (no ensuciar
@@ -2833,41 +3197,53 @@ def get_editables():
         _recol = MP.editables_recolorables(arte) if os.path.exists(arte) else {}
     except Exception:
         _recol = {}
-    # EXPANSIÓN POR OBJETO: una capa con VARIOS objetos se abre en un ítem por objeto (cada uno se
-    # edita/recolorea por separado). Identidad del ítem = `nombre` = IDENT ("capa<SEP>obj_id" en
-    # multi; el nombre de capa en 1-objeto = compat). `label` = etiqueta amigable para mostrar.
+    # UN ÍTEM POR CAPA: la capa "Editable …" ES el objeto editable — todo lo que tenga adentro se
+    # mueve/rota/escala JUNTO (el agrupado de Illustrator no viaja en el .ai, así que la capa es la
+    # unidad; ver §10.b). Su `bbox_mu`/`w_cm`/`h_cm` son los de la UNIÓN de sus figuras.
+    # El COLOR sí es por FIGURA: van en `partes` [{obj_id, ident, label, color, recolorable, svg}]
+    # y el editor deja elegir cuál pintar (cada una guarda con su IDENT "capa<SEP>obj_id").
     _expandido = []
     for o in objetos:
         pieza = mesa2pieza.get(o["mesa"], "")
         rp = reg.get(pieza) or {}
         pb = (rp.get(ref_talle) or next(iter(rp.values()), {})).get("bbox_mu")
-        _obs = o.get("objetos") or []
-        if len(_obs) >= 2:                                        # capa MULTI-objeto → N ítems
-            _cfg_capa = (cfg.get(o["nombre"]) or {}).get("objetos", {})
-            for _i, _ob in enumerate(_obs):
-                _ec = _cfg_capa.get(_ob["obj_id"], {})
-                _expandido.append({
-                    "mesa": o["mesa"], "capa": o["capa"],
-                    "nombre": _ident_obj(o["nombre"], _ob["obj_id"]),    # IDENTIDAD
-                    "label": f"{o['nombre']} ({_i + 1})", "obj_id": _ob["obj_id"],
-                    "pieza": pieza, "quitable": False,
-                    "transforms": _ec.get("transforms", {}), "color": _ec.get("color"),
-                    "recolorable": bool(_ob.get("recolorable")),
-                    "bbox_mu": _ob["bbox_mu"], "mesa_rect": _ob["mesa_rect"],
-                    "w_cm": _ob["w_cm"], "h_cm": _ob["h_cm"],
-                    "thumb": _ob.get("thumb"), "svg": _ob.get("svg") or o.get("svg"),
-                    "pos": _pos_en_pieza(_ob.get("mesa_rect"), _ob.get("bbox_mu"), pb),
-                })
-        else:                                                    # capa de 1 objeto → compat (obj_id None)
-            o["pieza"] = pieza
-            o["label"] = o["nombre"]; o["obj_id"] = None
-            o["quitable"] = o.get("capa") in _inyectadas
-            o["transforms"] = (cfg.get(o["nombre"]) or {}).get("transforms", {})
-            o["color"] = (cfg.get(o["nombre"]) or {}).get("color")
-            o["recolorable"] = bool(_recol.get(o.get("capa"), False))
-            o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
-            o.pop("objetos", None)                               # el front no necesita el detalle interno
-            _expandido.append(o)
+        _obs = o.pop("objetos", None) or []                      # detalle interno → se reexpone como `partes`
+        _entry = cfg.get(o["nombre"]) or {}
+        _sub = _entry.get("objetos") or {}
+        o["pieza"] = pieza
+        o["label"] = o["nombre"]; o["obj_id"] = None
+        o["quitable"] = o.get("capa") in _inyectadas
+        o["transforms"] = _tf_de_capa(_entry)
+        o["color"] = _entry.get("color")
+        o["recolorable"] = bool(_recol.get(o.get("capa"), False)) or any(b.get("recolorable") for b in _obs)
+        o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
+        # COLOR de cada figura para ESTA variable (la de la capa vale de default para las que no
+        # tengan el suyo) → {obj_id: (fill, stroke)}.
+        _lay_c = _clamp_color(_entry.get("color"))
+        _cols = {}
+        for b in _obs:
+            _c = _clamp_color((_sub.get(b["obj_id"]) or {}).get("color")) or _lay_c
+            if _c:
+                _cols[b["obj_id"]] = (_c.get("fill"), _c.get("stroke"))
+        o["partes"] = [{
+            "obj_id": b["obj_id"], "ident": _ident_obj(o["nombre"], b["obj_id"]),
+            "label": f"{o['nombre']} ({i + 1})", "recolorable": bool(b.get("recolorable")),
+            "color": (_sub.get(b["obj_id"]) or {}).get("color"), "fill": b.get("fill"),
+            # miniatura de la figura CON su color (si tiene override); si no, la del arte
+            "svg": (MP.svg_editable(arte, o["mesa"], o["capa"], b["bbox_mu"],
+                                    colores=_cols, obj_id=b["obj_id"]) if _cols.get(b["obj_id"])
+                    else b.get("svg")),
+            "w_cm": b.get("w_cm"), "h_cm": b.get("h_cm"),
+        } for i, b in enumerate(_obs)] if len(_obs) >= 2 else []
+        # DIBUJO DEL OBJETO EN EL EDITOR: si alguna figura tiene color, se regenera el SVG de la
+        # capa RECOLOREADO — el que trae `extraer_editables` es el del arte crudo y el cambio de
+        # color no se veía en pantalla aunque la tizada sí lo tuviera (LEY arte=tizada). El `thumb`
+        # (PNG del arte) se descarta: la lista lo prefiere al SVG y mostraría el color viejo.
+        if _cols:
+            _sv = MP.svg_editable(arte, o["mesa"], o["capa"], o["bbox_mu"], colores=_cols)
+            if _sv:
+                o["svg"] = _sv; o["thumb"] = None
+        _expandido.append(o)
     objetos = _expandido
     # ── OBJETOS AGREGADOS: se devuelven con la MISMA FORMA que uno del arte ──────────────
     # (mesa_rect, bbox_mu, pos, w_cm/h_cm, svg base64, transforms). Así NINGUNA pantalla
@@ -2918,21 +3294,19 @@ def set_editable():
     # "*" = compartida (sin variable, ej. front viejo).
     variante = str(cuerpo.get("variante") or "*").strip() or "*"
     tf = _clamp_tf(cuerpo.get("transform"))
-    # `nombre` puede venir como IDENT ("capa<SEP>obj_id"): una capa multi-objeto edita CADA objeto
-    # por separado y se guarda ANIDADO en …[capa]["objetos"][obj_id]. `obj_id` explícito también vale.
-    capa_n, oid = _split_ident(nombre)
-    oid = str(cuerpo.get("obj_id") or oid or "").strip() or None
+    # El TRANSFORM es SIEMPRE de la CAPA: la capa "Editable …" es UN objeto y todo lo que tenga
+    # adentro se mueve/rota/escala junto. Si viniera un IDENT por figura ("capa<SEP>obj_id", de un
+    # front viejo) se le saca el obj_id y se guarda a nivel capa. El color sí es por figura.
+    nombre, _oid_ignorado = _split_ident(nombre)
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if prod is None:
         return jsonify({"error": "molde no encontrado"}), 404
     eds = prod.setdefault("editables", {}).setdefault(_slugify_diseno(diseno), {}).setdefault(variante, {})
-    if oid:
-        obj = eds.setdefault(capa_n, {}).setdefault("objetos", {}).setdefault(oid, {"transforms": {}})
-    else:
-        obj = eds.setdefault(nombre, {"transforms": {}})
+    obj = eds.setdefault(nombre, {"transforms": {}})
+    obj.setdefault("transforms", {})
     for t in talles:
-        obj.setdefault("transforms", {})[t] = tf
+        obj["transforms"][t] = tf
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "nombre": nombre, "transforms": obj["transforms"]})
 
@@ -5142,7 +5516,26 @@ if __name__ == "__main__":
     # puro timeout). Escuchando también en ::1, "localhost" responde al instante. Medido:
     # localhost 2.08s/req → 0.02s/req. (El reloader se pierde con make_server → TIZADA_RELOAD=1
     # para volver a app.run con auto-reload en desarrollo, escuchando solo IPv4.)
-    if os.environ.get("TIZADA_RELOAD") == "1":
+    _PUERTO[0] = port
+    if PUBLICADO:
+        # Si una actualización quedó a mitad de camino (corte de luz), dejar constancia; y poner a
+        # vigilar la hora de la que esté programada.
+        ACT.recuperar_si_quedo_a_medias()
+        ACT.vigilar(port, _version()["version"], _apagarme)
+        # SERVIDOR DE PRODUCCIÓN. `make_server`/`app.run` son de DESARROLLO: un solo hilo por
+        # conexión, sin límite de cola y sin protección ante clientes lentos. Waitress es WSGI de
+        # verdad, corre en Windows y no necesita nada compilado. Si no está instalado NO se cae a
+        # los de desarrollo en silencio: se avisa y se corta (mejor no arrancar que arrancar mal).
+        try:
+            from waitress import serve as _waitress
+        except ImportError:
+            raise SystemExit(
+                "\n[ERROR] Modo 'publicado' sin waitress instalado.\n"
+                "        Instalalo con:  py -m pip install waitress\n")
+        _hilos = int(os.environ.get("TIZADA_HILOS", "8"))
+        print(f"  modo PUBLICADO · waitress · {_hilos} hilos · puerto {port}")
+        _waitress(app, host=host, port=port, threads=_hilos, ident="TIZADA PRO")
+    elif os.environ.get("TIZADA_RELOAD") == "1":
         app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=True)
     else:
         from werkzeug.serving import make_server

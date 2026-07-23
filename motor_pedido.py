@@ -13,7 +13,8 @@ from scipy import ndimage
 from molde_real import (extraer_contorno_mesa, extraer_piezas_mesa,
                         limpiar_capas, limpiar_capas_conservando_talle, aislar_capa, suprimir_capas,
                         recolorar_capa, capa_admite_color,
-                        objetos_de_capa, aislar_objeto, suprimir_objetos, capa_admite_color_objeto,
+                        objetos_de_capa, aislar_objeto, aislar_capa_objetos,
+                        suprimir_objetos, capa_admite_color_objeto,
                         geometrias_base, sanear_oc, _nombres_oc, MM)
 from nesting_contorno import anidar_contorno, componer_pdf_contorno
 from texto_curvas import FuenteCurvas
@@ -2127,15 +2128,24 @@ def extraer_editables(path_arte, con_thumb=True):
     return objs
 
 
-def _svg_objeto_aislado(path_arte, mesa, capa, obj_id, bbox_mu, cb, U):
-    """SVG vectorial de UN objeto editable aislado (para el visor del front, capas multi-objeto).
-    Aísla el objeto en una copia del arte, recorta al bbox y exporta SVG. None si falla."""
+def svg_editable(path_arte, mesa, capa, bbox_mu, colores=None, obj_id=None):
+    """SVG vectorial (base64) de una capa editable ENTERA — o de UNA figura con `obj_id` — aislada
+    del arte, **opcionalmente RECOLOREADA por figura** (`colores` = {obj_id: (fill_cmyk, stroke_cmyk)}).
+
+    Lo usa el EDITOR para dibujar el objeto con el color que realmente va a salir: el SVG que sale
+    de `extraer_editables` es el del arte crudo, así que sin esto el color cambiado NO se veía en la
+    pantalla aunque la tizada sí lo tuviera (LEY arte=tizada). None si falla."""
     import base64
     try:
         pk = pikepdf.open(path_arte)
         try:
-            aislar_objeto(pk, pk.pages[mesa - 1], capa, obj_id)
-            sanear_oc(pk, pk.pages[mesa - 1])
+            pag = pk.pages[mesa - 1]
+            if obj_id:
+                _c = (colores or {}).get(obj_id) or (None, None)
+                aislar_objeto(pk, pag, capa, obj_id, cmyk_fill=_c[0], cmyk_stroke=_c[1])
+            else:
+                aislar_capa_objetos(pk, pag, capa, colores or {})
+            sanear_oc(pk, pag)
             bio = io.BytesIO(); pk.save(bio)
         finally:
             pk.close()
@@ -2153,6 +2163,11 @@ def _svg_objeto_aislado(path_arte, mesa, capa, obj_id, bbox_mu, cb, U):
         return base64.b64encode(svg.encode("utf-8")).decode("ascii")
     except Exception:
         return None
+
+
+def _svg_objeto_aislado(path_arte, mesa, capa, obj_id, bbox_mu, cb=None, U=None):
+    """SVG de UNA figura de la capa (miniatura del selector de color). Alias de `svg_editable`."""
+    return svg_editable(path_arte, mesa, capa, bbox_mu, obj_id=obj_id)
 
 
 def editables_recolorables(path_arte):
@@ -3207,11 +3222,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             return True
         return (abs(tf.get("dx", 0)) < 1e-6 and abs(tf.get("dy", 0)) < 1e-6
                 and abs(tf.get("rot", 0)) < 1e-6 and abs(tf.get("scale", 1) - 1) < 1e-6)
-    # `editables_cfg` = {variable: {IDENT: {talle: tf}}} (posición POR VARIABLE). IDENT identifica al
-    # objeto editable: para una capa de UN objeto es el nombre de la capa (compat); para una capa con
-    # VARIOS objetos es "nombre\x00obj_id" (cada trazado/objeto se edita por separado). El servidor
-    # arma ese IDENT; acá el motor lo usa tal cual como identidad. Un objeto editado en CUALQUIER
-    # variable se saca del diseño base y se redibuja (unión); donde no se editó cae a identidad.
+    # `editables_cfg` = {variable: {IDENT: {talle: tf}}} (posición POR VARIABLE). IDENT del TRANSFORM
+    # = el NOMBRE DE LA CAPA: la capa "Editable …" es UN objeto, con todo lo que tenga adentro, y se
+    # mueve/rota/escala JUNTA (el agrupado de Illustrator no viaja en el .ai → la capa es la unidad).
+    # El COLOR sí es por figura: ese IDENT lleva "nombre\x00obj_id" (ver `_colores_de`). Un objeto
+    # editado en CUALQUIER variable se saca del diseño base y se redibuja (unión); donde no se editó
+    # cae a identidad.
     _editados_nombres = set()
     for _objs in (editables_cfg or {}).values():
         for _nom, _portalle in (_objs or {}).items():
@@ -3255,11 +3271,28 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     def _ident(nombre, obj_id):
         return f"{nombre}{SEP}{obj_id}" if obj_id else nombre
     def _es_redibujado(u):
-        """¿El objeto/unidad `u` se saca del diseño base y se redibuja aparte? (editado, con color
-        override o con tamaño configurado, por su IDENT; el tamaño puede estar por nombre de capa)."""
+        """¿La CAPA `u` se saca del diseño base y se redibuja aparte? (editada, con tamaño
+        configurado, o con color override — propio de la capa o de CUALQUIERA de sus figuras)."""
         nm = _norm_nombre(u["ident"]); lay = _norm_nombre(_nombre_editable(u["capa"]))
-        return (nm in _editados_nombres or nm in _coloreados_nombres
-                or nm in _tamano_nombres or lay in _tamano_nombres)
+        if (nm in _editados_nombres or nm in _coloreados_nombres
+                or nm in _tamano_nombres or lay in _tamano_nombres):
+            return True
+        return any(_norm_nombre(o["ident"]) in _coloreados_nombres
+                   for o in (u.get("objetos") or []))
+    def _colores_de(u, variante):
+        """Colores POR FIGURA de la capa `u` para esta variable: {obj_id: (fill, stroke)}.
+        Devuelve `None` si NINGUNA figura tiene color propio (ahí manda el color de capa, camino
+        legacy). Una figura sin color propio hereda el de la capa, si lo hay."""
+        _subs = u.get("objetos") or []
+        if not any(_color_de(o["ident"], variante) for o in _subs):
+            return None
+        _lay = _color_de(u["ident"], variante)
+        out = {}
+        for o in _subs:
+            c = _color_de(o["ident"], variante) or _lay
+            if c:
+                out[o["obj_id"]] = c
+        return out or None
     # GARANTÍA anti-desaparición: un objeto a redibujar (editado o fijo) solo se SACA del
     # diseño base si su aislamiento produce contenido real. Si fallara, se DEJA en el diseño
     # tal cual (presente) — nunca desaparece. Se valida más abajo (necesita _edit_por_mesa).
@@ -3279,25 +3312,13 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             # Si no, el placeholder original (ej. "00") sale igual, encima del valor.
             _quitar = {c for c in CAPAS_ARTE if _es_capa_guia(c)} | (CAPAS_ARTE & {"Personalizable"}) | {
                 c for c in CAPAS_ARTE if _norm_nombre(c) not in CAPAS_NO_PERS}
-            # Capas editables con VARIOS objetos: se manejan POR OBJETO (no enteras). Solo se saca
-            # del diseño base cada OBJETO redibujado; el resto de la capa queda intacto. Se hace
-            # ANTES de suprimir_capas y CONSERVANDO los marcadores OCG (un raspado los consume:
-            # si se hiciera después, suprimir_capas ya no encontraría los frames de guías/pers).
-            _units = _edit_por_mesa.get(arte_mesa, [])
-            _multi_capas = {u["capa"] for u in _units if u.get("obj_id")}
-            _parcial = {}
-            for u in _units:
-                if u["capa"] in _multi_capas and _norm_nombre(u["ident"]) in _redibujar_validos:
-                    _parcial.setdefault(u["capa"], set()).add(u["obj_id"])
-            for _capa, _oids in _parcial.items():
-                suprimir_objetos(pdf, pag, _norm_nombre(_capa), _oids, conservar_marcadores=True)
-            # Los objetos editables de UN solo objeto se MANTIENEN dentro del diseño (vectorial,
-            # exactos), SALVO los que el usuario transformó Y cuyo aislamiento es válido (esos se
-            # redibujan aparte → van enteros a _quitar). Las capas multi-objeto NUNCA van enteras.
+            # Los objetos editables se MANTIENEN dentro del diseño (vectorial, exactos), SALVO los
+            # que el usuario transformó/recoloreó y cuyo aislamiento es válido: esos salen del
+            # diseño y se redibujan aparte. Sale la CAPA ENTERA (con todas sus figuras): la capa es
+            # la unidad editable, así que nunca se parte a medias.
             _quitar = {c for c in _quitar if not (
-                _es_capa_editable(c) and (
-                    c in _multi_capas
-                    or _norm_nombre(_nombre_editable(c)) not in _redibujar_validos))}
+                _es_capa_editable(c)
+                and _norm_nombre(_nombre_editable(c)) not in _redibujar_validos)}
             # suprimir_capas (no limpiar_capas): quita esas capas SIN romper el estado gráfico,
             # así los editables que heredan color NO cambian de color (negro K100 seguía negro).
             suprimir_capas(pdf, pag, _quitar)
@@ -3308,20 +3329,28 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # Capa de UN objeto editable, AISLADA como vector (mismo lienzo del arte, con SOLO esa
     # capa pintada). Preserva el estado gráfico → color/CMYK/spot EXACTO del diseño (no se
     # rasteriza ni se arrastra lo que tenga encima). Cacheada por (mesa, capa).
-    _arte_solo = {}                       # (mesa, capa_norm, obj_id, color_key) -> pikepdf Pdf aislado
-    def pagina_arte_solo(arte_mesa, capa, color=None, obj_id=None):
-        # `color` = (fill_cmyk|None, stroke_cmyk|None) o None. Se cachea por color porque el
-        # mismo objeto puede tener colores distintos según la VARIABLE. `obj_id` = None → capa
-        # ENTERA (compat, 1 objeto); si viene → se aísla ESE objeto dentro de la capa.
+    _arte_solo = {}                       # (mesa, capa_norm, obj_id, color_key, colores_key) -> pikepdf
+    def pagina_arte_solo(arte_mesa, capa, color=None, obj_id=None, colores=None):
+        # `color` = (fill_cmyk|None, stroke_cmyk|None) de TODA la capa, o None. `colores` =
+        # {obj_id: (fill, stroke)} → color POR FIGURA dentro de la capa (la capa igual sale ENTERA:
+        # es una sola unidad). Se cachea por color porque el mismo objeto puede tener colores
+        # distintos según la VARIABLE. `obj_id` = aislar UNA figura sola (validación/miniaturas).
         _ck = None if not color else ((tuple(color[0]) if color[0] else None),
                                       (tuple(color[1]) if color[1] else None))
         if _ck == (None, None):
             _ck = None
-        key = (arte_mesa, _norm_nombre(capa), obj_id, _ck)
+        _cko = tuple(sorted((k, (tuple(v[0]) if v[0] else None), (tuple(v[1]) if v[1] else None))
+                            for k, v in (colores or {}).items()
+                            if v and (v[0] is not None or v[1] is not None))) or None
+        key = (arte_mesa, _norm_nombre(capa), obj_id, _ck, _cko)
         if key not in _arte_solo:
             pdf = _abrir_pike(arte)
             pag = pdf.pages[arte_mesa - 1]
-            if obj_id:
+            if _cko:
+                # Capa ENTERA con color POR FIGURA (aísla y recolorea en la misma pasada).
+                aislar_capa_objetos(pdf, pag, _norm_nombre(capa),
+                                    {k: (f, s) for k, f, s in _cko})
+            elif obj_id:
                 # UN objeto dentro de la capa: `aislar_objeto` aísla Y recolorea en la MISMA
                 # pasada (no hay gotcha de orden: no separa recolorar de aislar).
                 aislar_objeto(pdf, pag, _norm_nombre(capa), obj_id,
@@ -3374,28 +3403,21 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # Objetos editables del arte (capas "Editable …") → se dibujan APARTE de cada pieza,
     # con su transformación (mover/rotar/escalar). El diseño base ya los excluye.
     # Solo se activa cuando se pasa `editables_cfg` (None = no tocar la generación normal).
-    # `_edit_por_mesa[mesa]` = lista de UNIDADES editables (una por OBJETO). Una capa de 1 objeto
-    # → 1 unidad con obj_id=None (whole-layer, compat). Una capa con VARIOS objetos → 1 unidad por
-    # objeto (obj_id, bbox/tamaño propios). Cada unidad lleva su IDENT (identidad para la config).
+    # `_edit_por_mesa[mesa]` = lista de UNIDADES editables: UNA POR CAPA "Editable …", con TODO lo
+    # que la capa tenga adentro (bbox/tamaño = la UNIÓN de sus figuras) → se mueve/rota/escala junta.
+    # `objetos` = las figuras de adentro, sólo para el COLOR (ése sí es por figura).
     _edit_por_mesa = {}
     _ecfg = editables_cfg or {}
     if mapeo_arte and editables_cfg is not None:
         try:
             for _o in extraer_editables(arte, con_thumb=False):   # el motor usa solo geometría (no thumb/svg)
-                _objetos = _o.get("objetos") or []
-                if len(_objetos) >= 2:                             # capa MULTI-objeto: una unidad por objeto
-                    for _ob in _objetos:
-                        _edit_por_mesa.setdefault(_o["mesa"], []).append({
-                            "capa": _o["capa"], "nombre": _o["nombre"], "obj_id": _ob["obj_id"],
-                            "ident": _ident(_o["nombre"], _ob["obj_id"]), "mesa": _o["mesa"],
-                            "bbox_mu": _ob["bbox_mu"], "mesa_rect": _ob["mesa_rect"],
-                            "w_cm": _ob["w_cm"], "h_cm": _ob["h_cm"]})
-                else:                                             # capa de 1 objeto: whole-layer (compat)
-                    _edit_por_mesa.setdefault(_o["mesa"], []).append({
-                        "capa": _o["capa"], "nombre": _o["nombre"], "obj_id": None,
-                        "ident": _o["nombre"], "mesa": _o["mesa"],
-                        "bbox_mu": _o["bbox_mu"], "mesa_rect": _o["mesa_rect"],
-                        "w_cm": _o["w_cm"], "h_cm": _o["h_cm"]})
+                _edit_por_mesa.setdefault(_o["mesa"], []).append({
+                    "capa": _o["capa"], "nombre": _o["nombre"], "obj_id": None,
+                    "ident": _o["nombre"], "mesa": _o["mesa"],
+                    "bbox_mu": _o["bbox_mu"], "mesa_rect": _o["mesa_rect"],
+                    "w_cm": _o["w_cm"], "h_cm": _o["h_cm"],
+                    "objetos": [{"obj_id": _ob["obj_id"], "ident": _ident(_o["nombre"], _ob["obj_id"])}
+                                for _ob in (_o.get("objetos") or [])]})
         except Exception:
             _edit_por_mesa = {}
         # Validar el aislamiento de cada OBJETO a redibujar (editado/fijo/color): solo se saca del
@@ -3409,7 +3431,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 try:
                     pagina_arte_solo(_mesa, _u["capa"], obj_id=_u["obj_id"])   # aislamiento, sin color
                     _bf = io.BytesIO()
-                    _arte_solo[(_mesa, _norm_nombre(_u["capa"]), _u["obj_id"], None)].save(_bf)
+                    _arte_solo[(_mesa, _norm_nombre(_u["capa"]), _u["obj_id"], None, None)].save(_bf)
                     _pg = _abrir("pdf", _bf.getvalue())[_mesa - 1]
                     if _pg.get_drawings() or _pg.get_images() or _pg.get_text().strip():
                         _redibujar_validos.add(_id)
@@ -3563,8 +3585,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 try:
                     # Objeto AISLADO como vector (color/CMYK/spot exacto del diseño). Si esta
                     # VARIABLE tiene color override para el objeto, se recolorea al aislar.
-                    _ps = pagina_arte_solo(_mesa_a, _o["capa"], color=_color_de(_o["ident"], variante),
-                                           obj_id=_o["obj_id"])
+                    # La capa sale ENTERA (una unidad). Si alguna de sus figuras tiene color
+                    # propio, se recolorea figura por figura en el mismo aislado.
+                    _cols = _colores_de(_o, variante)
+                    _ps = pagina_arte_solo(_mesa_a, _o["capa"], obj_id=_o["obj_id"],
+                                           color=(None if _cols else _color_de(_o["ident"], variante)),
+                                           colores=_cols)
                     _xs = out.copy_foreign(_ps.as_form_xobject())
                     if "/OC" in _xs:
                         del _xs["/OC"]

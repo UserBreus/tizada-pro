@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+// La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
+import { esRutaAdmin, rutaApi } from './base.js';
 
 // --- Inline SVG Icons Component for clean, dependency-free icons ---
 // Acepta `style` además de `className`. Si no se pasa ni estilo ni clase,
@@ -1117,7 +1119,7 @@ function LoginScreen({ onLogin }) {
       <form onSubmit={entrar} style={{ width: '100%', maxWidth: 380, padding: 32, borderRadius: 16,
         background: 'var(--bg-card, #14181c)', border: '1px solid var(--border-light)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-          <img src="/logo.svg" alt="" style={{ width: 42, height: 42 }} />
+          <img src={rutaApi("/logo.svg")} alt="" style={{ width: 42, height: 42 }} />
           <div><h1 style={{ margin: 0, fontSize: 22 }}><span style={{ color: 'var(--accent)' }}>USER</span> PRO</h1></div>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 22px' }}>Iniciá sesión para continuar.</p>
@@ -1491,7 +1493,7 @@ function DetalleFuente({ f, onVolver }) {
 
   return (
     <div className="panel animate-fade">
-      <style>{`@font-face{font-family:'${fam}';src:url('/api/fuente/archivo/${encodeURIComponent(f.archivo)}');font-display:swap;}`}</style>
+      <style>{`@font-face{font-family:'${fam}';src:url('${rutaApi('/api/fuente/archivo/' + encodeURIComponent(f.archivo))}');font-display:swap;}`}</style>
       <div style={{ marginBottom: 20 }}>
         <button className="btn ghost" onClick={onVolver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
           ⬅ Volver al Catálogo de Fuentes
@@ -1664,7 +1666,7 @@ function MesasInfinito({ mesas, job }) {
         <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
           {(() => { let gi = 0; return mesas.flatMap((hoja, hi) => {
             const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
-            const urlPdf = `/trabajos/${job.resultado.id}/${hoja.archivo}`;
+            const urlPdf = rutaApi(`/trabajos/${job.resultado.id}/${hoja.archivo}`);
             return pvs.map((pv, pi) => {
               const gidx = gi++;                        // índice global en orden de aparición
               const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
@@ -1689,7 +1691,7 @@ function MesasInfinito({ mesas, job }) {
                           style={{ fontSize: 12, fontWeight: 700, color: '#000', background: '#fff', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', flex: 1, minWidth: 0, marginRight: 8, outline: 'none' }} />
                       : <span onDoubleClick={() => setEditando(key)} title="Doble-click para renombrar"
                           style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text', userSelect: 'none' }}>{nombre}</span>}
-                    <a href={`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`} download={sanit(nombre) + '.pdf'} title="Descargar esta mesa"
+                    <a href={rutaApi(`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`)} download={sanit(nombre) + '.pdf'} title="Descargar esta mesa"
                       onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
                       style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
                       <Icon name="download" style={{ width: 14, height: 14 }} />
@@ -1697,7 +1699,7 @@ function MesasInfinito({ mesas, job }) {
                   </div>
                   {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
                   {pv
-                    ? <img src={`/trabajos/${job.resultado.id}/${pv}`} alt={nombre} draggable={false}
+                    ? <img src={rutaApi(`/trabajos/${job.resultado.id}/${pv}`)} alt={nombre} draggable={false}
                         style={{ width: w, height: h, display: 'block' }} />
                     : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
                   {/* ABAJO: tamaño ancho × alto */}
@@ -2125,25 +2127,104 @@ const _hex2rgb = (h) => { h = (h || '').replace('#', '').trim(); if (h.length ==
 const _rgb2hsv = ({ r, g, b }) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0; if (d) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h *= 60; if (h < 0) h += 360; } return { h, s: mx ? d / mx : 0, v: mx }; };
 const _hsv2rgb = ({ h, s, v }) => { const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c; let r = 0, g = 0, b = 0; if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0]; else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c]; else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x]; return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) }; };
 
+// ── COLOR REAL (perfil ICC) ───────────────────────────────────────────────────────────────
+// La fórmula ingenua 255·(1-C)·(1-K) muestra un color FALSO: el verde C95 M0 Y91 K15 salía
+// #0bd913 (flúor) cuando Illustrator lo muestra #009550. El color real depende del PERFIL ICC
+// configurado → lo convierte el backend (`/api/color/convertir`, intent perceptual = el que
+// reproduce EXACTO lo que ve Illustrator). Acá: caché en memoria + pedido EN LOTE (un solo
+// fetch por tanda) + suscripción para re-renderizar cuando llega la respuesta. Mientras no está,
+// se devuelve el aproximado (la pantalla nunca queda sin color).
+const _iccMem = new Map();          // "c,m,y,k" → "#rrggbb"
+const _iccPend = new Set();
+const _iccSubs = new Set();
+let _iccTimer = null;
+const _iccKey = (c) => (c || [0, 0, 0, 0]).map(v => Math.round((+v || 0) * 1000) / 1000).join(',');
+const _cmykHexAprox = (c) => {
+  const [C, M, Y, K] = [0, 1, 2, 3].map(i => +(c || [])[i] || 0);
+  const h = (v) => Math.round(255 * (1 - v) * (1 - K)).toString(16).padStart(2, '0');
+  return `#${h(C)}${h(M)}${h(Y)}`;
+};
+function _iccFlush() {
+  _iccTimer = null;
+  const keys = [..._iccPend]; _iccPend.clear();
+  if (!keys.length) return;
+  fetch('/api/color/convertir', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cmyk: keys.map(k => k.split(',').map(Number)) }),
+  }).then(r => r.json()).then(d => {
+    (d.hex || []).forEach((h, i) => { if (h) _iccMem.set(keys[i], h); });
+    _iccSubs.forEach(f => f());
+  }).catch(() => { });
+}
+/** hex REAL de un CMYK (por el perfil ICC). Si todavía no llegó, el aproximado. */
+function cmykHex(c) {
+  const k = _iccKey(c);
+  if (_iccMem.has(k)) return _iccMem.get(k);
+  if (!_iccPend.has(k)) { _iccPend.add(k); if (!_iccTimer) _iccTimer = setTimeout(_iccFlush, 60); }
+  return _cmykHexAprox(c);
+}
+/** Suscribe el componente a las respuestas ICC (re-render cuando llega el color real). */
+function useIcc() {
+  const [, f] = useState(0);
+  useEffect(() => { const s = () => f(x => x + 1); _iccSubs.add(s); return () => { _iccSubs.delete(s); }; }, []);
+}
+
+/** Campo numérico del selector de color: SOLO para escribir (sin flechitas de subir/bajar) y con
+ *  coma decimal (41,2). Guarda el texto tal cual se tipea mientras está enfocado: si se
+ *  reformateara en cada tecla no se podría escribir la coma ("41," volvería a "41"). */
+function CampoNum({ valor, onCambio, ancho = 60, style }) {
+  const [txt, setTxt] = useState(null);
+  const mostrado = txt !== null ? txt : String(valor).replace('.', ',');
+  return (
+    <input type="text" inputMode="decimal" value={mostrado}
+      onChange={(e) => {
+        const t = e.target.value.replace(/[^\d.,]/g, '');
+        setTxt(t);
+        const n = parseFloat(t.replace(',', '.'));
+        if (!isNaN(n)) onCambio(n);
+      }}
+      onFocus={(e) => e.target.select()}
+      onBlur={() => setTxt(null)}
+      style={{ width: ancho, padding: '5px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.3)',
+        border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, textAlign: 'center',
+        outline: 'none', ...(style || {}) }} />
+  );
+}
+
 function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
   // Trabaja en HSV (UI fluida) + CMYK (salida exacta cuando se tipea CMYK).
   const [hsv, setHsv] = useState({ h: 0, s: 0, v: 0 });
   const [cmyk, setCmyk] = useState([0, 0, 0, 1]);
   const svRef = useRef(null), hueRef = useRef(null), drag = useRef(null);
+  useIcc();                                   // re-render cuando llega el color REAL del perfil
   useEffect(() => { if (open) { const c = color || [0, 0, 0, 1]; setCmyk(c); setHsv(_rgb2hsv(_cmyk2rgb(c))); } }, [open]);
   if (!open) return null;
-  const rgb = _hsv2rgb(hsv), hex = _rgb2hex(rgb);
+  const rgb = _hsv2rgb(hsv);
+  // Lo que se MUESTRA (muestra grande, HEX y R/G/B) es el color REAL del CMYK por el perfil ICC
+  // = lo mismo que muestra Illustrator. El cuadro de saturación/tono sigue siendo el espacio de
+  // selección (RGB puro): ahí se ELIGE, y abajo se ve cómo va a salir de verdad.
+  const hex = cmykHex(cmyk);
+  const rgbReal = _hex2rgb(hex) || rgb;
   const fromHsv = (nh) => { setHsv(nh); setCmyk(_rgb2cmyk(_hsv2rgb(nh))); };
-  const fromRgb = (nr) => { setHsv(_rgb2hsv(nr)); setCmyk(_rgb2cmyk(nr)); };
+  // Al TIPEAR un RGB/HEX se pide al perfil el CMYK que reproduce ese color (es lo que hace
+  // Illustrator); si el backend no responde, cae a la conversión simple.
+  const fromRgb = (nr) => {
+    setHsv(_rgb2hsv(nr));
+    setCmyk(_rgb2cmyk(nr));
+    fetch('/api/color/convertir', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rgb: [[nr.r, nr.g, nr.b]] }),
+    }).then(r => r.json()).then(d => { if (d.cmyk && d.cmyk[0]) setCmyk(d.cmyk[0]); }).catch(() => { });
+  };
   const fromCmyk = (nc) => { setCmyk(nc); setHsv(_rgb2hsv(_cmyk2rgb(nc))); };
   const onSV = (e) => { const r = svRef.current.getBoundingClientRect(); const s = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); const v = Math.max(0, Math.min(1, 1 - (e.clientY - r.top) / r.height)); fromHsv({ ...hsv, s, v }); };
   const onHue = (e) => { const r = hueRef.current.getBoundingClientRect(); const h = Math.max(0, Math.min(359.9, ((e.clientY - r.top) / r.height) * 360)); fromHsv({ ...hsv, h }); };
   const startDrag = (which, e) => { drag.current = which; (which === 'sv' ? onSV : onHue)(e); const mv = (ev) => { if (drag.current === 'sv') onSV(ev); else onHue(ev); }; const up = () => { drag.current = null; window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); }; window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up); };
-  const numIn = { width: 52, padding: '5px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, textAlign: 'right' };
+  const numIn = { width: 60, padding: '5px 7px', borderRadius: 6, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, textAlign: 'center', outline: 'none' };
   const row = (lbl, val, on, max, suf) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'space-between' }}>
       <span style={{ fontSize: 12, color: 'var(--text-secondary)', width: 16 }}>{lbl}</span>
-      <input type="number" min="0" max={max} value={val} onChange={(e) => on(parseFloat(e.target.value) || 0)} style={numIn} />
+      <CampoNum valor={val} onCambio={(n) => on(Math.max(0, Math.min(max, n)))} />
       {suf && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{suf}</span>}
     </div>
   );
@@ -2161,21 +2242,24 @@ function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
         </div>
         {/* Valores */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 9, minWidth: 0 }}>
-          <div style={{ height: 46, borderRadius: 8, border: '1px solid var(--border-light)', background: hex }} title="Color elegido" />
+          <div style={{ height: 46, borderRadius: 8, border: '1px solid var(--border-light)', background: hex }} title="Color real (con el perfil de color configurado) — igual que en Illustrator" />
           {row('H', Math.round(hsv.h), (v) => fromHsv({ ...hsv, h: Math.max(0, Math.min(360, v)) }), 360, '°')}
           {row('S', Math.round(hsv.s * 100), (v) => fromHsv({ ...hsv, s: Math.max(0, Math.min(100, v)) / 100 }), 100, '%')}
           {row('B', Math.round(hsv.v * 100), (v) => fromHsv({ ...hsv, v: Math.max(0, Math.min(100, v)) / 100 }), 100, '%')}
           <div style={{ height: 1, background: 'var(--border-light)', margin: '1px 0' }} />
-          {row('R', rgb.r, (v) => fromRgb({ ...rgb, r: Math.max(0, Math.min(255, v)) }), 255)}
-          {row('G', rgb.g, (v) => fromRgb({ ...rgb, g: Math.max(0, Math.min(255, v)) }), 255)}
-          {row('B', rgb.b, (v) => fromRgb({ ...rgb, b: Math.max(0, Math.min(255, v)) }), 255)}
+          {row('R', rgbReal.r, (v) => fromRgb({ ...rgbReal, r: Math.max(0, Math.min(255, v)) }), 255)}
+          {row('G', rgbReal.g, (v) => fromRgb({ ...rgbReal, g: Math.max(0, Math.min(255, v)) }), 255)}
+          {row('B', rgbReal.b, (v) => fromRgb({ ...rgbReal, b: Math.max(0, Math.min(255, v)) }), 255)}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 16, marginTop: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, auto)', gap: 8 }}>
           {['C', 'M', 'Y', 'K'].map((L, i) => (
             <div key={L} style={{ textAlign: 'center' }}>
-              <input type="number" min="0" max="100" value={Math.round((cmyk[i] || 0) * 100)} onChange={(e) => { const c = [...cmyk]; c[i] = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) / 100; fromCmyk(c); }} style={{ ...numIn, width: 46 }} />
+              {/* 1 decimal con COMA (Illustrator también trabaja con decimales: 94,9 %) —
+                  redondear a entero cambiaba el color al re-guardarlo. Ancho para "100,0". */}
+              <CampoNum valor={Math.round((cmyk[i] || 0) * 1000) / 10} ancho={62}
+                onCambio={(n) => { const c = [...cmyk]; c[i] = Math.max(0, Math.min(100, n)) / 100; fromCmyk(c); }} />
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3, fontWeight: 700 }}>{L}</div>
             </div>
           ))}
@@ -2193,9 +2277,250 @@ function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
   );
 }
 
+/** CINTA DE ACTUALIZACIÓN — la cuenta regresiva que ve quien está trabajando cuando hay una
+ *  actualización programada en el servidor. Pregunta cada 30 s (barato); cuando falta menos de
+ *  2 minutos pasa a contar segundo a segundo, con el reloj del navegador (no machaca al servidor).
+ *  Al llegar a cero el servidor se reinicia solo: acá se muestra «Actualizando…» y se reintenta
+ *  hasta que vuelva, y ahí la página se recarga sola con la versión nueva. */
+function AvisoActualizacion() {
+  const [est, setEst] = useState(null);       // {version, pendiente:{version,segundos}, en_curso}
+  const [seg, setSeg] = useState(null);       // segundos que faltan (los baja el reloj de acá)
+  const verRef = useRef(null);
+
+  useEffect(() => {
+    let vivo = true;
+    const pedir = async () => {
+      try {
+        const r = await fetch('/api/actualizacion/estado');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!vivo) return;
+        // Si el servidor volvió con OTRA versión, la pantalla está vieja → recargar.
+        if (verRef.current && d.version && d.version !== verRef.current) { window.location.reload(); return; }
+        verRef.current = d.version || verRef.current;
+        setEst(d);
+        setSeg(d.pendiente ? d.pendiente.segundos : null);
+      } catch { /* servidor reiniciándose: se reintenta en la próxima vuelta */ }
+    };
+    pedir();
+    const t = setInterval(pedir, 30000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+
+  // el contador corre localmente para que se vea bajar de a un segundo
+  useEffect(() => {
+    if (seg == null) return;
+    const t = setInterval(() => setSeg(s => (s == null ? null : Math.max(0, s - 1))), 1000);
+    return () => clearInterval(t);
+  }, [seg == null]);
+
+  if (!est || (!est.pendiente && !est.en_curso)) return null;
+  const enCurso = est.en_curso || seg === 0;
+  const mm = String(Math.floor((seg || 0) / 60)).padStart(2, '0');
+  const ss = String((seg || 0) % 60).padStart(2, '0');
+  const urgente = !enCurso && seg != null && seg <= 300;
+  return createPortal(
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10090, padding: '9px 16px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13.5, fontWeight: 700,
+      background: enCurso ? 'rgba(0,120,160,0.96)' : (urgente ? 'rgba(180,90,0,0.96)' : 'rgba(20,30,40,0.96)'),
+      color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(4px)' }}>
+      {enCurso ? (
+        <>
+          <span className="status-dot" style={{ background: '#fff' }} />
+          <span>Actualizando el sistema… vuelve en menos de un minuto. No cierres esta pantalla.</span>
+        </>
+      ) : (
+        <>
+          <span>El sistema se actualizará en</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 17, letterSpacing: 1,
+            padding: '2px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.35)' }}>{mm}:{ss}</span>
+          <span style={{ fontWeight: 400, opacity: 0.9 }}>
+            (versión {est.pendiente?.version}) · va a estar cortado alrededor de un minuto
+          </span>
+        </>
+      )}
+    </div>, document.body);
+}
+
+/** PANTALLA DE PUBLICACIÓN (Config → Publicación). Todo el circuito en un botón: compara la versión
+ *  de esta máquina con la que está publicada, arma el paquete, lo manda por internet y deja la
+ *  actualización programada. El servidor se encarga del resto (ver PLAN_PUBLICACION.md §Etapa 2). */
+function PantallaPublicacion({ volver }) {
+  const [est, setEst] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [trabajando, setTrabajando] = useState('');
+  const [msg, setMsg] = useState(null);            // {tipo:'ok'|'error', txt}
+  const [cuando, setCuando] = useState('0300');    // "ya" o HHMM
+
+  const cargar = async () => {
+    setCargando(true);
+    try {
+      const r = await fetch('/api/publicacion/estado');
+      setEst(await r.json());
+    } catch (e) { setMsg({ tipo: 'error', txt: 'No se pudo consultar: ' + e.message }); }
+    setCargando(false);
+  };
+  useEffect(() => { cargar(); }, []);
+
+  /** "0300" → la marca de tiempo del PRÓXIMO 03:00 (si ya pasó, mañana). "ya" → 0. */
+  const momento = () => {
+    if (cuando === 'ya') return 0;
+    const h = parseInt(cuando.slice(0, 2), 10), m = parseInt(cuando.slice(2), 10);
+    const d = new Date(); d.setHours(h, m, 0, 0);
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return Math.floor(d.getTime() / 1000);
+  };
+
+  const publicar = async () => {
+    setTrabajando('Compilando y armando el paquete… (puede tardar un minuto)');
+    setMsg(null);
+    try {
+      const r = await fetch('/api/publicacion/publicar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cuando: momento() }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'falló la publicación');
+      setMsg({ tipo: 'ok', txt: `Enviado (${d.mb} MB). ` + (momento()
+        ? `Se va a instalar a las ${cuando.slice(0, 2)}:${cuando.slice(2)}.`
+        : 'Se está instalando ahora; en un minuto vuelve.') });
+      await cargar();
+    } catch (e) { setMsg({ tipo: 'error', txt: e.message }); }
+    setTrabajando('');
+  };
+
+  const cancelar = async () => {
+    setTrabajando('Cancelando…');
+    try {
+      await fetch('/api/publicacion/cancelar', { method: 'POST' });
+      setMsg({ tipo: 'ok', txt: 'Actualización cancelada.' });
+      await cargar();
+    } catch (e) { setMsg({ tipo: 'error', txt: e.message }); }
+    setTrabajando('');
+  };
+
+  const local = est?.local?.version, remoto = est?.remoto?.version;
+  const pend = est?.remoto?.pendiente;
+  const igual = local && remoto && local === remoto;
+  const caja = { padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border-light)',
+    background: 'rgba(255,255,255,0.03)' };
+  const hhmm = (s) => `${String(s.slice(0, 2))}:${String(s.slice(2))}`;
+
+  return (
+    <div className="panel animate-fade">
+      <div style={{ marginBottom: 20 }}>
+        <button className="btn ghost" onClick={volver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
+          ⬅ Volver al Panel de Configuración
+        </button>
+      </div>
+      <div className="panel-header" style={{ marginBottom: 14 }}>
+        <h2>Publicación</h2>
+        <p>Manda las mejoras de <b>esta máquina</b> al sistema que está publicado en internet. El paquete viaja solo,
+          se instala solo y se revisa solo: <b>si algo falla, el servidor vuelve solo a la versión anterior</b>.
+          Los moldes, artes y pedidos <b>no se tocan</b> — no viajan en el paquete.</p>
+      </div>
+
+      {cargando ? <div style={{ color: 'var(--text-secondary)', padding: 20 }}>Consultando el servidor…</div> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 780 }}>
+          {/* versiones */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={caja}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>ACÁ (tu máquina)</div>
+              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4 }}>{local || '—'}</div>
+            </div>
+            <div style={{ ...caja, borderColor: est?.error ? 'var(--error)' : (igual ? 'var(--border-light)' : 'var(--accent)') }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>PUBLICADO (internet)</div>
+              <div style={{ fontSize: 26, fontWeight: 800, marginTop: 4, color: est?.error ? 'var(--error)' : '#fff' }}>
+                {est?.error ? 'sin contacto' : (remoto || '—')}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, wordBreak: 'break-all' }}>{est?.url}</div>
+            </div>
+          </div>
+
+          {est?.error && (est.sin_receptor ? (
+            /* el servidor publicado corre una versión vieja: todavía no sabe recibir paquetes */
+            <div style={{ ...caja, borderColor: 'var(--warning, #e0a020)', fontSize: 12.5, lineHeight: 1.5 }}>
+              <b style={{ color: 'var(--warning, #e0a020)' }}>El servidor publicado todavía no puede recibir actualizaciones.</b><br />
+              Está corriendo una versión anterior a este sistema de publicación. Hace falta <b>una última
+              instalación a mano</b> (copiar el paquete y ejecutar el instalador); desde ahí en adelante,
+              todo se hace desde este botón.
+            </div>
+          ) : (
+            <div style={{ ...caja, borderColor: 'var(--error)', color: 'var(--error)', fontSize: 12.5 }}>
+              No se pudo hablar con el servidor publicado: {est.error}
+            </div>
+          ))}
+
+          {/* ya hay una programada */}
+          {pend && (
+            <div style={{ ...caja, borderColor: 'var(--warning, #e0a020)' }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                Ya hay una actualización esperando: versión {pend.version}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                Se instala en {Math.floor(pend.segundos / 60)} min. Quien esté usando el sistema ya ve la cuenta regresiva.
+              </div>
+              <button className="btn ghost" onClick={cancelar} disabled={!!trabajando} style={{ marginTop: 10, padding: '7px 14px', fontSize: 12.5 }}>
+                Cancelar esa actualización
+              </button>
+            </div>
+          )}
+
+          {/* resultado de la última */}
+          {est?.remoto?.ultima && (
+            <div style={{ ...caja, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+              Última actualización: <b style={{ color: est.remoto.ultima.ok ? 'var(--success)' : 'var(--error)' }}>
+                {est.remoto.ultima.ok ? 'correcta' : 'falló'}</b> — versión {est.remoto.ultima.version}. {est.remoto.ultima.detalle}
+            </div>
+          )}
+
+          {/* publicar */}
+          <div style={{ ...caja, borderColor: igual ? 'var(--border-light)' : 'var(--accent)' }}>
+            {igual ? (
+              <div style={{ fontSize: 13 }}>El servidor ya tiene <b>la misma versión</b> que esta máquina. No hay nada para publicar
+                <span style={{ color: 'var(--text-muted)' }}> (igual podés volver a mandarla si querés).</span></div>
+            ) : (
+              <div style={{ fontSize: 13 }}>Hay mejoras para publicar: <b>{local}</b> → reemplaza a <b>{remoto || '—'}</b>.</div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>Instalar:</span>
+              {[['0300', 'esta madrugada (03:00)'], ['ya', 'ahora mismo']].map(([v, t]) => (
+                <button key={v} type="button" onClick={() => setCuando(v)}
+                  style={{ padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                    border: '1px solid ' + (cuando === v ? 'var(--accent)' : 'var(--border-light)'),
+                    background: cuando === v ? 'rgba(0,243,255,0.12)' : 'transparent',
+                    color: cuando === v ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>
+              ))}
+              <input type="time" value={cuando === 'ya' ? '03:00' : `${hhmm(cuando)}`}
+                onChange={(e) => setCuando(e.target.value.replace(':', ''))}
+                style={{ padding: '5px 8px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', fontSize: 12.5,
+                  border: '1px solid var(--border-light)', color: '#fff' }} />
+            </div>
+            <button className="btn primary" onClick={publicar} disabled={!!trabajando || !!est?.error}
+              style={{ marginTop: 14, padding: '10px 22px' }}>
+              {trabajando ? trabajando : (cuando === 'ya' ? 'Publicar y actualizar ahora' : 'Publicar y programar')}
+            </button>
+            {cuando !== 'ya' && !trabajando && (
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
+                El sistema publicado va a mostrar la cuenta regresiva a quien esté trabajando, y el corte dura alrededor de un minuto.
+              </div>
+            )}
+          </div>
+
+          {msg && (
+            <div style={{ ...caja, borderColor: msg.tipo === 'ok' ? 'var(--success)' : 'var(--error)',
+              color: msg.tipo === 'ok' ? 'var(--success)' : 'var(--error)', fontSize: 13 }}>{msg.txt}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
+  useIcc();          // los swatches CMYK de toda la app se redibujan con el color REAL del perfil
   const [activoTab, setActivoTab] = useState(() => {
-    return window.location.pathname === '/admin' ? 'config' : 'pedidos';
+    return esRutaAdmin() ? 'config' : 'pedidos';
   });
   const [estado, setEstado] = useState(null);
   const [productosCat, setProductosCat] = useState({ activo: 'prod_default', productos: [] });
@@ -2213,7 +2538,7 @@ export default function App() {
   const plFillSrcRef = useRef(null);              // rango origen {r0,c0,r1,c1} al empezar a llenar
   const plSelDragRef = useRef(false);             // true mientras se selecciona un rango arrastrando
   const [modoDisenador, setModoDisenador] = useState(() => {
-    return window.location.pathname === '/admin';
+    return esRutaAdmin();
   });
   const [adminSubView, setAdminSubView] = useState('dashboard');
   const [columnasConfig, setColumnasConfig] = useState([]);
@@ -2340,6 +2665,9 @@ export default function App() {
   const [editableDisenos, setEditableDisenos] = useState([]);  // diseños del molde que tienen objetos editables
   const [editableDiseno, setEditableDiseno] = useState('principal');  // diseño (id) en edición
   const [editableSel, setEditableSel] = useState([]);          // nombres de los objetos seleccionados (multi: Ctrl/Shift+click)
+  // Figura elegida DENTRO del objeto editable para pintarla: la capa se mueve/escala junta, pero
+  // el COLOR es de cada figura (ej. escudo = elipse negra + elipse celeste). null = la primera.
+  const [colorParte, setColorParte] = useState(null);          // obj_id de la figura a pintar
   const [edAlinearMesa, setEdAlinearMesa] = useState(false);   // false = alinear entre la SELECCIÓN; true = con la MESA DE TRABAJO
   const [edRotOpen, setEdRotOpen] = useState(false);           // desplegable de ángulos de rotación
   const [edSoloTalle, setEdSoloTalle] = useState(false);       // true = el ajuste va SOLO al talle en vista (no a todo el rango)
@@ -2820,7 +3148,7 @@ export default function App() {
 
   useEffect(() => {
     const handleLocationChange = () => {
-      const isSearchAdmin = window.location.pathname === '/admin';
+      const isSearchAdmin = esRutaAdmin();
       setModoDisenador(isSearchAdmin);
       setActivoTab(isSearchAdmin ? 'config' : 'pedidos');
       setAdminSubView('dashboard');
@@ -5868,9 +6196,9 @@ export default function App() {
       if (pidCfg) params.set('pid', pidCfg);
       if (configMedida === 'rango' && rangoMedida.length) { params.set('rango', rangoMedida.join(',')); if (etqData?.talle_ref) params.set('guia', etqData.talle_ref); }
       const keys = nombresDeVariante(verVariante); if (keys.length) params.set('piezas', JSON.stringify(keys));
-      window.open('/api/plantilla/pdf_guia?' + params.toString(), '_blank');
+      window.open(rutaApi('/api/plantilla/pdf_guia?' + params.toString()), '_blank');
     } else {
-      window.open(`/api/productos/${pidCfg}/descargar_plantilla`, '_blank');
+      window.open(rutaApi(`/api/productos/${pidCfg}/descargar_plantilla`), '_blank');
     }
   };
   // Toggle de una variante en el rango (con soporte shift+click para seleccionar un tramo).
@@ -6851,7 +7179,7 @@ export default function App() {
         <aside className="sidebar">
           <div className="logo-section">
             <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-              <img src="/logo.svg" alt="USER PRO" style={{ width: 40, height: 40, flexShrink: 0, display: 'block' }} />
+              <img src={rutaApi("/logo.svg")} alt="USER PRO" style={{ width: 40, height: 40, flexShrink: 0, display: 'block' }} />
               <div>
                 <h1 style={{ margin: 0 }}><span>USER</span> PRO</h1>
                 <div className="logo-subtitle">Motor de Sublimación</div>
@@ -6955,7 +7283,7 @@ export default function App() {
             borderRadius: '12px'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <img src="/logo.svg" alt="USER PRO" style={{ width: 34, height: 34, flexShrink: 0, display: 'block' }} />
+              <img src={rutaApi("/logo.svg")} alt="USER PRO" style={{ width: 34, height: 34, flexShrink: 0, display: 'block' }} />
               <h1 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>
                 <span style={{ color: 'var(--cmyk-cyan)', textShadow: '0 0 12px var(--cmyk-cyan)' }}>USER</span> PRO
               </h1>
@@ -7046,6 +7374,16 @@ export default function App() {
             </div>
           );
         })(), document.body)}
+
+        {/* CUENTA REGRESIVA DE ACTUALIZACIÓN — sólo aparece si el servidor tiene una programada */}
+        <AvisoActualizacion />
+
+        {/* SELECTOR DE COLOR — GLOBAL. Va acá arriba de todo y NO dentro de una pantalla: estaba
+            montado sólo dentro de la tab "etiqueta" de Config, así que desde cualquier otro lado
+            (el editor de objetos, por ejemplo) `setPicker` seteaba el estado y **no se abría nada**.
+            Uno solo para toda la app, el que use `picker` lo abre desde donde sea. */}
+        <ColorPickerModal open={!!picker} color={picker?.color} titulo={picker?.titulo}
+          onClose={() => setPicker(null)} onApply={(c) => picker?.onApply?.(c)} />
 
         {/* Alerts & Messages — toasts flotantes: no ocupan lugar en el layout */}
         {(mensajeInformativo || errorInformativo || advertenciaInformativa) && createPortal(
@@ -8035,13 +8373,12 @@ export default function App() {
                 // quedan disponibles para colocarlos. El lienzo igual solo dibuja los que tienen
                 // pieza (el render corta con `piezaDe`).
                 const _objsEd = (ed.objetos || []).filter(o => o._agregado || (piezaDe(o.pieza) && (!_hayMt || _mesasActT.has(o.mesa))));
-                // IDENTIDAD POR OBJETO: `o.nombre` YA es la identidad única de CADA objeto — el backend
-                // devuelve el IDENT "capa␟obj_id" (U+001F) cuando una capa trae varios objetos, y el
-                // nombre de capa pelado cuando trae uno solo (§10.b). Por eso todo el editor (esta
-                // dedup, `editableSel`, `editorTfs`, guardado y color) clavea por `o.nombre` sin
-                // colisionar: dos objetos de la MISMA capa tienen `nombre` distinto. NO reconstruir el
-                // IDENT acá (duplicaría el obj_id y rompería el ida-y-vuelta con el backend). Para
-                // MOSTRAR se usa `o.label` ("Escudo (1)", "Escudo (2)"), nunca el `nombre` con el ␟.
+                // IDENTIDAD = LA CAPA: el backend devuelve UN ítem por capa "Editable …" y `o.nombre`
+                // es el nombre de la capa. Todo lo que la capa tenga adentro se mueve/rota/escala
+                // JUNTO (el agrupado de Illustrator no viaja en el .ai → la capa es la unidad, §10.b).
+                // Por eso esta dedup, `editableSel`, `editorTfs` y el guardado clavean por `o.nombre`.
+                // Las figuras de adentro llegan en `o.partes` y SOLO se usan para el COLOR (cada una
+                // guarda con su IDENT "capa␟obj_id", que arma el backend — nunca reconstruirlo acá).
                 const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.nombre === o.nombre) === i);
                 const toVB = (cx, cy) => { const svg = editorSvgRef.current; if (!svg) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: q.x, y: q.y }; };
                 // Pan/zoom del visor del editor: rueda = zoom (al cursor); CLICK DERECHO arrastrado = mover el espacio.
@@ -8319,6 +8656,7 @@ export default function App() {
                           <button key={o.nombre} type="button" title="Click = seleccionar · Ctrl/Shift+click = sumar (solo objetos de la MISMA pieza)"
                             onClick={(e) => {
                               const add = e.ctrlKey || e.metaKey || e.shiftKey;
+                              setColorParte(null);                      // otro objeto → volver a su 1ª figura
                               if (!add) { setEditableSel([o.nombre]); return; }
                               if (editableSel.includes(o.nombre)) { setEditableSel(editableSel.filter(n => n !== o.nombre)); return; }
                               if (!_mismaPieza(o)) { showError('Solo podés seleccionar objetos de la MISMA pieza.'); return; }
@@ -8539,12 +8877,18 @@ export default function App() {
                     {editableSel.length === 1 && (() => {
                       const _o = _objsUnicos.find(o => o.nombre === editableSel[0]);
                       if (!_o) return null;
-                      const _recolor = _o.recolorable === true && !_o._agregado;
-                      const _fill = (_o.color && _o.color.fill) || null;   // [c,m,y,k] 0..1 o null (= original)
+                      // FIGURAS de adentro: el objeto se transforma entero, pero se pinta figura por
+                      // figura. Con una sola figura (o un objeto agregado) se pinta el objeto entero.
+                      const _partes = _o.partes || [];
+                      const _parte = _partes.length ? (_partes.find(p => p.obj_id === colorParte) || _partes[0]) : null;
+                      const _target = _parte ? _parte.ident : _o.nombre;   // IDENT con el que se guarda
+                      const _col = _parte ? _parte.color : _o.color;
+                      const _recolor = (_parte ? _parte.recolorable === true : _o.recolorable === true) && !_o._agregado;
+                      const _fill = (_col && _col.fill) || null;           // [c,m,y,k] 0..1 o null (= original)
                       const _cmyk = _fill || [0, 0, 0, 0];
-                      const _stroke = (_o.color && _o.color.stroke) || null;
-                      const _rgb = ([c, m, y, k]) => `rgb(${Math.round(255 * (1 - c) * (1 - k))},${Math.round(255 * (1 - m) * (1 - k))},${Math.round(255 * (1 - y) * (1 - k))})`;
-                      const _setFill = (arr) => guardarColorEditable(_o.nombre, { fill: arr, stroke: _stroke });
+                      const _stroke = (_col && _col.stroke) || null;
+                      const _rgb = (c) => cmykHex(c);      // color REAL por el perfil ICC (igual que Illustrator)
+                      const _setFill = (arr) => guardarColorEditable(_target, { fill: arr, stroke: _stroke });
                       const _commitCh = (i, val) => {
                         const n = Math.max(0, Math.min(100, parseFloat(String(val).replace(',', '.')) || 0)) / 100;
                         const nc = [..._cmyk]; nc[i] = n; _setFill(nc);
@@ -8560,9 +8904,39 @@ export default function App() {
                       return (
                         <div style={{ marginBottom: 6, flexShrink: 0 }}>
                           <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>COLOR</div>
+                          {/* El objeto se mueve/escala ENTERO, pero si trae VARIAS figuras cada una
+                              se pinta por su cuenta → acá se elige cuál. La miniatura muestra la
+                              figura aislada y el puntito su color actual. */}
+                          {_partes.length > 1 && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: 10.2, color: 'var(--text-muted)', marginBottom: 5, lineHeight: 1.35 }}>
+                                Este objeto tiene <b style={{ color: '#fff' }}>{_partes.length} figuras</b> — se mueven y escalan juntas, pero el color va de a una:
+                              </div>
+                              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                {_partes.map((p, i) => {
+                                  const _sel = p.obj_id === (_parte && _parte.obj_id);
+                                  const _pf = (p.color && p.color.fill) || p.fill || null;
+                                  return (
+                                    <button key={p.obj_id} type="button" title={`${p.label}${p.recolorable ? '' : ' — no admite color'}`}
+                                      onClick={() => setColorParte(p.obj_id)}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 7px 4px 4px', borderRadius: 8, cursor: 'pointer',
+                                        border: '1px solid ' + (_sel ? 'var(--accent)' : 'var(--border-light)'),
+                                        background: _sel ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff', fontSize: 11, fontWeight: 700 }}>
+                                      <span style={{ width: 22, height: 22, borderRadius: 5, background: '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                        {p.svg ? <img alt="" src={`data:image/svg+xml;base64,${p.svg}`} style={{ maxWidth: '100%', maxHeight: '100%' }} /> : null}
+                                      </span>
+                                      <span style={{ width: 10, height: 10, borderRadius: 999, flexShrink: 0, border: '1px solid rgba(255,255,255,0.35)',
+                                        background: _pf ? _rgb(_pf) : 'repeating-conic-gradient(#888 0% 25%, #ccc 0% 50%) 50% / 6px 6px' }} />
+                                      {i + 1}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                           {!_recolor ? (
                             <div style={{ fontSize: 10.8, color: 'var(--text-muted)', lineHeight: 1.45, padding: '7px 9px', borderRadius: 8, border: '1px dashed var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
-                              Este objeto <b>no admite cambio de color</b>: es una imagen o gráfico incrustado
+                              {_parte ? <>Esta figura <b>no admite cambio de color</b></> : <>Este objeto <b>no admite cambio de color</b></>}: es una imagen o gráfico incrustado
                               {_o._agregado ? ' (objeto agregado)' : ' (XObject)'} — el color vive adentro del objeto.
                             </div>
                           ) : (
@@ -8572,23 +8946,23 @@ export default function App() {
                                   sueltos. Al aceptar guarda el CMYK exacto. */}
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                 <button type="button" title="Elegir color…"
-                                  onClick={() => setPicker({ titulo: `Color de ${_o.label || _o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
+                                  onClick={() => setPicker({ titulo: `Color de ${_parte ? _parte.label : (_o.label || _o.nombre)}`, color: _cmyk, onApply: (c) => _setFill(c) })}
                                   style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0, cursor: 'pointer', padding: 0,
                                     border: '1px solid var(--border-light)',
                                     background: _fill ? _rgb(_cmyk) : 'repeating-conic-gradient(#888 0% 25%, #ccc 0% 50%) 50% / 12px 12px' }} />
                                 <button type="button"
-                                  onClick={() => setPicker({ titulo: `Color de ${_o.label || _o.nombre}`, color: _cmyk, onApply: (c) => _setFill(c) })}
+                                  onClick={() => setPicker({ titulo: `Color de ${_parte ? _parte.label : (_o.label || _o.nombre)}`, color: _cmyk, onApply: (c) => _setFill(c) })}
                                   style={{ flex: 1, textAlign: 'left', padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
                                     border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 11.5, fontWeight: 700 }}>
                                   {_fill ? <>CMYK {_cmyk.map(v => Math.round(v * 100)).join(' ')}</> : 'Elegir color…'}
                                 </button>
                               </div>
-                              <button type="button" onClick={() => guardarColorEditable(_o.nombre, null)}
+                              <button type="button" onClick={() => guardarColorEditable(_target, null)}
                                 disabled={!_fill && !_stroke}
                                 style={{ width: '100%', height: 28, borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: (_fill || _stroke) ? 'pointer' : 'not-allowed',
                                   border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)',
                                   color: (_fill || _stroke) ? '#fff' : 'var(--text-muted)', opacity: (_fill || _stroke) ? 1 : 0.5 }}>
-                                ↺ Volver al color original
+                                ↺ Volver al color original{_parte ? ' de esta figura' : ''}
                               </button>
                               <div style={{ fontSize: 10.2, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.4 }}>
                                 El color va <b>por variable</b> ({_selResumen}) y se ve igual en la tizada.
@@ -8753,7 +9127,7 @@ export default function App() {
                                   const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : ('Mesa ' + (gi + 1) + (tl ? ' - ' + tl : ''));
                                   gi++;
                                   const a = document.createElement('a');
-                                  a.href = `/api/trabajos/${j.resultado.id}/mesa/${h.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`;
+                                  a.href = rutaApi(`/api/trabajos/${j.resultado.id}/mesa/${h.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`);
                                   a.download = sanit(nombre) + '.pdf';
                                   document.body.appendChild(a); a.click(); a.remove();
                                   await new Promise(r => setTimeout(r, 500));
@@ -8844,7 +9218,7 @@ export default function App() {
                             {hoja.paginas} pág(s) · {(hoja.consumo_cm / 100).toFixed(2)} m · {hoja.aprovechamiento}% eficiencia
                           </span>
                           <a 
-                            href={`/trabajos/${trabajoEstado.resultado.id}/${hoja.archivo}`} 
+                            href={rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${hoja.archivo}`)} 
                             download 
                             className="btn" 
                             style={{ padding: '6px 12px', fontSize: 12, marginLeft: 'auto' }}
@@ -8872,14 +9246,14 @@ export default function App() {
                                 padding: 4
                               }}
                               onClick={() => {
-                                setZoomPreviewUrl(`/trabajos/${trabajoEstado.resultado.id}/${pv}`);
+                                setZoomPreviewUrl(rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${pv}`));
                                 setZoomState({ zoom: 1.0, pan: { x: 0, y: 0 } });
                                 setEsArrastrando(false);
                               }}
                               title="Click para ver a detalle (Vectorial)"
                             >
                               <img 
-                                src={`/trabajos/${trabajoEstado.resultado.id}/${pv}`} 
+                                src={rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${pv}`)} 
                                 alt="Preview" 
                                 style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
                               />
@@ -9025,6 +9399,19 @@ export default function App() {
                   </div>
 
                   {/* Card: Perfil de color (ICC) */}
+                  {/* PUBLICACIÓN: mandar la versión nueva al servidor de internet */}
+                  <div className="crm-config-card green" onClick={() => setAdminSubView('publicacion')}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="check" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Publicación</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        Mandar las mejoras al sistema publicado en internet. Podés hacerlo ahora o dejarlo programado para la madrugada.
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="crm-config-card magenta" onClick={() => { fetchPerfiles(); setAdminSubView('perfil'); }}>
                     <div>
                       <div className="crm-icon-container">
@@ -9259,7 +9646,7 @@ export default function App() {
                         const setEC = (patch) => setEtiquetaConfig({ ...ec, ...patch });
                         const lbl = { display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' };
                         const inp = { padding: '8px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13.5, textAlign: 'center' };
-                        const css = (c) => `rgb(${Math.round(255 * (1 - c[0]) * (1 - c[3]))},${Math.round(255 * (1 - c[1]) * (1 - c[3]))},${Math.round(255 * (1 - c[2]) * (1 - c[3]))})`;
+                        const css = (c) => cmykHex(c);     // color REAL por el perfil ICC (igual que Illustrator)
                         const Sw = ({ on, onClick }) => (
                           <span onClick={onClick} style={{ width: 38, height: 22, borderRadius: 999, background: on ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', cursor: 'pointer', transition: 'all .2s', flexShrink: 0 }}>
                             <span style={{ position: 'absolute', top: 2.5, left: on ? 18 : 2.5, width: 17, height: 17, borderRadius: '50%', background: '#fff', transition: 'all .2s' }} />
@@ -9382,8 +9769,7 @@ export default function App() {
                               </div>
                             </>)}
                             <button className="btn primary" onClick={guardarEtiqueta} style={{ alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar etiqueta</button>
-                            <ColorPickerModal open={!!picker} color={picker?.color} titulo={picker?.titulo}
-                              onClose={() => setPicker(null)} onApply={(c) => picker?.onApply?.(c)} />
+                            {/* el ColorPickerModal ahora es GLOBAL (una sola instancia arriba de todo) */}
                           </div>
                         );
                       })()}
@@ -12672,6 +13058,8 @@ export default function App() {
 
             {/* 7. Catálogo de Fuentes Subview */}
             {/* Perfil de color (ICC) */}
+            {adminSubView === 'publicacion' && <PantallaPublicacion volver={() => setAdminSubView('dashboard')} />}
+
             {adminSubView === 'perfil' && (
               <div className="panel animate-fade">
                 <div style={{ marginBottom: 20 }}>

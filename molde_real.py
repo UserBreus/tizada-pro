@@ -413,6 +413,15 @@ def _analizar_capa(page, objetivo):
                 fill = tuple(float(v) for v in it.operands)[:4]
             except Exception:
                 fill = None
+        elif op in ("scn", "sc"):
+            # Illustrator pinta el relleno con `scn` sobre un ColorSpace ICCBased de 4 canales
+            # (CMYK con perfil), no con `k`: sin esto el color de la figura salía vacío en el
+            # editor. Solo se toma cuando son 4 números (CMYK); patrones/spot (con /Nombre) no.
+            try:
+                vals = [float(v) for v in it.operands]
+                fill = tuple(vals) if len(vals) == 4 else fill
+            except Exception:
+                pass
         elif op in ("BDC", "BMC"):
             nombres = set()
             if op == "BDC" and len(it.operands) == 2 and str(it.operands[0]) == "/OC":
@@ -463,6 +472,15 @@ def _analizar_capa(page, objetivo):
             sig = ("do", nom, round(ctm[0], 3), round(ctm[3], 3), round(ctm[4], 1), round(ctm[5], 1))
             unidades.append({"i": i, "bbox": bbox, "es_clip": False, "capas": _frame_capas(),
                              "kind": "xobject", "fill_op": False, "stroke_op": False, "fill": None, "sig": sig})
+        elif op in _PAINT_TEXT:
+            # El TEXTO también es pintado: si no se cataloga, el aislado por índice deja el texto
+            # de las OTRAS capas (se colaba el rótulo de «guías» arriba de la mesa) y, al revés,
+            # se comería el texto de la capa objetivo. Una unidad por operador de texto.
+            bbox = (ctm[4], ctm[5], ctm[4], ctm[5])
+            paint_idx_todos.add(i)
+            sig = ("tx", i)
+            unidades.append({"i": i, "bbox": bbox, "es_clip": False, "capas": _frame_capas(),
+                             "kind": "texto", "fill_op": False, "stroke_op": False, "fill": None, "sig": sig})
         elif op == "sh":
             bbox = (ctm[4], ctm[5], ctm[4], ctm[5])
             paint_idx_todos.add(i)
@@ -577,6 +595,26 @@ def aislar_objeto(pdf, page, objetivo, obj_id, cmyk_fill=None, cmyk_stroke=None)
         for i in tgt["i_paints"]:
             recolor[i] = (cmyk_fill, cmyk_stroke)
     _reescribir_por_indice(pdf, page, a["instrucciones"], suprimir, recolor)
+
+
+def aislar_capa_objetos(pdf, page, objetivo, colores=None):
+    """AÍSLA la capa OCG `objetivo` ENTERA (TODOS sus objetos, como una sola unidad) pero
+    RECOLOREANDO CADA OBJETO POR SEPARADO: `colores` = {obj_id: (cmyk_fill|None, cmyk_stroke|None)}.
+
+    Es la mezcla de `aislar_capa` (la capa es UNA unidad: se mueve/escala junta) y `aislar_objeto`
+    (el color es de CADA figura). Se usa SOLO cuando hay color por objeto; sin colores por objeto
+    el motor sigue por `aislar_capa` (camino verificado, y el único que respeta el TEXTO de una
+    capa: el recorrido por índice sólo cataloga trazados/XObjects/shadings)."""
+    a = _analizar_capa(page, objetivo)
+    keep = set(a["clips_capa_idx"])                       # conservar los recortes de la capa
+    recolor = {}
+    for o in a["objetos"]:
+        keep |= o["i_paints"]
+        c = (colores or {}).get(o["obj_id"])
+        if c and (c[0] is not None or c[1] is not None):
+            for i in o["i_paints"]:
+                recolor[i] = (c[0], c[1])
+    _reescribir_por_indice(pdf, page, a["instrucciones"], a["paint_idx_todos"] - keep, recolor)
 
 
 def suprimir_objetos(pdf, page, objetivo, obj_ids, conservar_marcadores=False):

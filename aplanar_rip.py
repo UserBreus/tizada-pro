@@ -379,7 +379,14 @@ def aplanar_para_rip(path):
         # 2) aplanar cada página en PARALELO
         from concurrent.futures import ProcessPoolExecutor
         try:
-            with ProcessPoolExecutor(max_workers=min(len(tmps), max(2, (os.cpu_count() or 4) - 1))) as ex:
+            # `TIZADA_PROCESOS` acota el paralelismo en servidores con poca RAM (cada worker
+            # pesa ~200 MB). Sin la variable: como siempre (núcleos - 1).
+            try:
+                _tope = int(os.environ.get("TIZADA_PROCESOS") or 0)
+            except ValueError:
+                _tope = 0
+            _w = max(1, _tope) if _tope else max(2, (os.cpu_count() or 4) - 1)
+            with ProcessPoolExecutor(max_workers=min(len(tmps), _w)) as ex:
                 oks = list(ex.map(_aplanar_una_pagina, tmps))
         except Exception:
             oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial

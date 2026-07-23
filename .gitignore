@@ -30,3 +30,18 @@ Thumbs.db
 
 # respaldos de moldes viejos (no versionar)
 respaldo_moldes_*/
+
+# Banco de pruebas y paquetes generados (se rearman con empaquetar.py)
+scratchpad/
+dist/
+
+# Generado en el SERVIDOR por el instalador (cada máquina tiene lo suyo, y config_publicado.bat
+# lleva la CLAVE de sesión: nunca va al repositorio)
+config_publicado.bat
+arrancar.bat
+instalacion_log.txt
+servidor_log.txt
+DIAGNOSTICO.txt
+perfiles_icc/
+_actualizacion/
+_tarea.xml
