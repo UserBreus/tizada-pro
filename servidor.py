@@ -319,6 +319,15 @@ def publicacion_publicar():
         cfg["url"] = cuerpo["url"]
         with open(os.path.join(AQUI, "datos", "publicacion.json"), "w", encoding="utf-8") as fh:
             json.dump(cfg, fh, ensure_ascii=False, indent=1)
+    # El NÚMERO DE VERSIÓN lo decide el usuario desde la pantalla (no se toca solo). Se escribe en
+    # el archivo VERSION ANTES de empaquetar, así el paquete lo lleva. Se acepta sólo `1.2.3`.
+    nueva_v = str(cuerpo.get("version") or "").strip()
+    if nueva_v:
+        if not re.fullmatch(r"\d+(\.\d+){0,3}", nueva_v):
+            return jsonify({"error": "la versión tiene que ser números y puntos, por ej. 1.0.5"}), 400
+        with open(os.path.join(AQUI, "VERSION"), "w", encoding="ascii") as fh:
+            fh.write(nueva_v + "\n")
+        _version._v = None                     # invalidar la caché para que tome el número nuevo
     try:
         import subprocess as _sp, hashlib as _hl, urllib.request as _ur
         # 1) armar el paquete de ACTUALIZACIÓN (sin datos: nunca pisa moldes ni pedidos)

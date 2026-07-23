@@ -2376,12 +2376,24 @@ function PantallaPublicacion({ volver }) {
   const [fecha, setFecha] = useState(
     `${_hoy.getFullYear()}-${String(_hoy.getMonth() + 1).padStart(2, '0')}-${String(_hoy.getDate()).padStart(2, '0')}`);
   const [hora, setHora] = useState('03:00');
+  const [nuevaVer, setNuevaVer] = useState('');    // número de versión que escribe el usuario
+
+  /** Sugiere el próximo número subiendo el último tramo: 1.0.4 → 1.0.5. Es sólo una propuesta. */
+  const _sugerir = (v) => {
+    const p = String(v || '1.0.0').split('.').map(x => parseInt(x, 10) || 0);
+    p[p.length - 1] += 1;
+    return p.join('.');
+  };
 
   const cargar = async () => {
     setCargando(true);
     try {
       const r = await fetch('/api/publicacion/estado');
-      setEst(await r.json());
+      const d = await r.json();
+      setEst(d);
+      // al abrir, proponer el próximo número (sobre el más alto entre acá y lo publicado)
+      const vloc = d?.local?.version, vrem = d?.remoto?.version;
+      setNuevaVer(prev => prev || _sugerir(vloc || vrem || '1.0.0'));
     } catch (e) { setMsg({ tipo: 'error', txt: 'No se pudo consultar: ' + e.message }); }
     setCargando(false);
   };
@@ -2422,12 +2434,17 @@ function PantallaPublicacion({ volver }) {
   };
 
   const publicar = async () => {
+    const ver = nuevaVer.trim();
+    if (!/^\d+(\.\d+){0,3}$/.test(ver)) {
+      setMsg({ tipo: 'error', txt: 'Poné un número de versión válido (números y puntos, ej. 1.0.5).' });
+      return;
+    }
     setTrabajando('Compilando y armando el paquete… (puede tardar un minuto)');
     setMsg(null);
     try {
       const r = await fetch('/api/publicacion/publicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cuando: momento() }),
+        body: JSON.stringify({ cuando: momento(), version: ver }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'falló la publicación');
@@ -2530,6 +2547,22 @@ function PantallaPublicacion({ volver }) {
             ) : (
               <div style={{ fontSize: 13 }}>Hay mejoras para publicar: <b>{local}</b> → reemplaza a <b>{remoto || '—'}</b>.</div>
             )}
+            {/* NÚMERO DE VERSIÓN — lo pone el usuario acá (ya no en un archivo suelto). Viene con
+                un sugerido (el siguiente al actual); lo puede cambiar por el que quiera. */}
+            <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4 }}>
+                NÚMERO DE VERSIÓN
+              </span>
+              <input type="text" inputMode="decimal" value={nuevaVer}
+                onChange={(e) => setNuevaVer(e.target.value.replace(/[^\d.]/g, ''))}
+                placeholder="1.0.5"
+                style={{ width: 110, padding: '7px 10px', borderRadius: 8, fontSize: 15, fontWeight: 700,
+                  textAlign: 'center', letterSpacing: 1, background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid var(--accent)', color: '#fff', outline: 'none' }} />
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                sube el último número cada vez (podés poner el que quieras)
+              </span>
+            </div>
             {/* CUÁNDO: atajos, «en X tiempo», o día y hora exactos */}
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 8 }}>
