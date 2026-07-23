@@ -1251,3 +1251,22 @@ td.num {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ── Animación del LOGO (v1.0.2, la primera actualización publicada por el botón) ──
+   Flota suave todo el tiempo y cada ~6 s da un giro completo con un golpe de brillo:
+   simple, pero imposible de no ver. Respeta prefers-reduced-motion (regla de arriba). */
+.logo-animado {
+  animation: logoFlotar 3s ease-in-out infinite, logoGiro 6s ease-in-out infinite;
+  transform-origin: 50% 50%;
+  will-change: transform, filter;
+}
+@keyframes logoFlotar {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -3px; }
+}
+@keyframes logoGiro {
+  0%, 74% { rotate: 0deg; filter: none; }
+  80% { filter: drop-shadow(0 0 8px rgba(0, 243, 255, 0.9)); }
+  92% { rotate: 360deg; filter: drop-shadow(0 0 4px rgba(0, 243, 255, 0.4)); }
+  100% { rotate: 360deg; filter: none; }
+}

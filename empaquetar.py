@@ -111,12 +111,13 @@ def main():
 
     n = 0
     with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
+        # La CLAVE de actualización viaja SIEMPRE (también en el paquete de actualización): así el
+        # servidor y el taller quedan con la misma sin que nadie tipee nada. En especial, el primer
+        # servidor se instaló ANTES de que existiera la clave y no la tiene: este paquete se la lleva.
+        z.writestr("token_actualizacion.txt", config_publicacion()["token"]); n += 1
+        print("  + clave de actualizacion")
         if completo:
-            # 0) la CLAVE de actualización: viaja en el paquete de instalación para que el
-            #    servidor y el taller queden con la misma sin que nadie tipee nada.
-            z.writestr("token_actualizacion.txt", config_publicacion()["token"]); n += 1
-            print("  + clave de actualizacion")
-            # 1) perfiles ICC (van a `perfiles_icc/`, el instalador los deja apuntados)
+            # perfiles ICC (van a `perfiles_icc/`, el instalador los deja apuntados)
             perf = next((d for d in PERFILES_ORIGEN if os.path.isdir(d)), None)
             if perf:
                 for f in sorted(os.listdir(perf)):

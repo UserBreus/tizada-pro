@@ -18,6 +18,10 @@ SIN_NGINX = "--sin-nginx" in sys.argv
 PUERTO_PREF = 8050
 RUTA_SUB = "/Tizadapro"
 TAREA = "TIZADA PRO"
+# LA CARPETA DEFINITIVA. El instalador SIEMPRE termina acá, sin importar dónde se descomprima:
+# se copia solo, migra los datos del sistema vivo y sigue desde acá. Así las carpetas de
+# Documents con nombres parecidos dejan de importar y se pueden borrar TODAS.
+DESTINO = r"C:\TIZADAPRO"
 
 # Ghostscript oficial (Artifex). Solo se baja si NO está instalado.
 GS_URL = ("https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/"
@@ -128,6 +132,139 @@ def puerto_libre(p):
             return False
 
 
+def _salud_local(port):
+    """Le pregunta a un TIZADA PRO local. None si en ese puerto no hay uno nuestro."""
+    import urllib.request, json as _j
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/salud", timeout=4) as r:
+            d = _j.loads(r.read())
+        return d if isinstance(d, dict) and "modo" in d else None
+    except Exception:
+        return None
+
+
+def _carpeta_de(d):
+    """Carpeta del programa a partir del `/api/salud` (el padre de la carpeta `datos`).
+    Sólo la devuelve si ahí está `servidor.py` (para no adivinar mal)."""
+    try:
+        p = (d.get("chequeos", {}).get("datos_escribible", {}).get("detalle") or "").rstrip("\\/")
+        if p.lower().endswith("datos"):
+            base = os.path.dirname(p)
+            if os.path.exists(os.path.join(base, "servidor.py")):
+                return base
+    except Exception:
+        pass
+    return None
+
+
+def servidor_vivo():
+    """Busca un TIZADA PRO YA ANDANDO (puertos 8050..8059) y devuelve (carpeta, puerto). El 8050 es
+    el que usa nginx → ése manda. Es la carpeta REAL, viva, sin importar desde dónde se descomprimió
+    este instalador."""
+    vivos = []
+    for port in range(PUERTO_PREF, PUERTO_PREF + 10):
+        d = _salud_local(port)
+        if d:
+            vivos.append((port, _carpeta_de(d)))
+    for port, carp in vivos:                       # el 8050 (nginx) primero
+        if port == PUERTO_PREF and carp:
+            return carp, port
+    for port, carp in vivos:
+        if carp:
+            return carp, port
+    return None, None
+
+
+def _mismo(a, b):
+    try:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    except Exception:
+        return False
+
+
+# Lo que ES el programa (se copia a la carpeta viva). NO: datos, config, ni lo generado.
+_COPIAR_ARCH = (".py", ".bat", ".md", ".txt", ".svg")
+_COPIAR_DIRS = ("frontend", "db", "catalogo_fuentes", "perfiles_icc")
+_NO_COPIAR = {"config_publicado.bat", "arrancar.bat", "instalacion_log.txt",
+              "servidor_log.txt", "diagnostico.txt"}
+
+
+def copiar_codigo(origen, destino):
+    """Copia SÓLO el programa de una carpeta a otra (para meter la actualización en la carpeta viva).
+    Respeta la config y los datos del destino: no toca `datos/`, `entrada/`, `config_publicado.bat`…"""
+    for f in os.listdir(origen):
+        o = os.path.join(origen, f)
+        # `VERSION` no tiene extensión pero ES el programa (dice qué versión quedó): incluirlo aparte.
+        es_codigo = f.lower().endswith(_COPIAR_ARCH) or f == "VERSION"
+        if os.path.isfile(o) and es_codigo and f.lower() not in _NO_COPIAR:
+            shutil.copy2(o, os.path.join(destino, f))
+    for d in _COPIAR_DIRS:
+        od = os.path.join(origen, d)
+        if os.path.isdir(od):
+            shutil.copytree(od, os.path.join(destino, d), dirs_exist_ok=True)
+
+
+def _matar_puerto(port):
+    """Cierra el proceso que escucha ese puerto (para liberar una carpeta duplicada)."""
+    correr(["powershell", "-NoProfile", "-Command",
+            f"Get-NetTCPConnection -LocalPort {port} -State Listen -ErrorAction SilentlyContinue | "
+            "Select-Object -ExpandProperty OwningProcess -Unique | "
+            "ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"])
+
+
+def migrar_datos(origen, destino):
+    """Muda a la carpeta definitiva TODO lo que es del USUARIO y de ESTA instalación: moldes y
+    artes (`datos/`, `entrada/`), trabajos, perfiles y la config con las claves. El código NO
+    (ese ya lo puso `copiar_codigo`, más nuevo). No pisa una config que ya exista en el destino."""
+    for d in ("datos", "entrada", "trabajos", "perfiles_icc"):
+        od = os.path.join(origen, d)
+        if os.path.isdir(od):
+            shutil.copytree(od, os.path.join(destino, d), dirs_exist_ok=True)
+            print(f"   migrado: {d}/")
+    cfg_o = os.path.join(origen, "config_publicado.bat")
+    cfg_d = os.path.join(destino, "config_publicado.bat")
+    if os.path.exists(cfg_o) and not os.path.exists(cfg_d):
+        shutil.copy2(cfg_o, cfg_d)
+        print("   migrada: la configuración (con sus claves)")
+
+
+def carpetas_viejas():
+    """Las instalaciones viejas que quedaron dando vueltas (tienen `servidor.py` y no son la
+    definitiva). Para decirle al usuario QUÉ puede borrar, con nombre y apellido."""
+    out = []
+    for raiz in {os.path.join(os.path.expanduser("~"), "Documents"),
+                 os.path.join(os.path.expanduser("~"), "Desktop")}:
+        try:
+            for f in os.listdir(raiz):
+                p = os.path.join(raiz, f)
+                if (os.path.isdir(p) and os.path.exists(os.path.join(p, "servidor.py"))
+                        and not _mismo(p, DESTINO)):
+                    out.append(p)
+        except OSError:
+            pass
+    return out
+
+
+def cerrar_duplicados(puerto_bueno, carpeta_buena):
+    """Cierra cualquier TIZADA PRO que esté corriendo en OTRO puerto desde OTRA carpeta (el que se
+    coló al instalar en la carpeta equivocada). Así esa carpeta queda LIBRE y se puede borrar."""
+    otras = set()
+    for port in range(PUERTO_PREF, PUERTO_PREF + 10):
+        if port == puerto_bueno:
+            continue
+        d = _salud_local(port)
+        if not d:
+            continue
+        carp = _carpeta_de(d)
+        if carp and not _mismo(carp, carpeta_buena):
+            otras.add(carp)
+        _matar_puerto(port)
+    if otras:
+        time.sleep(2)
+        for c in otras:
+            print(f"   liberada la carpeta duplicada: {c}  (ya la podés borrar)")
+
+
 # ── 1. Python y dependencias ────────────────────────────────────────────────
 def asegurar_python():
     paso("Python")
@@ -218,10 +355,29 @@ def instalar_perfiles(destino_app):
 
 
 # ── 4. Configuración del servicio ───────────────────────────────────────────
+def _config_anterior(cfg):
+    """Lee las variables de un `config_publicado.bat` ya existente. Al REINSTALAR (actualizar a
+    mano) hay que CONSERVAR la clave de sesión —si cambia, se cierra la sesión de todos— y la de
+    actualización —si cambia, el taller ya no puede publicar—."""
+    out = {}
+    try:
+        with open(cfg, encoding="ascii", errors="replace") as fh:
+            for l in fh:
+                m = re.match(r"\s*set\s+([A-Z_]+)=(.*)", l.strip())
+                if m:
+                    out[m.group(1)] = m.group(2).strip()
+    except OSError:
+        pass
+    return out
+
+
 def escribir_config(puerto, perfiles, gs):
     paso("Configuración del servidor (clave de sesión, memoria, rutas)")
-    clave = secrets.token_hex(32)
     cfg = os.path.join(AQUI, "config_publicado.bat")
+    previo = _config_anterior(cfg)
+    clave = previo.get("TIZADA_SECRET") or secrets.token_hex(32)
+    if previo.get("TIZADA_SECRET"):
+        print("   se conserva la clave de sesión que ya tenía (nadie pierde la sesión)")
     lineas = [
         "@echo off",
         "REM  Generado por el instalador. La CLAVE no se cambia: si cambia, se cierra la sesion de todos.",
@@ -246,15 +402,35 @@ def escribir_config(puerto, perfiles, gs):
             print("   clave de actualización tomada del paquete (no hay que copiar nada)")
         except Exception as e:
             aviso(f"no se pudo leer la clave de actualización: {e}")
+    elif previo.get("TIZADA_TOKEN_ACT"):
+        # Paquete de ACTUALIZACIÓN (sin la clave adentro): se conserva la que ya estaba, si no
+        # el taller quedaría sin poder publicar nunca más.
+        lineas.append(f"set TIZADA_TOKEN_ACT={previo['TIZADA_TOKEN_ACT']}")
+        print("   se conserva la clave de actualización que ya tenía")
     else:
-        aviso("el paquete no trae la clave de actualización: este servidor NO va a poder "
-              "recibir actualizaciones automáticas (rearmá el paquete con --completo).")
+        aviso("el paquete no trae la clave de actualización y este servidor no tenía una: "
+              "NO va a poder recibir actualizaciones automáticas.")
+    # Y lo demás que hubiera configurado a mano (base de datos, hilos…): se respeta.
+    for k in ("TIZADA_DB_SERVER", "TIZADA_HILOS", "TIZADA_HTTPS"):
+        if previo.get(k) and not any(l.startswith(f"set {k}=") for l in lineas):
+            lineas.append(f"set {k}={previo[k]}")
+    # Las CARPETAS de datos sólo se respetan si NO viven dentro de una instalación vieja: tras la
+    # mudanza a C:\TIZADAPRO los datos ya están acá, y arrastrar la ruta vieja dejaría el sistema
+    # atado a la carpeta que justamente se quiere borrar.
+    for k in ("TIZADA_DATOS", "TIZADA_ENTRADA", "TIZADA_TRABAJOS"):
+        v = previo.get(k)
+        if not v or any(l.startswith(f"set {k}=") for l in lineas):
+            continue
+        padre = os.path.dirname(v.rstrip("\\/"))
+        if os.path.isdir(v) and not (os.path.exists(os.path.join(padre, "servidor.py"))
+                                     and not _mismo(padre, AQUI)):
+            lineas.append(f"set {k}={v}")
     if SIMULAR:
         print(f"   (simulado) escribir {cfg} con una clave nueva")
     else:
         with open(cfg, "w", encoding="ascii") as fh:
             fh.write("\n".join(lineas) + "\n")
-        ok(f"{cfg} (clave nueva generada)")
+        ok(f"{cfg}" + ("" if previo.get("TIZADA_SECRET") else " (clave nueva generada)"))
     # arranque = config + servidor
     arranque = os.path.join(AQUI, "arrancar.bat")
     if SIMULAR:
@@ -469,12 +645,15 @@ def arrancar(puerto):
                 break
             time.sleep(1)
     correr(["schtasks", "/run", "/tn", TAREA])
-    for _ in range(60):
+    # No alcanza con que el puerto esté tomado: puede tenerlo todavía una instalación VIEJA
+    # muriendo. Se espera a que conteste /api/salud Y que diga que corre desde ESTA carpeta.
+    for _ in range(90):
         time.sleep(1)
-        if not puerto_libre(puerto):
-            ok(f"escuchando en 127.0.0.1:{puerto} (sin ventana, como servicio)")
+        d = _salud_local(puerto)
+        if d and _carpeta_de(d) and _mismo(_carpeta_de(d), AQUI):
+            ok(f"escuchando en 127.0.0.1:{puerto} desde {AQUI} (sin ventana, como servicio)")
             return
-    aviso("no llegó a levantar en 60 s. Mirá servidor_log.txt, al lado de este instalador.")
+    aviso(f"no confirmó el arranque desde {AQUI} en 90 s. Mirá servidor_log.txt en esa carpeta.")
 
 
 # ── 5. nginx ────────────────────────────────────────────────────────────────
@@ -616,11 +795,32 @@ def main():
     if not es_admin() and not SIMULAR:
         raise SystemExit("\n[!] Hacé clic DERECHO en INSTALAR.bat → 'Ejecutar como administrador'.\n"
                          "    Hace falta para nginx y para que arranque solo.")
-    puerto = PUERTO_PREF
-    while not puerto_libre(puerto) and puerto < PUERTO_PREF + 10:
-        puerto += 1
-    if puerto != PUERTO_PREF:
-        aviso(f"el puerto {PUERTO_PREF} estaba ocupado; se usa el {puerto}")
+
+    # ── MUDANZA A LA CARPETA DEFINITIVA. Da igual dónde se haya descomprimido esto: el programa
+    #    se copia a C:\TIZADAPRO, los datos y la config del sistema vivo se migran ahí, y la
+    #    instalación sigue desde ahí. Después TODAS las carpetas viejas se pueden borrar.
+    #    (Además evita el problema de escribirle archivos a una carpeta con el servidor corriendo.)
+    global AQUI
+    if not _mismo(AQUI, DESTINO) and "--en-destino" not in sys.argv:
+        paso(f"Instalando en la carpeta definitiva: {DESTINO}")
+        viva, _pv = servidor_vivo()
+        if SIMULAR:
+            print(f"   (simulado) copiar el programa a {DESTINO}, migrar los datos de "
+                  f"{viva or AQUI} y seguir allá")
+        else:
+            os.makedirs(DESTINO, exist_ok=True)
+            copiar_codigo(AQUI, DESTINO)                      # el programa: SIEMPRE el de esta copia (el nuevo)
+            origen_datos = viva if (viva and not _mismo(viva, DESTINO)) else AQUI
+            migrar_datos(origen_datos, DESTINO)               # lo del usuario: del sistema vivo
+            ok(f"todo en su lugar; la instalación sigue en {DESTINO}")
+            py0 = sys.executable or "py"
+            subprocess.run([py0, os.path.join(DESTINO, "instalar_servidor.py"), "--en-destino"]
+                           + [a for a in sys.argv[1:]], cwd=DESTINO)
+            print("\n  (esta carpeta ya cumplió su función: al cerrar esta ventana se puede borrar)")
+            return
+    AQUI = DESTINO if not SIMULAR or _mismo(AQUI, DESTINO) else AQUI
+    puerto = PUERTO_PREF          # el 8050 SIEMPRE: es a donde apunta nginx. Si está tomado por
+                                  # una instalación vieja, el arranque nuevo la baja solo.
 
     py = asegurar_python()
     instalar_dependencias(py)
@@ -628,8 +828,9 @@ def main():
     perfiles = instalar_perfiles(AQUI)
     arranque = escribir_config(puerto, perfiles, gs)
     preparar_base(os.path.join(AQUI, "config_publicado.bat"))   # antes de arrancar: el server la lee
-    crear_tarea(arranque)
+    crear_tarea(arranque)                   # (re)apunta la tarea a ESTA carpeta (la buena)
     arrancar(puerto)
+    cerrar_duplicados(puerto, AQUI)         # baja cualquier server colado en otra carpeta → se puede borrar
     if not SIN_NGINX:
         configurar_nginx(puerto)
     chequear(puerto)
@@ -641,6 +842,13 @@ def main():
             print(f"   - {a}")
     else:
         print("  LISTO. No hubo ningún problema.")
+    print(f"\n  El sistema vive en:  {DESTINO}   (esa carpeta NO se borra)")
+    viejas = [] if SIMULAR else carpetas_viejas()
+    if viejas:
+        print("\n  YA PODÉS BORRAR estas carpetas viejas (cerrá antes las ventanas negras")
+        print("  que queden abiertas; si alguna se resiste, reiniciá el servidor y borrala):")
+        for v in viejas:
+            print(f"   - {v}")
     print(f"\n  Probalo en:  https://<tu-dominio>{RUTA_SUB}/")
     print(f"  Estado:      https://<tu-dominio>{RUTA_SUB}/api/salud")
     print("=" * 70)

@@ -133,7 +133,9 @@ def vigilar(puerto, version_actual, apagar):
     """Hilo que mira cada 20 s si llegó la hora de una actualización programada."""
     def _loop():
         while True:
-            time.sleep(20)
+            # cada 5 s (leer un json chico no cuesta nada) para que «en 15 segundos» signifique
+            # eso de verdad y no «en 15 segundos más lo que tarde en darse cuenta»
+            time.sleep(5)
             try:
                 p = _leer(PENDIENTE)
                 if p and time.time() >= float(p.get("cuando", 0)):

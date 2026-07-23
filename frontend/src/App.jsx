@@ -1119,7 +1119,7 @@ function LoginScreen({ onLogin }) {
       <form onSubmit={entrar} style={{ width: '100%', maxWidth: 380, padding: 32, borderRadius: 16,
         background: 'var(--bg-card, #14181c)', border: '1px solid var(--border-light)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-          <img src={rutaApi("/logo.svg")} alt="" style={{ width: 42, height: 42 }} />
+          <img className="logo-animado" src={rutaApi("/logo.svg")} alt="" style={{ width: 42, height: 42 }} />
           <div><h1 style={{ margin: 0, fontSize: 22 }}><span style={{ color: 'var(--accent)' }}>USER</span> PRO</h1></div>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 22px' }}>Iniciá sesión para continuar.</p>
@@ -2350,7 +2350,16 @@ function PantallaPublicacion({ volver }) {
   const [cargando, setCargando] = useState(true);
   const [trabajando, setTrabajando] = useState('');
   const [msg, setMsg] = useState(null);            // {tipo:'ok'|'error', txt}
-  const [cuando, setCuando] = useState('0300');    // "ya" o HHMM
+  // CUÁNDO se instala. Tres formas, porque hacen falta las tres: probar algo ya («en 15 segundos»),
+  // esperar un rato («en 3 horas») o dejarlo para un día y hora exactos.
+  const [modo, setModo] = useState('rapido');      // 'rapido' | 'en' | 'fecha'
+  const [rapido, setRapido] = useState(0);         // segundos desde ahora (0 = ya)
+  const [enCant, setEnCant] = useState('5');
+  const [enUnidad, setEnUnidad] = useState(60);    // 1=seg · 60=min · 3600=horas · 86400=días
+  const _hoy = new Date();
+  const [fecha, setFecha] = useState(
+    `${_hoy.getFullYear()}-${String(_hoy.getMonth() + 1).padStart(2, '0')}-${String(_hoy.getDate()).padStart(2, '0')}`);
+  const [hora, setHora] = useState('03:00');
 
   const cargar = async () => {
     setCargando(true);
@@ -2362,13 +2371,38 @@ function PantallaPublicacion({ volver }) {
   };
   useEffect(() => { cargar(); }, []);
 
-  /** "0300" → la marca de tiempo del PRÓXIMO 03:00 (si ya pasó, mañana). "ya" → 0. */
+  /** Cuándo se instala, en segundos desde 1970 (0 = ahora mismo). */
   const momento = () => {
-    if (cuando === 'ya') return 0;
-    const h = parseInt(cuando.slice(0, 2), 10), m = parseInt(cuando.slice(2), 10);
-    const d = new Date(); d.setHours(h, m, 0, 0);
-    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
-    return Math.floor(d.getTime() / 1000);
+    if (modo === 'rapido') return rapido ? Math.floor(Date.now() / 1000) + rapido : 0;
+    if (modo === 'en') {
+      const n = Math.max(0, parseFloat(String(enCant).replace(',', '.')) || 0);
+      return Math.floor(Date.now() / 1000 + n * enUnidad);
+    }
+    const t = new Date(`${fecha}T${hora}:00`);          // fecha y hora exactas, hora de esta máquina
+    return isNaN(t) ? 0 : Math.floor(t.getTime() / 1000);
+  };
+
+  /** «en 4 h 12 min» / «ya» — para que se vea qué se eligió antes de apretar. */
+  const _falta = (seg) => {
+    if (seg <= 5) return 'ahora mismo';
+    if (seg < 60) return `en ${Math.round(seg)} segundos`;
+    if (seg < 3600) { const m = Math.floor(seg / 60), s = Math.round(seg % 60);
+      return `en ${m} min${s ? ` ${s} s` : ''}`; }
+    const h = Math.floor(seg / 3600), m = Math.round((seg % 3600) / 60);
+    if (h < 24) return `en ${h} h${m ? ` ${m} min` : ''}`;
+    return `en ${Math.floor(h / 24)} día(s) ${h % 24} h`;
+  };
+  const _resumen = () => {
+    const t = momento();
+    if (!t) return 'Se instala ahora mismo.';
+    const d = new Date(t * 1000);
+    const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const cuandoTxt = `${dias[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1} a las `
+      + `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+      + (d.getSeconds() ? `:${String(d.getSeconds()).padStart(2, '0')}` : '');
+    const seg = t - Date.now() / 1000;
+    if (seg < -60) return '⚠ Esa fecha ya pasó: se instalaría apenas llegue.';
+    return `Se instala el ${cuandoTxt} — ${_falta(seg)}.`;
   };
 
   const publicar = async () => {
@@ -2382,8 +2416,7 @@ function PantallaPublicacion({ volver }) {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'falló la publicación');
       setMsg({ tipo: 'ok', txt: `Enviado (${d.mb} MB). ` + (momento()
-        ? `Se va a instalar a las ${cuando.slice(0, 2)}:${cuando.slice(2)}.`
-        : 'Se está instalando ahora; en un minuto vuelve.') });
+        ? _resumen() : 'Se está instalando ahora; en un minuto vuelve.') });
       await cargar();
     } catch (e) { setMsg({ tipo: 'error', txt: e.message }); }
     setTrabajando('');
@@ -2404,7 +2437,6 @@ function PantallaPublicacion({ volver }) {
   const igual = local && remoto && local === remoto;
   const caja = { padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border-light)',
     background: 'rgba(255,255,255,0.03)' };
-  const hhmm = (s) => `${String(s.slice(0, 2))}:${String(s.slice(2))}`;
 
   return (
     <div className="panel animate-fade">
@@ -2482,25 +2514,67 @@ function PantallaPublicacion({ volver }) {
             ) : (
               <div style={{ fontSize: 13 }}>Hay mejoras para publicar: <b>{local}</b> → reemplaza a <b>{remoto || '—'}</b>.</div>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>Instalar:</span>
-              {[['0300', 'esta madrugada (03:00)'], ['ya', 'ahora mismo']].map(([v, t]) => (
-                <button key={v} type="button" onClick={() => setCuando(v)}
-                  style={{ padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    border: '1px solid ' + (cuando === v ? 'var(--accent)' : 'var(--border-light)'),
-                    background: cuando === v ? 'rgba(0,243,255,0.12)' : 'transparent',
-                    color: cuando === v ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>
-              ))}
-              <input type="time" value={cuando === 'ya' ? '03:00' : `${hhmm(cuando)}`}
-                onChange={(e) => setCuando(e.target.value.replace(':', ''))}
-                style={{ padding: '5px 8px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', fontSize: 12.5,
-                  border: '1px solid var(--border-light)', color: '#fff' }} />
+            {/* CUÁNDO: atajos, «en X tiempo», o día y hora exactos */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 8 }}>
+                CUÁNDO SE INSTALA
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                {[[0, 'ahora'], [15, '15 seg'], [30, '30 seg'], [60, '1 min'], [300, '5 min'],
+                  [900, '15 min'], [1800, '30 min'], [3600, '1 hora'], [10800, '3 horas'],
+                  [36000, '10 horas']].map(([s, t]) => {
+                  const sel = modo === 'rapido' && rapido === s;
+                  return (
+                    <button key={s} type="button" onClick={() => { setModo('rapido'); setRapido(s); }}
+                      style={{ padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        border: '1px solid ' + (sel ? 'var(--accent)' : 'var(--border-light)'),
+                        background: sel ? 'rgba(0,243,255,0.12)' : 'transparent',
+                        color: sel ? 'var(--accent)' : 'var(--text-muted)' }}>{t}</button>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+                {/* en X tiempo */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                  padding: '7px 10px', borderRadius: 9, border: '1px solid ' + (modo === 'en' ? 'var(--accent)' : 'var(--border-light)') }}>
+                  <input type="radio" checked={modo === 'en'} onChange={() => setModo('en')} />
+                  <span style={{ fontSize: 12.5 }}>en</span>
+                  <input type="text" inputMode="decimal" value={enCant}
+                    onChange={(e) => { setEnCant(e.target.value.replace(/[^\d.,]/g, '')); setModo('en'); }}
+                    style={{ width: 56, padding: '4px 6px', borderRadius: 6, textAlign: 'center', fontSize: 12.5,
+                      background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff' }} />
+                  <select value={enUnidad} onChange={(e) => { setEnUnidad(Number(e.target.value)); setModo('en'); }}
+                    style={{ padding: '4px 6px', borderRadius: 6, fontSize: 12.5, background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid var(--border-light)', color: '#fff' }}>
+                    <option value={1}>segundos</option>
+                    <option value={60}>minutos</option>
+                    <option value={3600}>horas</option>
+                    <option value={86400}>días</option>
+                  </select>
+                </label>
+                {/* día y hora exactos */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                  padding: '7px 10px', borderRadius: 9, border: '1px solid ' + (modo === 'fecha' ? 'var(--accent)' : 'var(--border-light)') }}>
+                  <input type="radio" checked={modo === 'fecha'} onChange={() => setModo('fecha')} />
+                  <span style={{ fontSize: 12.5 }}>el día</span>
+                  <input type="date" value={fecha} onChange={(e) => { setFecha(e.target.value); setModo('fecha'); }}
+                    style={{ padding: '4px 6px', borderRadius: 6, fontSize: 12.5, background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid var(--border-light)', color: '#fff' }} />
+                  <span style={{ fontSize: 12.5 }}>a las</span>
+                  <input type="time" value={hora} onChange={(e) => { setHora(e.target.value); setModo('fecha'); }}
+                    style={{ padding: '4px 6px', borderRadius: 6, fontSize: 12.5, background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid var(--border-light)', color: '#fff' }} />
+                </label>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 700, marginTop: 10 }}>
+                {_resumen()}
+              </div>
             </div>
             <button className="btn primary" onClick={publicar} disabled={!!trabajando || !!est?.error}
               style={{ marginTop: 14, padding: '10px 22px' }}>
-              {trabajando ? trabajando : (cuando === 'ya' ? 'Publicar y actualizar ahora' : 'Publicar y programar')}
+              {trabajando ? trabajando : (momento() ? 'Publicar y programar' : 'Publicar y actualizar ahora')}
             </button>
-            {cuando !== 'ya' && !trabajando && (
+            {!!momento() && !trabajando && (
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
                 El sistema publicado va a mostrar la cuenta regresiva a quien esté trabajando, y el corte dura alrededor de un minuto.
               </div>
@@ -2519,6 +2593,13 @@ function PantallaPublicacion({ volver }) {
 
 export default function App() {
   useIcc();          // los swatches CMYK de toda la app se redibujan con el color REAL del perfil
+  // Versión del sistema (la que se muestra arriba, y la que se compara al publicar). Sale de
+  // /api/salud, que la lee del archivo VERSION del servidor que te está atendiendo.
+  const [versionApp, setVersionApp] = useState(null);
+  useEffect(() => {
+    fetch('/api/salud').then(r => r.json()).then(d => setVersionApp(d))
+      .catch(() => setVersionApp(null));
+  }, []);
   const [activoTab, setActivoTab] = useState(() => {
     return esRutaAdmin() ? 'config' : 'pedidos';
   });
@@ -7179,7 +7260,7 @@ export default function App() {
         <aside className="sidebar">
           <div className="logo-section">
             <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-              <img src={rutaApi("/logo.svg")} alt="USER PRO" style={{ width: 40, height: 40, flexShrink: 0, display: 'block' }} />
+              <img className="logo-animado" src={rutaApi("/logo.svg")} alt="USER PRO" style={{ width: 40, height: 40, flexShrink: 0, display: 'block' }} />
               <div>
                 <h1 style={{ margin: 0 }}><span>USER</span> PRO</h1>
                 <div className="logo-subtitle">Motor de Sublimación</div>
@@ -7253,13 +7334,16 @@ export default function App() {
               ⬅ Panel Operario
             </button>
             
-            <div className="connection-badge">
+            {/* Identidad del SISTEMA (versión y dónde está corriendo), no del molde: saber qué
+                versión tenés delante es lo que importa ahora que hay taller y publicado. */}
+            <div className="connection-badge" title={versionApp?.commit ? `revisión ${versionApp.commit}` : ''}>
               <div className={`status-dot ${!estado ? 'error' : ''}`}></div>
-              <span>{estado ? "Servidor Activo" : "Sin Conexión"}</span>
+              <span>{!estado ? 'Sin Conexión'
+                : `TIZADA PRO ${versionApp?.version || ''}`.trim()}</span>
             </div>
-            {activoProdDetalle && (
-              <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-muted)' }}>
-                Activo: <b style={{ color: 'var(--accent)' }}>{activoProdDetalle.nombre}</b>
+            {estado && versionApp?.modo === 'publicado' && (
+              <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--accent)', fontWeight: 700, letterSpacing: 0.4 }}>
+                EN INTERNET
               </div>
             )}
           </div>
@@ -7283,7 +7367,7 @@ export default function App() {
             borderRadius: '12px'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <img src={rutaApi("/logo.svg")} alt="USER PRO" style={{ width: 34, height: 34, flexShrink: 0, display: 'block' }} />
+              <img className="logo-animado" src={rutaApi("/logo.svg")} alt="USER PRO" style={{ width: 34, height: 34, flexShrink: 0, display: 'block' }} />
               <h1 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>
                 <span style={{ color: 'var(--cmyk-cyan)', textShadow: '0 0 12px var(--cmyk-cyan)' }}>USER</span> PRO
               </h1>
@@ -7299,9 +7383,12 @@ export default function App() {
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div className="connection-badge" style={{ margin: 0 }}>
+              <div className="connection-badge" style={{ margin: 0 }}
+                title={versionApp?.commit ? `revisión ${versionApp.commit}` : ''}>
                 <div className={`status-dot ${!estado ? 'error' : ''}`}></div>
-                <span style={{ fontSize: '12px' }}>{estado ? "Servidor Activo" : "Sin Conexión"}</span>
+                <span style={{ fontSize: '12px' }}>{!estado ? 'Sin Conexión'
+                  : `TIZADA PRO ${versionApp?.version || ''}`.trim()
+                    + (versionApp?.modo === 'publicado' ? ' · en internet' : '')}</span>
               </div>
             </div>
           </header>
