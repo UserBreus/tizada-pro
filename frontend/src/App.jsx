@@ -2288,23 +2288,36 @@ function AvisoActualizacion() {
   const verRef = useRef(null);
 
   useEffect(() => {
-    let vivo = true;
-    const pedir = async () => {
+    let vivo = true, timer = null;
+    // El ritmo de consulta se ACELERA cuando importa: 30 s de base, 10 s si hay una programada,
+    // y 2 s cuando falta poco, se está instalando o el servidor no contesta (= se está
+    // reiniciando). Así la versión nueva aparece SOLA a los pocos segundos, sin F5 — antes se
+    // miraba cada 30 s fijos y el usuario recargaba a mano antes de que el aviso se enterara.
+    const ciclo = async () => {
+      let delay = 30000;
       try {
         const r = await fetch('/api/actualizacion/estado');
-        if (!r.ok) return;
+        if (!r.ok) throw new Error('http ' + r.status);
         const d = await r.json();
         if (!vivo) return;
-        // Si el servidor volvió con OTRA versión, la pantalla está vieja → recargar.
+        // Si el servidor contesta con OTRA versión, esta pantalla quedó vieja → recargar YA.
         if (verRef.current && d.version && d.version !== verRef.current) { window.location.reload(); return; }
         verRef.current = d.version || verRef.current;
         setEst(d);
         setSeg(d.pendiente ? d.pendiente.segundos : null);
-      } catch { /* servidor reiniciándose: se reintenta en la próxima vuelta */ }
+        if (d.en_curso) delay = 2000;
+        else if (d.pendiente) delay = d.pendiente.segundos <= 15 ? 2000 : 10000;
+      } catch {
+        // No contesta: casi seguro se está actualizando. Mostrar «Actualizando…» e insistir
+        // cada 2 s para recargar apenas vuelva.
+        if (!vivo) return;
+        setEst(e => (e ? { ...e, en_curso: true } : e));
+        delay = 2000;
+      }
+      if (vivo) timer = setTimeout(ciclo, delay);
     };
-    pedir();
-    const t = setInterval(pedir, 30000);
-    return () => { vivo = false; clearInterval(t); };
+    ciclo();
+    return () => { vivo = false; clearTimeout(timer); };
   }, []);
 
   // el contador corre localmente para que se vea bajar de a un segundo
@@ -7251,7 +7264,10 @@ export default function App() {
   // NADA más. Mientras se consulta /yo no se pinta nada (evita el parpadeo login→app). Si la API
   // de usuarios no está viva (base caída), NO se traba el sistema: se deja pasar.
   if (!authListo) return <div style={{ minHeight: '100vh', background: 'var(--bg, #0a0d0f)' }} />;
-  if (authOn && !yo) return <LoginScreen onLogin={(u) => { setYo(u); }} />;
+  // La cinta de actualización TAMBIÉN en el login: si el sistema se actualiza mientras alguien
+  // está ahí parado, su pantalla se recarga sola igual que las demás (si no, entraba con el
+  // frontend viejo hasta un F5 a mano).
+  if (authOn && !yo) return <><AvisoActualizacion /><LoginScreen onLogin={(u) => { setYo(u); }} /></>;
 
   return (
     <div className="app-container">
