@@ -8479,7 +8479,10 @@ export default function App() {
                 const vfArte = verVariante ? (varianteFiltro(verVariante) || { show: new Set(), pos: new Map(), vb: null }) : null;
                 // ── TELA del pedido para este molde ──
                 const _molProd = productosCat.productos.find(p => p.id === _id) || {};
-                const _telasMol = (telasReg.telas || []).filter(t => (_molProd.telas_asignadas || []).includes(t.id));
+                const _telasAsig = (telasReg.telas || []).filter(t => (_molProd.telas_asignadas || []).includes(t.id));
+                // Si el molde tiene telas asignadas → esas. Si NO (o el registro aún no cargó) → TODO el
+                // registro global, para que en el Arte SIEMPRE se pueda elegir la tela de cada pieza.
+                const _telasMol = _telasAsig.length ? _telasAsig : (telasReg.telas || []);
                 const _telaBaseId = telaBaseMolde[_id] || (_telasMol[0] && _telasMol[0].id) || null;
                 const _telaDeGen = (gen) => (telaPorPieza[_id] || {})[gen] || _telaBaseId;
                 const _telaActiva = telaModoVer && _telasMol.length > 0;
