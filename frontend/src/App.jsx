@@ -353,7 +353,7 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
-  const cs = { width: '100%', padding: '4px 22px 4px 8px', border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', fontSize: 12.5, height: 30, boxSizing: 'border-box' };
+  const cs = { width: '100%', minWidth: 0, padding: '4px 22px 4px 8px', border: 'none', background: 'transparent', color: 'var(--text-primary)', outline: 'none', fontSize: 12.5, height: 30, boxSizing: 'border-box' };
   // Filtro tipo autocompletar: al escribir, muestra solo las opciones que se asemejan (sin acentos/mayúsc).
   // Si el texto coincide EXACTO con una opción (o está vacío), muestra todas para poder re-elegir.
   const _norm = (s) => (s == null ? '' : String(s)).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -366,7 +366,7 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   return (
     <div ref={wrapRef} title={invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
       style={{ position: 'relative', boxShadow: invalido ? 'inset 0 0 0 1.5px rgba(255,90,90,0.8)' : 'none', background: invalido ? 'rgba(255,70,70,0.08)' : 'transparent' }}>
-      <input ref={inputRef} value={value} placeholder="escribí o elegí…" data-plc={cellId}
+      <input ref={inputRef} value={value} placeholder="escribí o elegí…" size={1} data-plc={cellId}
         // NO se abre el desplegable con sólo hacer foco/clic: así seleccionar una celda o
         // agarrar el tirador para ARRASTRAR no lo dispara. Se abre con la flecha ▾, al ESCRIBIR,
         // o con la tecla ↓ (puntos estratégicos claros).
@@ -8187,12 +8187,12 @@ export default function App() {
                                 } else if (tipo === 'toggle') {
                                   control = (
                                     <div data-plc={plc} tabIndex={0} ref={(el) => el && el.focus()} onKeyDown={(e) => onEditKey(e, i, ci)}
-                                      style={{ display: 'flex', height: 32, outline: 'none' }}>
+                                      style={{ display: 'flex', height: 32, width: '100%', minWidth: 0, outline: 'none' }}>
                                       {toggleOpts.map(o => {
                                         const on = cellValue ? cellValue === o : o === toggleOpts[0];
                                         return (
                                           <button key={o} type="button" tabIndex={-1} onClick={() => { updateFila(i, c.id, o); setPlEdit(null); foco(); }}
-                                            style={{ flex: 1, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--bg-primary)' : 'var(--text-secondary)', transition: 'background 0.15s' }}>
+                                            style={{ flex: 1, minWidth: 0, overflow: 'hidden', border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--bg-primary)' : 'var(--text-secondary)', transition: 'background 0.15s' }}>
                                             {o}
                                           </button>
                                         );
@@ -8216,12 +8216,13 @@ export default function App() {
                                         type={_esNum ? 'number' : 'text'}
                                         value={cellValue}
                                         autoFocus
+                                        size={1}
                                         data-plc={plc}
                                         onFocus={foco}
                                         onBlur={() => setPlEdit(prev => (prev && prev.r === i && prev.c === ci ? null : prev))}
                                         onKeyDown={(e) => onEditKey(e, i, ci)}
                                         title={_hayFalta ? 'La fuente del diseño no tiene los caracteres en rojo' : undefined}
-                                        style={{ ..._fBase, width: '100%', border: 'none', background: 'none', outline: 'none', position: 'relative',
+                                        style={{ ..._fBase, width: '100%', minWidth: 0, border: 'none', background: 'none', outline: 'none', position: 'relative',
                                           color: _hayFalta ? 'transparent' : 'var(--text-primary)', caretColor: 'var(--text-primary)',
                                           textTransform: c.role === 'nombre' ? 'uppercase' : 'none' }}
                                         onChange={(e) => updateFila(i, c.id, e.target.value)}
