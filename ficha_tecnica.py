@@ -117,7 +117,7 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
     w_cel = ancho / cols
     gap = 5                              # aire entre tarjetas
     h_cel = 132                          # alto de la celda (tarjeta + rótulo)
-    h_card = h_cel - 26                  # alto de la tarjeta (la imagen)
+    h_card = h_cel - 18                  # alto de la tarjeta (la imagen); el rótulo es sólo el nombre
     restantes = []
     fila_y = y
     i = 0
@@ -152,11 +152,9 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
             finally:
                 if src is not None:
                     src.close()
-            nom = _generico(pz.get("nombre") or "—")     # nombre GENERAL de la pieza (sin el número)
-            med = f"{pz.get('w_cm', '')}×{pz.get('h_cm', '')} cm" if pz.get("w_cm") else ""
-            _texto(page, cx + gap + 2, fila_y + h_card + 15, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
-            if med:
-                _texto(page, cx + gap + 2, fila_y + h_card + 24, med, size=6.5, color=GRIS, max_w=w_cel - 2 * gap - 2)
+            # Sólo el NOMBRE general de la pieza (sin número). La MEDIDA no se muestra: no se necesita.
+            nom = _generico(pz.get("nombre") or "—")
+            _texto(page, cx + gap + 2, fila_y + h_card + 13, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
         fila_y += h_cel
     return fila_y, restantes
 
