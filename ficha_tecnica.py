@@ -88,15 +88,17 @@ def _dibujar_tabla(page, y, columnas, filas, y_max):
 
 
 # ── MOLDE GUÍA (piezas de la variable, con el diseño recortado — el MISMO PDF que la tizada) ───
-def _dibujar_piezas(doc, page, y, piezas, y_max, cols=3):
-    """Coloca las piezas en una grilla; devuelve (y_final, restantes). Cada celda: el PDF real de la
-    pieza (recorte NATIVO → el diseño queda dentro de la silueta, sin rectángulo) + nombre + medida.
+def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
+    """Coloca las piezas en una grilla de `cols` columnas; devuelve (y_final, restantes). Cada pieza
+    va en su propia TARJETA (sombra suave + fondo claro + borde) para que cada espacio se distinga;
+    adentro, el PDF real de la pieza (recorte NATIVO → el diseño queda dentro de la silueta).
     Cada pieza es {nombre, w_cm, h_cm, pdf(bytes)}."""
     x0 = MARGEN
     ancho = A4_W - 2 * MARGEN
     w_cel = ancho / cols
-    h_cel = 150
-    h_img = h_cel - 26
+    gap = 5                              # aire entre tarjetas
+    h_cel = 132                          # alto de la celda (tarjeta + rótulo)
+    h_card = h_cel - 26                  # alto de la tarjeta (la imagen)
     restantes = []
     fila_y = y
     i = 0
@@ -109,17 +111,22 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=3):
                 break
             pz = piezas[i]; i += 1
             cx = x0 + c * w_cel
-            caja = fitz.Rect(cx + 6, fila_y + 4, cx + w_cel - 6, fila_y + 4 + h_img)
-            # (sin fondo/borde de caja: la silueta de la pieza YA es el límite; un rectángulo detrás
-            #  sería justo lo que el usuario no quiere ver)
+            card = fitz.Rect(cx + gap, fila_y + gap, cx + w_cel - gap, fila_y + gap + h_card)
+            # SOMBRA suave: una tarjeta gris apenas corrida atrás → da relieve sin ser agresiva.
+            page.draw_rect(fitz.Rect(card.x0 + 1.6, card.y0 + 2.0, card.x1 + 1.6, card.y1 + 2.0),
+                           color=None, fill=(0.86, 0.87, 0.88))
+            # TARJETA: fondo casi blanco + borde fino.
+            page.draw_rect(card, color=(0.80, 0.82, 0.84), width=0.8, fill=(0.985, 0.99, 0.995))
             src = None
             try:
                 src = fitz.open("pdf", pz.get("pdf"))
                 r0 = src[0].rect
-                esc = min((caja.width) / r0.width, (caja.height) / r0.height) if r0.width and r0.height else 1
+                pad = 7
+                dispo_w, dispo_h = card.width - 2 * pad, card.height - 2 * pad
+                esc = min(dispo_w / r0.width, dispo_h / r0.height) if r0.width and r0.height else 1
                 aw, ah = r0.width * esc, r0.height * esc
-                dst = fitz.Rect(caja.x0 + (caja.width - aw) / 2, caja.y0 + (caja.height - ah) / 2,
-                                caja.x0 + (caja.width + aw) / 2, caja.y0 + (caja.height + ah) / 2)
+                dst = fitz.Rect(card.x0 + (card.width - aw) / 2, card.y0 + (card.height - ah) / 2,
+                                card.x0 + (card.width + aw) / 2, card.y0 + (card.height + ah) / 2)
                 page.show_pdf_page(dst, src, 0)
             except Exception:
                 pass
@@ -128,9 +135,9 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=3):
                     src.close()
             nom = pz.get("nombre") or "—"
             med = f"{pz.get('w_cm', '')}×{pz.get('h_cm', '')} cm" if pz.get("w_cm") else ""
-            _texto(page, cx + 8, fila_y + h_img + 16, nom, size=9, bold=True, color=NEGRO, max_w=w_cel - 16)
+            _texto(page, cx + gap + 2, fila_y + h_card + 15, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
             if med:
-                _texto(page, cx + 8, fila_y + h_img + 26, med, size=7.5, color=GRIS)
+                _texto(page, cx + gap + 2, fila_y + h_card + 24, med, size=6.5, color=GRIS, max_w=w_cel - 2 * gap - 2)
         fila_y += h_cel
     return fila_y, restantes
 
