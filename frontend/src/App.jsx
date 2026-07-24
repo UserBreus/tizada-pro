@@ -2845,6 +2845,7 @@ export default function App() {
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
   const [telaElegida, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
   const [telaBuscarAsig, setTelaBuscarAsig] = useState('');                        // buscador de telas en el modo asignar
+  const [telasFaltantes, setTelasFaltantes] = useState({});                        // {pid: nº de piezas sin tela} → bloquea avanzar a la planilla
   const [trabajoId, setTrabajoId] = useState(null);
   const [trabajoEstado, setTrabajoEstado] = useState(null);
   // Avance del wizard guardado (para no perderlo al recargar la página). Se lee
@@ -3721,6 +3722,10 @@ export default function App() {
   // primero pregunta a cuál unificar la exportación (con aviso de variación de color).
   const irAPlanillaDesdeArte = async () => {
     if (!todasArteCargadas) return;
+    if (telasIncompletas) {   // OBLIGATORIO: cada pieza tiene que tener una tela elegida
+      showError(`Faltan ${telasFaltantesTotal} pieza(s) sin tela. Asignales una tela en «Ver telas de pieza» antes de seguir.`);
+      return;
+    }
     if (bloqueaPorSinDiseno()) return;   // alguna pieza del molde activo sin diseño → no avanza, la marca en rojo
     // SINCRONIZAR el diseño de las filas con lo PREPARADO: una fila cuyo diseño NO esté entre los
     // que el usuario preparó en este pedido (`disenosPedido`) — ej. un valor viejo/vacío pegado en
@@ -6704,6 +6709,22 @@ export default function App() {
   // Tareas de arte: un (diseño, molde) por cada asignación.
   const tareasArte = disenosPedido.flatMap(d => (disenoMoldes[d.id] || []).map(mid => ({ did: d.id, mid })));
   const todasArteCargadas = tareasArte.length > 0 && tareasArte.every(t => arteCargado[t.did + '|' + t.mid]);
+  // ── TELAS OBLIGATORIAS: no se avanza a la planilla si alguna pieza quedó sin tela ──
+  // A medida que se ve cada molde en el Arte, se registra cuántas de SUS piezas (genéricas) siguen
+  // sin tela asignada. Se guarda por molde (`telasFaltantes[pid]`) para poder validar TODO el pedido.
+  const _genTelaP = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
+  const _arteMoldeAct = itemsArteDe(disenoActivo)?.[arteIdx]?.moldeId;
+  useEffect(() => {
+    if (pedidoPaso !== 'arte' || !_arteMoldeAct || !(mapeoData?.piezas?.length)) return;
+    const todas = [...new Set(mapeoData.piezas.map(_genTelaP))].filter(Boolean);
+    const map = telaPorPieza[_arteMoldeAct] || {};
+    const faltan = todas.filter(g => !map[g]).length;
+    setTelasFaltantes(prev => (prev[_arteMoldeAct] === faltan ? prev : { ...prev, [_arteMoldeAct]: faltan }));
+  }, [pedidoPaso, _arteMoldeAct, mapeoData, telaPorPieza]);
+  // Molde(s) del pedido con piezas todavía sin tela → mientras haya alguno, no se puede avanzar.
+  const _moldesPedido = [...new Set(tareasArte.map(t => t.mid))];
+  const telasFaltantesTotal = _moldesPedido.reduce((n, pid) => n + (telasFaltantes[pid] || 0), 0);
+  const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
   const arteEnPedido = (mid) => disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
@@ -8770,14 +8791,19 @@ export default function App() {
                     {_tieneDiseno && estado?.arte && !estado.arte.aprobado && (
                       <span style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)' }}>Ajustá el mapeo y «Guardar mapeo».</span>
                     )}
+                    {todasArteCargadas && telasIncompletas && (
+                      <span style={{ fontSize: 11.5, fontWeight: 700, color: '#ff8a8a' }}>⚠ Faltan {telasFaltantesTotal} pieza(s) sin tela — asigná su tela en «Ver telas de pieza».</span>
+                    )}
                     <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>{tareasArte.filter(t => arteCargado[t.did + '|' + t.mid]).length}/{tareasArte.length} con arte</span>
-                    <button onClick={irAPlanillaDesdeArte} disabled={!todasArteCargadas}
-                      title={todasArteCargadas ? '' : 'Cargá el arte de todos los moldes de todos los diseños'}
+                    {(() => { const _puede = todasArteCargadas && !telasIncompletas; return (
+                    <button onClick={irAPlanillaDesdeArte} disabled={!_puede}
+                      title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela` : '')}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
-                        cursor: todasArteCargadas ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
-                        background: todasArteCargadas ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: todasArteCargadas ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
+                        cursor: _puede ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
+                        background: _puede ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: _puede ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
                       A la planilla <span style={{ fontSize: 16 }}>→</span>
                     </button>
+                    ); })()}
                   </div>
                 </div>
                 );
