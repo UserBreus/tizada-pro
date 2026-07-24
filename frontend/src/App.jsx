@@ -331,7 +331,7 @@ async function leerJson(res) {
 }
 
 // ── Combo: casilla editable + lista desplegable propia (scrolleable, compacta) ──
-function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir, autoEdit }) {
+function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir, autoEdit, autoSel }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
@@ -347,7 +347,9 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
     setOpen(true);
   };
   // autoEdit: la celda entró en modo EDICIÓN (doble-click/Enter) → enfoca y abre la lista de una.
-  useEffect(() => { if (autoEdit) { inputRef.current?.focus(); try { inputRef.current?.select(); } catch (_e) { /* no-op */ } abrir(true); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // `autoSel` (entró por doble-click/Enter): selecciona todo y muestra TODAS las opciones (re-elegir).
+  // Si entró por TIPEO (autoSel falso): NO selecciona (cursor al final) y FILTRA por lo tipeado.
+  useEffect(() => { if (autoEdit) { inputRef.current?.focus(); if (autoSel) { try { inputRef.current?.select(); } catch (_e) { /* no-op */ } } abrir(!!autoSel); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (noAbrir) setOpen(false); }, [noAbrir]);   // al pasar a multi-selección, cerrar
   useEffect(() => {
     if (!open) return;
@@ -7309,6 +7311,19 @@ export default function App() {
       else if (k === 'ArrowLeft' || (k === 'Tab' && e.shiftKey)) nc = vis[Math.max(0, pos - 1)] ?? c;
       else if (k === 'ArrowRight' || k === 'Tab') nc = vis[Math.min(vis.length - 1, pos + 1)] ?? c;
       _focusCelda(nr, nc);
+      return;
+    }
+    // Escribir un caracter imprimible sobre la celda SELECCIONADA → entra a editar y ARRANCA con esa
+    // tecla (como Sheets): reemplaza el contenido con la letra tipeada. No aplica a toggles (opciones
+    // fijas) ni con Ctrl/Cmd/Alt (atajos). `typed:true` → el editor pone el cursor al final, no selecciona.
+    if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const col = cols[c];
+      const tp = col && (col.tipo || (col.role === 'manga' ? 'toggle' : 'texto'));
+      if (col && tp !== 'toggle') {
+        e.preventDefault();
+        setPlEdit({ r, c, val: String(filas[r]?.[col.id] ?? ''), typed: true });   // congela el ancho al valor previo
+        updateFila(r, col.id, k);                                                   // reemplaza el contenido con la tecla
+      }
     }
   };
   // Teclado dentro de una celda EN EDICIÓN: Enter confirma y baja, Tab confirma y va al lado, Esc sale.
@@ -8254,7 +8269,7 @@ export default function App() {
                               if (editando) {
                                 let ctrl;
                                 if (esDropdown) {
-                                  ctrl = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit />;
+                                  ctrl = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit autoSel={!plEdit.typed} />;
                                 } else if (tipo === 'toggle') {
                                   ctrl = (
                                     <div data-plc={plc} tabIndex={0} ref={(el) => el && el.focus()} onKeyDown={(e) => onEditKey(e, i, ci)}
