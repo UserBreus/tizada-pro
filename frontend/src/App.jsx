@@ -365,10 +365,14 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
     <div ref={wrapRef} title={invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
       style={{ position: 'relative', boxShadow: invalido ? 'inset 0 0 0 1.5px rgba(255,90,90,0.8)' : 'none', background: invalido ? 'rgba(255,70,70,0.08)' : 'transparent' }}>
       <input ref={inputRef} value={value} placeholder="escribí o elegí…" data-plc={cellId}
-        onFocus={() => { onFocusCell?.(); abrir(true); }}
+        // NO se abre el desplegable con sólo hacer foco/clic: así seleccionar una celda o
+        // agarrar el tirador para ARRASTRAR no lo dispara. Se abre con la flecha ▾, al ESCRIBIR,
+        // o con la tecla ↓ (puntos estratégicos claros).
+        onFocus={() => { onFocusCell?.(); }}
         onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
         onBlur={() => { const ex = options.find(o => _norm(o) === _nv); if (ex && ex !== value) onChange(ex); }}
         onKeyDown={(e) => {
+          if ((e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown')) && !open) { e.preventDefault(); abrir(true); return; }
           if (e.key === 'Enter' || e.key === 'Tab') {
             const ex = options.find(o => _norm(o) === _nv);   // coincide sin importar mayús/minús
             if (ex) { if (ex !== value) onChange(ex); }        // → guarda el valor canónico
@@ -6519,6 +6523,18 @@ export default function App() {
   const colorDeDiseno = (did) => DISENO_COLORS[Math.max(0, disenosPedido.findIndex(d => d.id === did)) % DISENO_COLORS.length];
   // Unión de moldes de las variables elegidas (el molde queda por detrás de la variable).
   const moldesUnion = [...new Set(Object.values(disenoMoldes).flat())];
+  // COLUMNAS ACTIVAS de la planilla según los moldes del pedido: una columna se usa si está en el
+  // `mapeo_columnas` de algún molde elegido (ej. «Talle short» sólo la usa el short). Las que no
+  // usa ningún molde del pedido quedan APAGADAS. `null` = todas activas (sin info → no apagar nada).
+  const columnasActivasPlanilla = React.useMemo(() => {
+    const molds = moldesUnion.map(id => (productosCat.productos || []).find(p => p.id === id)).filter(Boolean);
+    if (!molds.length || !molds.some(m => m.mapeo_columnas)) return null;
+    const usados = new Set();
+    molds.forEach(m => Object.values(m.mapeo_columnas || {}).forEach(v => usados.add(v)));
+    return usados;
+  }, [moldesUnion, productosCat]);
+  // Una columna está activa si: no hay info (null), es la de Diseño (siempre), o algún molde la usa.
+  const colActiva = (c) => !columnasActivasPlanilla || c.role === 'diseno' || columnasActivasPlanilla.has(c.id) || columnasActivasPlanilla.has(c.role);
   // VARIABLE-FIRST: TODAS las variables (con piezas) de TODOS los moldes, cada una con su
   // molde detrás. Es lo que se elige directamente en el pedido (ya no se elige el molde).
   const variablesDisponibles = productosCat.productos.flatMap(p =>
@@ -8107,17 +8123,23 @@ export default function App() {
                   </div>
                   <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
                   
-                  <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.15)', marginTop: 12 }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
+                  <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.18)', marginTop: 12, boxShadow: '0 4px 18px rgba(0,0,0,0.25)' }}>
+                    <table className="planilla-tbl" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
                       <thead>
-                        <tr style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderBottom: '2px solid var(--border-light)' }}>
-                          <th style={{ width: 45, padding: '8px 10px', borderRight: '1px solid var(--border-light)', textAlign: 'center', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>#</th>
-                          {cols.map(c => (
-                            <th key={c.id} style={{ padding: '8px 10px', borderRight: '1px solid var(--border-light)', textAlign: 'left', fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>
-                              {c.label} {c.role !== 'none' && <span style={{ fontSize: 9, opacity: 0.5, fontStyle: 'italic', fontWeight: 'normal' }}>({c.role})</span>}
-                            </th>
-                          ))}
-                          <th style={{ width: 40, padding: 8 }}></th>
+                        <tr style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02))' }}>
+                          <th style={{ width: 44, padding: '11px 10px', borderBottom: '1px solid var(--border-light)', textAlign: 'center', fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.5 }}>#</th>
+                          {cols.map(c => {
+                            const act = colActiva(c);
+                            return (
+                              <th key={c.id} title={act ? c.label : 'Ningún molde del pedido usa esta columna'}
+                                style={{ padding: '11px 12px', borderBottom: '1px solid var(--border-light)', borderLeft: '1px solid rgba(255,255,255,0.04)', textAlign: 'left',
+                                  fontSize: 11, color: act ? 'var(--text-secondary)' : 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+                                  opacity: act ? 1 : 0.45 }}>
+                                {c.label}{!act && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 600, opacity: 0.8, textTransform: 'none', letterSpacing: 0 }}>· sin uso</span>}
+                              </th>
+                            );
+                          })}
+                          <th style={{ width: 40, padding: 8, borderBottom: '1px solid var(--border-light)' }}></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -8127,6 +8149,16 @@ export default function App() {
                               {(i + 1).toString().padStart(2, '0')}
                             </td>
                             {cols.map((c, ci) => {
+                              // Columna que NO usa ningún molde del pedido → APAGADA (gris, no editable).
+                              if (!colActiva(c)) {
+                                return (
+                                  <td key={c.id} title="Ningún molde del pedido usa esta columna"
+                                    style={{ padding: 0, borderLeft: '1px solid rgba(255,255,255,0.04)',
+                                      background: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.02) 0 6px, rgba(255,255,255,0.04) 6px 12px)' }}>
+                                    <div style={{ height: 32 }} />
+                                  </td>
+                                );
+                              }
                               const cellValue = fila[c.id] !== undefined ? fila[c.id] : '';
                               const tipo = c.tipo || (c.role === 'manga' ? 'toggle' : 'texto');
                               const opts = (c.opciones || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -8216,14 +8248,16 @@ export default function App() {
                                     if (plDragRef.current) setPlFill({ r: i, c: ci });
                                     else if (plSelDragRef.current) { setPlSelEnd({ r: i, c: ci }); if (!(plSel && plSel.r === i && plSel.c === ci)) setPlSelDrag(true); }
                                   }}
-                                  style={{ position: 'relative', padding: 0, borderRight: '1px solid var(--border-light)',
+                                  style={{ position: 'relative', padding: 0, borderLeft: '1px solid rgba(255,255,255,0.04)',
                                     boxShadow: bs.length ? bs.join(', ') : 'none',
                                     background: enFill ? 'rgba(0,216,245,0.20)' : (enSel ? 'rgba(0,216,245,0.10)' : 'transparent') }}>
                                   {control}
                                   {esHandle && (
+                                    // Tirador de relleno: un poco más grande y con «hitbox» propio → fácil de agarrar
+                                    // para ARRASTRAR sin tocar la celda (que ya no abre el desplegable con el clic).
                                     <span onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); plFillSrcRef.current = plRango(); plDragRef.current = { r: i, c: ci }; setPlFill({ r: i, c: ci }); setPlSelDrag(true); }}
-                                      title="Arrastrá para copiar/seguir la secuencia (vertical u horizontal)"
-                                      style={{ position: 'absolute', right: -1, bottom: -1, width: 9, height: 9, background: 'var(--accent)', border: '1.5px solid var(--bg-primary)', borderRadius: 1, cursor: 'crosshair', zIndex: 3, boxShadow: '0 0 4px var(--accent)' }} />
+                                      title="Arrastrá para copiar o seguir la secuencia (vertical u horizontal)"
+                                      style={{ position: 'absolute', right: -3, bottom: -3, width: 12, height: 12, background: 'var(--accent)', border: '2px solid var(--bg-primary)', borderRadius: 3, cursor: 'crosshair', zIndex: 3, boxShadow: '0 0 5px var(--accent)' }} />
                                   )}
                                 </td>
                               );

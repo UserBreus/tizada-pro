@@ -1277,3 +1277,8 @@ td.num {
   scrollbar-width: thin;
   scrollbar-color: var(--cmyk-cyan) rgba(0, 0, 0, 0.3);
 }
+
+/* Planilla del pedido — look más profesional (zebra sutil + hover de fila). */
+.planilla-tbl tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.015); }
+.planilla-tbl tbody tr:hover { background: rgba(0, 216, 245, 0.04); }
+.planilla-tbl tbody td { transition: background .12s; }
