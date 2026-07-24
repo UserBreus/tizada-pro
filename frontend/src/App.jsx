@@ -8129,13 +8129,15 @@ export default function App() {
                         <tr style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02))' }}>
                           <th style={{ width: 44, padding: '11px 10px', borderBottom: '1px solid var(--border-light)', textAlign: 'center', fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.5 }}>#</th>
                           {cols.map(c => {
-                            const act = colActiva(c);
+                            // La columna se MUESTRA si al menos un molde del pedido la usa (unión); si
+                            // ninguno la usa, NO se muestra. Se mantiene el índice sobre `cols` (no se
+                            // filtra el array) para no romper la selección/arrastre, que indexa por posición.
+                            if (!colActiva(c)) return null;
                             return (
-                              <th key={c.id} title={act ? c.label : 'Ningún molde del pedido usa esta columna'}
+                              <th key={c.id} title={c.label}
                                 style={{ padding: '11px 12px', borderBottom: '1px solid var(--border-light)', borderLeft: '1px solid rgba(255,255,255,0.04)', textAlign: 'left',
-                                  fontSize: 11, color: act ? 'var(--text-secondary)' : 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
-                                  opacity: act ? 1 : 0.45 }}>
-                                {c.label}{!act && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 600, opacity: 0.8, textTransform: 'none', letterSpacing: 0 }}>· sin uso</span>}
+                                  fontSize: 11, color: 'var(--text-secondary)', fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>
+                                {c.label}
                               </th>
                             );
                           })}
@@ -8149,16 +8151,9 @@ export default function App() {
                               {(i + 1).toString().padStart(2, '0')}
                             </td>
                             {cols.map((c, ci) => {
-                              // Columna que NO usa ningún molde del pedido → APAGADA (gris, no editable).
-                              if (!colActiva(c)) {
-                                return (
-                                  <td key={c.id} title="Ningún molde del pedido usa esta columna"
-                                    style={{ padding: 0, borderLeft: '1px solid rgba(255,255,255,0.04)',
-                                      background: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.02) 0 6px, rgba(255,255,255,0.04) 6px 12px)' }}>
-                                    <div style={{ height: 32 }} />
-                                  </td>
-                                );
-                              }
+                              // Columna que ningún molde del pedido usa → NO se muestra (se mantiene el
+                              // índice `ci` sobre `cols` para no romper la selección/arrastre).
+                              if (!colActiva(c)) return null;
                               const cellValue = fila[c.id] !== undefined ? fila[c.id] : '';
                               const tipo = c.tipo || (c.role === 'manga' ? 'toggle' : 'texto');
                               const opts = (c.opciones || '').split(',').map(s => s.trim()).filter(Boolean);
