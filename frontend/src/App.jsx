@@ -369,10 +369,14 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
         // agarrar el tirador para ARRASTRAR no lo dispara. Se abre con la flecha ▾, al ESCRIBIR,
         // o con la tecla ↓ (puntos estratégicos claros).
         onFocus={() => { onFocusCell?.(); }}
+        // Doble click sobre la casilla → muestra el desplegable (además de la flecha ▾ y la tecla ↓).
+        onDoubleClick={() => { if (!noAbrir) abrir(true); }}
         onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
         onBlur={() => { const ex = options.find(o => _norm(o) === _nv); if (ex && ex !== value) onChange(ex); }}
         onKeyDown={(e) => {
           if ((e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown')) && !open) { e.preventDefault(); abrir(true); return; }
+          // Enter con el desplegable CERRADO → lo ABRE (no navega). Con la lista ABIERTA → confirma y cierra.
+          if (e.key === 'Enter' && !open && !noAbrir) { e.preventDefault(); abrir(true); return; }
           if (e.key === 'Enter' || e.key === 'Tab') {
             const ex = options.find(o => _norm(o) === _nv);   // coincide sin importar mayús/minús
             if (ex) { if (ex !== value) onChange(ex); }        // → guarda el valor canónico
@@ -382,12 +386,15 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
           onNavKey?.(e);
         }}
         style={invalido ? { ...cs, color: '#ff8a8a', fontWeight: 700 } : cs} />
-      <span onMouseDown={(e) => { e.preventDefault(); open ? setOpen(false) : abrir(true); }}
+      <span onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); open ? setOpen(false) : abrir(true); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
       {open && pos && filtradas.length > 0 && createPortal(
         <div style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
           {filtradas.map(o => (
-            <div key={o} onMouseDown={(e) => { e.preventDefault(); onChange(o); setOpen(false); }}
+            // stopPropagation: los eventos de un portal de React burbujean por el ÁRBOL de componentes,
+            // no por el DOM → sin esto, el clic en la opción llega al <td> dueño (dispara selección/arrastre)
+            // y termina seleccionando la celda de abajo. Se corta acá.
+            <div key={o} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(o); setOpen(false); }}
               style={{ padding: '5px 10px', fontSize: 12.5, cursor: 'pointer', color: o === value ? 'var(--accent)' : 'var(--text-secondary)', background: o === value ? 'rgba(0,216,245,0.10)' : 'transparent' }}
               onMouseEnter={e => { if (o !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
               onMouseLeave={e => { e.currentTarget.style.background = o === value ? 'rgba(0,216,245,0.10)' : 'transparent'; }}>
