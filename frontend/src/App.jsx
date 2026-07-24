@@ -1616,6 +1616,21 @@ function VisorFicha({ id, archivo, paginas }) {
   const imgPag = (pi) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
   const printRef = React.useRef(null);
+  const scrollRef = React.useRef(null);
+  // El visor ocupa EXACTAMENTE lo que queda hasta el borde inferior de la pantalla → la página NO
+  // scrollea (queda un solo scroll: el de adentro del visor). Se mide su tope y se recalcula al
+  // cambiar el tamaño de la ventana.
+  const [alto, setAlto] = React.useState('74vh');
+  React.useEffect(() => {
+    const calc = () => {
+      const el = scrollRef.current; if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      setAlto(Math.max(300, window.innerHeight - top - 14) + 'px');
+    };
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, []);
   const imprimir = () => {
     // iframe oculto con el PDF real → impresión nítida; si el navegador lo bloquea, se abre aparte.
     try { printRef.current?.contentWindow?.focus(); printRef.current?.contentWindow?.print(); }
@@ -1638,7 +1653,7 @@ function VisorFicha({ id, archivo, paginas }) {
       </div>
       {/* Las páginas como imágenes → el scroll es el del sistema (cyan/magenta). Cada hoja, una
           "lámina" blanca centrada con sombra, sobre el fondo de la app. */}
-      <div className="ficha-scroll" style={{ maxHeight: '74vh', overflowY: 'auto', padding: '4px 2px',
+      <div ref={scrollRef} className="ficha-scroll" style={{ height: alto, overflowY: 'auto', padding: '4px 2px',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
         {Array.from({ length: paginas }, (_, i) => (
           <img key={i} src={imgPag(i)} alt={`Hoja ${i + 1}`} loading="lazy"
