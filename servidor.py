@@ -4234,32 +4234,43 @@ def generar():
     return jsonify({"id": tid})
 
 
-def _molde_guia_ficha(pid, prod, reg, diseno):
-    """Piezas del talle GUÍA con el diseño aplicado, para la ficha técnica. Devuelve
-    {nombre, talle, piezas:[{nombre, w_cm, h_cm, svg}]} o None. Best-effort (usa `_piezas_base`,
-    el MISMO render que el visor y la tizada → arte = tizada)."""
+def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
+    """Molde guía para la ficha: las piezas de la VARIABLE del pedido (`var`), al talle guía, con el
+    diseño aplicado dentro de su máscara de recorte. Usa **`_piezas_base`** → EXACTAMENTE lo que
+    arma la tizada (arte = tizada). Devuelve {nombre, talle, variable, piezas:[…]} o None. Best-effort.
+    `var` = {clave, piezas, diseno} tomado del pedido; sin él, cae a todo el molde (compat)."""
     import base64 as _b64
     talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
     if not talles:
         return None
-    # Talle de referencia: el guía configurado, si sirve; si no, el del medio (el más "típico").
+    # TALLE GUÍA: el configurado; si no sirve, el del medio.
     guia = (prod or {}).get("variante_guia")
     talle = guia if guia in talles else talles[len(talles) // 2]
+    # VARIABLE del pedido: su clave (para el render) y su diseño (el mismo de la tizada).
+    variante = (var or {}).get("clave") or "*"
+    if (var or {}).get("diseno"):
+        diseno = var["diseno"]
     sub = _diseno_sub(diseno)
     if not os.path.exists(_ruta_entrada("arte.ai", pid, sub=sub)):
         diseno, sub = "principal", _diseno_sub("principal")
+    # Mapeo POR VARIABLE (el mismo criterio de la tizada): base + por_variable resueltos por clave.
     _b, _pv = _mapeo_estructura(pid, sub=sub)
     if not _b and not _pv:
         _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}).items() if v}
-    mp = {k: int(v) for k, v in (_b or {}).items() if v}
+    mp = {"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else {k: int(v) for k, v in (_b or {}).items() if v}
     try:
-        r = _piezas_base(pid, diseno, "*", talle, mp, prod, reg, prioridad="bg")
+        r = _piezas_base(pid, diseno, variante, talle, mp, prod, reg, prioridad="bg")
     except Exception:
         r = None
     if not r or not r.get("piezas"):
         return None
+    # Sólo las piezas de la variable (lo que la tizada realmente genera). Si no viniera la lista,
+    # se muestran todas (compat).
+    solo = set((var or {}).get("piezas") or [])
     piezas = []
     for nom, info in (r["piezas"] or {}).items():
+        if solo and nom not in solo:
+            continue
         svg = info.get("svg") or ""
         try:
             svg = _b64.b64decode(svg).decode("utf-8") if svg else ""
@@ -4267,7 +4278,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno):
             svg = ""
         piezas.append({"nombre": nom, "w_cm": info.get("w_cm"), "h_cm": info.get("h_cm"), "svg": svg})
     piezas.sort(key=lambda p: str(p["nombre"]))
-    return {"nombre": (prod or {}).get("nombre", pid), "talle": r.get("talle") or talle, "piezas": piezas}
+    return {"nombre": (prod or {}).get("nombre", pid), "talle": r.get("talle") or talle,
+            "variable": variante, "piezas": piezas}
 
 
 @app.post("/api/generar_multi")
@@ -4293,6 +4305,7 @@ def generar_multi():
                 return g
         return None
     molds_data, nombres, avisos = [], [], []
+    _var_ficha = {}                     # pid -> {clave, piezas, diseno}: la VARIABLE del pedido para la ficha
     for pid in pids:
         reg = _cargar("registro_producto.json", pid)
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -4325,6 +4338,13 @@ def generar_multi():
         # subgrupo se genera con el ARTE de ese diseño (carpeta del molde para
         # 'principal', o disenos/<slug>/ para los demás).
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg)
+        # La VARIABLE que usa el pedido para este molde (la 1ª fila que la trae): es LO MISMO que
+        # arma la tizada → la ficha usa esa variable + su diseño para el molde guía.
+        _vf = next((t for t in translated if t.get("variante_clave")), None)
+        if _vf:
+            _var_ficha[pid] = {"clave": _vf["variante_clave"],
+                               "piezas": _vf.get("variante_piezas"),
+                               "diseno": _vf.get("_diseno") or default_diseno}
         por_diseno = OrderedDict()
         for pr in translated:
             por_diseno.setdefault(pr.get("_diseno") or "principal", []).append(pr)
@@ -4490,7 +4510,7 @@ def generar_multi():
                     reg = _cargar("registro_producto.json", pid)
                     if prod and reg:
                         prog("ficha", (prod or {}).get("nombre", pid), None)
-                        g = _molde_guia_ficha(pid, prod, reg, default_diseno)
+                        g = _molde_guia_ficha(pid, prod, reg, default_diseno, _var_ficha.get(pid))
                         if g:
                             _guias.append(g)
                 _pl = planilla_ficha or {"columnas": [], "filas": prendas}
