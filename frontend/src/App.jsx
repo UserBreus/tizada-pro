@@ -3204,12 +3204,21 @@ export default function App() {
   // SIN sesión y el server oculta los moldes propios de quien no está identificado: la lista
   // quedaba con un solo molde para toda la sesión → "Mis artículos" vacío y subir el mismo molde
   // creaba OTRO artículo cada vez (así aparecieron 4 «Molde short»).
+  // SESIÓN LISTA = ya sabemos quién es el usuario (o que el sistema corre SIN usuarios). Desde que
+  // la API exige sesión (guardia global del backend), TODO lo de arranque se pide recién acá: si se
+  // pidiera al montar, el server contestaría 401 y la consola se llenaría de errores rojos al pedo.
+  const sesionLista = authListo && (!!yo?.id || !authOn);
   useEffect(() => {
-    if (!yo?.id) return;
+    if (!sesionLista) return;
     fetchProductos();
     fetchEstado();
     fetchCatalogoPiezas();
-  }, [yo?.id]);
+    fetchConfig();
+    fetchPlantillasPlanillas();
+    fetchReglasPlanilla();
+    fetchNestingPresets();
+    fetchGruposTizada();
+  }, [sesionLista, yo?.id]);
 
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
@@ -3529,12 +3538,9 @@ export default function App() {
     }
   };
 
-  // Load general state on mount & catalog
+  // Al montar: SOLO el listener de teclado. Los datos de arranque se piden cuando la sesión está
+  // lista (effect de `sesionLista`): pedirlos acá era antes del login → 401 y consola llena de rojos.
   useEffect(() => {
-    fetchEstado();
-    fetchProductos();
-    fetchCatalogoPiezas();
-
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setModalEtqOpen(false);
@@ -3548,9 +3554,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // OJO: todos los fetch de arranque chequean `res.ok`. La app se monta ANTES del login y el server
+  // ahora contesta 401 sin sesión → si el `{error}` se guardara como datos, el render revienta
+  // (p.ej. `productosCat.productos.find` sobre undefined). Al loguear se re-piden (effect de `yo`).
   const fetchEstado = async () => {
     try {
       const res = await fetch('/api/estado_general');
+      if (!res.ok) return;               // sin sesión (401) u otro error → conservar el estado por defecto
       const data = await res.json();
       setEstado(data);
     } catch (e) {
@@ -3561,6 +3571,7 @@ export default function App() {
   const fetchProductos = async () => {
     try {
       const res = await fetch('/api/productos');
+      if (!res.ok) return;               // sin sesión (401) → NO pisar el catálogo con {error}
       const data = await res.json();
       setProductosCat(data);
       setConfirmProductoId(data.activo);
@@ -3572,6 +3583,7 @@ export default function App() {
   const fetchConfig = async () => {
     try {
       const res = await fetch(`/api/config${qPid()}`);
+      if (!res.ok) return;               // sin sesión (401) → conservar la config por defecto
       const data = await res.json();
       setConfig(data);
     } catch (e) {
@@ -3646,6 +3658,7 @@ export default function App() {
   const fetchPlantillasPlanillas = async () => {
     try {
       const res = await fetch('/api/plantillas_planillas');
+      if (!res.ok) return;               // sin sesión (401) → no pisar las plantillas con {error}
       const data = await res.json();
       setPlantillasPlanillas(data);
     } catch (e) {
@@ -3863,9 +3876,10 @@ export default function App() {
 
   // Al cambiar de producto activo, el catálogo del backend suma las piezas
   // registradas en ese molde → lo recargamos para verlas en el selector.
+  // (`sesionLista`: el activo inicial es 'prod_default' → sin la guarda, dispararía antes del login → 401.)
   useEffect(() => {
-    if (productosCat.activo) fetchCatalogoPiezas();
-  }, [productosCat.activo]);
+    if (sesionLista && productosCat.activo) fetchCatalogoPiezas();
+  }, [productosCat.activo, sesionLista]);
 
   const agregarPiezaCatalogo = async (asignarAlSeleccionado = false) => {
     const nombre = nuevaPiezaInput.trim();
@@ -4100,6 +4114,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!sesionLista) return;   // sin sesión el server contesta 401: se pide recién al loguear
     fetchPlantillasPlanillas();
     fetchReglasPlanilla();
     fetchNestingPresets();
@@ -4107,7 +4122,7 @@ export default function App() {
     if (activoTab === 'config') {
       fetchConfig();
     }
-  }, [activoTab]);
+  }, [activoTab, sesionLista]);
 
   // Polling for tizada job
   useEffect(() => {
