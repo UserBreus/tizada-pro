@@ -335,8 +335,10 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
+  const [hi, setHi] = useState(0);                   // índice de la opción RESALTADA (navegación con ↑/↓)
   const wrapRef = useRef(null);
   const inputRef = useRef(null);
+  const hiRef = useRef(null);                         // opción resaltada → para hacerle scrollIntoView
   const abrir = (todas) => {
     if (noAbrir) return;   // hay varias celdas seleccionadas → no abrir el desplegable
     const r = inputRef.current?.getBoundingClientRect();
@@ -363,6 +365,12 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   const filtradas = (verTodas || !_nv) ? options : options.filter(o => _norm(o).includes(_nv));
   // Valor INVÁLIDO: hay opciones fijas, la celda tiene texto y no coincide con ninguna.
   const invalido = options.length > 0 && _nv !== '' && !options.some(o => _norm(o) === _nv);
+  // Al ABRIR la lista, resaltar la opción actual (o la primera). Al escribir, el resaltado vuelve a 0.
+  useEffect(() => {
+    if (open) { const idx = filtradas.findIndex(o => _norm(o) === _nv); setHi(idx >= 0 ? idx : 0); }
+  }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Mantener la opción resaltada a la vista al navegar con las flechas.
+  useEffect(() => { if (open && hiRef.current) hiRef.current.scrollIntoView({ block: 'nearest' }); }, [hi, open]);
   return (
     <div ref={wrapRef} title={invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
       style={{ position: 'relative', width: '100%', boxShadow: invalido ? 'inset 0 0 0 1.5px rgba(255,90,90,0.8)' : 'none', background: invalido ? 'rgba(255,70,70,0.08)' : 'transparent' }}>
@@ -373,14 +381,26 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
         onFocus={() => { onFocusCell?.(); }}
         // Doble click sobre la casilla → muestra el desplegable (además de la flecha ▾ y la tecla ↓).
         onDoubleClick={() => { if (!noAbrir) abrir(true); }}
-        onChange={e => { onChange(e.target.value); setVerTodas(false); if (!open) abrir(false); }}
+        onChange={e => { onChange(e.target.value); setVerTodas(false); setHi(0); if (!open) abrir(false); }}
         onBlur={() => { const ex = options.find(o => _norm(o) === _nv); if (ex && ex !== value) onChange(ex); }}
         onKeyDown={(e) => {
+          // Con la lista ABIERTA, ↑/↓ mueven el RESALTADO entre las opciones (no navega entre celdas).
+          if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            e.preventDefault();
+            const n = filtradas.length;
+            if (n) setHi(h => Math.max(0, Math.min(n - 1, (h < 0 ? 0 : h) + (e.key === 'ArrowDown' ? 1 : -1))));
+            return;
+          }
           if ((e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown')) && !open) { e.preventDefault(); abrir(true); return; }
-          if (e.key === 'Enter' || e.key === 'Tab') {
-            const ex = options.find(o => _norm(o) === _nv);   // coincide sin importar mayús/minús
-            if (ex) { if (ex !== value) onChange(ex); }        // → guarda el valor canónico
-            else if (open && filtradas.length && _nv) onChange(filtradas[0]);   // parcial → autocompleta
+          if (e.key === 'Enter') {
+            // Enter con la lista abierta → elige la opción RESALTADA; si no, el valor exacto tipeado.
+            if (open && filtradas.length) onChange(filtradas[Math.max(0, Math.min(filtradas.length - 1, hi))]);
+            else { const ex = options.find(o => _norm(o) === _nv); if (ex && ex !== value) onChange(ex); }
+            setOpen(false);
+          } else if (e.key === 'Tab') {
+            const ex = options.find(o => _norm(o) === _nv);   // Tab confirma el valor tipeado (no el resaltado)
+            if (ex) { if (ex !== value) onChange(ex); }
+            else if (open && filtradas.length && _nv) onChange(filtradas[0]);
             setOpen(false);
           }
           onNavKey?.(e);
@@ -390,17 +410,23 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
       {open && pos && filtradas.length > 0 && createPortal(
         <div style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
-          {filtradas.map(o => (
-            // stopPropagation: los eventos de un portal de React burbujean por el ÁRBOL de componentes,
-            // no por el DOM → sin esto, el clic en la opción llega al <td> dueño (dispara selección/arrastre)
-            // y termina seleccionando la celda de abajo. Se corta acá.
-            <div key={o} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(o); setOpen(false); }}
-              style={{ padding: '5px 10px', fontSize: 12.5, cursor: 'pointer', color: o === value ? 'var(--accent)' : 'var(--text-secondary)', background: o === value ? 'rgba(0,216,245,0.10)' : 'transparent' }}
-              onMouseEnter={e => { if (o !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = o === value ? 'rgba(0,216,245,0.10)' : 'transparent'; }}>
-              {o}
-            </div>
-          ))}
+          {filtradas.map((o, idx) => {
+            const sel = o === value;      // opción = valor actual de la celda
+            const act = idx === hi;       // opción RESALTADA (flechas o mouse encima)
+            return (
+              // stopPropagation: los eventos de un portal de React burbujean por el ÁRBOL de componentes,
+              // no por el DOM → sin esto, el clic en la opción llega al <td> dueño (dispara selección/arrastre)
+              // y termina seleccionando la celda de abajo. Se corta acá.
+              <div key={o} ref={act ? hiRef : undefined}
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(o); setOpen(false); }}
+                onMouseEnter={() => setHi(idx)}
+                style={{ padding: '5px 10px', fontSize: 12.5, cursor: 'pointer',
+                  color: sel ? 'var(--accent)' : 'var(--text-secondary)',
+                  background: act ? 'rgba(255,255,255,0.12)' : (sel ? 'rgba(0,216,245,0.10)' : 'transparent') }}>
+                {o}
+              </div>
+            );
+          })}
         </div>,
         document.getElementById('root') || document.body
       )}
