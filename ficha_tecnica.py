@@ -87,25 +87,15 @@ def _dibujar_tabla(page, y, columnas, filas, y_max):
     return y, restantes
 
 
-# ── MOLDE GUÍA (piezas del talle de referencia, con diseño y nombre) ──────────────────────────
-def _svg_a_pdf(svg):
-    """SVG (texto) → documento PDF de 1 página, para incrustarlo vectorial. None si falla."""
-    try:
-        d = fitz.open("svg", svg.encode("utf-8"))
-        pdfbytes = d.convert_to_pdf()
-        d.close()
-        return fitz.open("pdf", pdfbytes)
-    except Exception:
-        return None
-
-
+# ── MOLDE GUÍA (piezas de la variable, con el diseño recortado — el MISMO PDF que la tizada) ───
 def _dibujar_piezas(doc, page, y, piezas, y_max, cols=3):
-    """Coloca las piezas en una grilla; devuelve (y_final, restantes). Cada celda: el render de la
-    pieza (escalado a caja, respetando proporción) + nombre + medida."""
+    """Coloca las piezas en una grilla; devuelve (y_final, restantes). Cada celda: el PDF real de la
+    pieza (recorte NATIVO → el diseño queda dentro de la silueta, sin rectángulo) + nombre + medida.
+    Cada pieza es {nombre, w_cm, h_cm, pdf(bytes)}."""
     x0 = MARGEN
     ancho = A4_W - 2 * MARGEN
     w_cel = ancho / cols
-    h_cel = 150                          # alto de cada celda (imagen + rótulo)
+    h_cel = 150
     h_img = h_cel - 26
     restantes = []
     fila_y = y
@@ -120,19 +110,21 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=3):
             pz = piezas[i]; i += 1
             cx = x0 + c * w_cel
             caja = fitz.Rect(cx + 6, fila_y + 4, cx + w_cel - 6, fila_y + 4 + h_img)
-            page.draw_rect(caja, color=(0.85, 0.85, 0.85), width=0.6, fill=(0.99, 0.99, 0.99))
-            src = _svg_a_pdf(pz.get("svg") or "")
-            if src is not None:
-                try:
-                    r0 = src[0].rect
-                    esc = min((caja.width - 8) / r0.width, (caja.height - 8) / r0.height) if r0.width and r0.height else 1
-                    aw, ah = r0.width * esc, r0.height * esc
-                    dst = fitz.Rect(caja.x0 + (caja.width - aw) / 2, caja.y0 + (caja.height - ah) / 2,
-                                    caja.x0 + (caja.width + aw) / 2, caja.y0 + (caja.height + ah) / 2)
-                    page.show_pdf_page(dst, src, 0)
-                except Exception:
-                    pass
-                finally:
+            # (sin fondo/borde de caja: la silueta de la pieza YA es el límite; un rectángulo detrás
+            #  sería justo lo que el usuario no quiere ver)
+            src = None
+            try:
+                src = fitz.open("pdf", pz.get("pdf"))
+                r0 = src[0].rect
+                esc = min((caja.width) / r0.width, (caja.height) / r0.height) if r0.width and r0.height else 1
+                aw, ah = r0.width * esc, r0.height * esc
+                dst = fitz.Rect(caja.x0 + (caja.width - aw) / 2, caja.y0 + (caja.height - ah) / 2,
+                                caja.x0 + (caja.width + aw) / 2, caja.y0 + (caja.height + ah) / 2)
+                page.show_pdf_page(dst, src, 0)
+            except Exception:
+                pass
+            finally:
+                if src is not None:
                     src.close()
             nom = pz.get("nombre") or "—"
             med = f"{pz.get('w_cm', '')}×{pz.get('h_cm', '')} cm" if pz.get("w_cm") else ""
@@ -167,19 +159,20 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
         y, restan = _dibujar_tabla(pg, y, columnas, restan, A4_H - MARGEN)
 
     # 2) MOLDE GUÍA (abajo — sigue en la misma página si entra, si no, página nueva).
+    #    El encabezado dice el DISEÑO (para distinguir si hay más de uno), NO el talle: es sólo una guía.
     for mg in (moldes_guia or []):
         piezas = mg.get("piezas") or []
+        titulo_mg = f"MOLDE GUÍA · {mg.get('nombre', '')}" + (f"  ·  {mg.get('diseno')}" if mg.get("diseno") else "")
         if y + 200 > A4_H - MARGEN:        # no entra ni el título + una fila → página nueva
             pg = nueva_pagina(); y = 78
         else:
             y += 24
-        y = _seccion(pg, y, f"MOLDE GUÍA · {mg.get('nombre', '')}"
-                     + (f"  ·  talle {mg.get('talle')}" if mg.get("talle") else ""))
+        y = _seccion(pg, y, titulo_mg)
         y += 10
         y, rest = _dibujar_piezas(doc, pg, y, piezas, A4_H - MARGEN)
         while rest:
             pg = nueva_pagina(); y = 78
-            y = _seccion(pg, y, f"MOLDE GUÍA · {mg.get('nombre', '')} (continuación)")
+            y = _seccion(pg, y, titulo_mg + " (continuación)")
             y += 10
             y, rest = _dibujar_piezas(doc, pg, y, rest, A4_H - MARGEN)
 

@@ -4235,51 +4235,78 @@ def generar():
 
 
 def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
-    """Molde guía para la ficha: las piezas de la VARIABLE del pedido (`var`), al talle guía, con el
-    diseño aplicado dentro de su máscara de recorte. Usa **`_piezas_base`** → EXACTAMENTE lo que
-    arma la tizada (arte = tizada). Devuelve {nombre, talle, variable, piezas:[…]} o None. Best-effort.
-    `var` = {clave, piezas, diseno} tomado del pedido; sin él, cae a todo el molde (compat)."""
-    import base64 as _b64
+    """Molde guía para la ficha: las piezas de la VARIABLE del pedido, al talle guía, con el diseño
+    RECORTADO dentro de la máscara — EXACTAMENTE el mismo PDF de pieza que la tizada nestea en la
+    hoja (arte = tizada). Cada pieza vuelve como **PDF vectorial** (`pz['doc'].tobytes()`), NO como
+    SVG: el conversor de SVG de fitz descarta el clip y el diseño saldría como rectángulo. Devuelve
+    {nombre, diseno, piezas:[{nombre, w_cm, h_cm, pdf(bytes)}]} o None. Best-effort."""
+    import tempfile as _tmp, shutil as _sh
     talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
     if not talles:
         return None
-    # TALLE GUÍA: el configurado; si no sirve, el del medio.
     guia = (prod or {}).get("variante_guia")
-    talle = guia if guia in talles else talles[len(talles) // 2]
-    # VARIABLE del pedido: su clave (para el render) y su diseño (el mismo de la tizada).
+    talle = guia if guia in talles else talles[len(talles) // 2]     # talle sólo para RENDERIZAR (no se muestra)
     variante = (var or {}).get("clave") or "*"
     if (var or {}).get("diseno"):
         diseno = var["diseno"]
     sub = _diseno_sub(diseno)
-    if not os.path.exists(_ruta_entrada("arte.ai", pid, sub=sub)):
+    pl = _ruta_entrada("plantilla.ai", pid)
+    arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    if not os.path.exists(arte):
         diseno, sub = "principal", _diseno_sub("principal")
-    # Mapeo POR VARIABLE (el mismo criterio de la tizada): base + por_variable resueltos por clave.
+        arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    if not (os.path.exists(pl) and os.path.exists(arte)):
+        return None
+    # Mapeo POR VARIABLE (mismo criterio que la tizada).
     _b, _pv = _mapeo_estructura(pid, sub=sub)
     if not _b and not _pv:
-        _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}).items() if v}
-    mp = {"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else {k: int(v) for k, v in (_b or {}).items() if v}
-    try:
-        r = _piezas_base(pid, diseno, variante, talle, mp, prod, reg, prioridad="bg")
-    except Exception:
-        r = None
-    if not r or not r.get("piezas"):
+        _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(arte, reg) or {}).items() if v}
+    mapeo = ({"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None)
+    # Una prenda de muestra con la variable del pedido: el motor arma sus piezas igual que la tizada.
+    fila = {"__variante": variante, "talle": talle, "nombre": "", "numero": ""}
+    prendas = _traducir_prendas([fila], prod, cat=_cargar_catalogo(), reg=reg)
+    if not prendas:
         return None
-    # Sólo las piezas de la variable (lo que la tizada realmente genera). Si no viniera la lista,
-    # se muestran todas (compat).
+    try:
+        pers = MP.extraer_personalizacion(arte)
+    except Exception:
+        pers = {}
     solo = set((var or {}).get("piezas") or [])
+    tmp = _tmp.mkdtemp()
     piezas = []
-    for nom, info in (r["piezas"] or {}).items():
-        if solo and nom not in solo:
-            continue
-        svg = info.get("svg") or ""
-        try:
-            svg = _b64.b64decode(svg).decode("utf-8") if svg else ""
-        except Exception:
-            svg = ""
-        piezas.append({"nombre": nom, "w_cm": info.get("w_cm"), "h_cm": info.get("h_cm"), "svg": svg})
+    try:
+        ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, FUENTES, tmp,
+                                mapeo_arte=mapeo, solo_piezas=True,
+                                borde_corte=(prod or {}).get("borde_corte"),
+                                etiqueta=(prod or {}).get("etiqueta"),
+                                editables_cfg=_editables_cfg(prod, diseno or "principal"),
+                                editables_tamano=_editables_tamano(prod),
+                                editables_color=_editables_color(prod, diseno or "principal"),
+                                objetos_agregados=_objetos_agregados_motor(pid, sub))
+        for _tela, pzs in (ppt or {}).items():
+            for pz in pzs:
+                try:
+                    nom = pz["pieza"]
+                    if solo and nom not in solo:
+                        continue
+                    piezas.append({"nombre": nom, "w_cm": round(pz["w"] / MP.CM, 1),
+                                   "h_cm": round(pz["h"] / MP.CM, 1), "pdf": pz["doc"].tobytes()})
+                except Exception:
+                    pass
+                finally:
+                    try: pz["doc"].close()
+                    except Exception: pass
+    except Exception:
+        return None
+    finally:
+        _sh.rmtree(tmp, ignore_errors=True)
+    if not piezas:
+        return None
     piezas.sort(key=lambda p: str(p["nombre"]))
-    return {"nombre": (prod or {}).get("nombre", pid), "talle": r.get("talle") or talle,
-            "variable": variante, "piezas": piezas}
+    # Nombre del diseño (para el encabezado): distingue si hay más de uno en el pedido.
+    dnom = "Principal" if diseno in (None, "principal") else next(
+        (d.get("nombre") for d in ((prod or {}).get("disenos") or []) if d.get("id") == diseno), diseno)
+    return {"nombre": (prod or {}).get("nombre", pid), "diseno": dnom, "piezas": piezas}
 
 
 @app.post("/api/generar_multi")
