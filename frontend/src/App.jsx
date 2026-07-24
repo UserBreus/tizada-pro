@@ -3410,11 +3410,13 @@ export default function App() {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  // Load filas and columns configuration when active product changes
+  // Al cambiar de molde activo: la planilla arranca SIEMPRE limpia con 5 filas predeterminadas.
+  // NO hay memoria de pedidos viejos ni pedido de prueba: no se lee ni se guarda en localStorage
+  // (antes se persistía en `tizada_filas_<molde>` y se restauraba al abrir → arrastraba datos viejos;
+  //  se quitó a pedido del usuario).
+  const filasInitRef = useRef(null);
   useEffect(() => {
     if (!productosCat.activo) return;
-    const key = `tizada_filas_${productosCat.activo}`;
-    const saved = localStorage.getItem(key);
     const activoProd = productosCat.productos.find(p => p.id === productosCat.activo);
     const cols = activoProd?.columnas || [
       { id: 'talle', label: 'Talle', role: 'talle' },
@@ -3422,7 +3424,13 @@ export default function App() {
       { id: 'numero', label: 'Número', role: 'numero' },
       { id: 'manga', label: 'Manga', role: 'manga' }
     ];
-    
+    if (activoProd) setColumnasConfig(activoProd.columnas || cols);
+
+    // Las filas se inicializan UNA sola vez por molde activo (no en cada refresh de `productos`),
+    // para no borrar lo que el usuario está cargando en la misma sesión.
+    if (filasInitRef.current === productosCat.activo) return;
+    filasInitRef.current = productosCat.activo;
+
     const defaultRow = {};
     cols.forEach(c => {
       if (c.role === 'talle') defaultRow[c.id] = (estado?.talles?.[0] || 'M');
@@ -3430,28 +3438,16 @@ export default function App() {
       else if (c.role === 'diseno') defaultRow[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');   // arranca con el diseño que se editó en el Arte
       else defaultRow[c.id] = '';
     });
-    
-    if (saved) {
-      try {
-        setFilas(JSON.parse(saved));
-      } catch (e) {
-        setFilas([defaultRow]);
-      }
-    } else {
-      setFilas([defaultRow]);
-    }
-
-    if (activoProd) {
-      setColumnasConfig(activoProd.columnas || cols);
-    }
+    setFilas(Array.from({ length: 5 }, () => ({ ...defaultRow })));   // 5 filas predeterminadas, siempre
   }, [productosCat.activo, productosCat.productos, estado?.talles]);
 
-  // Sync rows of active product to local storage
+  // Limpieza única al abrir: borrar del navegador cualquier planilla vieja guardada por versiones
+  // anteriores (la "memoria de pedidos viejos" / el pedido de prueba que hubiera quedado ahí).
   useEffect(() => {
-    if (!productosCat.activo || filas.length === 0) return;
-    const key = `tizada_filas_${productosCat.activo}`;
-    localStorage.setItem(key, JSON.stringify(filas));
-  }, [filas, productosCat.activo]);
+    try {
+      Object.keys(localStorage).filter(k => k.startsWith('tizada_filas_')).forEach(k => localStorage.removeItem(k));
+    } catch (e) { /* localStorage no disponible → nada que limpiar */ }
+  }, []);
 
   const handleUpdateColumnConfig = (idx, field, val) => {
     const next = [...columnasConfig];
