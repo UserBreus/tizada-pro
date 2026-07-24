@@ -6533,8 +6533,14 @@ export default function App() {
     molds.forEach(m => Object.values(m.mapeo_columnas || {}).forEach(v => usados.add(v)));
     return usados;
   }, [moldesUnion, productosCat]);
-  // Una columna está activa si: no hay info (null), es la de Diseño (siempre), o algún molde la usa.
-  const colActiva = (c) => !columnasActivasPlanilla || c.role === 'diseno' || columnasActivasPlanilla.has(c.id) || columnasActivasPlanilla.has(c.role);
+  // Roles que se activan/desactivan por molde (los toggles «usar en este molde»). El resto —Diseño
+  // y columnas de dato libre— van SIEMPRE.
+  const COLS_MAPEABLES = ['talle', 'nombre', 'numero', 'manga'];
+  // Una columna está activa si: no hay info (null), NO es mapeable (Diseño/dato → siempre), o algún
+  // molde la mapea POR ID. Ojo: el match es SÓLO por `c.id`, nunca por `c.role`. `mapeo_columnas`
+  // guarda ids de columna, y hay roles compartidos por dos columnas (Talle y «Talle short» son ambas
+  // role 'talle'): si matcheáramos por rol, usar «Talle» prendería también «Talle short».
+  const colActiva = (c) => !columnasActivasPlanilla || !COLS_MAPEABLES.includes(c.role) || columnasActivasPlanilla.has(c.id);
   // VARIABLE-FIRST: TODAS las variables (con piezas) de TODOS los moldes, cada una con su
   // molde detrás. Es lo que se elige directamente en el pedido (ya no se elige el molde).
   const variablesDisponibles = productosCat.productos.flatMap(p =>
