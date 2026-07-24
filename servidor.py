@@ -4544,8 +4544,13 @@ def generar_multi():
                 _FT.generar_ficha(salida,
                                   "Ficha técnica", " + ".join(nombres) + " · " + time.strftime("%d/%m/%Y"),
                                   _pl, _guias)
-                if os.path.exists(os.path.join(salida, "FICHA_TECNICA.pdf")):
+                _fp = os.path.join(salida, "FICHA_TECNICA.pdf")
+                if os.path.exists(_fp):
                     res["ficha"] = "FICHA_TECNICA.pdf"
+                    try:
+                        _fd = fitz.open(_fp); res["ficha_paginas"] = _fd.page_count; _fd.close()
+                    except Exception:
+                        res["ficha_paginas"] = 1
             except Exception as _ef:
                 print("  [!] ficha técnica:", repr(_ef))
             json.dump({"prendas": prendas, "moldes": nombres,

@@ -1608,6 +1608,44 @@ function DetalleFuente({ f, onVolver }) {
   );
 }
 
+/** VISOR de la FICHA TÉCNICA en el mismo espacio: muestra el PDF embebido (con los controles
+ *  nativos del navegador para imprimir y descargar todo) + una barra propia para bajar el PDF
+ *  completo o SÓLO una hoja. La descarga por hoja reusa el endpoint de mesas (`?pi=<página>`). */
+function VisorFicha({ id, archivo, paginas }) {
+  const iframeRef = React.useRef(null);
+  const urlPdf = rutaApi(`/trabajos/${id}/${archivo}`);
+  const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
+  const imprimir = () => {
+    // Imprime el PDF que se está viendo (el visor nativo del iframe).
+    try { iframeRef.current?.contentWindow?.focus(); iframeRef.current?.contentWindow?.print(); }
+    catch { window.open(urlPdf, '_blank'); }   // si el navegador bloquea el print del iframe, se abre aparte
+  };
+  const bt = { padding: '8px 14px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+    border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 };
+  return (
+    <div className="animate-fade">
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <a href={urlPdf} download="Ficha_tecnica.pdf" style={{ ...bt, borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+          <Icon name="productos" style={{ width: 14, height: 14 }} /> Descargar todo el PDF
+        </a>
+        <button type="button" onClick={imprimir} style={bt}>🖨 Imprimir</button>
+        {paginas > 1 && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>o una sola hoja:</span>}
+        {paginas > 1 && Array.from({ length: paginas }, (_, i) => (
+          <a key={i} href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} style={bt} title={`Descargar la hoja ${i + 1}`}>
+            Hoja {i + 1} ⬇
+          </a>
+        ))}
+      </div>
+      {/* PDF embebido: el visor del navegador ya trae imprimir y descargar. #toolbar=1 lo deja visible. */}
+      <iframe ref={iframeRef} title="Ficha técnica" src={urlPdf + '#toolbar=1&navpanes=0'}
+        style={{ width: '100%', height: '75vh', minHeight: 520, border: '1px solid var(--border-light)', borderRadius: 12, background: '#fff' }} />
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
+        Desde el visor de arriba también podés imprimir o descargar con los botones del navegador.
+      </div>
+    </div>
+  );
+}
+
 function MesasInfinito({ mesas, job }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   // Nombres editados: PERSISTEN ligados a ESTE pedido (clave = id del trabajo). Un pedido NUEVO
@@ -2692,6 +2730,7 @@ export default function App() {
   const [moldesSeleccionados, setMoldesSeleccionados] = useState(_wiz.moldesSeleccionados || []);
   const [trabajosMulti, setTrabajosMulti] = useState(_wiz.trabajosMulti || []); // [{productoId, nombre, jobId, estado, resultado, error}]
   const [telaActiva, setTelaActiva] = useState(_wiz.telaActiva ?? null); // pestaña de tela en los resultados
+  const [vistaFicha, setVistaFicha] = useState(false);   // pestaña "Ficha técnica" activa en los resultados
   const [telaBaseMolde, setTelaBaseMolde] = useState(_wiz.telaBaseMolde || {});   // { [pid]: telaId } — tela base del pedido
   const [telaPorPieza, setTelaPorPieza] = useState(_wiz.telaPorPieza || {});       // { [pid]: { [pieza]: telaId } } — override por pieza
   // Wizard del Pedido: paso actual + índice del molde en el paso de diseños.
@@ -9312,33 +9351,29 @@ export default function App() {
                           </div>
                         </div>
                       )}
-                      {/* Pestañas de TELA: solo si hay más de una tela */}
-                      {telas.length > 1 && (
+                      {/* PESTAÑAS: la(s) tela(s) + una pestaña «Ficha técnica» (si hay ficha). La ficha
+                          ya NO es un banner: se ve en su propia pestaña, en el mismo espacio. */}
+                      {(telas.length > 1 || job.resultado?.ficha) && (
                         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', borderBottom: '1px solid var(--border-light)', paddingBottom: 12 }}>
                           {telas.map(tl => (
-                            <button key={tl} type="button" onClick={() => setTelaActiva(tl)}
-                              className={'chip' + (tl === tela ? ' active' : '')} style={{ padding: '9px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{tl}</button>
+                            <button key={tl} type="button" onClick={() => { setVistaFicha(false); setTelaActiva(tl); }}
+                              className={'chip' + (!vistaFicha && tl === tela ? ' active' : '')} style={{ padding: '9px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{tl}</button>
                           ))}
+                          {job.resultado?.ficha && (
+                            <button type="button" onClick={() => setVistaFicha(true)}
+                              className={'chip' + (vistaFicha ? ' active' : '')} style={{ padding: '9px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Icon name="productos" style={{ width: 15, height: 15 }} /> Ficha técnica
+                            </button>
+                          )}
                         </div>
                       )}
-                      {/* FICHA TÉCNICA (A4): la planilla + el molde guía con el diseño y las piezas
-                          nombradas. Sale junto con la tizada. */}
-                      {job.resultado?.ficha && (
-                        <a href={rutaApi(`/trabajos/${job.resultado.id}/${job.resultado.ficha}`)} target="_blank" rel="noreferrer"
-                          download="Ficha_tecnica.pdf"
-                          style={{ display: 'flex', alignItems: 'center', gap: 11, textDecoration: 'none', marginBottom: 16,
-                            padding: '13px 16px', borderRadius: 12, background: 'rgba(0,243,255,0.06)', border: '1px solid var(--accent)' }}>
-                          <Icon name="productos" style={{ width: 20, height: 20, color: 'var(--accent)', flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>Ficha técnica (PDF A4)</div>
-                            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>La tabla de talles y el molde guía con el diseño y las piezas nombradas.</div>
-                          </div>
-                          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--accent)' }}>Descargar ⬇</span>
-                        </a>
+                      {vistaFicha && job.resultado?.ficha ? (
+                        <VisorFicha id={job.resultado.id} archivo={job.resultado.ficha} paginas={job.resultado.ficha_paginas || 1} />
+                      ) : (
+                        /* ESPACIO INFINITO de las mesas (zoom con rueda, pan con click DERECHO,
+                           nombre renombrable, descarga con ese nombre). */
+                        <MesasInfinito mesas={mesas} job={job} />
                       )}
-                      {/* ESPACIO INFINITO de las mesas (componente propio: zoom con rueda sin scrollear
-                          la página, pan con click DERECHO, nombre renombrable, descarga con ese nombre). */}
-                      <MesasInfinito mesas={mesas} job={job} />
                     </div>
                   );
                 })()}

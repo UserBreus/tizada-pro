@@ -10,7 +10,14 @@ VECTORIALES en la página. Es best-effort: si algo falla, la tizada igual queda 
 envuelve en try/except).
 """
 import os
+import re
 import fitz
+
+
+def _generico(nombre):
+    """Nombre de la pieza SIN el número final: «Frente 1» → «Frente». En la ficha se muestra el
+    nombre general de la pieza, no el número de instancia."""
+    return re.sub(r"\s+\d+\s*$", "", str(nombre or "")).strip() or str(nombre or "")
 
 # A4 en puntos (72 dpi). Retrato.
 A4_W, A4_H = 595.28, 841.89
@@ -51,40 +58,52 @@ def _seccion(page, y, texto):
 
 
 # ── TABLA DE TALLES (la planilla del pedido tal cual) ─────────────────────────────────────────
-def _dibujar_tabla(page, y, columnas, filas, y_max):
-    """Dibuja tantas filas como entren desde `y` hasta `y_max`. Devuelve (y_final, filas_restantes):
-    si sobran filas, el llamador abre otra página y sigue."""
+def _dibujar_tabla(page, y, columnas, filas, y_max, fila0=0):
+    """Dibuja tantas filas como entren desde `y` hasta `y_max`. Devuelve (y_final, filas_restantes,
+    fila0_siguiente). La 1ª columna es «#» con el NÚMERO DE FILA (estilo columna de títulos), para
+    identificar cada fila. `fila0` = índice de la 1ª fila de esta página (continúa la numeración)."""
     if not columnas:
-        return y, []
+        return y, [], fila0
     x0, x1 = MARGEN, A4_W - MARGEN
-    ancho = x1 - x0
-    w_col = ancho / len(columnas)
+    W_NUM = 28                                    # ancho de la columna de números
+    w_col = (x1 - x0 - W_NUM) / len(columnas)     # el resto se reparte entre las columnas reales
     alto_fila = 18
-    # cabecera
+
+    def _cx(i):                                   # x de la columna i (0 = la de números)
+        return x0 if i == 0 else x0 + W_NUM + (i - 1) * w_col
+
+    def _cw(i):
+        return W_NUM if i == 0 else w_col
+
+    # cabecera (incluye el «#»)
     page.draw_rect(fitz.Rect(x0, y, x1, y + alto_fila), fill=(0.13, 0.15, 0.17), color=None)
+    _texto(page, x0 + 7, y + 12, "#", size=8, bold=True, color=(1, 1, 1))
     for i, c in enumerate(columnas):
-        _texto(page, x0 + i * w_col + 6, y + 12, (c.get("label") or c.get("id") or "").upper(),
+        _texto(page, _cx(i + 1) + 6, y + 12, (c.get("label") or c.get("id") or "").upper(),
                size=8, bold=True, color=(1, 1, 1), max_w=w_col - 10)
     y += alto_fila
     restantes = []
+    dibujadas = 0
     for r, fila in enumerate(filas):
         if y + alto_fila > y_max:
             restantes = filas[r:]
             break
         if r % 2:
-            page.draw_rect(fitz.Rect(x0, y, x1, y + alto_fila), fill=(0.96, 0.97, 0.98), color=None)
+            page.draw_rect(fitz.Rect(x0 + W_NUM, y, x1, y + alto_fila), fill=(0.96, 0.97, 0.98), color=None)
+        # celda de número: fondo distinguido (como columna de títulos) + el número de fila
+        page.draw_rect(fitz.Rect(x0, y, x0 + W_NUM, y + alto_fila), fill=(0.90, 0.92, 0.94), color=None)
+        _texto(page, x0 + 7, y + 12, str(fila0 + r + 1), size=8, bold=True, color=(0.25, 0.28, 0.32))
         for i, c in enumerate(columnas):
             val = fila.get(c.get("id"), fila.get(c.get("label"), ""))
-            _texto(page, x0 + i * w_col + 6, y + 12, val, size=8.5, color=NEGRO, max_w=w_col - 10)
+            _texto(page, _cx(i + 1) + 6, y + 12, val, size=8.5, color=NEGRO, max_w=w_col - 10)
         y += alto_fila
-    # bordes verticales + marco
-    for i in range(len(columnas) + 1):
-        xx = x0 + i * w_col
-        page.draw_line(fitz.Point(xx, (y - alto_fila * (len(filas) - len(restantes)) - alto_fila)),
-                       fitz.Point(xx, y), color=LINEA, width=0.6)
-    page.draw_rect(fitz.Rect(x0, y - alto_fila * (len(filas) - len(restantes)) - alto_fila, x1, y),
-                   color=LINEA, width=0.8)
-    return y, restantes
+        dibujadas += 1
+    top = y - alto_fila * dibujadas - alto_fila    # borde superior de la cabecera
+    for i in range(len(columnas) + 2):             # líneas verticales (incluye la del «#»)
+        xx = _cx(i) if i <= len(columnas) else x1
+        page.draw_line(fitz.Point(xx, top), fitz.Point(xx, y), color=LINEA, width=0.6)
+    page.draw_rect(fitz.Rect(x0, top, x1, y), color=LINEA, width=0.8)
+    return y, restantes, fila0 + dibujadas
 
 
 # ── MOLDE GUÍA (piezas de la variable, con el diseño recortado — el MISMO PDF que la tizada) ───
@@ -133,7 +152,7 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
             finally:
                 if src is not None:
                     src.close()
-            nom = pz.get("nombre") or "—"
+            nom = _generico(pz.get("nombre") or "—")     # nombre GENERAL de la pieza (sin el número)
             med = f"{pz.get('w_cm', '')}×{pz.get('h_cm', '')} cm" if pz.get("w_cm") else ""
             _texto(page, cx + gap + 2, fila_y + h_card + 15, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
             if med:
@@ -154,16 +173,16 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
     def nueva_pagina():
         return doc.new_page(width=A4_W, height=A4_H)
 
-    # 1) TABLA (arriba). Puede ocupar más de una página si hay muchas filas.
+    # 1) TABLA (arriba). Puede ocupar más de una página si hay muchas filas (la numeración sigue).
     pg = nueva_pagina()
     y = _seccion(pg, 78, "TABLA DE TALLES")
     y += 6
-    y, restan = _dibujar_tabla(pg, y, columnas, filas, A4_H - MARGEN)
+    y, restan, _f0 = _dibujar_tabla(pg, y, columnas, filas, A4_H - MARGEN)
     while restan:
         pg = nueva_pagina()
         y = _seccion(pg, 78, "TABLA DE TALLES (continuación)")
         y += 6
-        y, restan = _dibujar_tabla(pg, y, columnas, restan, A4_H - MARGEN)
+        y, restan, _f0 = _dibujar_tabla(pg, y, columnas, restan, A4_H - MARGEN, fila0=_f0)
 
     # 2) MOLDE GUÍA (abajo — sigue en la misma página si entra, si no, página nueva).
     #    El encabezado dice el DISEÑO (para distinguir si hay más de uno), NO el talle: es sólo una guía.
