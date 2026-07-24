@@ -4020,22 +4020,30 @@ def _fetch_telas_externas():
         arr = data.get("data") if isinstance(data, dict) else data
         telas = []
         for t in (arr or []):
-            telas.append({"id": str(t.get("id")), "nombre": str(t.get("descripcion") or t.get("id") or "").strip(),
-                          "codigo": str(t.get("codigoArticulo") or ""), "moneda": t.get("moneda"), "precio": t.get("precioBase")})
+            _desc = str(t.get("descripcion") or t.get("id") or "").strip()
+            telas.append({"id": str(t.get("id")), "nombre": _desc,
+                          "codigo": str(t.get("codigoArticulo") or ""), "moneda": t.get("moneda"), "precio": t.get("precioBase"),
+                          "medida_cm": _ancho_de_descripcion(_desc)})   # ancho de la TELA que informa el sistema (de la descripción)
         return telas, None
     except Exception as e:
         return None, str(e)
 
 
 def _telas_merge(cat, telas_api):
-    """Aplica el ancho LOCAL (cat['telas_ancho']) a cada tela de la API. Default: parseado del texto o 180."""
+    """Dos anchos por tela:
+      `medida_cm` = ancho de la TELA que informa el sistema (parseado de la descripción; informativo).
+      `ancho_cm`  = ANCHO DE IMPRESIÓN que usa la TIZADA (editable local en cat['telas_ancho']).
+    Default del ancho de impresión = la medida del sistema (o 180 si no se pudo leer), y el usuario lo
+    ajusta a lo que realmente imprime (suele ser menor que el rollo por orillos/márgenes)."""
     anchos = cat.get("telas_ancho") or {}
     out = []
     for t in telas_api:
-        a = anchos.get(str(t["id"]))
-        if a is None:
-            a = _ancho_de_descripcion(t["nombre"]) or 180.0
-        out.append({**t, "ancho_cm": float(a)})
+        med = t.get("medida_cm")
+        if med is None:
+            med = _ancho_de_descripcion(t.get("nombre"))
+        ov = anchos.get(str(t["id"]))
+        ancho = float(ov) if ov is not None else float(med if med is not None else 180.0)
+        out.append({**t, "medida_cm": med, "ancho_cm": ancho})
     return out
 
 

@@ -13489,7 +13489,7 @@ export default function App() {
                   </div>
                   <div className="panel-header"><h2 style={{ fontSize: 20, fontWeight: 700 }}>Telas</h2></div>
                   <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 16px', lineHeight: 1.5, maxWidth: 660 }}>
-                    Las telas vienen del <b>sistema de stock</b> — acá no se crean ni se borran. De este lado sólo ponés el <b>ancho de rollo (cm)</b> de cada una, que es lo que usa la tizada. El <b>alto</b> de la hoja se configura en Reglas de Nesting.
+                    Las telas vienen del <b>sistema de stock</b> — acá no se crean ni se borran. La <b>medida</b> es la que informa el sistema; vos ponés el <b>ancho de impresión (cm)</b> de cada tela, que es el que usa la <b>tizada</b> para nestear (suele ser menor que la medida del rollo, por orillos/márgenes). El <b>alto</b> de la hoja se configura en Reglas de Nesting.
                   </p>
 
                   {/* Conexión con la API del sistema (la api-key se guarda del lado del server) */}
@@ -13521,21 +13521,38 @@ export default function App() {
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T.length} tela{T.length === 1 ? '' : 's'}</span>
                           <input placeholder="Buscar tela…" value={telaFiltroCfg} onChange={e => setTelaFiltroCfg(e.target.value)} style={{ ...inS, flex: 1, minWidth: 180, maxWidth: 300 }} />
                         </div>
-                        <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden', maxHeight: 420, overflowY: 'auto' }}>
-                          {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>{T.length ? 'Ninguna tela coincide con la búsqueda.' : 'No hay telas. Tocá «Actualizar telas del sistema».'}</div>}
-                          {Tf.map(t => (
-                            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                              <span style={{ width: 14, height: 14, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
-                              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
-                              {t.codigo ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>#{t.codigo}</span> : null}
-                              <input type="number" min="1" value={t.ancho_cm ?? ''} placeholder="ancho"
-                                onChange={e => setAnchoLocal(t.id, e.target.value)}
-                                onBlur={e => guardarTelaAncho(t.id, e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                                style={{ ...inS, width: 84, textAlign: 'right' }} />
-                              <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 24 }}>cm</span>
-                            </div>
-                          ))}
+                        <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
+                          {/* Cabecera de columnas */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-light)', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                            <span style={{ width: 14, flexShrink: 0 }} />
+                            <span style={{ flex: 1 }}>Tela</span>
+                            <span style={{ width: 96, textAlign: 'right', flexShrink: 0 }} title="El ancho que informa el sistema de stock (dato)">Medida</span>
+                            <span style={{ width: 150, textAlign: 'right', flexShrink: 0 }} title="El ancho que usa la tizada para nestear en esta tela">Ancho de impresión</span>
+                          </div>
+                          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                            {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>{T.length ? 'Ninguna tela coincide con la búsqueda.' : 'No hay telas. Tocá «Actualizar telas del sistema».'}</div>}
+                            {Tf.map(t => (
+                              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                <span style={{ width: 14, height: 14, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
+                                <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 7, overflow: 'hidden' }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
+                                  {t.codigo ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>#{t.codigo}</span> : null}
+                                </span>
+                                {/* Medida del sistema (dato, no editable) */}
+                                <span style={{ width: 96, textAlign: 'right', flexShrink: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>{t.medida_cm != null ? `${t.medida_cm} cm` : '—'}</span>
+                                {/* Ancho de IMPRESIÓN (editable, el que usa la tizada) */}
+                                <span style={{ width: 150, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                  <input type="number" min="1" value={t.ancho_cm ?? ''} placeholder="ancho"
+                                    onChange={e => setAnchoLocal(t.id, e.target.value)}
+                                    onBlur={e => guardarTelaAncho(t.id, e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                    title="Ancho que usa la tizada en esta tela"
+                                    style={{ ...inS, width: 84, textAlign: 'right' }} />
+                                  <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 20 }}>cm</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
 
                         <h3 style={{ fontSize: 14, fontWeight: 700, margin: '26px 0 6px' }}>Grupos combinables</h3>
