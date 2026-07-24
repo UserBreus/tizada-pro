@@ -1139,15 +1139,32 @@ def _en_hilo(fn):
     threading.Thread(target=_envuelto, daemon=True).start()
 
 
+# Rutas de API que funcionan SIN sesión: el login mismo, la salud (monitoreo/instalador) y la
+# actualización taller→publicado (protegida por su propio token X-Token-Act, no por sesión).
+_API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/")
+
+
 @app.before_request
 def _guardia_moldes():
-    """Corta cualquier request de API que trabaje sobre un molde de OTRO usuario.
+    """SEGURIDAD en dos capas, para TODA la API:
+
+    1) SESIÓN OBLIGATORIA: el login del frontend es una cortina (ocultar ≠ proteger); sin esto,
+       cualquiera con la URL (o F12/curl) llamaba los endpoints sin loguearse. Si el sistema de
+       usuarios no está registrado (taller sin base MSSQL), no se puede exigir y se deja pasar.
+    2) PROPIEDAD DEL MOLDE: corta cualquier request que trabaje sobre un molde de OTRO usuario.
 
     Va acá y no endpoint por endpoint a propósito: son ~30 rutas que reciben un molde y alcanza
     con que se olvide UNA para que el molde ajeno quede accesible. El molde se resuelve igual que
     en el resto del sistema (`pid` de la request → activo de la sesión)."""
-    if not request.path.startswith("/api/") or request.path.startswith("/api/auth/"):
+    if not request.path.startswith("/api/") or any(request.path.startswith(p) for p in _API_SIN_SESION):
         return None
+    if _USUARIOS_ON:
+        try:
+            _u = _usuario_actual()
+        except Exception:
+            _u = True              # la base parpadeó: la seguridad no puede tumbar el sistema
+        if not _u:
+            return jsonify({"error": "no hay sesión iniciada"}), 401
     try:
         pid = _pid_de_request()
         if not pid:
