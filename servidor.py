@@ -81,9 +81,11 @@ if PUBLICADO:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     except Exception as _e:
         print(f"[publicado] ProxyFix no disponible: {_e}")
+_USUARIOS_ON = False      # ¿está registrado el sistema de usuarios? (si no, no se puede exigir sesión)
 try:
     from api_usuarios import bp as _bp_usuarios
     app.register_blueprint(_bp_usuarios)
+    _USUARIOS_ON = True
 except Exception as _e:   # sin base, el resto del sistema tiene que seguir andando
     print(f"[usuarios] API deshabilitada (¿base MSSQL sin levantar?): {_e}")
 trabajos = {}
@@ -3944,6 +3946,22 @@ def _config_externo():
     return (url or "https://user.com.uy/api/external/telas"), key
 
 
+def _guard_sesion_telas():
+    """SEGURIDAD: los datos de telas vienen del WMS (nombres, códigos, PRECIOS) → no se re-publican a
+    quien no esté logueado. Devuelve una respuesta 401 si no hay sesión, o None si puede pasar.
+    Dentro de TIZADA las telas son para TODOS los usuarios (cualquier sesión vale); esto sólo corta a
+    los EXTERNOS sin login. Si el sistema de usuarios no está registrado (taller sin base), no se puede
+    exigir sesión y se deja pasar — mismo criterio que el resto del server (la seguridad no lo tumba)."""
+    if not _USUARIOS_ON:
+        return None
+    try:
+        if _usuario_actual():
+            return None
+    except Exception:
+        return None
+    return jsonify({"error": "no hay sesión iniciada"}), 401
+
+
 # HOSTS a los que se permite mandar la api-key. SEGURIDAD: aunque alguien logre cambiar la URL
 # (endpoint de conexión), la key NUNCA se envía a un host fuera de esta lista → evita que un atacante
 # apunte la URL a su servidor y capture la key en el header. Ampliá acá si cambia el dominio del WMS.
@@ -4025,6 +4043,9 @@ def _telas_efectivas(cat, forzar=False):
 
 @app.get("/api/telas")
 def get_telas():
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
     cat = _cargar_catalogo()
     return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
 
@@ -4032,6 +4053,9 @@ def get_telas():
 @app.post("/api/telas/refrescar")
 def refrescar_telas():
     """Fuerza re-consulta a la API externa (botón «Actualizar telas del sistema»)."""
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
     cat = _cargar_catalogo()
     telas_api, err = _fetch_telas_externas()
     if telas_api is None:
@@ -4044,6 +4068,9 @@ def refrescar_telas():
 @app.post("/api/telas/ancho")
 def set_tela_ancho():
     """Guarda el ANCHO (cm) local de una tela de la API. Es lo único editable de nuestro lado."""
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
     cuerpo = request.get_json(force=True) or {}
     tid = str(cuerpo.get("id") or "").strip()
     if not tid:
@@ -4063,6 +4090,9 @@ def set_tela_ancho():
 @app.get("/api/telas/conexion")
 def get_telas_conexion():
     """Estado de la conexión con la API del sistema. NO devuelve la key (sólo si está o no)."""
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
     url, key = _config_externo()
     return jsonify({"url": url, "tiene_key": bool(key),
                     "por_env": bool(os.environ.get("EXTERNAL_API_KEY"))})
@@ -4072,6 +4102,9 @@ def get_telas_conexion():
 def set_telas_conexion():
     """Guarda la URL y/o la api-key en config_externo.json (del lado del server, no versionado).
     Así el usuario configura la conexión DESDE LA APP, sin tocar archivos en el servidor."""
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
     cuerpo = request.get_json(force=True) or {}
     url = str(cuerpo.get("url") or "").strip()
     key = str(cuerpo.get("key") or "").strip()
@@ -4101,6 +4134,9 @@ def set_telas_conexion():
 @app.post("/api/telas")
 def set_telas():
     """Ya NO crea telas (vienen de la API). Sólo administra los GRUPOS combinables."""
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
     cuerpo = request.get_json(force=True) or {}
     cat = _cargar_catalogo()
     if isinstance(cuerpo.get("grupos"), list):
