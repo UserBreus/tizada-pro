@@ -2844,6 +2844,7 @@ export default function App() {
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
   const [telaElegida, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
+  const [telaBuscarAsig, setTelaBuscarAsig] = useState('');                        // buscador de telas en el modo asignar
   const [trabajoId, setTrabajoId] = useState(null);
   const [trabajoEstado, setTrabajoEstado] = useState(null);
   // Avance del wizard guardado (para no perderlo al recargar la página). Se lee
@@ -8543,23 +8544,27 @@ export default function App() {
                 // Si el molde tiene telas asignadas → esas. Si NO (o el registro aún no cargó) → TODO el
                 // registro global, para que en el Arte SIEMPRE se pueda elegir la tela de cada pieza.
                 const _telasMol = _telasAsig.length ? _telasAsig : (telasReg.telas || []);
-                const _telaBaseId = telaBaseMolde[_id] || (_telasMol[0] && _telasMol[0].id) || null;
-                const _telaDeGen = (gen) => (telaPorPieza[_id] || {})[gen] || _telaBaseId;
+                // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
+                const _genTela = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
+                const _todasGen = [...new Set((mapeoData?.piezas || []).map(_genTela))].filter(Boolean);   // piezas del molde (genéricas)
+                const _telaDeGen = (gen) => (telaPorPieza[_id] || {})[gen] || null;                        // null si no se asignó
                 const _telaActiva = telaModoVer && _telasMol.length > 0;
-                // Telas EN USO (asignadas a las piezas: la base + los overrides) → la vista «Telas asignadas».
-                const _usoIds = new Set([_telaBaseId, ...Object.values(telaPorPieza[_id] || {})].filter(Boolean));
+                const _telasMap = telaPorPieza[_id] || {};
+                const _usoIds = new Set(Object.values(_telasMap).filter(Boolean));                         // telas EN USO en las piezas
                 const _telasEnUso = (telasReg.telas || []).filter(t => _usoIds.has(t.id));
-                // Asigna `telaId` a las piezas seleccionadas (o base para TODAS si no hay selección).
-                // Limpia la selección para poder seguir asignando otra tela sin salir del modo.
+                const _sinTela = _todasGen.filter(g => !_telasMap[g]);                                     // piezas AÚN sin tela
+                // Asigna `telaId` a las piezas seleccionadas, o a TODAS si no hay selección (no hay base).
                 const aplicarTela = (telaId) => {
                   if (!telaId) return;
-                  if (telaSelPiezas.length) {   // hay piezas seleccionadas → override solo a esas
-                    setTelaPorPieza(m => { const mm = { ...(m[_id] || {}) }; telaSelPiezas.forEach(g => { if (telaId === _telaBaseId) delete mm[g]; else mm[g] = telaId; }); return { ...m, [_id]: mm }; });
-                  } else {                        // sin selección → tela base para TODAS (limpia overrides)
-                    setTelaBaseMolde(m => ({ ...m, [_id]: telaId })); setTelaPorPieza(m => ({ ...m, [_id]: {} }));
-                  }
+                  const objetivo = telaSelPiezas.length ? telaSelPiezas : _todasGen;
+                  if (!objetivo.length) return;
+                  setTelaPorPieza(m => { const mm = { ...(m[_id] || {}) }; objetivo.forEach(g => { mm[g] = telaId; }); return { ...m, [_id]: mm }; });
                   setTelaSelPiezas([]); setTelaElegida(null);
                 };
+                const _telasAsigFiltradas = (() => {   // buscador del modo asignar
+                  const q = telaBuscarAsig.trim().toLowerCase();
+                  return q ? _telasMol.filter(t => (t.nombre || '').toLowerCase().includes(q)) : _telasMol;
+                })();
                 const panelTelaJSX = (
                   <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                     {!telaAsignMode ? (
@@ -8569,17 +8574,24 @@ export default function App() {
                           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Telas asignadas</div>
                           <button className="btn ghost" style={{ padding: '4px 8px', fontSize: 11 }} title="Cerrar" onClick={() => { setTelaModoVer(false); setTelaSelPiezas([]); setTelaElegida(null); }}>✕</button>
                         </div>
+                        {/* AVISO: cada pieza debe tener tela (no hay tela base). Rojo si falta alguna. */}
+                        {_todasGen.length > 0 && (
+                          <div style={{ fontSize: 10.5, fontWeight: 700, padding: '6px 9px', borderRadius: 8, marginBottom: 8, lineHeight: 1.35,
+                            background: _sinTela.length ? 'rgba(255,90,90,0.12)' : 'rgba(16,185,129,0.12)',
+                            color: _sinTela.length ? '#ff8a8a' : 'var(--success)' }}>
+                            {_sinTela.length ? `⚠ Faltan ${_sinTela.length} pieza${_sinTela.length > 1 ? 's' : ''} sin tela` : '✓ Todas las piezas tienen tela'}
+                          </div>
+                        )}
                         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {_telasEnUso.map(t => (
                             <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border-light)' }}>
                               <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
                               <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
-                              {t.id === _telaBaseId && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>base</span>}
                             </div>
                           ))}
-                          {_telasEnUso.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px', lineHeight: 1.4 }}>Todavía no hay telas asignadas.</div>}
+                          {_telasEnUso.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px', lineHeight: 1.4 }}>Todavía no hay telas asignadas. Tocá «Asignar tela».</div>}
                         </div>
-                        <button className="btn primary" style={{ width: '100%', marginTop: 8 }} onClick={() => { setTelaAsignMode(true); setTelaElegida(null); setTelaSelPiezas([]); }}>Asignar tela</button>
+                        <button className="btn primary" style={{ width: '100%', marginTop: 8 }} onClick={() => { setTelaAsignMode(true); setTelaElegida(null); setTelaSelPiezas([]); setTelaBuscarAsig(''); }}>Asignar tela</button>
                       </>
                     ) : (
                       /* ── VISTA 2: elegir una tela → tocar piezas → Asignar (Volver arriba) ── */
@@ -8589,8 +8601,11 @@ export default function App() {
                           <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Asignar tela</div>
                         </div>
                         <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.35 }}>1) Elegí una tela · 2) Tocá las piezas · 3) Asignar</div>
+                        {/* Buscador para filtrar la tela rápido */}
+                        <input autoFocus placeholder="Buscar tela…" value={telaBuscarAsig} onChange={e => setTelaBuscarAsig(e.target.value)}
+                          style={{ height: 32, fontSize: 12.5, padding: '0 9px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', marginBottom: 8 }} />
                         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {_telasMol.map(t => {
+                          {_telasAsigFiltradas.map(t => {
                             const on = telaElegida === t.id;
                             return (
                               <button key={t.id} type="button" onClick={() => setTelaElegida(t.id)}
@@ -8598,11 +8613,11 @@ export default function App() {
                                   border: on ? '1.5px solid var(--accent)' : '1px solid var(--border-light)', background: on ? 'rgba(0,216,245,0.10)' : 'transparent', color: '#fff' }}>
                                 <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
                                 <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
-                                {t.id === _telaBaseId && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>base</span>}
                               </button>
                             );
                           })}
                           {_telasMol.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px' }}>No hay telas. Registralas en Config › Telas.</div>}
+                          {_telasMol.length > 0 && _telasAsigFiltradas.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px' }}>Ninguna tela coincide.</div>}
                         </div>
                         <div style={{ fontSize: 10.5, color: telaSelPiezas.length ? 'var(--accent)' : 'var(--text-muted)', margin: '8px 0', lineHeight: 1.4 }}>
                           {telaSelPiezas.length ? `${telaSelPiezas.length} pieza(s): ${telaSelPiezas.join(', ')}` : 'Sin piezas seleccionadas → se aplica a TODAS.'}
@@ -8717,7 +8732,7 @@ export default function App() {
                           )}
                         </>)}
                         telaModo={_telaActiva}
-                        telaColorPieza={(gen) => colorDeTela(_telaDeGen(gen))}
+                        telaColorPieza={(gen) => { const t = _telaDeGen(gen); return t ? colorDeTela(t) : null; }}
                         telaSelSet={new Set(telaSelPiezas)}
                         onTelaClick={(gen) => setTelaSelPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen])}
                         onTelaVacio={() => setTelaSelPiezas([])}
