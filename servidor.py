@@ -4234,6 +4234,42 @@ def generar():
     return jsonify({"id": tid})
 
 
+def _molde_guia_ficha(pid, prod, reg, diseno):
+    """Piezas del talle GUÍA con el diseño aplicado, para la ficha técnica. Devuelve
+    {nombre, talle, piezas:[{nombre, w_cm, h_cm, svg}]} o None. Best-effort (usa `_piezas_base`,
+    el MISMO render que el visor y la tizada → arte = tizada)."""
+    import base64 as _b64
+    talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
+    if not talles:
+        return None
+    # Talle de referencia: el guía configurado, si sirve; si no, el del medio (el más "típico").
+    guia = (prod or {}).get("variante_guia")
+    talle = guia if guia in talles else talles[len(talles) // 2]
+    sub = _diseno_sub(diseno)
+    if not os.path.exists(_ruta_entrada("arte.ai", pid, sub=sub)):
+        diseno, sub = "principal", _diseno_sub("principal")
+    _b, _pv = _mapeo_estructura(pid, sub=sub)
+    if not _b and not _pv:
+        _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}).items() if v}
+    mp = {k: int(v) for k, v in (_b or {}).items() if v}
+    try:
+        r = _piezas_base(pid, diseno, "*", talle, mp, prod, reg, prioridad="bg")
+    except Exception:
+        r = None
+    if not r or not r.get("piezas"):
+        return None
+    piezas = []
+    for nom, info in (r["piezas"] or {}).items():
+        svg = info.get("svg") or ""
+        try:
+            svg = _b64.b64decode(svg).decode("utf-8") if svg else ""
+        except Exception:
+            svg = ""
+        piezas.append({"nombre": nom, "w_cm": info.get("w_cm"), "h_cm": info.get("h_cm"), "svg": svg})
+    piezas.sort(key=lambda p: str(p["nombre"]))
+    return {"nombre": (prod or {}).get("nombre", pid), "talle": r.get("talle") or talle, "piezas": piezas}
+
+
 @app.post("/api/generar_multi")
 def generar_multi():
     """Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA.
@@ -4242,6 +4278,7 @@ def generar_multi():
     prendas = cuerpo.get("prendas", [])
     pids = cuerpo.get("molds") or cuerpo.get("productos") or []
     default_diseno = cuerpo.get("default_diseno") or "principal"  # diseño de la fila si no hay columna
+    planilla_ficha = cuerpo.get("planilla") or None              # {columnas, filas} para la FICHA TÉCNICA
     perfil_forzado = cuerpo.get("perfil_forzado")  # archivo ICC para unificar perfiles distintos (o None)
     _ed_override = cuerpo.get("editables") or {}  # ajuste por pedido de objetos editables: {diseno_slug: {nombre: {talle: tf}}}
     if not prendas:
@@ -4443,6 +4480,27 @@ def generar_multi():
                     aplanar_para_rip(os.path.join(salida, h["archivo"]))
             except Exception as _ea:
                 print("  [!] aplanar RIP:", _ea)
+            # FICHA TÉCNICA (A4): la planilla del pedido arriba + el molde guía (diseño + piezas
+            # nombradas) abajo. Sale JUNTO con la tizada. Best-effort: si falla, la tizada igual queda.
+            try:
+                import ficha_tecnica as _FT
+                _guias = []
+                for pid in pids:
+                    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+                    reg = _cargar("registro_producto.json", pid)
+                    if prod and reg:
+                        prog("ficha", (prod or {}).get("nombre", pid), None)
+                        g = _molde_guia_ficha(pid, prod, reg, default_diseno)
+                        if g:
+                            _guias.append(g)
+                _pl = planilla_ficha or {"columnas": [], "filas": prendas}
+                _FT.generar_ficha(salida,
+                                  "Ficha técnica", " + ".join(nombres) + " · " + time.strftime("%d/%m/%Y"),
+                                  _pl, _guias)
+                if os.path.exists(os.path.join(salida, "FICHA_TECNICA.pdf")):
+                    res["ficha"] = "FICHA_TECNICA.pdf"
+            except Exception as _ef:
+                print("  [!] ficha técnica:", repr(_ef))
             json.dump({"prendas": prendas, "moldes": nombres,
                        "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res["hojas"]}},
                       open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)

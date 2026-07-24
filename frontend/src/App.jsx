@@ -5483,7 +5483,9 @@ export default function App() {
         Object.entries(ov).forEach(([pz, tid]) => { if (tid && _telaNom[tid]) o[pz] = _telaNom[tid]; });
         if (Object.keys(o).length) asignaciones[pid] = o;
       });
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones }) });
+      // Planilla EXACTA para la ficha técnica: las columnas (con su label) y las filas tal cual.
+      const planilla = { columnas: (cols || []).map(c => ({ id: c.id, label: c.label || c.id })), filas };
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -9318,6 +9320,21 @@ export default function App() {
                               className={'chip' + (tl === tela ? ' active' : '')} style={{ padding: '9px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{tl}</button>
                           ))}
                         </div>
+                      )}
+                      {/* FICHA TÉCNICA (A4): la planilla + el molde guía con el diseño y las piezas
+                          nombradas. Sale junto con la tizada. */}
+                      {job.resultado?.ficha && (
+                        <a href={rutaApi(`/trabajos/${job.resultado.id}/${job.resultado.ficha}`)} target="_blank" rel="noreferrer"
+                          download="Ficha_tecnica.pdf"
+                          style={{ display: 'flex', alignItems: 'center', gap: 11, textDecoration: 'none', marginBottom: 16,
+                            padding: '13px 16px', borderRadius: 12, background: 'rgba(0,243,255,0.06)', border: '1px solid var(--accent)' }}>
+                          <Icon name="productos" style={{ width: 20, height: 20, color: 'var(--accent)', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>Ficha técnica (PDF A4)</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>La tabla de talles y el molde guía con el diseño y las piezas nombradas.</div>
+                          </div>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--accent)' }}>Descargar ⬇</span>
+                        </a>
                       )}
                       {/* ESPACIO INFINITO de las mesas (componente propio: zoom con rueda sin scrollear
                           la página, pan con click DERECHO, nombre renombrable, descarga con ese nombre). */}
