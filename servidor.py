@@ -4044,6 +4044,42 @@ def set_tela_ancho():
     return jsonify({"ok": True, "id": tid, "ancho_cm": ancho})
 
 
+@app.get("/api/telas/conexion")
+def get_telas_conexion():
+    """Estado de la conexión con la API del sistema. NO devuelve la key (sólo si está o no)."""
+    url, key = _config_externo()
+    return jsonify({"url": url, "tiene_key": bool(key),
+                    "por_env": bool(os.environ.get("EXTERNAL_API_KEY"))})
+
+
+@app.post("/api/telas/conexion")
+def set_telas_conexion():
+    """Guarda la URL y/o la api-key en config_externo.json (del lado del server, no versionado).
+    Así el usuario configura la conexión DESDE LA APP, sin tocar archivos en el servidor."""
+    cuerpo = request.get_json(force=True) or {}
+    url = str(cuerpo.get("url") or "").strip()
+    key = str(cuerpo.get("key") or "").strip()
+    ruta = os.path.join(AQUI, "config_externo.json")
+    try:
+        cfg = json.load(open(ruta, encoding="utf-8"))
+    except Exception:
+        cfg = {}
+    if url:
+        cfg["telas_api_url"] = url
+    if key:
+        cfg["telas_api_key"] = key                # sólo se pisa si mandan una nueva
+    try:
+        with open(ruta, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo guardar la conexión: {e}"}), 500
+    _TELAS_MEM["data"] = None                      # forzar re-fetch con la nueva conexión
+    _TELAS_MEM["ts"] = 0.0
+    _url, _key = _config_externo()
+    return jsonify({"ok": True, "url": _url, "tiene_key": bool(_key),
+                    "por_env": bool(os.environ.get("EXTERNAL_API_KEY"))})
+
+
 @app.post("/api/telas")
 def set_telas():
     """Ya NO crea telas (vienen de la API). Sólo administra los GRUPOS combinables."""

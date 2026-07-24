@@ -2836,6 +2836,9 @@ export default function App() {
   const [telasReg, setTelasReg] = useState({ telas: [], grupos: [] });
   const [telaFiltroCfg, setTelaFiltroCfg] = useState('');                          // buscador de telas en Config
   const [telasRefrescando, setTelasRefrescando] = useState(false);                 // trayendo telas de la API del sistema
+  const [telaConexion, setTelaConexion] = useState({ url: '', tiene_key: false, por_env: false });  // estado de la conexión con la API
+  const [telaKeyInput, setTelaKeyInput] = useState('');                            // input de la api-key (no se muestra la guardada)
+  const [telaUrlInput, setTelaUrlInput] = useState('');                            // input de la URL de la API
   const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
@@ -3601,6 +3604,23 @@ export default function App() {
       showMsg(`Telas actualizadas ✓ (${d.count ?? (d.telas || []).length})`);
     } catch (e) { showError('No se pudo actualizar las telas del sistema: ' + (e.message || e)); }
     finally { setTelasRefrescando(false); }
+  };
+  // Estado de la conexión con la API del sistema (para el campo de configuración de la key).
+  const fetchTelaConexion = async () => {
+    try {
+      const r = await fetch('/api/telas/conexion');
+      if (r.ok) { const d = await r.json(); setTelaConexion(d); setTelaUrlInput(d.url || ''); }
+    } catch (e) { /* sin conexión al server: se deja el estado como está */ }
+  };
+  const guardarTelaConexion = async () => {
+    try {
+      const r = await fetch('/api/telas/conexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: telaUrlInput, key: telaKeyInput }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      setTelaConexion(d); setTelaKeyInput('');
+      showMsg('Conexión guardada ✓');
+      await refrescarTelas();   // reintenta traer las telas con la conexión nueva
+    } catch (e) { showError('No se pudo guardar la conexión: ' + (e.message || e)); }
   };
   // Guarda el ANCHO (cm) local de una tela de la API (lo único editable de nuestro lado).
   const guardarTelaAncho = async (id, ancho) => {
@@ -5699,6 +5719,8 @@ export default function App() {
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
+  // Estado de la conexión con la API del sistema al abrir Config › Telas.
+  useEffect(() => { if (adminSubView === 'telas') fetchTelaConexion(); }, [adminSubView]);
 
   // moldesSeleccionados = unión de los moldes asignados a algún diseño (lo usan la
   // planilla y la generación). Se deriva de disenoMoldes.
@@ -13454,6 +13476,24 @@ export default function App() {
                   <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 16px', lineHeight: 1.5, maxWidth: 660 }}>
                     Las telas vienen del <b>sistema de stock</b> — acá no se crean ni se borran. De este lado sólo ponés el <b>ancho de rollo (cm)</b> de cada una, que es lo que usa la tizada. El <b>alto</b> de la hoja se configura en Reglas de Nesting.
                   </p>
+
+                  {/* Conexión con la API del sistema (la api-key se guarda del lado del server) */}
+                  <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 14, marginBottom: 18, background: 'rgba(255,255,255,0.02)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 700 }}>Conexión con el sistema de stock</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 999, background: telaConexion.tiene_key ? 'rgba(16,185,129,0.15)' : 'rgba(224,160,32,0.15)', color: telaConexion.tiene_key ? 'var(--success)' : 'var(--warning, #e0a020)' }}>
+                        {telaConexion.tiene_key ? 'Conectado ✓' : 'Falta la clave'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.45, maxWidth: 660 }}>
+                      Pegá acá la <b>clave (api-key)</b> del sistema y se guarda en el servidor — no hay que tocar ningún archivo. {telaConexion.por_env ? <span style={{ color: 'var(--text-muted)' }}>(Ahora está tomada de una variable de entorno; lo que pongas acá no la reemplaza.)</span> : null}
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input value={telaUrlInput} onChange={e => setTelaUrlInput(e.target.value)} placeholder="URL de la API" style={{ ...({ height: 36, fontSize: 13, padding: '0 10px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }), flex: 1, minWidth: 240 }} />
+                      <input type="password" value={telaKeyInput} onChange={e => setTelaKeyInput(e.target.value)} placeholder={telaConexion.tiene_key ? '•••••• (ya configurada — pegá una nueva para cambiarla)' : 'Pegá la api-key'} style={{ ...({ height: 36, fontSize: 13, padding: '0 10px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }), flex: 1, minWidth: 240 }} />
+                      <button className="btn success" onClick={guardarTelaConexion} style={{ padding: '8px 18px', fontWeight: 700 }}>Guardar conexión</button>
+                    </div>
+                  </div>
 
                   {(() => {
                     const f = telaFiltroCfg.trim().toLowerCase();
