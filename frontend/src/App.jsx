@@ -1648,43 +1648,55 @@ function VisorFicha({ id, archivo, paginas }) {
     try { printRef.current?.contentWindow?.focus(); printRef.current?.contentWindow?.print(); }
     catch { window.open(urlPdf, '_blank'); }
   };
+  // Iconos modernos (SVG en línea, trazo fino) para no depender del set viejo.
+  const IcoDescarga = ({ s = 17 }) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v12" /><path d="m7 11 5 4 5-4" /><path d="M5 21h14" />
+    </svg>
+  );
+  const IcoImprimir = ({ s = 17 }) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 9V3h12v6" /><rect x="6" y="13" width="12" height="8" rx="1" /><path d="M6 17H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2" />
+    </svg>
+  );
+  const btnMod = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderRadius: 999,
+    fontSize: 13, fontWeight: 700, cursor: 'pointer', textDecoration: 'none', border: 'none', transition: 'all .15s' };
   return (
     <div className="animate-fade">
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-        <a href={urlPdf} download="Ficha_tecnica.pdf" className="btn ghost" style={{ padding: '8px 14px', fontSize: 13, color: 'var(--accent)' }}>
-          <Icon name="download" style={{ width: 15, height: 15 }} /> Descargar todo
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+        <a href={urlPdf} download="Ficha_tecnica.pdf" title="Descargar la ficha técnica completa"
+          style={{ ...btnMod, background: 'var(--accent)', color: 'var(--bg-primary)' }}>
+          <IcoDescarga /> Descargar ficha
         </a>
-        <button type="button" onClick={imprimir} className="btn ghost" style={{ padding: '8px 14px', fontSize: 13 }}>
-          🖨 Imprimir
+        <button type="button" onClick={imprimir} title="Imprimir la ficha técnica"
+          style={{ ...btnMod, background: 'rgba(255,255,255,0.06)', color: '#fff' }}>
+          <IcoImprimir /> Imprimir
         </button>
-        {paginas > 1 && <span style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 4px' }}>una hoja:</span>}
-        {paginas > 1 && Array.from({ length: paginas }, (_, i) => (
-          <a key={i} href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} className="btn ghost"
-            style={{ padding: '8px 12px', fontSize: 13 }} title={`Descargar la hoja ${i + 1}`}>Hoja {i + 1}</a>
-        ))}
       </div>
       {/* DOS columnas dentro de una fila de alto FIJO (`alto`): las MINIATURAS a la izquierda (para
           saltar a una hoja) y las páginas grandes a la derecha. Cada columna scrollea por su cuenta
           → la página NO scrollea (un solo scroll por columna, con el estilo del sistema). */}
       <div ref={scrollRef} style={{ height: alto, display: 'flex', gap: 12 }}>
-        {/* Miniaturas — sólo si hay más de una hoja */}
+        {/* Miniaturas — sólo si hay más de una hoja. El nombre va DEBAJO (fuera de la hoja), legible. */}
         {paginas > 1 && (
-          <div className="ficha-scroll" style={{ width: 104, flexShrink: 0, overflowY: 'auto', paddingRight: 4,
-            display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="ficha-scroll" style={{ width: 116, flexShrink: 0, overflowY: 'auto', paddingRight: 6,
+            display: 'flex', flexDirection: 'column', gap: 14 }}>
             {Array.from({ length: paginas }, (_, i) => (
               <button key={i} type="button" onClick={() => irAHoja(i)} title={`Ir a la hoja ${i + 1}`}
-                style={{ padding: 0, border: '2px solid ' + (actual === i ? 'var(--accent)' : 'transparent'),
-                  borderRadius: 8, cursor: 'pointer', background: 'transparent', lineHeight: 0 }}>
-                <img src={imgPag(i, 1)} alt={`Hoja ${i + 1}`} loading="lazy"
-                  style={{ width: '100%', height: 'auto', borderRadius: 6, background: '#fff', display: 'block' }} />
-                <div style={{ fontSize: 10, fontWeight: 700, textAlign: 'center', padding: '2px 0',
-                  color: actual === i ? 'var(--accent)' : 'var(--text-muted)' }}>Hoja {i + 1}</div>
+                style={{ padding: 0, border: 'none', cursor: 'pointer', background: 'transparent',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                <img src={imgPag(i, 1)} alt="" loading="lazy"
+                  style={{ width: '100%', height: 'auto', borderRadius: 6, background: '#fff', display: 'block',
+                    boxShadow: actual === i ? '0 0 0 2px var(--accent)' : '0 2px 8px rgba(0,0,0,0.4)' }} />
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: actual === i ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                  Hoja {i + 1}
+                </span>
               </button>
             ))}
           </div>
         )}
-        {/* Páginas grandes → cada hoja una lámina blanca con sombra. Al scrollear se resalta la
-            miniatura de la hoja que está arriba de la vista. */}
+        {/* Páginas grandes → cada hoja una lámina blanca con sombra, con un botón de DESCARGA en su
+            borde superior (baja sólo esa hoja). Al scrollear se resalta su miniatura. */}
         <div ref={pagsRef} className="ficha-scroll" style={{ flex: 1, overflowY: 'auto', padding: '4px 2px',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}
           onScroll={(e) => {
@@ -1694,9 +1706,18 @@ function VisorFicha({ id, archivo, paginas }) {
             setActual(best);
           }}>
           {Array.from({ length: paginas }, (_, i) => (
-            <img key={i} ref={el => (pagEls.current[i] = el)} src={imgPag(i)} alt={`Hoja ${i + 1}`} loading="lazy"
-              style={{ width: '100%', maxWidth: 720, height: 'auto', borderRadius: 10, background: '#fff',
-                boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
+            <div key={i} ref={el => (pagEls.current[i] = el)} style={{ position: 'relative', width: '100%', maxWidth: 720 }}>
+              <img src={imgPag(i)} alt={`Hoja ${i + 1}`} loading="lazy"
+                style={{ width: '100%', height: 'auto', borderRadius: 10, background: '#fff', display: 'block',
+                  boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
+              {/* botón de descarga de ESA hoja, en el borde superior */}
+              <a href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} title={`Descargar sólo la hoja ${i + 1}`}
+                style={{ position: 'absolute', top: 10, right: 10, width: 34, height: 34, borderRadius: 999,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+                  background: 'rgba(15,20,26,0.72)', backdropFilter: 'blur(3px)', border: '1px solid rgba(255,255,255,0.18)' }}>
+                <IcoDescarga s={16} />
+              </a>
+            </div>
           ))}
         </div>
       </div>
@@ -9349,7 +9370,9 @@ export default function App() {
                     {(() => {
                       const j = trabajosMulti[0];
                       const hojas = (j?.estado === 'listo' && j?.resultado?.hojas) || [];
-                      if (!hojas.length) return null;
+                      // En la pestaña «Ficha técnica» NO se muestra el «Descargar todo» de la TIZADA:
+                      // confunde (la ficha tiene su propia descarga). Es sólo para las tizadas.
+                      if (!hojas.length || vistaFicha) return null;
                       const totalMesas = hojas.reduce((s, h) => s + ((h.previews && h.previews.length) ? h.previews.length : 1), 0);
                       const sanit = (s) => ((s || 'mesa').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa');
                       return (
