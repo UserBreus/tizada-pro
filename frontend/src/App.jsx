@@ -331,7 +331,7 @@ async function leerJson(res) {
 }
 
 // ── Combo: casilla editable + lista desplegable propia (scrolleable, compacta) ──
-function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir }) {
+function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir, autoEdit }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
@@ -344,6 +344,8 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
     setVerTodas(!!todas);
     setOpen(true);
   };
+  // autoEdit: la celda entró en modo EDICIÓN (doble-click/Enter) → enfoca y abre la lista de una.
+  useEffect(() => { if (autoEdit) { inputRef.current?.focus(); try { inputRef.current?.select(); } catch (_e) { /* no-op */ } abrir(true); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (noAbrir) setOpen(false); }, [noAbrir]);   // al pasar a multi-selección, cerrar
   useEffect(() => {
     if (!open) return;
@@ -375,8 +377,6 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
         onBlur={() => { const ex = options.find(o => _norm(o) === _nv); if (ex && ex !== value) onChange(ex); }}
         onKeyDown={(e) => {
           if ((e.key === 'ArrowDown' || (e.altKey && e.key === 'ArrowDown')) && !open) { e.preventDefault(); abrir(true); return; }
-          // Enter con el desplegable CERRADO → lo ABRE (no navega). Con la lista ABIERTA → confirma y cierra.
-          if (e.key === 'Enter' && !open && !noAbrir) { e.preventDefault(); abrir(true); return; }
           if (e.key === 'Enter' || e.key === 'Tab') {
             const ex = options.find(o => _norm(o) === _nv);   // coincide sin importar mayús/minús
             if (ex) { if (ex !== value) onChange(ex); }        // → guarda el valor canónico
@@ -2791,6 +2791,7 @@ export default function App() {
   const [fuenteChars, setFuenteChars] = useState(null);    // Set de caracteres que SOPORTA la fuente del diseño (null = sin dato)
   const [plSel, setPlSel] = useState(null);       // planilla pedido: ANCLA del rango {r,c}
   const [plSelEnd, setPlSelEnd] = useState(null); // OTRA esquina del rango seleccionado {r,c}
+  const [plEdit, setPlEdit] = useState(null);     // {r,c} celda EN EDICIÓN (Sheets: 1 click selecciona, doble-click/Enter edita)
   const [plFill, setPlFill] = useState(null);     // {r,c} destino del arrastre del fill-handle
   const [plSelDrag, setPlSelDrag] = useState(false); // true mientras se arrastra (corta userSelect)
   const plDragRef = useRef(null);                 // {r,c} esquina origen del fill-handle
@@ -7240,29 +7241,54 @@ export default function App() {
     setFilas(next);
   };
 
-  // Navegación tipo planilla: Enter = baja (misma columna), Tab = derecha (misma fila,
-  // salta a la fila siguiente al pasar la última columna). Shift+Tab = izquierda.
+  // Enfoca la celda (r,c) por su marca data-plc — sea el div estático (selección) o el input (edición).
   const _focusCelda = (r, c) => {
     const el = document.querySelector(`[data-plc="${r}-${c}"]`);
     if (el) { el.focus(); try { el.select && el.select(); } catch (_e) { /* no-op */ } }
   };
-  const navKeyPlanilla = (e, r, c) => {
-    const nCols = cols.length, nFil = filas.length;
-    if (e.key === 'Enter') {
+
+  // ── Modelo tipo Google Sheets: SELECCIONAR ≠ EDITAR ────────────────────────────────────────────
+  // 1 click selecciona (celda estática, sin cursor). Arrastrar selecciona un rango (y Supr lo borra).
+  // Doble-click o Enter sobre la seleccionada = ENTRA A EDITAR (y en desplegables, abre la lista).
+  // Índices de las columnas VISIBLES (respeta el ocultado por molde) para navegar sin caer en ocultas.
+  const _colsVisibles = () => cols.map((_c, ci) => ci).filter(ci => colActiva(cols[ci]));
+  // Borra el contenido de TODAS las celdas del rango seleccionado (Supr/Backspace).
+  const _borrarRangoSel = () => {
+    const rg = plRango(); if (!rg) return;
+    setFilas(prev => prev.map((f, r) => {
+      if (r < rg.r0 || r > rg.r1) return f;
+      const nf = { ...f };
+      for (let cc = rg.c0; cc <= rg.c1; cc++) { const col = cols[cc]; if (col) nf[col.id] = ''; }
+      return nf;
+    }));
+  };
+  // Teclado sobre una celda SELECCIONADA (no en edición). Vive en el div estático de cada celda.
+  const onSelKey = (e, r, c) => {
+    const k = e.key;
+    if (k === 'Enter' || k === 'F2') { e.preventDefault(); setPlEdit({ r, c }); return; }
+    if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); _borrarRangoSel(); return; }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(k)) {
       e.preventDefault();
-      if (r + 1 < nFil) _focusCelda(r + 1, c);
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      if (e.shiftKey) {
-        let nc = c - 1, nr = r;
-        if (nc < 0) { nc = nCols - 1; nr = r - 1; }
-        if (nr >= 0) _focusCelda(nr, nc);
-      } else {
-        let nc = c + 1, nr = r;
-        if (nc >= nCols) { nc = 0; nr = r + 1; }
-        if (nr < nFil) _focusCelda(nr, nc);
-      }
+      const vis = _colsVisibles(); const pos = Math.max(0, vis.indexOf(c));
+      let nr = r, nc = c;
+      if (k === 'ArrowUp') nr = Math.max(0, r - 1);
+      else if (k === 'ArrowDown') nr = Math.min(filas.length - 1, r + 1);
+      else if (k === 'ArrowLeft' || (k === 'Tab' && e.shiftKey)) nc = vis[Math.max(0, pos - 1)] ?? c;
+      else if (k === 'ArrowRight' || k === 'Tab') nc = vis[Math.min(vis.length - 1, pos + 1)] ?? c;
+      _focusCelda(nr, nc);
     }
+  };
+  // Teclado dentro de una celda EN EDICIÓN: Enter confirma y baja, Tab confirma y va al lado, Esc sale.
+  const onEditKey = (e, r, c) => {
+    const k = e.key;
+    if (k === 'Enter') { e.preventDefault(); setPlEdit(null); _focusCelda(r + 1 < filas.length ? r + 1 : r, c); }
+    else if (k === 'Tab') {
+      e.preventDefault(); setPlEdit(null);
+      const vis = _colsVisibles(); const pos = Math.max(0, vis.indexOf(c)); let nr = r, nc = c;
+      if (e.shiftKey) { if (pos > 0) nc = vis[pos - 1]; else if (r > 0) { nr = r - 1; nc = vis[vis.length - 1]; } }
+      else { if (pos < vis.length - 1) nc = vis[pos + 1]; else if (r + 1 < filas.length) { nr = r + 1; nc = vis[0]; } }
+      _focusCelda(nr, nc);
+    } else if (k === 'Escape') { e.preventDefault(); setPlEdit(null); _focusCelda(r, c); }
   };
 
   // Celdas con valor INVÁLIDO: columna con opciones fijas + valor que no coincide con ninguna.
@@ -7362,9 +7388,19 @@ export default function App() {
     for (let i = 2; i < nums.length; i++) if (nums[i] - nums[i - 1] !== d) return null;
     return { nums, d };
   };
-  const _valFill = (srcVals, j) => {   // valor para el offset j (0 = primer origen)
-    const seq = _seq(srcVals);
-    if (seq) { const raw = seq.nums[0] + seq.d * j; return Number.isInteger(raw) ? String(raw) : String(Math.round(raw * 1e6) / 1e6); }
+  // Columnas donde el arrastre SOLO COPIA el valor (nunca hace secuencia numérica): variantes
+  // (talle), diseño, desplegables y toggles. Aunque el valor sea un número, ahí no hay progresión:
+  // «10, 10, 10…», no «10, 11, 12…». (Pedido del usuario 2026-07-24.)
+  const _colCopiaSolo = (col) => {
+    if (!col) return false;
+    const tp = col.tipo || (col.role === 'manga' ? 'toggle' : 'texto');
+    return col.role === 'talle' || col.role === 'diseno' || tp === 'desplegable' || tp === 'toggle';
+  };
+  const _valFill = (srcVals, j, copiaSolo) => {   // valor para el offset j (0 = primer origen)
+    if (!copiaSolo) {   // en columnas «copia sólo» no se continúa la progresión numérica
+      const seq = _seq(srcVals);
+      if (seq) { const raw = seq.nums[0] + seq.d * j; return Number.isInteger(raw) ? String(raw) : String(Math.round(raw * 1e6) / 1e6); }
+    }
     const len = srcVals.length, idx = ((j % len) + len) % len;
     return srcVals[idx];
   };
@@ -7375,15 +7411,16 @@ export default function App() {
       const R0 = Math.min(src.r0, target.r), R1 = Math.max(src.r1, target.r);
       for (let c = src.c0; c <= src.c1; c++) {
         const col = cols[c]; if (!col) continue;
+        const copiaSolo = _colCopiaSolo(col);
         const srcVals = []; for (let rr = src.r0; rr <= src.r1; rr++) srcVals.push(String(rows[rr]?.[col.id] ?? ''));
-        for (let r = R0; r <= R1; r++) { if (r >= src.r0 && r <= src.r1) continue; if (rows[r]) rows[r][col.id] = _valFill(srcVals, r - src.r0); }
+        for (let r = R0; r <= R1; r++) { if (r >= src.r0 && r <= src.r1) continue; if (rows[r]) rows[r][col.id] = _valFill(srcVals, r - src.r0, copiaSolo); }
       }
     } else {
       const C0 = Math.min(src.c0, target.c), C1 = Math.max(src.c1, target.c);
       for (let r = src.r0; r <= src.r1; r++) {
         if (!rows[r]) continue;
         const srcVals = []; for (let cc = src.c0; cc <= src.c1; cc++) srcVals.push(String(rows[r]?.[cols[cc]?.id] ?? ''));
-        for (let c = C0; c <= C1; c++) { if (c >= src.c0 && c <= src.c1) continue; if (cols[c]) rows[r][cols[c].id] = _valFill(srcVals, c - src.c0); }
+        for (let c = C0; c <= C1; c++) { if (c >= src.c0 && c <= src.c1) continue; if (cols[c]) rows[r][cols[c].id] = _valFill(srcVals, c - src.c0, _colCopiaSolo(cols[c])); }
       }
     }
     return rows;
@@ -8130,67 +8167,99 @@ export default function App() {
                               const _rg = plRango();
                               const enSel = !!_rg && i >= _rg.r0 && i <= _rg.r1 && ci >= _rg.c0 && ci <= _rg.c1;
                               const esHandle = !!_rg && i === _rg.r1 && ci === _rg.c1;   // esquina inf-der del rango
-                              const plMulti = !!_rg && (_rg.r0 !== _rg.r1 || _rg.c0 !== _rg.c1);   // hay más de una celda seleccionada
                               const enFill = plEnFill(i, ci);
                               const foco = () => { setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); };
-                              let control;
                               const plc = `${i}-${ci}`;
-                              if (c.role === 'talle') {
-                                /* variante: opciones = variantes del molde (escribible: podés tipear o elegir) */
-                                control = <ComboCell value={cellValue} options={estado?.talles || []} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} noAbrir={plMulti} />;
-                              } else if (c.role === 'diseno') {
-                                /* diseño: opciones = los diseños del pedido */
-                                control = <ComboCell value={cellValue} options={disenosPedido.map(d => d.nombre)} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} noAbrir={plMulti} />;
-                              } else if (tipo === 'desplegable') {
-                                control = <ComboCell value={cellValue} options={opts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => navKeyPlanilla(e, i, ci)} noAbrir={plMulti} />;
-                              } else if (tipo === 'toggle') {
-                                control = (
-                                  <div data-plc={plc} tabIndex={0} onFocus={foco} onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
-                                    style={{ display: 'flex', height: 32, outline: 'none' }}>
-                                    {toggleOpts.map(o => {
-                                      const on = cellValue ? cellValue === o : o === toggleOpts[0];
-                                      return (
-                                        <button key={o} type="button" tabIndex={-1} onClick={() => { updateFila(i, c.id, o); foco(); }}
-                                          style={{ flex: 1, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--bg-primary)' : 'var(--text-secondary)', transition: 'background 0.15s' }}>
-                                          {o}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                );
+                              const editando = !!plEdit && plEdit.r === i && plEdit.c === ci;
+                              const esDropdown = c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable';
+                              const dropdownOpts = c.role === 'talle' ? (estado?.talles || []) : c.role === 'diseno' ? disenosPedido.map(d => d.nombre) : opts;
+                              const _esNum = c.role === 'numero';
+                              const _chars = _colEsTexto(c) ? [..._textoCol(c, cellValue)] : [];
+                              const _hayFalta = _chars.some(faltaEnFuente);
+                              const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
+                                fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };
+                              let control;
+                              if (editando) {
+                                // ── MODO EDICIÓN (doble-click / Enter): recién acá aparece el control para escribir/elegir ──
+                                if (esDropdown) {
+                                  control = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit />;
+                                } else if (tipo === 'toggle') {
+                                  control = (
+                                    <div data-plc={plc} tabIndex={0} ref={(el) => el && el.focus()} onKeyDown={(e) => onEditKey(e, i, ci)}
+                                      style={{ display: 'flex', height: 32, outline: 'none' }}>
+                                      {toggleOpts.map(o => {
+                                        const on = cellValue ? cellValue === o : o === toggleOpts[0];
+                                        return (
+                                          <button key={o} type="button" tabIndex={-1} onClick={() => { updateFila(i, c.id, o); setPlEdit(null); foco(); }}
+                                            style={{ flex: 1, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--bg-primary)' : 'var(--text-secondary)', transition: 'background 0.15s' }}>
+                                            {o}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                } else {
+                                  // Texto libre. Espejo de caracteres faltantes en rojo (la fuente del diseño no los tiene).
+                                  control = (
+                                    <div style={{ position: 'relative' }}>
+                                      {_hayFalta && (
+                                        <div aria-hidden style={{ ..._fBase, position: 'absolute', inset: 0, whiteSpace: 'pre', overflow: 'hidden', pointerEvents: 'none' }}>
+                                          {_chars.map((ch, k) => (
+                                            <span key={k} style={faltaEnFuente(ch)
+                                              ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 }
+                                              : { color: 'var(--text-primary)' }}>{ch}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <input
+                                        type={_esNum ? 'number' : 'text'}
+                                        value={cellValue}
+                                        autoFocus
+                                        data-plc={plc}
+                                        onFocus={foco}
+                                        onBlur={() => setPlEdit(prev => (prev && prev.r === i && prev.c === ci ? null : prev))}
+                                        onKeyDown={(e) => onEditKey(e, i, ci)}
+                                        title={_hayFalta ? 'La fuente del diseño no tiene los caracteres en rojo' : undefined}
+                                        style={{ ..._fBase, width: '100%', border: 'none', background: 'none', outline: 'none', position: 'relative',
+                                          color: _hayFalta ? 'transparent' : 'var(--text-primary)', caretColor: 'var(--text-primary)',
+                                          textTransform: c.role === 'nombre' ? 'uppercase' : 'none' }}
+                                        onChange={(e) => updateFila(i, c.id, e.target.value)}
+                                      />
+                                    </div>
+                                  );
+                                }
                               } else {
-                                // Texto libre. Si la FUENTE del diseño no tiene algún caracter, se pinta
-                                // de ROJO: el input queda con texto transparente y debajo una capa espejo
-                                // (misma tipografía/tamaño/padding) que dibuja letra por letra.
-                                const _esNum = c.role === 'numero';
-                                const _chars = _colEsTexto(c) ? [..._textoCol(c, cellValue)] : [];
-                                const _hayFalta = _chars.some(faltaEnFuente);
-                                const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
-                                  fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };
+                                // ── MODO SELECCIÓN (Sheets): celda ESTÁTICA, sin cursor. 1 click selecciona. ──
+                                const _invalido = esDropdown && String(cellValue) !== '' && dropdownOpts.length > 0
+                                  && !dropdownOpts.some(o => String(o).toLowerCase() === String(cellValue).toLowerCase());
+                                const dispBase = { display: 'flex', alignItems: 'center', height: 32, padding: '6px 8px', fontSize: 13,
+                                  boxSizing: 'border-box', width: '100%', outline: 'none', cursor: 'default', whiteSpace: 'nowrap', overflow: 'hidden',
+                                  fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal',
+                                  textTransform: c.role === 'nombre' ? 'uppercase' : 'none',
+                                  color: _invalido ? '#ff8a8a' : 'var(--text-primary)' };
+                                let contenido;
+                                if (esDropdown) {
+                                  contenido = (<>
+                                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{cellValue}</span>
+                                    <span style={{ color: 'var(--cmyk-cyan)', fontSize: 10, marginLeft: 4, flexShrink: 0 }}>▾</span>
+                                  </>);
+                                } else if (tipo === 'toggle') {
+                                  contenido = <span>{cellValue || toggleOpts[0]}</span>;
+                                } else if (_hayFalta) {
+                                  contenido = _chars.map((ch, k) => (
+                                    <span key={k} style={faltaEnFuente(ch) ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 } : undefined}>{ch}</span>
+                                  ));
+                                } else {
+                                  contenido = <span>{cellValue}</span>;
+                                }
                                 control = (
-                                  <div style={{ position: 'relative' }}>
-                                    {_hayFalta && (
-                                      <div aria-hidden style={{ ..._fBase, position: 'absolute', inset: 0, whiteSpace: 'pre', overflow: 'hidden', pointerEvents: 'none' }}>
-                                        {_chars.map((ch, k) => (
-                                          <span key={k} style={faltaEnFuente(ch)
-                                            ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 }
-                                            : { color: 'var(--text-primary)' }}>{ch}</span>
-                                        ))}
-                                      </div>
-                                    )}
-                                    <input
-                                      type={_esNum ? 'number' : 'text'}
-                                      value={cellValue}
-                                      placeholder="..."
-                                      data-plc={plc}
-                                      onFocus={foco}
-                                      onKeyDown={(e) => navKeyPlanilla(e, i, ci)}
-                                      title={_hayFalta ? 'La fuente del diseño no tiene los caracteres en rojo' : undefined}
-                                      style={{ ..._fBase, width: '100%', border: 'none', background: 'none', outline: 'none', position: 'relative',
-                                        color: _hayFalta ? 'transparent' : 'var(--text-primary)', caretColor: 'var(--text-primary)',
-                                        textTransform: c.role === 'nombre' ? 'uppercase' : 'none' }}
-                                      onChange={(e) => updateFila(i, c.id, e.target.value)}
-                                    />
+                                  <div data-plc={plc} tabIndex={0}
+                                    onFocus={foco}
+                                    onKeyDown={(e) => onSelKey(e, i, ci)}
+                                    onDoubleClick={() => setPlEdit({ r: i, c: ci })}
+                                    title={_invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
+                                    style={dispBase}>
+                                    {contenido}
                                   </div>
                                 );
                               }
@@ -8205,7 +8274,9 @@ export default function App() {
                               return (
                                 <td key={c.id}
                                   onMouseDown={(e) => {
+                                    if (editando) return;   // en edición, el control maneja el mouse (mover el cursor, etc.)
                                     if (e.shiftKey && plSel) { e.preventDefault(); setPlSelEnd({ r: i, c: ci }); return; }   // Shift+click: extiende el rango desde el ancla
+                                    setPlEdit(null);   // 1 click = SÓLO seleccionar; sale de cualquier edición previa
                                     setPlSel({ r: i, c: ci }); setPlSelEnd({ r: i, c: ci }); plSelDragRef.current = true;
                                   }}
                                   onMouseOver={() => {
@@ -8220,7 +8291,7 @@ export default function App() {
                                     // Tirador de relleno: un poco más grande y con «hitbox» propio → fácil de agarrar
                                     // para ARRASTRAR sin tocar la celda (que ya no abre el desplegable con el clic).
                                     <span onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); plFillSrcRef.current = plRango(); plDragRef.current = { r: i, c: ci }; setPlFill({ r: i, c: ci }); setPlSelDrag(true); }}
-                                      title="Arrastrá para copiar o seguir la secuencia (vertical u horizontal)"
+                                      title="Arrastrá para copiar (variantes/diseño) o seguir la secuencia numérica (texto)"
                                       style={{ position: 'absolute', right: -3, bottom: -3, width: 12, height: 12, background: 'var(--accent)', border: '2px solid var(--bg-primary)', borderRadius: 3, cursor: 'crosshair', zIndex: 3, boxShadow: '0 0 5px var(--accent)' }} />
                                   )}
                                 </td>
