@@ -1613,24 +1613,36 @@ function DetalleFuente({ f, onVolver }) {
  *  los botones usan los estilos de la app (sin recuadros). Descargar todo / una hoja / imprimir. */
 function VisorFicha({ id, archivo, paginas }) {
   const urlPdf = rutaApi(`/trabajos/${id}/${archivo}`);
-  const imgPag = (pi) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
+  const imgPag = (pi, z = 2) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=${z}`);
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
   const printRef = React.useRef(null);
   const scrollRef = React.useRef(null);
-  // El visor ocupa EXACTAMENTE lo que queda hasta el borde inferior de la pantalla → la página NO
-  // scrollea (queda un solo scroll: el de adentro del visor). Se mide su tope y se recalcula al
-  // cambiar el tamaño de la ventana.
+  const pagsRef = React.useRef(null);          // columna donde están las páginas grandes (para scrollear)
+  const pagEls = React.useRef([]);             // cada <img> de página, para saltar a ella
+  const [actual, setActual] = React.useState(0);   // hoja visible (resalta su miniatura)
+  const irAHoja = (i) => { pagEls.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setActual(i); };
+  // UN SOLO scroll: el de adentro del visor. Se mide el contenedor que REALMENTE scrollea (el
+  // ancestro con overflow, `.main-content`) y se encoge el visor exactamente lo que ese ancestro se
+  // pasa de alto → descuenta TODOS los paddings/márgenes de por medio, sin hardcodear ninguno.
   const [alto, setAlto] = React.useState('74vh');
   React.useEffect(() => {
     const calc = () => {
       const el = scrollRef.current; if (!el) return;
-      const top = el.getBoundingClientRect().top;
-      setAlto(Math.max(300, window.innerHeight - top - 14) + 'px');
+      let sc = el.parentElement;
+      while (sc && sc !== document.body) {
+        const oy = getComputedStyle(sc).overflowY;
+        if (oy === 'auto' || oy === 'scroll') break;
+        sc = sc.parentElement;
+      }
+      if (!sc) sc = document.scrollingElement || document.documentElement;
+      // «otros» = todo lo que hay en el ancestro MENOS el visor (cabeceras, pestañas, paddings…).
+      const otros = sc.scrollHeight - el.clientHeight;
+      setAlto(Math.max(300, sc.clientHeight - otros - 2) + 'px');
     };
-    calc();
+    const t = setTimeout(calc, 0);          // tras el layout
     window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
-  }, []);
+    return () => { clearTimeout(t); window.removeEventListener('resize', calc); };
+  }, [paginas]);
   const imprimir = () => {
     // iframe oculto con el PDF real → impresión nítida; si el navegador lo bloquea, se abre aparte.
     try { printRef.current?.contentWindow?.focus(); printRef.current?.contentWindow?.print(); }
@@ -1651,15 +1663,42 @@ function VisorFicha({ id, archivo, paginas }) {
             style={{ padding: '8px 12px', fontSize: 13 }} title={`Descargar la hoja ${i + 1}`}>Hoja {i + 1}</a>
         ))}
       </div>
-      {/* Las páginas como imágenes → el scroll es el del sistema (cyan/magenta). Cada hoja, una
-          "lámina" blanca centrada con sombra, sobre el fondo de la app. */}
-      <div ref={scrollRef} className="ficha-scroll" style={{ height: alto, overflowY: 'auto', padding: '4px 2px',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
-        {Array.from({ length: paginas }, (_, i) => (
-          <img key={i} src={imgPag(i)} alt={`Hoja ${i + 1}`} loading="lazy"
-            style={{ width: '100%', maxWidth: 720, height: 'auto', borderRadius: 10, background: '#fff',
-              boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
-        ))}
+      {/* DOS columnas dentro de una fila de alto FIJO (`alto`): las MINIATURAS a la izquierda (para
+          saltar a una hoja) y las páginas grandes a la derecha. Cada columna scrollea por su cuenta
+          → la página NO scrollea (un solo scroll por columna, con el estilo del sistema). */}
+      <div ref={scrollRef} style={{ height: alto, display: 'flex', gap: 12 }}>
+        {/* Miniaturas — sólo si hay más de una hoja */}
+        {paginas > 1 && (
+          <div className="ficha-scroll" style={{ width: 104, flexShrink: 0, overflowY: 'auto', paddingRight: 4,
+            display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {Array.from({ length: paginas }, (_, i) => (
+              <button key={i} type="button" onClick={() => irAHoja(i)} title={`Ir a la hoja ${i + 1}`}
+                style={{ padding: 0, border: '2px solid ' + (actual === i ? 'var(--accent)' : 'transparent'),
+                  borderRadius: 8, cursor: 'pointer', background: 'transparent', lineHeight: 0 }}>
+                <img src={imgPag(i, 1)} alt={`Hoja ${i + 1}`} loading="lazy"
+                  style={{ width: '100%', height: 'auto', borderRadius: 6, background: '#fff', display: 'block' }} />
+                <div style={{ fontSize: 10, fontWeight: 700, textAlign: 'center', padding: '2px 0',
+                  color: actual === i ? 'var(--accent)' : 'var(--text-muted)' }}>Hoja {i + 1}</div>
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Páginas grandes → cada hoja una lámina blanca con sombra. Al scrollear se resalta la
+            miniatura de la hoja que está arriba de la vista. */}
+        <div ref={pagsRef} className="ficha-scroll" style={{ flex: 1, overflowY: 'auto', padding: '4px 2px',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}
+          onScroll={(e) => {
+            const cr = e.currentTarget.getBoundingClientRect();
+            let best = 0, bd = Infinity;
+            pagEls.current.forEach((el, i) => { if (!el) return; const d = Math.abs(el.getBoundingClientRect().top - cr.top); if (d < bd) { bd = d; best = i; } });
+            setActual(best);
+          }}>
+          {Array.from({ length: paginas }, (_, i) => (
+            <img key={i} ref={el => (pagEls.current[i] = el)} src={imgPag(i)} alt={`Hoja ${i + 1}`} loading="lazy"
+              style={{ width: '100%', maxWidth: 720, height: 'auto', borderRadius: 10, background: '#fff',
+                boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
+          ))}
+        </div>
       </div>
       <iframe ref={printRef} title="imprimir" src={urlPdf} style={{ display: 'none' }} />
     </div>
