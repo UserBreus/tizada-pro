@@ -45,3 +45,6 @@ DIAGNOSTICO.txt
 perfiles_icc/
 _actualizacion/
 _tarea.xml
+
+# Secretos de APIs externas (api-key de telas del WMS) — NUNCA versionar
+config_externo.json

@@ -3918,30 +3918,137 @@ def set_config():
 
 
 # ═════════════════ TELAS (registro GLOBAL + grupos combinables) ═════════════════
-# Modelo nuevo: las telas se registran una sola vez (catálogo `telas` = {id, nombre, ancho_cm}).
-# Los GRUPOS combinables (`grupos_telas` = {id, nombre, telas:[id]}) dicen qué telas pueden ir
-# juntas en una misma prenda. Cada molde ELIGE cuáles tiene asignadas (`prod.telas_asignadas`).
-# El alto de la hoja lo pone la config de tizada (nesting). La asignación pieza→tela viene del
-# PEDIDO (override por pieza), ya no del config del molde.
+# TELAS — YA NO se crean acá: vienen de la API EXTERNA del WMS (stock). De nuestro lado sólo se pone
+# el ANCHO (cm) por tela (la API lo trae dentro del texto, inconsistente). El catálogo local guarda:
+#   cat["telas_ancho"] = {str(id_api): ancho_cm}   ← lo ÚNICO que edita el usuario
+#   cat["telas"]        = último fetch mergeado {id,nombre,ancho_cm,codigo,moneda,precio}  ← cache/offline
+# `_config_produccion` lee cat["telas"] → la generación anda aun sin red. La api-key vive en
+# config_externo.json (NO versionado) o en la env EXTERNAL_API_KEY. Los GRUPOS combinables siguen.
+_TELAS_MEM = {"ts": 0.0, "data": None}     # cache en memoria del fetch (evita pegarle a la API en cada request)
+_TELAS_TTL = 300                            # segundos
+_UA_TELAS = "TIZADAPRO/1.0"                 # Cloudflare bloquea el UA por defecto de Python (ver _UA_PUB)
+
+
+def _config_externo():
+    """(url, key) de la API de telas. Prioridad: env EXTERNAL_TELAS_URL/EXTERNAL_API_KEY; si no,
+    config_externo.json (no versionado). Nunca hardcodeado en el repo."""
+    url = os.environ.get("EXTERNAL_TELAS_URL")
+    key = os.environ.get("EXTERNAL_API_KEY")
+    if not (url and key):
+        try:
+            cfg = json.load(open(os.path.join(AQUI, "config_externo.json"), encoding="utf-8"))
+            url = url or cfg.get("telas_api_url")
+            key = key or cfg.get("telas_api_key")
+        except Exception:
+            pass
+    return (url or "https://user.com.uy/api/external/telas"), key
+
+
+def _ancho_de_descripcion(desc):
+    """Mejor esfuerzo: saca el ancho (cm) del texto ('(1,60)', '1,68 m', 'Parisien 1,60'…). None si no hay."""
+    m = re.search(r'(\d+)[.,](\d{1,2})', str(desc or ""))
+    if not m:
+        return None
+    try:
+        val = float(m.group(1) + "." + m.group(2))
+        return round(val * 100.0, 1) if val < 10 else round(val, 1)   # metros→cm (heurística)
+    except Exception:
+        return None
+
+
+def _fetch_telas_externas():
+    """GET a la API externa del WMS. Devuelve (telas|None, error|None). UA custom (Cloudflare)."""
+    url, key = _config_externo()
+    if not key:
+        return None, "falta la api-key (config_externo.json o env EXTERNAL_API_KEY)"
+    try:
+        import urllib.request
+        rq = urllib.request.Request(url, headers={"x-api-key": key, "User-Agent": _UA_TELAS, "Accept": "application/json"})
+        with urllib.request.urlopen(rq, timeout=20) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        arr = data.get("data") if isinstance(data, dict) else data
+        telas = []
+        for t in (arr or []):
+            telas.append({"id": str(t.get("id")), "nombre": str(t.get("descripcion") or t.get("id") or "").strip(),
+                          "codigo": str(t.get("codigoArticulo") or ""), "moneda": t.get("moneda"), "precio": t.get("precioBase")})
+        return telas, None
+    except Exception as e:
+        return None, str(e)
+
+
+def _telas_merge(cat, telas_api):
+    """Aplica el ancho LOCAL (cat['telas_ancho']) a cada tela de la API. Default: parseado del texto o 180."""
+    anchos = cat.get("telas_ancho") or {}
+    out = []
+    for t in telas_api:
+        a = anchos.get(str(t["id"]))
+        if a is None:
+            a = _ancho_de_descripcion(t["nombre"]) or 180.0
+        out.append({**t, "ancho_cm": float(a)})
+    return out
+
+
+def _telas_efectivas(cat, forzar=False):
+    """Telas para usar = API + ancho local. Cache en memoria (TTL) + persistencia en cat['telas'] para
+    que la generación (lee cat['telas']) y la UI anden aun sin red / sin re-fetch."""
+    now = time.time()
+    if forzar or _TELAS_MEM["data"] is None or (now - _TELAS_MEM["ts"] > _TELAS_TTL):
+        telas_api, _err = _fetch_telas_externas()
+        if telas_api is not None:
+            _TELAS_MEM["data"] = telas_api
+            _TELAS_MEM["ts"] = now
+    telas_api = _TELAS_MEM["data"]
+    if telas_api is None:                       # sin red y sin cache → lo último persistido en cat['telas']
+        return list(cat.get("telas") or [])
+    merged = _telas_merge(cat, telas_api)
+    if merged != (cat.get("telas") or []):      # persistir sólo si cambió
+        cat["telas"] = merged
+        _guardar_catalogo(cat)
+    return merged
+
+
 @app.get("/api/telas")
 def get_telas():
     cat = _cargar_catalogo()
-    return jsonify({"telas": cat.get("telas", []), "grupos": cat.get("grupos_telas", [])})
+    return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
+
+
+@app.post("/api/telas/refrescar")
+def refrescar_telas():
+    """Fuerza re-consulta a la API externa (botón «Actualizar telas del sistema»)."""
+    cat = _cargar_catalogo()
+    telas_api, err = _fetch_telas_externas()
+    if telas_api is None:
+        return jsonify({"error": f"No se pudo consultar la API de telas: {err}"}), 502
+    _TELAS_MEM["data"] = telas_api
+    _TELAS_MEM["ts"] = time.time()
+    return jsonify({"telas": _telas_efectivas(cat, forzar=False), "grupos": cat.get("grupos_telas", []), "count": len(telas_api)})
+
+
+@app.post("/api/telas/ancho")
+def set_tela_ancho():
+    """Guarda el ANCHO (cm) local de una tela de la API. Es lo único editable de nuestro lado."""
+    cuerpo = request.get_json(force=True) or {}
+    tid = str(cuerpo.get("id") or "").strip()
+    if not tid:
+        return jsonify({"error": "falta id"}), 400
+    ancho = max(1.0, float(cuerpo.get("ancho_cm", 180) or 180))
+    cat = _cargar_catalogo()
+    anchos = cat.get("telas_ancho") or {}
+    anchos[tid] = ancho
+    cat["telas_ancho"] = anchos
+    for t in (cat.get("telas") or []):          # reflejar en la tela cacheada
+        if str(t.get("id")) == tid:
+            t["ancho_cm"] = ancho
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "id": tid, "ancho_cm": ancho})
 
 
 @app.post("/api/telas")
 def set_telas():
+    """Ya NO crea telas (vienen de la API). Sólo administra los GRUPOS combinables."""
     cuerpo = request.get_json(force=True) or {}
     cat = _cargar_catalogo()
-    if isinstance(cuerpo.get("telas"), list):
-        telas = []
-        for t in cuerpo["telas"]:
-            nom = str(t.get("nombre", "")).strip()
-            if not nom:
-                continue
-            telas.append({"id": t.get("id") or ("tl_" + uuid.uuid4().hex[:8]),
-                          "nombre": nom, "ancho_cm": max(1.0, float(t.get("ancho_cm", 180) or 180))})
-        cat["telas"] = telas
     if isinstance(cuerpo.get("grupos"), list):
         grupos = []
         for g in cuerpo["grupos"]:
@@ -3949,8 +4056,8 @@ def set_telas():
                            "nombre": str(g.get("nombre", "")).strip() or "Grupo",
                            "telas": [str(x) for x in (g.get("telas") or [])]})
         cat["grupos_telas"] = grupos
-    _guardar_catalogo(cat)
-    return jsonify({"telas": cat.get("telas", []), "grupos": cat.get("grupos_telas", [])})
+        _guardar_catalogo(cat)
+    return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
 
 
 @app.post("/api/productos/telas_asignadas")

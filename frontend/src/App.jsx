@@ -2834,6 +2834,8 @@ export default function App() {
   // TELAS: registro GLOBAL (nombre + ancho) + grupos combinables. La asignación pieza→tela vive
   // en el PEDIDO (telaBaseMolde/telaPorPieza, declarados abajo tras `_wiz`).
   const [telasReg, setTelasReg] = useState({ telas: [], grupos: [] });
+  const [telaFiltroCfg, setTelaFiltroCfg] = useState('');                          // buscador de telas en Config
+  const [telasRefrescando, setTelasRefrescando] = useState(false);                 // trayendo telas de la API del sistema
   const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
@@ -3582,10 +3584,31 @@ export default function App() {
     } catch (e) { console.error('telas', e); }
   };
   const guardarTelas = async (telas, grupos) => {
+    // Las telas ya NO se crean acá (vienen de la API del sistema); esto sólo guarda los GRUPOS.
     try {
-      const r = await fetch('/api/telas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telas, grupos }) });
-      if (r.ok) { setTelasReg(await r.json()); showMsg('Telas guardadas ✓'); }
-    } catch (e) { showError('No se pudieron guardar las telas'); }
+      const r = await fetch('/api/telas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grupos }) });
+      if (r.ok) { setTelasReg(await r.json()); showMsg('Grupos guardados ✓'); }
+    } catch (e) { showError('No se pudieron guardar los grupos'); }
+  };
+  // Re-consulta la API del sistema (stock) y trae las telas activas.
+  const refrescarTelas = async () => {
+    setTelasRefrescando(true);
+    try {
+      const r = await fetch('/api/telas/refrescar', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      setTelasReg({ telas: d.telas || [], grupos: d.grupos || [] });
+      showMsg(`Telas actualizadas ✓ (${d.count ?? (d.telas || []).length})`);
+    } catch (e) { showError('No se pudo actualizar las telas del sistema: ' + (e.message || e)); }
+    finally { setTelasRefrescando(false); }
+  };
+  // Guarda el ANCHO (cm) local de una tela de la API (lo único editable de nuestro lado).
+  const guardarTelaAncho = async (id, ancho) => {
+    const a = Math.max(1, parseFloat(String(ancho).replace(',', '.')) || 180);
+    try {
+      const r = await fetch('/api/telas/ancho', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ancho_cm: a }) });
+      if (r.ok) setTelasReg(prev => ({ ...prev, telas: (prev.telas || []).map(t => String(t.id) === String(id) ? { ...t, ancho_cm: a } : t) }));
+    } catch (e) { showError('No se pudo guardar el ancho'); }
   };
   const guardarTelasAsignadas = async (pid, telaIds) => {
     try {
@@ -13421,7 +13444,6 @@ export default function App() {
             {adminSubView === 'telas' && (() => {
               const inS = { height: 36, fontSize: 13, padding: '0 10px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
               const T = telasReg.telas || [], G = telasReg.grupos || [];
-              const setT = (ts) => setTelasReg({ ...telasReg, telas: ts });
               const setG = (gs) => setTelasReg({ ...telasReg, grupos: gs });
               return (
                 <div className="panel animate-fade">
@@ -13429,43 +13451,63 @@ export default function App() {
                     <button className="btn ghost" onClick={() => setAdminSubView('dashboard')} style={{ fontSize: 12.5, padding: '6px 12px' }}>⬅ Volver al Panel de Configuración</button>
                   </div>
                   <div className="panel-header"><h2 style={{ fontSize: 20, fontWeight: 700 }}>Telas</h2></div>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 18px', lineHeight: 1.5, maxWidth: 640 }}>
-                    Registrá tus telas (nombre + ancho de rollo). El <b>alto</b> de la hoja se configura en Reglas de Nesting. Después armá <b>grupos</b> de telas que se pueden combinar entre sí en una misma prenda.
+                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 16px', lineHeight: 1.5, maxWidth: 660 }}>
+                    Las telas vienen del <b>sistema de stock</b> — acá no se crean ni se borran. De este lado sólo ponés el <b>ancho de rollo (cm)</b> de cada una, que es lo que usa la tizada. El <b>alto</b> de la hoja se configura en Reglas de Nesting.
                   </p>
 
-                  <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Telas registradas</h3>
-                  {T.map((t, i) => (
-                    <div key={t.id || i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                      <input value={t.nombre} onChange={e => { const ts = [...T]; ts[i] = { ...ts[i], nombre: e.target.value }; setT(ts); }} placeholder="Nombre de la tela" style={{ ...inS, flex: 1, maxWidth: 260 }} />
-                      <input type="number" value={t.ancho_cm} onChange={e => { const ts = [...T]; ts[i] = { ...ts[i], ancho_cm: e.target.value }; setT(ts); }} placeholder="Ancho" style={{ ...inS, width: 100 }} />
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>cm de ancho</span>
-                      <button className="btn ghost" onClick={() => setT(T.filter((_, j) => j !== i))} title="Quitar" style={{ padding: '4px 9px' }}>✕</button>
-                    </div>
-                  ))}
-                  <button className="btn ghost" onClick={() => setT([...T, { id: 'tl_n' + Date.now(), nombre: '', ancho_cm: 180 }])} style={{ marginTop: 4, fontSize: 12.5 }}>+ Agregar tela</button>
+                  {(() => {
+                    const f = telaFiltroCfg.trim().toLowerCase();
+                    const Tf = f ? T.filter(t => (t.nombre || '').toLowerCase().includes(f)) : T;
+                    const setAnchoLocal = (id, val) => setTelasReg(prev => ({ ...prev, telas: (prev.telas || []).map(t => String(t.id) === String(id) ? { ...t, ancho_cm: val } : t) }));
+                    return (
+                      <>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                          <button className="btn ghost" onClick={refrescarTelas} disabled={telasRefrescando} style={{ fontSize: 12.5 }}>{telasRefrescando ? 'Actualizando…' : '↻ Actualizar telas del sistema'}</button>
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T.length} tela{T.length === 1 ? '' : 's'}</span>
+                          <input placeholder="Buscar tela…" value={telaFiltroCfg} onChange={e => setTelaFiltroCfg(e.target.value)} style={{ ...inS, flex: 1, minWidth: 180, maxWidth: 300 }} />
+                        </div>
+                        <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden', maxHeight: 420, overflowY: 'auto' }}>
+                          {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>{T.length ? 'Ninguna tela coincide con la búsqueda.' : 'No hay telas. Tocá «Actualizar telas del sistema».'}</div>}
+                          {Tf.map(t => (
+                            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <span style={{ width: 14, height: 14, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
+                              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
+                              {t.codigo ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>#{t.codigo}</span> : null}
+                              <input type="number" min="1" value={t.ancho_cm ?? ''} placeholder="ancho"
+                                onChange={e => setAnchoLocal(t.id, e.target.value)}
+                                onBlur={e => guardarTelaAncho(t.id, e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                style={{ ...inS, width: 84, textAlign: 'right' }} />
+                              <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 24 }}>cm</span>
+                            </div>
+                          ))}
+                        </div>
 
-                  <h3 style={{ fontSize: 14, fontWeight: 700, margin: '26px 0 6px' }}>Grupos combinables</h3>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 12, maxWidth: 640 }}>Tocá las telas que se pueden combinar entre sí. En el pedido, una pieza podrá cambiar su tela por otra del mismo grupo (si está asignada al molde).</p>
-                  {G.map((g, gi) => (
-                    <div key={g.id || gi} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, marginBottom: 10 }}>
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
-                        <input value={g.nombre} onChange={e => { const gs = [...G]; gs[gi] = { ...gs[gi], nombre: e.target.value }; setG(gs); }} placeholder="Nombre del grupo" style={{ ...inS, flex: 1, maxWidth: 260 }} />
-                        <button className="btn ghost" onClick={() => setG(G.filter((_, j) => j !== gi))} title="Quitar grupo" style={{ padding: '4px 9px' }}>✕</button>
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {T.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Registrá telas arriba primero.</span>}
-                        {T.map(t => {
-                          const on = (g.telas || []).includes(t.id);
-                          return <button key={t.id} onClick={() => { const gs = [...G]; const s = new Set(g.telas || []); on ? s.delete(t.id) : s.add(t.id); gs[gi] = { ...gs[gi], telas: [...s] }; setG(gs); }} style={{ padding: '4px 11px', borderRadius: 999, border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>{t.nombre || '(sin nombre)'}</button>;
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                  <button className="btn ghost" onClick={() => setG([...G, { id: 'gt_n' + Date.now(), nombre: '', telas: [] }])} style={{ fontSize: 12.5 }}>+ Agregar grupo</button>
+                        <h3 style={{ fontSize: 14, fontWeight: 700, margin: '26px 0 6px' }}>Grupos combinables</h3>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 12, maxWidth: 660 }}>Tocá las telas que se pueden combinar entre sí. En el pedido, una pieza podrá cambiar su tela por otra del mismo grupo (si está asignada al molde). Usá el buscador de arriba para filtrar la lista.</p>
+                        {G.map((g, gi) => (
+                          <div key={g.id || gi} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                            <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
+                              <input value={g.nombre} onChange={e => { const gs = [...G]; gs[gi] = { ...gs[gi], nombre: e.target.value }; setG(gs); }} placeholder="Nombre del grupo" style={{ ...inS, flex: 1, maxWidth: 260 }} />
+                              <button className="btn ghost" onClick={() => setG(G.filter((_, j) => j !== gi))} title="Quitar grupo" style={{ padding: '4px 9px' }}>✕</button>
+                            </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 160, overflowY: 'auto' }}>
+                              {T.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Actualizá las telas primero.</span>}
+                              {Tf.map(t => {
+                                const on = (g.telas || []).map(String).includes(String(t.id));
+                                return <button key={t.id} onClick={() => { const gs = [...G]; const s = new Set((g.telas || []).map(String)); on ? s.delete(String(t.id)) : s.add(String(t.id)); gs[gi] = { ...gs[gi], telas: [...s] }; setG(gs); }} style={{ padding: '4px 11px', borderRadius: 999, border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>{t.nombre || '(sin nombre)'}</button>;
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                        <button className="btn ghost" onClick={() => setG([...G, { id: 'gt_n' + Date.now(), nombre: '', telas: [] }])} style={{ fontSize: 12.5 }}>+ Agregar grupo</button>
 
-                  <div style={{ marginTop: 26, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
-                    <button className="btn success" onClick={() => guardarTelas(T, G)} style={{ padding: '9px 20px', fontWeight: 700 }}>Guardar telas</button>
-                  </div>
+                        <div style={{ marginTop: 26, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
+                          <button className="btn success" onClick={() => guardarTelas(T, G)} style={{ padding: '9px 20px', fontWeight: 700 }}>Guardar grupos</button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })()}
