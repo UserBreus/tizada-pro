@@ -3944,6 +3944,20 @@ def _config_externo():
     return (url or "https://user.com.uy/api/external/telas"), key
 
 
+# HOSTS a los que se permite mandar la api-key. SEGURIDAD: aunque alguien logre cambiar la URL
+# (endpoint de conexión), la key NUNCA se envía a un host fuera de esta lista → evita que un atacante
+# apunte la URL a su servidor y capture la key en el header. Ampliá acá si cambia el dominio del WMS.
+_HOSTS_TELAS_OK = {"user.com.uy", "www.user.com.uy", "localhost", "127.0.0.1"}
+
+
+def _host_permitido(url):
+    try:
+        import urllib.parse
+        return (urllib.parse.urlparse(str(url or "")).hostname or "").lower() in _HOSTS_TELAS_OK
+    except Exception:
+        return False
+
+
 def _ancho_de_descripcion(desc):
     """Mejor esfuerzo: saca el ancho (cm) del texto ('(1,60)', '1,68 m', 'Parisien 1,60'…). None si no hay."""
     m = re.search(r'(\d+)[.,](\d{1,2})', str(desc or ""))
@@ -3961,6 +3975,8 @@ def _fetch_telas_externas():
     url, key = _config_externo()
     if not key:
         return None, "falta la api-key (config_externo.json o env EXTERNAL_API_KEY)"
+    if not _host_permitido(url):     # SEGURIDAD: no mandar la key a un host desconocido
+        return None, "host de la API no permitido (no se envía la clave)"
     try:
         import urllib.request
         rq = urllib.request.Request(url, headers={"x-api-key": key, "User-Agent": _UA_TELAS, "Accept": "application/json"})
@@ -4059,6 +4075,8 @@ def set_telas_conexion():
     cuerpo = request.get_json(force=True) or {}
     url = str(cuerpo.get("url") or "").strip()
     key = str(cuerpo.get("key") or "").strip()
+    if url and not _host_permitido(url):   # SEGURIDAD: no dejar apuntar la URL a un host desconocido
+        return jsonify({"error": "El dominio de la API no está permitido. Sólo se admite el del sistema (user.com.uy)."}), 400
     ruta = os.path.join(AQUI, "config_externo.json")
     try:
         cfg = json.load(open(ruta, encoding="utf-8"))
