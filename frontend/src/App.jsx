@@ -365,7 +365,7 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   const invalido = options.length > 0 && _nv !== '' && !options.some(o => _norm(o) === _nv);
   return (
     <div ref={wrapRef} title={invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
-      style={{ position: 'relative', boxShadow: invalido ? 'inset 0 0 0 1.5px rgba(255,90,90,0.8)' : 'none', background: invalido ? 'rgba(255,70,70,0.08)' : 'transparent' }}>
+      style={{ position: 'relative', width: '100%', boxShadow: invalido ? 'inset 0 0 0 1.5px rgba(255,90,90,0.8)' : 'none', background: invalido ? 'rgba(255,70,70,0.08)' : 'transparent' }}>
       <input ref={inputRef} value={value} placeholder="escribí o elegí…" size={1} data-plc={cellId}
         // NO se abre el desplegable con sólo hacer foco/clic: así seleccionar una celda o
         // agarrar el tirador para ARRASTRAR no lo dispara. Se abre con la flecha ▾, al ESCRIBIR,
@@ -7263,10 +7263,16 @@ export default function App() {
       return nf;
     }));
   };
+  // Entra a editar la celda (r,c) CONGELANDO su valor actual en `plEdit.val`: ese valor congelado es
+  // el que define el ancho de la columna mientras se edita, así NO cambia de tamaño al escribir/editar.
+  const entrarEdicion = (r, c) => {
+    const col = cols[c];
+    setPlEdit({ r, c, val: col ? String(filas[r]?.[col.id] ?? '') : '' });
+  };
   // Teclado sobre una celda SELECCIONADA (no en edición). Vive en el div estático de cada celda.
   const onSelKey = (e, r, c) => {
     const k = e.key;
-    if (k === 'Enter' || k === 'F2') { e.preventDefault(); setPlEdit({ r, c }); return; }
+    if (k === 'Enter' || k === 'F2') { e.preventDefault(); entrarEdicion(r, c); return; }
     if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); _borrarRangoSel(); return; }
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(k)) {
       e.preventDefault();
@@ -8175,17 +8181,56 @@ export default function App() {
                               const esDropdown = c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable';
                               const dropdownOpts = c.role === 'talle' ? (estado?.talles || []) : c.role === 'diseno' ? disenosPedido.map(d => d.nombre) : opts;
                               const _esNum = c.role === 'numero';
-                              const _chars = _colEsTexto(c) ? [..._textoCol(c, cellValue)] : [];
-                              const _hayFalta = _chars.some(faltaEnFuente);
                               const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
                                 fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };
-                              let control;
+                              // ── CAPA ESTÁTICA: define el ANCHO de la columna SIEMPRE (en selección y en edición). ──
+                              // Mientras se edita, muestra el valor CONGELADO (plEdit.val) y queda invisible (visibility:hidden):
+                              // sólo reserva ancho → la columna NO cambia de tamaño al entrar a editar ni al escribir.
+                              const dispVal = editando ? (plEdit.val ?? '') : cellValue;
+                              const _dispChars = _colEsTexto(c) ? [..._textoCol(c, dispVal)] : [];
+                              const _dispFalta = !editando && _dispChars.some(faltaEnFuente);
+                              const _invalido = esDropdown && String(dispVal) !== '' && dropdownOpts.length > 0
+                                && !dropdownOpts.some(o => String(o).toLowerCase() === String(dispVal).toLowerCase());
+                              const dispBase = { display: 'flex', alignItems: 'center', height: 32, padding: '6px 8px', fontSize: 13,
+                                boxSizing: 'border-box', width: '100%', outline: 'none', cursor: 'default', whiteSpace: 'nowrap', overflow: 'hidden',
+                                fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal',
+                                textTransform: c.role === 'nombre' ? 'uppercase' : 'none',
+                                color: _invalido ? '#ff8a8a' : 'var(--text-primary)',
+                                visibility: editando ? 'hidden' : 'visible' };
+                              let contenido;
+                              if (esDropdown) {
+                                contenido = (<>
+                                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{dispVal}</span>
+                                  <span style={{ color: 'var(--cmyk-cyan)', fontSize: 10, marginLeft: 4, flexShrink: 0 }}>▾</span>
+                                </>);
+                              } else if (tipo === 'toggle') {
+                                contenido = <span>{dispVal || toggleOpts[0]}</span>;
+                              } else if (_dispFalta) {
+                                contenido = _dispChars.map((ch, k) => (
+                                  <span key={k} style={faltaEnFuente(ch) ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 } : undefined}>{ch}</span>
+                                ));
+                              } else {
+                                contenido = <span>{dispVal}</span>;
+                              }
+                              const estatico = (
+                                <div data-plc={editando ? undefined : plc} tabIndex={editando ? undefined : 0}
+                                  onFocus={editando ? undefined : foco}
+                                  onKeyDown={editando ? undefined : (e) => onSelKey(e, i, ci)}
+                                  onDoubleClick={editando ? undefined : () => entrarEdicion(i, ci)}
+                                  title={_invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
+                                  aria-hidden={editando ? true : undefined}
+                                  style={dispBase}>
+                                  {contenido}
+                                </div>
+                              );
+                              // ── CAPA EDITOR: sólo al editar, SUPERPUESTA en absoluto (no aporta ancho a la tabla). ──
+                              let editor = null;
                               if (editando) {
-                                // ── MODO EDICIÓN (doble-click / Enter): recién acá aparece el control para escribir/elegir ──
+                                let ctrl;
                                 if (esDropdown) {
-                                  control = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit />;
+                                  ctrl = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit />;
                                 } else if (tipo === 'toggle') {
-                                  control = (
+                                  ctrl = (
                                     <div data-plc={plc} tabIndex={0} ref={(el) => el && el.focus()} onKeyDown={(e) => onEditKey(e, i, ci)}
                                       style={{ display: 'flex', height: 32, width: '100%', minWidth: 0, outline: 'none' }}>
                                       {toggleOpts.map(o => {
@@ -8200,12 +8245,14 @@ export default function App() {
                                     </div>
                                   );
                                 } else {
-                                  // Texto libre. Espejo de caracteres faltantes en rojo (la fuente del diseño no los tiene).
-                                  control = (
-                                    <div style={{ position: 'relative' }}>
-                                      {_hayFalta && (
+                                  // Texto libre. Espejo de caracteres faltantes en rojo (usa el valor VIVO).
+                                  const _lc = _colEsTexto(c) ? [..._textoCol(c, cellValue)] : [];
+                                  const _lf = _lc.some(faltaEnFuente);
+                                  ctrl = (
+                                    <div style={{ position: 'relative', width: '100%', height: 32 }}>
+                                      {_lf && (
                                         <div aria-hidden style={{ ..._fBase, position: 'absolute', inset: 0, whiteSpace: 'pre', overflow: 'hidden', pointerEvents: 'none' }}>
-                                          {_chars.map((ch, k) => (
+                                          {_lc.map((ch, k) => (
                                             <span key={k} style={faltaEnFuente(ch)
                                               ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 }
                                               : { color: 'var(--text-primary)' }}>{ch}</span>
@@ -8221,49 +8268,17 @@ export default function App() {
                                         onFocus={foco}
                                         onBlur={() => setPlEdit(prev => (prev && prev.r === i && prev.c === ci ? null : prev))}
                                         onKeyDown={(e) => onEditKey(e, i, ci)}
-                                        title={_hayFalta ? 'La fuente del diseño no tiene los caracteres en rojo' : undefined}
+                                        title={_lf ? 'La fuente del diseño no tiene los caracteres en rojo' : undefined}
                                         style={{ ..._fBase, width: '100%', minWidth: 0, border: 'none', background: 'none', outline: 'none', position: 'relative',
-                                          color: _hayFalta ? 'transparent' : 'var(--text-primary)', caretColor: 'var(--text-primary)',
+                                          color: _lf ? 'transparent' : 'var(--text-primary)', caretColor: 'var(--text-primary)',
                                           textTransform: c.role === 'nombre' ? 'uppercase' : 'none' }}
                                         onChange={(e) => updateFila(i, c.id, e.target.value)}
                                       />
                                     </div>
                                   );
                                 }
-                              } else {
-                                // ── MODO SELECCIÓN (Sheets): celda ESTÁTICA, sin cursor. 1 click selecciona. ──
-                                const _invalido = esDropdown && String(cellValue) !== '' && dropdownOpts.length > 0
-                                  && !dropdownOpts.some(o => String(o).toLowerCase() === String(cellValue).toLowerCase());
-                                const dispBase = { display: 'flex', alignItems: 'center', height: 32, padding: '6px 8px', fontSize: 13,
-                                  boxSizing: 'border-box', width: '100%', outline: 'none', cursor: 'default', whiteSpace: 'nowrap', overflow: 'hidden',
-                                  fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal',
-                                  textTransform: c.role === 'nombre' ? 'uppercase' : 'none',
-                                  color: _invalido ? '#ff8a8a' : 'var(--text-primary)' };
-                                let contenido;
-                                if (esDropdown) {
-                                  contenido = (<>
-                                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{cellValue}</span>
-                                    <span style={{ color: 'var(--cmyk-cyan)', fontSize: 10, marginLeft: 4, flexShrink: 0 }}>▾</span>
-                                  </>);
-                                } else if (tipo === 'toggle') {
-                                  contenido = <span>{cellValue || toggleOpts[0]}</span>;
-                                } else if (_hayFalta) {
-                                  contenido = _chars.map((ch, k) => (
-                                    <span key={k} style={faltaEnFuente(ch) ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 } : undefined}>{ch}</span>
-                                  ));
-                                } else {
-                                  contenido = <span>{cellValue}</span>;
-                                }
-                                control = (
-                                  <div data-plc={plc} tabIndex={0}
-                                    onFocus={foco}
-                                    onKeyDown={(e) => onSelKey(e, i, ci)}
-                                    onDoubleClick={() => setPlEdit({ r: i, c: ci })}
-                                    title={_invalido ? 'Valor no válido — elegí uno de la lista' : undefined}
-                                    style={dispBase}>
-                                    {contenido}
-                                  </div>
-                                );
+                                // La capa editor cubre la celda (fondo del sistema para tapar la estática de atrás).
+                                editor = <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex', background: 'var(--bg-primary)' }}>{ctrl}</div>;
                               }
                               // Borde accent SOLO en los lados externos del rango → recuadro único.
                               const bs = [];
@@ -8288,7 +8303,8 @@ export default function App() {
                                   style={{ position: 'relative', padding: 0, borderLeft: '1px solid rgba(255,255,255,0.04)',
                                     boxShadow: bs.length ? bs.join(', ') : 'none',
                                     background: enFill ? 'rgba(0,216,245,0.20)' : (enSel ? 'rgba(0,216,245,0.10)' : 'transparent') }}>
-                                  {control}
+                                  {estatico}
+                                  {editor}
                                   {esHandle && (
                                     // Tirador de relleno: un poco más grande y con «hitbox» propio → fácil de agarrar
                                     // para ARRASTRAR sin tocar la celda (que ya no abre el desplegable con el clic).
