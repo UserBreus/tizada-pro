@@ -4277,6 +4277,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     try:
         ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, FUENTES, tmp,
                                 mapeo_arte=mapeo, solo_piezas=True,
+                                asignacion_tela=(var or {}).get("asig"),
+                                telas_cfg=(var or {}).get("telas"),
                                 borde_corte=(prod or {}).get("borde_corte"),
                                 etiqueta=(prod or {}).get("etiqueta"),
                                 editables_cfg=_editables_cfg(prod, diseno or "principal"),
@@ -4290,7 +4292,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
                     if solo and nom not in solo:
                         continue
                     piezas.append({"nombre": nom, "w_cm": round(pz["w"] / MP.CM, 1),
-                                   "h_cm": round(pz["h"] / MP.CM, 1), "pdf": pz["doc"].tobytes()})
+                                   "h_cm": round(pz["h"] / MP.CM, 1), "pdf": pz["doc"].tobytes(),
+                                   "tela": str(_tela) if _tela else ""})   # en qué tela va (grupo del motor)
                 except Exception:
                     pass
                 finally:
@@ -4368,10 +4371,14 @@ def generar_multi():
         # La VARIABLE que usa el pedido para este molde (la 1ª fila que la trae): es LO MISMO que
         # arma la tizada → la ficha usa esa variable + su diseño para el molde guía.
         _vf = next((t for t in translated if t.get("variante_clave")), None)
+        # Para la FICHA: además de la variable, guardo la asignación de telas por pieza (`asig`) y su
+        # config (`_telas`) → el molde guía puede decir en qué tela va cada pieza (igual que la tizada).
+        _vfd = {"asig": asig, "telas": _telas}
         if _vf:
-            _var_ficha[pid] = {"clave": _vf["variante_clave"],
-                               "piezas": _vf.get("variante_piezas"),
-                               "diseno": _vf.get("_diseno") or default_diseno}
+            _vfd.update({"clave": _vf["variante_clave"],
+                         "piezas": _vf.get("variante_piezas"),
+                         "diseno": _vf.get("_diseno") or default_diseno})
+        _var_ficha[pid] = _vfd
         por_diseno = OrderedDict()
         for pr in translated:
             por_diseno.setdefault(pr.get("_diseno") or "principal", []).append(pr)

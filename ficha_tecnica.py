@@ -116,8 +116,8 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
     ancho = A4_W - 2 * MARGEN
     w_cel = ancho / cols
     gap = 5                              # aire entre tarjetas
-    h_cel = 132                          # alto de la celda (tarjeta + rótulo)
-    h_card = h_cel - 18                  # alto de la tarjeta (la imagen); el rótulo es sólo el nombre
+    h_cel = 134                          # alto de la celda (tarjeta + rótulo)
+    h_card = h_cel - 28                  # alto de la tarjeta (la imagen); el rótulo es nombre + tela
     restantes = []
     fila_y = y
     i = 0
@@ -152,9 +152,12 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
             finally:
                 if src is not None:
                     src.close()
-            # Sólo el NOMBRE general de la pieza (sin número). La MEDIDA no se muestra: no se necesita.
+            # Rótulo: NOMBRE general de la pieza (sin número) + en qué TELA va. La medida no se muestra.
             nom = _generico(pz.get("nombre") or "—")
-            _texto(page, cx + gap + 2, fila_y + h_card + 13, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
+            _texto(page, cx + gap + 2, fila_y + h_card + 12, nom, size=7.5, bold=True, color=NEGRO, max_w=w_cel - 2 * gap - 2)
+            tela = str(pz.get("tela") or "").strip()
+            if tela:
+                _texto(page, cx + gap + 2, fila_y + h_card + 22, "Tela: " + tela, size=6.5, bold=True, color=ACENTO, max_w=w_cel - 2 * gap - 2)
         fila_y += h_cel
     return fila_y, restantes
 
