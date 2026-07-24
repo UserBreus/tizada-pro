@@ -9705,7 +9705,7 @@ export default function App() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12 }}>
                           <span style={{ fontWeight: 700, fontSize: 14 }}>Tela {hoja.tela}</span>
                           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                            {hoja.paginas} pág(s) · {(hoja.consumo_cm / 100).toFixed(2)} m · {hoja.aprovechamiento}% eficiencia
+                            <b style={{ color: 'var(--accent)' }}>{hoja.ancho_cm} cm de ancho</b> · {hoja.paginas} pág(s) · {(hoja.consumo_cm / 100).toFixed(2)} m de largo · {hoja.aprovechamiento}% eficiencia
                           </span>
                           <a 
                             href={rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${hoja.archivo}`)} 
