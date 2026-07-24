@@ -5607,8 +5607,9 @@ export default function App() {
         Object.entries(ov).forEach(([pz, tid]) => { if (tid && _telaNom[tid]) o[pz] = _telaNom[tid]; });
         if (Object.keys(o).length) asignaciones[pid] = o;
       });
-      // Planilla EXACTA para la ficha técnica: las columnas (con su label) y las filas tal cual.
-      const planilla = { columnas: (cols || []).map(c => ({ id: c.id, label: c.label || c.id })), filas };
+      // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
+      // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
+      const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas };
       const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
