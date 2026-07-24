@@ -3431,14 +3431,11 @@ export default function App() {
     if (filasInitRef.current === productosCat.activo) return;
     filasInitRef.current = productosCat.activo;
 
+    // Filas VACÍAS: todas las celdas en blanco (sin talle/manga/diseño precargados). El usuario las
+    // completa a mano; no se arrastra ningún dato de ejemplo ni de pedidos anteriores.
     const defaultRow = {};
-    cols.forEach(c => {
-      if (c.role === 'talle') defaultRow[c.id] = (estado?.talles?.[0] || 'M');
-      else if (c.role === 'manga') defaultRow[c.id] = 'corta';
-      else if (c.role === 'diseno') defaultRow[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');   // arranca con el diseño que se editó en el Arte
-      else defaultRow[c.id] = '';
-    });
-    setFilas(Array.from({ length: 5 }, () => ({ ...defaultRow })));   // 5 filas predeterminadas, siempre
+    cols.forEach(c => { defaultRow[c.id] = ''; });
+    setFilas(Array.from({ length: 5 }, () => ({ ...defaultRow })));   // 5 filas vacías, siempre
   }, [productosCat.activo, productosCat.productos, estado?.talles]);
 
   // Limpieza única al abrir: borrar del navegador cualquier planilla vieja guardada por versiones
@@ -7117,15 +7114,10 @@ export default function App() {
     }
   };
 
-  // Garments list helper
+  // Garments list helper — la fila nueva sale VACÍA (todas las celdas en blanco).
   const addPrenda = () => {
     const newRow = {};
-    cols.forEach(c => {
-      if (c.role === 'talle') newRow[c.id] = (estado?.talles?.[0] || 'M');
-      else if (c.role === 'manga') newRow[c.id] = 'corta';
-      else if (c.role === 'diseno') newRow[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');   // fila nueva → el diseño PREPARADO en el Arte (no el 1º de la lista, que puede ser otro/vacío)
-      else newRow[c.id] = '';
-    });
+    cols.forEach(c => { newRow[c.id] = ''; });
     setFilas([...filas, newRow]);
   };
 
@@ -7170,12 +7162,8 @@ export default function App() {
     if (tipo === 'toggle' || c.role === 'manga') return opts.length >= 2 ? opts : (c.role === 'manga' ? ['corta', 'larga'] : ['A', 'B']);
     return null;   // nombre / número / texto: valor libre
   };
-  const _defaultRow = () => { const r = {}; cols.forEach(c => {
-    if (c.role === 'talle') r[c.id] = (estado?.talles?.[0] || 'M');
-    else if (c.role === 'manga') r[c.id] = 'corta';
-    else if (c.role === 'diseno') r[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');
-    else r[c.id] = '';
-  }); return r; };
+  // Fila nueva = fila VACÍA (todas las celdas en blanco), igual que la planilla al abrir.
+  const _defaultRow = () => { const r = {}; cols.forEach(c => { r[c.id] = ''; }); return r; };
   const importarCSVTexto = (texto) => {
     const rows = _parseCSV(texto);
     if (!rows.length) { showError('El CSV está vacío.'); return; }
@@ -7337,12 +7325,7 @@ export default function App() {
       setFilas(next);
     } else {
       const newRow = {};
-      cols.forEach(c => {
-        if (c.role === 'talle') newRow[c.id] = (estado?.talles?.[0] || 'M');
-        else if (c.role === 'manga') newRow[c.id] = 'corta';
-        else if (c.role === 'diseno') newRow[c.id] = ((disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0])?.nombre || 'Principal');   // fila nueva → el diseño PREPARADO en el Arte (no el 1º de la lista, que puede ser otro/vacío)
-        else newRow[c.id] = '';
-      });
+      cols.forEach(c => { newRow[c.id] = ''; });   // fila vacía (coherente con la planilla en blanco)
       setFilas([newRow]);
     }
   };
@@ -7411,29 +7394,6 @@ export default function App() {
     return () => window.removeEventListener('mouseup', onUp);
   }, [plFill, filas, cols, plSel, plSelEnd]);
 
-  const loadExample = () => {
-    const tallesDisponibles = estado?.talles?.length ? estado.talles : ["S", "M", "L", "XL"];
-    const nombresEjemplo = ["FELIPE", "PIPOWSKI", "RODRIGUEZ", "DIEGO", "SILVA", "TECHERA"];
-    
-    const examples = Array.from({ length: 5 }).map((_, idx) => {
-      const row = {};
-      cols.forEach(c => {
-        if (c.role === 'talle') {
-          row[c.id] = tallesDisponibles[idx % tallesDisponibles.length];
-        } else if (c.role === 'manga') {
-          row[c.id] = idx % 2 === 0 ? 'corta' : 'larga';
-        } else if (c.role === 'nombre') {
-          row[c.id] = nombresEjemplo[idx % nombresEjemplo.length];
-        } else if (c.role === 'numero') {
-          row[c.id] = (idx * 5 + 3).toString();
-        } else {
-          row[c.id] = `Ejemplo ${idx + 1}`;
-        }
-      });
-      return row;
-    });
-    setFilas(examples);
-  };
 
   // PUERTA DE LOGIN: si el sistema de usuarios está activo y no hay sesión, se muestra el login y
   // NADA más. Mientras se consulta /yo no se pinta nada (evita el parpadeo login→app). Si la API
@@ -8286,9 +8246,6 @@ export default function App() {
                         title="Cuántas filas agregar"
                         style={{ width: 54, textAlign: 'center', padding: '0 6px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, fontWeight: 700, outline: 'none' }} />
                     </div>
-                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={loadExample}>
-                      Cargar Ejemplo
-                    </button>
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => document.getElementById('csvPedidoInput')?.click()}
                       title="Cargar filas desde un archivo CSV (Excel). En talle/diseño/manga solo acepta valores válidos; si no coinciden, deja la celda vacía.">
                       ⬆ Importar CSV
