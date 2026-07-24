@@ -2837,8 +2837,8 @@ export default function App() {
   const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
-  const [telaModalOpen, setTelaModalOpen] = useState(false);                       // modal "Asignar tela al pedido"
-  const [telaBusqueda, setTelaBusqueda] = useState('');                            // buscador del modal de telas
+  const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
+  const [telaElegida, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
   const [trabajoId, setTrabajoId] = useState(null);
   const [trabajoEstado, setTrabajoEstado] = useState(null);
   // Avance del wizard guardado (para no perderlo al recargar la página). Se lee
@@ -8486,31 +8486,72 @@ export default function App() {
                 const _telaBaseId = telaBaseMolde[_id] || (_telasMol[0] && _telasMol[0].id) || null;
                 const _telaDeGen = (gen) => (telaPorPieza[_id] || {})[gen] || _telaBaseId;
                 const _telaActiva = telaModoVer && _telasMol.length > 0;
+                // Telas EN USO (asignadas a las piezas: la base + los overrides) → la vista «Telas asignadas».
+                const _usoIds = new Set([_telaBaseId, ...Object.values(telaPorPieza[_id] || {})].filter(Boolean));
+                const _telasEnUso = (telasReg.telas || []).filter(t => _usoIds.has(t.id));
+                // Asigna `telaId` a las piezas seleccionadas (o base para TODAS si no hay selección).
+                // Limpia la selección para poder seguir asignando otra tela sin salir del modo.
                 const aplicarTela = (telaId) => {
+                  if (!telaId) return;
                   if (telaSelPiezas.length) {   // hay piezas seleccionadas → override solo a esas
                     setTelaPorPieza(m => { const mm = { ...(m[_id] || {}) }; telaSelPiezas.forEach(g => { if (telaId === _telaBaseId) delete mm[g]; else mm[g] = telaId; }); return { ...m, [_id]: mm }; });
                   } else {                        // sin selección → tela base para TODAS (limpia overrides)
                     setTelaBaseMolde(m => ({ ...m, [_id]: telaId })); setTelaPorPieza(m => ({ ...m, [_id]: {} }));
                   }
-                  setTelaModalOpen(false); setTelaSelPiezas([]); setTelaBusqueda('');
+                  setTelaSelPiezas([]); setTelaElegida(null);
                 };
                 const panelTelaJSX = (
-                  <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Telas</div>
-                      <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11 }} onClick={() => { setTelaModoVer(false); setTelaSelPiezas([]); }}>← Volver</button>
-                    </div>
-                    <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {_telasMol.map(t => (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border-light)' }}>
-                          <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
-                          <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
-                          {t.id === _telaBaseId && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>base</span>}
+                  <div style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    {!telaAsignMode ? (
+                      /* ── VISTA 1: sólo las telas ASIGNADAS (en uso en las piezas) ── */
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Telas asignadas</div>
+                          <button className="btn ghost" style={{ padding: '4px 8px', fontSize: 11 }} title="Cerrar" onClick={() => { setTelaModoVer(false); setTelaSelPiezas([]); setTelaElegida(null); }}>✕</button>
                         </div>
-                      ))}
-                    </div>
-                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '8px 0', lineHeight: 1.4 }}>{telaSelPiezas.length ? `${telaSelPiezas.length} pieza(s) seleccionada(s)` : 'Tocá piezas para elegirlas; tocá vacío para deseleccionar.'}</div>
-                    <button className="btn primary" style={{ width: '100%' }} onClick={() => setTelaModalOpen(true)}>Asignar tela</button>
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {_telasEnUso.map(t => (
+                            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border-light)' }}>
+                              <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
+                              <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
+                              {t.id === _telaBaseId && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>base</span>}
+                            </div>
+                          ))}
+                          {_telasEnUso.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px', lineHeight: 1.4 }}>Todavía no hay telas asignadas.</div>}
+                        </div>
+                        <button className="btn primary" style={{ width: '100%', marginTop: 8 }} onClick={() => { setTelaAsignMode(true); setTelaElegida(null); setTelaSelPiezas([]); }}>Asignar tela</button>
+                      </>
+                    ) : (
+                      /* ── VISTA 2: elegir una tela → tocar piezas → Asignar (Volver arriba) ── */
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <button className="btn ghost" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => { setTelaAsignMode(false); setTelaElegida(null); setTelaSelPiezas([]); }}>← Volver</button>
+                          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Asignar tela</div>
+                        </div>
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.35 }}>1) Elegí una tela · 2) Tocá las piezas · 3) Asignar</div>
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {_telasMol.map(t => {
+                            const on = telaElegida === t.id;
+                            return (
+                              <button key={t.id} type="button" onClick={() => setTelaElegida(t.id)}
+                                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                                  border: on ? '1.5px solid var(--accent)' : '1px solid var(--border-light)', background: on ? 'rgba(0,216,245,0.10)' : 'transparent', color: '#fff' }}>
+                                <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
+                                <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
+                                {t.id === _telaBaseId && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>base</span>}
+                              </button>
+                            );
+                          })}
+                          {_telasMol.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px' }}>No hay telas. Registralas en Config › Telas.</div>}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: telaSelPiezas.length ? 'var(--accent)' : 'var(--text-muted)', margin: '8px 0', lineHeight: 1.4 }}>
+                          {telaSelPiezas.length ? `${telaSelPiezas.length} pieza(s): ${telaSelPiezas.join(', ')}` : 'Sin piezas seleccionadas → se aplica a TODAS.'}
+                        </div>
+                        <button className="btn primary" style={{ width: '100%' }} disabled={!telaElegida} onClick={() => aplicarTela(telaElegida)}>
+                          Asignar{telaSelPiezas.length ? ` (${telaSelPiezas.length} pieza${telaSelPiezas.length > 1 ? 's' : ''})` : ' a todas'}
+                        </button>
+                      </>
+                    )}
                   </div>
                 );
                 return (
@@ -8610,7 +8651,7 @@ export default function App() {
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
                           </button>
                           {_telasMol.length > 0 && (
-                            <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); }} title="Ver y asignar telas por pieza">
+                            <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); }} title="Ver y asignar telas por pieza">
                               <Icon name="telas" style={{ width: 13, height: 13 }} /> Ver telas de pieza
                             </button>
                           )}
@@ -8646,34 +8687,7 @@ export default function App() {
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Cargando el molde…</div>
                   )}
 
-                  {/* Modal "Asignar tela al pedido": buscador + telas usables en el pedido */}
-                  {telaModalOpen && (
-                    <div onClick={() => setTelaModalOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-                      <div onClick={e => e.stopPropagation()} style={{ width: 420, maxWidth: '92vw', maxHeight: '80vh', background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <h3 style={{ fontSize: 16, fontWeight: 700 }}>Asignar tela al pedido</h3>
-                          <button className="btn ghost" style={{ padding: '4px 9px' }} onClick={() => setTelaModalOpen(false)}>✕</button>
-                        </div>
-                        <div style={{ fontSize: 12.5, color: telaSelPiezas.length ? 'var(--accent)' : 'var(--text-secondary)', lineHeight: 1.45 }}>
-                          {telaSelPiezas.length ? `Se aplicará a ${telaSelPiezas.length} pieza(s): ${telaSelPiezas.join(', ')}` : 'No hay piezas seleccionadas → se aplicará a TODAS las piezas.'}
-                        </div>
-                        <input autoFocus placeholder="Buscar tela…" value={telaBusqueda} onChange={e => setTelaBusqueda(e.target.value)}
-                          style={{ height: 38, fontSize: 13, padding: '0 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
-                        <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {_telasMol.filter(t => t.nombre.toLowerCase().includes(telaBusqueda.toLowerCase())).map(t => (
-                            <button key={t.id} onClick={() => aplicarTela(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'transparent', color: '#fff', textAlign: 'left' }}>
-                              <span style={{ width: 16, height: 16, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
-                              <span style={{ fontSize: 13.5, fontWeight: 600 }}>{t.nombre}</span>
-                              {t.id === _telaBaseId && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>base actual</span>}
-                            </button>
-                          ))}
-                          {_telasMol.filter(t => t.nombre.toLowerCase().includes(telaBusqueda.toLowerCase())).length === 0 && (
-                            <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 10 }}>No hay telas. Registralas en Config › Telas y asignalas al molde.</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  {/* (La asignación de tela por pieza ahora vive dentro del panel lateral, en 2 vistas.) */}
 
                   {/* Barra inferior fija */}
                   <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
