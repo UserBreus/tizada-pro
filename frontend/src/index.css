@@ -1270,3 +1270,10 @@ td.num {
   92% { rotate: 360deg; filter: drop-shadow(0 0 4px rgba(0, 243, 255, 0.4)); }
   100% { rotate: 360deg; filter: none; }
 }
+
+/* Visor de la ficha técnica: scroll fino del sistema también en Firefox (el ::-webkit- ya lo
+   cubre en Chrome/Edge). */
+.ficha-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cmyk-cyan) rgba(0, 0, 0, 0.3);
+}

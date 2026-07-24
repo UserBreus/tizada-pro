@@ -4548,7 +4548,8 @@ def generar_multi():
                 if os.path.exists(_fp):
                     res["ficha"] = "FICHA_TECNICA.pdf"
                     try:
-                        _fd = fitz.open(_fp); res["ficha_paginas"] = _fd.page_count; _fd.close()
+                        import fitz as _fz
+                        _fd = _fz.open(_fp); res["ficha_paginas"] = _fd.page_count; _fd.close()
                     except Exception:
                         res["ficha_paginas"] = 1
             except Exception as _ef:
@@ -4622,6 +4623,35 @@ def fuente_chars():
 @app.get("/trabajos/<tid>/<archivo>")
 def descargar(tid, archivo):
     return send_from_directory(os.path.join(TRABAJOS, tid), archivo)
+
+
+@app.get("/api/trabajos/<tid>/pagina_img/<archivo>")
+def pagina_img(tid, archivo):
+    """Una página de un PDF del trabajo como PNG (para MOSTRARLO en el visor con el look del sistema:
+    así el scroll es el de la app, no el del visor de PDF del navegador). `pi`=página, `z`=zoom."""
+    import io as _io
+    import fitz
+    try:
+        pi = int(request.args.get("pi", 0))
+    except Exception:
+        pi = 0
+    try:
+        z = max(1.0, min(3.0, float(request.args.get("z", 2))))
+    except Exception:
+        z = 2.0
+    ruta = os.path.join(TRABAJOS, tid, archivo)
+    if not os.path.exists(ruta):
+        return jsonify({"error": "no existe"}), 404
+    try:
+        d = fitz.open(ruta)
+        if pi < 0 or pi >= d.page_count:
+            pi = 0
+        pix = d[pi].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
+        png = pix.tobytes("png")
+        d.close()
+        return send_file(_io.BytesIO(png), mimetype="image/png")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.get("/api/trabajos/<tid>/mesa/<archivo>")

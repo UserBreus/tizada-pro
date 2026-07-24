@@ -1608,40 +1608,45 @@ function DetalleFuente({ f, onVolver }) {
   );
 }
 
-/** VISOR de la FICHA TÉCNICA en el mismo espacio: muestra el PDF embebido (con los controles
- *  nativos del navegador para imprimir y descargar todo) + una barra propia para bajar el PDF
- *  completo o SÓLO una hoja. La descarga por hoja reusa el endpoint de mesas (`?pi=<página>`). */
+/** VISOR de la FICHA TÉCNICA, integrado al diseño del sistema: las páginas se muestran como
+ *  imágenes en un contenedor con el SCROLL del sistema (no el del visor de PDF del navegador), y
+ *  los botones usan los estilos de la app (sin recuadros). Descargar todo / una hoja / imprimir. */
 function VisorFicha({ id, archivo, paginas }) {
-  const iframeRef = React.useRef(null);
   const urlPdf = rutaApi(`/trabajos/${id}/${archivo}`);
+  const imgPag = (pi) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
+  const printRef = React.useRef(null);
   const imprimir = () => {
-    // Imprime el PDF que se está viendo (el visor nativo del iframe).
-    try { iframeRef.current?.contentWindow?.focus(); iframeRef.current?.contentWindow?.print(); }
-    catch { window.open(urlPdf, '_blank'); }   // si el navegador bloquea el print del iframe, se abre aparte
+    // iframe oculto con el PDF real → impresión nítida; si el navegador lo bloquea, se abre aparte.
+    try { printRef.current?.contentWindow?.focus(); printRef.current?.contentWindow?.print(); }
+    catch { window.open(urlPdf, '_blank'); }
   };
-  const bt = { padding: '8px 14px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-    border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 };
   return (
     <div className="animate-fade">
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-        <a href={urlPdf} download="Ficha_tecnica.pdf" style={{ ...bt, borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-          <Icon name="productos" style={{ width: 14, height: 14 }} /> Descargar todo el PDF
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        <a href={urlPdf} download="Ficha_tecnica.pdf" className="btn ghost" style={{ padding: '8px 14px', fontSize: 13, color: 'var(--accent)' }}>
+          <Icon name="download" style={{ width: 15, height: 15 }} /> Descargar todo
         </a>
-        <button type="button" onClick={imprimir} style={bt}>🖨 Imprimir</button>
-        {paginas > 1 && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>o una sola hoja:</span>}
+        <button type="button" onClick={imprimir} className="btn ghost" style={{ padding: '8px 14px', fontSize: 13 }}>
+          🖨 Imprimir
+        </button>
+        {paginas > 1 && <span style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 4px' }}>una hoja:</span>}
         {paginas > 1 && Array.from({ length: paginas }, (_, i) => (
-          <a key={i} href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} style={bt} title={`Descargar la hoja ${i + 1}`}>
-            Hoja {i + 1} ⬇
-          </a>
+          <a key={i} href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} className="btn ghost"
+            style={{ padding: '8px 12px', fontSize: 13 }} title={`Descargar la hoja ${i + 1}`}>Hoja {i + 1}</a>
         ))}
       </div>
-      {/* PDF embebido: el visor del navegador ya trae imprimir y descargar. #toolbar=1 lo deja visible. */}
-      <iframe ref={iframeRef} title="Ficha técnica" src={urlPdf + '#toolbar=1&navpanes=0'}
-        style={{ width: '100%', height: '75vh', minHeight: 520, border: '1px solid var(--border-light)', borderRadius: 12, background: '#fff' }} />
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 8 }}>
-        Desde el visor de arriba también podés imprimir o descargar con los botones del navegador.
+      {/* Las páginas como imágenes → el scroll es el del sistema (cyan/magenta). Cada hoja, una
+          "lámina" blanca centrada con sombra, sobre el fondo de la app. */}
+      <div className="ficha-scroll" style={{ maxHeight: '74vh', overflowY: 'auto', padding: '4px 2px',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
+        {Array.from({ length: paginas }, (_, i) => (
+          <img key={i} src={imgPag(i)} alt={`Hoja ${i + 1}`} loading="lazy"
+            style={{ width: '100%', maxWidth: 720, height: 'auto', borderRadius: 10, background: '#fff',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
+        ))}
       </div>
+      <iframe ref={printRef} title="imprimir" src={urlPdf} style={{ display: 'none' }} />
     </div>
   );
 }
