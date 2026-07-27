@@ -2847,6 +2847,8 @@ export default function App() {
   const [telasCfgPiezas, setTelasCfgPiezas] = useState([]);                        // piezas elegidas ([] = todas)
   const [telasCfgVar, setTelasCfgVar] = useState('');                              // variable elegida ('' = todo el molde)
   const [telaCfgVerId, setTelaCfgVerId] = useState(null);                          // tela tocada en la lista → se pinta en sus piezas
+  const [telaCfgModalOpen, setTelaCfgModalOpen] = useState(false);                 // modal «Seleccionar tela» (tarjetas)
+  const [telaCfgModalBuscar, setTelaCfgModalBuscar] = useState('');                // buscador dentro del modal
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
@@ -10329,14 +10331,17 @@ export default function App() {
                                   {telasCfgModo === 'asignar' && (
                                     <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} onClick={() => { setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>← Volver</button>
                                   )}
-                                  <input placeholder="Buscar tela…" value={telasCfgBuscar} onChange={e => setTelasCfgBuscar(e.target.value)} style={{ ...inTS, flex: 1, minWidth: 170 }} />
+                                  {/* El buscador de la lista sólo tiene sentido en modo VER: en asignar
+                                      las telas se eligen en el modal, que trae el suyo. */}
+                                  {telasCfgModo === 'ver' && (
+                                    <input placeholder="Buscar tela…" value={telasCfgBuscar} onChange={e => setTelasCfgBuscar(e.target.value)} style={{ ...inTS, flex: 1, minWidth: 170 }} />
+                                  )}
                                   {telasCfgModo === 'ver'
                                     ? <button className="btn primary" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} onClick={() => { setTelasCfgModo('asignar'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>Asignar</button>
-                                    : <button className="btn success" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} disabled={!telasCfgSel.length} onClick={asignar}>
-                                        Asignar {telasCfgSel.length ? `${telasCfgSel.length} ` : ''}
-                                        {telasCfgPiezas.length ? `a ${telasCfgPiezas.length} pieza(s)`
-                                          : telasCfgVar ? `a la variable (${piezasMostradas.length} pza${piezasMostradas.length === 1 ? '' : 's'})`
-                                          : 'a todas las piezas'}
+                                    : <button className="btn success" style={{ flex: 1, padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }}
+                                        onClick={() => { setTelaCfgModalBuscar(''); setTelaCfgModalOpen(true); }}>
+                                        <Icon name="telas" style={{ width: 13, height: 13 }} /> Seleccionar tela
+                                        {telasCfgPiezas.length ? ` · ${telasCfgPiezas.length} pza${telasCfgPiezas.length > 1 ? 's' : ''}` : (telasCfgVar ? ' · toda la variable' : ' · todas las piezas')}
                                       </button>}
                                   <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>✕</button>
                                 </div>
@@ -10362,13 +10367,14 @@ export default function App() {
                                   </div>
                                 )}
 
-                                {/* Lista de telas. En modo VER son SÓLO las asignadas: al tocar una, sus
-                                    piezas se pintan con su color en el visor (volver a tocarla, apaga). */}
-                                <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                                {/* Lista de telas ASIGNADAS (sólo en modo VER): al tocar una, sus piezas
+                                    se pintan con su color en el visor (volver a tocarla, apaga).
+                                    En modo ASIGNAR las telas se eligen en el modal de tarjetas. */}
+                                <div style={{ maxHeight: 340, overflowY: 'auto', display: telasCfgModo === 'ver' ? 'block' : 'none' }}>
                                   {Tf.length === 0 && (
                                     <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>
                                       {telasCfgBuscar.trim() ? 'Ninguna tela coincide con la búsqueda.'
-                                        : telasCfgModo === 'ver' ? 'Todavía no hay telas asignadas acá. Tocá «Asignar».' : 'No hay telas.'}
+                                        : 'Todavía no hay telas asignadas acá. Tocá «Asignar».'}
                                     </div>
                                   )}
                                   {Tf.map(t => {
@@ -10424,6 +10430,63 @@ export default function App() {
                                 )}
                               </div>
                             )}
+
+                            {/* MODAL «Seleccionar tela»: todas las telas en tarjetas cuadradas, con
+                                buscador arriba. Se tildan las que se quieran y «Asignar» las aplica
+                                a las piezas elegidas (o a todas si no se eligió ninguna). */}
+                            <Modal open={telaCfgModalOpen} onClose={() => setTelaCfgModalOpen(false)}
+                              titulo="Seleccionar tela"
+                              subtitulo={telasCfgPiezas.length
+                                ? `Se van a asignar a ${telasCfgPiezas.length} pieza(s): ${telasCfgPiezas.join(', ')}`
+                                : (telasCfgVar ? `Se van a asignar a TODAS las piezas de la variable (${piezasMostradas.length})` : 'Se van a asignar a TODAS las piezas del molde')}
+                              maxWidth={860}>
+                              {(() => {
+                                const q = telaCfgModalBuscar.trim().toLowerCase();
+                                const lista = q ? T.filter(t => (t.nombre || '').toLowerCase().includes(q)) : T;
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                    <input autoFocus placeholder="Buscar tela…" value={telaCfgModalBuscar} onChange={e => setTelaCfgModalBuscar(e.target.value)}
+                                      style={{ height: 38, fontSize: 13, padding: '0 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                                    <div style={{ maxHeight: '52vh', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))', gap: 10, paddingRight: 2 }}>
+                                      {lista.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 8 }}>Ninguna tela coincide.</div>}
+                                      {lista.map(t => {
+                                        const on = telasCfgSel.includes(String(t.id));
+                                        const col = colorDeTela(t.id);
+                                        return (
+                                          <button key={t.id} type="button"
+                                            onClick={() => setTelasCfgSel(s => s.includes(String(t.id)) ? s.filter(x => x !== String(t.id)) : [...s, String(t.id)])}
+                                            title={t.nombre}
+                                            style={{ position: 'relative', aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-end',
+                                              padding: 0, borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'left', transition: 'all .15s',
+                                              border: on ? '2px solid var(--accent)' : '1px solid var(--border-light)',
+                                              background: 'rgba(255,255,255,0.02)', boxShadow: on ? '0 0 18px rgba(0,216,245,0.25)' : 'none' }}>
+                                            {/* Color de la tela: ocupa la tarjeta */}
+                                            <span style={{ position: 'absolute', inset: 0, background: col, opacity: on ? 0.5 : 0.28 }} />
+                                            {on && (
+                                              <span style={{ position: 'absolute', top: 7, right: 7, width: 21, height: 21, borderRadius: '50%', background: 'var(--accent)', color: '#001016', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, zIndex: 2 }}>✓</span>
+                                            )}
+                                            <span style={{ position: 'relative', zIndex: 1, padding: '8px 9px', background: 'linear-gradient(180deg, rgba(6,10,14,0), rgba(6,10,14,0.92) 55%)' }}>
+                                              <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.25, maxHeight: 30, overflow: 'hidden' }}>{t.nombre}</span>
+                                              <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>{t.ancho_cm} cm</span>
+                                            </span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--border-light)', paddingTop: 12 }}>
+                                      <span style={{ fontSize: 12.5, color: telasCfgSel.length ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
+                                        {telasCfgSel.length ? `${telasCfgSel.length} tela${telasCfgSel.length > 1 ? 's' : ''} elegida${telasCfgSel.length > 1 ? 's' : ''}` : 'Tocá las telas que quieras asignar'}
+                                      </span>
+                                      {telasCfgSel.length > 0 && <button className="btn ghost" style={{ padding: '5px 11px', fontSize: 11.5 }} onClick={() => setTelasCfgSel([])}>limpiar</button>}
+                                      <button className="btn success" style={{ marginLeft: 'auto', padding: '9px 22px', fontWeight: 700 }} disabled={!telasCfgSel.length}
+                                        onClick={async () => { await asignar(); setTelaCfgModalOpen(false); }}>
+                                        Asignar
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </Modal>
                           </div>
                         );
                       })()}
