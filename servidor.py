@@ -2918,7 +2918,11 @@ _ETIQUETA_DEFAULT = {
 }
 
 
-def _clamp_color(c, fb):
+# OJO con el NOMBRE: más abajo hay otro `_clamp_color(color)` (colores de editables, 1 argumento)
+# que PISABA a este —Python se queda con la última definición del módulo— y por eso guardar la
+# etiqueta tiraba siempre «_clamp_color() takes 1 positional argument but 2 were given» (400).
+def _clamp_color_etq(c, fb):
+    """Color CMYK de la ETIQUETA con valor por defecto (`fb`) si viene vacío o inválido."""
     try:
         col = [max(0.0, min(1.0, float(x))) for x in (c or fb)][:4]
     except (TypeError, ValueError):
@@ -2980,9 +2984,9 @@ def set_etiqueta():
                             for k, v in (cuerpo.get("posiciones") or {}).items() if isinstance(v, dict)},
             "align": cuerpo.get("align") if cuerpo.get("align") in ("izquierda", "centro", "derecha") else "centro",
             "size_mm": _num(cuerpo.get("size_mm"), 3.0, 1.0, 40.0),
-            "color": _clamp_color(cuerpo.get("color"), [0.15, 0.15, 0.15, 0.30]),
+            "color": _clamp_color_etq(cuerpo.get("color"), [0.15, 0.15, 0.15, 0.30]),
             "borde_activo": bool(cuerpo.get("borde_activo", True)),
-            "borde_color": _clamp_color(cuerpo.get("borde_color"), [0.01, 0.01, 0.01, 0.05]),
+            "borde_color": _clamp_color_etq(cuerpo.get("borde_color"), [0.01, 0.01, 0.01, 0.05]),
             "borde_mm": _num(cuerpo.get("borde_mm"), 1.0, 0.0, 10.0),
             "piezas_off": [str(p) for p in (cuerpo.get("piezas_off") or [])],
             # ZONAS de texto por pieza (dividir el contorno en tramos eligiendo esquinas):
