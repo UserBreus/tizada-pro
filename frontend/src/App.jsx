@@ -2837,7 +2837,14 @@ export default function App() {
   const [telaFiltroCfg, setTelaFiltroCfg] = useState('');                          // buscador de telas en Config
   const [telasRefrescando, setTelasRefrescando] = useState(false);                 // trayendo telas de la API del sistema
   const [telaConexion, setTelaConexion] = useState({ url: '', tiene_key: false, por_env: false });  // estado de la conexión con la API (sólo informativo)
-  const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición
+  const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición (unión plana)
+  // Disponibilidad de telas POR PIEZA del molde en edición: {todas:[id], por_pieza:{pieza:[id]}}.
+  const [telasCfgMolde, setTelasCfgMolde] = useState({ todas: [], por_pieza: {} });
+  const [telasPanelAbierto, setTelasPanelAbierto] = useState(false);               // «Mostrar telas asignadas»
+  const [telasCfgModo, setTelasCfgModo] = useState('ver');                         // 'ver' | 'asignar'
+  const [telasCfgBuscar, setTelasCfgBuscar] = useState('');                        // buscador de la lista
+  const [telasCfgSel, setTelasCfgSel] = useState([]);                              // telas tildadas para asignar
+  const [telasCfgPiezas, setTelasCfgPiezas] = useState([]);                        // piezas elegidas ([] = todas)
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
@@ -3643,10 +3650,21 @@ export default function App() {
       if (r.ok) setTelasReg(prev => ({ ...prev, telas: (prev.telas || []).map(t => String(t.id) === String(id) ? { ...t, ancho_cm: a } : t) }));
     } catch (e) { showError('No se pudo guardar el ancho'); }
   };
-  const guardarTelasAsignadas = async (pid, telaIds) => {
+  // Guarda la disponibilidad de telas del molde: `todas` (para todas las piezas) + `por_pieza`
+  // (telas EXTRA de esas piezas). Devuelve la config normalizada por el server.
+  const guardarTelasCfg = async (pid, cfg) => {
     try {
-      await fetch('/api/productos/telas_asignadas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: pid, telas: telaIds }) });
-    } catch (e) { showError('No se pudieron guardar las telas del molde'); }
+      const r = await fetch('/api/productos/telas_asignadas', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pid, todas: cfg.todas || [], por_pieza: cfg.por_pieza || {} })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      if (d.telas_cfg) setTelasCfgMolde(d.telas_cfg);
+      if (d.telas_asignadas) setTelasAsigMolde(d.telas_asignadas);
+      await fetchProductos();      // el catálogo en memoria queda al día (el Arte lee de ahí)
+      return d;
+    } catch (e) { showError('No se pudieron guardar las telas del molde: ' + (e.message || e)); }
   };
   // Color guía por tela (paleta fija, determinística por posición en el registro).
   const _PALETA_TELAS = ['#22d3ee', '#a78bfa', '#f472b6', '#facc15', '#34d399', '#fb923c', '#60a5fa', '#f87171', '#e879f9', '#4ade80'];
@@ -4668,6 +4686,14 @@ export default function App() {
     if (tabAjustesMolde === 'telas') {
       fetchTelas();
       setTelasAsigMolde(Array.isArray(activoProdDetalle?.telas_asignadas) ? activoProdDetalle.telas_asignadas : []);
+      // Disponibilidad por pieza. Los moldes viejos sólo tienen la lista plana → entra como «todas».
+      const tc = activoProdDetalle?.telas_cfg;
+      setTelasCfgMolde({
+        todas: Array.isArray(tc?.todas) ? tc.todas.map(String)
+          : (Array.isArray(activoProdDetalle?.telas_asignadas) ? activoProdDetalle.telas_asignadas.map(String) : []),
+        por_pieza: (tc && typeof tc.por_pieza === 'object' && tc.por_pieza) ? tc.por_pieza : {}
+      });
+      setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar('');
     }
   }, [tabAjustesMolde, activoProdDetalle]);
 
@@ -8577,10 +8603,28 @@ export default function App() {
                 const vfArte = verVariante ? (varianteFiltro(verVariante) || { show: new Set(), pos: new Map(), vb: null }) : null;
                 // ── TELA del pedido para este molde ──
                 const _molProd = productosCat.productos.find(p => p.id === _id) || {};
-                const _telasAsig = (telasReg.telas || []).filter(t => (_molProd.telas_asignadas || []).includes(t.id));
-                // Si el molde tiene telas asignadas → esas. Si NO (o el registro aún no cargó) → TODO el
-                // registro global, para que en el Arte SIEMPRE se pueda elegir la tela de cada pieza.
-                const _telasMol = _telasAsig.length ? _telasAsig : (telasReg.telas || []);
+                // DISPONIBILIDAD POR PIEZA (Config del molde): una pieza ofrece las telas de «todas»
+                // MÁS las suyas propias. Como la tela elegida se aplica a TODAS las piezas
+                // seleccionadas, se ofrece la INTERSECCIÓN de lo disponible en cada una (si no, se
+                // podría asignar a una pieza una tela que ahí no corresponde). Sin selección, se
+                // aplica a todas → sólo las de «todas».
+                const _tcfg = _molProd.telas_cfg || { todas: _molProd.telas_asignadas || [], por_pieza: {} };
+                const _todasIds = (_tcfg.todas || []).map(String);
+                const _porPz = _tcfg.por_pieza || {};
+                const _idsDisp = (() => {
+                  if (!telaSelPiezas.length) return _todasIds;
+                  let acc = null;
+                  telaSelPiezas.forEach(pz => {
+                    const s = new Set([..._todasIds, ...((_porPz[pz] || []).map(String))]);
+                    acc = acc === null ? s : new Set([...acc].filter(x => s.has(x)));
+                  });
+                  return [...(acc || new Set())];
+                })();
+                // Sin nada configurado en el molde → TODO el registro (así el Arte nunca queda sin telas).
+                const _hayCfgTelas = _todasIds.length > 0 || Object.keys(_porPz).length > 0;
+                const _telasMol = _hayCfgTelas
+                  ? (telasReg.telas || []).filter(t => _idsDisp.includes(String(t.id)))
+                  : (telasReg.telas || []);
                 // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
                 // `piezasArteGen` = las piezas que se VEN en el visor (misma fuente que se toca/pinta),
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
@@ -10100,28 +10144,159 @@ export default function App() {
                       {/* Contenido según pestaña activa */}
                       {tabAjustesMolde === 'telas' && (() => {
                         const T = telasReg.telas || [];
-                        const sel = new Set(telasAsigMolde);
-                        const toggle = (id) => { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); setTelasAsigMolde([...s]); guardarTelasAsignadas(activoProdDetalle?.id, [...s]); };
+                        const cfg = telasCfgMolde || { todas: [], por_pieza: {} };
+                        const todas = (cfg.todas || []).map(String);
+                        const porPieza = cfg.por_pieza || {};
+                        const setTodas = new Set(todas);
+                        // Piezas del molde por nombre GENÉRICO (sin el número), como el resto del sistema.
+                        const piezasMolde = [...new Set((etqData?.piezas || []).map((_p, i) => _genTelaP(_nombreDeIdx(i))))].filter(Boolean).sort();
+                        // En qué piezas está disponible cada tela: «todas» o la lista de piezas extra.
+                        const piezasDeTela = (id) => todas.includes(String(id))
+                          ? null                                                          // null = en todas
+                          : Object.keys(porPieza).filter(pz => (porPieza[pz] || []).map(String).includes(String(id)));
+                        // Telas disponibles en una pieza = todas ∪ extras de esa pieza.
+                        const telasDePieza = (pz) => [...new Set([...todas, ...((porPieza[pz] || []).map(String))])];
+                        const usadas = [...new Set([...todas, ...Object.values(porPieza).flat().map(String)])];
+                        const Tf = telasCfgBuscar.trim()
+                          ? T.filter(t => (t.nombre || '').toLowerCase().includes(telasCfgBuscar.trim().toLowerCase()))
+                          : T;
+                        const inTS = { height: 34, fontSize: 12.5, padding: '0 10px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
+                        // Asigna las telas TILDADAS a las piezas elegidas (o a todas si no se eligió ninguna).
+                        const asignar = async () => {
+                          if (!telasCfgSel.length) return;
+                          const next = { todas: [...todas], por_pieza: JSON.parse(JSON.stringify(porPieza)) };
+                          if (!telasCfgPiezas.length) {                    // → a TODAS las piezas
+                            telasCfgSel.forEach(id => { if (!next.todas.includes(String(id))) next.todas.push(String(id)); });
+                            // si una tela pasa a estar en todas, deja de ser «extra» de una pieza
+                            Object.keys(next.por_pieza).forEach(pz => {
+                              next.por_pieza[pz] = (next.por_pieza[pz] || []).filter(x => !next.todas.includes(String(x)));
+                              if (!next.por_pieza[pz].length) delete next.por_pieza[pz];
+                            });
+                          } else {                                          // → sólo a las piezas elegidas
+                            telasCfgPiezas.forEach(pz => {
+                              const act = new Set((next.por_pieza[pz] || []).map(String));
+                              telasCfgSel.forEach(id => { if (!next.todas.includes(String(id))) act.add(String(id)); });
+                              if (act.size) next.por_pieza[pz] = [...act]; else delete next.por_pieza[pz];
+                            });
+                          }
+                          await guardarTelasCfg(activoProdDetalle?.id, next);
+                          setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgModo('ver');
+                          showMsg('Telas asignadas ✓');
+                        };
+                        // Saca una tela de todo el molde (de «todas» y de cualquier pieza).
+                        const quitarTela = async (id) => {
+                          const next = { todas: todas.filter(x => String(x) !== String(id)), por_pieza: {} };
+                          Object.keys(porPieza).forEach(pz => {
+                            const r = (porPieza[pz] || []).map(String).filter(x => x !== String(id));
+                            if (r.length) next.por_pieza[pz] = r;
+                          });
+                          await guardarTelasCfg(activoProdDetalle?.id, next);
+                        };
                         return (
                           <div className="animate-fade" style={{ padding: 4 }}>
                             <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Telas asignadas a este molde</h3>
-                            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5, maxWidth: 620 }}>
-                              Elegí qué telas del registro están disponibles para este molde. En el pedido solo aparecerán estas (y las que combinen con la tela base). Las telas y los grupos se administran en <b>Configuración › Telas</b>.
+                            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5, maxWidth: 640 }}>
+                              Definí qué telas están <b>disponibles</b> para elegir en el pedido. Podés asignarlas a <b>todas las piezas</b> o sólo a <b>algunas</b>: una pieza ofrece las de «todas» <b>más</b> sus telas propias. Las telas se administran en <b>Configuración › Telas</b>.
                             </p>
                             {T.length === 0 ? (
-                              <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '16px 0' }}>No hay telas registradas todavía. Andá a Configuración › Telas para registrarlas.</div>
+                              <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '16px 0' }}>No hay telas registradas todavía. Andá a Configuración › Telas.</div>
+                            ) : !telasPanelAbierto ? (
+                              <button className="btn primary" style={{ padding: '10px 18px', fontWeight: 700 }} onClick={() => { setTelasPanelAbierto(true); setTelasCfgModo('ver'); }}>
+                                <Icon name="telas" style={{ width: 14, height: 14 }} /> Mostrar telas asignadas
+                                <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>({usadas.length})</span>
+                              </button>
                             ) : (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                {T.map(t => {
-                                  const on = sel.has(t.id);
-                                  return (
-                                    <button key={t.id} type="button" onClick={() => toggle(t.id)}
-                                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--success)' : 'var(--border-light)'), background: on ? 'rgba(16,185,129,0.1)' : 'transparent', color: on ? 'var(--success)' : 'var(--text-secondary)', fontSize: 13, fontWeight: 600 }}>
-                                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: on ? 'var(--success)' : 'rgba(255,255,255,0.15)' }} />
-                                      {t.nombre} <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>· {t.ancho_cm}cm</span>
-                                    </button>
-                                  );
-                                })}
+                              <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, overflow: 'hidden' }}>
+                                {/* Barra: buscador + Asignar (o Volver, en modo asignar) */}
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: 10, borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                                  {telasCfgModo === 'asignar' && (
+                                    <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} onClick={() => { setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>← Volver</button>
+                                  )}
+                                  <input placeholder="Buscar tela…" value={telasCfgBuscar} onChange={e => setTelasCfgBuscar(e.target.value)} style={{ ...inTS, flex: 1, minWidth: 170 }} />
+                                  {telasCfgModo === 'ver'
+                                    ? <button className="btn primary" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} onClick={() => { setTelasCfgModo('asignar'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>Asignar</button>
+                                    : <button className="btn success" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} disabled={!telasCfgSel.length} onClick={asignar}>
+                                        Asignar {telasCfgSel.length ? `${telasCfgSel.length} ` : ''}{telasCfgPiezas.length ? `a ${telasCfgPiezas.length} pieza(s)` : 'a todas las piezas'}
+                                      </button>}
+                                  <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>✕</button>
+                                </div>
+
+                                {/* En modo ASIGNAR: elegir a qué piezas va (vacío = todas) */}
+                                {telasCfgModo === 'asignar' && (
+                                  <div style={{ padding: 10, borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)' }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>
+                                      ¿A qué piezas? {telasCfgPiezas.length === 0 && <span style={{ color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}>· sin elegir ninguna = a TODAS</span>}
+                                    </div>
+                                    {piezasMolde.length === 0 ? (
+                                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No se pudieron leer las piezas del molde.</div>
+                                    ) : (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
+                                        {piezasMolde.map(pz => {
+                                          const on = telasCfgPiezas.includes(pz);
+                                          return (
+                                            <button key={pz} type="button" onClick={() => setTelasCfgPiezas(s => s.includes(pz) ? s.filter(x => x !== pz) : [...s, pz])}
+                                              style={{ padding: '4px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                                                border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                                              {pz}
+                                            </button>
+                                          );
+                                        })}
+                                        {telasCfgPiezas.length > 0 && (
+                                          <button className="btn ghost" style={{ padding: '3px 9px', fontSize: 11 }} onClick={() => setTelasCfgPiezas([])}>limpiar</button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Lista de telas */}
+                                <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+                                  {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>Ninguna tela coincide con la búsqueda.</div>}
+                                  {Tf.map(t => {
+                                    const enTodas = setTodas.has(String(t.id));
+                                    const pzs = piezasDeTela(t.id);
+                                    const asignada = enTodas || (pzs && pzs.length > 0);
+                                    const tildada = telasCfgSel.includes(String(t.id));
+                                    const modoA = telasCfgModo === 'asignar';
+                                    return (
+                                      <div key={t.id}
+                                        onClick={modoA ? () => setTelasCfgSel(s => s.includes(String(t.id)) ? s.filter(x => x !== String(t.id)) : [...s, String(t.id)]) : undefined}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: modoA ? 'pointer' : 'default', background: tildada ? 'rgba(0,216,245,0.08)' : 'transparent' }}>
+                                        {modoA && (
+                                          <span style={{ width: 15, height: 15, borderRadius: 4, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            border: '1.5px solid ' + (tildada ? 'var(--accent)' : 'var(--border-light)'), background: tildada ? 'var(--accent)' : 'transparent', color: '#001016', fontSize: 10, fontWeight: 900 }}>{tildada ? '✓' : ''}</span>
+                                        )}
+                                        <span style={{ width: 13, height: 13, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
+                                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
+                                        <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{t.ancho_cm}cm</span>
+                                        {/* Dónde está disponible */}
+                                        {enTodas
+                                          ? <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(16,185,129,0.15)', color: 'var(--success)', flexShrink: 0 }}>todas las piezas</span>
+                                          : (pzs && pzs.length)
+                                            ? <span title={pzs.join(', ')} style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(0,216,245,0.15)', color: 'var(--accent)', flexShrink: 0, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pzs.length} pieza{pzs.length > 1 ? 's' : ''}: {pzs.join(', ')}</span>
+                                            : <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>sin asignar</span>}
+                                        {!modoA && asignada && (
+                                          <button className="btn ghost" title="Quitar del molde" onClick={() => quitarTela(t.id)} style={{ padding: '2px 8px', fontSize: 12, color: 'var(--error)', flexShrink: 0 }}>✕</button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* Resumen por pieza (sólo si hay telas propias de alguna pieza) */}
+                                {telasCfgModo === 'ver' && Object.keys(porPieza).length > 0 && (
+                                  <div style={{ padding: 10, borderTop: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)' }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Piezas con telas propias</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                      {Object.keys(porPieza).sort().map(pz => (
+                                        <div key={pz} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                          <b style={{ color: '#fff' }}>{pz}</b>: {telasDePieza(pz).length} disponibles
+                                          <span style={{ color: 'var(--text-muted)' }}> ({todas.length} de todas + {(porPieza[pz] || []).length} propias)</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

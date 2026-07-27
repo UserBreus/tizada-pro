@@ -4177,18 +4177,51 @@ def set_telas():
     return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
 
 
+# TELAS DISPONIBLES POR PIEZA (config del molde). Modelo:
+#   prod["telas_cfg"] = {"todas": [telaId…],                 ← disponibles en TODAS las piezas
+#                        "por_pieza": {"Frente": [telaId…]}} ← telas EXTRA sólo para esas piezas
+# Disponible en una pieza = `todas` ∪ `por_pieza[pieza]`. Ej.: 10 telas a todas + 2 extra en 3 piezas
+# → esas 3 piezas ofrecen 12 y el resto 10. Las claves son el nombre GENÉRICO de la pieza (sin el
+# número final), igual que la asignación de tela del pedido.
+# COMPAT: los moldes viejos tienen `telas_asignadas` (lista plana) → se lee como `todas`.
+def _telas_cfg_prod(prod):
+    """Config de telas del molde, normalizada. Nunca revienta con datos viejos."""
+    tc = (prod or {}).get("telas_cfg")
+    if isinstance(tc, dict):
+        return {"todas": [str(x) for x in (tc.get("todas") or [])],
+                "por_pieza": {str(k): [str(x) for x in (v or [])]
+                              for k, v in (tc.get("por_pieza") or {}).items() if v}}
+    return {"todas": [str(x) for x in ((prod or {}).get("telas_asignadas") or [])], "por_pieza": {}}
+
+
 @app.post("/api/productos/telas_asignadas")
 def set_telas_asignadas():
-    """Telas (ids del registro global) disponibles para ESTE molde."""
+    """Telas (ids del registro global) disponibles para ESTE molde.
+    Cuerpo nuevo: {id, todas:[…], por_pieza:{pieza:[…]}}. Cuerpo viejo: {id, telas:[…]} (= `todas`)."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if not prod:
         return jsonify({"error": "Producto no encontrado"}), 404
-    prod["telas_asignadas"] = [str(t) for t in (cuerpo.get("telas") or [])]
+    if "todas" in cuerpo or "por_pieza" in cuerpo:
+        todas = [str(t) for t in (cuerpo.get("todas") or [])]
+        _st = set(todas)
+        por = {}
+        for k, v in (cuerpo.get("por_pieza") or {}).items():
+            # lo que ya está en `todas` no se repite como extra de la pieza
+            ids = [str(t) for t in (v or []) if str(t) not in _st]
+            if ids:
+                por[str(k)] = ids
+        prod["telas_cfg"] = {"todas": todas, "por_pieza": por}
+    else:                                          # forma vieja: una sola lista para todo el molde
+        prod["telas_cfg"] = {"todas": [str(t) for t in (cuerpo.get("telas") or [])], "por_pieza": {}}
+    # `telas_asignadas` se mantiene como la UNIÓN plana: lo que ya lee el resto del sistema
+    # (pedido/arte) sigue funcionando sin cambios mientras se migra.
+    cfg = prod["telas_cfg"]
+    prod["telas_asignadas"] = list(dict.fromkeys(cfg["todas"] + [t for ids in cfg["por_pieza"].values() for t in ids]))
     _guardar_catalogo(cat)
-    return jsonify({"ok": True, "telas_asignadas": prod["telas_asignadas"]})
+    return jsonify({"ok": True, "telas_cfg": cfg, "telas_asignadas": prod["telas_asignadas"]})
 
 
 def _config_produccion(pid=None):
@@ -5034,6 +5067,9 @@ def get_productos():
             # Telas (ids del registro global) asignadas a este molde → habilitan el
             # selector de tela por pieza en el pedido.
             "telas_asignadas": p.get("telas_asignadas") or [],
+            # Disponibilidad de telas POR PIEZA: {"todas":[…], "por_pieza":{pieza:[…]}}.
+            # Se deriva de `telas_asignadas` en los moldes viejos (ver `_telas_cfg_prod`).
+            "telas_cfg": _telas_cfg_prod(p),
         })
     return jsonify({
         "activo": cat["activo"],
