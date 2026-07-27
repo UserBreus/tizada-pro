@@ -4403,6 +4403,15 @@ export default function App() {
 
   const startDrag = (e, idx) => {
     if (e.button !== 0) return; // solo click izquierdo
+    // TELAS (eligiendo a qué piezas va la tela): tocar una pieza la selecciona/deselecciona, MISMO
+    // gesto que nombrar piezas o armar variables — se aprende una sola vez y se usa en todos lados.
+    // Se guarda por nombre GENÉRICO (sin el número), que es la clave de la config de telas.
+    if (tabAjustesMolde === 'telas' && telasCfgModo === 'asignar') {
+      const gen = ((etqNombres[idx] || etqData?.piezas?.[idx]?.nombre || '') + '').replace(/\s+\d+\s*$/, '').trim();
+      if (gen) setTelasCfgPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen]);
+      e.preventDefault();
+      return;
+    }
     // Asignando variantes POR PIEZAS: tocar una pieza la selecciona/deselecciona (mismo gesto
     // que el nombrado de piezas, para que se aprenda una sola vez).
     if (varPzModo) { toggleSelNombrar(idx); e.preventDefault(); return; }
@@ -10280,29 +10289,22 @@ export default function App() {
                                   <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>✕</button>
                                 </div>
 
-                                {/* En modo ASIGNAR: elegir a qué piezas va (vacío = todas) */}
+                                {/* En modo ASIGNAR: las piezas se eligen TOCÁNDOLAS EN EL VISOR (mismo
+                                    gesto que nombrar piezas / armar variables). Acá sólo el resumen. */}
                                 {telasCfgModo === 'asignar' && (
                                   <div style={{ padding: 10, borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)' }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>
-                                      ¿A qué piezas?{telasCfgPiezas.length === 0 && <span style={{ color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}> · sin elegir ninguna = {telasCfgVar ? 'a TODAS las de la variable' : 'a TODAS las piezas'}</span>}
-                                    </div>
-                                    {piezasMostradas.length === 0 ? (
-                                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{telasCfgVar ? 'Esta variable no tiene piezas.' : 'No se pudieron leer las piezas del molde.'}</div>
+                                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 6 }}>¿A qué piezas?</div>
+                                    {telasCfgPiezas.length === 0 ? (
+                                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                                        <b style={{ color: 'var(--accent)' }}>Tocá las piezas en el visor</b> para elegirlas.
+                                        <br /><span style={{ color: 'var(--text-muted)' }}>Si no tocás ninguna, la tela va a {telasCfgVar ? 'TODAS las piezas de la variable' : 'TODAS las piezas'}.</span>
+                                      </div>
                                     ) : (
-                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
-                                        {piezasMostradas.map(pz => {
-                                          const on = telasCfgPiezas.includes(pz);
-                                          return (
-                                            <button key={pz} type="button" onClick={() => setTelasCfgPiezas(s => s.includes(pz) ? s.filter(x => x !== pz) : [...s, pz])}
-                                              style={{ padding: '4px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                                                border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                                              {pz}
-                                            </button>
-                                          );
-                                        })}
-                                        {telasCfgPiezas.length > 0 && (
-                                          <button className="btn ghost" style={{ padding: '3px 9px', fontSize: 11 }} onClick={() => setTelasCfgPiezas([])}>limpiar</button>
-                                        )}
+                                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                                        <div style={{ flex: 1, fontSize: 12, color: 'var(--accent)', fontWeight: 600, lineHeight: 1.45 }}>
+                                          {telasCfgPiezas.length} pieza{telasCfgPiezas.length > 1 ? 's' : ''}: <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{telasCfgPiezas.join(', ')}</span>
+                                        </div>
+                                        <button className="btn ghost" style={{ padding: '3px 9px', fontSize: 11, flexShrink: 0 }} onClick={() => setTelasCfgPiezas([])}>limpiar</button>
                                       </div>
                                     )}
                                   </div>
@@ -12846,6 +12848,11 @@ export default function App() {
                                 let fillCol, badgeFill, textFill;
                                 // TELAS: al tocar una tela en la lista, sus piezas se pintan con el color
                                 // de esa tela y el resto queda neutro (se ve de un vistazo dónde va).
+                                // Eligiendo piezas para asignar tela: las tocadas van resaltadas.
+                                const _telaAsigPz = (tabAjustesMolde === 'telas' && telasCfgModo === 'asignar') ? (() => {
+                                  const gen = _genTelaP(etqNombres[p.idx] || p.name || '');
+                                  return telasCfgPiezas.includes(gen);
+                                })() : null;
                                 const _telaVerPz = (tabAjustesMolde === 'telas' && telaCfgVerId) ? (() => {
                                   const cfgT = telasCfgMolde || { todas: [], por_pieza: {} };
                                   const gen = _genTelaP(etqNombres[p.idx] || p.name || '');
@@ -12853,7 +12860,10 @@ export default function App() {
                                   const enPieza = ((cfgT.por_pieza || {})[gen] || []).map(String).includes(String(telaCfgVerId));
                                   return enTodas || enPieza;
                                 })() : null;
-                                if (_telaVerPz !== null) {
+                                if (_telaAsigPz !== null) {
+                                  if (_telaAsigPz) { fillCol = 'rgba(0,243,255,0.28)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
+                                  else { fillCol = 'rgba(255,255,255,0.04)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
+                                } else if (_telaVerPz !== null) {
                                   const c = colorDeTela(telaCfgVerId);
                                   if (_telaVerPz) { fillCol = c + '55'; badgeFill = c; textFill = '#0b0f14'; }
                                   else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
