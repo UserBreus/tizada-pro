@@ -1143,6 +1143,32 @@ def _en_hilo(fn):
 # actualización taller→publicado (protegida por su propio token X-Token-Act, no por sesión).
 _API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/")
 
+# PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
+# al servidor SIN pasar por nginx (localhost:8050 o la IP, típico al abrirlo en la propia máquina),
+# el frontend —compilado con base `/Tizadapro/`— pide `/Tizadapro/api/…` y nadie saca el prefijo:
+# Flask devolvía un 404/405 en HTML y el navegador tiraba «Unexpected token '<', "<!DOCTYPE"» (o sea,
+# el login y las telas fallaban sin dar explicación). Se saca acá para que ande con y sin nginx.
+#
+# Va como MIDDLEWARE WSGI y no como `before_request` a propósito: Flask resuelve la ruta ANTES de los
+# before_request, así que ahí ya sería tarde (el 404 estaría decidido).
+_PREFIJO_APP = "/" + (os.environ.get("TIZADA_PREFIJO") or "Tizadapro").strip("/")
+
+
+class _QuitarPrefijo:
+    def __init__(self, app_wsgi, prefijo):
+        self.app_wsgi, self.prefijo = app_wsgi, prefijo
+
+    def __call__(self, environ, start_response):
+        p = environ.get("PATH_INFO", "")
+        if self.prefijo and (p == self.prefijo or p.startswith(self.prefijo + "/")):
+            environ["PATH_INFO"] = p[len(self.prefijo):] or "/"
+            # SCRIPT_NAME = dónde vive la app → url_for/redirects siguen apuntando bien.
+            environ["SCRIPT_NAME"] = environ.get("SCRIPT_NAME", "") + self.prefijo
+        return self.app_wsgi(environ, start_response)
+
+
+app.wsgi_app = _QuitarPrefijo(app.wsgi_app, _PREFIJO_APP)
+
 
 @app.before_request
 def _guardia_moldes():
