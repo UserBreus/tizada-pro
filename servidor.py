@@ -4184,14 +4184,25 @@ def set_telas():
 # → esas 3 piezas ofrecen 12 y el resto 10. Las claves son el nombre GENÉRICO de la pieza (sin el
 # número final), igual que la asignación de tela del pedido.
 # COMPAT: los moldes viejos tienen `telas_asignadas` (lista plana) → se lee como `todas`.
+# `max_var` = {clave_variable: N} → TOPE de telas distintas que se pueden dejar disponibles para esa
+# variable (límite de la CONFIG, no del pedido). Sin entrada = sin tope.
 def _telas_cfg_prod(prod):
     """Config de telas del molde, normalizada. Nunca revienta con datos viejos."""
     tc = (prod or {}).get("telas_cfg")
     if isinstance(tc, dict):
+        mv = {}
+        for k, v in (tc.get("max_var") or {}).items():
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                mv[str(k)] = n
         return {"todas": [str(x) for x in (tc.get("todas") or [])],
                 "por_pieza": {str(k): [str(x) for x in (v or [])]
-                              for k, v in (tc.get("por_pieza") or {}).items() if v}}
-    return {"todas": [str(x) for x in ((prod or {}).get("telas_asignadas") or [])], "por_pieza": {}}
+                              for k, v in (tc.get("por_pieza") or {}).items() if v},
+                "max_var": mv}
+    return {"todas": [str(x) for x in ((prod or {}).get("telas_asignadas") or [])], "por_pieza": {}, "max_var": {}}
 
 
 @app.post("/api/productos/telas_asignadas")
@@ -4204,6 +4215,7 @@ def set_telas_asignadas():
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if not prod:
         return jsonify({"error": "Producto no encontrado"}), 404
+    _prev = _telas_cfg_prod(prod)          # lo que ya había (para no perder lo que no venga en el cuerpo)
     if "todas" in cuerpo or "por_pieza" in cuerpo:
         todas = [str(t) for t in (cuerpo.get("todas") or [])]
         _st = set(todas)
@@ -4213,9 +4225,22 @@ def set_telas_asignadas():
             ids = [str(t) for t in (v or []) if str(t) not in _st]
             if ids:
                 por[str(k)] = ids
-        prod["telas_cfg"] = {"todas": todas, "por_pieza": por}
-    else:                                          # forma vieja: una sola lista para todo el molde
-        prod["telas_cfg"] = {"todas": [str(t) for t in (cuerpo.get("telas") or [])], "por_pieza": {}}
+        prod["telas_cfg"] = {"todas": todas, "por_pieza": por, "max_var": _prev["max_var"]}
+    elif "telas" in cuerpo:                        # forma vieja: una sola lista para todo el molde
+        prod["telas_cfg"] = {"todas": [str(t) for t in (cuerpo.get("telas") or [])], "por_pieza": {}, "max_var": _prev["max_var"]}
+    else:                                          # sólo vino el tope → se conserva el resto
+        prod["telas_cfg"] = dict(_prev)
+    # TOPE por variable (opcional en el cuerpo): {clave: N}. N<=0 o vacío = sin tope (se borra).
+    if isinstance(cuerpo.get("max_var"), dict):
+        mv = {}
+        for k, v in cuerpo["max_var"].items():
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                mv[str(k)] = n
+        prod["telas_cfg"]["max_var"] = mv
     # `telas_asignadas` se mantiene como la UNIÓN plana: lo que ya lee el resto del sistema
     # (pedido/arte) sigue funcionando sin cambios mientras se migra.
     cfg = prod["telas_cfg"]

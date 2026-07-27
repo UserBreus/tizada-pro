@@ -2839,7 +2839,7 @@ export default function App() {
   const [telaConexion, setTelaConexion] = useState({ url: '', tiene_key: false, por_env: false });  // estado de la conexión con la API (sólo informativo)
   const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición (unión plana)
   // Disponibilidad de telas POR PIEZA del molde en edición: {todas:[id], por_pieza:{pieza:[id]}}.
-  const [telasCfgMolde, setTelasCfgMolde] = useState({ todas: [], por_pieza: {} });
+  const [telasCfgMolde, setTelasCfgMolde] = useState({ todas: [], por_pieza: {}, max_var: {} });
   const [telasPanelAbierto, setTelasPanelAbierto] = useState(false);               // «Mostrar telas asignadas»
   const [telasCfgBuscar, setTelasCfgBuscar] = useState('');                        // buscador de la lista
   const [telasCfgSel, setTelasCfgSel] = useState([]);                              // telas tildadas para asignar
@@ -3666,7 +3666,7 @@ export default function App() {
     try {
       const r = await fetch('/api/productos/telas_asignadas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pid, todas: cfg.todas || [], por_pieza: cfg.por_pieza || {} })
+        body: JSON.stringify({ id: pid, todas: cfg.todas || [], por_pieza: cfg.por_pieza || {}, max_var: cfg.max_var || {} })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Error');
@@ -4741,7 +4741,8 @@ export default function App() {
       setTelasCfgMolde({
         todas: Array.isArray(tc?.todas) ? tc.todas.map(String)
           : (Array.isArray(activoProdDetalle?.telas_asignadas) ? activoProdDetalle.telas_asignadas.map(String) : []),
-        por_pieza: (tc && typeof tc.por_pieza === 'object' && tc.por_pieza) ? tc.por_pieza : {}
+        por_pieza: (tc && typeof tc.por_pieza === 'object' && tc.por_pieza) ? tc.por_pieza : {},
+        max_var: (tc && typeof tc.max_var === 'object' && tc.max_var) ? tc.max_var : {}
       });
       setTelasPanelAbierto(false); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar('');
       setTelasCfgVar(''); setVerVariante(null); setTelaCfgVerId(null);   // entra en vista completa; al elegir variable, el visor se acota a ella
@@ -10243,6 +10244,20 @@ export default function App() {
                         const usadas = [...new Set([...todas, ...Object.values(porPieza).flat().map(String)])];
                         // Telas disponibles en la VARIABLE elegida = unión de las de sus piezas.
                         const telasDeVariable = [...new Set(piezasMostradas.flatMap(pz => telasDePieza(pz)))];
+                        // TOPE de telas por variable (config): cuántas distintas se pueden dejar
+                        // disponibles en ella. Sin número = sin tope.
+                        const maxVar = cfg.max_var || {};
+                        const topeVar = telasCfgVar ? (parseInt(maxVar[telasCfgVar], 10) || 0) : 0;
+                        const usadasVar = telasDeVariable.length;
+                        const guardarTope = async (n) => {
+                          const v = Math.max(0, parseInt(n, 10) || 0);
+                          const mv = { ...maxVar };
+                          if (v > 0) mv[telasCfgVar] = v; else delete mv[telasCfgVar];
+                          await guardarTelasCfg(activoProdDetalle?.id, { todas, por_pieza: porPieza, max_var: mv });
+                        };
+                        // Cuántas telas NUEVAS entrarían en la variable con lo que hay tildado en el modal.
+                        const nuevasEnVar = telasCfgSel.filter(id => !telasDeVariable.includes(String(id))).length;
+                        const excedeTope = topeVar > 0 && (usadasVar + nuevasEnVar) > topeVar;
                         // Lista base: en modo VER, SÓLO las telas ASIGNADAS (las de la variable elegida,
                         // o las del molde si es «Todo el molde») — mezclarlas con las sin asignar
                         // confundía. En modo ASIGNAR sí se ve todo el registro (hay que poder sumar).
@@ -10254,6 +10269,10 @@ export default function App() {
                         // Asigna las telas TILDADAS a las piezas elegidas (o a todas si no se eligió ninguna).
                         const asignar = async () => {
                           if (!telasCfgSel.length) return;
+                          if (excedeTope) {   // tope de la variable: no se puede pasar
+                            showError(`Esta variable admite hasta ${topeVar} tela${topeVar > 1 ? 's' : ''} y ya usa ${usadasVar}.`);
+                            return;
+                          }
                           const next = { todas: [...todas], por_pieza: JSON.parse(JSON.stringify(porPieza)) };
                           if (objetivoPiezas === null) {                    // → a TODAS las piezas del molde
                             telasCfgSel.forEach(id => { if (!next.todas.includes(String(id))) next.todas.push(String(id)); });
@@ -10309,6 +10328,22 @@ export default function App() {
                                     );
                                   })}
                                 </div>
+                                {/* TOPE de telas de la variable: cuántas puede tener disponibles. */}
+                                {telasCfgVar && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9 }}>
+                                    <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>Máximo de telas</span>
+                                    <input key={telasCfgVar + ':' + topeVar} type="number" min="0" defaultValue={topeVar || ''} placeholder="sin tope"
+                                      onBlur={e => guardarTope(e.target.value)}
+                                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                      title="Cuántas telas distintas puede tener esta variable. Vacío = sin tope."
+                                      style={{ width: 74, height: 30, fontSize: 12.5, textAlign: 'center', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                                    <span style={{ fontSize: 11.5, fontWeight: 700, padding: '3px 9px', borderRadius: 999,
+                                      background: topeVar && usadasVar >= topeVar ? 'rgba(255,90,90,0.14)' : 'rgba(255,255,255,0.06)',
+                                      color: topeVar && usadasVar >= topeVar ? '#ff8a8a' : 'var(--text-muted)' }}>
+                                      usa {usadasVar}{topeVar ? ` / ${topeVar}` : ''}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             )}
                             {T.length === 0 ? (
@@ -10464,7 +10499,12 @@ export default function App() {
                                         <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, marginTop: 2 }}>Con <b>Shift</b> + clic en otra elegís todo el tramo (y si la primera la habías quitado, lo quita).</span>
                                       </span>
                                       {telasCfgSel.length > 0 && <button className="btn ghost" style={{ padding: '5px 11px', fontSize: 11.5 }} onClick={() => setTelasCfgSel([])}>limpiar</button>}
-                                      <button className="btn success" style={{ marginLeft: 'auto', padding: '9px 22px', fontWeight: 700 }} disabled={!telasCfgSel.length}
+                                      {excedeTope && (
+                                        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#ff8a8a', padding: '3px 10px', borderRadius: 999, background: 'rgba(255,90,90,0.14)' }}>
+                                          Máximo {topeVar} · quedan {Math.max(0, topeVar - usadasVar)}
+                                        </span>
+                                      )}
+                                      <button className="btn success" style={{ marginLeft: 'auto', padding: '9px 22px', fontWeight: 700 }} disabled={!telasCfgSel.length || excedeTope}
                                         onClick={async () => { await asignar(); setTelaCfgModalOpen(false); }}>
                                         Asignar
                                       </button>
