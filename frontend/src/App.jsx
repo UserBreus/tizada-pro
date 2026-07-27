@@ -7535,7 +7535,9 @@ export default function App() {
   // Caracteres que SOPORTA la tipografía de personalización del/los diseño(s) del pedido.
   // Si el pedido tiene varios moldes, se intersecan (un caracter sirve si TODAS las fuentes lo tienen).
   useEffect(() => {
-    if (pedidoPaso !== 'planilla') return;
+    // `sesionLista`: sin sesión la API contesta 401 y este fetch salía al montar (con el paso
+    // 'planilla' restaurado del wizard) → 401 rojo en la consola apenas abría el programa.
+    if (pedidoPaso !== 'planilla' || !sesionLista) return;
     const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
     if (!ids.length) { setFuenteChars(null); return; }
     let cancelado = false;
@@ -7544,6 +7546,7 @@ export default function App() {
         const sets = [];
         for (const id of ids) {
           const r = await fetch(`/api/pedido/fuente_chars?producto_id=${encodeURIComponent(id)}`);
+          if (!r.ok) continue;                 // 401/404: se ignora, no rompe el paso
           const d = await r.json();
           if (d && d.ok && d.chars) sets.push(new Set([...d.chars]));
         }
@@ -7555,7 +7558,7 @@ export default function App() {
       } catch (_e) { if (!cancelado) setFuenteChars(null); }
     })();
     return () => { cancelado = true; };
-  }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo]);
+  }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo, sesionLista]);
 
   // ¿La fuente NO tiene este caracter? (los espacios nunca se marcan)
   const faltaEnFuente = (ch) => !!fuenteChars && fuenteChars.size > 0 && String(ch).trim() !== '' && !fuenteChars.has(ch);
