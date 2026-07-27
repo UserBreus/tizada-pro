@@ -1916,7 +1916,7 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, cargando }) {
+function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, aviso, cargando }) {
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
   // (onMapeoChange) persiste solo; si no, solo actualiza el estado local (comportamiento viejo).
   const aplicarMapeo = onMapeoChange || setMapeoValores;
@@ -1988,7 +1988,17 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
       </div>
       <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
         {panelIzquierdo}
-        <div ref={artWrapRef} onMouseDown={artPanStart} style={{ flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', cursor: 'grab' }}>
+        <div ref={artWrapRef} onMouseDown={artPanStart} style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', cursor: 'grab' }}>
+          {/* AVISO sobre el molde (ej. el tope de telas): donde el operario está mirando, no en un
+              cartel al costado de la pantalla. */}
+          {aviso && (
+            <div style={{ position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 6, display: 'flex', alignItems: 'center', gap: 9,
+              background: 'rgba(40,8,10,0.96)', border: '1px solid rgba(255,90,90,0.55)', borderRadius: 11, padding: '10px 15px',
+              boxShadow: '0 8px 26px rgba(0,0,0,0.6)', maxWidth: '86%', pointerEvents: 'none' }}>
+              <Icon name="alert" style={{ width: 16, height: 16, color: '#ff8a8a', flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#ffd9d9', lineHeight: 1.35 }}>{aviso}</span>
+            </div>
+          )}
           {canvasLayout?.layout?.length ? (() => {
             // VER VARIANTE: si viene `vf`, se muestran SOLO sus piezas y se ACOMODAN (translate por `vf.pos`,
             // el mismo orden guardado en Variables). `px/py` quedan en coords YA acomodadas (para labels y encuadre);
@@ -2858,6 +2868,14 @@ export default function App() {
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
   const [telaElegida, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
   const [telaBuscarAsig, setTelaBuscarAsig] = useState('');                        // buscador de telas en el modo asignar
+  const [telaAviso, setTelaAviso] = useState('');                                 // aviso SOBRE EL VISOR (ej. tope de telas)
+  const telaAvisoT = useRef(null);
+  // Muestra el aviso encima del molde unos segundos (no un cartel al costado de la pantalla).
+  const avisarEnVisor = (msg) => {
+    setTelaAviso(msg);
+    if (telaAvisoT.current) clearTimeout(telaAvisoT.current);
+    telaAvisoT.current = setTimeout(() => setTelaAviso(''), 3200);
+  };
   const [telasFaltantes, setTelasFaltantes] = useState({});                        // {pid: nº de piezas sin tela} → bloquea avanzar a la planilla
   const [trabajoId, setTrabajoId] = useState(null);
   const [trabajoEstado, setTrabajoEstado] = useState(null);
@@ -8733,7 +8751,7 @@ export default function App() {
                   // Cuántas telas distintas quedarían en la prenda con este cambio.
                   const distintas = new Set(_todasGen.map(g => mm[g]).filter(Boolean));
                   if (_topeVar > 0 && distintas.size > _topeVar) {
-                    showError(`Esta prenda puede combinar hasta ${_topeVar} tela${_topeVar > 1 ? 's' : ''} a la vez.`);
+                    avisarEnVisor(`Esta prenda puede combinar hasta ${_topeVar} tela${_topeVar > 1 ? 's' : ''} a la vez`);
                     return;
                   }
                   setTelaPorPieza(m => ({ ...m, [_id]: mm }));
@@ -8916,7 +8934,7 @@ export default function App() {
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
                           {(telasReg.telas || []).length > 0 && (
-                            <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); }} title="Ver y asignar telas por pieza">
+                            <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Ver y asignar telas por pieza">
                               <Icon name="telas" style={{ width: 13, height: 13 }} /> Ver telas de pieza
                             </button>
                           )}
@@ -8927,6 +8945,7 @@ export default function App() {
                         onTelaClick={(gen) => setTelaSelPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen])}
                         onTelaVacio={() => setTelaSelPiezas([])}
                         panelTela={panelTelaJSX}
+                        aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)' }}>{term.variante === 'Talle' ? 'Talles' : term.variante}</div>
