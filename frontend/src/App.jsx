@@ -5602,12 +5602,21 @@ export default function App() {
   // Recuadro de selección (marquee): clic izq. sostenido sobre un espacio vacío + arrastrar →
   // en "Nombrar" agrega las piezas a la selección; en "organizar" las asigna al tipo activo.
   // Usa coords de pantalla (getBoundingClientRect) para no lidiar con el zoom/pan.
+  // Piezas abarcadas por el RECUADRO de selección → se suman a las elegidas para la tela.
+  // Mismo gesto que en Variables: se arrastra desde un espacio vacío y se abarcan varias.
+  const agregarPiezasATela = (idxs) => {
+    const claves = idxs.map(i => _clavePiezaTela(i)).filter(Boolean);
+    if (!claves.length) return;
+    setTelasCfgPiezas(s => [...new Set([...s, ...claves])]);
+  };
+
   const iniciarRubber = (e) => {
     const cont = visorWheel.current.el;
     const modoNombrar = tabAjustesMolde === 'variables' && varStep === 'nombrar';
     const modoConj = tabAjustesMolde === 'variables' && asignandoConjunto;
     const modoGrupoPz = tabAjustesMolde === 'variables' && asignandoGrupoPz;
-    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo && !empModo)) return;
+    const modoTelas = tabAjustesMolde === 'telas' && telasCfgModo === 'asignar';   // elegir piezas para la tela
+    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo && !empModo && !modoTelas)) return;
     const clave = asignandoTipo;
     e.preventDefault();
     const x0 = e.clientX, y0 = e.clientY;
@@ -5623,7 +5632,7 @@ export default function App() {
           const b = g.getBoundingClientRect();
           if (b.right >= rx0 && b.left <= rx1 && b.bottom >= ry0 && b.top <= ry1) idxs.push(parseInt(g.getAttribute('data-piece'), 10));
         });
-        if (idxs.length) { if (empModo) { addSelNombrar(idxs); } else if (varPzModo) { addSelNombrar(idxs); } else if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
+        if (idxs.length) { if (modoTelas) { agregarPiezasATela(idxs); } else if (empModo) { addSelNombrar(idxs); } else if (varPzModo) { addSelNombrar(idxs); } else if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
       }
       setRubber(null);
     };
@@ -10339,7 +10348,7 @@ export default function App() {
                                     <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 6 }}>¿A qué piezas?</div>
                                     {telasCfgPiezas.length === 0 ? (
                                       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                                        <b style={{ color: 'var(--accent)' }}>Tocá las piezas en el visor</b> (o arrastrá con el botón apretado para marcar varias; arrastrando sobre las marcadas se desmarcan).
+                                        <b style={{ color: 'var(--accent)' }}>Tocá las piezas en el visor</b>, o <b>arrastrá un recuadro</b> desde un espacio vacío para elegir varias de una (igual que al armar variables). Arrastrando por encima de las piezas también se van marcando.
                                         <br /><span style={{ color: 'var(--text-muted)' }}>Si no tocás ninguna, la tela va a {telasCfgVar ? 'TODAS las piezas de la variable' : 'TODAS las piezas'}.</span>
                                       </div>
                                     ) : (
@@ -12133,7 +12142,7 @@ export default function App() {
                           if (e.button === 2 && etqData && tabAjustesMolde !== 'planilla') { panVisor(e); return; }
                           // `empModo` va acá o el recuadro NO se dibuja al agrupar piezas: este panel
                           // vive fuera de la pestaña Variables (el gesto quedaba sólo con el clic).
-                          if (e.button === 0 && (varPzModo || empModo || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
+                          if (e.button === 0 && (varPzModo || empModo || (tabAjustesMolde === 'telas' && telasCfgModo === 'asignar') || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
                           /* nota: en modo editar-nombre el recuadro también aplica (varStep==='nombrar') */
                         }}
                         onContextMenu={(e) => { if (etqData && tabAjustesMolde !== 'planilla') e.preventDefault(); }}>
