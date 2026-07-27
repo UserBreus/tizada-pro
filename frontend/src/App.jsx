@@ -3607,13 +3607,23 @@ export default function App() {
       if (r.ok) { setTelasReg(await r.json()); showMsg('Grupos guardados ✓'); }
     } catch (e) { showError('No se pudieron guardar los grupos'); }
   };
+  // Lee la respuesta como JSON. Si NO es JSON (típico: el proxy de adelante devolvió su página de
+  // error 502/504 en HTML), tira un error CON EL CÓDIGO REAL en vez del críptico
+  // «Unexpected token '<', "<!DOCTYPE"…», que no dice nada de lo que pasó.
+  const _jsonTelas = async (r) => {
+    const txt = await r.text();
+    try { return txt ? JSON.parse(txt) : {}; } catch {
+      throw new Error(`el servidor respondió ${r.status}${r.statusText ? ' ' + r.statusText : ''} sin JSON. `
+        + `Suele ser que el servidor no pudo alcanzar la API del sistema de stock (sin salida a internet o bloqueada) y el proxy cortó la espera.`);
+    }
+  };
   // Re-consulta la API del sistema (stock) y trae las telas activas.
   const refrescarTelas = async () => {
     setTelasRefrescando(true);
     try {
       const r = await fetch('/api/telas/refrescar', { method: 'POST' });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Error');
+      const d = await _jsonTelas(r);
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setTelasReg({ telas: d.telas || [], grupos: d.grupos || [] });
       showMsg(`Telas actualizadas ✓ (${d.count ?? (d.telas || []).length})`);
     } catch (e) { showError('No se pudo actualizar las telas del sistema: ' + (e.message || e)); }
@@ -3629,8 +3639,8 @@ export default function App() {
   const guardarTelaConexion = async () => {
     try {
       const r = await fetch('/api/telas/conexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: telaUrlInput, key: telaKeyInput }) });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'Error');
+      const d = await _jsonTelas(r);
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
       setTelaConexion(d); setTelaKeyInput('');
       showMsg('Conexión guardada ✓');
       await refrescarTelas();   // reintenta traer las telas con la conexión nueva

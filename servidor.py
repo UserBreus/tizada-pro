@@ -4041,7 +4041,10 @@ def _fetch_telas_externas():
     try:
         import urllib.request
         rq = urllib.request.Request(url, headers={"x-api-key": key, "User-Agent": _UA_TELAS, "Accept": "application/json"})
-        with urllib.request.urlopen(rq, timeout=20) as r:
+        # Timeout CORTO a propósito: si el servidor no puede salir a internet, hay que contestar el
+        # error (JSON) ANTES de que el proxy de adelante corte la espera y devuelva su 502/504 en
+        # HTML — que en el navegador aparecía como «Unexpected token '<'» sin explicar nada.
+        with urllib.request.urlopen(rq, timeout=12) as r:
             data = json.loads(r.read().decode("utf-8"))
         arr = data.get("data") if isinstance(data, dict) else data
         telas = []

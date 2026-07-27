@@ -116,6 +116,16 @@ def main():
         # servidor se instaló ANTES de que existiera la clave y no la tiene: este paquete se la lleva.
         z.writestr("token_actualizacion.txt", config_publicacion()["token"]); n += 1
         print("  + clave de actualizacion")
+        # CONEXIÓN CON EL SISTEMA DE STOCK (api-key de telas). Viaja con el paquete —mismo criterio
+        # que la clave de actualización— para que el servidor publicado quede configurado solo, sin
+        # tener que pegar la clave a mano en cada ambiente (pedido explícito del usuario).
+        # NUNCA va al repositorio (config_externo.json está en .gitignore).
+        _cfg_ext = os.path.join(AQUI, "config_externo.json")
+        if os.path.isfile(_cfg_ext):
+            z.write(_cfg_ext, "config_externo.json"); n += 1
+            print("  + conexion con el sistema de stock (api-key)")
+        else:
+            print("  [!] sin config_externo.json: el publicado va a pedir la api-key de telas a mano")
         if completo:
             # perfiles ICC (van a `perfiles_icc/`, el instalador los deja apuntados)
             perf = next((d for d in PERFILES_ORIGEN if os.path.isdir(d)), None)
