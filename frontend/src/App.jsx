@@ -2848,6 +2848,9 @@ export default function App() {
   const [telaCfgVerId, setTelaCfgVerId] = useState(null);                          // tela tocada en la lista → se pinta en sus piezas
   const [telaCfgModalOpen, setTelaCfgModalOpen] = useState(false);                 // modal «Seleccionar tela» (tarjetas)
   const [telaCfgModalBuscar, setTelaCfgModalBuscar] = useState('');                // buscador dentro del modal
+  // ANCLA para elegir por RANGO con Shift en el modal de telas: guarda la última tela tocada SIN
+  // shift y en qué quedó (`add`/`del`). El shift+clic aplica ese mismo modo a todo el tramo.
+  const [telaCfgAncla, setTelaCfgAncla] = useState(null);
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
@@ -10342,7 +10345,7 @@ export default function App() {
                                     </div>
                                   )}
                                   <button className="btn success" style={{ width: '100%', marginTop: 9, padding: '9px 16px', fontWeight: 700, fontSize: 12.5 }}
-                                    onClick={() => { setTelasCfgSel([]); setTelaCfgModalBuscar(''); setTelaCfgModalOpen(true); }}>
+                                    onClick={() => { setTelasCfgSel([]); setTelaCfgAncla(null); setTelaCfgModalBuscar(''); setTelaCfgModalOpen(true); }}>
                                     <Icon name="telas" style={{ width: 13, height: 13 }} /> Seleccionar tela
                                     {telasCfgPiezas.length ? ` · ${telasCfgPiezas.length} pza${telasCfgPiezas.length > 1 ? 's' : ''}` : (telasCfgVar ? ' · toda la variable' : ' · todas las piezas')}
                                   </button>
@@ -10427,35 +10430,63 @@ export default function App() {
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                                     <input autoFocus placeholder="Buscar tela…" value={telaCfgModalBuscar} onChange={e => setTelaCfgModalBuscar(e.target.value)}
                                       style={{ height: 38, fontSize: 13, padding: '0 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
-                                    <div style={{ maxHeight: '52vh', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(132px, 1fr))', gap: 10, paddingRight: 2 }}>
-                                      {lista.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 8 }}>Ninguna tela coincide.</div>}
-                                      {lista.map(t => {
-                                        const on = telasCfgSel.includes(String(t.id));
-                                        const col = colorDeTela(t.id);
-                                        return (
-                                          <button key={t.id} type="button"
-                                            onClick={() => setTelasCfgSel(s => s.includes(String(t.id)) ? s.filter(x => x !== String(t.id)) : [...s, String(t.id)])}
-                                            title={t.nombre}
-                                            style={{ position: 'relative', aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-end',
-                                              padding: 0, borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'left', transition: 'all .15s',
-                                              border: on ? '2px solid var(--accent)' : '1px solid var(--border-light)',
-                                              background: 'rgba(255,255,255,0.02)', boxShadow: on ? '0 0 18px rgba(0,216,245,0.25)' : 'none' }}>
-                                            {/* Color de la tela: ocupa la tarjeta */}
-                                            <span style={{ position: 'absolute', inset: 0, background: col, opacity: on ? 0.5 : 0.28 }} />
-                                            {on && (
-                                              <span style={{ position: 'absolute', top: 7, right: 7, width: 21, height: 21, borderRadius: '50%', background: 'var(--accent)', color: '#001016', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, zIndex: 2 }}>✓</span>
-                                            )}
-                                            <span style={{ position: 'relative', zIndex: 1, padding: '8px 9px', background: 'linear-gradient(180deg, rgba(6,10,14,0), rgba(6,10,14,0.92) 55%)' }}>
-                                              <span style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.25, maxHeight: 30, overflow: 'hidden' }}>{t.nombre}</span>
-                                              <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>{t.ancho_cm} cm</span>
-                                            </span>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
+                                    {(() => {
+                                      // Clic normal: alterna y deja el ANCLA (con el estado en que quedó).
+                                      // Shift+clic: aplica ESE mismo estado a todo el tramo entre el ancla
+                                      // y la tocada (ambas incluidas) → sirve para elegir y para quitar.
+                                      const clickTela = (t, e) => {
+                                        const id = String(t.id);
+                                        if (e.shiftKey && telaCfgAncla) {
+                                          const i0 = lista.findIndex(x => String(x.id) === String(telaCfgAncla.id));
+                                          const i1 = lista.findIndex(x => String(x.id) === id);
+                                          if (i0 >= 0 && i1 >= 0) {
+                                            const [a, b] = i0 <= i1 ? [i0, i1] : [i1, i0];
+                                            const tramo = lista.slice(a, b + 1).map(x => String(x.id));
+                                            setTelasCfgSel(s => telaCfgAncla.modo === 'add'
+                                              ? [...new Set([...s, ...tramo])]
+                                              : s.filter(x => !tramo.includes(x)));
+                                            return;
+                                          }
+                                        }
+                                        const ya = telasCfgSel.includes(id);
+                                        setTelasCfgSel(s => ya ? s.filter(x => x !== id) : [...new Set([...s, id])]);
+                                        setTelaCfgAncla({ id, modo: ya ? 'del' : 'add' });
+                                      };
+                                      return (
+                                        <div style={{ maxHeight: '52vh', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, paddingRight: 2 }}>
+                                          {lista.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 8 }}>Ninguna tela coincide.</div>}
+                                          {lista.map(t => {
+                                            const on = telasCfgSel.includes(String(t.id));
+                                            const col = colorDeTela(t.id);
+                                            return (
+                                              <button key={t.id} type="button"
+                                                onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}   // shift+clic no selecciona texto
+                                                onClick={(e) => clickTela(t, e)}
+                                                title={t.nombre}
+                                                style={{ position: 'relative', aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                                                  padding: '14px 14px 14px 18px', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'left', transition: 'all .15s',
+                                                  background: '#050709',                                    // TARJETA NEGRA
+                                                  border: '1px solid ' + (on ? 'var(--accent)' : 'rgba(255,255,255,0.10)'),
+                                                  boxShadow: on ? '0 0 0 1px var(--accent), 0 0 20px rgba(0,216,245,0.22)' : '0 2px 10px rgba(0,0,0,0.5)' }}>
+                                                {/* Borde lateral con el COLOR DE LA TELA (degradado, se apaga hacia abajo) */}
+                                                <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5,
+                                                  background: `linear-gradient(180deg, ${col}, ${col}55)`, boxShadow: `0 0 12px ${col}66` }} />
+                                                {on && (
+                                                  <span style={{ position: 'absolute', top: 8, right: 8, width: 20, height: 20, borderRadius: '50%', background: 'var(--accent)', color: '#001016', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
+                                                )}
+                                                {/* NOMBRE en grande y, debajo, la MEDIDA */}
+                                                <span style={{ fontSize: 15, fontWeight: 800, color: '#fff', lineHeight: 1.2, letterSpacing: -0.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{t.nombre}</span>
+                                                <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, fontWeight: 600 }}>{t.ancho_cm} cm</span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      );
+                                    })()}
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--border-light)', paddingTop: 12 }}>
                                       <span style={{ fontSize: 12.5, color: telasCfgSel.length ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
                                         {telasCfgSel.length ? `${telasCfgSel.length} tela${telasCfgSel.length > 1 ? 's' : ''} elegida${telasCfgSel.length > 1 ? 's' : ''}` : 'Tocá las telas que quieras asignar'}
+                                        <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, marginTop: 2 }}>Con <b>Shift</b> + clic en otra elegís todo el tramo (y si la primera la habías quitado, lo quita).</span>
                                       </span>
                                       {telasCfgSel.length > 0 && <button className="btn ghost" style={{ padding: '5px 11px', fontSize: 11.5 }} onClick={() => setTelasCfgSel([])}>limpiar</button>}
                                       <button className="btn success" style={{ marginLeft: 'auto', padding: '9px 22px', fontWeight: 700 }} disabled={!telasCfgSel.length}
