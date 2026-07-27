@@ -4411,7 +4411,9 @@ export default function App() {
     // gesto que nombrar piezas o armar variables — se aprende una sola vez y se usa en todos lados.
     // Se guarda por nombre GENÉRICO (sin el número), que es la clave de la config de telas.
     if (tabAjustesMolde === 'telas' && telasCfgModo === 'asignar') {
-      const gen = ((etqNombres[idx] || etqData?.piezas?.[idx]?.nombre || '') + '').replace(/\s+\d+\s*$/, '').trim();
+      // CLAVE COMPLETA de la pieza («Frente 1»), NO el genérico («Frente»): si no, tocar un
+      // frente marcaba TODOS los frentes del molde y no se podía elegir de a una.
+      const gen = _clavePiezaTela(idx);
       if (gen) {
         // El estado de la pieza donde se APRETÓ define el modo de todo el arrastre.
         const ya = telasCfgPiezas.includes(gen);
@@ -4526,11 +4528,14 @@ export default function App() {
     }));
   };
 
+  // CLAVE de una pieza para telas: el nombre COMPLETO tal cual («Frente 1»), que identifica UNA
+  // pieza. El genérico («Frente») agrupa todas las del molde y no deja elegir de a una.
+  const _clavePiezaTela = (idx) => ((etqNombres?.[idx] || '').trim() || (etqData?.piezas?.[idx]?.nombre || '').trim());
   // Pieza por la que pasa el cursor mientras se pinta la selección (telas): aplica el modo fijado
   // al apretar. Idempotente: pasar dos veces por la misma pieza no la alterna.
   const pintarTelaPieza = (idx) => {
     if (!pintaTela.current.on) return;
-    const gen = ((etqNombres[idx] || etqData?.piezas?.[idx]?.nombre || '') + '').replace(/\s+\d+\s*$/, '').trim();
+    const gen = _clavePiezaTela(idx);
     if (!gen) return;
     setTelasCfgPiezas(s => {
       const esta = s.includes(gen);
@@ -8653,11 +8658,19 @@ export default function App() {
                 const _tcfg = _molProd.telas_cfg || { todas: _molProd.telas_asignadas || [], por_pieza: {} };
                 const _todasIds = (_tcfg.todas || []).map(String);
                 const _porPz = _tcfg.por_pieza || {};
+                // La config guarda la CLAVE COMPLETA de cada pieza («Frente 1»); acá las piezas se
+                // manejan por genérico («Frente») → se toma lo de TODAS las claves de ese genérico.
+                const _extrasDeGen = (gen) => {
+                  const g = String(gen || '').replace(/\s+\d+\s*$/, '').trim().toLowerCase();
+                  return Object.entries(_porPz)
+                    .filter(([k]) => String(k).replace(/\s+\d+\s*$/, '').trim().toLowerCase() === g)
+                    .flatMap(([, v]) => (v || []).map(String));
+                };
                 const _idsDisp = (() => {
                   if (!telaSelPiezas.length) return _todasIds;
                   let acc = null;
                   telaSelPiezas.forEach(pz => {
-                    const s = new Set([..._todasIds, ...((_porPz[pz] || []).map(String))]);
+                    const s = new Set([..._todasIds, ..._extrasDeGen(pz)]);
                     acc = acc === null ? s : new Set([...acc].filter(x => s.has(x)));
                   });
                   return [...(acc || new Set())];
@@ -10191,13 +10204,13 @@ export default function App() {
                         const porPieza = cfg.por_pieza || {};
                         const setTodas = new Set(todas);
                         // Piezas del molde por nombre GENÉRICO (sin el número), como el resto del sistema.
-                        const piezasMolde = [...new Set((etqData?.piezas || []).map((_p, i) => _genTelaP(_nombreDeIdx(i))))].filter(Boolean).sort();
+                        const piezasMolde = [...new Set((etqData?.piezas || []).map((_p, i) => _nombreDeIdx(i)))].filter(Boolean).sort();
                         // VARIABLE-FIRST: se elige la variable y se trabaja con SUS piezas (~9), no con
                         // las del molde entero (~135). '' = todo el molde.
                         const varsTela = (variantesEdit || []).filter(v => (v.valores || []).some(x => x.pieza_idx != null));
                         const _nomPiezaVar = (idx, label) => {
                           const n = (etqNombres?.[idx] || '').trim() || (etqData?.piezas?.[idx]?.nombre || '').trim();
-                          return _genTelaP(n || (label || '').trim());
+                          return (n || (label || '').trim());   // CLAVE COMPLETA («Frente 1»)
                         };
                         const piezasDeVar = (clave) => {
                           const v = varsTela.find(x => x.clave === clave);
@@ -12730,7 +12743,16 @@ export default function App() {
                               viewBox={_vbBase}
                               width={_aBase[2] * visorView.k} height={_aBase[3] * visorView.k}
                               style={{ display: 'block', userSelect: 'none', overflow: 'visible' }}
-                              onMouseMove={handleDrag}
+                              onMouseMove={(e) => {
+                                handleDrag(e);
+                                // PINTAR SELECCIÓN (telas): se resuelve la pieza bajo el cursor por
+                                // `data-piece`. Se hace acá y no con `onMouseEnter` de cada pieza
+                                // porque con el botón apretado ese evento no llega de forma confiable.
+                                if (pintaTela.current.on) {
+                                  const el = e.target && e.target.closest ? e.target.closest('[data-piece]') : null;
+                                  if (el) { const i = parseInt(el.getAttribute('data-piece'), 10); if (!isNaN(i)) pintarTelaPieza(i); }
+                                }
+                              }}
                               onMouseUp={endDrag}
                               onMouseLeave={endDrag}
                             >
@@ -12880,12 +12902,11 @@ export default function App() {
                                 // de esa tela y el resto queda neutro (se ve de un vistazo dónde va).
                                 // Eligiendo piezas para asignar tela: las tocadas van resaltadas.
                                 const _telaAsigPz = (tabAjustesMolde === 'telas' && telasCfgModo === 'asignar') ? (() => {
-                                  const gen = _genTelaP(etqNombres[p.idx] || p.name || '');
-                                  return telasCfgPiezas.includes(gen);
+                                  return telasCfgPiezas.includes(_clavePiezaTela(p.idx));
                                 })() : null;
                                 const _telaVerPz = (tabAjustesMolde === 'telas' && telaCfgVerId) ? (() => {
                                   const cfgT = telasCfgMolde || { todas: [], por_pieza: {} };
-                                  const gen = _genTelaP(etqNombres[p.idx] || p.name || '');
+                                  const gen = _clavePiezaTela(p.idx);
                                   const enTodas = (cfgT.todas || []).map(String).includes(String(telaCfgVerId));
                                   const enPieza = ((cfgT.por_pieza || {})[gen] || []).map(String).includes(String(telaCfgVerId));
                                   return enTodas || enPieza;
@@ -12989,7 +13010,7 @@ export default function App() {
                                     transform={`translate(${tx}, ${ty})`}
                                     style={{ cursor: (modoAcomodar || (empModo && empVista !== 'simple' && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
                                     onMouseDown={(e) => startDrag(e, p.idx)}
-                                    onMouseEnter={() => pintarTelaPieza(p.idx)}
+                                    onMouseEnter={() => pintarTelaPieza(p.idx)}   /* respaldo del pintado (el principal va por onMouseMove del svg) */
                                   >
                                     <title>{empTodasInfo
                                       ? `${p.talle} · pieza #${p.t_idx + 1}${nombrePz ? ` — ${nombrePz}` : ' (sin agrupar)'}`
