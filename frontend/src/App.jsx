@@ -8682,8 +8682,12 @@ export default function App() {
                     .filter(([k]) => String(k).replace(/\s+\d+\s*$/, '').trim().toLowerCase() === g)
                     .flatMap(([, v]) => (v || []).map(String));
                 };
+                // TODAS las telas que el molde tiene disponibles (las de «todas» + las propias de
+                // cualquier pieza). OJO: sin esto, un molde que asignó telas SÓLO por pieza quedaba
+                // con la lista vacía y el botón «Ver telas de pieza» directamente no aparecía.
+                const _telasMoldeIds = [...new Set([..._todasIds, ...Object.values(_porPz).flat().map(String)])];
                 const _idsDisp = (() => {
-                  if (!telaSelPiezas.length) return _todasIds;
+                  if (!telaSelPiezas.length) return _telasMoldeIds;   // sin selección: todo lo del molde
                   let acc = null;
                   telaSelPiezas.forEach(pz => {
                     const s = new Set([..._todasIds, ..._extrasDeGen(pz)]);
@@ -8692,7 +8696,7 @@ export default function App() {
                   return [...(acc || new Set())];
                 })();
                 // Sin nada configurado en el molde → TODO el registro (así el Arte nunca queda sin telas).
-                const _hayCfgTelas = _todasIds.length > 0 || Object.keys(_porPz).length > 0;
+                const _hayCfgTelas = _telasMoldeIds.length > 0;
                 const _telasMol = _hayCfgTelas
                   ? (telasReg.telas || []).filter(t => _idsDisp.includes(String(t.id)))
                   : (telasReg.telas || []);
@@ -8701,7 +8705,9 @@ export default function App() {
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
                 const _todasGen = piezasArteGen;
                 const _telaDeGen = (gen) => (telaPorPieza[_id] || {})[gen] || null;                        // null si no se asignó
-                const _telaActiva = telaModoVer && _telasMol.length > 0;
+                // El modo tela del visor no puede depender de la lista YA filtrada por la selección:
+                // si la intersección queda vacía se apagaba solo (y con ella el pintado y el panel).
+                const _telaActiva = telaModoVer && (telasReg.telas || []).length > 0;
                 const _telasMap = telaPorPieza[_id] || {};
                 const _usoIds = new Set(Object.values(_telasMap).filter(Boolean));                         // telas EN USO en las piezas
                 const _telasEnUso = (telasReg.telas || []).filter(t => _usoIds.has(t.id));
@@ -8899,7 +8905,10 @@ export default function App() {
                           <button className="btn primary" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
                           </button>
-                          {_telasMol.length > 0 && (
+                          {/* El botón depende SÓLO de que haya telas en el sistema. Antes miraba la
+                              lista ya filtrada por la selección: con telas asignadas sólo por pieza
+                              (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
+                          {(telasReg.telas || []).length > 0 && (
                             <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); }} title="Ver y asignar telas por pieza">
                               <Icon name="telas" style={{ width: 13, height: 13 }} /> Ver telas de pieza
                             </button>
