@@ -2845,6 +2845,7 @@ export default function App() {
   const [telasCfgBuscar, setTelasCfgBuscar] = useState('');                        // buscador de la lista
   const [telasCfgSel, setTelasCfgSel] = useState([]);                              // telas tildadas para asignar
   const [telasCfgPiezas, setTelasCfgPiezas] = useState([]);                        // piezas elegidas ([] = todas)
+  const [telasCfgVar, setTelasCfgVar] = useState('');                              // variable elegida ('' = todo el molde)
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
@@ -4693,7 +4694,7 @@ export default function App() {
           : (Array.isArray(activoProdDetalle?.telas_asignadas) ? activoProdDetalle.telas_asignadas.map(String) : []),
         por_pieza: (tc && typeof tc.por_pieza === 'object' && tc.por_pieza) ? tc.por_pieza : {}
       });
-      setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar('');
+      setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar(''); setTelasCfgVar('');
     }
   }, [tabAjustesMolde, activoProdDetalle]);
 
@@ -10150,6 +10151,22 @@ export default function App() {
                         const setTodas = new Set(todas);
                         // Piezas del molde por nombre GENÉRICO (sin el número), como el resto del sistema.
                         const piezasMolde = [...new Set((etqData?.piezas || []).map((_p, i) => _genTelaP(_nombreDeIdx(i))))].filter(Boolean).sort();
+                        // VARIABLE-FIRST: se elige la variable y se trabaja con SUS piezas (~9), no con
+                        // las del molde entero (~135). '' = todo el molde.
+                        const varsTela = (variantesEdit || []).filter(v => (v.valores || []).some(x => x.pieza_idx != null));
+                        const _nomPiezaVar = (idx, label) => {
+                          const n = (etqNombres?.[idx] || '').trim() || (etqData?.piezas?.[idx]?.nombre || '').trim();
+                          return _genTelaP(n || (label || '').trim());
+                        };
+                        const piezasDeVar = (clave) => {
+                          const v = varsTela.find(x => x.clave === clave);
+                          if (!v) return [];
+                          return [...new Set((v.valores || []).filter(x => x.pieza_idx != null).map(x => _nomPiezaVar(x.pieza_idx, x.label)))].filter(Boolean).sort();
+                        };
+                        const piezasMostradas = telasCfgVar ? piezasDeVar(telasCfgVar) : piezasMolde;
+                        // A qué va la asignación: piezas tildadas → esas; si no, TODA la variable elegida;
+                        // y si tampoco hay variable, `null` = a todas las piezas del molde («todas»).
+                        const objetivoPiezas = telasCfgPiezas.length ? telasCfgPiezas : (telasCfgVar ? piezasMostradas : null);
                         // En qué piezas está disponible cada tela: «todas» o la lista de piezas extra.
                         const piezasDeTela = (id) => todas.includes(String(id))
                           ? null                                                          // null = en todas
@@ -10165,15 +10182,15 @@ export default function App() {
                         const asignar = async () => {
                           if (!telasCfgSel.length) return;
                           const next = { todas: [...todas], por_pieza: JSON.parse(JSON.stringify(porPieza)) };
-                          if (!telasCfgPiezas.length) {                    // → a TODAS las piezas
+                          if (objetivoPiezas === null) {                    // → a TODAS las piezas del molde
                             telasCfgSel.forEach(id => { if (!next.todas.includes(String(id))) next.todas.push(String(id)); });
                             // si una tela pasa a estar en todas, deja de ser «extra» de una pieza
                             Object.keys(next.por_pieza).forEach(pz => {
                               next.por_pieza[pz] = (next.por_pieza[pz] || []).filter(x => !next.todas.includes(String(x)));
                               if (!next.por_pieza[pz].length) delete next.por_pieza[pz];
                             });
-                          } else {                                          // → sólo a las piezas elegidas
-                            telasCfgPiezas.forEach(pz => {
+                          } else {                                          // → sólo a esas piezas (o a la variable)
+                            objetivoPiezas.forEach(pz => {
                               const act = new Set((next.por_pieza[pz] || []).map(String));
                               telasCfgSel.forEach(id => { if (!next.todas.includes(String(id))) act.add(String(id)); });
                               if (act.size) next.por_pieza[pz] = [...act]; else delete next.por_pieza[pz];
@@ -10216,7 +10233,10 @@ export default function App() {
                                   {telasCfgModo === 'ver'
                                     ? <button className="btn primary" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} onClick={() => { setTelasCfgModo('asignar'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>Asignar</button>
                                     : <button className="btn success" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} disabled={!telasCfgSel.length} onClick={asignar}>
-                                        Asignar {telasCfgSel.length ? `${telasCfgSel.length} ` : ''}{telasCfgPiezas.length ? `a ${telasCfgPiezas.length} pieza(s)` : 'a todas las piezas'}
+                                        Asignar {telasCfgSel.length ? `${telasCfgSel.length} ` : ''}
+                                        {telasCfgPiezas.length ? `a ${telasCfgPiezas.length} pieza(s)`
+                                          : telasCfgVar ? `a la variable (${piezasMostradas.length} pza${piezasMostradas.length === 1 ? '' : 's'})`
+                                          : 'a todas las piezas'}
                                       </button>}
                                   <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>✕</button>
                                 </div>
@@ -10224,14 +10244,32 @@ export default function App() {
                                 {/* En modo ASIGNAR: elegir a qué piezas va (vacío = todas) */}
                                 {telasCfgModo === 'asignar' && (
                                   <div style={{ padding: 10, borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)' }}>
+                                    {/* VARIABLE: primero se elige la variable y se trabaja con SUS piezas */}
+                                    {varsTela.length > 0 && (
+                                      <div style={{ marginBottom: 10 }}>
+                                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Variable</div>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                          {[{ clave: '', label: 'Todo el molde', n: piezasMolde.length }, ...varsTela.map(v => ({ clave: v.clave, label: v.label || 'Variable', n: piezasDeVar(v.clave).length }))].map(op => {
+                                            const on = telasCfgVar === op.clave;
+                                            return (
+                                              <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); }}
+                                                style={{ padding: '5px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                                                  border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                                                {op.label} <span style={{ fontWeight: 500, opacity: 0.75 }}>· {op.n}</span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                     <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>
-                                      ¿A qué piezas? {telasCfgPiezas.length === 0 && <span style={{ color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}>· sin elegir ninguna = a TODAS</span>}
+                                      ¿A qué piezas?{telasCfgPiezas.length === 0 && <span style={{ color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}> · sin elegir ninguna = {telasCfgVar ? 'a TODAS las de la variable' : 'a TODAS las piezas'}</span>}
                                     </div>
-                                    {piezasMolde.length === 0 ? (
-                                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No se pudieron leer las piezas del molde.</div>
+                                    {piezasMostradas.length === 0 ? (
+                                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{telasCfgVar ? 'Esta variable no tiene piezas.' : 'No se pudieron leer las piezas del molde.'}</div>
                                     ) : (
                                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
-                                        {piezasMolde.map(pz => {
+                                        {piezasMostradas.map(pz => {
                                           const on = telasCfgPiezas.includes(pz);
                                           return (
                                             <button key={pz} type="button" onClick={() => setTelasCfgPiezas(s => s.includes(pz) ? s.filter(x => x !== pz) : [...s, pz])}
