@@ -2949,6 +2949,20 @@ def set_etiqueta():
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if prod is None:
         return jsonify({"error": "molde no encontrado"}), 404
+    # Un campo numérico vacío o mal tipeado (el input de la UI puede quedar en "" mientras se edita,
+    # o venir con coma) NO puede impedir guardar: se toma el valor por defecto en vez de tirar 400.
+    def _num(v, d, lo=None, hi=None):
+        try:
+            x = float(str(v).replace(",", ".")) if isinstance(v, str) else float(v)
+            if x != x:                      # NaN
+                raise ValueError
+        except (TypeError, ValueError):
+            x = float(d)
+        if lo is not None:
+            x = max(lo, x)
+        if hi is not None:
+            x = min(hi, x)
+        return x
     try:
         mos = cuerpo.get("mostrar") or {}
         pos = cuerpo.get("posicion") or {}
@@ -2956,25 +2970,25 @@ def set_etiqueta():
             "activo": bool(cuerpo.get("activo", True)),
             "mostrar": {k: bool(mos.get(k, True)) for k in ("talle", "pieza", "numero")},
             "separador": (str(cuerpo.get("separador", "-")) or "-")[:3],
-            "posicion": {"rx": max(0.0, min(1.0, float(pos.get("rx", 0.5)))),
-                          "ry": max(0.0, min(1.0, float(pos.get("ry", 0.92))))},
-            "posiciones": {str(k): {"rx": max(0.0, min(1.0, float(v.get("rx", 0.5)))),
-                                     "ry": max(0.0, min(1.0, float(v.get("ry", 0.92)))),
-                                     "ang": float(v.get("ang", 0) or 0),
-                                     **({"t": max(0.0, min(1.0, float(v.get("t"))))} if v.get("t") is not None else {}),
+            "posicion": {"rx": _num(pos.get("rx"), 0.5, 0.0, 1.0),
+                          "ry": _num(pos.get("ry"), 0.92, 0.0, 1.0)},
+            "posiciones": {str(k): {"rx": _num(v.get("rx"), 0.5, 0.0, 1.0),
+                                     "ry": _num(v.get("ry"), 0.92, 0.0, 1.0),
+                                     "ang": _num(v.get("ang"), 0),
+                                     **({"t": _num(v.get("t"), 0.0, 0.0, 1.0)} if v.get("t") is not None else {}),
                                      **({"align": str(v.get("align"))} if v.get("align") in ("izquierda", "centro", "derecha") else {})}
                             for k, v in (cuerpo.get("posiciones") or {}).items() if isinstance(v, dict)},
             "align": cuerpo.get("align") if cuerpo.get("align") in ("izquierda", "centro", "derecha") else "centro",
-            "size_mm": max(1.0, min(40.0, float(cuerpo.get("size_mm", 3.0)))),
+            "size_mm": _num(cuerpo.get("size_mm"), 3.0, 1.0, 40.0),
             "color": _clamp_color(cuerpo.get("color"), [0.15, 0.15, 0.15, 0.30]),
             "borde_activo": bool(cuerpo.get("borde_activo", True)),
             "borde_color": _clamp_color(cuerpo.get("borde_color"), [0.01, 0.01, 0.01, 0.05]),
-            "borde_mm": max(0.0, min(10.0, float(cuerpo.get("borde_mm", 1.0)))),
+            "borde_mm": _num(cuerpo.get("borde_mm"), 1.0, 0.0, 10.0),
             "piezas_off": [str(p) for p in (cuerpo.get("piezas_off") or [])],
             # ZONAS de texto por pieza (dividir el contorno en tramos eligiendo esquinas):
             # {nombre: {puntos:[t 0-1], cont:[{mostrar:{talle,pieza,numero}, texto, align}]}}
             "zonas": {str(k): {
-                "puntos": [max(0.0, min(1.0, float(t))) for t in (v.get("puntos") or []) if isinstance(t, (int, float))],
+                "puntos": [_num(t, 0.0, 0.0, 1.0) for t in (v.get("puntos") or []) if isinstance(t, (int, float))],
                 "cont": [{
                     "mostrar": {kk: bool((c.get("mostrar") or {}).get(kk, False)) for kk in ("talle", "pieza", "numero")},
                     "texto": str(c.get("texto", ""))[:40],
@@ -2982,8 +2996,9 @@ def set_etiqueta():
                 } for c in (v.get("cont") or []) if isinstance(c, dict)],
             } for k, v in (cuerpo.get("zonas") or {}).items() if isinstance(v, dict) and (v.get("puntos") or [])},
         }
-    except (TypeError, ValueError):
-        return jsonify({"error": "valores de etiqueta inválidos"}), 400
+    except (TypeError, ValueError) as _e:
+        # Ya no debería pasar (todo lo numérico usa `_num`), pero si pasa se dice QUÉ falló.
+        return jsonify({"error": f"valores de etiqueta inválidos: {_e}"}), 400
     prod["etiqueta"] = et
     _guardar_catalogo(cat)
     return jsonify(et)

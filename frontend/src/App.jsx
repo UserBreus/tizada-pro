@@ -7227,8 +7227,12 @@ export default function App() {
     const pid = pidCfg; if (!pid || !etiquetaConfig) return;
     try {
       const r = await fetch('/api/productos/etiqueta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, ...etiquetaConfig }) });
-      if (r.ok) { setEtiquetaConfig(await r.json()); showMsg('Etiqueta guardada ✓'); } else showError('No se pudo guardar la etiqueta');
-    } catch { showError('No se pudo guardar la etiqueta'); }
+      if (r.ok) { setEtiquetaConfig(await r.json()); showMsg('Etiqueta guardada ✓'); return; }
+      // Mostrar el MOTIVO que devuelve el server (antes era un genérico y no se sabía qué pasaba).
+      let det = `HTTP ${r.status}`;
+      try { const d = await r.json(); if (d && d.error) det = d.error; } catch { /* respuesta sin JSON */ }
+      showError('No se pudo guardar la etiqueta: ' + det);
+    } catch (e) { showError('No se pudo guardar la etiqueta: ' + (e.message || e)); }
   };
   // ── ZONAS de texto de la etiqueta (por NOMBRE GENÉRICO, como la posición) ──
   // `zonas[gen] = { puntos:[t…(0-1, esquinas elegidas)], cont:[{mostrar,texto,align}…] }`.
