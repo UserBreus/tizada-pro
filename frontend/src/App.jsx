@@ -10453,7 +10453,7 @@ export default function App() {
                                         setTelaCfgAncla({ id, modo: ya ? 'del' : 'add' });
                                       };
                                       return (
-                                        <div style={{ maxHeight: '52vh', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, paddingRight: 2 }}>
+                                        <div style={{ maxHeight: '52vh', overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(116px, 1fr))', gap: 9, paddingRight: 2 }}>
                                           {lista.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 8 }}>Ninguna tela coincide.</div>}
                                           {lista.map(t => {
                                             const on = telasCfgSel.includes(String(t.id));
@@ -10463,20 +10463,20 @@ export default function App() {
                                                 onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}   // shift+clic no selecciona texto
                                                 onClick={(e) => clickTela(t, e)}
                                                 title={t.nombre}
-                                                style={{ position: 'relative', aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column', justifyContent: 'center',
-                                                  padding: '14px 14px 14px 18px', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', textAlign: 'left', transition: 'all .15s',
+                                                style={{ position: 'relative', aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+                                                  padding: '10px 10px 14px', borderRadius: 11, overflow: 'hidden', cursor: 'pointer', textAlign: 'center', transition: 'all .15s',
                                                   background: '#050709',                                    // TARJETA NEGRA
                                                   border: '1px solid ' + (on ? 'var(--accent)' : 'rgba(255,255,255,0.10)'),
                                                   boxShadow: on ? '0 0 0 1px var(--accent), 0 0 20px rgba(0,216,245,0.22)' : '0 2px 10px rgba(0,0,0,0.5)' }}>
-                                                {/* Borde lateral con el COLOR DE LA TELA (degradado, se apaga hacia abajo) */}
-                                                <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5,
-                                                  background: `linear-gradient(180deg, ${col}, ${col}55)`, boxShadow: `0 0 12px ${col}66` }} />
+                                                {/* Borde INFERIOR con el COLOR DE LA TELA (degradado hacia los costados) */}
+                                                <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 5,
+                                                  background: `linear-gradient(90deg, ${col}66, ${col}, ${col}66)`, boxShadow: `0 0 12px ${col}66` }} />
                                                 {on && (
-                                                  <span style={{ position: 'absolute', top: 8, right: 8, width: 20, height: 20, borderRadius: '50%', background: 'var(--accent)', color: '#001016', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>✓</span>
+                                                  <span style={{ position: 'absolute', top: 6, right: 6, width: 18, height: 18, borderRadius: '50%', background: 'var(--accent)', color: '#001016', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 900 }}>✓</span>
                                                 )}
-                                                {/* NOMBRE en grande y, debajo, la MEDIDA */}
-                                                <span style={{ fontSize: 15, fontWeight: 800, color: '#fff', lineHeight: 1.2, letterSpacing: -0.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{t.nombre}</span>
-                                                <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, fontWeight: 600 }}>{t.ancho_cm} cm</span>
+                                                {/* NOMBRE en grande y, debajo, la MEDIDA — todo centrado */}
+                                                <span style={{ fontSize: 13, fontWeight: 800, color: '#fff', lineHeight: 1.2, letterSpacing: -0.2, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{t.nombre}</span>
+                                                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 5, fontWeight: 600 }}>{t.ancho_cm} cm</span>
                                               </button>
                                             );
                                           })}
