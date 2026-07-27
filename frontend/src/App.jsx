@@ -6709,20 +6709,37 @@ export default function App() {
   const tareasArte = disenosPedido.flatMap(d => (disenoMoldes[d.id] || []).map(mid => ({ did: d.id, mid })));
   const todasArteCargadas = tareasArte.length > 0 && tareasArte.every(t => arteCargado[t.did + '|' + t.mid]);
   // ── TELAS OBLIGATORIAS: no se avanza a la planilla si alguna pieza quedó sin tela ──
-  // A medida que se ve cada molde en el Arte, se registra cuántas de SUS piezas (genéricas) siguen
-  // sin tela asignada. Se guarda por molde (`telasFaltantes[pid]`) para poder validar TODO el pedido.
   const _genTelaP = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
-  const _arteMoldeAct = itemsArteDe(disenoActivo)?.[arteIdx]?.moldeId;
+  // Piezas (genéricas) que el operario VE Y PUEDE TOCAR en el visor del Arte: las del canvas, con el
+  // nombre que se MUESTRA (`etqNombres` manda sobre el del registro) y filtradas por la variable en
+  // vista. Es la MISMA fuente que usa el visor para pintar/seleccionar.
+  // OJO: antes esto se sacaba de `mapeoData.piezas` = TODAS las piezas del molde (~135) con los
+  // nombres del registro → el operario asignaba las ~9 que veía y el sistema seguía reclamando las
+  // que nunca vio ni podía tocar («faltan piezas sin tela» para siempre). Validar y asignar tienen
+  // que mirar EXACTAMENTE lo mismo que se ve.
+  const piezasArteGen = useMemo(() => {
+    // Mismo piso que el visor (`vfArte`): con variable elegida que aún no resuelve, NO se listan
+    // piezas (en vez de caer a las del molde entero, que es lo que causaba el falso «faltan»).
+    const vf = verVariante ? (varianteFiltro(verVariante) || { show: new Set() }) : null;
+    const nom = (canvasLayout?.layout || [])
+      .filter(p => !vf || vf.show.has(p.idx))
+      .map(p => _genTelaP((etqNombres?.[p.idx] || p.name || '').trim()));
+    return [...new Set(nom)].filter(Boolean);
+  }, [canvasLayout, etqNombres, verVariante]);
+  // Se registra por (molde|variable del ítem): un mismo molde puede entrar con dos variables y cada
+  // una tiene SUS piezas. El total suma sólo los ítems que HOY están en el pedido, así una variable
+  // que se quitó no deja un bloqueo fantasma.
+  const _itemArteAct = itemsArteDe(disenoActivo)?.[arteIdx];
+  const _arteMoldeAct = _itemArteAct?.moldeId;
+  const _claveTela = _arteMoldeAct ? `${_arteMoldeAct}|${_itemArteAct?.clave || ''}` : null;
   useEffect(() => {
-    if (pedidoPaso !== 'arte' || !_arteMoldeAct || !(mapeoData?.piezas?.length)) return;
-    const todas = [...new Set(mapeoData.piezas.map(_genTelaP))].filter(Boolean);
+    if (pedidoPaso !== 'arte' || !_claveTela || !piezasArteGen.length) return;
     const map = telaPorPieza[_arteMoldeAct] || {};
-    const faltan = todas.filter(g => !map[g]).length;
-    setTelasFaltantes(prev => (prev[_arteMoldeAct] === faltan ? prev : { ...prev, [_arteMoldeAct]: faltan }));
-  }, [pedidoPaso, _arteMoldeAct, mapeoData, telaPorPieza]);
-  // Molde(s) del pedido con piezas todavía sin tela → mientras haya alguno, no se puede avanzar.
-  const _moldesPedido = [...new Set(tareasArte.map(t => t.mid))];
-  const telasFaltantesTotal = _moldesPedido.reduce((n, pid) => n + (telasFaltantes[pid] || 0), 0);
+    const faltan = piezasArteGen.filter(g => !map[g]).length;
+    setTelasFaltantes(prev => (prev[_claveTela] === faltan ? prev : { ...prev, [_claveTela]: faltan }));
+  }, [pedidoPaso, _claveTela, _arteMoldeAct, piezasArteGen, telaPorPieza]);
+  const _itemsTelaPedido = [...new Set(disenosPedido.flatMap(d => (itemsArteDe(d.id) || []).map(it => `${it.moldeId}|${it.clave || ''}`)))];
+  const telasFaltantesTotal = _itemsTelaPedido.reduce((n, k) => n + (telasFaltantes[k] || 0), 0);
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
@@ -8565,8 +8582,9 @@ export default function App() {
                 // registro global, para que en el Arte SIEMPRE se pueda elegir la tela de cada pieza.
                 const _telasMol = _telasAsig.length ? _telasAsig : (telasReg.telas || []);
                 // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
-                const _genTela = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
-                const _todasGen = [...new Set((mapeoData?.piezas || []).map(_genTela))].filter(Boolean);   // piezas del molde (genéricas)
+                // `piezasArteGen` = las piezas que se VEN en el visor (misma fuente que se toca/pinta),
+                // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
+                const _todasGen = piezasArteGen;
                 const _telaDeGen = (gen) => (telaPorPieza[_id] || {})[gen] || null;                        // null si no se asignó
                 const _telaActiva = telaModoVer && _telasMol.length > 0;
                 const _telasMap = telaPorPieza[_id] || {};
