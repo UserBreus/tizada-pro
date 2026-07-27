@@ -10285,9 +10285,6 @@ export default function App() {
                         return (
                           <div className="animate-fade" style={{ padding: 4 }}>
                             <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Telas asignadas a este molde</h3>
-                            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5, maxWidth: 640 }}>
-                              Definí qué telas están <b>disponibles</b> para elegir en el pedido. Podés asignarlas a <b>todas las piezas</b> o sólo a <b>algunas</b>: una pieza ofrece las de «todas» <b>más</b> sus telas propias. Las telas se administran en <b>Configuración › Telas</b>.
-                            </p>
                             {/* VARIABLE — SIEMPRE a la vista (el sistema trabaja por variable, no por
                                 molde entero). Lo que se elija acá manda en todo lo de abajo. */}
                             {varsTela.length === 0 && (
@@ -10312,9 +10309,6 @@ export default function App() {
                                     );
                                   })}
                                 </div>
-                                {telasCfgVar
-                                  ? <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 7 }}>Piezas de esta variable: <b style={{ color: 'var(--text-secondary)' }}>{piezasMostradas.join(', ') || '—'}</b></div>
-                                  : <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 7 }}>Elegí una variable para asignar telas a sus piezas.</div>}
                               </div>
                             )}
                             {T.length === 0 ? (
@@ -10334,16 +10328,11 @@ export default function App() {
                                     {telasCfgPiezas.length > 0 && <button className="btn ghost" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setTelasCfgPiezas([])}>limpiar</button>}
                                     <button className="btn ghost" style={{ marginLeft: 'auto', padding: '4px 9px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>✕</button>
                                   </div>
-                                  {telasCfgPiezas.length === 0 ? (
-                                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                                      <b style={{ color: 'var(--accent)' }}>Tocá las piezas en el visor</b>, o arrastrá un <b>recuadro</b> desde un espacio vacío para elegir varias.
-                                      <br /><span style={{ color: 'var(--text-muted)' }}>Sin elegir ninguna, la tela va a {telasCfgVar ? 'TODAS las de la variable' : 'TODAS las piezas'}.</span>
-                                    </div>
-                                  ) : (
-                                    <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, lineHeight: 1.45 }}>
-                                      {telasCfgPiezas.length} pieza{telasCfgPiezas.length > 1 ? 's' : ''}: <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{telasCfgPiezas.join(', ')}</span>
-                                    </div>
-                                  )}
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: telasCfgPiezas.length ? 'var(--accent)' : 'var(--text-muted)' }}>
+                                    {telasCfgPiezas.length
+                                      ? `${telasCfgPiezas.length} pieza${telasCfgPiezas.length > 1 ? 's' : ''} elegida${telasCfgPiezas.length > 1 ? 's' : ''}`
+                                      : (telasCfgVar ? 'Ninguna → va a toda la variable' : 'Ninguna → va a todas las piezas')}
+                                  </div>
                                   <button className="btn success" style={{ width: '100%', marginTop: 9, padding: '9px 16px', fontWeight: 700, fontSize: 12.5 }}
                                     onClick={() => { setTelasCfgSel([]); setTelaCfgAncla(null); setTelaCfgModalBuscar(''); setTelaCfgModalOpen(true); }}>
                                     <Icon name="telas" style={{ width: 13, height: 13 }} /> Seleccionar tela
@@ -10387,7 +10376,7 @@ export default function App() {
                                         {enTodas
                                           ? <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(16,185,129,0.15)', color: 'var(--success)', flexShrink: 0 }}>todas las piezas</span>
                                           : (pzs && pzs.length)
-                                            ? <span title={pzs.join(', ')} style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(0,216,245,0.15)', color: 'var(--accent)', flexShrink: 0, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pzs.length} pieza{pzs.length > 1 ? 's' : ''}: {pzs.join(', ')}</span>
+                                            ? <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(0,216,245,0.15)', color: 'var(--accent)', flexShrink: 0 }}>{pzs.length} pieza{pzs.length > 1 ? 's' : ''}</span>
                                             : <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>sin asignar</span>}
                                         {asignada && (
                                           <button className="btn ghost" title="Quitar del molde" onClick={() => quitarTela(t.id)} style={{ padding: '2px 8px', fontSize: 12, color: 'var(--error)', flexShrink: 0 }}>✕</button>
@@ -10397,20 +10386,6 @@ export default function App() {
                                   })}
                                 </div>
 
-                                {/* Resumen por pieza (sólo si hay telas propias de alguna pieza) */}
-                                {Object.keys(porPieza).length > 0 && (
-                                  <div style={{ padding: 10, borderTop: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)' }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Piezas con telas propias</div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                      {Object.keys(porPieza).sort().map(pz => (
-                                        <div key={pz} style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                                          <b style={{ color: '#fff' }}>{pz}</b>: {telasDePieza(pz).length} disponibles
-                                          <span style={{ color: 'var(--text-muted)' }}> ({todas.length} de todas + {(porPieza[pz] || []).length} propias)</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
                               </div>
                             )}
 
@@ -10420,7 +10395,7 @@ export default function App() {
                             <Modal open={telaCfgModalOpen} onClose={() => setTelaCfgModalOpen(false)}
                               titulo="Seleccionar tela"
                               subtitulo={telasCfgPiezas.length
-                                ? `Se van a asignar a ${telasCfgPiezas.length} pieza(s): ${telasCfgPiezas.join(', ')}`
+                                ? `Se van a asignar a ${telasCfgPiezas.length} pieza${telasCfgPiezas.length > 1 ? 's' : ''}`
                                 : (telasCfgVar ? `Se van a asignar a TODAS las piezas de la variable (${piezasMostradas.length})` : 'Se van a asignar a TODAS las piezas del molde')}
                               maxWidth={860}>
                               {(() => {
