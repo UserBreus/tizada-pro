@@ -10174,9 +10174,17 @@ export default function App() {
                         // Telas disponibles en una pieza = todas ∪ extras de esa pieza.
                         const telasDePieza = (pz) => [...new Set([...todas, ...((porPieza[pz] || []).map(String))])];
                         const usadas = [...new Set([...todas, ...Object.values(porPieza).flat().map(String)])];
-                        const Tf = telasCfgBuscar.trim()
-                          ? T.filter(t => (t.nombre || '').toLowerCase().includes(telasCfgBuscar.trim().toLowerCase()))
+                        // Telas disponibles en la VARIABLE elegida = unión de las de sus piezas.
+                        const telasDeVariable = [...new Set(piezasMostradas.flatMap(pz => telasDePieza(pz)))];
+                        // Lista base: en modo VER con una variable elegida, sólo las telas de esa
+                        // variable (es lo que se pidió «mostrar»); en modo ASIGNAR, todo el registro
+                        // (hay que poder sumar telas nuevas). El buscador filtra sobre eso.
+                        const _base = (telasCfgModo === 'ver' && telasCfgVar)
+                          ? T.filter(t => telasDeVariable.includes(String(t.id)))
                           : T;
+                        const Tf = telasCfgBuscar.trim()
+                          ? _base.filter(t => (t.nombre || '').toLowerCase().includes(telasCfgBuscar.trim().toLowerCase()))
+                          : _base;
                         const inTS = { height: 34, fontSize: 12.5, padding: '0 10px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
                         // Asigna las telas TILDADAS a las piezas elegidas (o a todas si no se eligió ninguna).
                         const asignar = async () => {
@@ -10215,12 +10223,39 @@ export default function App() {
                             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5, maxWidth: 640 }}>
                               Definí qué telas están <b>disponibles</b> para elegir en el pedido. Podés asignarlas a <b>todas las piezas</b> o sólo a <b>algunas</b>: una pieza ofrece las de «todas» <b>más</b> sus telas propias. Las telas se administran en <b>Configuración › Telas</b>.
                             </p>
+                            {/* VARIABLE — SIEMPRE a la vista (el sistema trabaja por variable, no por
+                                molde entero). Lo que se elija acá manda en todo lo de abajo. */}
+                            {varsTela.length === 0 && (
+                              <div style={{ fontSize: 12, color: 'var(--warning, #e0a020)', background: 'rgba(224,160,32,0.10)', border: '1px solid rgba(224,160,32,0.3)', borderRadius: 9, padding: '9px 12px', marginBottom: 14, lineHeight: 1.45 }}>
+                                Este molde todavía <b>no tiene variables con piezas</b>, así que las telas se asignan sobre las piezas del molde. Armá las variables en <b>Ajustes › Variables</b> para trabajar por variable.
+                              </div>
+                            )}
+                            {varsTela.length > 0 && (
+                              <div style={{ marginBottom: 14 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Variable</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                  {[{ clave: '', label: 'Todo el molde', n: piezasMolde.length }, ...varsTela.map(v => ({ clave: v.clave, label: v.label || 'Variable', n: piezasDeVar(v.clave).length }))].map(op => {
+                                    const on = telasCfgVar === op.clave;
+                                    return (
+                                      <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); }}
+                                        style={{ padding: '6px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .15s',
+                                          border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                                        {op.label} <span style={{ fontWeight: 500, opacity: 0.75 }}>· {op.n} pza{op.n === 1 ? '' : 's'}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                {telasCfgVar
+                                  ? <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 7 }}>Piezas de esta variable: <b style={{ color: 'var(--text-secondary)' }}>{piezasMostradas.join(', ') || '—'}</b></div>
+                                  : <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 7 }}>Elegí una variable para asignar telas a sus piezas.</div>}
+                              </div>
+                            )}
                             {T.length === 0 ? (
                               <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '16px 0' }}>No hay telas registradas todavía. Andá a Configuración › Telas.</div>
                             ) : !telasPanelAbierto ? (
                               <button className="btn primary" style={{ padding: '10px 18px', fontWeight: 700 }} onClick={() => { setTelasPanelAbierto(true); setTelasCfgModo('ver'); }}>
                                 <Icon name="telas" style={{ width: 14, height: 14 }} /> Mostrar telas asignadas
-                                <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>({usadas.length})</span>
+                                <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>({telasCfgVar ? telasDeVariable.length : usadas.length})</span>
                               </button>
                             ) : (
                               <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, overflow: 'hidden' }}>
@@ -10244,24 +10279,6 @@ export default function App() {
                                 {/* En modo ASIGNAR: elegir a qué piezas va (vacío = todas) */}
                                 {telasCfgModo === 'asignar' && (
                                   <div style={{ padding: 10, borderBottom: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.15)' }}>
-                                    {/* VARIABLE: primero se elige la variable y se trabaja con SUS piezas */}
-                                    {varsTela.length > 0 && (
-                                      <div style={{ marginBottom: 10 }}>
-                                        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Variable</div>
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                          {[{ clave: '', label: 'Todo el molde', n: piezasMolde.length }, ...varsTela.map(v => ({ clave: v.clave, label: v.label || 'Variable', n: piezasDeVar(v.clave).length }))].map(op => {
-                                            const on = telasCfgVar === op.clave;
-                                            return (
-                                              <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); }}
-                                                style={{ padding: '5px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                                                  border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                                                {op.label} <span style={{ fontWeight: 500, opacity: 0.75 }}>· {op.n}</span>
-                                              </button>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    )}
                                     <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>
                                       ¿A qué piezas?{telasCfgPiezas.length === 0 && <span style={{ color: 'var(--accent)', textTransform: 'none', letterSpacing: 0 }}> · sin elegir ninguna = {telasCfgVar ? 'a TODAS las de la variable' : 'a TODAS las piezas'}</span>}
                                     </div>
