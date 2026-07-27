@@ -4694,7 +4694,8 @@ export default function App() {
           : (Array.isArray(activoProdDetalle?.telas_asignadas) ? activoProdDetalle.telas_asignadas.map(String) : []),
         por_pieza: (tc && typeof tc.por_pieza === 'object' && tc.por_pieza) ? tc.por_pieza : {}
       });
-      setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar(''); setTelasCfgVar('');
+      setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar('');
+      setTelasCfgVar(''); setVerVariante(null);   // entra en vista completa; al elegir variable, el visor se acota a ella
     }
   }, [tabAjustesMolde, activoProdDetalle]);
 
@@ -4997,7 +4998,7 @@ export default function App() {
   // Cargar el nido al entrar a Variables o al abrir una variable. Si hubo error NO reintenta
   // solo (evita loop) — el usuario reintenta con el botón del panel.
   // En Variables SIEMPRE; en Plantilla/Etiqueta SOLO si hay una variante elegida (para reproducir su acomodo).
-  useEffect(() => { const necesita = tabAjustesMolde === 'variables' || (['diseno', 'etiqueta'].includes(tabAjustesMolde) && verVariante); if (necesita && etqData && !nidoData && !nidoLoading && !nidoError) cargarNido(); }, [tabAjustesMolde, etqData, grupoAislado, verVariante]);
+  useEffect(() => { const necesita = tabAjustesMolde === 'variables' || (['diseno', 'etiqueta', 'telas'].includes(tabAjustesMolde) && verVariante); if (necesita && etqData && !nidoData && !nidoLoading && !nidoError) cargarNido(); }, [tabAjustesMolde, etqData, grupoAislado, verVariante]);
   // Al abrir una variable en detalle, cargar su acomodo guardado y cerrar cualquier vínculo en curso.
   useEffect(() => {
     setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre('');
@@ -10236,8 +10237,10 @@ export default function App() {
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                   {[{ clave: '', label: 'Todo el molde', n: piezasMolde.length }, ...varsTela.map(v => ({ clave: v.clave, label: v.label || 'Variable', n: piezasDeVar(v.clave).length }))].map(op => {
                                     const on = telasCfgVar === op.clave;
+                                    // Al elegir la variable, el VISOR muestra SOLO sus piezas y con el
+                                    // acomodo que se le dio (mismo mecanismo que Etiqueta/Diseño).
                                     return (
-                                      <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); }}
+                                      <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); setVerVariante(op.clave || null); }}
                                         style={{ padding: '6px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .15s',
                                           border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
                                         {op.label} <span style={{ fontWeight: 500, opacity: 0.75 }}>· {op.n} pza{op.n === 1 ? '' : 's'}</span>
