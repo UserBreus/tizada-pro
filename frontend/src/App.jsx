@@ -2846,6 +2846,7 @@ export default function App() {
   const [telasCfgSel, setTelasCfgSel] = useState([]);                              // telas tildadas para asignar
   const [telasCfgPiezas, setTelasCfgPiezas] = useState([]);                        // piezas elegidas ([] = todas)
   const [telasCfgVar, setTelasCfgVar] = useState('');                              // variable elegida ('' = todo el molde)
+  const [telaCfgVerId, setTelaCfgVerId] = useState(null);                          // tela tocada en la lista → se pinta en sus piezas
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
@@ -4695,7 +4696,7 @@ export default function App() {
         por_pieza: (tc && typeof tc.por_pieza === 'object' && tc.por_pieza) ? tc.por_pieza : {}
       });
       setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelasCfgBuscar('');
-      setTelasCfgVar(''); setVerVariante(null);   // entra en vista completa; al elegir variable, el visor se acota a ella
+      setTelasCfgVar(''); setVerVariante(null); setTelaCfgVerId(null);   // entra en vista completa; al elegir variable, el visor se acota a ella
     }
   }, [tabAjustesMolde, activoProdDetalle]);
 
@@ -10177,11 +10178,11 @@ export default function App() {
                         const usadas = [...new Set([...todas, ...Object.values(porPieza).flat().map(String)])];
                         // Telas disponibles en la VARIABLE elegida = unión de las de sus piezas.
                         const telasDeVariable = [...new Set(piezasMostradas.flatMap(pz => telasDePieza(pz)))];
-                        // Lista base: en modo VER con una variable elegida, sólo las telas de esa
-                        // variable (es lo que se pidió «mostrar»); en modo ASIGNAR, todo el registro
-                        // (hay que poder sumar telas nuevas). El buscador filtra sobre eso.
-                        const _base = (telasCfgModo === 'ver' && telasCfgVar)
-                          ? T.filter(t => telasDeVariable.includes(String(t.id)))
+                        // Lista base: en modo VER, SÓLO las telas ASIGNADAS (las de la variable elegida,
+                        // o las del molde si es «Todo el molde») — mezclarlas con las sin asignar
+                        // confundía. En modo ASIGNAR sí se ve todo el registro (hay que poder sumar).
+                        const _base = telasCfgModo === 'ver'
+                          ? T.filter(t => (telasCfgVar ? telasDeVariable : usadas).includes(String(t.id)))
                           : T;
                         const Tf = telasCfgBuscar.trim()
                           ? _base.filter(t => (t.nombre || '').toLowerCase().includes(telasCfgBuscar.trim().toLowerCase()))
@@ -10240,7 +10241,7 @@ export default function App() {
                                     // Al elegir la variable, el VISOR muestra SOLO sus piezas y con el
                                     // acomodo que se le dio (mismo mecanismo que Etiqueta/Diseño).
                                     return (
-                                      <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); setVerVariante(op.clave || null); }}
+                                      <button key={op.clave || '__todo'} type="button" onClick={() => { setTelasCfgVar(op.clave); setTelasCfgPiezas([]); setVerVariante(op.clave || null); setTelaCfgVerId(null); }}
                                         style={{ padding: '6px 13px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .15s',
                                           border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
                                         {op.label} <span style={{ fontWeight: 500, opacity: 0.75 }}>· {op.n} pza{op.n === 1 ? '' : 's'}</span>
@@ -10256,7 +10257,7 @@ export default function App() {
                             {T.length === 0 ? (
                               <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '16px 0' }}>No hay telas registradas todavía. Andá a Configuración › Telas.</div>
                             ) : !telasPanelAbierto ? (
-                              <button className="btn primary" style={{ padding: '10px 18px', fontWeight: 700 }} onClick={() => { setTelasPanelAbierto(true); setTelasCfgModo('ver'); }}>
+                              <button className="btn primary" style={{ padding: '10px 18px', fontWeight: 700 }} onClick={() => { setTelasPanelAbierto(true); setTelasCfgModo('ver'); setTelaCfgVerId(null); }}>
                                 <Icon name="telas" style={{ width: 14, height: 14 }} /> Mostrar telas asignadas
                                 <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>({telasCfgVar ? telasDeVariable.length : usadas.length})</span>
                               </button>
@@ -10265,18 +10266,18 @@ export default function App() {
                                 {/* Barra: buscador + Asignar (o Volver, en modo asignar) */}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: 10, borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
                                   {telasCfgModo === 'asignar' && (
-                                    <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} onClick={() => { setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>← Volver</button>
+                                    <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} onClick={() => { setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>← Volver</button>
                                   )}
                                   <input placeholder="Buscar tela…" value={telasCfgBuscar} onChange={e => setTelasCfgBuscar(e.target.value)} style={{ ...inTS, flex: 1, minWidth: 170 }} />
                                   {telasCfgModo === 'ver'
-                                    ? <button className="btn primary" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} onClick={() => { setTelasCfgModo('asignar'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>Asignar</button>
+                                    ? <button className="btn primary" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} onClick={() => { setTelasCfgModo('asignar'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>Asignar</button>
                                     : <button className="btn success" style={{ padding: '7px 16px', fontWeight: 700, fontSize: 12.5 }} disabled={!telasCfgSel.length} onClick={asignar}>
                                         Asignar {telasCfgSel.length ? `${telasCfgSel.length} ` : ''}
                                         {telasCfgPiezas.length ? `a ${telasCfgPiezas.length} pieza(s)`
                                           : telasCfgVar ? `a la variable (${piezasMostradas.length} pza${piezasMostradas.length === 1 ? '' : 's'})`
                                           : 'a todas las piezas'}
                                       </button>}
-                                  <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); }}>✕</button>
+                                  <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} title="Cerrar" onClick={() => { setTelasPanelAbierto(false); setTelasCfgModo('ver'); setTelasCfgSel([]); setTelasCfgPiezas([]); setTelaCfgVerId(null); }}>✕</button>
                                 </div>
 
                                 {/* En modo ASIGNAR: elegir a qué piezas va (vacío = todas) */}
@@ -10307,19 +10308,31 @@ export default function App() {
                                   </div>
                                 )}
 
-                                {/* Lista de telas */}
+                                {/* Lista de telas. En modo VER son SÓLO las asignadas: al tocar una, sus
+                                    piezas se pintan con su color en el visor (volver a tocarla, apaga). */}
                                 <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-                                  {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>Ninguna tela coincide con la búsqueda.</div>}
+                                  {Tf.length === 0 && (
+                                    <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                      {telasCfgBuscar.trim() ? 'Ninguna tela coincide con la búsqueda.'
+                                        : telasCfgModo === 'ver' ? 'Todavía no hay telas asignadas acá. Tocá «Asignar».' : 'No hay telas.'}
+                                    </div>
+                                  )}
                                   {Tf.map(t => {
                                     const enTodas = setTodas.has(String(t.id));
                                     const pzs = piezasDeTela(t.id);
                                     const asignada = enTodas || (pzs && pzs.length > 0);
                                     const tildada = telasCfgSel.includes(String(t.id));
                                     const modoA = telasCfgModo === 'asignar';
+                                    const viendo = !modoA && String(telaCfgVerId) === String(t.id);
                                     return (
                                       <div key={t.id}
-                                        onClick={modoA ? () => setTelasCfgSel(s => s.includes(String(t.id)) ? s.filter(x => x !== String(t.id)) : [...s, String(t.id)]) : undefined}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: modoA ? 'pointer' : 'default', background: tildada ? 'rgba(0,216,245,0.08)' : 'transparent' }}>
+                                        onClick={modoA
+                                          ? () => setTelasCfgSel(s => s.includes(String(t.id)) ? s.filter(x => x !== String(t.id)) : [...s, String(t.id)])
+                                          : () => setTelaCfgVerId(v => String(v) === String(t.id) ? null : String(t.id))}
+                                        title={modoA ? undefined : 'Tocá para ver en qué piezas va'}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer',
+                                          background: tildada ? 'rgba(0,216,245,0.08)' : (viendo ? colorDeTela(t.id) + '22' : 'transparent'),
+                                          boxShadow: viendo ? `inset 3px 0 0 ${colorDeTela(t.id)}` : 'none' }}>
                                         {modoA && (
                                           <span style={{ width: 15, height: 15, borderRadius: 4, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                                             border: '1.5px solid ' + (tildada ? 'var(--accent)' : 'var(--border-light)'), background: tildada ? 'var(--accent)' : 'transparent', color: '#001016', fontSize: 10, fontWeight: 900 }}>{tildada ? '✓' : ''}</span>
@@ -12831,7 +12844,20 @@ export default function App() {
                                 // El BORDE es la línea REAL del archivo (contorno), fina y neutra.
                                 // El RELLENO verde (o cyan) marca el estado. Nada dibujado de más.
                                 let fillCol, badgeFill, textFill;
-                                if (enNombrar && editandoNombre) {
+                                // TELAS: al tocar una tela en la lista, sus piezas se pintan con el color
+                                // de esa tela y el resto queda neutro (se ve de un vistazo dónde va).
+                                const _telaVerPz = (tabAjustesMolde === 'telas' && telaCfgVerId) ? (() => {
+                                  const cfgT = telasCfgMolde || { todas: [], por_pieza: {} };
+                                  const gen = _genTelaP(etqNombres[p.idx] || p.name || '');
+                                  const enTodas = (cfgT.todas || []).map(String).includes(String(telaCfgVerId));
+                                  const enPieza = ((cfgT.por_pieza || {})[gen] || []).map(String).includes(String(telaCfgVerId));
+                                  return enTodas || enPieza;
+                                })() : null;
+                                if (_telaVerPz !== null) {
+                                  const c = colorDeTela(telaCfgVerId);
+                                  if (_telaVerPz) { fillCol = c + '55'; badgeFill = c; textFill = '#0b0f14'; }
+                                  else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
+                                } else if (enNombrar && editandoNombre) {
                                   // Editando un nombre: las piezas de ESE nombre resaltadas (cyan), el resto neutro.
                                   if (nombrePz && nombreGenerico(nombrePz) === editandoNombre) { fillCol = 'rgba(0,243,255,0.24)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
                                   else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
