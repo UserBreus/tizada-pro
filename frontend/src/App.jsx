@@ -2902,6 +2902,10 @@ export default function App() {
   const [pzOffsets, setPzOffsets] = useState({});
   const [varPickerRow, setVarPickerRow] = useState(null);   // fila (índice) cuyo picker de VARIABLE está abierto (null = cerrado)
   const dragInfo = useRef({ idx: null, startX: 0, startY: 0, initialX: 0, initialY: 0, hasMoved: false });
+  // PINTAR SELECCIÓN de piezas arrastrando con el botón apretado (telas): al apretar sobre una
+  // pieza se fija el modo según su estado (si estaba suelta → sumar; si estaba elegida → quitar) y
+  // se aplica lo mismo a cada pieza por la que se pasa. Igual gesto para elegir y para desmarcar.
+  const pintaTela = useRef({ on: false, modo: 'add' });
   const [modalMapeoOpen, setModalMapeoOpen] = useState(false);
   const [mapeoData, setMapeoData] = useState(null);
   const [mapeoCargando, setMapeoCargando] = useState(false);   // cargando el mapeo de OTRA variable (1ª vez) → no dibujar diseños viejos
@@ -4408,7 +4412,12 @@ export default function App() {
     // Se guarda por nombre GENÉRICO (sin el número), que es la clave de la config de telas.
     if (tabAjustesMolde === 'telas' && telasCfgModo === 'asignar') {
       const gen = ((etqNombres[idx] || etqData?.piezas?.[idx]?.nombre || '') + '').replace(/\s+\d+\s*$/, '').trim();
-      if (gen) setTelasCfgPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen]);
+      if (gen) {
+        // El estado de la pieza donde se APRETÓ define el modo de todo el arrastre.
+        const ya = telasCfgPiezas.includes(gen);
+        pintaTela.current = { on: true, modo: ya ? 'del' : 'add' };
+        setTelasCfgPiezas(s => (ya ? s.filter(x => x !== gen) : (s.includes(gen) ? s : [...s, gen])));
+      }
       e.preventDefault();
       return;
     }
@@ -4517,7 +4526,28 @@ export default function App() {
     }));
   };
 
+  // Pieza por la que pasa el cursor mientras se pinta la selección (telas): aplica el modo fijado
+  // al apretar. Idempotente: pasar dos veces por la misma pieza no la alterna.
+  const pintarTelaPieza = (idx) => {
+    if (!pintaTela.current.on) return;
+    const gen = ((etqNombres[idx] || etqData?.piezas?.[idx]?.nombre || '') + '').replace(/\s+\d+\s*$/, '').trim();
+    if (!gen) return;
+    setTelasCfgPiezas(s => {
+      const esta = s.includes(gen);
+      if (pintaTela.current.modo === 'add') return esta ? s : [...s, gen];
+      return esta ? s.filter(x => x !== gen) : s;
+    });
+  };
+
+  // Si se suelta el botón FUERA del visor, el pintado igual tiene que terminar.
+  useEffect(() => {
+    const up = () => { pintaTela.current.on = false; };
+    window.addEventListener('mouseup', up);
+    return () => window.removeEventListener('mouseup', up);
+  }, []);
+
   const endDrag = () => {
+    pintaTela.current.on = false;   // soltar el botón termina el pintado de selección
     const d = dragInfo.current;
     // En "emparejar talles" el mismo gesto sirve para las dos cosas: si no hubo movimiento
     // fue un clic → selecciona/deselecciona la pieza (mismo gesto que el resto del visor).
@@ -10296,7 +10326,7 @@ export default function App() {
                                     <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 6 }}>¿A qué piezas?</div>
                                     {telasCfgPiezas.length === 0 ? (
                                       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                                        <b style={{ color: 'var(--accent)' }}>Tocá las piezas en el visor</b> para elegirlas.
+                                        <b style={{ color: 'var(--accent)' }}>Tocá las piezas en el visor</b> (o arrastrá con el botón apretado para marcar varias; arrastrando sobre las marcadas se desmarcan).
                                         <br /><span style={{ color: 'var(--text-muted)' }}>Si no tocás ninguna, la tela va a {telasCfgVar ? 'TODAS las piezas de la variable' : 'TODAS las piezas'}.</span>
                                       </div>
                                     ) : (
@@ -12959,6 +12989,7 @@ export default function App() {
                                     transform={`translate(${tx}, ${ty})`}
                                     style={{ cursor: (modoAcomodar || (empModo && empVista !== 'simple' && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
                                     onMouseDown={(e) => startDrag(e, p.idx)}
+                                    onMouseEnter={() => pintarTelaPieza(p.idx)}
                                   >
                                     <title>{empTodasInfo
                                       ? `${p.talle} · pieza #${p.t_idx + 1}${nombrePz ? ` — ${nombrePz}` : ' (sin agrupar)'}`
