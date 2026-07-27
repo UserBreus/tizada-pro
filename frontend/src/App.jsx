@@ -2851,6 +2851,8 @@ export default function App() {
   // ANCLA para elegir por RANGO con Shift en el modal de telas: guarda la última tela tocada SIN
   // shift y en qué quedó (`add`/`del`). El shift+clic aplica ese mismo modo a todo el tramo.
   const [telaCfgAncla, setTelaCfgAncla] = useState(null);
+  const [telaTopeOpen, setTelaTopeOpen] = useState(false);                        // modal «Telas a la vez»
+  const [telaTopeVal, setTelaTopeVal] = useState('');                             // valor escrito en ese modal
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
@@ -10343,27 +10345,21 @@ export default function App() {
                                     );
                                   })}
                                 </div>
-                                {/* TOPE: cuántas telas distintas puede usar EN EL PEDIDO una prenda de
-                                    esta variable. Chips: un toque guarda (sin campos ni botón aparte). */}
+                                {/* TOPE: cuántas telas distintas puede combinar la prenda EN EL PEDIDO.
+                                    Se edita en su propio modal (número escrito), no acá apretado. */}
                                 {telasCfgVar && (
-                                  <div style={{ marginTop: 11 }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                                      Telas a la vez <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: 'var(--text-muted)' }}>· cuántas puede combinar la prenda en el pedido</span>
-                                    </div>
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                      {[0, 1, 2, 3, 4, 5, 6].map(n => {
-                                        const on = topeVar === n;
-                                        return (
-                                          <button key={n} type="button" onClick={() => guardarTope(n)}
-                                            title={n === 0 ? 'Sin límite' : `Hasta ${n} tela${n > 1 ? 's' : ''} distintas por prenda`}
-                                            style={{ minWidth: n === 0 ? 'auto' : 34, padding: n === 0 ? '5px 12px' : '5px 10px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .15s',
-                                              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,216,245,0.14)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                                            {n === 0 ? 'Sin límite' : n}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
+                                  <button type="button" onClick={() => { setTelaTopeVal(topeVar ? String(topeVar) : ''); setTelaTopeOpen(true); }}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: 11, padding: '10px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                                      border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: '#fff' }}>
+                                    <span style={{ flex: 1, minWidth: 0 }}>
+                                      <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700 }}>Telas a la vez</span>
+                                      <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>cuántas puede combinar la prenda en el pedido</span>
+                                    </span>
+                                    <span style={{ fontSize: 15, fontWeight: 800, padding: '4px 12px', borderRadius: 9, flexShrink: 0,
+                                      background: topeVar ? 'rgba(0,216,245,0.14)' : 'rgba(255,255,255,0.06)', color: topeVar ? 'var(--accent)' : 'var(--text-muted)' }}>
+                                      {topeVar || 'Sin límite'}
+                                    </span>
+                                  </button>
                                 )}
                               </div>
                             )}
@@ -10444,6 +10440,38 @@ export default function App() {
 
                               </div>
                             )}
+
+                            {/* MODAL «Telas a la vez»: el número se ESCRIBE, con su propio espacio.
+                                Es el límite del PEDIDO (no de lo que se asigna acá). */}
+                            <Modal open={telaTopeOpen} onClose={() => setTelaTopeOpen(false)}
+                              titulo="Telas a la vez"
+                              subtitulo={`Cuántas telas distintas puede combinar una prenda de «${(varsTela.find(v => v.clave === telasCfgVar) || {}).label || 'esta variable'}» en el pedido`}
+                              maxWidth={420} centrado>
+                              {(() => {
+                                const n = parseInt(telaTopeVal, 10) || 0;
+                                const paso = (d) => setTelaTopeVal(String(Math.max(0, n + d)));
+                                const guardar = async () => { await guardarTope(n); setTelaTopeOpen(false); };
+                                const btn = { width: 44, height: 44, borderRadius: 11, fontSize: 20, fontWeight: 700, cursor: 'pointer', border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff', flexShrink: 0 };
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                                      <button type="button" style={btn} onClick={() => paso(-1)}>−</button>
+                                      <input type="number" min="0" autoFocus value={telaTopeVal} onChange={e => setTelaTopeVal(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') guardar(); }} placeholder="0"
+                                        style={{ width: 120, height: 76, textAlign: 'center', fontSize: 34, fontWeight: 800, borderRadius: 14, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                                      <button type="button" style={btn} onClick={() => paso(1)}>+</button>
+                                    </div>
+                                    <div style={{ textAlign: 'center', fontSize: 12.5, color: n > 0 ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
+                                      {n > 0 ? `Hasta ${n} tela${n > 1 ? 's' : ''} distintas por prenda` : 'Sin límite: puede usar todas las que tenga asignadas'}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--border-light)', paddingTop: 14 }}>
+                                      <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setTelaTopeVal('0')}>Sin límite</button>
+                                      <button className="btn success" style={{ marginLeft: 'auto', padding: '9px 24px', fontWeight: 700 }} onClick={guardar}>Guardar</button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </Modal>
 
                             {/* MODAL «Seleccionar tela»: todas las telas en tarjetas cuadradas, con
                                 buscador arriba. Se tildan las que se quieran y «Asignar» las aplica
