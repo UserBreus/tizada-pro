@@ -165,7 +165,10 @@ const HACER_PEDIDO = {
       texto: 'Empezá por el DISEÑO: escribí acá cómo se llama.',
       nota: 'Es el estampado de la prenda. Ej: «River titular». Un pedido puede llevar varios.' },
     { ancla: 'pedido-diseno-agregar', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'click',
-      texto: 'Agregalo con este botón (o con Enter).' },
+      // Si ya lo confirmó con Enter en el campo, este paso está hecho: el motor lo saltea.
+      tambien: ['pedido-diseno-input'],
+      texto: 'Agregalo con este botón.',
+      nota: 'Si ya apretaste Enter en el campo, ya está agregado: seguimos.' },
     { ancla: 'pedido-diseno-chips', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'ver',
       texto: 'Ahí aparece tu diseño. Si cargás varios, tocá uno para trabajar sobre ese.',
       nota: 'El número al lado dice cuántas variables le asignaste.' },

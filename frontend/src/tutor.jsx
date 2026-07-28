@@ -67,6 +67,16 @@ function puente(destino, donde) {
   return null;
 }
 
+/**
+ * ¿El paso sirve SÓLO para llevar al usuario a una pantalla? Se sabe solo: su ancla es exactamente
+ * el botón que la tabla de RUTAS usa para llegar al destino que el paso pide. Si ya estamos ahí, el
+ * paso no tiene nada que pedir — sería el absurdo de decir «tocá Pedidos» estando en Pedidos.
+ */
+function esPasoNav(p) {
+  if (!p || !p.ir || !p.ancla) return false;
+  return Object.entries(p.ir).some(([k, v]) => (RUTAS[`${k}:${v}`] || {}).ancla === p.ancla);
+}
+
 /** Rectángulo del elemento marcado con `data-tour`, siguiéndolo si la página se mueve. */
 function useAncla(ancla, activo) {
   const [rect, setRect] = useState(null);
@@ -180,12 +190,12 @@ function Tour({ guia, onCerrar, ir, donde }) {
   // re-registraba al re-medir el elemento) y el tutorial saltaba del paso 1 al 3.
   const desde = useRef(-1);
   const idxRef = useRef(0);          // el paso ACTUAL, para que una acción vieja no empuje de más
-  const avanzar = useCallback(() => {
+  const avanzar = useCallback((n = 1) => {
     setIdx(i => {
       if (desde.current >= i) return i;          // ya se avanzó desde este paso
       desde.current = i;
-      if (i + 1 >= guia.pasos.length) { setTimeout(onCerrar, 0); return i; }
-      return i + 1;
+      if (i + n >= guia.pasos.length) { setTimeout(onCerrar, 0); return i; }
+      return i + n;
     });
   }, [guia.pasos.length, onCerrar]);
   const retroceder = useCallback(() => { desde.current = -1; setIdx(i => Math.max(0, i - 1)); }, []);
@@ -219,6 +229,10 @@ function Tour({ guia, onCerrar, ir, donde }) {
   const saltoRef = useRef(false);
   useEffect(() => { saltoRef.current = !!salto; }, [salto]);
 
+  // YA ESTÁS AHÍ: si el paso era sólo para llevarte a una pantalla y estás parado en ella, se da por
+  // cumplido solo. (Antes el tutorial abría en Pedidos y el primer paso te pedía tocar «Pedidos».)
+  useEffect(() => { if (!salto && esPasoNav(pasoGuion)) avanzar(); }, [idx, !!salto]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Si el paso pide una pantalla y NO hay camino marcado (no está en RUTAS), se navega solo para no
   // dejar al usuario colgado. Cuando sí hay camino, lo hace él tocando los botones (`salto`).
   useEffect(() => { if (pasoGuion?.ir && !salto) ir(pasoGuion.ir); }, [idx, !!salto]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -236,7 +250,10 @@ function Tour({ guia, onCerrar, ir, donde }) {
   // (pantalla que tarda) no se enganchaba nunca, y al re-medirlo se registraba de más → saltos.
   useEffect(() => {
     if (!paso || (paso.accion !== 'click' && paso.accion !== 'input')) return;
-    const dentro = (t) => t && t.closest && t.closest(`[data-tour="${paso.ancla}"]`);
+    // El paso puede aceptar más de un lugar: `tambien` lista las otras anclas que valen igual (el
+    // campo que confirma con Enter vale lo mismo que el botón que hace esa confirmación).
+    const anclas = [paso.ancla, ...(paso.tambien || [])];
+    const dentro = (t) => t && t.closest && anclas.some(a => t.closest(`[data-tour="${a}"]`));
     let temp = null;                                   // UN solo temporizador por paso
     // Avanza sólo si seguimos parados en el mismo paso (una acción vieja no empuja de más).
     // `eraPuente` se mira EN EL MOMENTO del evento, no después: si el botón que se tocó cambia de
@@ -265,7 +282,19 @@ function Tour({ guia, onCerrar, ir, donde }) {
     document.addEventListener('input', h, true);
     // Si el guion lo permite, ENTER también cuenta como hecho (varios campos del sistema
     // confirman con Enter en vez de con el botón).
-    const hk = (e) => { if (e.key === 'Enter' && dentro(e.target)) { const q = saltoRef.current; clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx, q), 200); } };
+    // ENTER: en este sistema no es «marcar el paso como hecho», es la CONFIRMACIÓN del campo (agrega
+    // el diseño, aplica el nombre…). Por eso, si el paso siguiente pide tocar el botón que hace
+    // exactamente eso, ese paso ya está cumplido y se saltea: pedirlo de nuevo sería mandar a hacer
+    // dos veces la misma cosa. El evento no se toca (ni preventDefault ni stopPropagation): el
+    // campo recibe su Enter igual que sin tutorial.
+    const hk = (e) => {
+      if (e.key !== 'Enter' || !dentro(e.target)) return;
+      const q = saltoRef.current;
+      const sig = guia.pasos[idx + 1];
+      const yaHecho = sig && (sig.tambien || []).includes(paso.ancla);
+      clearTimeout(temp);
+      temp = setTimeout(() => { if (idxRef.current === idx && !q) avanzar(yaHecho ? 2 : 1); }, 200);
+    };
     document.addEventListener('keydown', hk, true);
     // Salir del campo también es «ya terminé de escribir».
     const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); } };
