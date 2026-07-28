@@ -17,6 +17,42 @@ import { GUIAS, AREAS, guiaPorId } from './guias';
 const MARGEN = 8;          // aire entre el elemento iluminado y el recorte
 const REINTENTO = 250;     // cada cuánto se busca el elemento que todavía no apareció
 
+/**
+ * CÓMO SE LLEGA A CADA PANTALLA. La ayuda mira DÓNDE ESTÁ el usuario y, si no está donde el paso
+ * necesita, no lo teletransporta: le va marcando los botones hasta llegar. Cada destino dice qué
+ * botón tocar y, si a su vez necesita estar en otro lado, se encadena solo (`necesita`).
+ */
+const RUTAS = {
+  'tab:pedidos':      { ancla: 'nav-pedidos',   texto: 'Primero vamos a Pedidos. Tocá acá.' },
+  'tab:config':       { ancla: 'nav-config',    texto: 'Primero vamos a Configuración. Tocá acá.' },
+  'sub:productos':    { ancla: 'cfg-productos', texto: 'Ahora entrá a «Molderías».', necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:telas':        { ancla: 'cfg-telas',     texto: 'Ahora entrá a «Telas».',     necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:dashboard':    { ancla: 'nav-config',    texto: 'Volvé al panel de Configuración tocando acá.' },
+  // Dentro de un molde abierto: el menú de ajustes tiene un botón por pantalla.
+  'ajuste:variables': { ancla: 'ajuste-variables', texto: 'Entrá a «Variables».', necesita: { ajuste: 'menu' } },
+  'ajuste:telas':     { ancla: 'ajuste-telas',     texto: 'Entrá a «Telas asignadas».', necesita: { ajuste: 'menu' } },
+  'ajuste:borde':     { ancla: 'ajuste-borde',     texto: 'Entrá a «Borde de corte».', necesita: { ajuste: 'menu' } },
+  'ajuste:etiqueta':  { ancla: 'ajuste-etiqueta',  texto: 'Entrá a «Etiqueta».', necesita: { ajuste: 'menu' } },
+  'ajuste:diseno':    { ancla: 'ajuste-diseno',    texto: 'Entrá a «Diseño».', necesita: { ajuste: 'menu' } },
+  'ajuste:menu':      { ancla: 'ajuste-volver',    texto: 'Volvé al menú de ajustes tocando acá.' },
+  'paso:moldes':      { ancla: 'pedido-volver-moldes', texto: 'Volvé al primer paso del pedido.' },
+};
+
+/** Devuelve el paso-PUENTE que hay que hacer ahora para acercarse al destino, o null si ya llegó. */
+function puente(destino, donde) {
+  if (!destino) return null;
+  const claves = ['tab', 'sub', 'paso', 'ajuste'];
+  for (const k of claves) {
+    const q = destino[k];
+    if (!q || donde[k] === q) continue;               // no pedido, o ya estamos
+    const r = RUTAS[`${k}:${q}`];
+    if (!r) continue;                                  // sin ruta conocida: lo resuelve el propio guion
+    const previo = r.necesita ? puente(r.necesita, donde) : null;   // ¿hace falta llegar a otro lado antes?
+    return previo || { ancla: r.ancla, texto: r.texto, accion: 'click', esPuente: true };
+  }
+  return null;
+}
+
 /** Rectángulo del elemento marcado con `data-tour`, siguiéndolo si la página se mueve. */
 function useAncla(ancla, activo) {
   const [rect, setRect] = useState(null);
@@ -44,7 +80,7 @@ function useAncla(ancla, activo) {
 }
 
 /** Globo con la consigna, ubicado donde entre (abajo del elemento, o arriba si no hay lugar). */
-function Globo({ rect, paso, idx, total, onSiguiente, onAtras, onCerrar, esperando }) {
+function Globo({ rect, paso, idx, total, onSiguiente, onAtras, onCerrar, esperando, puente }) {
   const ANCHO = 330;
   const vh = window.innerHeight, vw = window.innerWidth;
   let top, left, flecha = 'arriba';
@@ -68,7 +104,7 @@ function Globo({ rect, paso, idx, total, onSiguiente, onAtras, onCerrar, esperan
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
         <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--accent)' }}>
-          Paso {idx + 1} de {total}
+          {puente ? 'Te llevo hasta ahí' : `Paso ${idx + 1} de ${total}`}
         </span>
         <button onClick={onCerrar} title="Salir de la ayuda"
           style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>✕</button>
@@ -88,22 +124,29 @@ function Globo({ rect, paso, idx, total, onSiguiente, onAtras, onCerrar, esperan
         <div style={{ flex: 1, height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.10)', overflow: 'hidden' }}>
           <div style={{ width: `${((idx + 1) / total) * 100}%`, height: '100%', background: 'var(--accent)' }} />
         </div>
-        <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12, fontWeight: 700 }} onClick={onSiguiente}>
-          {idx + 1 === total ? 'Terminar' : 'Siguiente →'}
-        </button>
+        {!puente && (
+          <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12, fontWeight: 700 }} onClick={onSiguiente}>
+            {idx + 1 === total ? 'Terminar' : 'Siguiente →'}
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 /** El tutorial en sí: recorte + globo + detección de la acción del usuario. */
-function Tour({ guia, onCerrar, ir }) {
+function Tour({ guia, onCerrar, ir, donde }) {
   const [idx, setIdx] = useState(0);
-  const paso = guia.pasos[idx];
+  const pasoGuion = guia.pasos[idx];
+  // AYUDA INTELIGENTE: si el usuario no está en la pantalla que el paso necesita, primero se le
+  // marca el camino (un botón por vez) en vez de saltar solo. Cuando llega, sigue el guion.
+  const salto = pasoGuion?.ir ? puente(pasoGuion.ir, donde || {}) : null;
+  const paso = salto || pasoGuion;
   const [rect, elRef] = useAncla(paso?.ancla, true);
   // Un paso avanza UNA sola vez. Sin esto, un mismo clic podía disparar dos avances (el listener se
   // re-registraba al re-medir el elemento) y el tutorial saltaba del paso 1 al 3.
   const desde = useRef(-1);
+  const idxRef = useRef(0);          // el paso ACTUAL, para que una acción vieja no empuje de más
   const avanzar = useCallback(() => {
     setIdx(i => {
       if (desde.current >= i) return i;          // ya se avanzó desde este paso
@@ -113,9 +156,13 @@ function Tour({ guia, onCerrar, ir }) {
     });
   }, [guia.pasos.length, onCerrar]);
   const retroceder = useCallback(() => { desde.current = -1; setIdx(i => Math.max(0, i - 1)); }, []);
+  useEffect(() => { idxRef.current = idx; }, [idx]);
+  const saltoRef = useRef(false);
+  useEffect(() => { saltoRef.current = !!salto; }, [salto]);
 
-  // Llevar al usuario a la pantalla del paso (si el guion lo pide).
-  useEffect(() => { if (paso?.ir) ir(paso.ir); }, [idx]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Si el paso pide una pantalla y NO hay camino marcado (no está en RUTAS), se navega solo para no
+  // dejar al usuario colgado. Cuando sí hay camino, lo hace él tocando los botones (`salto`).
+  useEffect(() => { if (pasoGuion?.ir && !salto) ir(pasoGuion.ir); }, [idx, !!salto]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Traer el elemento a la vista.
   useEffect(() => {
@@ -131,14 +178,30 @@ function Tour({ guia, onCerrar, ir }) {
   useEffect(() => {
     if (!paso || (paso.accion !== 'click' && paso.accion !== 'input')) return;
     const dentro = (t) => t && t.closest && t.closest(`[data-tour="${paso.ancla}"]`);
+    let temp = null;                                   // UN solo temporizador por paso
+    // `avanzarDesde` sólo corre si seguimos parados en el mismo paso: así una acción vieja no
+    // empuja pasos de más.
+    // Si lo cumplido fue un PUENTE, no se avanza el guion: al cambiar de pantalla el puente
+    // desaparece solo y el mismo paso queda listo para hacerse.
+    const avanzarDesde = (i) => { if (idxRef.current === i && !saltoRef.current) avanzar(); };
     if (paso.accion === 'click') {
-      const h = (e) => { if (dentro(e.target)) setTimeout(avanzar, 260); };   // deja reaccionar a la pantalla
+      const h = (e) => { if (dentro(e.target)) { clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx), 280); } };
       document.addEventListener('click', h, true);
-      return () => document.removeEventListener('click', h, true);
+      return () => { clearTimeout(temp); document.removeEventListener('click', h, true); };
     }
-    const h = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) setTimeout(avanzar, 600); };
+    // ESCRIBIR: se espera a que TERMINE de escribir (cada tecla reinicia la cuenta). Antes cada
+    // tecla programaba su propio avance y una palabra de 10 letras saltaba 10 pasos de una.
+    const h = (e) => {
+      if (!dentro(e.target) || (e.target.value || '').trim().length < 2) return;
+      clearTimeout(temp);
+      temp = setTimeout(() => avanzarDesde(idx), 900);
+    };
     document.addEventListener('input', h, true);
-    return () => document.removeEventListener('input', h, true);
+    // Si el guion lo permite, ENTER también cuenta como hecho (varios campos del sistema
+    // confirman con Enter en vez de con el botón).
+    const hk = (e) => { if (e.key === 'Enter' && dentro(e.target)) { clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx), 280); } };
+    document.addEventListener('keydown', hk, true);
+    return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('keydown', hk, true); };
   }, [idx, paso?.ancla, paso?.accion, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Salir con Escape.
@@ -155,13 +218,19 @@ function Tour({ guia, onCerrar, ir }) {
       {/* RECORTE: el `box-shadow` gigante oscurece TODO menos este rectángulo. `pointerEvents:none`
           es clave: deja que el usuario toque de verdad el elemento iluminado. */}
       {r ? (
-        <div style={{ position: 'fixed', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 10, zIndex: 100000,
-          boxShadow: '0 0 0 9999px rgba(3,7,12,0.72), 0 0 0 2px var(--accent), 0 0 26px rgba(0,216,245,0.55)',
-          pointerEvents: 'none', transition: 'all .18s ease' }} />
+        <>
+          {/* Fondo MUY oscuro + el hueco iluminado con borde grueso y resplandor. */}
+          <div style={{ position: 'fixed', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 12, zIndex: 100000,
+            boxShadow: '0 0 0 9999px rgba(2,5,9,0.88), 0 0 0 4px var(--accent), 0 0 40px 6px rgba(0,216,245,0.75), inset 0 0 22px rgba(0,216,245,0.30)',
+            pointerEvents: 'none', transition: 'all .18s ease' }} />
+          {/* Halo que late, para que salte a la vista dónde hay que tocar. */}
+          <div className="tour-pulso" style={{ position: 'fixed', left: r.x - 6, top: r.y - 6, width: r.w + 12, height: r.h + 12,
+            borderRadius: 16, border: '2px solid var(--accent)', zIndex: 100001, pointerEvents: 'none' }} />
+        </>
       ) : (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(3,7,12,0.72)', zIndex: 100000, pointerEvents: 'none' }} />
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,5,9,0.88)', zIndex: 100000, pointerEvents: 'none' }} />
       )}
-      <Globo rect={rect} paso={paso} idx={idx} total={guia.pasos.length} esperando={!rect}
+      <Globo rect={rect} paso={paso} idx={idx} total={guia.pasos.length} esperando={!rect} puente={!!salto}
         onSiguiente={() => { desde.current = -1; avanzar(); }} onAtras={retroceder} onCerrar={onCerrar} />
     </>,
     document.body
@@ -226,13 +295,13 @@ function Menu({ onElegir, onCerrar }) {
  *   abierto / setAbierto  el modal de «¿con qué te ayudo?»
  *   ir(destino)           lleva a la pantalla que pide el paso ({tab, sub, paso, ajuste})
  */
-export function Ayuda({ abierto, setAbierto, ir }) {
+export function Ayuda({ abierto, setAbierto, ir, donde }) {
   const [guiaId, setGuiaId] = useState(null);
   const guia = guiaPorId(guiaId);
   return (
     <>
       {abierto && !guia && <Menu onCerrar={() => setAbierto(false)} onElegir={(id) => { setGuiaId(id); setAbierto(false); }} />}
-      {guia && <Tour guia={guia} ir={ir} onCerrar={() => setGuiaId(null)} />}
+      {guia && <Tour guia={guia} ir={ir} donde={donde} onCerrar={() => setGuiaId(null)} />}
     </>
   );
 }

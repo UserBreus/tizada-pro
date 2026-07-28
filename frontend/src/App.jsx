@@ -8994,7 +8994,7 @@ export default function App() {
 
                   {/* Barra inferior fija */}
                   <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
-                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('moldes')}>← Diseños</button>
+                    <button className="btn ghost" data-tour="pedido-volver-moldes" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('moldes')}>← Diseños</button>
                     {_tieneDiseno && estado?.arte && !estado.arte.aprobado && (
                       <span style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)' }}>Ajustá el mapeo y «Guardar mapeo».</span>
                     )}
@@ -10284,7 +10284,7 @@ export default function App() {
                           </div>
                         ) : (
                           <div key={tabAjustesMolde} className="settings-slide" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                            <button className="btn ghost" onClick={() => setTabAjustesMolde('menu')} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 10px' }}>
+                            <button className="btn ghost" data-tour="ajuste-volver" onClick={() => setTabAjustesMolde('menu')} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 10px' }}>
                               ⬅ Volver a ajustes
                             </button>
 
@@ -14732,7 +14732,8 @@ export default function App() {
       )}
 
       {/* AYUDA GUIADA — se monta una sola vez y se dibuja por encima de todo */}
-      <AyudaGuiada abierto={ayudaAbierta} setAbierto={setAyudaAbierta} ir={irPantallaAyuda} />
+      <AyudaGuiada abierto={ayudaAbierta} setAbierto={setAyudaAbierta} ir={irPantallaAyuda}
+        donde={{ tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde }} />
     </div>
   );
 }

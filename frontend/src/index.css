@@ -1282,3 +1282,12 @@ td.num {
 .planilla-tbl tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.015); }
 .planilla-tbl tbody tr:hover { background: rgba(0, 216, 245, 0.04); }
 .planilla-tbl tbody td { transition: background .12s; }
+
+/* AYUDA GUIADA — halo que late sobre el elemento que hay que tocar (ver tutor.jsx). Va acá y no
+   inline porque una animación por keyframes no se puede declarar en el style de React. */
+@keyframes tourPulso {
+  0%   { transform: scale(1);    opacity: .95; }
+  70%  { transform: scale(1.06); opacity: 0;   }
+  100% { transform: scale(1.06); opacity: 0;   }
+}
+.tour-pulso { animation: tourPulso 1.5s ease-out infinite; }
