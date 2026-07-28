@@ -87,7 +87,7 @@ function useAncla(ancla, activo) {
  *           después de un ratito, con una barra que muestra cuánto falta.
  * El PUENTE (ámbar) es una acción especial: llevar al usuario a la pantalla que corresponde.
  */
-function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, progreso }) {
+function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, progreso, trabado, onSeguirIgual }) {
   const ANCHO = 340;
   const esInfo = !puente && paso.accion === 'ver';
   const col = puente ? 'var(--warning, #e0a020)' : esInfo ? '#a78bfa' : 'var(--accent)';
@@ -125,7 +125,15 @@ function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, p
       </div>
       <div style={{ fontSize: 14.5, color: '#fff', lineHeight: 1.45, fontWeight: 600 }}>{paso.texto}</div>
       {paso.nota && <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 7 }}>{paso.nota}</div>}
-      {esperando && <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', marginTop: 9 }}>Buscando ese lugar en pantalla…</div>}
+      {esperando && !trabado && <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', marginTop: 9 }}>Buscando ese lugar en pantalla…</div>}
+      {trabado && (
+        <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 9, background: 'rgba(224,160,32,0.12)', border: '1px solid rgba(224,160,32,0.35)' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', lineHeight: 1.4 }}>
+            No encuentro ese lugar en pantalla. Puede que falte abrir algo antes.
+          </div>
+          <button className="btn ghost" style={{ marginTop: 7, padding: '5px 11px', fontSize: 11.5 }} onClick={onSeguirIgual}>Seguir igual →</button>
+        </div>
+      )}
       {/* INFO: barra que se llena sola (no hay que apretar nada). ACCIÓN: recordatorio de qué se espera. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 13 }}>
         {idx > 0 && !puente && (
@@ -172,11 +180,20 @@ function Tour({ guia, onCerrar, ir, donde }) {
   // PASOS INFORMATIVOS: avanzan SOLOS (el usuario no tiene que apretar nada). El tiempo sale del
   // largo del texto —lo que tarda en leerse— con un piso de 3,5 s. `progreso` alimenta la barrita.
   const [progreso, setProgreso] = useState(0);
+  // RED DE SEGURIDAD: si lo que hay que marcar no aparece en unos segundos (la pantalla necesita
+  // algo previo, como tener un molde abierto), se ofrece seguir igual en vez de quedar esperando.
+  const [trabado, setTrabado] = useState(false);
+  useEffect(() => {
+    setTrabado(false);
+    if (rect) return;
+    const t = setTimeout(() => setTrabado(true), 5000);
+    return () => clearTimeout(t);
+  }, [idx, !!rect, !!salto]);
   useEffect(() => {
     setProgreso(0);
     if (salto || !paso || paso.accion !== 'ver') return;
     const largo = (paso.texto || '').length + (paso.nota || '').length;
-    const ms = Math.min(11000, Math.max(3500, largo * 55));
+    const ms = Math.min(9000, Math.max(2600, largo * 45));
     const t0 = Date.now();
     const tick = setInterval(() => {
       const p = Math.min(1, (Date.now() - t0) / ms);
@@ -207,13 +224,19 @@ function Tour({ guia, onCerrar, ir, donde }) {
     if (!paso || (paso.accion !== 'click' && paso.accion !== 'input')) return;
     const dentro = (t) => t && t.closest && t.closest(`[data-tour="${paso.ancla}"]`);
     let temp = null;                                   // UN solo temporizador por paso
-    // `avanzarDesde` sólo corre si seguimos parados en el mismo paso: así una acción vieja no
-    // empuja pasos de más.
-    // Si lo cumplido fue un PUENTE, no se avanza el guion: al cambiar de pantalla el puente
-    // desaparece solo y el mismo paso queda listo para hacerse.
-    const avanzarDesde = (i) => { if (idxRef.current === i && !saltoRef.current) avanzar(); };
+    // Avanza sólo si seguimos parados en el mismo paso (una acción vieja no empuja de más).
+    // `eraPuente` se mira EN EL MOMENTO del evento, no después: si el botón que se tocó cambia de
+    // pantalla, un instante más tarde el paso viejo «pide» la pantalla anterior y se encendería un
+    // puente que bloqueaba el avance para siempre (el tutorial quedaba trabado al tocar, por
+    // ejemplo, «Cargar el arte»).
+    const avanzarDesde = (i, eraPuente) => { if (idxRef.current === i && !eraPuente) avanzar(); };
     if (paso.accion === 'click') {
-      const h = (e) => { if (dentro(e.target)) { clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx), 280); } };
+      const h = (e) => {
+        if (!dentro(e.target)) return;
+        const eraPuente = saltoRef.current;
+        clearTimeout(temp);
+        temp = setTimeout(() => avanzarDesde(idx, eraPuente), 200);
+      };
       document.addEventListener('click', h, true);
       return () => { clearTimeout(temp); document.removeEventListener('click', h, true); };
     }
@@ -221,16 +244,17 @@ function Tour({ guia, onCerrar, ir, donde }) {
     // tecla programaba su propio avance y una palabra de 10 letras saltaba 10 pasos de una.
     const h = (e) => {
       if (!dentro(e.target) || (e.target.value || '').trim().length < 2) return;
+      const eraPuente = saltoRef.current;
       clearTimeout(temp);
-      temp = setTimeout(() => avanzarDesde(idx), 900);
+      temp = setTimeout(() => avanzarDesde(idx, eraPuente), 650);   // dejó de escribir
     };
     document.addEventListener('input', h, true);
     // Si el guion lo permite, ENTER también cuenta como hecho (varios campos del sistema
     // confirman con Enter en vez de con el botón).
-    const hk = (e) => { if (e.key === 'Enter' && dentro(e.target)) { clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx), 280); } };
+    const hk = (e) => { if (e.key === 'Enter' && dentro(e.target)) { const q = saltoRef.current; clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx, q), 200); } };
     document.addEventListener('keydown', hk, true);
     // Salir del campo también es «ya terminé de escribir».
-    const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) { clearTimeout(temp); avanzarDesde(idx); } };
+    const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); } };
     document.addEventListener('blur', hb, true);
     return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('keydown', hk, true); document.removeEventListener('blur', hb, true); };
   }, [idx, paso?.ancla, paso?.accion, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -262,7 +286,8 @@ function Tour({ guia, onCerrar, ir, donde }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,5,9,0.88)', zIndex: 100000, pointerEvents: 'none' }} />
       )}
       <Globo rect={rect} paso={paso} idx={idx} total={guia.pasos.length} esperando={!rect} puente={!!salto}
-        onAtras={retroceder} onCerrar={onCerrar} progreso={progreso} />
+        onAtras={retroceder} onCerrar={onCerrar} progreso={progreso} trabado={trabado}
+        onSeguirIgual={() => { if (salto && pasoGuion?.ir) ir(pasoGuion.ir); else { desde.current = -1; avanzar(); } }} />
     </>,
     document.body
   );
