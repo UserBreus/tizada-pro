@@ -77,6 +77,31 @@ function esPasoNav(p) {
   return Object.entries(p.ir).some(([k, v]) => (RUTAS[`${k}:${v}`] || {}).ancla === p.ancla);
 }
 
+/** Texto que tiene ahora mismo el campo marcado con ese `data-tour` ('' si no hay campo). */
+function valorDe(ancla) {
+  const el = document.querySelector(`[data-tour="${ancla}"]`);
+  if (!el) return '';
+  const campo = el.matches('input, textarea, select') ? el : el.querySelector('input, textarea, select');
+  return campo ? (campo.value || '').trim() : '';
+}
+
+/**
+ * Vigila que un campo pase de TENER TEXTO a QUEDAR VACÍO: así se sabe que la persona lo confirmó
+ * (con Enter o con el botón), porque el sistema limpia el campo al aceptarlo.
+ *
+ * OJO — POR QUÉ ES UN POLL Y NO UN LISTENER: React limpia el `value` por asignación directa y el
+ * navegador NO emite ningún evento `input` en ese caso. Escuchar el evento es esperar algo que no
+ * ocurre jamás (y una prueba que lo dispare a mano da un falso OK). Hay que MIRAR el valor.
+ */
+function vigilarVaciado(anclas, alConfirmar) {
+  let tenia = anclas.some(a => valorDe(a).length > 0);
+  return setInterval(() => {
+    const val = anclas.map(valorDe).find(v => v.length > 0) || '';
+    if (val) { tenia = true; return; }
+    if (tenia) { tenia = false; alConfirmar(); }
+  }, 150);
+}
+
 /** Rectángulo del elemento marcado con `data-tour`, siguiéndolo si la página se mueve. */
 function useAncla(ancla, activo) {
   const [rect, setRect] = useState(null);
@@ -237,6 +262,19 @@ function Tour({ guia, onCerrar, ir, donde }) {
   // dejar al usuario colgado. Cuando sí hay camino, lo hace él tocando los botones (`salto`).
   useEffect(() => { if (pasoGuion?.ir && !salto) ir(pasoGuion.ir); }, [idx, !!salto]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // FOCO: si el paso pide escribir y el foco quedó en la nada (el body), se lo damos al campo que
+  // estamos marcando. Sin foco la persona igual «escribe» —el navegador manda las teclas al último
+  // campo— pero el ENTER no llega al campo y no confirma nada. Nunca se le saca el foco a otro
+  // campo: sólo se toma cuando no lo tiene nadie.
+  useEffect(() => {
+    if (!paso || paso.accion !== 'input' || !rect) return;
+    const el = elRef.current;
+    if (!el) return;
+    const campo = el.matches('input, textarea, select') ? el : el.querySelector('input, textarea, select');
+    const act = document.activeElement;
+    if (campo && (!act || act === document.body)) { try { campo.focus({ preventScroll: true }); } catch { /* no-op */ } }
+  }, [idx, !!rect]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Traer el elemento a la vista.
   useEffect(() => {
     const el = elRef.current;
@@ -270,43 +308,23 @@ function Tour({ guia, onCerrar, ir, donde }) {
       };
       document.addEventListener('click', h, true);
       // Si el paso acepta que la acción se haga desde un campo (`tambien`) y ese campo se VACÍA, es
-      // que se confirmó con Enter: el botón ya no hace falta y el paso está cumplido.
-      // Al montar hay que MIRAR el campo: cuando este paso empieza, la persona ya escribió (viene del
-      // paso anterior). Si arrancara en `false`, el vaciado posterior no se reconocería como
-      // confirmación y el tutorial se quedaba esperando un clic que ya no hacía falta.
-      const valorDe = (a) => {
-        const el = document.querySelector(`[data-tour="${a}"]`);
-        if (!el) return '';
-        const campo = el.matches('input, textarea') ? el : el.querySelector('input, textarea');
-        return campo ? (campo.value || '').trim() : '';
-      };
-      let tenia = (paso.tambien || []).some(a => valorDe(a).length > 0);
-      const relee = setTimeout(() => { if (!tenia) tenia = (paso.tambien || []).some(a => valorDe(a).length > 0); }, 300);
-      const hv = (e) => {
-        const t = e.target;
-        if (!t || !t.closest || !(paso.tambien || []).some(a => t.closest(`[data-tour="${a}"]`))) return;
-        const val = (t.value || '').trim();
-        if (!val && tenia) { tenia = false; clearTimeout(temp); avanzarDesde(idx, saltoRef.current); }
-        else if (val) tenia = true;
-      };
-      document.addEventListener('input', hv, true);
-      return () => { clearTimeout(temp); clearTimeout(relee); document.removeEventListener('click', h, true); document.removeEventListener('input', hv, true); };
+      // que ya se confirmó (con Enter o con el botón): el clic no hace falta y el paso está cumplido.
+      const vig = (paso.tambien || []).length
+        ? vigilarVaciado(paso.tambien, () => { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); })
+        : null;
+      return () => { clearTimeout(temp); if (vig) clearInterval(vig); document.removeEventListener('click', h, true); };
     }
     // ESCRIBIR: se espera a que TERMINE de escribir (cada tecla reinicia la cuenta). Antes cada
     // tecla programaba su propio avance y una palabra de 10 letras saltaba 10 pasos de una.
-    let habiaTexto = false;                            // para notar el vaciado al confirmar
     const h = (e) => {
-      if (!dentro(e.target)) return;
-      const val = (e.target.value || '').trim();
-      // Se vació de golpe teniendo texto: el campo se confirmó (Enter o botón). Ya está hecho.
-      if (!val && habiaTexto) { habiaTexto = false; clearTimeout(temp); avanzarDesde(idx, saltoRef.current); return; }
-      if (val.length < 2) return;
-      habiaTexto = true;
+      if (!dentro(e.target) || !(e.target.value || '').trim()) return;   // basta UNA letra: un talle es «M»
       const eraPuente = saltoRef.current;
       clearTimeout(temp);
       temp = setTimeout(() => avanzarDesde(idx, eraPuente), 650);   // dejó de escribir
     };
     document.addEventListener('input', h, true);
+    // Y si confirma (Enter o botón) antes de esa pausa, el campo se vacía: también está hecho.
+    const vig = vigilarVaciado(anclas, () => { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); });
     // Si el guion lo permite, ENTER también cuenta como hecho (varios campos del sistema
     // confirman con Enter en vez de con el botón).
     // EL ENTER ES DEL CAMPO, NO DEL TUTORIAL. Acá no se escucha la tecla: cuando la persona aprieta
@@ -314,9 +332,9 @@ function Tour({ guia, onCerrar, ir, donde }) {
     // igual que sin tutorial. El tutorial se entera por el EFECTO: el campo que confirma se vacía,
     // y ese vaciado —de tener texto a quedar en blanco— es la señal de que la acción se hizo.
     // Salir del campo también es «ya terminé de escribir».
-    const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); } };
+    const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim()) { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); } };
     document.addEventListener('blur', hb, true);
-    return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('blur', hb, true); };
+    return () => { clearTimeout(temp); clearInterval(vig); document.removeEventListener('input', h, true); document.removeEventListener('blur', hb, true); };
   }, [idx, paso?.ancla, paso?.accion, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Salir con Escape.
