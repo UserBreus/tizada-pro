@@ -8154,16 +8154,16 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 340 }}>
                       <Icon name="edit" style={{ width: 14, height: 14, position: 'absolute', left: 12, top: 12, color: 'var(--text-muted)' }} />
-                      <input value={nuevoDisenoNombre} onChange={(e) => setNuevoDisenoNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') agregarDisenoPedido(); }}
+                      <input data-tour="pedido-diseno-input" value={nuevoDisenoNombre} onChange={(e) => setNuevoDisenoNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') agregarDisenoPedido(); }}
                         placeholder="Escribí un diseño y Enter"
                         style={{ width: '100%', height: 38, padding: '0 12px 0 34px', borderRadius: 9, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13.5 }} />
                     </div>
-                    <button className="btn primary" onClick={agregarDisenoPedido} disabled={!nuevoDisenoNombre.trim()} style={{ padding: '9px 14px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 5, fontSize: 13 }}>
+                    <button className="btn primary" data-tour="pedido-diseno-agregar" onClick={agregarDisenoPedido} disabled={!nuevoDisenoNombre.trim()} style={{ padding: '9px 14px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 5, fontSize: 13 }}>
                       <Icon name="plus" style={{ width: 13, height: 13 }} /> Diseño
                     </button>
                   </div>
                   {disenosPedido.length > 0 && (
-                    <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 11, alignItems: 'center' }}>
+                    <div data-tour="pedido-diseno-chips" style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 11, alignItems: 'center' }}>
                       <button type="button" onClick={() => setAsignDiseno('todos')}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .18s',
                           border: asignDiseno === 'todos' ? '1.5px solid var(--accent)' : '1px solid var(--border-light)', background: asignDiseno === 'todos' ? 'rgba(0,216,245,0.14)' : 'rgba(255,255,255,0.03)', color: asignDiseno === 'todos' ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -8194,7 +8194,7 @@ export default function App() {
                   const nMios = productosCat.productos.filter(p => p.propio).length;
                   const tabs = [{ k: 'catalogo', n: 'Catálogo', c: varsCatalogo.length }, { k: 'mios', n: 'Mis artículos', c: nMios }];
                   return (
-                    <div style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
+                    <div data-tour="pedido-tabs" style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
                       {tabs.map(t => (
                         <button key={t.k} type="button" onClick={() => setPedidoTabMoldes(t.k)}
                           style={{ padding: '7px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none', display: 'flex', alignItems: 'center', gap: 7,
@@ -8208,7 +8208,7 @@ export default function App() {
                 })()}
 
                 {/* Cuerpo: grilla de moldes (SIEMPRE visible, aunque no haya diseños) */}
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 12, paddingRight: 2 }}>
+                <div data-tour="pedido-variables" style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 12, paddingRight: 2 }}>
                   {disenosPedido.length === 0 && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', background: 'rgba(255,255,255,0.02)', border: '1px dashed var(--border-light)', borderRadius: 10, padding: '9px 12px', marginBottom: 12 }}>
                       <Icon name="edit" style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
@@ -8337,7 +8337,7 @@ export default function App() {
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
                   )}
                   {/* El cliente puede traer SU molde: se sube acá mismo y queda en «Mis artículos». */}
-                  <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
+                  <button className="btn ghost" data-tour="pedido-subir-molde" style={{ padding: '8px 14px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
                     onClick={() => { setPedidoTabMoldes('mios'); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
                     title="Subir un molde propio (.ai · .pdf · .dxf)">
                     <Icon name="upload" style={{ width: 13, height: 13 }} /> Subir mi propio molde
@@ -8348,7 +8348,7 @@ export default function App() {
                         Falta elegir variable en {disenosSinMolde.map(d => `«${d.nombre}»`).join(', ')}
                       </span>
                     )}
-                    <button onClick={irPasoArte} disabled={!puedeIrAArte}
+                    <button data-tour="pedido-ir-arte" onClick={irPasoArte} disabled={!puedeIrAArte}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
                         cursor: puedeIrAArte ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
                         background: puedeIrAArte ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: puedeIrAArte ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
@@ -8642,7 +8642,7 @@ export default function App() {
                             : sinArte.length ? `⚠ Falta el diseño de ${sinArte.map(id => moldeById(id)?.nombre).join(', ')}`
                               : `${filas.length} fila${filas.length === 1 ? '' : 's'}`}
                         </span>
-                        <button onClick={() => { if (!bloq) generarMulti(); }} disabled={bloq} title={motivo}
+                        <button data-tour="planilla-enviar" onClick={() => { if (!bloq) generarMulti(); }} disabled={bloq} title={motivo}
                           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 22px', borderRadius: 10, border: 'none', cursor: bloq ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
                             background: bloq ? 'rgba(255,255,255,0.07)' : 'var(--accent)', color: bloq ? 'var(--text-muted)' : '#001016', transition: 'all .2s' }}>
                           Enviar <span style={{ fontSize: 16 }}>→</span>
@@ -9929,7 +9929,7 @@ export default function App() {
                     <span>Error al generar: {trabajoEstado.error}</span>
                   </div>
                 ) : trabajoEstado.estado === 'listo' ? (
-                  <div style={{ marginTop: 16 }} className="animate-fade">
+                  <div data-tour="resultados-hojas" style={{ marginTop: 16 }} className="animate-fade">
                     <div className="card-title" style={{ fontSize: 15, marginBottom: 12 }}>Tizada Completa</div>
                     
                     {/* Render sheets */}
@@ -10064,7 +10064,7 @@ export default function App() {
                   </div>
 
                   {/* Card 3: Telas (registro global + grupos combinables) */}
-                  <div className="crm-config-card magenta" onClick={() => {
+                  <div className="crm-config-card magenta" data-tour="cfg-telas" onClick={() => {
                     setAdminSubView('telas');
                     fetchTelas();
                   }}>
@@ -10626,7 +10626,7 @@ export default function App() {
                             <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                               El <b>borde de corte</b> es la línea que rodea cada pieza en la tizada (guía para cortar). Elegí si lleva, su <b>color</b> y su <b>tamaño</b>.
                             </div>
-                            <button type="button" onClick={() => setBordeConfig({ ...bordeConfig, activo: !bordeConfig.activo })}
+                            <button type="button" data-tour="borde-activo" onClick={() => setBordeConfig({ ...bordeConfig, activo: !bordeConfig.activo })}
                               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', color: '#fff' }}>
                               <span style={{ fontSize: 13, fontWeight: 600 }}>Lleva borde de corte</span>
                               <span style={{ width: 40, height: 23, borderRadius: 999, background: bordeConfig.activo ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'all .2s', flexShrink: 0 }}>
@@ -10636,13 +10636,13 @@ export default function App() {
                             {bordeConfig.activo && (
                               <>
                                 <div>
-                                  <label style={bcLabel}>Tamaño del borde (mm)</label>
+                                  <label style={bcLabel} data-tour="borde-tamano">Tamaño del borde (mm)</label>
                                   <input type="number" min="0.2" max="20" step="0.1" value={bordeConfig.ancho_mm}
                                     onChange={(e) => setBordeConfig({ ...bordeConfig, ancho_mm: parseFloat(e.target.value) || 0 })}
                                     style={{ ...bcInput, width: 130 }} />
                                 </div>
                                 <div>
-                                  <label style={bcLabel}>Color del borde (CMYK %)</label>
+                                  <label style={bcLabel} data-tour="borde-color">Color del borde (CMYK %)</label>
                                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                                     {['C', 'M', 'Y', 'K'].map((lbl, i) => (
                                       <div key={lbl} style={{ textAlign: 'center' }}>
@@ -10657,7 +10657,7 @@ export default function App() {
                                 </div>
                               </>
                             )}
-                            <button className="btn primary" onClick={() => guardarBorde()} style={{ marginTop: 4, alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar borde</button>
+                            <button className="btn primary" data-tour="borde-guardar" onClick={() => guardarBorde()} style={{ marginTop: 4, alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar borde</button>
                           </div>
                         );
                       })()}
@@ -10706,12 +10706,12 @@ export default function App() {
                             </div>
                             {varsConPiezas.length > 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: -6 }}>Se trabaja <b>una variable a la vez</b> (más rápido y sin tocar las de otros grupos).</div>}
                             {renderSelVerVariante(true)}
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div data-tour="etq-activo" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                               <span style={{ fontSize: 13, fontWeight: 600 }}>Mostrar etiqueta</span>
                               <Sw on={ec.activo} onClick={() => setEC({ activo: !ec.activo })} />
                             </div>
                             {ec.activo && (<>
-                              <div>
+                              <div data-tour="etq-mostrar">
                                 <label style={lbl}>Qué muestra</label>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                   {chip(term.variante || 'Talle', ec.mostrar.talle, () => setEC({ mostrar: { ...ec.mostrar, talle: !ec.mostrar.talle } }))}
@@ -10789,7 +10789,7 @@ export default function App() {
                                 {!(ec.piezas || []).length && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Registrá la plantilla del molde para ver sus piezas.</div>}
                               </div>
                             </>)}
-                            <button className="btn primary" onClick={guardarEtiqueta} style={{ alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar etiqueta</button>
+                            <button className="btn primary" data-tour="etq-guardar" onClick={guardarEtiqueta} style={{ alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar etiqueta</button>
                             {/* el ColorPickerModal ahora es GLOBAL (una sola instancia arriba de todo) */}
                           </div>
                         );
@@ -11529,13 +11529,13 @@ export default function App() {
                           ) : activoProdDetalle?.plantilla ? (
                             <div style={{ color: 'var(--text-muted)', fontSize: 12.5, textAlign: 'center', padding: 28 }}>Cargando el molde…</div>
                           ) : (
-                            <div className="upload-zone" onClick={() => fileInputPlantillaRef.current.click()} style={{ padding: '24px 16px' }}>
+                            <div className="upload-zone" data-tour="molde-subir" onClick={() => fileInputPlantillaRef.current.click()} style={{ padding: '24px 16px' }}>
                               <Icon name="upload" className="upload-icon" />
                               <div style={{ fontSize: 12.5, fontWeight: 600 }}>Subí el molde (.ai · .pdf · .dxf)</div>
                               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Illustrator, Corel/PDF o DXF (Optitex, Gerber…)</div>
                             </div>
                           )}
-                          <button type="button" className="btn ghost" style={{ width: '100%', fontSize: 11.5, marginTop: 8 }} onClick={() => setVerAyudaExport(v => !v)}>
+                          <button type="button" className="btn ghost" data-tour="molde-como-exportar" style={{ width: '100%', fontSize: 11.5, marginTop: 8 }} onClick={() => setVerAyudaExport(v => !v)}>
                             {verAyudaExport ? '▲ Ocultar' : '❓ ¿Cómo exportar el molde desde tu programa?'}
                           </button>
                           {verAyudaExport && <AyudaExportMolde term={term} />}
@@ -11947,7 +11947,7 @@ export default function App() {
                             {/* Selector de pasos (se oculta al entrar al detalle de un grupo) */}
                             {/* En «mi molde» sólo existe el paso Nombrar (Grupos/Modelos son del catálogo). */}
                             {!grupoAislado && !modeloAbierto && !grupoPzAbierto && !modoMiMolde && (
-                            <div style={{ display: 'flex', gap: 6, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10 }}>
+                            <div data-tour="var-pasos" style={{ display: 'flex', gap: 6, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10 }}>
                               {[{ k: 'nombrar', n: '1. Nombrar' }, { k: 'grupos', n: '2. Grupos' }, { k: 'combinar', n: '3. Modelos' }].map(s => (
                                 <button key={s.k} type="button" onClick={() => { setVarStep(s.k); setAsignandoTipo(null); setGrupoAislado(null); setModeloAbierto(null); setComboVisor(null); setModoAcomodar(false); setAsignandoConjunto(null); setGrupoPzAbierto(null); setAsignandoGrupoPz(null); setEditandoNombre(null); }} style={{ flex: 1, padding: '8px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', background: varStep === s.k ? 'var(--accent)' : 'transparent', color: varStep === s.k ? '#04222b' : 'var(--text-secondary)' }}>{s.n}</button>
                               ))}
@@ -11978,12 +11978,12 @@ export default function App() {
                                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                       Seleccionadas: <b style={{ color: 'var(--accent)' }}>{selNombrar.size}</b> · Nombradas: <b style={{ color: 'var(--success)' }}>{Object.values(etqNombres).filter(Boolean).length}</b> de {etqData.piezas.length}
                                     </div>
-                                    <input value={etqNombreInput} onChange={(e) => setEtqNombreInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); nombrarSeleccionadas(); } }} placeholder="Nombre (ej.: Frente, Cuello…)" style={inp} />
+                                    <input data-tour="nombre-pieza-input" value={etqNombreInput} onChange={(e) => setEtqNombreInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); nombrarSeleccionadas(); } }} placeholder="Nombre (ej.: Frente, Cuello…)" style={inp} />
                                     <div style={{ display: 'flex', gap: 8 }}>
-                                      <button type="button" className="btn primary" style={{ flex: 1 }} disabled={!selNombrar.size} onClick={nombrarSeleccionadas}>Nombrar {selNombrar.size || ''} pieza{selNombrar.size === 1 ? '' : 's'}</button>
+                                      <button type="button" className="btn primary" data-tour="nombre-pieza-ok" style={{ flex: 1 }} disabled={!selNombrar.size} onClick={nombrarSeleccionadas}>Nombrar {selNombrar.size || ''} pieza{selNombrar.size === 1 ? '' : 's'}</button>
                                       {selNombrar.size > 0 && <button type="button" className="btn ghost" onClick={() => setSelNombrar(new Set())}>Limpiar</button>}
                                     </div>
-                                    <button type="button" className="btn" style={{ width: '100%' }} onClick={guardarEtiquetas}>Guardar nombres</button>
+                                    <button type="button" className="btn" data-tour="nombres-guardar" style={{ width: '100%' }} onClick={guardarEtiquetas}>Guardar nombres</button>
                                     <button type="button" className="btn ghost" style={{ width: '100%', fontSize: 12 }} onClick={() => { setRenombrarBuf(null); setGrupoNombresAbierto(null); setModalNombres(true); }}>
                                       Nombres puestos ({Object.values(etqNombres).filter(Boolean).length}) — ver / editar
                                     </button>
@@ -14072,7 +14072,7 @@ export default function App() {
                   {(() => {
                     const ok = !!telaConexion.tiene_key;
                     return (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderRadius: 999, marginBottom: 18,
+                      <div data-tour="telas-conexion" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderRadius: 999, marginBottom: 18,
                         border: '1px solid ' + (ok ? 'rgba(16,185,129,0.35)' : 'rgba(224,160,32,0.35)'),
                         background: ok ? 'rgba(16,185,129,0.10)' : 'rgba(224,160,32,0.10)' }}>
                         <span style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: ok ? 'var(--success)' : 'var(--warning, #e0a020)',
@@ -14095,7 +14095,7 @@ export default function App() {
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T.length} tela{T.length === 1 ? '' : 's'}</span>
                           <input placeholder="Buscar tela…" value={telaFiltroCfg} onChange={e => setTelaFiltroCfg(e.target.value)} style={{ ...inS, flex: 1, minWidth: 180, maxWidth: 300 }} />
                         </div>
-                        <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
+                        <div data-tour="telas-lista" style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
                           {/* Cabecera de columnas */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-light)', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                             <span style={{ width: 14, flexShrink: 0 }} />

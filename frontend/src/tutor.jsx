@@ -101,9 +101,18 @@ function Tour({ guia, onCerrar, ir }) {
   const [idx, setIdx] = useState(0);
   const paso = guia.pasos[idx];
   const [rect, elRef] = useAncla(paso?.ancla, true);
+  // Un paso avanza UNA sola vez. Sin esto, un mismo clic podía disparar dos avances (el listener se
+  // re-registraba al re-medir el elemento) y el tutorial saltaba del paso 1 al 3.
+  const desde = useRef(-1);
   const avanzar = useCallback(() => {
-    setIdx(i => (i + 1 >= guia.pasos.length ? (onCerrar(), i) : i + 1));
+    setIdx(i => {
+      if (desde.current >= i) return i;          // ya se avanzó desde este paso
+      desde.current = i;
+      if (i + 1 >= guia.pasos.length) { setTimeout(onCerrar, 0); return i; }
+      return i + 1;
+    });
   }, [guia.pasos.length, onCerrar]);
+  const retroceder = useCallback(() => { desde.current = -1; setIdx(i => Math.max(0, i - 1)); }, []);
 
   // Llevar al usuario a la pantalla del paso (si el guion lo pide).
   useEffect(() => { if (paso?.ir) ir(paso.ir); }, [idx]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -116,24 +125,21 @@ function Tour({ guia, onCerrar, ir }) {
     }
   }, [rect?.y, idx]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // AVANCE POR ACCIÓN REAL: se escucha sobre el elemento marcado.
+  // AVANCE POR ACCIÓN REAL. Se escucha en el DOCUMENTO (fase de captura) y se pregunta si lo que
+  // se tocó cae dentro del ancla. Antes el listener iba pegado al elemento: si todavía no existía
+  // (pantalla que tarda) no se enganchaba nunca, y al re-medirlo se registraba de más → saltos.
   useEffect(() => {
-    const el = elRef.current;
-    if (!el || !paso) return;
+    if (!paso || (paso.accion !== 'click' && paso.accion !== 'input')) return;
+    const dentro = (t) => t && t.closest && t.closest(`[data-tour="${paso.ancla}"]`);
     if (paso.accion === 'click') {
-      const h = () => setTimeout(avanzar, 220);       // deja que la pantalla reaccione primero
-      el.addEventListener('click', h);
-      return () => el.removeEventListener('click', h);
+      const h = (e) => { if (dentro(e.target)) setTimeout(avanzar, 260); };   // deja reaccionar a la pantalla
+      document.addEventListener('click', h, true);
+      return () => document.removeEventListener('click', h, true);
     }
-    if (paso.accion === 'input') {
-      const h = (e) => { if ((e.target.value || '').trim().length >= 2) setTimeout(avanzar, 500); };
-      el.addEventListener('input', h);
-      // el ancla puede ser el contenedor: también se escucha en el input de adentro
-      const inner = el.querySelector('input, textarea');
-      if (inner) inner.addEventListener('input', h);
-      return () => { el.removeEventListener('input', h); if (inner) inner.removeEventListener('input', h); };
-    }
-  }, [idx, rect, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
+    const h = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) setTimeout(avanzar, 600); };
+    document.addEventListener('input', h, true);
+    return () => document.removeEventListener('input', h, true);
+  }, [idx, paso?.ancla, paso?.accion, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Salir con Escape.
   useEffect(() => {
@@ -156,7 +162,7 @@ function Tour({ guia, onCerrar, ir }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(3,7,12,0.72)', zIndex: 100000, pointerEvents: 'none' }} />
       )}
       <Globo rect={rect} paso={paso} idx={idx} total={guia.pasos.length} esperando={!rect}
-        onSiguiente={avanzar} onAtras={() => setIdx(i => Math.max(0, i - 1))} onCerrar={onCerrar} />
+        onSiguiente={() => { desde.current = -1; avanzar(); }} onAtras={retroceder} onCerrar={onCerrar} />
     </>,
     document.body
   );
