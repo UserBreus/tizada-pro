@@ -79,55 +79,66 @@ function useAncla(ancla, activo) {
   return [rect, elRef];
 }
 
-/** Globo con la consigna, ubicado donde entre (abajo del elemento, o arriba si no hay lugar). */
-function Globo({ rect, paso, idx, total, onSiguiente, onAtras, onCerrar, esperando, puente }) {
-  const ANCHO = 330;
+/**
+ * Globo de la consigna. Hay DOS tipos, bien distintos a propósito:
+ *   ACCIÓN  (cyan, «TENÉS QUE HACER ESTO»): el usuario tiene que tocar/escribir algo. No avanza
+ *           solo: espera la acción de verdad. No hay botón «Siguiente».
+ *   INFO    (violeta, «PARA QUE SEPAS»): sólo explica para qué sirve ese espacio. Avanza solo
+ *           después de un ratito, con una barra que muestra cuánto falta.
+ * El PUENTE (ámbar) es una acción especial: llevar al usuario a la pantalla que corresponde.
+ */
+function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, progreso }) {
+  const ANCHO = 340;
+  const esInfo = !puente && paso.accion === 'ver';
+  const col = puente ? 'var(--warning, #e0a020)' : esInfo ? '#a78bfa' : 'var(--accent)';
+  const fondo = puente ? 'linear-gradient(180deg,#231a0d,#171208)'
+    : esInfo ? 'linear-gradient(180deg,#171526,#100f1b)' : 'linear-gradient(180deg,#0b1c22,#081418)';
+  const rotulo = puente ? 'Te llevo hasta ahí' : esInfo ? 'Para que sepas' : 'Hacé esto';
+  const icono = puente ? '➜' : esInfo ? 'i' : '☝';
   const vh = window.innerHeight, vw = window.innerWidth;
   let top, left, flecha = 'arriba';
-  if (!rect) {                                  // sin elemento: centrado (mientras se busca)
-    top = vh / 2 - 90; left = vw / 2 - ANCHO / 2; flecha = null;
-  } else {
+  if (!rect) { top = vh / 2 - 90; left = vw / 2 - ANCHO / 2; flecha = null; }
+  else {
     const abajo = rect.y + rect.h + MARGEN + 14;
-    const cabeAbajo = abajo + 190 < vh;
-    top = cabeAbajo ? abajo : Math.max(12, rect.y - 190 - MARGEN);
-    flecha = cabeAbajo ? 'arriba' : 'abajo';
+    const cabe = abajo + 200 < vh;
+    top = cabe ? abajo : Math.max(12, rect.y - 200 - MARGEN);
+    flecha = cabe ? 'arriba' : 'abajo';
     left = Math.min(Math.max(12, rect.x + rect.w / 2 - ANCHO / 2), vw - ANCHO - 12);
   }
   return (
-    <div style={{ position: 'fixed', top, left, width: ANCHO, zIndex: 100002,
-      background: 'linear-gradient(180deg, #0f1720, #0b1118)', border: '1px solid var(--accent)',
-      borderRadius: 14, boxShadow: '0 18px 50px rgba(0,0,0,0.65), 0 0 0 1px rgba(0,216,245,0.25)', padding: 16 }}>
+    <div style={{ position: 'fixed', top, left, width: ANCHO, zIndex: 100002, background: fondo,
+      border: `1.5px solid ${col}`, borderRadius: 14, padding: 16,
+      boxShadow: `0 18px 50px rgba(0,0,0,0.7), 0 0 0 1px ${col}44` }}>
       {flecha && (
         <span style={{ position: 'absolute', left: '50%', marginLeft: -8, [flecha === 'arriba' ? 'top' : 'bottom']: -8,
-          width: 14, height: 14, background: '#0f1720', borderLeft: '1px solid var(--accent)', borderTop: '1px solid var(--accent)',
+          width: 14, height: 14, background: fondo.includes('231a') ? '#231a0d' : fondo.includes('1715') ? '#171526' : '#0b1c22',
+          borderLeft: `1.5px solid ${col}`, borderTop: `1.5px solid ${col}`,
           transform: flecha === 'arriba' ? 'rotate(45deg)' : 'rotate(225deg)' }} />
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
-        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--accent)' }}>
-          {puente ? 'Te llevo hasta ahí' : `Paso ${idx + 1} de ${total}`}
-        </span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ width: 20, height: 20, borderRadius: '50%', background: col, color: '#04141a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, flexShrink: 0 }}>{icono}</span>
+        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.7, textTransform: 'uppercase', color: col }}>{rotulo}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-muted)' }}>{puente ? '' : `${idx + 1}/${total}`}</span>
         <button onClick={onCerrar} title="Salir de la ayuda"
-          style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>✕</button>
+          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>✕</button>
       </div>
-      <div style={{ fontSize: 14, color: '#fff', lineHeight: 1.45, fontWeight: 600 }}>{paso.texto}</div>
+      <div style={{ fontSize: 14.5, color: '#fff', lineHeight: 1.45, fontWeight: 600 }}>{paso.texto}</div>
       {paso.nota && <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 7 }}>{paso.nota}</div>}
-      {esperando && (
-        <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', marginTop: 9 }}>
-          Buscando ese lugar en pantalla…
-        </div>
-      )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 13 }}>
-        {idx > 0 && (
-          <button className="btn ghost" style={{ padding: '6px 12px', fontSize: 12 }} onClick={onAtras}>← Atrás</button>
+      {esperando && <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', marginTop: 9 }}>Buscando ese lugar en pantalla…</div>}
+      {/* INFO: barra que se llena sola (no hay que apretar nada). ACCIÓN: recordatorio de qué se espera. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 13 }}>
+        {idx > 0 && !puente && (
+          <button className="btn ghost" style={{ padding: '5px 11px', fontSize: 11.5 }} onClick={onAtras}>← Atrás</button>
         )}
-        {/* Barrita de avance */}
-        <div style={{ flex: 1, height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.10)', overflow: 'hidden' }}>
-          <div style={{ width: `${((idx + 1) / total) * 100}%`, height: '100%', background: 'var(--accent)' }} />
-        </div>
-        {!puente && (
-          <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12, fontWeight: 700 }} onClick={onSiguiente}>
-            {idx + 1 === total ? 'Terminar' : 'Siguiente →'}
-          </button>
+        {esInfo ? (
+          <div style={{ flex: 1, height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.10)', overflow: 'hidden' }}>
+            <div style={{ width: `${Math.round(progreso * 100)}%`, height: '100%', background: col, transition: 'width .2s linear' }} />
+          </div>
+        ) : (
+          <span style={{ flex: 1, fontSize: 11.5, color: col, fontWeight: 700 }}>
+            {paso.accion === 'input' ? 'Escribilo y seguimos' : 'Tocá lo que está marcado'}
+          </span>
         )}
       </div>
     </div>
@@ -157,6 +168,23 @@ function Tour({ guia, onCerrar, ir, donde }) {
   }, [guia.pasos.length, onCerrar]);
   const retroceder = useCallback(() => { desde.current = -1; setIdx(i => Math.max(0, i - 1)); }, []);
   useEffect(() => { idxRef.current = idx; }, [idx]);
+
+  // PASOS INFORMATIVOS: avanzan SOLOS (el usuario no tiene que apretar nada). El tiempo sale del
+  // largo del texto —lo que tarda en leerse— con un piso de 3,5 s. `progreso` alimenta la barrita.
+  const [progreso, setProgreso] = useState(0);
+  useEffect(() => {
+    setProgreso(0);
+    if (salto || !paso || paso.accion !== 'ver') return;
+    const largo = (paso.texto || '').length + (paso.nota || '').length;
+    const ms = Math.min(11000, Math.max(3500, largo * 55));
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      const p = Math.min(1, (Date.now() - t0) / ms);
+      setProgreso(p);
+      if (p >= 1) { clearInterval(tick); avanzar(); }
+    }, 100);
+    return () => clearInterval(tick);
+  }, [idx, !!salto]);   // eslint-disable-line react-hooks/exhaustive-deps
   const saltoRef = useRef(false);
   useEffect(() => { saltoRef.current = !!salto; }, [salto]);
 
@@ -201,7 +229,10 @@ function Tour({ guia, onCerrar, ir, donde }) {
     // confirman con Enter en vez de con el botón).
     const hk = (e) => { if (e.key === 'Enter' && dentro(e.target)) { clearTimeout(temp); temp = setTimeout(() => avanzarDesde(idx), 280); } };
     document.addEventListener('keydown', hk, true);
-    return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('keydown', hk, true); };
+    // Salir del campo también es «ya terminé de escribir».
+    const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) { clearTimeout(temp); avanzarDesde(idx); } };
+    document.addEventListener('blur', hb, true);
+    return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('keydown', hk, true); document.removeEventListener('blur', hb, true); };
   }, [idx, paso?.ancla, paso?.accion, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Salir con Escape.
@@ -231,7 +262,7 @@ function Tour({ guia, onCerrar, ir, donde }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,5,9,0.88)', zIndex: 100000, pointerEvents: 'none' }} />
       )}
       <Globo rect={rect} paso={paso} idx={idx} total={guia.pasos.length} esperando={!rect} puente={!!salto}
-        onSiguiente={() => { desde.current = -1; avanzar(); }} onAtras={retroceder} onCerrar={onCerrar} />
+        onAtras={retroceder} onCerrar={onCerrar} progreso={progreso} />
     </>,
     document.body
   );

@@ -1,0 +1,307 @@
+
+══ AJUSTE · etiqueta   (linea 7251, 899 lineas)
+     [nav-pedidos]          } > Pedidos
+     [nav-config]           } > Configuración
+     [nav-ayuda]            setAyudaAbierta(true)} title="Te guío paso a p
+      -                     ⏻
+      -                     navegarA('/')} > ⬅ Panel Operario
+      -                     ✕
+      -                     [input]
+      -                     } style={ }>✓
+      -                     } style={ }>✕
+      -                     } className="btn ghost" style={ }>Editar pieza
+      -                     { e.stopPropagation(); setRenombrarBuf( ); }} 
+      -                     } style={ }>🗑
+      -                     { setGuardandoNoms(true); try finally }}>
+      -                     Cerrar
+      -                     setAdvertenciaInformativa('')} style={ } title
+      -                     setCsvOmit(o => ( ))} style={ }> <span style={
+      -                     setCsvFix(fx => ( ))} style={{ padding: '5px 1
+      -                     { setCsvImport(null); setCsvFix( ); setCsvOmit
+      -                     Importar fila(s)
+      -                     setPerfilAviso(null)} style={ }>Entendido
+      -                     elegirPerfilUnificado(nom)} style={ }> {cols.l
+
+══ PEDIDO · moldes   (linea 8150, 235 lineas)
+     [pedido-diseno-input]  [input]
+     [pedido-diseno-agregar] Diseño
+      -                     setAsignDiseno('todos')} style={{ display: 'fl
+      -                     setAsignDiseno(d.id)} style={{ display: 'flex'
+      -                     quitarDisenoPedido(d.id)} style={ }>✕
+      -                     setPedidoTabMoldes(t.k)} style={ }>
+      -                     toggleMoldeEnDiseno(p.id)} title= style={ }> <
+      -                     abrirConfigMiMolde(p.id)}> ⚙ Configurar
+      -                     }> 🗑
+      -                     } style={{ minHeight: 150, borderRadius: 12, b
+      -                     toggleVarEnDiseno(v.clave)} title={distintaPla
+      -                     ↺ Nuevo pedido
+     [pedido-subir-molde]   } title="Subir un molde propio (.ai · .pdf · .
+     [pedido-ir-arte]       Cargar el arte →
+
+══ PEDIDO · planilla   (linea 8385, 306 lineas)
+      -                     } style={ }>
+      -                     [input]
+      -                     removeFila(i)} style={ } > ×
+      -                     Agregar {(parseInt(nFilasAgregar, 10) || 1) > 
+      -                     document.getElementById('csvPedidoInput')?.cli
+      -                     }>← Arte
+      -                     ↺ Nuevo pedido
+     [planilla-enviar]      } disabled= title= style={{ display: 'flex', a
+      -                     } style={{ textAlign: 'left', padding: 10, bor
+
+══ PEDIDO · arte   (linea 8691, 1110 lineas)
+      -                     }>✕
+      -                     }>Asignar tela
+      -                     }>← Volver
+      -                     [campo] Buscar tela…
+      -                     setTelaElegida(t.id)} style={ }>
+      -                     aplicarTela(telaElegida)}> Asignar{telaSelPiez
+      -                     } style={{ display: 'flex', alignItems: 'cente
+      -                     setArteIdx(idx)} style={{ position: 'relative'
+      -                     [input]
+      -                     }> Editar diseño
+     [arte-cargar]          fileInputArteRef.current.click()}>
+     [arte-telas]           } title="Ver y asignar telas por pieza"> Ver t
+      -                     verVarianteOperario(t)} style={{ width: '100%'
+     [pedido-volver-moldes] setPedidoPaso('moldes')}>← Diseños
+     [arte-siguiente]       A la planilla →
+      -                     } style={ }>Cancelar
+      -                     Volver al diseño principal
+      -                     ↶ Deshacer
+      -                     ↷ Rehacer
+      -                     setEditorEditOpen(false)}>Cerrar
+      -                     }> Guardar
+      -                     { const add = e.ctrlKey || e.metaKey || e.shif
+      -                     quitarObjetoDelArte(_iny.capa || _iny.nombre)}
+      -                     quitarObjetoDePieza(_sel._oid)}>Quitar de piez
+      -                     recolocarObjeto(_sel)}>Colocar
+      -                     duplicarObjetoAgregado(_sel._oid)}>Duplicar
+
+══ PEDIDO · resultados   (linea 9801, 10 lineas)
+      -                     setPedidoPaso('planilla')}>← Volver a la plani
+      -                     ↺ Nuevo pedido
+
+══ PEDIDO · resultados   (linea 9811, 203 lineas)
+      -                     setPedidoPaso('planilla')}>← Atrás
+      -                     { // Descarga CADA MESA por separado (una pági
+      -                     ↺ Nuevo pedido
+      -                     } className= style={ }>
+      -                     setVistaFicha(true)} className= style={ }> Fic
+
+══ CONFIG · productos   (linea 10154, 98 lineas)
+      -                     setAdminSubView('dashboard')} style={ }> ⬅ Vol
+     [molde-nuevo]          setCreandoProducto(true)}> Nueva Moldería
+      -                     } >
+      -                     handleEliminarProducto(p.id, e)} >
+      -                     } style={ }> ← Volver al pedido
+      -                     } style={ }> ⬅ Molderías
+
+══ AJUSTE · menu   (linea 10252, 40 lineas)
+      -                     { setTabAjustesMolde(item.id); if (item.id ===
+     [ajuste-volver]        setTabAjustesMolde('menu')} style={ }> ⬅ Volve
+
+══ AJUSTE · telas   (linea 10292, 326 lineas)
+      -                     } style={{ padding: '6px 13px', borderRadius: 
+     [telas-tope]           } style={{ display: 'flex', alignItems: 'cente
+     [telas-mostrar]        }> Mostrar telas asignadas ( )
+      -                     setTelasCfgPiezas([])}>limpiar
+      -                     }>✕
+     [telas-seleccionar]    }> Seleccionar tela {telasCfgPiezas.length ? `
+      -                     [campo] Buscar…
+      -                     quitarTela(t.id)} style={ }>✕
+      -                     paso(-1)}>−
+      -                     [input]
+      -                     paso(1)}>+
+      -                     setTelaTopeVal('0')}>Sin límite
+      -                     Guardar
+     [telas-modal-buscar]   [campo] Buscar tela…
+      -                     } // shift+clic no selecciona texto onClick= t
+      -                     setTelasCfgSel([])}>limpiar
+     [telas-modal-asignar]  }> Asignar
+
+══ AJUSTE · borde   (linea 10618, 47 lineas)
+     [borde-activo]         setBordeConfig( )} style={ }> <span style={{ f
+      -                     [input]
+     [borde-guardar]        guardarBorde()} style={ }>Guardar borde
+
+══ AJUSTE · etiqueta   (linea 10665, 133 lineas)
+      -                     setPicker( )} style={ }> <span style={{ width:
+      -                     cargarTalleEtq(t)} style={{ padding: '4px 10px
+      -                     [input]
+     [etq-guardar]          Guardar etiqueta
+
+══ AJUSTE · editable   (linea 10798, 40 lineas)
+      -                     abrirEditar(i)} style={ }> <span style={{ disp
+      -                     Registrar capa
+
+══ AJUSTE · nestingsel   (linea 10838, 50 lineas)
+      -                     [select]
+      -                     }> Configurar grupos de tizada →
+
+══ AJUSTE · molderia   (linea 10888, 657 lineas)
+      -                     fileInputPlantillaRef.current.click()} style={
+      -                     [input]
+      -                     setModoAcomodar(!modoAcomodar)} >
+      -                     } > Actual: <span style={{ fontWeight: 700, co
+      -                     {varPzGuardando ? 'Aplicando…' : !pendiente ? 
+      -                     Asignar pieza
+      -                     setSelNombrar(new Set())}>Limpiar
+      -                     setSelNombrar(new Set(porVar[nom]))} style={ }
+      -                     quitarVariantePz(nom)} style={ }>×
+      -                     activarEmparejar(!empModo, 'simple')}>
+      -                     {empGuardando ? 'Confirmando…' : `✓ Confirmar 
+      -                     }>Limpiar
+      -                     {empGuardando ? 'Guardando…' : `Es esta pieza 
+      -                     } style={ }>
+      -                     [select]
+      -                     }> Es la misma ✓
+      -                     setEmpFijar(null)} style={ }>×
+      -                     setEmpFiltro(k)} style={ }>
+      -                     { empRenomCancel.current = false; setEmpRenomb
+      -                     setEmpAbierto(abierta ? null : f.nombre)} styl
+
+══ AJUSTE · diseno   (linea 11545, 283 lineas)
+      -                     setTabAjustesMolde('molderia')}>Ir a Moldería
+      -                     guardarReferencia(o.k)} >
+      -                     cambiarConfigMedida(k)} style={{ flex: '1 1 0'
+      -                     verVarianteOperario(t)} className={`chip $ `} 
+      -                     toggleRango(t, idx, e)} style={ }>
+      -                     verVarianteOperario(t)} style={ }>
+      -                     setMapeandoDiseno(v => !v)}>
+      -                     setGuiaCapasOpen(true)} style={ }> Qué va en c
+      -                     copia(nombre)} title="Copiar nombre de la capa
+      -                     }> 📋 Copiar todos los nombres
+      -                     [select]
+      -                     Guardar Mapeo de Arte
+
+══ AJUSTE · planilla   (linea 11828, 61 lineas)
+      -                     setSelectedPlanillaTemplateId(t.id)} style={{ 
+      -                     [campo] corta
+      -                     [campo] larga
+      -                     setProbandoPlanilla(v => !v)}>
+      -                     Guardar configuración de este molde
+
+══ AJUSTE · terminologia   (linea 11889, 33 lineas)
+      -                     [campo] Talle
+      -                     [campo] Ej.: Camiseta River, Buzo Capucha…
+      -                     Guardar Nombres
+
+══ AJUSTE · variables   (linea 11922, 373 lineas)
+      -                     } style={{ flex: 1, padding: '8px 8px', border
+      -                     }>Listo
+     [nombre-pieza-input]   [input]
+     [nombre-pieza-ok]      Nombrar pieza
+      -                     setSelNombrar(new Set())}>Limpiar
+     [nombres-guardar]      Guardar nombres
+      -                     }> Nombres puestos ( ) — ver / editar
+      -                     setGrupoAislado(null)}>⬅ Volver
+      -                     } style={ }>⬅ Volver a las variables
+      -                     [campo] Nombre de la variable
+      -                     guardarGrupos()}>Guardar cambios
+      -                     }>
+      -                     setJuntasNombre(nm)} style={ }>
+      -                     }>Crear vínculo
+      -                     }>Cancelar
+      -                     cargarNido(true)}>↻ Reintentar
+      -                     borrarVinculoJuntas(g.clave, b.id)} style={ }>
+      -                     }>＋ Vincular piezas
+      -                     cargarTalleEtq(t)} style={ }>
+      -                     }>⬅ Volver
+      -                     } style={ }>⬅ Volver a los grupos
+      -                     [campo] Nombre del grupo
+      -                     + Elegir piezas
+
+══ AJUSTE · telas   (linea 12333, 31 lineas)
+      -                     Ver todo
+      -                     100%
+
+══ AJUSTE · variables   (linea 12364, 14 lineas)
+      -                     { const c = asignandoTipo; setAsignandoTipo(nu
+
+══ CONFIG · columnas   (linea 13299, 409 lineas)
+      -                     setAdminSubView('dashboard')} style={ }> ⬅ Vol
+      -                     Nueva Planilla
+      -                     } > Usar para
+      -                     } >
+      -                     setPlanillaEditando(null)} style={ }> ⬅ Volver
+      -                     [input]
+      -                     setProbandoPlanilla(true)} style={ }> Visualiz
+      -                     Guardar Planilla
+      -                     setColSeleccionada(null)} style={ }>×
+      -                     [campo] Nombre de columna…
+      -                     [select]
+      -                     setAdminSubView('reglas')} style={ }> ⚙ Gestio
+      -                     } style={{ position: 'absolute', right: 4, top
+      -                     [campo] Nombre de columna...
+
+══ CONFIG · reglas   (linea 13708, 165 lineas)
+      -                     } style={ }> ⬅ Volver al Panel de Configuració
+      -                     setReglaEditando( )} style={ }> Nueva Regla
+      -                     }> 📋 Copiar todas las capas
+      -                     [campo] Ej. Color, Equipo, Talle…
+      -                     set('tipo', o.v)} className= style={ }>
+      -                     [input]
+      -                     [select]
+      -                     [campo] Ej. manga, sisa, capucha…
+      -                     setReglaEditando(null)} style={ }>Cancelar
+      -                     guardarRegla(r)} style={ }>Guardar regla
+      -                     setReglaEditando( )} style={ }>Editar
+      -                     eliminarRegla(r.id)} style={ }>Eliminar
+
+══ CONFIG · nesting   (linea 13873, 183 lineas)
+      -                     } style={ }> ⬅ Volver al Panel de Configuració
+      -                     } style={{ background: 'none', border: 'none',
+      -                     setNestingEditando( )} style={ }> Nuevo Nestin
+      -                     [campo] Ej. Estándar, Apretado, Sin giro…
+      -                     [input]
+      -                     [select]
+      -                     setNestingEditando(null)} style={ }>Cancelar
+      -                     }>Guardar nesting
+      -                     setNestingEditando( )}>Editar
+      -                     eliminarNestingPreset(n.id)}>Eliminar
+      -                     setGrupoTizadaEditando(null)} style={ }> ⬅ Vol
+      -                     [campo] Ej. Conjunto deportivo, Equipo de fútbol…
+      -                     toggle(p.id)} style={{ textAlign: 'left', curs
+      -                     setGrupoTizadaEditando(null)} style={ }>Cancel
+      -                     }>Guardar grupo
+      -                     setGrupoTizadaEditando( )} style={ }> Nuevo gr
+      -                     setGrupoTizadaEditando( )}>Editar
+      -                     eliminarGrupoTizadaCfg(g.id)}>Eliminar
+
+══ CONFIG · telas   (linea 14056, 108 lineas)
+      -                     setAdminSubView('dashboard')} style={ }>⬅ Volv
+      -                     [campo] Buscar tela…
+      -                     [campo] ancho
+      -                     [input]
+      -                     setG(G.filter((_, j) => j !== gi))} title="Qui
+      -                     { const gs = [...G]; const s = new Set((g.tela
+      -                     setG([...G, ])} style={ }>+ Agregar grupo
+      -                     guardarTelas(T, G)} style={ }>Guardar grupos
+
+══ CONFIG · perfil   (linea 14166, 63 lineas)
+      -                     setAdminSubView('dashboard')} style={ }> ⬅ Vol
+      -                     guardarPerfilDefault(grp.k, p.archivo)} title=
+
+══ CONFIG · fuentes   (linea 14238, 502 lineas)
+      -                     setAdminSubView('dashboard')} style={ }> ⬅ Vol
+      -                     [input]
+      -                     setBuscarFuente('')} title="Limpiar" style={{ 
+      -                     fileInputFuenteRef.current.click()} style={ }>
+      -                     eliminarFuente(f.archivo)} title="Confirmar" s
+      -                     setFuenteABorrar(null)} title="Cancelar" style
+      -                     } title="Eliminar esta fuente del catálogo" st
+      -                     setBorrarArt(null)}>Cancelar
+      -                     { const id = borrarArt?.id; setBorrarArt(null)
+      -                     setSubirMoldeOpen(false)}>Cancelar
+      -                     setCreandoProducto(false)}>×
+     [molde-nombre]         [campo] Ej. Camiseta River, Buzo Capucha…
+      -                     setCreandoProducto(false)}>Cancelar
+     [molde-crear-ok]       Crear Molde
+      -                     setModalConfirmOpen(false)}>×
+      -                     [select]
+      -                     setModalConfirmOpen(false)}>Cancelar
+      -                     Confirmar e Iniciar
+      -                     setModalTipoClave(null)}>×
+      -                     } style={ }> Asignar piezas en el visor
+      -                     [campo] Nombre de la pieza
+      -                     quitarPiezaDeGrupo(t.clave, v.pieza_idx)} styl
