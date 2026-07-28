@@ -28,14 +28,28 @@ const RUTAS = {
   'sub:productos':    { ancla: 'cfg-productos', texto: 'Ahora entrá a «Molderías».', necesita: { tab: 'config', sub: 'dashboard' } },
   'sub:telas':        { ancla: 'cfg-telas',     texto: 'Ahora entrá a «Telas».',     necesita: { tab: 'config', sub: 'dashboard' } },
   'sub:dashboard':    { ancla: 'nav-config',    texto: 'Volvé al panel de Configuración tocando acá.' },
+  'sub:columnas':     { ancla: 'cfg-columnas',  texto: 'Ahora entrá a «Planillas».',   necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:reglas':       { ancla: 'cfg-reglas',    texto: 'Ahora entrá a «Reglas de planilla».', necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:nesting':      { ancla: 'cfg-nesting',   texto: 'Ahora entrá a «Reglas de Nesting».', necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:fuentes':      { ancla: 'cfg-fuentes',   texto: 'Ahora entrá a «Catálogo de Fuentes».', necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:perfil':       { ancla: 'cfg-perfil',    texto: 'Ahora entrá a «Perfil de color».', necesita: { tab: 'config', sub: 'dashboard' } },
+  'sub:usuarios':     { ancla: 'cfg-usuarios',  texto: 'Ahora entrá a «Usuarios y permisos».', necesita: { tab: 'config', sub: 'dashboard' } },
   // Dentro de un molde abierto: el menú de ajustes tiene un botón por pantalla.
   'ajuste:variables': { ancla: 'ajuste-variables', texto: 'Entrá a «Variables».', necesita: { ajuste: 'menu' } },
   'ajuste:telas':     { ancla: 'ajuste-telas',     texto: 'Entrá a «Telas asignadas».', necesita: { ajuste: 'menu' } },
   'ajuste:borde':     { ancla: 'ajuste-borde',     texto: 'Entrá a «Borde de corte».', necesita: { ajuste: 'menu' } },
   'ajuste:etiqueta':  { ancla: 'ajuste-etiqueta',  texto: 'Entrá a «Etiqueta».', necesita: { ajuste: 'menu' } },
   'ajuste:diseno':    { ancla: 'ajuste-diseno',    texto: 'Entrá a «Diseño».', necesita: { ajuste: 'menu' } },
+  'ajuste:planilla':  { ancla: 'ajuste-planilla',  texto: 'Entrá a «Planilla».', necesita: { ajuste: 'menu' } },
+  'ajuste:terminologia': { ancla: 'ajuste-terminologia', texto: 'Entrá a «Nombres».', necesita: { ajuste: 'menu' } },
+  'ajuste:nestingsel': { ancla: 'ajuste-nestingsel', texto: 'Entrá a «Nesting».', necesita: { ajuste: 'menu' } },
+  'ajuste:molderia':  { ancla: 'ajuste-molderia',  texto: 'Entrá a «Moldería».', necesita: { ajuste: 'menu' } },
+  'ajuste:editable':  { ancla: 'ajuste-editable',  texto: 'Entrá a «Editable».', necesita: { ajuste: 'menu' } },
   'ajuste:menu':      { ancla: 'ajuste-volver',    texto: 'Volvé al menú de ajustes tocando acá.' },
   'paso:moldes':      { ancla: 'pedido-volver-moldes', texto: 'Volvé al primer paso del pedido.' },
+  // Los pasos del pedido son en fila: para llegar a la planilla hay que pasar por el arte.
+  'paso:arte':        { ancla: 'pedido-ir-arte',   texto: 'Pasá al arte con «Cargar el arte».', necesita: { tab: 'pedidos', paso: 'moldes' } },
+  'paso:planilla':    { ancla: 'arte-siguiente',   texto: 'Pasá a la planilla con «A la planilla».', necesita: { tab: 'pedidos', paso: 'arte' } },
 };
 
 /** Devuelve el paso-PUENTE que hay que hacer ahora para acercarse al destino, o null si ya llegó. */

@@ -8604,7 +8604,7 @@ export default function App() {
 
                   <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
-                      <button className="btn" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={agregarFilas}>
+                      <button className="btn" data-tour="planilla-agregar" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={agregarFilas}>
                         <Icon name="plus" style={{ width: 13, height: 13 }} /> Agregar {(parseInt(nFilasAgregar, 10) || 1) > 1 ? `${parseInt(nFilasAgregar, 10)} filas` : 'Fila'}
                       </button>
                       <input type="number" min="1" max="500" value={nFilasAgregar}
@@ -8614,7 +8614,7 @@ export default function App() {
                         title="Cuántas filas agregar"
                         style={{ width: 54, textAlign: 'center', padding: '0 6px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, fontWeight: 700, outline: 'none' }} />
                     </div>
-                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => document.getElementById('csvPedidoInput')?.click()}
+                    <button className="btn ghost" data-tour="planilla-csv" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => document.getElementById('csvPedidoInput')?.click()}
                       title="Cargar filas desde un archivo CSV (Excel). En talle/diseño/manga solo acepta valores válidos; si no coinciden, deja la celda vacía.">
                       ⬆ Importar CSV
                     </button>
@@ -10038,7 +10038,7 @@ export default function App() {
                   </div>
 
                   {/* Card 2: Planillas */}
-                  <div className="crm-config-card magenta" onClick={() => setAdminSubView('columnas')}>
+                  <div className="crm-config-card magenta" data-tour="cfg-columnas" onClick={() => setAdminSubView('columnas')}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="columnas" style={{ width: 18, height: 18 }} />
@@ -10051,7 +10051,7 @@ export default function App() {
                   </div>
 
                   {/* Card 2b: Reglas de planilla — campos de personalización = capas del diseño */}
-                  <div className="crm-config-card green" onClick={() => { setReglaEditando(null); setAdminSubView('reglas'); }}>
+                  <div className="crm-config-card green" data-tour="cfg-reglas" onClick={() => { setReglaEditando(null); setAdminSubView('reglas'); }}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="fuentes" style={{ width: 18, height: 18 }} />
@@ -10080,7 +10080,7 @@ export default function App() {
                   </div>
 
                   {/* Card 4: Reglas de Nesting */}
-                  <div className="crm-config-card cyan" onClick={() => {
+                  <div className="crm-config-card cyan" data-tour="cfg-nesting" onClick={() => {
                     setAdminSubView('nesting');
                     fetchConfig();
                   }}>
@@ -10096,7 +10096,7 @@ export default function App() {
                   </div>
 
                   {/* Card 6: Catálogo de Fuentes */}
-                  <div className="crm-config-card yellow" onClick={() => setAdminSubView('fuentes')}>
+                  <div className="crm-config-card yellow" data-tour="cfg-fuentes" onClick={() => setAdminSubView('fuentes')}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="fuentes" style={{ width: 18, height: 18 }} />
@@ -10109,7 +10109,7 @@ export default function App() {
                   </div>
 
                   {/* Card: Usuarios y permisos */}
-                  <div className="crm-config-card cyan" onClick={() => setAdminSubView('usuarios')}>
+                  <div className="crm-config-card cyan" data-tour="cfg-usuarios" onClick={() => setAdminSubView('usuarios')}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="user" style={{ width: 18, height: 18 }} />
@@ -10123,7 +10123,7 @@ export default function App() {
 
                   {/* Card: Perfil de color (ICC) */}
                   {/* PUBLICACIÓN: mandar la versión nueva al servidor de internet */}
-                  <div className="crm-config-card green" onClick={() => setAdminSubView('publicacion')}>
+                  <div className="crm-config-card green" data-tour="cfg-publicacion" onClick={() => setAdminSubView('publicacion')}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="check" style={{ width: 18, height: 18 }} />
@@ -10135,7 +10135,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="crm-config-card magenta" onClick={() => { fetchPerfiles(); setAdminSubView('perfil'); }}>
+                  <div className="crm-config-card magenta" data-tour="cfg-perfil" onClick={() => { fetchPerfiles(); setAdminSubView('perfil'); }}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="distribucion" style={{ width: 18, height: 18 }} />
@@ -10843,6 +10843,7 @@ export default function App() {
                           <div>
                             <label style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Nesting de este molde</label>
                             <select
+                              data-tour="nsel-elegir"
                               value={activoProdDetalle?.nesting_preset_id || 'nesting_default'}
                               onChange={(e) => asignarNestingAMolde(activoProdDetalle.id, e.target.value)}
                               style={{ width: '100%', height: 40, padding: '0 11px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 14, cursor: 'pointer' }}
@@ -10875,7 +10876,7 @@ export default function App() {
                                   </div>
                                 : <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>Este molde no está en ningún grupo → se arma en su <b>propia tizada</b>.</div>;
                             })()}
-                            <button className="btn ghost" style={{ marginTop: 12, fontSize: 12 }} onClick={() => { setGrupoTizadaEditando(null); setNestingTab('grupos'); setAdminSubView('nesting'); }}>
+                            <button className="btn ghost" data-tour="nsel-grupos" style={{ marginTop: 12, fontSize: 12 }} onClick={() => { setGrupoTizadaEditando(null); setNestingTab('grupos'); setAdminSubView('nesting'); }}>
                               Configurar grupos de tizada →
                             </button>
                             <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 8, lineHeight: 1.45 }}>
@@ -11637,7 +11638,7 @@ export default function App() {
                           {mapeoData && (
                             <button className="btn" type="button"
                               style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: mapeandoDiseno ? 'var(--accent)' : undefined, color: mapeandoDiseno ? 'var(--accent)' : undefined }}
-                              onClick={() => setMapeandoDiseno(v => !v)}>
+                              data-tour="diseno-mapear" onClick={() => setMapeandoDiseno(v => !v)}>
                               <Icon name="eye" style={{ width: 14, height: 14 }} />
                               {mapeandoDiseno ? '↩ Ver medidas de las piezas' : 'Mapear diseño al molde'}
                             </button>
@@ -11654,7 +11655,7 @@ export default function App() {
                           </div>
 
                           {/* Guía "qué va en cada capa del .ai" → ventana emergente. */}
-                          <button type="button" className="btn ghost" onClick={() => setGuiaCapasOpen(true)}
+                          <button type="button" className="btn ghost" data-tour="diseno-capas" onClick={() => setGuiaCapasOpen(true)}
                             style={{ width: '100%', fontSize: 11.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                             <span>Qué va en cada capa del .ai</span>
                             <span style={{ opacity: 0.55, fontSize: 15 }}>›</span>
@@ -11807,6 +11808,7 @@ export default function App() {
 
                               <button 
                                 className="btn primary" 
+                                data-tour="diseno-guardar"
                                 style={{ width: '100%', marginTop: 8 }}
                                 onClick={guardarMapeo}
                               >
@@ -11833,7 +11835,7 @@ export default function App() {
                               {plantillasPlanillas.map(t => {
                                 const sel = t.id === selectedPlanillaTemplateId;
                                 return (
-                                  <button key={t.id} onClick={() => setSelectedPlanillaTemplateId(t.id)}
+                                  <button key={t.id} data-tour="mplanilla-elegir" onClick={() => setSelectedPlanillaTemplateId(t.id)}
                                     style={{ padding: '8px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', transition: 'all .2s',
                                       border: sel ? '1px solid var(--accent)' : '1px solid var(--border-light)',
                                       background: sel ? 'linear-gradient(180deg, rgba(0,216,245,0.14), rgba(0,216,245,0.03))' : 'transparent',
@@ -11877,7 +11879,7 @@ export default function App() {
                                 <button className="btn ghost" style={{ width: '100%', marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: 'var(--cmyk-cyan)', borderColor: 'var(--cmyk-cyan)' }} onClick={() => setProbandoPlanilla(v => !v)}>
                                   <Icon name="eye" style={{ width: 14, height: 14 }} /> {probandoPlanilla ? 'Cerrar visor' : 'Visualizar cómo carga este molde'}
                                 </button>
-                                <button className="btn primary" style={{ width: '100%' }} onClick={guardarConfigMapeoColumnas}>
+                                <button className="btn primary" data-tour="mplanilla-guardar" style={{ width: '100%' }} onClick={guardarConfigMapeoColumnas}>
                                   Guardar configuración de este molde
                                 </button>
                               </>
@@ -11896,7 +11898,7 @@ export default function App() {
                             <input
                               type="text"
                               value={terminologiaEdit.variante}
-                              placeholder="Talle"
+                              data-tour="term-variante" placeholder="Talle"
                               style={{ width: '100%', padding: '8px 10px', fontSize: 13, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', color: '#fff' }}
                               onChange={(e) => setTerminologiaEdit({ ...terminologiaEdit, variante: e.target.value })}
                             />
@@ -11907,13 +11909,13 @@ export default function App() {
                             <input
                               type="text"
                               value={nombreMoldeEdit}
-                              placeholder="Ej.: Camiseta River, Buzo Capucha…"
+                              data-tour="term-molde" placeholder="Ej.: Camiseta River, Buzo Capucha…"
                               style={{ width: '100%', padding: '8px 10px', fontSize: 13, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-light)', color: '#fff' }}
                               onChange={(e) => setNombreMoldeEdit(e.target.value)}
                             />
                             <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 4 }}>Es el nombre que se muestra en la tarjeta del molde.</small>
                           </div>
-                          <button className="btn primary" style={{ width: '100%', marginTop: 4 }} onClick={guardarTerminologia}>
+                          <button className="btn primary" data-tour="term-guardar" style={{ width: '100%', marginTop: 4 }} onClick={guardarTerminologia}>
                             Guardar Nombres
                           </button>
                         </div>
@@ -12118,7 +12120,7 @@ export default function App() {
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                                     <button type="button" className="btn ghost" onClick={() => { setAsignandoGrupoPz(null); setAsignandoTipo(null); setGrupoPzAbierto(null); }} style={{ alignSelf: 'flex-start', fontSize: 12, padding: '6px 10px' }}>⬅ Volver a los grupos</button>
                                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                      <input value={gp.nombre} placeholder="Nombre del grupo" onChange={(e) => aplicarGruposPz(arr => arr.map(g => g.id === gp.id ? { ...g, nombre: e.target.value } : g))} style={{ ...inpG, fontWeight: 600, fontSize: 14 }} />
+                                      <input value={gp.nombre} data-tour="grupo-nombre" placeholder="Nombre del grupo" onChange={(e) => aplicarGruposPz(arr => arr.map(g => g.id === gp.id ? { ...g, nombre: e.target.value } : g))} style={{ ...inpG, fontWeight: 600, fontSize: 14 }} />
                                       <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{(gp.piezas || []).length} pza{(gp.piezas || []).length === 1 ? '' : 's'}</span>
                                     </div>
                                     <button type="button" className="btn" style={{ width: '100%', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: eligiendo ? 'var(--accent)' : undefined, color: eligiendo ? 'var(--accent)' : undefined }} onClick={() => { setAsignandoTipo(null); setAsignandoGrupoPz(eligiendo ? null : gp.id); }}>
@@ -12136,15 +12138,15 @@ export default function App() {
                                           <div style={{ fontSize: 13, fontWeight: 700 }}>{varAsignando.label || 'Variable'}</div>
                                           <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>Tocá en el visor (o arrastrá un recuadro) las piezas del grupo que <b>forman esta variable</b>. Tocá una elegida para sacarla.</div>
                                           <div style={{ fontSize: 12 }}><b style={{ color: 'var(--accent)', fontSize: 15 }}>{((varAsignando.valores || []).filter(x => x.pieza_idx != null)).length}</b> pieza{((varAsignando.valores || []).filter(x => x.pieza_idx != null)).length === 1 ? '' : 's'} elegida{((varAsignando.valores || []).filter(x => x.pieza_idx != null)).length === 1 ? '' : 's'}</div>
-                                          <button type="button" className="btn primary" style={{ width: '100%' }} onClick={() => { setAsignandoTipo(null); guardarGrupos(); }}>Listo</button>
+                                          <button type="button" className="btn primary" data-tour="var-listo" style={{ width: '100%' }} onClick={() => { setAsignandoTipo(null); guardarGrupos(); }}>Listo</button>
                                         </div>
                                       ) : (<>
                                         {/* crear variable A MANO */}
                                         <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 11, display: 'flex', flexDirection: 'column', gap: 8 }}>
                                           <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>Nueva variable <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· ponele nombre y elegí sus piezas</span></div>
                                           <div style={{ display: 'flex', gap: 6 }}>
-                                            <input value={nuevaVarNombre} onChange={(e) => setNuevaVarNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && nuevaVarNombre.trim()) { e.preventDefault(); crearVar(); } }} placeholder="Nombre (ej.: Cuello V manga corta)" style={{ ...inpG, flex: 1, width: 'auto' }} />
-                                            <button type="button" className="btn primary" style={{ fontSize: 12, whiteSpace: 'nowrap' }} disabled={!nuevaVarNombre.trim()} onClick={crearVar}>+ Elegir piezas</button>
+                                            <input value={nuevaVarNombre} data-tour="var-nombre" onChange={(e) => setNuevaVarNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && nuevaVarNombre.trim()) { e.preventDefault(); crearVar(); } }} placeholder="Nombre (ej.: Cuello V manga corta)" style={{ ...inpG, flex: 1, width: 'auto' }} />
+                                            <button type="button" className="btn primary" data-tour="var-elegir-piezas" style={{ fontSize: 12, whiteSpace: 'nowrap' }} disabled={!nuevaVarNombre.trim()} onClick={crearVar}>+ Elegir piezas</button>
                                           </div>
                                         </div>
                                         {/* Variables del grupo */}
@@ -13309,7 +13311,7 @@ export default function App() {
                       <h2>Plantillas de Planilla</h2>
                       <p>Define la estructura de columnas Excel y asócialas a tus productos.</p>
                     </div>
-                    <button className="btn primary" onClick={handleCreatePlanilla} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button className="btn primary" data-tour="col-nueva" onClick={handleCreatePlanilla} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Icon name="plus" style={{ width: 14, height: 14 }} /> Nueva Planilla
                     </button>
                   </div>
@@ -13461,7 +13463,7 @@ export default function App() {
                       <button className="btn ghost" onClick={() => setProbandoPlanilla(true)} style={{ padding: '8px 16px', fontSize: 13, height: 36, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--cmyk-cyan)', borderColor: 'var(--cmyk-cyan)' }}>
                         <Icon name="eye" style={{ width: 14, height: 14 }} /> Visualizar
                       </button>
-                      <button className="btn success" onClick={handleSavePlanilla} style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px', fontSize: 13, height: 36 }}>
+                      <button className="btn success" data-tour="col-guardar" onClick={handleSavePlanilla} style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px', fontSize: 13, height: 36 }}>
                         Guardar Planilla
                       </button>
                     </div>
@@ -13730,7 +13732,7 @@ export default function App() {
                       <h2>Reglas de planilla</h2>
                       <p>Campos reutilizables: definí cómo se cargan (casilla / desplegable / botón) y qué hacen. Después, en cada columna de la planilla, solo elegís la regla.</p>
                     </div>
-                    <button className="btn primary" onClick={() => setReglaEditando({ nombre: '', tipo: 'texto', opciones: '', comportamiento: 'none' })} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button className="btn primary" data-tour="regla-nueva" onClick={() => setReglaEditando({ nombre: '', tipo: 'texto', opciones: '', comportamiento: 'none' })} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Icon name="plus" style={{ width: 14, height: 14 }} /> Nueva Regla
                     </button>
                   </div>
@@ -13800,7 +13802,7 @@ export default function App() {
                         <div style={{ display: 'grid', gap: 14 }}>
                           <div>
                             <label style={labelStyle}>Nombre</label>
-                            <input type="text" value={r.nombre} placeholder="Ej. Color, Equipo, Talle…" onChange={(e) => set('nombre', e.target.value)} style={inputStyle} />
+                            <input type="text" value={r.nombre} data-tour="regla-nombre" placeholder="Ej. Color, Equipo, Talle…" onChange={(e) => set('nombre', e.target.value)} style={inputStyle} />
                           </div>
                           <div>
                             <label style={labelStyle}>¿Cómo se carga en la planilla?</label>
@@ -13842,7 +13844,7 @@ export default function App() {
                           )}
                           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
                             <button className="btn ghost" onClick={() => setReglaEditando(null)} style={{ padding: '8px 16px' }}>Cancelar</button>
-                            <button className="btn success" onClick={() => guardarRegla(r)} style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px' }}>Guardar regla</button>
+                            <button className="btn success" data-tour="regla-guardar" onClick={() => guardarRegla(r)} style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px' }}>Guardar regla</button>
                           </div>
                         </div>
                       );
@@ -13903,7 +13905,7 @@ export default function App() {
                       <h3 style={{ fontSize: 17, fontWeight: 700 }}>Plantillas de nesting</h3>
                       <p>Guardá distintos nesting como plantillas. Después, en cada molde elegís cuál usar.</p>
                     </div>
-                    <button className="btn primary" onClick={() => setNestingEditando({ nombre: '', espaciado_mm: 5, margen_mm: 10, rotacion: 'ninguna' })} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button className="btn primary" data-tour="nesting-nuevo" onClick={() => setNestingEditando({ nombre: '', espaciado_mm: 5, margen_mm: 10, rotacion: 'ninguna' })} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Icon name="plus" style={{ width: 14, height: 14 }} /> Nuevo Nesting
                     </button>
                   </div>
@@ -13917,7 +13919,7 @@ export default function App() {
                         <div style={{ display: 'grid', gap: 16 }}>
                           <div>
                             <label style={labelStyle}>Nombre</label>
-                            <input type="text" value={n.nombre} placeholder="Ej. Estándar, Apretado, Sin giro…" onChange={(e) => set('nombre', e.target.value)} style={inputStyle} />
+                            <input type="text" value={n.nombre} data-tour="nesting-nombre" placeholder="Ej. Estándar, Apretado, Sin giro…" onChange={(e) => set('nombre', e.target.value)} style={inputStyle} />
                           </div>
                           <div>
                             <label style={labelStyle}>Separación de seguridad entre piezas (mm)</label>
@@ -13940,7 +13942,7 @@ export default function App() {
                           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
                             <button className="btn ghost" onClick={() => setNestingEditando(null)} style={{ padding: '8px 16px' }}>Cancelar</button>
                             <button className="btn success" style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px' }}
-                              onClick={async () => { const id = await guardarNestingPreset(n); if (id) setNestingEditando(null); }}>Guardar nesting</button>
+                              data-tour="nesting-guardar" onClick={async () => { const id = await guardarNestingPreset(n); if (id) setNestingEditando(null); }}>Guardar nesting</button>
                           </div>
                         </div>
                       );
@@ -14196,11 +14198,11 @@ export default function App() {
                           ); })()}
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(226px, 1fr))', gap: 12 }}>
-                          {lista.map(p => {
+                          {lista.map((p, i) => {
                             const sel = p.archivo === actual;
                             const cols = (p.colores && p.colores.length) ? p.colores : ['#2a2a30', '#33333a', '#3c3c44', '#45454e', '#4e4e58', '#575762'];
                             return (
-                              <button key={p.archivo} type="button" className="perfil-card" onClick={() => guardarPerfilDefault(grp.k, p.archivo)} title={p.archivo}
+                              <button key={p.archivo} type="button" className="perfil-card" data-tour={i === 0 ? 'perfil-card' : undefined} onClick={() => guardarPerfilDefault(grp.k, p.archivo)} title={p.archivo}
                                 style={{ position: 'relative', textAlign: 'left', display: 'flex', flexDirection: 'column', padding: 0, borderRadius: 13, overflow: 'hidden', cursor: 'pointer', transition: 'all .18s',
                                   border: sel ? '1.5px solid var(--accent)' : '1px solid var(--border-light)',
                                   background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.012))',
@@ -14270,14 +14272,14 @@ export default function App() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                     <div className="card-title" style={{ margin: 0 }}>Tipografías Registradas en el Servidor</div>
                     <input type="file" ref={fileInputFuenteRef} accept=".ttf,.otf" onChange={(e) => handleUploadFile('fuente', e.target.files[0])} hidden />
-                    <button className="btn primary" onClick={() => fileInputFuenteRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <button className="btn primary" data-tour="fuentes-subir" onClick={() => fileInputFuenteRef.current.click()} style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                       <Icon name="plus" style={{ width: 14, height: 14 }} /> Subir Nueva Fuente (.ttf / .otf)
                     </button>
                   </div>
                   {/* MUESTRA GLOBAL: lo que se escribe acá se ve al instante en TODAS las tarjetas,
                       con la tipografía real de cada una → comparar fuentes con el mismo texto. */}
                   <input value={muestraGlobal} onChange={(e) => setMuestraGlobal(e.target.value)}
-                    spellCheck={false} placeholder={`Escribí para probar todas las fuentes… (${MUESTRA_DEF})`}
+                    spellCheck={false} data-tour="fuentes-probar" placeholder={`Escribí para probar todas las fuentes… (${MUESTRA_DEF})`}
                     style={{ width: '100%', margin: '14px 0 20px', padding: '10px 12px', fontSize: 13.5, borderRadius: 8,
                       background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' }} />
 
