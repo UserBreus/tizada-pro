@@ -167,8 +167,8 @@ const HACER_PEDIDO = {
     { ancla: 'pedido-diseno-agregar', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'click',
       // Si ya lo confirmó con Enter en el campo, este paso está hecho: el motor lo saltea.
       tambien: ['pedido-diseno-input'],
-      texto: 'Agregalo con este botón.',
-      nota: 'Si ya apretaste Enter en el campo, ya está agregado: seguimos.' },
+      texto: 'Agregalo: tocá el botón o apretá Enter en el campo.',
+      nota: 'Con Enter se agrega igual que con el botón; el tutorial sigue solo.' },
     { ancla: 'pedido-diseno-chips', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'ver',
       texto: 'Ahí aparece tu diseño. Si cargás varios, tocá uno para trabajar sobre ese.',
       nota: 'El número al lado dice cuántas variables le asignaste.' },

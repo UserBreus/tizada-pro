@@ -269,12 +269,39 @@ function Tour({ guia, onCerrar, ir, donde }) {
         temp = setTimeout(() => avanzarDesde(idx, eraPuente), 200);
       };
       document.addEventListener('click', h, true);
-      return () => { clearTimeout(temp); document.removeEventListener('click', h, true); };
+      // Si el paso acepta que la acción se haga desde un campo (`tambien`) y ese campo se VACÍA, es
+      // que se confirmó con Enter: el botón ya no hace falta y el paso está cumplido.
+      // Al montar hay que MIRAR el campo: cuando este paso empieza, la persona ya escribió (viene del
+      // paso anterior). Si arrancara en `false`, el vaciado posterior no se reconocería como
+      // confirmación y el tutorial se quedaba esperando un clic que ya no hacía falta.
+      const valorDe = (a) => {
+        const el = document.querySelector(`[data-tour="${a}"]`);
+        if (!el) return '';
+        const campo = el.matches('input, textarea') ? el : el.querySelector('input, textarea');
+        return campo ? (campo.value || '').trim() : '';
+      };
+      let tenia = (paso.tambien || []).some(a => valorDe(a).length > 0);
+      const relee = setTimeout(() => { if (!tenia) tenia = (paso.tambien || []).some(a => valorDe(a).length > 0); }, 300);
+      const hv = (e) => {
+        const t = e.target;
+        if (!t || !t.closest || !(paso.tambien || []).some(a => t.closest(`[data-tour="${a}"]`))) return;
+        const val = (t.value || '').trim();
+        if (!val && tenia) { tenia = false; clearTimeout(temp); avanzarDesde(idx, saltoRef.current); }
+        else if (val) tenia = true;
+      };
+      document.addEventListener('input', hv, true);
+      return () => { clearTimeout(temp); clearTimeout(relee); document.removeEventListener('click', h, true); document.removeEventListener('input', hv, true); };
     }
     // ESCRIBIR: se espera a que TERMINE de escribir (cada tecla reinicia la cuenta). Antes cada
     // tecla programaba su propio avance y una palabra de 10 letras saltaba 10 pasos de una.
+    let habiaTexto = false;                            // para notar el vaciado al confirmar
     const h = (e) => {
-      if (!dentro(e.target) || (e.target.value || '').trim().length < 2) return;
+      if (!dentro(e.target)) return;
+      const val = (e.target.value || '').trim();
+      // Se vació de golpe teniendo texto: el campo se confirmó (Enter o botón). Ya está hecho.
+      if (!val && habiaTexto) { habiaTexto = false; clearTimeout(temp); avanzarDesde(idx, saltoRef.current); return; }
+      if (val.length < 2) return;
+      habiaTexto = true;
       const eraPuente = saltoRef.current;
       clearTimeout(temp);
       temp = setTimeout(() => avanzarDesde(idx, eraPuente), 650);   // dejó de escribir
@@ -282,24 +309,14 @@ function Tour({ guia, onCerrar, ir, donde }) {
     document.addEventListener('input', h, true);
     // Si el guion lo permite, ENTER también cuenta como hecho (varios campos del sistema
     // confirman con Enter en vez de con el botón).
-    // ENTER: en este sistema no es «marcar el paso como hecho», es la CONFIRMACIÓN del campo (agrega
-    // el diseño, aplica el nombre…). Por eso, si el paso siguiente pide tocar el botón que hace
-    // exactamente eso, ese paso ya está cumplido y se saltea: pedirlo de nuevo sería mandar a hacer
-    // dos veces la misma cosa. El evento no se toca (ni preventDefault ni stopPropagation): el
-    // campo recibe su Enter igual que sin tutorial.
-    const hk = (e) => {
-      if (e.key !== 'Enter' || !dentro(e.target)) return;
-      const q = saltoRef.current;
-      const sig = guia.pasos[idx + 1];
-      const yaHecho = sig && (sig.tambien || []).includes(paso.ancla);
-      clearTimeout(temp);
-      temp = setTimeout(() => { if (idxRef.current === idx && !q) avanzar(yaHecho ? 2 : 1); }, 200);
-    };
-    document.addEventListener('keydown', hk, true);
+    // EL ENTER ES DEL CAMPO, NO DEL TUTORIAL. Acá no se escucha la tecla: cuando la persona aprieta
+    // Enter está CONFIRMANDO el campo (agrega el diseño, aplica el nombre) y eso tiene que pasar
+    // igual que sin tutorial. El tutorial se entera por el EFECTO: el campo que confirma se vacía,
+    // y ese vaciado —de tener texto a quedar en blanco— es la señal de que la acción se hizo.
     // Salir del campo también es «ya terminé de escribir».
     const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim().length >= 2) { clearTimeout(temp); avanzarDesde(idx, saltoRef.current); } };
     document.addEventListener('blur', hb, true);
-    return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('keydown', hk, true); document.removeEventListener('blur', hb, true); };
+    return () => { clearTimeout(temp); document.removeEventListener('input', h, true); document.removeEventListener('blur', hb, true); };
   }, [idx, paso?.ancla, paso?.accion, avanzar]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Salir con Escape.
