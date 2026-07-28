@@ -86,18 +86,38 @@ def restaurar(respaldo, app):
             shutil.copy2(o, d)
 
 
-def arrancar(app=None):
-    """Levanta por la TAREA (servicio), igual que después de un reinicio. Si la tarea no existe
-    (servidor de prueba, o alguien la borró), cae a ejecutar `arrancar.bat` directamente: quedarse
-    sin levantar el sistema por una tarea faltante sería el peor final posible."""
-    r = subprocess.run(["schtasks", "/run", "/tn", TAREA], capture_output=True, text=True)
-    if r.returncode == 0:
-        return
+def _lanzar_bat(app):
+    """Ejecuta `arrancar.bat` directamente (sin la tarea). La salida va al vacío: si el .bat no
+    puede escribir su log, igual arranca."""
     bat = os.path.join(app or os.getcwd(), "arrancar.bat")
-    if os.path.exists(bat):
-        flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
-        subprocess.Popen(["cmd", "/c", bat], cwd=(app or os.getcwd()), creationflags=flags,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    if not os.path.exists(bat):
+        return False
+    flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
+    subprocess.Popen(["cmd", "/c", bat], cwd=(app or os.getcwd()), creationflags=flags,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    return True
+
+
+def arrancar(app=None, puerto=None):
+    """Levanta por la TAREA (servicio), igual que después de un reinicio, y COMPRUEBA que haya
+    levantado de verdad.
+
+    OJO: `schtasks /run` contesta 0 («intenté ejecutarla») aunque después no ejecute NADA — pasó en
+    producción y el ayudante lo tomó por bueno: dio la actualización por exitosa con el servidor
+    caído, y ni la versión nueva ni la anterior volvieron. Por eso ahora, si el puerto no contesta,
+    se reintenta lanzando el .bat a mano. Sin `puerto` no se puede verificar y se hace lo de antes."""
+    r = subprocess.run(["schtasks", "/run", "/tn", TAREA], capture_output=True, text=True)
+    if puerto is None:
+        if r.returncode != 0:
+            _lanzar_bat(app)
+        return True
+    if salud(puerto, 45):
+        return True
+    log(app, "la tarea no levantó el servidor; se lanza arrancar.bat a mano")
+    if _lanzar_bat(app) and salud(puerto, 60):
+        return True
+    log(app, "NO se pudo levantar el servidor (ni por la tarea ni por el .bat)")
+    return False
 
 
 def resultado(carpeta, ok, version, detalle):
@@ -129,7 +149,7 @@ def main():
         log(app, f"respaldo hecho en {respaldo}")
     except Exception as e:
         log(app, f"NO se pudo respaldar ({e}); se cancela para no arriesgar")
-        arrancar(app)
+        arrancar(app, puerto)
         resultado(app, False, version, f"no se pudo respaldar: {e}")
         return
 
@@ -140,11 +160,11 @@ def main():
     except Exception as e:
         log(app, f"falló al descomprimir ({e}); se restaura")
         restaurar(respaldo, app)
-        arrancar(app)
+        arrancar(app, puerto)
         resultado(app, False, version, f"no se pudo descomprimir: {e}")
         return
 
-    arrancar(app)
+    arrancar(app, puerto)
     if salud(puerto, ESPERA_SALUD):
         log(app, f"OK: {version} andando")
         resultado(app, True, version, "actualizado y verificado")
@@ -159,7 +179,7 @@ def main():
     subprocess.run(["schtasks", "/end", "/tn", TAREA], capture_output=True)
     esperar_libre(puerto, 30)
     restaurar(respaldo, app)
-    arrancar(app)
+    arrancar(app, puerto)
     volvio = salud(puerto, 90)
     log(app, "restaurada la versión anterior" + ("" if volvio else " (¡tampoco contesta!)"))
     resultado(app, False, version,

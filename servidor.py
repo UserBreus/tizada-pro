@@ -275,6 +275,23 @@ def _apagarme():
     lo vuelve a levantar (y el ayudante también lo arranca explícitamente)."""
     def _fin():
         time.sleep(1)
+        # CERRAR LOS PROCESOS DE RENDER ANTES DE SALIR. Heredan la salida del servidor —el .bat de
+        # arranque la manda a un archivo de log— así que si quedan vivos MANTIENEN ESE ARCHIVO
+        # ABIERTO. El siguiente arranque no puede escribirlo, el .bat muere al instante y la tarea
+        # devuelve error sin dejar rastro: el servidor publicado queda caído y ni la versión nueva
+        # ni la anterior levantan. Pasó de verdad (2026-07-27, ver changelog).
+        try:
+            global _RENDER_POOL
+            if _RENDER_POOL is not None:
+                for _p in list(getattr(_RENDER_POOL, "_processes", {}).values()):
+                    try:
+                        _p.terminate()
+                    except Exception:
+                        pass
+                _RENDER_POOL.shutdown(wait=False)
+                _RENDER_POOL = None
+        except Exception:
+            pass
         os._exit(0)
     _en_hilo(_fin)
 

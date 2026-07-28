@@ -441,10 +441,17 @@ def escribir_config(puerto, perfiles, gs):
             # `call` CON RUTA COMPLETA: si el entorno tiene NoDefaultCurrentDirectoryInExePath,
             # `call config_publicado.bat` no encuentra el archivo y el servidor arranca SIN su
             # configuración (sin clave, sin puerto). Pasó en las pruebas.
+            # EL LOG NO PUEDE IMPEDIR EL ARRANQUE: si un proceso viejo quedó vivo con ese archivo
+            # abierto (pasa con los workers de render, que heredan la salida del servidor), la
+            # redirección falla y el .bat muere al instante SIN dejar rastro → el servidor queda
+            # caído y la tarea sólo devuelve «error 1». Por eso se prueba escribir y, si no se
+            # puede, se usa otro nombre. Ocurrió en producción (2026-07-27, ver changelog).
             fh.write("@echo off\r\ncd /d \"%~dp0\"\r\ncall \"%~dp0config_publicado.bat\"\r\n"
-                     "echo ---- arranque %date% %time% >> servidor_log.txt\r\n"
-                     "where py >nul 2>nul && (py servidor.py >> servidor_log.txt 2>&1) "
-                     "|| (python servidor.py >> servidor_log.txt 2>&1)\r\n")
+                     "set LOG=arranque_log.txt\r\n"
+                     "(echo ---- arranque %date% %time%)>> \"%LOG%\" 2>nul "
+                     "|| set LOG=arranque_%RANDOM%.txt\r\n"
+                     "where py >nul 2>nul && (py servidor.py >> \"%LOG%\" 2>&1) "
+                     "|| (python servidor.py >> \"%LOG%\" 2>&1)\r\n")
         ok(arranque)
     return arranque
 
