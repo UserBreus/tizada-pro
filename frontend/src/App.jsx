@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import AyudaGuiada from './tutor';   // motor de tutoriales paso a paso
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 
@@ -2974,6 +2975,16 @@ export default function App() {
   // Integrated workspace states
   // tabAjustesMolde: 'menu' (lista de botones) | 'molderia' | 'diseno' | 'planilla'
   const [tabAjustesMolde, setTabAjustesMolde] = useState('menu');
+  // ── AYUDA GUIADA ── El tutorial pide «llevame a tal pantalla» y esto lo resuelve; así el guion
+  // no sabe nada de los estados internos y se escribe en criollo (ver guias.js).
+  const [ayudaAbierta, setAyudaAbierta] = useState(false);
+  const irPantallaAyuda = React.useCallback((d) => {
+    if (!d) return;
+    if (d.tab) setActivoTab(d.tab);
+    if (d.sub) setAdminSubView(d.sub);
+    if (d.paso) setPedidoPaso(d.paso);
+    if (d.ajuste) setTabAjustesMolde(d.ajuste);
+  }, []);
   // molderiaAbierta: id de la moldería en la que entramos a configurar (null = grilla)
   const [molderiaAbierta, setMolderiaAbierta] = useState(null);
   // modoMiMolde: pid del molde PROPIO que el usuario está configurando DESDE el pedido. No es
@@ -7725,6 +7736,7 @@ export default function App() {
 
           <nav className="nav-menu">
             <button 
+              data-tour="nav-pedidos"
               className={`nav-item ${activoTab === 'pedidos' ? 'active' : ''}`}
               onClick={() => {
                 setActivoTab('pedidos');
@@ -7736,6 +7748,7 @@ export default function App() {
               Pedidos
             </button>
             <button 
+              data-tour="nav-config"
               className={`nav-item ${activoTab === 'config' ? 'active' : ''}`}
               onClick={() => {
                 setActivoTab('config');
@@ -7745,6 +7758,12 @@ export default function App() {
             >
               <Icon name="config" />
               Configuración
+            </button>
+            {/* AYUDA GUIADA: abre el menú de tutoriales (ver tutor.jsx / guias.js) */}
+            <button className="nav-item" data-tour="nav-ayuda" onClick={() => setAyudaAbierta(true)}
+              title="Te guío paso a paso, marcándote qué tocar">
+              <Icon name="alert" />
+              Ayuda
             </button>
           </nav>
 
@@ -8390,7 +8409,7 @@ export default function App() {
                   <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
                   
                   <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.18)', marginTop: 12, boxShadow: '0 4px 18px rgba(0,0,0,0.25)' }}>
-                    <table className="planilla-tbl" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
+                    <table className="planilla-tbl" data-tour="planilla-tabla" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
                       <thead>
                         <tr style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02))' }}>
                           <th style={{ width: 44, padding: '11px 10px', borderBottom: '1px solid var(--border-light)', textAlign: 'center', fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.5 }}>#</th>
@@ -8927,14 +8946,14 @@ export default function App() {
                               <Icon name="edit" style={{ width: 14, height: 14 }} /> Editar diseño
                             </button>
                           )}
-                          <button className="btn primary" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
+                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
                           </button>
                           {/* El botón depende SÓLO de que haya telas en el sistema. Antes miraba la
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
                           {(telasReg.telas || []).length > 0 && (
-                            <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Ver y asignar telas por pieza">
+                            <button className="btn ghost" data-tour="arte-telas" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Ver y asignar telas por pieza">
                               <Icon name="telas" style={{ width: 13, height: 13 }} /> Ver telas de pieza
                             </button>
                           )}
@@ -8984,7 +9003,7 @@ export default function App() {
                     )}
                     <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>{tareasArte.filter(t => arteCargado[t.did + '|' + t.mid]).length}/{tareasArte.length} con arte</span>
                     {(() => { const _puede = todasArteCargadas && !telasIncompletas; return (
-                    <button onClick={irAPlanillaDesdeArte} disabled={!_puede}
+                    <button data-tour="arte-siguiente" onClick={irAPlanillaDesdeArte} disabled={!_puede}
                       title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela` : '')}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
                         cursor: _puede ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
@@ -10006,7 +10025,7 @@ export default function App() {
                   marginTop: '20px'
                 }}>
                   {/* Card 1: Productos y Molderías */}
-                  <div className="crm-config-card cyan" onClick={() => setAdminSubView('productos')}>
+                  <div className="crm-config-card cyan" data-tour="cfg-productos" onClick={() => setAdminSubView('productos')}>
                     <div>
                       <div className="crm-icon-container">
                         <Icon name="productos" style={{ width: 18, height: 18 }} />
@@ -10149,7 +10168,7 @@ export default function App() {
                         <h2>Moldería</h2>
                         <p>Tus molderías registradas. Hacé clic en una para configurar molde, diseño y planilla.</p>
                       </div>
-                      <button className="btn primary" onClick={() => setCreandoProducto(true)}>
+                      <button className="btn primary" data-tour="molde-nuevo" onClick={() => setCreandoProducto(true)}>
                         <Icon name="plus" style={{ width: 14, height: 14 }} /> Nueva Moldería
                       </button>
                     </div>
@@ -10249,6 +10268,7 @@ export default function App() {
                             ].filter(item => !(modoMiMolde && item.id === 'variables')).map(item => (
                               <button
                                 key={item.id}
+                                data-tour={'ajuste-' + item.id}
                                 className="setting-nav-btn"
                                 disabled={item.disabled}
                                 onClick={() => { setTabAjustesMolde(item.id); if (item.id === 'diseno') setMapeandoDiseno(false); if (item.id === 'borde') cargarBorde(); if (item.id === 'etiqueta') { cargarEtiqueta(); cargarBorde(); } if (item.id === 'editable') cargarEditConfig(); }}
@@ -10365,7 +10385,7 @@ export default function App() {
                             )}
                             {varsTela.length > 0 && (
                               <div style={{ marginBottom: 14 }}>
-                                <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Variable</div>
+                                <div data-tour="telas-variable" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-secondary)', marginBottom: 7 }}>Variable</div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                                   {[{ clave: '', label: 'Todo el molde', n: piezasMolde.length }, ...varsTela.map(v => ({ clave: v.clave, label: v.label || 'Variable', n: piezasDeVar(v.clave).length }))].map(op => {
                                     const on = telasCfgVar === op.clave;
@@ -10383,7 +10403,7 @@ export default function App() {
                                 {/* TOPE: cuántas telas distintas puede combinar la prenda EN EL PEDIDO.
                                     Se edita en su propio modal (número escrito), no acá apretado. */}
                                 {telasCfgVar && (
-                                  <button type="button" onClick={() => { setTelaTopeVal(topeVar ? String(topeVar) : ''); setTelaTopeOpen(true); }}
+                                  <button type="button" data-tour="telas-tope" onClick={() => { setTelaTopeVal(topeVar ? String(topeVar) : ''); setTelaTopeOpen(true); }}
                                     style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: 11, padding: '10px 12px', borderRadius: 10, cursor: 'pointer', textAlign: 'left',
                                       border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: '#fff' }}>
                                     <span style={{ flex: 1, minWidth: 0 }}>
@@ -10401,7 +10421,7 @@ export default function App() {
                             {T.length === 0 ? (
                               <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '16px 0' }}>No hay telas registradas todavía. Andá a Configuración › Telas.</div>
                             ) : !telasPanelAbierto ? (
-                              <button className="btn primary" style={{ padding: '10px 18px', fontWeight: 700 }} onClick={() => { setTelasPanelAbierto(true); setTelaCfgVerId(null); }}>
+                              <button className="btn primary" data-tour="telas-mostrar" style={{ padding: '10px 18px', fontWeight: 700 }} onClick={() => { setTelasPanelAbierto(true); setTelaCfgVerId(null); }}>
                                 <Icon name="telas" style={{ width: 14, height: 14 }} /> Mostrar telas asignadas
                                 <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>({telasCfgVar ? telasDeVariable.length : usadas.length})</span>
                               </button>
@@ -10420,7 +10440,7 @@ export default function App() {
                                       ? `${telasCfgPiezas.length} pieza${telasCfgPiezas.length > 1 ? 's' : ''} elegida${telasCfgPiezas.length > 1 ? 's' : ''}`
                                       : (telasCfgVar ? 'Ninguna → va a toda la variable' : 'Ninguna → va a todas las piezas')}
                                   </div>
-                                  <button className="btn success" style={{ width: '100%', marginTop: 9, padding: '9px 16px', fontWeight: 700, fontSize: 12.5 }}
+                                  <button className="btn success" data-tour="telas-seleccionar" style={{ width: '100%', marginTop: 9, padding: '9px 16px', fontWeight: 700, fontSize: 12.5 }}
                                     onClick={() => { setTelasCfgSel([]); setTelaCfgAncla(null); setTelaCfgModalBuscar(''); setTelaCfgModalOpen(true); }}>
                                     <Icon name="telas" style={{ width: 13, height: 13 }} /> Seleccionar tela
                                     {telasCfgPiezas.length ? ` · ${telasCfgPiezas.length} pza${telasCfgPiezas.length > 1 ? 's' : ''}` : (telasCfgVar ? ' · toda la variable' : ' · todas las piezas')}
@@ -10522,7 +10542,7 @@ export default function App() {
                                 const lista = q ? T.filter(t => (t.nombre || '').toLowerCase().includes(q)) : T;
                                 return (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                    <input autoFocus placeholder="Buscar tela…" value={telaCfgModalBuscar} onChange={e => setTelaCfgModalBuscar(e.target.value)}
+                                    <input autoFocus data-tour="telas-modal-buscar" placeholder="Buscar tela…" value={telaCfgModalBuscar} onChange={e => setTelaCfgModalBuscar(e.target.value)}
                                       style={{ height: 38, fontSize: 13, padding: '0 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
                                     {(() => {
                                       // Clic normal: alterna y deja el ANCLA (con el estado en que quedó).
@@ -10583,7 +10603,7 @@ export default function App() {
                                         <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, marginTop: 2 }}>Con <b>Shift</b> + clic en otra elegís todo el tramo (y si la primera la habías quitado, lo quita).</span>
                                       </span>
                                       {telasCfgSel.length > 0 && <button className="btn ghost" style={{ padding: '5px 11px', fontSize: 11.5 }} onClick={() => setTelasCfgSel([])}>limpiar</button>}
-                                      <button className="btn success" style={{ marginLeft: 'auto', padding: '9px 22px', fontWeight: 700 }} disabled={!telasCfgSel.length}
+                                      <button className="btn success" data-tour="telas-modal-asignar" style={{ marginLeft: 'auto', padding: '9px 22px', fontWeight: 700 }} disabled={!telasCfgSel.length}
                                         onClick={async () => { await asignar(); setTelaCfgModalOpen(false); }}>
                                         Asignar
                                       </button>
@@ -12289,7 +12309,7 @@ export default function App() {
                         )}
                       </div>
 
-                      <div style={{
+                      <div data-tour="visor-molde" style={{
                         flex: 1,
                         background: 'rgba(9, 9, 11, 0.4)',
                         backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px)',
@@ -14071,7 +14091,7 @@ export default function App() {
                     return (
                       <>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                          <button className="btn ghost" onClick={refrescarTelas} disabled={telasRefrescando} style={{ fontSize: 12.5 }}>{telasRefrescando ? 'Actualizando…' : '↻ Actualizar telas del sistema'}</button>
+                          <button className="btn ghost" data-tour="telas-actualizar" onClick={refrescarTelas} disabled={telasRefrescando} style={{ fontSize: 12.5 }}>{telasRefrescando ? 'Actualizando…' : '↻ Actualizar telas del sistema'}</button>
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T.length} tela{T.length === 1 ? '' : 's'}</span>
                           <input placeholder="Buscar tela…" value={telaFiltroCfg} onChange={e => setTelaFiltroCfg(e.target.value)} style={{ ...inS, flex: 1, minWidth: 180, maxWidth: 300 }} />
                         </div>
@@ -14409,6 +14429,7 @@ export default function App() {
             <div style={{ marginBottom: 20 }}>
               <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Nombre del molde</label>
               <input
+                data-tour="molde-nombre"
                 type="text"
                 value={nuevoProductoNombre}
                 placeholder="Ej. Camiseta River, Buzo Capucha…"
@@ -14419,7 +14440,7 @@ export default function App() {
             
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <button type="button" className="btn ghost" onClick={() => setCreandoProducto(false)}>Cancelar</button>
-              <button type="submit" className="btn primary">Crear Molde</button>
+              <button type="submit" className="btn primary" data-tour="molde-crear-ok">Crear Molde</button>
             </div>
           </form>
         </div>
@@ -14710,6 +14731,8 @@ export default function App() {
         </div>
       )}
 
+      {/* AYUDA GUIADA — se monta una sola vez y se dibuja por encima de todo */}
+      <AyudaGuiada abierto={ayudaAbierta} setAbierto={setAyudaAbierta} ir={irPantallaAyuda} />
     </div>
   );
 }
