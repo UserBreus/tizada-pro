@@ -62,13 +62,24 @@ def estado(version_actual):
 def guardar(datos, version, sha256, cuando):
     """Recibe el .zip: verifica la huella, que abra, que traiga lo imprescindible y que la versión
     coincida con la de adentro. Recién ahí lo deja pendiente. Devuelve (ok, mensaje)."""
-    os.makedirs(CARPETA, exist_ok=True)
+    # ⚠️ TODO lo que escribe va PROTEGIDO. Antes, `makedirs`, el `open` del temporal, el
+    # `os.replace` y el `_escribir` estaban FUERA del try: si el servidor no tenía permiso de
+    # escritura en su carpeta, o el paquete anterior estaba tomado por otro proceso (en Windows
+    # `os.replace` da WinError 5), la excepción subía sin atajar y el que publicaba veía un
+    # **«HTTP Error 500»** pelado, sin ninguna pista de qué pasó. Le pasó al usuario.
+    try:
+        os.makedirs(CARPETA, exist_ok=True)
+    except Exception as e:
+        return False, f"no puedo crear la carpeta de actualizaciones ({CARPETA}): {e}"
     real = hashlib.sha256(datos).hexdigest()
     if sha256 and real != sha256:
         return False, "el paquete llegó cortado o alterado (la huella no coincide)"
     tmp = PAQUETE + ".tmp"
-    with open(tmp, "wb") as fh:
-        fh.write(datos)
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(datos)
+    except Exception as e:
+        return False, f"no puedo escribir el paquete en {CARPETA}: {e}"
     try:
         with zipfile.ZipFile(tmp) as z:
             if z.testzip() is not None:

@@ -60,6 +60,20 @@ def _contorno_de_drawing(d, cb, U, mesa, talle):
             x0r, y0r = pt(fitz.Point(rr.x0, rr.y1))
             seg.append(("re", x0r, y0r, rr.width / U, rr.height / U))
             actual = None
+        elif t == "qu":
+            # CUADRILÁTERO. PyMuPDF lo devuelve como un item propio, y no estaba contemplado: una
+            # pieza dibujada SÓLO con quads salía con `segmentos == [("h",)]` — sin un solo punto.
+            # No fallaba: la pieza se DETECTABA (tiene bbox) pero después `_bbox_segs` devolvía
+            # None y quedaba fuera del nido en silencio. Pasó con dos tiras finas del molde real
+            # («Cuello 4» y «Tapa costura»): la variable decía 8 piezas y se veían menos.
+            q = item[1]
+            ps = [q.ul, q.ur, q.lr, q.ll]
+            if not mismo(actual, ps[0]):
+                seg.append(("m", *pt(ps[0])))
+            for _p in ps[1:]:
+                seg.append(("l", *pt(_p)))
+            seg.append(("l", *pt(ps[0])))
+            actual = ps[0]
     seg.append(("h",))
     bbox_raw = (r.x0 / U + cb.x0, cb.y1 - r.y1 / U, r.x1 / U + cb.x0, cb.y1 - r.y0 / U)
     return {"segmentos": seg, "bbox_raw": bbox_raw, "user_unit": U,

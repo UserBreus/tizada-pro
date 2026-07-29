@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "guias": "node verificar_guias.mjs",
+    "build": "node verificar_guias.mjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "build:publicado": "vite build --base=/Tizadapro/"
+    "build:publicado": "node verificar_guias.mjs && vite build --base=/Tizadapro/"
   },
   "dependencies": {
     "react": "^19.2.6",

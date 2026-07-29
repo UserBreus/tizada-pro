@@ -8,6 +8,7 @@ from flask import Flask, request, jsonify, send_from_directory, send_file, sessi
 from werkzeug.exceptions import HTTPException
 
 import motor_pedido as MP
+import piezas_molde as PM
 import db
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -253,6 +254,51 @@ def salud():
     _chk("base", _base, critico=False)
     _chk("frontend", lambda: (os.path.exists(os.path.join(AQUI, "frontend", "dist", "index.html")),
                               "frontend/dist"), critico=True)
+
+    def _disco():
+        """Espacio libre. El disco lleno rompe de formas que NO parecen de disco: publicar da
+        «HTTP Error 500», las descargas se cortan (ERR_QUIC_PROTOCOL_ERROR) y generar la tizada
+        tira **std::bad_alloc** — Windows no puede agrandar el archivo de paginación y las
+        reservas de memoria fallan. Ya pasó: 0 bytes libres de 39,9 GB en el servidor, y los tres
+        síntomas se veían como tres problemas distintos. Por eso ahora se mira acá."""
+        import shutil as _sh
+        libre = _sh.disk_usage(AQUI).free / 2**30
+        if libre < 1.0:
+            return False, f"quedan {libre:.2f} GB libres — CRÍTICO: publicar y generar van a fallar"
+        if libre < 3.0:
+            return False, f"quedan {libre:.1f} GB libres — poco; conviene liberar (LIBERAR-ESPACIO.bat)"
+        return True, f"{libre:.1f} GB libres"
+    _chk("disco", _disco, critico=False)
+
+    def _dist_al_dia():
+        """¿La pantalla que se está sirviendo tiene los cambios del código?
+
+        El frontend se sirve desde `dist`, o sea COMPILADO: editar `frontend/src` no cambia nada
+        hasta que se corre `npm run build`. Sin este aviso el síntoma es indistinguible de un bug —
+        se toca el código, se prueba, «no anda», y se busca la falla donde no está. Ya pasó: la
+        planilla tenía el arreglo del botón de un clic en `src` y el usuario seguía teniendo que
+        hacer doble clic, porque el `dist` era viejo (se confirmó buscando el texto del botón
+        adentro del bundle: no estaba). No es crítico: la app anda, pero anda con código viejo."""
+        src = os.path.join(AQUI, "frontend", "src")
+        dist = os.path.join(AQUI, "frontend", "dist")
+        if not os.path.isdir(src) or not os.path.isdir(dist):
+            return True, "sin fuentes (paquete publicado)"
+        def _ultimo(d):
+            t = 0
+            for raiz, _, archivos in os.walk(d):
+                for a in archivos:
+                    try:
+                        t = max(t, os.path.getmtime(os.path.join(raiz, a)))
+                    except OSError:
+                        pass
+            return t
+        t_src, t_dist = _ultimo(src), _ultimo(dist)
+        if t_src <= t_dist:
+            return True, "compilado al día"
+        _min = int((t_src - t_dist) / 60)
+        return False, (f"frontend/src es {_min} min más nuevo que dist → la pantalla está "
+                       f"corriendo código VIEJO. Corré: cd frontend && npm run build")
+    _chk("frontend_compilado", _dist_al_dia, critico=False)
     v = _version()
     return jsonify({
         "ok": not fallas, "fallas": fallas, "modo": MODO,
@@ -923,6 +969,53 @@ def _cargar_catalogo():
         cat["catalogo_grupos"] = [{"nombre": "Prenda Superior", "piezas": list(base)}]
         _guardar_catalogo(cat)
 
+    # ── MIGRACIÓN: las molderías de CONFIGURACIÓN son del SISTEMA, no de quien las cargó ───────
+    # Regla del usuario (2026-07-29): lo que se hace en Configuración es del taller y lo ve todo
+    # el mundo; sólo los «Mis artículos» (`propio`) tienen dueño. Antes se sellaba `creado_por` en
+    # TODA alta, así que las molderías cargadas desde Configuración con sesión quedaron con dueño
+    # personal. Acá se las libera: el dueño pasa a `alta_por` (trazabilidad, no propiedad) y
+    # `creado_por` queda vacío.
+    # Va en la CARGA del catálogo —y no en un script aparte— justamente para que el sistema ya
+    # publicado se arregle solo al desplegar, sin entrar al servidor a correr nada. Es idempotente:
+    # después de la primera vez no encuentra ninguna y no escribe.
+    # ⚠️ CORRE UNA SOLA VEZ EN LA VIDA DEL CATÁLOGO, y queda marcado. No es «en cada actualización
+    # se comparten los moldes»: es un arreglo de los datos que dejó el modelo viejo. La marca no es
+    # decorativa — sin ella, esto sería una regla PERMANENTE («todo lo que tenga dueño y no sea
+    # propio, liberalo»), y cualquier cambio futuro que sellara `creado_por` en un molde compartido
+    # terminaría compartiendo moldes de nuevo en el próximo despliegue. Con la marca, no puede.
+    if not cat.get("migracion_dueno_config"):
+        _mig_dueno = [p for p in cat.get("productos", [])
+                      if p.get("creado_por") and not p.get("propio")]
+        for p in _mig_dueno:
+            p.setdefault("alta_por", p.get("creado_por"))
+            p["creado_por"] = None
+        if _mig_dueno:
+            print(f"[migración] {len(_mig_dueno)} moldería/s de Configuración pasan a ser del sistema "
+                  f"(las ve todo el mundo): {', '.join((p.get('nombre') or p['id']) for p in _mig_dueno)}")
+        cat["migracion_dueno_config"] = True      # se marca SIEMPRE, haya encontrado o no
+        _guardar_catalogo(cat)
+
+    # ── REPARACIÓN: «Mi artículo» SIN DUEÑO ───────────────────────────────────────────────────
+    # Estado imposible (ver `crear_producto`): se comporta como del sistema para la privacidad y
+    # como propio para TODOS en el pedido. Se arregla dejándolo coherente:
+    #   · si se sabe quién lo dio de alta (`alta_por`) → se le devuelve a esa persona;
+    #   · si no se sabe → pasa a ser del sistema, que es lo único que se puede afirmar de algo
+    #     sin dueño. Se avisa en el log: es un cambio visible y el usuario tiene que enterarse.
+    # Sólo con sistema de usuarios: sin él, `propio` sin dueño es lo NORMAL (no hay a quién sellar).
+    if _USUARIOS_ON:
+        _rotos = [p for p in cat.get("productos", []) if p.get("propio") and not p.get("creado_por")]
+        for p in _rotos:
+            if p.get("alta_por"):
+                p["creado_por"] = p["alta_por"]
+                print(f"[reparación] «{p.get('nombre')}» era un artículo sin dueño → se le devuelve "
+                      f"al usuario {p['alta_por']}")
+            else:
+                p["propio"] = False
+                print(f"[reparación] «{p.get('nombre')}» estaba marcado como artículo personal pero "
+                      f"SIN dueño y sin saber quién lo cargó → pasa a ser del sistema (lo ven todos)")
+        if _rotos:
+            _guardar_catalogo(cat)
+
     # Map existing products to the default template and set default mapeo_columnas if missing
     modificado = False
     for p in cat.get("productos", []):
@@ -1021,12 +1114,29 @@ def _uid_actual():
     return (u or {}).get("id")
 
 
+def _es_privado(prod):
+    """¿Este molde es de UNA persona (su «Mi artículo») o del CATÁLOGO (de todos)?
+
+    ⚠️ Lo decide **`propio`**, NO `creado_por`. `creado_por` es AUTORÍA: quién lo dio de alta. Toda
+    moldería del catálogo la crea alguien —y ese alguien está logueado—, así que usar `creado_por`
+    como señal de privacidad **escondía del resto del mundo los moldes que se cargan desde
+    Configuración**, que son justamente los que tienen que ver todos (lo reportó el usuario).
+    `propio` sólo lo pone «Subir mi propio molde» del pedido. Ver §10.d del mapa."""
+    p = prod or {}
+    return bool(p.get("propio")) and bool(p.get("creado_por"))
+
+
 def _puede_ver_molde(prod, u=None):
-    """¿Este usuario puede ver/tocar este molde? Sin dueño = del catálogo, lo ve cualquiera.
-    Con dueño = sólo él (o quien tenga el permiso `molde.ver_todos`, p. ej. un admin)."""
-    dueno = (prod or {}).get("creado_por")
-    if not dueno:
+    """¿Este usuario puede ver este molde? Catálogo = lo ve cualquiera. «Mi artículo» = sólo su
+    dueño (o quien tenga `molde.ver_todos`, p. ej. un admin — el permiso dice literalmente
+    «ver también los moldes propios que subió cada usuario»)."""
+    if not _es_privado(prod):
         return True
+    if not _USUARIOS_ON:
+        # Taller sin sistema de usuarios: no hay a quién ocultarle nada, y esconder un molde que
+        # NADIE puede reclamar lo dejaría inaccesible para siempre.
+        return True
+    dueno = (prod or {}).get("creado_por")
     if u is None:
         u = _usuario_actual()
     if not u:
@@ -1034,15 +1144,62 @@ def _puede_ver_molde(prod, u=None):
     return u.get("id") == dueno or "molde.ver_todos" in (u.get("permisos") or [])
 
 
-def _guard_molde(pid):
-    """Corta la request si el molde es de otro. Devuelve None si está permitido."""
+def _puede_editar_molde(prod, permiso, u=None):
+    """Ver no alcanza para ESCRIBIR. Un molde del catálogo lo ve todo el mundo (un Operario lo
+    necesita para trabajar) pero sólo lo toca quien tenga el permiso (`molde.editar` /
+    `molde.borrar`). Su propio «Mi artículo» lo configura siempre, sin permisos: para eso está.
+
+    Sin sesión (taller de un solo usuario) no hay a quién pedirle permiso → se permite, que es
+    como funcionó siempre."""
+    if not permiso:
+        return True
+    if u is None:
+        u = _usuario_actual()
+    if not u:
+        return True
+    if _es_privado(prod):
+        # UN «Mi artículo» LO TOCA SÓLO SU DUEÑO. Ni siquiera con `molde.editar`: es de esa
+        # persona, no del taller. `molde.ver_todos` da VER (soporte, auditoría), no escribir —
+        # si no, un admin podía editarle el artículo privado a otro.
+        return (prod or {}).get("creado_por") == u.get("id")
+    return permiso in (u.get("permisos") or [])
+
+
+def _guard_molde(pid, permiso=None):
+    """Corta la request si el molde no es visible para este usuario, o si lo es pero le falta el
+    permiso para tocarlo. Devuelve None si está permitido."""
     cat = _cargar_catalogo()
     prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
     if prod is None:
         return None                      # no existe: lo maneja cada endpoint como ya lo hacía
-    if not _puede_ver_molde(prod):
+    _u = _usuario_actual()
+    if not _puede_ver_molde(prod, _u):
         return jsonify({"error": "Ese molde es de otro usuario"}), 403
+    if not _puede_editar_molde(prod, permiso, _u):
+        if _es_privado(prod):
+            return jsonify({"error": "Ese artículo es de otro usuario: sólo su dueño lo puede tocar."}), 403
+        return jsonify({"error": f"Tu usuario no tiene el permiso «{permiso}». Esa moldería es del "
+                                 f"catálogo (la comparten todos) y ese permiso se da por ROL en "
+                                 f"Configuración › Usuarios y permisos."}), 403
     return None
+
+
+def _guard_id(cuerpo, permiso="molde.editar"):
+    """Guarda de DUEÑO + PERMISO para los endpoints que reciben el molde en el campo `id`.
+
+    `_pid_de_request` ignora `id` A PROPÓSITO (en varios endpoints `id` es un preset, una regla o
+    un grupo, y tomarlo como molde escribiría en el producto equivocado), así que estas rutas se
+    saltaban `_guardia_moldes` por completo: cualquiera podía borrar, renombrar o activar el molde
+    de otro usuario — y borrar hace `rmtree` de sus archivos. Por eso la guarda va acá, explícita,
+    endpoint por endpoint. Devuelve None si está permitido, o la respuesta 403 si no.
+
+    El permiso por defecto es `molde.editar` porque casi todas estas rutas ESCRIBEN; las que sólo
+    usan el molde (activar) pasan `permiso=None` y las destructivas, `molde.borrar`.
+    """
+    pid = (cuerpo or {}).get("id")
+    if not pid:
+        return None                      # sin molde: lo maneja el endpoint como ya lo hacía
+    return _guard_molde(str(pid), permiso)
 
 
 def _pid_de_request():
@@ -1160,6 +1317,11 @@ def _en_hilo(fn):
 # actualización taller→publicado (protegida por su propio token X-Token-Act, no por sesión).
 _API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/")
 
+# POSTs que reciben un molde pero NO lo modifican: rendes y generación de tizada. No pueden pedir
+# `molde.editar` — un Operario (sólo `molde.ver` + los de pedido) tiene que poder generar y ver el
+# preview del catálogo. Todo lo demás que llegue por POST/PUT/PATCH/DELETE con `pid` SÍ escribe.
+_API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_multi")
+
 # PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
 # al servidor SIN pasar por nginx (localhost:8050 o la IP, típico al abrirlo en la propia máquina),
 # el frontend —compilado con base `/Tizadapro/`— pide `/Tizadapro/api/…` y nadie saca el prefijo:
@@ -1212,7 +1374,15 @@ def _guardia_moldes():
         pid = _pid_de_request()
         if not pid:
             return None            # sin molde explícito no hay nada que proteger acá
-        return _guard_molde(pid)
+        # 3) ESCRIBIR EL CATÁLOGO PIDE PERMISO. Una moldería del catálogo la VE todo el mundo (un
+        #    Operario la necesita para trabajar), pero tocarla es otra cosa. Antes lo que hacía de
+        #    candado era el DUEÑO, y al arreglar «lo que subo desde Configuración es de todos» ese
+        #    candado desaparecía: cualquiera con sesión podría re-subir el molde o renombrarle las
+        #    piezas al catálogo compartido. Se mira el MÉTODO porque son ~30 rutas y la que se
+        #    olvide queda abierta; las de sólo lectura/generación van en la lista de excepciones.
+        _escribe = (request.method in ("POST", "PUT", "PATCH", "DELETE")
+                    and request.path not in _API_LEE_CON_PID)
+        return _guard_molde(pid, "molde.editar" if _escribe else None)
     except Exception:
         return None                # la seguridad no puede tumbar el sistema
 
@@ -1306,15 +1476,29 @@ def estado_general():
     })
 
 
+def _descartar_tmp(ruta):
+    """Borra el temporal de una subida que no llegó a buen puerto. Nunca toca el molde bueno."""
+    try:
+        if ruta and os.path.exists(ruta):
+            os.remove(ruta)
+    except Exception:
+        pass
+
+
 @app.post("/api/plantilla")
 def subir_plantilla():
     f = request.files.get("archivo")
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
     destino = _ruta_entrada("plantilla.ai", original=True)
-    # molde nuevo = se descartan las versiones del anterior (p. ej. el renombrado de variantes),
-    # o quedaría vigente una versión que ya no corresponde a este archivo
-    OA.reset_versiones(destino)
+    # ── SUBIDA ATÓMICA ───────────────────────────────────────────────────────────────────────
+    # El archivo entra a un TEMPORAL y sólo reemplaza al molde bueno si se pudo procesar.
+    # Antes se guardaba encima y recién después se procesaba: si el alta fallaba (422), el molde
+    # quedaba con el ARCHIVO NUEVO y el REGISTRO VIEJO — o sea, las piezas registradas apuntando
+    # a la geometría de otro archivo. Un molde así se ve bien y genera cualquier cosa.
+    # ⚠️ El temporal CONSERVA la extensión `.ai`: PyMuPDF deduce el tipo de documento por la
+    # extensión, y con un `.tmp` no lo abriría (y el alta fallaría por una razón inventada).
+    tmp = os.path.join(os.path.dirname(destino), "plantilla.subiendo.ai")
     nombre = (f.filename or "").lower()
     # Si YA había un molde con piezas nombradas, sacar una FOTO de su talle guía antes
     # de pisarlo: si el archivo nuevo es el mismo molde (re-subida, p. ej. reimportar el
@@ -1328,6 +1512,7 @@ def subir_plantilla():
     except Exception:
         snap_nombres = None
     dxf_resumen = None
+    _corresp_nueva = None          # correspondencia pieza↔talle del DXF (se escribe con el commit)
     if nombre.endswith(".dxf"):
         # Molde en DXF (AAMA/ASTM de Optitex, Gerber, Lectra…): se CONVIERTE a un PDF
         # con una capa por talle + los contornos de cada pieza, igual que un .ai.
@@ -1339,22 +1524,23 @@ def subir_plantilla():
         f.save(fuente)
         try:
             pdf_bytes, dxf_resumen = importar_dxf.dxf_a_pdf(fuente)
-            with open(destino, "wb") as g:
+            with open(tmp, "wb") as g:
                 g.write(pdf_bytes)
         except Exception as e:
             _tb.print_exc()
+            _descartar_tmp(tmp)
             return jsonify({"error": f"no se pudo importar el DXF: {e}"}), 422
         # Correspondencia EXACTA pieza↔talle del DXF (Piece Name + Size): la usan el
         # nido y el registro para NO adivinar el emparejado entre talles.
+        # Se GUARDA EN MEMORIA y se escribe recién con el `os.replace` de más abajo: forma parte
+        # de la misma transacción que el archivo del molde (ver «EL REEMPLAZO, AL FINAL Y ATÓMICO»).
         try:
-            _idx = dxf_resumen.pop("indices", None)
-            if _idx:
-                json.dump(_idx, open(_ruta_datos("correspondencia_piezas.json"), "w", encoding="utf-8"), ensure_ascii=False)
+            _corresp_nueva = dxf_resumen.pop("indices", None)
         except Exception:
-            pass
+            _corresp_nueva = None
     else:
         # .ai / .pdf (Illustrator, Corel, InDesign…): PyMuPDF los lee directo.
-        f.save(destino)
+        f.save(tmp)
     if dxf_resumen:
         # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
         # pone → solo genera ruido y tarda). Los talles ya vienen del DXF; las piezas se
@@ -1364,8 +1550,9 @@ def subir_plantilla():
                 "piezas_detalle": {}}
     else:
         try:
-            alta = MP.alta_plantilla(destino)
+            alta = MP.alta_plantilla(tmp)          # se valida ANTES de pisar el molde bueno
         except Exception as e:
+            _descartar_tmp(tmp)
             return jsonify({"error": f"no se pudo procesar la plantilla: {e}"}), 422
     # Si el DXF trajo NOMBRES de pieza, se aplican SOLOS (arma el registro con esos
     # nombres, emparejando por posición). SOLO para moldes chicos: con muchas piezas el
@@ -1373,11 +1560,11 @@ def subir_plantilla():
     _nombres = [n for n in (dxf_resumen.get("nombres") or []) if str(n).strip()] if dxf_resumen else []
     if _nombres and len(_nombres) <= 25:
         try:
-            det = MP.detectar_piezas(destino)
+            det = MP.detectar_piezas(tmp)
             nombres = dxf_resumen["nombres"]
             asign = [{"idx": i, "nombre": nombres[i]}
                      for i in range(min(len(det["piezas"]), len(nombres))) if str(nombres[i]).strip()]
-            manual = MP.alta_plantilla_manual(destino, asign, det["mesa"], det["talle_ref"], indices=_cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg()) if asign else None
+            manual = MP.alta_plantilla_manual(tmp, asign, det["mesa"], det["talle_ref"], indices=_corresp_nueva or _cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg()) if asign else None
             if manual and manual.get("registro"):
                 alta = manual
                 dxf_resumen["nombres_aplicados"] = sorted(manual["registro"].keys())
@@ -1391,12 +1578,36 @@ def subir_plantilla():
     nombres_conservados = None
     if snap_nombres and not alta.get("registro"):
         try:
-            alta_remap, cobertura = MP.remapear_registro(destino, snap_nombres, indices=_cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg())
+            alta_remap, cobertura = MP.remapear_registro(tmp, snap_nombres, indices=_corresp_nueva or _cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg())
             if alta_remap and alta_remap.get("registro") and cobertura >= 0.5:
                 alta = alta_remap
                 nombres_conservados = f"{len(alta['registro'])}/{len(snap_nombres['nombres'])}"
             elif alta_remap:
                 nombres_conservados = f"0/{len(snap_nombres['nombres'])} (el molde nuevo no coincide)"
+        except Exception:
+            pass
+    # ── EL REEMPLAZO, AL FINAL Y ATÓMICO ──────────────────────────────────────────────────────
+    # Todo lo de arriba se hizo sobre el temporal. Si llegamos hasta acá, el archivo sirve.
+    # ⚠️ En Windows `os.replace` falla con WinError 5 si algún proceso tiene el PDF abierto, así
+    # que primero se cierran los documentos que dejó el procesado (§10.b del mapa).
+    try:
+        MP.cerrar_abiertos()
+    except Exception:
+        pass
+    try:
+        os.replace(tmp, destino)
+    except Exception as e:
+        _descartar_tmp(tmp)
+        return jsonify({"error": f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}"}), 422
+    # Molde nuevo = se descartan las versiones del anterior (p. ej. el renombrado de variantes),
+    # o quedaría vigente una versión que ya no corresponde a este archivo. Va DESPUÉS del
+    # reemplazo: si la subida falla, el molde viejo y sus versiones quedan intactos.
+    OA.reset_versiones(destino)
+    # Correspondencia EXACTA pieza↔talle del DXF (Piece Name + Size): la usan el nido y el registro
+    # para NO adivinar el emparejado entre talles. Va acá, con el molde ya reemplazado.
+    if _corresp_nueva:
+        try:
+            json.dump(_corresp_nueva, open(_ruta_datos("correspondencia_piezas.json"), "w", encoding="utf-8"), ensure_ascii=False)
         except Exception:
             pass
     json.dump(alta["registro"], open(_ruta_datos("registro_producto.json"), "w", encoding="utf-8"), ensure_ascii=False)
@@ -1506,7 +1717,11 @@ def plantilla_deteccion():
         # Identidad ESTABLE de las piezas (id ↔ clave), para que el frontend resuelva las
         # variables por id y no por pieza_idx (que varía por talle → la pieza se caía al cambiar
         # de talle en el visor). Es talle-independiente; viene igual en cada detección.
-        res["piezas_id"] = (_cargar("piezas.json", pid) or {}).get("piezas") or []
+        # SIN las retiradas: son el historial (para no reciclar ids) y no tienen que llegar al
+        # front, que arma un `{id: clave}` recorriendo la lista — una retirada con el nombre viejo
+        # pisaba a la viva y la pieza renombrada desaparecía del visor.
+        res["piezas_id"] = [p for p in ((_cargar("piezas.json", pid) or {}).get("piezas") or [])
+                            if not p.get("retirada")]
         # ACOTAR A LA VARIABLE: si el cliente (paso Arte) pasa `?variante=v_xxx`, se devuelven SOLO
         # las piezas de esa variable (no las ~135 del molde) → la respuesta baja ~15× (el visor usa
         # ~9). El caché en disco sigue siendo full (compartido); el filtro es post-caché, sobre un
@@ -1607,12 +1822,16 @@ def _nido_clave():
     cor_path = _ruta_datos("correspondencia_piezas.json")
     emp_path = _ruta_datos("emparejado_talles.json")
     try:
-        return ["v6", pl, os.path.getmtime(pl),
+        # v7 (2026-07-29): el extractor de contornos aprendió a leer los CUADRILÁTEROS («qu»).
+        # Los nidos cacheados con v6 se armaron sin las piezas dibujadas sólo con quads (tiras
+        # finas: cuellos, tapacosturas) y su clave —mtimes de plantilla y registro— no cambió, así
+        # que no se invalidaban solos. Subir la versión es lo que los rehace.
+        return ["v7", pl, os.path.getmtime(pl),
                 os.path.getmtime(reg_path) if os.path.exists(reg_path) else 0,
                 os.path.getmtime(cor_path) if os.path.exists(cor_path) else 0,
                 os.path.getmtime(emp_path) if os.path.exists(emp_path) else 0]
     except OSError:
-        return ["v6", pl, 0, 0, 0, 0]
+        return ["v7", pl, 0, 0, 0, 0]
 
 def _nido_obtener():
     """Devuelve el nido (calculándolo si hace falta) con caché en memoria + DISCO
@@ -1647,13 +1866,37 @@ def _nido_obtener():
         pass
     return nido
 
+def _nido_con_ids(nido, pid=None):
+    """Le agrega a cada pieza del nido su **`pieza_id`** estable.
+
+    Por qué: el front tenía que cruzar el nido con las variables POR NOMBRE, usando el mapa
+    id→clave que venía en la detección. Ese mapa se queda viejo apenas se renombra una pieza (la
+    detección está cacheada y nadie la vuelve a pedir), y entonces una variable de 8 piezas
+    mostraba 3: las únicas cuyo nombre no había cambiado. Con el id adentro del nido el cruce es
+    id↔id y no hay nombre que se pueda quedar viejo. El nombre queda sólo para mostrar."""
+    if not isinstance(nido, dict) or not nido.get("piezas"):
+        return nido
+    try:
+        _pz = _cargar("piezas.json", pid or _get_active_producto_id()) or {}
+        clave2id = {p["clave"]: p["id"] for p in _pz.get("piezas", [])
+                    if p.get("clave") and p.get("id") and not p.get("retirada")}
+    except Exception:
+        return nido
+    if not clave2id:
+        return nido
+    return {**nido, "piezas": [{**p, "pieza_id": clave2id.get(p.get("nombre"))}
+                               for p in nido["piezas"]]}
+
+
 @app.get("/api/plantilla/nido")
 def plantilla_nido():
     """Geometría NESTEADA de cada pieza nombrada en TODOS los talles (para acomodar en el visor)."""
     if not os.path.exists(_ruta_entrada("plantilla.ai")):
         return jsonify({"error": "primero subí la plantilla base"}), 409
     try:
-        return jsonify(_nido_obtener())
+        # Los ids se resuelven FUERA del caché del nido: el nido es geometría (caro, se cachea por
+        # plantilla+registro) y los ids cambian por su cuenta al renombrar.
+        return jsonify(_nido_con_ids(_nido_obtener()))
     except LookupError as e:
         return jsonify({"error": str(e)}), 409
     except Exception as e:
@@ -1824,18 +2067,97 @@ def producto_preview(pid):
                                for p in res.get("piezas", []) if p.get("path_svg")]})
 
 
+def _puente_idx(reg, desde, hacia):
+    """{pieza_idx en el talle `desde`: pieza_idx en el talle `hacia`}, sacado del registro."""
+    puente = {}
+    for _por_t in (reg or {}).values():
+        _d = (_por_t or {}).get(desde) or {}
+        _h = (_por_t or {}).get(hacia) or {}
+        if _d.get("pieza_idx") is not None and _h.get("pieza_idx") is not None:
+            puente[int(_d["pieza_idx"])] = int(_h["pieza_idx"])
+    return puente
+
+
+def _asign_a_guia(reg, asign, talle_visto, guia):
+    """Traduce `[{idx,nombre}]` del talle QUE SE ESTABA MIRANDO a los índices del talle GUÍA.
+
+    Devuelve `(traducidas, sin_traducir)`. `sin_traducir` son piezas que el usuario nombró en
+    otro talle y que todavía no están en el registro: no hay puente posible, hay que emparejarlas
+    por forma (lo hace el llamador con `alta_plantilla_manual`)."""
+    if not talle_visto or not guia or talle_visto == guia:
+        return list(asign or []), []
+    puente = _puente_idx(reg, talle_visto, guia)
+    trad, sin = [], []
+    for a in (asign or []):
+        _i = puente.get(int(a["idx"]))
+        if _i is None:
+            sin.append(a)
+        else:
+            trad.append({"idx": _i, "nombre": a.get("nombre")})
+    return trad, sin
+
+
+def _merge_asignaciones(base, encima):
+    """`base` = lo YA nombrado en la guía; `encima` = lo que mandó la pantalla.
+
+    Lo que NO vino en la pantalla **no se toca**; antes se borraba, y ese era el bug: la pantalla
+    manda sólo las piezas del talle que se está mirando, así que nombrar desde un talle donde una
+    pieza no aparece la BORRABA del registro. Quitar un nombre sigue siendo posible porque el
+    front manda el idx con el nombre en blanco (eso sí pisa)."""
+    m = {int(a["idx"]): (a.get("nombre") or "") for a in (base or [])}
+    for a in (encima or []):
+        m[int(a["idx"])] = (a.get("nombre") or "")
+    return [{"idx": i, "nombre": n} for i, n in sorted(m.items()) if n.strip()]
+
+
 @app.post("/api/plantilla/etiquetas")
 def plantilla_etiquetas():
-    """Recibe los nombres puestos a mano en el talle de referencia y arma el
-    registro propagándolos a todos los talles por posición."""
+    """Recibe los nombres puestos a mano en el talle que se está mirando y arma el
+    registro propagándolos a todos los talles por posición.
+
+    ⚠️ El registro se re-arma SIEMPRE desde el talle GUÍA, con el nombrado de la guía mergeado
+    (ver `_merge_asignaciones`). Tomar el talle visto como referencia hacía dos daños: cambiaba el
+    marco en el que se resuelve el emparejado, y perdía todo nombre cuya pieza no existiera en ese
+    talle."""
     cuerpo = request.get_json(force=True)
     asign = cuerpo.get("asignaciones", [])
     mesa, talle_ref = cuerpo.get("mesa"), cuerpo.get("talle_ref")
     pl = _ruta_entrada("plantilla.ai")
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí la plantilla base"}), 409
-    alta = MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=_cargar("correspondencia_piezas.json") or None,
-                                    emparejado=_emparejado_cfg())
+    _indices = _cargar("correspondencia_piezas.json") or None
+    _emp = _emparejado_cfg()
+    _pid = _get_active_producto_id()
+    _reg = _cargar("registro_producto.json", _pid) or {}
+    _prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == _pid), None)
+    _guia = (_prod or {}).get("variante_guia")
+    if not _guia and _reg:
+        # Sin guía elegida a mano la detección la resuelve sola; hay que abrir el PDF para saberla.
+        try:
+            _guia = _guia_y_asignaciones(_pid)[3]
+        except Exception:
+            _guia = None
+    # El nombrado que YA existe en la guía, acotado a la MESA que mandó la pantalla: con otra mesa
+    # los índices no son comparables y mezclarlos escribiría piezas equivocadas.
+    _asign_base = [{"idx": int(_i["pieza_idx"]), "nombre": _nom}
+                   for _nom, _por_t in _reg.items()
+                   for _i in [(_por_t or {}).get(_guia) or {}]
+                   if _i.get("pieza_idx") is not None and _i.get("mesa") == mesa]
+    if _guia:
+        _trad, _sin = _asign_a_guia(_reg, asign, talle_ref, _guia)
+        if _sin:
+            # Piezas nombradas en otro talle que el registro todavía no conoce: no hay puente, se
+            # las empareja por forma desde el talle visto y se lee dónde caen en la guía.
+            try:
+                _n = MP.alta_plantilla_manual(pl, _sin, mesa, talle_ref, indices=_indices, emparejado=_emp)
+                for _nom, _por_t in (_n.get("registro") or {}).items():
+                    _g = (_por_t or {}).get(_guia) or {}
+                    if _g.get("pieza_idx") is not None:
+                        _trad.append({"idx": int(_g["pieza_idx"]), "nombre": _nom})
+            except Exception as e:
+                print(f"[etiquetas] no se pudieron llevar a la guía las piezas nuevas: {e}")
+        asign, talle_ref = _merge_asignaciones(_asign_base, _trad), _guia
+    alta = MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=_indices, emparejado=_emp)
     if not alta["registro"]:
         return jsonify({"error": "; ".join(alta["problemas"]) or "no se registró ninguna pieza"}), 422
     json.dump(alta["registro"], open(_ruta_datos("registro_producto.json"), "w", encoding="utf-8"), ensure_ascii=False)
@@ -1997,6 +2319,262 @@ def plantilla_emparejado_post():
             cfg["manual"] = cuerpo["manual"]
 
     return _guardar_y_repropagar(pid, cfg)
+
+
+def _prod_de(pid):
+    return next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+
+
+@app.post("/api/plantilla/pieza_archivo")
+def plantilla_pieza_archivo():
+    """Guarda el archivo de la pieza que se va a agregar (paso previo a `pieza_agregar`).
+
+    Va a un nombre fijo (`pieza_nueva.ai`) y NO toca el molde: recién `pieza_agregar` lo lee y
+    escribe la geometría. Así, si el alta falla, el molde queda exactamente como estaba."""
+    pid = _pid_de_request() or _get_active_producto_id()
+    _no = _guard_molde(pid, "molde.editar")
+    if _no: return _no
+    f = request.files.get("archivo")
+    if not f or not f.filename:
+        return jsonify({"error": "no llegó ningún archivo"}), 400
+    if not f.filename.lower().endswith((".ai", ".pdf")):
+        return jsonify({"error": "la pieza tiene que ser .ai o .pdf"}), 400
+    destino = _ruta_entrada("pieza_nueva.ai", pid, original=True)
+    f.save(destino)
+    try:
+        conts = PM.contornos_de_pdf(destino)
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer el archivo: {e}"}), 422
+    if not conts:
+        return jsonify({"error": "el archivo no tiene ningún contorno dibujado"}), 422
+    # Se avisa ACÁ si no trae todos los talles, para no dejar que marque el lugar y recién ahí fallar.
+    _n_talles = 0
+    try:
+        pl = _ruta_entrada("plantilla.ai", pid)
+        if os.path.exists(pl):
+            d = MP._abrir(pl)
+            try:
+                _n_talles = len(MP._talles_de_plantilla(d))
+            finally:
+                d.close()
+    except Exception:
+        pass
+    c = conts[0]
+    return jsonify({"ok": True, "contornos": len(conts), "talles": _n_talles,
+                    "completo": (not _n_talles) or len(conts) >= _n_talles,
+                    "w_cm": round(c["w"] / MP.CM, 1), "h_cm": round(c["h"] / MP.CM, 1)})
+
+
+def _invalidar_cache_molde(pid):
+    """Tira TODO lo derivado del molde: cambió su geometría.
+
+    Son cachés (se rehacen solas) pero ninguna se invalida por su cuenta acá: la de detección va
+    por mtime del archivo —y el archivo nuevo es OTRO, el versionado—, y la del nido por una clave
+    que mira la plantilla base. Si no se limpian, el visor sigue mostrando el molde de antes."""
+    import shutil as _sh
+    for sub in ("deteccion_cache", "piezas_cache"):
+        try:
+            _sh.rmtree(_ruta_datos(sub, pid), ignore_errors=True)
+        except Exception:
+            pass
+    try:
+        os.remove(_ruta_datos("nido_cache.json", pid))
+    except OSError:
+        pass
+    _NIDO_CACHE.clear()
+    _TOGGLES_CACHE.pop(pid, None)
+
+
+@app.post("/api/plantilla/pieza_agregar")
+def plantilla_pieza_agregar():
+    """Agrega una PIEZA NUEVA al molde, en el lugar del lienzo que se indique.
+
+    Cuerpo: `{pid?, origen: "duplicar"|"archivo", pieza_idx?, dx, dy, nombre?}`
+      · `duplicar`: copia la pieza `pieza_idx` (índice en el talle GUÍA). En cada talle se copia la
+        geometría DE ESE TALLE → la pieza nueva acompaña la progresión de talles como cualquier otra.
+      · `archivo`: usa el contorno más grande del PDF/AI subido antes a `entrada/<pid>/pieza_nueva.ai`.
+        Va IGUAL en todos los talles (un archivo suelto no tiene progresión).
+    `dx`/`dy` = desplazamiento respecto de la pieza copiada, en MILÍMETROS.
+
+    ⚠️ Entra en TODOS los talles a propósito: una pieza que exista sólo en algunos deja el registro
+    con un hueco y **la generación explota** (`registro[pieza][talle]` no tiene guarda en el motor).
+    ⚠️ Y después del alta se REMAPEA el registro: el `pieza_idx` es la posición en el orden por bbox,
+    así que insertar una pieza corre a todas las que siguen (medido: 1478 de 2760 entradas)."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = _pid_de_request() or _get_active_producto_id()
+    _no = _guard_molde(pid, "molde.editar")
+    if _no: return _no
+    # 🔴 DOS RUTAS DISTINTAS, Y NO SE PUEDEN CONFUNDIR:
+    #   · `pl_base` = `plantilla.ai` SIEMPRE (el original). Es sobre ÉL que se versiona.
+    #   · `pl`      = la versión VIGENTE. Es de ella que se lee la geometría de ahora.
+    # `_ruta_entrada` devuelve la VIGENTE, así que pasarle esa a `agregar_pieza` versionaba lo ya
+    # versionado: la 2ª pieza generaba `plantilla.v1.v1.ai` + `plantilla.v1.ver`, y como el puntero
+    # bueno (`plantilla.ver`) seguía en 1, **la 2ª pieza quedaba huérfana**: el sistema seguía
+    # sirviendo el archivo con una sola. Pasó en el molde del usuario.
+    pl_base = _ruta_entrada("plantilla.ai", pid, original=True)
+    pl = OA.ruta_vigente(pl_base)
+    if not os.path.exists(pl):
+        return jsonify({"error": "primero subí el molde"}), 409
+    reg = _cargar("registro_producto.json", pid) or {}
+    try:
+        doc = MP._abrir(pl)
+        try:
+            talles = MP._talles_de_plantilla(doc)
+            det = MP.detectar_piezas(pl, talle_ref=(_prod_de(pid) or {}).get("variante_guia") or None)
+        finally:
+            doc.close()
+        mesa, guia = det["mesa"], det["talle_ref"]
+        if not talles:
+            return jsonify({"error": "el molde no tiene talles"}), 422
+        antes = PM.detectar_por_talle(pl, mesa, talles)
+        firmas_antes = {t: PM.firma_contornos(cs) for t, cs in antes.items()}
+        # ── UNIDADES ──────────────────────────────────────────────────────────────────────────
+        # `dx`/`dy` llegan **como se ven en el visor**: milímetros, con la Y para ABAJO (es lo que
+        # devuelve un clic sobre el svg, que está dibujado a px = mm). El lienzo del PDF va en
+        # unidades crudas con la Y para ARRIBA → se escala (1 mm = CM/10 unidades) y se da vuelta
+        # la Y. Verificado sobre el molde real: `CM` = 28.3465 unidades por cm y `user_unit` = 1.
+        dx = float(cuerpo.get("dx") or 0) * (MP.CM / 10.0)
+        dy = -float(cuerpo.get("dy") or 0) * (MP.CM / 10.0)
+        origen = str(cuerpo.get("origen") or "duplicar")
+        colocaciones = {}
+        if origen == "duplicar":
+            i = cuerpo.get("pieza_idx")
+            if i is None:
+                return jsonify({"error": "falta indicar qué pieza duplicar"}), 400
+            i = int(i)
+            # el idx viene del talle GUÍA; en cada talle se toma SU pieza del mismo índice
+            for t in talles:
+                cs = antes.get(t) or []
+                if i < len(cs):
+                    colocaciones[t] = {"segmentos": cs[i]["segmentos"], "dx": dx, "dy": dy}
+            if guia not in colocaciones:
+                return jsonify({"error": "esa pieza no existe en el talle guía"}), 422
+        else:
+            _f = _ruta_entrada("pieza_nueva.ai", pid)
+            if not os.path.exists(_f):
+                return jsonify({"error": "primero subí el archivo de la pieza"}), 409
+            conts = PM.contornos_de_pdf(_f)
+            # 🔴 EL ARCHIVO TIENE QUE TRAER LA PIEZA EN TODOS LOS TALLES. Una pieza de moldería
+            # cambia de forma con el talle: meter la MISMA forma en los 20 sería una pieza que no
+            # escala, y saldría mal cortada en todos menos uno. Y si entrara sólo en algunos, el
+            # registro queda con un hueco y la generación explota. Por eso se rechaza.
+            if len(conts) < len(talles):
+                return jsonify({"error": f"el archivo trae {len(conts)} contorno/s y el molde tiene "
+                                         f"{len(talles)} {('talles' if len(talles) != 1 else 'talle')}. "
+                                         f"La pieza tiene que venir dibujada en todos los talles, una "
+                                         f"forma por talle (del más chico al más grande).",
+                                "contornos": len(conts), "talles": len(talles)}), 422
+            # De menor a mayor área ↔ los talles en el orden del molde (que va del más chico al más
+            # grande). Si sobran contornos se usan los N más grandes.
+            _orden = sorted(conts[:len(talles)], key=lambda c: c["w"] * c["h"])
+            _ref = (antes.get(guia) or [{}])[0].get("bbox_raw") if antes.get(guia) else None
+            _base0 = _orden[0]["bbox_raw"]
+            for _i, t in enumerate(talles):
+                _c = _orden[_i]
+                # cada talle conserva su posición RELATIVA dentro del archivo (si vienen anidados,
+                # la pila queda como el usuario la dibujó); el conjunto se lleva al lugar marcado.
+                _dx = dx - _base0[0] + (_ref[0] if _ref else 0)
+                _dy = dy - _base0[1] + (_ref[1] if _ref else 0)
+                colocaciones[t] = {"segmentos": _c["segmentos"], "dx": _dx, "dy": _dy}
+        # ── DÓNDE VA A CAER EN LA NUMERACIÓN (antes de escribir) ──────────────────────────────
+        # El orden de las piezas es por (x0, y0), así que la posición de la nueva se CALCULA: no
+        # hace falta volver a detectar los 20 talles después de escribir (era la mitad del tiempo).
+        _ks = {}
+        for t, col in colocaciones.items():
+            _bb = PM.bbox_desplazado(col["segmentos"], col["dx"], col["dy"], antes[t])
+            _ks[t] = PM.indice_de_insercion(antes[t], _bb)
+        destino, puestos = PM.agregar_pieza(pl_base, colocaciones, mesa=mesa)   # ← la BASE, no la vigente
+        # ── REMAPEO: sin esto el registro apunta a la pieza vecina ─────────────────────────────
+        mapas = {t: PM.mapa_insercion(len(antes[t]), _ks.get(t, len(antes[t]))) for t in talles}
+        reg2, cambios, avisos = PM.remapear_registro(reg, mapas)
+        if reg:
+            # RESPALDO ANTES DE PISAR. El archivo del molde se versiona solo, pero el registro se
+            # sobreescribe: sin esta copia, agregar una pieza era un camino de ida (no se podía
+            # volver a los `pieza_idx` de antes). Es lo que hace posible «Deshacer».
+            _rp = _ruta_datos("registro_producto.json", pid)
+            try:
+                import shutil as _sh
+                _sh.copy(_rp, _rp + ".antes_pieza")
+            except Exception as e:
+                print(f"[pieza_agregar] no se pudo respaldar el registro: {e}")
+            json.dump(reg2, open(_rp, "w", encoding="utf-8"), ensure_ascii=False)
+            try:
+                _regenerar_piezas_index(pid, reg=reg2)
+            except Exception as e:
+                print(f"[pieza_agregar] no se pudo refrescar piezas.json: {e}")
+        _invalidar_cache_molde(pid)
+        _nueva_idx = {t: [j for j in range(len(despues[t])) if j not in set(mapas[t].values())]
+                      for t in talles}
+        return jsonify({"ok": True, "talles": len(puestos), "version": os.path.basename(destino),
+                        "piezas_remapeadas": cambios, "avisos": avisos[:10],
+                        "pieza_idx_nueva": (_nueva_idx.get(guia) or [None])[0],
+                        "sin_nombre": True})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"no se pudo agregar la pieza: {e}"}), 422
+
+
+@app.post("/api/plantilla/pieza_deshacer")
+def plantilla_pieza_deshacer():
+    """Saca la ÚLTIMA pieza agregada: vuelve el molde a su versión anterior y el registro con él.
+
+    El archivo se revierte moviendo el puntero de versión (el original nunca se tocó). El registro
+    se restaura del respaldo `.antes_pieza`; si ese respaldo no está —altas hechas antes de que
+    existiera— se **reconstruye** el mapa inverso comparando las dos versiones del molde, que es
+    determinista: la pieza que sobra en la nueva dice en qué posición se insertó, y todo lo que va
+    de ahí en adelante vuelve un lugar atrás."""
+    pid = _pid_de_request() or _get_active_producto_id()
+    _no = _guard_molde(pid, "molde.editar")
+    if _no: return _no
+    pl = _ruta_entrada("plantilla.ai", pid, original=True)
+    n = OA._ver_actual(pl)
+    if n <= 0:
+        return jsonify({"error": "el molde no tiene ninguna pieza agregada para sacar"}), 409
+    try:
+        vig = OA.ruta_vigente(pl)
+        prev = OA._ver_path(pl, n - 1) if n > 1 else pl
+        if not os.path.exists(prev):
+            return jsonify({"error": "no está la versión anterior del molde"}), 409
+        _rp = _ruta_datos("registro_producto.json", pid)
+        _bak = _rp + ".antes_pieza"
+        if os.path.exists(_bak):
+            import shutil as _sh
+            _sh.copy(_bak, _rp)
+            os.remove(_bak)
+        else:
+            # Sin respaldo: se reconstruye el inverso comparando las dos versiones.
+            d = MP._abrir(prev)
+            try:
+                talles = MP._talles_de_plantilla(d)
+                mesa = MP.detectar_piezas(prev, talle_ref=(_prod_de(pid) or {}).get("variante_guia") or None)["mesa"]
+            finally:
+                d.close()
+            a = PM.detectar_por_talle(prev, mesa, talles)
+            b = PM.detectar_por_talle(vig, mesa, talles)
+            inv = {}
+            for t in talles:
+                fa = set(PM.firma_contornos(a[t]))
+                k = next((i for i, c in enumerate(b[t])
+                          if tuple(round(float(v), 1) for v in c["bbox_raw"]) not in fa), len(a[t]))
+                # inverso de `mapa_insercion`: lo que estaba después de k vuelve un lugar atrás
+                inv[t] = {j: (j if j < k else j - 1) for j in range(len(b[t])) if j != k}
+            reg = _cargar("registro_producto.json", pid) or {}
+            reg2, _c, _av = PM.remapear_registro(reg, inv)
+            json.dump(reg2, open(_rp, "w", encoding="utf-8"), ensure_ascii=False)
+        OA.fijar_version(pl, n - 1)
+        try:
+            os.remove(vig)
+        except OSError:
+            pass
+        try:
+            _regenerar_piezas_index(pid)
+        except Exception as e:
+            print(f"[pieza_deshacer] no se pudo refrescar piezas.json: {e}")
+        _invalidar_cache_molde(pid)
+        return jsonify({"ok": True, "version": n - 1})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"no se pudo deshacer: {e}"}), 422
 
 
 @app.post("/api/plantilla/grupo_pieza")
@@ -2289,6 +2867,142 @@ def _piezas_de_variable(prod, vcl, reg=None):
         nombres = [_idx2nom[int(x["pieza_idx"])] for x in (v.get("valores") or [])
                    if x.get("pieza_idx") is not None and int(x["pieza_idx"]) in _idx2nom]
     return nombres or None
+
+
+def _toggles_de_template(cols_template, cat):
+    """Los TOGGLES DE PIEZA de una planilla: `[{col, clave, opciones}]`.
+
+    Un toggle es una columna con comportamiento `manga` (el rol se generalizó: puede ser sisa,
+    capucha…). Aporta una palabra CLAVE y sus OPCIONES; el valor de la fila dice cuál se eligió.
+    La regla se busca por `reglaId` **y, si la columna no lo tiene, por COMPORTAMIENTO** — igual que
+    `_reglaDeCol` en el front. Buscándola sólo por id, una columna sin `reglaId` (así está la de
+    «Manga» en los datos reales) caía al literal "Corta, Larga" e ignoraba las opciones que el
+    usuario configuró: la pantalla mostraba unas y el motor usaba otras."""
+    _by_id = {r.get("id"): r for r in cat.get("reglas_planilla", [])}
+    _por_comp = {}
+    for _r in cat.get("reglas_planilla", []):
+        _por_comp.setdefault(_r.get("comportamiento"), _r)
+    out = []
+    for c in (cols_template or []):
+        if c.get("role") != "manga":
+            continue
+        regla = _by_id.get(c.get("reglaId")) or _por_comp.get(c.get("role")) or {}
+        clave = c.get("clave") or regla.get("clave") or regla.get("nombre") or c.get("label") or "manga"
+        ops_str = c.get("opciones") or regla.get("opciones") or "Corta, Larga"
+        out.append({"col": c, "clave": str(clave).strip(),
+                    "opciones": [o.strip() for o in str(ops_str).split(",") if o.strip()]})
+    return out
+
+
+def _cols_template_de(prod, cat):
+    _t = next((t for t in cat.get("plantillas_planillas", [])
+               if t.get("id") == (prod or {}).get("planilla_template_id")), None)
+    return (_t or {}).get("columnas", [])
+
+
+def _toggles_disponibles(prod, cat, reg=None):
+    """Qué opciones de cada toggle SOPORTA de verdad este molde, en total y por variable.
+
+    `{clave_toggle: {"opciones": [...], "*": {op: n}, "<v_xxx>": {op: n}}}` — `n` = piezas que
+    mencionan esa opción; la clave `__clave__` cuenta las que mencionan la palabra del toggle.
+
+    Por qué existe: el motor arma la prenda por el NOMBRE de las piezas. Si se elige «Larga» y las
+    piezas del molde dicen «Manga Corta …», el filtro las saca a TODAS y la prenda sale **sin
+    mangas, en silencio**; y si dicen «Manga Derecha» a secas, elegir Corta o Larga da exactamente
+    lo mismo. Con esto la pantalla puede no ofrecer lo que el molde no tiene, y `generar_multi`
+    puede frenar antes de fabricar una tizada mal."""
+    toggles = _toggles_de_template(_cols_template_de(prod, cat), cat)
+    if not toggles:
+        return {}
+    reg = reg if reg is not None else (_cargar("registro_producto.json", (prod or {}).get("id")) or {})
+    todas = list(reg.keys())
+    por_var = {}
+    for v in ((prod or {}).get("variantes") or []):
+        _cl = v.get("clave")
+        if _cl:
+            por_var[_cl] = _piezas_de_variable(prod, _cl, reg) or []
+    out = {}
+    for tg in toggles:
+        d = {"opciones": tg["opciones"], "col": (tg.get("col") or {}).get("id"),
+             "*": MP.opciones_soportadas(todas, tg["clave"], tg["opciones"])}
+        for _cl, _nombres in por_var.items():
+            d[_cl] = MP.opciones_soportadas(_nombres, tg["clave"], tg["opciones"])
+        # La clave se guarda en MINÚSCULA: es la palabra que se busca en el nombre de la pieza y
+        # ahí ya se compara sin mayúsculas — que el índice dependa de cómo se escribió la regla
+        # («Manga» vs «manga») es una fuente de bugs silenciosos para quien lo consuma.
+        out[str(tg["clave"]).strip().lower()] = d
+    return out
+
+
+def _toggle_no_distingue(sop):
+    """Hay piezas del toggle pero NINGUNA menciona ninguna opción (ej. «Manga Derecha» a secas).
+
+    Elegir Corta o Larga da EXACTAMENTE la misma tizada: la columna no aplica a este molde. No es
+    un error de producción —lo que sale está bien— así que **no traba**: se avisa, y el front no
+    ofrece opciones que no significan nada. Trabar acá dejaría al usuario sin poder generar nunca
+    con ese molde (pasó al escribir esto: la traba se comía las 5 filas del pedido)."""
+    if not sop or not sop.get("__clave__"):
+        return False
+    return all(int(v) == 0 for k, v in sop.items() if k != "__clave__")
+
+
+def _opcion_sin_piezas(sop, opcion):
+    """¿Esta opción deja a la prenda SIN esa parte? `sop` = un `opciones_soportadas`.
+
+    Sólo es verdad cuando el molde **sí distingue** las opciones y la elegida no tiene ninguna
+    pieza: ahí el motor saca todas las piezas del toggle y la prenda sale sin mangas (o sin lo que
+    sea) **en silencio**. Eso SÍ traba.
+
+    Los otros dos casos no son un error de producción y devuelven False: que el toggle no toque
+    ninguna pieza (`__clave__ == 0` — esa variable no lleva esa parte, ej. una musculosa) y que
+    ninguna opción se distinga (ver `_toggle_no_distingue`)."""
+    if not sop or not sop.get("__clave__") or _toggle_no_distingue(sop):
+        return False
+    return int(sop.get(str(opcion or "").strip().lower(), 0)) == 0
+
+
+def _validar_pedido(pid, nombre_molde, prod, cat, translated, asig, reg):
+    """Frena el pedido ANTES de generar. Devuelve `(mensaje, [detalle…])` o None.
+
+    `asig` puede ser el mapa pieza→tela, o una FUNCIÓN `dslug → mapa`: la tela se elige por
+    DISEÑO, así que cada fila se valida con la de SU diseño. Con un mapa suelto (o sin filas con
+    diseño) se comporta como antes.
+
+    Los dos errores que corta salen bien impresos y parecen correctos — por eso hay que avisar
+    antes y decir en qué FILA está el problema:
+
+    1. **Una opción de toggle que el molde no tiene.** Elegir «Larga» cuando las piezas dicen
+       «Manga Corta …» las saca a TODAS: la prenda sale **sin mangas**. Y si las piezas dicen
+       «Manga Derecha» a secas, elegir Corta o Larga da lo mismo: la columna miente.
+    2. **Una pieza sin tela.** El motor la mandaba a una tela inventada, «Principal», con el ancho
+       por defecto (180 cm) en vez del de la tela real → aparecía una hoja fantasma de unos pocos
+       centímetros que no corresponde a ninguna tela del registro.
+    """
+    _sop = _toggles_disponibles(prod, cat, reg)
+    _malas, _sin_tela = [], set()
+    for _i, pr in enumerate(translated, start=1):
+        _vcl = pr.get("variante_clave")
+        for tg in (pr.get("toggles") or []):
+            _d = _sop.get(str(tg.get("clave") or "").strip().lower()) or {}
+            _s = _d.get(_vcl) if (_vcl and _vcl in _d) else _d.get("*")
+            if _opcion_sin_piezas(_s, tg.get("opcion")):
+                _otras = [o for o in (_d.get("opciones") or []) if not _opcion_sin_piezas(_s, o)]
+                _malas.append(f"Fila {_i}: el molde «{nombre_molde}» no tiene piezas de "
+                              f"{tg.get('clave')} {tg.get('opcion')}"
+                              + (f" (sí tiene: {', '.join(_otras)})" if _otras else
+                                 f" — ninguna de sus piezas de {tg.get('clave')} distingue esa opción"))
+        _a = asig(pr.get("_diseno") or "principal") if callable(asig) else asig
+        if _a:
+            for _p in (pr.get("variante_piezas") or []):
+                if not _a.get(str(_p)):
+                    _sin_tela.add(str(_p))
+    if _malas:
+        return ("Hay filas que piden algo que este molde no tiene. Corregilas y volvé a enviar.",
+                sorted(set(_malas))[:20])
+    if _sin_tela:
+        return (f"Hay {len(_sin_tela)} pieza/s sin tela asignada. Asignales una en el paso Arte "
+                f"(si no, no se sabe en qué tela se cortan).", sorted(_sin_tela)[:20])
+    return None
 
 
 def _alcance_variables(prod, reg):
@@ -4247,6 +4961,8 @@ def set_telas_asignadas():
     Cuerpo nuevo: {id, todas:[…], por_pieza:{pieza:[…]}}. Cuerpo viejo: {id, telas:[…]} (= `todas`)."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if not prod:
@@ -4349,16 +5065,7 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None):
     # TOGGLES DE PIEZA (generaliza la manga): TODAS las columnas con comportamiento
     # "manga" (role="manga"). Cada una aporta una palabra CLAVE (ej. 'manga', 'sisa') y
     # sus OPCIONES; el valor de la fila dice qué opción se eligió. Puede haber varias.
-    reglas_by_id = {r.get("id"): r for r in cat.get("reglas_planilla", [])}
-    def _toggle_info(c):
-        if c.get("role") != "manga":
-            return None
-        regla = reglas_by_id.get(c.get("reglaId")) or {}
-        clave = c.get("clave") or regla.get("clave") or regla.get("nombre") or c.get("label") or "manga"
-        ops_str = c.get("opciones") or regla.get("opciones") or "Corta, Larga"
-        opciones = [o.strip() for o in str(ops_str).split(",") if o.strip()]
-        return {"col": c, "clave": str(clave).strip(), "opciones": opciones}
-    toggle_cols = [t for t in (_toggle_info(c) for c in cols_template) if t]
+    toggle_cols = _toggles_de_template(cols_template, cat)
     # Columna que elige el DISEÑO de cada fila (comportamiento "diseno"). Si no
     # existe, todas las filas van al diseño "principal" (el arte base de hoy).
     diseno_col = next((c for c in cols_template if c.get("role") == "diseno"), None)
@@ -4645,6 +5352,14 @@ def generar_multi():
         return jsonify({"error": "el pedido no tiene prendas"}), 400
     if not pids:
         return jsonify({"error": "no hay moldes elegidos"}), 400
+    # GUARDA DE DUEÑO, MOLDE POR MOLDE. Los pids llegan en una LISTA (`molds`), que
+    # `_pid_de_request` no mira (sólo `pid`/`producto_id`/la ruta) → esta ruta no pasaba por
+    # ninguna guarda y generaba —y devolvía— la tizada de moldes ajenos, con su registro y su
+    # arte. No es sólo escritura: es fuga de datos.
+    for _p in pids:
+        _no = _guard_molde(str(_p))
+        if _no:
+            return _no
     cat = _cargar_catalogo()
     grupos_cfg = cat.get("grupos_tizada", [])
     def _grupo_de(_pid):
@@ -4665,27 +5380,49 @@ def generar_multi():
         #   tela_base:   {pid: tela_nombre}
         #   asignaciones:{pid: {pieza_nombre: tela_nombre}}
         _base = (cuerpo.get("tela_base") or {}).get(pid)
-        _ovr = (cuerpo.get("asignaciones") or {}).get(pid) or {}
-        if _base or _ovr:
-            asig = {}
+        _ovr_all = (cuerpo.get("asignaciones") or {}).get(pid) or {}
+        # ── LA TELA ES POR DISEÑO ─────────────────────────────────────────────────────────────
+        # `asignaciones[pid]` ahora es `{slug_diseño: {pieza: tela}}`. Dos diseños que usan el
+        # MISMO molde pueden ir en telas distintas: antes había una sola asignación por molde, así
+        # que cambiarla en un diseño se la cambiaba al otro y los dos salían cortados igual.
+        # COMPAT: el formato viejo era plano (`{pieza: tela}`) — se reconoce porque sus valores son
+        # textos y no diccionarios, y se aplica a todos los diseños como antes.
+        _por_dis = bool(_ovr_all) and all(isinstance(v, dict) for v in _ovr_all.values())
+        _asig_cfg = asig                                  # la del molde (config), como base
+        _gen = lambda s: re.sub(r"\s+\d+\s*$", "", str(s)).strip().lower()
+
+        def _asig_de(dslug):
+            """Asignación pieza→tela para UN diseño de este molde."""
+            _ovr = (_ovr_all.get(dslug) or {}) if _por_dis else _ovr_all
+            if not (_base or _ovr):
+                return _asig_cfg
+            _a = {}
             if _base:
                 for _p in reg.keys():
-                    asig[str(_p)] = str(_base)
+                    _a[str(_p)] = str(_base)
             # Los overrides vienen por nombre GENÉRICO ("Cuello") → se aplican a TODAS las piezas
             # de ese genérico ("Cuello 25", "Cuello 12", …).
-            _gen = lambda s: re.sub(r"\s+\d+\s*$", "", str(s)).strip().lower()
             for _p, _t in (_ovr.items() if isinstance(_ovr, dict) else []):
                 if not _t:
                     continue
                 _pg = _gen(_p)
                 _match = [full for full in reg if _gen(full) == _pg]
                 for full in (_match or [_p]):
-                    asig[str(full)] = str(_t)
+                    _a[str(full)] = str(_t)
+            return _a
+        # La del diseño que se editó en el Arte: sirve de referencia para la ficha técnica.
+        asig = _asig_de(_slugify_diseno(default_diseno))
         gconf = _grupo_de(pid)
         # Filas traducidas (cada una con su _diseno). Se separan por diseño: cada
         # subgrupo se genera con el ARTE de ese diseño (carpeta del molde para
         # 'principal', o disenos/<slug>/ para los demás).
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg)
+        # ── TRABA ANTES DE FABRICAR ──────────────────────────────────────────────────────────
+        # Una tizada mal sale igual de bien impresa que una bien: los dos errores de acá abajo NO
+        # fallan, producen algo que PARECE correcto. Por eso se frena antes y se dice qué fila.
+        _err = _validar_pedido(pid, nombre, prod, cat, translated, _asig_de, reg)
+        if _err:
+            return jsonify({"error": _err[0], "detalle": _err[1]}), 422
         # La VARIABLE que usa el pedido para este molde (la 1ª fila que la trae): es LO MISMO que
         # arma la tizada → la ficha usa esa variable + su diseño para el molde guía.
         _vf = next((t for t in translated if t.get("variante_clave")), None)
@@ -4775,7 +5512,7 @@ def generar_multi():
                 "plantilla": _ruta_entrada("plantilla.ai", pid),
                 "arte": _ruta_entrada("arte.ai", pid, sub=sub),
                 "registro": reg, "pers": pers, "prendas": subset,
-                "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": asig,
+                "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(dslug),
                 "borde_corte": (prod or {}).get("borde_corte"),
                 "etiqueta": (prod or {}).get("etiqueta"),
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
@@ -5044,6 +5781,62 @@ def descargar_zip():
 
 
 # ════════════════ PRODUCT CATALOG ENDPOINTS (CRM) ════════════════
+_PZ_COUNT = {}   # ruta -> (mtime, cantidad)
+
+
+_TOGGLES_CACHE = {}
+
+
+def _toggles_disponibles_cached(prod, cat):
+    """`_toggles_disponibles` cacheado por mtime del registro + firma de la config que lo afecta.
+
+    `GET /api/productos` es el endpoint más caliente de la app; esto abre el registro, `piezas.json`
+    y recorre los nombres de ~135 piezas por variable. La firma incluye la plantilla y las variables
+    porque cambiarlas cambia el resultado sin tocar el registro."""
+    pid = (prod or {}).get("id")
+    if not pid:
+        return {}
+    try:
+        mt = os.path.getmtime(_ruta_datos("registro_producto.json", pid))
+    except OSError:
+        return {}
+    firma = (mt, prod.get("planilla_template_id"),
+             len(prod.get("variantes") or []),
+             tuple(sorted((v.get("clave") or "") for v in (prod.get("variantes") or []))),
+             len(cat.get("reglas_planilla") or []))
+    hit = _TOGGLES_CACHE.get(pid)
+    if hit and hit[0] == firma:
+        return hit[1]
+    try:
+        val = _toggles_disponibles(prod, cat)
+    except Exception as e:
+        print(f"[toggles] no se pudo calcular para {pid}: {e}")
+        val = {}
+    _TOGGLES_CACHE[pid] = (firma, val)
+    return val
+
+
+def _contar_piezas_registro(reg_path):
+    """Cuántas piezas tiene registradas un molde, CACHEADO por mtime.
+
+    `GET /api/productos` es el endpoint más caliente de la app (el front lo llama en ~28 lugares)
+    y abrir + parsear el registro de cada molde en cada llamada es caro: son ~135 piezas por
+    molde. El registro cambia poco, así que alcanza con mirar la fecha del archivo."""
+    try:
+        mt = os.path.getmtime(reg_path)
+    except OSError:
+        return 0
+    hit = _PZ_COUNT.get(reg_path)
+    if hit and hit[0] == mt:
+        return hit[1]
+    try:
+        n = len(json.load(open(reg_path, encoding="utf-8")) or {})
+    except Exception:
+        n = 0
+    _PZ_COUNT[reg_path] = (mt, n)
+    return n
+
+
 @app.get("/api/productos")
 def get_productos():
     cat = _cargar_catalogo()
@@ -5057,6 +5850,12 @@ def get_productos():
         pid = p["id"]
         reg_path = os.path.join(DATOS, "productos", pid, "registro_producto.json")
         has_plantilla = os.path.exists(reg_path)
+        # CUÁNTAS PIEZAS TIENE REGISTRADAS. `has_plantilla` sólo dice que el archivo del registro
+        # existe, y el alta lo escribe SIEMPRE — aunque no haya encontrado ni una pieza. Así, un
+        # molde vacío figuraba «Molde OK» con el visor en blanco y sin ninguna explicación.
+        # ⚠️ NO se invierte `has_plantilla`: un DXF entra a propósito con el registro vacío (las
+        # piezas se nombran después) y apagarlo rompería ese flujo. Es un dato MÁS, no un cambio.
+        n_piezas = _contar_piezas_registro(reg_path) if has_plantilla else 0
         val_path = os.path.join(DATOS, "productos", pid, "validacion_arte.json")
         has_arte = False
         if os.path.exists(val_path):
@@ -5084,13 +5883,28 @@ def get_productos():
             "id": pid,
             "nombre": p["nombre"],
             "creado": p.get("creado", 0),
-            # `propio` = va a la pestaña "Mis artículos" del pedido. Normalmente sale del DUEÑO;
-            # sin sesión (modo de un solo usuario) no hay dueño que sellar, así que vale la
-            # marca que dejó el alta — si no, "Mis artículos" quedaría SIEMPRE vacío sin login.
-            "propio": (bool(p.get("creado_por")) and (not _u or p.get("creado_por") == _u.get("id")))
-                      or (not p.get("creado_por") and not _u and bool(p.get("propio"))),
-            "de_otro": bool(p.get("creado_por")) and bool(_u) and p.get("creado_por") != _u.get("id"),
+            # `propio` = va a la pestaña "Mis artículos" del pedido. Lo decide la marca **`propio`**
+            # del alta, NO el dueño: `creado_por` es autoría y lo lleva TODA moldería creada con
+            # sesión, incluidas las del catálogo — mirarlo a él mandaba a "Mis artículos" (y le
+            # escondía al resto) los moldes cargados desde Configuración, que son de todos.
+            "propio": bool(p.get("propio")) and (not _u or not p.get("creado_por")
+                                                 or p.get("creado_por") == _u.get("id")),
+            # Un molde de OTRO que igual se ve: sólo pasa con el permiso `molde.ver_todos`.
+            "de_otro": _es_privado(p) and bool(_u) and p.get("creado_por") != _u.get("id"),
+            # 🔴 «ES DE ALGUIEN» — NO depende de quién mira. `propio` y `de_otro` sí (uno es «es
+            # MÍO» y el otro «es de OTRO»), así que ninguno de los dos sirve para preguntar «¿esto
+            # es un artículo personal?». Sin este campo, el artículo privado de admin le llegaba a
+            # otro admin con `propio: false` y se le colaba en Configuración como si fuera del
+            # catálogo compartido. Para «¿va en el espacio del taller?» se usa ESTE.
+            "personal": _es_privado(p),
             "plantilla": has_plantilla,
+            "piezas_registradas": n_piezas,
+            # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla
+            # puede ofrecer «Deshacer»: sin el dato, agregar una pieza parecía un camino de ida.
+            "piezas_agregadas": OA._ver_actual(os.path.join(ENTRADA, pid, "plantilla.ai")),
+            # Qué opciones de cada toggle (manga/sisa/…) tiene REALMENTE este molde, y por variable:
+            # la planilla no puede ofrecer «Larga» si ninguna pieza dice «larga» (ver §9 del mapa).
+            "toggles_piezas": _toggles_disponibles_cached(p, cat),
             "arte": has_arte,
             "planilla_template_id": tid or "plan_default",
             "nesting_preset_id": p.get("nesting_preset_id") or "nesting_default",
@@ -5138,6 +5952,55 @@ def get_productos():
     })
 
 
+@app.get("/api/productos/diagnostico")
+def productos_diagnostico():
+    """Por qué CADA moldería se ve o no se ve, para el usuario que está logueado AHORA.
+
+    Existe porque «no me aparece» no se puede diagnosticar a ciegas: el sistema publicado corre en
+    otra máquina y con otros usuarios. Se abre en el navegador con la sesión de la persona que
+    tiene el problema y dice, molde por molde, qué guarda lo está tapando. Es de SÓLO LECTURA."""
+    u = _usuario_actual()
+    cat = _cargar_catalogo()
+    out = []
+    for p in cat.get("productos", []):
+        _ver = _puede_ver_molde(p, u)
+        _priv = _es_privado(p)
+        _prop = bool(p.get("propio")) and (not u or not p.get("creado_por")
+                                           or p.get("creado_por") == u.get("id"))
+        _deotro = _priv and bool(u) and p.get("creado_por") != u.get("id")
+        if not _ver:
+            motivo = ("Es el «Mi artículo» de otro usuario y te falta el permiso «molde.ver_todos»."
+                      if _priv else "No deberías ver esto: revisar `_puede_ver_molde`.")
+        elif _priv:
+            motivo = ("Es TU «Mi artículo»: va en Pedido → Mis artículos, NO en Configuración."
+                      if _prop else
+                      "Es el «Mi artículo» de OTRO: lo ves por «molde.ver_todos», pero no va ni en "
+                      "Configuración ni en tu catálogo.")
+        else:
+            motivo = "Del sistema: se ve en Configuración y su variable en el catálogo del pedido."
+        out.append({
+            "id": p.get("id"), "nombre": p.get("nombre"),
+            "creado_por": p.get("creado_por"), "alta_por": p.get("alta_por"),
+            "propio_guardado": p.get("propio"),
+            "personal": _priv, "propio": _prop, "de_otro": _deotro,
+            "lo_ves": _ver,
+            "aparece_en_configuracion": _ver and not _priv,
+            "aparece_en_mis_articulos": _ver and _prop,
+            "variables_con_piezas": sum(1 for v in (p.get("variantes") or [])
+                                        if any(x.get("pieza_idx") is not None for x in (v.get("valores") or []))),
+            "motivo": motivo,
+        })
+    return jsonify({
+        "usuario": ({"id": u.get("id"), "usuario": u.get("usuario"), "roles": u.get("roles"),
+                     "permisos": sorted(u.get("permisos") or [])} if u else None),
+        "usuarios_activados": _USUARIOS_ON,
+        "moldes": out,
+        "leeme": ("`aparece_en_configuracion` = lo ves en Configuración › Molderías. "
+                  "Si un molde SIN dueño (`creado_por: null`) no te aparece, el problema NO es de "
+                  "propiedad: mirá `lo_ves` y `motivo`."),
+    })
+
+
 def _activar_en_sesion(pid):
     """Deja `pid` como molde activo DE ESTA SESIÓN (el global lo escribe cada llamador)."""
     try:
@@ -5157,6 +6020,25 @@ def crear_producto():
     cat = _cargar_catalogo()
     propio = bool(cuerpo.get("propio"))
 
+    # 🔴 UN «MI ARTÍCULO» SIN DUEÑO ES UN ESTADO IMPOSIBLE — no se crea.
+    # `propio: true` + `creado_por: null` es contradictorio y se comporta pésimo: `_es_privado` da
+    # False (no cuenta como privado → se cuela en Configuración) pero `get_productos` lo marca
+    # `propio: true` para CUALQUIERA (la rama `not creado_por`) → aparece en «Mis artículos» de
+    # todos. Se llega ahí si la base parpadea justo en el alta: `_guardia_moldes` deja pasar con un
+    # usuario de mentira (`_u = True`) y después `_uid_actual()` devuelve None.
+    # Sin sistema de usuarios (taller de una persona) sí es legítimo: no hay a quién sellar.
+    if propio and _USUARIOS_ON and not _uid_actual():
+        return jsonify({"error": "Se perdió tu sesión: volvé a entrar y subilo de nuevo. "
+                                 "Un artículo tuyo necesita saber de quién es."}), 401
+
+    # Dar de alta en el CATÁLOGO (el que ven todos) pide `molde.crear`. Subir «mi propio molde»
+    # desde el pedido NO: para eso está esa pestaña, y el Operario justamente no tiene ese permiso.
+    if not propio:
+        _u = _usuario_actual()
+        if _u and "molde.crear" not in (_u.get("permisos") or []):
+            return jsonify({"error": "No tenés permiso para crear molderías del catálogo "
+                                     "(molde.crear)."}), 403
+
     # IDEMPOTENTE para "Mis artículos": subir DE NUEVO el mismo molde (mismo dueño, mismo nombre)
     # RE-USA el artículo que ya existe en vez de crear otro. La guarda equivalente vivía sólo en el
     # front y se caía sola: si el catálogo del navegador se había pedido sin sesión, la lista venía
@@ -5174,6 +6056,25 @@ def crear_producto():
             _activar_en_sesion(ya["id"])
             return jsonify({"id": ya["id"], "nombre": ya["nombre"], "reusado": True})
 
+    # NOMBRE ÚNICO, **EN EL ESPACIO QUE CORRESPONDA**. Dos molderías con el mismo nombre quedan
+    # como dos tarjetas idénticas y no hay forma de saber en cuál estabas trabajando (ya pasó:
+    # cuatro «Molde short»). Pero el espacio no es el mismo para las dos clases de molde:
+    #   · «Mi artículo» → único **por dueño** (dos usuarios pueden tener cada uno su «Camiseta»).
+    #   · Catálogo      → único **entre todos**, sin mirar quién lo creó: lo comparten todos, y si
+    #     la unicidad fuera por dueño dos personas podrían dejar dos «Camiseta» en la misma grilla.
+    _dueno_nuevo = _uid_actual()
+    _mismo_nombre = lambda p: (p.get("nombre") or "").strip().lower() == nombre.lower()
+    if propio:
+        _choque = next((p for p in cat["productos"] if _mismo_nombre(p)
+                        and _es_privado(p) and p.get("creado_por") == _dueno_nuevo), None)
+    else:
+        _choque = next((p for p in cat["productos"] if _mismo_nombre(p)
+                        and not _es_privado(p)), None)
+    if _choque:
+        _mio = " tenés" if (propio and _dueno_nuevo) else " existe"
+        return jsonify({"error": f"Ya{_mio} una moldería que se llama «{nombre}». "
+                                 f"Ponele otro nombre o entrá a la que ya existe."}), 409
+
     pid = "prod_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
 
     os.makedirs(os.path.join(DATOS, "productos", pid), exist_ok=True)
@@ -5186,9 +6087,16 @@ def crear_producto():
         "id": pid,
         "nombre": nombre,
         "creado": time.time(),
-        # DUEÑO: los moldes que sube un usuario desde el pedido son suyos y sólo los ve él.
-        # Los del catálogo (creados sin sesión) quedan sin dueño = visibles para todos.
-        "creado_por": _uid_actual(),
+        # ── DE QUIÉN ES ESTE MOLDE (regla del usuario, 2026-07-29) ────────────────────────────
+        # · Lo que se hace en **CONFIGURACIÓN** es del **SISTEMA**: no tiene dueño personal
+        #   (`creado_por = None`) y lo ve y usa todo el mundo. Aunque lo haya cargado un usuario
+        #   con su sesión, no es suyo: es del taller.
+        # · Lo que se hace en **PEDIDO → «Mis artículos»** (`propio: true`) es de **quien tiene la
+        #   sesión iniciada**, y no lo ve nadie más.
+        # `alta_por` guarda igual QUIÉN lo dio de alta: es trazabilidad, no propiedad — nunca se
+        # usa para decidir quién ve qué (para eso está `_es_privado`).
+        "creado_por": (_uid_actual() if propio else None),
+        "alta_por": _uid_actual(),
         "propio": propio,
         "planilla_template_id": "plan_default",
         "mapeo_columnas": {
@@ -5213,6 +6121,10 @@ def crear_producto():
 def activar_producto():
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    # Activar NO es editar: un Operario (que sólo tiene `molde.ver`) necesita poder elegir un molde
+    # del catálogo para trabajar. Alcanza con que lo pueda VER.
+    _no = _guard_id(cuerpo, permiso=None)
+    if _no: return _no          # molde de otro usuario
     cat = _cargar_catalogo()
     exists = any(p["id"] == pid for p in cat["productos"])
     if not exists:
@@ -5245,6 +6157,9 @@ def _limpiar_activo_si_borrado(cat, pid):
 def eliminar_producto():
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    # Borrar hace `rmtree` de los archivos del molde: va con su propio permiso, no con `molde.editar`.
+    _no = _guard_id(cuerpo, permiso="molde.borrar")
+    if _no: return _no          # molde de otro usuario / sin permiso
     if pid == "prod_default":
         return jsonify({"error": "No se puede eliminar el producto por defecto"}), 400
     
@@ -5277,6 +6192,8 @@ def eliminar_producto():
 def renombrar_producto():
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     nombre = cuerpo.get("nombre", "").strip()
     if not nombre:
         return jsonify({"error": "Nombre vacío"}), 400
@@ -5300,6 +6217,8 @@ def renombrar_producto():
 def config_columnas_producto():
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     columnas = cuerpo.get("columnas", [])
     
     if not any(c.get("role") == "talle" for c in columnas):
@@ -5326,6 +6245,8 @@ def config_terminologia():
     afecta las etiquetas que ve el usuario; el funcionamiento es el mismo."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     term = cuerpo.get("terminologia") or {}
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -5347,6 +6268,8 @@ def set_variante_guia():
     Al estar en el servidor, todos los usuarios ven la misma."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     variante = str(cuerpo.get("variante", "")).strip()
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -5370,6 +6293,8 @@ def set_referencia_medida():
     """Guarda la dimensión de referencia del diseño ('alto' o 'ancho') del molde."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     ref = "ancho" if str(cuerpo.get("referencia", "")).lower().startswith("anch") else "alto"
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -5395,8 +6320,37 @@ def _regenerar_piezas_index(pid, reg=None, guia=None):
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
         guia = (prod or {}).get("variante_guia")
     prev = _cargar("piezas.json", pid) or {"version": 1, "piezas": []}
-    id_por_clave = {p["clave"]: p["id"] for p in prev.get("piezas", []) if p.get("clave")}
-    usados = set(id_por_clave.values())
+    _prev_pz = prev.get("piezas", [])
+    id_por_clave = {p["clave"]: p["id"] for p in _prev_pz if p.get("clave")}
+    # ── EL ID NO PUEDE SEGUIR AL NOMBRE ────────────────────────────────────────────────────────
+    # `clave` ES el nombre de la pieza, y el sistema lo reescribe solo (el renumerado de
+    # `nombres_normalizados`). Anclado sólo a la clave, al renombrarse una pieza su id se mudaba
+    # con el nombre — o se emitía uno nuevo y las variables que apuntaban al viejo quedaban
+    # colgadas. Se agrega un ANCLA: en qué talle y con qué índice estaba la pieza la última vez.
+    # ⚠️ NO se ancla por geometría: medido sobre los moldes reales, una firma por TAMAÑO colisiona
+    #    en 94 de 137 piezas (las espejadas —manga derecha/izquierda, sisas— miden exactamente lo
+    #    mismo) y fusionaría piezas distintas, que es el peor error posible acá.
+    ancla_por_id = {p["id"]: p.get("ancla") for p in _prev_pz if p.get("ancla")}
+    # `usados` cuenta TODAS las entradas, incluidas las retiradas: un id no se recicla nunca.
+    usados = {p["id"] for p in _prev_pz if p.get("id")} | set(id_por_clave.values())
+
+    _tomados = set()
+
+    def _por_ancla(clave):
+        """Id de una pieza que se RENOMBRÓ: se la reconoce por dónde estaba (talle + índice).
+        Se traduce contra el registro actual, así que sirve aunque haya cambiado el talle guía."""
+        for _id, anc in ancla_por_id.items():
+            if not isinstance(anc, dict):
+                continue
+            _t, _i = anc.get("talle"), anc.get("idx")
+            if _t is None or _i is None:
+                continue
+            _inf = (reg.get(clave) or {}).get(_t) or {}
+            if _inf.get("pieza_idx") is not None and int(_inf["pieza_idx"]) == int(_i):
+                # sólo si ese id no lo reclamó ya otra clave de esta misma pasada
+                if _id not in _tomados:
+                    return _id
+        return None
 
     def _nuevo_id():
         n = 1
@@ -5406,26 +6360,68 @@ def _regenerar_piezas_index(pid, reg=None, guia=None):
         usados.add(_id)
         return _id
 
+    # ── DOS PASADAS, y en este orden ───────────────────────────────────────────────────────────
+    # La clave exacta es la señal MÁS FUERTE, así que se resuelve toda primero. Resolviendo de a
+    # una clave (clave→ancla→nuevo) el resultado dependía del ORDEN del registro: una pieza NUEVA
+    # que caía en la posición de otra se llevaba por ANCLA el id de una pieza que seguía viva, y
+    # después la viva volvía a recibir el mismo id por clave exacta → dos claves con el mismo
+    # pieza_id → `id2clave` se quedaba con la última y una variable resolvía la pieza equivocada.
+    _asignado = {}
+    for clave in reg.keys():
+        _id = id_por_clave.get(clave)
+        if _id and _id not in _tomados:
+            _asignado[clave] = _id
+            _tomados.add(_id)
+    for clave in reg.keys():                      # recién ahora, sobre lo que quedó libre
+        if clave in _asignado:
+            continue
+        _id = _por_ancla(clave)
+        if _id:
+            _asignado[clave] = _id
+            _tomados.add(_id)
+
     piezas, id2clave, clave2id, idx_guia2id = [], {}, {}, {}
     for clave in reg.keys():
-        _id = id_por_clave.get(clave) or _nuevo_id()
+        _id = _asignado.get(clave) or _nuevo_id()
+        _tomados.add(_id)
         m = _RE_PZ_NUM.search(clave)
         nombre = clave[:m.start()].rstrip() if m else clave
         numero = int(m.group(1)) if m else None
-        piezas.append({"id": _id, "nombre": nombre, "numero": numero, "clave": clave})
+        info = (reg[clave] or {}).get(guia)
+        # El ancla se re-escribe con la posición ACTUAL en el talle guía.
+        anc = ({"talle": guia, "idx": int(info["pieza_idx"])}
+               if isinstance(info, dict) and info.get("pieza_idx") is not None and guia else
+               ancla_por_id.get(_id))
+        piezas.append({"id": _id, "nombre": nombre, "numero": numero, "clave": clave,
+                       **({"ancla": anc} if anc else {})})
         id2clave[_id] = clave
         clave2id[clave] = _id
-        info = (reg[clave] or {}).get(guia)
         if isinstance(info, dict) and info.get("pieza_idx") is not None:
             idx_guia2id[int(info["pieza_idx"])] = _id
+    # ── APPEND-ONLY: las piezas que ya no están en el registro se MARCAN, no se borran ─────────
+    # Si se borraran, su id se perdería y al volver la pieza (un renombrado en dos pasos, o
+    # re-subir el molde) recibiría uno nuevo: las variables que la apuntaban quedarían colgadas.
+    # Las retiradas no entran en `id2clave` (nadie las resuelve) pero conservan su ancla para
+    # poder recuperarlas, y su id sigue ocupado para que nunca se recicle.
+    # 🔴 SÓLO se retira lo que de verdad SE FUE. Si el id sigue vivo, la pieza no desapareció:
+    # se RENOMBRÓ (justamente lo que el ancla permite). Retirando por CLAVE a secas quedaban dos
+    # entradas con el MISMO id —la viva con el nombre nuevo y una «retirada» con el viejo— y
+    # cualquier `{id: clave}` armado recorriendo la lista se quedaba con la última: el NOMBRE
+    # VIEJO. Con eso, las variables dejaban de matchear y **las piezas renombradas desaparecían
+    # del visor del Arte** (pasó con 24 mangas del molde real).
+    _vivas = set(clave2id.keys())
+    _ids_vivos = set(clave2id.values())
+    for p_prev in _prev_pz:
+        if p_prev.get("clave") and p_prev["clave"] not in _vivas and p_prev.get("id") not in _ids_vivos:
+            piezas.append({**p_prev, "retirada": True})
     ruta = _ruta_datos("piezas.json", pid)
     with open(ruta, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "piezas": piezas}, f, ensure_ascii=False, indent=2)
+        json.dump({"version": 2, "piezas": piezas}, f, ensure_ascii=False, indent=2)
     # A LA BASE: las piezas del molde se guardan acá mismo — este punto corre al CARGAR el molde
     # (subir_plantilla) y al re-etiquetar. Así cada pieza tiene su id en la tabla `pieza` y su
     # pertenencia al molde desde que el molde entra, sin esperar a las variables.
     try:
-        db.sync_piezas_molde(pid, piezas)
+        db.sync_piezas_molde(pid, [p for p in piezas if not p.get('retirada')])
     except Exception as e:
         print(f"[piezas] no se pudieron sincronizar a la base: {e}")
     return id2clave, clave2id, idx_guia2id
@@ -5439,6 +6435,8 @@ def set_variantes():
     (resuelto del pieza_idx@talle-guía vía piezas.json) para no depender del talle guía."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     variantes = cuerpo.get("variantes")
     if not isinstance(variantes, list):
         return jsonify({"error": "Faltan las variantes"}), 400
@@ -5446,13 +6444,45 @@ def set_variantes():
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if not prod:
         return jsonify({"error": "Producto no encontrado"}), 404
-    # Identidad estable: cada valor (pieza_idx@guía) → pieza_id.
+    # ── IDENTIDAD ESTABLE: cada valor (pieza_idx @ SU talle) → pieza_id ──────────────────────
+    # ⚠️ El `pieza_idx` que manda el front es el índice DENTRO DEL TALLE QUE SE ESTABA MIRANDO
+    # (`talle_origen`), no del talle guía. Traducirlo siempre contra la guía —que es lo que se
+    # hacía— guardaba OTRAS piezas cuando el usuario elegía mirando otro talle. Ahora cada valor
+    # se resuelve con su propio talle; sin `talle_origen` (datos viejos) se cae a la guía, que es
+    # el comportamiento anterior.
     try:
-        _, _, _idx2id = _regenerar_piezas_index(pid, guia=prod.get("variante_guia"))
+        _guia = prod.get("variante_guia")
+        _reg = _cargar("registro_producto.json", pid) or {}
+        _, _clave2id, _idx2id_guia = _regenerar_piezas_index(pid, reg=_reg, guia=_guia)
+        _id2clave_now = {v: k for k, v in _clave2id.items()}     # id → nombre de HOY (para el label)
+        _cache_talle = {}                       # talle -> {pieza_idx: pieza_id}
+
+        def _idx2id_de(talle):
+            """{pieza_idx: pieza_id} para UN talle cualquiera, sacado del registro."""
+            if talle in _cache_talle:
+                return _cache_talle[talle]
+            m = {}
+            for _clave, _por_t in _reg.items():
+                _inf = (_por_t or {}).get(talle) or {}
+                if _inf.get("pieza_idx") is not None and _clave in _clave2id:
+                    m[int(_inf["pieza_idx"])] = _clave2id[_clave]
+            _cache_talle[talle] = m
+            return m
+
         for _v in variantes:
             for _val in (_v.get("valores") or []):
-                if _val.get("pieza_idx") is not None and int(_val["pieza_idx"]) in _idx2id:
-                    _val["pieza_id"] = _idx2id[int(_val["pieza_idx"])]
+                if _val.get("pieza_idx") is not None:
+                    _t = _val.get("talle_origen")
+                    _mapa = _idx2id_de(_t) if _t else _idx2id_guia
+                    _pid_pieza = _mapa.get(int(_val["pieza_idx"]))
+                    if _pid_pieza:
+                        _val["pieza_id"] = _pid_pieza
+                # El `label` es sólo para MOSTRAR y quedaba viejo al renombrar la pieza (la variable
+                # se ata por `pieza_id`, que es lo correcto, pero la pantalla seguía diciendo el
+                # nombre anterior). Se refresca con el nombre de HOY cada vez que se guarda.
+                _cl_hoy = _id2clave_now.get(_val.get("pieza_id"))
+                if _cl_hoy:
+                    _val["label"] = _cl_hoy
     except Exception:
         pass  # si algo falla, se guarda igual con pieza_idx (fallback por talle guía)
     prod["variantes"] = variantes
@@ -5467,6 +6497,8 @@ def set_modelos():
     modelo no se puede repetir (se valida acá)."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     modelos = cuerpo.get("modelos")
     if not isinstance(modelos, list):
         return jsonify({"error": "Faltan los modelos"}), 400
@@ -5493,6 +6525,8 @@ def set_grupos():
     entre grupos."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     grupos = cuerpo.get("grupos")
     if not isinstance(grupos, list):
         return jsonify({"error": "Faltan los grupos"}), 400
@@ -5511,6 +6545,8 @@ def set_conjuntos():
     Estructura: [{id, nombre, piezas:[idx]}]. Para la generación automática de variables."""
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     conjuntos = cuerpo.get("conjuntos")
     if not isinstance(conjuntos, list):
         return jsonify({"error": "Faltan los conjuntos"}), 400
@@ -5602,6 +6638,8 @@ def eliminar_grupo_catalogo():
 def config_mapeo():
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
     tid = cuerpo.get("planilla_template_id")
     mapeo = cuerpo.get("mapeo_columnas")
     
@@ -5888,7 +6926,11 @@ def eliminar_grupo_tizada():
 @app.post("/api/productos/nesting_preset")
 def asignar_nesting_a_producto():
     cuerpo = request.get_json(force=True) or {}
+    # `producto_id` lo cubre `_pid_de_request`; el fallback a `id` NO pasaba por ninguna guarda
+    # (era una puerta trasera para escribir en el molde de otro).
     pid = cuerpo.get("producto_id") or cuerpo.get("id")
+    _no = _guard_molde(str(pid)) if pid else None
+    if _no: return _no
     nid = cuerpo.get("nesting_preset_id")
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -5904,7 +6946,9 @@ def asignar_grupo_tizada():
     """Grupo de tizada del molde: los moldes con el MISMO grupo comparten mesa de
     trabajo; grupos distintos se arman en tizadas separadas."""
     cuerpo = request.get_json(force=True) or {}
-    pid = cuerpo.get("producto_id") or cuerpo.get("id")
+    pid = cuerpo.get("producto_id") or cuerpo.get("id")   # el fallback a `id` no tenía guarda
+    _no = _guard_molde(str(pid)) if pid else None
+    if _no: return _no
     grupo = (cuerpo.get("grupo_tizada") or "General").strip() or "General"
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)

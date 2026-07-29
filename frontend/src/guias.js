@@ -1,472 +1,410 @@
 /**
- * GUIONES DE AYUDA — el CONTENIDO de los tutoriales, separado del motor (`tutor.jsx`).
+ * GUION DE AYUDA — el CONTENIDO del tutorial, separado del motor (`tutor.jsx`).
  *
- * Cada guía es una tarea real del sistema, contada paso a paso. Se escriben acá, en texto plano,
- * para poder corregir o ampliar la ayuda SIN tocar el motor.
+ * HAY UNA SOLA GUÍA, A PROPÓSITO (decisión del usuario, 2026-07-28): **armar una tizada**, que es
+ * el trabajo de todos los días. Las otras 26 guías se sacaron: sumaban pantallas de configuración
+ * que el operario no toca y hacían que la ayuda pareciera un manual en vez de un acompañamiento.
  *
- * Un paso:
+ * Los pasos están calcados del video «Como cargar un pedido.mp4» que grabó el usuario: mismo
+ * orden, mismos botones, mismas palabras que se ven en pantalla. Si el flujo del pedido cambia,
+ * ESTE archivo es lo que hay que corregir (y el video, la referencia de qué es "lo correcto").
+ *
+ * ── UN PASO ────────────────────────────────────────────────────────────────────────────────────
  *   ancla    'id' del elemento a iluminar. En el JSX se marca con `data-tour="id"`.
  *            Si el elemento no está en pantalla todavía, el motor espera a que aparezca.
  *   texto    qué tiene que hacer el usuario, en criollo y en imperativo («Tocá acá…»).
  *   accion   cómo se pasa al paso siguiente:
  *              'click'  cuando toca el elemento         (lo más común)
  *              'input'  cuando escribe algo adentro
- *              'ver'    es sólo para mirar → avanza con «Siguiente»
- *              'espera' avanza solo cuando aparece el elemento del paso siguiente
+ *              'ver'    es sólo para mirar → avanza solo a los pocos segundos
+ *              'gesto'  se trabaja EN EL VISOR (elegir piezas, arrastrar): NO avanza por tiempo,
+ *                       avanza cuando `hecho` dice que el gesto ocurrió de verdad
  *   ir       (opcional) a qué pantalla hay que llevarlo antes del paso: {tab, sub, paso, ajuste}
  *   nota     (opcional) aclaración corta que va abajo del texto, en gris.
+ *   tambien  (opcional) otras anclas que valen lo mismo (el campo que confirma con Enter vale
+ *            igual que el botón que hace esa confirmación).
+ *   hecho(E, E0)  (opcional) — EL PASO YA ESTÁ CUMPLIDO. `E` = estado real de la app AHORA,
+ *            `E0` = el mismo estado en el momento en que arrancó el paso (para poder pedir
+ *            «que AUMENTE», no «que sea mayor a cero»). Ver la forma de `E` abajo.
+ *            ⚠️ Si un paso declara `hecho`, **ES LA ÚNICA forma de avanzar** (más el escape
+ *            manual). Eso es a propósito: tocar un botón NO es lo mismo que que la acción SALGA
+ *            BIEN — si el POST falla, el estado no cambia y el tutorial no avanza.
+ *            Si `hecho` ya da true al empezar el paso, el paso se SALTEA (no se pide lo hecho).
+ *
+ * ── EL ESTADO `E` (lo arma `App.jsx`, buscar `ayudaEstado`) ────────────────────────────────────
+ *   E.cargado (¿ya llegaron los datos?) · E.nMoldes · E.tab/sub/paso/ajuste
+ *   E.pedido  {nDisenos, sinVariable, artesTotal, artesCargadas, telasFaltan, nFilas,
+ *              hayResultados, editorAbierto, nEditables}
+ *   Si hiciera falta mirar otra cosa (el molde, la configuración), se agrega ahí y se documenta acá.
  *
  * REGLA: el usuario trabaja sobre SUS datos reales (decisión del usuario), así que ningún paso
  * borra ni cambia nada por su cuenta: la acción siempre la hace la persona.
  */
 
-// ── ÁREA 1 · MOLDES: crear uno y dejarlo listo para usar ────────────────────────────────────────
-const CREAR_MOLDE = {
-  id: 'crear-molde',
-  area: 'moldes',
-  titulo: 'Crear un molde de cero',
-  desc: 'Subir la moldería, ponerle nombre a las piezas y dejarla lista.',
-  minutos: 5,
-  pasos: [
-    { ancla: 'nav-config', ir: { tab: 'config' }, accion: 'click',
-      texto: 'Entrá a Configuración.' },
-    { ancla: 'cfg-productos', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Molderías»: acá viven todos los moldes.' },
-    { ancla: 'molde-nuevo', ir: { tab: 'config', sub: 'productos' }, accion: 'click',
-      texto: 'Tocá «Nueva Moldería».' },
-    { ancla: 'molde-nombre', accion: 'input',
-      texto: 'Escribí el nombre del molde. Ej: «Camiseta fútbol».',
-      nota: 'Es el nombre con el que lo vas a reconocer después en el pedido.' },
-    { ancla: 'molde-crear-ok', accion: 'click',
-      texto: 'Tocá «Crear Molde».' },
-    { ancla: 'molde-subir', accion: 'click',
-      texto: 'Ahora subí el archivo de la moldería (.ai, .pdf o .dxf).',
-      nota: 'Es el archivo con TODAS las piezas y todos los talles.' },
-    { ancla: 'molde-como-exportar', accion: 'ver',
-      texto: 'Si no sabés cómo sacar ese archivo de tu programa, acá está explicado.',
-      nota: 'Sirve para Illustrator, Corel y los de moldería (Optitex, Gerber…).' },
-    { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Listo: acá ves tu moldería. Cada pieza tiene su número.',
-      nota: 'Rueda del mouse para acercar, clic derecho para moverla.' },
-    { ancla: 'ajuste-variables', accion: 'ver',
-      texto: 'El molde ya está cargado. El paso que sigue es ponerle nombre a las piezas, en «Variables».',
-      nota: 'Está en la guía «Ponerle nombre a las piezas».' },
-  ],
-};
-
-const NOMBRAR_PIEZAS = {
-  id: 'nombrar-piezas',
-  area: 'moldes',
-  titulo: 'Ponerle nombre a las piezas',
-  desc: 'Decirle al sistema cuál es el frente, la espalda, la manga…',
+const ARMAR_TIZADA = {
+  id: 'hacer-pedido',
+  titulo: 'Armar una tizada',
+  desc: 'El camino completo: diseño, prenda, arte, telas, planilla y las hojas para imprimir.',
   minutos: 6,
   pasos: [
-    { ancla: 'ajuste-variables', ir: { ajuste: 'variables' }, accion: 'click',
-      texto: 'Entrá a «Variables»: ahí se nombran las piezas.' },
-    { ancla: 'var-pasos', ir: { ajuste: 'variables' }, accion: 'ver',
-      texto: 'Variables tiene 3 pasos. Ahora vas por el primero: «1. Nombrar».',
-      nota: 'Los otros dos (Grupos y Modelos) van después, con las piezas ya nombradas.' },
-    { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Tocá una pieza en el molde para elegirla. Para varias, arrastrá un recuadro desde un espacio vacío.',
-      nota: 'Si elegís varias iguales, el sistema las numera solo: Frente 1, Frente 2…' },
-    { ancla: 'nombre-pieza-input', accion: 'input',
-      texto: 'Escribí el nombre de esa pieza. Ej: «Frente».' },
-    { ancla: 'nombre-pieza-ok', accion: 'click',
-      texto: 'Tocá «Nombrar» para aplicarlo.',
-      nota: 'Repetí con el resto hasta que no quede ninguna pieza sin nombre.' },
-    { ancla: 'nombres-guardar', accion: 'click',
-      texto: 'Al terminar, tocá «Guardar nombres».' },
-  ],
-};
-
-// ── ÁREA 2 · AJUSTES DEL MOLDE ──────────────────────────────────────────────────────────────────
-const AJUSTE_TELAS = {
-  id: 'ajuste-telas',
-  area: 'ajustes',
-  titulo: 'Telas del molde',
-  desc: 'Elegir qué telas se van a poder usar en cada pieza.',
-  minutos: 4,
-  pasos: [
-    { ancla: 'ajuste-telas', ir: { ajuste: 'telas' }, accion: 'click',
-      texto: 'Entrá a «Telas asignadas».' },
-    { ancla: 'telas-variable', ir: { ajuste: 'telas' }, accion: 'ver',
-      texto: 'Primero elegí la variable con la que vas a trabajar. El molde de al lado te muestra sólo sus piezas.' },
-    { ancla: 'telas-tope', ir: { ajuste: 'telas' }, accion: 'ver',
-      texto: 'Acá definís cuántas telas distintas puede combinar la prenda en un pedido.',
-      nota: 'Ej: 2 = el operario podrá usar hasta 2 telas en esa prenda.' },
-    { ancla: 'telas-mostrar', ir: { ajuste: 'telas' }, accion: 'click',
-      texto: 'Tocá «Mostrar telas asignadas».' },
-    { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Tocá en el molde las piezas que van a llevar una tela. Si no tocás ninguna, la tela va a TODAS.' },
-    { ancla: 'telas-seleccionar', accion: 'click',
-      texto: 'Ahora tocá «Seleccionar tela».' },
-    { ancla: 'telas-modal-buscar', accion: 'ver',
-      texto: 'Buscá la tela por nombre y tocá las que quieras habilitar.' },
-    { ancla: 'telas-modal-asignar', accion: 'click',
-      texto: 'Tocá «Asignar» y listo.' },
-  ],
-};
-
-const AJUSTE_ETIQUETA = {
-  id: 'ajuste-etiqueta',
-  area: 'ajustes',
-  titulo: 'Etiqueta de las piezas',
-  desc: 'Qué dice el textito de cada pieza y dónde va.',
-  minutos: 4,
-  pasos: [
-    { ancla: 'ajuste-etiqueta', ir: { ajuste: 'etiqueta' }, accion: 'click',
-      texto: 'Entrá a «Etiqueta».' },
-    { ancla: 'etq-activo', ir: { ajuste: 'etiqueta' }, accion: 'ver',
-      texto: 'Con esto prendés o apagás la etiqueta en toda la moldería.' },
-    { ancla: 'etq-mostrar', accion: 'ver',
-      texto: 'Elegí qué tiene que decir: el talle, el nombre de la pieza, el número.' },
-    { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Tocá sobre la pieza, en el visor, para mover la etiqueta al lugar que quieras.',
-      nota: 'Se acomoda sobre el borde de la pieza.' },
-    { ancla: 'etq-guardar', accion: 'click',
-      texto: 'Guardá los cambios.' },
-  ],
-};
-
-const AJUSTE_BORDE = {
-  id: 'ajuste-borde',
-  area: 'ajustes',
-  titulo: 'Borde de corte',
-  desc: 'La línea que rodea cada pieza para guiar el corte.',
-  minutos: 2,
-  pasos: [
-    { ancla: 'ajuste-borde', ir: { ajuste: 'borde' }, accion: 'click',
-      texto: 'Entrá a «Borde de corte».' },
-    { ancla: 'borde-activo', ir: { ajuste: 'borde' }, accion: 'click',
-      texto: 'Prendé el borde si este molde lo lleva.' },
-    { ancla: 'borde-tamano', accion: 'ver',
-      texto: 'Poné el grosor en milímetros.' },
-    { ancla: 'borde-color', accion: 'ver',
-      texto: 'Y elegí el color con el que se va a imprimir.' },
-    { ancla: 'borde-guardar', accion: 'click',
-      texto: 'Guardá.' },
-  ],
-};
-
-// ── ÁREA 3 · PEDIDO (el uso de todos los días) ─────────────────────────────────────────────────
-const HACER_PEDIDO = {
-  id: 'hacer-pedido',
-  area: 'pedido',
-  titulo: 'Armar una tizada',
-  desc: 'El camino completo: diseño, variables, arte, planilla y enviar.',
-  minutos: 8,
-  // ORDEN REAL del sistema (verificado en pantalla): primero se CREA EL DISEÑO y recién después se
-  // le eligen las VARIABLES que lo componen. No se «elige un molde»: se eligen variables, que ya
-  // traen su molde detrás.
-  pasos: [
+    // ── 1 · DISEÑOS ────────────────────────────────────────────────────────────────────────────
     { ancla: 'nav-pedidos', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'click',
       texto: 'Entrá a Pedidos.' },
     { ancla: 'pedido-diseno-input', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'input',
       texto: 'Empezá por el DISEÑO: escribí acá cómo se llama.',
-      nota: 'Es el estampado de la prenda. Ej: «River titular». Un pedido puede llevar varios.' },
+      nota: 'Es el estampado de la prenda. Un pedido puede llevar varios diseños.' },
     { ancla: 'pedido-diseno-agregar', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'click',
       // Si ya lo confirmó con Enter en el campo, este paso está hecho: el motor lo saltea.
       tambien: ['pedido-diseno-input'],
-      texto: 'Agregalo: tocá el botón o apretá Enter en el campo.',
-      nota: 'Con Enter se agrega igual que con el botón; el tutorial sigue solo.' },
+      texto: 'Agregalo: tocá «+ Diseño» o apretá Enter en el campo.',
+      hecho: (E, E0) => E.pedido.nDisenos > E0.pedido.nDisenos },
     { ancla: 'pedido-diseno-chips', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'ver',
-      texto: 'Ahí aparece tu diseño. Si cargás varios, tocá uno para trabajar sobre ese.',
-      nota: 'El número al lado dice cuántas variables le asignaste.' },
-    { ancla: 'pedido-tabs', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'ver',
-      texto: 'Acá elegís de dónde salen las prendas: del «Catálogo» compartido o de «Mis artículos» (los que subiste vos).' },
-    { ancla: 'pedido-variables', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'ver',
-      texto: 'Ahora tocá las VARIABLES que van en ese diseño (por ejemplo: musculosa, manga corta).',
-      nota: 'No se elige el molde: se eligen sus variables, que ya saben a qué molde pertenecen. Cada diseño necesita al menos una.' },
+      texto: 'Ahí queda tu diseño. Si cargás varios, tocá uno para trabajar sobre ese.',
+      nota: 'El número al lado dice cuántas prendas le asignaste.' },
+    { ancla: 'pedido-variables', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'gesto',
+      texto: 'Ahora tocá la prenda que lleva ese diseño. Queda marcada con un ✓.',
+      nota: 'En «Catálogo» están las compartidas; en «Mis artículos», los moldes que subiste vos.',
+      hecho: (E) => E.pedido.nDisenos > 0 && E.pedido.sinVariable === 0 },
     { ancla: 'pedido-ir-arte', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'click',
-      texto: 'Cuando cada diseño tenga su variable, tocá «Cargar el arte».',
-      nota: 'Si está apagado, es que falta elegir variable en algún diseño: te lo avisa al lado.' },
+      texto: 'Tocá «Cargar el arte».',
+      nota: 'Si está apagado, es que falta elegir la prenda de algún diseño: te lo avisa al lado.' },
+
+    // ── 2 · ARTE ───────────────────────────────────────────────────────────────────────────────
     { ancla: 'arte-cargar', accion: 'click',
-      texto: 'Subí el archivo del arte (.ai o .pdf) de esta variable.' },
+      texto: 'Tocá «Cargar arte» y elegí el archivo del diseño (.ai o .pdf).',
+      // No alcanza con abrir el explorador: el arte tiene que quedar procesado.
+      hecho: (E, E0) => E.pedido.artesCargadas > E0.pedido.artesCargadas },
     { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Revisá que cada pieza tenga su parte del diseño. Si algo no quedó bien, arrastrá el diseño hasta la pieza.',
-      nota: 'Arriba podés cambiar de diseño y de variable: hay que cargar el arte de todas.' },
+      texto: 'El sistema le pone el diseño a cada talle. Esperá a que termine esa barra: se hace una sola vez.',
+      nota: 'Después cambiar de talle es instantáneo.' },
+    { ancla: 'visor-molde', accion: 'ver',
+      texto: 'Fijate que cada pieza tenga su parte del diseño. Si alguna quedó vacía, arrastrale su diseño desde la lista de la derecha.',
+      nota: 'También podés tocar la pieza en el molde y después su diseño. Se guarda solo.' },
+    { ancla: 'editar-diseno', accion: 'ver',
+      texto: 'Si necesitás mover, agrandar o pintar algo del diseño (un escudo, un logo), entrás por «Editar diseño».',
+      nota: 'Ahí elegís si el cambio va a todo el rango de talles o sólo al que estás viendo. No es obligatorio.' },
+
+    // ── 3 · TELAS ──────────────────────────────────────────────────────────────────────────────
     { ancla: 'arte-telas', accion: 'click',
-      texto: 'Tocá «Ver telas de pieza» para decir en qué tela va cada una.',
-      nota: 'Todas las piezas necesitan tela: si falta alguna, no te deja seguir.' },
+      texto: 'Tocá «Ver telas de pieza»: hay que decir en qué tela va cada pieza.' },
+    { ancla: 'telas-panel', accion: 'gesto',
+      texto: 'Son tres pasos: 1) elegí la tela de la lista · 2) tocá las piezas en el molde · 3) «Asignar».',
+      nota: 'Si no tocás ninguna pieza, el botón dice «Asignar a todas» y la tela va a todas.',
+      hecho: (E) => E.pedido.telasFaltan === 0 },
     { ancla: 'arte-siguiente', accion: 'click',
-      texto: 'Con el arte y las telas listas, pasá a la planilla.' },
+      texto: 'Cuando diga «Todas las piezas tienen tela», tocá «A la planilla».',
+      nota: 'Si falta alguna pieza sin tela, el botón queda apagado y te dice cuántas son.' },
+
+    // ── 4 · PLANILLA ───────────────────────────────────────────────────────────────────────────
     { ancla: 'planilla-tabla', accion: 'ver',
-      texto: 'Cargá una fila por prenda: talle, nombre, número… Funciona como una planilla de Excel.',
-      nota: 'Tocás una celda y escribís. Con el cuadradito de la esquina copiás hacia abajo arrastrando.' },
-    { ancla: 'planilla-enviar', accion: 'click',
-      texto: 'Tocá «Enviar» y el sistema arma la tizada.',
-      nota: 'Si está apagado, arriba te dice qué falta: filas, un valor inválido o el arte de algún molde.' },
-    { ancla: 'resultados-hojas', accion: 'ver',
-      texto: '¡Listo! Acá tenés las hojas para imprimir y la ficha técnica.' },
-  ],
-};
-
-// ── ÁREA 4 · CONFIGURACIÓN GENERAL ─────────────────────────────────────────────────────────────
-const CFG_TELAS = {
-  id: 'cfg-telas',
-  area: 'config',
-  titulo: 'Telas del sistema',
-  desc: 'De dónde salen las telas y cómo se pone el ancho de impresión.',
-  minutos: 3,
-  pasos: [
-    { ancla: 'nav-config', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Entrá a Configuración.' },
-    { ancla: 'cfg-telas', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Telas».' },
-    { ancla: 'telas-conexion', ir: { tab: 'config', sub: 'telas' }, accion: 'ver',
-      texto: 'Las telas vienen solas del sistema de stock. Acá ves si la conexión está andando.' },
-    { ancla: 'telas-actualizar', accion: 'click',
-      texto: 'Si cargaste telas nuevas en el stock, tocá acá para traerlas.' },
-    { ancla: 'telas-lista', accion: 'ver',
-      texto: 'La medida la informa el stock; vos ponés el ANCHO DE IMPRESIÓN, que es el que usa la tizada.',
-      nota: 'Suele ser menor que el rollo, por los orillos.' },
-  ],
-};
-
-
-const VARIABLES_GRUPOS = {
-  id: 'variables-grupos',
-  area: 'moldes',
-  titulo: 'Armar las variables del molde',
-  desc: 'Decirle al sistema qué combinaciones de piezas se pueden pedir.',
-  minutos: 7,
-  pasos: [
-    { ancla: 'ajuste-variables', ir: { ajuste: 'variables' }, accion: 'click',
-      texto: 'Entrá a «Variables».' },
-    { ancla: 'var-pasos', ir: { ajuste: 'variables' }, accion: 'ver',
-      texto: 'Con las piezas ya nombradas, ahora vas por el paso «2. Grupos».',
-      nota: 'Un GRUPO junta decisiones parecidas (ej: «Tipo de manga»). Adentro van las VARIABLES.' },
-    { ancla: 'grupo-nombre', accion: 'input',
-      texto: 'Ponele nombre al grupo. Ej: «Tipo de manga».',
-      nota: 'Es la pregunta que se le hace a la prenda, no la respuesta.' },
-    { ancla: 'var-nombre', accion: 'input',
-      texto: 'Ahora la variable: escribí una de las respuestas posibles. Ej: «Manga corta».' },
-    { ancla: 'var-elegir-piezas', accion: 'click',
-      texto: 'Tocá «+ Elegir piezas».' },
-    { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Tocá en el molde TODAS las piezas que lleva esa variable: frente, espalda, esa manga…',
-      nota: 'Sólo esas piezas se van a imprimir cuando alguien pida esta variable.' },
-    { ancla: 'var-listo', accion: 'click',
-      texto: 'Tocá «Listo» para cerrar esa variable.',
-      nota: 'Repetí con las demás respuestas del grupo (manga larga, musculosa…).' },
-  ],
-};
-
-const AJUSTE_PLANTILLA = {
-  id: 'ajuste-plantilla',
-  area: 'ajustes',
-  titulo: 'Plantilla: medidas y arte',
-  desc: 'Decirle al sistema qué parte del arte va en cada pieza.',
-  minutos: 5,
-  pasos: [
-    { ancla: 'ajuste-diseno', ir: { ajuste: 'diseno' }, accion: 'click',
-      texto: 'Entrá a «Plantilla».' },
-    { ancla: 'diseno-capas', ir: { ajuste: 'diseno' }, accion: 'click',
-      texto: 'Antes que nada, mirá qué tiene que traer el archivo del arte.',
-      nota: 'El .ai necesita una capa por cosa: el diseño, las guías con el nombre de cada pieza…' },
-    { ancla: 'diseno-mapear', ir: { ajuste: 'diseno' }, accion: 'click',
-      texto: 'Tocá «Mapear diseño al molde» para pasar del modo medidas al modo arte.' },
-    { ancla: 'visor-molde', accion: 'ver',
-      texto: 'Acá emparejás cada mesa del arte con su pieza del molde.',
-      nota: 'Si en el .ai cada mesa tiene escrito el nombre de la pieza, el sistema lo hace solo.' },
-    { ancla: 'diseno-guardar', accion: 'click',
-      texto: 'Guardá el mapeo.',
-      nota: 'Se guarda por variable: repetilo con cada una que tenga arte propio.' },
-  ],
-};
-
-const AJUSTE_PLANILLA_MOLDE = {
-  id: 'ajuste-planilla-molde',
-  area: 'ajustes',
-  titulo: 'Planilla del molde',
-  desc: 'Qué columnas se cargan cuando se pide este molde.',
-  minutos: 3,
-  pasos: [
-    { ancla: 'ajuste-planilla', ir: { ajuste: 'planilla' }, accion: 'click',
-      texto: 'Entrá a «Planilla».' },
-    { ancla: 'mplanilla-elegir', ir: { ajuste: 'planilla' }, accion: 'click',
-      texto: 'Elegí la planilla de columnas que usa este molde.',
-      nota: 'Las planillas se arman en Configuración › Planillas. Acá sólo se elige una.' },
-    { ancla: 'mplanilla-guardar', accion: 'click',
-      texto: 'Guardá la configuración de este molde.',
-      nota: 'En el pedido van a aparecer sólo las columnas que este molde use de verdad.' },
-  ],
-};
-
-const AJUSTE_NESTING = {
-  id: 'ajuste-nesting',
-  area: 'ajustes',
-  titulo: 'Cómo se acomodan las piezas',
-  desc: 'La separación y el giro con los que se arma la tizada.',
-  minutos: 2,
-  pasos: [
-    { ancla: 'ajuste-nestingsel', ir: { ajuste: 'nestingsel' }, accion: 'click',
-      texto: 'Entrá a «Nesting».' },
-    { ancla: 'nsel-elegir', ir: { ajuste: 'nestingsel' }, accion: 'input',
-      texto: 'Elegí con qué acomodo se van a tizar las piezas de este molde.',
-      nota: 'Cada opción trae su separación entre piezas, su margen y si se permite girarlas.' },
-    { ancla: 'nsel-grupos', accion: 'ver',
-      texto: 'Si varias molderías se tizan juntas (ej: camiseta + short), eso se arma en «grupos de tizada».' },
-  ],
-};
-
-const AJUSTE_NOMBRES = {
-  id: 'ajuste-nombres',
-  area: 'ajustes',
-  titulo: 'Nombres propios del molde',
-  desc: 'Cómo querés que el sistema llame al talle y a la prenda.',
-  minutos: 2,
-  pasos: [
-    { ancla: 'ajuste-terminologia', ir: { ajuste: 'terminologia' }, accion: 'click',
-      texto: 'Entrá a «Nombres».' },
-    { ancla: 'term-variante', ir: { ajuste: 'terminologia' }, accion: 'input',
-      texto: 'Escribí cómo llamás al talle en este molde. Ej: «Talle», «Medida».',
-      nota: 'Es sólo el nombre que se muestra: cambia los carteles, no el funcionamiento.' },
-    { ancla: 'term-molde', accion: 'input',
-      texto: 'Y acá el nombre de la prenda, como lo vas a reconocer en el pedido.' },
-    { ancla: 'term-guardar', accion: 'click',
-      texto: 'Guardá los nombres.' },
-  ],
-};
-
-const PLANILLA_PEDIDO = {
-  id: 'planilla-pedido',
-  area: 'pedido',
-  titulo: 'Cargar la planilla',
-  desc: 'Cargar las prendas del pedido como en una planilla de Excel.',
-  minutos: 4,
-  pasos: [
-    { ancla: 'planilla-tabla', ir: { tab: 'pedidos', paso: 'planilla' }, accion: 'ver',
-      texto: 'Una fila = una prenda. Un clic elige la celda; doble clic (o Enter) la abre para escribir.',
-      nota: 'También podés empezar a escribir directo: la primera letra ya entra.' },
+      texto: 'Una fila = una prenda. Cargá el talle, y el nombre y el número si la prenda los lleva.',
+      nota: 'Un clic elige la celda; escribís directo. En Talle y Diseño se abre la lista de opciones.' },
     { ancla: 'planilla-tabla', accion: 'ver',
-      texto: 'Con el cuadradito de la esquina de la celda copiás hacia abajo o al costado arrastrando.',
-      nota: 'En números hace la secuencia (1, 2, 3…); en talle y diseño copia el mismo valor.' },
-    { ancla: 'planilla-agregar', accion: 'click',
-      texto: 'Si te faltan filas, poné cuántas y tocá «Agregar».' },
+      texto: 'Con el cuadradito de la esquina de la celda copiás hacia abajo arrastrando.',
+      nota: 'En los números hace la secuencia (1, 2, 3…); en talle y diseño repite el mismo valor.' },
+    { ancla: 'planilla-agregar', accion: 'ver',
+      texto: 'Si te faltan filas, poné cuántas y tocá «Agregar Fila».' },
     { ancla: 'planilla-csv', accion: 'ver',
-      texto: 'Si el pedido ya te llegó en Excel, podés importarlo como CSV en vez de tipearlo.',
-      nota: 'Los valores que no existan en el molde quedan vacíos, no inventa nada.' },
+      texto: 'Si el pedido ya te llegó en Excel, lo podés importar como CSV en vez de tipearlo.',
+      nota: 'Lo que no exista en el molde queda vacío: no inventa datos.' },
     { ancla: 'planilla-enviar', accion: 'click',
       texto: 'Cuando esté completa, tocá «Enviar».',
-      nota: 'Si está apagado, arriba dice qué falta.' },
+      nota: 'Si está apagado, arriba dice qué falta: filas, un valor inválido o el arte de algún molde.' },
+
+    // ── 5 · TIZADAS ────────────────────────────────────────────────────────────────────────────
+    { ancla: 'resultados-mesas', accion: 'ver',
+      texto: 'Se está armando la tizada. No cierres la ventana: te va mostrando en qué va.',
+      nota: 'Cuando termina, aparecen las mesas listas para imprimir.' },
+    { ancla: 'resultados-mesas', accion: 'ver',
+      texto: 'Acá tenés cada mesa. Rueda del mouse para acercar y clic DERECHO para moverte.',
+      nota: 'Si el pedido usa más de una tela, arriba hay una pestaña por tela.' },
+    { ancla: 'resultados-descargar', accion: 'ver',
+      texto: 'Con «Descargar todo» bajás cada mesa como un archivo aparte, con su nombre.' },
+    { ancla: 'resultados-ficha', accion: 'ver',
+      texto: 'Y en «Ficha técnica» tenés la hoja para el taller: la tabla de talles y el molde guía con la tela de cada pieza.',
+      nota: 'Se puede descargar o imprimir directo.' },
   ],
 };
 
-const CFG_COLUMNAS = {
-  id: 'cfg-columnas',
-  area: 'config',
-  titulo: 'Armar una planilla de columnas',
-  desc: 'Definir qué datos se le piden al operario en el pedido.',
-  minutos: 5,
-  pasos: [
-    { ancla: 'nav-config', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Entrá a Configuración.' },
-    { ancla: 'cfg-columnas', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Planillas».',
-      nota: 'Una planilla es el juego de columnas que se carga al hacer un pedido.' },
-    { ancla: 'col-nueva', ir: { tab: 'config', sub: 'columnas' }, accion: 'click',
-      texto: 'Tocá «Nueva Planilla».' },
-    { ancla: 'col-guardar', accion: 'ver',
-      texto: 'Agregá las columnas que necesites (talle, nombre, número, color…) y ordenálas arrastrando.',
-      nota: 'Cada columna usa una REGLA, que dice si es texto libre, una lista de opciones o un toggle.' },
-    { ancla: 'col-guardar', accion: 'click',
-      texto: 'Guardá la planilla.',
-      nota: 'Después se le asigna a cada molde desde su ajuste «Planilla».' },
-  ],
-};
 
-const CFG_REGLAS = {
-  id: 'cfg-reglas',
-  area: 'config',
-  titulo: 'Reglas de las columnas',
-  desc: 'Qué se puede escribir en cada columna y qué efecto tiene.',
-  minutos: 4,
-  pasos: [
-    { ancla: 'cfg-reglas', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Reglas de planilla · Capas».' },
-    { ancla: 'regla-nueva', ir: { tab: 'config', sub: 'reglas' }, accion: 'click',
-      texto: 'Tocá «Nueva Regla».' },
-    { ancla: 'regla-nombre', accion: 'input',
-      texto: 'Ponele nombre. Ej: «Color», «Equipo», «Capucha».' },
-    { ancla: 'regla-guardar', accion: 'ver',
-      texto: 'Elegí el tipo: texto libre, lista de opciones o toggle (sí/no).',
-      nota: 'El toggle puede CAMBIAR LAS PIEZAS: ej. «capucha = sí» agrega las piezas de la capucha.' },
-    { ancla: 'regla-guardar', accion: 'click',
-      texto: 'Guardá la regla.',
-      nota: 'Ya la podés usar en cualquier columna de cualquier planilla.' },
-  ],
-};
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+ * RECORRIDOS EXPLICATIVOS — «para qué sirve cada cosa»
+ *
+ * OJO, NO SON TUTORIALES: acá NO se le pide a la persona que haga nada. Sólo se recorre la
+ * pantalla contando para qué sirve cada control. Por eso TODOS los pasos son `accion: 'ver'`
+ * (globo violeta «PARA QUE SEPAS», avanza solo) y ninguno declara `hecho`.
+ *   · el ÚNICO paso a paso de verdad es «Armar una tizada» (arriba), que es el trabajo diario;
+ *   · para llegar a la pantalla el motor sí marca los botones del camino (los puentes ámbar).
+ * Si mañana uno de estos tiene que pedir una acción, se le cambia la `accion` y se le pone `hecho`.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════ */
 
-const CFG_NESTING = {
-  id: 'cfg-nesting',
-  area: 'config',
-  titulo: 'Reglas de nesting',
-  desc: 'Cuánta separación deja la tizada y si puede girar las piezas.',
-  minutos: 3,
-  pasos: [
-    { ancla: 'cfg-nesting', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Reglas de Nesting».' },
-    { ancla: 'nesting-nuevo', ir: { tab: 'config', sub: 'nesting' }, accion: 'click',
-      texto: 'Tocá «Nuevo Nesting».' },
-    { ancla: 'nesting-nombre', accion: 'input',
-      texto: 'Ponele un nombre que se entienda. Ej: «Apretado», «Sin giro».' },
-    { ancla: 'nesting-guardar', accion: 'ver',
-      texto: 'Definí la separación entre piezas, el margen de la hoja y si se pueden girar.',
-      nota: 'Menos separación = menos tela, pero deja menos aire para cortar.' },
-    { ancla: 'nesting-guardar', accion: 'click',
-      texto: 'Guardá.',
-      nota: 'Después se le asigna a cada molde desde su ajuste «Nesting».' },
-  ],
-};
+const R = (id, area, titulo, desc, minutos, pasos) => ({ id, area, titulo, desc, minutos, explica: true, pasos });
 
-const CFG_FUENTES = {
-  id: 'cfg-fuentes',
-  area: 'config',
-  titulo: 'Fuentes para estampar',
-  desc: 'Subir las tipografías con las que salen los nombres y números.',
-  minutos: 2,
-  pasos: [
-    { ancla: 'cfg-fuentes', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Catálogo de Fuentes».' },
-    { ancla: 'fuentes-subir', ir: { tab: 'config', sub: 'fuentes' }, accion: 'click',
-      texto: 'Subí la tipografía (.ttf o .otf).',
-      nota: 'Es el archivo de la fuente, el mismo que instalarías en la computadora.' },
-    { ancla: 'fuentes-probar', accion: 'input',
-      texto: 'Escribí un nombre o un número acá para ver cómo queda en todas las fuentes.',
-      nota: 'Sirve para elegir sin tener que generar una tizada de prueba.' },
-  ],
-};
+// ── ÁREA · LA MOLDERÍA Y SUS AJUSTES ───────────────────────────────────────────────────────────
+const EX_MOLDERIA = R('ex-molderia', 'molde', 'Moldería', 'Dónde vive el molde y cómo se prepara.', 3, [
+  { ancla: 'ajuste-molderia', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'molderia' }, accion: 'ver',
+    texto: 'Esta es la pantalla del MOLDE: el archivo con todas las piezas y todos los talles.',
+    nota: 'Todo lo demás del sistema se apoya en lo que definas acá.' },
+  { ancla: 'molde-subir', accion: 'ver',
+    texto: 'Acá se sube o se reemplaza el archivo del molde (.ai, .pdf o .dxf).',
+    nota: 'Si lo volvés a subir, los nombres de pieza que ya pusiste se transfieren solos.' },
+  { ancla: 'molde-guia', accion: 'ver',
+    texto: 'El TALLE DE GUÍA es el talle de referencia: sobre él se nombran las piezas y desde él se copian a los demás.',
+    nota: 'Conviene uno del medio de la curva (M, 38…).' },
+  { ancla: 'variantes-panel', accion: 'ver',
+    texto: 'Acá se definen los TALLES. Si el molde vino sin ellos, este panel se pone naranja: hasta resolverlo el molde no se puede usar.',
+    nota: 'Hay dos casos: que cada talle venga en su capa, o que venga todo junto en una sola.' },
+  { ancla: 'agrupar-activar', accion: 'ver',
+    texto: '«Agrupar piezas» es decir cuál es la MISMA pieza en cada talle: el Frente de la S, el de la M, el de la L…',
+    nota: 'Sin eso el sistema no sabe que son la misma y la tizada sale mal.' },
+  { ancla: 'visor-molde', accion: 'ver',
+    texto: 'El visor muestra el molde en medidas reales. Rueda del mouse para acercar, clic derecho para moverte.',
+    nota: 'Es el mismo visor de casi todas las pantallas: cambia lo que pasa al tocar una pieza.' },
+]);
 
-const CFG_PERFIL = {
-  id: 'cfg-perfil',
-  area: 'config',
-  titulo: 'Perfil de color',
-  desc: 'Con qué perfil CMYK sale la impresión.',
-  minutos: 2,
-  pasos: [
-    { ancla: 'cfg-perfil', ir: { tab: 'config', sub: 'dashboard' }, accion: 'click',
-      texto: 'Abrí «Perfil de color».' },
-    { ancla: 'perfil-card', ir: { tab: 'config', sub: 'perfil' }, accion: 'ver',
-      texto: 'Estos son los perfiles instalados en la máquina. El marcado es el que se usa por defecto.',
-      nota: 'Si no sabés cuál poner, dejá el que viene: cambiarlo mueve los colores de todo lo que imprimas.' },
-    { ancla: 'perfil-card', accion: 'ver',
-      texto: 'Cuando cargás un arte que ya trae su propio perfil incrustado, el sistema te avisa y respeta ese.' },
-  ],
-};
+const EX_VARIABLES = R('ex-variables', 'molde', 'Variables', 'Qué es una variable y para qué sirven los grupos.', 4, [
+  { ancla: 'ajuste-variables', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'variables' }, accion: 'ver',
+    texto: 'Acá se le pone NOMBRE a cada pieza y se arman las VARIABLES del molde.',
+    nota: 'Una variable es una combinación de piezas: «manga corta», «musculosa», «con capucha».' },
+  { ancla: 'var-pasos', accion: 'ver',
+    texto: 'Son 2 pasos: 1) Nombrar las piezas · 2) Grupos y variables.',
+    nota: 'Van en ese orden: sin nombres no se pueden armar variables.' },
+  { ancla: 'nombre-pieza-input', accion: 'ver',
+    texto: 'Paso 1: se eligen piezas en el visor y se les escribe qué son («Frente», «Manga»).',
+    nota: 'Si elegís varias iguales, se numeran solas: Frente 1, Frente 2…' },
+  { ancla: 'var-pasos', accion: 'ver',
+    texto: 'Paso 2: un GRUPO es la pregunta («Tipo de manga») y las VARIABLES son las respuestas («corta», «larga»).',
+    nota: 'Cada variable guarda qué piezas lleva: eso es lo que se imprime cuando alguien la pide.' },
+  { ancla: 'ajuste-variables', accion: 'ver',
+    texto: 'Y «piezas que van juntas» es para las que nunca viajan solas: una manga y su vivo, por ejemplo.',
+    nota: 'Si entra una, entra la otra.' },
+]);
 
-export const GUIAS = [
-  CREAR_MOLDE, NOMBRAR_PIEZAS, VARIABLES_GRUPOS,
-  AJUSTE_PLANTILLA, AJUSTE_TELAS, AJUSTE_ETIQUETA, AJUSTE_BORDE, AJUSTE_PLANILLA_MOLDE, AJUSTE_NESTING, AJUSTE_NOMBRES,
-  HACER_PEDIDO, PLANILLA_PEDIDO,
-  CFG_TELAS, CFG_COLUMNAS, CFG_REGLAS, CFG_NESTING, CFG_FUENTES, CFG_PERFIL,
+const EX_PLANTILLA = R('ex-plantilla', 'molde', 'Plantilla (medidas y arte)', 'Cómo se escala el diseño y cómo se empareja con las piezas.', 4, [
+  { ancla: 'ajuste-diseno', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'diseno' }, accion: 'ver',
+    texto: 'Esta pantalla define DOS cosas: qué tamaño tiene el diseño sobre cada pieza, y qué parte del arte va en cada una.' },
+  { ancla: 'ajuste-diseno', accion: 'ver',
+    texto: 'La «dimensión de referencia» dice qué manda: el alto o el ancho. El sistema calcula la otra para que cubra todos los talles sin huecos.' },
+  { ancla: 'ajuste-diseno', accion: 'ver',
+    texto: 'Y «cómo se adapta»: un diseño para todos los talles, uno por rango, o uno por talle.',
+    nota: 'Cuantos más diseños distintos, más trabajo para el diseñador — pero mejor calce.' },
+  { ancla: 'diseno-capas', accion: 'ver',
+    texto: 'Acá está la lista de capas que tiene que traer el archivo .ai del diseño.',
+    nota: 'El diseñador las copia de acá tal cual: los nombres tienen que coincidir.' },
+  { ancla: 'diseno-mapear', accion: 'ver',
+    texto: '«Mapear diseño al molde» es emparejar cada mesa del arte con su pieza.',
+    nota: 'Si en el .ai cada mesa dice el nombre de la pieza, el sistema lo hace solo. Se guarda por variable.' },
+]);
+
+const EX_PLANILLA_MOLDE = R('ex-planilla-molde', 'molde', 'Planilla del molde', 'Qué datos se piden cuando se pide este molde.', 2, [
+  { ancla: 'ajuste-planilla', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'planilla' }, accion: 'ver',
+    texto: 'Acá se elige QUÉ COLUMNAS se cargan en el pedido cuando alguien pide este molde.',
+    nota: 'Las planillas se arman en Configuración › Planillas; acá sólo se elige una.' },
+  { ancla: 'mplanilla-elegir', accion: 'ver',
+    texto: 'Un molde que no lleva número, por ejemplo, no tiene por qué mostrar esa columna.',
+    nota: 'En el pedido aparecen sólo las columnas que los moldes elegidos usan de verdad.' },
+]);
+
+const EX_NESTING_MOLDE = R('ex-nesting-molde', 'molde', 'Nesting del molde', 'Con qué separación y giro se acomodan sus piezas.', 2, [
+  { ancla: 'ajuste-nestingsel', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'nestingsel' }, accion: 'ver',
+    texto: 'El NESTING es cómo se acomodan las piezas en la tela: cuánta separación dejan y si se pueden girar.',
+    nota: 'Menos separación = menos tela, pero deja menos aire para cortar.' },
+  { ancla: 'nsel-elegir', accion: 'ver',
+    texto: 'Acá se elige cuál de los acomodos usa este molde. Se arman en Configuración › Reglas de Nesting.' },
+  { ancla: 'nsel-grupos', accion: 'ver',
+    texto: 'Y un GRUPO DE TIZADA es cuando dos molderías se arman juntas en la misma mesa (camiseta + short).',
+    nota: 'Un molde que no está en ningún grupo se arma en su propia tizada.' },
+]);
+
+const EX_TELAS_MOLDE = R('ex-telas-molde', 'molde', 'Telas asignadas', 'Qué telas puede usar este molde y en qué piezas.', 3, [
+  { ancla: 'ajuste-telas', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'telas' }, accion: 'ver',
+    texto: 'Acá se dice QUÉ TELAS están disponibles para este molde, y en qué piezas.',
+    nota: 'Es lo que después el operario puede elegir en el pedido: si no está acá, no aparece.' },
+  { ancla: 'telas-variable', accion: 'ver',
+    texto: 'Se trabaja de a una variable: el visor muestra sólo sus piezas y no las del molde entero.' },
+  { ancla: 'telas-tope', accion: 'ver',
+    texto: 'El TOPE dice cuántas telas distintas puede combinar una misma prenda en un pedido.',
+    nota: 'Ej.: 2 = el operario podrá usar hasta dos telas en esa prenda.' },
+  { ancla: 'telas-mostrar', accion: 'ver',
+    texto: 'Y acá se ve, sobre el molde, qué tela quedó en cada pieza.',
+    nota: 'El cuello y las tapacosturas suelen ir en RIB.' },
+]);
+
+const EX_BORDE = R('ex-borde', 'molde', 'Borde de corte', 'La línea que rodea cada pieza.', 2, [
+  { ancla: 'ajuste-borde', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'borde' }, accion: 'ver',
+    texto: 'El BORDE DE CORTE es la línea que se imprime alrededor de cada pieza para guiar el corte.',
+    nota: 'Se imprime: por eso tiene color y grosor propios.' },
+  { ancla: 'borde-tamano', accion: 'ver',
+    texto: 'El grosor va en milímetros; el color, en CMYK igual que el resto de la impresión.',
+    nota: 'Si tu taller corta con plotter o a mano, esto es lo que sigue la tijera.' },
+]);
+
+const EX_ETIQUETA = R('ex-etiqueta', 'molde', 'Etiqueta', 'El textito que identifica cada pieza cortada.', 3, [
+  { ancla: 'ajuste-etiqueta', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'etiqueta' }, accion: 'ver',
+    texto: 'La ETIQUETA es el textito que se imprime en cada pieza para saber, ya cortada, de qué prenda es.',
+    nota: 'Sin eso, en una mesa con 60 piezas cortadas no se sabe qué va con qué.' },
+  { ancla: 'etq-mostrar', accion: 'ver',
+    texto: 'Se elige qué dice: el talle, el nombre de la pieza y el número de prenda.' },
+  { ancla: 'etq-activo', accion: 'ver',
+    texto: 'Se puede apagar entera, y también apagarla en las piezas donde molesta.',
+    nota: 'El texto se apoya sobre el borde de la pieza y se inclina siguiéndolo.' },
+]);
+
+const EX_EDITABLE = R('ex-editable', 'molde', 'Editable (tamaño)', 'Que el escudo mida lo mismo en todos los talles.', 2, [
+  { ancla: 'ajuste-editable', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'editable' }, accion: 'ver',
+    texto: 'Un OBJETO EDITABLE es algo del diseño que se puede mover o cambiar aparte: un escudo, un logo, un número.',
+    nota: 'El diseñador los deja en una capa del .ai que se llama «Editable …».' },
+  { ancla: 'editable-registrar', accion: 'ver',
+    texto: 'Acá se dice qué tamaño tiene que tener en cada rango de talles.',
+    nota: 'Si no se registra, se agranda junto con el diseño: un escudo terminaría enorme en los talles grandes.' },
+]);
+
+const EX_NOMBRES = R('ex-nombres', 'molde', 'Nombres', 'Cómo llama el sistema al talle y a la prenda.', 1, [
+  { ancla: 'ajuste-terminologia', ir: { tab: 'config', sub: 'productos', molde: 'abierto', ajuste: 'terminologia' }, accion: 'ver',
+    texto: 'Acá se cambia cómo llama el sistema al TALLE y a la PRENDA en este molde.',
+    nota: 'Sólo cambia los carteles, no el funcionamiento: si en tu rubro se dice «medida», que lo diga.' },
+]);
+
+// ── ÁREA · CONFIGURACIÓN DEL SISTEMA ───────────────────────────────────────────────────────────
+const EX_MOLDERIAS = R('ex-molderias', 'config', 'Molderías', 'El catálogo de moldes del sistema.', 2, [
+  { ancla: 'cfg-productos', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Acá viven TODOS los moldes del sistema. Cada tarjeta es una moldería.' },
+  { ancla: 'molde-nuevo', ir: { tab: 'config', sub: 'productos' }, accion: 'ver',
+    texto: 'Con «Nueva Moldería» se crea una vacía y después se le sube el archivo.' },
+  { ancla: 'molde-tarjeta', accion: 'ver',
+    texto: 'Cada tarjeta avisa si ya tiene molde y diseño cargados. Tocándola se entra a sus ajustes.',
+    nota: 'Ahí adentro están las 10 pantallas de configuración de ese molde.' },
+]);
+
+const EX_PLANILLAS = R('ex-planillas', 'config', 'Planillas', 'Qué datos se le piden al operario.', 3, [
+  { ancla: 'cfg-columnas', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Una PLANILLA es el juego de columnas que se carga al hacer un pedido: talle, nombre, número, color…' },
+  { ancla: 'col-nueva', ir: { tab: 'config', sub: 'columnas' }, accion: 'ver',
+    texto: 'Se pueden tener varias: una para camisetas con nombre y número, otra para prendas lisas.',
+    nota: 'Después, cada molde elige cuál usa.' },
+  { ancla: 'col-guardar', accion: 'ver',
+    texto: 'Las columnas se ordenan arrastrando, y cada una usa una REGLA que dice qué se puede escribir.' },
+]);
+
+const EX_REGLAS = R('ex-reglas', 'config', 'Reglas de planilla y capas', 'Qué se puede escribir en cada columna y qué efecto tiene.', 3, [
+  { ancla: 'cfg-reglas', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Una REGLA define un campo reutilizable: cómo se carga (casilla, lista o botones) y qué hace con ese dato.' },
+  { ancla: 'regla-nueva', ir: { tab: 'config', sub: 'reglas' }, accion: 'ver',
+    texto: 'Lo importante es «qué hace»: puede elegir el talle, elegir el diseño, ESTAMPARSE en la prenda, o cambiar qué piezas entran.',
+    nota: 'Ej.: un toggle «capucha = sí» agrega las piezas de la capucha.' },
+  { ancla: 'cfg-reglas', accion: 'ver',
+    texto: 'Y cada campo que se estampa necesita SU CAPA en el archivo del diseño: abajo está la lista con los nombres exactos.',
+    nota: 'Se copian de acá y se le pasan al diseñador.' },
+]);
+
+const EX_TELAS = R('ex-telas', 'config', 'Telas', 'De dónde salen y por qué hay que poner el ancho.', 3, [
+  { ancla: 'cfg-telas', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Las telas NO se crean acá: vienen solas del sistema de stock.' },
+  { ancla: 'telas-lista', ir: { tab: 'config', sub: 'telas' }, accion: 'ver',
+    texto: 'Lo único que se carga a mano es el ANCHO DE IMPRESIÓN, que es el que usa la tizada para acomodar.',
+    nota: 'Suele ser menor que la medida del rollo, por los orillos. Si está mal, la tizada sale mal.' },
+  { ancla: 'telas-lista', accion: 'ver',
+    texto: 'Y los GRUPOS COMBINABLES dicen qué telas se pueden cambiar entre sí en un pedido.' },
+]);
+
+const EX_NESTING = R('ex-nesting', 'config', 'Reglas de nesting', 'Cuánta tela se gasta y cómo se corta.', 3, [
+  { ancla: 'cfg-nesting', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Acá se arman los ACOMODOS: separación entre piezas, margen de la hoja y si se pueden girar.' },
+  { ancla: 'nesting-nuevo', ir: { tab: 'config', sub: 'nesting' }, accion: 'ver',
+    texto: 'Conviene tener dos o tres: «estándar», «apretado» para ahorrar tela y «sin giro» para telas con pelo o rayas.',
+    nota: 'Girar una pieza en una tela con dirección la arruina.' },
+  { ancla: 'nesting-nuevo', accion: 'ver',
+    texto: 'En la otra pestaña están los GRUPOS DE TIZADA: qué molderías se arman juntas en la misma mesa.' },
+]);
+
+const EX_FUENTES = R('ex-fuentes', 'config', 'Fuentes', 'Con qué tipografía salen los nombres y números.', 2, [
+  { ancla: 'cfg-fuentes', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Acá se cargan las tipografías con las que se estampan los nombres y los números.',
+    nota: 'El sistema las dibuja como curvas: sale igual aunque la máquina no tenga la fuente instalada.' },
+  { ancla: 'fuentes-probar', ir: { tab: 'config', sub: 'fuentes' }, accion: 'ver',
+    texto: 'Escribiendo acá se ve cómo queda ese texto en todas las fuentes cargadas.',
+    nota: 'Sirve para elegir sin generar una tizada de prueba. También avisa si a la fuente le falta alguna letra.' },
+]);
+
+const EX_PERFIL = R('ex-perfil', 'config', 'Perfil de color', 'Por qué los colores salen como salen.', 2, [
+  { ancla: 'cfg-perfil', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'El PERFIL DE COLOR es la traducción entre lo que se ve en pantalla y lo que sale impreso.' },
+  { ancla: 'perfil-card', ir: { tab: 'config', sub: 'perfil' }, accion: 'ver',
+    texto: 'Estos son los perfiles instalados en esta máquina; el marcado es el que se usa por defecto.',
+    nota: 'Si no sabés cuál poner, dejá el que viene: cambiarlo mueve los colores de TODO lo que imprimas.' },
+]);
+
+const EX_USUARIOS = R('ex-usuarios', 'config', 'Usuarios y permisos', 'Quién entra y qué puede hacer.', 2, [
+  { ancla: 'cfg-usuarios', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Acá se define quién usa el sistema y qué puede hacer cada uno.' },
+  { ancla: 'usuarios-tabs', ir: { tab: 'config', sub: 'usuarios' }, accion: 'ver',
+    texto: 'Son tres listas: los USUARIOS (las personas), los ROLES (paquetes de permisos) y los PERMISOS que existen.',
+    nota: 'Conviene armar primero el rol y después las personas.' },
+]);
+
+const EX_PUBLICACION = R('ex-publicacion', 'config', 'Publicación', 'Cómo viajan las mejoras al sistema de internet.', 2, [
+  { ancla: 'cfg-publicacion', ir: { tab: 'config', sub: 'dashboard' }, accion: 'ver',
+    texto: 'Hay dos sistemas: éste, el del taller, y el que está publicado en internet. Acá se manda lo de esta máquina al de internet.' },
+  { ancla: 'pub-cuando', ir: { tab: 'config', sub: 'publicacion' }, accion: 'ver',
+    texto: 'Se elige cuándo se instala: ahora, en un rato, o un día y hora exactos.',
+    nota: 'El corte dura alrededor de un minuto y, si algo falla, el servidor vuelve solo a la versión anterior. Los moldes y pedidos no viajan.' },
+]);
+
+// ── ÁREA · DENTRO DEL PEDIDO ───────────────────────────────────────────────────────────────────
+const EX_EDITAR_DISENO = R('ex-editar-diseno', 'pedido', 'Editar diseño', 'Mover, agrandar o pintar algo del arte.', 3, [
+  { ancla: 'editar-diseno', ir: { tab: 'pedidos', paso: 'arte' }, accion: 'ver',
+    texto: 'Con «Editar diseño» se acomoda lo que el arte trae como editable: un escudo, un logo, un objeto suelto.',
+    nota: 'No cambia el archivo del diseñador: se guarda una versión aparte.' },
+  { ancla: 'edit-alcance', accion: 'ver',
+    texto: 'Lo más importante es el ALCANCE: si el cambio va a todo el rango de talles o sólo al que estás viendo.' },
+  { ancla: 'edit-color', accion: 'ver',
+    texto: 'También se le puede cambiar el color en CMYK, figura por figura.',
+    nota: 'Si el control está apagado, ese objeto pinta desde adentro (una imagen) y no se puede recolorear.' },
+  { ancla: 'edit-agregar', accion: 'ver',
+    texto: 'Y con «Agregar objeto» se suma algo propio (PNG, SVG, PDF o AI) y se coloca sobre una pieza.' },
+]);
+// Es adentro de un pedido en curso: sin arte cargado no hay nada que mostrar (ver `bloqueo`).
+EX_EDITAR_DISENO.requiere = (E) => E.pedido.artesCargadas > 0 ? null
+  : 'Es dentro de un pedido con el arte ya cargado: hacé primero «Armar una tizada».';
+
+const EX_MI_MOLDE = R('ex-mi-molde', 'pedido', 'Mis artículos', 'Traer un molde propio al pedido.', 2, [
+  { ancla: 'pedido-tabs', ir: { tab: 'pedidos', paso: 'moldes' }, accion: 'ver',
+    texto: 'En el pedido hay dos orígenes: el CATÁLOGO (los moldes compartidos) y MIS ARTÍCULOS (los que subiste vos).' },
+  { ancla: 'pedido-subir-molde', accion: 'ver',
+    texto: 'Con esto se sube un molde propio sin pasar por la configuración del catálogo.',
+    nota: 'Sólo hay que decirle qué es cada pieza; después ya se puede pedir.' },
+  { ancla: 'pedido-tabs', accion: 'ver',
+    texto: 'Un artículo propio se elige ENTERO: no tiene variables, se generan todas sus piezas.' },
+]);
+
+export const RECORRIDOS = [
+  EX_MOLDERIA, EX_VARIABLES, EX_PLANTILLA, EX_PLANILLA_MOLDE, EX_NESTING_MOLDE, EX_TELAS_MOLDE,
+  EX_BORDE, EX_ETIQUETA, EX_EDITABLE, EX_NOMBRES,
+  EX_MOLDERIAS, EX_PLANILLAS, EX_REGLAS, EX_TELAS, EX_NESTING, EX_FUENTES, EX_PERFIL,
+  EX_USUARIOS, EX_PUBLICACION,
+  EX_EDITAR_DISENO, EX_MI_MOLDE,
 ];
 
 export const AREAS = [
-  { id: 'moldes', titulo: 'Crear y preparar un molde', desc: 'Desde subir la moldería hasta dejarla lista', icono: 'productos' },
-  { id: 'ajustes', titulo: 'Ajustes del molde', desc: 'Telas, etiqueta, borde y demás', icono: 'config' },
-  { id: 'pedido', titulo: 'Armar una tizada', desc: 'El uso de todos los días', icono: 'pedidos' },
-  { id: 'config', titulo: 'Configuración del sistema', desc: 'Telas, planillas, usuarios', icono: 'config' },
+  { id: 'molde', titulo: 'El molde y sus ajustes', desc: 'Moldería, variables, telas, etiqueta…' },
+  { id: 'config', titulo: 'Configuración del sistema', desc: 'Planillas, reglas, telas, nesting, usuarios…' },
+  { id: 'pedido', titulo: 'Dentro del pedido', desc: 'Editar el diseño, mis artículos' },
 ];
 
+// El paso a paso primero; después los recorridos explicativos.
+export const GUIAS = [ARMAR_TIZADA, ...RECORRIDOS];
+
 export const guiaPorId = (id) => GUIAS.find(g => g.id === id) || null;
+
+/** La única guía PASO A PASO: la que ofrece el botón de Ayuda como acción principal. */
+export const GUIA_PRINCIPAL = ARMAR_TIZADA;
+
+/**
+ * ¿Falta algo para poder arrancar? Devuelve el texto a mostrar, o null.
+ * Impide que un recorrido del PEDIDO saque al usuario de su pedido para dejarlo en una pantalla
+ * vacía (ver la regla de `requiere` arriba).
+ */
+export function bloqueo(g, E) {
+  if (!E || E.cargado === false || typeof g.requiere !== 'function') return null;
+  try { return g.requiere(E) || null; } catch { return null; }
+}

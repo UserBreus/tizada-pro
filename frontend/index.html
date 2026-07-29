@@ -1,13 +1,58 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>USER PRO · Motor de Sublimación</title>
+    <style>
+      /* Aviso de arranque: se ve SOLO si la app no llegó a montarse (ver el script del final). */
+      #arranque{position:fixed;inset:0;display:none;place-items:center;background:#0a0d12;
+        color:#e4e4e7;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;z-index:99999;text-align:center}
+      #arranque .caja{max-width:460px;padding:26px 28px;border:1px solid rgba(255,255,255,.12);border-radius:14px;
+        background:rgba(255,255,255,.03)}
+      #arranque h1{margin:0 0 10px;font-size:16px;color:#00d8f5}
+      #arranque p{margin:0 0 8px;color:#a1a1aa}
+      #arranque button{margin-top:14px;padding:9px 18px;border-radius:9px;border:none;cursor:pointer;
+        background:#00d8f5;color:#04222b;font-weight:700;font-size:13px}
+      #arranque code{color:#e4e4e7;background:rgba(255,255,255,.07);padding:1px 6px;border-radius:5px;font-size:12px}
+    </style>
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- ── SI LA APP NO CARGA, DECIRLO ────────────────────────────────────────────────────────
+         El bundle de JS puede no llegar por un problema de RED, no de la aplicación: pasó con
+         `ERR_QUIC_PROTOCOL_ERROR` (Chrome pide por HTTP/3 y la transferencia se corta, aunque el
+         servidor haya respondido 200). Sin esto, el usuario se queda mirando una PANTALLA EN
+         BLANCO sin ninguna explicación y sin saber que alcanza con recargar. -->
+    <div id="arranque">
+      <div class="caja">
+        <h1>No se pudo cargar la aplicación</h1>
+        <p>El programa está bien: lo que falló fue la <b>descarga</b> de los archivos.
+           Casi siempre se arregla recargando.</p>
+        <p>Si vuelve a pasar seguido, avisá: puede ser el <code>HTTP/3</code> del servidor.</p>
+        <button onclick="location.reload(true)">Recargar</button>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Si a los 12 s el <div id="root"> sigue vacío, la app no montó: se muestra el aviso.
+      // 12 s es holgado a propósito — una conexión lenta NO tiene que disparar el cartel.
+      (function () {
+        var t = setTimeout(function () {
+          var r = document.getElementById('root');
+          if (!r || r.childElementCount === 0) document.getElementById('arranque').style.display = 'grid';
+        }, 12000);
+        // Un error al CARGAR un script/estilo es concluyente: no hace falta esperar los 12 s.
+        window.addEventListener('error', function (e) {
+          if (e && e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+            clearTimeout(t);
+            document.getElementById('arranque').style.display = 'grid';
+          }
+        }, true);
+      })();
+    </script>
   </body>
 </html>

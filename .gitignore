@@ -48,3 +48,6 @@ _tarea.xml
 
 # Secretos de APIs externas (api-key de telas del WMS) — NUNCA versionar
 config_externo.json
+
+# clave de sesion del servidor publicado (se genera sola, NO se versiona)
+secret.txt

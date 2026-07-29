@@ -3,7 +3,7 @@ MOTOR DE PEDIDOS — biblioteca central de la app web.
 Alta de plantilla, validación de arte, catálogo de fuentes, generación
 del pedido (texto en curvas) y validaciones de salida.
 """
-import io, os, json, time, math, glob, hashlib, base64
+import io, os, json, time, math, glob, hashlib, base64, unicodedata
 import numpy as np
 import pymupdf as fitz
 import pikepdf
@@ -39,6 +39,45 @@ PIEZAS_SIN_ROTACION = {"Frente", "Espalda"}           # no rotan en el nesting
 PIEZA_PERSONALIZABLE = "Espalda"                       # lleva nombre + número
 MARGEN_MESA_CM = 2.0                                   # margen sugerido por lado
 CAPAS_GUIA = {"guias", "guías", "guides", "Guides", "guia", "guía"}  # se descartan
+
+
+def tokens_pieza(nombre):
+    """Tokens normalizados del nombre de una pieza (minúsculas, sin acentos).
+
+    Vive a nivel de módulo (y no adentro de `generar_pedido`) porque el SERVIDOR necesita la
+    MISMA regla para avisar antes de generar: si la validación usara otra normalización, diría
+    que una opción existe y después el motor no encontraría ninguna pieza."""
+    s = "".join(c for c in unicodedata.normalize("NFKD", str(nombre)) if not unicodedata.combining(c))
+    return [t for t in s.lower().replace("(", " ").replace(")", " ").split() if t]
+
+
+def opciones_soportadas(piezas_nombres, clave, opciones):
+    """¿Qué opciones de un TOGGLE DE PIEZA tiene realmente este molde/variable?
+
+    Devuelve `{opcion: cantidad de piezas que la mencionan}` + la clave especial `"__clave__"`
+    con cuántas piezas mencionan la palabra del toggle (ej. 'manga').
+
+    Para qué: elegir «Larga» en un molde cuyas piezas son «Manga Corta …» las deja AFUERA a
+    todas (`partes_de`) y la prenda sale **sin mangas, en silencio**. Y si las piezas son
+    «Manga Derecha» a secas —sin decir corta ni larga— el toggle no cambia nada: elegir Corta o
+    Larga da lo mismo. En los dos casos hay que avisar ANTES, no generar una tizada mal."""
+    _cl = str(clave or "").strip().lower()
+    out = {"__clave__": 0}
+    if not _cl:
+        return out
+    _ops = [str(o).strip().lower() for o in (opciones or []) if str(o).strip()]
+    _toks = {o: o.split() for o in _ops}
+    for o in _ops:
+        out[o] = 0
+    for p in piezas_nombres or []:
+        tset = set(tokens_pieza(p))
+        if _cl not in tset:
+            continue
+        out["__clave__"] += 1
+        for o in _ops:
+            if all(t in tset for t in _toks[o]):
+                out[o] += 1
+    return out
 
 
 
@@ -1311,13 +1350,30 @@ def nombres_normalizados(asignaciones):
     for _g, _idxs in _por_gen.items():
         _vals = [_raw[_i] for _i in _idxs]
         if len(set(_vals)) == len(_vals):
+            # Todos distintos: se respetan TAL CUAL, incluido el número que puso el usuario.
             for _i in _idxs:
                 nombres[_i] = _raw[_i]
-        elif len(_idxs) == 1:
-            nombres[_idxs[0]] = _g
-        else:
-            for _k, _i in enumerate(_idxs, 1):
-                nombres[_i] = f"{_g} {_k}"
+            continue
+        # ── HAY REPETIDOS EN ESTE GENÉRICO ────────────────────────────────────────────────────
+        # ⚠️ ANTES SE RENUMERABA TODO EL GENÉRICO 1..N POR ORDEN DE ÍNDICE. Eso REESCRIBÍA
+        # nombres que el usuario ya había puesto y bien: la pieza que él llamó «Frente 2» podía
+        # pasar a ser «Frente 1» y viceversa — los nombres se mudaban de pieza. Y si el genérico
+        # quedaba con una sola pieza, se le borraba el número («Frente 2» → «Frente»).
+        # Ahora: **lo que ya es único se respeta**, y sólo se desambiguan los repetidos, dándoles
+        # el primer número LIBRE. El nombre que escribiste no te lo toca nadie.
+        _libres = {v for v in _vals if _vals.count(v) == 1}
+        _usados = set(_libres)
+        for _i in _idxs:
+            _v = _raw[_i]
+            if _v in _libres:
+                nombres[_i] = _v            # único: intacto
+                continue
+            _base = _gen_pz(_v) or _v
+            _n = 1
+            while f"{_base} {_n}" in _usados:
+                _n += 1
+            nombres[_i] = f"{_base} {_n}"
+            _usados.add(nombres[_i])
     return nombres
 
 
@@ -3108,11 +3164,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             if isinstance(_info, dict) and _info.get("pieza_idx") is not None:
                 _idx_a_nombre.setdefault(int(_info["pieza_idx"]), _nom)
                 break
-    import unicodedata as _ud
-    def _toks_pieza(nombre):
-        """Tokens normalizados del nombre de una pieza (minúsculas, sin acentos)."""
-        s = "".join(c for c in _ud.normalize("NFKD", str(nombre)) if not _ud.combining(c))
-        return [t for t in s.lower().replace("(", " ").replace(")", " ").split() if t]
+    _toks_pieza = tokens_pieza      # (vive a nivel de módulo: lo comparte la validación del pedido)
 
     def partes_de(prenda):
         """Piezas que entran en una prenda según sus TOGGLES DE PIEZA (generalización de la
