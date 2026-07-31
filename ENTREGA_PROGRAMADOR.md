@@ -41,9 +41,11 @@ si el alcance importa para una decisión, preguntá.
 |---|---|---|
 | **Python** | 3.12 | todo el backend y el motor |
 | **Node.js + npm** | 24 / 11 | compilar la pantalla (React + Vite) |
-| **SQL Server** | — | base de datos (catálogo, usuarios, moldes) |
-| **ODBC Driver for SQL Server** | 17 o 18 | lo usa `pyodbc` |
+| **SQL Server** | — | base de datos (catálogo, usuarios, moldes). **Opcional para desarrollar**: sin base el sistema arranca igual y no pide login |
+| **ODBC Driver for SQL Server** | 17 o 18 | lo usa `pyodbc` (sólo si vas a usar la base) |
 | **Ghostscript** | 10.x (opcional) | sólo para unificar RGB/CMYK mezclados |
+
+> Si usás `INSTALAR.bat` (ver 3.b) no hace falta instalar nada de esto a mano: lo hace él.
 
 Sistema operativo: se desarrolla y corre en **Windows**. Hay partes específicas de Windows
 (el Job Object que ata los procesos hijos al servidor, en `servidor.py`).
@@ -89,6 +91,58 @@ Abrí `http://localhost:8050`.
 
 En VS Code hay tareas listas (`.vscode/tasks.json`): *Servidor TIZADA PRO (8050)* — que además
 libera el puerto si quedó ocupado —, *Recompilar el front (dist)* y *Parar el servidor*.
+
+---
+
+## 3.b Instalación automática (la vía recomendada)
+
+Los pasos de arriba son la instalación "a mano", para desarrollar. Si lo que querés es **dejarlo
+andando de una**, el proyecto ya trae su instalador:
+
+**`INSTALAR.bat`** — clic derecho → *Ejecutar como administrador* (o doble clic: pide los permisos
+solo). Hace todo sin preguntar nada:
+
+- instala **Python** si no está,
+- instala las dependencias,
+- instala **Ghostscript** y prepara los perfiles de color,
+- genera la clave de sesión,
+- crea la **base de datos y sus tablas**,
+- crea el **usuario `admin` con una contraseña generada y te la muestra**,
+- deja el arranque automático configurado.
+
+Deja el detalle de todo en `instalacion_log.txt`, al lado del ejecutable.
+
+```bash
+py instalar_servidor.py --simular     # NO toca nada: dice paso por paso qué haría
+py instalar_servidor.py --sin-nginx   # no toca la configuración de nginx
+```
+
+> El `--simular` conviene la primera vez: muestra exactamente qué va a hacer sin tocar la máquina.
+
+---
+
+## 3.c Cómo se entra al sistema (usuarios)
+
+Esto es lo que más confunde al principio:
+
+**Sin base de datos, el sistema NO pide usuario ni contraseña.** Si `pyodbc` no puede conectar, el
+módulo de usuarios no se registra (`_USUARIOS_ON = False`), el sistema avisa por consola
+(`[usuarios] API deshabilitada (¿base MSSQL sin levantar?)`) y **entrás directo**. El catálogo cae
+a los archivos JSON de `datos/`. Para desarrollar y probar, alcanza con esto: no hace falta
+instalar SQL Server.
+
+**Con base de datos, sí hay login.** El usuario inicial lo crea `auth.bootstrap()`, que corre desde
+el instalador:
+
+- usuario: **`admin`**
+- contraseña: **se genera al azar y se muestra UNA sola vez** al terminar de instalar (también
+  queda en `instalacion_log.txt`). No hay un `admin/admin` por defecto, a propósito.
+
+Desde la pantalla, ese admin crea el resto de los usuarios y les asigna **roles y permisos**
+(el catálogo de permisos está en `auth.py`, arriba de todo; el rol `admin` es de sistema y no se
+puede borrar, para no quedarse sin quién administre).
+
+Si te quedaste afuera, se puede volver a generar el admin corriendo el bootstrap contra la base.
 
 ---
 
