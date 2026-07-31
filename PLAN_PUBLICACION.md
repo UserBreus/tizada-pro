@@ -372,8 +372,44 @@ actualizaciones se hacen a mano hasta que entre la Etapa 2.
   cerrarlo**.
 - El servidor no tiene auto-reload: toda subida implica reiniciar el proceso (por eso el rollback).
 
+## 6.bis CAMINO ALTERNATIVO ELEGIDO POR EL USUARIO (2026-07-30): **desde su propia conexión, con IP fija**
+
+En vez del EC2, el usuario decidió publicarlo **desde la PC del taller**, aprovechando que su
+internet tiene **IP fija**. Decisiones suyas: **sin dominio** (se entra por la IP) · puerto público
+**8443** · la IP local se fija con **reserva en el router**.
+
+**Lo que quedó hecho y verificado (2026-07-30):**
+
+| Pieza | Qué es |
+|---|---|
+| `PUBLICAR-EN-INTERNET.bat` | Arranca en modo `publicado`. Genera y guarda la clave de sesión la 1ª vez (`config_publicado.env`, gitignoreado — sin clave fija cada reinicio desloguea a todos). Toma el certificado si existe. |
+| `GENERAR-CERTIFICADO.bat [IP]` | Certificado autofirmado (10 años) con **openssl, el que viene con Git** — no hace falta instalar nada. SAN: `localhost`, `127.0.0.1`, `192.168.0.120` y la IP pública si se le pasa. |
+| `servidor.py` (`__main__`) | Si están `TIZADA_TLS_CERT`/`TIZADA_TLS_KEY`, el **TLS lo termina el propio servidor con cheroot** (waitress NO habla TLS). Sin ellos, waitress como antes. |
+| `servidor.py` (arranque) | **ProxyFix ya NO se aplica cuando hay TLS propio**: sin un proxy delante, los `X-Forwarded-*` los manda el cliente y son falsificables (dejaba mentir la IP de origen y el esquema). |
+
+**Verificado:** `https://localhost:8443/api/salud` y `https://192.168.0.120:8443/api/salud` responden
+`ok=True`; la app carga por HTTPS; `/api/productos` sigue exigiendo sesión (401); un `http://` contra
+el puerto seguro se rechaza. Certificado con los SAN correctos (`openssl x509 -ext subjectAltName`).
+
+**Lo que le queda al usuario (no lo puedo hacer yo: son cambios de seguridad del sistema y del router):**
+1. Abrir el **8443** en el Firewall de Windows (PowerShell **como administrador**).
+2. En el router: **reenviar 8443 → 192.168.0.120:8443** y **reservar** esa IP para la MAC de la PC
+   (hoy es DHCP: si cambia, el reenvío deja de funcionar).
+3. Regenerar el certificado con su IP pública: `GENERAR-CERTIFICADO.bat <IP-PUBLICA>`.
+
+⚠️ **NO correr los dos servidores a la vez** (el de siempre en 8050 y el publicado en 8443): son dos
+procesos escribiendo los MISMOS `datos/`. El lock del catálogo es por proceso, no entre procesos.
+⚠️ Y esto **no** son los dos ambientes de §2: es el MISMO sistema abierto a internet. Lo que toque
+alguien de afuera en las pantallas de setup, se lo toca al taller.
+⚠️ Al quedar expuesto a internet van a llegar **escaneos automáticos** al login: contraseñas largas
+en todos los usuarios. La base MSSQL **no** se expone (sólo el 8443).
+
 ## 7. ESTADO
 
+- **2026-07-30:** el usuario eligió publicar **desde su propia conexión con IP fija** (ver §6.bis),
+  no el EC2. Hecho y verificado el lado del programa (modo publicado + HTTPS propio con cheroot +
+  certificado autofirmado); falta lo que depende de él: firewall, router y la IP pública en el
+  certificado.
 - **2026-07-22:** plan escrito y decidido el VPS Windows.
 - **2026-07-23:** **Etapa 2 COMPLETA** (motor + pantalla, verificados de punta a punta). Falta la
   ÚLTIMA instalación a mano en el servidor, la que lleva el receptor. Después: un botón.

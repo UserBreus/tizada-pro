@@ -160,6 +160,24 @@ function Icon({ name, className = "", style }) {
 }
 
 // Función helper para desglosar el progreso del backend y calcular porcentaje + texto detallado
+// ALTURA DE LA LETRA vs TAMAÑO DE FUENTE. El tamaño de la etiqueta se configura en MILÍMETROS DE
+// LETRA (una mayúscula de 3 mm mide 3 mm en la tela), pero `font-size` es el **em**: el cuerpo
+// entero, con lugar para las colas de la «p». En Arial Bold una mayúscula ocupa 0,716 del em, así
+// que hay que dividir por eso — el motor hace lo mismo con la proporción real de la fuente
+// (`FuenteCurvas.size_para_alto`). Sin esto el visor mostraría la etiqueta un 28 % más chica que
+// la tizada, y la ley del sistema es que se vean IGUAL.
+const CAP_RATIO_ETQ = 0.716;
+
+// El DIBUJO de una mesa del arte se pide por URL (`m.img`), no viene dentro del JSON. Un arte de
+// vector pesado son 1098 KB por mesa (11,6 MB en total) que el navegador tenía que parsear y
+// rasterizar de golpe: el paso Arte tardaba casi un minuto. Pedido así, el navegador baja sólo las
+// mesas que muestra, en paralelo, y las cachea él (la URL lleva la firma del archivo).
+// Sigue siendo el VECTOR, no una foto: en pantalla se ve el diseño de verdad, nítido al acercarse
+// e igual a lo que sale en la tizada.
+// No hay versión "de espera" en miniatura a propósito: se muestra el diseño de verdad o nada,
+// Tardar es aceptable; mostrar una versión en baja calidad no.
+const hrefMesa = (m) => (m && m.img ? m.img : null);
+
 const getProgresoDetalle = (progresoStr, estado) => {
   if (estado === 'en cola') {
     return { pct: 5, texto: 'Esperando en cola de procesamiento...' };
@@ -201,11 +219,24 @@ const getProgresoDetalle = (progresoStr, estado) => {
     const nums = valParts[0].split('/');
     const hechas = parseInt(nums[0], 10) || 0;
     const total = parseInt(nums[1], 10) || 1;
-    const pct = 80 + Math.round((hechas / total) * 20);
+    // Hasta 85% y NO 100%: después de las previews todavía falta preparar las hojas para el RIP,
+    // que es lo que más tarda. Mostrar 100% ahí hacía que pareciera colgado varios minutos.
+    const pct = 70 + Math.round((hechas / total) * 15);
     const detalle = valParts[1] ? ` (Tela ${valParts[1]})` : '';
-    return { 
-      pct, 
+    return {
+      pct,
       texto: `Generando vistas previas de impresión: página ${hechas} de ${total}${detalle}`
+    };
+  }
+
+  // Preparar cada hoja para el RIP: la parte más lenta del pedido (minutos con hojas grandes).
+  if (fase === 'rip') {
+    const nums = String(valor).split('/');
+    const hechas = parseInt(nums[0], 10) || 0;
+    const total = parseInt(nums[1], 10) || 1;
+    return {
+      pct: 85 + Math.round((hechas / total) * 13),
+      texto: `Preparando la hoja ${hechas} de ${total} para el RIP… (es el paso más lento)`
     };
   }
 
@@ -1931,6 +1962,9 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
   const _domVB = () => {
     const el = artWrapRef.current && artWrapRef.current.querySelector('svg');
     const n = ((el && el.getAttribute('viewBox')) || '0 0 100 100').split(/\s+/).map(Number);
+    // Si el viewBox del DOM viniera roto (no numérico), el zoom/pan propagaría la basura a cada
+    // encuadre siguiente. Se cae a un encuadre neutro en vez de arrastrar el error.
+    if (!n.slice(0, 4).every(Number.isFinite) || !(n[2] > 0) || !(n[3] > 0)) return { x: 0, y: 0, w: 100, h: 100 };
     return { x: n[0], y: n[1], w: n[2], h: n[3] };
   };
   const _artZoom = (mx, my, f) => setArtVB(prev => {
@@ -2039,10 +2073,19 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
               labels.push({ p, nombre: p.nombre, ...chosen });
             }
             const all = [...ocupados, ...labels.map(l => l.r)];
-            const minX = Math.min(...all.map(a => a.x)), minY = Math.min(...all.map(a => a.y));
-            const maxX = Math.max(...all.map(a => a.x + a.w)), maxY = Math.max(...all.map(a => a.y + a.h));
             const PAD = 6;
-            const vb = `${minX - PAD} ${minY - PAD} ${(maxX - minX) + 2 * PAD} ${(maxY - minY) + 2 * PAD}`;
+            // ⚠️ `Math.min()` SIN argumentos devuelve Infinity (y `Math.max()`, -Infinity). Con el
+            // molde todavía sin piezas dibujadas —arte recién elegido, variable que aún no resuelve—
+            // el viewBox salía «Infinity Infinity -Infinity -Infinity»: el navegador DESCARTA el
+            // <svg> entero («attribute viewBox: Expected number») y el paso Arte quedaba trancado,
+            // en blanco y sin explicación. Sin piezas se usa un encuadre neutro y la pantalla sigue
+            // viva (el cartel de «Cargando el molde…» hace su trabajo).
+            const _fin = (v, alt) => (Number.isFinite(v) ? v : alt);
+            const minX = _fin(Math.min(...all.map(a => a.x)), 0);
+            const minY = _fin(Math.min(...all.map(a => a.y)), 0);
+            const maxX = _fin(Math.max(...all.map(a => a.x + a.w)), 100);
+            const maxY = _fin(Math.max(...all.map(a => a.y + a.h)), 100);
+            const vb = `${minX - PAD} ${minY - PAD} ${Math.max(1, (maxX - minX) + 2 * PAD)} ${Math.max(1, (maxY - minY) + 2 * PAD)}`;
             const _gen = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
             const drop = (pzName) => (e) => {
               e.preventDefault(); const mesa = e.dataTransfer.getData('mesa'); if (!mesa) return;
@@ -2058,6 +2101,13 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                 preserveAspectRatio="xMidYMid meet"
                 onClick={() => { if (telaModo) onTelaVacio && onTelaVacio(); }}
                 style={{ width: '100%', height: '100%', display: 'block', userSelect: 'none' }}>
+                {/* Sin piezas para dibujar (la prenda todavía se está resolviendo): se dice, en vez
+                    de dejar un lienzo vacío que parece que la pantalla se colgó. */}
+                {!piezas.length && (
+                  <text x="50" y="50" textAnchor="middle" style={{ fontSize: 5, fontFamily: 'sans-serif', fill: 'rgba(255,255,255,0.45)' }}>
+                    Preparando las piezas de esta prenda…
+                  </text>
+                )}
                 {piezas.map((p) => {
                   const pzName = p.nombre;
                   const isSelected = selectedPiezaMapeo === pzName;
@@ -2091,7 +2141,9 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       <defs><clipPath id={`clipmapv-${p.idx}`}><path d={p.path_svg} /></clipPath></defs>
                       {/* RENDER REAL del motor (la pieza tal cual sale en la tizada). Si está, NO se re-dibuja nada. */}
                       {pv && <image href={`data:image/svg+xml;base64,${pv.svg}`} x={ox} y={oy} width={p.pw} height={p.ph} preserveAspectRatio="none" />}
-                      {!pv && mappedMesa && !cargando && <image href={mappedMesa.svg ? `data:image/svg+xml;base64,${mappedMesa.svg}` : `data:image/png;base64,${mappedMesa.thumb}`} x={imgX} y={imgY} width={imgW} height={imgH} preserveAspectRatio="none" clipPath={`url(#clipmapv-${p.idx})`} opacity={0.9} />}
+                      {!pv && mappedMesa && !cargando && <>
+                        <image href={hrefMesa(mappedMesa)} x={imgX} y={imgY} width={imgW} height={imgH} preserveAspectRatio="none" clipPath={`url(#clipmapv-${p.idx})`} opacity={0.9} />
+                      </>}
                       {/* BORDE DE CORTE REAL (WYSIWYG): igual que el motor — trazo 2× recortado al EXTERIOR del
                           contorno, así se ve solo la mitad de afuera, con el color/grosor configurado del molde. */}
                       {!pv && !telaModo && bordeConfig?.activo && (() => {
@@ -2128,11 +2180,20 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                         const txt = [ec.mostrar?.talle && (talleRef || '2XL'), ec.mostrar?.pieza && pzName, ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-');
                         if (!txt) return null;
                         const pxmm = p.h_cm ? p.ph / (p.h_cm * 10) : (p.w_cm ? p.pw / (p.w_cm * 10) : 0.033);
-                        const fs = Math.max(0.6, (ec.size_mm || 3) * pxmm);
+                        const fs = Math.max(0.6, (ec.size_mm || 3) * pxmm / CAP_RATIO_ETQ);   // mm de LETRA -> em
                         const ox = p.px - p._dx, oy = p.py - p._dy;
                         const lx = ox + (pos.rx != null ? pos.rx : 0.5) * p.pw, ly = oy + (pos.ry != null ? pos.ry : 0.92) * p.ph;
                         const c = ec.color || [0.15, 0.15, 0.15, 0.3];
-                        const rgb = `rgb(${Math.round(255 * (1 - (c[0] || 0)) * (1 - (c[3] || 0)))},${Math.round(255 * (1 - (c[1] || 0)) * (1 - (c[3] || 0)))},${Math.round(255 * (1 - (c[2] || 0)) * (1 - (c[3] || 0)))})`;
+                        const _cmyk2rgb = (k) => `rgb(${Math.round(255 * (1 - (k[0] || 0)) * (1 - (k[3] || 0)))},${Math.round(255 * (1 - (k[1] || 0)) * (1 - (k[3] || 0)))},${Math.round(255 * (1 - (k[2] || 0)) * (1 - (k[3] || 0)))})`;
+                        const rgb = _cmyk2rgb(c);
+                        // EL HALO DE LA ETIQUETA, igual que la tizada: acá no se dibujaba (la tizada sí lo
+                        // hace), así que el arte mostraba una etiqueta más finita de la que salía impresa.
+                        // Va en MILÍMETROS reales y en su propia capa, DETRÁS de todo el texto (si se usara
+                        // `paint-order` el navegador lo pinta letra por letra y se cruzan los contornos).
+                        const _bwArte = ec.borde_activo ? Math.max(0.02, (ec.borde_mm || 1) * pxmm) : 0;
+                        const _stlBordeArte = { pointerEvents: 'none', fontFamily: 'sans-serif', fill: 'none',
+                          stroke: _cmyk2rgb(ec.borde_color || [0.01, 0.01, 0.01, 0.05]), strokeWidth: _bwArte,
+                          strokeLinejoin: 'round', strokeLinecap: 'round' };
                         const pAlign = pos.align || ec.align || 'centro';
                         const anchor = pAlign === 'izquierda' ? 'start' : pAlign === 'derecha' ? 'end' : 'middle';
                         // TEXT-ON-PATH: si la etiqueta tiene posición COLOCADA (`t`), el texto SIGUE la curva
@@ -2151,13 +2212,23 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                           return (
                             <g clipPath={`url(#clipmapv-${p.idx})`}>
                               <path id={`arteetq-${p.idx}`} d={seg.d} fill="none" stroke="none" />
-                              <text fontSize={fs} fontWeight="800" textAnchor={anchor} fill={rgb} style={{ pointerEvents: 'none', fontFamily: 'sans-serif' }}>
+                              {ec.borde_activo && (
+                                <text fontSize={fs} fontWeight="800" textAnchor={anchor} style={_stlBordeArte}>
+                                  <textPath href={`#arteetq-${p.idx}`} startOffset={so}>{txt}</textPath>
+                                </text>
+                              )}
+                              <text fontSize={fs} fontWeight="800" textAnchor={anchor} fill={rgb} style={{ pointerEvents: 'none', fontFamily: 'sans-serif', stroke: 'none' }}>
                                 <textPath href={`#arteetq-${p.idx}`} startOffset={so}>{txt}</textPath>
                               </text>
                             </g>
                           );
                         }
-                        return <text x={lx} y={ly} textAnchor={anchor} fontSize={fs} fontWeight="800" fill={rgb} clipPath={`url(#clipmapv-${p.idx})`} style={{ pointerEvents: 'none', fontFamily: 'sans-serif' }}>{txt}</text>;
+                        return (
+                          <g clipPath={`url(#clipmapv-${p.idx})`}>
+                            {ec.borde_activo && <text x={lx} y={ly} textAnchor={anchor} fontSize={fs} fontWeight="800" style={_stlBordeArte}>{txt}</text>}
+                            <text x={lx} y={ly} textAnchor={anchor} fontSize={fs} fontWeight="800" fill={rgb} style={{ pointerEvents: 'none', fontFamily: 'sans-serif', stroke: 'none' }}>{txt}</text>
+                          </g>
+                        );
                       })()}
                     </g>
                   );
@@ -2231,7 +2302,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                   <div style={{ width: '100%', height: 96, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                     {_eds.length ? (
                       <svg viewBox={`0 0 ${_W} ${_H}`} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: '100%', display: 'block', pointerEvents: 'none' }}>
-                        <image href={m.svg ? `data:image/svg+xml;base64,${m.svg}` : `data:image/png;base64,${m.thumb}`} x={0} y={0} width={_W} height={_H} preserveAspectRatio="none" />
+                        <image href={hrefMesa(m)} x={0} y={0} width={_W} height={_H} preserveAspectRatio="none" />
                         {_eds.map(o => (<image key={o.nombre} href={o.href} x={o.x} y={o.y} width={o.w} height={o.h} preserveAspectRatio="none" />))}
                       </svg>
                     ) : (
@@ -2879,7 +2950,12 @@ export default function App() {
     if (telaAvisoT.current) clearTimeout(telaAvisoT.current);
     telaAvisoT.current = setTimeout(() => setTelaAviso(''), 3200);
   };
-  const [telasFaltantes, setTelasFaltantes] = useState({});                        // {pid: nº de piezas sin tela} → bloquea avanzar a la planilla
+  // Piezas (nombre genérico) que el visor mostró de cada ítem del pedido: `${diseño}|${molde}|${variable}`.
+  // Se guardan LAS PIEZAS, no «cuántas faltan»: el faltante se calcula derivado de las telas de ese
+  // momento. Guardar el número lo dejaba PEGADO — decía «faltan 4 piezas sin tela» con todas
+  // asignadas, porque el contador viejo sólo se recalculaba al volver a ese ítem y su clave ni
+  // siquiera distinguía el DISEÑO (dos diseños del mismo molde se pisaban el número).
+  const [piezasPorItem, setPiezasPorItem] = useState({});
   const [trabajoId, setTrabajoId] = useState(null);
   const [trabajoEstado, setTrabajoEstado] = useState(null);
   // Avance del wizard guardado (para no perderlo al recargar la página). Se lee
@@ -2908,7 +2984,7 @@ export default function App() {
   const [disenoMoldes, setDisenoMoldes] = useState(_wiz.disenoMoldes || {}); // { [disenoId]: [moldId...] } — derivado de las variables elegidas (el molde queda por detrás)
   const [disenoVars, setDisenoVars] = useState(_wiz.disenoVars || {}); // { [disenoId]: [claveVariable...] } — VARIABLE-FIRST: lo que se elige en el paso 1
   const [disenoActivo, setDisenoActivo] = useState(_wiz.disenoActivo || ''); // diseño que se está editando (paso 2)
-  const [asignDiseno, setAsignDiseno] = useState('todos'); // a qué diseño se asignan los moldes en el paso 1 ('todos' o un id)
+  const [asignDiseno, setAsignDiseno] = useState(''); // el diseño que se está armando en el paso 1 (las prendas que se tocan van SÓLO a ése)
   const [nuevoDisenoNombre, setNuevoDisenoNombre] = useState(''); // input para escribir un diseño nuevo
 
   // Modales y Formularios
@@ -2939,6 +3015,10 @@ export default function App() {
   const [zonaSel, setZonaSel] = useState(0);             // índice de la zona cuyo contenido se edita
   const [etqSeleccion, setEtqSeleccion] = useState(null);
   const [etqNombres, setEtqNombres] = useState({});
+  // De qué MOLDE es el `etqData` que está dibujado ahora. Sin esto no se puede saber si el visor ya
+  // corresponde al ítem que se está mirando: al cambiar de prenda, el ítem cambia ANTES que el
+  // dibujo, y todo lo que se derive del visor en ese instante pertenece al ítem anterior.
+  const [etqPid, setEtqPid] = useState(null);
   const [etqNombreInput, setEtqNombreInput] = useState('');
   // AGREGAR UNA PIEZA AL MOLDE: {origen:'duplicar'|'archivo', idx, punto:{x,y}, medidas} | null
   const [pzNueva, setPzNueva] = useState(null);
@@ -2954,6 +3034,7 @@ export default function App() {
   const pintaTela = useRef({ on: false, modo: 'add' });
   const [modalMapeoOpen, setModalMapeoOpen] = useState(false);
   const [mapeoData, setMapeoData] = useState(null);
+  const [cargaArte, setCargaArte] = useState(null);            // {hechas,total} bajando el dibujo de cada mesa (sin cartel: sólo para saber si terminó)
   const [mapeoCargando, setMapeoCargando] = useState(false);   // cargando el mapeo de OTRA variable (1ª vez) → no dibujar diseños viejos
   const [asignando, setAsignando] = useState(null);            // ventana "Asignando el diseño a cada variante… {hecho,total,talle}" al cargar el arte
   const [mapeandoDiseno, setMapeandoDiseno] = useState(false); // tab Plantilla: false=medidas (default), true=mapear diseño sobre el molde
@@ -3264,6 +3345,35 @@ export default function App() {
     .catch(() => { setYo(null); setAuthOn(false); })
     .finally(() => setAuthListo(true));
   useEffect(() => { recargarYo(); }, []);
+
+  // BAJAR EL DIBUJO DE LAS MESAS (vector) mostrando el avance de verdad. El dibujo ya no viaja
+  // dentro del JSON (ver `hrefMesa`): se pide por URL, así que acá se piden todas de una y se
+  // cuenta cuántas llegaron. Cuando el `<image>` del visor use la misma URL, el navegador ya la
+  // tiene → aparece de golpe, sin pasos intermedios ni versiones en baja calidad.
+  const _mesasImg = React.useMemo(
+    () => [...new Set(((mapeoData || {}).mesas || []).map(m => m.img).filter(Boolean))].join('|'),
+    [mapeoData]);
+  // Cuántas piezas tiene la variable que se está viendo: es el total contra el que se mide el
+  // avance de «Poniendo el diseño sobre el molde…» (el server informa cuántas lleva dibujadas).
+  const piezasDeLaVariable = ((mapeoData || {}).piezas_variable || (mapeoData || {}).piezas || []).length || 8;
+  const _asignEnCurso = React.useRef({});   // dibujos en curso: evita dos pasadas iguales a la vez
+  useEffect(() => {
+    const urls = _mesasImg ? _mesasImg.split('|') : [];
+    if (!urls.length) { setCargaArte(null); return; }
+    let vivo = true, hechas = 0;
+    setCargaArte({ hechas: 0, total: urls.length });
+    const imgs = urls.map(u => {
+      const im = new Image();
+      const fin = () => {
+        if (!vivo) return;
+        hechas += 1;
+        setCargaArte(hechas >= urls.length ? null : { hechas, total: urls.length });
+      };
+      im.onload = fin; im.onerror = fin; im.src = u;
+      return im;
+    });
+    return () => { vivo = false; imgs.forEach(im => { im.onload = null; im.onerror = null; }); };
+  }, [_mesasImg]);
   const cerrarSesion = () => fetch('/api/auth/logout', { method: 'POST' }).then(() => setYo(null));
   // ¿Tengo este permiso? Sin sistema de usuarios (taller de una sola persona) se puede todo, que es
   // como funcionó siempre. Esto SÓLO pinta la UI: quien corta es el server (`_guard_molde`).
@@ -4471,11 +4581,25 @@ export default function App() {
       ? (grande ? 'Procesando el molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando el molde…')
       : 'Subiendo y procesando el archivo…');
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        body: formData
+      // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Con un arte de 8 MB (y más todavía
+      // cuando el sistema esté publicado) el usuario se queda mirando un cartel quieto sin saber
+      // si avanza. Así ve el porcentaje real de envío y después el aviso de que se está procesando.
+      const res = await new Promise((ok, no) => {
+        const x = new XMLHttpRequest();
+        x.open('POST', url);
+        x.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.round(100 * e.loaded / e.total);
+          setProcesando(pct >= 100
+            ? (type === 'plantilla' ? 'Procesando el molde…' : 'Procesando el diseño… (con archivos grandes puede tardar)')
+            : `Subiendo el archivo… ${pct}%`);
+        };
+        x.onload = () => ok({ ok: x.status >= 200 && x.status < 300, status: x.status, text: x.responseText });
+        x.onerror = () => no(new Error('no se pudo subir el archivo (¿se cortó la conexión?)'));
+        x.send(formData);
       });
-      const data = await res.json();
+      let data;
+      try { data = JSON.parse(res.text || '{}'); } catch (e) { data = {}; }
       if (!res.ok) throw new Error(data.error || "Error al procesar archivo");
       
       if (type === 'arte' && data.modo === 'separado' && (!data.auto || !data.aprobado)) {
@@ -6054,12 +6178,12 @@ export default function App() {
     return tpl.length ? tpl[0] : (moldeById(productosCat.activo)?.planilla_template_id || 'plan_default');
   })();
 
-  // Al entrar/cambiar de molde activo, arrancar con ese molde elegido.
-  useEffect(() => {
-    if (productosCat.activo && moldesSeleccionados.length === 0) {
-      setMoldesSeleccionados([productosCat.activo]);
-    }
-  }, [productosCat.activo]);
+  // (Acá vivía un efecto que, con la selección vacía, metía el molde ACTIVO del server como
+  // elegido. Es del flujo viejo —un molde por pedido— y hoy `moldesSeleccionados` se DERIVA de las
+  // variables elegidas en el paso 1 (ver el efecto de `disenoMoldes`). Con «Nuevo pedido» + F5
+  // volvía a aparecer una prenda que nadie eligió: el pedido nuevo arrancaba con un molde del
+  // pedido anterior, y el paso planilla pedía su arte. Se sacó a propósito: si no hay diseños, no
+  // hay moldes.)
 
   const toggleMoldeSeleccion = (id) => {
     setMoldesSeleccionados(prev => {
@@ -6117,10 +6241,23 @@ export default function App() {
           if (Object.keys(o).length) { asignaciones[pid] = asignaciones[pid] || {}; asignaciones[pid][slug] = o; }
         });
       });
+      // LA VARIABLE DE CADA ESPACIO, MOLDE POR MOLDE: `{slug_del_espacio: {pid: clave}}`. En la
+      // fila entra UNA sola `__variante`, así que si el espacio usa dos moldes, para el segundo la
+      // fila llegaba sin variable y el motor generaba TODAS sus piezas. Con esto el server le
+      // devuelve a cada molde la variable que ese espacio eligió en el paso 1.
+      const vars_por_diseno = {};
+      (disenosPedido || []).forEach(d => {
+        const slug = _slugDiseno(d.nombre), m = {};
+        (disenoVars[d.id] || []).forEach(cl => {
+          const v = varByClave(cl);
+          if (v?.moldeId && !m[v.moldeId]) m[v.moldeId] = cl;   // la 1ª elegida para ese molde
+        });
+        if (Object.keys(m).length) vars_por_diseno[slug] = m;
+      });
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
       const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla }) });
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -6189,6 +6326,13 @@ export default function App() {
     }
   }, [activoTab, adminSubView, productosCat.productos.length]);
 
+  // Firma ESTABLE del catálogo: sólo cambia si aparece o desaparece un molde. Va como dependencia
+  // de los efectos que resuelven un molde POR ID (`itemsArteDe`): `productosCat.productos` es un
+  // array NUEVO en cada `fetchProductos()` —se llama en ~28 lugares— así que como dep dispararía
+  // recargas al pedo; pero sin ninguna dep del catálogo, un efecto que corrió ANTES de que
+  // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
+  const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
+
   // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
   // molde por detrás, MÁS cada molde elegido ENTERO. Los moldes propios que sube el usuario no
   // tienen Variables (ese paso se les recorta) → sin esto no tendrían pantalla de arte.
@@ -6219,13 +6363,29 @@ export default function App() {
     const it = itemsArteDe(disenoActivo)[arteIdx] || {};
     const clave = it.clave;
     const id = it.moldeId;
-    if (!id) return;
-    if (id !== productosCat.activo) { handleActivarProducto(id); return; } // al activar, el efecto vuelve a correr
+    if (!id) return;      // el catálogo todavía no llegó → se re-corre cuando llegue (dep `_idsCat`)
+    // ACTIVAR ≠ PODER VER. Se activa (la planilla y la config trabajan con el molde activo) pero
+    // NO se espera: antes había un `return` acá y, si el POST fallaba o el catálogo tardaba en
+    // volver, el paso Arte se quedaba en «Cargando el molde…» PARA SIEMPRE — el bug de «elegís el
+    // molde y el Arte queda vacío hasta que recargás». El visor carga con el `pid` EXPLÍCITO, que
+    // en el server tiene prioridad sobre el activo, así que no depende de esa ida y vuelta.
+    if (id !== productosCat.activo) handleActivarProducto(id);
     if (clave && verVariante !== clave) setVerVariante(clave);   // el visor de arte muestra SOLO las piezas de la variable
     if (!clave && verVariante) setVerVariante(null);             // molde entero → sin filtro de variable
     // Siempre se ve el MOLDE (vacío). El DISEÑO solo si en ESTE pedido ya se subió (para ESTE diseño).
-    if (arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(); else { setMapeoData(null); cargarMoldeOperario(); }
-  }, [activoTab, pedidoPaso, arteIdx, productosCat.activo, arteCargado, disenoActivo, disenoVars, disenoMoldes, verVariante]);
+    if (arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(id); else { setMapeoData(null); cargarMoldeOperario(id); }
+  }, [activoTab, pedidoPaso, arteIdx, productosCat.activo, _idsCat, arteCargado, disenoActivo, disenoVars, disenoMoldes, verVariante]);
+
+  // CADA DISEÑO ES UN ESPACIO PROPIO. Al cambiar de diseño —o de prenda dentro del diseño— se
+  // suelta lo que estaba a medio hacer en el panel de telas: la SELECCIÓN de piezas y la tela
+  // elegida son del ítem que se estaba mirando. Si sobreviven, al entrar al otro diseño aparecen
+  // piezas YA MARCADAS que ahí nadie tocó y la siguiente asignación se las pinta sin querer
+  // (reportado por el usuario: «voy de un diseño a otro y veo las mismas piezas seleccionadas»).
+  // El panel queda abierto a propósito: se asigna diseño por diseño sin tener que reabrirlo.
+  useEffect(() => {
+    setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
+    setTelaBuscarAsig(''); setTelaAviso('');
+  }, [disenoActivo, arteIdx]);
 
   // Render de la miniatura vectorial de un molde (siluetas de las piezas).
   const MoldePreviewSVG = ({ id, height = 90, color = 'rgba(0,216,245,0.85)' }) => {
@@ -6265,12 +6425,23 @@ export default function App() {
     );
   };
 
-  // Carga SOLO el molde (sus piezas) del molde activo → se ve el molde vacío aunque
-  // todavía no haya diseño cargado.
-  const cargarMoldeOperario = async () => {
+  // Carga SOLO el molde (sus piezas) → se ve el molde vacío aunque todavía no haya diseño cargado.
+  // `pidEx` = el molde del ítem que se está mirando en el paso Arte. Se manda EXPLÍCITO: el server
+  // le da prioridad al `pid` de la request sobre el molde «activo», así el visor no depende de que
+  // el POST de activar haya llegado, ni de que el catálogo se haya vuelto a bajar (era el bug del
+  // «Arte vacío hasta que recargás»). Sin `pidEx` se comporta como antes.
+  const cargarMoldeOperario = async (pidEx) => {
+    const _p = pidEx || pidCfg;
+    const _k = `${_p}|__guia__`;
+    const _hit = _talleDetCache.current[_k];
+    if (_hit) { setEtqData(_hit); setEtqNombres(_hit.nombres_existentes || {}); setEtqPid(_p); }
     try {
-      const r = await fetch(`/api/plantilla/deteccion${qPid()}`);
-      if (r.ok) { const data = await r.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
+      const r = await fetch(`/api/plantilla/deteccion${_p ? `?pid=${encodeURIComponent(_p)}` : ''}`);
+      if (r.ok) {
+        const data = await r.json();
+        _talleDetCache.current[_k] = data;
+        setEtqData(data); setEtqNombres(data.nombres_existentes || {}); setEtqPid(_p);
+      }
     } catch (e) { /* sin molde */ }
   };
 
@@ -6290,28 +6461,31 @@ export default function App() {
     setSelectedPiezaMapeo(det.piezas_variable?.[0] || det.piezas?.[0] || '');   // 1ª de la VARIABLE, no del molde
     return inicial;
   };
-  const cargarMapeadorOperario = async () => {
+  const cargarMapeadorOperario = async (pidEx) => {
     // CACHÉ por (molde, diseño, variable): una variable ya visitada carga INSTANTÁNEO desde
     // memoria (sin neutro). El neutro (mapeoCargando) queda SOLO para la primerísima vez.
-    const _dk = `${productosCat.activo}|${disenoActivo}|${verVariante || ''}`;
+    // `pidEx`: ver `cargarMoldeOperario` — el molde va EXPLÍCITO, sin depender del «activo».
+    const _p = pidEx || pidCfg;
+    const _dk = `${_p}|${disenoActivo}|${verVariante || ''}`;
     const _hit = _detArteCache.current[_dk];
     let _mapa = _hit ? _aplicarDetArte(_hit) : null;
     try {
       if (!_hit) setMapeoCargando(true);
       // REGLA mapeo-por-variable: se pide el mapeo DE la variable activa (autoritativo si tiene
       // el suyo; si no, la base). Al cambiar de variable el efecto re-corre y recarga el suyo.
-      const res = await fetch(`/api/arte/deteccion?diseno=${encodeURIComponent(disenoActivo)}&variante=${encodeURIComponent(verVariante || '')}${qPid('&')}`);
+      const _qp = _p ? `&pid=${encodeURIComponent(_p)}` : '';
+      const res = await fetch(`/api/arte/deteccion?diseno=${encodeURIComponent(disenoActivo)}&variante=${encodeURIComponent(verVariante || '')}${_qp}`);
       if (!res.ok) { if (!_hit) setMapeoData(null); return null; }
       const det = await res.json();
       _detArteCache.current[_dk] = det;
       if (!_hit) _mapa = _aplicarDetArte(det);   // con caché ya aplicado, solo refrescamos el caché (sin re-pintar)
       // Geometría del molde al talle guía: también cacheada → revisitar variable = instantáneo.
-      const _k2 = `${productosCat.activo}|__guia__`;
+      const _k2 = `${_p}|__guia__`;
       const _det2 = _talleDetCache.current[_k2];
-      if (_det2) { setEtqData(_det2); setEtqNombres(_det2.nombres_existentes || {}); }
+      if (_det2) { setEtqData(_det2); setEtqNombres(_det2.nombres_existentes || {}); setEtqPid(_p); }
       else {
-        const r2 = await fetch(`/api/plantilla/deteccion${qPid()}`);
-        if (r2.ok) { const data = await r2.json(); _talleDetCache.current[_k2] = data; setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
+        const r2 = await fetch(`/api/plantilla/deteccion${_p ? `?pid=${encodeURIComponent(_p)}` : ''}`);
+        if (r2.ok) { const data = await r2.json(); _talleDetCache.current[_k2] = data; setEtqData(data); setEtqNombres(data.nombres_existentes || {}); setEtqPid(_p); }
       }
       // WYSIWYG: cargar el BORDE de corte + la ETIQUETA REALES del molde para mostrarlos en el visor
       // del arte tal cual saldrán en la tizada (no solo el diseño).
@@ -6320,32 +6494,54 @@ export default function App() {
     finally { setMapeoCargando(false); }
     return _mapa;
   };
-  // "ASIGNANDO EL DISEÑO A CADA VARIANTE…": al CARGAR el arte se arma YA el render real de
-  // TODOS los talles (una sola espera, visible, con progreso) → después navegar es instantáneo
-  // desde memoria. Cada (diseño, variable, talle) guarda lo suyo; re-subir el arte lo renueva.
-  const asignarTodasLasVariantes = async (mapeo) => {
-    const pid = pidCfg, clave = verVariante, dis = disenoActivo;
-    const talles = tallesMolde.length ? tallesMolde : (estado?.talles || []);
+  // AL CARGAR EL ARTE se dibuja SOLO EL TALLE GUÍA; los demás se dibujan cuando se los toca y
+  // quedan en el caché (regla del usuario). Con un arte de vector pesado cada talle son ~8
+  // recortes del vector original y hacer los 20 de una eran ~60 s mirando un cartel antes de ver
+  // NADA. La TIZADA no depende de esto: el motor arma cada pieza que necesite (`_armar_base`),
+  // este caché es sólo para que el visor no rehaga trabajo.
+  const asignarTodasLasVariantes = async (mapeo, pidEx, tallesPedidos) => {
+    // `pidEx` = el molde del ítem del pedido. Sin él caía en `pidCfg` (el molde ABIERTO/ACTIVO),
+    // que en el pedido puede ser otro: se precalentaban los talles del molde equivocado y el visor
+    // quedaba esperando un render que nunca era para él.
+    // `tallesPedidos` = dibujar ESTOS talles (lo usa el cambio de talle). Sin eso, sólo el guía.
+    const pid = pidEx || pidCfg, clave = verVariante, dis = disenoActivo;
+    const _todos = tallesMolde.length ? tallesMolde : (estado?.talles || []);
+    // AL CARGAR EL ARTE se preparan TODOS los talles, en una sola espera visible con progreso.
+    // Se probó dejar sólo el talle guía (para arrancar antes) y fue peor de usar: después había
+    // que esperar en CADA cambio de talle o de molde. Una espera al principio y listo.
+    const talles = (tallesPedidos && tallesPedidos.length) ? tallesPedidos.map(String) : _todos.map(String);
     if (!pid || !clave || !talles.length || !mapeo || !Object.keys(mapeo).length) return;
+    // UN dibujo por vez para lo mismo: al tocar un talle se dispara desde más de un lado y se
+    // lanzaban DOS pasadas iguales, que se peleaban la CPU y tardaban el doble. Si ya hay una en
+    // curso para este molde/variable/talle, se espera a esa.
+    const _kEnCurso = `${pid}|${clave}|${dis}|${talles.join(',')}`;
+    if (_asignEnCurso.current[_kEnCurso]) return _asignEnCurso.current[_kEnCurso];
+    let _fin;
+    _asignEnCurso.current[_kEnCurso] = new Promise(r => { _fin = r; });
     _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
-    setAsignando({ hecho: 0, total: talles.length, talle: '' });
+    const _tIni = Date.now();   // para mostrar los segundos: así SIEMPRE hay algo moviéndose
+    setAsignando({ hecho: 0, total: talles.length, talle: '', piezas: 0, fase: 'arrancando', seg: 0 });
     const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
     try {
-      // GENERACIÓN EN PARALELO en el server (ProcessPool, ~4x): un endpoint arma TODOS los talles
-      // a la vez y el front hace polling del progreso. PyMuPDF no es thread-safe → multiproceso.
+      // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.
+      // PyMuPDF no es thread-safe → multiproceso. `talles` acota el trabajo al talle guía.
       let usoParalelo = false;
       try {
         const r = await fetch('/api/arte/asignar_todo', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo })
+          body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, talles })
         });
         if (r.ok) {
           const { job, total } = await r.json();
           usoParalelo = true;
-          for (let guard = 0; guard < 2000; guard++) {   // polling del progreso (hasta ~16min)
-            await _sleep(500);
+          for (let guard = 0; guard < 4000; guard++) {   // polling del progreso (hasta ~16min)
+            await _sleep(250);
             let s; try { s = await (await fetch('/api/arte/asignar_estado?job=' + job)).json(); } catch (e) { break; }
-            setAsignando({ hecho: s.hecho || 0, total: total || talles.length, talle: '' });
+            // `hecho` sube de a un TALLE ENTERO: con un arte pesado se queda quieto un buen rato y
+            // parece colgado. `piezas` son las que los workers ya dejaron listas — eso se mueve
+            // siempre, y `fase` dice qué está pasando cuando todavía no hay nada terminado.
+            setAsignando({ hecho: s.hecho || 0, total: total || talles.length, talle: '',
+                           piezas: s.piezas || 0, fase: s.fase || '', seg: Math.round((Date.now() - _tIni) / 1000) });
             if (s.done) break;
           }
         }
@@ -6373,7 +6569,7 @@ export default function App() {
         }
         setAsignando({ hecho: talles.length, total: talles.length, talle: String(t) });
       }
-    } finally { setAsignando(null); }
+    } finally { setAsignando(null); delete _asignEnCurso.current[_kEnCurso]; if (_fin) _fin(); }
   };
   // RENDER REAL del motor por pieza, CACHEADO en disco (/api/arte/preview_piezas): una sola fuente
   // de verdad con la tizada. La 1ª vez por config arma+guarda (unos segundos; mientras tanto se ve
@@ -6393,9 +6589,13 @@ export default function App() {
     if (Object.keys(_pvCache.current).length > 300) _pvCache.current = {};   // tope de memoria
     _pvCache.current[k] = piezas;
   };
-  // Precarga en background del RESTO de los talles (render + geometría). Corre tras cargar el
-  // talle actual; el server ya los tiene en disco (pre-warm) → cada pedido es rápido. Con
-  // ediciones de editables SIN guardar (override) no se precarga (cambia con cada arrastre).
+  // Precarga en background del RESTO de los talles (dibujo + medidas), empezando por los vecinos
+  // del que se está viendo. Corre DESPUÉS de mostrar el actual, así la pantalla no espera, y con
+  // `bg: true` el server le cede el paso a lo que pida el usuario. Es lo que hace que cambiar de
+  // talle o de molde sea instantáneo: cuando el usuario llega, ya está dibujado.
+  // ⚠️ NO sacar esto "para no gastar máquina": sin la precarga aparece «preparando piezas» en
+  // cada movimiento, que es peor que trabajar en silencio de fondo.
+  // Con ediciones de editables SIN guardar no se precarga (cambian con cada arrastre).
   const _prefetchTalles = (mapeo, talleActual) => {
     const pid = pidCfg, clave = verVariante, dis = disenoActivo;
     if (Object.keys(editorTfs || {}).length) return;
@@ -6411,10 +6611,13 @@ export default function App() {
     (async () => {
       for (const t of talles) {
         if (tok !== _prefetchTok.current) return;         // cambió variable/mapeo/talle → abortar
+        // EL DIBUJO DE LOS DEMÁS TALLES, EN SEGUNDO PLANO. Sin esto había que esperar cada vez
+        // que se cambiaba de talle o de molde («preparando piezas» todo el tiempo), que es
+        // justo lo que no puede pasar: cuando el usuario llega, tiene que estar listo.
+        // `bg: true` → el server le CEDE EL PASO a lo que pida el usuario (nunca compite).
         const k = _pvKeyCon(mapeo, t);
         if (!_pvCache.current[k]) {
           try {
-            // `bg: true` → el server le CEDE EL PASO a lo que pida el usuario (nunca compite)
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true })
@@ -6457,15 +6660,25 @@ export default function App() {
       }
     } catch (e) { /* cae al re-dibujo JS */ }
   };
-  // Al cambiar de variante/diseño: limpiar YA (se ve el re-dibujo JS de la nueva variante) para no
-  // mostrar por un instante las piezas de la anterior.
-  React.useEffect(() => { setPreviewPiezas({}); }, [verVariante, disenoActivo]);
+  // Al cambiar de variante/diseño: si eso YA está dibujado (se estuvo antes, o lo dejó listo la
+  // precarga), se muestra AL INSTANTE. Sólo se limpia cuando de verdad no hay nada, para no
+  // mostrar por un instante las piezas de la anterior. Antes se limpiaba siempre: volver a un
+  // espacio ya cargado mostraba «Preparando las piezas de esta prenda…» al pedo.
+  React.useEffect(() => {
+    const hit = _pvCache.current[_pvKeyDe(etqData?.talle_ref)];
+    setPreviewPiezas(hit || {});
+  }, [verVariante, disenoActivo]);
   // Al cambiar de TALLE: el render cacheado es de OTRO talle y se dibuja estirado a las medidas nuevas
   // (efecto feo de "molde estirado"). Limpiarlo YA (cae al placeholder, ya a medidas correctas) y
   // re-pedir el render del talle nuevo SIN debounce (es un cambio discreto y el caché lo hace instantáneo).
+  // ⚠️ NO condicionar estos efectos al estado de la tizada. Se probó cortarlos mientras un trabajo
+  // estaba «generando» (para que no compitieran por la máquina) y si el trabajo quedaba marcado
+  // así, el visor NO volvía a pedir nada nunca: la pantalla se quedaba en «Preparando las piezas
+  // de esta prenda…» para siempre. El visor tiene que poder dibujar siempre.
   React.useEffect(() => {
     if (pedidoPaso !== 'arte' || !verVariante) return;
-    setPreviewPiezas({});
+    // Si el talle ya está dibujado, se muestra al instante y no se borra lo que había.
+    setPreviewPiezas(_pvCache.current[_pvKeyDe(etqData?.talle_ref)] || {});
     cargarPreviewPiezas();
   }, [etqData?.talle_ref]);
   // Refrescar el render real al entrar al Arte / cambiar variante / mover el mapeo o el override
@@ -6489,6 +6702,9 @@ export default function App() {
       if (_prevHit) setPreviewPiezas(_prevHit);
       return;
     }
+    // TALLE NUEVO: lo dibuja `cargarPreviewPiezas` (el efecto que sigue a `etqData.talle_ref`) y
+    // queda guardado en el caché. ⚠️ NO lanzar acá otra pasada de dibujo: se generaba el MISMO
+    // talle dos veces a la vez, los dos procesos se pisaban los archivos y tardaba el doble.
     try {
       const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talle)}${qPid('&')}`);
       if (r.ok) {
@@ -7013,11 +7229,30 @@ export default function App() {
     const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo); if (id) fd.append('pid', id);
     showMsg('Subiendo y procesando el diseño…');
     try {
-      const res = await fetch('/api/arte', { method: 'POST', body: fd });
-      const data = await res.json();
+      // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Un arte puede pesar 8 MB o más y
+      // procesarlo lleva unos segundos; sin esto el usuario mira un cartel quieto sin saber si
+      // avanza (justamente lo que reportó). Ver también `handleUploadFile`.
+      const res = await new Promise((ok, no) => {
+        const x = new XMLHttpRequest();
+        x.open('POST', '/api/arte');
+        x.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.round(100 * e.loaded / e.total);
+          showMsg(pct >= 100 ? 'Procesando el diseño… (leyendo el original, puede tardar)'
+                             : `Subiendo el diseño… ${pct}%`);
+        };
+        x.onload = () => ok({ ok: x.status >= 200 && x.status < 300, text: x.responseText });
+        x.onerror = () => no(new Error('no se pudo subir el diseño (¿se cortó la conexión?)'));
+        x.send(fd);
+      });
+      let data;
+      try { data = JSON.parse(res.text || '{}'); } catch (e) { data = {}; }
       if (!res.ok) throw new Error(data.error || 'Error al procesar el diseño');
       _pvCache.current = {}; _detArteCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar precargas (serían del arte viejo)
       setArteCargado(prev => ({ ...prev, [disenoActivo + '|' + id]: true }));
+      // El panel de telas vuelve a la vista de «Telas asignadas»: cargar el arte tarda, y si queda
+      // en la pantalla de asignar (vacía) parece que se perdió lo que ya se había asignado.
+      setTelaAsignMode(false); setTelaSelPiezas([]); setTelaElegida(null); setTelaBuscarAsig('');
       avisarPerfilDiseno(disenoActivo, id);   // dispara YA el cartel del perfil (no espera los refrescos)
       // Si es un diseño NO principal, lo registro en el molde para que aparezca
       // como opción en la columna "Diseño" de la planilla.
@@ -7027,12 +7262,14 @@ export default function App() {
       }
       await fetchEstado();
       await fetchProductos();
-      const _mapa = await cargarMapeadorOperario();
+      // Con el pid del ítem, SIEMPRE: el arte se subió a ESE molde, así que el mapeador y el
+      // precalentado tienen que ser de ése y no del molde «activo» del server.
+      const _mapa = await cargarMapeadorOperario(id);
       if (data.campos_personalizacion) avisarCapasFaltantes(data.campos_personalizacion);
       showMsg('Diseño cargado ✓');
       // Una sola espera, VISIBLE: se asigna el diseño a todos los talles ahora (ventana con
       // progreso) → después navegar entre variantes es instantáneo desde memoria.
-      await asignarTodasLasVariantes(_mapa || {});
+      await asignarTodasLasVariantes(_mapa || {}, id);
     } catch (e) { showError(e.message); }
   };
 
@@ -7088,14 +7325,20 @@ export default function App() {
   const hayVariablesPlanilla = variablesPlanilla.length > 0;
   const varianteDeFila = (fila) => variablesPlanilla.find(v => v.clave === fila?.__variante) || null;
   const moldeDeVariante = (fila) => varianteDeFila(fila)?.moldeId || moldesUnion[0] || productosCat.activo;
-  // Elegir/soltar una VARIABLE en el/los diseño(s) activo(s). Sincroniza disenoMoldes (el
-  // molde de la variable entra por detrás para que arte y generación sigan funcionando).
+  // CADA DISEÑO ES SUYO. Elegir una variable la agrega o la saca ÚNICAMENTE del diseño que se está
+  // armando — no importa qué tengan los demás: la misma variable puede estar en los 10 diseños del
+  // pedido y cada uno la maneja aparte (arte, telas y piezas van por diseño).
+  // Antes existía un modo «Todos» que era el estado por DEFECTO: tocar una variable la metía en
+  // TODOS los diseños de una, así que aparecía elegida en diseños donde nadie la puso y el pedido
+  // la fabricaba de más. Se sacó: siempre hay UN diseño destino.
+  const disenoDestino = () => (disenosPedido.some(d => d.id === asignDiseno) ? asignDiseno : (disenosPedido[0]?.id || ''));
   const toggleVarEnDiseno = (clave) => {
-    const targets = asignDiseno === 'todos' ? disenosPedido.map(d => d.id) : [asignDiseno];
-    if (!targets.length) { showError('Primero escribí un diseño.'); return; }
+    const did = disenoDestino();
+    if (!did) { showError('Primero escribí un diseño.'); return; }
     const nv = { ...disenoVars };
-    const enTodos = targets.every(did => (nv[did] || []).includes(clave));
-    targets.forEach(did => { const s = new Set(nv[did] || []); if (enTodos) s.delete(clave); else s.add(clave); nv[did] = [...s]; });
+    const s = new Set(nv[did] || []);
+    if (s.has(clave)) s.delete(clave); else s.add(clave);
+    nv[did] = [...s];
     setDisenoVars(nv);
     const nm = { ...disenoMoldes };
     // Los moldes elegidos ENTEROS (los propios, que no tienen variables) NO salen de `nv`:
@@ -7177,17 +7420,39 @@ export default function App() {
     if (!t || t === 'principal' || t === 'default') return 'principal';
     return t.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'principal';
   };
+  // Clave de un ítem del pedido para las telas: DISEÑO + molde + variable. El diseño va SÍ O SÍ —
+  // la tela es por (diseño, molde) desde la entrada 142, así que sin él dos diseños del mismo molde
+  // comparten entrada y se pisan el estado.
+  const _claveItemTela = (did, mid, cl) => `${did}|${mid}|${cl || ''}`;
   const _itemArteAct = itemsArteDe(disenoActivo)?.[arteIdx];
   const _arteMoldeAct = _itemArteAct?.moldeId;
-  const _claveTela = _arteMoldeAct ? `${_arteMoldeAct}|${_itemArteAct?.clave || ''}` : null;
+  const _claveTela = _arteMoldeAct ? _claveItemTela(disenoActivo, _arteMoldeAct, _itemArteAct?.clave) : null;
+  // Se anotan las PIEZAS que este ítem mostró (no cuántas faltan): así el faltante se recalcula solo
+  // cada vez que cambian las telas, en vez de quedar congelado en el número de la última visita.
   useEffect(() => {
     if (pedidoPaso !== 'arte' || !_claveTela || !piezasArteGen.length) return;
-    const map = _telasDe(disenoActivo, _arteMoldeAct);
-    const faltan = piezasArteGen.filter(g => !map[g]).length;
-    setTelasFaltantes(prev => (prev[_claveTela] === faltan ? prev : { ...prev, [_claveTela]: faltan }));
-  }, [pedidoPaso, _claveTela, _arteMoldeAct, piezasArteGen, telaPorPieza]);
-  const _itemsTelaPedido = [...new Set(disenosPedido.flatMap(d => (itemsArteDe(d.id) || []).map(it => `${it.moldeId}|${it.clave || ''}`)))];
-  const telasFaltantesTotal = _itemsTelaPedido.reduce((n, k) => n + (telasFaltantes[k] || 0), 0);
+    // ⚠️ SÓLO cuando el visor YA es el de este ítem. Al cambiar de prenda, el ítem (`_claveTela`)
+    // cambia al instante pero el dibujo llega después: en ese hueco `piezasArteGen` todavía trae
+    // las piezas de la prenda ANTERIOR y se anotaban bajo la clave de la nueva. Como esas piezas
+    // no existen en este molde, jamás iban a tener tela → «faltan 8 piezas sin tela» con TODO
+    // asignado, y la planilla bloqueada. Se compara el molde dibujado (`etqPid`) y la variable en
+    // vista (`verVariante`) contra los del ítem.
+    if (etqPid !== _arteMoldeAct) return;
+    if ((_itemArteAct?.clave || null) !== (verVariante || null)) return;
+    setPiezasPorItem(prev => {
+      const ant = prev[_claveTela];
+      if (ant && ant.length === piezasArteGen.length && ant.every((x, i) => x === piezasArteGen[i])) return prev;
+      return { ...prev, [_claveTela]: piezasArteGen };
+    });
+  }, [pedidoPaso, _claveTela, piezasArteGen, etqPid, _arteMoldeAct, verVariante]);
+  // TOTAL de piezas sin tela: DERIVADO de las telas de ahora, recorriendo sólo los ítems que HOY
+  // están en el pedido (una variable que se sacó no deja un bloqueo fantasma) y de los que ya se
+  // conocen sus piezas (las que el visor mostró alguna vez).
+  const telasFaltantesTotal = (disenosPedido || []).reduce((n, d) => n + (itemsArteDe(d.id) || []).reduce((m, it) => {
+    const map = _telasDe(d.id, it.moldeId);
+    const pzs = piezasPorItem[_claveItemTela(d.id, it.moldeId, it.clave)] || [];
+    return m + pzs.filter(g => !map[g]).length;
+  }, 0), 0);
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
@@ -7239,22 +7504,23 @@ export default function App() {
     setDisenosPedido(prev => prev.filter(d => d.id !== did));
     setDisenoMoldes(prev => { const n = { ...prev }; delete n[did]; return n; });
     setArteCargado(prev => { const n = { ...prev }; Object.keys(n).forEach(k => { if (k.startsWith(did + '|')) delete n[k]; }); return n; });
-    if (asignDiseno === did) setAsignDiseno('todos');
+    // Al borrar el diseño que se estaba armando, se pasa a otro que quede (nunca a un modo «todos»).
+    if (asignDiseno === did) setAsignDiseno((disenosPedido.find(d => d.id !== did) || {}).id || '');
     if (disenoActivo === did) { setDisenoActivo(''); setArteIdx(0); }
+    // Sus variables también se van: si no, un diseño borrado seguía aportando al pedido.
+    setDisenoVars(prev => { const n = { ...prev }; delete n[did]; return n; });
+    setTelaPorPieza(prev => { const n = { ...prev }; Object.keys(n).forEach(k => { if (k.startsWith(did + '|')) delete n[k]; }); return n; });
   };
-  // Asignar/quitar un molde a un diseño (o a TODOS si asignDiseno==='todos').
+  // Asignar/quitar un molde entero (los propios, sin variables) al diseño que se está armando.
+  // Mismo criterio que las variables: va SÓLO a ese diseño.
   const toggleMoldeEnDiseno = (mid) => {
-    const targets = asignDiseno === 'todos' ? disenosPedido.map(d => d.id) : [asignDiseno];
-    if (!targets.length) { showError('Primero escribí un diseño.'); return; }
+    const did = disenoDestino();
+    if (!did) { showError('Primero escribí un diseño.'); return; }
     setDisenoMoldes(prev => {
       const n = { ...prev };
-      // Si está en TODOS los targets, lo saco de todos; si no, lo agrego a los que falten.
-      const enTodos = targets.every(did => (n[did] || []).includes(mid));
-      targets.forEach(did => {
-        const lst = new Set(n[did] || []);
-        if (enTodos) lst.delete(mid); else lst.add(mid);
-        n[did] = [...lst];
-      });
+      const lst = new Set(n[did] || []);
+      if (lst.has(mid)) lst.delete(mid); else lst.add(mid);
+      n[did] = [...lst];
       return n;
     });
   };
@@ -7703,23 +7969,43 @@ export default function App() {
   // Empezar un pedido nuevo desde 0: limpia toda la selección y vuelve al paso 1.
   const reiniciarPedido = () => abrirConfirmar({
     titulo: 'Empezar un pedido nuevo', ok: 'Empezar de 0',
-    texto: 'Se borra la selección actual del pedido (diseños, prendas y filas). Las tizadas ya generadas no se tocan.',
+    texto: 'Se borra TODO lo de este pedido: diseños, prendas, telas asignadas, filas de la planilla y lo que quedó en memoria. Las tizadas ya generadas y la configuración de los moldes no se tocan.',
     onOk: _reiniciarPedido });
+  // «NUEVO PEDIDO» = ARRANCAR DE CERO, DE VERDAD. Si sobrevive algo del pedido anterior —una tela
+  // asignada, un diseño, el arte marcado como cargado, una caché de piezas— el pedido nuevo sale
+  // con datos del viejo y eso se descubre recién con la tela CORTADA. Por eso se limpia TODO lo
+  // del pedido, incluido lo guardado en el navegador y las cachés en memoria.
+  // NO se toca: las tizadas ya generadas (sus archivos) ni la configuración de los moldes.
   const _reiniciarPedido = () => {
+    // 1) lo que se elige en el pedido
     setMoldesSeleccionados([]);
-    setTrabajosMulti([]);
-    setArteCargado({});
-    setMapeoData(null);
-    setArteIdx(0);
-    setTelaActiva(null);
-    setDisenosPedido([]);
-    setDisenoMoldes({});
-    setDisenoVars({});
-    setDisenoActivo('');
-    setAsignDiseno('todos');
-    setNuevoDisenoNombre('');
-    setPerfilesArte({});
-    setPerfilForzado(null);
+    setDisenosPedido([]); setDisenoMoldes({}); setDisenoVars({}); setDisenoActivo('');
+    setAsignDiseno(''); setNuevoDisenoNombre('');
+    // 2) TELAS del pedido (esto era lo que quedaba pegado: `telaBaseMolde`/`telaPorPieza` no se
+    //    limpiaban y además se guardan en el navegador, así que volvían hasta recargando)
+    setTelaBaseMolde({}); setTelaPorPieza({}); setPiezasPorItem({});
+    setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
+    setTelaBuscarAsig(''); setTelaModoVer(false); setTelaAviso('');
+    // 3) arte y visor
+    setArteCargado({}); setArteIdx(0);
+    setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
+    setEtqData(null); setEtqNombres({}); setVerVariante(null);
+    setPerfilesArte({}); setPerfilForzado(null);
+    setEditorTfs({}); setEditableData(null); setEditableDiseno('principal');
+    // 4) planilla: vuelve a 5 filas VACÍAS con las columnas de ahora. Se siembran acá y no se deja
+    //    al efecto de `filas`, que sólo corre cuando CAMBIA el molde activo (y acá no cambia).
+    const _fila0 = {}; (cols || []).forEach(c => { _fila0[c.id] = ''; });
+    setFilas(Array.from({ length: 5 }, () => ({ ..._fila0 })));
+    filasInitRef.current = null;
+    // 5) resultados
+    setTrabajosMulti([]); setTrabajoId(null); setTrabajoEstado(null);
+    setTelaActiva(null); setVistaFicha(false);
+    // 6) CACHÉS EN MEMORIA (render de piezas, geometría por talle y detección del arte). Están
+    //    indexadas por molde/diseño/variable, pero si el pedido nuevo usa el mismo molde con otro
+    //    arte mostrarían el anterior hasta recargar la página.
+    _pvCache.current = {}; _talleDetCache.current = {}; _detArteCache.current = {};
+    // 7) el avance guardado en el navegador (si no, «nuevo pedido» + F5 resucitaba el viejo)
+    try { localStorage.removeItem('tizada_wizard'); } catch (e) { /* sin storage: nada que borrar */ }
     setPedidoPaso('moldes');
   };
 
@@ -8638,13 +8924,11 @@ export default function App() {
                   </div>
                   {disenosPedido.length > 0 && (
                     <div data-tour="pedido-diseno-chips" style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 11, alignItems: 'center' }}>
-                      <button type="button" onClick={() => setAsignDiseno('todos')}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .18s',
-                          border: asignDiseno === 'todos' ? '1.5px solid var(--accent)' : '1px solid var(--border-light)', background: asignDiseno === 'todos' ? 'rgba(0,216,245,0.14)' : 'rgba(255,255,255,0.03)', color: asignDiseno === 'todos' ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                        <Icon name="productos" style={{ width: 13, height: 13 }} /> Todos
-                      </button>
+                      {/* Un chip por diseño; el encendido es el que se está armando. Las prendas que
+                          toques abajo van SÓLO a ése. (No hay «Todos»: metía la misma variable en
+                          todos los diseños de una y el pedido la fabricaba de más.) */}
                       {disenosPedido.map(d => {
-                        const on = asignDiseno === d.id, col = colorDeDiseno(d.id), n = moldesDeDiseno(d.id).length;
+                        const on = disenoDestino() === d.id, col = colorDeDiseno(d.id), n = moldesDeDiseno(d.id).length;
                         return (
                           <div key={d.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                             <button type="button" onClick={() => setAsignDiseno(d.id)}
@@ -8725,10 +9009,10 @@ export default function App() {
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                         {mios.map(p => {
                           const susDisenos = disenosPedido.filter(d => (disenoMoldes[d.id] || []).includes(p.id));
-                          const enActivo = asignDiseno === 'todos'
-                            ? (disenosPedido.length > 0 && disenosPedido.every(d => (disenoMoldes[d.id] || []).includes(p.id)))
-                            : (disenoMoldes[asignDiseno] || []).includes(p.id);
-                          const colAct = asignDiseno === 'todos' ? 'var(--accent)' : colorDeDiseno(asignDiseno);
+                          // Igual que las variables: marcado = está en el diseño que se está armando.
+                          const _dDest = disenoDestino();
+                          const enActivo = !!_dDest && (disenoMoldes[_dDest] || []).includes(p.id);
+                          const colAct = _dDest ? colorDeDiseno(_dDest) : 'var(--accent)';
                           return (
                             <div key={p.id}
                               style={{ position: 'relative', textAlign: 'left', padding: 10, borderRadius: 12, transition: 'all .18s',
@@ -8805,11 +9089,14 @@ export default function App() {
                   <div style={{ display: pedidoTabMoldes === 'catalogo' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                       {varsCatalogo.map(v => {
                         const susDisenos = disenosPedido.filter(d => varsDeDiseno(d.id).includes(v.clave));
-                        const enActivo = asignDiseno === 'todos' ? (disenosPedido.length > 0 && disenosPedido.every(d => varsDeDiseno(d.id).includes(v.clave))) : varsDeDiseno(asignDiseno).includes(v.clave);
+                        // Marcada = está en el diseño que se está armando. Que otro diseño la use
+                        // no la marca acá: cada diseño lleva la suya, aunque sea la misma.
+                        const _dDest = disenoDestino();
+                        const enActivo = !!_dDest && varsDeDiseno(_dDest).includes(v.clave);
                         const tplBase = variablesPlanilla.length ? variablesPlanilla[0].planilla : v.planilla;
                         const distintaPlanilla = variablesPlanilla.length > 0 && !variablesPlanilla.some(x => x.clave === v.clave) && v.planilla !== tplBase;
                         const nPz = (v.valores || []).filter(x => x.pieza_idx != null).length;
-                        const colAct = asignDiseno === 'todos' ? 'var(--accent)' : colorDeDiseno(asignDiseno);
+                        const colAct = _dDest ? colorDeDiseno(_dDest) : 'var(--accent)';
                         return (
                           <button key={v.clave} type="button" disabled={distintaPlanilla} onClick={() => toggleVarEnDiseno(v.clave)}
                             title={distintaPlanilla ? 'Usa otra planilla — no se puede combinar' : `${v.moldeNombre} · ${nPz} pza${nPz === 1 ? '' : 's'}`}
@@ -9325,6 +9612,11 @@ export default function App() {
                   // diseño no puede cambiársela a otro que use el mismo molde.
                   setTelaPorPieza(m => ({ ...m, [_claveTelaDis(disenoActivo, _id)]: mm }));
                   setTelaSelPiezas([]); setTelaElegida(null);
+                  // VOLVER A «Telas asignadas»: si el panel se queda en la pantalla de asignar
+                  // (que está en blanco), no se ve NADA de lo que se acaba de hacer y parece que
+                  // se perdió — más todavía después de cargar el arte, que tarda. Al volver, se ve
+                  // la lista de telas en uso y el «✓ Todas las piezas tienen tela».
+                  setTelaAsignMode(false); setTelaBuscarAsig('');
                 };
                 const _telasAsigFiltradas = (() => {   // buscador del modo asignar
                   const q = telaBuscarAsig.trim().toLowerCase();
@@ -9997,8 +10289,8 @@ export default function App() {
                             return (
                             <g key={p.idx} transform={(vo.dx || vo.dy) ? `translate(${vo.dx} ${vo.dy})` : undefined}>
                               <defs><clipPath id={`edclip-${p.idx}`}><path d={p.path_svg} /></clipPath></defs>
-                              {_mesa?.svg && <image href={`data:image/svg+xml;base64,${_mesa.svg}`} x={_iX} y={_iY} width={_iW} height={_iH} preserveAspectRatio="none" clipPath={`url(#edclip-${p.idx})`} opacity={0.92} />}
-                              <path d={p.path_svg} vectorEffect="non-scaling-stroke" fill={_mesa?.svg ? 'none' : 'rgba(0,243,255,0.04)'} stroke="rgba(0,243,255,0.5)" strokeWidth="1.1" />
+                              {hrefMesa(_mesa) && <image href={hrefMesa(_mesa)} x={_iX} y={_iY} width={_iW} height={_iH} preserveAspectRatio="none" clipPath={`url(#edclip-${p.idx})`} opacity={0.92} />}
+                              <path d={p.path_svg} vectorEffect="non-scaling-stroke" fill={hrefMesa(_mesa) ? 'none' : 'rgba(0,243,255,0.04)'} stroke="rgba(0,243,255,0.5)" strokeWidth="1.1" />
                             </g>
                           ); })}
                           {_objsEd.map(o => {
@@ -10329,18 +10621,32 @@ export default function App() {
                 );
               })()}
 
+              {/* Cartel de avance mientras baja el DIBUJO ORIGINAL (vector) de cada mesa del arte.
+                  No bloquea: se puede seguir trabajando. Aparece apenas se abre el paso Arte y
+                  muestra cuántas mesas llegaron — con un arte muy cargado esto puede tardar, y es
+                  a propósito: se muestra el diseño de verdad, no una versión liviana. */}
               {/* Ventana "Asignando el diseño a cada variante…" (al cargar el arte, una sola vez) */}
               {asignando && (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(2,6,12,0.82)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <div style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340 }}>
-                    <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 8 }}>Asignando el diseño a cada variante…</div>
-                    <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
-                      {asignando.talle ? `Variante ${asignando.talle}` : ''} · {asignando.hecho}/{asignando.total}
+                    <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 8 }}>Poniendo el diseño sobre el molde…</div>
+                    {/* Nada quieto: se muestran las PIEZAS que el server ya dejó dibujadas, en qué
+                        anda y los segundos. Antes decía «0/20» y se quedaba clavado ahí ~27 s. */}
+                    <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      Variante {asignando.hecho} de {asignando.total}{asignando.talle ? ` · talle ${asignando.talle}` : ''}
                     </div>
-                    <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.round(100 * asignando.hecho / Math.max(1, asignando.total))}%`, background: 'var(--accent)', borderRadius: 999, transition: 'width .3s' }} />
+                    <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 10 }}>
+                      <div style={{ height: '100%', width: `${Math.max(3, Math.round(100 * asignando.hecho / Math.max(1, asignando.total)))}%`, background: 'var(--accent)', borderRadius: 999, transition: 'width .3s' }} />
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12 }}>Es una sola vez por diseño: después el cambio de variante es instantáneo.</div>
+                    <div style={{ fontSize: 12, color: 'var(--accent)', marginTop: 10, display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center' }}>
+                      <span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                      {asignando.fase === 'arrancando' && !asignando.piezas ? 'Preparando el motor de dibujo…'
+                        : asignando.fase === 'midiendo' ? 'Tomando las medidas del molde…'
+                        : !asignando.piezas ? 'Recortando el diseño pieza por pieza…'
+                        : `${asignando.piezas} pieza${asignando.piezas === 1 ? '' : 's'} dibujada${asignando.piezas === 1 ? '' : 's'}`}
+                      {asignando.seg > 2 ? <span style={{ color: 'var(--text-muted)' }}>· {asignando.seg}s</span> : null}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 12 }}>Se trabaja siempre sobre el vector original: nada se convierte a imagen.</div>
                   </div>
                 </div>
               )}
@@ -10419,8 +10725,23 @@ export default function App() {
                   const tela = (telaActiva && telas.includes(telaActiva)) ? telaActiva : telas[0];
                   const mesas = hojas.filter(h => h.tela === tela);   // mesas de esa tela (una por grupo)
                   const avisos = job.resultado?.avisos || [];
+                  // Avisos del PEDIDO (variable sin elegir, etiqueta al lugar por defecto…). Van en
+                  // su propio cartel: mezclarlos con los de «piezas en blanco» hacía leer «no tienen
+                  // gráfica» cuando el arte estaba perfecto.
+                  const avisosPedido = job.resultado?.avisos_pedido || [];
                   return (
                     <div data-tour="resultados-mesas" style={{ marginTop: 16 }}>
+                      {avisosPedido.length > 0 && (
+                        <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', marginBottom: 16, padding: '13px 16px', borderRadius: 12, background: 'rgba(180,120,0,0.12)', border: '1px solid var(--warning, #e0a020)' }}>
+                          <Icon name="alert" style={{ width: 19, height: 19, color: 'var(--warning, #e0a020)', flexShrink: 0, marginTop: 1 }} />
+                          <div style={{ fontSize: 13, color: 'var(--warning, #e0a020)', lineHeight: 1.5 }}>
+                            <b>Revisá esto del pedido.</b> La tizada se generó igual:
+                            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                              {avisosPedido.map((a, i) => <li key={i} style={{ marginTop: 2 }}>{a}</li>)}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
                       {/* AVISO: piezas que salieron EN BLANCO por no tener diseño (la tizada SÍ se generó) */}
                       {avisos.length > 0 && (
                         <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', marginBottom: 16, padding: '13px 16px', borderRadius: 12, background: 'rgba(180,120,0,0.12)', border: '1px solid var(--warning, #e0a020)' }}>
@@ -11443,7 +11764,7 @@ export default function App() {
                             const rotTxt = { auto: 'No girar', ninguna: 'No girar', '90': '90°', '180': '180°', libre: 'Libre' };
                             return sel ? (
                               <div className="card" style={{ padding: 14, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                                Separación: <b>{sel.espaciado_mm} mm</b> · Margen: <b>{sel.margen_mm} mm</b> · Giro: <b>{rotTxt[sel.rotacion] || sel.rotacion}</b>
+                                Separación: <b>{sel.espaciado_mm} mm</b> · Margen: <b>{sel.margen_mm} mm</b> · Alto máx. de mesa: <b>{(Math.min(5000, sel.alto_max_cm ?? 500) / 100)} m</b> · Giro: <b>{rotTxt[sel.rotacion] || sel.rotacion}</b>
                               </div>
                             ) : null;
                           })()}
@@ -13398,7 +13719,7 @@ export default function App() {
                                   // 1.5px lo hacía ENORME en piezas chicas (vivo 3.5cm = 68%). Sin piso queda REAL
                                   // (proporcional). Chico al ver todo el molde (correcto), se agranda con el zoom.
                                   const pxmm = p.h_cm ? p.ph / (p.h_cm * 10) : (p.w_cm ? p.pw / (p.w_cm * 10) : p.ph * 0.0033);
-                                  const fs = Math.max(0.05, (ec.size_mm || 3) * pxmm);
+                                  const fs = Math.max(0.05, (ec.size_mm || 3) * pxmm / CAP_RATIO_ETQ);   // mm de LETRA -> em
                                   const tw = Math.max(fs, (muestraDe(p) || '').length * fs * 0.55);   // ancho aprox del texto
                                   const lx = p.px + rx * p.pw, ly = p.py + ry * p.ph;
                                   const vo = vf ? (vf.pos.get(p.idx) || { dx: 0, dy: 0 }) : null;   // traslado a la grilla compacta (Ver variante)
@@ -13424,7 +13745,20 @@ export default function App() {
                                       {/* etiqueta: SIGUE el contorno (text-on-path, como Illustrator) cuando está
                                           colocada; recta si es la posición por defecto. Recortada al contorno. */}
                                       {ec.activo && !omit && (() => {
-                                        const stl = { paintOrder: 'stroke', stroke: ec.borde_activo ? cssC(ec.borde_color || [0, 0, 0, 0.05]) : 'transparent', strokeWidth: ec.borde_activo ? Math.max(0.02, fs * 0.07 * (ec.borde_mm || 1)) : 0, fontFamily: 'sans-serif', pointerEvents: 'none' };
+                                        // ── EL BORDE VA DETRÁS DE TODO EL TEXTO, NO POR LETRA ──────────────────────
+                                        // El motor traza PRIMERO el contorno de todos los glifos y RECIÉN DESPUÉS los
+                                        // rellena todos, así que el halo queda por detrás de la palabra entera. El
+                                        // navegador, con `paint-order: stroke` en un <text>, lo hace **glifo por
+                                        // glifo**: el borde de una letra se monta sobre el relleno de la anterior y se
+                                        // ven los contornos entre letras. Por eso el texto se dibuja en DOS CAPAS:
+                                        // una sólo con el trazo (todo el texto) y encima otra sólo con el relleno.
+                                        // El grosor va en MILÍMETROS REALES, igual que el motor (`borde_mm*MM`).
+                                        const _bw = ec.borde_activo ? Math.max(0.02, (ec.borde_mm || 1) * pxmm) : 0;
+                                        const stlBorde = { paintOrder: 'stroke', stroke: cssC(ec.borde_color || [0, 0, 0, 0.05]),
+                                          strokeWidth: _bw, strokeLinejoin: 'round', strokeLinecap: 'round', fill: 'none',
+                                          fontFamily: 'sans-serif', pointerEvents: 'none' };
+                                        const stlTexto = { stroke: 'none', fontFamily: 'sans-serif', pointerEvents: 'none' };
+                                        const stl = stlTexto;   // (compat: el resto del render usa `stl` para el texto)
                                         const _offIn = 0.18 * pxmm;   // apoyar sobre el borde (descendentes quedan ocultos bajo el contorno)
                                         const ccx = p.px + p.pw / 2, ccy = p.py + p.ph / 2;
                                         // ── ZONAS por esquinas: reemplazan la etiqueta única cuando la pieza tiene ≥2 puntos.
@@ -13449,7 +13783,12 @@ export default function App() {
                                                 return (
                                                   <g key={i}>
                                                     <path id={`etqz-${p.idx}-${i}`} d={seg.d} fill="none" stroke="none" />
-                                                    <text fontSize={fs} fontWeight="800" textAnchor={zAnchor} fill={cssC(ec.color || [0.15, 0.15, 0.15, 0.3])} style={stl}>
+                                                    {ec.borde_activo && (
+                                                      <text fontSize={fs} fontWeight="800" textAnchor={zAnchor} style={stlBorde}>
+                                                        <textPath href={`#etqz-${p.idx}-${i}`} startOffset={so}>{txt}</textPath>
+                                                      </text>
+                                                    )}
+                                                    <text fontSize={fs} fontWeight="800" textAnchor={zAnchor} fill={cssC(ec.color || [0.15, 0.15, 0.15, 0.3])} style={stlTexto}>
                                                       <textPath href={`#etqz-${p.idx}-${i}`} startOffset={so}>{txt}</textPath>
                                                     </text>
                                                   </g>
@@ -13481,13 +13820,22 @@ export default function App() {
                                             {seg ? (
                                               <>
                                                 <path id={`etqbl-${p.idx}`} d={seg.d} fill="none" stroke="none" />
-                                                <text fontSize={fs} fontWeight="800" textAnchor={pAnchor} fill={cssC(ec.color || [0.15, 0.15, 0.15, 0.3])} style={stl}>
+                                                {/* capa 1: el halo de TODO el texto; capa 2: las letras encima */}
+                                                {ec.borde_activo && (
+                                                  <text fontSize={fs} fontWeight="800" textAnchor={pAnchor} style={stlBorde}>
+                                                    <textPath href={`#etqbl-${p.idx}`} startOffset={off}>{txt}</textPath>
+                                                  </text>
+                                                )}
+                                                <text fontSize={fs} fontWeight="800" textAnchor={pAnchor} fill={cssC(ec.color || [0.15, 0.15, 0.15, 0.3])} style={stlTexto}>
                                                   <textPath href={`#etqbl-${p.idx}`} startOffset={off}>{txt}</textPath>
                                                 </text>
                                               </>
                                             ) : (
                                               <g transform={`rotate(${ang} ${lx} ${ly})`}>
-                                                <text x={lx} y={ly} textAnchor={pAnchor} fontSize={fs} fontWeight="800" fill={cssC(ec.color || [0.15, 0.15, 0.15, 0.3])} style={stl}>{txt}</text>
+                                                {ec.borde_activo && (
+                                                  <text x={lx} y={ly} textAnchor={pAnchor} fontSize={fs} fontWeight="800" style={stlBorde}>{txt}</text>
+                                                )}
+                                                <text x={lx} y={ly} textAnchor={pAnchor} fontSize={fs} fontWeight="800" fill={cssC(ec.color || [0.15, 0.15, 0.15, 0.3])} style={stlTexto}>{txt}</text>
                                               </g>
                                             )}
                                           </g>
@@ -14564,7 +14912,7 @@ export default function App() {
                       <h3 style={{ fontSize: 17, fontWeight: 700 }}>Plantillas de nesting</h3>
                       <p>Guardá distintos nesting como plantillas. Después, en cada molde elegís cuál usar.</p>
                     </div>
-                    <button className="btn primary" data-tour="nesting-nuevo" onClick={() => setNestingEditando({ nombre: '', espaciado_mm: 5, margen_mm: 10, rotacion: 'ninguna' })} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button className="btn primary" data-tour="nesting-nuevo" onClick={() => setNestingEditando({ nombre: '', espaciado_mm: 5, margen_mm: 10, alto_max_cm: 500, rotacion: 'ninguna' })} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Icon name="plus" style={{ width: 14, height: 14 }} /> Nuevo Nesting
                     </button>
                   </div>
@@ -14588,6 +14936,21 @@ export default function App() {
                           <div>
                             <label style={labelStyle}>Margen del borde de la tela (mm)</label>
                             <input type="number" value={n.margen_mm} onChange={(e) => set('margen_mm', parseFloat(e.target.value) || 0)} style={inputStyle} />
+                          </div>
+                          <div>
+                            {/* ALTO MÁXIMO DE LA MESA. Se guarda en cm; acá se pide en METROS, que es
+                                como se habla de la mesa. Cuando la tizada llega a este alto, se abre
+                                otra hoja. */}
+                            <label style={labelStyle}>Alto máximo de cada mesa (metros)</label>
+                            <input type="number" step="0.5" min="0.5" max="50" data-tour="nesting-alto"
+                              value={(Math.min(5000, n.alto_max_cm ?? 500) / 100)}
+                              onChange={(e) => set('alto_max_cm', Math.min(5000, Math.round((parseFloat(e.target.value) || 0) * 100)))} style={inputStyle} />
+                            <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 4 }}>
+                              Hasta dónde crece una mesa antes de abrir la siguiente. El ancho lo da la tela.<br />
+                              Hasta 5,08 m es PDF común. <b>Más largo que eso</b> se genera con una marca especial del
+                              formato (UserUnit) que tu RIP entiende — verificado con una mesa de 10 m. Máximo 50 m;
+                              cuanto más larga, más tarda y más pesa el archivo.
+                            </small>
                           </div>
                           <div>
                             <label style={labelStyle}>Giro de piezas <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>— se aplica igual a TODAS las piezas</span></label>
@@ -14615,6 +14978,7 @@ export default function App() {
                         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.7, flex: 1 }}>
                           Separación: <b>{n.espaciado_mm} mm</b><br />
                           Margen: <b>{n.margen_mm} mm</b><br />
+                          Alto máx. de mesa: <b>{(Math.min(5000, n.alto_max_cm ?? 500) / 100)} m</b><br />
                           Giro: <b>{rotTxt[n.rotacion] || n.rotacion}</b>
                         </div>
                         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>

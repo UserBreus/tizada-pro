@@ -100,7 +100,9 @@ def _preparar(piezas, cfg):
     cell_pt = cfg.get("resolucion_mm", 2) / 10 * CM
     m = cfg["margenes_cm"]
     ancho_c = int((cfg["ancho_cm"] - m["izq"] - m["der"]) * CM / cell_pt)
-    alto_c = int((min(cfg["altura_max_cm"] * CM, 14400) - (m["sup"] + m["inf"]) * CM) / cell_pt)
+    # El alto de la mesa ya NO se recorta a 14400 pt: las mesas largas se resuelven con /UserUnit al
+    # componer (ver `componer_pdf_contorno`). El tope real lo pone la configuración de nesting.
+    alto_c = int((cfg["altura_max_cm"] * CM - (m["sup"] + m["inf"]) * CM) / cell_pt)
     esp_c = max(1, ceil(cfg["espaciado_cm"] * CM / cell_pt))  # respeta la separación, sin la celda extra de antes
     paso = cfg.get("paso_libre_grados", 15)
     # DEDUP por GEOMETRÍA: muchas piezas comparten silueta (mismo (pieza,talle,variante,
@@ -290,22 +292,45 @@ def componer_pdf_contorno(colocaciones, cfg, path_salida, etiquetas=True):
     out = fitz.open()
     consumo_cm = 0.0
     alturas_cm = []   # alto de CADA página (cada página = una MESA física de tela)
+    user_units = []   # /UserUnit de cada página (1 = mesa normal, sin truco)
     for hoja in colocaciones:
         if not hoja:
             continue
         alto_usado = max(c["cy"] + c["bh"] / 2 for c in hoja)
         alto_pag = alto_usado + (m["sup"] + m["inf"]) * CM
-        page = out.new_page(width=ancho_pag, height=alto_pag)
+        # ── MESAS DE MÁS DE 5,08 m ────────────────────────────────────────────────────────────
+        # Ninguna página PDF puede pasar de 14400 unidades por lado (200 pulgadas = 508 cm). Para
+        # mesas más largas se usa **/UserUnit** (PDF 1.6): cada unidad vale `uu` puntos, así que se
+        # dibuja TODO dividido por `uu` y el lector lo multiplica de vuelta. Verificado con el RIP
+        # del usuario, que reporta el largo real. Con uu=1 (mesas normales) la salida es idéntica
+        # a la de siempre: `s` vale 1 y no se toca nada.
+        uu = max(1, ceil(max(ancho_pag, alto_pag) / 14400.0))
+        s = 1.0 / uu
+        page = out.new_page(width=ancho_pag * s, height=alto_pag * s)
         for c in hoja:
-            x0 = m["izq"] * CM + c["cx"] - c["bw"] / 2
-            y0 = m["sup"] * CM + c["cy"] - c["bh"] / 2
-            page.show_pdf_page(fitz.Rect(x0, y0, x0 + c["bw"], y0 + c["bh"]),
+            x0 = (m["izq"] * CM + c["cx"] - c["bw"] / 2) * s
+            y0 = (m["sup"] * CM + c["cy"] - c["bh"] / 2) * s
+            page.show_pdf_page(fitz.Rect(x0, y0, x0 + c["bw"] * s, y0 + c["bh"] * s),
                                c["pieza"]["doc"], 0, rotate=c["ang"])
             if etiquetas:
-                page.insert_text(fitz.Point(x0 + 2, max(y0 - 3, 6)), c["pieza"]["etiqueta"],
-                                 fontname="helvetica", fontsize=6, color=(0.4, 0.4, 0.4))
+                page.insert_text(fitz.Point(x0 + 2 * s, max(y0 - 3 * s, 6 * s)), c["pieza"]["etiqueta"],
+                                 fontname="helvetica", fontsize=max(1, 6 * s), color=(0.4, 0.4, 0.4))
+        user_units.append(uu)
         alturas_cm.append(round(alto_pag / CM, 1))
         consumo_cm += alto_pag / CM
     out.save(path_salida, deflate=True, garbage=3)
     out.close()
+    # PyMuPDF no escribe /UserUnit → se agrega con pikepdf (ya es dependencia del proyecto). Si
+    # fallara, la hoja quedaría a 1/uu de escala: se avisa fuerte en el log en vez de pasar callado.
+    if any(u > 1 for u in user_units):
+        try:
+            import pikepdf
+            with pikepdf.open(path_salida, allow_overwriting_input=True) as pdf:
+                for pg, u in zip(pdf.pages, user_units):
+                    if u > 1:
+                        pg.UserUnit = int(u)
+                pdf.save(path_salida)
+        except Exception as e:
+            print(f"  [!!] MESA LARGA SIN /UserUnit ({path_salida}): {e}\n"
+                  f"       La hoja quedaría a 1/{max(user_units):g} de escala. NO IMPRIMIR.")
     return consumo_cm, alturas_cm

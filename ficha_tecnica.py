@@ -164,7 +164,8 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
 
 def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archivo="FICHA_TECNICA.pdf"):
     """Arma el PDF. `planilla` = {columnas:[{id,label}], filas:[{colId: valor}]}.
-    `moldes_guia` = [{nombre, talle, piezas:[{nombre,w_cm,h_cm,svg}]}]. Devuelve la ruta o None."""
+    `moldes_guia` = [{nombre, diseno, variante, piezas:[{nombre, tela, pdf}]}] — UNO POR DISEÑO del
+    pedido (y por variable dentro del diseño). Devuelve la ruta o None."""
     doc = fitz.open()
     columnas = (planilla or {}).get("columnas") or []
     filas = (planilla or {}).get("filas") or []
@@ -185,17 +186,43 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
         y += 6
         y, restan, _f0 = _dibujar_tabla(pg, y, columnas, restan, A4_H - MARGEN, fila0=_f0)
 
-    # 2) MOLDE GUÍA (abajo — sigue en la misma página si entra, si no, página nueva).
-    #    El encabezado dice el DISEÑO (para distinguir si hay más de uno), NO el talle: es sólo una guía.
-    for mg in (moldes_guia or []):
+    # 2) MOLDE GUÍA — UNO POR CADA DISEÑO del pedido (abajo; sigue en la misma página si entra, si
+    #    no, página nueva). El encabezado dice el DISEÑO, NO el talle: es sólo una guía.
+    guias = list(moldes_guia or [])
+    # La VARIABLE sólo se nombra cuando el MISMO molde+diseño sale en más de una: ahí las piezas
+    # cambian y hace falta distinguirlas. Si es la única, nombrarla sería ruido.
+    _rep = {}
+    for mg in guias:
+        _rep[(mg.get("nombre"), mg.get("diseno"))] = _rep.get((mg.get("nombre"), mg.get("diseno")), 0) + 1
+    for i_mg, mg in enumerate(guias):
         piezas = mg.get("piezas") or []
         titulo_mg = f"MOLDE GUÍA · {mg.get('nombre', '')}" + (f"  ·  {mg.get('diseno')}" if mg.get("diseno") else "")
-        if y + 200 > A4_H - MARGEN:        # no entra ni el título + una fila → página nueva
+        # Línea gris de abajo: la variable (si distingue), QUÉ OPCIONES lleva (manga corta/larga…)
+        # y cuántas piezas son. Las opciones importan: si el pedido pidió las dos mangas, las piezas
+        # de las dos están acá y hay que decirlo, si no parece que sobran piezas.
+        var = str(mg.get("variante") or "").strip()
+        detalle = []
+        if var and _rep.get((mg.get("nombre"), mg.get("diseno")), 0) > 1:
+            detalle.append("Variable: " + var)
+        if str(mg.get("opciones") or "").strip():
+            detalle.append(str(mg["opciones"]).strip())
+        # El nombre/número que se ve estampado sale de UNA fila del pedido: se aclara para que no se
+        # lea como «todas las prendas llevan esto» (los de cada prenda están en la tabla de arriba).
+        if str(mg.get("ejemplo") or "").strip():
+            detalle.append("ejemplo: " + str(mg["ejemplo"]).strip())
+        detalle.append(f"{len(piezas)} pieza" + ("s" if len(piezas) != 1 else ""))
+        detalle = "  ·  ".join(detalle)
+        if y + 210 > A4_H - MARGEN:        # no entra ni el título + una fila → página nueva
             pg = nueva_pagina(); y = 78
         else:
             y += 24
+            if i_mg:                        # separador: se ve dónde termina un diseño y empieza otro
+                page_y = y - 12
+                pg.draw_line(fitz.Point(MARGEN, page_y), fitz.Point(A4_W - MARGEN, page_y), color=LINEA, width=0.6)
         y = _seccion(pg, y, titulo_mg)
-        y += 10
+        y += 11
+        _texto(pg, MARGEN, y, detalle, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
+        y += 9
         y, rest = _dibujar_piezas(doc, pg, y, piezas, A4_H - MARGEN)
         while rest:
             pg = nueva_pagina(); y = 78

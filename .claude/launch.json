@@ -13,6 +13,12 @@
         "TIZADA_TRABAJOS": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/.preview_sandbox/trabajos",
         "TIZADA_FUENTES": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/catalogo_fuentes"
       }
+    },
+    {
+      "name": "tizada-real",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["servidor.py"],
+      "port": 8050
     }
   ]
 }

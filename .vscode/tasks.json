@@ -1,0 +1,46 @@
+{
+  // TIZADA PRO — el servidor se levanta desde acá.
+  //
+  // «Servidor TIZADA PRO (8050)» arranca SOLA al abrir esta carpeta en VS Code (`runOn: folderOpen`)
+  // y queda en su propia terminal, a la vista. La primera vez VS Code pide permiso:
+  //   Ctrl+Shift+P → «Tasks: Manage Automatic Tasks» → «Allow Automatic Tasks in Folder».
+  //
+  // Para pararlo: Ctrl+C en esa terminal (o el tacho de la terminal). Para volver a arrancarlo:
+  //   Ctrl+Shift+P → «Tasks: Run Task» → «Servidor TIZADA PRO (8050)».
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Servidor TIZADA PRO (8050)",
+      "type": "shell",
+      // Antes de arrancar libera el 8050: si quedó uno viejo dando vueltas (o alguien lo levantó
+      // por fuera), esta tarea GANA y no aparece el error de «puerto ocupado».
+      "command": "Get-NetTCPConnection -LocalPort 8050 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }; py servidor.py",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "tizada",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Recompilar el front (dist)",
+      "type": "shell",
+      "command": "npm run build",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "tizada" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Parar el servidor (puerto 8050)",
+      "type": "shell",
+      "command": "powershell -NoProfile -Command \"Get-NetTCPConnection -LocalPort 8050 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force }\"",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

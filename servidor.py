@@ -67,7 +67,26 @@ if PUBLICADO and not _secret:
         "        Sin una clave fija, cada reinicio del servidor cierra la sesión de todos.\n"
         "        Generá una y dejala en la configuración del servicio, por ejemplo:\n"
         "        py -c \"import secrets;print(secrets.token_hex(32))\"\n")
-app.secret_key = _secret or __import__("secrets").token_hex(32)
+if not _secret:
+    # TALLER: una clave al azar por arranque dejaba al usuario DESLOGUEADO cada vez que se
+    # reinicia el servidor (401 en medio del trabajo, sin entender por qué). Se guarda una en
+    # `datos/` — que no se publica ni va al repo — y así reiniciar no molesta a nadie. Es la misma
+    # idea de siempre: la clave nunca es fija en el código, sólo que ahora sobrevive al reinicio.
+    _ruta_secret = os.path.join(DATOS, ".secret")
+    try:
+        with open(_ruta_secret, encoding="utf-8") as _f:
+            _secret = (_f.read() or "").strip() or None
+    except OSError:
+        _secret = None
+    if not _secret:
+        _secret = __import__("secrets").token_hex(32)
+        try:
+            os.makedirs(DATOS, exist_ok=True)
+            with open(_ruta_secret, "w", encoding="utf-8") as _f:
+                _f.write(_secret)
+        except OSError:
+            pass          # sin poder guardarla se sigue con la de esta corrida (como antes)
+app.secret_key = _secret
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 # HTTPS: la cookie de sesión sólo viaja por conexión segura. Se prende solo en publicado
 # (en el taller es http://localhost y con SECURE el navegador NO guardaría la sesión).
@@ -76,7 +95,10 @@ if PUBLICADO and os.environ.get("TIZADA_HTTPS", "1") != "0":
     app.config.update(SESSION_COOKIE_SECURE=True)
 # Detrás de un proxy inverso (el que termina el HTTPS) Flask ve http:// y la IP del proxy;
 # ProxyFix le hace leer los X-Forwarded-* para que los redirects y la IP real sean correctos.
-if PUBLICADO:
+# ⚠️ SÓLO si hay un proxy delante: con HTTPS PROPIO (`TIZADA_TLS_CERT`, el caso «se entra por la
+# IP») los `X-Forwarded-*` los manda el cliente y son mentira — confiar en ellos deja falsear la
+# IP de origen y el esquema.
+if PUBLICADO and not os.environ.get("TIZADA_TLS_CERT"):
     try:
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -1298,6 +1320,46 @@ def _ruta_entrada(nombre, pid=None, sub=None, original=False):
     return p
 
 
+_DETECCION_CACHE_V = 2     # subir esto invalida TODAS las cachés (cambió el formato de `det`)
+
+
+def _deteccion_cache(arte, reg):
+    """`MP.detectar_arte` con caché en disco: es lo que hace lento el paso Arte.
+
+    Con un arte pesado tarda ~5 s (el 95% es vectorizar cada mesa a SVG) y se vuelve a pedir
+    ENTERO cada vez que se entra al paso Arte, siempre con el mismo archivo. La caché vive al
+    lado del arte y se invalida sola: la clave lleva el archivo (ruta + fecha + tamaño) y los
+    nombres de las piezas del molde, que son de donde salen las sugerencias.
+
+    Devuelve un dict FRESCO en cada llamada (el que llama le agrega `modo`/`mapeo`), así que
+    mutarlo no ensucia la caché."""
+    import hashlib
+    try:
+        clave = hashlib.sha1(json.dumps([
+            os.path.abspath(arte), int(os.path.getmtime(arte)), os.path.getsize(arte),
+            sorted(reg.keys()), _DETECCION_CACHE_V,
+        ]).encode("utf-8")).hexdigest()
+    except Exception:
+        return MP.detectar_arte(arte, reg)     # sin clave confiable, mejor no cachear
+    ruta = os.path.join(os.path.dirname(arte), ".deteccion_cache.json")
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            g = json.load(f)
+        if g.get("clave") == clave and isinstance(g.get("det"), dict):
+            return g["det"]
+    except Exception:
+        pass
+    det = MP.detectar_arte(arte, reg)
+    try:
+        tmp = ruta + ".tmp"                    # atómico: dos pestañas pueden pedirlo a la vez
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"clave": clave, "det": det}, f)
+        os.replace(tmp, ruta)
+    except Exception:
+        pass
+    return det
+
+
 def _en_hilo(fn):
     """Corre `fn` en un hilo de fondo cerrando al final los PDFs que haya abierto. El
     `teardown_request` de Flask sólo alcanza a los hilos de request; sin esto un pre-warm dejaba
@@ -1410,6 +1472,10 @@ def _error_no_controlado(e):
 
 @app.after_request
 def _evitar_cache(response):
+    # Excepción: lo que ya se marcó `immutable` (las mesas del arte) lleva la firma del archivo
+    # en su propia URL — cachearlo es justamente lo que evita volver a bajar megabytes de dibujo.
+    if "immutable" in (response.headers.get("Cache-Control") or ""):
+        return response
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -3045,13 +3111,17 @@ def subir_arte():
     destino = _ruta_entrada("arte.ai", sub=sub, original=True)
     f.save(destino)
     OA.reset_versiones(destino)   # arte nuevo = se descartan las ediciones (versiones) del anterior
+    return _subir_arte_analizar(destino, plantilla, f, sub)
+
+
+def _subir_arte_analizar(destino, plantilla, f, sub):
     try:
         if MP.arte_es_separado(destino, plantilla):
             reg = _cargar("registro_producto.json")
             if not reg:
                 return jsonify({"error": "primero registrá las piezas del molde "
                                 "(subí o etiquetá la plantilla)"}), 409
-            det = MP.detectar_arte(destino, reg)
+            det = _urls_mesas(_deteccion_cache(destino, reg), destino, request.form.get("diseno"))
             det.update({"modo": "separado", "archivo": f.filename})
             # Los NOMBRES de la capa "guías" MANDAN: cada mesa del arte que diga el
             # nombre de una pieza se asigna a esa pieza. El mapeo fijo guardado solo
@@ -3108,6 +3178,86 @@ def subir_arte():
     return jsonify(val)
 
 
+def _urls_mesas(det, arte, diseno):
+    """Le pone a cada mesa la URL de su imagen (`m.img`), en vez de mandar el dibujo adentro.
+
+    Antes cada mesa viajaba como SVG dentro del JSON: con un arte de vector pesado eso son
+    1098 KB **por mesa** (11,6 MB en total) que el navegador tiene que parsear y rasterizar de
+    una — el paso Arte tardaba casi un minuto. Ahora el navegador pide cada mesa por separado,
+    sólo las que ve, en paralelo y con caché propia. La URL lleva la firma del archivo, así que
+    se puede cachear para siempre y cambia sola cuando el usuario sube otro arte."""
+    from urllib.parse import quote
+    try:
+        firma = f"{int(os.path.getmtime(arte))}-{os.path.getsize(arte)}"
+    except OSError:
+        return det
+    qs = f"&diseno={quote(diseno)}" if diseno else ""
+    pid = quote(_get_active_producto_id() or "")
+    for m in det.get("mesas") or []:
+        m["img"] = f"/api/arte/mesa_img?pid={pid}{qs}&mesa={m['mesa']}&v={firma}"
+    return det
+
+
+@app.get("/api/arte/mesa_img")
+def arte_mesa_img():
+    """UNA mesa del arte, para el visor. Ver `_urls_mesas`.
+
+    **Sale VECTORIAL (SVG), siempre**: lo que se ve en pantalla tiene que ser el diseño de
+    verdad, no una foto de él — al acercarse se sigue viendo nítido y es exactamente el mismo
+    dibujo que va a la tizada (ley del sistema: el arte se ve igual que la tizada). Decisión
+    explícita del usuario: prefiere esperar antes que ver una versión rasterizada. El `.ai`
+    original ni se toca: la tizada lo lee entero, esto es sólo para mirar.
+
+    Lo generado se guarda en disco junto al arte, y la respuesta se puede cachear para siempre
+    porque la URL lleva la firma del archivo (`v`): subir otro arte cambia la URL sola."""
+    sub = _diseno_sub(request.args.get("diseno"))
+    arte = _ruta_entrada("arte.ai", sub=sub)
+    if not os.path.exists(arte):
+        return jsonify({"error": "no hay arte cargado"}), 404
+    try:
+        mesa = max(1, int(request.args.get("mesa") or 1))
+    except ValueError:
+        return jsonify({"error": "mesa inválida"}), 400
+    firma = f"{int(os.path.getmtime(arte))}-{os.path.getsize(arte)}"
+    cdir = os.path.join(os.path.dirname(arte), "mesas_cache")
+    dest = os.path.join(cdir, f"{firma}_{mesa}.svg")
+    if not os.path.exists(dest):
+        try:
+            os.makedirs(cdir, exist_ok=True)
+            for viejo in os.listdir(cdir):          # el arte cambió: lo de la firma vieja no sirve
+                if viejo == os.path.basename(dest):
+                    continue
+                if not viejo.startswith(firma + "_"):
+                    try:
+                        os.remove(os.path.join(cdir, viejo))
+                    except OSError:
+                        pass
+            import pymupdf as fitz
+            doc = fitz.open(arte)
+            if mesa > len(doc):
+                doc.close()
+                return jsonify({"error": "esa mesa no existe"}), 404
+            try:                                    # las guías y los editables no se imprimen
+                for c in doc.layer_ui_configs():
+                    if MP._es_capa_guia(c.get("text")) or MP._es_capa_editable(c.get("text")):
+                        doc.set_layer_ui_config(c["number"], action=2)
+            except Exception:
+                pass
+            pg = doc[mesa - 1]
+            tmp = dest + ".tmp"                     # atómico: dos pestañas pueden pedir lo mismo
+            # newline="": en Windows el modo texto convierte cada \n en \r\n y el archivo dejaría
+            # de ser byte por byte el vector que produce el motor (además de pesar más).
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.write(pg.get_svg_image())
+            os.replace(tmp, dest)
+            doc.close()
+        except Exception as e:
+            return jsonify({"error": f"no se pudo dibujar la mesa: {e}"}), 500
+    r = send_file(dest, mimetype="image/svg+xml", conditional=True)
+    r.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return r
+
+
 @app.get("/api/arte/deteccion")
 def arte_deteccion():
     sub = _diseno_sub(request.args.get("diseno"))
@@ -3117,7 +3267,7 @@ def arte_deteccion():
         return jsonify({"error": "primero subí el arte"}), 409
     if not reg:
         return jsonify({"error": "primero registrá las piezas del molde"}), 409
-    det = MP.detectar_arte(arte, reg)
+    det = _urls_mesas(_deteccion_cache(arte, reg), arte, request.args.get("diseno"))
     det["modo"] = "separado"
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == _get_active_producto_id()), None)
@@ -3206,6 +3356,12 @@ def arte_mapeo():
 # YA armada (contorno + diseño encajado + borde + etiqueta, en cm reales, sin nombre/número)
 # se genera UNA vez con el MISMO motor de la tizada (`generar_pedido(solo_piezas=True)`) y se
 # guarda en disco. Mientras la config no cambie, se REUSA (instantáneo) en vez de re-armar.
+# ⚠️ NO convertir esto en una cola general de "todo lo pesado". Se probó (subir el arte, detectar
+# mesas y dibujar una mesa tomando este mismo lock) para que dos artes pesados no se pelearan la
+# CPU, y el resultado fue PEOR: la generación de la tizada quedó esperando detrás de pedidos del
+# visor y el usuario vio la ventana de "Armando la tizada" clavada. La tizada tiene que poder
+# avanzar SIEMPRE, sin depender de lo que esté mirando la pantalla. Este lock cubre sólo el armado
+# de piezas del visor, como antes.
 _PIEZAS_BASE_LOCK = threading.Lock()
 _PREWARM_LOCK = threading.Lock()
 _PREWARM_EN_CURSO = set()   # claves (pid,diseno,variante,mapeo) con pre-warm de talles en curso
@@ -3462,10 +3618,21 @@ def procesos_render():
 def _get_render_pool():
     global _RENDER_POOL
     with _RENDER_POOL_LOCK:
+        # Si un worker murió de golpe (se quedó sin memoria, lo mató el sistema), el pool queda
+        # ROTO y todo lo que se le mande después falla con BrokenProcessPool — para siempre, hasta
+        # reiniciar el servidor. Se descarta y se arma otro: es preferible perder unos segundos
+        # levantándolo de nuevo a que el usuario no pueda volver a generar nada.
+        if _RENDER_POOL is not None and getattr(_RENDER_POOL, "_broken", False):
+            try:
+                _RENDER_POOL.shutdown(wait=False)
+            except Exception:
+                pass
+            _RENDER_POOL = None
         if _RENDER_POOL is None:
             from concurrent.futures import ProcessPoolExecutor
             _RENDER_POOL = ProcessPoolExecutor(max_workers=procesos_render())
     return _RENDER_POOL
+
 
 def _render_talle_worker(args):
     """WORKER de proceso: genera UN talle → caché en disco. Recibe SOLO tipos simples
@@ -3506,9 +3673,22 @@ def arte_asignar_todo():
         return jsonify({"error": "falta producto/registro"}), 409
     _b, _ = _mapeo_estructura(pid, sub=_diseno_sub(diseno))
     _mapeo_arg = {"mapeo": (_b or mapeo), "por_variable": ({variante: mapeo} if variante else {})}
-    talles = _variantes_molde(pid)
+    # `talles` explícitos = dibujar SÓLO esos (por defecto, el molde entero). El visor pide primero
+    # el talle guía y los demás recién cuando se los toca: con un arte pesado cada talle son ~8
+    # recortes del vector, y hacer los 20 de una eran ~60 s de espera para ver algo.
+    talles = [str(t) for t in (cuerpo.get("talles") or []) if str(t).strip()] or _variantes_molde(pid)
     job = uuid.uuid4().hex[:8]
-    _ASIGNAR_JOBS[job] = {"hecho": 0, "total": len(talles), "done": False}
+    # PROGRESO DE VERDAD: los talles terminan de a uno y de golpe (el primero tarda lo que tarda
+    # levantar los procesos + renderizar entero) → el cartel se quedaba clavado en «0/20» y parecía
+    # colgado. Los workers van dejando cada pieza en disco (`piezas_cache/<variable>/<talle>/*.svg`),
+    # así que se cuentan esos archivos: eso SÍ se mueve todo el tiempo y no es una estimación.
+    _vslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(variante or "todas"))[:40] or "todas"
+    _sub = os.path.join("piezas_cache", _vslug)
+    if len(talles) == 1:   # con un solo talle se mira SU carpeta: si no, se cuentan las piezas
+        _sub = os.path.join(_sub, re.sub(r"[^A-Za-z0-9_-]+", "_", str(talles[0]))[:24] or "guia")
+    _dircache = _ruta_datos(_sub, pid, sub=_diseno_sub(diseno))
+    _ASIGNAR_JOBS[job] = {"hecho": 0, "total": len(talles), "done": False,
+                          "dir": _dircache, "desde": time.time() - 1, "fase": "arrancando"}
     if len(_ASIGNAR_JOBS) > 40:   # no acumular jobs viejos
         for k in [k for k, v in list(_ASIGNAR_JOBS.items()) if v.get("done")][:20]:
             _ASIGNAR_JOBS.pop(k, None)
@@ -3519,8 +3699,10 @@ def arte_asignar_todo():
             # RENDERS (por variable) + DETECCIONES (por molde, para el visor) — ambos en paralelo.
             futs = [pool.submit(_render_talle_worker, (pid, diseno, variante, str(t), _mapeo_arg)) for t in talles]
             det = [pool.submit(_deteccion_talle_worker, (pid, str(t))) for t in talles]
+            _ASIGNAR_JOBS[job]["fase"] = "dibujando"
             for _f in as_completed(futs):
                 _ASIGNAR_JOBS[job]["hecho"] += 1
+            _ASIGNAR_JOBS[job]["fase"] = "midiendo"    # ya están los diseños; faltan las medidas
             for _f in as_completed(det):   # esperar también las detecciones (para que el front no las recalcule)
                 pass
         except Exception as e:
@@ -3530,10 +3712,31 @@ def arte_asignar_todo():
     _en_hilo(_run)
     return jsonify({"job": job, "total": len(talles)})
 
+def _contar_svgs(carpeta, desde=0):
+    """Piezas dibujadas EN ESTA pasada: los `.svg` del caché de la variable escritos después de
+    `desde`. Por fecha y no por diferencia de totales, porque re-dibujar un talle PISA los
+    archivos que ya estaban (misma cantidad) y el contador se quedaba clavado en cero."""
+    n = 0
+    for raiz, _dirs, arch in os.walk(carpeta):
+        for a in arch:
+            if a.endswith(".svg"):
+                try:
+                    if os.path.getmtime(os.path.join(raiz, a)) >= desde:
+                        n += 1
+                except OSError:
+                    pass
+    return n
+
+
 @app.get("/api/arte/asignar_estado")
 def arte_asignar_estado():
     st = _ASIGNAR_JOBS.get(request.args.get("job"))
-    return jsonify(st or {"error": "job desconocido", "done": True})
+    if not st:
+        return jsonify({"error": "job desconocido", "done": True})
+    out = {k: v for k, v in st.items() if k not in ("dir", "desde")}
+    if st.get("dir"):   # piezas ya dibujadas EN ESTA pasada: se mueve aunque ningún talle haya terminado
+        out["piezas"] = _contar_svgs(st["dir"], st.get("desde") or 0)
+    return jsonify(out)
 
 
 # ── Diseños nombrados por molde ──────────────────────────────────────────────
@@ -5001,6 +5204,16 @@ def set_telas_asignadas():
     return jsonify({"ok": True, "telas_cfg": cfg, "telas_asignadas": prod["telas_asignadas"]})
 
 
+# ALTO MÁXIMO DE UNA MESA, EN CM.
+# El PDF no admite páginas de más de 14400 unidades por lado (200 pulgadas = 508 cm), pero desde
+# PDF 1.6 existe **/UserUnit**: cada unidad puede valer más de un punto, y así la mesa crece sin
+# romper el formato. `componer_pdf_contorno` lo aplica solo cuando hace falta.
+# ⚠️ Depende de que el RIP lo respete. **Verificado con el RIP del usuario (2026-07-30): carga una
+# hoja de 10 m y la reporta como 10 m** (probado también en Illustrator). Si algún día se cambia de
+# RIP, hay que repetir la prueba: si lo ignora, imprime a 1/UserUnit de escala.
+ALTO_MESA_MAX_CM = 5000.0     # 50 m
+
+
 def _config_produccion(pid=None):
     """Traduce la config a los parámetros del motor: (config_nesting global,
     rotaciones por pieza, telas_cfg por tela, asignación pieza→tela).
@@ -5022,7 +5235,9 @@ def _config_produccion(pid=None):
             espaciado_mm = preset.get("espaciado_mm", espaciado_mm)
             margen_mm = preset.get("margen_mm", margen_mm)
             rot = preset.get("rotacion", rot)
-            alto_max_cm = float(preset.get("alto_max_cm", alto_max_cm) or alto_max_cm)
+            # Se acota también al LEER: los presets guardados antes de este tope pueden tener 8 m,
+            # y el resumen de la pantalla mostraría un número que el nesting no respeta.
+            alto_max_cm = min(ALTO_MESA_MAX_CM, float(preset.get("alto_max_cm", alto_max_cm) or alto_max_cm))
     except Exception:
         pass
     margen_cm = float(margen_mm) / 10.0
@@ -5046,11 +5261,17 @@ def _config_produccion(pid=None):
     return base, rotaciones, telas_cfg, asignacion
 
 
-def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None):
+def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
     (talle/nombre/numero/manga + personalización por columna), según el template y
     el mapeo de columnas del molde. `default_diseno` = diseño de la fila cuando no
-    hay columna "Diseño" (pedido de un solo diseño)."""
+    hay columna "Diseño" (pedido de un solo diseño).
+
+    `var_por_diseno` = {slug_del_espacio: clave_de_variable} **para ESTE molde**. La fila sólo
+    puede traer UNA `__variante`, así que cuando un espacio del pedido usa dos moldes, la variable
+    que viaja en la fila es la de uno solo: para el otro, la fila llegaba SIN variable y el motor
+    generaba TODAS sus piezas (y la etiqueta caía a la posición por defecto). Con este mapa, cada
+    molde recupera la variable que ese espacio eligió PARA ÉL en el paso 1."""
     mapeo_columnas = {"talle": "talle", "nombre": "nombre", "numero": "numero",
                       "manga": "manga", "manga_corta_val": "corta", "manga_larga_val": "larga"}
     if prod and "mapeo_columnas" in prod:
@@ -5142,6 +5363,10 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None):
         dval = pr.get(diseno_col.get("id"), pr.get(diseno_col.get("label"), "")) if diseno_col else ""
         translated_pr["_diseno"] = _slugify_diseno(dval) if str(dval or "").strip() else _slugify_diseno(default_diseno)
         _vcl = str(pr.get("__variante", "") or "").strip()
+        # ¿La variable que trae la fila es de ESTE molde? Si no lo es —porque el espacio usa varios
+        # moldes y en la fila sólo entra una— se toma la que ese espacio eligió para este molde.
+        if not (_vcl and (_vcl in variantes_prod or _vcl in variantes_piezas)):
+            _vcl = str((var_por_diseno or {}).get(translated_pr["_diseno"], "") or "").strip()
         if _vcl and (_vcl in variantes_prod or _vcl in variantes_piezas):
             translated_pr["variante_clave"] = _vcl
             if _vcl in variantes_prod:
@@ -5239,10 +5464,18 @@ def generar():
                     res["perfil_icc"] = _icc_nom
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
-            try:   # aplanar cada hoja para el RIP (ver generar_multi)
+            try:   # aplanar cada hoja para el RIP (ver generar_multi) — avisando hoja por hoja
                 from aplanar_rip import aplanar_para_rip
-                for h in res.get("hojas", []):
+                _hs = res.get("hojas", [])
+                for _i, h in enumerate(_hs):
+                    try:
+                        prog("rip", f"{_i + 1}/{len(_hs)}", None)
+                    except Exception:
+                        pass
+                    _tr = time.time()
                     aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
+                          f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
             except Exception as _ea:
                 print("  [!] aplanar RIP:", _ea)
             json.dump({"prendas": prendas, "resultado": {k: v for k, v in res.items() if k != "hojas"} |
@@ -5257,6 +5490,26 @@ def generar():
 
     _en_hilo(correr)
     return jsonify({"id": tid})
+
+
+# Tope de moldes guía de la ficha. Cada uno pasa por el motor (render de sus piezas), así que un
+# pedido con muchas combinaciones molde × diseño × variable haría una ficha eterna. Si se recorta,
+# se avisa (nunca en silencio).
+_MAX_GUIAS_FICHA = 16
+
+
+def _muestra_de(prenda):
+    """Nombre/número (y el resto de lo personalizable) de una fila del pedido, para que el molde
+    guía de la ficha los muestre ESTAMPADOS como en la prenda y no en blanco."""
+    return {"nombre": prenda.get("nombre") or "", "numero": prenda.get("numero") or "",
+            "personalizacion": prenda.get("personalizacion") or {}}
+
+
+def _combo_toggles(prenda):
+    """Firma de la combinación de toggles de una fila («manga=larga», «sisa=con»…). Dos filas con
+    la misma firma llevan LAS MISMAS piezas, así que a la ficha le alcanza con una."""
+    return tuple(sorted((str(t.get("clave") or "").lower(), str(t.get("opcion") or "").lower())
+                        for t in (prenda.get("toggles") or [])))
 
 
 def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
@@ -5292,6 +5545,25 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     prendas = _traducir_prendas([fila], prod, cat=_cargar_catalogo(), reg=reg)
     if not prendas:
         return None
+    # ── NOMBRE Y NÚMERO, TAL CUAL SALEN EN LA PRENDA ─────────────────────────────────────────
+    # La muestra salía con nombre y número VACÍOS, así que el molde guía no mostraba cómo queda la
+    # personalización (tipografía, curva y borde del diseño). Se toma la PRIMERA fila del pedido
+    # que traiga alguno y se estampa igual que en la tizada: lo que el taller ve en la ficha es
+    # exactamente lo que va a salir impreso.
+    _mu = (var or {}).get("muestra") or {}
+    if _mu.get("nombre") or _mu.get("numero"):
+        prendas = [{**_p, "nombre": _mu.get("nombre") or "", "numero": _mu.get("numero") or "",
+                    "personalizacion": _mu.get("personalizacion") or _p.get("personalizacion")}
+                   for _p in prendas]
+    # ── LAS PIEZAS EXACTAS DEL PEDIDO ─────────────────────────────────────────────────────────
+    # Los TOGGLES (manga corta/larga, con/sin capucha…) cambian QUÉ PIEZAS lleva la prenda. La
+    # muestra salía siempre con la opción por defecto, así que un pedido entero de manga larga
+    # mostraba las mangas cortas. Ahora se genera UNA prenda por cada combinación que aparece en
+    # las filas y se juntan las piezas: si el pedido tiene filas de manga corta Y de manga larga,
+    # la ficha muestra las dos (que es lo que hay que cortar).
+    _combos = (var or {}).get("combos") or []
+    if _combos:
+        prendas = [{**prendas[0], "toggles": list(_c)} for _c in _combos]
     try:
         pers = MP.extraer_personalizacion(arte)
     except Exception:
@@ -5310,12 +5582,16 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
                                 editables_tamano=_editables_tamano(prod),
                                 editables_color=_editables_color(prod, diseno or "principal"),
                                 objetos_agregados=_objetos_agregados_motor(pid, sub))
+        _vistas = set()   # con varias combinaciones de toggle, las piezas comunes vienen repetidas
         for _tela, pzs in (ppt or {}).items():
             for pz in pzs:
                 try:
                     nom = pz["pieza"]
                     if solo and nom not in solo:
                         continue
+                    if nom in _vistas:      # el Frente es el mismo con manga corta o larga: va una vez
+                        continue
+                    _vistas.add(nom)
                     piezas.append({"nombre": nom, "w_cm": round(pz["w"] / MP.CM, 1),
                                    "h_cm": round(pz["h"] / MP.CM, 1), "pdf": pz["doc"].tobytes(),
                                    "tela": str(_tela) if _tela else ""})   # en qué tela va (grupo del motor)
@@ -5334,7 +5610,26 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     # Nombre del diseño (para el encabezado): distingue si hay más de uno en el pedido.
     dnom = "Principal" if diseno in (None, "principal") else next(
         (d.get("nombre") for d in ((prod or {}).get("disenos") or []) if d.get("id") == diseno), diseno)
-    return {"nombre": (prod or {}).get("nombre", pid), "diseno": dnom, "piezas": piezas}
+    # Nombre legible de la VARIABLE (la clave es un id tipo `v_x3706kt`): la ficha lo muestra cuando
+    # un mismo diseño sale en más de una variable, que es cuando las piezas cambian.
+    vnom = next((v.get("label") or v.get("nombre") for v in ((prod or {}).get("variantes") or [])
+                 if v.get("clave") == (var or {}).get("clave")), None)
+    # Qué opciones de toggle incluye esta guía («Manga: corta + larga»), para que se entienda por
+    # qué están las piezas de las dos.
+    _ops = {}
+    for _c in _combos:
+        for _t in (_c or []):
+            _k = str(_t.get("clave") or "").strip()
+            _o = str(_t.get("opcion") or "").strip()
+            if _k and _o:
+                _ops.setdefault(_k.capitalize(), [])
+                if _o not in _ops[_k.capitalize()]:
+                    _ops[_k.capitalize()].append(_o)
+    opciones = " · ".join(f"{k}: {' + '.join(v)}" for k, v in _ops.items()) or None
+    # De quién es el nombre/número que se ve estampado (es UNA fila del pedido, no todas).
+    _ej = " ".join(x for x in (_mu.get("nombre"), _mu.get("numero")) if x).strip() or None
+    return {"nombre": (prod or {}).get("nombre", pid), "diseno": dnom, "variante": vnom,
+            "opciones": opciones, "ejemplo": _ej, "piezas": piezas}
 
 
 @app.post("/api/generar_multi")
@@ -5368,7 +5663,15 @@ def generar_multi():
                 return g
         return None
     molds_data, nombres, avisos = [], [], []
-    _var_ficha = {}                     # pid -> {clave, piezas, diseno}: la VARIABLE del pedido para la ficha
+    # DOS canales de aviso, porque el front los muestra distinto y con títulos distintos:
+    #   `avisos`        → piezas que salieron EN BLANCO (sin diseño): «agregá su mesa en el arte».
+    #   `avisos_pedido` → cosas del PEDIDO (variable sin elegir, etiqueta al lugar por defecto…),
+    #                     que no tienen nada que ver con el arte.
+    avisos_pedido = []
+    # FICHA TÉCNICA: un molde guía POR CADA DISEÑO del pedido (y por cada variable dentro del
+    # diseño), en el orden en que aparecen. Antes era uno solo por molde — el de la 1ª fila — así
+    # que un pedido con «Jugador» + «Golero» mostraba un solo diseño y escondía el otro.
+    _guias_ficha, _guias_vistas = [], set()
     for pid in pids:
         reg = _cargar("registro_producto.json", pid)
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -5410,30 +5713,37 @@ def generar_multi():
                 for full in (_match or [_p]):
                     _a[str(full)] = str(_t)
             return _a
-        # La del diseño que se editó en el Arte: sirve de referencia para la ficha técnica.
-        asig = _asig_de(_slugify_diseno(default_diseno))
         gconf = _grupo_de(pid)
         # Filas traducidas (cada una con su _diseno). Se separan por diseño: cada
         # subgrupo se genera con el ARTE de ese diseño (carpeta del molde para
         # 'principal', o disenos/<slug>/ para los demás).
-        translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg)
+        # La variable que ese ESPACIO eligió para ESTE molde (paso 1 del pedido): rescata las filas
+        # cuya `__variante` es de otro molde del mismo espacio (ver `_traducir_prendas`).
+        _vpd = {str(_sl): (_m or {}).get(pid) for _sl, _m in (cuerpo.get("vars_por_diseno") or {}).items()
+                if isinstance(_m, dict)}
+        translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd)
+        # AVISO (no traba): la posición de la etiqueta se guarda POR VARIABLE. Una fila que llega
+        # sin variable —molde pedido entero, o variable cuyos valores no resuelven piezas— usa la
+        # posición de la primera variable configurada (antes se iba al lugar por defecto, ver
+        # `verificar_etiqueta_posicion.py`). Si dos variables la tienen en lugares distintos, esa
+        # elección puede no ser la que se quería: se dice, no se frena.
+        _etq_pos = ((prod or {}).get("etiqueta") or {}).get("posiciones") or {}
+        if any("§" in str(_k) for _k in _etq_pos):
+            _sin_var = sum(1 for _t in translated if not _t.get("variante_clave"))
+            if _sin_var:
+                # Va en `avisos_pedido`, NO en `avisos`: ese otro es «piezas que salieron en blanco»
+                # (sin diseño) y el front lo muestra bajo ese título — mezclarlos hacía leer «no
+                # tienen gráfica» cuando el arte estaba perfecto.
+                avisos_pedido.append(f"«{nombre}»: {_sin_var} fila(s) quedaron sin variable elegida, así que "
+                                     f"se generaron TODAS las piezas del molde y la etiqueta fue a la posición "
+                                     f"de la primera variable configurada. Revisá que cada espacio tenga su "
+                                     f"variable para este molde.")
         # ── TRABA ANTES DE FABRICAR ──────────────────────────────────────────────────────────
         # Una tizada mal sale igual de bien impresa que una bien: los dos errores de acá abajo NO
         # fallan, producen algo que PARECE correcto. Por eso se frena antes y se dice qué fila.
         _err = _validar_pedido(pid, nombre, prod, cat, translated, _asig_de, reg)
         if _err:
             return jsonify({"error": _err[0], "detalle": _err[1]}), 422
-        # La VARIABLE que usa el pedido para este molde (la 1ª fila que la trae): es LO MISMO que
-        # arma la tizada → la ficha usa esa variable + su diseño para el molde guía.
-        _vf = next((t for t in translated if t.get("variante_clave")), None)
-        # Para la FICHA: además de la variable, guardo la asignación de telas por pieza (`asig`) y su
-        # config (`_telas`) → el molde guía puede decir en qué tela va cada pieza (igual que la tizada).
-        _vfd = {"asig": asig, "telas": _telas}
-        if _vf:
-            _vfd.update({"clave": _vf["variante_clave"],
-                         "piezas": _vf.get("variante_piezas"),
-                         "diseno": _vf.get("_diseno") or default_diseno})
-        _var_ficha[pid] = _vfd
         por_diseno = OrderedDict()
         for pr in translated:
             por_diseno.setdefault(pr.get("_diseno") or "principal", []).append(pr)
@@ -5508,6 +5818,44 @@ def generar_multi():
                 if not _b and not _pv:
                     _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}).items() if v}
                 mapeo = ({"mapeo": _b, "por_variable": _pv} if (_b or _pv) else None)
+            # ── FICHA: el molde guía de ESTE diseño ──────────────────────────────────────────
+            # Se anota acá (y no arriba con la 1ª fila) porque recién ahora `dslug` es el diseño
+            # DEFINITIVO: si el elegido no tenía arte, más arriba cayó al `_fallback` — la ficha
+            # tiene que mostrar el arte que de verdad se estampó. Dentro del diseño se anota una
+            # guía por VARIABLE distinta: las piezas cambian (cuello redondo ≠ cuello V), así que
+            # una sola guía mentiría sobre la mitad del pedido.
+            # La asignación de telas se calcula ACÁ, no en `correr()`: `_asig_de` es una clausura
+            # sobre el molde del ciclo y para cuando corre el hilo ya apunta al último molde.
+            _asig_d = _asig_de(dslug)
+            for _prg in subset:
+                _vc = str(_prg.get("variante_clave") or "")
+                _kg = (pid, dslug, _vc)
+                if _kg in _guias_vistas:
+                    # Ya hay guía para este combo: sólo se le suma la COMBINACIÓN DE TOGGLES de
+                    # esta fila, si es nueva (manga corta y manga larga son piezas distintas y las
+                    # dos tienen que salir en la ficha).
+                    _g0 = next((g for g in _guias_ficha if (g["pid"], g["diseno"], g["clave"] or "") == _kg), None)
+                    if _g0 is not None:
+                        _cb = _combo_toggles(_prg)
+                        if _cb not in _g0["_combos_vistos"]:
+                            _g0["_combos_vistos"].add(_cb)
+                            _g0["combos"].append(_prg.get("toggles") or [])
+                        # Si la guía todavía no tiene un nombre/número de ejemplo, se toma de esta
+                        # fila: la ficha muestra la personalización tal como sale estampada.
+                        if not (_g0["muestra"].get("nombre") or _g0["muestra"].get("numero")):
+                            _g0["muestra"] = _muestra_de(_prg)
+                    continue
+                _guias_vistas.add(_kg)
+                _guias_ficha.append({"pid": pid, "molde": nombre, "diseno": dslug, "diseno_nombre": dnom,
+                                     "clave": _vc or None, "piezas": _prg.get("variante_piezas"),
+                                     "asig": _asig_d, "telas": _telas,
+                                     # QUÉ PIEZAS lleva de verdad: una entrada por combinación de
+                                     # toggles usada en el pedido (manga corta / manga larga / …).
+                                     "combos": [_prg.get("toggles") or []],
+                                     "_combos_vistos": {_combo_toggles(_prg)},
+                                     # Nombre y número de ejemplo (de una fila real del pedido) para
+                                     # que el molde guía los muestre estampados como en la prenda.
+                                     "muestra": _muestra_de(_prg)})
             molds_data.append({
                 "plantilla": _ruta_entrada("plantilla.ai", pid),
                 "arte": _ruta_entrada("arte.ai", pid, sub=sub),
@@ -5555,6 +5903,7 @@ def generar_multi():
             res["id"] = tid
             res["moldes"] = nombres
             res["avisos"] = avisos   # combos (molde,diseño) que no se generaron por mapeo sin aprobar
+            res["avisos_pedido"] = avisos_pedido   # cosas del pedido (no del arte) — ver arriba
             # Embeber el perfil ICC en cada hoja: el que vino en el arte, o el
             # predeterminado del sistema si el arte no traía. Tagea (OutputIntent),
             # NO convierte los colores.
@@ -5585,21 +5934,49 @@ def generar_multi():
             # esto, los XObjects anidados + perfiles repetidos daban "error RIP". Best-effort.
             try:
                 from aplanar_rip import aplanar_para_rip
-                for h in res.get("hojas", []):
+                # AVISAR hoja por hoja: es lo que MÁS tarda de todo el pedido (minutos con hojas
+                # grandes) y la pantalla se quedaba en «vistas previas 100%» sin decir nada más
+                # durante ese rato → parecía colgada aunque estuviera trabajando.
+                _hs = res.get("hojas", [])
+                for _i, h in enumerate(_hs):
+                    try:
+                        prog("rip", f"{_i + 1}/{len(_hs)}", None)
+                    except Exception:
+                        pass
+                    _tr = time.time()
                     aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
+                          f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
             except Exception as _ea:
                 print("  [!] aplanar RIP:", _ea)
-            # FICHA TÉCNICA (A4): la planilla del pedido arriba + el molde guía (diseño + piezas
-            # nombradas) abajo. Sale JUNTO con la tizada. Best-effort: si falla, la tizada igual queda.
+            # FICHA TÉCNICA (A4): la planilla del pedido arriba y, abajo, UN MOLDE GUÍA POR CADA
+            # DISEÑO del pedido (diseño estampado + piezas nombradas + su tela). Sale JUNTO con la
+            # tizada. Best-effort: si falla, la tizada igual queda.
             try:
                 import ficha_tecnica as _FT
                 _guias = []
-                for pid in pids:
-                    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-                    reg = _cargar("registro_producto.json", pid)
-                    if prod and reg:
-                        prog("ficha", (prod or {}).get("nombre", pid), None)
-                        g = _molde_guia_ficha(pid, prod, reg, default_diseno, _var_ficha.get(pid))
+                # Las guías se anotaron molde por molde, ya con el diseño y la variable REALES.
+                # Si no quedó ninguna (pedido viejo o sin arte por diseño), se cae al de siempre:
+                # una guía por molde con el diseño que se editó en el Arte.
+                _specs = _guias_ficha or [{"pid": _p, "diseno": _slugify_diseno(default_diseno)} for _p in pids]
+                if len(_specs) > _MAX_GUIAS_FICHA:
+                    # Cada guía renderiza las piezas con el motor: con muchas combinaciones la ficha
+                    # tardaría más que la tizada. Se recorta, pero se DICE (mismo `avisos` que ya
+                    # viaja en `res`, por referencia).
+                    avisos.append(f"Ficha técnica: el pedido tiene {len(_specs)} combinaciones de molde · diseño · "
+                                  f"variable; se muestran los primeros {_MAX_GUIAS_FICHA} moldes guía.")
+                    _specs = _specs[:_MAX_GUIAS_FICHA]
+                _pr_cache = {}
+                for _sp in _specs:
+                    _pf = _sp["pid"]
+                    if _pf not in _pr_cache:
+                        _pr_cache[_pf] = (next((p for p in cat["productos"] if p["id"] == _pf), None),
+                                          _cargar("registro_producto.json", _pf))
+                    _prodf, _regf = _pr_cache[_pf]
+                    if _prodf and _regf:
+                        prog("ficha", (_sp.get("molde") or (_prodf or {}).get("nombre", _pf))
+                             + (f" · {_sp['diseno_nombre']}" if _sp.get("diseno_nombre") else ""), None)
+                        g = _molde_guia_ficha(_pf, _prodf, _regf, _sp.get("diseno") or default_diseno, _sp)
                         if g:
                             _guias.append(g)
                 _pl = planilla_ficha or {"columnas": [], "filas": prendas}
@@ -6830,10 +7207,21 @@ def guardar_nesting_preset():
         margen = float(cuerpo.get("margen_mm", 10))
     except (TypeError, ValueError):
         return jsonify({"error": "Espaciado y margen deben ser números"}), 400
+    # ALTO MÁXIMO DE LA MESA (cm): hasta dónde puede crecer una hoja antes de abrir otra.
+    # ⚠️ EL TECHO ES DEL FORMATO PDF, no nuestro: una página no puede pasar de **14400 puntos =
+    # 200 pulgadas = 508 cm**. `nesting_contorno._preparar` ya hace `min(alto*CM, 14400)`, así que
+    # pedir 8 m daba mesas de 5,08 igual — la pantalla mentía. Se acota acá para que lo guardado
+    # sea lo que de verdad va a pasar.
+    try:
+        alto_max = float(str(cuerpo.get("alto_max_cm", 500)).replace(",", ".") or 500)
+    except (TypeError, ValueError):
+        alto_max = 500.0
+    alto_max = max(50.0, min(ALTO_MESA_MAX_CM, alto_max))
     rotacion = cuerpo.get("rotacion") or "auto"
     cat = _cargar_catalogo()
     presets = cat.setdefault("nesting_presets", [])
-    preset = {"nombre": nombre, "espaciado_mm": espaciado, "margen_mm": margen, "rotacion": rotacion}
+    preset = {"nombre": nombre, "espaciado_mm": espaciado, "margen_mm": margen,
+              "rotacion": rotacion, "alto_max_cm": alto_max}
     if not nid:
         nid = "nesting_" + uuid.uuid4().hex[:8]
         preset["id"] = nid
@@ -7006,6 +7394,75 @@ def _liberar_puerto(port):
         pass
 
 
+_JOB_WIN = None      # handle del Job de Windows: mientras viva, los hijos viven; al morir, mueren
+
+
+def _atar_hijos_a_este_proceso():
+    """Que los procesos de dibujo NO sobrevivan al servidor.
+
+    Windows no mata a los hijos cuando muere el padre: al reiniciar el servidor quedaban 6
+    procesos de dibujo sueltos ocupando ~1 GB, y se iban acumulando con cada reinicio hasta
+    dejar la máquina a medio andar (pasó: 86 procesos, 4,8 GB, y todo tardaba el doble).
+    La forma que da Windows para esto es un JOB OBJECT con `KILL_ON_JOB_CLOSE`: se mete a
+    ESTE proceso adentro y **todos los que cree lo heredan**, así que cuando el servidor se
+    apaga —o lo matan— el sistema se lleva a sus hijos con él.
+
+    Si algo falla (Windows viejo, permisos), se sigue como siempre: no rompe nada."""
+    global _JOB_WIN
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _LIMITES(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+                        ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class _IO(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in
+                        ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                         "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+        class _EXT(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", _LIMITES), ("IoInfo", _IO),
+                        ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # Declarar los tipos es OBLIGATORIO: sin esto ctypes asume enteros de 32 bits y en
+        # Windows de 64 el HANDLE se trunca → todo falla en silencio (comprobado: el hijo
+        # sobrevivía igual). Con los tipos puestos, el hijo muere con el padre.
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        k32.SetInformationJobObject.restype = wintypes.BOOL
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                wintypes.LPVOID, wintypes.DWORD]
+        k32.AssignProcessToJobObject.restype = wintypes.BOOL
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return False
+        info = _EXT()
+        info.BasicLimitInformation.LimitFlags = 0x2000        # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            return False
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            return False
+        _JOB_WIN = job       # ¡NO cerrar este handle! Cerrarlo mataría a todo el grupo.
+        return True
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
     # Puerto y host configurables por variable de entorno (sin tocar el código).
     #   PORT=8001 py servidor.py     → cambia el puerto si el 8050 está ocupado
@@ -7018,10 +7475,16 @@ if __name__ == "__main__":
     # El reloader corre en un proceso hijo (WERKZEUG_RUN_MAIN=true). Solo el
     # proceso inicial libera el puerto e imprime; el hijo no.
     es_reload = os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    # Los procesos de dibujo tienen que morirse CON el servidor (si no, cada reinicio deja
+    # ~1 GB de procesos sueltos y la máquina se va poniendo lenta sin que se note por qué).
+    _atado = _atar_hijos_a_este_proceso()
     if not es_reload:
         _liberar_puerto(port)
         print("\n  USER · Motor de Sublimación")
         print(f"  Abrí el navegador en:  http://localhost:{port}\n")
+        if not _atado and os.name == "nt":
+            print("  [!] No se pudo atar los procesos de dibujo a este servidor: si lo reiniciás,\n"
+                  "      puede que queden procesos sueltos ocupando memoria.\n")
     # Precalentar el nido (todos los talles nesteados) en segundo plano: si no está
     # cacheado en disco, el primer cálculo tarda varios segundos — mejor hacerlo ya.
     def _precalentar_nido():
@@ -7044,18 +7507,42 @@ if __name__ == "__main__":
         ACT.recuperar_si_quedo_a_medias()
         ACT.vigilar(port, _version()["version"], _apagarme)
         # SERVIDOR DE PRODUCCIÓN. `make_server`/`app.run` son de DESARROLLO: un solo hilo por
-        # conexión, sin límite de cola y sin protección ante clientes lentos. Waitress es WSGI de
-        # verdad, corre en Windows y no necesita nada compilado. Si no está instalado NO se cae a
-        # los de desarrollo en silencio: se avisa y se corta (mejor no arrancar que arrancar mal).
-        try:
-            from waitress import serve as _waitress
-        except ImportError:
-            raise SystemExit(
-                "\n[ERROR] Modo 'publicado' sin waitress instalado.\n"
-                "        Instalalo con:  py -m pip install waitress\n")
+        # conexión, sin límite de cola y sin protección ante clientes lentos. Si el de producción
+        # no está instalado NO se cae a los de desarrollo en silencio: se avisa y se corta (mejor
+        # no arrancar que arrancar mal).
         _hilos = int(os.environ.get("TIZADA_HILOS", "8"))
-        print(f"  modo PUBLICADO · waitress · {_hilos} hilos · puerto {port}")
-        _waitress(app, host=host, port=port, threads=_hilos, ident="TIZADA PRO")
+        _cert, _key = os.environ.get("TIZADA_TLS_CERT"), os.environ.get("TIZADA_TLS_KEY")
+        if _cert and _key:
+            # ── HTTPS PROPIO (sin proxy delante) ──────────────────────────────────────────────
+            # Es el caso «se entra por la IP, sin dominio»: no hay nginx ni Cloudflare que termine
+            # el TLS, así que lo termina el servidor. Waitress NO habla TLS; cheroot (el server de
+            # CherryPy, WSGI, sin nada compilado) sí.
+            if not (os.path.exists(_cert) and os.path.exists(_key)):
+                raise SystemExit(f"\n[ERROR] No encuentro el certificado:\n          {_cert}\n"
+                                 f"          {_key}\n        Generalo con GENERAR-CERTIFICADO.bat\n")
+            try:
+                from cheroot.wsgi import Server as _ChServer
+                from cheroot.ssl.builtin import BuiltinSSLAdapter
+            except ImportError:
+                raise SystemExit(
+                    "\n[ERROR] Modo 'publicado' con HTTPS y sin cheroot instalado.\n"
+                    "        Instalalo con:  py -m pip install cheroot\n")
+            print(f"  modo PUBLICADO · HTTPS propio (cheroot) · {_hilos} hilos · puerto {port}")
+            _srv = _ChServer((host, port), app, numthreads=_hilos, server_name="TIZADA PRO")
+            _srv.ssl_adapter = BuiltinSSLAdapter(_cert, _key)
+            try:
+                _srv.start()
+            except KeyboardInterrupt:
+                _srv.stop()
+        else:
+            try:
+                from waitress import serve as _waitress
+            except ImportError:
+                raise SystemExit(
+                    "\n[ERROR] Modo 'publicado' sin waitress instalado.\n"
+                    "        Instalalo con:  py -m pip install waitress\n")
+            print(f"  modo PUBLICADO · waitress · {_hilos} hilos · puerto {port}")
+            _waitress(app, host=host, port=port, threads=_hilos, ident="TIZADA PRO")
     elif os.environ.get("TIZADA_RELOAD") == "1":
         app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=True)
     else:

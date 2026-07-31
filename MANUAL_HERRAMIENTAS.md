@@ -629,8 +629,11 @@ Funciona **como una planilla de Excel** (`planilla-tabla`).
   4. `anidar_contorno` + `componer_pdf_contorno` → **una `HOJA_<tela>.pdf` por tela** + `prev_*.svg`
      + consumo/aprovechamiento. Salida en `trabajos/<tid>/`.
 - **Pantalla de resultados:**
-  - **Pestañas** por tela + pestaña **Ficha técnica** (PDF A4 con la tabla de talles arriba y el
-    molde guía abajo).
+  - **Pestañas** por tela + pestaña **Ficha técnica** (PDF A4: la tabla de talles arriba y, abajo,
+    **un molde guía POR CADA DISEÑO del pedido** — con su arte estampado, cada pieza nombrada y en
+    qué tela va). Si un mismo diseño se pidió en **más de una variable**, sale una guía por cada
+    una y el rótulo la nombra («Variable: Cuello V»). Se lee de arriba abajo: la fila N de la tabla
+    dice su diseño, y ese diseño tiene su molde guía más abajo.
   - **Espacio infinito de mesas** (`MesasInfinito`): zoom con la rueda, **pan con clic derecho**,
     cada mesa se puede **renombrar** y se descarga con ese nombre.
   - **Descargar todo (N)**: baja **cada mesa por separado** (una página = un archivo), con su

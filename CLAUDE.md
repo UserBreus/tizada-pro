@@ -54,6 +54,11 @@ el changelog con los pendientes.
 - **Matar servers por PID específico. NUNCA mass-kill** (`taskkill //IM py.exe` está prohibido).
 - **LEY: el arte se ve igual que la tizada.** Lo que se ve en el Arte es exactamente lo que sale
   estampado (vectorial, pixel-idéntico). Si un cambio rompe esa igualdad, está mal.
+- **LEY: SIEMPRE el vector original. NUNCA rasterizar ni tocar el archivo del usuario.** Ni para
+  acelerar, ni para "el visor", ni como versión de espera. El único píxel admitido es una imagen
+  que ya venga incrustada en el propio archivo. Si algo va lento, la salida es hacer MENOS trabajo
+  (dibujar sólo lo que se está mirando, cachearlo, pedirlo cuando se necesita), nunca bajar la
+  calidad. Tardar con un cartel de avance honesto es aceptable; mostrar una aproximación no.
 - **Colores CMYK EXACTOS**: nada de Ghostscript ni re-cuantizar (sublimación). Ver `aplanar_rip.py`.
 - **Escalar con las piezas de la VARIABLE (~9), no del MOLDE (~135).**
 - **PyMuPDF/pikepdf NO son thread-safe** → paralelizar con ProcessPool (procesos), nunca hilos.

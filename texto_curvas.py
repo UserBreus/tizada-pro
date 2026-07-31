@@ -15,6 +15,43 @@ class FuenteCurvas:
         self.cmap = self.tt.getBestCmap()
         self.upem = self.tt["head"].unitsPerEm
         self._cache = {}
+        self._cap = None
+
+    @property
+    def cap_ratio(self):
+        """Qué proporción del tamaño de fuente ocupa una MAYÚSCULA (altura de caja, «cap height»).
+
+        Hace falta porque el «tamaño de letra» de una fuente es el **em**, que reserva lugar para
+        ascendentes y descendentes: pedir 3 mm dibujaba una M de **2,15 mm** en Arial Bold (28 %
+        menos). Quien configura una etiqueta en milímetros habla de la ALTURA DE LA LETRA, no del
+        em — así que se convierte con esta proporción. Se usa `sCapHeight` de la tabla OS/2 y, si la
+        fuente no la trae, se mide la «H» de verdad."""
+        if self._cap is None:
+            r = None
+            try:
+                cap = getattr(self.tt["OS/2"], "sCapHeight", None)
+                if cap and cap > 0:
+                    r = cap / self.upem
+            except Exception:
+                pass
+            if not r:
+                try:                                   # medir la H real (su bbox vertical)
+                    ops, _ = self._glifo("H")
+                    ys = []
+                    for _op, args in ops:
+                        for a in (args or ()):
+                            if isinstance(a, (tuple, list)) and len(a) == 2:
+                                ys.append(a[1])
+                    if ys:
+                        r = (max(ys) - min(ys)) / self.upem
+                except Exception:
+                    pass
+            self._cap = r or 0.72                      # típico si la fuente no dice nada
+        return self._cap
+
+    def size_para_alto(self, alto_pt):
+        """Tamaño de fuente que hace que una MAYÚSCULA mida exactamente `alto_pt`."""
+        return float(alto_pt) / (self.cap_ratio or 0.72)
 
     def _glifo(self, ch):
         if ch in self._cache:

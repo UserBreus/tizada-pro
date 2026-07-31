@@ -2964,10 +2964,19 @@ def arte_es_separado(path_arte, path_plantilla):
     return True
 
 
-def detectar_arte(path_arte, registro_molde, ancho_thumb=240):
+def detectar_arte(path_arte, registro_molde, ancho_thumb=240, svgs=None, con_svg=False):
     """Para el mapeo visual del arte separado: una miniatura por mesa del arte,
     con una sugerencia de pieza por proporción. Devuelve {mesas:[{mesa, thumb,
-    w_cm, h_cm, tiene_diseno, sugerencia}], piezas:[nombres del molde]}."""
+    w_cm, h_cm, tiene_diseno, sugerencia}], piezas:[nombres del molde]}.
+
+    `con_svg=False` (por defecto) NO vectoriza las mesas, y ahí está casi todo el tiempo y
+    TODO el peso: en un arte real de 8 mesas el SVG son 8,6 MB (1098 KB por mesa, vector puro)
+    contra 0,17 MB de miniaturas. Vectorizar las 8 tarda ~8 s y después el navegador tiene que
+    parsear ese JSON y rasterizar cientos de miles de trazos → el paso Arte tardaba casi un
+    minuto. Cada mesa se pide aparte y sólo cuando se ve (`/api/arte/mesa_img`), así el peso
+    depende de la PANTALLA y no de lo complicado que sea el arte.
+
+    `svgs` (opcional) = {índice de mesa: SVG ya hecho} para quien vectorice por su cuenta."""
     doc = _abrir(path_arte)       # para MINIATURAS (ocultamos la capa de guías)
     doc_txt = _abrir(path_arte)   # para LEER nombres (guías visibles)
     # La miniatura muestra el diseño REAL (lo que se imprime), no las guías/nombres
@@ -2996,10 +3005,13 @@ def detectar_arte(path_arte, registro_molde, ancho_thumb=240):
         pix = doc[i].get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
         # SVG VECTORIAL del diseño (guías/editables ya ocultas): para mostrarlo NÍTIDO/vectorial en el
         # visor del arte (la miniatura raster es solo fallback). El diseño es vector puro (~20-30 KB).
-        try:
-            _svg = base64.b64encode(doc[i].get_svg_image().encode("utf-8")).decode("ascii")
-        except Exception:
-            _svg = None
+        _svg = None
+        if con_svg or (svgs or {}).get(i):
+            try:
+                _s = (svgs or {}).get(i) or doc[i].get_svg_image()
+                _svg = base64.b64encode(_s.encode("utf-8")).decode("ascii")
+            except Exception:
+                _svg = None
 
         # Detectar por texto o por nombre de capa (en el doc ORIGINAL, guías visibles)
         nom_det = _match_pieza(_texto_mesa(doc_txt, i + 1), piezas)
@@ -3581,6 +3593,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # `generar_pieza` solo le ESTAMPA encima el nombre/número + la etiqueta (que cambian por
     # prenda). Mismo resultado que armar todo junto, sin recomputar el diseño en cada prenda.
     _base_cache = {}
+    _cnt = {"armadas": 0, "reusadas": 0, "seg_armado": 0.0}
     # CACHÉ de contornos del molde por (mesa, talle): `extraer_piezas_mesa` devuelve TODAS las piezas
     # de la mesa (135 en la Camiseta) y es caro (get_drawings del molde). Antes se llamaba una vez POR
     # PIEZA generada (9+) con los MISMOS args → extraía las 135 N veces. Cacheado = 1 sola extracción
@@ -3709,7 +3722,14 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         _bk = (pieza, talle, variante)
         b = _base_cache.get(_bk)
         if b is None:
+            # ¿Se rehace trabajo? Cada (pieza, talle, variable) debería armarse UNA vez y
+            # reusarse en todas las prendas que la compartan. El contador lo deja por escrito.
+            _cnt["armadas"] += 1
+            _t_a = time.time()
             b = _armar_base(pieza, talle, variante); _base_cache[_bk] = b
+            _cnt["seg_armado"] += time.time() - _t_a
+        else:
+            _cnt["reusadas"] += 1
         out, page = b["out"], b["page"]
         mesa, _mesa_a, info = b["mesa"], b["_mesa_a"], b["info"]
         cont, W, H, S, clip = b["cont"], b["W"], b["H"], b["S"], b["clip"]
@@ -3809,10 +3829,11 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         _zna = {_norm_generico(k): v for k, v in (_et.get("zonas") or {}).items()}.get(_norm_generico(_pieza_limpia))
         _usa_zonas = bool(_et_on and _zna and len(_zna.get("puntos") or []) >= 2)
         if _usa_zonas:
-            _esize = float(_et.get("size_mm") or 3.0) * MM
             _zeops = None
             try:
                 fetq = fuente("Arial-BoldMT")
+                # El tamaño configurado son MILÍMETROS DE LETRA, no de «em»: ver `size_para_alto`.
+                _esize = fetq.size_para_alto(float(_et.get("size_mm") or 3.0) * MM)
                 _zeops = _eops_zonas(cont, S, x0, y0, B, _zna["puntos"], _zna.get("cont") or [],
                                      _esize, _et.get("align") or "centro", fetq,
                                      talle, _pieza_limpia, nro, (_et.get("separador", "-") or "-"))
@@ -3834,7 +3855,19 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             et = (_et.get("separador", "-") or "-").join(_partes)
             if et:
                 import math as _m
+                # ── EL TAMAÑO SON MILÍMETROS DE LETRA ────────────────────────────────────────
+                # `size_mm` es la ALTURA que tiene que medir la letra en la tela. Antes se pasaba
+                # tal cual como tamaño de fuente, que es el **em** — el cuerpo completo, con lugar
+                # para las colas de la «p» y las tildes: con 3 mm configurados, una «M» de Arial
+                # Bold salía de **2,15 mm** (28 % menos). Ahora se convierte con la proporción real
+                # de la fuente, así una mayúscula mide exactamente lo pedido.
+                _fmet = None
+                try:
+                    _fmet = fuente("Arial-BoldMT")
+                except Exception:
+                    pass
                 _esize = float(_et.get("size_mm") or 3.0) * MM
+                _esize = _fmet.size_para_alto(_esize) if _fmet else _esize / 0.72
                 # Posición POR PIEZA (el usuario la apoyó sobre el contorno de ESA pieza).
                 # Las claves de `posiciones` vienen con el nombre tal cual ("Espalda",
                 # "costadillo izquierdo"); se normalizan AMBOS lados para que matcheen.
@@ -3844,18 +3877,35 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # VARIABLE, nombre completo p/ ej "Frente 8") > "grupo§Nombre" (por grupo, genérico,
                 # legacy) > "Nombre" (global, genérico, legacy). La clave de variante (v_…) y el grupoId
                 # (g_…) son namespaces distintos → sin ambigüedad. Compat total con moldes viejos.
+                #
+                # 🔴 Y SI NADA DE ESO MATCHEA, NO SE CAE AL DEFAULT: se usa la posición que el usuario
+                # dejó para esa misma pieza EN OTRA VARIABLE. Sin esto, cualquier fila que llegara sin
+                # `variante` —o con una variable distinta de la que se configuró— mandaba TODAS las
+                # etiquetas al lugar por defecto (abajo al centro) aunque estuvieran configuradas: el
+                # usuario configuraba la etiqueta, la veía bien en pantalla y salía movida en la tizada.
+                # Una fila llega sin variante cuando el molde se pide entero, o cuando la variable
+                # elegida no resuelve piezas (valores sin `pieza_id` ni `pieza_idx`).
                 _pos_glob, _pos_grp, _pos_var = {}, {}, {}
+                _pos_var_gen, _pos_otra, _pos_otra_gen = {}, {}, {}
                 for _k, _v in (_et.get("posiciones") or {}).items():
                     if "§" in _k:
                         _g, _n = _k.split("§", 1)
                         if variante and _g == variante:
                             _pos_var[_norm_nombre(_n)] = _v          # por PIEZA (nombre completo) por variable
+                            _pos_var_gen.setdefault(_norm_generico(_n), _v)   # …y por genérico, si la numeración cambió
                         elif grupo and _g == grupo:
                             _pos_grp[_norm_generico(_n)] = _v         # legacy: por grupo, genérico
+                        else:
+                            # De OTRA variable: último recurso. `setdefault` = gana la primera que
+                            # aparece en la config (orden estable) → misma salida en cada corrida.
+                            _pos_otra.setdefault(_norm_nombre(_n), _v)
+                            _pos_otra_gen.setdefault(_norm_generico(_n), _v)
                     else:
                         _pos_glob[_norm_generico(_k)] = _v            # legacy: global, genérico
                 _kn = _norm_generico(_pieza_limpia)
-                _posi = _pos_var.get(_norm_nombre(_pieza_limpia)) or _pos_grp.get(_kn) or _pos_glob.get(_kn)
+                _knc = _norm_nombre(_pieza_limpia)
+                _posi = (_pos_var.get(_knc) or _pos_var_gen.get(_kn) or _pos_grp.get(_kn)
+                         or _pos_glob.get(_kn) or _pos_otra.get(_knc) or _pos_otra_gen.get(_kn))
                 eops = None
                 # TEXT-ON-PATH: si la pieza tiene `t` (posición relativa en el contorno),
                 # el texto SIGUE el segmento del borde con su alineación, igual que el
@@ -3918,6 +3968,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             if progreso:
                 progreso("piezas", f"{hechas}/{total} - {pieza} (Prenda {nro}, Talle {pr['talle']})", None)
 
+    # ¿Se rehízo trabajo? Cada (pieza, talle, variable) se arma UNA vez y se reusa en todas las
+    # prendas que la comparten: si "armadas" se acerca a "estampadas", algo no está reusando.
+    print(f"  [piezas] armadas de cero: {_cnt['armadas']} ({_cnt['seg_armado']:.0f}s) · "
+          f"reusadas: {_cnt['reusadas']} · estampadas en total: {total}", flush=True)
     # Modo "solo piezas": devuelve {tela: [piezas...]} con los docs ABIERTOS, para
     # que un pedido MULTI-MOLDE junte las piezas de varios moldes y las anide juntas.
     if solo_piezas:
@@ -3934,18 +3988,25 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
     if config_nesting:
         cfg.update(config_nesting)
     hojas = []
+    # CRONÓMETRO por etapa: sin esto, cuando un pedido tarda de más hay que adivinar en qué paso
+    # se fue el tiempo. Se imprime al final, en la ventana del servidor.
+    _crono = {"armar piezas": time.time() - t0, "acomodar en la tela": 0.0,
+              "escribir el PDF": 0.0, "vistas previas": 0.0}
     for tela, piezas in piezas_por_tela.items():
         if not piezas:
             continue
         if progreso:
             progreso("nesting", tela, None)
+        _t_et = time.time()
         cfg_t = dict(cfg)
         if telas_cfg and tela in telas_cfg:           # ancho/alto propios de esta tela
             cfg_t.update(telas_cfg[tela])
         slug = (prefijo + "".join(c if c.isalnum() else "_" for c in tela))[:48] or "Tela"
         coloc, area = anidar_contorno(piezas, cfg_t)
+        _crono["acomodar en la tela"] += time.time() - _t_et; _t_et = time.time()
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
         consumo, alturas_cm = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
+        _crono["escribir el PDF"] += time.time() - _t_et; _t_et = time.time()
         for p in piezas:
             if "doc" in p and p["doc"]:
                 try:
@@ -3973,6 +4034,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                 prevs.append(pv)
         finally:
             d.close()
+        _crono["vistas previas"] += time.time() - _t_et
         # El aprovechamiento puede no calcularse si la hoja salió vacía (consumo 0):
         # evitamos la división por cero y reportamos 0 % en vez de romper el pedido.
         denom = float(cfg_t["ancho_cm"]) * float(consumo)
@@ -3991,7 +4053,13 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
             cfg_t.update(telas_cfg[tela])
         telas_spacing[tela] = float(cfg_t.get("espaciado_cm", 0.5)) * 10.0
     validaciones = validar_salida(salida, hojas, telas_spacing)
+    # Queda escrito en la ventana del servidor: cuando un pedido tarda de más, se ve en QUÉ paso
+    # se fue el tiempo, en vez de tener que adivinar. (El contador de piezas se imprime en
+    # `generar_pedido`, que es donde vive: acá esa variable NO existe.)
+    print("  [tiempos] " + " · ".join(f"{k}: {v:.0f}s" for k, v in _crono.items())
+          + f" · TOTAL motor: {time.time() - t0:.0f}s", flush=True)
     return {"hojas": hojas, "validaciones": validaciones,
+            "tiempos": {k: round(v, 1) for k, v in _crono.items()},
             "duracion_s": round(time.time() - t0, 1), "piezas": total}
 
 
