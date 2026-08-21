@@ -1690,17 +1690,14 @@ def subir_plantilla():
     # extensión, y con un `.tmp` no lo abriría (y el alta fallaría por una razón inventada).
     tmp = os.path.join(os.path.dirname(destino), "plantilla.subiendo.ai")
     nombre = (f.filename or "").lower()
-    # Si YA había un molde con piezas nombradas, sacar una FOTO de su talle guía antes
-    # de pisarlo: si el archivo nuevo es el mismo molde (re-subida, p. ej. reimportar el
-    # DXF con curvas), los nombres se transfieren solos y no se pierde el trabajo.
-    snap_nombres = None
-    try:
-        if os.path.exists(destino):
-            _reg_viejo = _cargar("registro_producto.json")
-            if _reg_viejo:
-                snap_nombres = MP.snapshot_nombres_guia(destino, _reg_viejo)
-    except Exception:
-        snap_nombres = None
+    # LOS NOMBRES DEL MOLDE ANTERIOR **NO** SE TRANSFIEREN: re-subir un molde es un RESET
+    # TOTAL (registro, variables, emparejado; los ids arrancan de nuevo) — decisión del
+    # 2026-08-18. Acá se sacaba una «foto» del talle guía (`snapshot_nombres_guia`) para
+    # remapear los nombres al archivo nuevo; el remapeo se fue con esa decisión y la foto
+    # quedó huérfana: se leía el molde VIEJO entero en cada re-subida para tirar el
+    # resultado. Lo destapó comparar contra la copia del servidor, que todavía tiene el
+    # camino completo. `nombres_conservados` sigue en la respuesta —siempre null— porque la
+    # pantalla ya lo contempla y es el enganche si algún día se decide volver a transferirlos.
     dxf_resumen = None
     _corresp_nueva = None          # correspondencia pieza↔talle del DXF (se escribe con el commit)
     if nombre.endswith(".dxf"):

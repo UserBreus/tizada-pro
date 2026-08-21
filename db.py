@@ -227,8 +227,14 @@ def sync_productos(cat):
 
 
 def sync_piezas_molde(legacy_pid, piezas):
-    """Guarda las PIEZAS de un molde en la tabla `pieza` — se llama AL CARGAR el molde (y al
-    re-etiquetar). Cada pieza queda con su id numérico propio y su pertenencia al molde
+    """⚠️ SUPERADA — hoy **no la llama nadie**: `guardar_registro()` reconstruye `pieza`,
+    `pieza_talle` y `variable_pieza` del molde entero en cada guardado del registro, que es
+    más completo (esto sólo sincronizaba id y nombre, sin la geometría por talle). Se
+    conserva por si hiciera falta sincronizar los nombres sin tocar la geometría. **No
+    volver a llamarla desde `_regenerar_piezas_index`**: la copia vieja del servidor lo hace
+    y duplicar la escritura no aporta nada.
+
+    Guarda las PIEZAS de un molde en la tabla `pieza`. Cada pieza queda con su id numérico propio y su pertenencia al molde
     (producto_id). El nombre es DATO editable; la identidad es el id.
 
     `piezas` = lista de {id: 'pz_0001' (id estable del molde), nombre, numero, clave}.
