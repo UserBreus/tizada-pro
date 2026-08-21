@@ -16,3 +16,18 @@ La pantalla ya viene compilada adentro (frontend/dist): NO hace falta
 node ni npm en el servidor.
 
 Que cambio en cada version: ver el CHANGELOG al final de MAPA_DEL_SISTEMA.md.
+
+--------------------------------------------------------------
+PARA NO RECIBIR MAS ZIPS (recomendado, se hace UNA sola vez)
+--------------------------------------------------------------
+Si instalas el sistema por git, las proximas actualizaciones son un doble
+clic en el servidor (ACTUALIZAR-SISTEMA.bat) y no hace falta mandar nada:
+
+  1. En una carpeta NUEVA del servidor, correr INSTALAR-EN-OTRA-PC.bat
+     (instala lo necesario y baja el sistema; pide una cuenta de GitHub
+     con acceso al repositorio).
+  2. Copiar de la carpeta vieja a la nueva: datos\, entrada\, trabajos\
+     y config_externo.json.
+  3. Arrancar desde la carpeta nueva (iniciar.bat).
+
+Desde ahi, actualizar = doble clic a ACTUALIZAR-SISTEMA.bat + reiniciar.
