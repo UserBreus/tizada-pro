@@ -279,12 +279,39 @@ def salud():
             return True, "sin driver ODBC (el sistema corre con archivos)"
         return bool(db.valor("SELECT 1")), "responde"
 
+    def _esquema():
+        """¿La base tiene las tablas que el código espera? `_base` sólo dice si CONTESTA, y con
+        una base vieja eso da verde igual: el sistema arranca «sano» y después devuelve **500 en
+        cada pantalla** (estado_general, catalogo_piezas, config, preview…) sin decir por qué.
+        Pasó en el VPS recién publicado: `db/schema.sql` viaja en el paquete pero **aplicarlo es
+        un paso a mano** (DESPLIEGUE.md §4) que nadie volvió a correr después de que el registro
+        de piezas se mudó a la base. Las esperadas salen del propio `schema.sql`, así que esto no
+        se desactualiza solo. NO es crítico a propósito: el ayudante de actualizaciones usa el
+        `ok` de esta pantalla como semáforo y una base a medias no tiene que disparar un rollback
+        de una versión que está bien."""
+        if not db.driver_disponible():
+            return True, "sin base (el sistema corre con archivos)"
+        import re as _re
+        ruta = os.path.join(AQUI, "db", "schema.sql")
+        with open(ruta, encoding="utf-8") as fh:
+            esperadas = {m.lower() for m in _re.findall(
+                r"CREATE\s+TABLE\s+(?:\[?dbo\]?\.)?\[?(\w+)\]?", fh.read(), _re.I)}
+        if not esperadas:
+            return True, "no se pudo leer schema.sql (no se comprueba)"
+        faltan = sorted(esperadas - {t.lower() for t in db.tablas()})
+        if faltan:
+            _lista = ", ".join(faltan[:4]) + (f" y {len(faltan) - 4} m\u00e1s" if len(faltan) > 4 else "")
+            return False, (f"faltan {len(faltan)} tablas ({_lista}) — el sistema va a dar error 500 "
+                           f"en casi todo: hay que aplicar db/schema.sql (DESPLIEGUE.md §4)")
+        return True, f"{len(esperadas)} tablas"
+
     # Ghostscript NO es crítico: sólo se usa para unificar el modo de color cuando la hoja trae
     # contenido RGB. Con arte CMYK (lo normal) la tizada sale igual sin él.
     _chk("ghostscript", _gs, critico=False)
     _chk("perfiles_icc", _icc)
     _chk("datos_escribible", _escribible)
     _chk("base", _base, critico=False)
+    _chk("esquema_base", _esquema, critico=False)
     _chk("frontend", lambda: (os.path.exists(os.path.join(AQUI, "frontend", "dist", "index.html")),
                               "frontend/dist"), critico=True)
 
