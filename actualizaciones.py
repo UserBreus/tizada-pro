@@ -57,13 +57,17 @@ def token_ok(recibido):
 def estado(version_actual):
     """Lo que ve la pantalla: qué versión corre, si hay una pendiente y cuánto falta."""
     p = _leer(PENDIENTE)
-    out = {"version": version_actual, "pendiente": None, "ultima": _leer(ULTIMA),
+    # `so` = dónde corre ESTE servidor. La pantalla del taller lo usa para avisar que en Linux
+    # el modo automático depende de `KillMode=process` en el unit (ver DESPLIEGUE.md §11.b).
+    out = {"version": version_actual, "so": ("windows" if os.name == "nt" else "linux"),
+           "pendiente": None, "ultima": _leer(ULTIMA),
            "en_curso": bool(_leer(EN_CURSO))}
     if p:
         faltan = int(p.get("cuando", 0) - time.time())
         out["pendiente"] = {"version": p.get("version"), "cuando": p.get("cuando"),
                             "segundos": max(0, faltan), "tamano": p.get("tamano"),
-                            "manual": float(p.get("cuando") or 0) >= MANUAL}
+                            "manual": float(p.get("cuando") or 0) >= MANUAL,
+                            "aparcada": bool(p.get("aparcada"))}
     return out
 
 
@@ -148,8 +152,20 @@ def recuperar_si_quedo_a_medias():
     if not m:
         return
     _escribir(ULTIMA, {"ok": False, "version": m.get("hacia"), "cuando": time.time(),
-                       "detalle": "la actualización quedó interrumpida (¿corte o reinicio?); "
-                                  "el sistema volvió a la versión anterior"})
+                       "detalle": "la actualización quedó interrumpida; el paquete quedó "
+                                  "APARCADO para aplicarlo a mano (no se reintenta solo)"})
+    # 🔴 NO REINTENTAR SOLA. Si el intento anterior no terminó y la pendiente sigue
+    # marcada para «ya», `vigilar()` la reaplica a los 5 s del arranque — y si lo que la
+    # cortó sigue ahí (en Linux: el ayudante muere con el `systemctl stop` cuando al unit le
+    # falta `KillMode=process`), el servidor se vuelve a apagar en cada arranque: BUCLE DE
+    # CAÍDAS, con la máquina inalcanzable y sin pista de por qué. **Pasó de verdad**
+    # (2026-08-21, primera actualización automática al VPS). Se APARCA con la fecha
+    # centinela: el paquete queda entero para aplicarlo a mano, pero nadie lo intenta solo.
+    p = _leer(PENDIENTE)
+    if p and float(p.get("cuando", 0) or 0) < MANUAL:
+        p["cuando"] = MANUAL
+        p["aparcada"] = True
+        _escribir(PENDIENTE, p)
     try:
         os.remove(EN_CURSO)
     except OSError:

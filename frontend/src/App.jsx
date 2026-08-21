@@ -2912,6 +2912,17 @@ function PantallaPublicacion({ volver }) {
               <div style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 700, marginTop: 10 }}>
                 {_resumen()}
               </div>
+              {/* En Linux el ayudante que aplica la actualización es HIJO del servidor: si al
+                  servicio le falta `KillMode=process`, el `systemctl stop` que él mismo pide lo
+                  mata y el servidor queda APAGADO. Pasó el 2026-08-21. Mientras no esté
+                  confirmado, «a mano» es el camino seguro (no usa el ayudante). */}
+              {modo !== 'manual' && est?.remoto?.so === 'linux' && (
+                <div style={{ fontSize: 12, color: 'var(--warning, #e0a020)', fontWeight: 700, marginTop: 8, lineHeight: 1.5 }}>
+                  ⚠ El servidor corre en Linux: instalar solo exige <code>KillMode=process</code> en el
+                  servicio. Si no está, el servidor queda apagado hasta que alguien lo arranque a mano.
+                  Si no lo confirmaste, usá «a mano».
+                </div>
+              )}
             </div>
             <button className="btn primary" data-tour="pub-publicar" onClick={publicar} disabled={!!trabajando || !!est?.error}
               style={{ marginTop: 14, padding: '10px 22px' }}>
