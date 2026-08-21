@@ -15,6 +15,13 @@ TAREA = "TIZADA PRO"
 ESPERA_APAGADO = 90          # s a que el servidor libere el puerto
 ESPERA_SALUD = 120           # s a que la versión nueva conteste que está bien
 
+# CÓMO SE PRENDE Y SE APAGA EL SERVIDOR, según dónde corra: en Windows es una TAREA PROGRAMADA
+# (`schtasks`), en Linux un SERVICIO de systemd. Sin esta distinción el ayudante descomprimía bien
+# y después no sabía levantar NADA —`schtasks` no existe en Linux—, así que no volvían ni la versión
+# nueva ni la anterior: el rollback también depende de poder arrancar. (2026-08-04)
+ES_WINDOWS = os.name == "nt"
+SERVICIO = os.environ.get("TIZADA_SERVICIO") or "tizadapro"   # nombre del unit de systemd
+
 
 def log(carpeta, txt):
     linea = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {txt}"
@@ -86,37 +93,78 @@ def restaurar(respaldo, app):
             shutil.copy2(o, d)
 
 
-def _lanzar_bat(app):
-    """Ejecuta `arrancar.bat` directamente (sin la tarea). La salida va al vacío: si el .bat no
-    puede escribir su log, igual arranca."""
+def _systemctl(accion, app=None):
+    """`systemctl <accion> <SERVICIO>` (Linux). True si el comando salió bien.
+
+    Se prueba PRIMERO sin sudo (por si el ayudante corriera como root) y después con `sudo -n`: el
+    sistema NO corre como root a propósito —usuario `tizada`, sin shell— y un usuario común no puede
+    manejar un servicio. La regla de sudoers que lo habilita está acotada a estas tres acciones sobre
+    ESTA unidad y se instala una sola vez (ver `DESPLIEGUE.md` §11.b).
+    `-n` = que NO pregunte contraseña: acá no hay nadie para tipearla, así que es mejor fallar rápido
+    y que quede en el log que falta la regla, antes que colgarse esperando una respuesta."""
+    for cmd in (["systemctl", accion, SERVICIO], ["sudo", "-n", "systemctl", accion, SERVICIO]):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        except (FileNotFoundError, OSError):
+            continue
+        if r.returncode == 0:
+            return True
+    log(app, f"systemctl {accion} {SERVICIO} FALLÓ (¿falta la regla de sudoers?)")
+    return False
+
+
+def parar(app=None):
+    """Apaga el servidor por el mecanismo del sistema.
+
+    🔴 EN LINUX ES IMPRESCINDIBLE, Y NO ALCANZA CON QUE EL PROCESO SE MUERA: el unit de systemd
+    tiene `Restart=always`, así que el servidor que se apaga solo vuelve a los 5 segundos. Sin
+    pararlo por systemd, el ayudante terminaría descomprimiendo por debajo de un servidor VIVO, que
+    encima seguiría sirviendo el código viejo desde memoria. `systemctl stop` le dice a systemd que
+    no lo relance hasta nueva orden."""
+    if ES_WINDOWS:
+        subprocess.run(["schtasks", "/end", "/tn", TAREA], capture_output=True)
+        return True
+    return _systemctl("stop", app)
+
+
+def _plan_b(app):
+    """Segundo intento de arranque, para cuando el mecanismo normal dijo que sí pero el servidor no
+    contesta. Windows: `arrancar.bat` a mano, sin la tarea. Linux: `restart`, que además saca a la
+    unidad del estado `failed` (un `start` sobre una unidad fallida no siempre arranca)."""
+    if not ES_WINDOWS:
+        return _systemctl("restart", app)
     bat = os.path.join(app or os.getcwd(), "arrancar.bat")
     if not os.path.exists(bat):
         return False
-    flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
+    flags = 0x00000008 | 0x00000200
     subprocess.Popen(["cmd", "/c", bat], cwd=(app or os.getcwd()), creationflags=flags,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
     return True
 
 
 def arrancar(app=None, puerto=None):
-    """Levanta por la TAREA (servicio), igual que después de un reinicio, y COMPRUEBA que haya
-    levantado de verdad.
+    """Levanta por el mecanismo del sistema (tarea de Windows / servicio systemd), igual que después
+    de un reinicio, y COMPRUEBA que haya levantado de verdad.
 
     OJO: `schtasks /run` contesta 0 («intenté ejecutarla») aunque después no ejecute NADA — pasó en
     producción y el ayudante lo tomó por bueno: dio la actualización por exitosa con el servidor
-    caído, y ni la versión nueva ni la anterior volvieron. Por eso ahora, si el puerto no contesta,
-    se reintenta lanzando el .bat a mano. Sin `puerto` no se puede verificar y se hace lo de antes."""
-    r = subprocess.run(["schtasks", "/run", "/tn", TAREA], capture_output=True, text=True)
+    caído, y ni la versión nueva ni la anterior volvieron. Por eso, si el puerto no contesta, se
+    reintenta con el plan B. Sin `puerto` no se puede verificar y se hace lo de antes."""
+    if ES_WINDOWS:
+        lanzado = subprocess.run(["schtasks", "/run", "/tn", TAREA],
+                                 capture_output=True, text=True).returncode == 0
+    else:
+        lanzado = _systemctl("start", app)
     if puerto is None:
-        if r.returncode != 0:
-            _lanzar_bat(app)
+        if not lanzado:
+            _plan_b(app)
         return True
     if salud(puerto, 45):
         return True
-    log(app, "la tarea no levantó el servidor; se lanza arrancar.bat a mano")
-    if _lanzar_bat(app) and salud(puerto, 60):
+    log(app, "el servicio no levantó el servidor; se reintenta con el plan B")
+    if _plan_b(app) and salud(puerto, 60):
         return True
-    log(app, "NO se pudo levantar el servidor (ni por la tarea ni por el .bat)")
+    log(app, "NO se pudo levantar el servidor (ni por el servicio ni por el plan B)")
     return False
 
 
@@ -137,9 +185,15 @@ def main():
     app, paquete, puerto, version = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
     log(app, f"=== actualizando a {version} ===")
 
+    # LINUX: hay que parar el SERVICIO ya, antes de esperar nada. Con `Restart=always` el proceso
+    # que se apagó solo vuelve en 5 s, y descomprimiríamos por debajo de un servidor vivo. En Windows
+    # la tarea es «al iniciar el sistema» y no relanza sola: ahí el apagado limpio que ya venía
+    # funcionando alcanza, y no se toca.
+    if not ES_WINDOWS:
+        parar(app)
     if not esperar_libre(puerto, ESPERA_APAGADO):
         log(app, "el servidor no se apagó; se lo fuerza")
-        subprocess.run(["schtasks", "/end", "/tn", TAREA], capture_output=True)
+        parar(app)
         esperar_libre(puerto, 20)
 
     respaldo = os.path.join(app, "_actualizacion", "respaldo")
@@ -176,7 +230,7 @@ def main():
 
     # No contestó: se vuelve atrás. El sistema NUNCA queda caído por una actualización mala.
     log(app, "la versión nueva no contestó; VOLVIENDO A LA ANTERIOR")
-    subprocess.run(["schtasks", "/end", "/tn", TAREA], capture_output=True)
+    parar(app)
     esperar_libre(puerto, 30)
     restaurar(respaldo, app)
     arrancar(app, puerto)
