@@ -22,7 +22,11 @@ SALIDA = os.path.join(AQUI, "dist")
 INCLUIR_ARCHIVOS = ["*.py", "requirements.txt", "VERSION", "publicado.bat", "iniciar.bat",
                     "INSTALAR.bat", "DIAGNOSTICO.bat", "*.md", "logo.svg"]
 INCLUIR_CARPETAS = ["frontend/dist", "db", "catalogo_fuentes"]
-EXCLUIR = ["empaquetar.py", "migrar_ids.py", "catalogo_fuentes/subida_*", "**/__pycache__/**"]
+# OJO con `catalogo_fuentes/subida_*`: estuvo acá (por ser «datos del usuario») y era un
+# agujero silencioso — las tipografías cargadas a mano en el taller NO llegaban al servidor
+# publicado, así que un diseño que las usa salía estampado con el reemplazo temporal (Anton)
+# SIN que nadie se enterara: el peor error es el que sale bien impreso. Viajan, son pocos KB.
+EXCLUIR = ["empaquetar.py", "migrar_ids.py", "**/__pycache__/**"]
 
 # Con `--completo` (primera instalación) el paquete lleva ADEMÁS:
 #  • los perfiles ICC de esta máquina → sin ellos el color del servidor sale distinto;
