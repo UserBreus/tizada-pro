@@ -16,6 +16,13 @@ PAQUETE = os.path.join(CARPETA, "pendiente.zip")
 ULTIMA = os.path.join(CARPETA, "ultima.json")
 EN_CURSO = os.path.join(CARPETA, "en_curso.json")
 
+# «Aplicación A MANO»: un `cuando` en el año 2100 (o más) significa que el paquete queda
+# esperando y NADIE lo aplica solo — lo aplican en el servidor (parar → descomprimir
+# `_actualizacion/pendiente.zip` sobre la carpeta → arrancar). Es una FECHA y no un flag
+# a propósito: los servidores con receptor viejo solo comparan la hora, y a éstos la hora
+# no les llega nunca — compatibilidad gratis, sin tocar el servidor de enfrente.
+MANUAL = 4102444800.0            # 2100-01-01
+
 # Archivos que el paquete DEBE traer para ser creíble. Si no están, no es una actualización de
 # TIZADA PRO (o llegó cortada) y se rechaza antes de tocar nada.
 IMPRESCINDIBLES = ["servidor.py", "motor_pedido.py", "VERSION", "frontend/dist/index.html"]
@@ -55,7 +62,8 @@ def estado(version_actual):
     if p:
         faltan = int(p.get("cuando", 0) - time.time())
         out["pendiente"] = {"version": p.get("version"), "cuando": p.get("cuando"),
-                            "segundos": max(0, faltan), "tamano": p.get("tamano")}
+                            "segundos": max(0, faltan), "tamano": p.get("tamano"),
+                            "manual": float(p.get("cuando") or 0) >= MANUAL}
     return out
 
 
@@ -106,6 +114,14 @@ def cancelar():
             pass
 
 
+def limpiar_si_aplicada(version_actual):
+    """Si lo pendiente ya ES la versión que está corriendo, lo aplicaron a mano y reiniciaron:
+    se limpia solo. Sin esto, el paquete quedaría «esperando» para siempre en la pantalla."""
+    p = _leer(PENDIENTE)
+    if p and str(p.get("version") or "") == str(version_actual or ""):
+        cancelar()
+
+
 def aplicar(puerto, version_actual):
     """Lanza al ayudante SUELTO y devuelve. Quien llama debe apagar el servidor a continuación:
     el ayudante espera a que el puerto quede libre para empezar."""
@@ -149,7 +165,7 @@ def vigilar(puerto, version_actual, apagar):
             time.sleep(5)
             try:
                 p = _leer(PENDIENTE)
-                if p and time.time() >= float(p.get("cuando", 0)):
+                if p and float(p.get("cuando", 0)) < MANUAL and time.time() >= float(p.get("cuando", 0)):
                     ok, _ = aplicar(puerto, version_actual)
                     if ok:
                         time.sleep(2)          # que el ayudante levante antes de apagarnos

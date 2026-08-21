@@ -2613,6 +2613,9 @@ function AvisoActualizacion() {
   }, [seg == null]);
 
   if (!est || (!est.pendiente && !est.en_curso)) return null;
+  // Pendiente MANUAL (año 2100): no hay cuenta regresiva que mostrar — se instala cuando
+  // la apliquen en el servidor, no a una hora conocida.
+  if (!est.en_curso && est.pendiente && (est.pendiente.manual || est.pendiente.segundos > 315360000)) return null;
   const enCurso = est.en_curso || seg === 0;
   const mm = String(Math.floor((seg || 0) / 60)).padStart(2, '0');
   const ss = String((seg || 0) % 60).padStart(2, '0');
@@ -2683,6 +2686,7 @@ function PantallaPublicacion({ volver }) {
 
   /** Cuándo se instala, en segundos desde 1970 (0 = ahora mismo). */
   const momento = () => {
+    if (modo === 'manual') return 4102444800;   // año 2100 = «la aplican a mano» (ver actualizaciones.py MANUAL)
     if (modo === 'rapido') return rapido ? Math.floor(Date.now() / 1000) + rapido : 0;
     if (modo === 'en') {
       const n = Math.max(0, parseFloat(String(enCant).replace(',', '.')) || 0);
@@ -2703,6 +2707,7 @@ function PantallaPublicacion({ volver }) {
     return `en ${Math.floor(h / 24)} día(s) ${h % 24} h`;
   };
   const _resumen = () => {
+    if (modo === 'manual') return 'Se envía y queda esperando: la instalan a mano en el servidor, cuando ellos decidan.';
     const t = momento();
     if (!t) return 'Se instala ahora mismo.';
     const d = new Date(t * 1000);
@@ -2804,7 +2809,9 @@ function PantallaPublicacion({ volver }) {
               <div style={{ fontWeight: 700, marginBottom: 4 }}>
                 Ya hay una actualización esperando: versión {pend.version}
               </div>
-              <Ayuda ancho={330}>Se instala en {Math.floor(pend.segundos / 60)} min. Quien esté usando el sistema ya ve la cuenta regresiva.</Ayuda>
+              <Ayuda ancho={330}>{(pend.manual || pend.segundos > 315360000)
+                ? 'Está esperando que la apliquen A MANO en el servidor (parar → descomprimir _actualizacion/pendiente.zip → arrancar). No se instala sola.'
+                : `Se instala en ${Math.floor(pend.segundos / 60)} min. Quien esté usando el sistema ya ve la cuenta regresiva.`}</Ayuda>
               <button className="btn ghost" onClick={cancelar} disabled={!!trabajando} style={{ marginTop: 10, padding: '7px 14px', fontSize: 12.5 }}>
                 Cancelar esa actualización
               </button>
@@ -2894,6 +2901,13 @@ function PantallaPublicacion({ volver }) {
                     style={{ padding: '4px 6px', borderRadius: 6, fontSize: 12.5, background: 'rgba(0,0,0,0.3)',
                       border: '1px solid var(--border-light)', color: '#fff' }} />
                 </label>
+                {/* aplicación MANUAL: se sube y queda esperando; la aplican en el servidor */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                  padding: '7px 10px', borderRadius: 9, border: '1px solid ' + (modo === 'manual' ? 'var(--accent)' : 'var(--border-light)') }}>
+                  <input type="radio" checked={modo === 'manual'} onChange={() => setModo('manual')} />
+                  <span style={{ fontSize: 12.5 }}>a mano</span>
+                </label>
+                <Ayuda ancho={340}>El paquete se sube y queda esperando en el servidor, sin instalarse solo. Allá lo aplican cuando quieran: parar el servidor, descomprimir «_actualizacion/pendiente.zip» sobre la carpeta del sistema y volver a arrancarlo. Al reiniciar con la versión nueva, lo pendiente se limpia solo. Útil cuando el servidor no es Windows o el reinicio lo maneja otra persona.</Ayuda>
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 700, marginTop: 10 }}>
                 {_resumen()}
@@ -2901,7 +2915,7 @@ function PantallaPublicacion({ volver }) {
             </div>
             <button className="btn primary" data-tour="pub-publicar" onClick={publicar} disabled={!!trabajando || !!est?.error}
               style={{ marginTop: 14, padding: '10px 22px' }}>
-              {trabajando ? trabajando : (momento() ? 'Publicar y programar' : 'Publicar y actualizar ahora')}
+              {trabajando ? trabajando : (modo === 'manual' ? 'Publicar (se aplica a mano)' : momento() ? 'Publicar y programar' : 'Publicar y actualizar ahora')}
             </button>
             {!!momento() && !trabajando && (
               <Ayuda ancho={330}>El sistema publicado va a mostrar la cuenta regresiva a quien esté trabajando, y el corte dura alrededor de un minuto.</Ayuda>

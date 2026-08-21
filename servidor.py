@@ -8062,6 +8062,7 @@ if __name__ == "__main__":
         # Si una actualización quedó a mitad de camino (corte de luz), dejar constancia; y poner a
         # vigilar la hora de la que esté programada.
         ACT.recuperar_si_quedo_a_medias()
+        ACT.limpiar_si_aplicada(_version()["version"])   # aplicada a mano → ya no está pendiente
         ACT.vigilar(port, _version()["version"], _apagarme)
         # SERVIDOR DE PRODUCCIÓN. `make_server`/`app.run` son de DESARROLLO: un solo hilo por
         # conexión, sin límite de cola y sin protección ante clientes lentos. Si el de producción
