@@ -40,9 +40,14 @@ def _excluido(rel):
 
 
 def compilar_frontend(base):
-    script = "build:publicado" if base != "/" else "build"
+    # La base se pasa POR ARGUMENTO a vite (npm agrega lo que va tras `--` al final del
+    # script, o sea a `vite build`). Antes se usaba el script fijo `build:publicado`, que
+    # tiene `--base=/Tizadapro/` escrito adentro: cualquier otro destino compilaba mal.
+    # Con un servidor que sirve en la RAÍZ, eso deja la pantalla en blanco (los assets se
+    # piden a /Tizadapro/… → 404). Ahora sale de la URL del destino.
+    cmd = ["npm", "run", "build"] + ([] if base == "/" else ["--", f"--base={base}"])
     print(f"  compilando frontend ({'base ' + base}) …")
-    r = subprocess.run(["npm", "run", script], cwd=os.path.join(AQUI, "frontend"),
+    r = subprocess.run(cmd, cwd=os.path.join(AQUI, "frontend"),
                        shell=True, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stdout[-2000:]); print(r.stderr[-2000:])

@@ -411,6 +411,7 @@ def publicacion_estado():
 @app.post("/api/publicacion/publicar")
 def publicacion_publicar():
     """Arma el paquete y lo SUBE. `cuando` = 0 (ya) o marca de tiempo. Es lo que hace el botón."""
+    from urllib.parse import urlparse as _urlparse
     cuerpo = request.get_json(force=True) or {}
     cfg = _pub_cfg()
     if cuerpo.get("url"):
@@ -429,7 +430,13 @@ def publicacion_publicar():
     try:
         import subprocess as _sp, hashlib as _hl, urllib.request as _ur
         # 1) armar el paquete de ACTUALIZACIÓN (sin datos: nunca pisa moldes ni pedidos)
-        r = _sp.run([sys.executable, os.path.join(AQUI, "empaquetar.py")],
+        # La BASE del frontend sale de la URL del destino: un servidor que vive en un
+        # subdirectorio (…/Tizadapro) necesita los assets con ese prefijo, y uno que sirve
+        # en la raíz los necesita sin él. Estaba fija en `/Tizadapro/` (el servidor viejo):
+        # con el nuevo (raíz) el paquete habría dejado la pantalla EN BLANCO al aplicarse.
+        _ruta_pub = _urlparse(cfg.get("url") or "").path.strip("/")
+        _base_pub = f"/{_ruta_pub}/" if _ruta_pub else "/"
+        r = _sp.run([sys.executable, os.path.join(AQUI, "empaquetar.py"), "--base", _base_pub],
                     cwd=AQUI, capture_output=True, text=True, timeout=900)
         if r.returncode != 0:
             return jsonify({"error": "no se pudo armar el paquete: " + (r.stdout or r.stderr)[-400:]}), 500
