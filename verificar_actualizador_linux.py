@@ -143,6 +143,31 @@ i_esperar = main_src.find("esperar_libre(")
 if i_parar < 0 or i_esperar < 0 or i_parar > i_esperar:
     _falla("`main()` no para el servicio ANTES de esperar el apagado (Restart=always lo revive)")
 
+# ── 9. Las DOS mitades de la supervivencia del ayudante en Linux ────────────────────────
+# (a) `aplicar()` lo lanza con sesión propia; (b) el unit lleva `KillMode=process`. La (a) sola
+# NO alcanza — de un cgroup no se sale — y por eso el porqué tiene que estar escrito donde se
+# lee: en el código y en la guía de despliegue. Sin esto se perdió el VPS una vez.
+_ruta_act = os.path.join(AQUI, "actualizaciones.py")
+if not os.path.exists(_ruta_act):
+    # Sin el archivo no hay nada que exigir, pero callarlo sería peor: el contrato diría «OK»
+    # sobre un sistema al que le falta la mitad del mecanismo.
+    _falla("falta `actualizaciones.py` al lado de este contrato (¿carpeta incompleta?)")
+else:
+    _spec_act = importlib.util.spec_from_file_location("_act_mod_verif", _ruta_act)
+    _ACT = importlib.util.module_from_spec(_spec_act)
+    _spec_act.loader.exec_module(_ACT)
+    # OJO: se busca el ARGUMENTO (`start_new_session=`), no la palabra suelta — el comentario que
+    # explica el porqué también la nombra, y buscarla a secas daba OK con el arreglo ya borrado.
+    if "start_new_session=" not in inspect.getsource(_ACT.aplicar):
+        _falla("`actualizaciones.aplicar()` no lanza el ayudante con sesión propia "
+               "(`start_new_session`): en Linux se lo lleva puesto la señal del servidor")
+if os.path.exists(_ruta_act) and "KillMode" not in open(_ruta_act, encoding="utf-8").read():
+    _falla("`actualizaciones.py` no explica que hace falta `KillMode=process`: el próximo que "
+           "toque `aplicar()` no tiene cómo saber que la sesión propia es sólo la mitad")
+_desp = os.path.join(AQUI, "DESPLIEGUE.md")
+if os.path.exists(_desp) and "KillMode=process" not in open(_desp, encoding="utf-8").read():
+    _falla("DESPLIEGUE.md no documenta el drop-in con `KillMode=process` (§11.b)")
+
 if FALLOS:
     print(f"\nx EL ACTUALIZADOR NO CUMPLE EL CONTRATO DE LINUX ({len(FALLOS)}):\n")
     for f in FALLOS:

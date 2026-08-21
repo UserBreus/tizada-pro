@@ -139,7 +139,17 @@ def aplicar(puerto, version_actual):
     # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: el ayudante tiene que SOBREVIVIR a que el
     # servidor se apague. Si fuese hijo normal, se lo llevaría puesto y quedaría todo a medias.
     flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
+    # 🔴 LINUX — LAS DOS MITADES, LAS DOS NECESARIAS (2026-08-21, se pagó en producción):
+    #   (a) `start_new_session` = sesión propia (`setsid`): no le llegan las señales dirigidas al
+    #       grupo del servidor.
+    #   (b) `KillMode=process` en el unit (drop-in `tizadapro.service.d/kill.conf`, ver
+    #       DESPLIEGUE.md §11.b): **de un cgroup NO SE SALE** — la sesión nueva no lo saca del
+    #       cgroup del servicio, así que con el `KillMode` por defecto (`control-group`) el
+    #       `systemctl stop` que el propio ayudante pide mata el grupo ENTERO, ayudante incluido.
+    # Pasó en la primera publicación al VPS: el log del ayudante quedó en la primera línea y el
+    # servicio se apagó sin versión nueva ni vieja (`Restart=always` no revive un stop deliberado).
     subprocess.Popen(cmd, cwd=AQUI, creationflags=flags, close_fds=True,
+                     start_new_session=(os.name != "nt"),
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True, p.get("version")
 

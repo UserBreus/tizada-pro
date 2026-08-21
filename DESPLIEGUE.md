@@ -192,27 +192,20 @@ printf 'tizada ALL=(root) NOPASSWD: /usr/bin/systemctl start tizadapro, /usr/bin
 chmod 440 /etc/sudoers.d/tizadapro && visudo -c
 ```
 
-🔴 **Y el unit necesita `KillMode=process`.** El ayudante se lanza como **hijo del servidor**, así
-que vive dentro del *cgroup* del servicio. Con el `KillMode` por defecto (`control-group`),
-`systemctl stop` manda la señal de terminar **a todo el grupo** — incluido el ayudante, que moriría
-apenas pide el stop: servicio parado, archivos a medio reemplazar y **nada que lo vuelva a levantar**
-(`Restart=always` no actúa después de un `stop` explícito, y el rollback también necesitaba a ese
-ayudante). Con `KillMode=process` la señal va sólo al proceso principal y el ayudante sobrevive para
-terminar el trabajo:
+🔴 **Y hace falta `KillMode=process` en el unit, o el ayudante se mata a sí mismo.** El ayudante
+nace dentro del cgroup del servicio, y por defecto `systemctl stop` mata al cgroup **entero** —
+pasó de verdad (2026-08-21, primera publicación al VPS): el log quedó en la primera línea y el
+servicio apagado, sin versión nueva ni vieja. Con `KillMode=process` systemd mata sólo el proceso
+principal y el ayudante (en su propia sesión: `start_new_session`) sobrevive. Se agrega con un
+drop-in, sin tocar el unit original:
 
-```ini
-[Service]
-KillMode=process
+```bash
+mkdir -p /etc/systemd/system/tizadapro.service.d
+printf '[Service]\nKillMode=process\n' > /etc/systemd/system/tizadapro.service.d/kill.conf
+systemctl daemon-reload
 ```
 
-La alternativa sería lanzarlo fuera del cgroup con `systemd-run --scope`, que pide más privilegios
-que los tres `systemctl` de la regla de sudoers. ⚠️ **Sin confirmar esto, la primera actualización va
-en modo «a mano»** (el paquete queda esperando y se descomprime a mano): ese camino no usa el
-ayudante y no corre ningún riesgo.
-
-**Por qué `stop` y no sólo `restart`:** el unit tiene `Restart=always`, así que un proceso que se
-apaga vuelve a los 5 segundos. Sin `systemctl stop`, el ayudante descomprimiría por debajo de un
-servidor vivo — que encima seguiría sirviendo el código viejo desde memoria.
+⚠️ Mientras el drop-in no esté puesto, publicar en modo automático deja el servidor apagado: en ese caso va «a mano» (el paquete queda esperando y se descomprime a mano), que no usa el ayudante.
 
 **El prefijo de la pantalla se deduce solo** de la URL de destino de `datos/publicacion.json`: un
 subdominio compila con base `/`, una sub-ruta con `/Tizadapro/`. Antes se compilaba siempre para la
