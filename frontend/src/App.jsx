@@ -7743,6 +7743,17 @@ export default function App() {
   // Artículo personal de OTRO usuario: sólo lo ve quien tenga `molde.ver_todos` (un admin), y no
   // tiene por qué poder usarlo en su pedido — es de esa persona.
   const _moldeDeOtro = (mid) => !!(productosCat.productos.find(p => p.id === mid) || {}).de_otro;
+  // ¿ESTE MOLDE SE PUEDE FABRICAR? Necesita las dos cosas: el ARCHIVO del molde (`plantilla`)
+  // y al menos una pieza NOMBRADA por el usuario (`piezas_nombradas`). El catálogo vive en la
+  // base y los archivos en disco, así que pueden no coincidir: un servidor al que le
+  // restauraron la base pero no le copiaron `entrada/` muestra moldes que no existen — el
+  // operario los elige, arma el pedido y recién ahí falla (reportado 2026-08-21 en el VPS).
+  // Se ocultan SÓLO de la grilla de elegir: en Configuración siguen apareciendo, que es donde
+  // se terminan de configurar.
+  const _moldeUsable = (mid) => {
+    const p = productosCat.productos.find(x => x.id === mid);
+    return !!p && !!p.plantilla && (p.piezas_nombradas || 0) > 0;
+  };
   // 🔴 ACÁ VAN **TODAS** LAS VARIABLES QUE SE PUEDEN USAR, incluidas las de los moldes propios.
   // Antes se excluían los propios («tienen su pestaña»), pero `propio` lo calcula el server
   // **según QUIÉN MIRA** (`propio and creado_por == vos`): para el DUEÑO daba true y para
@@ -7752,7 +7763,11 @@ export default function App() {
   // no ensucia: sólo aparecen las variables que alguien configuró de verdad.
   // Lo único que se saca es el artículo personal de OTRO (que un admin igual VE): es de esa
   // persona, no del taller.
-  const varsCatalogo = variablesDisponibles.filter(v => !_moldeDeOtro(v.moldeId));
+  const _varsVisibles = variablesDisponibles.filter(v => !_moldeDeOtro(v.moldeId));
+  const varsCatalogo = _varsVisibles.filter(v => _moldeUsable(v.moldeId));
+  // Cuántos MOLDES quedaron afuera por incompletos (no variables: el aviso habla de moldes).
+  const moldesIncompletos = [...new Set(_varsVisibles.filter(v => !_moldeUsable(v.moldeId))
+    .map(v => v.moldeId))].length;
   const varByClave = (clave) => variablesDisponibles.find(v => v.clave === clave) || null;
   const varsDeDiseno = (did) => disenoVars[did] || [];
   // Pool de variables ELEGIDAS en el pedido (unión de todos los diseños) → lo que ofrece la planilla.
@@ -9544,7 +9559,7 @@ export default function App() {
 
                 {/* Pestañas: el catálogo compartido vs. lo que subió este usuario */}
                 {(() => {
-                  const nMios = productosCat.productos.filter(p => p.propio).length;
+                  const nMios = productosCat.productos.filter(p => p.propio && _moldeUsable(p.id)).length;
                   const tabs = [{ k: 'catalogo', n: 'Catálogo', c: varsCatalogo.length }, { k: 'mios', n: 'Mis artículos', c: nMios }];
                   return (
                     <div data-tour="pedido-tabs" style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
@@ -9589,7 +9604,15 @@ export default function App() {
                       </div>
                     );
                   })()}
-                  {pedidoTabMoldes === 'catalogo' && varsCatalogo.length === 0 && (
+                  {pedidoTabMoldes === 'catalogo' && moldesIncompletos > 0 && (
+                  <div style={{ flexShrink: 0, marginTop: 12, padding: '9px 12px', borderRadius: 9, fontSize: 12,
+                    border: '1px solid var(--border-light)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    {moldesIncompletos === 1 ? 'Hay 1 molde que no se muestra' : `Hay ${moldesIncompletos} moldes que no se muestran`} porque
+                    todavía no se pueden fabricar: les falta el archivo del molde o nombrar sus piezas.
+                    Se terminan de configurar en Configuración → Moldes.
+                  </div>
+                )}
+                {pedidoTabMoldes === 'catalogo' && varsCatalogo.length === 0 && (
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '12px 0' }}>No hay variables creadas. Armalas en <b>Configuración › Variables</b>.</div>
                   )}
 
@@ -9597,7 +9620,7 @@ export default function App() {
                       (ese paso se les recorta), así que se eligen ENTEROS: el motor genera
                       todas sus piezas. ── */}
                   {pedidoTabMoldes === 'mios' && (() => {
-                    const mios = productosCat.productos.filter(p => p.propio);
+                    const mios = productosCat.productos.filter(p => p.propio && _moldeUsable(p.id));
                     return (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                         {mios.map(p => {
