@@ -1,0 +1,18 @@
+COMO APLICAR ESTA ACTUALIZACION (TIZADA PRO)
+============================================
+
+1. Detener el servidor (cerrar la ventana donde corre "py servidor.py").
+
+2. Extraer TODO este ZIP sobre la carpeta donde esta instalado el sistema,
+   eligiendo SOBREESCRIBIR cuando pregunte.
+
+   Es seguro: el ZIP trae solo el CODIGO. Los datos del cliente (carpetas
+   datos/, entrada/, trabajos/ y el archivo config_externo.json) no vienen
+   en el ZIP, asi que quedan exactamente como estaban.
+
+3. Volver a iniciar el servidor: iniciar.bat (o "py servidor.py").
+
+La pantalla ya viene compilada adentro (frontend/dist): NO hace falta
+node ni npm en el servidor.
+
+Que cambio en cada version: ver el CHANGELOG al final de MAPA_DEL_SISTEMA.md.
