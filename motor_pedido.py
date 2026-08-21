@@ -17,6 +17,36 @@ from molde_real import (extraer_contorno_mesa, extraer_piezas_mesa,
                         suprimir_objetos, capa_admite_color_objeto,
                         geometrias_base, sanear_oc, _nombres_oc, MM)
 from nesting_contorno import anidar_contorno, componer_pdf_contorno
+
+# ── CACHÉ DE EXTRACCIÓN POR TALLE ────────────────────────────────────────────────────────────
+# `extraer_piezas_mesa` cuesta ~0,35 s por talle: con 30 talles, CADA guardado de un nombre
+# re-parseaba el archivo entero (~13 s) aunque el archivo no hubiera cambiado. La geometría
+# sólo depende de (archivo, mtime, mesa, talle) → se cachea acá y todo el módulo la reusa.
+# Se devuelve una COPIA profunda: varios llamadores anotan cosas sobre las piezas y una
+# referencia compartida envenenaría el caché. Cap: los últimos 3 archivos.
+_extraer_piezas_mesa_cruda = extraer_piezas_mesa
+_PZS_CACHE = {}          # {(path, mtime): {(mesa, talle): piezas}}
+
+def extraer_piezas_mesa(doc, mesa, talle, **kw):
+    import copy as _copy
+    try:
+        _path = getattr(doc, "name", "") or ""
+        _mt = int(os.path.getmtime(_path)) if _path else None
+    except OSError:
+        _path, _mt = "", None
+    if not _path or _mt is None or kw:
+        return _extraer_piezas_mesa_cruda(doc, mesa, talle, **kw)
+    _fk = (_path, _mt)
+    if _fk not in _PZS_CACHE:
+        while len(_PZS_CACHE) >= 3:                      # FIFO: fuera el archivo más viejo
+            _PZS_CACHE.pop(next(iter(_PZS_CACHE)))
+        _PZS_CACHE[_fk] = {}
+    _d = _PZS_CACHE[_fk]
+    _k = (mesa, talle)
+    if _k not in _d:
+        _d[_k] = _extraer_piezas_mesa_cruda(doc, mesa, talle)
+    return _copy.deepcopy(_d[_k])
+
 from texto_curvas import FuenteCurvas
 
 CM = 28.3465
@@ -148,16 +178,27 @@ CAPAS_GRAFICAS = CAPAS_NO_PERS - {"personalizable"}
 
 # ════════════════ CATÁLOGO DE FUENTES ════════════════
 def catalogo_fuentes(carpeta):
+    """`carpeta` puede ser una ruta, una LISTA de rutas (las primeras PISAN a las últimas:
+    fuentes del pedido antes que las del sistema) o `{"carpetas": [...], "alias": {...}}`."""
+    if isinstance(carpeta, dict):
+        carpetas = list(carpeta.get("carpetas") or [])
+    elif isinstance(carpeta, (list, tuple)):
+        carpetas = list(carpeta)
+    else:
+        carpetas = [carpeta]
     cat = {}
-    for ruta in glob.glob(os.path.join(carpeta, "*")):
-        if not ruta.lower().endswith((".ttf", ".otf")):
+    for c in reversed(carpetas):
+        if not c or not os.path.isdir(c):
             continue
-        try:
-            f = fitz.Font(fontfile=ruta)
-            cat[ruta] = {"interno": f.name, "archivo": os.path.basename(ruta),
-                         "hash": hashlib.md5(open(ruta, "rb").read()).hexdigest()[:12]}
-        except Exception:
-            pass
+        for ruta in glob.glob(os.path.join(c, "*")):
+            if not ruta.lower().endswith((".ttf", ".otf")):
+                continue
+            try:
+                f = fitz.Font(fontfile=ruta)
+                cat[ruta] = {"interno": f.name, "archivo": os.path.basename(ruta),
+                             "hash": hashlib.md5(open(ruta, "rb").read()).hexdigest()[:12]}
+            except Exception:
+                pass
     return cat
 
 
@@ -168,7 +209,16 @@ def _norm(n):
 
 
 def resolver_fuente(nombre_ps, carpeta):
-    """Nombre PostScript del arte -> ruta del archivo en el catálogo, o None."""
+    """Nombre PostScript del arte -> ruta del archivo en el catálogo, o None.
+    Si `carpeta` trae `alias` ({fuente_faltante: interno_del_catálogo}), el reemplazo
+    elegido por el usuario manda: se busca la fuente destino en su lugar."""
+    if isinstance(carpeta, dict):
+        _al = carpeta.get("alias") or {}
+        # REGLA (2026-08-20, como Illustrator): la ELECCIÓN del usuario manda. Si eligió un
+        # reemplazo, se estampa con ése aunque la fuente original esté en el catálogo; sin
+        # elección, se respeta la original. «Volver a la original» = elegirla en la lista o
+        # cargar su archivo (el server borra el alias en los dos casos) — nunca vuelve sola.
+        nombre_ps = _al.get(nombre_ps, nombre_ps)
     objetivo = _norm(nombre_ps)
     for ruta, info in catalogo_fuentes(carpeta).items():
         if _norm(info["interno"]) == objetivo or objetivo in _norm(info["interno"]) \
@@ -516,7 +566,29 @@ def detectar_piezas_todas(path):
             "por_talle": {t: len(por_talle[t]) for t in talles}}
 
 
+_DET_CACHE = {}          # {(path, mtime, talle_ref, ancho, cand): resultado} — cap 6 entradas
+
 def detectar_piezas(path, talle_ref=None, ancho_preview=1100, capas_candidatas=False):
+    # CACHEADO por (archivo, mtime, args): cada guardado de un nombre llama esto de nuevo
+    # (~1.8 s de get_drawings sobre el doc entero) y el archivo no cambió. Copia profunda
+    # al devolver: los llamadores anotan sobre el resultado.
+    import copy as _copy
+    try:
+        _mt = int(os.path.getmtime(path))
+    except OSError:
+        _mt = None
+    _k = (path, _mt, talle_ref, ancho_preview, capas_candidatas)
+    if _mt is not None and _k in _DET_CACHE:
+        return _copy.deepcopy(_DET_CACHE[_k])
+    _res = _detectar_piezas_impl(path, talle_ref, ancho_preview, capas_candidatas)
+    if _mt is not None:
+        while len(_DET_CACHE) >= 6:
+            _DET_CACHE.pop(next(iter(_DET_CACHE)))
+        _DET_CACHE[_k] = _copy.deepcopy(_res)
+    return _res
+
+
+def _detectar_piezas_impl(path, talle_ref=None, ancho_preview=1100, capas_candidatas=False):
     """Detecta las piezas de la moldería para el etiquetado visual. Elige un talle
     de referencia (el de más piezas), las extrae y arma una imagen de la mesa con
     las piezas mapeadas a píxeles para superponer cajas clicables en la web.
@@ -1377,7 +1449,86 @@ def nombres_normalizados(asignaciones):
     return nombres
 
 
-def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emparejado=None):
+def _orden_se_corresponde(a, b, tol=0.28, minimo=0.75):
+    """¿La pieza `i` de un talle es la misma que la pieza `i` del otro?
+
+    Cuando un molde trae las piezas dibujadas en la MISMA disposición en cada talle (lo normal en
+    moldería: el mismo bloque escalado), el índice ES la correspondencia y es exacta. Emparejar por
+    forma en ese caso sólo agrega error: con 34 piezas parecidas —frentes, espaldas, mangas— cruza
+    unas con otras y una misma pieza termina con geometría de manga en un talle y de frente en otro
+    (bug reportado con captura, 2026-08-18).
+
+    Se valida antes de confiar en el índice: cada par `i` tiene que escalar por el MISMO factor que
+    el resto (se compara el área contra la mediana de los factores). Así, si el molde de verdad
+    tiene las piezas en otro orden, esto da False y se sigue emparejando por forma como antes.
+    """
+    if not a or not b or len(a) != len(b):
+        return False
+    fs = []
+    for pa, pb in zip(a, b):
+        aa = (pa.get("w") or 0) * (pa.get("h") or 0)
+        ab = (pb.get("w") or 0) * (pb.get("h") or 0)
+        if aa <= 0 or ab <= 0:
+            return False
+        fs.append(ab / aa)
+    orden = sorted(fs)
+    med = orden[len(orden) // 2]
+    if med <= 0:
+        return False
+    ok = sum(1 for f in fs if abs(f - med) / med <= tol)
+    return ok >= max(1, int(len(fs) * minimo))
+
+
+def _emparejar_por_solape(piezas_ref, nombres_ref, piezas):
+    """Empareja las piezas de dos talles por SUPERPOSICIÓN espacial (regla del usuario, 2026-08-18).
+
+    En moldería los talles se dibujan **anidados**: la misma pieza de cada talle va una encima de
+    la otra, compartiendo centro o esquina. Entonces la homóloga de una pieza es *la que está
+    puesta arriba*, y eso es un dato duro del dibujo.
+
+    ⛔ **Por TAMAÑO no se empareja más: el tamaño MIENTE.** Dos piezas distintas pueden medir casi
+    igual (un frente y una espalda), y la misma pieza cambia de proporción entre el talle 0 y el
+    6XL. Emparejando por forma/tamaño el sistema cruzaba las piezas y un nombre terminaba con
+    geometría de manga en un talle y de frente en otro (bug reportado con captura).
+
+    Puntaje = solape del bbox (intersección / unión). Se resuelve del mejor al peor para que cada
+    pieza quede con su mejor candidata sin que dos nombres se peleen la misma.
+    """
+    def _bb(p):
+        b = p.get("bbox_mu")
+        return b if b and len(b) == 4 else None
+
+    pares = []
+    for nom, i in (nombres_ref or {}).items():
+        if i is None or i >= len(piezas_ref):
+            continue
+        a = _bb(piezas_ref[i])
+        if not a:
+            continue
+        for j, pz in enumerate(piezas):
+            b = _bb(pz)
+            if not b:
+                continue
+            ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+            iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+            inter = ix * iy
+            if inter <= 0:
+                continue
+            union = ((a[2]-a[0])*(a[3]-a[1])) + ((b[2]-b[0])*(b[3]-b[1])) - inter
+            if union > 0:
+                pares.append((inter / union, nom, j))
+    pares.sort(reverse=True)
+    eleccion, usados = {}, set()
+    for _sc, nom, j in pares:
+        if nom in eleccion or j in usados:
+            continue
+        eleccion[nom] = (j, False)
+        usados.add(j)
+    return eleccion
+
+
+def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emparejado=None,
+                          excluir_talles=None):
     """Construye el registro a partir de nombres puestos a mano en el talle de
     referencia. `asignaciones` = [{"idx": i, "nombre": "Frente"}, ...]. El nombre
     de cada pieza se propaga a TODOS los talles emparejando por posición
@@ -1395,12 +1546,31 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emp
     piezas_ref = extraer_piezas_mesa(doc, mesa, talle_ref)
     f_ref = _feats_conts(piezas_ref, emp_offsets(emparejado, talle_ref))
     nombres_ref = {nombres[i]: i for i in nombres if i < len(piezas_ref)}
+    # ⛔ REGLA DEL USUARIO (2026-08-18): **se cargan TODAS las piezas, tengan nombre o no** — «los
+    # nombres los ponemos nosotros en el sistema». Antes el registro se armaba SÓLO con las piezas
+    # que el usuario había nombrado en el talle de referencia: una pieza sin nombre no entraba al
+    # molde, no aparecía en ninguna pantalla y no había forma de nombrarla después. Ahora las que
+    # quedaron sin nombre se registran con uno PROVISORIO («Pieza N», N = su posición+1) y se
+    # propagan a los demás talles como cualquier otra; el usuario las renombra cuando quiera.
+    _usados_ref = set(nombres_ref.values())
+    for _i in range(len(piezas_ref)):
+        if _i in _usados_ref:
+            continue
+        _prov = f"Pieza {_i + 1}"
+        while _prov in nombres_ref:      # no pisar un nombre que el usuario ya usó
+            _prov += "'"
+        nombres_ref[_prov] = _i
     mapa_exacto = _mapa_indices(indices, talle_ref)   # correspondencia EXACTA del DXF (si existe)
 
     talles_mesas = _talles_con_molde(doc)
     registro, problemas, advertencias = {}, [], []
+    sobrantes_por_talle = {}   # talle -> piezas dibujadas que ningún nombre reclamó
+    _pzs_talle, _sobra_talle = {}, {}   # contornos y sobrantes de cada talle (2ª pasada)
+    # Talles que el usuario decidió NO cargar (opción «cargar sin esos talles» del aviso de piezas
+    # faltantes, changelog 179). Sin esto la única salida era cancelar el alta entera.
+    _excl = {str(t) for t in (excluir_talles or [])}
     for talle, mesas in talles_mesas.items():
-        if mesa not in mesas:
+        if mesa not in mesas or talle in _excl:
             continue
         piezas = extraer_piezas_mesa(doc, mesa, talle)
         if not piezas:
@@ -1413,13 +1583,40 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emp
             mt = mapa_exacto[talle]
             eleccion = {nom: (mt[ir], False) for nom, ir in nombres_ref.items()
                         if ir in mt and mt[ir] < len(piezas)}
+        elif len(piezas) == len(piezas_ref):
+            # MISMA CANTIDAD de piezas → el índice ES la correspondencia, y es exacta: el orden
+            # que devuelve `extraer_piezas_mesa` es determinista (por posición), y un molde dibuja
+            # el mismo bloque de piezas escalado en cada talle.
+            # ⚠️ La decisión tiene que ser la MISMA para todos los talles con igual cantidad. Un
+            # primer intento validaba además la progresión de áreas, y esa validación daba True en
+            # unos talles y False en otros: el molde terminaba emparejado mitad por índice y mitad
+            # por forma, con la misma pieza en índices distintos según el talle — peor que antes.
+            # El emparejado por forma queda para los talles que tienen OTRA cantidad de piezas.
+            eleccion = {nom: (i, False) for nom, i in nombres_ref.items() if i < len(piezas)}
         else:
-            eleccion = _emparejar_por_forma(f_ref, nombres_ref,
-                                            _feats_conts(piezas, emp_offsets(emparejado, talle)))
+            # Distinta cantidad de piezas → se empareja por SUPERPOSICIÓN (la pieza que está
+            # dibujada encima), nunca por tamaño: el tamaño miente (ver `_emparejar_por_solape`).
+            eleccion = _emparejar_por_solape(piezas_ref, nombres_ref, piezas)
+            if not eleccion:      # sin solape (molde extendido, talles lado a lado) → forma
+                eleccion = _emparejar_por_forma(f_ref, nombres_ref,
+                                                _feats_conts(piezas, emp_offsets(emparejado, talle)))
         # Una corrección MANUAL nunca se pisa con lo automático (ni con el DXF): va última.
         # En el talle GUÍA no se toca: ahí la asignación ES el nombrado del usuario.
         if talle != talle_ref:
             eleccion = _aplicar_fijos(eleccion, emp_fijos(emparejado, talle), len(piezas))
+        # Piezas de ESTE talle que no se llevó ningún nombre. No es un error: el nombrado se hace
+        # sobre el talle de referencia, así que una pieza que sólo existe en otros talles queda sin
+        # dueño y —hasta ahora— se caía en silencio. Es exactamente lo que pasa en «Camiseta de
+        # futbol»: los talles femeninos traen 31 piezas y los masculinos 30. Se informa igual que
+        # los faltantes, para que el usuario decida (changelog 178/179).
+        _usados = {j for (j, _r) in eleccion.values()}
+        _sobra = [i for i in range(len(piezas)) if i not in _usados]
+        _pzs_talle[talle] = piezas
+        _sobra_talle[talle] = _sobra
+        if _sobra:
+            sobrantes_por_talle[talle] = [
+                {"idx": i, "w_cm": round(piezas[i]["w"] / CM, 1), "h_cm": round(piezas[i]["h"] / CM, 1)}
+                for i in _sobra]
         for nom, (j, _rot) in eleccion.items():
             cont = piezas[j]
             registro.setdefault(nom, {})[talle] = {
@@ -1427,6 +1624,48 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emp
                 "w_cm": round(cont["w"] / CM, 1), "h_cm": round(cont["h"] / CM, 1),
                 "bbox_mu": [round(v, 2) for v in cont["bbox_mu"]],
                 "ancla": _ancla_sintetica(cont, talle)}
+
+    # 2ª PASADA — las piezas que existen en OTROS talles pero NO en el de referencia. También se
+    # cargan (regla del usuario: se cargan TODAS). El nombrado se hace sobre el talle de
+    # referencia, así que estas nunca tuvieron dueño y se caían. Se toma como referencia de este
+    # grupo el talle que MÁS sobrantes tenga, se les da nombre provisorio y se emparejan con las
+    # sobrantes de los demás talles por forma — la misma maquinaria que usa el nombrado normal.
+    _con_sobra = {t: idxs for t, idxs in _sobra_talle.items() if idxs}
+    if _con_sobra:
+        _t0 = max(_con_sobra, key=lambda t: len(_con_sobra[t]))
+        _extras = {}
+        for _k, _i in enumerate(_con_sobra[_t0]):
+            _nom = f"Pieza extra {_k + 1}"
+            while _nom in registro or _nom in _extras:
+                _nom += "'"
+            _extras[_nom] = _i
+        for _nom, _i in _extras.items():
+            _c = _pzs_talle[_t0][_i]
+            registro.setdefault(_nom, {})[_t0] = {
+                "mesa": mesa, "pieza_idx": _i,
+                "w_cm": round(_c["w"] / CM, 1), "h_cm": round(_c["h"] / CM, 1),
+                "bbox_mu": [round(v, 2) for v in _c["bbox_mu"]],
+                "ancla": _ancla_sintetica(_c, _t0)}
+        _f0 = _feats_conts([_pzs_talle[_t0][i] for i in _con_sobra[_t0]], emp_offsets(emparejado, _t0))
+        _pos0 = {nom: k for k, nom in enumerate(_extras)}      # nombre -> posición dentro de _f0
+        for _t, _idxs in _con_sobra.items():
+            if _t == _t0:
+                continue
+            _ft = _feats_conts([_pzs_talle[_t][i] for i in _idxs], emp_offsets(emparejado, _t))
+            try:
+                _el = _emparejar_por_forma(_f0, _pos0, _ft)
+            except Exception:
+                _el = {}
+            for _nom, (_j, _r) in _el.items():
+                if _j >= len(_idxs):
+                    continue
+                _c = _pzs_talle[_t][_idxs[_j]]
+                registro.setdefault(_nom, {})[_t] = {
+                    "mesa": mesa, "pieza_idx": _idxs[_j],
+                    "w_cm": round(_c["w"] / CM, 1), "h_cm": round(_c["h"] / CM, 1),
+                    "bbox_mu": [round(v, 2) for v in _c["bbox_mu"]],
+                    "ancla": _ancla_sintetica(_c, _t)}
+        sobrantes_por_talle = {}      # ya no queda nada sin cargar
 
     talles = _ordenar_por_archivo(doc, talles_mesas.keys())
     completos = [t for t in talles if all(t in registro.get(p, {}) for p in registro)]
@@ -1436,9 +1675,23 @@ def alta_plantilla_manual(path, asignaciones, mesa, talle_ref, indices=None, emp
         piezas_detalle[pieza] = {"mesas": [mesa],
             "talles": _ordenar_por_archivo(doc, por_talle.keys()),
             "talle_mayor_cm": {"w": mayor["w_cm"], "h": mayor["h_cm"]}}
+    # QUÉ LE FALTA A CADA TALLE — lo que muestra la ventana al subir (changelog 179): `{talle:
+    # [piezas que ese talle no tiene]}`, sólo de los talles incompletos. Sale de comparar cada
+    # talle contra las piezas que SÍ se registraron; los excluidos no se listan (ya se decidió
+    # dejarlos afuera). El alta NO traba por esto: la regla es que cada talle carga lo que tiene,
+    # y el usuario decide entre «cargar sin esos talles» y «cerrar y subirlo de nuevo».
+    faltantes = {}
+    for t in talles:
+        if t in _excl:
+            continue
+        f = sorted(p for p in registro if t not in registro.get(p, {}))
+        if f:
+            faltantes[t] = f
     return {"mesas": len(doc), "talles": talles, "piezas": sorted(registro.keys()),
             "completos": completos, "registro": registro, "problemas": problemas,
-            "advertencias": advertencias, "piezas_detalle": piezas_detalle}
+            "advertencias": advertencias, "piezas_detalle": piezas_detalle,
+            "faltantes_por_talle": faltantes, "sobrantes_por_talle": sobrantes_por_talle,
+            "excluidos": sorted(_excl)}
 
 
 # ════════════════ VALIDACIÓN DE ARTE ════════════════
@@ -2452,16 +2705,11 @@ def _match_pieza(lineas, piezas):
 
 
 def _match_piezas(lineas, piezas):
-    """Piezas del molde que cubre UNA mesa del arte, con precedencia:
-      • nombre COMPLETO exacto → solo esa pieza (es_exacto=True);
-      • si no, nombre GENÉRICO → TODAS las piezas de ese genérico (una mesa 'Cuello'
-        cubre 'Cuello 25', 'Cuello 12', …). es_exacto=False.
-    Devuelve (lista_de_piezas, es_exacto). Vacío si no matchea nada."""
-    exact = {_norm_nombre(p): p for p in piezas}
-    for t in lineas:
-        nt = _norm_nombre(t)
-        if nt in exact:
-            return [exact[nt]], True
+    """Piezas del molde que cubre UNA mesa del arte — SIEMPRE por nombre GENÉRICO
+    (regla del usuario 2026-08-20: el número de la pieza NO importa; una mesa «Espalda»
+    o «Espalda 2» cubre TODAS las espaldas). Los prefijos #variante/#rango se resuelven
+    aparte (`mapeo_variantes_arte`) y siguen respetándose.
+    Devuelve (lista_de_piezas, es_exacto=False). Vacío si no matchea nada."""
     porgen = {}
     for p in piezas:
         porgen.setdefault(_norm_generico(p), []).append(p)
@@ -2986,7 +3234,13 @@ def detectar_arte(path_arte, registro_molde, ancho_thumb=240, svgs=None, con_svg
         for c in doc.layer_ui_configs():
             # Ocultar guías Y objetos editables (estos se muestran APARTE, posicionados,
             # en el paso Arte / la tizada; no deben salir en su lugar original del thumbnail).
-            if _es_capa_guia(c.get("text")) or _es_capa_editable(c.get("text")):
+            _nc = _norm_nombre(c.get("text") or "")
+            # Ocultar también las capas de PERSONALIZACIÓN (Nombre/Número/Palabra… = todo lo
+            # que no es gráfica del diseño) y la silueta «molde»: la miniatura muestra lo que
+            # se IMPRIME — los placeholders «00»/«nombre» se re-dibujan por prenda y en la
+            # barra confundían (reporte 2026-08-20: «textos en la barra y no en el molde»).
+            if (_es_capa_guia(c.get("text")) or _es_capa_editable(c.get("text"))
+                    or _nc not in CAPAS_GRAFICAS):
                 doc.set_layer_ui_config(c["number"], action=2)  # ocultar para la miniatura
     except Exception:
         pass
@@ -3014,13 +3268,37 @@ def detectar_arte(path_arte, registro_molde, ancho_thumb=240, svgs=None, con_svg
                 _svg = None
 
         # Detectar por texto o por nombre de capa (en el doc ORIGINAL, guías visibles)
-        nom_det = _match_pieza(_texto_mesa(doc_txt, i + 1), piezas)
+        _txt_mesa = _texto_mesa(doc_txt, i + 1)
+        _cap_mesa = _capas_mesa(doc_txt, i + 1)
+        nom_det = _match_pieza(_txt_mesa, piezas)
         if not nom_det:
-            nom_det = _match_pieza(_capas_mesa(doc_txt, i + 1), piezas)
+            nom_det = _match_pieza(_cap_mesa, piezas)
+        # RANGO crudo de la mesa (el prefijo #… del rótulo/capa): `nombre_detectado` es la
+        # PIEZA ya resuelta y pierde el #; la barra de Diseños agrupa por esto (2026-08-20).
+        import re as _re2
+        _rango = ""
+        for _t in list(_txt_mesa) + list(_cap_mesa):
+            _mm = _re2.match(r"^\s*#(\S+)", _t or "")
+            if _mm:
+                _rango = _mm.group(1)
+                break
 
+        # RÓTULO REAL de la mesa (lo que el diseñador escribió): primero la línea con #,
+        # si no la línea con más letras (los placeholders sueltos 'n','o','m'… no cuentan).
+        _rotulo = ""
+        for _t in list(_txt_mesa) + list(_cap_mesa):
+            if (_t or "").strip().startswith("#"):
+                _rotulo = _t.strip()
+                break
+        if not _rotulo:
+            _cands = [(_t or "").strip() for _t in _txt_mesa
+                      if len([ch for ch in (_t or "") if ch.isalpha()]) >= 3]
+            if _cands:
+                _rotulo = max(_cands, key=len)
         mesas.append({"mesa": i + 1, "w_cm": round(pr.width / CM, 1), "h_cm": round(pr.height / CM, 1),
                       "aspecto": (pr.width / pr.height) if pr.height else 1.0,
                       "tiene_diseno": bool(_mesa_tiene_diseno(doc_txt, i + 1)),
+                      "rango": _rango, "rotulo": _rotulo,
                       "nombre_detectado": nom_det,
                       "thumb": base64.b64encode(pix.tobytes("png")).decode("ascii"),
                       "svg": _svg,
@@ -3152,6 +3430,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _bc_activo = _bc.get("activo", True)
     _bc_mm = max(0.2, float(_bc.get("ancho_mm", 2.0) or 2.0))
     _bc_color = (_bc.get("color") or [0, 0, 0, 0.85])[:4]
+    # ALINEACIÓN del borde respecto de la línea del contorno (2026-08-20):
+    #   'fuera' (default, lo de siempre) · 'centro' · 'dentro'. En los tres, `ancho_mm`
+    #   es el ancho VISIBLE del borde.
+    _bc_alin = _bc.get("alineacion") or "fuera"
+    if _bc_alin not in ("fuera", "centro", "dentro"):
+        _bc_alin = "fuera"
     B = (_bc_mm if _bc_activo else 2.0) * MM
     base_doc = _abrir(plantilla)
     TODAS = set(i["name"] for i in base_doc.get_ocgs().values())
@@ -3162,7 +3446,13 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         if nombre_ps not in fuentes_cache:
             ruta = resolver_fuente(nombre_ps, carpeta_fuentes)
             if not ruta:
-                raise RuntimeError(f"tipografía '{nombre_ps}' no está en el catálogo")
+                # FUENTE NO ENCONTRADA → se estampa TEMPORALMENTE con Anton Regular (regla del
+                # usuario 2026-08-20) para que el texto NUNCA desaparezca ni frene el trabajo.
+                # Es un stand-in: apenas la fuente real entra al catálogo (o se elige un
+                # reemplazo), el resolver la encuentra primero y Anton no se usa más.
+                ruta = resolver_fuente("Anton Regular", carpeta_fuentes)
+            if not ruta:
+                raise RuntimeError(f"tipografía '{nombre_ps}' no está en el catálogo (ni el reemplazo temporal Anton Regular)")
             fuentes_cache[nombre_ps] = FuenteCurvas(open(ruta, "rb").read())
         return fuentes_cache[nombre_ps]
 
@@ -3705,8 +3995,17 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         # miter limit alto para no biselar las esquinas. (Antes 1 j = round → curvas.)
         if _bc_activo:
             _bcol = " ".join(f"{v:g}" for v in _bc_color) + " K"
-            borde = (f"q\n{-3*B:.3f} {-3*B:.3f} {W+8*B:.3f} {H+8*B:.3f} re\n{clip}\nW* n\n{clip}\n"
-                     f"{2*B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
+            if _bc_alin == "centro":
+                # centrado en la línea: trazo de ancho B sin clip (mitad adentro, mitad afuera)
+                borde = f"q\n{clip}\n{B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n"
+            elif _bc_alin == "dentro":
+                # hacia adentro: trazo 2B clipado al INTERIOR del contorno → queda B visible adentro
+                borde = (f"q\n{clip}\nW n\n{clip}\n"
+                         f"{2*B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
+            else:
+                # hacia afuera (default): trazo 2B clipado al EXTERIOR (par-impar) → B visible afuera
+                borde = (f"q\n{-3*B:.3f} {-3*B:.3f} {W+8*B:.3f} {H+8*B:.3f} re\n{clip}\nW* n\n{clip}\n"
+                         f"{2*B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
         else:
             borde = ""
 
@@ -3714,7 +4013,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         # por prenda con `cstream.write()` → no se acumulan objetos aunque se comparta la base.
         cstream = out.make_stream(b"")
         page.Contents = cstream
-        return {"out": out, "page": page, "cstream": cstream, "base_stream": f"{borde}{arte_draw}",
+        _base_stream = (f"{borde}{arte_draw}" if _bc_alin == "fuera" else f"{arte_draw}{borde}")
+        return {"out": out, "page": page, "cstream": cstream, "base_stream": _base_stream,
                 "clip": clip, "cont": cont, "W": W, "H": H, "x0": x0, "y0": y0, "x0m": x0m,
                 "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info}
 
@@ -3887,6 +4187,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # elegida no resuelve piezas (valores sin `pieza_id` ni `pieza_idx`).
                 _pos_glob, _pos_grp, _pos_var = {}, {}, {}
                 _pos_var_gen, _pos_otra, _pos_otra_gen = {}, {}, {}
+                _pos_glob_pz = {}      # POR PIEZA (nombre completo, sin namespace) — el que manda
                 for _k, _v in (_et.get("posiciones") or {}).items():
                     if "§" in _k:
                         _g, _n = _k.split("§", 1)
@@ -3901,10 +4202,19 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                             _pos_otra.setdefault(_norm_nombre(_n), _v)
                             _pos_otra_gen.setdefault(_norm_generico(_n), _v)
                     else:
-                        _pos_glob[_norm_generico(_k)] = _v            # legacy: global, genérico
+                        # POR PIEZA (2026-08-18, regla del usuario): «Frente 1» y «Frente 2» son
+                        # piezas DISTINTAS y cada una lleva SU etiqueta — mover la de una no mueve
+                        # las otras. Por eso la clave sin `§` se guarda además por nombre COMPLETO
+                        # y ese nivel es el que manda. El genérico se sigue llenando porque los
+                        # datos viejos guardaban «Frente» para todos los frentes (y porque una
+                        # pieza que no tenga la suya propia hereda la del nombre, que es lo
+                        # razonable: es el mismo tipo de pieza).
+                        _pos_glob_pz[_norm_nombre(_k)] = _v          # POR PIEZA (nombre completo)
+                        _pos_glob.setdefault(_norm_generico(_k), _v)  # …y por genérico (compat/herencia)
                 _kn = _norm_generico(_pieza_limpia)
                 _knc = _norm_nombre(_pieza_limpia)
-                _posi = (_pos_var.get(_knc) or _pos_var_gen.get(_kn) or _pos_grp.get(_kn)
+                _posi = (_pos_glob_pz.get(_knc)
+                         or _pos_var.get(_knc) or _pos_var_gen.get(_kn) or _pos_grp.get(_kn)
                          or _pos_glob.get(_kn) or _pos_otra.get(_knc) or _pos_otra_gen.get(_kn))
                 eops = None
                 # TEXT-ON-PATH: si la pieza tiene `t` (posición relativa en el contorno),
@@ -4073,8 +4383,10 @@ def generar_pedido_multi(molds, carpeta_fuentes, salida, config_nesting=None,
     acc = {}
     total = 0
     for md in molds:
+        # `fuentes` por MOLDE (carpeta del pedido + catálogo + reemplazos elegidos): sin esto
+        # el visor estampaba con el reemplazo y la tizada con la original (LEY arte=tizada).
         pt = generar_pedido(md["plantilla"], md["arte"], md["registro"], md.get("pers") or {},
-                            md["prendas"], carpeta_fuentes, salida,
+                            md["prendas"], md.get("fuentes") or carpeta_fuentes, salida,
                             config_nesting=config_nesting, progreso=progreso,
                             mapeo_arte=md.get("mapeo_arte"), rotaciones=md.get("rotaciones"),
                             asignacion_tela=md.get("asignacion_tela"), telas_cfg=telas_cfg,
@@ -4097,8 +4409,9 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
     for gi, grupo in enumerate(grupos):
         acc = {}
         for md in grupo["moldes"]:
+            # `fuentes` por MOLDE: mismo motivo que en generar_pedido_multi (LEY arte=tizada).
             pt = generar_pedido(md["plantilla"], md["arte"], md["registro"], md.get("pers") or {},
-                                md["prendas"], carpeta_fuentes, salida,
+                                md["prendas"], md.get("fuentes") or carpeta_fuentes, salida,
                                 config_nesting=config_nesting, progreso=progreso,
                                 mapeo_arte=md.get("mapeo_arte"), rotaciones=md.get("rotaciones"),
                                 asignacion_tela=md.get("asignacion_tela"), telas_cfg=telas_cfg,

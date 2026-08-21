@@ -57,6 +57,22 @@ def _preparar():
                        "TIZADA_DB_SERVER": r"localhost\NO_EXISTE", "PORT": str(PUERTO)})
     f = types.ModuleType("db")
     f.__getattr__ = lambda n: (lambda *a, **k: (_ for _ in ()).throw(AssertionError("MSSQL")))
+    # la "base" del registro, simulada (el server ya no lee el JSON: fuente única 2026-08-19)
+    import json as _rj
+    _RM, _RR = {}, {}
+    def _rl(pid):
+        if pid not in _RM:
+            try:
+                _RM[pid] = _rj.load(open(os.path.join(os.environ["TIZADA_DATOS"], "productos", pid,
+                                                      "registro_producto.json"), encoding="utf-8"))
+                _RR[pid] = 1
+            except Exception:
+                return None
+        return _RM.get(pid)
+    f.leer_registro = _rl
+    f.registro_rev = lambda pid: (_RR.get(pid, 1) if _rl(pid) is not None else None)
+    f.guardar_registro = lambda pid, piezas, reg: (_RM.__setitem__(pid, reg), _RR.__setitem__(pid, _RR.get(pid, 1) + 1), 1)[-1]
+    f.borrar_piezas_molde = lambda pid: (_RM.pop(pid, None), _RR.pop(pid, None), 0)[-1]
     sys.modules["db"] = f
     os.makedirs(os.path.join(t, "datos", "productos"), exist_ok=True)
     for n in os.listdir(os.path.join(RAIZ, "datos")):

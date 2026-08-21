@@ -298,3 +298,16 @@ CREATE TABLE dbo.config (
     valor       NVARCHAR(MAX) NULL,   -- JSON
     CONSTRAINT UQ_config UNIQUE (producto_id, clave)
 );
+
+GO
+/* 2026-08-19: el `ancla` real es un dict JSON (~120 chars) — NVARCHAR(32) lo truncaba. (ancla_ancha) */
+IF COL_LENGTH('dbo.pieza_talle','ancla') IS NOT NULL AND COL_LENGTH('dbo.pieza_talle','ancla') <= 64
+    ALTER TABLE dbo.pieza_talle ALTER COLUMN ancla NVARCHAR(MAX) NULL;
+GO
+
+GO
+/* 2026-08-19: version del REGISTRO por producto — reemplaza al mtime del JSON como señal de
+   invalidacion de caches (sin espejo en disco ya no hay mtime que mirar). */
+IF COL_LENGTH('dbo.producto','registro_rev') IS NULL
+    ALTER TABLE dbo.producto ADD registro_rev INT NOT NULL CONSTRAINT DF_producto_regrev DEFAULT 0;
+GO

@@ -246,11 +246,14 @@ def detectar_por_talle(path, mesa, talles):
             if not (r.width < pr.width * 1.2 and r.height < pr.height * 1.2):
                 continue
             w_cm, h_cm = r.width / U / CM, r.height / U / CM
-            if w_cm * h_cm < 10.0 or min(w_cm, h_cm) < 1.0:
+            # MISMO filtro que `extraer_piezas_mesa` (0.25 cm² / 0.3 cm — regla del usuario:
+            # cargar todas aunque midan menos de 1 cm). Divergir acá cambia el pieza_idx.
+            if w_cm * h_cm < 0.25 or min(w_cm, h_cm) < 0.3:
                 continue
             out[t].append(_contorno_de_drawing(d, cb, U, mesa, t))
-        for t in out:
-            out[t].sort(key=lambda c: (round(c["bbox_mu"][0], 1), round(c["bbox_mu"][1], 1)))
+        # ⛔ SIN reordenar (entrada 182): el orden es el de DIBUJO del archivo, igual que
+        # `extraer_piezas_mesa`. El sort viejo por posición divergía en moldes anidados y el
+        # pieza_idx apuntaba a otra pieza según qué camino lo leyera.
         return out
     finally:
         doc.close()
@@ -290,14 +293,11 @@ def indice_de_insercion(conts, bbox_mu_nueva):
     Sirve para dos cosas: evitar la segunda detección completa (era la mitad del tiempo) y poder
     DECIRLE al usuario, antes de escribir nada, qué número le va a tocar y a cuántas piezas les
     mueve el suyo."""
-    k = (round(float(bbox_mu_nueva[0]), 1), round(float(bbox_mu_nueva[1]), 1))
-    n = 0
-    for c in conts:
-        if (round(c["bbox_mu"][0], 1), round(c["bbox_mu"][1], 1)) < k:
-            n += 1
-        else:
-            break
-    return n
+    # ⛔ ORDEN DE DIBUJO (entrada 182): la pieza nueva se AGREGA al final del contenido de la
+    # capa, así que su índice es SIEMPRE el último — nadie se renumera. (Con el orden viejo por
+    # posición había que predecir dónde caía y correr a todas las de después; ese renumerado
+    # era la mitad de la complejidad de agregar una pieza, y ya no existe.)
+    return len(conts)
 
 
 def mapa_insercion(n_antes, k):

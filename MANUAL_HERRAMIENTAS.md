@@ -346,20 +346,35 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
 
 ### 3.9 **Etiqueta** (el textito de corte sobre cada pieza)
 
-- **Se trabaja UNA VARIABLE a la vez** (rápido y sin tocar las de otros grupos).
+- **Se trabaja POR PIEZA** (2026-08-18). La etiqueta **es de la pieza** y vale para todo el molde:
+  donde la pongas en el «Frente 1», queda en el «Frente 1» de **todos los talles y todas las
+  variables**. ⛔ **«Frente 1» y «Frente 2» son piezas DISTINTAS:** cada una lleva su etiqueta y
+  mover una **no mueve** las otras. La lista agrupa por nombre y muestra **`n/m`** cuántas de las
+  piezas de ese nombre ya tienen su lugar marcado.
 - **Pasos:**
-  1. Elegir la variable.
-  2. **Mostrar etiqueta** on/off (`etq-activo`).
-  3. **Qué muestra** (`etq-mostrar`): talle · nombre de pieza · número de prenda (+ separador).
-  4. **Dónde:** tocar en el **visor**, sobre el **borde de cada pieza**, el punto donde va. Cada
-     pieza se ubica por separado; el texto se **apoya y se inclina según el borde** (text-on-path).
-  5. **Alineación** del texto (izquierda/centro/derecha) — por pieza si hay una seleccionada, si no
-     el default global.
-  6. **Tamaño (mm)**, **color**, y **borde del texto (halo)** con su color y su tamaño.
-  7. **En qué piezas se muestra** — chips por **nombre genérico** (apaga/prende).
+  1. **Elegir la pieza** en la lista de la derecha (`etq-piezas`): una entrada por pieza
+     («Frente», «Cuello»…, ~9 — no una por talle). Cada fila muestra cuántos talles tiene, un
+     **✓** si ya tiene su lugar marcado, y un **sí/no** para apagarle la etiqueta a esa pieza.
+  2. El **visor** pasa a mostrar **esa pieza en todos sus talles**, una al lado de la otra, y se
+     **centra y encuadra solo** en ella (si son varias, el encuadre las abarca a todas). Al entrar,
+     la primera pieza de la lista queda elegida sola.
+  3. **Dónde:** tocar sobre el **borde** de cualquiera de ellas el punto donde va. La posición se
+     guarda **relativa al contorno**, así que cae en el mismo lugar en todos los talles; el texto
+     se **apoya y se inclina según el borde** (text-on-path).
+  4. **Mostrar etiqueta** on/off general (`etq-activo`).
+  5. **Qué muestra** (`etq-mostrar`): talle · nombre de pieza · número de prenda (+ separador).
+  6. **Alineación** del texto (izquierda/centro/derecha) — de la pieza elegida; sin ninguna, el
+     default global.
+  7. **Tamaño (mm)**, **color**, y **borde del texto (halo)** con su color y su tamaño.
   8. **Guardar etiqueta** (`etq-guardar`).
-- **Guarda:** `GET/POST /api/productos/etiqueta` → `prod["etiqueta"]`. Las posiciones usan namespace
-  con precedencia **`variante§nombre` > `grupo§nombre` > `nombre`**.
+- **Guarda:** `GET/POST /api/productos/etiqueta` → `prod["etiqueta"]`. La clave de cada posición es
+  el **nombre genérico** de la pieza («Frente»), sin namespace.
+- **Molde ANIDADO** (talles dibujados uno encima del otro): no existe la vista de todos los talles
+  juntos, así que el visor muestra el talle en pantalla. Se configura igual — la posición es
+  relativa al contorno.
+- ⚠️ **Lo que ya estaba configurado por variable se MIGRA solo** al abrir la pantalla (y se guarda
+  al Guardar). Si una pieza tenía la etiqueta en **lugares distintos según la variable**, sólo
+  puede quedar uno: queda el de la primera variable y la pantalla **avisa cuáles** para revisarlas.
 - ⛔ **NO ROMPER la baseline** del text-on-path (ver `etiqueta-baseline-no-romper`; respaldo
   `respaldo29626.rar`).
 

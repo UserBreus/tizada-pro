@@ -102,7 +102,7 @@ def extraer_contorno_mesa(doc_molde, mesa, talle):
     return _contorno_de_drawing(cont, cb, U, mesa, talle)
 
 
-def extraer_piezas_mesa(doc_molde, mesa, talle, area_min_cm2=10.0, lado_min_cm=1.0):
+def extraer_piezas_mesa(doc_molde, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
     """Devuelve TODAS las piezas (contornos significativos) de una capa de talle,
     no solo la mayor — para moldería con varias piezas en la misma mesa.
     Orden DETERMINISTA por bounding box (x0, y0): el índice de cada pieza es
@@ -118,7 +118,13 @@ def extraer_piezas_mesa(doc_molde, mesa, talle, area_min_cm2=10.0, lado_min_cm=1
         if w_cm * h_cm < area_min_cm2 or min(w_cm, h_cm) < lado_min_cm:
             continue
         piezas.append(_contorno_de_drawing(d, cb, U, mesa, talle))
-    piezas.sort(key=lambda c: (round(c["bbox_mu"][0], 1), round(c["bbox_mu"][1], 1)))
+    # ⛔ NO SE REORDENA (regla del usuario, 2026-08-18): las piezas quedan **en el orden del
+    # archivo** — el mismo que se ve en el panel de capas de Illustrator. Antes se ordenaban
+    # por posición en el lienzo (`bbox_mu` x,y) buscando un índice estable, pero eso es
+    # justamente «acomodarlas»: cuando dos piezas están SUPERPUESTAS (moldería anidada) el
+    # orden por posición cambia de un talle a otro, el índice deja de corresponder y el
+    # nombre termina asignado a otra pieza. El orden de dibujo es igual de determinista y
+    # además es el que el usuario ve y espera.
     return piezas
 
 

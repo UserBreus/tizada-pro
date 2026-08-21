@@ -28,6 +28,15 @@ except Exception:
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PID = "prod_20260729_163651_4d0d"     # «Manga pegada»: tiene mangas cortas Y largas
+
+# ⚠️ El molde de este contrato lo puede haber borrado el usuario (ya pasó): sin sus datos no hay
+# nada que verificar — se sale LIMPIO avisando, no con un traceback (lección del changelog 174).
+import sys as _sg, os as _og
+if not _og.path.isdir(_og.path.join(RAIZ, "datos", "productos", PID)):
+    print(f"AVISO: el molde {PID} de este contrato ya no existe — no hay datos para verificar. "
+          f"Actualizar el PID cuando haya un molde con lo que este contrato necesita.")
+    _sg.exit(0)
+
 DISENO = "jugador"
 
 _TMP = tempfile.mkdtemp(prefix="verif_fpz_")
@@ -39,6 +48,24 @@ os.environ.update({"TIZADA_DATOS": os.path.join(_TMP, "datos"),
 _falso_db = types.ModuleType("db")
 _falso_db.__getattr__ = lambda n: (lambda *a, **k: (_ for _ in ()).throw(
     AssertionError(f"LA PRUEBA INTENTO TOCAR MSSQL (db.{n})")))
+
+# ── LA "BASE" DEL REGISTRO, SIMULADA (2026-08-19: el server lee el registro SOLO de la base;
+#    el doble la imita en memoria, sembrada del JSON que este contrato dejó en su tmp). ──
+import json as _rj, os as _ro
+_REG_MEM, _REG_REV = {}, {}
+def _reg_leer(pid):
+    if pid not in _REG_MEM:
+        try:
+            _p = _ro.path.join(_ro.environ["TIZADA_DATOS"], "productos", pid, "registro_producto.json")
+            _REG_MEM[pid] = _rj.load(open(_p, encoding="utf-8")); _REG_REV[pid] = 1
+        except Exception:
+            return None
+    return _REG_MEM.get(pid)
+_falso_db.leer_registro = _reg_leer
+_falso_db.registro_rev = lambda pid: (_REG_REV.get(pid, 1) if _reg_leer(pid) is not None else None)
+_falso_db.guardar_registro = lambda pid, piezas, reg: (_REG_MEM.__setitem__(pid, reg),
+                                                  _REG_REV.__setitem__(pid, _REG_REV.get(pid, 1) + 1), 1)[-1]
+_falso_db.borrar_piezas_molde = lambda pid: (_REG_MEM.pop(pid, None), _REG_REV.pop(pid, None), 0)[-1]
 sys.modules["db"] = _falso_db
 
 os.makedirs(os.path.join(_TMP, "datos", "productos"), exist_ok=True)

@@ -310,50 +310,220 @@ def proyectar_catalogo(cat):
 
 
 def _proyectar_un_producto(pid, p):
+    """Proyecta la config del producto a la base por UPSERT (clave natural: talle.nombre,
+    variable.clave, diseno.nombre). NUNCA borrar-y-recrear: `pieza_talle`, `editable`,
+    `mapeo_arte` y `pedido_fila` referencian estas filas SIN cascade -- el DELETE masivo
+    reventaba con error 547 (FK pieza_talle->talle, reportado 2026-08-19) y, aunque no
+    reventara, recrear cambiaba los ids y dejaba esas referencias apuntando a filas muertas."""
+    import json as _j
     with cursor() as cur:
-        # Las PIEZAS ya NO se tocan acá: son propiedad del molde (sync_piezas_molde, al cargar el
-        # molde). Acá sólo se rehacen las cosas DERIVADAS de la config: talles, diseños, variables
-        # y su relación con piezas EXISTENTES (por id). No se borra ni se crea ninguna pieza.
-        cur.execute("DELETE FROM variable_pieza WHERE variable_id IN (SELECT id FROM variable WHERE producto_id=?)", pid)
-        cur.execute("DELETE FROM variable WHERE producto_id=?", pid)
-        cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
-        cur.execute("DELETE FROM diseno WHERE producto_id=?", pid)
-
-        # TALLES (variantes de tamaño)
+        # ── TALLES: upsert por nombre; el orden se actualiza ────────────────────────────────
+        cur.execute("SELECT id, nombre FROM talle WHERE producto_id=?", pid)
+        t_exist = {r[1]: r[0] for r in cur.fetchall()}
+        cfg_talles = []
         for i, t in enumerate(p.get("talles") or p.get("variantes_talles") or []):
             nom = t if isinstance(t, str) else t.get("nombre")
-            if nom:
+            if not nom:
+                continue
+            cfg_talles.append(nom)
+            if nom in t_exist:
+                cur.execute("UPDATE talle SET orden=? WHERE id=?", i, t_exist[nom])
+            else:
                 cur.execute("INSERT INTO talle (producto_id, nombre, orden) VALUES (?,?,?)", pid, nom, i)
+        # Talles que la config ya no lista: se van SOLO si nada los referencia. Si el registro
+        # del molde todavia los tiene (pieza_talle) se quedan: la geometria manda sobre la config.
+        for nom, tid in t_exist.items():
+            if nom in cfg_talles:
+                continue
+            # con el MISMO cursor: valor() abre otra conexión y en medio de esta
+            # transacción se puede quedar esperando los locks de acá mismo
+            cur.execute("SELECT TOP 1 1 FROM pieza_talle WHERE talle_id=?", tid)
+            if cur.fetchone():
+                continue
+            cur.execute("DELETE FROM editable WHERE talle_id=?", tid)
+            cur.execute("UPDATE pedido_fila SET talle_id=NULL WHERE talle_id=?", tid)
+            cur.execute("DELETE FROM talle WHERE id=?", tid)
 
         # piezas existentes del molde, indexadas por su legacy_id ('pz_0001') para vincular.
         cur.execute("SELECT id, legacy_id FROM pieza WHERE producto_id=?", pid)
         pieza_por_leg = {r[1]: r[0] for r in cur.fetchall()}
 
-        # VARIABLES + su relación con piezas (POR ID, referenciando las existentes)
-        import json as _j
-        for v in (p.get("variantes") or []):
+        # ── VARIABLES: upsert por clave; la relacion con piezas se rehace entera ───────────
+        cur.execute("SELECT id, clave FROM variable WHERE producto_id=?", pid)
+        v_exist = {r[1]: r[0] for r in cur.fetchall()}
+        cur.execute("DELETE FROM variable_pieza WHERE variable_id IN (SELECT id FROM variable WHERE producto_id=?)", pid)
+        cfg_claves = set()
+        for i, v in enumerate(p.get("variantes") or []):
             clave = v.get("clave")
             if not clave:
                 continue
-            cur.execute("INSERT INTO variable (producto_id, clave, label, acomodo, orden) OUTPUT INSERTED.id VALUES (?,?,?,?,?)",
-                        pid, clave, v.get("label") or clave,
-                        _j.dumps(v.get("acomodo")) if v.get("acomodo") is not None else None,
-                        _j.dumps(v.get("orden")) if v.get("orden") is not None else None)
-            vid = int(cur.fetchone()[0])
+            cfg_claves.add(clave)
+            _aco = _j.dumps(v.get("acomodo")) if v.get("acomodo") is not None else None
+            _ord = _j.dumps(v.get("orden")) if v.get("orden") is not None else None
+            if clave in v_exist:
+                vid = v_exist[clave]
+                cur.execute("UPDATE variable SET label=?, acomodo=?, orden=? WHERE id=?",
+                            v.get("label") or clave, _aco, _ord, vid)
+            else:
+                cur.execute("INSERT INTO variable (producto_id, clave, label, acomodo, orden) OUTPUT INSERTED.id VALUES (?,?,?,?,?)",
+                            pid, clave, v.get("label") or clave, _aco, _ord)
+                vid = int(cur.fetchone()[0])
             for val in (v.get("valores") or []):
                 nid = pieza_por_leg.get(val.get("pieza_id"))   # la pieza YA existe (del molde)
                 if nid is None:
-                    continue   # la variable referencia una pieza que no está en el molde: se ignora
+                    continue   # la variable referencia una pieza que no esta en el molde: se ignora
                 cur.execute("IF NOT EXISTS (SELECT 1 FROM variable_pieza WHERE variable_id=? AND pieza_id=?) "
                             "INSERT INTO variable_pieza (variable_id, pieza_id) VALUES (?,?)", vid, nid, vid, nid)
+        # Variables borradas de la config: se van CON sus referencias derivadas (mapeo/editable
+        # son config tambien); las filas de pedidos historicos quedan con la variable en NULL.
+        for clave, vid in v_exist.items():
+            if clave in cfg_claves:
+                continue
+            cur.execute("DELETE FROM mapeo_arte WHERE variable_id=?", vid)
+            cur.execute("DELETE FROM editable WHERE variable_id=?", vid)
+            cur.execute("UPDATE pedido_fila SET variable_id=NULL WHERE variable_id=?", vid)
+            cur.execute("DELETE FROM variable WHERE id=?", vid)   # junta/variable_pieza: CASCADE
 
-        # DISEÑOS
+        # ── DISENOS: upsert por nombre ─────────────────────────────────────────────────────
+        cur.execute("SELECT id, nombre FROM diseno WHERE producto_id=?", pid)
+        d_exist = {r[1]: r[0] for r in cur.fetchall()}
+        cfg_dis = set()
         disenos = p.get("disenos") or []
         if isinstance(disenos, list):
             for d in disenos:
                 nom = d if isinstance(d, str) else (d.get("nombre") or d.get("id"))
                 if not nom:
                     continue
+                cfg_dis.add(nom)
                 slug = None if isinstance(d, str) else d.get("slug")
-                cur.execute("INSERT INTO diseno (producto_id, nombre, slug, es_principal) VALUES (?,?,?,?)",
-                            pid, nom, slug, 1 if (isinstance(d, dict) and d.get("principal")) else 0)
+                _pri = 1 if (isinstance(d, dict) and d.get("principal")) else 0
+                if nom in d_exist:
+                    cur.execute("UPDATE diseno SET slug=?, es_principal=? WHERE id=?", slug, _pri, d_exist[nom])
+                else:
+                    cur.execute("INSERT INTO diseno (producto_id, nombre, slug, es_principal) VALUES (?,?,?,?)",
+                                pid, nom, slug, _pri)
+        for nom, did in d_exist.items():
+            if nom in cfg_dis:
+                continue
+            cur.execute("UPDATE pedido_fila SET diseno_id=NULL WHERE diseno_id=?", did)
+            cur.execute("DELETE FROM diseno WHERE id=?", did)     # mapeo_arte/editable: CASCADE
+
+def guardar_registro(legacy_pid, piezas, reg):
+    """Reconstruye las piezas del molde en la base. `piezas` = piezas.json['piezas'] (ids 1..N
+    numéricos), `reg` = el registro {clave: {talle: {...}}}. Idempotente: upsert por
+    (producto_id, id_en_molde); las piezas que ya no están se borran con lo suyo."""
+    import json as _j
+    pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
+    if pid is None:
+        pid = insertar("INSERT INTO producto (nombre, legacy_id, activo) VALUES (?,?,1)",
+                       legacy_pid, legacy_pid)
+    with cursor() as cur:
+        # RECONSTRUCCIÓN TOTAL por molde: fuera lo del producto (cualquier residuo de caminos
+        # anteriores incluido) y se inserta el estado actual. Idempotente; la relación con las
+        # variables la rehace `proyectar_catalogo` en cada guardado del catálogo.
+        cur.execute("DELETE FROM variable_pieza WHERE pieza_id IN (SELECT id FROM pieza WHERE producto_id=?)", pid)
+        cur.execute("DELETE FROM pieza_talle WHERE pieza_id IN (SELECT id FROM pieza WHERE producto_id=?)", pid)
+        cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)
+        # TALLES del molde (upsert por nombre)
+        talles = sorted({t for por_t in (reg or {}).values() for t in (por_t or {})})
+        cur.execute("SELECT id, nombre FROM talle WHERE producto_id=?", pid)
+        t_id = {r[1]: r[0] for r in cur.fetchall()}
+        for i, t in enumerate(talles):
+            if t not in t_id:
+                cur.execute("INSERT INTO talle (producto_id, nombre, orden) OUTPUT INSERTED.id VALUES (?,?,?)",
+                            pid, t, i)
+                t_id[t] = int(cur.fetchone()[0])
+        fila_id = {}
+        for pz in (piezas or []):
+            num = pz.get("id")
+            clave = pz.get("clave")
+            if num is None or clave is None:
+                continue
+            try:
+                num = int(num)
+            except (TypeError, ValueError):
+                # ids legacy 'pz_0001': se numeran por posición para no perder la pieza
+                num = len(fila_id) + 1
+            gen, n2 = _norm_generico(clave)
+            cur.execute("INSERT INTO pieza (producto_id, id_en_molde, nombre, nombre_generico, numero) "
+                        "OUTPUT INSERTED.id VALUES (?,?,?,?,?)", pid, num, clave, gen or None, n2)
+            fila_id[clave] = int(cur.fetchone()[0])
+        # nueva REVISIÓN del registro: es la señal de invalidación de todos los cachés
+        # (antes era el mtime del espejo JSON; sin espejo, la versión vive acá)
+        cur.execute("UPDATE producto SET registro_rev = registro_rev + 1 WHERE id=?", pid)
+        # EN LOTE: con 30 talles son ~1000 filas; de a una eran ~1000 idas y vueltas al
+        # server por cada guardado de un nombre. `fast_executemany` las manda juntas.
+        _filas_pt = []
+        for clave, por_t in (reg or {}).items():
+            fid = fila_id.get(clave)
+            if fid is None:
+                continue
+            for t, inf in (por_t or {}).items():
+                tid = t_id.get(t)
+                if tid is None or not isinstance(inf, dict):
+                    continue
+                _filas_pt.append((fid, tid, inf.get("mesa"), inf.get("pieza_idx"),
+                                  _j.dumps(inf.get("ancla"), ensure_ascii=False) if inf.get("ancla") is not None else None,
+                                  _j.dumps(inf.get("bbox_mu")) if inf.get("bbox_mu") is not None else None,
+                                  inf.get("w_cm"), inf.get("h_cm")))
+        if _filas_pt:
+            try:
+                cur.fast_executemany = True
+            except Exception:
+                pass
+            cur.executemany("INSERT INTO pieza_talle (pieza_id, talle_id, mesa, pieza_idx, ancla, bbox_mu, ancho_cm, alto_cm) "
+                            "VALUES (?,?,?,?,?,?,?,?)", _filas_pt)
+            try:
+                cur.fast_executemany = False
+            except Exception:
+                pass
+    return pid
+
+
+def leer_registro(legacy_pid):
+    """El registro del molde desde la base, en el formato de siempre
+    {clave: {talle: {mesa, pieza_idx, w_cm, h_cm, bbox_mu, ancla}}}. None si el molde no está."""
+    import json as _j
+    pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
+    if pid is None:
+        return None
+    rows = filas(
+        "SELECT p.nombre AS clave, t.nombre AS talle, pt.mesa, pt.pieza_idx, pt.ancla, "
+        "pt.bbox_mu, pt.ancho_cm, pt.alto_cm "
+        "FROM pieza p JOIN pieza_talle pt ON pt.pieza_id=p.id JOIN talle t ON t.id=pt.talle_id "
+        "WHERE p.producto_id=? ORDER BY p.id_en_molde", pid)
+    if not rows:
+        return None
+    reg = {}
+    for r in rows:
+        inf = {"mesa": r["mesa"], "pieza_idx": r["pieza_idx"],
+               "w_cm": float(r["ancho_cm"]) if r["ancho_cm"] is not None else None,
+               "h_cm": float(r["alto_cm"]) if r["alto_cm"] is not None else None}
+        for k in ("bbox_mu", "ancla"):
+            if r[k]:
+                try:
+                    inf[k] = _j.loads(r[k])
+                except Exception:
+                    pass
+        reg.setdefault(r["clave"], {})[r["talle"]] = inf
+    return reg
+
+
+def borrar_piezas_molde(legacy_pid):
+    """Borra TODO lo del molde en la base (piezas, geometría, relaciones, talles).
+    Para «borrar molde = borrar todo» y para el reset al re-subir."""
+    pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
+    if pid is None:
+        return 0
+    with cursor() as cur:
+        cur.execute("DELETE FROM variable_pieza WHERE pieza_id IN (SELECT id FROM pieza WHERE producto_id=?)", pid)
+        cur.execute("DELETE FROM pieza_talle WHERE pieza_id IN (SELECT id FROM pieza WHERE producto_id=?)", pid)
+        cur.execute("DELETE FROM variable WHERE producto_id=?", pid)
+        cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)
+        cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
+        return 1
+
+
+def registro_rev(legacy_pid):
+    """Revisión actual del registro del molde (para claves de caché). None si el molde no está."""
+    return valor("SELECT registro_rev FROM producto WHERE legacy_id=?", legacy_pid)
