@@ -142,6 +142,89 @@ generadas.
 Correr **`LIBERAR-ESPACIO.bat`** cada tanto. Borra sólo lo que se puede volver a generar y **nunca
 toca `datos/` ni `entrada/`**.
 
+## 11.b Variante **LINUX (VPS)** — lo que cambia
+
+Hecho de verdad el **2026-08-04** en Ubuntu 24.04 (`https://tizadapro.user.com.uy`). El código
+Python **no cambia**; lo que no sirve es el envoltorio de arranque de Windows.
+
+| Windows | Linux |
+|---|---|
+| `INSTALAR.bat` / `publicado.bat` | servicio **systemd** + `EnvironmentFile` |
+| Tarea programada «al iniciar» | `systemctl enable` |
+| IIS | **nginx** + certbot (Let's Encrypt) |
+| Perfiles ICC de Adobe ya instalados | **hay que copiarlos** y apuntar `TIZADA_PERFILES` |
+
+**Subdominio, no sub-ruta.** Con subdominio alcanza el build por defecto (`npm run build`) y el
+nginx es un `proxy_pass`. La sub-ruta obliga a `TIZADA_BASE=/Tizadapro/` al compilar y a reescribir
+rutas: más piezas móviles, y de ahí salen los assets que no cargan.
+
+🔴 **Las tres trampas que ya se pagaron** (detalle en `MAPA_DEL_SISTEMA.md` §9):
+
+1. **`TIZADA_DB_SERVER` con la IP literal, nunca `localhost`.** Ubuntu resuelve `localhost` a `::1`
+   y un SQL Server en Docker escucha sólo IPv4 → `HYT00 Login timeout expired`, que parece un
+   problema de credenciales y no lo es. Va `127.0.0.1,1433`.
+2. **Los perfiles ICC.** `PERFILES_DIRS` sólo tiene rutas de Windows → en Linux quedan 0 perfiles y
+   el color CMYK sale distinto. Copiar los `.icc/.icm` del taller y apuntar `TIZADA_PERFILES`.
+3. **`npm ci` necesita `--legacy-peer-deps`** por un conflicto del propio `package.json`
+   (`@eslint/js@^10` vs `eslint@^9`). eslint no participa del build: el bundle sale idéntico.
+
+**nginx — los valores que NO son adorno:** `client_max_body_size 512M` (moldes y `.ai` grandes),
+`proxy_read_timeout`/`proxy_send_timeout 900s` (generar tarda minutos; si no, **504**) y
+`proxy_buffering off` (descargas de PDF grandes).
+
+**Servicio** (`/etc/systemd/system/tizadapro.service`): corre con un usuario **`tizada`** sin shell,
+`WorkingDirectory=/opt/tizadapro`, `EnvironmentFile=/opt/tizadapro/tizada.env`, `Restart=always`.
+Se maneja con `systemctl {start,stop,restart,status} tizadapro` y se mira con
+`journalctl -u tizadapro -f`.
+
+### Actualizaciones remotas en Linux (el botón «Publicar»)
+
+Desde 2026-08-04 `actualizador.py` distingue el sistema: en Windows sigue usando la tarea
+programada (`schtasks`), en Linux usa **systemd**. El nombre de la unidad sale de la variable
+**`TIZADA_SERVICIO`** (por defecto `tizadapro`).
+
+🔴 **Hace falta UNA regla de sudoers, o el rollback no puede levantar nada.** El sistema corre como
+`tizada` (sin shell, sin privilegios) y un usuario común no puede manejar un servicio. La regla está
+acotada a **tres acciones sobre esta única unidad** — no da nada más:
+
+```bash
+printf 'tizada ALL=(root) NOPASSWD: /usr/bin/systemctl start tizadapro, /usr/bin/systemctl stop tizadapro, /usr/bin/systemctl restart tizadapro\n' > /etc/sudoers.d/tizadapro
+chmod 440 /etc/sudoers.d/tizadapro && visudo -c
+```
+
+🔴 **Y el unit necesita `KillMode=process`.** El ayudante se lanza como **hijo del servidor**, así
+que vive dentro del *cgroup* del servicio. Con el `KillMode` por defecto (`control-group`),
+`systemctl stop` manda la señal de terminar **a todo el grupo** — incluido el ayudante, que moriría
+apenas pide el stop: servicio parado, archivos a medio reemplazar y **nada que lo vuelva a levantar**
+(`Restart=always` no actúa después de un `stop` explícito, y el rollback también necesitaba a ese
+ayudante). Con `KillMode=process` la señal va sólo al proceso principal y el ayudante sobrevive para
+terminar el trabajo:
+
+```ini
+[Service]
+KillMode=process
+```
+
+La alternativa sería lanzarlo fuera del cgroup con `systemd-run --scope`, que pide más privilegios
+que los tres `systemctl` de la regla de sudoers. ⚠️ **Sin confirmar esto, la primera actualización va
+en modo «a mano»** (el paquete queda esperando y se descomprime a mano): ese camino no usa el
+ayudante y no corre ningún riesgo.
+
+**Por qué `stop` y no sólo `restart`:** el unit tiene `Restart=always`, así que un proceso que se
+apaga vuelve a los 5 segundos. Sin `systemctl stop`, el ayudante descomprimiría por debajo de un
+servidor vivo — que encima seguiría sirviendo el código viejo desde memoria.
+
+**El prefijo de la pantalla se deduce solo** de la URL de destino de `datos/publicacion.json`: un
+subdominio compila con base `/`, una sub-ruta con `/Tizadapro/`. Antes se compilaba siempre para la
+sub-ruta y en un subdominio todos los assets daban 404 (pantalla en blanco con el servidor sano).
+
+**Contrato:** `py verificar_actualizador_linux.py` — no toca red ni servicios.
+
+⚠️ **No configures `TIZADA_TOKEN_ACT` sin esto puesto.** Mientras el token no esté, el endpoint
+responde 401 y el servidor está a salvo: es la red de seguridad, no un problema.
+
+⚠️ **El VPS arranca SANO PERO VACÍO**: git trae el programa, no los datos. Ver el punto 6.
+
 ## 11. Para entender el sistema
 
 - **`MAPA_DEL_SISTEMA.md`** — el cerebro: arquitectura, modelo de datos, invariantes, trampas
