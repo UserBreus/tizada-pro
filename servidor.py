@@ -503,7 +503,17 @@ def actualizacion_subir():
                           request.headers.get("X-Sha256") or "", cuando or time.time())
     if not ok:
         return jsonify({"error": det}), 400
-    return jsonify({"ok": True, "version": det, "cuando": cuando or time.time()})
+    # Si pedían instalación automática pero este servidor no sabría volver de un `stop`
+    # (Linux sin `KillMode=process`), se APARCA de entrada y se le dice al que publicó: el
+    # paquete queda sano y esperando, y nadie se queda sin servidor por una config invisible.
+    _aviso = None
+    _solo_ok, _solo_det = ACT.puede_instalarse_solo()
+    if not _solo_ok and float(cuando or 0) < ACT.MANUAL:
+        ACT.aparcar()
+        _aviso = (f"El paquete llegó, pero este servidor NO puede instalarse solo ({_solo_det}). "
+                  f"Quedó esperando para aplicarlo a mano.")
+    return jsonify({"ok": True, "version": det, "cuando": cuando or time.time(),
+                    "puede_solo": _solo_ok, "aviso": _aviso})
 
 
 @app.post("/api/actualizacion/aplicar")

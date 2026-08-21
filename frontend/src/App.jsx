@@ -2916,11 +2916,23 @@ function PantallaPublicacion({ volver }) {
                   servicio le falta `KillMode=process`, el `systemctl stop` que él mismo pide lo
                   mata y el servidor queda APAGADO. Pasó el 2026-08-21. Mientras no esté
                   confirmado, «a mano» es el camino seguro (no usa el ayudante). */}
-              {modo !== 'manual' && est?.remoto?.so === 'linux' && (
+              {/* El servidor CONTESTA si sabe instalarse solo (mira su propio KillMode). Así no
+                  hay que adivinar: si dice que no, el paquete se aparca y se aplica a mano. */}
+              {modo !== 'manual' && est?.remoto && est.remoto.puede_solo === false && (
                 <div style={{ fontSize: 12, color: 'var(--warning, #e0a020)', fontWeight: 700, marginTop: 8, lineHeight: 1.5 }}>
-                  ⚠ El servidor corre en Linux: instalar solo exige <code>KillMode=process</code> en el
-                  servicio. Si no está, el servidor queda apagado hasta que alguien lo arranque a mano.
-                  Si no lo confirmaste, usá «a mano».
+                  ⚠ Este servidor <b>no puede instalarse solo</b> ({est.remoto.puede_solo_detalle}).
+                  Si publicás igual, el paquete llega y queda esperando para aplicarlo a mano — no se apaga nada.
+                </div>
+              )}
+              {modo !== 'manual' && est?.remoto?.puede_solo === true && est?.remoto?.so === 'linux' && (
+                <div style={{ fontSize: 12, color: 'var(--success)', fontWeight: 700, marginTop: 8 }}>
+                  ✓ El servidor puede instalarse solo ({est.remoto.puede_solo_detalle}).
+                </div>
+              )}
+              {modo !== 'manual' && est?.remoto && est.remoto.puede_solo === undefined && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+                  Este servidor todavía no sabe decir si puede instalarse solo (versión anterior a esta
+                  comprobación). Si no lo confirmaste, «a mano» es el camino seguro.
                 </div>
               )}
             </div>

@@ -44,6 +44,34 @@ def _escribir(path, obj):
     os.replace(tmp, path)                      # atómico: nunca queda un json a medio escribir
 
 
+def puede_instalarse_solo():
+    """¿Este servidor puede aplicar una actualización SIN que nadie lo ayude? → (ok, detalle).
+
+    En Windows sí: el ayudante se lanza `DETACHED` y la tarea programada no lo toca. En Linux
+    depende del **`KillMode` del servicio**: el ayudante nace dentro del cgroup de la unidad, así
+    que con el valor por defecto (`control-group`) el `systemctl stop` que él mismo pide lo mata
+    a él también — servidor apagado, archivos a medio reemplazar y sin rollback (pasó el
+    2026-08-21). Con `KillMode=process` systemd mata sólo el proceso principal y el ayudante
+    sobrevive. Se PREGUNTA en vez de confiar: `systemctl show` es de sólo lectura y no pide sudo.
+    Ante la duda (no se puede consultar) se contesta NO: mejor pedir que lo apliquen a mano que
+    apagar un servidor de producción."""
+    if os.name == "nt":
+        return True, "windows"
+    servicio = os.environ.get("TIZADA_SERVICIO") or "tizadapro"
+    try:
+        r = subprocess.run(["systemctl", "show", "-p", "KillMode", "--value", servicio],
+                           capture_output=True, text=True, timeout=15)
+        valor = (r.stdout or "").strip().lower()
+    except Exception as e:
+        return False, f"no se pudo consultar el servicio ({e})"
+    if not valor:
+        return False, f"el servicio «{servicio}» no contestó su KillMode"
+    if valor != "process":
+        return False, (f"KillMode={valor} en «{servicio}»: instalar solo apagaría el servidor. "
+                       f"Falta el drop-in con KillMode=process (ver DESPLIEGUE.md §11.b)")
+    return True, "KillMode=process"
+
+
 def token_ok(recibido):
     """La clave del header contra la del servidor. Comparación en tiempo constante (no se filtra
     cuántos caracteres coinciden). Sin clave configurada, NADIE puede actualizar."""
@@ -59,7 +87,11 @@ def estado(version_actual):
     p = _leer(PENDIENTE)
     # `so` = dónde corre ESTE servidor. La pantalla del taller lo usa para avisar que en Linux
     # el modo automático depende de `KillMode=process` en el unit (ver DESPLIEGUE.md §11.b).
+    _solo_ok, _solo_det = puede_instalarse_solo()
     out = {"version": version_actual, "so": ("windows" if os.name == "nt" else "linux"),
+           # `puede_solo` = si este servidor sabe aplicar una actualización sin ayuda humana.
+           # La pantalla del taller lo muestra ANTES de publicar, para no elegir a ciegas.
+           "puede_solo": _solo_ok, "puede_solo_detalle": _solo_det,
            "pendiente": None, "ultima": _leer(ULTIMA),
            "en_curso": bool(_leer(EN_CURSO))}
     if p:
@@ -110,6 +142,17 @@ def guardar(datos, version, sha256, cuando):
     return True, ver_zip
 
 
+def aparcar():
+    """Deja la pendiente para aplicar A MANO (nadie la reintenta sola). El paquete no se toca."""
+    p = _leer(PENDIENTE)
+    if p and float(p.get("cuando", 0) or 0) < MANUAL:
+        p["cuando"] = MANUAL
+        p["aparcada"] = True
+        _escribir(PENDIENTE, p)
+        return True
+    return False
+
+
 def cancelar():
     for f in (PENDIENTE, PAQUETE):
         try:
@@ -132,6 +175,18 @@ def aplicar(puerto, version_actual):
     p = _leer(PENDIENTE)
     if not p or not os.path.exists(PAQUETE):
         return False, "no hay ninguna actualización pendiente"
+    # 🔴 NO APAGAR UN SERVIDOR QUE NO VA A SABER VOLVER. Si el ayudante no sobreviviría al
+    # `systemctl stop`, aplicar sola es garantizar la caída: se APARCA y queda para aplicar a
+    # mano (el paquete está sano, no se pierde nada).
+    _ok, _det = puede_instalarse_solo()
+    if not _ok:
+        p["cuando"] = MANUAL
+        p["aparcada"] = True
+        _escribir(PENDIENTE, p)
+        _escribir(ULTIMA, {"ok": False, "version": p.get("version"), "cuando": time.time(),
+                           "detalle": f"no se instaló sola para no dejar el servidor apagado "
+                                      f"({_det}); el paquete quedó esperando para aplicarlo a mano"})
+        return False, _det
     _escribir(EN_CURSO, {"desde": version_actual, "hacia": p.get("version"), "inicio": time.time()})
     exe = sys.executable or "py"
     cmd = [exe, os.path.join(AQUI, "actualizador.py"), AQUI, PAQUETE, str(puerto),
