@@ -205,7 +205,36 @@ printf '[Service]\nKillMode=process\n' > /etc/systemd/system/tizadapro.service.d
 systemctl daemon-reload
 ```
 
-⚠️ Mientras el drop-in no esté puesto, publicar en modo automático deja el servidor apagado: en ese caso va «a mano» (el paquete queda esperando y se descomprime a mano), que no usa el ayudante.
+✅ **Desde 2026-08-27 el drop-in ya NO es obligatorio.** Con `Restart=always` en el unit —que ya
+lo tiene— el servidor usa el **modo «reinicio»**: el ayudante descomprime con el servidor todavía
+vivo y, cuando éste se apaga, **systemd lo levanta con la versión nueva**. Nunca se llama a
+`systemctl stop`, así que el `KillMode` deja de importar y **no hace falta root**. El drop-in sigue
+sirviendo (habilita el modo clásico: parar → descomprimir → arrancar), pero es opcional.
+
+### Aplicar un paquete APARCADO a mano (Linux)
+
+Cuando el servidor publicado dice **«no puede instalarse solo»**, el paquete igual viaja y queda
+sano en `/opt/tizadapro/_actualizacion/pendiente.zip`, esperando. Así se aplica:
+
+```bash
+cd /opt/tizadapro
+sudo -u tizada unzip -o _actualizacion/pendiente.zip -d /opt/tizadapro
+sudo systemctl restart tizadapro
+curl -s localhost:8050/api/salud
+```
+
+🔴 **La descompresión va como `tizada`, NO como root.** El zip se extrae directamente
+sobre la raíz de la app (no trae `datos/` ni `entrada/`, así que no pisa nada del usuario). Si se
+descomprime como root, los `.py` quedan de root: el servidor los puede LEER y arranca igual — pero
+la próxima actualización automática, que corre como `tizada`, **no va a poder sobrescribirlos y
+fallará sin motivo aparente**. Si ya pasó: `sudo chown -R tizada:tizada /opt/tizadapro`.
+
+ℹ️ Esto hace falta **una sola vez**: desde la versión que trae el modo «reinicio», el propio
+servidor se encarga y el aviso de la pantalla pasa a verde.
+
+El servidor **elige solo** el camino y lo dice en la pantalla de publicación (`modo_instalacion`):
+`reinicio` · `systemd` · o ninguno, y ahí sí queda para aplicarlo a mano. Contrato:
+`py verificar_actualizador_linux.py`.
 
 **El prefijo de la pantalla se deduce solo** de la URL de destino de `datos/publicacion.json`: un
 subdominio compila con base `/`, una sub-ruta con `/Tizadapro/`. Antes se compilaba siempre para la

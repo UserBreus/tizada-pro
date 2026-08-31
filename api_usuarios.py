@@ -46,7 +46,11 @@ def requiere(*permisos):
 @bp.post("/api/auth/login")
 def login():
     d = request.get_json(silent=True) or {}
-    u = auth.autenticar((d.get("usuario") or "").strip(), d.get("password") or "")
+    try:
+        u = auth.autenticar((d.get("usuario") or "").strip(), d.get("password") or "")
+    except Exception as e:   # la base caída no es «usuario o contraseña incorrectos»
+        return jsonify({"error": "no hay conexión con la base de datos del sistema",
+                        "base": False, "detalle": str(e)[:200]}), 503
     if not u:
         return jsonify({"error": "usuario o contraseña incorrectos"}), 401
     session["uid"] = u["id"]
@@ -62,9 +66,23 @@ def logout():
 
 @bp.get("/api/auth/yo")
 def yo():
-    """Quién soy y qué puedo. El front lo usa para pintar la UI (ocultar ≠ proteger)."""
-    u = usuario_actual()
-    return jsonify({"ok": bool(u), "usuario": u})
+    """Quién soy y qué puedo. El front lo usa para pintar la UI (ocultar ≠ proteger).
+
+    ⚠️ Si la BASE no responde hay que decirlo con todas las letras (**503 + `base: false`**). Antes
+    salía un 500 con el traceback de Flask: el front no lo podía leer como JSON, se iba al `catch`
+    y concluía «este sistema no tiene usuarios» — entraba igual y después todo daba 401."""
+    try:
+        u = usuario_actual()
+        if u is None:
+            # SIN SESIÓN `usuario_actual` corta antes de tocar la base, así que no alcanza para
+            # afirmar que la base está viva: se comprueba. Si no, el front vería «no hay sesión»
+            # (login) cuando en realidad no hay CONTRA QUÉ validar.
+            db.valor("SELECT 1")
+    except Exception as e:
+        return jsonify({"ok": False, "usuario": None, "base": False,
+                        "error": "no hay conexión con la base de datos del sistema",
+                        "detalle": str(e)[:200]}), 503
+    return jsonify({"ok": bool(u), "usuario": u, "base": True})
 
 
 @bp.post("/api/auth/password")

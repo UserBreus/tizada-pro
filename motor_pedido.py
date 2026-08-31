@@ -2303,6 +2303,11 @@ def _norm_nombre(s):
     return " ".join(s.lower().replace("-", " ").split())
 
 
+# Número final de una pieza numerada: «Frente 9» → «Frente». Compilado una vez (se usa por pieza
+# y por talle al armar la tizada).
+_re_etq = __import__("re").compile(r"\s+\d+\s*$")
+
+
 def _norm_generico(s):
     """Nombre normalizado SIN el número final ("Frente 8" → "frente"). Sirve para que la
     posición/config de la etiqueta se aplique a TODAS las piezas del mismo nombre (todos los
@@ -2517,7 +2522,7 @@ def mesa_rect_arte(path_arte, mesa):
             except Exception: pass
 
 
-def pos_agregado_en_diseno(obj, cont, mesa_rect):
+def pos_agregado_en_diseno(obj, cont, mesa_rect, referencia="alto"):
     """Posición base de un objeto AGREGADO, medida **DENTRO DEL DISEÑO** — igual que un editable
     que viene del arte: escala y se mueve CON el diseño, y el ajuste por rango/talle usa la misma
     ruta que los demás editables.
@@ -2526,9 +2531,8 @@ def pos_agregado_en_diseno(obj, cont, mesa_rect):
     porque las mesas cambian de tamaño según el rango (en un arte real: 1233x1842 el rango chico
     y 2352x2607 el grande); tomar una mesa fija es lo que producía el corrimiento entre rangos.
 
-    El diseño se coloca sobre la pieza escalando al ALTO y centrando el ancho (`cm_encajar`):
-        alto del diseño sobre la pieza = alto de la pieza  -> fh = h_cm / ph_cm
-        ancho del diseño en cm         = (aw/ah) * ph_cm   -> fw = w_cm / ese ancho
+    El encaje del diseño sobre la pieza sale de `_encaje()`: con «alto manda» el alto del diseño
+    es el de la pieza y el ancho queda centrado; con «ancho manda», al revés.
     Devuelve el mismo dict que `_pos_en_pieza` (fracciones de la PIEZA), centrado en el diseño.
     """
     try:
@@ -2539,16 +2543,44 @@ def pos_agregado_en_diseno(obj, cont, mesa_rect):
         ow = float(obj.get("w_cm") or 0); oh = float(obj.get("h_cm") or 0)
         if min(aw, ah, pw, ph, ph_cm, ow, oh) <= 0:
             return None
-        awf = (aw * (ph / ah)) / pw          # ancho del DISEÑO como fracción de la pieza
-        fw = ow / ((aw / ah) * ph_cm)        # ancho del objeto como fracción del DISEÑO
-        fh = oh / ph_cm                      # alto  del objeto como fracción del DISEÑO
-        rw, rh = fw * awf, fh                # -> fracciones de la PIEZA
-        return {"rx": 0.5 - rw / 2, "ry": 0.5 - rh / 2, "rw": rw, "rh": rh, "awf": awf}
+        awf, ahf, _ox, _oy = _encaje(aw, ah, pw, ph, referencia)
+        # El diseño mide, sobre la pieza: alto = ahf*alto_pieza, ancho = awf*ancho_pieza.
+        pw_cm = float(cont["w"]) / CM
+        d_alto_cm = ahf * ph_cm              # alto del DISEÑO en cm sobre la pieza
+        d_ancho_cm = awf * pw_cm             # ancho del DISEÑO en cm sobre la pieza
+        if min(d_alto_cm, d_ancho_cm) <= 0:
+            return None
+        fw = ow / d_ancho_cm                 # ancho del objeto como fracción del DISEÑO
+        fh = oh / d_alto_cm                  # alto  del objeto como fracción del DISEÑO
+        rw, rh = fw * awf, fh * ahf          # -> fracciones de la PIEZA
+        return {"rx": 0.5 - rw / 2, "ry": 0.5 - rh / 2, "rw": rw, "rh": rh,
+                "awf": awf, "ahf": ahf}
     except Exception:
         return None
 
 
-def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
+def _encaje(aw, ah, pw, ph, referencia="alto"):
+    """CÓMO ENTRA EL DISEÑO EN LA PIEZA. Es la cuenta de la que dependen TODAS las posiciones.
+
+    Con escala uniforme, una sola dimensión puede coincidir con la pieza; la otra queda más
+    chica y centrada (lo que sobra lo recorta el contorno).
+      · **alto manda** (por defecto): el alto del diseño = alto de la pieza, y el ancho queda
+        centrado → `awf` < 1, `ahf` = 1.
+      · **ancho manda**: al revés → `awf` = 1, `ahf` < 1, centrado a lo alto.
+
+    Devuelve `(awf, ahf, offx, offy)` en fracciones de la PIEZA. 🔴 Con «alto» da
+    `ahf=1, offy=0`, o sea exactamente lo que hacía el sistema antes: los moldes que no usan
+    «ancho manda» no cambian nada."""
+    if min(aw, ah, pw, ph) <= 0:
+        return (1.0, 1.0, 0.0, 0.0)
+    if str(referencia).lower().startswith("anch"):
+        ahf = (ah * (pw / aw)) / ph
+        return (1.0, ahf, 0.0, (1 - ahf) / 2)
+    awf = (aw * (ph / ah)) / pw
+    return (awf, 1.0, (1 - awf) / 2, 0.0)
+
+
+def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox, referencia="alto"):
     """Posición del objeto sobre la pieza en fracciones 0..1 (mismo encaje que cm_encajar:
     escala al alto, centra el ancho). {rx,ry,rw,rh} con (rx,ry)=esquina sup-izq, o None."""
     try:
@@ -2558,15 +2590,80 @@ def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
         pw, ph = (px1 - px0), (py1 - py0)
         if aw <= 0 or ah <= 0 or pw <= 0 or ph <= 0:
             return None
-        awf = (aw * (ph / ah)) / pw
-        return {"rx": (1 - awf) / 2 + ((ox0 - ax0) / aw) * awf, "ry": (oy0 - ay0) / ah,
-                "rw": ((ox1 - ox0) / aw) * awf, "rh": (oy1 - oy0) / ah,
-                "awf": awf}   # ancho del DISEÑO en la pieza (fracción) — para mover en coords del diseño
+        awf, ahf, offx, offy = _encaje(aw, ah, pw, ph, referencia)
+        return {"rx": offx + ((ox0 - ax0) / aw) * awf, "ry": offy + ((oy0 - ay0) / ah) * ahf,
+                "rw": ((ox1 - ox0) / aw) * awf, "rh": ((oy1 - oy0) / ah) * ahf,
+                # ancho y alto del DISEÑO en la pieza (fracciones) — para mover en coords del diseño
+                "awf": awf, "ahf": ahf}
     except Exception:
         return None
 
 
-def _matriz_editable(tf, obj, cont, W, H, B, pos_override=None):
+# ════════════════ MARCAS DE PROCESO: TPU · BORDADO · DTF ════════════════
+# Un objeto marcado no se sublima: se aplica después por otro proceso. En la tizada, en su lugar,
+# va una CRUZ de 3 cm con la letra del proceso — el operario la usa para centrar lo que pegue o
+# borde. Los tres van en NEGRO PURO y se distinguen por la letra (decisión del usuario 2026-08-26:
+# tres colores distintos podían confundirse con el diseño).
+MARCAS_PROCESO = {
+    "tpu":     {"letra": "T", "nombre": "TPU"},
+    "bordado": {"letra": "B", "nombre": "Bordado"},
+    "dtf":     {"letra": "D", "nombre": "DTF"},
+}
+CRUZ_MM = 30.0        # 3 cm de PUNTA A PUNTA (1,5 cm cada brazo)
+CRUZ_TRAZO_MM = 1.6   # bien gruesa: tiene que verse de lejos en la mesa (pedido del usuario)
+CRUZ_LETRA_MM = 7.0   # alto de la letra, que va DENTRO de un cuadrante de la cruz
+
+
+def _centro_editable(tf, obj, cont, W, H, B, pos_override=None, referencia="alto"):
+    """Dónde queda el CENTRO del objeto editable, en coordenadas de página. Es el mismo punto que
+    usa `_matriz_editable` como pivote más el desplazamiento del usuario — sale de ahí para que la
+    cruz caiga exactamente donde estaba el objeto, movido o no."""
+    tf = tf or {}
+    pos = pos_override or _pos_en_pieza(obj.get("mesa_rect"), obj.get("bbox_mu"),
+                                        cont.get("bbox_mu"), referencia)
+    if not pos:
+        return None
+    Cx = B + (pos["rx"] + pos["rw"] / 2) * W
+    Cy = B + (1 - (pos["ry"] + pos["rh"] / 2)) * H
+    dx = float(tf.get("dx", 0) or 0); dy = float(tf.get("dy", 0) or 0)
+    # el mover se mide contra el tamaño del DISEÑO sobre la pieza, no contra la pieza
+    return (Cx + dx * pos.get("awf", 1.0) * W, Cy - dy * pos.get("ahf", 1.0) * H)
+
+
+def _ops_cruz_proceso(cx, cy, marca, fuente=None):
+    """Los operadores PDF de la marca: cruz de 3 cm + la letra del proceso al lado. Negro puro
+    (`0 0 0 1 K`) para que no dependa del perfil de color ni se confunda con el diseño."""
+    info = MARCAS_PROCESO.get(str(marca or "").lower())
+    if not info:
+        return ""
+    r = (CRUZ_MM * MM) / 2.0
+    w = CRUZ_TRAZO_MM * MM
+    ops = ["q", "0 0 0 1 K", f"{w:.3f} w", "0 J",
+           f"{cx - r:.3f} {cy:.3f} m {cx + r:.3f} {cy:.3f} l S",
+           f"{cx:.3f} {cy - r:.3f} m {cx:.3f} {cy + r:.3f} l S"]
+    # LA LETRA VA ADENTRO DE UN CUADRANTE (el de arriba a la derecha), no al costado: así la marca
+    # entra completa en los 3 cm y el cruce —que es el punto exacto donde va el objeto— queda libre.
+    if fuente is not None:
+        try:
+            size = fuente.size_para_alto(CRUZ_LETRA_MM * MM)
+            _an = 0.0
+            try:
+                _an = fuente.ancho_texto(info["letra"], size)
+            except Exception:
+                _an = CRUZ_LETRA_MM * MM * 0.7
+            # centro del cuadrante = a mitad de camino entre el cruce y la punta de cada brazo
+            _qx, _qy = cx + r / 2.0, cy + r / 2.0
+            ops.append("0 0 0 1 k")
+            # ojo: la firma es ops_texto(texto, size, x, y) — y devuelve SOLO el path (sin pintar)
+            ops.append(fuente.ops_texto(info["letra"], size, _qx - _an / 2.0, _qy - (CRUZ_LETRA_MM * MM) / 2.0))
+            ops.append("f")
+        except Exception:
+            pass
+    ops.append("Q")
+    return "\n".join(ops) + "\n"
+
+
+def _matriz_editable(tf, obj, cont, W, H, B, pos_override=None, referencia="alto"):
     """Matriz `cm` del transform del usuario (mover/rotar/escalar) de un objeto editable,
     alrededor de su centro sobre la pieza. Devuelve "" si es identidad. `dx,dy` en fracciones
     de la pieza (dy hacia abajo, y-down del editor); `rot` en grados (horario del editor);
@@ -2581,7 +2678,8 @@ def _matriz_editable(tf, obj, cont, W, H, B, pos_override=None):
     sy = float(tf.get("sy") if tf.get("sy") is not None else sc)
     if abs(dx) < 1e-6 and abs(dy) < 1e-6 and abs(rot) < 1e-6 and abs(sx - 1) < 1e-6 and abs(sy - 1) < 1e-6:
         return ""
-    pos = pos_override or _pos_en_pieza(obj.get("mesa_rect"), obj.get("bbox_mu"), cont.get("bbox_mu"))
+    pos = pos_override or _pos_en_pieza(obj.get("mesa_rect"), obj.get("bbox_mu"),
+                                        cont.get("bbox_mu"), referencia)
     if not pos:
         return ""
     Cx = B + (pos["rx"] + pos["rw"] / 2) * W
@@ -2591,7 +2689,7 @@ def _matriz_editable(tf, obj, cont, W, H, B, pos_override=None):
     a, b, c, d = sx * cs, sx * sn, -sy * sn, sy * cs   # escala (sx,sy) y después rotación
     # COORDS DEL DISEÑO: el objeto vive en el diseño → el mover se mide contra el ancho del DISEÑO en la
     # pieza (awf*W), no el ancho de la pieza. El alto del diseño = alto de la pieza (cm_encajar) → dy*H.
-    tdx, tdy = dx * pos.get("awf", 1.0) * W, -dy * H    # dy hacia abajo → y-arriba: negativo
+    tdx, tdy = dx * pos.get("awf", 1.0) * W, -dy * pos.get("ahf", 1.0) * H   # dy abajo → y-arriba: negativo
     e = Cx + tdx - (a * Cx + c * Cy)
     f = Cy + tdy - (b * Cx + d * Cy)
     return f"{a:.6f} {b:.6f} {c:.6f} {d:.6f} {e:.3f} {f:.3f} cm\n"
@@ -2608,7 +2706,8 @@ def _bbox_de_xo(xo):
     return min(xs), max(xs), min(ys), max(ys)
 
 
-def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page, mesa_rect):
+def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page,
+                               mesa_rect, referencia="alto"):
     """Content-stream que dibuja los objetos AGREGADOS asignados a `pieza`, con su transform.
     Cada objeto es un PDF suelto (datos/.../objetos_agregados/<oid>.pdf). Base = 30% centrado
     (como el editor); encima, el transform del usuario (mover/rotar/escalar/espejar)."""
@@ -2639,7 +2738,7 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
             # BASE: la BBox del objeto se escala a su MEDIDA REAL sobre la pieza (fw×fh), centrada
             # → misma proporción que el archivo (no se estira) y mismo tamaño que muestra el editor.
             # DENTRO DEL DISEÑO, con la mesa de ESTE talle (ver `pos_agregado_en_diseno`).
-            pos = pos_agregado_en_diseno(o, cont, mesa_rect)
+            pos = pos_agregado_en_diseno(o, cont, mesa_rect, referencia)
             if not pos:
                 continue
             # BASE: la BBox del objeto se escala al rectangulo que le toca sobre la pieza
@@ -2654,7 +2753,7 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
             ey = _cy - syb * cyo
             base = f"{sxb:.6f} 0 0 {syb:.6f} {ex:.3f} {ey:.3f} cm\n"
             # transform del usuario con el MISMO pos (pivote = centro del objeto en la pieza)
-            utf = _matriz_editable(tf, None, cont, W, H, B, pos_override=pos)   # "" si identidad
+            utf = _matriz_editable(tf, None, cont, W, H, B, pos_override=pos, referencia=referencia)   # "" si identidad
             draw += f"q\n{clip}\nW n\n{utf}{base}\n{nom} Do\nQ\n"
         except Exception:
             pass
@@ -2720,6 +2819,16 @@ def _match_piezas(lineas, piezas):
     return [], False
 
 
+def _cm_arriba(v):
+    """Redondea al MILÍMETRO, siempre HACIA ARRIBA.
+
+    🔴 Una medida de diseño no se puede redondear para abajo: lo que falte es tela SIN ESTAMPAR en
+    el borde de la pieza. Con `round()` a 1 decimal, 11 de las 34 piezas del molde del usuario
+    quedaban entre 0,1 y 0,5 mm cortas (medido 2026-08-28). Sobrar no molesta: lo que sobra lo
+    recorta el contorno de la pieza."""
+    return math.ceil(round(float(v), 6) * 10.0) / 10.0
+
+
 def medidas_diseno(registro, referencia="alto", talle_guia=None):
     """Medida que debe tener el diseño de cada pieza para CUBRIR todos los talles
     sin huecos, según la dimensión guía (alto o ancho).
@@ -2738,16 +2847,18 @@ def medidas_diseno(registro, referencia="alto", talle_guia=None):
             continue
         guia = next((d for d in dims if d[0] == talle_guia), None)
         if ref == "ancho":
-            base_w = guia[1] if guia else max(dims, key=lambda x: x[1])[1]
+            base_w = round(guia[1] if guia else max(dims, key=lambda x: x[1])[1], 1)
             t_crit, ratio = max(((t, h / w) for t, w, h in dims), key=lambda x: x[1])
-            out[pieza] = {"ref": "ancho", "ancho_cm": round(base_w, 1),
-                          "alto_cm": round(base_w * ratio, 1),
+            # La derivada se calcula sobre la base YA REDONDEADA y se sube al milímetro: así la
+            # proporción que ve el diseñador (alto/ancho) nunca queda por debajo de la necesaria.
+            out[pieza] = {"ref": "ancho", "ancho_cm": base_w,
+                          "alto_cm": _cm_arriba(base_w * ratio),
                           "ratio": round(ratio, 4), "talle_critico": t_crit}
         else:
-            base_h = guia[2] if guia else max(dims, key=lambda x: x[2])[2]
+            base_h = round(guia[2] if guia else max(dims, key=lambda x: x[2])[2], 1)
             t_crit, ratio = max(((t, w / h) for t, w, h in dims), key=lambda x: x[1])
-            out[pieza] = {"ref": "alto", "alto_cm": round(base_h, 1),
-                          "ancho_cm": round(base_h * ratio, 1),
+            out[pieza] = {"ref": "alto", "alto_cm": base_h,
+                          "ancho_cm": _cm_arriba(base_h * ratio),
                           "ratio": round(ratio, 4), "talle_critico": t_crit}
     return out
 
@@ -2815,9 +2926,9 @@ def _guia_capas_data(path_plantilla, registro, config, talle_guia, rango, refere
             elif config == "rango":
                 mv = (registro or {}).get(nombre, {}); dimsR = [mv[v] for v in rango if v in mv]
                 if dimsR and guia_es_ancho:
-                    r = max(d["h_cm"] / d["w_cm"] for d in dimsR); a_cm, hh_cm = w_cm, round(w_cm * r, 1)
+                    r = max(d["h_cm"] / d["w_cm"] for d in dimsR); a_cm, hh_cm = w_cm, _cm_arriba(w_cm * r)
                 elif dimsR:
-                    r = max(d["w_cm"] / d["h_cm"] for d in dimsR); a_cm, hh_cm = round(h_cm * r, 1), h_cm
+                    r = max(d["w_cm"] / d["h_cm"] for d in dimsR); a_cm, hh_cm = _cm_arriba(h_cm * r), h_cm
                 else:
                     a_cm, hh_cm = w_cm, h_cm
             else:
@@ -2963,10 +3074,22 @@ def _segs_bbox(segs):
     return (min(xs), min(ys), max(xs), max(ys)) if xs else (0.0, 0.0, 0.0, 0.0)
 
 
+# Capas EDITABLES que trae la guía lista para usar. El sistema reconoce un objeto editable por el
+# PREFIJO del nombre de la capa (`_es_capa_editable`: empieza con «editable»), así que el nombre va
+# «Editable <qué es>» y no al revés — «escudo editable» NO lo detectaría.
+EDITABLES_GUIA = ("Editable escudo", "Editable logo")
+
+
 def ai_guia_medidas(path_plantilla, registro, config="default", rango=None, referencia="alto",
-                    titulo="Molde", talle_guia=None, piezas_incluir=None, capas=None):
-    """Devuelve los bytes de un .ai (legacy) con la guía en CAPAS reales. `capas` = nombres de las
-    capas del arte a crear vacías (diseño + columnas de texto/número). Un solo talle (el de guía)."""
+                    titulo="Molde", talle_guia=None, piezas_incluir=None, capas=None,
+                    editables=None):
+    """Devuelve los bytes de un .ai (legacy) con la guía en CAPAS reales, en el ORDEN en que las
+    necesita el arte. `capas` = capas del arte a crear vacías (diseño + columnas de texto/número);
+    `editables` = capas «Editable …» (por defecto, escudo y logo). Un solo talle (el de guía).
+
+    🔴 ORDEN (en un .ai la capa escrita PRIMERO queda ABAJO): diseño · editables · nombre/número ·
+    **guías arriba de todo**. Antes se escribía «molde» y «guias» primero y las capas del arte
+    después: el diseño terminaba TAPANDO la guía y había que reordenar a mano en Illustrator."""
     import re as _re
     rango = rango or []
 
@@ -3010,7 +3133,9 @@ def ai_guia_medidas(path_plantilla, registro, config="default", rango=None, refe
     def Ti(i, cx, cy):
         ox, oy = placed[i]; return (cx + ox, cy + oy)
 
-    # CAPA molde: contorno (trazo negro) + recuadro del diseño (cyan punteado) + título.
+    # GUÍA: contorno (trazo negro) + recuadro del diseño (cyan punteado) + título. Va todo en la
+    # capa `guias` — no existe más una capa «molde»: lo que hay acá es una guía para dibujar encima
+    # (pedido del usuario 2026-08-21).
     mo = ["0 0 0 1 K", "1.5 w"]
     for i, it in enumerate(its):
         mo.append(_ai_path(it["segs"], lambda cx, cy, _i=i: Ti(_i, cx, cy))); mo.append("S")
@@ -3022,25 +3147,39 @@ def ai_guia_medidas(path_plantilla, registro, config="default", rango=None, refe
         mo.append("[] 0 d")
     mo.append(_ai_text("%s - Guia (arma el arte encima) - 1:1" % titulo, MARG, PH - 34, 14))
 
-    # CAPA guias: los NOMBRES de pieza como texto vivo, centrados en cada pieza.
-    gu = []
+    # …y los NOMBRES de pieza como texto vivo, centrados en cada una. Ese texto es lo que el
+    # sistema lee después para saber qué mesa va en qué pieza (auto-mapeo por nombre).
     for i, it in enumerate(its):
         nm = nombre_mesa(it["nombre"]) if it["nombre"] else ""
         if not nm:
             continue
         cx, cy = Ti(i, it["ccx"], it["ccy"])
-        gu.append(_ai_text(nm, cx - len(nm) * 3.2, cy, 12))
+        mo.append(_ai_text(nm, cx - len(nm) * 3.2, cy, 12))
 
-    cuerpo = _ai_layer("molde", 79, 128, 255, "\n".join(mo))
-    cuerpo += _ai_layer("guias", 52, 211, 153, "\n".join(gu) if gu else "0 0 0 1 k")
-    # Capas del arte VACÍAS (diseño + texto/número): se crean igual (un marcador mínimo invisible
-    # para que la capa exista) para que el diseñador arme el arte con la estructura lista.
+    # ── LAS CAPAS, DE ABAJO HACIA ARRIBA ────────────────────────────────────────────────────
+    # Un marcador mínimo e invisible para que la capa exista aunque esté vacía.
+    marca = "1 1 1 0 K\n0.01 w\n%.2f %.2f m\n%.2f %.2f L\nS" % (MARG, MARG, MARG + 0.1, MARG)
+    _RESERVADAS = {"molde", "guia", "guias"}          # las de guía las arma este código, no el front
+    _pers = []
+    _diseno = None
     for nc in (capas or []):
         nc = str(nc).strip()
-        if not nc or nc.lower() in ("molde", "guias"):
+        if not nc or nc.lower() in _RESERVADAS:
             continue
-        marca = "1 1 1 0 K\n0.01 w\n%.2f %.2f m\n%.2f %.2f L\nS" % (MARG, MARG, MARG + 0.1, MARG)
-        cuerpo += _ai_layer(nc, 128, 128, 128, marca)
+        if _norm_nombre(nc) in ("diseno", "diseño"):   # el diseño va al fondo, sea cual sea su lugar en la lista
+            _diseno = nc
+        elif _es_capa_editable(nc):                    # si el front manda editables, no se duplican
+            continue
+        else:
+            _pers.append(nc)
+    _eds = [str(e).strip() for e in (editables if editables is not None else EDITABLES_GUIA) if str(e).strip()]
+
+    cuerpo = _ai_layer(_diseno or "diseño", 128, 128, 128, marca)          # 1) el DISEÑO, al fondo
+    for ed in _eds:                                                        # 2) los EDITABLES
+        cuerpo += _ai_layer(ed, 255, 170, 60, marca)
+    for nc in _pers:                                                       # 3) NOMBRE / NÚMERO…
+        cuerpo += _ai_layer(nc, 190, 120, 255, marca)
+    cuerpo += _ai_layer("guias", 52, 211, 153, "\n".join(mo))             # 4) LAS GUÍAS, arriba
 
     ai = (
         "%%!PS-Adobe-3.0 EPSF-3.0\n"
@@ -3413,7 +3552,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                    config_nesting=None, progreso=None, mapeo_arte=None, rotaciones=None,
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
                    etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None,
-                   editables_color=None):
+                   editables_color=None, editables_marca=None, editables_sin_marca=None,
+                   marcas_como_cruz=True, referencia="alto"):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -3602,6 +3742,32 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # base y se redibuja RECOLOREADO (mismo camino que los editados). En las variables sin color, cae
     # a color original. El color se resuelve por variable al armar la base (`_color_de`).
     _ecolor = editables_color or {}
+
+    def _cfg_var(mapa, variante):
+        """La config de editables que corresponde a esta fila: `{IDENT: valor}`.
+
+        🔴 POR QUÉ EXISTE (bug real, 2026-08-27): la config del editable se guarda POR VARIABLE
+        (`{v_xxxx: {...}}`), pero una fila del pedido puede venir **sin variable elegida**
+        (`variante_clave=None`) — el molde entero. Hasta acá eso devolvía `{}` y **toda** la
+        configuración del editable se perdía EN SILENCIO: las marcas TPU/Bordado/DTF no se
+        aplicaban y el objeto salía impreso en la tizada como si nada. El usuario lo reportó con
+        un molde de una sola variable.
+
+        La regla (la misma que ya usa la ETIQUETA para las filas sin variable, ver servidor.py):
+          · la fila eligió variable → esa (o el `"*"` legacy);
+          · la fila NO eligió y hay UNA SOLA variable configurada → esa, que es inequívoca;
+          · hay VARIAS y la fila no eligió → **no se adivina** (devuelve vacío). Elegir una al azar
+            puede sacar una prenda mal y bien impresa, que es el peor error posible.
+        """
+        if not mapa:
+            return {}
+        if variante:
+            return mapa.get(variante) or mapa.get("*") or {}
+        if mapa.get("*"):
+            return mapa["*"]
+        _cs = [k for k in mapa if (mapa.get(k) or {})]
+        return (mapa[_cs[0]] or {}) if len(_cs) == 1 else {}
+
     def _cmyk4(v):
         try:
             return tuple(float(x) for x in v)[:4] if (v and len(v) >= 4) else None
@@ -3610,7 +3776,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     def _color_de(nombre, variante):
         """(fill, stroke) CMYK del objeto para esta VARIABLE (fallback a "*"), o None si no hay
         override. Cada canal en 0..1; None en un canal = no tocar ese relleno/trazo."""
-        c = ((_ecolor.get(variante) or _ecolor.get("*") or {}).get(nombre)) or {}
+        c = (_cfg_var(_ecolor, variante).get(nombre)) or {}
         f, s = _cmyk4(c.get("fill")), _cmyk4(c.get("stroke"))
         return (f, s) if (f or s) else None
     _coloreados_nombres = set()
@@ -3619,8 +3785,38 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _cc = _c or {}
             if _cmyk4(_cc.get("fill")) or _cmyk4(_cc.get("stroke")):
                 _coloreados_nombres.add(_norm_nombre(_nom))
-    # Conjunto a redibujar fuera del diseño base = editados ∪ con-tamaño-configurado ∪ recoloreados.
-    _redibujar_nombres = _editados_nombres | _tamano_nombres | _coloreados_nombres
+    # ── MARCAS DE PROCESO (TPU/Bordado/DTF) ─────────────────────────────────────────────────
+    # `editables_marca` = {variable: {IDENT: "tpu"|"bordado"|"dtf"}}. Un objeto marcado se saca del
+    # diseño base igual que uno recoloreado —para eso entra en `_redibujar_nombres`— pero después
+    # NO se vuelve a dibujar: en su lugar va la cruz.
+    # ¿QUÉ DIMENSIÓN MANDA en este molde? Decide cómo entra el diseño en la pieza y, por lo tanto,
+    # dónde cae cada objeto editable. Sale de la configuración del molde (`referencia_medida`).
+    _manda_ancho = str(referencia).lower().startswith("anch")
+    _emarca = editables_marca or {}
+    def _marca_de(nombre, variante):
+        return (_cfg_var(_emarca, variante).get(nombre)) or None
+    # SIN MARCA: el objeto lleva proceso igual (no se sublima) pero en la tizada no queda NADA en
+    # su lugar — ni cruz ni letra. Es un pedido explícito del usuario: hay trabajos donde la marca
+    # molesta (la tela se ve, o el proceso se posiciona con otra referencia). Va aparte de
+    # `editables_marca` a propósito: el «no se imprime» y el «no se marca» son dos decisiones
+    # distintas, y mezclarlas obligaría a tocar todo el circuito de MARCAS_PROCESO.
+    _esinmarca = editables_sin_marca or {}
+    def _sin_marca_de(nombre, variante):
+        return bool(_cfg_var(_esinmarca, variante).get(nombre))
+    _marcados_nombres = set()
+    for _objs in _emarca.values():
+        for _nom, _mk in (_objs or {}).items():
+            if str(_mk or "").lower() in MARCAS_PROCESO:
+                _marcados_nombres.add(_norm_nombre(_nom))
+    # 🔴 «Sin marca» SIN proceso también saca el objeto del diseño base. Sin esto el objeto se
+    # quedaba adentro del diseño y se imprimía igual — que es justo lo que el usuario reportó:
+    # «sigue estando ahí el maldito objeto».
+    for _objs in _esinmarca.values():
+        for _nom, _sm in (_objs or {}).items():
+            if _sm:
+                _marcados_nombres.add(_norm_nombre(_nom))
+    # Conjunto a redibujar fuera del diseño base = editados ∪ con-tamaño ∪ recoloreados ∪ marcados.
+    _redibujar_nombres = _editados_nombres | _tamano_nombres | _coloreados_nombres | _marcados_nombres
     SEP = ""                              # separa el nombre de capa del id de objeto en el IDENT
     def _ident(nombre, obj_id):
         return f"{nombre}{SEP}{obj_id}" if obj_id else nombre
@@ -3629,7 +3825,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         configurado, o con color override — propio de la capa o de CUALQUIERA de sus figuras)."""
         nm = _norm_nombre(u["ident"]); lay = _norm_nombre(_nombre_editable(u["capa"]))
         if (nm in _editados_nombres or nm in _coloreados_nombres
-                or nm in _tamano_nombres or lay in _tamano_nombres):
+                or nm in _tamano_nombres or lay in _tamano_nombres
+                or nm in _marcados_nombres):
             return True
         return any(_norm_nombre(o["ident"]) in _coloreados_nombres
                    for o in (u.get("objetos") or []))
@@ -3810,26 +4007,39 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         return min(xs), max(xs), min(ys), max(ys)
 
     def cm_encajar(xo, W, H, B):
-        """Escala el diseño al ALTO de la pieza (manda el alto) con escala
-        UNIFORME: el ancho crece/se achica en la MISMA proporción (sin deformar)
-        y queda centrado a lo ancho. Lo que sobra a los costados lo recorta el
-        contorno; si el diseño es más angosto que la pieza, queda centrado."""
+        """Escala el diseño a la DIMENSIÓN QUE MANDA en este molde, con escala UNIFORME (la otra
+        crece/se achica en la misma proporción, sin deformar) y centrado en la que sobra.
+
+        🔴 `referencia` sale de la configuración del molde (`referencia_medida`). Antes esto
+        estaba FIJO en el alto: un molde con «ancho manda» pedía una medida de plantilla y después
+        la tizada la escalaba con la otra — el arte no coincidía. Lo reportó el usuario 2026-08-28.
+        Lo que sobra lo recorta el contorno de la pieza."""
         tx0, tx1, ty0, ty1 = _bbox_arte(xo)
-        s = H / (ty1 - ty0) if ty1 != ty0 else 1.0
-        aw = (tx1 - tx0) * s
-        return f"{s:.6f} 0 0 {s:.6f} {B + (W - aw) / 2 - s*tx0:.3f} {B - s*ty0:.3f} cm"
+        if _manda_ancho:
+            e = W / (tx1 - tx0) if tx1 != tx0 else 1.0
+            ah = (ty1 - ty0) * e
+            return f"{e:.6f} 0 0 {e:.6f} {B - e*tx0:.3f} {B + (H - ah) / 2 - e*ty0:.3f} cm"
+        e = H / (ty1 - ty0) if ty1 != ty0 else 1.0
+        aw = (tx1 - tx0) * e
+        return f"{e:.6f} 0 0 {e:.6f} {B + (W - aw) / 2 - e*tx0:.3f} {B - e*ty0:.3f} cm"
 
     def cm_tamano_editable(xo, W, H, B, bbox_mu, sf):
         """Coloca el objeto a una escala ABSOLUTA `sf` (no la del talle) en la POSICIÓN donde
         caería si se escalara con el diseño. Para tamaño máximo: sf = max_cm / lado_mayor_cm.
         `bbox_mu` = bbox del objeto en coords MuPDF. (sf=1 = tamaño original del diseño.)"""
         tx0, tx1, ty0, ty1 = _bbox_arte(xo)
-        s = H / (ty1 - ty0) if ty1 != ty0 else 1.0
-        aw = (tx1 - tx0) * s
+        # 🔴 La escala del DISEÑO y su corrimiento tienen que ser los mismos que en `cm_encajar`,
+        # o el objeto con tamaño configurado cae en otro lado que el resto del arte.
+        if _manda_ancho:
+            s = W / (tx1 - tx0) if tx1 != tx0 else 1.0
+            cx0, cy0 = B, B + (H - (ty1 - ty0) * s) / 2
+        else:
+            s = H / (ty1 - ty0) if ty1 != ty0 else 1.0
+            cx0, cy0 = B + (W - (tx1 - tx0) * s) / 2, B
         ox = (bbox_mu[0] + bbox_mu[2]) / 2.0                  # centro X (MuPDF x = PDF x)
         oy = ty1 - (bbox_mu[1] + bbox_mu[3]) / 2.0            # centro Y → PDF (y-arriba)
-        ex = (s - sf) * ox + B + (W - aw) / 2 - s * tx0       # centro escalado − sf·centro
-        ey = (s - sf) * oy + B - s * ty0
+        ex = (s - sf) * ox + cx0 - s * tx0                    # centro escalado − sf·centro
+        ey = (s - sf) * oy + cy0 - s * ty0
         return f"{sf:.6f} 0 0 {sf:.6f} {ex:.3f} {ey:.3f} cm"
 
     def ops_cont(cont, S, dx=0.0, dy=0.0):
@@ -3931,8 +4141,28 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                          if _norm_nombre(u["ident"]) in _redibujar_validos]
             for _o in _edit_obj:
                 # Posición POR VARIABLE: la de esta `variante`, si no la base legacy "*", si no identidad.
-                _tf = ((_ecfg.get(variante) or _ecfg.get("*") or {}).get(_o["ident"]) or {}).get(talle) or {}
-                _utf = _matriz_editable(_tf, _o, cont, W, H, B)          # "" si identidad
+                _tf = (_cfg_var(_ecfg, variante).get(_o["ident"]) or {}).get(talle) or {}
+                # ¿ESTE OBJETO LLEVA OTRO PROCESO? Entonces no se imprime: va la CRUZ de 3 cm en su
+                # centro (donde el usuario lo dejó) y el objeto no se dibuja. `marcas_como_cruz` es
+                # False en el preview del arte, donde el diseñador tiene que seguir viéndolo.
+                _mk = _marca_de(_o["ident"], variante)
+                _sin = _sin_marca_de(_o["ident"], variante)
+                # LAS CUATRO COMBINACIONES, con una sola regla: el `continue` (el objeto NO se
+                # imprime) vale para las tres primeras; lo único opcional es qué queda en su lugar.
+                #   proceso, sin «sin marca»  → va la CRUZ
+                #   proceso + «sin marca»     → no queda nada
+                #   sólo «sin marca»          → no queda nada (el objeto simplemente no se imprime)
+                #   ninguno                   → se dibuja normal
+                if (_mk or _sin) and marcas_como_cruz:
+                    _c = _centro_editable(_tf, _o, cont, W, H, B, referencia=referencia) if (_mk and not _sin) else None
+                    if _c:
+                        try:
+                            _fcruz = fuente("Arial-BoldMT")
+                        except Exception:
+                            _fcruz = None
+                        arte_draw += f"q\n{clip}\nW n\n" + _ops_cruz_proceso(_c[0], _c[1], _mk, _fcruz) + "Q\n"
+                    continue
+                _utf = _matriz_editable(_tf, _o, cont, W, H, B, referencia=referencia)   # "" si identidad
                 # Caja de tamaño configurada para este objeto+variante (por IDENT o por nombre de
                 # capa; None = escala con el diseño).
                 _box = (_tamano.get(_norm_nombre(_o["ident"]), {}).get(str(talle))
@@ -3976,7 +4206,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _ar = arte_rect(_mesa_a)      # mesa del arte de ESTA pieza y ESTE talle
             arte_draw += _dibujar_objetos_agregados(
                 objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page,
-                [_ar.x0, _ar.y0, _ar.width, _ar.height])
+                [_ar.x0, _ar.y0, _ar.width, _ar.height], referencia)
         else:                                   # ARTE CLÁSICO: diseño sobre la misma mesa del molde
             pag = pagina_arte(mesa, talle)
             xo = out.copy_foreign(pag.as_form_xobject())
@@ -4120,6 +4350,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         # (talle-pieza-#nro, abajo, gris con halo claro) como antes.
         _et = etiqueta or {}
         _pieza_limpia = pieza.replace(' (corta)', '').replace(' (larga)', '')
+        # LO QUE SE IMPRIME: el nombre GENERAL, sin el número de pieza al lado («Frente 9» →
+        # «Frente») — pedido del usuario 2026-08-21. Ojo: se rotula así pero se SIGUE buscando la
+        # config y la posición con `_pieza_limpia` (ya se resuelven por genérico más abajo), y las
+        # piezas del mismo nombre se distinguen por el `#nro` de la propia etiqueta.
+        # ⚠️ No sirve `_norm_generico`: eso normaliza (minúsculas) para comparar, no para mostrar.
+        _pieza_txt = _re_etq.sub("", _pieza_limpia).strip() or _pieza_limpia
         # piezas_off se maneja por NOMBRE GENÉRICO (un "Cuello" apaga todos los cuellos). _norm_generico
         # tolera datos viejos con número ("Cuello 3" → "cuello") sin migrar nada.
         _et_off = set(_norm_generico(p) for p in (_et.get("piezas_off") or []))
@@ -4136,7 +4372,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 _esize = fetq.size_para_alto(float(_et.get("size_mm") or 3.0) * MM)
                 _zeops = _eops_zonas(cont, S, x0, y0, B, _zna["puntos"], _zna.get("cont") or [],
                                      _esize, _et.get("align") or "centro", fetq,
-                                     talle, _pieza_limpia, nro, (_et.get("separador", "-") or "-"))
+                                     talle, _pieza_txt, nro, (_et.get("separador", "-") or "-"))
             except Exception:
                 _zeops = None
             if _zeops:
@@ -4150,7 +4386,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _mos = _et.get("mostrar") or {"talle": True, "pieza": True, "numero": True}
             _partes = []
             if _mos.get("talle", True):  _partes.append(str(talle))
-            if _mos.get("pieza", True):  _partes.append(_pieza_limpia)
+            if _mos.get("pieza", True):  _partes.append(_pieza_txt)
             if _mos.get("numero", True): _partes.append(f"#{nro:02d}")
             et = (_et.get("separador", "-") or "-").join(_partes)
             if et:
@@ -4419,7 +4655,10 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                                 etiqueta=md.get("etiqueta"), editables_cfg=md.get("editables_cfg"),
                                 editables_tamano=md.get("editables_tamano"),
                                 objetos_agregados=md.get("objetos_agregados"),
-                                editables_color=md.get("editables_color"))
+                                editables_color=md.get("editables_color"),
+                                editables_marca=md.get("editables_marca"),
+                                editables_sin_marca=md.get("editables_sin_marca"),
+                                referencia=md.get("referencia") or "alto")
             for tela, lst in pt.items():
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)

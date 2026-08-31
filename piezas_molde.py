@@ -14,13 +14,17 @@ son opcionales:
    ve como UN objeto y no como una pieza. Verificado sobre el molde real: inyectando operadores,
    la pieza pasa a detectarse (138 → 139 contornos) sin que aparezca ningún talle nuevo.
 
-3. 🔴 **AGREGAR UNA PIEZA RENUMERA A LAS DEMÁS.** El `pieza_idx` no es un id: es la POSICIÓN de la
-   pieza en el orden por bbox dentro de su capa (`molde_real.extraer_piezas_mesa`). Al insertar una
-   pieza en el medio, todas las que siguen corren un lugar — medido en el molde real: **69 de 138**.
-   Si no se remapea, el registro queda apuntando a la pieza vecina y el nombrado se reasigna en
-   masa. Por eso `remapear_registro` cruza la detección de ANTES con la de DESPUÉS por bbox (la
-   geometría de las que ya estaban no cambia, así que el cruce es exacto, no una heurística) y
-   reescribe los `pieza_idx`. No es un extra: es parte de agregar.
+3. **EL `pieza_idx` ES LA POSICIÓN, NO UN ID** — y por eso el orden importa. Desde que las piezas
+   quedan en **orden de DIBUJO** (`molde_real.extraer_piezas_mesa`, regla del usuario 2026-08-18) y
+   la pieza nueva se escribe **al final** del contenido de la capa (`page.contents_add`), la nueva
+   es **la última** de cada talle y **no se renumera nada**: `indice_de_insercion` devuelve
+   `len(conts)` y el mapa de remapeo queda en la identidad. Medido con el contrato sobre el molde
+   real: **0 de 2760** entradas cambian de índice.
+   ⚠️ El remapeo (`remapear_registro`, cruce por bbox de la detección de ANTES contra la de DESPUÉS)
+   **se conserva igual**: es la red que sostiene la identidad si el orden volviera a depender de la
+   posición, o si un archivo raro alterara el orden de dibujo. No se saca porque hoy dé 0.
+   (Con el orden viejo —por bbox— insertar en el medio corría a **69 de 138** piezas: de ahí venía
+   la mitad de la complejidad de esta operación.)
 
 ⚠️ Una capa nueva NO sirve para esto: en la plantilla, toda capa con dibujo que no esté en
 `CAPAS_SISTEMA` se lee como un TALLE (`motor_pedido._talles_de_plantilla`). La pieza va DENTRO de
@@ -179,11 +183,14 @@ def contornos_de_pdf(path):
 
 
 def agregar_pieza(plantilla, colocaciones, mesa=1, etiqueta="Pieza nueva"):
-    """Escribe una pieza nueva en `plantilla.ai` y devuelve la ruta de la VERSIÓN nueva.
+    """Escribe piezas nuevas en `plantilla.ai` y devuelve la ruta de la VERSIÓN nueva.
 
-    `colocaciones` = `{talle: {"segmentos": [...], "dx": float, "dy": float}}` — la geometría que
-    va en cada capa y su traslado, en unidades crudas del lienzo. Se escriben TODOS los talles en
-    UNA sola pasada = una sola versión nueva del archivo.
+    `colocaciones` = `{talle: colocacion | [colocacion, …]}` con
+    `colocacion = {"segmentos": [...], "dx": float, "dy": float}` — la geometría que va en cada
+    capa y su traslado, en unidades crudas del lienzo. Se escriben TODOS los talles en UNA sola
+    pasada = una sola versión nueva del archivo, **aunque se agreguen varias piezas de un saque**
+    (regla del usuario: lo preparado se guarda junto, y una versión por pieza era además una copia
+    entera del molde en disco por cada una).
 
     ⚠️ La pieza tiene que entrar en TODOS los talles del molde. Si sólo entrara en algunos, el
     registro quedaría con una pieza que no existe en el resto y **la generación de la tizada
@@ -199,17 +206,22 @@ def agregar_pieza(plantilla, colocaciones, mesa=1, etiqueta="Pieza nueva"):
         cb = page.obj.get("/CropBox") or page.obj.get("/MediaBox")
         y1 = float(cb[3])
         puestos = []
-        for talle, col in colocaciones.items():
+        for talle, cols in colocaciones.items():
             ocg = _ocg_por_nombre(pdf, talle)
             if ocg is None:
                 continue                      # ese talle no existe como capa: se salta y se informa
             pname = _nombre_en_recursos(page, pdf, ocg, "OCpz")
-            ops = ops_de_segmentos(col["segmentos"], col.get("dx", 0.0), col.get("dy", 0.0), y1)
-            if not ops.strip():
-                continue
-            # Trazo fino y negro, como el resto del molde: lo que importa es el CONTORNO.
-            page.contents_add(Stream(pdf, f"q\n/OC /{pname} BDC\n0 0 0 RG 1 w\n{ops}\nS\nEMC\nQ\n".encode()))
-            puestos.append(talle)
+            escrito = False
+            for col in (cols if isinstance(cols, (list, tuple)) else [cols]):
+                ops = ops_de_segmentos(col["segmentos"], col.get("dx", 0.0), col.get("dy", 0.0), y1)
+                if not ops.strip():
+                    continue
+                # Trazo fino y negro, como el resto del molde: lo que importa es el CONTORNO.
+                # Va al FINAL del contenido → la pieza nueva es la última de su capa y no renumera.
+                page.contents_add(Stream(pdf, f"q\n/OC /{pname} BDC\n0 0 0 RG 1 w\n{ops}\nS\nEMC\nQ\n".encode()))
+                escrito = True
+            if escrito:
+                puestos.append(talle)
         if not puestos:
             raise ValueError("ninguno de los talles pedidos existe como capa en el molde")
         pdf.save(destino)

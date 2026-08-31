@@ -113,6 +113,24 @@ def _systemctl(accion, app=None):
     return False
 
 
+def _bandera(app, poner):
+    """Enciende/apaga `logs/apagado.flag`, que es como se le dice al vigilante de Windows que el
+    servidor se apago A PROPOSITO y no tiene que revivirlo."""
+    if not ES_WINDOWS:
+        return
+    d = os.path.join(app or os.getcwd(), "logs")
+    f = os.path.join(d, "apagado.flag")
+    try:
+        if poner:
+            os.makedirs(d, exist_ok=True)
+            with open(f, "w", encoding="ascii") as fh:
+                fh.write("actualizando" + chr(10))
+        elif os.path.exists(f):
+            os.remove(f)
+    except OSError as e:
+        log(app, f"no se pudo {'poner' if poner else 'sacar'} la bandera de apagado: {e}")
+
+
 def parar(app=None):
     """Apaga el servidor por el mecanismo del sistema.
 
@@ -122,6 +140,12 @@ def parar(app=None):
     encima seguiría sirviendo el código viejo desde memoria. `systemctl stop` le dice a systemd que
     no lo relance hasta nueva orden."""
     if ES_WINDOWS:
+        # 🔴 LA BANDERA VA PRIMERO. Desde 2026-08-27 la tarea de Windows corre un VIGILANTE
+        # que vuelve a levantar el servidor a los pocos segundos de que se cierre: sin avisarle que
+        # el apagado es a proposito, revivirasel servidor por debajo del ayudante y la actualizacion
+        # se aplicaria sobre un servidor VIVO. La bandera caduca sola a los 15 minutos, asi que un
+        # ayudante que muera a mitad de camino no deja el sistema apagado para siempre.
+        _bandera(app, True)
         subprocess.run(["schtasks", "/end", "/tn", TAREA], capture_output=True)
         return True
     return _systemctl("stop", app)
@@ -133,6 +157,7 @@ def _plan_b(app):
     unidad del estado `failed` (un `start` sobre una unidad fallida no siempre arranca)."""
     if not ES_WINDOWS:
         return _systemctl("restart", app)
+    _bandera(app, False)
     bat = os.path.join(app or os.getcwd(), "arrancar.bat")
     if not os.path.exists(bat):
         return False
@@ -151,6 +176,7 @@ def arrancar(app=None, puerto=None):
     caído, y ni la versión nueva ni la anterior volvieron. Por eso, si el puerto no contesta, se
     reintenta con el plan B. Sin `puerto` no se puede verificar y se hace lo de antes."""
     if ES_WINDOWS:
+        _bandera(app, False)          # sin sacarla, el vigilante no levantaria nada
         lanzado = subprocess.run(["schtasks", "/run", "/tn", TAREA],
                                  capture_output=True, text=True).returncode == 0
     else:
@@ -183,8 +209,65 @@ def resultado(carpeta, ok, version, detalle):
 
 def main():
     app, paquete, puerto, version = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    log(app, f"=== actualizando a {version} ===")
+    # MODO (lo decide `actualizaciones.como_se_instala`): "windows" · "systemd" · "reinicio".
+    # Sin argumento se asume el de siempre, para no romper un ayudante lanzado por una versión vieja.
+    modo = (sys.argv[5] if len(sys.argv) > 5 else ("windows" if ES_WINDOWS else "systemd")).strip().lower()
+    log(app, f"=== actualizando a {version} (modo: {modo}) ===")
 
+    respaldo = os.path.join(app, "_actualizacion", "respaldo")
+
+    def _respaldar():
+        shutil.rmtree(respaldo, ignore_errors=True)
+        respaldar(app, respaldo)
+        log(app, f"respaldo hecho en {respaldo}")
+
+    def _descomprimir():
+        with zipfile.ZipFile(paquete) as z:
+            z.extractall(app)                  # el paquete NO trae datos/ ni entrada/
+        log(app, "paquete descomprimido")
+
+    # ── MODO «REINICIO» (Linux sin drop-in ni root) ──────────────────────────────────────────
+    # Se descomprime con el servidor TODAVÍA VIVO —sus módulos ya están en memoria, así que
+    # reemplazar los .py no lo tumba— y cuando se apaga (lo hace él solo, después de lanzarnos)
+    # `Restart=always` lo levanta con la versión nueva. Nunca se llama a `systemctl stop`, que es
+    # justo lo que mataba al ayudante cuando falta `KillMode=process`.
+    if modo == "reinicio":
+        try:
+            _respaldar()
+        except Exception as e:
+            log(app, f"NO se pudo respaldar ({e}); se cancela para no arriesgar")
+            resultado(app, False, version, f"no se pudo respaldar: {e}")
+            return
+        try:
+            _descomprimir()
+        except Exception as e:
+            log(app, f"falló al descomprimir ({e}); se restaura")
+            restaurar(respaldo, app)
+            resultado(app, False, version, f"no se pudo descomprimir: {e}")
+            return
+        # el servidor se apaga solo; systemd lo revive con lo nuevo
+        if not esperar_libre(puerto, ESPERA_APAGADO):
+            log(app, "el servidor no se apagó solo; se lo pide por systemd")
+            _systemctl("restart", app)
+        if salud(puerto, ESPERA_SALUD):
+            log(app, f"OK: {version} andando (systemd lo relevantó solo)")
+            resultado(app, True, version, "actualizado y verificado (reinicio por systemd)")
+            try:
+                os.remove(paquete)
+            except OSError:
+                pass
+            return
+        log(app, "la versión nueva no contestó; VOLVIENDO A LA ANTERIOR")
+        restaurar(respaldo, app)
+        _systemctl("restart", app)
+        volvio = salud(puerto, 90)
+        log(app, "restaurada la versión anterior" + ("" if volvio else " (¡tampoco contesta!)"))
+        resultado(app, False, version,
+                  "la versión nueva no respondió; se restauró la anterior"
+                  + ("" if volvio else " — y la anterior TAMPOCO responde, revisar servidor_log.txt"))
+        return
+
+    # ── MODO CLÁSICO (Windows, o Linux con KillMode=process) ─────────────────────────────────
     # LINUX: hay que parar el SERVICIO ya, antes de esperar nada. Con `Restart=always` el proceso
     # que se apagó solo vuelve en 5 s, y descomprimiríamos por debajo de un servidor vivo. En Windows
     # la tarea es «al iniciar el sistema» y no relanza sola: ahí el apagado limpio que ya venía
@@ -196,11 +279,8 @@ def main():
         parar(app)
         esperar_libre(puerto, 20)
 
-    respaldo = os.path.join(app, "_actualizacion", "respaldo")
-    shutil.rmtree(respaldo, ignore_errors=True)
     try:
-        respaldar(app, respaldo)
-        log(app, f"respaldo hecho en {respaldo}")
+        _respaldar()
     except Exception as e:
         log(app, f"NO se pudo respaldar ({e}); se cancela para no arriesgar")
         arrancar(app, puerto)
@@ -208,9 +288,7 @@ def main():
         return
 
     try:
-        with zipfile.ZipFile(paquete) as z:
-            z.extractall(app)                  # el paquete NO trae datos/ ni entrada/
-        log(app, "paquete descomprimido")
+        _descomprimir()
     except Exception as e:
         log(app, f"falló al descomprimir ({e}); se restaura")
         restaurar(respaldo, app)

@@ -49,15 +49,20 @@ def _elegir_molde():
     except Exception as e:
         print(f"no se pudo leer el catálogo: {e}")
         sys.exit(1)
+    # 🔴 EL REGISTRO SE LEE DE LA BASE, no de disco: desde la migración a MSSQL
+    # `datos/productos/<pid>/registro_producto.json` ya no existe y este contrato se moría diciendo
+    # «no hay ningún molde», sin verificar nada. Es la ÚNICA lectura real (después se instala el
+    # doble que explota).
+    import db as _db_real
     cands = []
     for p in (cat.get("productos") or []):
         pid = p.get("id")
-        dreg = os.path.join(RAIZ, "datos", "productos", pid, "registro_producto.json")
-        if not (pid and os.path.exists(os.path.join(RAIZ, "entrada", pid, "plantilla.ai")) and os.path.exists(dreg)):
+        if not (pid and os.path.exists(os.path.join(RAIZ, "entrada", pid, "plantilla.ai"))):
             continue
         try:
-            reg = json.load(open(dreg, encoding="utf-8"))
-        except Exception:
+            reg = _db_real.leer_registro(pid)
+        except Exception as e:
+            print(f"  (no se pudo leer el registro de {pid}: {str(e)[:70]})")
             continue
         if not reg:
             continue
@@ -127,7 +132,15 @@ for _f in os.listdir(os.path.join(RAIZ, "datos")):
     _o = os.path.join(RAIZ, "datos", _f)
     if os.path.isfile(_o):
         shutil.copy2(_o, os.path.join(_DATOS, _f))
-shutil.copytree(os.path.join(RAIZ, "datos", "productos", PID), os.path.join(_DATOS, "productos", PID))
+_DPID = os.path.join(_DATOS, "productos", PID)
+_OPID = os.path.join(RAIZ, "datos", "productos", PID)
+if os.path.isdir(_OPID):
+    shutil.copytree(_OPID, _DPID)
+else:
+    os.makedirs(_DPID, exist_ok=True)
+# el registro salió de la BASE: se siembra en el temporal para que el doble de `db` lo encuentre
+json.dump(_M["reg"], open(os.path.join(_DPID, "registro_producto.json"), "w", encoding="utf-8"),
+          ensure_ascii=False)
 shutil.copytree(os.path.join(RAIZ, "entrada", PID), os.path.join(_ENTRADA, PID))
 
 sys.path.insert(0, RAIZ)
@@ -155,7 +168,10 @@ def _render(fila, etq, pieza=None):
     _b, _pv = S._mapeo_estructura(PID, sub=sub)
     mapeo = {"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None
     _cfg_n, _rot, telas, asig = S._config_produccion(PID)
-    prendas = S._traducir_prendas([fila], prod, cat, DISENO, reg=reg)
+    # fila de MUESTRA (no es un pedido): sin el filtro de columnas obligatorias de la
+    # plantilla, que si no la descarta y esta prueba se queda sin piezas.
+    prendas = S._traducir_prendas([fila], prod, cat, DISENO, reg=reg,
+                                  exigir_obligatorias=False)
     tmp = tempfile.mkdtemp()
     try:
         ppt = MP.generar_pedido(pl, arte, reg, MP.extraer_personalizacion(arte), prendas, S.FUENTES, tmp,

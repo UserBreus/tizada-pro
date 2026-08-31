@@ -11,6 +11,7 @@ envuelve en try/except).
 """
 import os
 import re
+import base64
 import fitz
 
 
@@ -26,6 +27,7 @@ GRIS = (0.45, 0.45, 0.45)
 NEGRO = (0.1, 0.1, 0.1)
 LINEA = (0.75, 0.75, 0.75)
 ACENTO = (0.0, 0.55, 0.62)
+ROJO = (0.72, 0.13, 0.13)        # falta un dato que alguien tiene que completar
 FONT = "helv"
 FONT_B = "hebo"
 
@@ -229,6 +231,89 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
             y = _seccion(pg, y, titulo_mg + " (continuación)")
             y += 10
             y, rest = _dibujar_piezas(doc, pg, y, rest, A4_H - MARGEN)
+
+        # ── LO QUE NO SE SUBLIMA ────────────────────────────────────────────────────────────
+        # Los objetos marcados como TPU / Bordado / DTF: en la tela sale sólo una cruz de 3 cm,
+        # así que el taller necesita saber acá qué va en ese lugar y sobre qué pieza.
+        procesos = mg.get("procesos") or []
+        if procesos:
+            ALTO_PR = 58                       # alto MÍNIMO: el dibujo + los datos al lado
+                                               # (crece si el objeto tiene medidas por rango)
+            if y + 34 + ALTO_PR > A4_H - MARGEN:
+                pg = nueva_pagina(); y = 78
+            else:
+                y += 16
+            y = _seccion(pg, y, "NO SE SUBLIMA · se aplica aparte")
+            y += 10
+            # El texto se adapta: decir "va una cruz" cuando el usuario la deshabilitó mandaría a
+            # buscar en la tela una marca que no existe.
+            _con = [p for p in procesos if not p.get("sin_marca")]
+            _sin = [p for p in procesos if p.get("sin_marca")]
+            if _con and _sin:
+                _cab = ("En la tela va una cruz de 3 cm marcando el centro, salvo en los que dicen "
+                        "SIN MARCA: en ese lugar la tela sale limpia, sin marca ni diseño.")
+            elif _sin:
+                _cab = ("En la tela NO queda nada en su lugar (ni marca ni diseño): se ubican con "
+                        "el molde guía de abajo.")
+            else:
+                _cab = "En la tela, en el lugar de cada uno, va una cruz de 3 cm marcando el centro:"
+            _texto(pg, MARGEN, y, _cab, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
+            y += 14
+            for pr in procesos:
+                if y + ALTO_PR > A4_H - MARGEN:
+                    pg = nueva_pagina(); y = 78
+                caja = fitz.Rect(MARGEN, y, MARGEN + 54, y + 48)
+                pg.draw_rect(caja, color=LINEA, width=0.6)
+                # EL OBJETO, DIBUJADO. Es lo que el taller tiene que bordar o pegar, así que se
+                # muestra tal cual: primero el vector (SVG) y, si no se puede, la miniatura PNG.
+                _dib = False
+                try:
+                    if pr.get("svg"):
+                        _sd = base64.b64decode(pr["svg"])
+                        _sv = fitz.open(stream=_sd, filetype="svg")
+                        _pdf = fitz.open("pdf", _sv.convert_to_pdf()); _sv.close()
+                        pg.show_pdf_page(caja + (3, 3, -3, -3), _pdf, 0, keep_proportion=True)
+                        _pdf.close(); _dib = True
+                except Exception:
+                    _dib = False
+                if not _dib and pr.get("thumb"):
+                    try:
+                        pg.insert_image(caja + (3, 3, -3, -3), stream=base64.b64decode(pr["thumb"]),
+                                        keep_proportion=True)
+                        _dib = True
+                    except Exception:
+                        pass
+                if not _dib:
+                    _texto(pg, caja.x0 + 8, caja.y0 + 27, "(sin vista)", size=7, color=GRIS)
+                # …y al lado, QUÉ es y EN QUÉ MATERIAL se hace.
+                _x = caja.x1 + 12
+                _texto(pg, _x, y + 13, str(pr.get("nombre") or ""), size=10, bold=True,
+                       max_w=A4_W - MARGEN - _x)
+                # El MATERIAL. Si nadie lo eligió se dice así, sin inventarlo: el objeto igual no
+                # se imprime, así que alguien tiene que decidir cómo se hace.
+                _mat = str(pr.get("proceso") or "").strip()
+                _proc = ("Se hace en: " + _mat) if _mat else "Falta indicar en qué material se hace"
+                if pr.get("sin_marca"):
+                    _proc += "   ·   SIN MARCA en la tela"
+                _texto(pg, _x, y + 27, _proc, size=9, bold=(not _mat),
+                       color=(ROJO if not _mat else NEGRO), max_w=A4_W - MARGEN - _x)
+                # MEDIDAS: una línea por rango cuando el tamaño está configurado («XS a M →
+                # 8 × 8 cm»); si no, la del talle guía. Las arma el servidor (`_procesos_ficha`).
+                _yy = y + 40
+                _meds = pr.get("medidas") or []
+                for _md in _meds:
+                    _t = "  ·  ".join([x for x in [str(_md.get("talles") or ""), str(_md.get("texto") or "")] if x])
+                    if _t:
+                        _texto(pg, _x, _yy, _t, size=8, color=GRIS, max_w=A4_W - MARGEN - _x)
+                        _yy += 11
+                if pr.get("pieza"):
+                    _texto(pg, _x, _yy, "va en " + str(pr["pieza"]), size=8, color=GRIS,
+                           max_w=A4_W - MARGEN - _x)
+                    _yy += 11
+                if pr.get("nota"):
+                    _texto(pg, _x, _yy, str(pr["nota"]), size=7, color=GRIS, max_w=A4_W - MARGEN - _x)
+                    _yy += 10
+                y += max(ALTO_PR, (_yy - y) + 10)     # el bloque crece si hay varios rangos
 
     total = doc.page_count
     for i, pg in enumerate(doc):

@@ -33,6 +33,9 @@ PERMISOS = [
     ("fuente.gestionar", "config",  "Gestionar fuentes",           "Subir y eliminar tipografías del catálogo."),
     ("usuario.ver",      "usuario", "Ver usuarios",                "Ver usuarios, roles y permisos."),
     ("usuario.gestionar","usuario", "Gestionar usuarios y roles",  "Crear/editar usuarios, roles y sus permisos."),
+    # La AYUDA la usa todo el mundo (ver y seguir tutoriales no pide permiso); GRABARLOS sí:
+    # un tutorial mal grabado se lo come todo el taller (decisión del usuario, 2026-08-28).
+    ("ayuda.grabar",     "config",  "Grabar tutoriales de ayuda",  "Grabar, editar y borrar los tutoriales guiados."),
 ]
 
 # Roles propuestos por defecto (el usuario los puede editar/borrar desde la pantalla).
@@ -80,7 +83,11 @@ def sincronizar_permisos():
 
 def sincronizar_roles():
     """Crea los roles por defecto SI NO EXISTEN. No pisa los permisos de un rol ya creado:
-    si el usuario los editó desde la pantalla, mandan los suyos."""
+    si el usuario los editó desde la pantalla, mandan los suyos.
+
+    EXCEPCIÓN: el rol de SISTEMA (admin) recibe siempre TODOS los permisos, incluidos los que se
+    agreguen después. Sin esto, un permiso nuevo no le llegaba nunca al administrador —el rol ya
+    existía y esta función lo saltea— y la función quedaba inaccesible para todos."""
     n = 0
     for clave, nombre, desc, sistema, permisos in ROLES_DEFAULT:
         rid = db.valor("SELECT id FROM rol WHERE clave=?", clave)
@@ -93,6 +100,17 @@ def sincronizar_roles():
             if pid:
                 db.ejecutar("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
         n += 1
+    # el rol de sistema se pone al día con los permisos nuevos (su pantalla no los deja editar)
+    for clave, _n, _d, sistema, _p in ROLES_DEFAULT:
+        if not sistema:
+            continue
+        rid = db.valor("SELECT id FROM rol WHERE clave=?", clave)
+        if rid is None:
+            continue
+        for pclave, *_ in PERMISOS:
+            pid = db.valor("SELECT id FROM permiso WHERE clave=?", pclave)
+            if pid and db.valor("SELECT 1 FROM rol_permiso WHERE rol_id=? AND permiso_id=?", rid, pid) is None:
+                db.ejecutar("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
     return n
 
 

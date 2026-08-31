@@ -134,14 +134,43 @@ for fn in ("main", "arrancar", "_plan_b", "parar"):
     if "schtasks" in cuerpo and "ES_WINDOWS" not in cuerpo:
         _falla(f"`{fn}()` llama a schtasks sin preguntar por la plataforma")
 
-# ── 8. En Linux hay que PARAR EL SERVICIO antes de esperar el apagado ───────────────────
-# El unit tiene `Restart=always`: el proceso que se apaga solo vuelve en 5 s y descomprimiríamos
-# por debajo de un servidor vivo (que además sigue sirviendo el código viejo desde memoria).
+# ── 8. LOS DOS MODOS DE LINUX, cada uno con su regla ────────────────────────────────────
+# (a) MODO CLÁSICO (`KillMode=process`): hay que PARAR EL SERVICIO antes de esperar el apagado —
+#     con `Restart=always` el proceso que se apaga solo vuelve en 5 s y descomprimiríamos por
+#     debajo de un servidor vivo, que además sigue sirviendo el código viejo desde memoria.
+# (b) MODO «REINICIO» (sin drop-in, sin root): NO se para nada. Se descomprime con el servidor
+#     vivo y se deja que `Restart=always` lo levante con la versión nueva. Si este modo llamara a
+#     `parar()` volvería el problema de siempre: el `systemctl stop` mata al propio ayudante.
 main_src = inspect.getsource(m.main)
-i_parar = main_src.find("parar(app)")
-i_esperar = main_src.find("esperar_libre(")
-if i_parar < 0 or i_esperar < 0 or i_parar > i_esperar:
-    _falla("`main()` no para el servicio ANTES de esperar el apagado (Restart=always lo revive)")
+_i_modo = main_src.find('modo == "reinicio"')
+if _i_modo < 0:
+    _falla("`main()` no contempla el modo «reinicio» (Linux sin drop-in): sin él, un VPS sin "
+           "`KillMode=process` nunca se puede actualizar solo")
+else:
+    _clasico = main_src[main_src.find("MODO CLÁSICO"):]
+    i_parar = _clasico.find("parar(app)")
+    i_esperar = _clasico.find("esperar_libre(")
+    if i_parar < 0 or i_esperar < 0 or i_parar > i_esperar:
+        _falla("en el modo CLÁSICO, `main()` no para el servicio ANTES de esperar el apagado "
+               "(Restart=always lo revive)")
+    _rama = main_src[_i_modo:main_src.find("MODO CLÁSICO")]
+    if "parar(app)" in _rama:
+        _falla("el modo «reinicio» llama a `parar()`: ese `systemctl stop` es justo lo que mata "
+               "al ayudante cuando falta `KillMode=process`")
+    if _rama.find("_descomprimir()") > _rama.find("esperar_libre("):
+        _falla("el modo «reinicio» espera el apagado ANTES de descomprimir: así systemd lo revive "
+               "con el código VIEJO y la actualización no se aplica nunca")
+    if "restaurar(respaldo, app)" not in _rama:
+        _falla("el modo «reinicio» no tiene vuelta atrás: si la versión nueva no contesta hay que "
+               "restaurar el respaldo")
+
+# ── 8.b Los dos caminos se DECIDEN mirando el servicio, no adivinando ───────────────────
+_ruta_act0 = os.path.join(AQUI, "actualizaciones.py")
+if os.path.exists(_ruta_act0):
+    _src0 = open(_ruta_act0, encoding="utf-8").read()
+    if "Restart" not in _src0:
+        _falla("`actualizaciones.py` no mira `Restart` del unit: es lo que habilita el modo "
+               "«reinicio» sin pedir root")
 
 # ── 9. Las DOS mitades de la supervivencia del ayudante en Linux ────────────────────────
 # (a) `aplicar()` lo lanza con sesión propia; (b) el unit lleva `KillMode=process`. La (a) sola
@@ -173,5 +202,6 @@ if FALLOS:
     for f in FALLOS:
         print("    -", f)
     sys.exit(1)
-print("OK actualizador: convive Windows (tarea programada) con Linux (systemd + sudo -n), "
-      "y en Linux para el servicio antes de tocar los archivos")
+print("OK actualizador: conviven Windows (tarea programada) y Linux en sus DOS modos — "
+      "clásico (KillMode=process: parar, descomprimir, arrancar) y reinicio "
+      "(sin root: descomprimir con el servidor vivo y dejar que Restart=always lo levante)")

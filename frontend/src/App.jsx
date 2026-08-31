@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import AyudaGuiada from './tutor';   // motor de tutoriales paso a paso
+import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, sePuedeGrabar } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 
@@ -106,6 +107,130 @@ function Icon({ name, className = "", style }) {
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5">
         <line x1="5" y1="12" x2="19" y2="12"/>
         <polyline points="12 5 19 12 12 19"/>
+      </svg>
+    ),
+    // Ojo TACHADO: el par del `eye` para el botón de ver/ocultar la contraseña.
+    eyeOff: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10.6 5.2A9.9 9.9 0 0 1 12 5c5 0 9 4.5 10 7-.4 1-1.4 2.6-3 4" />
+        <path d="M6.4 6.6C4 8.2 2.5 10.4 2 12c1 2.5 5 7 10 7 1.8 0 3.4-.5 4.8-1.3" />
+        <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+        <path d="m3 3 18 18" />
+      </svg>
+    ),
+    // ── MARCAS DE PROCESO (lo que NO se sublima) ──────────────────────────────────────────
+    // TPU: una plancha de calor (el TPU se aplica con calor y presión).
+    sinMarca: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 4.5v15M4.5 12h15" opacity=".45" />
+        <path d="M4.8 19.2 19.2 4.8" />
+      </svg>
+    ),
+    tpu: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3.2 15.6c0-3.9 3.1-7 7-7h6.2a3.4 3.4 0 0 1 3.4 3.4v3.6Z" />
+        <path d="M2.6 18.6h18.8" />
+        <path d="M7.4 8.6V7.2a2 2 0 0 1 2-2h4.2" />
+      </svg>
+    ),
+    // BORDADO: la aguja con el hilo.
+    bordado: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.4 3.6 8.8 15.2" />
+        <path d="m6.2 17.8-2.4 2.4" />
+        <circle cx="19.1" cy="4.9" r="1.5" />
+        <path d="M4.2 12.4c2.6-.9 4.6.3 4 2.2-.5 1.6-2.7 1.6-3 .2-.3-1.5 1.7-2.6 3.6-1.6" />
+      </svg>
+    ),
+    // DTF: la película que se transfiere (una hoja con la figura despegándose).
+    dtf: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.8" y="6.4" width="13" height="13" rx="2" />
+        <path d="M8.2 6.4V4.4a1.6 1.6 0 0 1 1.6-1.6h9.8a1.6 1.6 0 0 1 1.6 1.6v9.8a1.6 1.6 0 0 1-1.6 1.6h-2" />
+        <path d="m6.4 14.4 2.6-2.6 3 3 1.6-1.6" />
+      </svg>
+    ),
+    // ── AJUSTES DEL MOLDE: un ícono por concepto, y ninguno parecido a otro ───────────────
+    // (pedido del usuario 2026-08-21; antes «Borde de corte» y «Editable» compartían dibujo)
+    // MOLDERÍA: el archivo del molde — una hoja con una pieza adentro.
+    molderia: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 2.8h7.5L19 8.3V20a1.2 1.2 0 0 1-1.2 1.2H6A1.2 1.2 0 0 1 4.8 20V4A1.2 1.2 0 0 1 6 2.8Z" />
+        <path d="M13.5 2.8v5.5H19" />
+        <path d="M8.6 12.4c1.9-.9 3.9-.9 5.8 0v4.9c-1.9.9-3.9.9-5.8 0Z" />
+      </svg>
+    ),
+    // VARIABLES: un tronco que se abre en dos ramas (de un grupo salen sus variables).
+    variables: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="5.5" cy="12" r="2.3" />
+        <circle cx="18" cy="6" r="2.3" />
+        <circle cx="18" cy="18" r="2.3" />
+        <path d="M7.7 11.1 15.8 6.9" />
+        <path d="M7.7 12.9 15.8 17.1" />
+      </svg>
+    ),
+    // ETIQUETA: la etiqueta colgante de toda la vida.
+    etiqueta: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3.4 11.9V4.7a1.3 1.3 0 0 1 1.3-1.3h7.2l8.3 8.3a1.4 1.4 0 0 1 0 2l-6.2 6.2a1.4 1.4 0 0 1-2 0Z" />
+        <circle cx="8.1" cy="8.1" r="1.5" />
+      </svg>
+    ),
+    // NESTING: piezas encastradas dentro de la tela (aprovechamiento).
+    nestingPiezas: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.6" y="3.6" width="18.8" height="16.8" rx="2" />
+        <path d="M5.6 7h5.2v5.4H5.6Z" />
+        <path d="M13.4 7h5v9.8h-5Z" />
+        <path d="M5.6 14.6h5.2V17H5.6Z" />
+      </svg>
+    ),
+    // TELAS: el rollo, con la tela saliendo.
+    telaRollo: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3.4 6.8v10.4c0 1.5 1.7 2.6 3.8 2.6s3.8-1.1 3.8-2.6V6.8" />
+        <ellipse cx="7.2" cy="6.8" rx="3.8" ry="2.4" />
+        <path d="M11 9.6h6.4a2.6 2.6 0 0 1 2.6 2.6v5.2a2.4 2.4 0 0 1-2.4 2.4H9.6" />
+      </svg>
+    ),
+    // BORDE DE CORTE: la pieza y, alrededor, la línea punteada por donde se corta.
+    bordeCorte: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="7.2" y="7.2" width="9.6" height="9.6" rx="1.6" />
+        <rect x="2.8" y="2.8" width="18.4" height="18.4" rx="3" strokeDasharray="3 3.2" />
+      </svg>
+    ),
+    // EDITABLE: mover / transformar (las cuatro flechas).
+    editable: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3.2v17.6M3.2 12h17.6" />
+        <path d="m9.2 6 2.8-2.8L14.8 6M9.2 18l2.8 2.8L14.8 18M6 9.2 3.2 12 6 14.8M18 9.2l2.8 2.8L18 14.8" />
+      </svg>
+    ),
+    // NOMBRES: cómo se llaman las cosas.
+    nombres: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="none">
+        <text x="12" y="17" textAnchor="middle" fontSize="14" fontWeight="700" fill="currentColor"
+          fontFamily="Segoe UI, Inter, Arial, sans-serif">Aa</text>
+      </svg>
+    ),
+    // PLANILLA: una grilla de hoja de cálculo (encabezado + filas y columnas) — se ve como
+    // lo que es, una tabla de Excel. Pedido del usuario 2026-08-21.
+    planilla: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3.5" width="18" height="17" rx="2" />
+        <path d="M3 8.5h18" />
+        <path d="M3 14.5h18" />
+        <path d="M9.5 8.5v12" />
+        <path d="M15.5 8.5v12" />
+      </svg>
+    ),
+    // PLANTILLA: la silueta de una camiseta — la plantilla ES la moldería de la prenda.
+    plantilla: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8.5 3 5 4.6 3 8.2l3 1.7 1-1.2V21h10V8.7l1 1.2 3-1.7-2-3.6L15.5 3" />
+        <path d="M8.5 3a3.5 3.5 0 0 0 7 0" />
       </svg>
     ),
     columnas: (
@@ -301,7 +426,7 @@ function TizadaLoader({ det }) {
   const ss = String(seg % 60).padStart(2, '0');
   const pct = det?.pct ?? 0;
   return (
-    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 12px' }}>
+    <div data-cargando="Se está armando la tizada." style={{ marginTop: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '20px 12px' }}>
       <style>{`
         @keyframes tzFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
         /* Resaltar UNA pieza HACIA ADELANTE (se agranda + brilla + sombra = se acerca), y vuelve.
@@ -363,7 +488,7 @@ async function leerJson(res) {
 }
 
 // ── Combo: casilla editable + lista desplegable propia (scrolleable, compacta) ──
-function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir, autoEdit, autoSel }) {
+function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, noAbrir, autoEdit, autoSel, colId }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const [verTodas, setVerTodas] = useState(false);   // true = mostrar todas (foco/flecha); false = filtrar por lo escrito
@@ -396,7 +521,21 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   const _nv = _norm(value);
   // Al ESCRIBIR siempre filtra por lo tipeado (aunque sea un valor exacto). Muestra TODAS solo
   // cuando se abre por foco o por la flecha ▾ (verTodas), o si el campo está vacío.
-  const filtradas = (verTodas || !_nv) ? options : options.filter(o => _norm(o).includes(_nv));
+  // 🔴 EL ORDEN IMPORTA (pedido del usuario 2026-08-26): escribiendo «L» lo primero tiene que ser
+  // **L**, después lo que EMPIEZA con L (Lfem…) y recién al final lo que la contiene en el medio
+  // (XL, 2XL). Con el `includes` pelado, «L» abría con XL arriba y había que buscar la L a mano.
+  const filtradas = React.useMemo(() => {
+    if (verTodas || !_nv) return options;
+    const exacta = [], empieza = [], contiene = [];
+    options.forEach(o => {
+      const n = _norm(o);
+      if (n === _nv) exacta.push(o);
+      else if (n.startsWith(_nv)) empieza.push(o);
+      else if (n.includes(_nv)) contiene.push(o);
+    });
+    return [...exacta, ...empieza, ...contiene];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options, _nv, verTodas]);
   // Valor INVÁLIDO: hay opciones fijas, la celda tiene texto y no coincide con ninguna.
   const invalido = options.length > 0 && _nv !== '' && !options.some(o => _norm(o) === _nv);
   // Al ABRIR la lista, resaltar la opción actual (o la primera). Al escribir, el resaltado vuelve a 0.
@@ -443,7 +582,10 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
       <span onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); open ? setOpen(false) : abrir(true); }}
         style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--cmyk-cyan)', fontSize: 10, cursor: 'pointer' }}>▾</span>
       {open && pos && filtradas.length > 0 && createPortal(
-        <div style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
+        // `data-col-lista`: la lista vive en el body (portal), no en la tabla. Sin esta marca, el
+        // tutorial iluminaba la columna y dejaba la lista bajo el velo (ver `rectDeColumna`).
+        <div data-col-lista={colId || undefined}
+          style={{ position: 'fixed', left: pos.left, top: pos.top, width: pos.width, zIndex: 3000, background: '#15151a', border: '1px solid var(--border-light)', borderRadius: 6, maxHeight: 130, overflowY: 'auto', boxShadow: '0 10px 24px rgba(0,0,0,0.55)' }}>
           {filtradas.map((o, idx) => {
             const sel = o === value;      // opción = valor actual de la celda
             const act = idx === hi;       // opción RESALTADA (flechas o mouse encima)
@@ -620,7 +762,7 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
   };
   return createPortal(
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10010, background: 'rgba(2,6,12,0.92)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#0b1622', border: '1px solid var(--border-light)', borderRadius: 14, padding: 18, maxWidth: 560, width: '100%', maxHeight: '82vh', overflow: 'auto', color: '#fff' }}>
+      <div onClick={e => e.stopPropagation()} data-modal="Elegí las variantes" style={{ background: '#0b1622', border: '1px solid var(--border-light)', borderRadius: 14, padding: 18, maxWidth: 560, width: '100%', maxHeight: '82vh', overflow: 'auto', color: '#fff' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>Elegí las variantes</h3>
           <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>{sel.size} elegida(s)</span>
@@ -976,7 +1118,7 @@ function EditableTamanoModal({ inicial, variantes, esNueva, onGuardar, onElimina
   );
   return createPortal(
     <div onClick={onCerrar} style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(2,6,12,0.92)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: '#0b1622', border: '1px solid var(--border-light)', borderRadius: 14, padding: 18, maxWidth: 640, width: '100%', maxHeight: '88vh', overflow: 'auto', color: '#fff', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div onClick={e => e.stopPropagation()} data-modal="Registrar capa editable" style={{ background: '#0b1622', border: '1px solid var(--border-light)', borderRadius: 14, padding: 18, maxWidth: 640, width: '100%', maxHeight: '88vh', overflow: 'auto', color: '#fff', display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>{esNueva ? 'Registrar capa editable' : 'Editar capa'}</h3>
           <button type="button" onClick={onCerrar} title="Cerrar" style={{ ...delBtn, marginLeft: 'auto' }}>✕</button>
@@ -1082,8 +1224,166 @@ const marcoDeObjeto = (o, p, aspMesa) => {
 
 // ── Controles del laboratorio de fuentes (estilo programa de diseño) ──
 // Paleta de la muestra: colores planos + el acento del sistema.
+// ── DISEÑOS PREESTABLECIDOS DEL PEDIDO (2026-08-21) ─────────────────────────────────────────
+// El paso 1 del pedido es elegir el diseño, y estos son los de siempre: se tocan en vez de
+// escribirlos. ⏳ PROVISORIO A PROPÓSITO (decisión del usuario): «de mientras crea en el código
+// los siguientes… después vemos de que puedan crear en configuración y crearle una tabla».
+// El operario igual puede ESCRIBIR uno para un trabajo puntual — la lista es un atajo, no una traba.
+const DISENOS_PRESET = ['JUGADOR', 'GOLERO', 'CUERPO TECNICO', 'DISEÑO 1', 'DISEÑO 2', 'DISEÑO 3',
+  'DISEÑO 4', 'DISEÑO 5', 'ALTERNATIVA', 'PRINCIPAL', 'LOCAL', 'VISITANTE'];
+
 const _PALETA = ['#ffffff', '#000000', '#111417', '#e11d2e', '#f5a524', '#f7e733', '#17c964',
   '#00f3ff', '#1d4ed8', '#7c3aed', '#ec4899', '#9ca3af'];
+
+// ── LA BARRA DE ABAJO DEL PEDIDO — UNA SOLA, PARA LOS 5 PASOS ────────────────────────────────
+// 🔴 Regla del usuario (2026-08-21): «que estén todos abajo de la pantalla y en los 5 pasos
+// ubicados en el mismo lado; no puede variar el orden en ningún paso». Antes cada paso armaba su
+// barra a mano y el orden bailaba (en Moldes «Nuevo pedido» iba primero, en Planilla iba «← Arte»,
+// en Arte no había «Nuevo pedido»…). Con un solo componente eso no puede volver a pasar:
+//   IZQUIERDA: ← volver · ↺ Nuevo pedido · acciones propias del paso
+//   DERECHA:   avisos · el botón que AVANZA
+function BarraPaso({ volver, acciones, centro, derecha, siguiente, aviso }) {
+  return (
+    <div style={{ flexShrink: 0, marginTop: 4, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
+      {/* Aviso sutil: que se sepa que lo que falta FRENA el paso, sin gritarlo (2026-08-21). */}
+      {aviso && (
+        <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', marginBottom: 7, letterSpacing: '0.01em' }}>
+          {aviso}
+        </div>
+      )}
+      {/* `position: relative` + el centro en absolute: así el progreso queda centrado respecto de la
+          BARRA y no de lo que sobra entre los botones (que cambia de ancho en cada paso). */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {volver}
+        {acciones}
+        {centro && (
+          <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', display: 'flex', alignItems: 'center' }}>
+            {centro}
+          </div>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          {derecha}
+          {siguiente}
+        </div>
+      </div>
+    </div>
+  );
+}
+/** LO QUE FALTA EN ESTE PASO (2026-08-21). Va CENTRADO en la barra y en UNA línea: cada requisito
+ *  con su marca —**✓ verde** si está, **✕ rojo** si falta— y su nombre **completo** («Asignar arte»,
+ *  no «Arte»). Se toca y abre el detalle, sólo de este paso.
+ *  El rojo es a propósito: lo que falta **frena** el pedido, así que no es una advertencia tibia. */
+// `aviso`: falta, pero NO frena el pedido (hoy: la tipografía). Va AMARILLO con un «!», para
+// distinguirlo de un ROJO —que sí traba— de un vistazo. Pedido del usuario 2026-08-21.
+function MarcaPaso({ ok, aviso }) {
+  const c = ok ? '#10b981' : (aviso ? '#f59e0b' : '#ef4444');
+  const bg = ok ? 'rgba(16,185,129,0.16)' : (aviso ? 'rgba(245,158,11,0.16)' : 'rgba(239,68,68,0.16)');
+  const bd = ok ? 'rgba(16,185,129,0.55)' : (aviso ? 'rgba(245,158,11,0.6)' : 'rgba(239,68,68,0.55)');
+  return (
+    <span style={{
+      width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: bg, border: '1px solid ' + bd,
+    }}>
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none"
+        stroke={c} strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round">
+        {ok ? <path d="M20 6 9 17l-5-5" />
+            : aviso ? <><path d="M12 6v7" /><path d="M12 17.6v.4" /></>
+                    : <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>}
+      </svg>
+    </span>
+  );
+}
+/** ¿Qué frena y qué sólo avisa? Un ítem con `aviso: true` NO traba el paso (se puede avanzar). */
+const _pasoTraba = (items) => (items || []).some(i => !i.hecho && !i.aviso);
+const _pasoAvisa = (items) => (items || []).some(i => !i.hecho && i.aviso);
+/** El texto sutil de arriba de la barra: distinto si lo que falta FRENA o sólo avisa. */
+function textoAvisoPaso(items) {
+  if (_pasoTraba(items)) return 'Tenés que completar todo lo de este paso para pasar al siguiente';
+  if (_pasoAvisa(items)) return 'Lo que está en amarillo no frena el pedido, pero te lo vamos a recordar antes de avanzar';
+  return null;
+}
+function ProgresoPaso({ items, onClick }) {
+  if (!items || !items.length) return null;
+  const hechos = items.filter(i => i.hecho).length;
+  const listo = hechos === items.length;
+  // El borde del conjunto: rojo sólo si algo TRABA; amarillo si lo que falta sólo avisa.
+  const traba = _pasoTraba(items);
+  const borde = listo ? 'rgba(16,185,129,0.45)' : (traba ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.4)');
+  return (
+    <button type="button" onClick={onClick} data-tour="pedido-progreso"
+      title="Tocá para ver el detalle de lo que falta en este paso"
+      style={{ display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', borderRadius: 999,
+               padding: '7px 16px', background: 'rgba(255,255,255,0.03)',
+               border: '1px solid ' + borde }}>
+      {items.map(i => (
+        <span key={i.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <MarcaPaso ok={i.hecho} aviso={i.aviso} />
+          <span style={{ fontSize: 12.5, fontWeight: i.hecho ? 600 : 800, whiteSpace: 'nowrap',
+                         color: i.hecho ? 'var(--text-secondary)' : (i.aviso ? '#f5b942' : '#ff8a8a') }}>
+            {i.corto}
+          </span>
+        </span>
+      ))}
+      <span style={{ fontSize: 11.5, fontWeight: 800, color: listo ? 'var(--success)' : 'var(--text-muted)' }}>
+        {hechos}/{items.length}
+      </span>
+    </button>
+  );
+}
+
+/** El botón de VOLVER: siempre el primero de la izquierda, siempre igual. */
+function BtnVolver({ texto, onClick, ancla }) {
+  return (
+    <button className="btn ghost" data-tour={ancla} style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={onClick}>← {texto}</button>
+  );
+}
+/** El botón que AVANZA: siempre el último de la derecha, siempre igual (apagado si no se puede). */
+function BtnSiguiente({ texto, onClick, disabled, ancla, title }) {
+  return (
+    <button data-tour={ancla} onClick={onClick} disabled={disabled} title={title || ''}
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
+        cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
+        background: disabled ? 'rgba(255,255,255,0.07)' : 'var(--accent)',
+        color: disabled ? 'var(--text-muted)' : '#001016', transition: 'all .2s' }}>
+      {texto} <span style={{ fontSize: 16 }}>→</span>
+    </button>
+  );
+}
+
+// ── Piezas de la BARRA DE CAPAS (estilo Illustrator) ─────────────────────────────────────────
+/** El TIK de selección: el cuadradito del extremo derecho de cada capa en Illustrator.
+ *  `estado`: 'lleno' (todo lo de esa fila está seleccionado) · 'parcial' (algo) · 'vacio'.
+ *  Sin `onClick` queda INFORMATIVO (no clicable): así se usa donde la selección es de a una. */
+function TikSel({ estado, onClick, title }) {
+  const lleno = estado === 'lleno', parcial = estado === 'parcial';
+  return (
+    <span onClick={onClick ? (e) => { e.stopPropagation(); onClick(e); } : undefined} title={title}
+      style={{
+        width: 14, height: 14, flexShrink: 0, borderRadius: 3, boxSizing: 'border-box',
+        cursor: onClick ? 'pointer' : 'default',
+        border: '1px solid ' + (lleno || parcial ? 'var(--accent)' : 'var(--border-light-hover)'),
+        background: lleno ? 'var(--accent)' : 'transparent',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+      {parcial && <span style={{ width: 6, height: 6, borderRadius: 1, background: 'var(--accent)' }} />}
+    </span>
+  );
+}
+
+/** Miniatura de una capa o de una pieza: el CONTORNO REAL, en su propio bbox (`vb`).
+ *  Es el mismo `path_svg` que dibuja el visor — no hay un segundo dibujo que pueda diferir. */
+function MiniCapa({ vb, d, sel, size = 26 }) {
+  if (!vb || !d) return <span style={{ width: size, height: size, flexShrink: 0 }} />;
+  return (
+    <svg viewBox={vb} width={size} height={size} preserveAspectRatio="xMidYMid meet"
+      style={{ flexShrink: 0, borderRadius: 4, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+      <path d={d} vectorEffect="non-scaling-stroke"
+        fill={sel ? 'rgba(0,243,255,0.30)' : 'rgba(255,255,255,0.12)'}
+        stroke={sel ? 'var(--accent)' : 'rgba(255,255,255,0.5)'} strokeWidth={1} />
+    </svg>
+  );
+}
 
 // Botón de color con paleta propia (nada de <input type=color> pelado).
 function SwatchColor({ value, onChange, titulo }) {
@@ -1170,6 +1470,44 @@ const IcoLab = ({ d }) => (
 );
 
 // ── LOGIN: la puerta del sistema. Sin sesión no se ve nada más. ──────────────
+/** EL SERVIDOR ESTÁ, SU BASE NO. Pantalla honesta en vez de un login que no puede funcionar:
+ *  sin base no hay con qué comparar la contraseña, y todo lo demás va a dar 401. */
+function PantallaSinBase({ motivo, onReintentar }) {
+  const [probando, setProbando] = useState(false);
+  const reintentar = async () => { setProbando(true); try { await onReintentar(); } finally { setProbando(false); } };
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg, #0a0d0f)', padding: 20 }}>
+      <div style={{ width: '100%', maxWidth: 520, padding: 30, borderRadius: 16,
+        background: 'var(--bg-card, #14181c)', border: '1px solid rgba(239,68,68,0.45)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <span style={{ width: 38, height: 38, borderRadius: 11, display: 'grid', placeItems: 'center', flexShrink: 0,
+                         background: 'rgba(239,68,68,0.13)', border: '1px solid rgba(239,68,68,0.45)', color: '#ff8a8a' }}>
+            <Icon name="alert" style={{ width: 19, height: 19 }} />
+          </span>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>La base de datos no responde</h1>
+        </div>
+        <p style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)', margin: '0 0 14px' }}>
+          El sistema está funcionando, pero <b>no puede hablar con su base de datos</b>. Sin ella no se
+          puede iniciar sesión ni abrir ningún molde: los usuarios y las piezas viven ahí.
+        </p>
+        <div style={{ fontSize: 11.5, fontFamily: 'monospace', color: 'var(--text-muted)', padding: '9px 11px',
+                      borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
+                      wordBreak: 'break-word', marginBottom: 16 }}>{motivo}</div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-secondary)', marginBottom: 18 }}>
+          <b style={{ color: '#fff' }}>Qué hacer:</b> casi siempre es el <b>servicio de SQL Server</b> apagado.
+          Abrí <b>Servicios</b> (tecla Windows → «Servicios»), buscá <b>SQL Server (SQLEXPRESS)</b> y tocá
+          <b> Iniciar</b>. Después volvé acá y tocá «Reintentar».
+        </div>
+        <button className="btn primary" onClick={reintentar} disabled={probando}
+          style={{ width: '100%', padding: 12, fontSize: 14, fontWeight: 700, opacity: probando ? 0.6 : 1 }}>
+          {probando ? 'Probando…' : 'Reintentar'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin }) {
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
@@ -1201,7 +1539,8 @@ function LoginScreen({ onLogin }) {
         <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Usuario</label>
         <input style={inp} value={usuario} onChange={e => setUsuario(e.target.value)} autoFocus autoComplete="username" />
         <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Contraseña</label>
-        <input style={inp} type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+        <CampoPass valor={password} onChange={setPassword} autoComplete="current-password"
+          estilo={{ ...inp, marginBottom: 0 }} contenedor={{ marginBottom: 12 }} />
         {error && <div style={{ fontSize: 12.5, color: 'var(--danger, #ff4d4f)', fontWeight: 600, margin: '2px 0 14px' }}>{error}</div>}
         <button type="submit" className="btn primary" disabled={cargando}
           style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 700, marginTop: 6, opacity: cargando ? 0.6 : 1 }}>
@@ -1215,14 +1554,90 @@ function LoginScreen({ onLogin }) {
 // ── USUARIOS / ROLES / PERMISOS ──────────────────────────────────────────────
 // Los permisos se resuelven en el SERVIDOR. Acá se pinta la UI: ocultar un botón NO es
 // proteger nada (la API igual rechaza), es sólo no mostrarle a alguien lo que no puede usar.
+/** USUARIOS Y PERMISOS — rehecha de cero (pedido del usuario 2026-08-21).
+ *
+ *  Lo que estaba mal y por qué se cambió:
+ *   · Los roles se elegían con chips que mostraban la **clave** (`op_taller`) y nada más: no había
+ *     forma de saber qué habilitaba cada uno sin irse a otra pestaña.
+ *   · Al asignar roles no se veía **qué termina pudiendo hacer** el usuario. Ahora se muestra el
+ *     resumen de permisos efectivos ahí mismo, mientras se elige.
+ *   · El selector de permisos del rol era una lista larga de checkboxes chicos, sin buscador, sin
+ *     poder marcar un módulo entero y sin contador: con 20+ permisos era intratable.
+ *   · La contraseña se escribía a ciegas → ahora va con puntos y un OJO para verla.
+ */
+function CampoPass({ valor, onChange, placeholder, autoFocus, estilo, autoComplete, contenedor }) {
+  const [ver, setVer] = useState(false);
+  return (
+    <div style={{ position: 'relative', ...(contenedor || {}) }}>
+      <input
+        type={ver ? 'text' : 'password'}
+        value={valor || ''}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete || 'new-password'}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        style={{ width: '100%', padding: '10px 40px 10px 12px', fontSize: 13, borderRadius: 9,
+                 background: 'rgba(255,255,255,0.04)', color: 'var(--text-primary, #fff)',
+                 border: '1px solid var(--border-light)', outline: 'none',
+                 ...(estilo || {}), paddingRight: 40, marginBottom: 0,
+                 letterSpacing: ver ? 0 : '0.12em' }} />
+      <button type="button" onClick={() => setVer(v => !v)} title={ver ? 'Ocultar' : 'Ver la contraseña'}
+        data-tour="usuarios-ver-pass"
+        style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                 width: 28, height: 28, borderRadius: 7, display: 'grid', placeItems: 'center',
+                 border: 'none', background: 'transparent', cursor: 'pointer',
+                 color: ver ? 'var(--accent)' : 'var(--text-muted)' }}>
+        <Icon name={ver ? 'eyeOff' : 'eye'} style={{ width: 15, height: 15 }} />
+      </button>
+    </div>
+  );
+}
+
+/** Caja de check con tres estados (vacío · parcial · lleno) para «todo el módulo». Es un BOTÓN
+ *  del mismo tamaño que las de cada acción — el `TikSel` de la barra de capas mide 14 px y acá
+ *  quedaba chico para apuntarle. */
+function CajaCheck({ estado, onClick, disabled, title }) {
+  const lleno = estado === 'lleno', parcial = estado === 'parcial';
+  return (
+    <button type="button" disabled={disabled} title={title}
+      onClick={(e) => { e.stopPropagation(); onClick && onClick(e); }}
+      style={{ width: 19, height: 19, borderRadius: 6, flexShrink: 0, display: 'grid', placeItems: 'center',
+        cursor: disabled ? 'not-allowed' : 'pointer', padding: 0,
+        border: '1.5px solid ' + (lleno || parcial ? 'var(--accent)' : 'var(--border-light)'),
+        background: lleno ? 'var(--accent)' : 'transparent' }}>
+      {lleno && <Icon name="check" style={{ width: 12, height: 12, color: '#001016', strokeWidth: 3.5 }} />}
+      {parcial && <span style={{ width: 8, height: 2.5, borderRadius: 2, background: 'var(--accent)' }} />}
+    </button>
+  );
+}
+
+/** Interruptor sí/no (nada de checkbox nativo: la app tiene su propio lenguaje visual). */
+function Switch({ on, onChange, disabled, title }) {
+  return (
+    // `title` NO es decorativo: es el NOMBRE del control. Sin él, un interruptor es un botón mudo
+    // que el tutorial no puede grabar ni volver a encontrar (auditoría 2026-08-31).
+    <button type="button" disabled={disabled} onClick={() => onChange(!on)}
+      title={title || (on ? 'Apagar' : 'Encender')}
+      style={{ width: 40, height: 22, borderRadius: 999, flexShrink: 0, position: 'relative',
+               cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all .18s',
+               border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+               background: on ? 'rgba(0,216,245,0.22)' : 'rgba(255,255,255,0.05)', opacity: disabled ? 0.5 : 1 }}>
+      <span style={{ position: 'absolute', top: 2, left: on ? 20 : 2, width: 16, height: 16, borderRadius: '50%',
+                     background: on ? 'var(--accent)' : 'var(--text-muted)', transition: 'left .18s' }} />
+    </button>
+  );
+}
+
 function PantallaUsuarios({ onVolver, showMsg, showError, yo }) {
   const [tab, setTab] = useState('usuarios');
   const [usuarios, setUsuarios] = useState([]);
   const [roles, setRoles] = useState([]);
   const [permisos, setPermisos] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [buscar, setBuscar] = useState('');
   const [editUsr, setEditUsr] = useState(null);   // usuario en edición (null = cerrado; {} = nuevo)
   const [editRol, setEditRol] = useState(null);
+  const [buscarPerm, setBuscarPerm] = useState('');   // buscador DENTRO del modal de rol
   const [confirmar, setConfirmar] = useState(null);  // {tipo:'usuario'|'rol', id, label}
 
   const recargar = async () => {
@@ -1280,242 +1695,496 @@ function PantallaUsuarios({ onVolver, showMsg, showError, yo }) {
     showMsg((c.tipo === 'usuario' ? 'Usuario' : 'Rol') + ' eliminado.'); recargar();
   };
 
-  const inp = { width: '100%', padding: '9px 11px', fontSize: 13, borderRadius: 8, background: 'rgba(255,255,255,0.04)',
+  // ── Datos derivados ───────────────────────────────────────────────────────────────────────
+  const inp = { width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 9, background: 'rgba(255,255,255,0.04)',
     color: 'var(--text-primary, #fff)', border: '1px solid var(--border-light)', outline: 'none' };
-  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 5 };
-  const chipRol = (clave, on, fn) => (
-    <button key={clave} type="button" onClick={fn} style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700,
-      cursor: fn ? 'pointer' : 'default', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
-      background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{clave}</button>
-  );
+  const lbl = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', display: 'block', marginBottom: 6, letterSpacing: '.02em' };
   const porModulo = {};
   permisos.forEach(p => { (porModulo[p.modulo] = porModulo[p.modulo] || []).push(p); });
+  const permPorClave = {};
+  permisos.forEach(p => { permPorClave[p.clave] = p; });
+  const rolPorClave = {};
+  roles.forEach(r => { rolPorClave[r.clave] = r; });
+  /** Lo que REALMENTE va a poder hacer alguien con estos roles (la unión de sus permisos). */
+  const permisosEfectivos = (claves) => {
+    const s = new Set();
+    (claves || []).forEach(c => (rolPorClave[c]?.permisos || []).forEach(p => s.add(p)));
+    return [...s];
+  };
+  const _match = (txt) => (txt || '').toLowerCase().includes(buscar.trim().toLowerCase());
+  const usuariosVis = usuarios.filter(u => !buscar.trim() || _match(u.nombre) || _match(u.usuario) || _match(u.email) || (u.roles || []).some(_match));
+  const rolesVis = roles.filter(r => !buscar.trim() || _match(r.nombre) || _match(r.clave) || _match(r.descripcion));
+
+  /** Chip de rol: el NOMBRE legible adelante y la clave chiquita — antes sólo se veía la clave. */
+  const ChipRol = ({ clave, sel, onClick, mini }) => {
+    const r = rolPorClave[clave];
+    return (
+      <button type="button" onClick={onClick} disabled={!onClick} title={r?.descripcion || clave}
+        style={{ padding: mini ? '3px 9px' : '5px 11px', borderRadius: 999, fontSize: mini ? 10.5 : 11.5, fontWeight: 700,
+          cursor: onClick ? 'pointer' : 'default', display: 'inline-flex', alignItems: 'center', gap: 6,
+          border: '1px solid ' + (sel ? 'var(--accent)' : 'var(--border-light)'),
+          background: sel ? 'rgba(0,216,245,0.12)' : 'transparent', color: sel ? 'var(--accent)' : 'var(--text-muted)' }}>
+        {r?.nombre || clave}
+      </button>
+    );
+  };
+
+  /** Resumen «qué va a poder hacer», agrupado por módulo. Es lo que hace entendible un rol. */
+  const ResumenPermisos = ({ claves, vacio }) => {
+    const efect = permisosEfectivos(claves);
+    if (!efect.length) {
+      return <div style={{ fontSize: 12, color: 'var(--warning, #f5b942)', padding: '10px 12px', borderRadius: 9,
+                           background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)' }}>{vacio}</div>;
+    }
+    const grupos = {};
+    efect.forEach(c => { const p = permPorClave[c]; if (p) (grupos[p.modulo] = grupos[p.modulo] || []).push(p); });
+    return (
+      <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: '10px 12px', background: 'rgba(0,0,0,0.14)' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--success)', marginBottom: 8 }}>
+          {efect.length} acción/es habilitada/s
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, maxHeight: 168, overflowY: 'auto' }}>
+          {Object.entries(grupos).map(([mod, ps]) => (
+            <div key={mod} style={{ display: 'flex', gap: 9, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em',
+                             color: 'var(--text-muted)', minWidth: 78, flexShrink: 0 }}>{mod}</span>
+              <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                {ps.map(p => p.nombre).join(' · ')}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="panel animate-fade">
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 18 }}>
         <button className="btn ghost" onClick={onVolver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
           ⬅ Volver al Panel de Configuración
         </button>
       </div>
-      <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-        <div>
-          <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>Usuarios y permisos
-            <Ayuda ancho={300}>Quién usa el sistema y qué puede hacer. Los permisos se aplican en el servidor.</Ayuda></h2>
+
+      {/* ENCABEZADO */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+        <span style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, display: 'grid', placeItems: 'center',
+                       background: 'rgba(0,216,245,0.12)', border: '1px solid rgba(0,216,245,0.35)', color: 'var(--accent)' }}>
+          <Icon name="user" style={{ width: 19, height: 19 }} />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.01em' }}>Usuarios y permisos</h2>
+          <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+            Quién entra al sistema y qué puede hacer cada uno.
+            <Ayuda ancho={340}>Un <b>usuario</b> no tiene permisos sueltos: recibe <b>roles</b>, y cada rol trae un conjunto de <b>acciones</b> permitidas. Todo se controla en el <b>servidor</b>: esconder un botón no alcanza, la acción se rechaza igual.</Ayuda>
+          </p>
         </div>
         {puedeGestionar && (
-          <button className="btn primary" data-tour="usuarios-nuevo" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
-            onClick={() => tab === 'usuarios' ? setEditUsr({ roles: [], activo: true }) : setEditRol({ permisos: [] })}>
-            <Icon name="plus" style={{ width: 14, height: 14 }} /> {tab === 'usuarios' ? 'Nuevo usuario' : 'Nuevo rol'}
+          <button className="btn primary" data-tour="usuarios-nuevo" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
+            onClick={() => tab === 'roles' ? setEditRol({ permisos: [] }) : setEditUsr({ roles: [], activo: true })}>
+            <Icon name="plus" style={{ width: 14, height: 14 }} /> {tab === 'roles' ? 'Nuevo rol' : 'Nuevo usuario'}
           </button>
         )}
       </div>
 
-      <div data-tour="usuarios-tabs" style={{ display: 'flex', gap: 8, margin: '16px 0' }}>
-        {[['usuarios', 'Usuarios', usuarios.length], ['roles', 'Roles', roles.length], ['permisos', 'Permisos', permisos.length]].map(([k, t, n]) => (
-          <button key={k} type="button" onClick={() => setTab(k)} style={{ padding: '7px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
-            border: '1px solid ' + (tab === k ? 'var(--accent)' : 'var(--border-light)'),
-            background: tab === k ? 'rgba(0,243,255,0.12)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)' }}>{t} ({n})</button>
-        ))}
+      {/* PESTAÑAS + BUSCADOR */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div data-tour="usuarios-tabs" style={{ display: 'flex', gap: 6, padding: 4, borderRadius: 11, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+          {[['usuarios', 'Usuarios', usuarios.length], ['roles', 'Roles', roles.length], ['permisos', 'Acciones', permisos.length]].map(([k, t, n]) => (
+            <button key={k} type="button" onClick={() => setTab(k)}
+              style={{ padding: '8px 15px', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none',
+                background: tab === k ? 'rgba(0,216,245,0.14)' : 'transparent', color: tab === k ? 'var(--accent)' : 'var(--text-muted)' }}>
+              {t} <span style={{ opacity: 0.65, fontWeight: 600 }}>{n}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
+          <Icon name="search" style={{ width: 14, height: 14, position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Buscar…"
+            style={{ ...inp, padding: '9px 12px 9px 32px' }} />
+        </div>
       </div>
 
       {cargando && <div className="card" style={{ padding: 20, fontSize: 13, color: 'var(--text-muted)' }}>Cargando…</div>}
 
-      {/* ── USUARIOS ── */}
+      {/* ══ USUARIOS ══ */}
       {!cargando && tab === 'usuarios' && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          {usuarios.map((u, i) => (
-            <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
-              borderTop: i ? '1px solid var(--border-light)' : 'none', opacity: u.activo ? 1 : 0.5 }}>
-              <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(0,243,255,0.12)', color: 'var(--accent)', fontWeight: 800, fontSize: 13 }}>
-                {(u.nombre || u.usuario).slice(0, 1).toUpperCase()}
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-                  {u.nombre} <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>· {u.usuario}</span>
-                  {u.id === yo?.id && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)' }}>(vos)</span>}
-                  {!u.activo && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text-muted)' }}>inactivo</span>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {usuariosVis.map(u => {
+            const nEfect = permisosEfectivos(u.roles).length;
+            return (
+              <div key={u.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '13px 15px',
+                borderRadius: 12, opacity: u.activo ? 1 : 0.55 }}>
+                <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center',
+                  background: u.activo ? 'rgba(0,216,245,0.13)' : 'rgba(255,255,255,0.06)',
+                  color: u.activo ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 800, fontSize: 15 }}>
+                  {(u.nombre || u.usuario).slice(0, 1).toUpperCase()}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {u.ultimo_acceso ? 'Último acceso: ' + u.ultimo_acceso.slice(0, 16).replace('T', ' ') : 'Nunca entró'}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>{(u.roles || []).map(r => chipRol(r, true, null))}</div>
-              {puedeGestionar && (
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  <button type="button" onClick={() => setEditUsr({ ...u, password: '' })} title="Editar"
-                    style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
-                    <Icon name="edit" style={{ width: 12, height: 12 }} />
-                  </button>
-                  <button type="button" onClick={() => setConfirmar({ tipo: 'usuario', id: u.id, label: u.usuario })} title="Eliminar"
-                    style={{ width: 26, height: 26, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
-                    <Icon name="trash" style={{ width: 12, height: 12 }} />
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── ROLES ── */}
-      {!cargando && tab === 'roles' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-          {roles.map(r => (
-            <div key={r.id} className="card" style={{ padding: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <Icon name="shield" style={{ width: 13, height: 13, color: 'var(--accent)' }} /> {r.nombre}
-                    {r.es_sistema && <span className="badge success" style={{ fontSize: 9 }}>sistema</span>}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                    {u.nombre || u.usuario}
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 500, fontSize: 12 }}>@{u.usuario}</span>
+                    {u.id === yo?.id && <span style={{ fontSize: 9.5, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: 'rgba(0,216,245,0.14)', color: 'var(--accent)' }}>VOS</span>}
+                    {!u.activo && <span style={{ fontSize: 9.5, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: 'rgba(255,255,255,0.07)', color: 'var(--text-muted)' }}>INACTIVO</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{r.clave} · {r.usuarios} usuario/s</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {u.ultimo_acceso ? 'Último acceso: ' + u.ultimo_acceso.slice(0, 16).replace('T', ' ') : 'Nunca entró'}
+                    {' · '}{nEfect} acción/es
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 260 }}>
+                  {(u.roles || []).length
+                    ? (u.roles || []).map(r => <ChipRol key={r} clave={r} sel mini />)
+                    : <span style={{ fontSize: 11, color: 'var(--warning, #f5b942)' }}>sin rol</span>}
                 </div>
                 {puedeGestionar && (
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                    <button type="button" onClick={() => setEditRol({ ...r })} title="Editar"
-                      style={{ width: 24, height: 24, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
-                      <Icon name="edit" style={{ width: 11, height: 11 }} />
+                    <button type="button" onClick={() => setEditUsr({ ...u, password: '' })} title="Editar"
+                      style={{ width: 30, height: 30, borderRadius: 8, cursor: 'pointer', display: 'grid', placeItems: 'center',
+                        border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-secondary)' }}>
+                      <Icon name="edit" style={{ width: 13, height: 13 }} />
                     </button>
-                    {!r.es_sistema && (
-                      <button type="button" onClick={() => setConfirmar({ tipo: 'rol', id: r.id, label: r.nombre })} title="Eliminar"
-                        style={{ width: 24, height: 24, borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
-                        <Icon name="trash" style={{ width: 11, height: 11 }} />
-                      </button>
-                    )}
+                    <button type="button" onClick={() => setConfirmar({ tipo: 'usuario', id: u.id, label: u.usuario })} title="Eliminar"
+                      style={{ width: 30, height: 30, borderRadius: 8, cursor: 'pointer', display: 'grid', placeItems: 'center',
+                        border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                      <Icon name="trash" style={{ width: 13, height: 13 }} />
+                    </button>
                   </div>
                 )}
               </div>
-              {r.descripcion && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>{r.descripcion}</div>}
-              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{r.permisos.length} permiso/s</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
-                {r.permisos.slice(0, 6).map(p => (
-                  <span key={p} style={{ fontSize: 9.5, padding: '2px 6px', borderRadius: 5, background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>{p}</span>
-                ))}
-                {r.permisos.length > 6 && <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>+{r.permisos.length - 6}</span>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
+          {!usuariosVis.length && <div className="card" style={{ padding: 18, fontSize: 12.5, color: 'var(--text-muted)' }}>No hay usuarios que coincidan con «{buscar}».</div>}
         </div>
       )}
 
-      {/* ── PERMISOS (catálogo, sólo lectura: los define el código) ── */}
-      {!cargando && tab === 'permisos' && (
-        <div className="card" style={{ padding: 24 }}>
-          <div className="card-subtitle" style={{ marginBottom: 16 }}>
-            Los permisos son por ACCIÓN, no por pantalla (las pantallas cambian, las acciones no). Los define el sistema; acá se ven para saber qué se le puede dar a cada rol.
-          </div>
-          {Object.entries(porModulo).map(([mod, ps]) => (
-            <div key={mod} style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase' }}>{mod}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
-                {ps.map(p => (
-                  <div key={p.id} style={{ border: '1px solid var(--border-light)', borderRadius: 8, padding: '9px 12px', background: 'rgba(0,0,0,0.1)' }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{p.nombre}</div>
-                    <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'monospace' }}>{p.clave}</div>
-                    {p.descripcion && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{p.descripcion}</div>}
+      {/* ══ ROLES ══ */}
+      {!cargando && tab === 'roles' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 12 }}>
+          {rolesVis.map(r => {
+            const mods = {};
+            r.permisos.forEach(c => { const p = permPorClave[c]; if (p) mods[p.modulo] = (mods[p.modulo] || 0) + 1; });
+            return (
+              <div key={r.id} className="card" style={{ padding: 16, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <Icon name="shield" style={{ width: 14, height: 14, color: 'var(--accent)' }} /> {r.nombre}
+                      {r.es_sistema && <span style={{ fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 999, background: 'rgba(16,185,129,0.14)', color: 'var(--success)' }}>SISTEMA</span>}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'monospace', marginTop: 3 }}>{r.clave}</div>
                   </div>
-                ))}
+                  {puedeGestionar && (
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button type="button" onClick={() => { setBuscarPerm(''); setEditRol({ ...r }); }} title="Editar"
+                        style={{ width: 28, height: 28, borderRadius: 8, cursor: 'pointer', display: 'grid', placeItems: 'center',
+                          border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-secondary)' }}>
+                        <Icon name="edit" style={{ width: 12, height: 12 }} />
+                      </button>
+                      {!r.es_sistema && (
+                        <button type="button" onClick={() => setConfirmar({ tipo: 'rol', id: r.id, label: r.nombre })} title="Eliminar"
+                          style={{ width: 28, height: 28, borderRadius: 8, cursor: 'pointer', display: 'grid', placeItems: 'center',
+                            border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
+                          <Icon name="trash" style={{ width: 12, height: 12 }} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {r.descripcion && <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{r.descripcion}</div>}
+                {/* QUÉ PUEDE, por módulo: más útil que una tira de claves cortada en «+12» */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                  {Object.entries(mods).map(([m, n]) => (
+                    <span key={m} style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 999,
+                                           background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>{m} <b style={{ color: 'var(--accent)' }}>{n}</b></span>
+                  ))}
+                  {!r.permisos.length && <span style={{ fontSize: 11, color: 'var(--warning, #f5b942)' }}>sin permisos: no habilita nada</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-muted)', marginTop: 'auto', paddingTop: 4 }}>
+                  <Icon name="user" style={{ width: 12, height: 12 }} /> {r.usuarios} usuario/s
+                  <span style={{ marginLeft: 'auto' }}>{r.permisos.length} de {permisos.length} acciones</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
+          {!rolesVis.length && <div className="card" style={{ padding: 18, fontSize: 12.5, color: 'var(--text-muted)' }}>No hay roles que coincidan con «{buscar}».</div>}
         </div>
       )}
 
-      {/* ── MODAL usuario ── */}
+      {/* ══ ACCIONES (catálogo; las define el código) ══ */}
+      {!cargando && tab === 'permisos' && (
+        <div className="card" style={{ padding: 20, borderRadius: 12 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
+            Las acciones las define el <b>sistema</b> (no se crean ni se borran acá): son lo que se le puede dar a un rol.
+            Al lado de cada una, <b>qué roles la tienen</b> hoy.
+          </div>
+          {Object.entries(porModulo).map(([mod, ps]) => {
+            const vis = ps.filter(p => !buscar.trim() || _match(p.nombre) || _match(p.clave) || _match(p.descripcion) || _match(mod));
+            if (!vis.length) return null;
+            return (
+              <div key={mod} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent)', marginBottom: 9, textTransform: 'uppercase', letterSpacing: '.07em' }}>{mod}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 9 }}>
+                  {vis.map(p => {
+                    const quienes = roles.filter(r => (r.permisos || []).includes(p.clave));
+                    return (
+                      <div key={p.id} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: '10px 13px', background: 'rgba(0,0,0,0.14)' }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700 }}>{p.nombre}</div>
+                        <div style={{ fontSize: 10, color: 'var(--accent)', fontFamily: 'monospace', marginTop: 2 }}>{p.clave}</div>
+                        {p.descripcion && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>{p.descripcion}</div>}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                          {quienes.length
+                            ? quienes.map(r => <ChipRol key={r.clave} clave={r.clave} sel mini />)
+                            : <span style={{ fontSize: 10.5, color: 'var(--warning, #f5b942)' }}>ningún rol la tiene</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ══════ MODAL USUARIO ══════ */}
       <Modal open={!!editUsr} onClose={() => setEditUsr(null)} titulo={editUsr?.id ? 'Editar usuario' : 'Nuevo usuario'}
-        subtitulo={editUsr?.id ? 'Dejá la contraseña vacía para no cambiarla.' : 'Mínimo 8 caracteres de contraseña.'} maxWidth={520}>
+        subtitulo="Datos de acceso y qué va a poder hacer." maxWidth={620}>
         {editUsr && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Usuario</label>
-                <input style={inp} value={editUsr.usuario || ''} disabled={!!editUsr.id}
-                  onChange={e => setEditUsr(u => ({ ...u, usuario: e.target.value }))} /></div>
-              <div><label style={lbl}>Nombre</label>
-                <input style={inp} value={editUsr.nombre || ''} onChange={e => setEditUsr(u => ({ ...u, nombre: e.target.value }))} /></div>
-            </div>
-            <div><label style={lbl}>Email (opcional)</label>
-              <input style={inp} value={editUsr.email || ''} onChange={e => setEditUsr(u => ({ ...u, email: e.target.value }))} /></div>
-            <div><label style={lbl}>Contraseña {editUsr.id ? '(vacío = no cambiar)' : ''}</label>
-              <input style={inp} type="password" value={editUsr.password || ''} autoComplete="new-password"
-                onChange={e => setEditUsr(u => ({ ...u, password: e.target.value }))} /></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 1. QUIÉN ES */}
             <div>
-              <label style={lbl}>Roles</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {roles.map(r => chipRol(r.clave, (editUsr.roles || []).includes(r.clave), () => setEditUsr(u => {
-                  const s = new Set(u.roles || []); s.has(r.clave) ? s.delete(r.clave) : s.add(r.clave);
-                  return { ...u, roles: [...s] };
-                })))}
+              <div style={{ ...lbl, color: 'var(--accent)', marginBottom: 9 }}>1 · QUIÉN ES</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div><label style={lbl}>Usuario (con el que entra)</label>
+                  <input style={inp} value={editUsr.usuario || ''} disabled={!!editUsr.id} autoFocus={!editUsr.id}
+                    onChange={e => setEditUsr(u => ({ ...u, usuario: e.target.value }))} /></div>
+                <div><label style={lbl}>Nombre y apellido</label>
+                  <input style={inp} value={editUsr.nombre || ''} onChange={e => setEditUsr(u => ({ ...u, nombre: e.target.value }))} /></div>
+              </div>
+              <div style={{ marginTop: 10 }}><label style={lbl}>Email (opcional)</label>
+                <input style={inp} value={editUsr.email || ''} onChange={e => setEditUsr(u => ({ ...u, email: e.target.value }))} /></div>
+            </div>
+
+            {/* 2. CONTRASEÑA — con puntos y un ojo para verla.
+                Al EDITAR no se muestra un campo vacío: parecía que el usuario «no tenía»
+                contraseña (lo preguntó el usuario 2026-08-21). La contraseña no se puede mostrar
+                —se guarda hasheada (PBKDF2 + salt), no en texto—, así que se dice eso y se ofrece
+                cambiarla. Recién ahí aparece el campo. */}
+            <div>
+              <div style={{ ...lbl, color: 'var(--accent)', marginBottom: 9 }}>2 · CONTRASEÑA</div>
+              {editUsr.id && !editUsr._cambiarPass ? (
+                <>
+                  {/* El campo NO queda vacío: se ve como una contraseña puesta y protegida.
+                      ⚠️ Los puntos son de relleno FIJO (12): no salen de la contraseña real, así
+                      que ni siquiera dejan adivinar cuántos caracteres tiene. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9,
+                                border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)',
+                                cursor: 'not-allowed' }}>
+                    <Icon name="shield" style={{ width: 15, height: 15, color: 'var(--success)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 15, letterSpacing: '0.22em', color: 'var(--text-secondary)', lineHeight: 1,
+                                   userSelect: 'none' }}>••••••••••••</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.05em', padding: '3px 8px', borderRadius: 999,
+                                   background: 'rgba(16,185,129,0.13)', color: 'var(--success)', flexShrink: 0 }}>PROTEGIDA</span>
+                    <button type="button" className="btn ghost" style={{ marginLeft: 'auto', flexShrink: 0, padding: '6px 12px', fontSize: 12 }}
+                      onClick={() => setEditUsr(u => ({ ...u, _cambiarPass: true }))}>Cambiar</button>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.45 }}>
+                    Guardada cifrada: <b>no se puede ver</b>, ni desde acá ni desde la base. Si el usuario la perdió, ponele una nueva.
+                  </div>
+                </>
+              ) : (
+                <>
+                  <CampoPass valor={editUsr.password} autoFocus={!!editUsr.id}
+                    onChange={v => setEditUsr(u => ({ ...u, password: v }))}
+                    placeholder={editUsr.id ? 'La contraseña nueva' : 'Mínimo 8 caracteres'} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                    <span>Mínimo 8 caracteres. Tocá el ojo para verla mientras la escribís.</span>
+                    {editUsr.id && (
+                      <button type="button" className="btn ghost" style={{ marginLeft: 'auto', flexShrink: 0, padding: '5px 10px', fontSize: 11 }}
+                        onClick={() => setEditUsr(u => ({ ...u, _cambiarPass: false, password: '' }))}>Dejarla como está</button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 3. ROLES — tarjetas, no chips crípticos */}
+            <div>
+              <div style={{ ...lbl, color: 'var(--accent)', marginBottom: 9 }}>3 · QUÉ ES EN EL SISTEMA</div>
+              <div data-tour="usuarios-roles" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 8 }}>
+                {roles.map(r => {
+                  const on = (editUsr.roles || []).includes(r.clave);
+                  return (
+                    <button key={r.id} type="button"
+                      onClick={() => setEditUsr(u => {
+                        const s = new Set(u.roles || []); s.has(r.clave) ? s.delete(r.clave) : s.add(r.clave);
+                        return { ...u, roles: [...s] };
+                      })}
+                      style={{ display: 'flex', alignItems: 'flex-start', gap: 10, textAlign: 'left', padding: '11px 12px', borderRadius: 11,
+                        cursor: 'pointer', transition: 'all .16s',
+                        border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                        background: on ? 'rgba(0,216,245,0.07)' : 'rgba(255,255,255,0.025)' }}>
+                      <span style={{ width: 19, height: 19, borderRadius: 6, flexShrink: 0, marginTop: 1, display: 'grid', placeItems: 'center',
+                        border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                        background: on ? 'var(--accent)' : 'transparent' }}>
+                        {on && <Icon name="check" style={{ width: 12, height: 12, color: '#001016', strokeWidth: 3.5 }} />}
+                      </span>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: on ? '#fff' : 'var(--text-secondary)' }}>{r.nombre}</span>
+                        <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>
+                          {r.descripcion || r.clave} · <b>{r.permisos.length}</b> acción/es
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
+
+            {/* 4. LO QUE VA A PODER HACER (se arma solo con los roles marcados) */}
+            <div>
+              <div style={{ ...lbl, color: 'var(--accent)', marginBottom: 9 }}>4 · CON ESO VA A PODER</div>
+              <ResumenPermisos claves={editUsr.roles} vacio="Sin ningún rol marcado, este usuario puede entrar pero no hacer nada." />
+            </div>
+
             {editUsr.id && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, cursor: 'pointer' }}>
-                <input type="checkbox" checked={editUsr.activo !== false} onChange={e => setEditUsr(u => ({ ...u, activo: e.target.checked }))} />
-                Activo (si lo desactivás no puede entrar, pero su historial queda)
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px', borderRadius: 11,
+                            border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                <Switch on={editUsr.activo !== false} onChange={v => setEditUsr(u => ({ ...u, activo: v }))} />
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Puede entrar
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
+                    Si lo apagás no puede iniciar sesión, pero su historial queda.
+                  </span>
+                </span>
+              </div>
             )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>
+
+            <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end', paddingTop: 2 }}>
               <button className="btn ghost" onClick={() => setEditUsr(null)}>Cancelar</button>
-              <button className="btn primary" onClick={guardarUsuario}>Guardar</button>
+              <button className="btn primary" onClick={guardarUsuario}>{editUsr.id ? 'Guardar cambios' : 'Crear usuario'}</button>
             </div>
           </div>
         )}
       </Modal>
 
-      {/* ── MODAL rol ── */}
+      {/* ══════ MODAL ROL ══════ */}
       <Modal open={!!editRol} onClose={() => setEditRol(null)} titulo={editRol?.id ? 'Editar rol' : 'Nuevo rol'}
-        subtitulo="Elegí qué acciones puede hacer este rol." maxWidth={640}>
-        {editRol && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={lbl}>Clave</label>
-                <input style={inp} value={editRol.clave || ''} disabled={!!editRol.id} placeholder="ej: supervisor"
-                  onChange={e => setEditRol(g => ({ ...g, clave: e.target.value }))} /></div>
-              <div><label style={lbl}>Nombre</label>
-                <input style={inp} value={editRol.nombre || ''} onChange={e => setEditRol(g => ({ ...g, nombre: e.target.value }))} /></div>
-            </div>
-            <div><label style={lbl}>Descripción</label>
-              <input style={inp} value={editRol.descripcion || ''} onChange={e => setEditRol(g => ({ ...g, descripcion: e.target.value }))} /></div>
-            <div>
-              <label style={lbl}>Permisos {editRol.es_sistema && <span style={{ color: 'var(--text-muted)' }}>— el rol de sistema no los puede cambiar (si se los sacan, nadie podría volver a dárselos)</span>}</label>
-              <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: 8, padding: 10 }}>
-                {Object.entries(porModulo).map(([mod, ps]) => (
-                  <div key={mod} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 5 }}>{mod}</div>
-                    {ps.map(p => (
-                      <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '3px 0',
-                        cursor: editRol.es_sistema ? 'not-allowed' : 'pointer', opacity: editRol.es_sistema ? 0.5 : 1 }}>
-                        <input type="checkbox" disabled={editRol.es_sistema} checked={(editRol.permisos || []).includes(p.clave)}
-                          onChange={() => setEditRol(g => {
-                            const s = new Set(g.permisos || []); s.has(p.clave) ? s.delete(p.clave) : s.add(p.clave);
-                            return { ...g, permisos: [...s] };
-                          })} />
-                        <span style={{ fontWeight: 600 }}>{p.nombre}</span>
-                        <span style={{ fontSize: 9.5, color: 'var(--accent)', fontFamily: 'monospace' }}>{p.clave}</span>
-                      </label>
-                    ))}
+        subtitulo="Un rol es un paquete de acciones que se le da a varios usuarios a la vez." maxWidth={700}>
+        {editRol && (() => {
+          const sel = new Set(editRol.permisos || []);
+          const bloq = !!editRol.es_sistema;
+          const setSel = (s) => setEditRol(g => ({ ...g, permisos: [...s] }));
+          const q = buscarPerm.trim().toLowerCase();
+          const visibles = (ps) => ps.filter(p => !q || (p.nombre || '').toLowerCase().includes(q)
+            || (p.clave || '').toLowerCase().includes(q) || (p.descripcion || '').toLowerCase().includes(q));
+          const todosVis = Object.values(porModulo).flatMap(visibles);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div><label style={lbl}>Clave (interna, no cambia)</label>
+                  <input style={inp} value={editRol.clave || ''} disabled={!!editRol.id} placeholder="ej: supervisor"
+                    onChange={e => setEditRol(g => ({ ...g, clave: e.target.value }))} /></div>
+                <div><label style={lbl}>Nombre (el que se ve)</label>
+                  <input style={inp} value={editRol.nombre || ''} placeholder="ej: Supervisor de taller"
+                    onChange={e => setEditRol(g => ({ ...g, nombre: e.target.value }))} /></div>
+              </div>
+              <div><label style={lbl}>Para qué sirve este rol</label>
+                <input style={inp} value={editRol.descripcion || ''} placeholder="Una línea que explique qué hace quien lo tiene"
+                  onChange={e => setEditRol(g => ({ ...g, descripcion: e.target.value }))} /></div>
+
+              {bloq && (
+                <div style={{ fontSize: 11.5, lineHeight: 1.45, color: 'var(--text-secondary)', padding: '10px 12px', borderRadius: 10,
+                              background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)' }}>
+                  <b style={{ color: '#f5b942' }}>Rol de sistema:</b> sus acciones no se tocan. Si alguien le sacara «gestionar usuarios»,
+                  nadie podría volver a dárselo y el sistema quedaría sin administrador.
+                </div>
+              )}
+
+              {/* ── SELECTOR DE ACCIONES ─────────────────────────────────────────────────── */}
+              <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, overflow: 'hidden' }}>
+                {/* barra: buscador + contador + todo/nada */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 12px', flexWrap: 'wrap',
+                              borderBottom: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.025)' }}>
+                  <div style={{ position: 'relative', flex: 1, minWidth: 160 }}>
+                    <Icon name="search" style={{ width: 13, height: 13, position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input value={buscarPerm} onChange={e => setBuscarPerm(e.target.value)} placeholder="Buscar una acción…"
+                      style={{ ...inp, padding: '7px 10px 7px 30px', fontSize: 12 }} />
                   </div>
-                ))}
+                  <span style={{ fontSize: 11.5, fontWeight: 800, color: sel.size ? 'var(--accent)' : 'var(--text-muted)' }}>
+                    {sel.size} de {permisos.length}
+                  </span>
+                  <button type="button" className="btn ghost" disabled={bloq} style={{ padding: '6px 11px', fontSize: 11.5 }}
+                    onClick={() => setSel(new Set([...sel, ...todosVis.map(p => p.clave)]))}>Marcar todo</button>
+                  <button type="button" className="btn ghost" disabled={bloq} style={{ padding: '6px 11px', fontSize: 11.5 }}
+                    onClick={() => { const s = new Set(sel); todosVis.forEach(p => s.delete(p.clave)); setSel(s); }}>Ninguna</button>
+                </div>
+
+                <div data-tour="rol-permisos" style={{ maxHeight: 330, overflowY: 'auto', opacity: bloq ? 0.6 : 1 }}>
+                  {Object.entries(porModulo).map(([mod, ps]) => {
+                    const vis = visibles(ps);
+                    if (!vis.length) return null;
+                    const n = vis.filter(p => sel.has(p.clave)).length;
+                    const estado = n === 0 ? 'vacio' : (n === vis.length ? 'lleno' : 'parcial');
+                    return (
+                      <div key={mod}>
+                        {/* encabezado del MÓDULO: marca o desmarca todo el bloque de una */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+                                      background: 'rgba(255,255,255,0.022)', borderBottom: '1px solid var(--border-light)' }}>
+                          <CajaCheck estado={estado} disabled={bloq}
+                            title={estado === 'lleno' ? 'Sacar todas las de este módulo' : 'Marcar todas las de este módulo'}
+                            onClick={bloq ? null : () => {
+                              const s = new Set(sel);
+                              if (estado === 'lleno') vis.forEach(p => s.delete(p.clave)); else vis.forEach(p => s.add(p.clave));
+                              setSel(s);
+                            }} />
+                          <span style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-secondary)' }}>{mod}</span>
+                          <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: n ? 'var(--accent)' : 'var(--text-muted)' }}>{n}/{vis.length}</span>
+                        </div>
+                        {vis.map(p => {
+                          const on = sel.has(p.clave);
+                          return (
+                            <button key={p.id} type="button" disabled={bloq}
+                              onClick={() => { const s = new Set(sel); on ? s.delete(p.clave) : s.add(p.clave); setSel(s); }}
+                              style={{ display: 'flex', alignItems: 'flex-start', gap: 11, width: '100%', textAlign: 'left',
+                                padding: '10px 12px 10px 14px', border: 'none', borderBottom: '1px solid var(--border-light)',
+                                background: on ? 'rgba(0,216,245,0.05)' : 'transparent', cursor: bloq ? 'not-allowed' : 'pointer' }}>
+                              <span style={{ width: 18, height: 18, borderRadius: 6, flexShrink: 0, marginTop: 1, display: 'grid', placeItems: 'center',
+                                border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                                background: on ? 'var(--accent)' : 'transparent' }}>
+                                {on && <Icon name="check" style={{ width: 11, height: 11, color: '#001016', strokeWidth: 3.5 }} />}
+                              </span>
+                              <span style={{ minWidth: 0, flex: 1 }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                  <b style={{ fontSize: 12.5, fontWeight: 700, color: on ? '#fff' : 'var(--text-secondary)' }}>{p.nombre}</b>
+                                  <code style={{ fontSize: 9.5, color: 'var(--accent)', opacity: 0.75 }}>{p.clave}</code>
+                                </span>
+                                {p.descripcion && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>{p.descripcion}</span>}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                  {!todosVis.length && <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)' }}>Ninguna acción coincide con «{buscarPerm}».</div>}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+                <button className="btn ghost" onClick={() => setEditRol(null)}>Cancelar</button>
+                <button className="btn primary" onClick={guardarRol}>{editRol.id ? 'Guardar cambios' : 'Crear rol'}</button>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn ghost" onClick={() => setEditRol(null)}>Cancelar</button>
-              <button className="btn primary" onClick={guardarRol}>Guardar</button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
 
       {/* ── MODAL confirmar borrado (nada de diálogos del navegador) ── */}
       <Modal open={!!confirmar} onClose={() => setConfirmar(null)} titulo="¿Eliminar?" maxWidth={420} centrado>
         {confirmar && (
           <div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
               Se va a eliminar {confirmar.tipo === 'usuario' ? 'el usuario' : 'el rol'} <b style={{ color: '#fff' }}>{confirmar.label}</b>. No se puede deshacer.
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -2048,6 +2717,13 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
               .filter(p => (etqNombres[p.idx] || p.name))
               .filter(p => !vf || vf.show.has(p.idx))
               .map(p => { const o = vf ? (vf.pos.get(p.idx) || { dx: 0, dy: 0 }) : { dx: 0, dy: 0 }; return { ...p, nombre: etqNombres[p.idx] || p.name, _dx: o.dx, _dy: o.dy, px: p.px + o.dx, py: p.py + o.dy }; });
+            // ORDEN DE APILADO = el panel de capas (la capa de arriba, adelante): se pinta al
+            // revés porque en SVG tapa lo último dibujado. Los CARTELES se siguen ubicando con
+            // `piezas` (orden lógico): el acomodo greedy depende del orden y no tiene por qué
+            // cambiar por esto.
+            const _zt = canvasLayout.zTalle;
+            const _zp = (p) => (p.talle != null && _zt && _zt.has(p.talle) ? _zt.get(p.talle) : -1);
+            const piezasZ = piezas.slice().sort((a, b) => _zp(b) - _zp(a));
             // Ubicar el cartel de cada pieza a un costado (abajo/arriba/der/izq) SIN
             // superponerse a las piezas ni a otros carteles.
             const LH = 15, GAP = 6, CW = 5.4;
@@ -2103,6 +2779,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
             return (
               <svg viewBox={artVB ? `${artVB.x} ${artVB.y} ${artVB.w} ${artVB.h}` : vb}
                 preserveAspectRatio="xMidYMid meet"
+                data-tour="molde-visor"
                 onClick={() => { if (telaModo) onTelaVacio && onTelaVacio(); }}
                 style={{ width: '100%', height: '100%', display: 'block', userSelect: 'none' }}>
                 {/* Sin piezas para dibujar (la prenda todavía se está resolviendo): se dice, en vez
@@ -2112,7 +2789,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                     Preparando las piezas de esta prenda…
                   </text>
                 )}
-                {piezas.map((p) => {
+                {piezasZ.map((p) => {
                   const pzName = p.nombre;
                   const isSelected = selectedPiezaMapeo === pzName;
                   // ARTE POR RANGO (#talle/#rango): el diseño mostrado es el del TALLE que se ve
@@ -2140,7 +2817,11 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                   // fondo blanco, cm reales). Si existe, se MUESTRA y NO se re-dibuja nada → arte = tizada.
                   const pv = (!telaModo && !cargando && previewPiezas) ? previewPiezas[pzName] : null;
                   return (
-                    <g key={p.idx} transform={(p._dx || p._dy) ? `translate(${p._dx} ${p._dy})` : undefined} style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
+                    <g key={p.idx} transform={(p._dx || p._dy) ? `translate(${p._dx} ${p._dy})` : undefined}
+                      /* `data-pieza`: sin esto, un paso grabado tocando una pieza no se podía volver
+                         a encontrar (el SVG no tiene texto ni controles). Ver `pieza:` en localizar.js */
+                      data-pieza={pzName || _genN || ('pieza ' + p.idx)}
+                      style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
                       <title>{pzName} {mappedMesaIdx ? `(Mesa ${mappedMesaIdx})` : '(sin diseño)'}</title>
                       <defs><clipPath id={`clipmapv-${p.idx}`}><path d={p.path_svg} /></clipPath></defs>
                       {/* RENDER REAL del motor (la pieza tal cual sale en la tizada). Si está, NO se re-dibuja nada. */}
@@ -2192,7 +2873,8 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                         const ec = etiquetaConfig;
                         if (new Set((ec.piezas_off || []).map(_gen)).has(_genN)) return null;   // esta pieza NO lleva etiqueta (igual que el motor)
                         const pos = (ec.posiciones || {})[pzName] || (ec.posiciones || {})[_genN] || ec.posicion || { rx: 0.5, ry: 0.92 };
-                        const txt = [ec.mostrar?.talle && (talleRef || '2XL'), ec.mostrar?.pieza && pzName, ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-');
+                        // el nombre GENERAL, sin el número: igual que la tizada (2026-08-21)
+                        const txt = [ec.mostrar?.talle && (talleRef || '2XL'), ec.mostrar?.pieza && _genN, ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-');
                         if (!txt) return null;
                         const pxmm = p.h_cm ? p.ph / (p.h_cm * 10) : (p.w_cm ? p.pw / (p.w_cm * 10) : 0.033);
                         const fs = Math.max(0.6, (ec.size_mm || 3) * pxmm / CAP_RATIO_ETQ);   // mm de LETRA -> em
@@ -2385,7 +3067,8 @@ function Modal({ open, onClose, titulo, subtitulo, children, maxWidth = 640, cen
   return createPortal(
     <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: centrado ? 'center' : 'flex-start', justifyContent: 'center', padding: centrado ? '24px 20px' : '6vh 20px 24px', overflowY: 'auto' }}>
-      <div className="modal-pop" onMouseDown={(e) => e.stopPropagation()}
+      {/* data-modal: el tutorial lo usa para FRENAR y explicar el modal (todos pasan por acá) */}
+      <div className="modal-pop" data-modal={titulo || 'aviso'} onMouseDown={(e) => e.stopPropagation()}
         style={{ width: '100%', maxWidth, background: '#141417', border: '1px solid var(--border-light)', borderRadius: 16, boxShadow: '0 24px 70px rgba(0,0,0,0.6)', overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '88vh' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, padding: '16px 20px', borderBottom: '1px solid var(--border-light)' }}>
           <div>
@@ -3012,7 +3695,7 @@ export default function App() {
   const [telaTopeOpen, setTelaTopeOpen] = useState(false);                        // modal «Telas a la vez»
   const [telaTopeVal, setTelaTopeVal] = useState('');                             // valor escrito en ese modal
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
-  const [telaModoVer, setTelaModoVer] = useState(false);                           // "Ver telas de pieza": pinta por tela + panel de telas
+  const [telaModoVer, setTelaModoVer] = useState(false);                           // "Asignar telas": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
   const [telaElegida, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
   const [telaBuscarAsig, setTelaBuscarAsig] = useState('');                        // buscador de telas en el modo asignar
@@ -3048,10 +3731,13 @@ export default function App() {
   // cambiabas una y se cambiaba la otra sin avisar, y las dos salían cortadas en la misma tela.
   const [telaPorPieza, setTelaPorPieza] = useState(_wiz.telaPorPieza || {});
   // Wizard del Pedido: paso actual + índice del molde en el paso de diseños.
-  const [pedidoPaso, setPedidoPaso] = useState(_wiz.pedidoPaso || 'moldes'); // moldes | arte | planilla | generar | resultados
+  const [pedidoPaso, setPedidoPaso] = useState(_wiz.pedidoPaso || 'diseno'); // diseno | moldes | arte | planilla | generar | resultados
   const [arteIdx, setArteIdx] = useState(_wiz.arteIdx || 0);
   const [moldePreviews, setMoldePreviews] = useState({}); // { [id]: {img_w, img_h, piezas} }
   const [arteCargado, setArteCargado] = useState(_wiz.arteCargado || {}); // { ["<diseno>|<moldId>"]: true } — arte cargado en ESTE pedido
+  // COLUMNA CANTIDAD: la prende el operario con un botón (salvo que la config diga «siempre»).
+  // Es del PEDIDO, no del molde: un pedido nuevo arranca sin ella. Ver `colCantidad`/`cantidadVisible`.
+  const [cantidadOn, setCantidadOn] = useState(!!_wiz.cantidadOn);
   // Múltiples DISEÑOS por pedido: cada diseño (nombre) tiene su arte por molde.
   // Los diseños se ESCRIBEN (ninguno hardcodeado). disenoMoldes = qué moldes van en cada diseño.
   const [disenosPedido, setDisenosPedido] = useState(_wiz.disenosPedido || []); // [{id(slug), nombre}]
@@ -3104,10 +3790,27 @@ export default function App() {
   // AGREGAR UNA PIEZA AL MOLDE: {origen:'duplicar'|'archivo', idx, punto:{x,y}, medidas} | null
   const [pzNueva, setPzNueva] = useState(null);
   const [pzNuevaCargando, setPzNuevaCargando] = useState(false);
+  // 🔴 PREPARADAS, NO GUARDADAS (regla del usuario 2026-08-21): las piezas nuevas viven ACÁ hasta
+  // que se toca «Guardar». Mientras tanto no se tocó el molde: se pueden sacar o rehacer sin
+  // consecuencias. Después de guardar NO se pueden borrar (se borra el molde entero y se re-sube).
+  const [pzPend, setPzPend] = useState([]);
+  const [progresoOpen, setProgresoOpen] = useState(false);   // detalle de «qué falta en este paso»
+  // COPIAR LAS TELAS a otros moldes del pedido: {origen:{did,mid}, destinos:Set} | null
+  const [telaCopiar, setTelaCopiar] = useState(null);
+  // Selector de tela (modal): {destino:'todas'|'seleccion', piezas:[...]} | null
+  const [telaPicker, setTelaPicker] = useState(null);
+  const [telaPickerQ, setTelaPickerQ] = useState('');
+  // El selector vive FUERA del paso Arte (es un modal a nivel de la app), así que el paso publica
+  // acá la lista de telas del molde y qué hacer al elegir una. Un ref y no estado: cambia en cada
+  // render del paso y no tiene que provocar otro.
+  const telaPickerRef = useRef({ lista: [], aplicar: () => {} });
+  const telasPickerLista = telaPickerRef.current.lista;
+  const telaPickerAplicar = (id) => { telaPickerRef.current.aplicar(id); setTelaPicker(null); };
   const fileInputPiezaRef = useRef(null);
   const [modoAcomodar, setModoAcomodar] = useState(false);
   const [pzOffsets, setPzOffsets] = useState({});
-  const [varPickerRow, setVarPickerRow] = useState(null);   // fila (índice) cuyo picker de VARIABLE está abierto (null = cerrado)
+  const [varPickerRow, setVarPickerRow] = useState(null);
+  const [faltanDatos, setFaltanDatos] = useState(null);   // filas incompletas: se pregunta antes de armar   // fila (índice) cuyo picker de VARIABLE está abierto (null = cerrado)
   const dragInfo = useRef({ idx: null, startX: 0, startY: 0, initialX: 0, initialY: 0, hasMoved: false });
   // PINTAR SELECCIÓN de piezas arrastrando con el botón apretado (telas): al apretar sobre una
   // pieza se fija el modo según su estado (si estaba suelta → sumar; si estaba elegida → quitar) y
@@ -3130,7 +3833,16 @@ export default function App() {
   const [mapeoValores, setMapeoValores] = useState({});
   const [previewPiezas, setPreviewPiezas] = useState({});   // {pieza: {svg, w_cm, h_cm}} = render REAL del motor por pieza (fuente única, WYSIWYG)
   const [fuentesEstado, setFuentesEstado] = useState(null);  // {faltantes, catalogo, reemplazos} del arte del diseño activo
+  // 🔴 LA FUENTE ELEGIDA ES DE ESTE PEDIDO (regla del usuario 2026-08-21): «si le asigna una
+  // tipografía de las nuestras se asigna a ESE pedido; si empieza uno de 0, ya se olvidó».
+  // Antes se guardaba en el molde (`prod.fuentes_reemplazo`) y una elección vieja pisaba la fuente
+  // correcta para siempre — pasó: el arte traía una fuente QUE ESTABA en el catálogo y se estampaba
+  // con otra. Viaja en cada request (`fuentes_reemplazo`) y se limpia con «Nuevo pedido».
+  const [fuentesReempl, setFuentesReempl] = useState(_wiz.fuentesReempl || {});
   const [fuenteModal, setFuenteModal] = useState(false);     // modal «Resolver fuente»
+  // Cartel de «la tipografía no está» al querer avanzar a la Planilla. NO traba: trae el botón
+  // «Seguir de todos modos» (regla del usuario 2026-08-21). Sólo recuerda lo que va a pasar.
+  const [fuenteAvanzar, setFuenteAvanzar] = useState(false);
   const [fuenteSubiendo, setFuenteSubiendo] = useState(false);
   const [fuenteArchivo, setFuenteArchivo] = useState(null);      // .ttf/.otf elegido, esperando «Cargar»/«Cargar y guardar»
   const [fuentePrueba, setFuentePrueba] = useState('');          // texto de prueba: se dibuja EN VIVO con cada fuente del catálogo
@@ -3138,12 +3850,40 @@ export default function App() {
   const [fuenteFaltanteSel, setFuenteFaltanteSel] = useState(''); // cuál faltante se está resolviendo (si hay varias)
   const fuenteFileRef = useRef(null);
   const fuenteDestinoRef = useRef('pedido');
-  const cargarFuentesEstado = async () => {
+  // `reemplOverride`: el mapa que ACABA de elegirse (el estado de React aún no lo tiene). Sin esto
+  // el cartel de «tipografía no encontrada» seguía puesto después de resolverla.
+  const cargarFuentesEstado = async (reemplOverride) => {
     const pid = pidCfg || productosCat.activo; if (!pid) return;
     try {
-      const r = await fetch(`/api/pedido/fuentes_estado?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(disenoActivo || 'principal')}`);
-      if (r.ok) setFuentesEstado(await r.json());
+      const r = await fetch(`/api/pedido/fuentes_estado?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(disenoActivo || 'principal')}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(reemplOverride ?? fuentesReempl ?? {}))}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setFuentesEstado(d);
+      // …y se anota de QUÉ arte era, para que el aviso pueda nombrarlo (ver abajo)
+      setFuentesPorArte(prev => ({ ...prev, [(disenoActivo || 'principal') + '|' + pid]: d.faltantes || [] }));
     } catch { /* sin red: no bloquear por esto */ }
+  };
+  // ── DE QUÉ ARTE ES LO QUE FALTA (2026-08-21) ─────────────────────────────────────────────────
+  // `fuentesEstado` es SÓLO del arte que estás mirando: con dos moldes o dos diseños, el aviso no
+  // podía decir a cuál pertenecía la tipografía que falta (y de los otros ni te enterabas hasta
+  // llegar). Se consulta el estado de CADA arte cargado del pedido y se guarda por su clave.
+  // 🔑 La clave es `diseño|MOLDE` — **nunca la variable**: el arte se carga por molde entero.
+  const [fuentesPorArte, setFuentesPorArte] = useState({});
+  const cargarFuentesDeArte = async (did, mid, reemplOverride) => {
+    if (!did || !mid) return;
+    try {
+      const q = `pid=${encodeURIComponent(mid)}&diseno=${encodeURIComponent(did)}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(reemplOverride ?? fuentesReempl ?? {}))}`;
+      const r = await fetch(`/api/pedido/fuentes_estado?${q}`);
+      if (!r.ok) return;
+      const d = await r.json();
+      setFuentesPorArte(prev => ({ ...prev, [did + '|' + mid]: d.faltantes || [] }));
+    } catch { /* sin red: no bloquear por esto */ }
+  };
+  // Todos los artes YA cargados, en paralelo (son GET; el paso no espera por esto).
+  const cargarFuentesTodas = async (reemplOverride) => {
+    const tareas = (disenosPedido || []).flatMap(d => (disenoMoldes[d.id] || []).map(mid => ({ did: d.id, mid })))
+      .filter(t => arteCargado[t.did + '|' + t.mid]);
+    await Promise.all(tareas.map(t => cargarFuentesDeArte(t.did, t.mid, reemplOverride)));
   };
   const [selectedPiezaMapeo, setSelectedPiezaMapeo] = useState('');
   const [piezasSeleccionadas, setPiezasSeleccionadas] = useState([]);
@@ -3173,6 +3913,9 @@ export default function App() {
   const [grupoTizadaEditando, setGrupoTizadaEditando] = useState(null); // grupo en edición
   const [nestingTab, setNestingTab] = useState('presets'); // pestaña en Reglas de Nesting: presets | grupos
   const [perfilesData, setPerfilesData] = useState(null); // {perfiles, cmyk, rgb, config, hay_perfiles}
+  // Espacio que se está mirando en «Perfiles de color». Arranca en CMYK: es el que manda para
+  // sublimar (el RGB sólo se usa si el arte viene en pantalla). Rediseño 2026-08-21.
+  const [perfilEspacio, setPerfilEspacio] = useState('cmyk');
   const [perfilAviso, setPerfilAviso] = useState(null); // {estado, mensaje, incrustado, predeterminado, espacio} → modal al cargar diseño
   const [perfilesArte, setPerfilesArte] = useState({}); // { "<diseno>|<moldId>": {nombre, espacio} } perfil efectivo de cada arte cargado
   const [perfilUnificar, setPerfilUnificar] = useState(null); // {nombres:[...], espacio} → modal "elegí a qué perfil unificar"
@@ -3183,7 +3926,7 @@ export default function App() {
   // tabAjustesMolde: 'menu' (lista de botones) | 'molderia' | 'diseno' | 'planilla'
   const [tabAjustesMolde, setTabAjustesMolde] = useState('menu');
   // ── AYUDA GUIADA ── El tutorial pide «llevame a tal pantalla» y esto lo resuelve; así el guion
-  // no sabe nada de los estados internos y se escribe en criollo (ver guias.js).
+  // no sabe nada de los estados internos y se escribe en criollo (ver diccionario.js).
   const [ayudaAbierta, setAyudaAbierta] = useState(false);
   const irPantallaAyuda = React.useCallback((d) => {
     if (!d) return;
@@ -3313,6 +4056,93 @@ export default function App() {
   const [editableRangoTo, setEditableRangoTo] = useState(null); // talle "hasta" cuando el alcance es 'rango'
   const [editorEditOpen, setEditorEditOpen] = useState(false); // modal del editor de objetos (en Pedidos→Arte)
   const [editorTfs, setEditorTfs] = useState({});   // {obj: {talle: {dx,dy,rot,scale}}} transformaciones en edición
+  // ── MARCAS DE PROCESO: TPU · BORDADO · DTF ────────────────────────────────────────────────
+  // Un objeto marcado NO se sublima: en la tizada, en su lugar, sale una cruz de 3 cm con la letra
+  // del proceso. En el visor se sigue viendo entero (así lo pidió el usuario 2026-08-26).
+  // `{variable: {IDENT: 'tpu'|'bordado'|'dtf'}}`, tal cual lo guarda el catálogo.
+  const [editMarcas, setEditMarcas] = useState({});
+  const [editSinMarca, setEditSinMarca] = useState({});   // objetos con proceso que NO dejan cruz
+  const MARCAS_PROC = [
+    { k: 'tpu', t: 'TPU', icon: 'tpu' },
+    { k: 'bordado', t: 'Bordado', icon: 'bordado' },
+    { k: 'dtf', t: 'DTF', icon: 'dtf' },
+  ];
+  const cargarMarcasEditables = async (pid, diseno) => {
+    try {
+      const r = await fetch(`/api/productos/editables_marcas?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}`);
+      if (r.ok) { const d = await r.json(); setEditMarcas(d.marcas || {}); setEditSinMarca(d.sin_marca || {}); }
+    } catch { /* sin red: el editor igual abre */ }
+  };
+  /** Qué marca tiene un objeto en la variable en curso (o en la base «*»). */
+  const marcaDe = (nombre) => (editMarcas[verVariante] || {})[nombre]
+    || (editMarcas['*'] || {})[nombre] || null;
+  /** ¿Este objeto está en «sin marca»? (no deja NADA en la tizada) */
+  const sinMarcaDe = (nombre) => !!((editSinMarca[verVariante] || {})[nombre]
+    || (editSinMarca['*'] || {})[nombre]);
+  /** «SIN MARCA»: en la tizada no queda NADA en el lugar de estos objetos.
+      🔴 Es AUTÓNOMO — no exige haberles puesto proceso. La primera versión sí lo exigía y era un
+      error mío: al objeto que el usuario sólo quería hacer desaparecer no se le podía aplicar y la
+      orden se descartaba en silencio. Sus palabras: «si presiono en sin marca es sin marca».
+      · con proceso  → no va la cruz de 3 cm (el objeto ya no se sublimaba)
+      · sin proceso  → el objeto simplemente no se imprime */
+  const alternarMarcaVisible = async (pid, diseno, nombres) => {
+    const conProceso = nombres;
+    if (!conProceso.length) { showError('Elegí al menos un objeto.'); return; }
+    // si TODOS ya están sin marca, el botón se la devuelve
+    const nueva = !conProceso.every(n => sinMarcaDe(n));
+    const clave = verVariante || '*';
+    try {
+      for (const nombre of conProceso) {
+        const r = await fetch('/api/productos/editable_marca', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid, diseno: diseno || 'principal', nombre, variante: clave, sin_marca: nueva }),
+        });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'no se pudo guardar'); }
+      }
+      setEditSinMarca(prev => {
+        const m = { ...prev, [clave]: { ...(prev[clave] || {}) } };
+        conProceso.forEach(n => { if (nueva) m[clave][n] = true; else delete m[clave][n]; });
+        return m;
+      });
+      // OJO: acá NO se invalida el caché del visor. El preview del arte muestra el objeto ENTERO
+      // en los dos casos (`marcas_como_cruz=false`), así que rehacerlo sería trabajo al pedo.
+      const _conP = conProceso.filter(n => marcaDe(n)).length;
+      showMsg(nueva
+        ? `${conProceso.length} objeto(s): en la tizada no queda nada en su lugar.`
+        : (_conP ? `${conProceso.length} objeto(s) vuelven a dejar la cruz de 3 cm.`
+                 : `${conProceso.length} objeto(s) vuelven a imprimirse normal.`));
+    } catch (e) { showError(String(e.message || e)); }
+  };
+  /** Asignar (o quitar, tocando la misma) el proceso a TODOS los objetos seleccionados. */
+  const asignarMarca = async (pid, diseno, nombres, marca) => {
+    if (!nombres.length) { showError('Elegí al menos un objeto.'); return; }
+    // si TODOS ya la tienen, el botón la saca (regla del usuario: se apaga tocando de nuevo)
+    const todos = nombres.every(n => marcaDe(n) === marca);
+    const nueva = todos ? '' : marca;
+    const clave = verVariante || '*';
+    try {
+      for (const nombre of nombres) {
+        const r = await fetch('/api/productos/editable_marca', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pid, diseno: diseno || 'principal', nombre, variante: clave, marca: nueva }),
+        });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'no se pudo guardar'); }
+      }
+      setEditMarcas(prev => {
+        const m = { ...prev, [clave]: { ...(prev[clave] || {}) } };
+        nombres.forEach(n => { if (nueva) m[clave][n] = nueva; else delete m[clave][n]; });
+        return m;
+      });
+      // el render cacheado del visor incluye qué objetos salen del diseño → hay que rehacerlo
+      _pvCache.current = {}; setPreviewPiezas({}); cargarPreviewPiezas();
+      const _n = MARCAS_PROC.find(x => x.k === marca)?.t || marca;
+      // el aviso tiene que decir la verdad: si el objeto está en «sin marca», no sale ninguna cruz
+      const _sinM = nueva && nombres.every(nm => sinMarcaDe(nm));
+      showMsg(nueva ? `${nombres.length} objeto(s) van por ${_n}: `
+                      + (_sinM ? 'no dejan ninguna marca en la tizada.' : 'en la tizada sale la cruz de 3 cm.')
+                    : `${nombres.length} objeto(s) vuelven a sublimarse normal.`);
+    } catch (e) { showError(String(e.message || e)); }
+  };
   const editorTfsRef = useRef({});                  // espejo de editorTfs (leer el valor actual sin re-crear closures)
   React.useEffect(() => { editorTfsRef.current = editorTfs; }, [editorTfs]);
   const editorSvgRef = useRef(null);                // <svg> del editor (para mapear pantalla→viewBox)
@@ -3450,9 +4280,26 @@ export default function App() {
   const [yo, setYo] = useState(null);
   const [authListo, setAuthListo] = useState(false);   // ya se consultó /yo (evita parpadeo del login)
   const [authOn, setAuthOn] = useState(true);          // ¿la API de usuarios está viva? (si no, no se exige login)
-  const recargarYo = () => fetch('/api/auth/yo').then(r => r.json())
-    .then(d => { setYo(d.usuario || null); setAuthOn(true); })
-    .catch(() => { setYo(null); setAuthOn(false); })
+  // El servidor CONTESTA pero su base no: hay que decirlo, no entrar como si no hubiera usuarios.
+  const [sinBase, setSinBase] = useState(null);        // null = la base responde; string = el motivo
+  // ⚠️ TRES respuestas distintas, y confundirlas costó una pantalla entera de errores rojos:
+  //   · 200            → hay sistema de usuarios (haya o no sesión).
+  //   · 404            → esta instalación NO tiene usuarios (`authOn = false`, se entra directo).
+  //   · 5xx / sin red  → el servidor está pero **su base no responde**. Antes caía en el `catch`
+  //                      junto con el 404 y la app arrancaba como «sin usuarios»: entraba igual y
+  //                      después TODO daba 401, sin decir nunca qué pasaba. (2026-08-26)
+  const recargarYo = () => fetch('/api/auth/yo')
+    .then(async r => {
+      if (r.status === 404) { setYo(null); setAuthOn(false); setSinBase(null); return; }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.base === false) {
+        setSinBase(d.error || 'no hay conexión con la base de datos del sistema');
+        setYo(null); setAuthOn(true);
+        return;
+      }
+      setSinBase(null); setYo(d.usuario || null); setAuthOn(true);
+    })
+    .catch(() => { setSinBase('no se puede hablar con el servidor'); setYo(null); setAuthOn(true); })
     .finally(() => setAuthListo(true));
   useEffect(() => { recargarYo(); }, []);
 
@@ -3529,12 +4376,32 @@ export default function App() {
   // usa ESTE objeto; cae a `activoProdDetalle` sólo mientras el catálogo todavía no llegó.
   const prodCfg = productosCat.productos.find(p => p.id === pidCfg) || activoProdDetalle;
 
-  const cols = activoProdDetalle?.columnas || [
+  const _colsProd = activoProdDetalle?.columnas || [
     { id: 'talle', label: 'Talle', role: 'talle' },
     { id: 'nombre', label: 'Nombre', role: 'nombre' },
     { id: 'numero', label: 'Número', role: 'numero' },
     { id: 'manga', label: 'Manga', role: 'manga' }
   ];
+  // LA COLUMNA «CANTIDAD» ESTÁ EN TODAS LAS PLANILLAS, sin migrar ninguna: si el molde no la trae
+  // guardada se agrega acá (y lo mismo hace el servidor con el template, `_con_cantidad`, para que
+  // las dos puntas vean lo mismo). Su configuración —dónde va y si se muestra siempre o con
+  // botón— sale del template de la planilla, que es donde se edita.
+  const cols = React.useMemo(() => {
+    const base = _colsProd || [];
+    const yaEsta = base.some(c => c.role === 'cantidad');
+    const delTpl = (plantillasPlanillas.find(t => t.id === activoProdDetalle?.planilla_template_id) || {}).columnas || [];
+    const cfg = delTpl.find(c => c.role === 'cantidad');
+    if (yaEsta) {
+      // la config manda: el molde puede tener una copia vieja de la columna
+      return base.map(c => c.role === 'cantidad' ? { ...c, ...(cfg || {}) } : c);
+    }
+    const col = cfg || { id: 'cantidad', label: 'Cantidad', role: 'cantidad', tipo: 'numero', mostrar: 'boton' };
+    // si el template la ubicó en una posición concreta, se respeta; si no, va al final
+    const pos = cfg ? delTpl.findIndex(c => c.role === 'cantidad') : -1;
+    if (pos < 0 || pos >= base.length) return [...base, col];
+    const out = [...base]; out.splice(pos, 0, col); return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_colsProd, plantillasPlanillas, activoProdDetalle?.planilla_template_id]);
 
   // Terminología configurable del producto activo (cómo se llaman los conceptos
   // de cara al usuario). Solo cambian las etiquetas; el funcionamiento es igual.
@@ -3573,9 +4440,14 @@ export default function App() {
     // ETIQUETA (2026-08-20 bis): lienzo TODAS con BARRA DE CAPAS — arranca mostrando sólo
     // la guía (el resto oculto por su ojito) y el usuario destapa los talles que quiera.
     const _etqPorPieza = tabAjustesMolde === 'etiqueta' && !!etqPiezaSel;
-    const _varAbierta = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado;
+    // ⚠️ ELEGIR PIEZAS va sobre UN talle, NUNCA sobre el lienzo junto (bug 2026-08-21): las
+    // piezas del grupo se guardan con el `pieza_idx` DEL TALLE GUÍA, y en el lienzo de todos
+    // los talles esos índices caen en el bloque del PRIMER talle (el «0»): el usuario elegía
+    // creyendo ver la guía y estaba tocando otro talle. Con `asignandoTipo` se vuelve a `etqData`
+    // (el talle guía o el que eligió con los chips), que es de donde salen esos índices.
+    const _varAbierta = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado && !asignandoTipo;
     const src = (((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData;
-    if (!src?.piezas) return { layout: [], width: 850, height: 400, vb: '0 0 850 400' };
+    if (!src?.piezas) return { layout: [], dibujo: [], zTalle: new Map(), width: 850, height: 400, vb: '0 0 850 400' };
 
     // Siempre usar las posiciones originales del PDF
     const layout = src.piezas.map((p) => ({
@@ -3642,8 +4514,23 @@ export default function App() {
       clusters = [...cajas.values()];
     }
 
-    return { layout, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
-  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado]);
+    // ── ORDEN DE APILADO = EL PANEL DE CAPAS ─────────────────────────────────
+    // La capa de más ARRIBA en la barra de talles es la que va más ADELANTE (igual que
+    // Illustrator). Importa de verdad en un molde ANIDADO, donde los talles están dibujados
+    // uno encima del otro: sin esto el talle de abajo de la lista tapaba a todos los demás y
+    // el clic siempre caía en él (el navegador entrega el evento al que está más arriba en el
+    // z-order, y en SVG eso es LO ÚLTIMO PINTADO — no hay z-index).
+    //   · `layout` queda en orden LÓGICO (adelante primero) → los hit-tests por bbox toman el
+    //     primer match y aciertan la pieza de adelante.
+    //   · `dibujo` es el mismo conjunto AL REVÉS, que es lo que hay que pintar.
+    // Dentro de una capa el orden relativo no se toca (`sort` es estable): sólo se invierten
+    // los bloques de talle.
+    const zTalle = new Map((src.talles || []).map((t, i) => [t, i]));
+    const _z = (p) => (p.talle != null && zTalle.has(p.talle) ? zTalle.get(p.talle) : -1);
+    const dibujo = layout.slice().sort((a, b) => _z(b) - _z(a));
+
+    return { layout, dibujo, zTalle, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
+  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo]);
 
   // Las variantes del MOLDE. `etqData.talles` es de la DETECCIÓN que se está mostrando: en la
   // vista «asignar variantes por piezas» son las capas del archivo original (una sola, «Capa 1»).
@@ -4031,13 +4918,14 @@ export default function App() {
 
   // Ir del paso Arte a la Planilla. Si los diseños tienen perfiles de color DISTINTOS,
   // primero pregunta a cuál unificar la exportación (con aviso de variación de color).
-  const irAPlanillaDesdeArte = async () => {
+  const irAPlanillaDesdeArte = async ({ forzarFuente } = {}) => {
     if (!todasArteCargadas) return;
-    // FUENTE NO RECONOCIDA = TRABA (2026-08-20): el nombre/número estampado saldría con
-    // otra tipografía. Se resuelve acá: subirla (sistema o sólo este pedido) o reemplazarla.
-    if (fuentesEstado?.faltantes?.length) { setFuenteModal(true); return; }
+    // FUENTE NO RECONOCIDA = AVISO, NO TRABA (cambio 2026-08-21, pedido del usuario). La tizada
+    // sale igual: el nombre/número se sublima con la predeterminada. Así que en vez de frenar, se
+    // muestra el cartel una vez y el usuario decide — «Seguir de todos modos» pasa `forzarFuente`.
+    if (!forzarFuente && fuentesFaltantesItems.length) { setFuenteAvanzar(true); return; }
     if (telasIncompletas) {   // OBLIGATORIO: cada pieza tiene que tener una tela elegida
-      showError(`Faltan ${telasFaltantesTotal} pieza(s) sin tela. Asignales una tela en «Ver telas de pieza» antes de seguir.`);
+      showError(`Faltan ${telasFaltantesTotal} pieza(s) sin tela. Asignales una tela en «Asignar telas» antes de seguir.`);
       return;
     }
     if (bloqueaPorSinDiseno()) return;   // alguna pieza del molde activo sin diseño → no avanza, la marca en rojo
@@ -4085,13 +4973,28 @@ export default function App() {
       }
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo resolver la fuente'); return; }
+      // El reemplazo NO lo guarda el server: vive en ESTE pedido.
+      if (accion === 'subir') {
+        // cargar el archivo de una fuente que tenía reemplazo = volver a ella
+        if ((d.alias_quitados || []).length) setFuentesReempl(m => { const n = { ...m }; d.alias_quitados.forEach(k => delete n[k]); return n; });
+      } else if (d.quitar) {
+        setFuentesReempl(m => { const n = { ...m }; delete n[datos.faltante]; return n; });   // eligió la original
+      } else {
+        setFuentesReempl(m => ({ ...m, [datos.faltante]: datos.usar }));
+      }
       showMsg(accion === 'subir'
-        ? (datos.destino === 'sistema' ? 'Fuente cargada al sistema ✓' : 'Fuente cargada para este pedido ✓')
-        : 'Reemplazo guardado ✓');
-      await cargarFuentesEstado();
-      // con la fuente resuelta, el render de las piezas cambia (aparecen los textos):
-      // se tiran los previews y el visor los repide con la fuente nueva
-      _pvCache.current = {}; setPreviewPiezas({}); cargarPreviewPiezas();
+        ? (datos.destino === 'sistema' ? 'Fuente cargada al sistema ✓ — el sistema la va a reconocer siempre' : 'Fuente cargada sólo para este pedido ✓')
+        : 'Listo: esta tizada usa esa tipografía ✓');
+      // EN TIEMPO REAL: se repide el render con el mapa de fuentes YA actualizado (el estado de
+      // React todavía no lo tiene en este tick), así el visor cambia la tipografía al instante.
+      const _nuevo = accion === 'subir'
+        ? (() => { const m = { ...fuentesReempl }; (d.alias_quitados || []).forEach(k => delete m[k]); return m; })()
+        : d.quitar
+          ? (() => { const m = { ...fuentesReempl }; delete m[datos.faltante]; return m; })()
+          : { ...fuentesReempl, [datos.faltante]: datos.usar };
+      await cargarFuentesEstado(_nuevo);        // el cartel se va apenas queda resuelta
+      cargarFuentesTodas(_nuevo);               // …y en los demás artes del pedido también
+      _pvCache.current = {}; setPreviewPiezas({}); cargarPreviewPiezas(null, _nuevo);
     } catch (e) { showError('No se pudo: ' + (e.message || e)); }
     finally { setFuenteSubiendo(false); }
   };
@@ -4656,27 +5559,38 @@ export default function App() {
       const r = await fetch('/api/plantilla/pieza_archivo', { method: 'POST', body: fd });
       const d = await leerJson(r);
       if (!r.ok) throw new Error(d.error || 'No se pudo leer el archivo');
-      setPzNueva(p => ({ ...(p || {}), origen: 'archivo', archivo: file.name, medidas: `${d.w_cm} × ${d.h_cm} cm`,
+      setPzNueva(p => ({ ...(p || {}), origen: 'archivo', archivo: file.name, archivoId: d.archivo,
+                         medidas: `${d.w_cm} × ${d.h_cm} cm`,
                          contornos: d.contornos, tallesMolde: d.talles, completo: d.completo }));
       if (d.completo) showMsg(`Pieza leída: ${d.w_cm} × ${d.h_cm} cm ✓`);
       else showWarn(`El archivo trae ${d.contornos} contorno/s y el molde tiene ${d.talles} talles. La pieza tiene que venir dibujada en todos los talles.`);
     } catch (err) { showError(err.message); }
     finally { setPzNuevaCargando(false); }
   };
-  // Escribe la pieza en el molde. El server la mete en TODOS los talles y remapea el registro
-  // (agregar una pieza corre el `pieza_idx` de las que siguen — ver `piezas_molde.py`).
-  const agregarPiezaAlMolde = async () => {
+  // PREPARAR la pieza (no escribe nada todavía): pasa a la lista de pendientes.
+  const prepararPieza = () => {
     if (!pzNueva || !pzNueva.punto) { showError('Primero marcá en el visor dónde va la pieza.'); return; }
+    setPzPend(prev => [...prev, { ...pzNueva }]);
+    setPzNueva(null);
+  };
+  const sacarPiezaPend = (i) => setPzPend(prev => prev.filter((_, k) => k !== i));
+  // GUARDAR: recién acá se escribe el molde, y TODAS las preparadas entran en una sola versión.
+  // Lo guardado ya no se puede sacar (regla del usuario): la confirmación lo dice.
+  const guardarPiezasNuevas = async () => {
+    const lista = [...pzPend, ...(pzNueva && pzNueva.punto ? [pzNueva] : [])];
+    if (!lista.length) { showError('No hay ninguna pieza preparada.'); return; }
     setPzNuevaCargando(true);
     try {
-      const cuerpo = { pid: pidCfg, origen: pzNueva.origen, dx: pzNueva.punto.dx, dy: pzNueva.punto.dy };
-      if (pzNueva.origen === 'duplicar') cuerpo.pieza_idx = pzNueva.idx;
+      const piezas = lista.map(p => ({
+        origen: p.origen, dx: p.punto.dx, dy: p.punto.dy,
+        ...(p.origen === 'duplicar' ? { pieza_idx: p.idx } : { archivo: p.archivoId }),
+      }));
       const r = await fetch('/api/plantilla/pieza_agregar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo)
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: pidCfg, piezas })
       });
       const d = await leerJson(r);
-      if (!r.ok) throw new Error(d.error || 'No se pudo agregar la pieza');
-      setPzNueva(null);
+      if (!r.ok) throw new Error(d.error || 'No se pudieron guardar las piezas');
+      setPzPend([]); setPzNueva(null);
       // El molde es OTRO archivo: hay que recargar la detección y tirar todo lo derivado.
       _talleDetCache.current = {};
       invalidarNido();
@@ -4684,29 +5598,8 @@ export default function App() {
       const _rd = await fetch(`/api/plantilla/deteccion${qPid()}`);
       if (_rd.ok) { const _dd = await _rd.json(); setEtqData(_dd); setEtqNombres(_dd.nombres_existentes || {}); }
       await fetchEstado();
-      showMsg(`Pieza agregada en ${d.talles} talles ✓ — ponele nombre en Variables · Paso 1`);
-      if (d.avisos && d.avisos.length) showWarn(`Quedaron ${d.avisos.length} pieza/s sin reubicar: ${d.avisos[0]}`);
-    } catch (err) { showError(err.message); }
-    finally { setPzNuevaCargando(false); }
-  };
-
-  // Saca la última pieza agregada: el molde vuelve a su versión anterior y el registro con él.
-  const deshacerPiezaMolde = async () => {
-    setPzNuevaCargando(true);
-    try {
-      const r = await fetch('/api/plantilla/pieza_deshacer', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: pidCfg })
-      });
-      const d = await leerJson(r);
-      if (!r.ok) throw new Error(d.error || 'No se pudo deshacer');
-      _talleDetCache.current = {};
-      invalidarNido();
-      setSembrarGen(v => v + 1);
-      const _rd = await fetch(`/api/plantilla/deteccion${qPid()}`);
-      if (_rd.ok) { const _dd = await _rd.json(); setEtqData(_dd); setEtqNombres(_dd.nombres_existentes || {}); }
-      await fetchProductos();
-      await fetchEstado();
-      showMsg('Pieza sacada — el molde volvió a como estaba ✓');
+      showMsg(`${d.agregadas > 1 ? `${d.agregadas} piezas guardadas` : 'Pieza guardada'} en ${d.talles} talles ✓ — ponele nombre en Moldería · Nombrar piezas`);
+      if (d.avisos && d.avisos.length) showWarn(d.avisos[0]);
     } catch (err) { showError(err.message); }
     finally { setPzNuevaCargando(false); }
   };
@@ -4869,6 +5762,27 @@ export default function App() {
     setPzOffsets(o);
   }, [etqData, empModo, empTalle, empData]);
 
+  // ══════ VARIABLE ABIERTA: acomodar piezas (Config → Moldería → Variables) ═════════════════
+  // El visor está para ACOMODAR cuando hay una variable abierta y NINGUNA herramienta de
+  // asignación en curso (si no, el clic es para asignar y no para mover).
+  const modoAcomodoVar = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado
+    && !asignandoTipo && !asignandoConjunto && !asignandoGrupoPz && !vinculandoJuntas;
+  // 🔴 Acá el OBJETO que se mueve es el NOMBRE, no la pieza suelta: una «pieza de la variable» son
+  // todos sus talles nesteados, que van y se acomodan JUNTOS. Por eso seleccionar una la selecciona
+  // entera (todos sus talles) y el acomodo se guarda por nombre (`acomodo_mm`).
+  const _nombreDePieza = (idx) => (((canvasLayout.layout.find(p => p.idx === idx) || {}).name) || etqNombres[idx] || '').trim();
+  const _idxsDeNombre = (nom) => canvasLayout.layout.filter(p => (((p.name || etqNombres[p.idx]) || '').trim()) === nom).map(p => p.idx);
+  const toggleSelVarNombre = (idx) => {
+    const nom = _nombreDePieza(idx);
+    const idxs = nom ? _idxsDeNombre(nom) : [idx];
+    setSelNombrar(prev => {
+      const ya = idxs.every(i => prev.has(i));
+      const nx = new Set(prev);
+      idxs.forEach(i => { if (ya) nx.delete(i); else nx.add(i); });
+      return nx;
+    });
+  };
+
   const startDrag = (e, idx) => {
     // RUEDA DEL MOUSE apretada sobre una pieza: MOVER libremente la selección por el
     // visor (pedido 2026-08-20). Directo, sin timer de agarre.
@@ -4914,15 +5828,18 @@ export default function App() {
         // selecciona, lo seleccionado se deselecciona. Sin modos. MOVER = quieto TOTAL 350 ms
         // (agarre): revierte el toggle del apretón y mueve la selección previa.
         {
-          const svgEl = e.currentTarget.ownerSVGElement || (e.currentTarget.closest && e.currentTarget.closest('svg'));
-          const bajo = _piezasBajoPunto(svgEl, e.clientX, e.clientY);
           const sx = e.clientX, sy = e.clientY;
           const prevSel = new Set(selNombrar);
-          const tocadas = new Set(bajo.length ? bajo : [idx]);
+          // 🔴 CLICK SIN ARRASTRAR = UNA SOLA PIEZA (regla del usuario 2026-08-21): la de ADELANTE
+          // (`idx` es la que recibió el evento, o sea la de la capa más alta), **sin importar
+          // cuántas tenga debajo**. Antes el apretón toggleaba TODA la pila, que en un molde
+          // anidado son 30 piezas de un saque. Varias piezas se eligen ARRASTRANDO — y ahí sí,
+          // cada punto del arrastre se lleva todo lo apilado (lo pinta el `onMouseMove`, que
+          // ahora exige haber superado el umbral de 3 px: un temblor no puede contar como arrastre).
+          const tocadas = new Set([idx]);
           pintaSel.current = { on: true, sx, sy, movio: false, tocadas };
-          const objetivo = bajo.length ? bajo : [idx];
           setSelNombrar(prev => { const nx = new Set(prev);
-            objetivo.forEach(i => { if (nx.has(i)) nx.delete(i); else nx.add(i); });
+            if (nx.has(idx)) nx.delete(idx); else nx.add(idx);
             return nx; });
           if (selHold.current) clearTimeout(selHold.current);
           selHold.current = setTimeout(() => {
@@ -4982,15 +5899,22 @@ export default function App() {
     // VARIABLE ABIERTA (sin modo de asignación activo): arrastrar ACOMODA la pieza — se
     // mueve con TODOS sus talles juntos (la pieza de la variable es el nombre) y al soltar
     // queda guardado en la variante (pedido del usuario 2026-08-20).
-    if (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado) {
-      const nom = (((canvasLayout.layout.find(p => p.idx === idx) || {}).name) || etqNombres[idx] || '').trim();
-      const idxs = nom
-        ? canvasLayout.layout.filter(p => (((p.name || etqNombres[p.idx]) || '').trim()) === nom).map(p => p.idx)
-        : [idx];
+    if (modoAcomodoVar) {
+      const nom = _nombreDePieza(idx);
+      // VARIAS A LA VEZ (pedido 2026-08-21): si la pieza tocada es parte de la SELECCIÓN, el
+      // arrastre mueve TODAS las seleccionadas juntas (cada una con todos sus talles). Si no lo
+      // es, se mueve sólo ella — la selección no se toca hasta soltar (un clic sin arrastrar la
+      // suma/saca, igual que en el espacio de nombrar).
+      const enSel = selNombrar.has(idx);
+      const nombres = enSel
+        ? [...new Set(Array.from(selNombrar).map(_nombreDePieza).filter(Boolean))]
+        : (nom ? [nom] : []);
+      const idxs = nombres.length ? [...new Set(nombres.flatMap(_idxsDeNombre))] : [idx];
       const inis = {};
       idxs.forEach(i => { inis[i] = pzOffsets[i] || { x: 0, y: 0 }; });
       dragInfo.current = { idx, startX: e.clientX, startY: e.clientY, initialX: 0, initialY: 0,
-                           hasMoved: false, emp: true, inis, noToggle: true, varNombre: nom || `#${idx}` };
+                           hasMoved: false, emp: true, inis, noToggle: true, varAcomodo: true,
+                           varNombres: nombres.length ? nombres : [`#${idx}`] };
       e.preventDefault(); return;
     }
     setEtqSeleccion(idx);
@@ -5077,11 +6001,19 @@ export default function App() {
     // En "emparejar talles" el mismo gesto sirve para las dos cosas: si no hubo movimiento
     // fue un clic → selecciona/deselecciona la pieza (mismo gesto que el resto del visor).
     if (d.idx !== null && d.emp && !d.hasMoved && !d.noToggle) toggleSelNombrar(d.idx);
-    if (d.varNombre && d.hasMoved && d.idx !== null) {
-      // acomodo de la VARIABLE: se guarda por nombre al soltar (una escritura por gesto)
-      const off = pzOffsets[d.idx];
-      if (off) guardarAcomodoVarMm({ [d.varNombre]: { x: Math.round(off.x * 100) / 100,
-                                                     y: Math.round(off.y * 100) / 100 } });
+    // VARIABLE ABIERTA: un clic sin arrastrar SELECCIONA (la pieza entera, todos sus talles) —
+    // así se juntan varias y después se mueven todas de un arrastre.
+    if (d.varAcomodo && !d.hasMoved && d.idx !== null) toggleSelVarNombre(d.idx);
+    if (d.varNombres && d.hasMoved && d.idx !== null) {
+      // acomodo de la VARIABLE: se guarda por nombre al soltar (UNA escritura por gesto, aunque
+      // se hayan movido 7 piezas — todas las de un nombre comparten el mismo offset).
+      const offs = {};
+      d.varNombres.forEach(nom => {
+        const i = (nom || '').startsWith('#') ? d.idx : _idxsDeNombre(nom)[0];
+        const off = pzOffsets[i];
+        if (off) offs[nom] = { x: Math.round(off.x * 100) / 100, y: Math.round(off.y * 100) / 100 };
+      });
+      if (Object.keys(offs).length) guardarAcomodoVarMm(offs);
     }
     dragInfo.current.idx = null;
     dragInfo.current.inis = null;
@@ -6144,20 +7076,59 @@ export default function App() {
     return { id: 'v_' + idx, label: (b ? (b.nombre || '').trim() : '') || _nombreDeIdx(idx),
              pieza_idx: idx, talle_origen: (etqData?.talle_ref) || null };
   };
+  // ══════ «VAN JUNTAS» — VIVE EN EL GRUPO, NO EN LA VARIABLE (2026-08-21) ══════════════════
+  // Regla del usuario: en una variable NO pueden entrar dos piezas que se llamen igual, SALVO que
+  // estén declaradas como «van juntas» (ej. manga + su vivo). Y eso se declara ANTES, al configurar
+  // el GRUPO: así, al armar una variable, elegir una de las dos trae la otra sola.
+  // 🔴 Compat: los vínculos VIEJOS quedaron guardados dentro de la variante (`v.juntas`). No se
+  // migran a la fuerza — se leen los dos lados y mandan los del grupo. Borrar uno lo saca de donde
+  // esté. Así un molde ya configurado sigue andando sin tocar nada.
+  const juntasDelGrupo = (gid) => (((gruposPz || []).find(g => g.id === gid) || {}).juntas) || [];
+  const juntasDeVariable = (v) => {
+    if (!v) return [];
+    const delGrupo = juntasDelGrupo(v.grupoId);
+    const propias = (v.juntas || []).filter(b => !delGrupo.some(x => x.id === b.id));   // legacy
+    return [...delGrupo, ...propias];
+  };
+  // Nombre con el que se compara: el guardado en el valor (`label`) o el del talle en pantalla.
+  const _nomDeValor = (v) => ((v && v.label) || '').trim() || _nombreDeIdx(v && v.pieza_idx);
+  /** UN NOMBRE = UN LUGAR (2026-08-21). Las piezas que hay que SACAR de la variable para que
+   *  entren `nuevas`: las que ocupan el mismo nombre generico y no son parte del mismo vinculo.
+   *  Si la que sale esta vinculada con otra, sale el vinculo ENTERO (es atomico).
+   *  ⛔ No es un error ni se avisa: elegir el otro frente es CAMBIAR de frente, no equivocarse. */
+  const _desplazadasPorNombre = (t, nuevas, juntas) => {
+    const gens = new Set(nuevas.map(i => nombreGenerico(_nombreDeIdx(i))).filter(Boolean));
+    const entran = new Set(nuevas);
+    const salen = new Set();
+    (t?.valores || []).forEach(v => {
+      if (v.pieza_idx == null || entran.has(v.pieza_idx)) return;
+      const g = nombreGenerico(_nomDeValor(v));
+      if (!g || !gens.has(g)) return;
+      const bv = _juntaDeIdx(juntas, v.pieza_idx);
+      (bv ? (bv.piezas || []) : [v.pieza_idx]).forEach(i => salen.add(i));
+    });
+    return salen;
+  };
+
   const togglePiezaEnTipo = (clave, idx) => {
-    // MULTIGRUPO: togglea la pieza SOLO en este grupo; no la saca de los demás.
+    const t0 = (variantesEdit || []).find(x => x.clave === clave);
+    const juntas = juntasDeVariable(t0);
+    const b = _juntaDeIdx(juntas, idx);
+    const afectadas = b ? (b.piezas || []) : [idx];    // "van juntas": la unidad entera entra/sale junta
+    const yaEsta = (t0?.valores || []).some(v => v.pieza_idx === idx);
+    // MULTIGRUPO: togglea la pieza SOLO en este grupo; no la saca de los demas.
     setVariantesEdit(prev => prev.map(t => {
       if (t.clave !== clave) return t;
-      const juntas = t.juntas || [];
-      const b = _juntaDeIdx(juntas, idx);
-      const afectadas = b ? (b.piezas || []) : [idx];    // "van juntas": la unidad entera entra/sale junta
-      const yaEsta = (t.valores || []).some(v => v.pieza_idx === idx);
       let vals;
       if (yaEsta) { const quitar = new Set(afectadas); vals = (t.valores || []).filter(v => !quitar.has(v.pieza_idx)); }
       else {
-        const yaSet = new Set((t.valores || []).map(v => v.pieza_idx));
+        // El nombre es un LUGAR: la que estaba con ese nombre se va y entra esta (uno u el otro).
+        // Dos piezas del mismo nombre solo conviven si estan vinculadas como «van juntas».
+        const fuera = _desplazadasPorNombre(t, afectadas, juntas);
+        const base = (t.valores || []).filter(v => !fuera.has(v.pieza_idx));
+        const yaSet = new Set(base.map(v => v.pieza_idx));
         const nuevos = afectadas.filter(i => !yaSet.has(i)).map(i => _valorDeIdx(i, juntas));
-        vals = dedupePorPieza([...(t.valores || []), ...nuevos]);
+        vals = dedupePorPieza([...base, ...nuevos]);
       }
       return { ...t, valores: vals };
     }));
@@ -6169,35 +7140,63 @@ export default function App() {
   // solo agrega al grupo destino (no las saca de los otros grupos). Expande los vínculos.
   const agregarPiezasATipo = (clave, idxs) => {
     if (!idxs || !idxs.length) return;
+    const t0 = (variantesEdit || []).find(x => x.clave === clave);
+    const juntas = juntasDeVariable(t0);
+    // Expandir los vinculos: si entra una de «van juntas», entran todas.
+    const expandido = [];
+    idxs.forEach(idx => { const b = _juntaDeIdx(juntas, idx); (b ? (b.piezas || []) : [idx]).forEach(i => { if (!expandido.includes(i)) expandido.push(i); }); });
+    // UN NOMBRE = UN LUGAR: del recuadro entra UNA por nombre, y NO se pisa lo que ya estaba
+    // elegido (para cambiar de pieza se toca la que se quiere: eso si reemplaza). Sin carteles.
+    const ocupados = new Set((t0?.valores || []).filter(v => v.pieza_idx != null).map(v => nombreGenerico(_nomDeValor(v))).filter(Boolean));
+    const yaSet = new Set((t0?.valores || []).map(v => v.pieza_idx));
+    const entran = [];
+    expandido.forEach(i => {
+      if (yaSet.has(i)) return;
+      const b = _juntaDeIdx(juntas, i);
+      const gen = nombreGenerico(_nombreDeIdx(i));
+      // una pieza vinculada entra con su compañera aunque compartan nombre: para eso es el vinculo
+      const conVinculo = !!b && (b.piezas || []).some(j => entran.includes(j));
+      if (gen && ocupados.has(gen) && !conVinculo) return;
+      entran.push(i);
+      if (gen) ocupados.add(gen);
+    });
+    if (!entran.length) return;
     setVariantesEdit(prev => prev.map(t => {
       if (t.clave !== clave) return t;
-      const juntas = t.juntas || [];
-      const expandido = new Set();
-      idxs.forEach(idx => { const b = _juntaDeIdx(juntas, idx); (b ? (b.piezas || []) : [idx]).forEach(i => expandido.add(i)); });
-      const yaSet = new Set((t.valores || []).map(v => v.pieza_idx));
-      const nuevos = [...expandido].filter(idx => !yaSet.has(idx)).map(idx => _valorDeIdx(idx, juntas));
+      const ya = new Set((t.valores || []).map(v => v.pieza_idx));
+      const nuevos = entran.filter(idx => !ya.has(idx)).map(idx => _valorDeIdx(idx, juntas));
       return { ...t, valores: dedupePorPieza([...(t.valores || []), ...nuevos]) };
     }));
   };
-  // ── Vínculos "van juntas" dentro de una variable ──
-  const crearVinculoJuntas = (clave, idxs, nombre) => {
+  // ── Vínculos "van juntas" — SE DEFINEN EN EL GRUPO ──
+  // El vínculo es del GRUPO (se declara antes de armar las variables) y de ahí lo toman todas sus
+  // variables: elegir una de las piezas trae la otra sola.
+  const crearVinculoJuntas = (gid, idxs, nombre) => {
     const piezas = Array.from(new Set(idxs)).sort((a, b) => a - b);
     if (piezas.length < 2) { showError('Elegí al menos 2 piezas para vincularlas'); return; }
     const nom = (nombre || '').trim() || _nombreDeIdx(piezas[0]);
     const setP = new Set(piezas);
-    const nueva = (variantesEdit || []).map(t => {
-      if (t.clave !== clave) return t;
-      // sacar esas piezas de vínculos previos, agregar el nuevo, y re-etiquetar sus valores
-      const juntasPrev = (t.juntas || []).map(b => ({ ...b, piezas: (b.piezas || []).filter(i => !setP.has(i)) })).filter(b => (b.piezas || []).length >= 2);
-      const juntas = [...juntasPrev, { id: 'j_' + uidVar(), nombre: nom, piezas }];
-      const valores = (t.valores || []).map(v => setP.has(v.pieza_idx) ? { ...v, label: nom } : v);
-      return { ...t, juntas, valores };
-    });
+    const nuevoB = { id: 'j_' + uidVar(), nombre: nom, piezas };
+    aplicarGruposPz(arr => arr.map(g => {
+      if (g.id !== gid) return g;
+      // una pieza pertenece a UN vínculo: se la saca de los anteriores
+      const prev = (g.juntas || []).map(b => ({ ...b, piezas: (b.piezas || []).filter(i => !setP.has(i)) })).filter(b => (b.piezas || []).length >= 2);
+      return { ...g, juntas: [...prev, nuevoB] };
+    }));
+    // Las variables que YA tienen esas piezas pasan a mostrarlas con el nombre del vínculo (van y
+    // se nombran juntas). No se agregan piezas acá: eso lo decide el usuario al armar la variable.
+    const nueva = (variantesEdit || []).map(t => t.grupoId === gid
+      ? { ...t, valores: (t.valores || []).map(v => setP.has(v.pieza_idx) ? { ...v, label: nom } : v) } : t);
     setVariantesEdit(nueva); guardarGruposCon(nueva, true);
   };
-  const borrarVinculoJuntas = (clave, jid) => {
-    const nueva = (variantesEdit || []).map(t => t.clave === clave ? { ...t, juntas: (t.juntas || []).filter(b => b.id !== jid) } : t);
-    setVariantesEdit(nueva); guardarGruposCon(nueva, true);
+  const borrarVinculoJuntas = (gid, jid) => {
+    aplicarGruposPz(arr => arr.map(g => g.id === gid ? { ...g, juntas: (g.juntas || []).filter(b => b.id !== jid) } : g));
+    // …y de las variantes VIEJAS, donde vivían antes (compat): si no, el vínculo borrado seguiría
+    // aplicándose por el lado legacy.
+    if ((variantesEdit || []).some(t => (t.juntas || []).some(b => b.id === jid))) {
+      const nueva = (variantesEdit || []).map(t => ({ ...t, juntas: (t.juntas || []).filter(b => b.id !== jid) }));
+      setVariantesEdit(nueva); guardarGruposCon(nueva, true);
+    }
   };
   // ── Paso 1: Nombrar piezas (selección con clic + recuadro) ──
   // Nombre genérico = sin el número final ("Espalda 8" → "Espalda"). Agrupa las piezas por familia.
@@ -6256,7 +7255,10 @@ export default function App() {
       if (o) nx[p.idx] = { x: o.x, y: o.y };
     });
     setPzOffsets(nx);
-    return () => setPzOffsets({});
+    // La selección para acomodar es de ESTA variable: entrar o salir la deja limpia (si no, al
+    // abrir la siguiente quedarían marcadas piezas que ni siquiera están en el visor).
+    setSelNombrar(new Set());
+    return () => { setPzOffsets({}); setSelNombrar(new Set()); };
   }, [grupoAislado, canvasLayout, tabAjustesMolde, varStep]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ETIQUETA: capas ocultas al entrar (todas menos la guía) — la misma barra de capas de
@@ -6454,7 +7456,7 @@ export default function App() {
     const modoConj = tabAjustesMolde === 'variables' && asignandoConjunto;
     const modoGrupoPz = tabAjustesMolde === 'variables' && asignandoGrupoPz;
     const modoTelas = tabAjustesMolde === 'telas' && telasPanelAbierto;   // elegir piezas para la tela
-    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo && !empModo && !modoTelas)) return;
+    if (!cont || (!asignandoTipo && !modoNombrar && !modoConj && !modoGrupoPz && !varPzModo && !empModo && !modoTelas && !modoAcomodoVar)) return;
     const clave = asignandoTipo;
     e.preventDefault();
     const x0 = e.clientX, y0 = e.clientY;
@@ -6470,19 +7472,27 @@ export default function App() {
           const b = g.getBoundingClientRect();
           if (b.right >= rx0 && b.left <= rx1 && b.bottom >= ry0 && b.top <= ry1) idxs.push(parseInt(g.getAttribute('data-piece'), 10));
         });
-        if (idxs.length) { if (modoTelas) { agregarPiezasATela(idxs); } else if (empModo) {
+        if (idxs.length) { if (modoAcomodoVar) {
+          // ACOMODAR la variable: el recuadro elige piezas ENTERAS (todos los talles de cada
+          // nombre), que es la unidad que después se arrastra.
+          const nombres = [...new Set(idxs.map(_nombreDePieza).filter(Boolean))];
+          const todos = nombres.length ? [...new Set(nombres.flatMap(_idxsDeNombre))] : idxs;
+          setSelNombrar(prev => { const nx = new Set(prev);
+            todos.forEach(i => { if (nx.has(i)) nx.delete(i); else nx.add(i); }); return nx; });
+        } else if (modoTelas) { agregarPiezasATela(idxs); } else if (empModo) {
           // NOMBRAR: el recuadro TOGGLEA — cada pieza abarcada se invierte según su estado
           // (pedido del usuario: mismo gesto que Illustrator, con el recuadro dibujándose).
           setSelNombrar(prev => { const nx = new Set(prev);
             idxs.forEach(i => { if (nx.has(i)) nx.delete(i); else nx.add(i); }); return nx; });
         } else if (varPzModo) { addSelNombrar(idxs); } else if (modoNombrar) { if (editandoNombre) agregarPiezasANombre(editandoNombre, idxs); else addSelNombrar(idxs); } else if (modoConj) agregarPiezasAConjunto(asignandoConjunto, idxs); else if (modoGrupoPz) agregarPiezasAGrupoPz(asignandoGrupoPz, idxs); else if (clave) agregarPiezasATipo(clave, idxs); }
       } else if (empModo) {
-        // click corto en el fondo: si el punto cae dentro del bbox de piezas (apiladas
-        // incluidas), se togglean igual — el gesto no exige arrastrar.
+        // Click corto que entró por el FONDO pero cayó sobre piezas (el hueco entre dos contornos
+        // encimados): se toggle la de ADELANTE y nada más — misma regla que tocar una pieza
+        // (2026-08-21). `_piezasBajoPunto` devuelve la pila ordenada de adelante hacia atrás.
         const svgEl = cont.querySelector('svg');
         const bajo = svgEl ? _piezasBajoPunto(svgEl, x0, y0) : [];
         if (bajo.length) setSelNombrar(prev => { const nx = new Set(prev);
-          bajo.forEach(i => { if (nx.has(i)) nx.delete(i); else nx.add(i); }); return nx; });
+          const i = bajo[0]; if (nx.has(i)) nx.delete(i); else nx.add(i); return nx; });
       }
       setRubber(null);
     };
@@ -6598,12 +7608,14 @@ export default function App() {
     });
   };
 
-  const generarMulti = async () => {
+  const generarMulti = async (filasUtiles = null) => {
     const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
     if (!ids.length) { showError('Elegí al menos un molde.'); return; }
-    const sinArte = ids.filter(id => !arteEnPedido(id));
+    // Nombra el arte que falta con MOLDE y DISEÑO (nunca la variable): con el mismo molde en dos
+    // diseños, «falta el arte de X» no alcanzaba para saber a cuál volver.
+    const sinArte = itemsSinArte.filter(x => ids.includes(x.moldeId));
     if (sinArte.length) {
-      showError('Cargá el diseño en el paso Arte para: ' + sinArte.map(id => moldeById(id)?.nombre).join(', '));
+      showError('Cargá el diseño en el paso Arte para: ' + sinArte.map(x => _arteLbl(x.did, x)).join(' · '));
       return;
     }
     setTrabajoEstado(null); setTrabajoId(null); setTelaActiva(null);
@@ -6616,11 +7628,22 @@ export default function App() {
       // diseño → su molde), sin depender del efecto que rellena __variante. Solo se pisa si
       // la variable guardada no es del molde de esa fila (evita mandar una variable de otro molde).
       const _disCol = cols.find(c => c.role === 'diseno');
-      const prendasFinal = (hayVariablesPlanilla ? filas.map(f => {
+      // 🔴 COLUMNA OCULTA = NO SE APLICA: se saca el valor antes de mandarlo, así el servidor no
+      // puede multiplicar por algo que el operario no está viendo.
+      // 🔴 SÓLO LAS FILAS QUE SE FABRICAN. Una fila ignorada (vacía o sin un dato obligatorio) no
+      // va ni a la tizada ni a la FICHA TÉCNICA: la ficha es la hoja con la que el taller controla
+      // lo que salió, así que listar filas que no se imprimieron la vuelve mentirosa (pedido del
+      // usuario 2026-08-31). La lista la pasa QUIEN LLAMA (`filasQueSalen()`), que se declara más
+      // abajo: usarla acá sería leerla antes de tiempo.
+      const _filasUtiles = filasUtiles || filas;
+      const _filasQ = cantidadVisible || !colCantidad
+        ? _filasUtiles
+        : _filasUtiles.map(f => { const g = { ...f }; delete g[colCantidad.id]; return g; });
+      const prendasFinal = (hayVariablesPlanilla ? _filasQ.map(f => {
         const cl = varianteDeDiseno(_disCol ? (f[_disCol.id] || '') : '');
         const claveOk = cl && (!f.__variante || !variablesDisponibles.some(v => v.clave === f.__variante && ids.includes(v.moldeId)));
         return claveOk ? { ...f, __variante: cl } : f;
-      }) : filas);
+      }) : _filasQ);
       // TELAS del pedido: tela base por molde + overrides por pieza (id → nombre para el motor).
       const _telaNom = {}; (telasReg.telas || []).forEach(t => { _telaNom[t.id] = t.nombre; });
       const tela_base = {}, asignaciones = {};
@@ -6653,8 +7676,8 @@ export default function App() {
       });
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
-      const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno }) });
+      const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -6684,11 +7707,11 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.setItem('tizada_wizard', JSON.stringify({
-        pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars,
-        telaBaseMolde, telaPorPieza,
+        pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
+        telaBaseMolde, telaPorPieza, cantidadOn,
       }));
     } catch (e) { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
@@ -6948,12 +7971,12 @@ export default function App() {
       for (let i = 0; i < talles.length; i++) {
         const t = talles[i];
         setAsignando({ hecho: i, total: talles.length, talle: String(t) });
-        const k = _pvKeyCon(mapeo, t);
+        const k = _pvKeyCon(mapeo, t, fuentesReempl);
         if (!_pvCache.current[k]) {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true })
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true, fuentes_reemplazo: fuentesReempl })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
           } catch (e) { /* sigue con el próximo talle */ }
@@ -6981,7 +8004,9 @@ export default function App() {
   const _talleDetCache = React.useRef({});  // `${pid}|${talle}` → /api/plantilla/deteccion de ese talle
   const _detArteCache = React.useRef({});   // `${pid}|${diseño}|${variable}` → /api/arte/deteccion (mapeador)
   const _prefetchTok = React.useRef(0);     // aborta una precarga vieja si cambió el contexto
-  const _pvKeyCon = (mapeo, talle) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}`;
+  // ⚠️ La TIPOGRAFÍA elegida entra en la clave: sin ella, cambiarla devolvía el render cacheado
+  // con la anterior y parecía que no pasaba nada (mismo mapeo, mismo talle → mismo hit).
+  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(reempl ?? fuentesReempl ?? {})}`;
   const _pvKeyDe = (talle) => _pvKeyCon(mapeoValores, talle);
   const _pvGuardar = (k, piezas) => {
     if (Object.keys(_pvCache.current).length > 300) _pvCache.current = {};   // tope de memoria
@@ -6994,8 +8019,9 @@ export default function App() {
   // ⚠️ NO sacar esto "para no gastar máquina": sin la precarga aparece «preparando piezas» en
   // cada movimiento, que es peor que trabajar en silencio de fondo.
   // Con ediciones de editables SIN guardar no se precarga (cambian con cada arrastre).
-  const _prefetchTalles = (mapeo, talleActual) => {
+  const _prefetchTalles = (mapeo, talleActual, reempl) => {
     const pid = pidCfg, clave = verVariante, dis = disenoActivo;
+    const _reempl = reempl ?? fuentesReempl;   // la precarga usa la MISMA tipografía que la vista
     if (Object.keys(editorTfs || {}).length) return;
     const todos = tallesMolde.length ? tallesMolde : (estado?.talles || []);
     const iAct = todos.findIndex(t => String(t) === String(talleActual || ''));
@@ -7013,12 +8039,12 @@ export default function App() {
         // que se cambiaba de talle o de molde («preparando piezas» todo el tiempo), que es
         // justo lo que no puede pasar: cuando el usuario llega, tiene que estar listo.
         // `bg: true` → el server le CEDE EL PASO a lo que pida el usuario (nunca compite).
-        const k = _pvKeyCon(mapeo, t);
+        const k = _pvKeyCon(mapeo, t, _reempl);
         if (!_pvCache.current[k]) {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true })
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true, fuentes_reemplazo: _reempl })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
             else if (res.status === 409) return;   // falta arte/registro: no martillar 30 veces
@@ -7034,34 +8060,47 @@ export default function App() {
       }
     })();
   };
-  const cargarPreviewPiezas = async (mapeoOverride) => {
+  // `reemplOverride`: los reemplazos que ACABAN de elegirse. `setFuentesReempl` es asíncrono, así
+  // que llamar a esto justo después leería el estado VIEJO y el visor no cambiaría hasta el
+  // próximo render — el usuario lo pidió «en tiempo real», y así se cumple.
+  const cargarPreviewPiezas = async (mapeoOverride, reemplOverride) => {
     const pid = pidCfg, clave = verVariante;
+    const _reempl = reemplOverride ?? fuentesReempl;
     if (pedidoPaso !== 'arte' || !pid || !clave) { setPreviewPiezas({}); return; }
+    // SIN ARTE NO HAY NADA QUE DIBUJAR (2026-08-21): al entrar al paso, el arte de ese diseño
+    // todavía no está cargado —es justamente a lo que se viene— y pedir el preview devolvía 409;
+    // el front lo mostraba como «El visor del arte no puede dibujar: falta plantilla/arte/registro»
+    // apenas entrar. Se pide sólo cuando hay arte para este (diseño, molde).
+    if (!arteCargado[disenoActivo + '|' + pid]) { setPreviewPiezas({}); return; }
     const mapeo = mapeoOverride || mapeoValores;
     const talle = etqData?.talle_ref;
-    const k = _pvKeyCon(mapeo, talle);
+    const k = _pvKeyCon(mapeo, talle, _reempl);
     const hit = _pvCache.current[k];
     if (hit) {   // EN MEMORIA → instantáneo (sincrónico: se pinta en el mismo frame, sin blanco)
       setPreviewPiezas(hit);
-      _prefetchTalles(mapeo, talle);
+      _prefetchTalles(mapeo, talle, _reempl);
       return;
     }
     const req = ++_pvReq.current;
     try {
       const res = await fetch('/api/arte/preview_piezas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid, diseno: disenoActivo, variante: clave, mapeo, editables: { [clave || '*']: editorTfs }, talle })   // override de editables POR VARIABLE (clave) + el TALLE que se ve
+        body: JSON.stringify({ pid, diseno: disenoActivo, variante: clave, mapeo, editables: { [clave || '*']: editorTfs }, talle, fuentes_reemplazo: _reempl })   // + los reemplazos de fuente DEL PEDIDO
       });
       if (req !== _pvReq.current) return;                 // llegó una respuesta vieja → descartar
       if (res.ok) {
         const d = await res.json();
-        if (req === _pvReq.current) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas); _prefetchTalles(mapeo, talle); }
+        if (req === _pvReq.current) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas); _prefetchTalles(mapeo, talle, _reempl); }
       } else {
         // El server dice POR QUÉ no puede (falta arte/registro/producto): avisar UNA vez y
         // NO precargar los demás talles (era el loop de 409 en la consola, 2026-08-20).
         try {
           const d = await res.json();
-          if (d.error && _pvErrAviso.current !== d.error) { _pvErrAviso.current = d.error; showError('El visor del arte no puede dibujar: ' + d.error); }
+          // `falta: 'arte'` es el estado NORMAL de este paso (se viene a cargarlo): no se grita.
+          // Los otros dos —sin molde, sin piezas registradas— sí son un problema y se avisan.
+          if (d.error && d.falta !== 'arte' && _pvErrAviso.current !== d.error) {
+            _pvErrAviso.current = d.error; showError('El visor del arte no puede dibujar: ' + d.error);
+          }
         } catch { /* sin cuerpo */ }
       }
     } catch (e) { /* cae al re-dibujo JS */ }
@@ -7087,13 +8126,15 @@ export default function App() {
     setPreviewPiezas(_pvCache.current[_pvKeyDe(etqData?.talle_ref)] || {});
     cargarPreviewPiezas();
   }, [etqData?.talle_ref]);
-  // FUENTES del arte: al entrar al Arte o cambiar de diseño se chequea si el sistema
-  // reconoce todas las tipografías del arte (si no, el paso se traba hasta resolverlas).
+  // FUENTES: al entrar al Arte o cambiar de diseño se chequea si el sistema reconoce las
+  // tipografías. `cargarFuentesTodas` mira TODOS los artes del pedido (no sólo el que estás
+  // viendo): así el aviso puede decir de qué molde y de qué diseño es cada faltante.
   React.useEffect(() => {
     if (pedidoPaso !== 'arte') return;
     cargarFuentesEstado();
+    cargarFuentesTodas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pedidoPaso, disenoActivo]);
+  }, [pedidoPaso, disenoActivo, arteCargado]);
   // Refrescar el render real al entrar al Arte / cambiar variante / mover el mapeo o el override
   // (debounce largo: espera a que dejes de arrastrar; el caché hace instantáneos los repetidos).
   React.useEffect(() => {
@@ -7447,6 +8488,60 @@ export default function App() {
 
   const borrarGrupoPieza = (nombre) => _postGrupo({ nombre, eliminar: true }, `«${nombre}» deshecha`);
 
+  // ══════ BARRA DE CAPAS estilo Illustrator (2026-08-21) ═══════════════════════════════════
+  // MINIATURA: la del CONTORNO de UNA pieza (su `path_svg` + su bbox como viewBox). La fila de
+  // la CAPA no lleva miniatura a propósito (pedido 2026-08-21): junta 34 piezas distintas y el
+  // dibujo resultante no identificaba nada — la miniatura sirve pieza por pieza, adentro.
+  const miniPzVB = (p) => {
+    const m = Math.max(1, Math.max(p.pw, p.ph) * 0.06);
+    return `${p.px - m} ${p.py - m} ${Math.max(1, p.pw + 2 * m)} ${Math.max(1, p.ph + 2 * m)}`;
+  };
+
+  // El TIK (el cuadradito de selección de Illustrator) opera sobre la selección REAL de cada
+  // pantalla, no sobre una propia: en Nombrar/Agrupar es `selNombrar` (múltiple); en Etiqueta es
+  // la pieza elegida (`etqPiezaSel` + `etqPzTocada`), que por definición es de a UNA. Si tuviera
+  // estado propio, el panel y el visor mostrarían cosas distintas.
+  const capasSelModo = (empModo && empTodas) ? 'multi' : (tabAjustesMolde === 'etiqueta' ? 'etiqueta' : null);
+  const pzEstaSel = (p) => (capasSelModo === 'etiqueta'
+    ? (!!etqPiezaSel && nombreGenerico((p.name || '').trim()) === etqPiezaSel)
+    : selNombrar.has(p.idx));
+  const togglePzSel = (p) => {
+    if (capasSelModo === 'etiqueta') {
+      // En Etiqueta el tik UNITARIO elige esta pieza concreta: el visor filtra por el nombre
+      // genérico («Espalda») y `etqPzTocada` queda en LA pieza («Espalda 3»), que es la dueña
+      // de la etiqueta que se está ubicando.
+      const nom = (p.name || '').trim(); if (!nom) return;
+      const gen = nombreGenerico(nom);
+      if (etqPzTocada === nom) { setEtqPiezaSel(null); setEtqPzTocada(null); }
+      else { setEtqPiezaSel(gen); setEtqPzTocada(nom); }
+      return;
+    }
+    toggleSelNombrar(p.idx);
+  };
+  // ⚠️ NO hay «seleccionar el grupo» desde la barra de capas (pedido 2026-08-21): tocar una pieza
+  // dentro de un talle elige **sólo ésa**. El grupo (la misma pieza en todos los talles) se elige
+  // desde la lista «Ver piezas» del panel, que trabaja por nombre; y la capa entera, con su tik.
+  // Estado del tik de una CAPA: cuántas de sus piezas están seleccionadas (vacío / parcial / lleno).
+  const capaSelInfo = (pzsT) => {
+    const n = pzsT.reduce((a, p) => a + (pzEstaSel(p) ? 1 : 0), 0);
+    return { n, total: pzsT.length, todas: !!pzsT.length && n === pzsT.length };
+  };
+  const toggleCapaSel = (pzsT) => {
+    if (capasSelModo !== 'multi' || !pzsT.length) return;
+    const { todas } = capaSelInfo(pzsT);
+    setSelNombrar(prev => { const nx = new Set(prev);
+      pzsT.forEach(p => { if (todas) nx.delete(p.idx); else nx.add(p.idx); }); return nx; });
+  };
+  // OJO GENERAL: un solo gesto para las 30 capas. Si hay alguna visible, se apagan todas (y se
+  // limpia la selección: misma regla que el ojito de a una — lo que no se ve no puede quedar
+  // seleccionado); si estaban todas apagadas, se encienden.
+  const toggleTodasCapas = () => {
+    const talles = empTodasData?.talles || [];
+    const hayVisible = talles.some(t => !tallesOcultos.has(t));
+    setTallesOcultos(hayVisible ? new Set(talles) : new Set());
+    if (hayVisible && capasSelModo === 'multi') setSelNombrar(new Set());
+  };
+
   // Confirmar en bloque lo que propuso el sistema: pasa de «propuesto» a FIJO en todos los talles.
   const confirmarTodoGrupo = (nombre) => {
     const piezas = {};
@@ -7577,9 +8672,12 @@ export default function App() {
   // Capas del ARTE que el .ai debe tener (para pre-crearlas como OCG en la guía): «diseño», «guias»
   // y una por cada columna de texto/número de la planilla. MISMA lógica que el modal "Qué va en cada
   // capa". Los nombres NO distinguen mayúsculas/acentos (el motor los usa igual que el arte real).
+  // Capas del ARTE que va a traer la guía .ai, EN ORDEN (de abajo hacia arriba): el diseño al
+  // fondo y después las de personalización que salen de la planilla (Nombre, Número…).
+  // Las capas de GUÍA y las «Editable …» las arma el servidor: no viajan acá.
   const capasArteNombres = () => {
-    const out = ['diseño', 'guias'];
-    const seen = new Set(out.map(x => x.toLowerCase()));
+    const out = ['diseño'];
+    const seen = new Set([...out.map(x => x.toLowerCase()), 'guias', 'molde']);
     const reglaDe = (c) => (reglasPlanilla || []).find(r => r.id === c.reglaId) || (reglasPlanilla || []).find(r => r.comportamiento === (c.role || 'none'));
     for (const c of (cols || [])) {
       const reg = reglaDe(c); const comp = reg?.comportamiento || c.role;
@@ -7685,6 +8783,7 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Error al procesar el diseño');
       _pvCache.current = {}; _detArteCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar precargas (serían del arte viejo)
       setArteCargado(prev => ({ ...prev, [disenoActivo + '|' + id]: true }));
+      cargarFuentesDeArte(disenoActivo, id);   // ¿este arte trae alguna tipografía que no tenemos?
       // El panel de telas vuelve a la vista de «Telas asignadas»: cargar el arte tarda, y si queda
       // en la pantalla de asignar (vacía) parece que se perdió lo que ya se había asignado.
       setTelaAsignMode(false); setTelaSelPiezas([]); setTelaElegida(null); setTelaBuscarAsig('');
@@ -7732,7 +8831,64 @@ export default function App() {
   // molde la mapea POR ID. Ojo: el match es SÓLO por `c.id`, nunca por `c.role`. `mapeo_columnas`
   // guarda ids de columna, y hay roles compartidos por dos columnas (Talle y «Talle short» son ambas
   // role 'talle'): si matcheáramos por rol, usar «Talle» prendería también «Talle short».
-  const colActiva = (c) => !columnasActivasPlanilla || !COLS_MAPEABLES.includes(c.role) || columnasActivasPlanilla.has(c.id);
+  // ── COLUMNA CANTIDAD ──────────────────────────────────────────────────────────────────────
+  // Multiplica la fila: cantidad 5 en «M · pepe · 12» ⇒ 5 prendas iguales en la tizada.
+  // `mostrar: 'siempre'` → está a la vista sola; `'boton'` (default) → la prende el operario.
+  const colCantidad = (cols || []).find(c => c.role === 'cantidad') || null;
+  const cantidadSiempre = (colCantidad?.mostrar || 'boton') === 'siempre';
+
+  const colActiva = (c) => (c.role === 'cantidad')
+    ? cantidadVisible
+    : (!columnasActivasPlanilla || !COLS_MAPEABLES.includes(c.role) || columnasActivasPlanilla.has(c.id));
+
+
+  const cantidadVisible = !!colCantidad && (cantidadSiempre || cantidadOn);
+
+  // ── COLUMNAS OBLIGATORIAS: qué filas NO se van a fabricar ─────────────────────────────────
+  // Mismo criterio que el servidor (`_traducir_prendas`): se exigen las columnas marcadas
+  // `obligatoria` en la plantilla, pero SÓLO las que este pedido usa de verdad (`colActiva`) — si
+  // no, una columna que no aparece en la planilla dejaría todas las filas afuera. Sin ninguna
+  // marcada vale el talle, que es lo mínimo para poder cortar.
+  const columnasObligatorias = React.useMemo(() => {
+    const marcadas = (cols || []).filter(c => c.obligatoria && colActiva(c));
+    if (marcadas.length) return marcadas;
+    const talle = (cols || []).find(c => c.role === 'talle' && colActiva(c));
+    return talle ? [talle] : [];
+  }, [cols, columnasActivasPlanilla, cantidadVisible]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** ¿Esta fila está VACÍA? Ningún dato cargado por la persona. Los BOTONES (manga…) no cuentan:
+   *  vienen con su opción puesta, así que una fila en blanco los tiene igual. Una fila vacía es
+   *  una fila que SOBRA, no un olvido (pedido del usuario 2026-08-31). */
+  const filaVacia = (f) => (cols || []).every(c => {
+    if (!colActiva(c) || _colEsBoton(c)) return true;
+    return String(f?.[c.id] ?? '').trim() === '';
+  });
+
+  /** Las filas EMPEZADAS a las que les falta un dato obligatorio (las vacías no cuentan: se
+   *  ignoran solas). Es lo que se pregunta antes de armar la tizada. */
+  const filasIncompletas = React.useCallback(() => {
+    if (!columnasObligatorias.length) return [];
+    const out = [];
+    filas.forEach((f, i) => {
+      if (filaVacia(f)) return;                     // fila en blanco: sobra, no se pregunta
+      const faltan = columnasObligatorias.filter(c => !String(f[c.id] ?? '').trim());
+      if (faltan.length) out.push({ i, faltan: faltan.map(c => c.label || c.id) });
+    });
+    return out;
+  }, [filas, columnasObligatorias, cols, columnasActivasPlanilla]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** LAS FILAS QUE SE VAN A FABRICAR: las completas. Las vacías y las que no tienen todas las
+   *  columnas obligatorias quedan afuera —de la tizada Y de la ficha técnica—. */
+  const filasQueSalen = React.useCallback(() => filas.filter(f => !filaVacia(f)
+    && columnasObligatorias.every(c => String(f[c.id] ?? '').trim())),
+  [filas, columnasObligatorias, cols, columnasActivasPlanilla]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** Cuántas prendas sale una fila. 🔴 Si la columna NO está a la vista vale 1: lo que no se ve no
+   *  puede multiplicar la tizada (decisión del usuario 2026-08-26). El valor cargado NO se borra:
+   *  vuelve a valer en cuanto la columna se muestre otra vez. */
+  const cantidadDeFila = (f) => {
+    if (!cantidadVisible) return 1;
+    const n = parseInt(String(f?.[colCantidad.id] ?? '').trim(), 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;   // sin tope: el usuario lo pidió así
+  };
+  const totalPrendas = (filas || []).reduce((n, f) => n + cantidadDeFila(f), 0);
   // VARIABLE-FIRST: TODAS las variables (con piezas) de TODOS los moldes, cada una con su
   // molde detrás. Es lo que se elige directamente en el pedido (ya no se elige el molde).
   const variablesDisponibles = productosCat.productos.flatMap(p =>
@@ -7898,57 +9054,194 @@ export default function App() {
   // TOTAL de piezas sin tela: DERIVADO de las telas de ahora, recorriendo sólo los ítems que HOY
   // están en el pedido (una variable que se sacó no deja un bloqueo fantasma) y de los que ya se
   // conocen sus piezas (las que el visor mostró alguna vez).
-  const telasFaltantesTotal = (disenosPedido || []).reduce((n, d) => n + (itemsArteDe(d.id) || []).reduce((m, it) => {
-    const map = _telasDe(d.id, it.moldeId);
-    const pzs = piezasPorItem[_claveItemTela(d.id, it.moldeId, it.clave)] || [];
-    return m + pzs.filter(g => !map[g]).length;
-  }, 0), 0);
+  // DETALLE POR VARIABLE: cuántas piezas sin tela tiene cada variable del pedido. Se avisa por
+  // variable —no por molde— porque es lo que el operario está mirando (corrección del usuario
+  // 2026-08-21) y porque las piezas sin tela son de ESA variable, no del molde entero.
+  const telasFaltantesDet = (disenosPedido || []).flatMap(d =>
+    (itemsArteDe(d.id) || []).map(it => {
+      const map = _telasDe(d.id, it.moldeId);
+      const pzs = piezasPorItem[_claveItemTela(d.id, it.moldeId, it.clave)] || [];
+      return { did: d.id, it, n: pzs.filter(g => !map[g]).length };
+    }).filter(x => x.n > 0));
+  const telasFaltantesTotal = telasFaltantesDet.reduce((n, x) => n + x.n, 0);
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
   const arteEnPedido = (mid) => disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
+
   const moldesDeDiseno = (did) => disenoMoldes[did] || [];
 
   // ── ESTADO PARA LA AYUDA GUIADA ────────────────────────────────────────────────────────────────
   // Lo que el tutorial mira para saber si un paso YA SE HIZO DE VERDAD. Todo esto la app ya lo
-  // calcula para sus propios carteles; acá sólo se junta en un objeto plano que lee `guias.js`.
+  // calcula para sus propios carteles; acá sólo se junta en un objeto plano que lee `tutor.jsx`.
   // Sirve para que cada paso pueda declarar `hecho(E, E0)` y avanzar por el ESTADO REAL en vez de
   // por el clic: un POST que falla no hace avanzar el tutorial, y los gestos del visor (elegir la
   // prenda, asignar telas) se pueden verificar de verdad en lugar de cronometrarse.
   // Es un objeto nuevo por render a propósito: los predicados se evalúan contra el valor de AHORA.
   // ⚠️ Hay UNA sola guía (armar una tizada) → acá sólo va lo del PEDIDO. Si algún día se suma otra
-  // guía, se agregan los campos que necesite (el contrato está documentado arriba de `guias.js`).
-  const ayudaEstado = {
-    // ¿ya llegaron los datos? Sin esto, abrir la ayuda mientras carga (o sin sesión) haría que los
-    // predicados vean ceros y saquen conclusiones falsas.
-    cargado: !!estado,
-    // dónde está parado (lo mismo que `donde`, repetido acá para que el guion tenga todo junto)
-    tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde,
-    nMoldes: (productosCat.productos || []).length,
-    // el PEDIDO en curso
-    pedido: {
-      nDisenos: disenosPedido.length,
-      sinVariable: disenosPedido.filter(d => !(disenoMoldes[d.id] || []).length).length,
-      artesTotal: tareasArte.length,
-      artesCargadas: tareasArte.filter(t => arteCargado[t.did + '|' + t.mid]).length,
-      telasFaltan: telasFaltantesTotal,
-      nFilas: filas.length,
-      hayResultados: trabajosMulti.some(t => t.estado === 'listo'),
-      editorAbierto: !!editorEditOpen,
-      nEditables: (editableData?.objetos || []).length,
-    },
+  // guía, se agregan los campos que necesite (el contrato está arriba de `tutor.jsx`).
+  // ══ TUTORIALES GRABADOS ═══════════════════════════════════════════════════════════════════
+  // El usuario aprieta «Grabar», hace el trabajo como lo hace siempre y para. El sistema NO graba
+  // video: anota QUÉ ELEMENTO tocó y EN QUÉ PANTALLA estaba. Los carteles los escribe después el
+  // propio sistema con `diccionario.js` (por eso mejorar una explicación mejora los tutoriales ya
+  // grabados, sin regrabar nada).
+  const [tutoriales, setTutoriales] = useState([]);
+  const [grabando, setGrabando] = useState(false);
+  const [guardandoTut, setGuardandoTut] = useState(null);   // {pasos} → abre el modal del nombre
+  const [nombreTut, setNombreTut] = useState('');
+  const pasosGrab = useRef([]);
+  const ultCtrlGrab = useRef(null);   // el último control tocado al grabar (para no colapsar dos opciones distintas)
+  const [nPasosGrab, setNPasosGrab] = useState(0);   // sólo para el cartel (un ref no redibuja)
+  const [sinGrabar, setSinGrabar] = useState(0);     // clics sobre algo que no se puede volver a encontrar
+  // Espejo de dónde está parado el usuario: el listener de clics no puede leer el estado de React
+  // (quedaría congelado en el del primer render), así que se lo deja acá al día.
+  const dondeRef = useRef({});
+  React.useEffect(() => {
+    dondeRef.current = { tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde };
+  }, [activoTab, adminSubView, pedidoPaso, tabAjustesMolde]);
+
+  const cargarTutoriales = React.useCallback(async () => {
+    try {
+      const r = await fetch('/api/tutoriales');
+      if (r.ok) { const d = await r.json(); setTutoriales(d.tutoriales || []); }
+    } catch { /* sin red: la ayuda igual abre */ }
+  }, []);
+  // Se piden al ABRIR la ayuda, no al arrancar: antes del login el endpoint contesta 401 y
+  // ensuciaba la consola con un error que no era tal.
+  React.useEffect(() => { if (ayudaAbierta) cargarTutoriales(); }, [ayudaAbierta, cargarTutoriales]);
+
+  // EL OÍDO. Se engancha en fase de captura y sobre `document`, así ve el clic aunque el botón
+  // pare la propagación. Del elemento tocado sube buscando el `data-tour` más cercano: ése es el
+  // único identificador que el reproductor va a poder volver a encontrar.
+  React.useEffect(() => {
+    if (!grabando) return undefined;
+    const anotar = (e, accion) => {
+      const el = e.target;
+      // 🔴 LA BARRA LATERAL NO ENTRA EN LOS TUTORIALES (pedido del usuario): moverse entre
+      // secciones no es parte del trabajo que se enseña, y ensuciaba cada tutorial con un
+      // «tocá Pedidos» antes de lo importante. El motor igual lleva a la pantalla que hace falta.
+      // 🔴 QUÉ NO SE GRABA (mismo criterio que el «⏺ Agregar pasos» del editor, en localizar.js):
+      // la BARRA LATERAL —moverse entre secciones no es el trabajo que se enseña— y todo lo que
+      // sea del propio sistema de ayuda, como el «Parar y guardar» del grabador.
+      if (!sePuedeGrabar(el)) return;
+      // El identificador sale del localizador: `data-tour` si el control lo tiene y, si no, su
+      // TEXTO VISIBLE. Sin esto sólo se podrían grabar 82 de los 477 controles del sistema.
+      const ancla = identificarControl(el);
+      if (!ancla) { setSinGrabar((n) => n + 1); return; }
+      const prev = pasosGrab.current[pasosGrab.current.length - 1];
+      // 🔴 EN UNA LISTA DE OPCIONES, DOS CLICS SEGUIDOS SON DOS COSAS DISTINTAS. Como esas listas
+      // dan el MISMO identificador para todos sus botones (es la lista, no el botón: ver
+      // `data-opciones`), la regla de «no repetir» se comía el segundo diseño y el tutorial salía
+      // pidiendo uno solo (reporte del usuario 2026-08-31, después de subir la actualización).
+      // Ahí lo que se compara es el BOTÓN tocado, no el identificador: dos botones distintos son
+      // dos pasos; tocar dos veces el MISMO (doble clic) sigue siendo uno.
+      const _ctrl = (el && el.closest && (el.closest('button, [role="button"], a[href], input, select, textarea, label') || el)) || el;
+      const _enOpciones = !!(el && el.closest && el.closest('[data-opciones]'));
+      const _repetido = prev && prev.ancla === ancla && prev.accion === accion
+        && (!_enOpciones || ultCtrlGrab.current === _ctrl);
+      ultCtrlGrab.current = _ctrl;
+      if (_repetido) return;
+      // ¿El clic cayó DENTRO de una ventana emergente? Se guarda cuál: el editor la muestra
+      // como ventanita y la reproducción sabe explicar que este paso vive ahí.
+      const _enVentana = el && el.closest && el.closest('[data-modal]');
+      pasosGrab.current.push({
+        ancla, accion,
+        etiqueta: etiquetaDeControl(el).slice(0, 120),
+        donde: { ...dondeRef.current },
+        ...(_enVentana ? { ventana: (_enVentana.getAttribute('data-modal') || '').slice(0, 80) } : {}),
+      });
+      setNPasosGrab(pasosGrab.current.length);
+    };
+    const onClick = (e) => anotar(e, 'click');
+    const onChange = (e) => anotar(e, 'input');
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('change', onChange, true);
+    return () => {
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('change', onChange, true);
+    };
+  }, [grabando]);
+
+  const empezarAGrabar = () => {
+    pasosGrab.current = [];
+    setNPasosGrab(0);
+    setSinGrabar(0);
+    setGrabando(true);
+    showMsg('Grabando. Hacé el trabajo como siempre y, cuando termines, tocá «Parar».');
+  };
+  const pararDeGrabar = () => {
+    setGrabando(false);
+    const pasos = pasosGrab.current.slice();
+    if (!pasos.length) { showError('No se grabó ningún paso: no llegaste a tocar nada.'); return; }
+    setNombreTut('');
+    setGuardandoTut({ pasos });
+  };
+  const guardarTutorial = async () => {
+    const nombre = (nombreTut || '').trim();
+    if (!nombre) { showError('Ponele un nombre al tutorial.'); return; }
+    try {
+      const r = await fetch('/api/tutoriales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, pasos: guardandoTut.pasos }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
+      setGuardandoTut(null);
+      await cargarTutoriales();
+      showMsg(`Tutorial «${nombre}» guardado: ${guardandoTut.pasos.length} paso(s).`);
+    } catch (e) { showError(String(e.message || e)); }
+  };
+  /** Guarda un tutorial MODIFICADO en el editor (mismo id = reemplaza). */
+  const guardarTutorialEditado = async (t) => {
+    try {
+      const r = await fetch('/api/tutoriales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: t.id, nombre: t.nombre, desc: t.desc || '', pasos: t.pasos }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
+      await cargarTutoriales();
+      showMsg(`Tutorial «${t.nombre}» actualizado.`);
+      return true;
+    } catch (e) { showError(String(e.message || e)); return false; }
+  };
+  const borrarTutorial = async (id) => {
+    try {
+      const r = await fetch('/api/tutoriales/borrar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'no se pudo borrar'); }
+      await cargarTutoriales();
+      showMsg('Tutorial borrado.');
+    } catch (e) { showError(String(e.message || e)); }
   };
 
+
   // Escribir un diseño nuevo (input del sistema, no ventana del navegador).
-  const agregarDisenoPedido = () => {
-    const nombre = (nuevoDisenoNombre || '').trim();
-    if (!nombre) return;
-    const slug = nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'diseno';
-    if (disenosPedido.some(d => d.id === slug)) { showError('Ya existe un diseño con ese nombre.'); return; }
+  // El id del diseño sale del nombre con `_slugDiseno` — EL MISMO que usa el motor para agrupar
+  // las filas (`_slugify_diseno` del server). Con un slug propio, las filas de un diseño no le
+  // llegarían a su diseño.
+  const _sumarDiseno = (nombre) => {
+    const slug = _slugDiseno(nombre);
+    if (disenosPedido.some(d => d.id === slug)) return null;
     setDisenosPedido(prev => [...prev, { id: slug, nombre }]);
     setDisenoMoldes(prev => ({ ...prev, [slug]: prev[slug] || [] }));
     setAsignDiseno(slug);
+    return slug;
+  };
+  const agregarDisenoPedido = () => {
+    const nombre = (nuevoDisenoNombre || '').trim();
+    if (!nombre) return;
+    if (!_sumarDiseno(nombre)) { showError('Ya existe un diseño con ese nombre.'); return; }
     setNuevoDisenoNombre('');
+  };
+  // Botón de la lista preestablecida: lo toca y entra (o sale, si ya estaba). Mismo diseño que
+  // escribirlo a mano — sólo que no hay que escribirlo.
+  const toggleDisenoPreset = (nombre) => {
+    const slug = _slugDiseno(nombre);
+    if (disenosPedido.some(d => d.id === slug)) quitarDisenoPedido(slug);
+    else _sumarDiseno(nombre);
   };
   const quitarDisenoPedido = (did) => {
     setDisenosPedido(prev => prev.filter(d => d.id !== did));
@@ -8059,6 +9352,7 @@ export default function App() {
   };
   // Carga los editables de un (molde, diseño) puntual — para el editor en Pedidos→Arte.
   const cargarEditablesPedido = async (pid, diseno, variante) => {
+    cargarMarcasEditables(pid, diseno);   // qué objetos van por TPU/Bordado/DTF (botones encendidos)
     if (!pid) return { objetos: [] };
     try {
       const r = await fetch(`/api/productos/editables?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}&variante=${encodeURIComponent(variante || '*')}`);   // transforms POR VARIABLE
@@ -8455,7 +9749,17 @@ export default function App() {
     setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
     setTelaBuscarAsig(''); setTelaModoVer(false); setTelaAviso('');
     // 3) arte y visor
-    setArteCargado({}); setArteIdx(0);
+    setArteCargado({}); setArteIdx(0); setCantidadOn(false);
+    setFuentesReempl({}); setFuentesPorArte({});   // la fuente elegida era de ESE pedido: uno nuevo arranca sin ella
+    // …y las tipografías subidas «sólo para este pedido» se borran: el sistema no tiene que
+    // reconocerlas en el próximo (regla del usuario). Las del catálogo no se tocan.
+    (async () => {
+      const _pids = [...new Set([...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()])].filter(Boolean);
+      if (!_pids.length) return;
+      try {
+        await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
+      } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+    })();
     setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
     setEtqData(null); setEtqNombres({}); setVerVariante(null);
     setPerfilesArte({}); setPerfilForzado(null);
@@ -8474,7 +9778,7 @@ export default function App() {
     _pvCache.current = {}; _talleDetCache.current = {}; _detArteCache.current = {};
     // 7) el avance guardado en el navegador (si no, «nuevo pedido» + F5 resucitaba el viejo)
     try { localStorage.removeItem('tizada_wizard'); } catch (e) { /* sin storage: nada que borrar */ }
-    setPedidoPaso('moldes');
+    setPedidoPaso('diseno');          // el wizard arranca por el DISEÑO (2026-08-21)
   };
 
   const showMsg = (txt) => {
@@ -8522,6 +9826,55 @@ export default function App() {
     setFilas([...filas, ...nuevas]);
   };
 
+  // ── CARGAR POR LOTE ───────────────────────────────────────────────────────────────────────
+  // Se pone cuántas prendas de cada talle y se crea UNA FILA POR PRENDA: M = 5 ⇒ 5 filas de M,
+  // cada una lista para su nombre y su número. (La columna Cantidad hace lo otro: una fila que
+  // vale por N prendas IGUALES.)
+  const [loteOpen, setLoteOpen] = useState(false);
+  /** EN QUÉ GRUPO VA CADA TALLE. Los moldes del usuario mezclan tres familias en la misma lista
+   *  («0…16», «XS…6XL», «XSfem…6XLfem»): mostrarlas juntas es una pared de 30 casilleros. Se separan
+   *  por lo que quede DESPUÉS del talle en sí — «6XLfem» → sufijo «fem» — y los puramente numéricos
+   *  van aparte. Si un molde no usa sufijos, queda un solo grupo y se ve como antes. */
+  const _grupoTalle = (t) => {
+    const x = String(t || '').trim();
+    if (!x) return '—';
+    if (/^\d+$/.test(x)) return 'Numéricos';
+    const m = x.match(/^\s*\d*\s*X*\s*(?:XS|XL|S|M|L)\s*(.*)$/i);
+    const suf = (m ? m[1] : '').trim();
+    return suf ? suf.charAt(0).toUpperCase() + suf.slice(1) : 'Adulto';
+  };
+  const [loteCant, setLoteCant] = useState({});        // { talle: n }
+  const loteTalles = (estado?.talles || []);
+  const loteTotal = Object.values(loteCant).reduce((n, v) => n + (parseInt(v, 10) || 0), 0);
+  /** ¿Esta fila está en blanco? Los toggles no cuentan: nacen con una opción puesta. */
+  const planillaEnBlanco = () => (filas || []).every(filaVacia);
+  /** Cuántas filas en blanco hay para aprovechar (van a ser las primeras que use el lote). */
+  const filasVaciasCount = () => (filas || []).filter(filaVacia).length;
+  const aplicarLote = () => {
+    const colTalle = (cols || []).find(c => c.role === 'talle' && colActiva(c));
+    const nuevas = [];
+    loteTalles.forEach(t => {
+      const n = Math.max(0, parseInt(loteCant[t], 10) || 0);
+      for (let i = 0; i < n; i++) {
+        const f = _defaultRow();
+        if (colTalle) f[colTalle.id] = t;
+        nuevas.push(f);
+      }
+    });
+    if (!nuevas.length) { showError('Poné al menos una prenda en algún talle.'); return; }
+    // 🔴 PRIMERO SE RELLENAN LAS FILAS VACÍAS que ya están (pedido del usuario 2026-08-26): sin
+    // esto, cargar un lote en una planilla recién abierta dejaba 5 renglones en blanco arriba y las
+    // del lote abajo. Se respetan la posición de cada vacía y lo que ya tenga cargado el resto.
+    const pendientes = [...nuevas];
+    const out = (filas || []).map(f => (pendientes.length && filaVacia(f)) ? pendientes.shift() : f);
+    const usadas = nuevas.length - pendientes.length;
+    setFilas([...out, ...pendientes]);
+    setLoteOpen(false); setLoteCant({});
+    showMsg(`${nuevas.length} prenda(s) por lote`
+      + (usadas ? ` · ${usadas} en las filas vacías` : '')
+      + (pendientes.length ? ` · ${pendientes.length} agregada(s) al final` : '') + '.');
+  };
+
   // ── Importar un archivo CSV a la planilla ────────────────────────────────
   // Vuelca las filas del CSV. En las columnas con opciones FIJAS (talle, diseño,
   // manga, desplegables) solo acepta valores que coincidan con lo predefinido;
@@ -8547,6 +9900,32 @@ export default function App() {
     return rows.filter(r => r.some(x => (x || '').trim() !== ''));
   };
   const _normTxt = (s) => (s == null ? '' : String(s)).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  /** BAJAR LA PLANILLA COMO CSV (se abre en Excel) — y que ese mismo archivo se pueda volver a
+   *  subir por «Importar». Por eso:
+   *   · Encabezados = el **label** de cada columna: es lo que `importarCSVTexto` matchea.
+   *   · SÓLO las columnas que se están viendo (`colActiva`) — la de Cantidad se exporta únicamente
+   *     si está a la vista, que es justo lo que pidió el usuario (2026-08-26).
+   *   · Separador `;` y **BOM UTF-8**: así Excel lo abre en columnas y con los acentos bien. El
+   *     importador detecta solo el delimitador, así que si después se guarda con comas, entra igual.
+   */
+  const exportarPlanillaCSV = () => {
+    const visibles = (cols || []).filter(c => colActiva(c));
+    if (!visibles.length) { showError('No hay columnas para exportar.'); return; }
+    const esc = (v) => {
+      const t = v == null ? '' : String(v);
+      return /[";\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    };
+    const lineas = [visibles.map(c => esc(c.label || c.id)).join(';')];
+    (filas || []).forEach(f => lineas.push(visibles.map(c => esc(f[c.id] ?? '')).join(';')));
+    const nombre = (moldeById(moldesSeleccionados[0])?.nombre || 'planilla')
+      .replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, '').trim().replace(/\s+/g, '_') || 'planilla';
+    const blob = new Blob(['\ufeff' + lineas.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `planilla_${nombre}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    showMsg(`Planilla exportada: ${filas.length} fila(s) · ${visibles.length} columna(s).`);
+  };
   // ── CÓMO ESTÁ CONFIGURADA UNA COLUMNA ─────────────────────────────────────────────────────────
   // El tipo y las opciones pueden venir de la columna MISMA o de su REGLA (el preset de
   // «Reglas de planilla»). Todas las demás pantallas resuelven con las dos (`c.tipo || regla?.tipo`);
@@ -8620,6 +9999,196 @@ export default function App() {
   const _valorBoton = (c, v) => (String(v ?? '').trim() ? v : _botonDefault(c));
   // Fila nueva: las celdas en blanco, salvo las de BOTÓN, que arrancan con su opción por defecto
   // (una columna de botón nunca queda sin elegir).
+  // ── ANCHO INTELIGENTE DE CADA COLUMNA ────────────────────────────────────────────────────
+  // Se MIDE el texto de verdad (canvas 2D con la misma tipografía de la celda) en vez de contar
+  // caracteres: con «MMMM» y «iiii» un promedio erraba por el doble.
+  const _medirRef = useRef(null);
+  const _medirTexto = (txt, font) => {
+    if (!_medirRef.current) {
+      const c = document.createElement('canvas');
+      _medirRef.current = c.getContext('2d');
+    }
+    const ctx = _medirRef.current;
+    if (!ctx) return String(txt || '').length * 8;
+    ctx.font = font;
+    return ctx.measureText(String(txt ?? '')).width;
+  };
+  const ANCHO_COL = React.useMemo(() => {
+    const PAD = 22;            // padding de la celda + los bordes
+    const FLECHA = 20;         // el ▾ de los desplegables
+    const MAX = 280;           // que una columna sola no se coma la pantalla
+    const out = {};
+    (cols || []).forEach(c => {
+      if (!colActiva(c)) return;
+      const esNum = c.role === 'numero' || c.role === 'cantidad';
+      const esNombre = c.role === 'nombre';
+      const tipo = _tipoCol(c);
+      const esDrop = c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable';
+      // la celda dibuja el nombre en MAYÚSCULAS y el número en monoespaciada: se mide igual
+      const fontCelda = esNum ? '13px monospace' : (esNombre ? '600 13px sans-serif' : '13px sans-serif');
+      const fontCab = '700 11px sans-serif';
+      const val = (v) => (esNombre ? String(v ?? '').toUpperCase() : String(v ?? ''));
+      // 1) lo que ocupa el encabezado (va en mayúsculas y con espaciado)
+      let ancho = _medirTexto(String(c.label || c.id).toUpperCase(), fontCab) + (String(c.label || '').length * 0.4);
+      // 2) lo que ocupa el contenido más largo
+      (filas || []).forEach(f => {
+        const w = _medirTexto(val(f[c.id]), fontCelda);
+        if (w > ancho) ancho = w;
+      });
+      // 3) las opciones de un botón/desplegable tienen que entrar aunque nadie las haya elegido
+      if (tipo === 'toggle') {
+        const opts = _opcionesBoton(c) || [];
+        const suma = opts.reduce((n, o) => n + _medirTexto(String(o), '600 12px sans-serif') + 18, 0);
+        if (suma > ancho) ancho = suma;
+      }
+      // 4) PISO: una numérica arranca fina —5 dígitos— y el resto con su ancho predeterminado,
+      //    que es lo que se ve cuando la columna está vacía.
+      const piso = esNum ? _medirTexto('00000', fontCelda) : (esDrop ? 96 : esNombre ? 130 : 110);
+      out[c.id] = Math.round(Math.min(MAX, Math.max(piso, ancho) + PAD + (esDrop ? FLECHA : 0)));
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cols, filas, columnasActivasPlanilla, cantidadVisible, reglasPlanilla]);
+
+  // ── REORDENAR FILAS (arrastrando desde la columna «#») ───────────────────────────────────
+  // `filasSel`  = filas elegidas desde el número (Set de índices).
+  // `dragFilas` = { sel:[índices], destino, alto, tops } mientras se está arrastrando; con eso se
+  //               calcula, para CADA fila, cuánto tiene que correrse — de ahí sale la animación.
+  const [filasSel, setFilasSel] = useState(() => new Set());
+  const [dragFilas, setDragFilas] = useState(null);
+  const filaSelAncla = useRef(null);      // ancla del shift+click
+  const dragRef = useRef(null);           // el drag en curso (los handlers de documento leen de acá)
+  const clickTrasDrag = useRef(false);    // el click que viene DESPUÉS de arrastrar no selecciona
+  // Al SOLTAR, las filas ya quedaron en su lugar: los `transform` valen 0 y no hay que animar ese
+  // cambio. Sin esta bandera se veía un REBOTE — como las `key` son el índice, React reutiliza el
+  // mismo `<tr>` para otra fila y el navegador animaba el paso de translateY(99px) a 0.
+  const [soltandoFilas, setSoltandoFilas] = useState(false);
+
+  /** Click en el número: elige la fila. `shift` = rango desde la última · `ctrl/cmd` = de a una. */
+  const clickNumeroFila = (i, e) => {
+    const s = new Set(filasSel);
+    if (e.shiftKey && filaSelAncla.current != null) {
+      const a = Math.min(filaSelAncla.current, i), b = Math.max(filaSelAncla.current, i);
+      for (let k = a; k <= b; k++) s.add(k);
+    } else if (e.ctrlKey || e.metaKey) {
+      s.has(i) ? s.delete(i) : s.add(i);
+      filaSelAncla.current = i;
+    } else {
+      // ya elegida y sola → se deselecciona; si no, queda sólo ésta
+      if (s.size === 1 && s.has(i)) { s.clear(); filaSelAncla.current = null; }
+      else { s.clear(); s.add(i); filaSelAncla.current = i; }
+    }
+    setFilasSel(s);
+  };
+
+  /** Mueve el bloque `sel` para que quede insertado en la posición `d` (índice sobre la lista SIN
+   *  las seleccionadas). Devuelve {filas, sel} — la selección sigue a las filas movidas. */
+  const _reordenar = (arr, sel, d) => {
+    const bloque = sel.map(i => arr[i]);
+    const resto = arr.filter((_, i) => !sel.includes(i));
+    const out = [...resto.slice(0, d), ...bloque, ...resto.slice(d)];
+    return { filas: out, sel: bloque.map((_, k) => d + k) };
+  };
+
+  /** Empezar a arrastrar desde el número.
+   *  ⚠️ NO toca la selección: si la fila no estaba elegida se arrastra sola, y recién al soltar la
+   *  selección pasa a ser el bloque movido. Cambiarla acá pisaba el shift+click — el `mousedown`
+   *  corre ANTES que el `click`, así que «elegir de a varias» se perdía en el camino.
+   *  🔴 Los listeners del gesto se enganchan ACÁ MISMO, no en un `useEffect`: montarlos en el
+   *  render siguiente dejaba una carrera — un clic corto (soltar antes de que React re-renderice)
+   *  no encontraba su `mouseup`, el gesto quedaba abierto y la tabla seguía «arrastrando» sin
+   *  ningún botón apretado. */
+  const empezarDragFilas = (i, e) => {
+    if (e.button !== 0) return;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) return;   // eso es elegir, no arrastrar
+    const base = filasSel.has(i) ? [...filasSel].sort((a, b) => a - b) : [i];
+    const trs = [...(e.currentTarget.closest('tbody')?.children || [])];
+    const tops = trs.map(tr => tr.getBoundingClientRect().top);
+    const alto = trs.length > 1 ? (tops[1] - tops[0]) : (trs[0]?.getBoundingClientRect().height || 33);
+    const dInicial = base[0] - base.filter(x => x < base[0]).length;
+    const d = { sel: base, destino: dInicial, alto, tops, movio: false };
+    dragRef.current = d;
+    setDragFilas({ ...d });
+
+    const onMove = (ev) => {
+      const dd = dragRef.current; if (!dd) return;
+      // Con las posiciones CONGELADAS del arranque (`tops`): las filas se están moviendo con
+      // `transform`, así que preguntarle al DOM dónde está cada una daría la posición ya
+      // desplazada y el destino se perseguiría a sí mismo.
+      let k = 0;
+      dd.tops.forEach((t, idx) => {
+        if (dd.sel.includes(idx)) return;
+        if (ev.clientY > t + dd.alto / 2) k++;
+      });
+      if (k !== dd.destino || !dd.movio) {
+        dd.destino = k; dd.movio = true;
+        setDragFilas({ ...dd });
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const dd = dragRef.current;
+      dragRef.current = null;
+      if (!dd || !dd.movio) { setDragFilas(null); return; }   // fue un clic: lo maneja el onClick
+      clickTrasDrag.current = true;          // soltar después de mover no debe re-seleccionar
+      // Todo se calcula ACÁ y se aplica de una: nada de `setState` adentro de un updater —
+      // eso provocaba un render intermedio con las filas viejas y los desplazamientos ya en cero,
+      // que es exactamente el rebote que se veía.
+      const r = _reordenar(filas, dd.sel, dd.destino);
+      setSoltandoFilas(true);                // este frame va SIN transición
+      setFilas(r.filas);
+      setFilasSel(new Set(r.sel));
+      filaSelAncla.current = r.sel[0];
+      setDragFilas(null);
+      setPlSel(null); setPlSelEnd(null);     // la selección de CELDAS apuntaba a los índices viejos
+      setTimeout(() => setSoltandoFilas(false), 60);   // y a partir de ahí, todo normal
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  };
+
+  // TOCAR EN OTRO LADO SUELTA LA SELECCIÓN (pedido del usuario 2026-08-26): en una celda, en otra
+  // parte de la pantalla, donde sea — salvo que se esté eligiendo de a varias (shift/ctrl) o que el
+  // click haya sido en la propia columna del número, que tiene su propia lógica.
+  useEffect(() => {
+    if (!filasSel.size) return;
+    const onDown = (e) => {
+      if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+      if (e.target?.closest?.('[data-numfila]')) return;   // eso lo maneja `clickNumeroFila`
+      setFilasSel(new Set());
+      filaSelAncla.current = null;
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [filasSel]);
+
+  /** QUÉ NÚMERO LE VA A TOCAR a la fila `i` cuando se suelte. Mientras se arrastra, la numeración
+   *  se recalcula sola: las que quedan antes del hueco conservan el suyo y las de abajo corren
+   *  tantos lugares como filas se estén moviendo (pedido del usuario 2026-08-26). Sin arrastre, es
+   *  simplemente la posición. */
+  const numeroFila = (i) => {
+    const d = dragFilas;
+    if (!d || !d.movio) return i + 1;
+    if (d.sel.includes(i)) return d.destino + d.sel.indexOf(i) + 1;   // el bloque, ya en su destino
+    const p = i - d.sel.filter(x => x < i).length;                    // su lugar sin las que viajan
+    return (p >= d.destino ? p + d.sel.length : p) + 1;
+  };
+  /** CUÁNTO SE CORRE la fila `i` en este instante (px). Es toda la animación: la que se arrastra
+   *  va hacia su destino y las demás se hacen a un lado para dejarle el lugar. */
+  const desplazoFila = (i) => {
+    const d = dragFilas; if (!d || !d.movio) return 0;
+    const k = d.sel.length;
+    if (d.sel.includes(i)) {
+      const t = d.sel.indexOf(i);                       // posición dentro del bloque que viaja
+      return (d.destino + t - i) * d.alto;
+    }
+    const p = i - d.sel.filter(x => x < i).length;      // su índice sin las que viajan
+    const final = p + (p >= d.destino ? k : 0);
+    return (final - i) * d.alto;
+  };
+
   const _defaultRow = () => {
     const r = {};
     cols.forEach(c => { r[c.id] = _colEsBoton(c) ? _botonDefault(c) : ''; });
@@ -8848,6 +10417,130 @@ export default function App() {
     return bad;
   };
 
+  // ⚠️ ESTE MEMO VA ACÁ Y NO ARRIBA: un `useMemo` se EJECUTA durante el render, en la línea donde
+  // está, y usa `planillaInvalidos` —un `const` declarado justo acá arriba—. Arriba explotaba con
+  // «Cannot access 'planillaInvalidos' before initialization» (TDZ) y la pantalla quedaba en
+  // blanco: el error lo vio el usuario. Si le agregás una dependencia nueva, comprobá que esté
+  // declarada ANTES de este punto.
+  // ══ QUÉ FALTA EN CADA PASO ══════════════════════════════════════════════════════════════════
+  // Una lista de requisitos por paso: `{label, hecho, faltan:[qué falta, con nombre y apellido]}`.
+  // Es la MISMA fuente para la barrita de abajo y para el modal del detalle — si fueran dos, una
+  // diría «todo listo» mientras la otra muestra pendientes.
+  const _nomDiseno = (did) => (disenosPedido.find(d => d.id === did) || {}).nombre || did;
+  const _nomMolde = (mid) => (moldeById(mid) || {}).nombre || mid;
+  // TODOS los ítems del pedido = lo que el paso Arte recorre: una entrada por VARIABLE elegida
+  // (con su molde por detrás) o por molde entero. Es la unidad con la que se avisa.
+  const itemsPedido = (disenosPedido || []).flatMap(d => (itemsArteDe(d.id) || []).map(it => ({ did: d.id, ...it })));
+  /** CÓMO SE NOMBRA lo que falta, en TODO el pedido (regla del usuario 2026-08-21):
+   *  **`«MOLDE» · variable «VARIABLE» · diseño «DISEÑO»`** — los tres, SIEMPRE.
+   *  La misma variable la pueden usar muchos diseños: lo que separa un caso de otro es el diseño,
+   *  y el molde es el contexto. (Se probó mostrar el molde sólo cuando el nombre de la variable se
+   *  repetía: demasiado sutil, dos líneas parecían iguales.) Si el ítem es un molde ENTERO —los
+   *  moldes propios no tienen Variables— no hay parte de variable. Una sola función para que arte,
+   *  tela y tipografía hablen igual. */
+  const _arteLbl = (did, it) => {
+    const mol = _nomMolde(it && it.moldeId);
+    const va = it && it.clave ? ` · variable «${it.label}»` : '';
+    return `«${mol}»${va} · diseño «${_nomDiseno(did)}»`;
+  };
+  // Variables cuyo arte todavía no se cargó (el arte es del MOLDE, pero se avisa por variable).
+  const itemsSinArte = itemsPedido.filter(x => !arteCargado[x.did + '|' + x.moldeId]);
+  // Variables cuya tipografía no está: el estado es por (diseño, molde) — se expande a sus
+  // variables para poder nombrar la que estás usando.
+  const fuentesFaltantesItems = itemsPedido
+    .filter(x => arteCargado[x.did + '|' + x.moldeId])
+    .map(x => ({ ...x, mid: x.moldeId, fuentes: fuentesPorArte[x.did + '|' + x.moldeId] || [] }))
+    .filter(x => x.fuentes.length);
+
+  // OJO: este bloque vive ACÁ y no más arriba porque mira `fuentesFaltantesItems`, que se
+  // calcula recién unas líneas antes. Un `const` leído antes de su declaración deja la
+  // pantalla EN BLANCO («Cannot access … before initialization»): ya pasó.
+
+  const ayudaEstado = {
+    // ¿ya llegaron los datos? Sin esto, abrir la ayuda mientras carga (o sin sesión) haría que los
+    // predicados vean ceros y saquen conclusiones falsas.
+    cargado: !!estado,
+    // dónde está parado (lo mismo que `donde`, repetido acá para que el guion tenga todo junto)
+    tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde,
+    nMoldes: (productosCat.productos || []).length,
+    // el PEDIDO en curso
+    pedido: {
+      nDisenos: disenosPedido.length,
+      sinVariable: disenosPedido.filter(d => !(disenoMoldes[d.id] || []).length).length,
+      artesTotal: tareasArte.length,
+      artesCargadas: tareasArte.filter(t => arteCargado[t.did + '|' + t.mid]).length,
+      telasFaltan: telasFaltantesTotal,
+      nFilas: filas.length,
+      hayResultados: trabajosMulti.some(t => t.estado === 'listo'),
+      editorAbierto: !!editorEditOpen,
+      nEditables: (editableData?.objetos || []).length,
+      // ¿le falta al arte alguna tipografía? Es el Único requisito que NO traba el pedido, y lo
+      // que permite que un tutorial grabado cargando una fuente se saltee ese paso a quien ya
+      // la tiene (regla `listo` de `arte-fuente` en diccionario.js).
+      fuentesFaltan: fuentesFaltantesItems.length,
+    },
+  };
+  /** Ir al arte de ESA VARIABLE — para que «Resolver» lleve exactamente donde está el problema. */
+  const irAlArte = (did, it) => {
+    setDisenoActivo(did);
+    const lista = itemsArteDe(did) || [];
+    const idx = lista.findIndex(x => x.moldeId === (it && it.moldeId) && (x.clave || null) === ((it && it.clave) || null));
+    setArteIdx(idx >= 0 ? idx : Math.max(0, lista.findIndex(x => x.moldeId === (it && it.moldeId))));
+  };
+  const pasoItems = React.useMemo(() => {
+    const it = [];
+    if (pedidoPaso === 'diseno') {
+      it.push({ id: 'dis', label: 'elegir el diseño', corto: 'Elegir diseño', hecho: disenosPedido.length > 0,
+                faltan: disenosPedido.length ? [] : ['Todavía no elegiste ningún diseño: tocá uno de la lista o escribilo.'],
+                ok: disenosPedido.map(d => `«${d.nombre}»`) });
+    } else if (pedidoPaso === 'moldes') {
+      it.push({ id: 'dis', label: 'elegir el diseño', corto: 'Elegir diseño', hecho: disenosPedido.length > 0,
+                faltan: disenosPedido.length ? [] : ['Volvé al paso 1 y elegí al menos un diseño.'],
+                ok: disenosPedido.map(d => `«${d.nombre}»`) });
+      it.push({ id: 'mol', label: 'la prenda de cada diseño', corto: 'Elegir prenda', hecho: disenosPedido.length > 0 && disenosSinMolde.length === 0,
+                faltan: disenosSinMolde.map(d => `«${d.nombre}» no tiene ninguna prenda elegida.`),
+                ok: disenosPedido.filter(d => !disenosSinMolde.includes(d)).map(d => `«${d.nombre}»: ${(disenoMoldes[d.id] || []).length} prenda(s)`) });
+    } else if (pedidoPaso === 'arte') {
+      it.push({ id: 'arte', label: 'cargar el arte', corto: 'Asignar arte', hecho: tareasArte.length > 0 && itemsSinArte.length === 0,
+                faltan: itemsSinArte.map(x => `Falta el arte de ${_arteLbl(x.did, x)}.`),
+                ok: itemsPedido.filter(x => arteCargado[x.did + '|' + x.moldeId]).map(x => `Arte cargado en ${_arteLbl(x.did, x)}`) });
+      it.push({ id: 'telas', label: 'la tela de cada pieza', corto: 'Asignar tela', hecho: !telasIncompletas,
+                // POR VARIABLE: «faltan 3 piezas» sin decir dónde obligaba a buscarlas a mano
+                faltan: telasFaltantesDet.map(x => `${_arteLbl(x.did, x.it)}: ${x.n} pieza(s) sin tela — asignalas en «Asignar telas».`),
+                ok: telasIncompletas ? [] : ['Todas las piezas tienen su tela'] });
+      // ⚠️ `aviso: true` — ES EL ÚNICO REQUISITO QUE NO TRABA (regla del usuario 2026-08-21): sin la
+      // tipografía la tizada igual sale, sublimada con la predeterminada. Queda AMARILLO y deja
+      // avanzar, pero al tocar «A la planilla» aparece el cartel con «Seguir de todos modos».
+      // Se mira TODO el pedido (`fuentesFaltantesItems`), no sólo el arte en pantalla, y cada línea
+      // dice de qué molde y de qué diseño es.
+      it.push({ id: 'fuentes', label: 'las fuentes del diseño', corto: 'Cargar fuente',
+                hecho: fuentesFaltantesItems.length === 0, aviso: true,
+                faltan: fuentesFaltantesItems.map(x => `${_arteLbl(x.did, x)}: no se encontró ${x.fuentes.map(f => `«${f}»`).join(' · ')} — se va a sublimar con «Anton Regular» (la predeterminada). Podés avanzar igual.`),
+                ok: fuentesFaltantesItems.length ? [] : ['Todas las fuentes del arte están'] });
+    } else if (pedidoPaso === 'planilla') {
+      const inv = planillaInvalidos();
+      const colsInv = [...new Set(inv.map(x => x.label))];
+      const sinArte = itemsSinArte;
+      it.push({ id: 'filas', label: 'cargar las prendas', corto: 'Cargar prendas', hecho: filas.length > 0,
+                faltan: filas.length ? [] : ['La planilla está vacía: agregá al menos una fila.'],
+                ok: filas.length ? [`${filas.length} fila(s) cargada(s)`] : [] });
+      it.push({ id: 'valores', label: 'valores válidos', corto: 'Revisar valores', hecho: inv.length === 0,
+                faltan: inv.length ? [`${inv.length} valor(es) fuera de las opciones en: ${colsInv.join(', ')}.`] : [],
+                ok: inv.length ? [] : ['Todos los valores están entre las opciones'] });
+      it.push({ id: 'arte', label: 'el arte de cada molde', corto: 'Asignar arte', hecho: sinArte.length === 0,
+                faltan: sinArte.map(x => `Falta el arte de ${_arteLbl(x.did, x)} (volvé al paso Arte).`),
+                ok: sinArte.length ? [] : ['Todos los moldes del pedido tienen su arte'] });
+    } else if (pedidoPaso === 'resultados') {
+      const enCurso = trabajosMulti.filter(t => t.estado === 'generando' || t.estado === 'en cola');
+      const listos = trabajosMulti.filter(t => t.estado === 'listo');
+      it.push({ id: 'gen', label: 'armar la tizada', corto: 'Armar la tizada', hecho: trabajosMulti.length > 0 && !enCurso.length,
+                faltan: enCurso.length ? [`${enCurso.length} tizada(s) todavía en proceso.`] : (trabajosMulti.length ? [] : ['Todavía no se generó ninguna tizada.']),
+                ok: listos.map(t => `Tizada lista${t.nombre ? `: ${t.nombre}` : ''}`) });
+    }
+    return it;
+  }, [pedidoPaso, disenosPedido, disenoMoldes, disenosSinMolde, tareasArte, arteCargado, disenoVars, _idsCat,
+      telasIncompletas, telasFaltantesTotal, fuentesPorArte, filas, cols, moldesSeleccionados, trabajosMulti]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const removeFila = (i) => {
     const next = filas.filter((_, idx) => idx !== i);
     if (next.length) {
@@ -8940,6 +10633,8 @@ export default function App() {
   // La cinta de actualización TAMBIÉN en el login: si el sistema se actualiza mientras alguien
   // está ahí parado, su pantalla se recarga sola igual que las demás (si no, entraba con el
   // frontend viejo hasta un F5 a mano).
+  // BASE CAÍDA: pantalla propia. Mostrar el login sería mentir — no hay contra qué validar.
+  if (sinBase) return <><AvisoActualizacion /><PantallaSinBase motivo={sinBase} onReintentar={recargarYo} /></>;
   if (authOn && !yo) return <><AvisoActualizacion /><LoginScreen onLogin={(u) => { setYo(u); }} /></>;
 
   return (
@@ -8988,7 +10683,7 @@ export default function App() {
               <span className="sb-texto">Configuración</span>
             </button>
             )}
-            {/* AYUDA GUIADA: abre el menú de tutoriales (ver tutor.jsx / guias.js) */}
+            {/* AYUDA GUIADA: abre el menú de tutoriales grabados (ver tutor.jsx / diccionario.js) */}
             <button className="nav-item" data-tour="nav-ayuda" onClick={() => setAyudaAbierta(true)}
               title="Te guío paso a paso, marcándote qué tocar">
               <Icon name="alert" />
@@ -9086,6 +10781,17 @@ export default function App() {
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              {/* AYUDA para quien NO tiene la barra lateral (pedido del usuario 2026-08-28): el
+                  operario trabaja en este panel y no llegaba al menú de tutoriales. Mismo
+                  `data-tour` que el de la barra: nunca están los dos a la vez. */}
+              <button data-tour="nav-ayuda" onClick={() => setAyudaAbierta(true)}
+                title="Te guío paso a paso, marcándote qué tocar"
+                style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 13px',
+                  borderRadius: 9, cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                  border: '1px solid var(--accent)', background: 'rgba(0,216,245,0.10)',
+                  color: 'var(--accent)' }}>
+                <Icon name="alert" /> Ayuda
+              </button>
               <div className="connection-badge" style={{ margin: 0 }}
                 title={versionApp?.commit ? `revisión ${versionApp.commit}` : ''}>
                 <div className={`status-dot ${!estado ? 'error' : ''}`}></div>
@@ -9101,7 +10807,7 @@ export default function App() {
         {procesando && createPortal(
           <div style={{ position: 'fixed', inset: 0, zIndex: 10050, background: 'rgba(2,6,12,0.82)', backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18 }}>
             <div style={{ width: 46, height: 46, border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'ldspin 0.8s linear infinite' }} />
-            <div style={{ color: '#fff', fontSize: 14, fontWeight: 600, maxWidth: 440, textAlign: 'center', lineHeight: 1.5, padding: '0 20px' }}>{procesando}</div>
+            <div data-cargando="Se está procesando el archivo." style={{ color: '#fff', fontSize: 14, fontWeight: 600, maxWidth: 440, textAlign: 'center', lineHeight: 1.5, padding: '0 20px' }}>{procesando}</div>
             <style>{`@keyframes ldspin{to{transform:rotate(360deg)}}`}</style>
           </div>,
           document.body
@@ -9483,13 +11189,164 @@ export default function App() {
           )}
         </Modal>
 
+        {/* ELEGIR LA TELA (2026-08-21) — el selector salió de la columna angosta a un modal: la
+            lista de 35 telas en una tira de 210 px era ilegible y obligaba a buscar por texto.
+            Acá entran en grilla, con su MUESTRA DE COLOR (la misma del visor), el ancho, y el
+            buscador arriba. Un toque elige y aplica: no hay «guardar» aparte. */}
+        <Modal open={!!telaPicker} onClose={() => setTelaPicker(null)}
+          titulo={telaPicker?.destino === 'seleccion' ? `Tela para ${telaPicker.piezas.length} pieza${telaPicker.piezas.length === 1 ? '' : 's'}` : 'Tela de esta prenda'}
+          subtitulo={telaPicker?.destino === 'seleccion' ? telaPicker.piezas.join(' · ') : 'Se aplica a todas las piezas'}
+          maxWidth={720}>
+          {telaPicker && (() => {
+            const q = telaPickerQ.trim().toLowerCase();
+            const lista = (telasPickerLista || []).filter(t => !q || (t.nombre || '').toLowerCase().includes(q));
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input autoFocus value={telaPickerQ} onChange={(e) => setTelaPickerQ(e.target.value)} placeholder="Buscar tela…"
+                  style={{ height: 40, fontSize: 13.5, padding: '0 13px', borderRadius: 11, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 9, maxHeight: 420, overflowY: 'auto', paddingRight: 2 }}>
+                  {lista.map(t => (
+                    <button key={t.id} type="button" onClick={() => { telaPickerAplicar(t.id); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 12px', borderRadius: 13, cursor: 'pointer', textAlign: 'left',
+                               border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', transition: 'all .15s' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = colorDeTela(t.id); e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-light)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}>
+                      <span style={{ width: 30, height: 30, borderRadius: 9, background: colorDeTela(t.id), flexShrink: 0, boxShadow: `0 0 0 3px ${colorDeTela(t.id)}22` }} />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
+                        {t.ancho_cm ? <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)', marginTop: 1 }}>{t.ancho_cm} cm útiles</span> : null}
+                      </span>
+                    </button>
+                  ))}
+                  {!lista.length && (
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 2px' }}>
+                      {(telasPickerLista || []).length ? 'Ninguna tela coincide con la búsqueda.' : 'No hay telas. Registralas en Configuración › Telas.'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+
+        {/* COPIAR LAS TELAS A OTROS MOLDES DEL PEDIDO (2026-08-21, pedido del usuario: «que tenga
+            la opción de clonar la selección de tela para todos los moldes o elegir a qué moldes,
+            sin la necesidad de navegar de molde en molde»). Copia el mapa {pieza → tela} del ítem
+            que se está mirando a los ítems elegidos. Las piezas que allá se llamen distinto no
+            reciben nada y quedan marcadas como faltantes, que es lo que corresponde. */}
+        <Modal open={!!telaCopiar} onClose={() => setTelaCopiar(null)} titulo="Copiar estas telas a…" maxWidth={560}>
+          {telaCopiar && (() => {
+            const origen = _telasDe(telaCopiar.did, telaCopiar.mid);
+            const nOrigen = Object.keys(origen).length;
+            const destinos = tareasArte.filter(t => !(t.did === telaCopiar.did && t.mid === telaCopiar.mid));
+            const todos = destinos.length > 0 && destinos.every(t => telaCopiar.destinos.has(t.did + '|' + t.mid));
+            const marcar = (k) => setTelaCopiar(c => { const n = new Set(c.destinos); if (n.has(k)) n.delete(k); else n.add(k); return { ...c, destinos: n }; });
+            const aplicar = () => {
+              const elegidos = destinos.filter(t => telaCopiar.destinos.has(t.did + '|' + t.mid));
+              if (!elegidos.length) return;
+              setTelaPorPieza(m => {
+                const n = { ...m };
+                elegidos.forEach(t => {
+                  const k = _claveTelaDis(t.did, t.mid);
+                  n[k] = { ...(n[k] || {}), ...origen };
+                });
+                return n;
+              });
+              setTelaCopiar(null);
+              showMsg(`Telas copiadas a ${elegidos.length} ${elegidos.length === 1 ? 'molde' : 'moldes'} ✓`);
+            };
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                  Se copia la asignación de <b>«{_nomMolde(telaCopiar.mid)}»</b> en <b>«{_nomDiseno(telaCopiar.did)}»</b> ({nOrigen} pieza{nOrigen === 1 ? '' : 's'} con tela) a los moldes que marques. <b>Pisa</b> lo que esos moldes tuvieran asignado en esas piezas.
+                </div>
+                {destinos.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Este pedido tiene un solo molde: no hay a dónde copiar.</div>
+                ) : (<>
+                  <button type="button" className="btn ghost" style={{ alignSelf: 'flex-start', fontSize: 12 }}
+                    onClick={() => setTelaCopiar(c => ({ ...c, destinos: todos ? new Set() : new Set(destinos.map(t => t.did + '|' + t.mid)) }))}>
+                    {todos ? 'Ninguno' : 'Todos los moldes del pedido'}
+                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto' }}>
+                    {destinos.map(t => {
+                      const k = t.did + '|' + t.mid;
+                      const on = telaCopiar.destinos.has(k);
+                      const yaTiene = Object.keys(_telasDe(t.did, t.mid)).length;
+                      return (
+                        <div key={k} onClick={() => marcar(k)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 9, cursor: 'pointer',
+                                   border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                                   background: on ? 'rgba(0,243,255,0.08)' : 'transparent' }}>
+                          <TikSel estado={on ? 'lleno' : 'vacio'} onClick={() => marcar(k)} title={on ? 'No copiar acá' : 'Copiar acá'} />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
+                            <b>{_nomMolde(t.mid)}</b> <span style={{ color: 'var(--text-muted)' }}>en «{_nomDiseno(t.did)}»</span>
+                          </span>
+                          {yaTiene > 0 && <span style={{ fontSize: 10.5, color: 'var(--warning)' }}>ya tiene {yaTiene}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button className="btn ghost" onClick={() => setTelaCopiar(null)}>Cancelar</button>
+                    <button className="btn primary" disabled={!telaCopiar.destinos.size} onClick={aplicar}>
+                      Copiar{telaCopiar.destinos.size ? ` a ${telaCopiar.destinos.size}` : ''}
+                    </button>
+                  </div>
+                </>)}
+              </div>
+            );
+          })()}
+        </Modal>
+
+        {/* QUÉ FALTA EN ESTE PASO — el detalle de la barrita de abajo (pedido del usuario
+            2026-08-21: «al presionar debe abrir un modal mostrándole más a detalle lo que le falta
+            dentro de ese paso»). Sale de `pasoItems`, la misma lista que pinta la barrita. */}
+        <Modal open={progresoOpen} onClose={() => setProgresoOpen(false)} titulo={`Paso ${({ diseno: 1, moldes: 2, arte: 3, planilla: 4, resultados: 5 })[pedidoPaso] || ''} · ${({ diseno: 'Diseño', moldes: 'Moldes', arte: 'Arte', planilla: 'Planilla', resultados: 'Tizadas' })[pedidoPaso] || ''} — qué falta`} maxWidth={560}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {(() => {
+              const hechos = pasoItems.filter(i => i.hecho).length;
+              const total = pasoItems.length || 1;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flex: 1, height: 7, borderRadius: 4, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.round(100 * hechos / total)}%`, height: '100%', background: 'var(--success)' }} />
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: hechos === total ? 'var(--success)' : 'var(--text-secondary)' }}>{hechos} de {total}</span>
+                </div>
+              );
+            })()}
+            {pasoItems.map(i => {
+              // mismo código de colores que la barrita: verde hecho · amarillo avisa · rojo traba
+              const _c = i.hecho ? '16,185,129' : (i.aviso ? '245,158,11' : '239,68,68');
+              const _txt = i.hecho ? 'var(--success)' : (i.aviso ? '#f5b942' : '#ff8a8a');
+              return (
+              <div key={i.id} style={{ border: `1px solid rgba(${_c},0.35)`, background: `rgba(${_c},0.06)`,
+                                       borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: _txt }}>
+                  <MarcaPaso ok={i.hecho} aviso={i.aviso} />
+                  {/* el label se escribe en minúscula (la barrita dice «Falta: cargar el arte»); acá va con mayúscula inicial */}
+                  <span>{i.label.charAt(0).toUpperCase() + i.label.slice(1)}</span>
+                </div>
+                {(i.hecho ? (i.ok || []) : (i.faltan || [])).map((t, k) => (
+                  <div key={k} style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, paddingLeft: 28 }}>· {t}</div>
+                ))}
+              </div>
+              );
+            })}
+            {!pasoItems.length && (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Este paso no tiene nada pendiente.</div>
+            )}
+          </div>
+        </Modal>
+
         {/* Tab 1: Pedidos */}
         {activoTab === 'pedidos' && (
-          <div className="panel animate-fade pedido-unido" style={['moldes', 'arte', 'planilla'].includes(pedidoPaso) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}}>
+          <div className="panel animate-fade pedido-unido" style={['diseno', 'moldes', 'arte', 'planilla'].includes(pedidoPaso) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}}>
             {/* Título + pasos en UNA fila */}
             {(() => {
               const pasos = [
-                { k: 'moldes', label: 'Diseños' }, { k: 'arte', label: 'Arte' },
+                { k: 'diseno', label: 'Diseño' }, { k: 'moldes', label: 'Moldes' },
+                { k: 'arte', label: 'Arte' },
                 { k: 'planilla', label: 'Planilla' }, { k: 'resultados', label: 'Tizadas' },
               ];
               const idx = pasos.findIndex(p => p.k === pedidoPaso);
@@ -9516,24 +11373,86 @@ export default function App() {
               );
             })()}
 
-            {/* Paso 1 · Escribir diseños + asignar moldes (columna de alto fijo, sin scroll de página) */}
-            {pedidoPaso === 'moldes' && !mapeandoOperario && (
+            {/* ══ PASO 1 · ELEGIR EL DISEÑO ══════════════════════════════════════════════════
+                Acá NO se ve ningún molde: sólo los diseños. Orden pedido por el usuario
+                (2026-08-21): el campo para escribir arriba y CENTRADO, y debajo los botones,
+                también centrados y de a TRES por línea. Los botones de acción, todos en la barra
+                de abajo — la misma de los otros 4 pasos. */}
+            {pedidoPaso === 'diseno' && !mapeandoOperario && (
               <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                {/* Cabecera fija: escribir diseño + chips */}
-                <div style={{ flexShrink: 0 }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 340 }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, paddingTop: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>¿Qué diseño lleva este trabajo?</span>
+                    <Ayuda ancho={320}>Tocá el o los diseños que vas a armar. En el paso siguiente elegís <b>qué moldes</b> lleva cada uno. Si el diseño no está en la lista, escribilo acá arriba: vale para este trabajo.</Ayuda>
+                  </div>
+                  {/* ESCRIBIR uno (centrado) */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', width: '100%', maxWidth: 620 }}>
+                    <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
                       <Icon name="edit" style={{ width: 14, height: 14, position: 'absolute', left: 12, top: 12, color: 'var(--text-muted)' }} />
                       <input data-tour="pedido-diseno-input" value={nuevoDisenoNombre} onChange={(e) => setNuevoDisenoNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') agregarDisenoPedido(); }}
                         placeholder="Escribí un diseño y Enter"
-                        style={{ width: '100%', height: 38, padding: '0 12px 0 34px', borderRadius: 9, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13.5 }} />
+                        style={{ width: '100%', height: 38, padding: '0 12px 0 34px', borderRadius: 9, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13.5, textAlign: 'center' }} />
                     </div>
-                    <button className="btn primary" data-tour="pedido-diseno-agregar" onClick={agregarDisenoPedido} disabled={!nuevoDisenoNombre.trim()} style={{ padding: '9px 14px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 5, fontSize: 13 }}>
+                    <button className="btn primary" data-tour="pedido-diseno-agregar" onClick={agregarDisenoPedido} disabled={!nuevoDisenoNombre.trim()} style={{ padding: '9px 14px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, flexShrink: 0 }}>
                       <Icon name="plus" style={{ width: 13, height: 13 }} /> Diseño
                     </button>
                   </div>
+                  {/* LOS DE SIEMPRE: 3 por línea, centrados, debajo del campo */}
+                  <div data-tour="pedido-diseno-lista" data-opciones="1" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, width: '100%', maxWidth: 620 }}>
+                    {DISENOS_PRESET.map(nom => {
+                      const on = disenosPedido.some(d => d.id === _slugDiseno(nom));
+                      return (
+                        <button key={nom} type="button" onClick={() => toggleDisenoPreset(nom)}
+                          style={{ padding: '13px 10px', borderRadius: 11, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                                   letterSpacing: '0.02em', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                   border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                                   background: on ? 'rgba(0,243,255,0.14)' : 'rgba(255,255,255,0.03)',
+                                   color: on ? 'var(--accent)' : 'var(--text-primary)' }}>
+                          {on ? '✓ ' : ''}{nom}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* Los elegidos */}
                   {disenosPedido.length > 0 && (
-                    <div data-tour="pedido-diseno-chips" style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 11, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center', width: '100%', maxWidth: 620 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Este trabajo lleva</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, justifyContent: 'center' }}>
+                        {disenosPedido.map(d => (
+                          <span key={d.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, background: 'rgba(0,243,255,0.12)', border: '1px solid var(--accent)', color: 'var(--accent)' }}>
+                            {d.nombre}
+                            <button title="Sacarlo" onClick={() => quitarDisenoPedido(d.id)} style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 }}>✕</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <BarraPaso
+                  acciones={disenosPedido.length > 0 ? (
+                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
+                  ) : null}
+                  centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={textoAvisoPaso(pasoItems)}
+                  siguiente={<BtnSiguiente texto="Elegir los moldes" ancla="pedido-ir-moldes"
+                    disabled={!disenosPedido.length} onClick={() => setPedidoPaso('moldes')} />} />
+              </div>
+            )}
+
+            {/* Paso 1 · Escribir diseños + asignar moldes (columna de alto fijo, sin scroll de página) */}
+            {pedidoPaso === 'moldes' && !mapeandoOperario && (
+              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                {/* Cabecera fija: volver al paso del diseño + chips de los diseños elegidos.
+                    El nombre del diseño YA se eligió en el paso 1: acá sólo se dice a cuál se le
+                    están cargando los moldes. */}
+                <div style={{ flexShrink: 0 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      Elegí los moldes de cada diseño{disenosPedido.length > 1 ? ' (tocá el chip para cambiar de diseño)' : ''}.
+                    </span>
+                  </div>
+                  {disenosPedido.length > 0 && (
+                    <div data-tour="pedido-diseno-chips" data-opciones="1" style={{ display: 'flex', gap: 7, flexWrap: 'wrap', marginTop: 11, alignItems: 'center' }}>
                       {/* Un chip por diseño; el encendido es el que se está armando. Las prendas que
                           toques abajo van SÓLO a ése. (No hay «Todos»: metía la misma variable en
                           todos los diseños de una y el pedido la fabricaba de más.) */}
@@ -9576,7 +11495,7 @@ export default function App() {
                 })()}
 
                 {/* Cuerpo: grilla de moldes (SIEMPRE visible, aunque no haya diseños) */}
-                <div data-tour="pedido-variables" style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 12, paddingRight: 2 }}>
+                <div data-tour="pedido-variables" data-opciones="1" style={{ flex: 1, minHeight: 0, overflowY: 'auto', marginTop: 12, paddingRight: 2 }}>
                   {disenosPedido.length === 0 && (
                     <Ayuda ancho={330}><Icon name="edit" style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
                       Escribí un diseño arriba y después tocá las variables que van en él.</Ayuda>
@@ -9744,31 +11663,23 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Barra inferior fija */}
-                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
-                  {(moldesUnion.length > 0 || disenosPedido.length > 0) && (
-                    <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
-                  )}
-                  {/* El cliente puede traer SU molde: se sube acá mismo y queda en «Mis artículos». */}
-                  <button className="btn ghost" data-tour="pedido-subir-molde" style={{ padding: '8px 14px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
-                    onClick={() => { setPedidoTabMoldes('mios'); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
-                    title="Subir un molde propio (.ai · .pdf · .dxf)">
-                    <Icon name="upload" style={{ width: 13, height: 13 }} /> Subir mi propio molde
-                  </button>
-                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    {disenosPedido.length > 0 && disenosSinMolde.length > 0 && (
-                      <span style={{ fontSize: 11.5, color: 'var(--warning)', maxWidth: 280, textAlign: 'right', lineHeight: 1.35 }}>
-                        Falta elegir variable en {disenosSinMolde.map(d => `«${d.nombre}»`).join(', ')}
-                      </span>
+                {/* Barra inferior: LA MISMA de los 5 pasos (`BarraPaso`) */}
+                <BarraPaso
+                  volver={<BtnVolver texto="Diseño" ancla="pedido-volver-diseno" onClick={() => setPedidoPaso('diseno')} />}
+                  acciones={<>
+                    {(moldesUnion.length > 0 || disenosPedido.length > 0) && (
+                      <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
                     )}
-                    <button data-tour="pedido-ir-arte" onClick={irPasoArte} disabled={!puedeIrAArte}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
-                        cursor: puedeIrAArte ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
-                        background: puedeIrAArte ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: puedeIrAArte ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
-                      Cargar el arte <span style={{ fontSize: 16 }}>→</span>
+                    {/* El cliente puede traer SU molde: se sube acá mismo y queda en «Mis artículos». */}
+                    <button className="btn ghost" data-tour="pedido-subir-molde" style={{ padding: '8px 14px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}
+                      onClick={() => { setPedidoTabMoldes('mios'); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                      title="Subir un molde propio (.ai · .pdf · .dxf)">
+                      <Icon name="upload" style={{ width: 13, height: 13 }} /> Subir mi propio molde
                     </button>
-                  </div>
-                </div>
+                  </>}
+                  centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={textoAvisoPaso(pasoItems)}
+                  siguiente={<BtnSiguiente texto="Cargar el arte" ancla="pedido-ir-arte" onClick={irPasoArte} disabled={!puedeIrAArte} />} />
               </div>
             )}
 
@@ -9798,10 +11709,13 @@ export default function App() {
               {pedidoPaso === 'planilla' && (
                 <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                <div className="card" style={{ padding: 16 }}>
+                <div className="card" style={{ padding: 18, width: 'max-content', maxWidth: '100%',
+                                               minWidth: 'min(100%, 780px)', marginLeft: 'auto', marginRight: 'auto' }}>
                   {/* Título + (al lado contrario) aviso de caracteres que la fuente NO tiene */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-                    <div className="card-title">3 · Cargá la planilla (una sola vez)</div>
+                    <div>
+                      <div className="card-title" style={{ marginBottom: 2 }}>Cargá la planilla</div>
+                    </div>
                     {faltantesFuente.length > 0 && (
                       <div style={{ flexShrink: 0, maxWidth: 460, display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 13px', borderRadius: 10,
                         background: 'rgba(255,60,60,0.12)', border: '1.5px solid #ff4d4d', boxShadow: '0 0 14px rgba(255,60,60,0.25)' }}>
@@ -9820,9 +11734,112 @@ export default function App() {
                     )}
                   </div>
                   <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
+
+                  {/* ══ BARRA DE HERRAMIENTAS ══════════════════════════════════════════════════
+                      Todo lo que se le hace a la planilla, ARRIBA de ella y agrupado por lo que
+                      hace: [agregar filas] · [archivo] · [vista] · [cuánto hay]. Antes estaba
+                      abajo, todo del mismo peso y con flechitas de texto en vez de íconos. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 14, marginBottom: 12,
+                                padding: '10px 12px', borderRadius: 12, border: '1px solid var(--border-light)',
+                                background: 'linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012))' }}>
+                    {/* — agregar filas — */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                      <button data-tour="planilla-agregar" onClick={agregarFilas}
+                        title="Agregar filas en blanco al final"
+                        style={{ display: 'flex', alignItems: 'center', gap: 7, height: 36, padding: '0 14px', fontSize: 12.5, fontWeight: 700,
+                          borderRadius: '9px 0 0 9px', cursor: 'pointer', color: '#001016', border: 'none',
+                          background: 'var(--accent)' }}>
+                        <Icon name="plus" style={{ width: 14, height: 14 }} />
+                        Agregar {(parseInt(nFilasAgregar, 10) || 1) > 1 ? `${parseInt(nFilasAgregar, 10)} filas` : 'fila'}
+                      </button>
+                      <input type="number" min="1" max="500" value={nFilasAgregar}
+                        onChange={(e) => setNFilasAgregar(e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                        onKeyDown={(e) => { if (e.key === 'Enter') agregarFilas(); }}
+                        title="Cuántas filas agregar"
+                        style={{ width: 50, height: 36, textAlign: 'center', padding: '0 4px', borderRadius: '0 9px 9px 0',
+                          background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', borderLeft: 'none',
+                          color: '#fff', fontSize: 13, fontWeight: 800, fontFamily: 'monospace', outline: 'none' }} />
+                    </div>
+
+                    <button className="btn ghost" data-tour="planilla-lote"
+                      onClick={() => { setLoteCant({}); setLoteOpen(true); }}
+                      title="Cuántas prendas de cada talle. Crea UNA FILA POR PRENDA, lista para ponerle el nombre."
+                      style={{ display: 'flex', alignItems: 'center', gap: 7, height: 36, padding: '0 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 9 }}>
+                      <Icon name="planilla" style={{ width: 14, height: 14 }} /> Cargar por lote
+                    </button>
+
+                    <span style={{ width: 1, height: 24, background: 'var(--border-light)', flexShrink: 0 }} />
+
+                    {/* — archivo — */}
+                    <button className="btn ghost" data-tour="planilla-csv" onClick={() => document.getElementById('csvPedidoInput')?.click()}
+                      title="Subir filas desde un Excel/CSV. En talle, diseño y toggles sólo entran valores válidos."
+                      style={{ display: 'flex', alignItems: 'center', gap: 7, height: 36, padding: '0 13px', fontSize: 12.5, fontWeight: 600, borderRadius: 9 }}>
+                      <Icon name="upload" style={{ width: 14, height: 14 }} /> Importar
+                    </button>
+                    <input id="csvPedidoInput" type="file" accept=".csv,text/csv,text/plain" style={{ display: 'none' }} onChange={onImportCSVFile} />
+                    <button className="btn ghost" data-tour="planilla-exportar" onClick={exportarPlanillaCSV}
+                      title="Bajar la planilla en Excel (CSV) con las columnas que estás viendo. Se completa afuera y se vuelve a subir con «Importar»."
+                      style={{ display: 'flex', alignItems: 'center', gap: 7, height: 36, padding: '0 13px', fontSize: 12.5, fontWeight: 600, borderRadius: 9 }}>
+                      <Icon name="download" style={{ width: 14, height: 14 }} /> Exportar
+                    </button>
+
+                    {/* — vista: la columna Cantidad — */}
+                    {colCantidad && !cantidadSiempre && (<>
+                      <span style={{ width: 1, height: 24, background: 'var(--border-light)', flexShrink: 0 }} />
+                      <div data-tour="planilla-cantidad" onClick={() => setCantidadOn(v => !v)}
+                        title={cantidadOn ? 'Sacar la columna: cada fila vuelve a ser UNA prenda'
+                                          : 'Mostrar la columna: una fila puede valer varias prendas iguales'}
+                        style={{ display: 'flex', alignItems: 'center', gap: 9, height: 36, padding: '0 12px 0 8px', borderRadius: 9, cursor: 'pointer',
+                          border: '1px solid ' + (cantidadOn ? 'rgba(0,216,245,0.5)' : 'transparent'),
+                          background: cantidadOn ? 'rgba(0,216,245,0.10)' : 'transparent' }}>
+                        {/* el `onClick` lo maneja la fila entera: si el Switch también lo
+                            atendiera, tocarlo dispararía DOS veces el toggle y volvería a como
+                            estaba — se veía como «el botón anda sólo en las letras» (2026-08-26) */}
+                        <span style={{ pointerEvents: 'none', display: 'flex' }}>
+                          <Switch on={cantidadOn} onChange={() => {}} />
+                        </span>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: cantidadOn ? 'var(--accent)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          Columna cantidad
+                        </span>
+                        <span onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
+                          <Ayuda ancho={320}>Repite la misma prenda sin cargarla de nuevo: <i>M · pepe · 12</i> con cantidad <b>5</b> son <b>5 remeras iguales</b>. Si cada prenda lleva un nombre distinto, usá <b>Cargar por lote</b>.</Ayuda>
+                        </span>
+                      </div>
+                    </>)}
+
+                    {/* — cuánto hay — */}
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 36, padding: '0 14px', borderRadius: 999,
+                                     background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-light)' }}>
+                        <b style={{ fontSize: 14, fontWeight: 800, fontFamily: 'monospace' }}>{filas.length}</b>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>fila{filas.length === 1 ? '' : 's'}</span>
+                      </span>
+                      {totalPrendas !== filas.length && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 36, padding: '0 14px', borderRadius: 999,
+                                       background: 'rgba(0,216,245,0.12)', border: '1px solid rgba(0,216,245,0.45)' }}>
+                          <b style={{ fontSize: 14, fontWeight: 800, fontFamily: 'monospace', color: 'var(--accent)' }}>{totalPrendas}</b>
+                          <span style={{ fontSize: 11.5, color: 'var(--accent)' }}>prendas</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   
-                  <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.18)', marginTop: 12, boxShadow: '0 4px 18px rgba(0,0,0,0.25)' }}>
-                    <table className="planilla-tbl" data-tour="planilla-tabla" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
+                  {/* el marco envuelve la tabla y NADA MÁS: `max-content` + tope del 100% (si la
+                      planilla es más ancha que la pantalla, scrollea como siempre) */}
+                  <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.18)', boxShadow: '0 4px 18px rgba(0,0,0,0.25)', width: 'max-content', maxWidth: '100%',
+                                marginLeft: 'auto', marginRight: 'auto' }}>
+                    <table className="planilla-tbl" data-tour="planilla-tabla" style={{ width: 'max-content', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
+                      {/* ANCHOS: los fija el contenido (ver `ANCHO_COL`). La tabla mide EXACTO lo que
+                          suman sus columnas (`width: max-content`): donde terminan, termina la
+                          planilla, y a la derecha se ve el fondo del panel. Antes había una columna
+                          de relleno que se comía el sobrante y quedaba como una columna vacía con
+                          las líneas de las filas (lo marcó el usuario 2026-08-26). */}
+                      <colgroup>
+                        <col style={{ width: 44 }} />
+                        {cols.map(c => colActiva(c) ? <col key={c.id} style={{ width: ANCHO_COL[c.id] }} /> : null)}
+                        <col style={{ width: 40 }} />
+                      </colgroup>
                       <thead>
                         <tr style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.02))' }}>
                           <th style={{ width: 44, padding: '11px 10px', borderBottom: '1px solid var(--border-light)', textAlign: 'center', fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: 0.5 }}>#</th>
@@ -9833,6 +11850,7 @@ export default function App() {
                             if (!colActiva(c)) return null;
                             return (
                               <th key={c.id} title={c.label}
+                                data-col={c.id} data-col-label={c.label} data-col-role={c.role || ''}
                                 style={{ padding: '11px 12px', borderBottom: '1px solid var(--border-light)', borderLeft: '1px solid rgba(255,255,255,0.04)', textAlign: 'left',
                                   fontSize: 11, color: 'var(--text-secondary)', fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>
                                 {c.label}
@@ -9843,10 +11861,40 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filas.map((fila, i) => (
-                          <tr key={i} style={{ borderBottom: '1px solid var(--border-light)' }}>
-                            <td style={{ padding: '6px 10px', borderRight: '1px solid var(--border-light)', textAlign: 'center', fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>
-                              {(i + 1).toString().padStart(2, '0')}
+                        {filas.map((fila, i) => {
+                          const _sel = filasSel.has(i);
+                          const _arrastrando = !!dragFilas && dragFilas.sel.includes(i);
+                          const _dy = desplazoFila(i);
+                          return (
+                          <tr key={i} data-fila="1"
+                            style={{ borderBottom: '1px solid var(--border-light)',
+                            // EL MOVIMIENTO: cada fila se corre a donde va a quedar. La transición
+                            // va sólo mientras dura el gesto — al soltar, el array ya está
+                            // reordenado y animar ahí haría un salto.
+                            transform: _dy ? `translateY(${_dy}px)` : undefined,
+                            transition: soltandoFilas ? 'none' : (dragFilas ? 'transform .16s cubic-bezier(.2,.8,.2,1)' : undefined),
+                            position: _arrastrando ? 'relative' : undefined,
+                            zIndex: _arrastrando ? 2 : undefined,
+                            background: _arrastrando ? 'rgba(0,216,245,0.16)' : (_sel ? 'rgba(0,216,245,0.07)' : undefined),
+                            boxShadow: _arrastrando ? '0 8px 22px rgba(0,0,0,0.45)' : undefined }}>
+                            <td data-numfila="1"
+                              onMouseDown={(e) => empezarDragFilas(i, e)}
+                              onClick={(e) => {
+                                if (clickTrasDrag.current) { clickTrasDrag.current = false; return; }
+                                clickNumeroFila(i, e);
+                              }}
+                              title="Tocá para elegir la fila (shift = varias) · arrastrá para moverla de lugar"
+                              style={{ padding: '6px 10px', borderRight: '1px solid var(--border-light)', textAlign: 'center',
+                                fontFamily: 'monospace', fontSize: 12, cursor: dragFilas ? 'grabbing' : 'grab',
+                                userSelect: 'none', position: 'relative',
+                                color: (_sel || _arrastrando) ? 'var(--accent)' : 'var(--text-muted)',
+                                fontWeight: (_sel || _arrastrando) ? 800 : 400 }}>
+                              {/* el número SIEMPRE es la posición: no viaja con la fila. Mientras se
+                                  arrastra muestra el que le VA A TOCAR al soltar. */}
+                              {numeroFila(i).toString().padStart(2, '0')}
+                              {(_sel || _arrastrando) && (
+                                <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'var(--accent)' }} />
+                              )}
                             </td>
                             {cols.map((c, ci) => {
                               // Columna que ningún molde del pedido usa → NO se muestra (se mantiene el
@@ -9868,7 +11916,7 @@ export default function App() {
                               const editando = !!plEdit && plEdit.r === i && plEdit.c === ci;
                               const esDropdown = c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable';
                               const dropdownOpts = c.role === 'talle' ? (estado?.talles || []) : c.role === 'diseno' ? disenosPedido.map(d => d.nombre) : opts;
-                              const _esNum = c.role === 'numero';
+                              const _esNum = c.role === 'numero' || c.role === 'cantidad';
                               const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
                                 fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };
                               // ── CAPA ESTÁTICA: define el ANCHO de la columna SIEMPRE (en selección y en edición). ──
@@ -9951,7 +11999,7 @@ export default function App() {
                               if (editando) {
                                 let ctrl;
                                 if (esDropdown) {
-                                  ctrl = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit autoSel={!plEdit.typed} />;
+                                  ctrl = <ComboCell value={cellValue} options={dropdownOpts} onChange={(v) => updateFila(i, c.id, v)} onFocusCell={foco} cellId={plc} colId={c.id} onNavKey={(e) => onEditKey(e, i, ci)} autoEdit autoSel={!plEdit.typed} />;
                                 } else if (tipo === 'toggle') {
                                   ctrl = (
                                     <div data-plc={plc} tabIndex={0} ref={(el) => el && el.focus()} onKeyDown={(e) => onEditKey(e, i, ci)}
@@ -10013,6 +12061,7 @@ export default function App() {
                               }
                               return (
                                 <td key={c.id}
+                                  data-col={c.id} data-col-label={c.label} data-col-role={c.role || ''}
                                   onMouseDown={(e) => {
                                     if (editando) return;   // en edición, el control maneja el mouse (mover el cursor, etc.)
                                     if (e.shiftKey && plSel) { e.preventDefault(); setPlSelEnd({ r: i, c: ci }); return; }   // Shift+click: extiende el rango desde el ancla
@@ -10048,62 +12097,99 @@ export default function App() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'stretch', gap: 6 }}>
-                      <button className="btn" data-tour="planilla-agregar" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={agregarFilas}>
-                        <Icon name="plus" style={{ width: 13, height: 13 }} /> Agregar {(parseInt(nFilasAgregar, 10) || 1) > 1 ? `${parseInt(nFilasAgregar, 10)} filas` : 'Fila'}
-                      </button>
-                      <input type="number" min="1" max="500" value={nFilasAgregar}
-                        onChange={(e) => setNFilasAgregar(e.target.value)}
-                        onFocus={(e) => e.target.select()}
-                        onKeyDown={(e) => { if (e.key === 'Enter') agregarFilas(); }}
-                        title="Cuántas filas agregar"
-                        style={{ width: 54, textAlign: 'center', padding: '0 6px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, fontWeight: 700, outline: 'none' }} />
-                    </div>
-                    <button className="btn ghost" data-tour="planilla-csv" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => document.getElementById('csvPedidoInput')?.click()}
-                      title="Cargar filas desde un archivo CSV (Excel). En talle/diseño/manga solo acepta valores válidos; si no coinciden, deja la celda vacía.">
-                      ⬆ Importar CSV
-                    </button>
-                    <input id="csvPedidoInput" type="file" accept=".csv,text/csv,text/plain" style={{ display: 'none' }} onChange={onImportCSVFile} />
                   </div>
                 </div>
                 </div>
                 {/* Barra inferior fija (igual que en los otros pasos) */}
-                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
-                  <button className="btn ghost" data-tour="planilla-volver-arte" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }}>← Arte</button>
-                  <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
-                  {(() => {
-                    // De la planilla se ENVÍA directo a generar la tizada (no hay paso de revisión).
-                    const invalidos = planillaInvalidos();
-                    const cols_inv = [...new Set(invalidos.map(x => x.label))];
-                    const sinArte = moldesSeleccionados.filter(id => !arteEnPedido(id));
-                    const bloq = !filas.length || invalidos.length > 0 || !moldesSeleccionados.length || sinArte.length > 0;
-                    const motivo = invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')})`
-                      : sinArte.length ? `Falta el diseño en el paso Arte para: ${sinArte.map(id => moldeById(id)?.nombre).join(', ')}`
-                        : !filas.length ? 'Agregá al menos una fila' : '';
-                    return (
-                      <>
-                        <span style={{ marginLeft: 'auto', fontSize: 12, color: (invalidos.length || sinArte.length) ? '#ff8a8a' : 'var(--text-muted)', fontWeight: (invalidos.length || sinArte.length) ? 700 : 400 }}>
-                          {invalidos.length ? `⚠ ${invalidos.length} valor(es) inválido(s) en ${cols_inv.join(', ')}`
-                            : sinArte.length ? `⚠ Falta el diseño de ${sinArte.map(id => moldeById(id)?.nombre).join(', ')}`
-                              : `${filas.length} fila${filas.length === 1 ? '' : 's'}`}
-                        </span>
-                        <button data-tour="planilla-enviar" onClick={() => { if (!bloq) generarMulti(); }} disabled={bloq} title={motivo}
-                          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 22px', borderRadius: 10, border: 'none', cursor: bloq ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
-                            background: bloq ? 'rgba(255,255,255,0.07)' : 'var(--accent)', color: bloq ? 'var(--text-muted)' : '#001016', transition: 'all .2s' }}>
-                          Enviar <span style={{ fontSize: 16 }}>→</span>
-                        </button>
-                      </>
-                    );
-                  })()}
-                </div>
+                {(() => {
+                  // De la planilla se ENVÍA directo a generar la tizada (no hay paso de revisión).
+                  const invalidos = planillaInvalidos();
+                  const cols_inv = [...new Set(invalidos.map(x => x.label))];
+                  // Por VARIABLE y diseño: «falta el arte de X» sin decir cuál no alcanza cuando
+                  // el mismo molde entra en dos diseños o con dos variables (2026-08-21).
+                  const sinArte = itemsSinArte;
+                  // 🔴 AL MENOS UNA FILA COMPLETA. Sin ninguna no hay nada para fabricar: el botón no
+                  // se activa (antes se generaba «igual» y el aviso llegaba después, con la tizada
+                  // ya armada — pedido del usuario 2026-08-31).
+                  const _incompletas = filasIncompletas();
+                  const _salen = filasQueSalen().length;
+                  const _ningunaCompleta = filas.length > 0 && _salen === 0;
+                  const bloq = !filas.length || invalidos.length > 0 || !moldesSeleccionados.length
+                    || sinArte.length > 0 || _ningunaCompleta;
+                  const _faltaEnTodas = [...new Set((_incompletas.length ? _incompletas : filas.map((f, i) => ({ i, faltan: columnasObligatorias.filter(c => !String(f[c.id] ?? '').trim()).map(c => c.label || c.id) }))).flatMap(x => x.faltan))].join(', ');
+                  const motivo = invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')})`
+                    : sinArte.length ? `Falta cargar el arte de: ${sinArte.map(x => _arteLbl(x.did, x)).join(' · ')} (paso Arte)`
+                      : !filas.length ? 'Agregá al menos una fila'
+                        : _ningunaCompleta ? `Ninguna fila está completa: falta ${_faltaEnTodas}. Cargá al menos una.` : '';
+                  return (
+                    <BarraPaso
+                      volver={<BtnVolver texto="Arte" ancla="planilla-volver-arte" onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }} />}
+                      acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
+                      centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={textoAvisoPaso(pasoItems)}
+                      siguiente={<BtnSiguiente texto="Enviar" ancla="planilla-enviar" disabled={bloq} title={motivo}
+                        onClick={() => {
+                          if (bloq) return;
+                          // ¿Hay filas a medio llenar? Se PREGUNTA antes de armar: la persona
+                          // decide si sigue sin ellas o las completa. Nunca se descartan solas.
+                          if (_incompletas.length) { setFaltanDatos(_incompletas); return; }
+                          generarMulti(filasQueSalen());
+                        }} />} />
+                  );
+                })()}
                 </div>
               )}
+
+              {/* FALTAN DATOS: se decide ANTES de armar la tizada (pedido del usuario
+                  2026-08-31). Dos caminos y ninguno silencioso: seguir sin esas filas, o volver a
+                  la planilla a completarlas. */}
+              <Modal open={!!faltanDatos} onClose={() => setFaltanDatos(null)} titulo="Faltan datos en la planilla" ancho={520}>
+                {!!faltanDatos && (() => {
+                  const _cols = [...new Set(faltanDatos.flatMap(x => x.faltan))];
+                  const _filasOk = filasQueSalen().length;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ fontSize: 13.5, lineHeight: 1.6 }}>
+                        {faltanDatos.length === 1
+                          ? <>La fila <b>{faltanDatos[0].i + 1}</b> no tiene cargado: <b>{faltanDatos[0].faltan.join(', ')}</b>.</>
+                          : <><b>{faltanDatos.length} filas</b> no tienen cargado: <b>{_cols.join(', ')}</b>.</>}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                        Sin ese dato no se pueden fabricar. Podés seguir sin ellas —se arma la tizada
+                        con las <b>{_filasOk}</b> fila(s) completas— o volver a la planilla a cargarlo
+                        (o borrar las filas que sobren).
+                      </div>
+                      <div style={{ maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        {faltanDatos.slice(0, 12).map(x => (
+                          <div key={x.i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12,
+                            padding: '5px 9px', borderRadius: 7, background: 'rgba(245,165,36,0.08)',
+                            border: '1px solid rgba(245,165,36,0.25)' }}>
+                            <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                              {String(x.i + 1).padStart(2, '0')}
+                            </span>
+                            <span>le falta <b>{x.faltan.join(', ')}</b></span>
+                          </div>
+                        ))}
+                        {faltanDatos.length > 12 && (
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>…y {faltanDatos.length - 12} más.</div>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end', marginTop: 4 }}>
+                        <button className="btn ghost" style={{ padding: '9px 16px', fontSize: 13 }}
+                          onClick={() => setFaltanDatos(null)}>Cargar el dato</button>
+                        <button className="btn primary" style={{ padding: '9px 16px', fontSize: 13 }}
+                          onClick={() => { setFaltanDatos(null); generarMulti(filasQueSalen()); }}>
+                          Enviar igual ({_filasOk} fila{_filasOk === 1 ? '' : 's'})
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </Modal>
 
               {/* Picker de VARIABLE por fila: tarjetas con preview de las piezas de cada variable */}
               <Modal open={varPickerRow !== null} onClose={() => setVarPickerRow(null)}
@@ -10179,7 +12265,7 @@ export default function App() {
                 };
                 // TODAS las telas que el molde tiene disponibles (las de «todas» + las propias de
                 // cualquier pieza). OJO: sin esto, un molde que asignó telas SÓLO por pieza quedaba
-                // con la lista vacía y el botón «Ver telas de pieza» directamente no aparecía.
+                // con la lista vacía y el botón «Asignar telas» directamente no aparecía.
                 const _telasMoldeIds = [...new Set([..._todasIds, ...Object.values(_porPz).flat().map(String)])];
                 const _idsDisp = (() => {
                   if (!telaSelPiezas.length) return _telasMoldeIds;   // sin selección: todo lo del molde
@@ -10215,7 +12301,12 @@ export default function App() {
                 const aplicarTela = (telaId) => {
                   if (!telaId) return;
                   const objetivo = telaSelPiezas.length ? telaSelPiezas : _todasGen;
-                  if (!objetivo.length) return;
+                  if (!objetivo.length) {
+                    // Pasa cuando la prenda todavía se está armando (o falta el arte): sin piezas a
+                    // la vista no hay a qué asignarle la tela. Antes no hacía NADA y parecía roto.
+                    avisarEnVisor('Todavía no se ven las piezas de esta prenda — cargá el arte o esperá a que termine de armarse');
+                    return;
+                  }
                   const mm = { ..._telasDe(disenoActivo, _id) };
                   objetivo.forEach(g => { mm[g] = telaId; });
                   // Cuántas telas distintas quedarían en la prenda con este cambio.
@@ -10238,83 +12329,130 @@ export default function App() {
                   const q = telaBuscarAsig.trim().toLowerCase();
                   return q ? _telasMol.filter(t => (t.nombre || '').toLowerCase().includes(q)) : _telasMol;
                 })();
+                // ══ PANEL DE TELAS — rehecho 2026-08-21 ══════════════════════════════════
+                // El anterior era un formulario: dos vistas, una lista larga con buscador y un
+                // botón «Asignar» al final. Este cuenta la historia como la piensa el operario:
+                //   1) esta prenda va en TAL tela  →  2) salvo estas piezas, que van en tal otra.
+                // La tela PRINCIPAL es la más usada en las piezas; el resto son EXCEPCIONES.
+                const _conteoTela = {};
+                _todasGen.forEach(g => { const t = _telasMap[g]; if (t) _conteoTela[t] = (_conteoTela[t] || 0) + 1; });
+                const _telaPrincipal = Object.entries(_conteoTela).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+                const _telaObj = (id) => (telasReg.telas || []).find(t => String(t.id) === String(id));
+                const _excepciones = Object.entries(_conteoTela)
+                  .filter(([id]) => String(id) !== String(_telaPrincipal))
+                  .map(([id, n]) => ({ id, n, piezas: _todasGen.filter(g => String(_telasMap[g]) === String(id)) }));
+                // lo que el modal necesita para funcionar (ver `telaPickerRef`)
+                telaPickerRef.current = {
+                  lista: _telasMol,
+                  aplicar: (id) => { if (telaPicker?.destino === 'seleccion') { setTelaSelPiezas(telaPicker.piezas); } aplicarTela(id); setTelaAsignMode(false); },
+                };
+                const _abrirPicker = (destino) => { setTelaPickerQ(''); setTelaPicker({ destino, piezas: destino === 'seleccion' ? [...telaSelPiezas] : [] }); };
                 const panelTelaJSX = (
-                  <div data-tour="telas-panel" style={{ width: 210, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                    {!telaAsignMode ? (
-                      /* ── VISTA 1: sólo las telas ASIGNADAS (en uso en las piezas) ── */
-                      <>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>
-                            Telas asignadas
-                            {_topeVar > 0 && (
-                              <span style={{ marginLeft: 6, textTransform: 'none', letterSpacing: 0, padding: '2px 7px', borderRadius: 999, fontSize: 10.5,
-                                background: _telasUsadasVar.size >= _topeVar ? 'rgba(255,90,90,0.16)' : 'rgba(255,255,255,0.07)',
-                                color: _telasUsadasVar.size >= _topeVar ? '#ff8a8a' : 'var(--text-muted)' }}>
-                                {_telasUsadasVar.size}/{_topeVar}
-                              </span>
-                            )}
-                          </div>
-                          <button className="btn ghost" style={{ padding: '4px 8px', fontSize: 11 }} title="Cerrar" onClick={() => { setTelaModoVer(false); setTelaSelPiezas([]); setTelaElegida(null); }}>✕</button>
-                        </div>
-                        {/* AVISO: cada pieza debe tener tela (no hay tela base). Rojo si falta alguna. */}
-                        {_todasGen.length > 0 && (
-                          <div style={{ fontSize: 10.5, fontWeight: 700, padding: '6px 9px', borderRadius: 8, marginBottom: 8, lineHeight: 1.35,
-                            background: _sinTela.length ? 'rgba(255,90,90,0.12)' : 'rgba(16,185,129,0.12)',
-                            color: _sinTela.length ? '#ff8a8a' : 'var(--success)' }}>
-                            {_sinTela.length ? `⚠ Faltan ${_sinTela.length} pieza${_sinTela.length > 1 ? 's' : ''} sin tela` : '✓ Todas las piezas tienen tela'}
-                          </div>
+                  <div data-tour="telas-panel" style={{ width: 244, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 12 }}>
+                    {/* CABECERA */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Icon name="telaRollo" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Telas</span>
+                      <button className="btn ghost" style={{ padding: '3px 8px', fontSize: 12 }} title="Cerrar"
+                        onClick={() => { setTelaModoVer(false); setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false); }}>✕</button>
+                    </div>
+
+                    {/* ESTADO: verde si está todo, y si falta algo se dice CUÁNTAS y CUÁLES */}
+                    {_todasGen.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '9px 11px', borderRadius: 12,
+                        background: _sinTela.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)',
+                        border: '1px solid ' + (_sinTela.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)') }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: _sinTela.length ? 'var(--warning)' : 'var(--success)' }}>
+                          {_sinTela.length ? `Faltan ${_sinTela.length} de ${_todasGen.length} piezas` : `Las ${_todasGen.length} piezas tienen tela`}
+                        </span>
+                        {_sinTela.length > 0 && (
+                          <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{_sinTela.slice(0, 6).join(' · ')}{_sinTela.length > 6 ? ' …' : ''}</span>
                         )}
-                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {_telasEnUso.map(t => (
-                            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border-light)' }}>
-                              <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
-                              <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
+                      </div>
+                    )}
+
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {/* 1) LA TELA DE LA PRENDA (card grande, se toca y se elige) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-muted)' }}>La tela de esta prenda</span>
+                        <button type="button" onClick={() => _abrirPicker('todas')}
+                          style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 13px', borderRadius: 14, cursor: 'pointer', textAlign: 'left',
+                                   border: '1px solid ' + (_telaPrincipal ? 'var(--border-light-hover)' : 'var(--accent)'),
+                                   background: _telaPrincipal ? 'rgba(255,255,255,0.04)' : 'rgba(0,243,255,0.08)' }}>
+                          <span style={{ width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+                                         background: _telaPrincipal ? colorDeTela(_telaPrincipal) : 'rgba(255,255,255,0.10)',
+                                         boxShadow: _telaPrincipal ? `0 0 0 3px ${colorDeTela(_telaPrincipal)}22` : 'none',
+                                         display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, color: '#0b0f14' }}>
+                            {_telaPrincipal ? '' : '+'}
+                          </span>
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <span style={{ display: 'block', fontSize: 13, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {_telaPrincipal ? (_telaObj(_telaPrincipal)?.nombre || 'Tela') : 'Elegí la tela'}
+                            </span>
+                            <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                              {_telaPrincipal ? `${_conteoTela[_telaPrincipal]} de ${_todasGen.length} piezas · tocá para cambiar` : 'se aplica a todas las piezas'}
+                            </span>
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* 2) EXCEPCIONES: las piezas que van en otra tela */}
+                      {(_excepciones.length > 0 || _telaPrincipal) && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-muted)' }}>
+                            Piezas en otra tela{_excepciones.length ? ` (${_excepciones.reduce((n, e) => n + e.n, 0)})` : ''}
+                          </span>
+                          {_excepciones.map(e => (
+                            <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+                              <span style={{ width: 22, height: 22, borderRadius: 7, background: colorDeTela(e.id), flexShrink: 0 }} />
+                              <span style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ display: 'block', fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{_telaObj(e.id)?.nombre || 'Tela'}</span>
+                                <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.piezas.join(' · ')}</span>
+                              </span>
+                              <button title="Volver estas piezas a la tela principal"
+                                onClick={() => { if (!_telaPrincipal) return; const mm = { ..._telasMap }; e.piezas.forEach(g => { mm[g] = _telaPrincipal; }); setTelaPorPieza(m => ({ ...m, [_claveTelaDis(disenoActivo, _id)]: mm })); }}
+                                style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
                             </div>
                           ))}
-                          {_telasEnUso.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px', lineHeight: 1.4 }}>Todavía no hay telas asignadas. Tocá «Asignar tela».</div>}
+                          {/* el gesto: tocar piezas en el visor y darles otra tela */}
+                          {!telaAsignMode ? (
+                            <button type="button" onClick={() => { setTelaAsignMode(true); setTelaSelPiezas([]); setTelaElegida(null); }}
+                              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '10px', borderRadius: 12, cursor: 'pointer',
+                                       border: '1px dashed var(--border-light-hover)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700 }}>
+                              + Otra tela para algunas piezas
+                            </button>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '11px', borderRadius: 12, border: '1px solid var(--accent)', background: 'rgba(0,243,255,0.06)' }}>
+                              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--accent)' }}>Tocá las piezas en el visor</span>
+                              <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                                {telaSelPiezas.length ? telaSelPiezas.join(' · ') : 'Ninguna todavía — tocá las que van en otra tela.'}
+                              </span>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button className="btn ghost" style={{ flex: 1, fontSize: 12 }} onClick={() => { setTelaAsignMode(false); setTelaSelPiezas([]); }}>Cancelar</button>
+                                <button className="btn primary" style={{ flex: 1.4, fontSize: 12 }} disabled={!telaSelPiezas.length} onClick={() => _abrirPicker('seleccion')}>
+                                  Elegir tela{telaSelPiezas.length ? ` (${telaSelPiezas.length})` : ''}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <button className="btn primary" style={{ width: '100%', marginTop: 8 }} onClick={() => { setTelaAsignMode(true); setTelaElegida(null); setTelaSelPiezas([]); setTelaBuscarAsig(''); }}>Asignar tela</button>
-                      </>
-                    ) : (
-                      /* ── VISTA 2: elegir una tela → tocar piezas → Asignar (Volver arriba) ── */
-                      <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <button className="btn ghost" style={{ padding: '4px 9px', fontSize: 11 }} onClick={() => { setTelaAsignMode(false); setTelaElegida(null); setTelaSelPiezas([]); }}>← Volver</button>
-                          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Asignar tela</div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>1) Elegí una tela</span><Ayuda ancho={330}>2) Tocá las piezas · 3) Asignar</Ayuda></div>
-                        {/* Buscador para filtrar la tela rápido */}
-                        <input autoFocus placeholder="Buscar tela…" value={telaBuscarAsig} onChange={e => setTelaBuscarAsig(e.target.value)}
-                          style={{ height: 32, fontSize: 12.5, padding: '0 9px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', marginBottom: 8 }} />
-                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {_telasAsigFiltradas.map(t => {
-                            const on = telaElegida === t.id;
-                            return (
-                              <button key={t.id} type="button" onClick={() => setTelaElegida(t.id)}
-                                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 8, cursor: 'pointer', textAlign: 'left',
-                                  border: on ? '1.5px solid var(--accent)' : '1px solid var(--border-light)', background: on ? 'rgba(0,216,245,0.10)' : 'transparent', color: '#fff' }}>
-                                <span style={{ width: 15, height: 15, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
-                                <span style={{ fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nombre}</span>
-                              </button>
-                            );
-                          })}
-                          {_telasMol.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px' }}>No hay telas. Registralas en Config › Telas.</div>}
-                          {_telasMol.length > 0 && _telasAsigFiltradas.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', padding: '6px 2px' }}>Ninguna tela coincide.</div>}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: telaSelPiezas.length ? 'var(--accent)' : 'var(--text-muted)', margin: '8px 0', lineHeight: 1.4 }}>
-                          {telaSelPiezas.length ? `${telaSelPiezas.length} pieza(s): ${telaSelPiezas.join(', ')}` : 'Sin piezas seleccionadas → se aplica a TODAS.'}
-                        </div>
-                        <button className="btn primary" style={{ width: '100%' }} disabled={!telaElegida} onClick={() => aplicarTela(telaElegida)}>
-                          Asignar{telaSelPiezas.length ? ` (${telaSelPiezas.length} pieza${telaSelPiezas.length > 1 ? 's' : ''})` : ' a todas'}
-                        </button>
-                      </>
+                      )}
+                    </div>
+
+                    {/* 3) NO REPETIR EL TRABAJO: copiar a los otros moldes del pedido */}
+                    {Object.keys(_telasMap).length > 0 && tareasArte.length > 1 && (
+                      <button type="button" onClick={() => setTelaCopiar({ did: disenoActivo, mid: _id, destinos: new Set() })}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '11px', borderRadius: 12, cursor: 'pointer',
+                                 border: '1px solid var(--border-light-hover)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 700 }}>
+                        ⧉ Usar estas telas en otros moldes
+                      </button>
                     )}
                   </div>
                 );
                 return (
                 <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                   {/* Navegación por DISEÑO (chips con progreso) */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 10, flexShrink: 0 }}>
+                  <div data-tour="arte-diseno-chips" data-opciones="1" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 10, flexShrink: 0 }}>
                     {disenosPedido.map(d => {
                       const on = d.id === disenoActivo, col = colorDeDiseno(d.id);
                       const ms = moldesDeDiseno(d.id), done = ms.filter(m => arteCargado[d.id + '|' + m]).length;
@@ -10329,10 +12467,46 @@ export default function App() {
                         </button>
                       );
                     })}
+                    {/* TIPOGRAFÍA NO ENCONTRADA — va ACÁ ARRIBA (2026-08-21, pedido del usuario:
+                        «en la parte superior que tenemos vacía al pedo»): la fila de los diseños
+                        deja todo ese espacio libre y el cartel encima del lienzo tapaba el arte.
+                        Desaparece SOLO en cuanto la tipografía queda resuelta (elegida o cargada):
+                        `fuentesEstado.faltantes` son las que no se pueden estampar ni con
+                        reemplazo, y se recalcula con el mapa nuevo apenas se elige. */}
+                    {fuentesFaltantesItems.length > 0 && (
+                      /* AMARILLO, no rojo: la fuente es el único requisito que NO frena el pedido
+                         (2026-08-21). Mismo código de colores que su marca en la barrita de abajo.
+                         Cada línea dice DE QUÉ ARTE es: el molde y el diseño (nunca la variable). */
+                      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, maxWidth: 680,
+                                    padding: '8px 12px', borderRadius: 11, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.45)' }}>
+                        <MarcaPaso aviso />
+                        <div style={{ fontSize: 11.5, lineHeight: 1.45, color: 'var(--text-secondary)' }}>
+                          <b style={{ color: '#f5b942' }}>Tipografía no encontrada</b> — se va a sublimar con <b>«Anton Regular»</b> (la predeterminada):
+                          {fuentesFaltantesItems.slice(0, 3).map(x => (
+                            <div key={x.did + '|' + x.moldeId + '|' + (x.clave || '')} style={{ marginTop: 2 }}>
+                              · {x.fuentes.map(f => `«${f}»`).join(' · ')} en <b style={{ color: 'var(--text-primary)' }}>{_nomMolde(x.moldeId)}</b>
+                              {x.clave && <> · variable <b style={{ color: 'var(--text-primary)' }}>{x.label}</b></>}
+                              {' '}· diseño <b style={{ color: 'var(--text-primary)' }}>{_nomDiseno(x.did)}</b>
+                            </div>
+                          ))}
+                          {fuentesFaltantesItems.length > 3 && (
+                            <div style={{ marginTop: 2 }}>· y {fuentesFaltantesItems.length - 3} más</div>
+                          )}
+                        </div>
+                        <button className="btn" style={{ flexShrink: 0, padding: '6px 12px', fontSize: 12, fontWeight: 700 }}
+                          onClick={() => { const x = fuentesFaltantesItems[0];
+                                           irAlArte(x.did, x);
+                                           setFuenteArchivo(null); setFuenteFaltanteSel(x.fuentes[0] || ''); setFuenteModal(true); }}>
+                          Resolver
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Navegación por VARIABLE (miniaturas con estado) del diseño activo */}
-                  <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexShrink: 0 }}>
+                  {/* Navegación por VARIABLE (miniaturas con estado) del diseño activo.
+                      `data-tour`: es una LISTA DE OPCIONES — el tutorial marca la lista, no la
+                      variable que haya tocado quien grabó (ver `opciones` en diccionario.js). */}
+                  <div data-tour="arte-variables" data-opciones="1" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexShrink: 0 }}>
                     {itemsDis.map((it, idx) => {
                       const vo = it.clave ? varByClave(it.clave) : null;
                       const on = idx === arteIdx, loaded = !!arteCargado[disenoActivo + '|' + it.moldeId];
@@ -10405,10 +12579,10 @@ export default function App() {
                               <Icon name="edit" style={{ width: 14, height: 14 }} /> Editar diseño
                             </button>
                           )}
-                          <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, borderColor: fuentesEstado?.faltantes?.length ? 'var(--warning, #f5a524)' : undefined, color: fuentesEstado?.faltantes?.length ? 'var(--warning, #f5a524)' : undefined }}
-                            title="Ver las fuentes del sistema, cargar una nueva o reemplazar la que falta"
+                          <button className="btn ghost" data-tour="arte-fuente" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, borderColor: fuentesEstado?.faltantes?.length ? 'var(--warning, #f5a524)' : undefined, color: fuentesEstado?.faltantes?.length ? 'var(--warning, #f5a524)' : undefined }}
+                            title="Cambiar la tipografía del estampado: elegí una del catálogo o cargá la del diseño (se ve al instante)"
                             onClick={() => { setFuenteArchivo(null); setFuenteFaltanteSel((fuentesEstado?.faltantes || [])[0] || ''); setFuenteModal(true); cargarFuentesEstado(); }}>
-                            Reemplazar fuente{fuentesEstado?.faltantes?.length ? ` (${fuentesEstado.faltantes.length})` : ''}
+                            Tipografía{fuentesEstado?.faltantes?.length ? ` (${fuentesEstado.faltantes.length})` : ''}
                           </button>
                           <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
@@ -10417,8 +12591,8 @@ export default function App() {
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
                           {(telasReg.telas || []).length > 0 && (
-                            <button className="btn ghost" data-tour="arte-telas" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Ver y asignar telas por pieza">
-                              <Icon name="telas" style={{ width: 13, height: 13 }} /> Ver telas de pieza
+                            <button className="btn ghost" data-tour="arte-telas" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9, ...(telaModoVer ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }} onClick={() => { setTelaModoVer(v => !v); setTelaSelPiezas([]); setTelaAsignMode(false); setTelaElegida(null); setTelaAviso(''); }} title="Asignar la tela de cada pieza (por defecto, una para todas)">
+                              <Icon name="telaRollo" style={{ width: 13, height: 13 }} /> Asignar telas
                             </button>
                           )}
                         </>)}
@@ -10428,9 +12602,7 @@ export default function App() {
                         onTelaClick={(gen) => setTelaSelPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen])}
                         onTelaVacio={() => setTelaSelPiezas([])}
                         panelTela={panelTelaJSX}
-                        aviso={telaAviso || (fuentesEstado?.faltantes?.length
-                          ? `No se encontraron las fuentes: ${fuentesEstado.faltantes.join(' · ')} — mientras tanto se usa Anton Regular`
-                          : null)}
+                        aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)' }}>{term.variante === 'Talle' ? 'Talles' : term.variante}</div>
@@ -10459,25 +12631,14 @@ export default function App() {
                   {/* (La asignación de tela por pieza ahora vive dentro del panel lateral, en 2 vistas.) */}
 
                   {/* Barra inferior fija */}
-                  <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, paddingTop: 12, marginTop: 4, borderTop: '1px solid var(--border-light)' }}>
-                    <button className="btn ghost" data-tour="pedido-volver-moldes" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('moldes')}>← Diseños</button>
-                    {_tieneDiseno && estado?.arte && !estado.arte.aprobado && (
-                      <span style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)' }}>Ajustá el mapeo y «Guardar mapeo».</span>
-                    )}
-                    {todasArteCargadas && telasIncompletas && (
-                      <span style={{ fontSize: 11.5, fontWeight: 700, color: '#ff8a8a' }}>⚠ Faltan {telasFaltantesTotal} pieza(s) sin tela — asigná su tela en «Ver telas de pieza».</span>
-                    )}
-                    <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>{tareasArte.filter(t => arteCargado[t.did + '|' + t.mid]).length}/{tareasArte.length} con arte</span>
-                    {(() => { const _puede = todasArteCargadas && !telasIncompletas; return (
-                    <button data-tour="arte-siguiente" onClick={irAPlanillaDesdeArte} disabled={!_puede}
-                      title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela` : '')}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
-                        cursor: _puede ? 'pointer' : 'not-allowed', fontSize: 14, fontWeight: 800,
-                        background: _puede ? 'var(--accent)' : 'rgba(255,255,255,0.07)', color: _puede ? '#001016' : 'var(--text-muted)', transition: 'all .2s' }}>
-                      A la planilla <span style={{ fontSize: 16 }}>→</span>
-                    </button>
-                    ); })()}
-                  </div>
+                  <BarraPaso
+                    volver={<BtnVolver texto="Moldes" ancla="pedido-volver-moldes" onClick={() => setPedidoPaso('moldes')} />}
+                    acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
+                    centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={textoAvisoPaso(pasoItems)}
+                    siguiente={<BtnSiguiente texto="A la planilla" ancla="arte-siguiente" onClick={() => irAPlanillaDesdeArte()}
+                      disabled={!(todasArteCargadas && !telasIncompletas)}
+                      title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela` : '')} />} />
                 </div>
                 );
               })()}
@@ -10819,7 +12980,71 @@ export default function App() {
                       <Icon name="edit" style={{ width: 18, height: 18, color: 'var(--accent)' }} />
                       <h3 style={{ margin: 0, fontSize: 16 }}>Editar diseño</h3>
                       <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{moldeById(_mid)?.nombre} · {(disenosPedido.find(d => d.id === disenoActivo) || {}).nombre || disenoActivo}</span>
-                      <button className="btn ghost" style={{ marginLeft: 'auto', padding: '8px 12px' }} onClick={volverPrincipal} title="Volver a como viene el diseño (sin ediciones), en el alcance elegido"><Icon name="reset" style={{ width: 13, height: 13 }} /> Volver al diseño principal</button>
+                      {/* ── LO QUE NO SE SUBLIMA ──────────────────────────────────────────
+                          Se eligen uno o varios objetos y se toca el proceso: en la tizada, en su
+                          lugar, sale una cruz de 3 cm con la letra. Tocar el mismo botón otra vez
+                          lo devuelve a sublimado normal. */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto',
+                                    padding: '4px 6px 4px 10px', borderRadius: 11, border: '1px solid var(--border-light)',
+                                    background: 'rgba(255,255,255,0.025)' }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.05em', textTransform: 'uppercase',
+                                       color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>No se sublima</span>
+                        {MARCAS_PROC.map(mp => {
+                          const _n = editableSel.length;
+                          const _on = _n > 0 && editableSel.every(nm => marcaDe(nm) === mp.k);
+                          return (
+                            <button key={mp.k} type="button" data-tour={'edit-marca-' + mp.k}
+                              disabled={!_n}
+                              onClick={() => asignarMarca(_mid, disenoActivo, editableSel, mp.k)}
+                              title={!_n ? 'Elegí primero uno o varios objetos'
+                                : _on ? `Sacar «${mp.t}»: el objeto vuelve a sublimarse`
+                                      : `Asignar ${mp.t}: el objeto no se imprime y en su lugar va la cruz de 3 cm`}
+                              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 11px',
+                                borderRadius: 9, fontSize: 12, fontWeight: 700,
+                                cursor: _n ? 'pointer' : 'not-allowed', opacity: _n ? 1 : 0.45,
+                                border: '1px solid ' + (_on ? 'var(--accent)' : 'var(--border-light)'),
+                                background: _on ? 'rgba(0,216,245,0.13)' : 'transparent',
+                                color: _on ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                              <Icon name={mp.icon} style={{ width: 15, height: 15 }} /> {mp.t}
+                            </button>
+                          );
+                        })}
+                        {(() => {
+                          const _hay = editableSel.length > 0;
+                          const _off = _hay && editableSel.every(nm => sinMarcaDe(nm));
+                          return (
+                            <>
+                              <span style={{ width: 1, height: 20, background: 'var(--border-light)', margin: '0 2px' }} />
+                              <button type="button" data-tour="edit-marca-visible"
+                                disabled={!_hay}
+                                onClick={() => alternarMarcaVisible(_mid, disenoActivo, editableSel)}
+                                title={!_hay ? 'Elegí primero uno o varios objetos'
+                                  : _off ? 'Volver a como estaba (se imprime, o deja su cruz)'
+                                         : 'Que en la tizada no quede NADA en su lugar'}
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 11px',
+                                  borderRadius: 9, fontSize: 12, fontWeight: 700,
+                                  cursor: _hay ? 'pointer' : 'not-allowed', opacity: _hay ? 1 : 0.45,
+                                  border: '1px solid ' + (_off ? 'var(--warning)' : 'var(--border-light)'),
+                                  background: _off ? 'rgba(255,176,32,0.13)' : 'transparent',
+                                  color: _off ? 'var(--warning)' : 'var(--text-secondary)' }}>
+                                <Icon name="sinMarca" style={{ width: 15, height: 15 }} /> Sin marca
+                              </button>
+                              <Ayuda ancho={290}>
+                                <b>Sin marca</b> deja el lugar del objeto <b>vacío</b> en la tizada: ahí no
+                                se imprime nada.
+                                <br /><br />
+                                Si el objeto tiene <b>TPU, Bordado o DTF</b>, lo que se saca es la cruz de
+                                3 cm (el objeto ya no se sublimaba).
+                                <br /><br />
+                                Si <b>no tiene ningún proceso</b>, el objeto directamente no se imprime.
+                                <br /><br />
+                                Se aplica a todos los objetos elegidos y queda anotado en la ficha técnica.
+                              </Ayuda>
+                            </>
+                          );
+                        })()}
+                      </div>
+                      <button className="btn ghost" style={{ padding: '8px 12px' }} onClick={volverPrincipal} title="Volver a como viene el diseño (sin ediciones), en el alcance elegido"><Icon name="reset" style={{ width: 13, height: 13 }} /> Volver al diseño principal</button>
                       <button className="btn ghost" style={{ padding: '8px 12px', opacity: _canUndo ? 1 : 0.4 }} onClick={editorUndo} disabled={!_canUndo} title="Deshacer (Ctrl+Z)">↶ Deshacer</button>
                       <button className="btn ghost" style={{ padding: '8px 12px', opacity: _canRedo ? 1 : 0.4 }} onClick={editorRedo} disabled={!_canRedo} title="Rehacer (Ctrl+Y)">↷ Rehacer</button>
                       <button className="btn ghost" style={{ padding: '8px 14px' }} onClick={() => setEditorEditOpen(false)}>Cerrar</button>
@@ -11249,7 +13474,7 @@ export default function App() {
               {/* Ventana "Asignando el diseño a cada variante…" (al cargar el arte, una sola vez) */}
               {asignando && (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(2,6,12,0.82)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <div style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340 }}>
+                  <div data-cargando="Se está poniendo el diseño sobre el molde." style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340 }}>
                     <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 8 }}>Poniendo el diseño sobre el molde…</div>
                     {/* Nada quieto: se muestran las PIEZAS que el server ya dejó dibujadas, en qué
                         anda y los segundos. Antes decía «0/20» y se quedaba clavado ahí ~27 s. */}
@@ -11280,10 +13505,11 @@ export default function App() {
               <div className="card animate-fade" style={{ marginTop: 8, padding: 20 }}>
                 <div className="card-title" style={{ margin: 0 }}>5 · Tizadas</div>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '14px 0' }}>No hay ninguna tizada en curso.</div>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn ghost" data-tour="resultados-volver-planilla" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('planilla')}>← Volver a la planilla</button>
-                  <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido}>↺ Nuevo pedido</button>
-                </div>
+                <BarraPaso
+                  volver={<BtnVolver texto="Planilla" ancla="resultados-volver-planilla" onClick={() => setPedidoPaso('planilla')} />}
+                  acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
+                  centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={textoAvisoPaso(pasoItems)} />
               </div>
             )}
             {pedidoPaso === 'resultados' && trabajosMulti.length > 0 && (
@@ -11294,7 +13520,6 @@ export default function App() {
                     {trabajosMulti.some(t => t.estado === 'generando' || t.estado === 'en cola') && <span className="badge warning" style={{ marginLeft: 10 }}>Procesando</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <button className="btn ghost" data-tour="resultados-volver-planilla" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={() => setPedidoPaso('planilla')}>← Atrás</button>
                     {(() => {
                       const j = trabajosMulti[0];
                       const hojas = (j?.estado === 'listo' && j?.resultado?.hojas) || [];
@@ -11402,6 +13627,13 @@ export default function App() {
                     </div>
                   );
                 })()}
+                {/* La barra de siempre, también acá: los botones del pedido van SIEMPRE abajo y en
+                    el mismo orden (regla del usuario 2026-08-21). */}
+                <BarraPaso
+                  volver={<BtnVolver texto="Planilla" ancla="resultados-volver-planilla" onClick={() => setPedidoPaso('planilla')} />}
+                  acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
+                  centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={textoAvisoPaso(pasoItems)} />
               </div>
             )}
 
@@ -11521,7 +13753,7 @@ export default function App() {
                   <div className="crm-config-card cyan" data-tour="cfg-productos" onClick={() => setAdminSubView('productos')}>
                     <div>
                       <div className="crm-icon-container">
-                        <Icon name="productos" style={{ width: 18, height: 18 }} />
+                        <Icon name="molderia" style={{ width: 18, height: 18 }} />
                       </div>
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Moldería</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
@@ -11534,7 +13766,8 @@ export default function App() {
                   <div className="crm-config-card magenta" data-tour="cfg-columnas" onClick={() => setAdminSubView('columnas')}>
                     <div>
                       <div className="crm-icon-container">
-                        <Icon name="columnas" style={{ width: 18, height: 18 }} />
+                        {/* la MISMA grilla que el botón «Planilla» del molde: un solo ícono por concepto */}
+                        <Icon name="planilla" style={{ width: 18, height: 18 }} />
                       </div>
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Planillas</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
@@ -11563,7 +13796,7 @@ export default function App() {
                   }}>
                     <div>
                       <div className="crm-icon-container">
-                        <Icon name="telas" style={{ width: 18, height: 18 }} />
+                        <Icon name="telaRollo" style={{ width: 18, height: 18 }} />
                       </div>
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Telas</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
@@ -11579,7 +13812,7 @@ export default function App() {
                   }}>
                     <div>
                       <div className="crm-icon-container">
-                        <Icon name="nesting" style={{ width: 18, height: 18 }} />
+                        <Icon name="nestingPiezas" style={{ width: 18, height: 18 }} />
                       </div>
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Reglas de Nesting</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
@@ -11717,6 +13950,7 @@ export default function App() {
                             <div className="product-card-actions">
                               <button
                                 className="btn ghost"
+                                title="Cambiarle el nombre a esta moldería"
                                 style={{ padding: '4px 8px', fontSize: 11 }}
                                 onClick={(e) => { e.stopPropagation(); handleRenombrarProducto(p.id, p.nombre); }}
                               >
@@ -11775,18 +14009,47 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="workspace-container animate-fade" style={{ display: 'grid', gridTemplateColumns: ((empModo && empTodas && empTodasData?.piezas?.length) || (tabAjustesMolde === 'etiqueta' && empTodasData?.piezas?.length)) ? '128px 1fr 380px' : '1fr 380px', gap: ((empModo && empTodas) || tabAjustesMolde === 'etiqueta') ? 12 : 24, marginTop: 8, alignItems: 'start' }}>
-                      {/* CAPAS DE TALLES: columna PROPIA (fuera del visor, lado contrario al panel).
-                          Ojito por talle con arrastre en cadena; ▸ despliega las piezas del talle
-                          (click = seleccionar); doble click en el nombre = renombrar la capa. */}
+                    <div className="workspace-container animate-fade" style={{ display: 'grid', gridTemplateColumns: ((empModo && empTodas && empTodasData?.piezas?.length) || (tabAjustesMolde === 'etiqueta' && empTodasData?.piezas?.length)) ? '208px 1fr 380px' : '1fr 380px', gap: ((empModo && empTodas) || tabAjustesMolde === 'etiqueta') ? 12 : 24, marginTop: 8, alignItems: 'start' }}>
+                      {/* CAPAS DE TALLES — panel estilo Illustrator (2026-08-21). Columna PROPIA
+                          (fuera del visor, del lado contrario al panel de ajustes). Cada fila:
+                          ojito (con arrastre en cadena), MINIATURA del contorno real, nombre
+                          (doble click = renombrar la capa) y TIK de selección; ▸ despliega las
+                          piezas de la capa, cada una con su miniatura y su tik. Arriba, el ojo
+                          GENERAL (muestra/oculta todas de una) y el contador de lo seleccionado.
+                          ⚠️ El tik NO tiene estado propio: lee y escribe la selección de la
+                          pantalla (`selNombrar` al nombrar; la pieza elegida en Etiqueta). Con
+                          estado propio, el panel y el visor mostrarían cosas distintas. */}
                       {((empModo && empTodas && empTodasData?.piezas?.length) || (tabAjustesMolde === 'etiqueta' && empTodasData?.piezas?.length)) ? (
                         <div className="card" onMouseUp={() => { pintaOjo.current.on = false; }} onMouseLeave={() => { pintaOjo.current.on = false; }}
-                          style={{ order: 0, position: 'sticky', top: 24, height: 620, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', padding: '2px 4px 8px' }}>{term.variante}s</div>
+                          style={{ order: 0, position: 'sticky', top: 24, height: 620, overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          {(() => {
+                            const _talles = empTodasData.talles || [];
+                            const _hayVisible = _talles.some(t => !tallesOcultos.has(t));
+                            const _nSel = (empTodasData.piezas || []).filter(p => pzEstaSel(p)).length;
+                            const _vt = (term.variante || 'talle').toLowerCase();
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '1px 2px 7px', position: 'sticky', top: -8, background: 'var(--bg-dark)', zIndex: 2 }}>
+                                {/* OJO GENERAL: el mismo gesto de una capa, aplicado a las 30. */}
+                                <span onMouseDown={(e) => { e.preventDefault(); toggleTodasCapas(); }}
+                                  title={_hayVisible ? `Ocultar todos los ${_vt}s (${_talles.length})` : `Mostrar todos los ${_vt}s (${_talles.length})`}
+                                  style={{ cursor: 'pointer', width: 24, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, borderRadius: 5, border: '1px solid var(--border-light-hover)', opacity: _hayVisible ? 1 : 0.5 }}>
+                                  {_hayVisible ? '👁' : '◡'}
+                                </span>
+                                <span style={{ flex: 1, minWidth: 0, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>{term.variante}s</span>
+                                {_nSel > 0 && (
+                                  <span title={`${_nSel} pieza${_nSel === 1 ? '' : 's'} seleccionada${_nSel === 1 ? '' : 's'}`}
+                                    style={{ maxWidth: 88, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 800, color: 'var(--accent)' }}>
+                                    {capasSelModo === 'etiqueta' ? (etqPzTocada || etqPiezaSel) : _nSel}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                           {(empTodasData.talles || []).map(t => {
                             const oculto = tallesOcultos.has(t);
                             const abierto = tallesAbiertos.has(t);
                             const pzsT = (empTodasData.piezas || []).filter(p => p.talle === t);
+                            const selInfo = capaSelInfo(pzsT);
                             const aplicar = (modo) => {
                               setTallesOcultos(prev => { const nx = new Set(prev);
                                 if (modo === 'ocultar') nx.add(t); else nx.delete(t); return nx; });
@@ -11795,20 +14058,29 @@ export default function App() {
                               if (modo === 'ocultar') setSelNombrar(prev => {
                                 const nx = new Set(prev); pzsT.forEach(p => nx.delete(p.idx)); return nx; });
                             };
-                            const todasSel = pzsT.length && pzsT.every(p => selNombrar.has(p.idx));
                             return (
                               <div key={t} style={{ display: 'flex', flexDirection: 'column', userSelect: 'none' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 2px', borderRadius: 6 }}>
-                                  <span onClick={() => setTallesAbiertos(prev => { const nx = new Set(prev); if (nx.has(t)) nx.delete(t); else nx.add(t); return nx; })}
-                                    style={{ cursor: 'pointer', width: 12, fontSize: 9, color: 'var(--text-muted)' }}>{abierto ? '▾' : '▸'}</span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 3px', borderRadius: 6, background: selInfo.n ? 'rgba(0,243,255,0.07)' : 'transparent' }}>
+                                  {/* TIK de la CAPA = seleccionar/quitar sus piezas de una. Abre la fila
+                                      (pedido 2026-08-21) y la flecha pasó al final. Donde la selección
+                                      es de a UNA (Etiqueta) queda informativo. */}
+                                  <TikSel
+                                    estado={selInfo.todas ? 'lleno' : (selInfo.n ? 'parcial' : 'vacio')}
+                                    onClick={capasSelModo === 'multi' ? () => toggleCapaSel(pzsT) : undefined}
+                                    title={capasSelModo === 'multi'
+                                      ? (selInfo.todas ? `Quitar las ${selInfo.total} piezas de ${t}` : `Seleccionar las ${selInfo.total} piezas de ${t}`)
+                                      : (selInfo.n ? `La pieza elegida está en ${t}` : 'Sin selección en esta capa')} />
                                   <span
                                     onMouseDown={(e) => { e.preventDefault(); const modo = oculto ? 'mostrar' : 'ocultar';
                                       pintaOjo.current = { on: true, modo }; aplicar(modo); }}
                                     onMouseEnter={(e) => { if (pintaOjo.current.on && (e.buttons & 1)) aplicar(pintaOjo.current.modo); }}
                                     title={oculto ? 'Mostrar' : 'Ocultar'}
-                                    style={{ cursor: 'pointer', width: 20, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, opacity: oculto ? 0.35 : 1 }}>
+                                    style={{ cursor: 'pointer', width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, opacity: oculto ? 0.35 : 1 }}>
                                     {oculto ? '◡' : '👁'}
                                   </span>
+                                  {/* SIN MINIATURA en la fila de la CAPA (pedido 2026-08-21): junta 34
+                                      piezas distintas y el dibujo no decía nada — la miniatura es de
+                                      la pieza sola, adentro. */}
                                   {capaEdit && capaEdit.talle === t ? (
                                     <input autoFocus value={capaEdit.valor}
                                       onChange={e => setCapaEdit({ talle: t, valor: e.target.value })}
@@ -11830,43 +14102,48 @@ export default function App() {
                                   ) : (
                                     <span onDoubleClick={() => setCapaEdit({ talle: t, valor: t })}
                                       title="Doble click para renombrar la capa"
-                                      style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, color: oculto ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 600, cursor: 'text' }}>{t}</span>
+                                      style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: oculto ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 600, cursor: 'text' }}>{t}</span>
                                   )}
+                                  {/* La FLECHA cerró la fila (pedido 2026-08-21: cambió de lugar con el
+                                      tik). Grande y con área clicable propia: es lo que más se toca. */}
+                                  <span onClick={() => setTallesAbiertos(prev => { const nx = new Set(prev); if (nx.has(t)) nx.delete(t); else nx.add(t); return nx; })}
+                                    title={abierto ? 'Cerrar' : 'Ver sus piezas'}
+                                    style={{ cursor: 'pointer', width: 20, height: 22, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                             fontSize: 15, lineHeight: 1, color: abierto ? 'var(--text-secondary)' : 'var(--text-muted)' }}>{abierto ? '▾' : '▸'}</span>
                                 </div>
                                 {abierto && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: 20 }}>
-                                    <span onClick={() => setSelNombrar(prev => { const nx = new Set(prev);
-                                        pzsT.forEach(p => { if (todasSel) nx.delete(p.idx); else nx.add(p.idx); }); return nx; })}
-                                      style={{ fontSize: 10.5, color: 'var(--accent)', cursor: 'pointer', padding: '2px 0' }}>
-                                      {todasSel ? 'Quitar todas' : 'Seleccionar todas'}
-                                    </span>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingLeft: 16, paddingBottom: 3 }}>
                                     {pzsT.map(p => {
-                                      const sel = selNombrar.has(p.idx);
+                                      const sel = pzEstaSel(p);
+                                      const nom = (p.name || '').trim();
+                                      // pieza NOMBRADA: tocar el NOMBRE elige el GRUPO entero (la misma
+                                      // pieza en todos los talles); el TIK de la derecha es siempre
+                                      // unitario. Provisoria («Pieza 3») no tiene grupo: nombre = tik.
+                                      // En Etiqueta el tik LLENO es la pieza dueña de la etiqueta
+                                      // (`etqPzTocada`); las otras del mismo nombre van en parcial.
+                                      const esDuena = capasSelModo === 'etiqueta' && !!nom && etqPzTocada === nom;
+                                      const tikPz = capasSelModo === 'etiqueta'
+                                        ? (esDuena ? 'lleno' : (sel ? 'parcial' : 'vacio'))
+                                        : (sel ? 'lleno' : 'vacio');
                                       return (
-                                        <span key={p.idx}
-                                          onClick={() => {
-                                            // pieza NOMBRADA: se elige el GRUPO entero (todas las de
-                                            // ese nombre en todos los talles — «elegir las piezas del
-                                            // grupo»); provisoria/sin nombre: sólo ésa.
-                                            const nom = (p.name || '').trim();
-                                            const esGrupo = nom && !/^Pieza( extra)? \d+'*$/.test(nom);
-                                            if (esGrupo) {
-                                              const del_grupo = (empTodasData?.piezas || [])
-                                                .filter(q => (q.name || '').trim() === nom).map(q => q.idx);
-                                              setSelNombrar(prev => {
-                                                const ya = del_grupo.every(i => prev.has(i));
-                                                const nx = new Set(prev);
-                                                del_grupo.forEach(i => { if (ya) nx.delete(i); else nx.add(i); });
-                                                return nx; });
-                                              setEmpNombreInput(nom);
-                                            } else {
-                                              setSelNombrar(prev => { const nx = new Set(prev); if (nx.has(p.idx)) nx.delete(p.idx); else nx.add(p.idx); return nx; });
-                                            }
-                                          }}
-                                          style={{ fontSize: 10.5, cursor: 'pointer', padding: '1px 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                                   color: sel ? 'var(--accent)' : 'var(--text-muted)', fontWeight: sel ? 700 : 400 }}>
-                                          {sel ? '■ ' : '□ '}{p.name || `Pieza ${p.t_idx + 1}`}
-                                        </span>
+                                        <div key={p.idx} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '2px 3px', borderRadius: 6, background: sel ? 'rgba(0,243,255,0.10)' : 'transparent' }}>
+                                          {/* El tik abre la fila, igual que en la capa: los dos caen en
+                                              la MISMA columna y la selección se lee de un vistazo. */}
+                                          <TikSel estado={tikPz} onClick={() => togglePzSel(p)}
+                                            title={capasSelModo === 'etiqueta'
+                                              ? (esDuena ? 'Es la pieza que estás ubicando — tocá para soltarla' : 'Ubicar la etiqueta de ESTA pieza')
+                                              : (sel ? 'Quitar esta pieza' : 'Seleccionar sólo esta pieza')} />
+                                          <MiniCapa vb={miniPzVB(p)} d={p.path_svg} sel={sel} size={20} />
+                                          <span
+                                            onClick={() => togglePzSel(p)}
+                                            title={capasSelModo === 'etiqueta'
+                                              ? `Ubicar la etiqueta de «${nom || `Pieza ${p.t_idx + 1}`}» (${t})`
+                                              : `Seleccionar / quitar «${nom || `Pieza ${p.t_idx + 1}`}» de ${t} — sólo ésta`}
+                                            style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, cursor: 'pointer',
+                                                     color: sel ? 'var(--accent)' : 'var(--text-muted)', fontWeight: sel ? 700 : 500 }}>
+                                            {nom || `Pieza ${p.t_idx + 1}`}
+                                          </span>
+                                        </div>
                                       );
                                     })}
                                   </div>
@@ -11891,16 +14168,20 @@ export default function App() {
                                 ? { ...item, disabled: true, desc: 'Primero nombrá las piezas (Moldería → Nombrar piezas)' }
                                 : item;
                               return [
-                              { id: 'molderia', icon: 'productos', label: 'Moldería', desc: 'Subí el molde y nombrá sus piezas', disabled: false },
-                              { id: 'variables', icon: 'columnas', label: 'Variables', desc: 'Armar los grupos y las variables (el talle va aparte)', disabled: false },
-                              { id: 'diseno', icon: 'distribucion', label: 'Plantilla', desc: 'Medidas de cada pieza y carga del diseño', disabled: false },
-                              { id: 'planilla', icon: 'columnas', label: 'Planilla', desc: 'Vinculá las columnas del Excel', disabled: false },
-                              { id: 'nestingsel', icon: 'nesting', label: 'Nesting', desc: 'Qué acomodo (separación/giro) usa este molde', disabled: false },
-                              { id: 'telas', icon: 'telas', label: 'Telas asignadas', desc: 'Qué telas del registro están disponibles para este molde', disabled: false },
-                              { id: 'borde', icon: 'distribucion', label: 'Borde de corte', desc: 'Si lleva borde, el color y el tamaño (mm)', disabled: false },
-                              { id: 'etiqueta', icon: 'columnas', label: 'Etiqueta', desc: 'Qué muestra, dónde, en qué piezas, color y tamaño', disabled: false },
-                              { id: 'editable', icon: 'distribucion', label: 'Editable', desc: 'Mover, rotar y escalar los objetos de la capa «Editable» del diseño', disabled: false },
-                              { id: 'terminologia', icon: 'config', label: 'Nombres', desc: `Cómo se llaman ${term.variante.toLowerCase()} y ${term.molde.toLowerCase()}`, disabled: false },
+                              { id: 'molderia', icon: 'molderia', label: 'Moldería', desc: 'Subí el molde y nombrá sus piezas', disabled: false },
+                              { id: 'variables', icon: 'variables', label: 'Variables', desc: 'Armar los grupos y las variables (el talle va aparte)', disabled: false },
+                              // ⚠️ «Plantilla» y «Planilla» NO van pegadas (pedido del usuario 2026-08-21):
+                              // los nombres se diferencian en una letra y se tocaba una por la otra.
+                              // Etiqueta ocupa este lugar y Plantilla bajó al de Etiqueta; además
+                              // Etiqueta cambió de ícono para no repetir el de Planilla.
+                              { id: 'etiqueta', icon: 'etiqueta', label: 'Etiqueta', desc: 'Qué muestra, dónde, en qué piezas, color y tamaño', disabled: false },
+                              { id: 'planilla', icon: 'planilla', label: 'Planilla', desc: 'Vinculá las columnas del Excel', disabled: false },
+                              { id: 'nestingsel', icon: 'nestingPiezas', label: 'Nesting', desc: 'Qué acomodo (separación/giro) usa este molde', disabled: false },
+                              { id: 'telas', icon: 'telaRollo', label: 'Telas asignadas', desc: 'Qué telas del registro están disponibles para este molde', disabled: false },
+                              { id: 'borde', icon: 'bordeCorte', label: 'Borde de corte', desc: 'Si lleva borde, el color y el tamaño (mm)', disabled: false },
+                              { id: 'diseno', icon: 'plantilla', label: 'Plantilla', desc: 'Medidas de cada pieza y carga del diseño', disabled: false },
+                              { id: 'editable', icon: 'editable', label: 'Editable', desc: 'Mover, rotar y escalar los objetos de la capa «Editable» del diseño', disabled: false },
+                              { id: 'terminologia', icon: 'nombres', label: 'Nombres', desc: `Cómo se llaman ${term.variante.toLowerCase()} y ${term.molde.toLowerCase()}`, disabled: false },
                             ].map(_lock).filter(item => !(modoMiMolde && item.id === 'variables'));
                             })().map(item => (
                               <button
@@ -12339,7 +14620,7 @@ export default function App() {
                         const align = ec.align || 'centro';
                         const anchorSvg = align === 'izquierda' ? 'start' : align === 'derecha' ? 'end' : 'middle';
                         const nombrePc = (pc) => etqNombres[pc.idx] || pc.name || 'Pieza';
-                        const muestraDe = (pc) => [ec.mostrar.talle && '2XL', ec.mostrar.pieza && nombrePc(pc), ec.mostrar.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
+                        const muestraDe = (pc) => [ec.mostrar.talle && '2XL', ec.mostrar.pieza && nombreGenerico(nombrePc(pc)), ec.mostrar.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
                         const piezasVisor = canvasLayout?.layout?.filter(p => (etqNombres[p.idx] || p.name)) || [];
                         // Click sobre el contorno → posición relativa (rx,ry) en el bbox de esa pieza; se aplica a todas.
                         const onPickContorno = (e) => {
@@ -12591,13 +14872,34 @@ export default function App() {
                             />
                           </div>
 
-                          {/* ── AGREGAR UNA PIEZA AL MOLDE ──────────────────────────────────── */}
+                          {/* AGREGAR UNA PIEZA AL MOLDE.
+                              🔴 REGLAS DEL USUARIO (2026-08-21): lo nuevo queda PREPARADO y no se
+                              escribe hasta «Guardar» (mientras tanto se saca o se rehace sin
+                              consecuencias); y lo GUARDADO ya no se puede borrar — para sacar una
+                              pieza se borra el molde entero y se sube de nuevo. Por eso acá no hay
+                              ningún «deshacer». */}
                           {etqData && (
                           <div data-tour="pieza-agregar" style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 9 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', flex: 1 }}>Agregar una pieza</span>
-                              <Ayuda ancho={300}>Suma una pieza NUEVA al molde: la duplicás de una que ya está o la subís en un archivo, y marcás en el visor dónde va. Entra en **todos los talles** — si estuviera en algunos sí y en otros no, la tizada no se podría generar. El archivo original de tu molde **no se toca**: se guarda una versión nueva.</Ayuda>
+                              <Ayuda ancho={320}>Suma piezas NUEVAS al molde: las duplicás de una que ya está o las subís en un archivo, y marcás en el visor dónde van. Entran en <b>todos los talles</b>. Nada se escribe hasta que tocás <b>Guardar</b>: hasta entonces podés sacarlas o rehacerlas. <b>Una vez guardadas no se pueden borrar</b> — para sacar una pieza hay que borrar el molde y subirlo de nuevo. Tu archivo original no se toca: se guarda una versión nueva.</Ayuda>
                             </div>
+                            {/* PREPARADAS (todavía no están en el molde) */}
+                            {pzPend.length > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.06)', borderRadius: 9, padding: 8 }}>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24' }}>{pzPend.length} pieza{pzPend.length === 1 ? '' : 's'} preparada{pzPend.length === 1 ? '' : 's'} · sin guardar</div>
+                                {pzPend.map((p, i) => (
+                                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
+                                      {p.origen === 'duplicar' ? `copia de ${nombreDePieza(p.idx) || `la pieza ${p.idx + 1}`}` : (p.archivo || 'archivo')}
+                                      {p.punto ? ` · ${Math.round(p.punto.x / 10)} × ${Math.round(p.punto.y / 10)} cm` : ''}
+                                    </span>
+                                    <button title="Sacar de la lista" onClick={() => sacarPiezaPend(i)} disabled={pzNuevaCargando}
+                                      style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             {!pzNueva ? (
                               <>
                               <div style={{ display: 'flex', gap: 6 }}>
@@ -12612,28 +14914,33 @@ export default function App() {
                                   <Icon name="upload" style={{ width: 11, height: 11, marginRight: 4 }} /> Subir un archivo
                                 </button>
                               </div>
-                              {/* DESHACER: sacar la última pieza agregada. El molde se versiona, así
-                                  que volver atrás es mover el puntero; el registro se restaura del
-                                  respaldo. Sin esto, agregar era un camino de ida. */}
-                              {(prodCfg?.piezas_agregadas || 0) > 0 && (
-                                <button type="button" className="btn ghost" disabled={pzNuevaCargando}
-                                  style={{ fontSize: 11.5, padding: '6px 8px', color: '#f87171', borderColor: 'rgba(248,113,113,0.3)' }}
-                                  onClick={() => abrirConfirmar({
-                                    titulo: 'Sacar la última pieza agregada', peligro: true, ok: 'Sacarla',
-                                    texto: 'El molde vuelve a como estaba antes de agregarla y la numeración de las piezas se acomoda sola. Lo que hayas nombrado NO se pierde.',
-                                    onOk: deshacerPiezaMolde,
-                                  })}>
-                                  ↩ Sacar la última pieza agregada ({prodCfg.piezas_agregadas})
-                                </button>
+                              {pzPend.length > 0 && (
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }} disabled={pzNuevaCargando}
+                                    onClick={() => setPzPend([])}>Descartar</button>
+                                  <button type="button" className="btn primary" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }} disabled={pzNuevaCargando}
+                                    onClick={() => abrirConfirmar({
+                                      titulo: `Guardar ${pzPend.length} pieza${pzPend.length === 1 ? '' : 's'} en el molde`, ok: 'Guardar',
+                                      texto: 'Entran en todos los talles y quedan SIN NOMBRE (se nombran en Moldería · Nombrar piezas). ⚠️ Una vez guardadas no se pueden borrar: para sacar una pieza hay que borrar el molde entero y subirlo de nuevo.',
+                                      onOk: guardarPiezasNuevas,
+                                    })}>
+                                    {pzNuevaCargando ? 'Guardando…' : `Guardar (${pzPend.length})`}
+                                  </button>
+                                </div>
                               )}
                               </>
                             ) : (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                                   {pzNueva.origen === 'duplicar'
-                                    ? <>Duplicando <b>{nombreDePieza(pzNueva.idx) || `la pieza ${pzNueva.idx + 1}`}</b>.</>
+                                    ? <>Duplicando <b>{nombreDePieza(pzNueva.idx) || `la pieza ${pzNueva.idx + 1}`}</b> — se copian <b>sus vectores en cada talle</b>; el nombre y el número NO se copian.</>
                                     : (pzNueva.archivo ? <>Archivo <b>{pzNueva.archivo}</b> · {pzNueva.medidas}</> : <>Elegí el archivo de la pieza…</>)}
                                 </div>
+                                {pzNueva.origen === 'duplicar' && !nombreDePieza(pzNueva.idx) && (
+                                  <div style={{ fontSize: 11, padding: '6px 9px', borderRadius: 8, lineHeight: 1.4, background: 'rgba(245,158,11,0.10)', color: '#fbbf24' }}>
+                                    Esa pieza todavía <b>no tiene nombre</b>, así que no hay correspondencia entre talles: se va a copiar la del <b>mismo número</b> en cada talle. Si el molde no está alineado, puede copiar otra figura — conviene nombrarla primero.
+                                  </div>
+                                )}
                                 {pzNueva.origen === 'archivo' && pzNueva.archivo && pzNueva.completo === false && (
                                   <div style={{ fontSize: 11.5, fontWeight: 700, padding: '7px 9px', borderRadius: 8, lineHeight: 1.4,
                                     background: 'rgba(255,90,90,0.12)', color: '#ff8a8a' }}>
@@ -12648,37 +14955,26 @@ export default function App() {
                                     ? `✓ Lugar marcado (${Math.round(pzNueva.punto.x / 10)} × ${Math.round(pzNueva.punto.y / 10)} cm). Tocá otra vez para corregirlo.`
                                     : '👆 Tocá en el visor dónde querés que quede la pieza.'}
                                 </div>
-                                {/* QUÉ NÚMERO LE VA A TOCAR. Las piezas se numeran por su posición
-                                    (de izquierda a derecha), así que ponerla en el medio corre el
-                                    número de todas las que siguen. Se avisa ANTES de escribir. */}
-                                {pzNueva.punto && (() => {
-                                  const L = canvasLayout.layout || [];
-                                  const kx = pzNueva.punto.x, ky = pzNueva.punto.y;
-                                  const antes = L.filter(q => (q.px < kx) || (q.px === kx && q.py < ky)).length;
-                                  const corre = L.length - antes;
-                                  return (
-                                    <div style={{ fontSize: 11, padding: '6px 9px', borderRadius: 8, lineHeight: 1.4,
-                                      background: corre ? 'rgba(245,158,11,0.10)' : 'rgba(255,255,255,0.03)',
-                                      color: corre ? '#fbbf24' : 'var(--text-muted)' }}>
-                                      Va a quedar como la <b>pieza {antes + 1}</b>
-                                      {corre
-                                        ? <> y le corre el número a las <b>{corre}</b> que están más a la derecha. Si no querés que se muevan, marcala <b>a la derecha de todo</b>.</>
-                                        : <> — <b>la última</b>, no le mueve el número a ninguna. ✓</>}
-                                    </div>
-                                  );
-                                })()}
+                                {/* QUÉ NÚMERO LE TOCA: las piezas van en el ORDEN DEL ARCHIVO y la nueva
+                                    se escribe al final, así que es SIEMPRE la última y no le mueve el
+                                    número a ninguna (antes el orden era por posición y sí las corría). */}
+                                {pzNueva.punto && (
+                                  <div style={{ fontSize: 11, padding: '6px 9px', borderRadius: 8, lineHeight: 1.4, background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)' }}>
+                                    Va a quedar como la <b>última pieza</b> ({(canvasLayout.layout || []).length + pzPend.length + 1}) — <b>no le mueve el número a ninguna</b>. ✓
+                                  </div>
+                                )}
                                 <div style={{ display: 'flex', gap: 6 }}>
                                   <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }}
                                     onClick={() => setPzNueva(null)} disabled={pzNuevaCargando}>Cancelar</button>
                                   <button type="button" className="btn primary" style={{ flex: 1, fontSize: 11.5, padding: '6px 8px' }}
                                     disabled={pzNuevaCargando || !pzNueva.punto
                                       || (pzNueva.origen === 'archivo' && (!pzNueva.archivo || pzNueva.completo === false))}
-                                    onClick={agregarPiezaAlMolde}>
-                                    {pzNuevaCargando ? 'Agregando…' : 'Agregar al molde'}
+                                    onClick={prepararPieza}>
+                                    Listo, prepararla
                                   </button>
                                 </div>
                                 <div style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                                  Entra en <b>todos los talles</b>. Después ponele nombre en <b>Variables · Paso 1</b>.
+                                  Todavía <b>no se escribe nada</b>: queda preparada y se guarda cuando toques <b>Guardar</b>.
                                 </div>
                               </div>
                             )}
@@ -13069,8 +15365,22 @@ export default function App() {
                                               const oculto = piezasOcultas.has(g);
                                               const aplicarPz = (modo) => setPiezasOcultas(prev => { const nx = new Set(prev);
                                                 if (modo === 'ocultar') nx.add(g); else nx.delete(g); return nx; });
+                                              // Mismo trato que la barra de capas (2026-08-21): miniatura del
+                                              // contorno + TIK que selecciona/quita el GRUPO entero (esa pieza
+                                              // en todos los talles). Acá el grupo es el nombre GENÉRICO, que
+                                              // es la unidad con la que trabaja esta lista.
+                                              const pzsG = (empTodasData?.piezas || []).filter(p => nombreGenerico((p.name || '').trim()) === g);
+                                              // ¿la fila es UNA pieza repetida por talle, o varias piezas
+                                              // distintas que comparten nombre genérico («Cuello 1..11»)?
+                                              const _unaFigura = new Set(pzsG.map(p => (p.name || '').trim())).size === 1 && !!pzsG.length;
+                                              const nSelG = pzsG.reduce((a, p) => a + (pzEstaSel(p) ? 1 : 0), 0);
+                                              const todasG = !!pzsG.length && nSelG === pzsG.length;
+                                              const toggleG = () => setSelNombrar(prev => { const nx = new Set(prev);
+                                                pzsG.forEach(p => { if (todasG) nx.delete(p.idx); else nx.add(p.idx); }); return nx; });
                                               return (
-                                                <div key={g} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 2px', borderRadius: 6, userSelect: 'none' }}>
+                                                <div key={g} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 2px', borderRadius: 6, userSelect: 'none', background: nSelG ? 'rgba(0,243,255,0.07)' : 'transparent' }}>
+                                                  <TikSel estado={todasG ? 'lleno' : (nSelG ? 'parcial' : 'vacio')} onClick={toggleG}
+                                                    title={todasG ? `Quitar «${g}» (${pzsG.length})` : `Seleccionar «${g}» (${pzsG.length})`} />
                                                   <span
                                                     onMouseDown={(e) => { e.preventDefault(); const modo = oculto ? 'mostrar' : 'ocultar';
                                                       pintaOjoPz.current = { on: true, modo }; aplicarPz(modo); }}
@@ -13079,7 +15389,16 @@ export default function App() {
                                                     style={{ cursor: 'pointer', width: 20, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, opacity: oculto ? 0.35 : 1 }}>
                                                     {oculto ? '◡' : '👁'}
                                                   </span>
-                                                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, color: oculto ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: 600 }}>{g}</span>
+                                                  {/* Miniatura SÓLO si la fila es UNA pieza (la misma en
+                                                      todos los talles). «Cuello» junta 11 formas
+                                                      distintas: dibujar la primera sería mentir. */}
+                                                  {_unaFigura && (
+                                                    <span style={{ opacity: oculto ? 0.35 : 1, display: 'inline-flex' }}>
+                                                      <MiniCapa vb={miniPzVB(pzsG[0])} d={pzsG[0].path_svg} sel={todasG} size={20} />
+                                                    </span>
+                                                  )}
+                                                  <span onClick={toggleG} title={todasG ? `Quitar «${g}» (${pzsG.length})` : `Seleccionar «${g}» en todos los ${(term.variante || 'talle').toLowerCase()}s (${pzsG.length})`}
+                                                    style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5, cursor: 'pointer', color: oculto ? 'var(--text-muted)' : (nSelG ? 'var(--accent)' : 'var(--text-primary)'), fontWeight: 600 }}>{g}</span>
                                                 </div>
                                               );
                                             })}
@@ -13579,83 +15898,78 @@ export default function App() {
                                 if (!g) return <button className="btn ghost" onClick={() => setGrupoAislado(null)}>⬅ Volver</button>;
                                 const nPz = (g.valores || []).filter(v => v.pieza_idx != null).length;
                                 const asignando = asignandoTipo === g.clave;
-                                const vinc = vinculandoJuntas === g.clave;
-                                const bundles = g.juntas || [];
-                                const nombresSel = Array.from(new Set(Array.from(juntasSel).map(i => nombreGenerico(_nombreDeIdx(i))).filter(Boolean)));
+                                const bundles = juntasDeVariable(g);
+                                // REGLA (2026-08-21): en una variable no pueden convivir dos piezas
+                                // que se llamen igual, salvo que esten vinculadas como «van juntas».
+                                // Lo nuevo ya no entra (se avisa al tocar), pero un molde configurado
+                                // ANTES puede tenerlas: se muestra para que el usuario lo resuelva.
+                                const choquesVar = (() => {
+                                  const porGen = {};
+                                  (g.valores || []).filter(v => v.pieza_idx != null).forEach(v => {
+                                    const gen = nombreGenerico(_nomDeValor(v));
+                                    if (!gen) return;
+                                    const b = _juntaDeIdx(bundles, v.pieza_idx);
+                                    const k = gen + (b ? '|' + b.id : '');   // el vinculo hace grupo aparte
+                                    (porGen[k] = porGen[k] || []).push(v);
+                                  });
+                                  return Object.entries(porGen).filter(([k, arr]) => arr.length > 1 && !k.includes('|'))
+                                    .map(([k, arr]) => ({ gen: k, nombres: arr.map(_nomDeValor) }));
+                                })();
                                 return (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                    <button type="button" className="btn ghost" onClick={() => { setAsignandoTipo(null); setVinculandoJuntas(null); setModoAcomodar(false); setGrupoAislado(null); }} style={{ alignSelf: 'flex-start', fontSize: 12, padding: '6px 10px' }}>⬅ Volver a las variables</button>
+                                    <button type="button" className="btn ghost" onClick={() => { setAsignandoTipo(null); setModoAcomodar(false); setGrupoAislado(null); }} style={{ alignSelf: 'flex-start', fontSize: 12, padding: '6px 10px' }}>⬅ Volver a las variables</button>
                                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                       <input value={g.label} placeholder="Nombre de la variable" onChange={(e) => renameTipo(gi, e.target.value)} style={{ ...inp, fontWeight: 600, fontSize: 14 }} />
                                       <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{nPz} pza{nPz === 1 ? '' : 's'}</span>
                                     </div>
-                                    {!vinc && (
-                                      <div style={{ display: 'flex', gap: 6 }}>
+                                    <div style={{ display: 'flex', gap: 6 }}>
                                         <button type="button" className="btn primary" style={{ flex: 1, fontSize: 12 }} onClick={() => guardarGrupos()}>Guardar cambios</button>
                                         <button type="button" className="btn" style={{ flex: 1, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderColor: asignando ? 'var(--accent)' : undefined, color: asignando ? 'var(--accent)' : undefined }} onClick={() => { setModoAcomodar(false); setAsignandoTipo(asignando ? null : g.clave); }}>
                                           <Icon name={asignando ? 'check' : 'plus'} style={{ width: 12, height: 12 }} /> {asignando ? 'Listo' : 'Cargar piezas'}
                                         </button>
-                                      </div>
-                                    )}
-                                    {/* ── MODO VINCULAR "van juntas": elegir 2+ piezas + nombre común ── */}
-                                    {vinc && (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid #f59e0b', borderRadius: 12, padding: 12, background: 'rgba(245,158,11,0.06)' }}>
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>⛓ Piezas que van juntas</div>
-                                        <Ayuda ancho={330}>Tocá <b>acá en el visor</b> (sobre la variante acomodada) <b>2 o más</b> piezas que van <b>siempre juntas</b> (ej.: manga corta + su vivo). Al elegir la principal, la compañera entra sola; y comparten un mismo nombre.</Ayuda>
-                                        <div style={{ fontSize: 12 }}><b style={{ color: '#f59e0b', fontSize: 15 }}>{juntasSel.size}</b> pieza{juntasSel.size === 1 ? '' : 's'} elegida{juntasSel.size === 1 ? '' : 's'}</div>
-                                        {nombresSel.length > 0 && (
-                                          <div>
-                                            <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 5 }}>¿Qué nombre usan las dos? (tocá uno)</div>
-                                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                                              {nombresSel.map(nm => (
-                                                <button key={nm} type="button" onClick={() => setJuntasNombre(nm)} style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (juntasNombre === nm ? '#f59e0b' : 'var(--border-light)'), background: juntasNombre === nm ? 'rgba(245,158,11,0.14)' : 'transparent', color: juntasNombre === nm ? '#f59e0b' : 'var(--text-muted)' }}>{nm}</button>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        )}
-                                        <div style={{ display: 'flex', gap: 6 }}>
-                                          <button type="button" className="btn primary" style={{ flex: 1, fontSize: 12 }} disabled={juntasSel.size < 2} onClick={() => { crearVinculoJuntas(g.clave, Array.from(juntasSel), juntasNombre || (nombresSel[0] || '')); setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); }}>Crear vínculo</button>
-                                          <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 12 }} onClick={() => { setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); }}>Cancelar</button>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {!asignando && !vinc && nidoLoading && (
+                                    </div>
+                                    {!asignando && nidoLoading && (
                                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--text-secondary)', padding: '7px 10px', border: '1px solid var(--border-light)', borderRadius: 9 }}>
                                         <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
                                         Armando todos los talles… (una sola vez, después queda al instante)
                                       </div>
                                     )}
-                                    {!asignando && !vinc && !nidoLoading && nidoError && (
+                                    {!asignando && !nidoLoading && nidoError && (
                                       <div style={{ display: 'flex', flexDirection: 'column', gap: 7, fontSize: 11.5, color: 'var(--warning)', padding: '8px 10px', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 9, background: 'rgba(245,158,11,0.06)' }}>
                                         <div>No se pudo armar el nido de talles: {nidoError}</div>
                                         <button type="button" className="btn" style={{ alignSelf: 'flex-start', fontSize: 11, padding: '4px 12px' }} onClick={() => cargarNido(true)}>↻ Reintentar</button>
                                       </div>
                                     )}
-                                    {!asignando && !vinc && !nidoLoading && !nidoError && nidoData && nidoVarPiezas().length === 0 && (
+                                    {!asignando && !nidoLoading && !nidoError && nidoData && nidoVarPiezas().length === 0 && (
                                       <div style={{ fontSize: 11.5, color: 'var(--warning)', padding: '7px 10px', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 9, background: 'rgba(245,158,11,0.06)' }}>
                                         No pude ubicar las piezas de esta variable en el acomodo de talles — se muestra solo el talle actual. Suele ser porque todavía no tienen <b>nombre</b> (Paso 1) o porque se eligieron mirando otro {term.variante.toLowerCase()}.
                                       </div>
                                     )}
-                                    {/* ── Piezas que van juntas (vínculos de la variable) ── */}
-                                    {!asignando && !vinc && (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, border: '1px solid var(--border-light)', borderRadius: 11, padding: 11 }}>
-                                        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>⛓ Piezas que van juntas <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· van y se nombran juntas (ej. manga + su vivo)</span></div>
-                                        {bundles.length > 0 && (
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                            {bundles.map(b => (
-                                              <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
-                                                <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
-                                                <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).length} piezas: {(b.piezas || []).map(i => _nombreDeIdx(i)).join(', ')}</span>
-                                                <button title="Quitar vínculo" onClick={() => borrarVinculoJuntas(g.clave, b.id)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                        <button type="button" className="btn" disabled={nPz < 2} style={{ fontSize: 11.5, alignSelf: 'flex-start', padding: '5px 12px', opacity: nPz < 2 ? 0.5 : 1 }} onClick={() => { setAsignandoTipo(null); setModoAcomodar(false); setJuntasSel(new Set()); setJuntasNombre(''); setVinculandoJuntas(g.clave); }}>＋ Vincular piezas</button>
-                                        {nPz < 2 && <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Cargá al menos 2 piezas para poder vincularlas.</div>}
+                                    {!asignando && choquesVar.length > 0 && (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11.5, color: 'var(--warning)', padding: '9px 11px', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 10, background: 'rgba(245,158,11,0.06)' }}>
+                                        <div><b>Hay piezas con el mismo nombre en esta variable.</b> Una variable no deberia llevar dos piezas que se llaman igual, salvo que vayan SIEMPRE juntas.</div>
+                                        {choquesVar.map(c => (
+                                          <div key={c.gen} style={{ color: 'var(--text-secondary)' }}>· {c.nombres.join(' + ')}</div>
+                                        ))}
+                                        <div style={{ color: 'var(--text-muted)' }}>Salida: vinculalas en el <b>grupo</b> (⛓ Piezas que van juntas) o saca una con «Cargar piezas».</div>
                                       </div>
                                     )}
-                                    {!vinc && (estado?.talles || []).length > 1 && (
+                                    {/* ── Piezas que van juntas: SE DEFINEN EN EL GRUPO (2026-08-21) ──
+                                        Acá sólo se muestran, para entender por qué al tocar una pieza
+                                        entra también su compañera. El botón vive en el grupo. */}
+                                    {!asignando && bundles.length > 0 && (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--border-light)', borderRadius: 11, padding: 11 }}>
+                                        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>⛓ Piezas que van juntas <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· se definen en el grupo</span></div>
+                                        {bundles.map(b => (
+                                          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
+                                            <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
+                                            <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).map(i => _nombreDeIdx(i)).join(' + ')}</span>
+                                          </div>
+                                        ))}
+                                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Al elegir una, entra la otra sola.</div>
+                                      </div>
+                                    )}
+                                    {(estado?.talles || []).length > 1 && (
                                       <div>
                                         <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 5 }}>Resaltar {term.variante.toLowerCase()} (celeste en el visor):</div>
                                         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
@@ -13665,9 +15979,9 @@ export default function App() {
                                         </div>
                                       </div>
                                     )}
-                                    {!vinc && (
+                                    {(
                                       <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
-                                        {asignando ? <>Tocá las piezas (o arrastrá un recuadro) que <b>forman esta variable</b>. Después <b>Listo</b>.</> : <>En el visor ves las piezas de esta variable con <b>todos sus talles nesteados</b>. <b>Arrastrá una pieza</b> para acomodarla (se mueven todas sus tallas juntas) — la posición <b>se guarda sola</b>.</>}
+                                        {asignando ? <>Tocá las piezas (o arrastrá un recuadro) que <b>forman esta variable</b>. Después <b>Listo</b>.</> : <>En el visor ves las piezas de esta variable con <b>todos sus talles nesteados</b>. <b>Arrastrá una pieza</b> para acomodarla (se mueven todas sus tallas juntas) — la posición <b>se guarda sola</b>. Para mover <b>varias juntas</b>: tocalas (o hacé un <b>recuadro</b> desde el fondo) y arrastrá cualquiera de las marcadas.</>}
                                       </div>
                                     )}
                                   </div>
@@ -13699,6 +16013,54 @@ export default function App() {
                                     {eligiendo && (
                                       <Ayuda ancho={330}>Tocá las piezas (o arrastrá un recuadro). Una pieza <b>puede estar en varios grupos</b>. Después <b>Listo</b>.</Ayuda>
                                     )}
+                                    {/* PIEZAS QUE VAN JUNTAS - se declaran ACA, en el grupo (2026-08-21),
+                                        ANTES de armar las variables: asi, al elegir una de las dos para
+                                        una variable, la companera entra sola. Y es lo unico que habilita
+                                        que dos piezas con el mismo nombre convivan en una variable. */}
+                                    {!eligiendo && !asignandoTipo && (() => {
+                                      const vincG = vinculandoJuntas === gp.id;
+                                      const bundlesG = gp.juntas || [];
+                                      const nombresSel = Array.from(new Set(Array.from(juntasSel).map(i => nombreGenerico(_nombreDeIdx(i))).filter(Boolean)));
+                                      const nPzG = (gp.piezas || []).length;
+                                      return vincG ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid #f59e0b', borderRadius: 12, padding: 12, background: 'rgba(245,158,11,0.06)' }}>
+                                          <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>⛓ Piezas que van juntas</div>
+                                          <Ayuda ancho={330}>Toca en el visor <b>2 o mas</b> piezas del grupo que van <b>siempre juntas</b> (ej.: manga corta + su vivo). Despues, al armar una variable, elegir una <b>trae la otra sola</b> — y es la unica forma de que dos piezas con el mismo nombre entren en la misma variable.</Ayuda>
+                                          <div style={{ fontSize: 12 }}><b style={{ color: '#f59e0b', fontSize: 15 }}>{juntasSel.size}</b> pieza{juntasSel.size === 1 ? '' : 's'} elegida{juntasSel.size === 1 ? '' : 's'}</div>
+                                          {nombresSel.length > 0 && (
+                                            <div>
+                                              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 5 }}>¿Que nombre usan las dos? (toca uno)</div>
+                                              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                {nombresSel.map(nm => (
+                                                  <button key={nm} type="button" onClick={() => setJuntasNombre(nm)} style={{ padding: '4px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (juntasNombre === nm ? '#f59e0b' : 'var(--border-light)'), background: juntasNombre === nm ? 'rgba(245,158,11,0.14)' : 'transparent', color: juntasNombre === nm ? '#f59e0b' : 'var(--text-muted)' }}>{nm}</button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div style={{ display: 'flex', gap: 6 }}>
+                                            <button type="button" className="btn primary" style={{ flex: 1, fontSize: 12 }} disabled={juntasSel.size < 2} onClick={() => { crearVinculoJuntas(gp.id, Array.from(juntasSel), juntasNombre || (nombresSel[0] || '')); setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); }}>Crear vinculo</button>
+                                            <button type="button" className="btn ghost" style={{ flex: 1, fontSize: 12 }} onClick={() => { setVinculandoJuntas(null); setJuntasSel(new Set()); setJuntasNombre(''); }}>Cancelar</button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, border: '1px solid var(--border-light)', borderRadius: 11, padding: 11 }}>
+                                          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>⛓ Piezas que van juntas <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· van y se nombran juntas (ej. manga + su vivo)</span></div>
+                                          {bundlesG.length > 0 && (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                              {bundlesG.map(b => (
+                                                <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, padding: '5px 8px', borderRadius: 8, background: 'rgba(167,139,250,0.10)', border: '1px solid rgba(167,139,250,0.3)' }}>
+                                                  <span style={{ color: '#c4b5fd', fontWeight: 700 }}>{b.nombre}</span>
+                                                  <span style={{ color: 'var(--text-muted)' }}>· {(b.piezas || []).length} piezas: {(b.piezas || []).map(i => _nombreDeIdx(i)).join(', ')}</span>
+                                                  <button title="Quitar vinculo" onClick={() => borrarVinculoJuntas(gp.id, b.id)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <button type="button" className="btn" disabled={nPzG < 2} style={{ fontSize: 11.5, alignSelf: 'flex-start', padding: '5px 12px', opacity: nPzG < 2 ? 0.5 : 1 }} onClick={() => { setAsignandoTipo(null); setAsignandoGrupoPz(null); setModoAcomodar(false); setJuntasSel(new Set()); setJuntasNombre(''); setVinculandoJuntas(gp.id); }}>＋ Vincular piezas</button>
+                                          {nPzG < 2 && <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Elegi al menos 2 piezas del grupo para poder vincularlas.</div>}
+                                        </div>
+                                      );
+                                    })()}
                                     {!eligiendo && (<>
                                       {/* eligiendo piezas de una VARIABLE */}
                                       {varAsignando ? (
@@ -13796,7 +16158,7 @@ export default function App() {
                                 hacía creer que el molde había perdido sus variantes. */}
                             {varPzModo
                               ? `Mesa: ${etqData.mesa} · todas las piezas, sin separar`
-                              : ((empModo && empTodas) || (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado)) && empTodasData?.piezas?.length
+                              : ((empModo && empTodas) || (tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo)) && empTodasData?.piezas?.length
                                 ? `Mesa: ${etqData.mesa} · todas las ${term.variante.toLowerCase()}s juntas`
                                 : `Mesa: ${etqData.mesa} · ${term.variante}: ${etqData.talle_ref}`}
                           </div>
@@ -13824,7 +16186,7 @@ export default function App() {
                           if (e.button === 2 && etqData && tabAjustesMolde !== 'planilla') { panVisor(e); return; }
                           // `empModo` va acá o el recuadro NO se dibuja al agrupar piezas: este panel
                           // vive fuera de la pestaña Variables (el gesto quedaba sólo con el clic).
-                          if (e.button === 0 && (varPzModo || empModo || (tabAjustesMolde === 'telas' && telasPanelAbierto) || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
+                          if (e.button === 0 && (varPzModo || empModo || modoAcomodoVar || (tabAjustesMolde === 'telas' && telasPanelAbierto) || (tabAjustesMolde === 'variables' && (asignandoTipo || asignandoConjunto || asignandoGrupoPz || varStep === 'nombrar'))) && !(e.target.closest && e.target.closest('[data-piece]'))) iniciarRubber(e);
                           /* nota: en modo editar-nombre el recuadro también aplica (varStep==='nombrar') */
                         }}
                         onContextMenu={(e) => { if (etqData && tabAjustesMolde !== 'planilla') e.preventDefault(); }}>
@@ -13992,7 +16354,7 @@ export default function App() {
                               width={_sz.w * visorView.k} height={_sz.h * visorView.k}
                               style={{ display: 'block', userSelect: 'none', overflow: 'visible' }}
                             >
-                              {canvasLayout.layout.map((p) => {
+                              {canvasLayout.dibujo.map((p) => {
                                 if (vf && !vf.show.has(p.idx)) return null;   // VER VARIANTE: solo las piezas de la variante
                                 const pzName = etqNombres[p.idx] || p.name || '';
                                 if (!pzName) return null;
@@ -14131,7 +16493,7 @@ export default function App() {
                               style={{ display: 'block', userSelect: 'none', overflow: 'visible' }}
                             >
                               {/* Sin fondo ráster (rectángulo gris): las siluetas vectoriales + cajas flotan en el espacio. */}
-                              {canvasLayout.layout.map((p) => {
+                              {canvasLayout.dibujo.map((p) => {
                                 if (vf && !vf.show.has(p.idx)) return null;   // VER VARIANTE: solo las piezas de la variante
                                 const { nombrePz, ancho, alto, rectW, rectH, cx, cy, rx, ry } = cajaDe(p);
                                 const esTalle = configMedida === 'talle';
@@ -14180,7 +16542,7 @@ export default function App() {
                             // En el lienzo TODAS el idx es GLOBAL: `etqNombres` (idx del talle guía)
                             // pondría nombres cruzados — el nombre viene del lienzo (p.name).
                             const nombrePc = (p) => p.name || etqNombres[p.idx] || ('Pieza ' + (p.idx + 1));
-                            const muestraDe = (p) => [ec.mostrar?.talle && (etqData.talle_ref || '2XL'), ec.mostrar?.pieza && nombrePc(p), ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
+                            const muestraDe = (p) => [ec.mostrar?.talle && (etqData.talle_ref || '2XL'), ec.mostrar?.pieza && nombreGenerico(nombrePc(p)), ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
                             // Apoyar el texto en el CONTORNO: punto más cercano del path + ángulo de la tangente.
                             const snapContorno = (d, cx, cy, pc) => {
                               try {
@@ -14305,7 +16667,7 @@ export default function App() {
                                 onClick={zonasModo ? onPickZona : (ec.activo ? onPick : undefined)} onMouseMove={(ec.activo && !zonasModo) ? onHover : undefined} onMouseLeave={() => setEtqHover(null)}
                                 style={{ display: 'block', userSelect: 'none', overflow: 'visible', cursor: zonasModo ? 'copy' : (ec.activo ? 'crosshair' : 'default') }}>
                                 {/* sin imagen de fondo: las piezas van sobre el espacio del visor */}
-                                {canvasLayout.layout.map((p) => {
+                                {canvasLayout.dibujo.map((p) => {
                                   if (p.talle && tallesOcultos.has(p.talle)) return null;   // capa oculta por su ojito
                                   if (vf && !vf.show.has(p.idx)) return null;   // VER VARIANTE: solo las piezas de la variante
                                   if (varsConPiezas.length && !vf) return null; // molde con variables: NO procesar todas (lento) hasta elegir una
@@ -14378,7 +16740,7 @@ export default function App() {
                                                 const seg = zonaSegPath(geo.el, geo.len, snapT(t0), snapT(t1), ccx, ccy, _offIn);
                                                 if (!seg) return null;
                                                 const c = cont[i] || {};
-                                                const txt = [c.mostrar && c.mostrar.talle && (etqData.talle_ref || '2XL'), c.mostrar && c.mostrar.pieza && name, c.mostrar && c.mostrar.numero && '#01', c.texto].filter(Boolean).join(ec.separador || '-');
+                                                const txt = [c.mostrar && c.mostrar.talle && (etqData.talle_ref || '2XL'), c.mostrar && c.mostrar.pieza && nombreGenerico(name), c.mostrar && c.mostrar.numero && '#01', c.texto].filter(Boolean).join(ec.separador || '-');
                                                 if (!txt) return null;
                                                 const zAlign = c.align || pAlign, zAnchor = zAlign === 'izquierda' ? 'start' : zAlign === 'derecha' ? 'end' : 'middle';
                                                 const mg = Math.min(seg.segLen * 0.03, 4);
@@ -14538,8 +16900,13 @@ export default function App() {
                                   }
                                   // TOGGLE de TODO lo que pasa bajo el cursor (apilado incluido),
                                   // una sola vez por arrastre (set `tocadas`).
-                                  const bajo = _piezasBajoPunto(e.currentTarget, e.clientX, e.clientY)
-                                    .filter(i => !pintaSel.current.tocadas.has(i));
+                                  // ⚠️ Sólo con `movio`: el apretón ya eligió UNA pieza (la de
+                                  // adelante) y un temblor de 1-2 px no puede convertirse en «las 30
+                                  // apiladas». Seleccionar varias es un ARRASTRE de verdad (>3 px).
+                                  const bajo = pintaSel.current.movio
+                                    ? _piezasBajoPunto(e.currentTarget, e.clientX, e.clientY)
+                                        .filter(i => !pintaSel.current.tocadas.has(i))
+                                    : [];
                                   if (bajo.length) {
                                     bajo.forEach(i => pintaSel.current.tocadas.add(i));
                                     setSelNombrar(prev => { const nx = new Set(prev);
@@ -14579,6 +16946,24 @@ export default function App() {
                             >
                               {/* Dónde va a caer la pieza nueva: cruz + contorno fantasma de la que se
                                   duplica, así se ve el TAMAÑO real antes de escribir nada en el molde. */}
+                              {/* Las PREPARADAS (todavía no escritas) se ven en ámbar: el usuario tiene
+                                  que poder mirar el conjunto antes de guardar. */}
+                              {pzPend.map((p, i) => {
+                                if (!p.punto) return null;
+                                const k2 = visorView.k || 1, r = 20 / k2;
+                                const o = p.origen === 'duplicar' ? (canvasLayout.layout || []).find(q => q.idx === p.idx) : null;
+                                return (
+                                  <g key={'pzp' + i} style={{ pointerEvents: 'none' }}>
+                                    {o && (
+                                      <rect x={p.punto.x - o.pw / 2} y={p.punto.y - o.ph / 2} width={o.pw} height={o.ph}
+                                        fill="rgba(245,158,11,0.10)" stroke="#f59e0b" strokeWidth={1.5 / k2}
+                                        strokeDasharray={`${6 / k2} ${4 / k2}`} />
+                                    )}
+                                    <line x1={p.punto.x - r} y1={p.punto.y} x2={p.punto.x + r} y2={p.punto.y} stroke="#f59e0b" strokeWidth={2 / k2} />
+                                    <line x1={p.punto.x} y1={p.punto.y - r} x2={p.punto.x} y2={p.punto.y + r} stroke="#f59e0b" strokeWidth={2 / k2} />
+                                  </g>
+                                );
+                              })}
                               {pzNueva && pzNueva.punto && (() => {
                                 const k2 = visorView.k || 1, r = 26 / k2;
                                 const o = pzNueva.origen === 'duplicar'
@@ -14620,7 +17005,7 @@ export default function App() {
                                   return [
                                     ...layoutN.items.map(({ p: pieza, dx, dy, mcx, mcy, mhw, mhh }) => {
                                     const off = nidoOffsets[pieza.nombre] || { x: 0, y: 0 };
-                                    const bnd = gAbierta && _juntaDeIdx(gAbierta.juntas, pieza.idx);   // vínculo "van juntas"
+                                    const bnd = gAbierta && _juntaDeIdx(juntasDeVariable(gAbierta), pieza.idx);   // vínculo "van juntas"
                                     const linkSel = enLink && juntasSel.has(pieza.idx);
                                     const marcada = !enLink && nidoSel.has(pieza.nombre);              // elegida con el recuadro
                                     const label = bnd ? (bnd.nombre || pieza.nombre) : pieza.nombre;
@@ -14756,7 +17141,7 @@ export default function App() {
                                     </text>
                                   </g>
                                 ));
-                                return (<>{chipsVariante}{canvasLayout.layout.map((p) => {
+                                return (<>{chipsVariante}{canvasLayout.dibujo.map((p) => {
                                 if (aisladoSet && !aisladoSet.has(p.idx)) return null;
                                 if (empTodasInfo && p.talle && tallesOcultos.has(p.talle)) return null;   // capa oculta por su ojito
                                 if (empModo && piezasOcultas.size && piezasOcultas.has(nombreGenerico((((p.name || etqNombres[p.idx]) || '').trim())))) return null;   // pieza con el ojo cerrado (sección Piezas de la barra)
@@ -14772,7 +17157,9 @@ export default function App() {
                                 const asignada = enVar && claveP != null;
                                 const selN = enNombrar && selNombrar.has(p.idx);
                                 const enJuntaSel = enVar && !!vinculandoJuntas && juntasSel.has(p.idx);
-                                const destacada = esSeleccionado || enActivo || selN || enJuntaSel;
+                                // ACOMODAR la variable: lo seleccionado (lo que se va a mover junto) va en cyan.
+                                const selVar = modoAcomodoVar && selNombrar.has(p.idx);
+                                const destacada = esSeleccionado || enActivo || selN || enJuntaSel || selVar;
                                 // El BORDE es la línea REAL del archivo (contorno), fina y neutra.
                                 // El RELLENO verde (o cyan) marca el estado. Nada dibujado de más.
                                 let fillCol, badgeFill, textFill;
@@ -14805,7 +17192,7 @@ export default function App() {
                                   else { fillCol = 'rgba(16,185,129,0.10)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
                                 } else if (enVar) {
                                   if (vinculandoJuntas) { // armando "van juntas": elegidas en ÁMBAR, ya vinculadas en violeta, resto neutro
-                                    const yaVinc = (() => { const g = (variantesEdit || []).find(t => t.clave === vinculandoJuntas); return g && _juntaDeIdx(g.juntas, p.idx); })();
+                                    const yaVinc = (() => { const g = (gruposPz || []).find(x => x.id === vinculandoJuntas); return g && _juntaDeIdx(g.juntas, p.idx); })();
                                     if (juntasSel.has(p.idx)) { fillCol = 'rgba(245,158,11,0.36)'; badgeFill = '#f59e0b'; textFill = '#18181b'; }
                                     else if (yaVinc) { fillCol = 'rgba(167,139,250,0.24)'; badgeFill = '#a78bfa'; textFill = '#18181b'; }
                                     else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
@@ -14828,6 +17215,9 @@ export default function App() {
                                   badgeFill = esSeleccionado ? '#00d8f5' : nombrePz ? '#10b981' : '#3f3f46';
                                   textFill = esSeleccionado || nombrePz ? '#18181b' : '#ffffff';
                                 }
+                                // ACOMODAR: la selección MANDA sobre el coloreo de estado — es lo que se
+                                // va a mover y tiene que verse de un vistazo.
+                                if (selVar) { fillCol = 'rgba(0,243,255,0.32)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
                                 // Resaltado por nombre genérico (hover en la lista agrupada de piezas).
                                 const resaltada = resaltarNombre != null && ((nombrePz && nombreGenerico(nombrePz) === resaltarNombre) || (resaltarNombre === '(sin asignar)' && !nombrePz));
                                 if (resaltada) { fillCol = 'rgba(0,243,255,0.34)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
@@ -14891,7 +17281,7 @@ export default function App() {
                                     key={p.idx}
                                     data-piece={p.idx}
                                     transform={`translate(${tx}, ${ty})`}
-                                    style={{ cursor: (modoAcomodar || (empModo && empVista !== 'simple' && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
+                                    style={{ cursor: (modoAcomodar || modoAcomodoVar || (empModo && empVista !== 'simple' && !empFijar)) ? (dragInfo.current.idx === p.idx ? 'grabbing' : 'grab') : (empModo && empFijar ? 'crosshair' : 'pointer') }}
                                     onMouseDown={(e) => startDrag(e, p.idx)}
                                     onMouseEnter={() => pintarTelaPieza(p.idx)}   /* respaldo del pintado (el principal va por onMouseMove del svg) */
                                   >
@@ -15078,6 +17468,7 @@ export default function App() {
                             {plan.id !== 'plan_default' && (
                               <button 
                                 className="btn danger-ghost" 
+                                title="Borrar esta planilla"
                                 style={{ padding: '5px 8px', fontSize: '11.5px', whiteSpace: 'nowrap', marginLeft: 'auto' }} 
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -15181,6 +17572,41 @@ export default function App() {
                         <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>Encabezado de la columna</label>
                         <input type="text" value={col.label || ''} placeholder="Nombre de columna…" onChange={(e) => handleUpdateEditorColumn(idx, 'label', e.target.value)}
                           style={{ width: '100%', padding: '8px 10px', borderRadius: 7, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13, marginBottom: 16 }} />
+                        {/* CANTIDAD: es una columna del SISTEMA — no se le elige regla, ya sabe qué
+                            hace (repetir la fila). Lo único configurable es si se ve siempre o si la
+                            prende el operario, y en qué posición va (arrastrando su letra arriba). */}
+                        {col.role === 'cantidad' ? (
+                          <>
+                            <div style={{ padding: 12, borderRadius: 9, background: 'rgba(0,216,245,0.06)',
+                                          border: '1px solid rgba(0,216,245,0.3)', fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
+                              <b style={{ color: 'var(--accent)' }}>Columna del sistema.</b> Repite la fila tantas veces
+                              como diga el número: <i>M · pepe · 12 · <b>5</b></i> ⇒ la tizada arma <b>5 prendas iguales</b>.
+                              Está en todas las planillas y no se puede borrar.
+                            </div>
+                            <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 7 }}>¿Cuándo se ve en el pedido?</label>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 4 }}>
+                              {[{ v: 'boton', t: 'Sólo si el operario la pide', d: 'No aparece hasta que toque el botón «Cantidad». Es lo normal.' },
+                                { v: 'siempre', t: 'Siempre a la vista', d: 'La planilla la trae puesta desde el principio.' }].map(o => {
+                                const on = (col.mostrar || 'boton') === o.v;
+                                return (
+                                  <button key={o.v} type="button" onClick={() => handleUpdateEditorColumn(idx, 'mostrar', o.v)}
+                                    style={{ display: 'flex', alignItems: 'flex-start', gap: 9, textAlign: 'left', padding: '9px 11px', borderRadius: 9,
+                                      cursor: 'pointer', border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                                      background: on ? 'rgba(0,216,245,0.07)' : 'rgba(255,255,255,0.02)' }}>
+                                    <span style={{ width: 17, height: 17, borderRadius: 5, flexShrink: 0, marginTop: 1, display: 'grid', placeItems: 'center',
+                                      border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'var(--accent)' : 'transparent' }}>
+                                      {on && <Icon name="check" style={{ width: 11, height: 11, color: '#001016', strokeWidth: 3.5 }} />}
+                                    </span>
+                                    <span>
+                                      <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: on ? '#fff' : 'var(--text-secondary)' }}>{o.t}</span>
+                                      <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.35 }}>{o.d}</span>
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (<>
                         <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 5 }}>¿Qué es esta columna?</label>
                         <select value={col.reglaId || (reglaActual?.id) || ''} onChange={(e) => aplicarReglaAColumna(idx, e.target.value)}
                           style={{ width: '100%', padding: '8px 10px', borderRadius: 7, background: '#121214', border: '1px solid var(--border-light)', color: 'var(--cmyk-cyan)', outline: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -15203,6 +17629,25 @@ export default function App() {
                         <button className="btn ghost" onClick={() => setAdminSubView('reglas')} style={{ marginTop: 16, width: '100%', fontSize: 12, padding: '7px 10px', color: 'var(--cmyk-cyan)', borderColor: 'var(--cmyk-cyan)' }}>
                           ⚙ Gestionar reglas
                         </button>
+                        </>)}
+                        {/* OBLIGATORIA PARA FABRICAR — pedido del usuario 2026-08-31: «debe tener
+                            en configuración cuáles son las columnas que debe tener sí o sí
+                            cargadas para que aparezca en la tizada; puede ser 1 o varias». Una
+                            fila a la que le falte alguna NO se fabrica (y el pedido lo avisa). */}
+                        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border-light)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                            <Switch on={!!col.obligatoria} title="Sin esta columna cargada, la fila no se fabrica"
+                              onChange={(v2) => handleUpdateEditorColumn(idx, 'obligatoria', v2)} />
+                            <span style={{ fontSize: 12.5, fontWeight: 700 }}>Obligatoria para fabricar</span>
+                            <Ayuda ancho={320}>Una fila que tenga <b>vacía</b> esta columna <b>no sale en la tizada</b>: el pedido avisa cuántas quedaron afuera y qué les falta. Marcá las que sin cargar no se puede cortar (el {term.variante.toLowerCase()}, el diseño…). Si no marcás ninguna, vale el {term.variante.toLowerCase()}.<br /><br /><b>Sólo se pide en los moldes que usan esta columna.</b> Si un molde no la usa —y por eso no aparece en su planilla— no se le exige: si no, ninguna de sus filas se podría fabricar.</Ayuda>
+                          </div>
+                          {!!col.obligatoria && (
+                            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                              Las filas con «{col.label || 'esta columna'}» vacía se van a ignorar al generar,
+                              en los moldes que usen esta columna.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })()}
@@ -15230,7 +17675,7 @@ export default function App() {
                                   <span style={{ fontSize: 13, opacity: activa ? 1 : 0.6 }}>⚙</span>
                                   <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--cmyk-cyan)' }}>{letter}</span>
                                 </span>
-                                {columnasPlanillaEditando.length > 1 && (
+                                {columnasPlanillaEditando.length > 1 && col.role !== 'cantidad' && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleRemoveEditorColumn(idx); }}
                                     style={{
@@ -15874,58 +18319,119 @@ export default function App() {
                     ⬅ Volver al Panel de Configuración
                   </button>
                 </div>
-                <div className="panel-header" style={{ marginBottom: 14 }}>
-                  <h2>Perfil de color</h2>
-                  <p>Elegí el perfil ICC <b>predeterminado</b> para los diseños. Al cargar un arte, el sistema lee el perfil <b>incrustado</b> y avisa si no coincide con el predeterminado (o si viene sin perfil). Los colores no se modifican: solo se asigna/recomienda el perfil.</p>
+                {/* ENCABEZADO: la rueda + el título grande + una línea de qué hace esto.
+                    La rueda va en CMYK (cian-magenta-amarillo-negro): es de lo que habla la
+                    pantalla, y no pelea con el acento del sistema. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+                  <span style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                                 background: 'conic-gradient(#00d8f5, #7c5cff, #ff3ea5, #ffd400, #00d8f5)',
+                                 boxShadow: '0 0 18px rgba(0,216,245,0.28)',
+                                 display: 'grid', placeItems: 'center' }}>
+                    <span style={{ width: 13, height: 13, borderRadius: '50%', background: 'var(--bg-panel, #0f1216)' }} />
+                  </span>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em' }}>Perfiles de color</h2>
+                    <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      Elegí el perfil que mejor se adapte a tu flujo de trabajo.
+                      <Ayuda ancho={360}>Es el perfil ICC <b>predeterminado</b> de los diseños. Al cargar un arte, el sistema lee el perfil <b>incrustado</b> y avisa si no coincide con éste (o si viene sin perfil). <b>Los colores no se tocan</b>: sólo se asigna o se recomienda el perfil.</Ayuda>
+                    </p>
+                  </div>
                 </div>
                 {!perfilesData ? (
                   <div style={{ color: 'var(--text-secondary)', padding: 20 }}>Cargando perfiles…</div>
                 ) : !perfilesData.hay_perfiles ? (
                   <div style={{ color: 'var(--warning, #e0a020)', padding: 16, border: '1px solid var(--border-light)', borderRadius: 10 }}>No se encontraron perfiles ICC en el sistema. Instalá los perfiles de color (vienen con Adobe) o definí la carpeta con la variable <code>TIZADA_PERFILES</code>.</div>
                 ) : (
-                  [{ k: 'cmyk', t: 'CMYK (impresión)' }, { k: 'rgb', t: 'RGB (pantalla)' }].map(grp => {
+                  (() => {
+                    // UN espacio por vez, elegido con el toggle de arriba (antes iban las dos
+                    // listas apiladas y había que scrollear para ver la de abajo).
+                    const grp = perfilEspacio === 'rgb' ? { k: 'rgb', t: 'RGB' } : { k: 'cmyk', t: 'CMYK' };
                     const lista = perfilesData[grp.k] || [];
                     const actual = perfilesData.config?.[grp.k];
-                    const actualNombre = (lista.find(p => p.archivo === actual) || {}).nombre || actual;
+                    const dp = lista.find(p => p.archivo === actual);
+                    const ESPACIOS = [
+                      { k: 'rgb', t: 'RGB', sub: 'pantalla' },
+                      { k: 'cmyk', t: 'CMYK / Impresión', sub: 'sublimación' },
+                    ];
                     return (
-                      <div key={grp.k} style={{ marginBottom: 28 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.09em', textTransform: 'uppercase', color: grp.k === 'cmyk' ? '#7c5cff' : '#00d8f5', background: (grp.k === 'cmyk' ? '#7c5cff' : '#00d8f5') + '1e', padding: '5px 11px', borderRadius: 999 }}>{grp.t}</span>
-                          {(() => { const dp = lista.find(p => p.archivo === actual); return (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                              Predeterminado:
-                              {dp?.colores?.length > 0 && <span style={{ display: 'flex', width: 56, height: 13, borderRadius: 4, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(255,255,255,0.12)' }}>{dp.colores.map((c, i) => <span key={i} style={{ flex: 1, background: c }} />)}</span>}
-                              <b style={{ color: '#fff' }}>{actualNombre || '—'}</b>
-                            </span>
-                          ); })()}
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(226px, 1fr))', gap: 12 }}>
-                          {lista.map((p, i) => {
-                            const sel = p.archivo === actual;
-                            const cols = (p.colores && p.colores.length) ? p.colores : ['#2a2a30', '#33333a', '#3c3c44', '#45454e', '#4e4e58', '#575762'];
+                      <>
+                        {/* TOGGLE del espacio: dos botones grandes, mitad y mitad */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 22 }}>
+                          {ESPACIOS.map(e => {
+                            const on = perfilEspacio === e.k;
                             return (
-                              <button key={p.archivo} type="button" className="perfil-card" data-tour={i === 0 ? 'perfil-card' : undefined} onClick={() => guardarPerfilDefault(grp.k, p.archivo)} title={p.archivo}
-                                style={{ position: 'relative', textAlign: 'left', display: 'flex', flexDirection: 'column', padding: 0, borderRadius: 13, overflow: 'hidden', cursor: 'pointer', transition: 'all .18s',
-                                  border: sel ? '1.5px solid var(--accent)' : '1px solid var(--border-light)',
-                                  background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.012))',
-                                  boxShadow: sel ? '0 0 22px rgba(0,216,245,0.28), inset 0 0 0 1px rgba(0,216,245,0.14)' : 'none' }}>
-                                {/* franja de COLORES REALES que produce el perfil (referencia) */}
-                                <div style={{ display: 'flex', height: 22 }}>
-                                  {cols.map((c, ci) => <span key={ci} style={{ flex: 1, background: c }} />)}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px' }}>
-                                  <span style={{ fontSize: 12.5, fontWeight: sel ? 700 : 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
-                                  {sel
-                                    ? <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, boxShadow: '0 0 10px rgba(0,216,245,0.6)' }}><Icon name="check" style={{ width: 11, height: 11, color: '#001016', strokeWidth: 3.5 }} /></span>
-                                    : <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-muted)', flexShrink: 0, opacity: 0.65 }}>Usar</span>}
-                                </div>
+                              <button key={e.k} type="button" data-tour={'perfil-esp-' + e.k}
+                                onClick={() => setPerfilEspacio(e.k)}
+                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 11,
+                                  padding: '16px 14px', borderRadius: 13, cursor: 'pointer', transition: 'all .18s',
+                                  border: on ? '1.5px solid var(--accent)' : '1px solid var(--border-light)',
+                                  background: on ? 'rgba(0,216,245,0.08)' : 'rgba(255,255,255,0.025)',
+                                  boxShadow: on ? '0 0 20px rgba(0,216,245,0.20)' : 'none' }}>
+                                {e.k === 'rgb'
+                                  ? <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke={on ? 'var(--accent)' : 'var(--text-muted)'} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
+                                  : <span style={{ width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                                                   background: 'conic-gradient(#00d8f5, #ff3ea5, #ffd400, #00d8f5)',
+                                                   opacity: on ? 1 : 0.55 }} />}
+                                <span style={{ fontSize: 15, fontWeight: 700, color: on ? '#fff' : 'var(--text-secondary)' }}>{e.t}</span>
                               </button>
                             );
                           })}
                         </div>
-                      </div>
+
+                        {/* Título de la lista + cuál está puesto hoy */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 13, flexWrap: 'wrap' }}>
+                          <span style={{ width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
+                                         background: grp.k === 'cmyk' ? 'conic-gradient(#00d8f5, #ff3ea5, #ffd400, #00d8f5)' : 'conic-gradient(#ff4d4d, #3ee06f, #4d7dff, #ff4d4d)' }} />
+                          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Perfiles {grp.t}</h3>
+                          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
+                            En uso:
+                            {dp?.colores?.length > 0 && <span style={{ display: 'flex', width: 52, height: 12, borderRadius: 4, overflow: 'hidden', boxShadow: '0 0 0 1px rgba(255,255,255,0.12)' }}>{dp.colores.map((c, i) => <span key={i} style={{ flex: 1, background: c }} />)}</span>}
+                            <b style={{ color: '#fff' }}>{dp?.nombre || actual || '—'}</b>
+                          </span>
+                        </div>
+
+                        {/* GRILLA: tarjeta = nombre centrado + tick si es la elegida. La franja de
+                            COLORES REALES del perfil quedó como una línea fina abajo (información
+                            que ya estaba; sacarla sería perder referencia de color). */}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))', gap: 12,
+                                      maxHeight: '58vh', overflowY: 'auto', paddingRight: 4 }}>
+                          {lista.map((p, i) => {
+                            const sel = p.archivo === actual;
+                            const cols = (p.colores && p.colores.length) ? p.colores : [];
+                            return (
+                              <button key={p.archivo} type="button" className="perfil-card" data-tour={i === 0 ? 'perfil-card' : undefined}
+                                onClick={() => guardarPerfilDefault(grp.k, p.archivo)} title={p.archivo}
+                                style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  minHeight: 56, padding: '12px 44px 12px 16px', borderRadius: 12, overflow: 'hidden',
+                                  cursor: 'pointer', transition: 'all .18s',
+                                  border: sel ? '1.5px solid var(--accent)' : '1px solid var(--border-light)',
+                                  background: sel ? 'rgba(0,216,245,0.06)' : 'rgba(255,255,255,0.028)',
+                                  boxShadow: sel ? '0 0 20px rgba(0,216,245,0.22)' : 'none' }}>
+                                <span style={{ fontSize: 13.5, fontWeight: sel ? 700 : 600, color: sel ? '#fff' : 'var(--text-secondary)',
+                                               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
+                                {sel && (
+                                  <span style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                                                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                                 width: 21, height: 21, borderRadius: '50%', background: 'var(--accent)',
+                                                 boxShadow: '0 0 10px rgba(0,216,245,0.55)' }}>
+                                    <Icon name="check" style={{ width: 12, height: 12, color: '#001016', strokeWidth: 3.5 }} />
+                                  </span>
+                                )}
+                                {cols.length > 0 && (
+                                  <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, display: 'flex', opacity: sel ? 1 : 0.5 }}>
+                                    {cols.map((c, ci) => <span key={ci} style={{ flex: 1, background: c }} />)}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                          {!lista.length && (
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 10 }}>No hay perfiles {grp.t} instalados.</div>
+                          )}
+                        </div>
+                      </>
                     );
-                  })
+                  })()
                 )}
               </div>
             )}
@@ -16133,6 +18639,149 @@ export default function App() {
             onClick={() => { const f = confirmar?.onOk; setConfirmar(null); if (f) f(); }}>
             {confirmar?.ok || 'Confirmar'}
           </button>
+        </div>
+      </Modal>
+
+      {/* TIPOGRAFÍA NO ENCONTRADA, AL AVANZAR (2026-08-21). Mismo mensaje que el cartel del paso
+          Arte, pero acá con la decisión: resolverla o «Seguir de todos modos». No traba: la tizada
+          sale igual, sublimada con la predeterminada. */}
+      <Modal open={fuenteAvanzar} onClose={() => setFuenteAvanzar(false)} centrado maxWidth={520}
+        titulo="Tipografía no encontrada">
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start',
+                      padding: '12px 14px', borderRadius: 11, background: 'rgba(245,158,11,0.10)',
+                      border: '1px solid rgba(245,158,11,0.45)' }}>
+          <MarcaPaso aviso />
+          <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+            <b style={{ color: '#f5b942' }}>Falta una tipografía que usa el diseño.</b> Se va a sublimar con{' '}
+            <b>«Anton Regular»</b> (la predeterminada). Cargá la que usó el diseño o elegí una del catálogo.
+            {/* SIEMPRE con nombre y apellido: qué fuente, en qué MOLDE y en qué DISEÑO */}
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {fuentesFaltantesItems.map(x => (
+                <div key={x.did + '|' + x.moldeId + '|' + (x.clave || '')} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5 }}>
+                    · {x.fuentes.map(f => `«${f}»`).join(' · ')} en <b style={{ color: 'var(--text-primary)' }}>{_nomMolde(x.moldeId)}</b>
+                    {x.clave && <> · variable <b style={{ color: 'var(--text-primary)' }}>{x.label}</b></>}
+                    {' '}· diseño <b style={{ color: 'var(--text-primary)' }}>{_nomDiseno(x.did)}</b>
+                  </span>
+                  <button className="btn ghost" style={{ padding: '3px 10px', fontSize: 11.5, borderRadius: 8 }}
+                    onClick={() => { setFuenteAvanzar(false); irAlArte(x.did, x);
+                                     setFuenteArchivo(null); setFuenteFaltanteSel(x.fuentes[0] || ''); setFuenteModal(true); }}>
+                    Ir a esta variable
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20, flexWrap: 'wrap' }}>
+          <button className="btn ghost" onClick={() => setFuenteAvanzar(false)}>Cancelar</button>
+          <button className="btn ghost" style={{ fontWeight: 700 }}
+            onClick={() => { setFuenteAvanzar(false); irAPlanillaDesdeArte({ forzarFuente: true }); }}>
+            Seguir de todos modos
+          </button>
+          <button className="btn primary"
+            onClick={() => { const x = fuentesFaltantesItems[0]; setFuenteAvanzar(false);
+                             if (x) irAlArte(x.did, x);
+                             setFuenteArchivo(null); setFuenteFaltanteSel(x ? x.fuentes[0] : ''); setFuenteModal(true); }}>
+            Cargar la tipografía
+          </button>
+        </div>
+      </Modal>
+
+      {/* CARGAR POR LOTE: cuántas prendas de cada talle → una fila por prenda. */}
+      <Modal open={loteOpen} onClose={() => setLoteOpen(false)} maxWidth={760}
+        titulo="Cargar por lote"
+        subtitulo="Poné cuántas prendas lleva cada talle. Se crea UNA FILA POR PRENDA, lista para el nombre y el número.">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {!loteTalles.length ? (
+            <div style={{ fontSize: 12.5, color: 'var(--warning, #f5b942)' }}>
+              Este molde todavía no tiene talles detectados.
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxHeight: '52vh', overflowY: 'auto', paddingRight: 6 }}>
+                {(() => {
+                  // agrupado conservando el orden del molde, tanto de los grupos como de los talles
+                  const grupos = [];
+                  loteTalles.forEach(t => {
+                    const g = _grupoTalle(t);
+                    let e = grupos.find(x => x.g === g);
+                    if (!e) { e = { g, talles: [] }; grupos.push(e); }
+                    e.talles.push(t);
+                  });
+                  return grupos.map(({ g, talles }) => {
+                    const sub = talles.reduce((n, t) => n + (parseInt(loteCant[t], 10) || 0), 0);
+                    return (
+                      <div key={g}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase',
+                                         color: sub ? 'var(--accent)' : 'var(--text-muted)' }}>{g}</span>
+                          <span style={{ flex: 1, height: 1, background: 'var(--border-light)' }} />
+                          {sub > 0 && (
+                            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--accent)', whiteSpace: 'nowrap' }}>{sub} prenda{sub === 1 ? '' : 's'}</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(178px, 1fr))', gap: 8 }}>
+                          {talles.map(t => {
+                            const n = parseInt(loteCant[t], 10) || 0;
+                            const set = (v) => setLoteCant(p => ({ ...p, [t]: Math.max(0, v) }));
+                            return (
+                              <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 8px 7px 11px', borderRadius: 10,
+                                border: '1px solid ' + (n ? 'var(--accent)' : 'var(--border-light)'),
+                                background: n ? 'rgba(0,216,245,0.08)' : 'rgba(255,255,255,0.02)' }}>
+                                {/* el nombre del talle va COMPLETO: sin recortes ni «…» */}
+                                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
+                                               color: n ? '#fff' : 'var(--text-secondary)' }}>{t}</span>
+                                <button type="button" onClick={() => set(n - 1)} disabled={!n}
+                                  title={`Sacar una de ${t}`}
+                                  style={{ width: 26, height: 26, borderRadius: 7, cursor: n ? 'pointer' : 'not-allowed', flexShrink: 0,
+                                    border: '1px solid var(--border-light)', background: 'transparent',
+                                    color: n ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: 15, lineHeight: 1, opacity: n ? 1 : 0.45 }}>−</button>
+                                <input value={loteCant[t] ?? ''} onChange={e => {
+                                    const v = e.target.value.replace(/[^0-9]/g, '');
+                                    setLoteCant(p => ({ ...p, [t]: v }));
+                                  }}
+                                  placeholder="0" inputMode="numeric" title={`Cuántas prendas de ${t}`}
+                                  style={{ width: 44, height: 26, textAlign: 'center', padding: '0 2px', borderRadius: 7, fontFamily: 'monospace',
+                                    background: 'rgba(0,0,0,0.32)', border: '1px solid var(--border-light)',
+                                    color: n ? 'var(--accent)' : '#fff', fontSize: 13, fontWeight: 800, outline: 'none' }} />
+                                <button type="button" onClick={() => set(n + 1)} title={`Agregar una de ${t}`}
+                                  style={{ width: 26, height: 26, borderRadius: 7, cursor: 'pointer', flexShrink: 0,
+                                    border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--accent)', fontSize: 15, lineHeight: 1 }}>+</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <button className="btn ghost" style={{ padding: '6px 11px', fontSize: 11.5 }}
+                  onClick={() => setLoteCant({})}>Poner todo en 0</button>
+                <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--text-secondary)', textAlign: 'right' }}>
+                  {loteTotal ? (() => {
+                    const libres = Math.min(filasVaciasCount(), loteTotal);
+                    const alFinal = loteTotal - libres;
+                    return (<>
+                      <b style={{ color: 'var(--accent)' }}>{loteTotal} prenda{loteTotal === 1 ? '' : 's'}</b>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {libres > 0 && <> · {libres} en {libres === 1 ? 'la fila vacía' : `las ${libres} filas vacías`}</>}
+                        {alFinal > 0 && <> · {alFinal} al final</>}
+                      </span>
+                    </>);
+                  })() : <span style={{ color: 'var(--text-muted)' }}>Todavía no pusiste ninguna prenda</span>}
+                </span>
+              </div>
+            </>
+          )}
+          <div style={{ display: 'flex', gap: 9, justifyContent: 'flex-end' }}>
+            <button className="btn ghost" onClick={() => setLoteOpen(false)}>Cancelar</button>
+            <button className="btn primary" onClick={aplicarLote} disabled={!loteTotal}>
+              {loteTotal ? `Crear ${loteTotal} fila(s)` : 'Crear filas'}
+            </button>
+          </div>
         </div>
       </Modal>
 
@@ -16485,7 +19134,60 @@ export default function App() {
                  /* Para llegar a un «ajuste» primero hay que ABRIR una moldería: la ayuda tiene que
                     saber si ya estamos adentro de una o si seguimos en la grilla. */
                  molde: (molderiaAbierta || modoMiMolde) ? 'abierto' : 'grilla' }}
-        estado={ayudaEstado} />
+        estado={ayudaEstado}
+        tutoriales={tutoriales} grabando={grabando}
+        /* Grabar/editar/borrar es del admin. Sin sistema de usuarios (taller sin base) puede
+           cualquiera, que es como funcionó siempre. El servidor lo valida igual. */
+        puedeGrabar={!authOn || (yo?.permisos || []).includes('ayuda.grabar')}
+        onGrabar={empezarAGrabar} onParar={pararDeGrabar} onBorrar={borrarTutorial}
+        onGuardarEdicion={guardarTutorialEditado} />
+
+      {/* GRABANDO: un aviso fijo, para que nadie se olvide de que está grabando. Se puede parar
+          desde acá sin tener que volver a abrir el menú de ayuda. */}
+      {grabando && (
+        /* `data-no-grabar`: este cartel es del GRABADOR. Sin esto, «Parar y guardar» quedaba
+           grabado como un paso del tutorial (reporte del usuario 2026-08-31). */
+        <div data-no-grabar="1"
+          style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 18,
+          zIndex: 100000, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+          borderRadius: 12, background: '#14181d', border: '1px solid var(--error, #e0503a)',
+          boxShadow: '0 10px 30px -12px rgba(0,0,0,0.8)' }}>
+          <span className="grabando-punto" style={{ width: 11, height: 11, borderRadius: '50%',
+            background: 'var(--error, #e0503a)', flexShrink: 0 }} />
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>Grabando el tutorial</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {nPasosGrab} paso{nPasosGrab === 1 ? '' : 's'}
+            {sinGrabar > 0 && (
+              <span title={'Hubo ' + sinGrabar + ' clic(s) sobre algo sin texto ni nombre: no se puede volver a encontrar, así que no se grabó.'}
+                style={{ color: 'var(--warning, #e0a020)', marginLeft: 6 }}>
+                · {sinGrabar} sin grabar
+              </span>
+            )}
+          </span>
+          <button className="btn" style={{ padding: '5px 12px', fontSize: 12.5 }}
+            onClick={pararDeGrabar}>Parar y guardar</button>
+        </div>
+      )}
+
+      {/* EL NOMBRE. Lo pone el usuario; las explicaciones de cada paso las escribe el sistema. */}
+      {guardandoTut && (
+        <Modal open titulo="Guardar el tutorial" maxWidth={520}
+          onClose={() => setGuardandoTut(null)}>
+          <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: '0 0 14px', lineHeight: 1.55 }}>
+            Se grabaron <b>{guardandoTut.pasos.length} paso(s)</b>. Ponele un nombre con el que lo
+            vayas a reconocer; las explicaciones de cada paso las escribe el sistema.
+          </p>
+          <input autoFocus value={nombreTut} onChange={(e) => setNombreTut(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') guardarTutorial(); }}
+            placeholder="Ej.: Cargar un pedido de camisetas"
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 9, fontSize: 14,
+              border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff' }} />
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+            <button className="btn ghost" onClick={() => setGuardandoTut(null)}>Descartar</button>
+            <button className="btn primary" onClick={guardarTutorial}>Guardar tutorial</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

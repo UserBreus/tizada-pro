@@ -4,10 +4,15 @@ CONTRATO DE «AGREGAR UNA PIEZA AL MOLDE» — `py verificar_agregar_pieza.py`
 Es el primer camino del sistema que ESCRIBE geometría en el molde, así que lo que se prueba no es
 que "ande": es que **no rompa la identidad de las piezas que ya estaban**.
 
-🔴 El peligro concreto: el `pieza_idx` NO es un id, es la POSICIÓN de la pieza en el orden por
-bbox dentro de su capa. Insertar una pieza en el medio **corre a todas las que siguen** — medido
-sobre el molde real: 69 de 138. Sin remapear, el registro queda apuntando a la pieza vecina y el
-nombrado se reasigna en masa, sin ningún error a la vista.
+🔴 El peligro concreto: el `pieza_idx` NO es un id, es la POSICIÓN de la pieza dentro de su capa.
+HOY las piezas van en **orden de dibujo** y la nueva se escribe **al final**, así que no se renumera
+nada — esta prueba lo MIDE (imprime cuántas cambiarían de índice: 0 de 2760). Con el orden viejo
+(por bbox) insertar en el medio corría a 69 de 138 y el nombrado se reasignaba en masa sin ningún
+error a la vista; por eso el remapeo sigue acá y se sigue verificando.
+
+Desde 2026-08-21 valen además las reglas nuevas: **duplicar copia la HOMÓLOGA de cada talle** (no
+la del mismo número) y **lo preparado se guarda junto, en UNA sola versión** — las dos se prueban
+acá. Ya no hay «deshacer»: lo guardado no se borra (se borra el molde entero).
 
 ⚠️ No toca nada del usuario: trabaja sobre una COPIA del molde en un temporal, y el módulo `db` se
 reemplaza por un doble que explota (ver [[test-no-toca-mssql]]).
@@ -205,21 +210,69 @@ else:
     print(f"  · sin el remapeo quedarian {sin_remapear} piezas apuntando a otra")
 
 
-    # ══ 1.b DESHACER: el molde y el registro vuelven EXACTAMENTE a como estaban ═══════════════
-    # Agregar tiene que ser reversible. El archivo se revierte moviendo el puntero de versión (el
-    # original nunca se tocó); el registro se restaura del respaldo, y si no lo hay se reconstruye
-    # el mapa INVERSO comparando las dos versiones. Acá se prueba esa reconstrucción, que es la
-    # parte que puede quedar mal.
-    inv = {}
-    for t in TALLES:
-        _fa = set(firmas_antes[t])
-        _k = next((j for j, c in enumerate(despues[t])
-                   if tuple(round(float(v), 1) for v in c["bbox_raw"]) not in _fa), len(antes[t]))
-        inv[t] = {j: (j if j < _k else j - 1) for j in range(len(despues[t])) if j != _k}
-    reg_vuelta, _cv, _avv = PM.remapear_registro(reg2, inv)
-    ok(reg_vuelta == reg, "deshacer NO devuelve el registro a como estaba")
-    ok(not _avv, f"deshacer dejo piezas sin reubicar: {_avv[:3]}")
-    print("  · deshacer: el registro vuelve identico al de antes")
+    # ══ 1.b DUPLICAR COPIA LA HOMÓLOGA, NO EL MISMO NÚMERO ═══════════════════════════════════
+    # 🔴 Regla del usuario (2026-08-21): «duplicar debe tomar los vectores, respetar los talles».
+    # El endpoint resolvía la pieza de cada talle por el MISMO índice del talle guía, y el índice
+    # no se corresponde entre talles (medido en un molde real: «Frente 2» es la #2 en M y la #1 en
+    # el talle 0) → en los talles desalineados copiaba OTRA figura, y eso sale impreso.
+    # Acá se prueba la resolución que usa el endpoint: la homóloga sale del REGISTRO.
+    _guia_t = TALLES[0]                     # en el registro sintetico la guia es el 1er talle
+    _t_otro = next((t for t in TALLES if t != _guia_t), None)
+    if _t_otro:
+        _nom_pz = next(iter(reg))
+        _i_guia = reg[_nom_pz][_guia_t]["pieza_idx"]
+        _i_otro = reg[_nom_pz][_t_otro]["pieza_idx"]
+        # se simula el desalineado: la misma pieza con OTRO índice en el otro talle
+        _reg_desal = {k: dict(v) for k, v in reg.items()}
+        _otro_idx = (_i_otro + 1) % len(antes[_t_otro])
+        _reg_desal[_nom_pz] = dict(_reg_desal[_nom_pz])
+        _reg_desal[_nom_pz][_t_otro] = {**_reg_desal[_nom_pz][_t_otro], "pieza_idx": _otro_idx}
+
+        def _homologas(reg_, i, guia, talles):
+            """La misma resolución que hace `pieza_agregar` (servidor.py)."""
+            nom = next((n for n, por_t in (reg_ or {}).items()
+                        if ((por_t or {}).get(guia) or {}).get("pieza_idx") == i), None)
+            if not nom:
+                return {t: i for t in talles}, None
+            out = {}
+            for t in talles:
+                inf = ((reg_.get(nom) or {}).get(t) or {})
+                out[t] = int(inf["pieza_idx"]) if inf.get("pieza_idx") is not None else i
+            return out, nom
+
+        _hom, _nom_res = _homologas(_reg_desal, _i_guia, _guia_t, TALLES)
+        ok(_nom_res == _nom_pz, f"no se identifico la pieza a duplicar por el registro ({_nom_res})")
+        ok(_hom.get(_t_otro) == _otro_idx,
+           f"duplicar tomo el indice {_hom.get(_t_otro)} en {_t_otro} y la homologa es {_otro_idx}")
+        # y la geometría que se copiaría es la de ESA pieza, no la del mismo número
+        _g_hom = antes[_t_otro][_hom[_t_otro]]["segmentos"]
+        _g_num = antes[_t_otro][_i_guia]["segmentos"] if _i_guia < len(antes[_t_otro]) else None
+        ok(_g_hom is not _g_num or _hom[_t_otro] == _i_guia,
+           "la geometria copiada no es la de la pieza homologa")
+        # sin nombre no hay correspondencia: cae al mismo indice, y eso se avisa (lo hace el server)
+        _hom2, _nom2 = _homologas({}, _i_guia, _guia_t, TALLES)
+        ok(_nom2 is None and _hom2[_t_otro] == _i_guia,
+           "sin nombre, duplicar tiene que caer al mismo indice (y avisarlo)")
+        print(f"  · duplicar: toma la HOMOLOGA de cada talle ({_guia_t}#{_i_guia} -> {_t_otro}#{_otro_idx})")
+
+    # ══ 1.b-bis VARIAS PIEZAS PREPARADAS = UNA SOLA VERSION ═══════════════════════════════════
+    # Regla del usuario: nada se escribe hasta «Guardar», y lo preparado se guarda junto. Una
+    # version por pieza era ademas una copia entera del molde en disco por cada una.
+    _dir2 = os.path.join(_TMP, "multi")
+    os.makedirs(_dir2, exist_ok=True)
+    COPIA2 = os.path.join(_dir2, "plantilla.ai")
+    shutil.copy(_ORIG, COPIA2)
+    _t0 = TALLES[0]
+    _n0 = len(PM.detectar_por_talle(COPIA2, MESA, [_t0])[_t0])
+    _cs = PM.detectar_por_talle(COPIA2, MESA, TALLES)
+    _cols = {t: [{"segmentos": _cs[t][0]["segmentos"], "dx": 300.0 * (k + 1), "dy": 0.0}
+                 for k in range(3)] for t in TALLES}
+    PM.agregar_pieza(COPIA2, _cols, mesa=MESA)
+    _vig2 = PM.OA.ruta_vigente(COPIA2)
+    _n1 = len(PM.detectar_por_talle(_vig2, MESA, [_t0])[_t0])
+    ok(_n1 == _n0 + 3, f"guardar 3 piezas juntas dejo {_n1 - _n0} en {_t0} (esperado 3)")
+    ok(PM.OA._ver_actual(COPIA2) == 1, f"3 piezas dejaron {PM.OA._ver_actual(COPIA2)} versiones (esperado 1)")
+    print(f"  · 3 piezas preparadas -> UNA sola version, {_n0} -> {_n1} contornos")
 
     # ══ 1.c DOS PIEZAS SEGUIDAS: la cadena de versiones tiene que quedar sana ══════════════════
     # 🔴 `_ruta_entrada` devuelve la versión VIGENTE. Versionando ESA, la 2ª pieza generaba
@@ -279,4 +332,74 @@ if FALLOS:
     for f in FALLOS:
         print("    -", f)
     sys.exit(1)
+
+# ══ 2. EL ENDPOINT REAL (lo que llama la pantalla al tocar «Guardar») ════════════════════════
+# Hasta acá se probó el módulo. Esto ejercita `POST /api/plantilla/pieza_agregar` con el cuerpo
+# NUEVO —una lista de piezas preparadas— sobre un pid temporal montado en el TIZADA_DATOS de la
+# prueba. Nada del usuario: el molde es una copia y el catálogo vive en memoria.
+import servidor as S
+
+_PID = "ZZ_test_pieza"
+_ent = os.path.join(os.environ["TIZADA_ENTRADA"], _PID)
+_dat = os.path.join(_TMP, "productos", _PID)
+os.makedirs(_ent, exist_ok=True)
+os.makedirs(_dat, exist_ok=True)
+shutil.copy(_ORIG, os.path.join(_ent, "plantilla.ai"))
+
+_prod = {"id": _PID, "nombre": "TEST PIEZA", "variante_guia": None}
+S._cargar_catalogo = lambda: {"productos": [_prod]}
+S._cargar_catalogo_para_editar = lambda: {"productos": [_prod]}
+S._guardar_catalogo = lambda c: None
+S._guard_molde = lambda pid, perm: None            # sin sesión en la prueba
+S._prod_de = lambda pid=None: _prod
+S._regenerar_piezas_index = lambda pid, **kw: None  # necesita la base; no es lo que se prueba acá
+
+_doc = MP._abrir(os.path.join(_ent, "plantilla.ai"))
+_TALLES_E = MP._talles_de_plantilla(_doc)
+_doc.close()
+_antes_e = PM.detectar_por_talle(os.path.join(_ent, "plantilla.ai"), 1, _TALLES_E)
+_t_e = _TALLES_E[0]
+_n_antes_e = len(_antes_e[_t_e])
+
+# registro con UNA pieza nombrada, DESALINEADA a propósito entre talles: si el endpoint duplicara
+# por número copiaría otra figura en el segundo talle.
+_t2_e = _TALLES_E[1]
+_idx_g, _idx_2 = 0, min(2, len(_antes_e[_t2_e]) - 1)
+_reg_e = {"Frente": {_t_e: {"mesa": 1, "pieza_idx": _idx_g}, _t2_e: {"mesa": 1, "pieza_idx": _idx_2}}}
+json.dump(_reg_e, open(os.path.join(_dat, "registro_producto.json"), "w", encoding="utf-8"))
+_REG_MEM[_PID] = _reg_e            # el server lee el registro de la "base" simulada
+
+with S.app.test_request_context(method="POST", json={"pid": _PID, "piezas": [
+        {"origen": "duplicar", "pieza_idx": _idx_g, "dx": 400, "dy": 0},
+        {"origen": "duplicar", "pieza_idx": _idx_g, "dx": 600, "dy": 0}]}):
+    _resp = S.plantilla_pieza_agregar()
+_body = _resp[0].get_json() if isinstance(_resp, tuple) else _resp.get_json()
+_code = _resp[1] if isinstance(_resp, tuple) else 200
+ok(_code == 200, f"el endpoint respondio {_code}: {_body.get('error')}")
+ok(_body.get("agregadas") == 2, f"agregadas={_body.get('agregadas')} (esperado 2)")
+
+_vig_e = PM.OA.ruta_vigente(os.path.join(_ent, "plantilla.ai"))
+ok(PM.OA._ver_actual(os.path.join(_ent, "plantilla.ai")) == 1,
+   "guardar 2 piezas juntas tiene que dejar UNA sola version")
+_desp_e = PM.detectar_por_talle(_vig_e, 1, _TALLES_E)
+ok(len(_desp_e[_t_e]) == _n_antes_e + 2,
+   f"talle {_t_e}: {len(_desp_e[_t_e])} contornos (esperado {_n_antes_e + 2})")
+# 🔴 la que importa: en el 2º talle se copio la HOMOLOGA (#{_idx_2}), no la del mismo numero
+_fh = PM.firma_contornos([_antes_e[_t2_e][_idx_2]])[0]
+_fn = PM.firma_contornos([_antes_e[_t2_e][_idx_g]])[0]
+_nuevas2 = [c for c in _desp_e[_t2_e]
+            if tuple(round(float(v), 1) for v in c["bbox_raw"]) not in set(PM.firma_contornos(_antes_e[_t2_e]))]
+ok(len(_nuevas2) == 2, f"en {_t2_e} aparecieron {len(_nuevas2)} piezas nuevas (esperado 2)")
+_w_hom = round(_antes_e[_t2_e][_idx_2]["w"], 1)
+_w_num = round(_antes_e[_t2_e][_idx_g]["w"], 1)
+if _nuevas2:
+    _w_new = round(_nuevas2[0]["w"], 1)
+    ok(_w_new == _w_hom, f"se copio la pieza equivocada en {_t2_e}: ancho {_w_new} (homologa {_w_hom}, misma-posicion {_w_num})")
+    print(f"  · endpoint: 2 piezas en un POST -> 1 version; en {_t2_e} copio la HOMOLOGA (#{_idx_2}, ancho {_w_hom}) y no la #{_idx_g} (ancho {_w_num})")
+else:
+    print(f"  · endpoint: respuesta {_code} {_body}")
+ok(not hasattr(S, "plantilla_pieza_deshacer"), "quedo el endpoint de deshacer (lo guardado no se borra)")
+print("  · «deshacer» ya no existe: lo guardado no se puede sacar")
+
+
 print("OK agregar pieza: entra en todos los talles, no inventa talles y el registro se remapea entero")

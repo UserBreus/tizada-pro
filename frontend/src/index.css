@@ -405,6 +405,25 @@ input:focus, select:focus {
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
+/* DESPLEGABLES: la lista que se abre la dibuja el SISTEMA, no la app. Sin `color-scheme` Windows
+   la pinta BLANCA y las opciones heredan el texto claro del tema → texto blanco sobre blanco (la
+   lista se veía vacía). `color-scheme` arregla el popup, los scrollbars y todo control nativo;
+   los colores de `option` quedan explícitos por si el navegador no lo respeta. */
+:root {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+}
+
+select optgroup {
+  background-color: var(--bg-dark);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
 /* Sleek Tables */
 table {
   width: 100%;
@@ -1323,3 +1342,25 @@ td.num {
   100% { transform: scale(1.06); opacity: 0;   }
 }
 .tour-pulso { animation: tourPulso 1.5s ease-out infinite; }
+
+/* ── CASILLAS DE NÚMERO, SIN EL SPINNER DEL NAVEGADOR ───────────────────────────────────────
+   Un `input[type=number]` dibuja de fábrica las flechitas ▲▼ con SU PROPIO fondo claro: dentro de
+   una interfaz oscura se ve como un parche pegado (lo marcó el usuario 2026-08-26). Se ocultan en
+   todos lados —Chrome/Edge y Firefox— así la casilla queda con el fondo que le pone la app y el
+   número centrado. El valor se sigue escribiendo igual, y donde hace falta subir/bajar de a uno hay
+   botones propios (± del «Cargar por lote», menú del `NumeroConMenu`). */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* El puntito del cartel «Grabando el tutorial»: late despacio para que se note sin molestar. */
+@keyframes tizada-latido { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.grabando-punto { animation: tizada-latido 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .grabando-punto { animation: none; } }

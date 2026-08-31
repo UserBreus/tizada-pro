@@ -2,6 +2,7 @@
 USER · Motor de Sublimación — servidor web local.
 Correr:  python servidor.py   y abrir  http://localhost:8000
 """
+import copy
 import os, re, sys, json, time, threading, uuid, traceback
 from collections import OrderedDict
 from flask import Flask, request, jsonify, send_from_directory, send_file, session, has_request_context
@@ -109,6 +110,19 @@ try:
     from api_usuarios import bp as _bp_usuarios
     app.register_blueprint(_bp_usuarios)
     _USUARIOS_ON = True
+    # LOS PERMISOS NUEVOS LLEGAN SOLOS. `bootstrap()` corre en la INSTALACIÓN, así que un permiso
+    # agregado después (ej. `ayuda.grabar`, 2026-08-28) no existía en las bases ya instaladas y la
+    # función quedaba inaccesible para todos, administrador incluido. Esto es idempotente: agrega
+    # lo que falta, no borra nada y no pisa los permisos que el usuario haya configurado en SUS
+    # roles (sólo el rol de SISTEMA se pone al día — su pantalla no deja editarlo).
+    try:
+        import auth as _auth
+        _n_perm = _auth.sincronizar_permisos()
+        _auth.sincronizar_roles()
+        if _n_perm:
+            print(f"[usuarios] {_n_perm} permiso(s) nuevo(s) agregados al catálogo")
+    except Exception as _e2:
+        print(f"[usuarios] no se pudieron sincronizar los permisos: {_e2}")
 except Exception as _e:   # sin base, el resto del sistema tiene que seguir andando
     print(f"[usuarios] API deshabilitada (¿base MSSQL sin levantar?): {_e}")
 trabajos = {}
@@ -273,8 +287,12 @@ def salud():
         return True, DATOS
 
     def _base():
-        # La base es opcional mientras la migración a MSSQL esté en curso (PLAN_MSSQL.md):
-        # si no hay driver, no es una falla — el sistema sigue andando con los archivos.
+        # Sin DRIVER ODBC no es una falla: esa máquina no usa base (queda de la etapa en que el
+        # sistema corría sólo con archivos, PLAN_MSSQL.md).
+        # 🔴 Pero si el driver ESTÁ, la máquina está configurada para usar MSSQL y una base que no
+        # responde es CRÍTICA: los usuarios y el registro de piezas viven ahí, así que nadie puede
+        # ni siquiera iniciar sesión. Antes esto era `critico=False` y `/api/salud` contestaba
+        # `ok: true` con la base muerta — el peor error es el que sale «bien». (2026-08-26)
         if not db.driver_disponible():
             return True, "sin driver ODBC (el sistema corre con archivos)"
         return bool(db.valor("SELECT 1")), "responde"
@@ -310,7 +328,7 @@ def salud():
     _chk("ghostscript", _gs, critico=False)
     _chk("perfiles_icc", _icc)
     _chk("datos_escribible", _escribible)
-    _chk("base", _base, critico=False)
+    _chk("base", _base)   # CRÍTICO si hay driver: sin base no hay login (ver `_base`)
     _chk("esquema_base", _esquema, critico=False)
     _chk("frontend", lambda: (os.path.exists(os.path.join(AQUI, "frontend", "dist", "index.html")),
                               "frontend/dist"), critico=True)
@@ -2247,10 +2265,19 @@ def plantilla_pdf_guia():
                 capas = None
         except Exception:
             capas = None
+        # Capas «Editable …» que trae la guía. Sin el parámetro van las de fábrica (escudo y logo).
+        try:
+            _edr = request.args.get("editables")
+            editables = json.loads(_edr) if _edr else None
+            if editables is not None and not isinstance(editables, list):
+                editables = None
+        except Exception:
+            editables = None
         try:
             ai = MP.ai_guia_medidas(pl, reg, config=config, rango=rango, referencia=referencia,
                                     titulo=titulo, talle_guia=talle_guia,
-                                    piezas_incluir=piezas_incluir, capas=capas)
+                                    piezas_incluir=piezas_incluir, capas=capas,
+                                    editables=editables)
         except Exception as e:
             return jsonify({"error": f"no se pudo generar el .ai: {e}"}), 422
         _slug = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in (titulo or "guia")).strip("_") or "guia"
@@ -2336,7 +2363,11 @@ def producto_preview(pid):
     del Pedido. Liviano: solo los contornos, sin imagen rasterizada."""
     pl = _ruta_entrada("plantilla.ai", pid)
     if not os.path.exists(pl):
-        return jsonify({"error": "sin molde"}), 404
+        # Un molde SIN archivo todavía (el «Molde 1» que crea la instalación, o uno recién dado de
+        # alta) no es un error: es un paso pendiente. Se devuelve 200 con la miniatura vacía —igual
+        # que cuando falta nombrar las variantes, abajo— así la tarjeta se dibuja con su ícono y la
+        # consola no se llena de 404 rojos (reporte del usuario 2026-08-31 en el server publicado).
+        return jsonify({"img_w": 0, "img_h": 0, "piezas": [], "sin_molde": True})
     prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
     talle_ref = (prod or {}).get("variante_guia")
     try:
@@ -2621,8 +2652,9 @@ def _prod_de(pid):
 def plantilla_pieza_archivo():
     """Guarda el archivo de la pieza que se va a agregar (paso previo a `pieza_agregar`).
 
-    Va a un nombre fijo (`pieza_nueva.ai`) y NO toca el molde: recién `pieza_agregar` lo lee y
-    escribe la geometría. Así, si el alta falla, el molde queda exactamente como estaba."""
+    Va a un nombre ÚNICO (`pieza_nueva_<uid>.ai`, devuelto en `archivo`) y NO toca el molde: recién
+    `pieza_agregar` —o sea, el «Guardar»— lo lee y escribe la geometría. Así se pueden dejar varias
+    piezas preparadas sin pisarse, y si el guardado falla el molde queda exactamente como estaba."""
     pid = _pid_de_request() or _get_active_producto_id()
     _no = _guard_molde(pid, "molde.editar")
     if _no: return _no
@@ -2631,7 +2663,12 @@ def plantilla_pieza_archivo():
         return jsonify({"error": "no llegó ningún archivo"}), 400
     if not f.filename.lower().endswith((".ai", ".pdf")):
         return jsonify({"error": "la pieza tiene que ser .ai o .pdf"}), 400
-    destino = _ruta_entrada("pieza_nueva.ai", pid, original=True)
+    # NOMBRE ÚNICO por archivo subido: se pueden dejar VARIAS piezas preparadas antes de guardar
+    # (regla del usuario 2026-08-21) y con un nombre fijo la segunda le pisaba el archivo a la
+    # primera — se habrían guardado dos veces los mismos vectores.
+    import uuid as _uuid
+    _nom = f"pieza_nueva_{_uuid.uuid4().hex[:8]}.ai"
+    destino = _ruta_entrada(_nom, pid, original=True)
     f.save(destino)
     try:
         conts = PM.contornos_de_pdf(destino)
@@ -2652,7 +2689,7 @@ def plantilla_pieza_archivo():
     except Exception:
         pass
     c = conts[0]
-    return jsonify({"ok": True, "contornos": len(conts), "talles": _n_talles,
+    return jsonify({"ok": True, "archivo": _nom, "contornos": len(conts), "talles": _n_talles,
                     "completo": (not _n_talles) or len(conts) >= _n_talles,
                     "w_cm": round(c["w"] / MP.CM, 1), "h_cm": round(c["h"] / MP.CM, 1)})
 
@@ -2679,30 +2716,40 @@ def _invalidar_cache_molde(pid):
 
 @app.post("/api/plantilla/pieza_agregar")
 def plantilla_pieza_agregar():
-    """Agrega una PIEZA NUEVA al molde, en el lugar del lienzo que se indique.
+    """GUARDA en el molde las piezas nuevas que el usuario dejó preparadas.
 
-    Cuerpo: `{pid?, origen: "duplicar"|"archivo", pieza_idx?, dx, dy, nombre?}`
-      · `duplicar`: copia la pieza `pieza_idx` (índice en el talle GUÍA). En cada talle se copia la
-        geometría DE ESE TALLE → la pieza nueva acompaña la progresión de talles como cualquier otra.
-      · `archivo`: usa el contorno más grande del PDF/AI subido antes a `entrada/<pid>/pieza_nueva.ai`.
-        Va IGUAL en todos los talles (un archivo suelto no tiene progresión).
-    `dx`/`dy` = desplazamiento respecto de la pieza copiada, en MILÍMETROS.
+    Cuerpo: `{pid?, piezas: [{origen:"duplicar"|"archivo", pieza_idx?, archivo?, dx, dy}, …]}`.
+    Se acepta también el formato viejo de UNA pieza suelta (`{origen, pieza_idx?, dx, dy}`).
+    `dx`/`dy` = desplazamiento en MILÍMETROS (para `duplicar`, respecto de la pieza copiada).
 
-    ⚠️ Entra en TODOS los talles a propósito: una pieza que exista sólo en algunos deja el registro
-    con un hueco y **la generación explota** (`registro[pieza][talle]` no tiene guarda en el motor).
-    ⚠️ Y después del alta se REMAPEA el registro: el `pieza_idx` es la posición en el orden por bbox,
-    así que insertar una pieza corre a todas las que siguen (medido: 1478 de 2760 entradas)."""
+    🔴 REGLAS DEL USUARIO (2026-08-21) — las tres cambian cómo funciona esto:
+      · **Hasta que no se toca «Guardar» no se escribe NADA.** Las piezas preparadas viven en la
+        pantalla: se pueden mover, cambiar o sacar sin tocar el molde. Este endpoint **ES** el
+        guardar, y por eso escribe TODAS las preparadas en **una sola versión** del archivo.
+      · **Lo guardado no se borra.** No hay «deshacer»: para sacar una pieza se borra el molde
+        entero y se sube de nuevo. (El endpoint `pieza_deshacer` se eliminó.)
+      · **Duplicar copia los VECTORES respetando los talles**: en cada talle se copia la geometría
+        de la pieza **HOMÓLOGA** —la que el registro dice que es la misma— y NO la que tenga el
+        mismo número. El número no se corresponde entre talles (medido en un molde real: «Frente 2»
+        es la #2 en M y la #1 en el talle 0), así que copiar por número mete **otra figura** en los
+        talles desalineados y eso sale impreso. El **nombre y el número NO se heredan**: la pieza
+        entra como nueva y sin nombre.
+
+    ⚠️ Cada pieza entra en TODOS los talles. Si existiera sólo en algunos, el registro queda con un
+    hueco y la generación explota (`registro[pieza][talle]`, sin guarda en el motor)."""
     cuerpo = request.get_json(force=True) or {}
     pid = _pid_de_request() or _get_active_producto_id()
     _no = _guard_molde(pid, "molde.editar")
     if _no: return _no
+    pedidas = cuerpo.get("piezas")
+    if not isinstance(pedidas, list) or not pedidas:
+        pedidas = [cuerpo]                      # compat: una pieza suelta en el cuerpo
     # 🔴 DOS RUTAS DISTINTAS, Y NO SE PUEDEN CONFUNDIR:
     #   · `pl_base` = `plantilla.ai` SIEMPRE (el original). Es sobre ÉL que se versiona.
     #   · `pl`      = la versión VIGENTE. Es de ella que se lee la geometría de ahora.
     # `_ruta_entrada` devuelve la VIGENTE, así que pasarle esa a `agregar_pieza` versionaba lo ya
     # versionado: la 2ª pieza generaba `plantilla.v1.v1.ai` + `plantilla.v1.ver`, y como el puntero
-    # bueno (`plantilla.ver`) seguía en 1, **la 2ª pieza quedaba huérfana**: el sistema seguía
-    # sirviendo el archivo con una sola. Pasó en el molde del usuario.
+    # bueno (`plantilla.ver`) seguía en 1, **la 2ª pieza quedaba huérfana**. Pasó en un molde real.
     pl_base = _ruta_entrada("plantilla.ai", pid, original=True)
     pl = OA.ruta_vigente(pl_base)
     if not os.path.exists(pl):
@@ -2719,154 +2766,116 @@ def plantilla_pieza_agregar():
         if not talles:
             return jsonify({"error": "el molde no tiene talles"}), 422
         antes = PM.detectar_por_talle(pl, mesa, talles)
-        firmas_antes = {t: PM.firma_contornos(cs) for t, cs in antes.items()}
-        # ── UNIDADES ──────────────────────────────────────────────────────────────────────────
-        # `dx`/`dy` llegan **como se ven en el visor**: milímetros, con la Y para ABAJO (es lo que
-        # devuelve un clic sobre el svg, que está dibujado a px = mm). El lienzo del PDF va en
-        # unidades crudas con la Y para ARRIBA → se escala (1 mm = CM/10 unidades) y se da vuelta
-        # la Y. Verificado sobre el molde real: `CM` = 28.3465 unidades por cm y `user_unit` = 1.
-        dx = float(cuerpo.get("dx") or 0) * (MP.CM / 10.0)
-        dy = -float(cuerpo.get("dy") or 0) * (MP.CM / 10.0)
-        origen = str(cuerpo.get("origen") or "duplicar")
-        colocaciones = {}
-        if origen == "duplicar":
-            i = cuerpo.get("pieza_idx")
-            if i is None:
-                return jsonify({"error": "falta indicar qué pieza duplicar"}), 400
-            i = int(i)
-            # el idx viene del talle GUÍA; en cada talle se toma SU pieza del mismo índice
+
+        def _homologas(i):
+            """`({talle: idx}, nombre)` de la pieza `i` del talle GUÍA en cada talle.
+
+            Sale del REGISTRO, que es donde vive la correspondencia real entre talles (la misma que
+            arma el emparejado). Sin nombre todavía no hay correspondencia: se cae al mismo índice
+            —lo único que se puede hacer— y se avisa, nunca en silencio."""
+            nom = next((n for n, por_t in (reg or {}).items()
+                        if ((por_t or {}).get(guia) or {}).get("pieza_idx") == i), None)
+            if not nom:
+                return {t: i for t in talles}, None
+            out = {}
             for t in talles:
-                cs = antes.get(t) or []
-                if i < len(cs):
-                    colocaciones[t] = {"segmentos": cs[i]["segmentos"], "dx": dx, "dy": dy}
-            if guia not in colocaciones:
-                return jsonify({"error": "esa pieza no existe en el talle guía"}), 422
-        else:
-            _f = _ruta_entrada("pieza_nueva.ai", pid)
-            if not os.path.exists(_f):
-                return jsonify({"error": "primero subí el archivo de la pieza"}), 409
-            conts = PM.contornos_de_pdf(_f)
-            # 🔴 EL ARCHIVO TIENE QUE TRAER LA PIEZA EN TODOS LOS TALLES. Una pieza de moldería
-            # cambia de forma con el talle: meter la MISMA forma en los 20 sería una pieza que no
-            # escala, y saldría mal cortada en todos menos uno. Y si entrara sólo en algunos, el
-            # registro queda con un hueco y la generación explota. Por eso se rechaza.
-            if len(conts) < len(talles):
-                return jsonify({"error": f"el archivo trae {len(conts)} contorno/s y el molde tiene "
-                                         f"{len(talles)} {('talles' if len(talles) != 1 else 'talle')}. "
-                                         f"La pieza tiene que venir dibujada en todos los talles, una "
-                                         f"forma por talle (del más chico al más grande).",
-                                "contornos": len(conts), "talles": len(talles)}), 422
-            # De menor a mayor área ↔ los talles en el orden del molde (que va del más chico al más
-            # grande). Si sobran contornos se usan los N más grandes.
-            _orden = sorted(conts[:len(talles)], key=lambda c: c["w"] * c["h"])
-            _ref = (antes.get(guia) or [{}])[0].get("bbox_raw") if antes.get(guia) else None
-            _base0 = _orden[0]["bbox_raw"]
-            for _i, t in enumerate(talles):
-                _c = _orden[_i]
-                # cada talle conserva su posición RELATIVA dentro del archivo (si vienen anidados,
-                # la pila queda como el usuario la dibujó); el conjunto se lleva al lugar marcado.
-                _dx = dx - _base0[0] + (_ref[0] if _ref else 0)
-                _dy = dy - _base0[1] + (_ref[1] if _ref else 0)
-                colocaciones[t] = {"segmentos": _c["segmentos"], "dx": _dx, "dy": _dy}
-        # ── DÓNDE VA A CAER EN LA NUMERACIÓN (antes de escribir) ──────────────────────────────
-        # El orden de las piezas es por (x0, y0), así que la posición de la nueva se CALCULA: no
-        # hace falta volver a detectar los 20 talles después de escribir (era la mitad del tiempo).
-        _ks = {}
-        for t, col in colocaciones.items():
-            _bb = PM.bbox_desplazado(col["segmentos"], col["dx"], col["dy"], antes[t])
-            _ks[t] = PM.indice_de_insercion(antes[t], _bb)
+                inf = ((reg.get(nom) or {}).get(t) or {})
+                if inf.get("pieza_idx") is not None:
+                    out[t] = int(inf["pieza_idx"])
+                else:
+                    out[t] = i          # ese talle no tiene la pieza en el registro: último recurso
+            return out, nom
+
+        colocaciones = {t: [] for t in talles}
+        avisos_dup, agregadas = [], 0
+        for pz in pedidas:
+            dx = float(pz.get("dx") or 0) * (MP.CM / 10.0)
+            dy = -float(pz.get("dy") or 0) * (MP.CM / 10.0)   # el visor manda mm con la Y para ABAJO
+            origen = str(pz.get("origen") or "duplicar")
+            if origen == "duplicar":
+                i = pz.get("pieza_idx")
+                if i is None:
+                    return jsonify({"error": "falta indicar qué pieza duplicar"}), 400
+                i = int(i)
+                hom, nom = _homologas(i)
+                if nom is None:
+                    avisos_dup.append(f"la pieza #{i + 1} todavía no tiene nombre: se copió la misma "
+                                      f"posición en todos los {'talles' if len(talles) != 1 else 'talle'} "
+                                      f"(sin nombre no hay correspondencia entre talles)")
+                puestos_pz = 0
+                for t in talles:
+                    cs = antes.get(t) or []
+                    j = hom.get(t, i)
+                    if j < len(cs):
+                        colocaciones[t].append({"segmentos": cs[j]["segmentos"], "dx": dx, "dy": dy})
+                        puestos_pz += 1
+                if not puestos_pz:
+                    return jsonify({"error": "esa pieza no existe en el talle guía"}), 422
+            else:
+                _nombre_arch = str(pz.get("archivo") or "pieza_nueva.ai")
+                if "/" in _nombre_arch or "\\" in _nombre_arch or not _nombre_arch.endswith(".ai"):
+                    return jsonify({"error": "archivo de pieza inválido"}), 400
+                _f = _ruta_entrada(_nombre_arch, pid, original=True)
+                if not os.path.exists(_f):
+                    return jsonify({"error": "primero subí el archivo de la pieza"}), 409
+                conts = PM.contornos_de_pdf(_f)
+                # 🔴 EL ARCHIVO TIENE QUE TRAER LA PIEZA EN TODOS LOS TALLES. Una pieza de moldería
+                # cambia de forma con el talle: meter la MISMA forma en los 20 sería una pieza que
+                # no escala, y saldría mal cortada en todos menos uno.
+                if len(conts) < len(talles):
+                    return jsonify({"error": f"el archivo trae {len(conts)} contorno/s y el molde tiene "
+                                             f"{len(talles)} {('talles' if len(talles) != 1 else 'talle')}. "
+                                             f"La pieza tiene que venir dibujada en todos los talles, una "
+                                             f"forma por talle (del más chico al más grande).",
+                                    "contornos": len(conts), "talles": len(talles)}), 422
+                # De menor a mayor área ↔ los talles en el orden del molde (que va del más chico al
+                # más grande). Si sobran contornos se usan los N más grandes.
+                _orden = sorted(conts[:len(talles)], key=lambda c: c["w"] * c["h"])
+                _ref = (antes.get(guia) or [{}])[0].get("bbox_raw") if antes.get(guia) else None
+                _base0 = _orden[0]["bbox_raw"]
+                for _i, t in enumerate(talles):
+                    _c = _orden[_i]
+                    # cada talle conserva su posición RELATIVA dentro del archivo; el conjunto se
+                    # lleva al lugar marcado.
+                    _dx = dx - _base0[0] + (_ref[0] if _ref else 0)
+                    _dy = dy - _base0[1] + (_ref[1] if _ref else 0)
+                    colocaciones[t].append({"segmentos": _c["segmentos"], "dx": _dx, "dy": _dy})
+            agregadas += 1
+        colocaciones = {t: c for t, c in colocaciones.items() if c}
+        if not colocaciones:
+            return jsonify({"error": "no hay ninguna pieza para agregar"}), 400
+        # ── SE ESCRIBE (una sola versión para todas las preparadas) ────────────────────────────
         destino, puestos = PM.agregar_pieza(pl_base, colocaciones, mesa=mesa)   # ← la BASE, no la vigente
-        # ── REMAPEO: sin esto el registro apunta a la pieza vecina ─────────────────────────────
-        mapas = {t: PM.mapa_insercion(len(antes[t]), _ks.get(t, len(antes[t]))) for t in talles}
+        # El REMAPEO del registro sigue corriendo aunque hoy dé identidad: la pieza nueva se escribe
+        # al final de su capa y las piezas se leen en orden de dibujo, así que no se renumera nada
+        # (medido: 0 de 2760). Es la red por si el orden volviera a depender de la posición.
+        mapas = {t: PM.mapa_insercion(len(antes[t]), len(antes[t])) for t in talles}
         reg2, cambios, avisos = PM.remapear_registro(reg, mapas)
-        if reg:
-            # RESPALDO ANTES DE PISAR. El archivo del molde se versiona solo, pero el registro se
-            # sobreescribe: sin esta copia, agregar una pieza era un camino de ida (no se podía
-            # volver a los `pieza_idx` de antes). Es lo que hace posible «Deshacer».
-            _rp = _ruta_datos("registro_producto.json", pid)
-            try:
-                import shutil as _sh
-                _sh.copy(_rp, _rp + ".antes_pieza")
-            except Exception as e:
-                print(f"[pieza_agregar] no se pudo respaldar el registro: {e}")
-            json.dump(reg2, open(_rp, "w", encoding="utf-8"), ensure_ascii=False)
-            try:
-                _regenerar_piezas_index(pid, reg=reg2)
-            except Exception as e:
-                print(f"[pieza_agregar] no se pudo refrescar piezas.json: {e}")
-        _invalidar_cache_molde(pid)
-        _nueva_idx = {t: [j for j in range(len(despues[t])) if j not in set(mapas[t].values())]
-                      for t in talles}
-        return jsonify({"ok": True, "talles": len(puestos), "version": os.path.basename(destino),
-                        "piezas_remapeadas": cambios, "avisos": avisos[:10],
-                        "pieza_idx_nueva": (_nueva_idx.get(guia) or [None])[0],
-                        "sin_nombre": True})
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"error": f"no se pudo agregar la pieza: {e}"}), 422
-
-
-@app.post("/api/plantilla/pieza_deshacer")
-def plantilla_pieza_deshacer():
-    """Saca la ÚLTIMA pieza agregada: vuelve el molde a su versión anterior y el registro con él.
-
-    El archivo se revierte moviendo el puntero de versión (el original nunca se tocó). El registro
-    se restaura del respaldo `.antes_pieza`; si ese respaldo no está —altas hechas antes de que
-    existiera— se **reconstruye** el mapa inverso comparando las dos versiones del molde, que es
-    determinista: la pieza que sobra en la nueva dice en qué posición se insertó, y todo lo que va
-    de ahí en adelante vuelve un lugar atrás."""
-    pid = _pid_de_request() or _get_active_producto_id()
-    _no = _guard_molde(pid, "molde.editar")
-    if _no: return _no
-    pl = _ruta_entrada("plantilla.ai", pid, original=True)
-    n = OA._ver_actual(pl)
-    if n <= 0:
-        return jsonify({"error": "el molde no tiene ninguna pieza agregada para sacar"}), 409
-    try:
-        vig = OA.ruta_vigente(pl)
-        prev = OA._ver_path(pl, n - 1) if n > 1 else pl
-        if not os.path.exists(prev):
-            return jsonify({"error": "no está la versión anterior del molde"}), 409
-        _rp = _ruta_datos("registro_producto.json", pid)
-        _bak = _rp + ".antes_pieza"
-        if os.path.exists(_bak):
-            import shutil as _sh
-            _sh.copy(_bak, _rp)
-            os.remove(_bak)
-        else:
-            # Sin respaldo: se reconstruye el inverso comparando las dos versiones.
-            d = MP._abrir(prev)
-            try:
-                talles = MP._talles_de_plantilla(d)
-                mesa = MP.detectar_piezas(prev, talle_ref=(_prod_de(pid) or {}).get("variante_guia") or None)["mesa"]
-            finally:
-                d.close()
-            a = PM.detectar_por_talle(prev, mesa, talles)
-            b = PM.detectar_por_talle(vig, mesa, talles)
-            inv = {}
-            for t in talles:
-                fa = set(PM.firma_contornos(a[t]))
-                k = next((i for i, c in enumerate(b[t])
-                          if tuple(round(float(v), 1) for v in c["bbox_raw"]) not in fa), len(a[t]))
-                # inverso de `mapa_insercion`: lo que estaba después de k vuelve un lugar atrás
-                inv[t] = {j: (j if j < k else j - 1) for j in range(len(b[t])) if j != k}
-            reg = _cargar("registro_producto.json", pid) or {}
-            reg2, _c, _av = PM.remapear_registro(reg, inv)
-            json.dump(reg2, open(_rp, "w", encoding="utf-8"), ensure_ascii=False)
-        OA.fijar_version(pl, n - 1)
-        try:
-            os.remove(vig)
-        except OSError:
-            pass
+        if reg and cambios:
+            json.dump(reg2, open(_ruta_datos("registro_producto.json", pid), "w", encoding="utf-8"),
+                      ensure_ascii=False)
         try:
             _regenerar_piezas_index(pid)
         except Exception as e:
-            print(f"[pieza_deshacer] no se pudo refrescar piezas.json: {e}")
+            print(f"[pieza_agregar] no se pudo refrescar piezas.json: {e}")
+        # El resumen guarda el CONTEO de piezas y lo mira la pantalla de estado: sin esto queda
+        # diciendo el número viejo hasta que se rehaga el alta.
+        try:
+            _res = _cargar("resumen_plantilla.json", pid) or {}
+            if _res.get("piezas") is not None:
+                _res["piezas"] = int(_res["piezas"]) + agregadas
+                json.dump(_res, open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"),
+                          ensure_ascii=False)
+        except Exception as e:
+            print(f"[pieza_agregar] no se pudo actualizar el resumen: {e}")
         _invalidar_cache_molde(pid)
-        return jsonify({"ok": True, "version": n - 1})
+        return jsonify({"ok": True, "agregadas": agregadas, "talles": len(puestos),
+                        "version": os.path.basename(destino),
+                        "piezas_remapeadas": cambios, "avisos": (avisos_dup + avisos)[:10],
+                        "sin_nombre": True})
     except Exception as e:
         traceback.print_exc()
-        return jsonify({"error": f"no se pudo deshacer: {e}"}), 422
+        return jsonify({"error": f"no se pudo guardar la pieza: {e}"}), 422
 
 
 def _migrar_nombres_pieza(pid, ren):
@@ -3441,7 +3450,7 @@ def _subir_arte_analizar(destino, plantilla, f, sub):
                 if _vcl and _pzv:
                     _pv_ini[_vcl] = {p: mapeo[p] for p in _pzv if p in mapeo}
             if _alcance <= set(mapeo.keys()):            # quedó completo (en su alcance) → se aplica solo
-                val = MP.validar_arte_separado(destino, reg, _fuentes_para(None), mapeo, _orden_var(reg), piezas_scope=_alcance)
+                val = MP.validar_arte_separado(destino, reg, _fuentes_para(None, _reempl_de_request()), mapeo, _orden_var(reg), piezas_scope=_alcance)
                 val["archivo"] = f.filename
                 json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
                 json.dump(val.get("personalizacion", {}), open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
@@ -3461,7 +3470,7 @@ def _subir_arte_analizar(destino, plantilla, f, sub):
             json.dump({"mapeo": mapeo, "por_variable": _pv_ini}, open(_ruta_datos("mapeo_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
             det.update({"auto": False, "mapeo": mapeo, "por_nombre": sorted(auto.keys()), "faltan": faltan})
             return jsonify(det)
-        val = MP.validar_arte(destino, plantilla, _fuentes_para(None))
+        val = MP.validar_arte(destino, plantilla, _fuentes_para(None, _reempl_de_request()))
     except Exception as e:
         return jsonify({"error": f"no se pudo validar el arte: {e}"}), 422
     val["archivo"] = f.filename
@@ -3608,7 +3617,7 @@ def arte_mapeo():
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == _get_active_producto_id()), None)
     _scope = _piezas_de_variable(prod, variante, reg) if variante else None
-    val = MP.validar_arte_separado(arte, reg, _fuentes_para(_get_active_producto_id()), mapeo, _orden_var(reg), piezas_scope=_scope)
+    val = MP.validar_arte_separado(arte, reg, _fuentes_para(_get_active_producto_id(), _reempl_de_request()), mapeo, _orden_var(reg), piezas_scope=_scope)
     val["archivo"] = (_cargar("validacion_arte.json", sub=sub) or {}).get("archivo", "arte.ai")
     json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
     json.dump(val.get("personalizacion", {}), open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
@@ -3680,7 +3689,7 @@ def _sha1_corto(obj):
         s = str(obj)
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]
 
-def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle, edit_color=None, cat=None):
+def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle, edit_color=None, cat=None, reempl=None, edit_marca=None):
     """Clave de invalidación (espejo de `_nido_clave`): si cambia el molde, el arte, el mapeo,
     el borde, la etiqueta o los editables → cambia la clave → se regenera esa base."""
     def _mt(p):
@@ -3723,17 +3732,25 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
             except OSError:
                 pass
         return fs
-    return ["v12", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
-            _sha1_corto((prod or {}).get("fuentes_reemplazo") or {}), _sha1_corto(_firma_fuentes()),
+    return ["v14", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+            # ⚠️ Los reemplazos son DEL PEDIDO (2026-08-21): si la clave siguiera firmando los del
+            # molde, cambiar de fuente en el pedido serviría el render cacheado con la anterior.
+            _sha1_corto(reempl or {}), _sha1_corto(_firma_fuentes()),
             _reg_rev(pid),   # versión del registro EN LA BASE (antes: mtime del espejo)
             _sha1_corto(mapeo or {}), _sha1_corto((prod or {}).get("borde_corte") or {}),
             _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
             _sha1_corto(edit_tam or {}), _sha1_corto(_oa_cargar(pid, sub) or {}),
             _sha1_corto(edit_color or {}),
+            # v13: las MARCAS DE PROCESO (TPU/Bordado/DTF). Aunque el visor dibuje el objeto igual,
+            # marcar uno cambia lo que se saca del diseño base → el render tiene que rehacerse.
+            _sha1_corto(edit_marca or {}),
             _sha1_corto(_comp or []), _sha1_corto(_tg),
+            # v14: la DIMENSIÓN QUE MANDA (alto/ancho). Cambia cómo entra el diseño en la pieza y
+            # dónde cae cada editable: sin esto, cambiar el ajuste servía el render viejo.
+            str((prod or {}).get("referencia_medida") or "alto"),
             str(variante or ""), str(talle or "")]
 
-def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, prioridad="fg", cat=None):
+def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, prioridad="fg", cat=None, _reempl=None):
     """Devuelve {piezas:{nombre:{svg,w_cm,h_cm}}, talle, cache:bool} — desde disco si la clave
     coincide, si no lo genera con el motor y lo guarda. None si faltan archivos.
     `override` = ajuste per-pedido de editables (mover sin guardar como base): entra al `edit_cfg`
@@ -3753,7 +3770,8 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
     # Lo pasan todos los llamadores porque ya lo tienen en la mano: cargarlo acá sería un viaje
     # de más a la base en el camino caliente (el hit de caché).
     cat = cat if cat is not None else _cargar_catalogo()
-    clave = _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle, edit_color, cat)
+    clave = _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, talle, edit_color, cat, _reempl,
+                               _editables_marca(prod, sub or "principal"))
     vslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(variante or "todas"))[:40] or "todas"
     tslug = re.sub(r"[^A-Za-z0-9_-]+", "_", str(talle or "guia"))[:24] or "guia"
     cdir = _ruta_datos(os.path.join("piezas_cache", vslug, tslug), pid, sub=sub)
@@ -3826,18 +3844,27 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
             for _op in _ops[1:]:
                 _f2 = dict(fila); _f2[_cid] = _op
                 filas.append(_f2)
-        prendas = _traducir_prendas(filas, prod, cat, reg=reg)
+        # fila(s) de MUESTRA para dibujar: no pasan por las columnas obligatorias del pedido
+        prendas = _traducir_prendas(filas, prod, cat, reg=reg, exigir_obligatorias=False)
         if not prendas:
             return {"piezas": {}, "talle": talle, "cache": False}
         try: _pers = MP.extraer_personalizacion(arte)   # placeholders (dónde caen nombre/número)
         except Exception: _pers = {}
         tmp = tempfile.mkdtemp()
         try:
-            ppt = MP.generar_pedido(pl, arte, reg, _pers, prendas, _fuentes_para(pid), tmp,
+            ppt = MP.generar_pedido(pl, arte, reg, _pers, prendas, _fuentes_para(pid, _reempl), tmp,
                                     mapeo_arte=(mapeo or None), solo_piezas=True,
                                     borde_corte=prod.get("borde_corte"), etiqueta=prod.get("etiqueta"),
                                     editables_cfg=edit_cfg, editables_tamano=edit_tam,
                                     editables_color=edit_color,   # color override (LEY arte=tizada)
+                                    # MARCAS DE PROCESO (TPU/Bordado/DTF): en el VISOR el objeto se
+                                    # muestra ENTERO — `marcas_como_cruz=False`. Es la única
+                                    # excepción a «el arte se ve igual que la tizada», y es a pedido
+                                    # del usuario: el diseñador tiene que seguir viendo lo que hizo.
+                                    editables_marca=_editables_marca(prod, sub or "principal"),
+                                    editables_sin_marca=_editables_sin_marca(prod, sub or "principal"),
+                                    marcas_como_cruz=False,
+                                    referencia=(prod or {}).get("referencia_medida") or "alto",
                                     # el PREVIEW debe mostrar lo MISMO que la tizada (LEY arte=tizada):
                                     # sin esto los objetos agregados no aparecían en el paso Arte.
                                     objetos_agregados=_objetos_agregados_motor(pid, sub))
@@ -3899,11 +3926,21 @@ def arte_preview_piezas():
                   if (_b or mapeo) else None)
     try:
         res = _piezas_base(pid, diseno, variante, talle, _mapeo_arg, prod, reg, override,
-                           prioridad=("bg" if _es_bg else "fg"), cat=cat)
+                           prioridad=("bg" if _es_bg else "fg"), cat=cat, _reempl=_reempl_de_request())
     except Exception as e:
         return jsonify({"error": f"no se pudo generar el preview: {e}"}), 422
     if res is None:
-        return jsonify({"error": "falta plantilla/arte/registro"}), 409
+        # QUÉ falta, no «algo falta»: el front necesita distinguir el caso NORMAL —todavía no se
+        # cargó el arte de este diseño, que es a lo que se viene a este paso— de los que sí son
+        # un problema (sin molde, sin registro). Antes los tres decían lo mismo y la pantalla
+        # recibía un cartel rojo apenas entraba.
+        _falta = ("plantilla" if not os.path.exists(_ruta_entrada("plantilla.ai", pid))
+                  else "arte" if not os.path.exists(_ruta_entrada("arte.ai", pid, sub=_diseno_sub(diseno)))
+                  else "registro")
+        _txt = {"plantilla": "este molde todavía no tiene plantilla cargada",
+                "arte": "todavía no cargaste el arte de este diseño",
+                "registro": "el molde no tiene piezas registradas"}[_falta]
+        return jsonify({"error": _txt, "falta": _falta}), 409
     # PRE-WARM en background del RESTO de talles de esta variable (mismo mapeo, sin override):
     # una vez cargado el diseño, navegar entre talles es INSTANTÁNEO (todo queda en disco).
     # Se deduplica por clave para no lanzar la misma tanda dos veces. Se SALTA cuando el front
@@ -4379,10 +4416,12 @@ def set_etiqueta():
 
 
 # ── Objetos editables (capa "Editable …" del arte) ───────────────────────────
-def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
-    """Posición del objeto sobre su pieza en FRACCIONES (0..1 del bbox de la pieza), con el
-    mismo encaje que el motor (cm_encajar): el arte se escala al ALTO de la pieza (manda el
-    alto) y se centra a lo ancho. Devuelve {rx,ry,rw,rh} (esquina sup-izq + tamaño) o None."""
+def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox, referencia="alto"):
+    """Posición del objeto sobre su pieza en FRACCIONES (0..1 del bbox de la pieza).
+
+    🔴 TIENE QUE DAR LO MISMO QUE EL MOTOR (`MP._encaje` / `cm_encajar`): esto es lo que ve el
+    EDITOR y el motor es lo que se imprime — si difieren, se rompe la ley «el arte se ve igual que
+    la tizada». Por eso se delega en el motor en vez de repetir la cuenta acá."""
     try:
         ax0, ay0, aw, ah = mesa_rect
         ox0, oy0, ox1, oy1 = bbox_mu
@@ -4390,11 +4429,12 @@ def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox):
         pw, ph = (px1 - px0), (py1 - py0)
         if aw <= 0 or ah <= 0 or pw <= 0 or ph <= 0:
             return None
-        awf = (aw * (ph / ah)) / pw                       # ancho del arte como fracción del de la pieza
-        rx = (1 - awf) / 2 + ((ox0 - ax0) / aw) * awf      # centrado a lo ancho
-        ry = (oy0 - ay0) / ah                              # vertical: el arte llena el alto (y-abajo)
+        awf, ahf, offx, offy = MP._encaje(aw, ah, pw, ph, referencia)
+        rx = offx + ((ox0 - ax0) / aw) * awf
+        ry = offy + ((oy0 - ay0) / ah) * ahf
         return {"rx": round(rx, 4), "ry": round(ry, 4),
-                "rw": round(((ox1 - ox0) / aw) * awf, 4), "rh": round((oy1 - oy0) / ah, 4)}
+                "rw": round(((ox1 - ox0) / aw) * awf, 4),
+                "rh": round(((oy1 - oy0) / ah) * ahf, 4)}
     except Exception:
         return None
 
@@ -4483,6 +4523,60 @@ def _clamp_color(color):
     if f is None and s is None:
         return None
     return {"fill": f, "stroke": s}
+
+
+def _editables_marca(prod, dslug):
+    """MARCAS DE PROCESO (TPU/Bordado/DTF) para el motor: `{variable: {IDENT: "tpu"|…}}`.
+    Espejo de `_editables_color`: la marca es del OBJETO y de la VARIABLE (no por talle) — lo que
+    no se sublima no cambia de proceso según el talle."""
+    base = (((prod or {}).get("editables") or {}).get(dslug) or {})
+    out = {}
+    _val = lambda x: str(x or "").strip().lower() or None
+    for var, objs in base.items():
+        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO (capa)
+            mk = _val(objs.get("marca"))
+            if mk:
+                out.setdefault("*", {})[var] = mk
+        else:                                                     # NUEVO: var es una VARIABLE
+            for capa, entry in (objs or {}).items():
+                entry = entry or {}
+                if "objetos" in entry:                            # capa MULTI-objeto
+                    for oid, sub in (entry.get("objetos") or {}).items():
+                        mk = _val((sub or {}).get("marca"))
+                        if mk:
+                            out.setdefault(var, {})[_ident_obj(capa, oid)] = mk
+                else:                                             # capa de 1 objeto (compat)
+                    mk = _val(entry.get("marca"))
+                    if mk:
+                        out.setdefault(var, {})[capa] = mk
+    return out
+
+
+def _editables_sin_marca(prod, dslug):
+    """Qué objetos con proceso NO dejan marca en la tizada: `{variable: {IDENT: True}}`.
+
+    🔴 ES AUTÓNOMO: NO hace falta que el objeto tenga proceso. Lo pidió el usuario con estas
+    palabras — «si presiono en sin marca es sin marca» — después de que la primera versión exigiera
+    asignar TPU/Bordado/DTF antes: al objeto que sólo quería hacer desaparecer no se le podía
+    aplicar, y la orden se descartaba en silencio («vuelvo para atrás y está como si nunca lo
+    hubiese dicho»). Con proceso: no va la cruz. Sin proceso: el objeto no se imprime y listo."""
+    base = (((prod or {}).get("editables") or {}).get(dslug) or {})
+    out = {}
+    for var, objs in base.items():
+        if isinstance(objs, dict) and "transforms" in objs:       # VIEJO: var es un OBJETO (capa)
+            if objs.get("sin_marca"):
+                out.setdefault("*", {})[var] = True
+        else:                                                     # NUEVO: var es una VARIABLE
+            for capa, entry in (objs or {}).items():
+                entry = entry or {}
+                if "objetos" in entry:                            # capa MULTI-objeto
+                    for oid, sub in (entry.get("objetos") or {}).items():
+                        if (sub or {}).get("sin_marca"):
+                            out.setdefault(var, {})[_ident_obj(capa, oid)] = True
+                else:                                             # capa de 1 objeto (compat)
+                    if entry.get("sin_marca"):
+                        out.setdefault(var, {})[capa] = True
+    return out
 
 
 def _editables_color(prod, dslug):
@@ -4659,7 +4753,8 @@ def get_editables():
         o["transforms"] = _tf_de_capa(_entry)
         o["color"] = _entry.get("color")
         o["recolorable"] = bool(_recol.get(o.get("capa"), False)) or any(b.get("recolorable") for b in _obs)
-        o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb)
+        o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb,
+                                 (prod or {}).get("referencia_medida") or "alto")
         # COLOR de cada figura para ESTA variable (la de la capa vale de default para las que no
         # tengan el suyo) → {obj_id: (fill, stroke)}.
         _lay_c = _clamp_color(_entry.get("color"))
@@ -4785,6 +4880,70 @@ def set_editable_color():
         obj["color"] = color
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "nombre": nombre, "color": obj.get("color")})
+
+
+@app.post("/api/productos/editable_marca")
+def set_editable_marca():
+    """Asigna (o QUITA) la marca de proceso de un editable — TPU · Bordado · DTF — POR VARIABLE y a
+    nivel OBJETO. Body: {pid?, diseno, nombre, variante, marca}. `marca` vacía/null = quitar (el
+    objeto vuelve a sublimarse normal).
+
+    Qué significa: el objeto **no se imprime**; en la tizada, en su lugar, va una cruz de 3 cm con
+    la letra del proceso (lo dibuja el motor, `_ops_cruz_proceso`). El visor del arte lo sigue
+    mostrando entero."""
+    cuerpo = request.get_json(force=True)
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    diseno = cuerpo.get("diseno") or "principal"
+    nombre = str(cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "falta nombre del objeto"}), 400
+    variante = str(cuerpo.get("variante") or "*").strip() or "*"
+    # Se tocan SÓLO los campos que vengan en el cuerpo: así el interruptor de «deja marca» no
+    # pisa el proceso asignado, ni al revés.
+    _pide_marca = "marca" in cuerpo
+    _pide_sin = "sin_marca" in cuerpo
+    marca = str(cuerpo.get("marca") or "").strip().lower() or None
+    if marca and marca not in MP.MARCAS_PROCESO:
+        return jsonify({"error": f"marca desconocida: {marca}"}), 400
+    capa_n, oid = _split_ident(nombre)
+    oid = str(cuerpo.get("obj_id") or oid or "").strip() or None
+    cat = _cargar_catalogo_para_editar()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    eds = prod.setdefault("editables", {}).setdefault(_slugify_diseno(diseno), {}).setdefault(variante, {})
+    if oid:                                       # capa multi-objeto: la marca es POR OBJETO
+        obj = eds.setdefault(capa_n, {}).setdefault("objetos", {}).setdefault(oid, {"transforms": {}})
+    else:
+        obj = eds.setdefault(nombre, {"transforms": {}})
+    if _pide_marca:
+        if marca:
+            obj["marca"] = marca
+        else:
+            # OJO: sacar el proceso NO toca `sin_marca`. Son independientes desde 2026-08-27: el
+            # usuario puede querer que un objeto no aparezca sin asignarle ningún proceso. Antes
+            # se borraban juntos y eso hacía desaparecer la decisión sin avisar.
+            obj.pop("marca", None)
+    if _pide_sin:
+        if cuerpo.get("sin_marca"):
+            obj["sin_marca"] = True
+        else:
+            obj.pop("sin_marca", None)
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "nombre": nombre, "marca": obj.get("marca"),
+                    "sin_marca": bool(obj.get("sin_marca"))})
+
+
+@app.get("/api/productos/editables_marcas")
+def get_editables_marcas():
+    """Las marcas de proceso de un molde+diseño, tal como las guarda el catálogo:
+    `{variable: {IDENT: marca}}`. Lo usa el editor para pintar los botones encendidos."""
+    pid = request.args.get("pid") or _get_active_producto_id()
+    diseno = request.args.get("diseno") or "principal"
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    return jsonify({"ok": True, "marcas": _editables_marca(prod, _slugify_diseno(diseno)),
+                    "sin_marca": _editables_sin_marca(prod, _slugify_diseno(diseno)),
+                    "opciones": [{"clave": k, **v} for k, v in MP.MARCAS_PROCESO.items()]})
 
 
 @app.get("/api/productos/editables_config")
@@ -5705,7 +5864,49 @@ def _config_produccion(pid=None):
     return base, rotaciones, telas_cfg, asignacion
 
 
-def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None):
+# ════════════════ COLUMNA DE SISTEMA «CANTIDAD» ════════════════
+# Multiplica la fila: cantidad 5 en «M · pepe · 12» ⇒ 5 prendas iguales en la tizada.
+# Está en TODAS las planillas sin migrar nada: si el template no la tiene guardada, se agrega al
+# vuelo (`_con_cantidad`) tanto al servir las plantillas como al traducir las filas — un solo lugar
+# para las dos puntas, que es lo que evita que la planilla que ve el usuario y la que lee el motor
+# digan cosas distintas.
+#   `mostrar`: 'boton'   → el operario la muestra con un botón (por defecto; no molesta a nadie)
+#              'siempre' → la planilla la trae siempre a la vista
+COL_CANTIDAD = {"id": "cantidad", "label": "Cantidad", "role": "cantidad",
+                "tipo": "numero", "mostrar": "boton"}
+
+
+def _con_cantidad(columnas):
+    """Las columnas de un template CON la de cantidad garantizada (respeta la posición y la
+    configuración si ya está guardada; si no, la agrega al final)."""
+    cols = list(columnas or [])
+    for c in cols:
+        if c.get("role") == "cantidad":
+            c.setdefault("id", COL_CANTIDAD["id"])
+            c.setdefault("label", COL_CANTIDAD["label"])
+            c.setdefault("tipo", "numero")
+            if c.get("mostrar") not in ("boton", "siempre"):
+                c["mostrar"] = COL_CANTIDAD["mostrar"]
+            return cols
+    return cols + [dict(COL_CANTIDAD)]
+
+
+def _cantidad_de_fila(pr, col):
+    """Cuántas prendas sale esta fila. SIN TOPE (decisión del usuario 2026-08-26): lo único que se
+    fuerza es que sea un entero ≥ 1. Si la columna no está, o vino vacía, o es basura → 1, que es
+    exactamente como se comportaba el sistema antes de que existiera esta columna."""
+    if not col:
+        return 1
+    raw = pr.get(col.get("id"), pr.get(col.get("label"), ""))
+    try:
+        n = int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return 1
+    return max(1, n)
+
+
+def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None,
+                      exigir_obligatorias=True):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
     (talle/nombre/numero/manga + personalización por columna), según el template y
     el mapeo de columnas del molde. `default_diseno` = diseño de la fila cuando no
@@ -5721,7 +5922,9 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     if prod and "mapeo_columnas" in prod:
         mapeo_columnas.update(prod["mapeo_columnas"])
     _tpl = next((t for t in cat.get("plantillas_planillas", []) if t.get("id") == (prod or {}).get("planilla_template_id")), None)
-    cols_template = (_tpl or {}).get("columnas", [])
+    cols_template = _con_cantidad((_tpl or {}).get("columnas", []))
+    # La columna que MULTIPLICA la fila (puede no estar en un template viejo: `_con_cantidad` la pone)
+    cantidad_col = next((c for c in cols_template if c.get("role") == "cantidad"), None)
     talle_col = mapeo_columnas.get("talle", "talle")
     nombre_col = mapeo_columnas.get("nombre", "nombre")
     numero_col = mapeo_columnas.get("numero", "numero")
@@ -5764,10 +5967,21 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
                 _idxs.append(x["pieza_idx"])
                 if _clp:
                     _idx2cl_v[int(x["pieza_idx"])] = _clp
-        # Vínculos "van juntas" de ESTA variable → sets de CLAVES de registro (el motor los trata
-        # como unidad frente al toggle: si saca la manga, saca también el vivo enlazado).
+        # Vínculos "van juntas" → sets de CLAVES de registro (el motor los trata como unidad frente
+        # al toggle: si saca la manga, saca también el vivo enlazado).
+        # 🔴 DESDE 2026-08-21 EL VÍNCULO ES DEL **GRUPO** (se declara antes de armar las variables),
+        # así que se leen los del grupo de esta variable MÁS los que quedaron guardados dentro de la
+        # variante en los moldes viejos (compat: nada se migra a la fuerza). Sólo aplican a las
+        # piezas que la variable realmente tiene — `_idx2cl_v` es su propio mapa idx→clave.
+        _juntas_grupo = []
+        _gid = _v.get("grupoId")
+        if _gid:
+            _g = next((g for g in ((prod or {}).get("grupos") or []) if g.get("id") == _gid), None)
+            _juntas_grupo = (_g or {}).get("juntas") or []
+        _ids_grupo = {b.get("id") for b in _juntas_grupo}
+        _todas_juntas = list(_juntas_grupo) + [b for b in (_v.get("juntas") or []) if b.get("id") not in _ids_grupo]
         _js = []
-        for _b in (_v.get("juntas") or []):
+        for _b in _todas_juntas:
             _nm = [_idx2cl_v[int(i)] for i in (_b.get("piezas") or []) if int(i) in _idx2cl_v]
             if len(_nm) >= 2:
                 _js.append(_nm)
@@ -5787,8 +6001,50 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             _info = (_pt or {}).get(_guia)
             if isinstance(_info, dict) and _info.get("pieza_idx") is not None:
                 _idx2nom_guia[int(_info["pieza_idx"])] = _nm
+    # 🔴 QUÉ COLUMNAS SON OBLIGATORIAS PARA FABRICAR. Se configura por PLANILLA (marcando la
+    # columna en Configuración → Planillas): puede ser una o varias — «este molde necesita talle y
+    # diseño» (pedido del usuario 2026-08-31). Si la plantilla no marca ninguna, vale el TALLE, que
+    # es lo mínimo sin lo cual no se puede cortar nada: así ninguna planilla vieja cambia sola.
+    # 🔴 …PERO SÓLO SE PIDE LO QUE ESTE MOLDE USA. Una columna puede estar en la plantilla y NO
+    # aplicar a este molde: «Talle short» y «Talle» son las dos role 'talle', y cada molde mapea
+    # la suya. Si se exigiera una columna que el molde no usa —y que por eso ni se muestra en la
+    # planilla— estaría SIEMPRE vacía y no se fabricaría NADA (pregunta del usuario 2026-08-31).
+    # El criterio es el mismo que usa la pantalla para mostrarla (`colActiva`): las columnas de
+    # rol mapeable valen si este molde las mapea POR ID; las demás (Diseño, dato libre) van
+    # siempre.
+    _ROLES_MAPEABLES = {"talle", "nombre", "numero", "manga"}
+    _usa = set((prod or {}).get("mapeo_columnas", {}).values()) if (prod or {}).get("mapeo_columnas") else None
+
+    def _aplica_al_molde(c):
+        if c.get("role") not in _ROLES_MAPEABLES:
+            return True
+        if _usa is None:
+            return True                      # molde sin mapeo: la planilla va entera
+        return c.get("id") in _usa
+
+    _oblig = [c for c in cols_template if c.get("obligatoria") and _aplica_al_molde(c)]
+    if not _oblig:
+        _oblig = [{"id": talle_col, "label": "Talle"}]
+    # 🔴 …y NO se exige nada cuando la fila es una MUESTRA INTERNA (el molde guía de la ficha, el
+    # preview del arte, el visor): esas filas traen lo mínimo para dibujar y no tienen por qué
+    # cargar las columnas que el pedido pide. Con el filtro puesto se descartaban y la ficha se
+    # quedaba sin moldes (reporte del usuario 2026-08-31).
+    if not exigir_obligatorias:
+        _oblig = []
     out = []
+    _faltantes = {}       # etiqueta de la columna -> cuántas filas la tienen vacía
+    _descartadas = 0
     for pr in prendas:
+        # Una fila a la que le falte alguna obligatoria NO se fabrica. Antes se rellenaba el talle
+        # con «M» y las filas a medio llenar salían impresas: no falla, sale de más.
+        _faltan = [c for c in _oblig
+                   if not str(pr.get(c.get("id"), pr.get(c.get("label"), "")) or "").strip()]
+        if _faltan:   # (con `exigir_obligatorias=False` la lista está vacía: no descarta nada)
+            _descartadas += 1
+            for c in _faltan:
+                _et = c.get("label") or c.get("id")
+                _faltantes[_et] = _faltantes.get(_et, 0) + 1
+            continue
         manga_final = "larga" if str(pr.get(manga_col, "")).strip().lower() == larga_val else "corta"
         toggles = []
         for ti in toggle_cols:
@@ -5798,7 +6054,7 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             if opcion:
                 toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
         translated_pr = {
-            "talle": pr.get(talle_col, "") or pr.get("talle", "") or pr.get("Talle", "") or "M",
+            "talle": pr.get(talle_col, "") or pr.get("talle", "") or pr.get("Talle", ""),
             "nombre": pr.get(nombre_col, "") or pr.get("nombre", "") or pr.get("Nombre", "") or "",
             "numero": pr.get(numero_col, "") or pr.get("numero", "") or pr.get("Número", "") or pr.get("Numero", "") or "",
             "manga": manga_final,
@@ -5826,13 +6082,24 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             translated_pr["juntas_piezas"] = variantes_juntas[_vcl]   # vínculos "van juntas" → atómicos frente al toggle
         persona = {"nombre": translated_pr["nombre"], "numero": translated_pr["numero"]}
         for c in cols_template:
-            if c.get("role") == "diseno":
-                continue  # el diseño no es un dato a estampar
+            if c.get("role") in ("diseno", "cantidad"):
+                continue  # ni el diseño ni la cantidad son datos a estampar
             cval = pr.get(c.get("id"), pr.get(c.get("label"), ""))
             if cval not in (None, ""):
                 persona[c.get("label") or c.get("id")] = cval
         translated_pr["personalizacion"] = persona
+        # LA FILA SE REPITE `cantidad` VECES. Se hace acá —y no en el motor— a propósito: de este
+        # punto para abajo TODO (nesting, numerado de la etiqueta #01…#05, consumo de tela, ficha)
+        # ve prendas de verdad, sin enterarse de que salieron de una sola fila.
+        _n = _cantidad_de_fila(pr, cantidad_col)
+        translated_pr["_cantidad"] = _n
         out.append(translated_pr)
+        for _ in range(_n - 1):
+            out.append(copy.deepcopy(translated_pr))   # copia PROFUNDA: comparten listas si no
+    # qué quedó afuera y por qué (la pantalla lo avisa; nunca en silencio)
+    _traducir_prendas.sin_talle = _descartadas
+    _traducir_prendas.faltantes = _faltantes
+    _traducir_prendas.obligatorias = [c.get("label") or c.get("id") for c in _oblig]
     return out
 
 
@@ -5856,7 +6123,8 @@ def generar():
 
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-    translated_prendas = _traducir_prendas(prendas, prod, cat, reg=reg)
+    # muestra interna (no es el pedido): sin el filtro de columnas obligatorias
+    translated_prendas = _traducir_prendas(prendas, prod, cat, reg=reg, exigir_obligatorias=False)
 
     mapeo = None
     if val.get("modo") == "separado":
@@ -5881,7 +6149,7 @@ def generar():
                 trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
             res = MP.generar_pedido(_ruta_entrada("plantilla.ai", pid),
                                     _ruta_entrada("arte.ai", pid),
-                                    reg, pers, translated_prendas, _fuentes_para(pid), salida, progreso=prog,
+                                    reg, pers, translated_prendas, _fuentes_para(pid, _reempl_de_request()), salida, progreso=prog,
                                     mapeo_arte=mapeo, config_nesting=cfg_nesting,
                                      rotaciones=rotaciones, asignacion_tela=asignacion,
                                      telas_cfg=telas_cfg, borde_corte=(prod or {}).get("borde_corte"),
@@ -5889,6 +6157,9 @@ def generar():
                                      editables_cfg=_editables_cfg(prod, "principal", (cuerpo.get("editables") or {}).get("principal")),
                                      editables_tamano=_editables_tamano(prod),
                                      editables_color=_editables_color(prod, "principal"),
+                                     editables_marca=_editables_marca(prod, "principal"),
+                                     editables_sin_marca=_editables_sin_marca(prod, "principal"),
+                                     referencia=(prod or {}).get("referencia_medida") or "alto",
                                      objetos_agregados=_objetos_agregados_motor(pid, _diseno_sub("principal")))
             res["id"] = tid
             res["producto_id"] = pid
@@ -5956,7 +6227,151 @@ def _combo_toggles(prenda):
                         for t in (prenda.get("toggles") or [])))
 
 
+def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None):
+    """Los objetos que NO se subliman (TPU/Bordado/DTF) de este molde+diseño, para la ficha.
+
+    🔴 UNO POR OBJETO. El arte puede traer el mismo objeto en varias mesas (una por rango de
+    talles) y `extraer_editables` los devuelve todos: listarlos tal cual repetía cuatro veces el
+    mismo escudo (lo marcó el usuario 2026-08-26). Se agrupan por nombre y las MEDIDAS se resuelven
+    así:
+      · si el objeto tiene **tamaño configurado por rangos**, una línea por rango con los talles que
+        abarca — es la medida que va a salir de verdad;
+      · si no, la medida que el objeto tiene en el **TALLE GUÍA** (la del arte).
+    Best-effort: si el arte no se puede leer, la ficha sale igual sin esta sección."""
+    marcas = _editables_marca(prod, _slugify_diseno(diseno))
+    _m = {**(marcas.get("*") or {}), **(marcas.get(variante) or {})}
+    _sm_all = _editables_sin_marca(prod, _slugify_diseno(diseno))
+    _sm = {**(_sm_all.get("*") or {}), **(_sm_all.get(variante) or {})}
+    # 🔴 LOS «SIN MARCA» TAMBIÉN VAN A LA FICHA, tengan proceso o no. Es la definición del usuario:
+    # en la tizada no sale nada, pero acá tiene que estar el dibujo, el material y el tamaño — si
+    # no, el objeto desaparece del sistema y nadie sabe que hay que hacerlo aparte.
+    if not _m and not _sm:
+        return []
+    try:
+        objs = MP.extraer_editables(arte) or []
+    except Exception:
+        return []
+
+    def _cm(v):
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # ── el TAMAÑO CONFIGURADO de cada capa, agrupado por medida ──────────────────────────────
+    # `editables_config` guarda rangos {variantes:[...], apaisado:[a,l], vertical:[a,l]}; se
+    # muestra tal cual lo configuró el usuario, que es lo que la tizada va a respetar.
+    _cfg = ((prod or {}).get("editables_config") or {})
+
+    def _medidas_config(nombre_capa):
+        cfg = None
+        for k, c in _cfg.items():
+            if MP._norm_nombre(k) == MP._norm_nombre(nombre_capa) or MP._norm_nombre((c or {}).get("capa") or "") == MP._norm_nombre(nombre_capa):
+                cfg = c; break
+        if not cfg:
+            return []
+        out = []
+        for r in (cfg.get("rangos") or []):
+            vs = [str(v) for v in (r.get("variantes") or [])]
+            if not vs:
+                continue
+            _tramo = vs[0] if len(vs) == 1 else f"{vs[0]} a {vs[-1]}"
+            if r.get("mantener"):
+                out.append({"talles": _tramo, "texto": "tamaño original del diseño"})
+                continue
+            ap, ve = _caja_cm(r.get("apaisado")), _caja_cm(r.get("vertical"))
+            caja = ap if max(ap) > 0 else ve
+            if max(caja) <= 0:
+                continue
+            _lim = " × ".join(f"{c:.1f}" for c in caja if c > 0)
+            out.append({"talles": _tramo, "texto": f"{_lim} cm"})
+        return out
+
+    vistos, out = {}, []
+    for o in objs:
+        ident = o.get("ident") or o.get("nombre")
+        mk = _m.get(ident) or _m.get(o.get("nombre"))
+        _sinm = bool(_sm.get(ident) or _sm.get(o.get("nombre")))
+        if not mk and not _sinm:
+            continue
+        nom = o.get("nombre") or ident
+        clave = MP._norm_nombre(nom)
+        if clave in vistos:                      # el mismo objeto en otra mesa: ya está listado
+            vistos[clave]["_alt"].append((_cm(o.get("w_cm")), _cm(o.get("h_cm")), o.get("mesa")))
+            continue
+        info = MP.MARCAS_PROCESO.get(str(mk).lower()) or {}
+        # sin proceso elegido, la ficha lo dice en vez de mentir un material: el objeto igual no se
+        # imprime, así que alguien tiene que decidir cómo se hace.
+        item = {"nombre": nom, "proceso": (info.get("nombre") or mk or ""),
+                "pieza": o.get("pieza") or "",
+                # sin marca: en la tela no queda NADA en su lugar (el objeto igual no se sublima)
+                "sin_marca": _sinm,
+                "w_cm": _cm(o.get("w_cm")), "h_cm": _cm(o.get("h_cm")),
+                "svg": o.get("svg"), "thumb": o.get("thumb"),
+                "medidas": _medidas_config(o.get("capa") or nom),
+                "_alt": [(_cm(o.get("w_cm")), _cm(o.get("h_cm")), o.get("mesa"))]}
+        vistos[clave] = item
+        out.append(item)
+
+    # ── SIN TAMAÑO CONFIGURADO ──────────────────────────────────────────────────────────────
+    # ARTE POR RANGO: cada mesa del arte es un tramo de talles y el objeto puede medir distinto en
+    # cada uno → se muestra UNA LÍNEA POR RANGO, con los talles que abarca. La medida del TALLE
+    # GUÍA es sólo para el modo *default* o para un arte *por talle* (una sola mesa).
+    # `mapeo_variantes_arte` da {pieza: {talle: mesa}}; se invierte a {mesa: [talles]}.
+    _mesa_talles = {}
+    try:
+        if reg:
+            _orden = _orden_var(reg)
+            for _pz, _vm in (MP.mapeo_variantes_arte(arte, reg, _orden) or {}).items():
+                for _v, _ms in (_vm or {}).items():
+                    _mesa_talles.setdefault(int(_ms), set()).add(str(_v))
+            # los talles de cada mesa, en el orden real del molde (para poder decir «XS a L»)
+            _pos = {str(t): i for i, t in enumerate(_orden)}
+            _mesa_talles = {m: sorted(ts, key=lambda t: _pos.get(t, 999)) for m, ts in _mesa_talles.items()}
+    except Exception:
+        _mesa_talles = {}
+
+    def _tramo(talles):
+        if not talles:
+            return ""
+        return talles[0] if len(talles) == 1 else f"{talles[0]} a {talles[-1]}"
+
+    for it in out:
+        if not it["medidas"]:
+            # agrupar las mesas del objeto POR MEDIDA: las que miden igual se dicen juntas
+            _por_medida = {}
+            for w, h, ms in it["_alt"]:
+                if w <= 0 or h <= 0:
+                    continue
+                _por_medida.setdefault((round(w, 1), round(h, 1)), []).append(ms)
+            _lineas = []
+            for (w, h), mesas in _por_medida.items():
+                _ts = []
+                for ms in mesas:
+                    try:
+                        _ts += _mesa_talles.get(int(ms), [])
+                    except (TypeError, ValueError):
+                        pass
+                _ord = _orden_var(reg) if reg else []
+                _pos = {str(t): i for i, t in enumerate(_ord)}
+                _ts = sorted(set(_ts), key=lambda t: _pos.get(t, 999))
+                _lineas.append({"talles": _tramo(_ts), "texto": f"{w:.1f} × {h:.1f} cm", "_n": len(_ts)})
+            if len(_lineas) > 1:
+                # ARTE POR RANGO: se ordenan como los talles y se muestran TODOS
+                _lineas.sort(key=lambda L: (0 if L["talles"] else 1))
+                it["medidas"] = [{k: v for k, v in L.items() if k != "_n"} for L in _lineas]
+            elif _lineas:
+                # una sola medida (default / arte por talle) → la del talle guía, sin inventar rangos
+                _L = _lineas[0]
+                it["medidas"] = [{"talles": _L["talles"] or (f"talle {talle_guia}" if talle_guia else ""),
+                                  "texto": _L["texto"]}]
+        it.pop("_alt", None)
+    return out
+
+
 def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
+    # ⚠️ El molde guía de la FICHA se genera con `marcas_como_cruz=False`: ahí el objeto se tiene que
+    # seguir viendo en su lugar (pedido del usuario 2026-08-26). La cruz es para la TELA.
     """Molde guía para la ficha: las piezas de la VARIABLE del pedido, al talle guía, con el diseño
     RECORTADO dentro de la máscara — EXACTAMENTE el mismo PDF de pieza que la tizada nestea en la
     hoja (arte = tizada). Cada pieza vuelve como **PDF vectorial** (`pz['doc'].tobytes()`), NO como
@@ -5986,7 +6401,9 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     mapeo = ({"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None)
     # Una prenda de muestra con la variable del pedido: el motor arma sus piezas igual que la tizada.
     fila = {"__variante": variante, "talle": talle, "nombre": "", "numero": ""}
-    prendas = _traducir_prendas([fila], prod, cat=_cargar_catalogo(), reg=reg)
+    # la prenda de muestra del MOLDE GUÍA: no lleva las columnas obligatorias del pedido y no
+    # tiene por qué — si se filtrara, la ficha se quedaría sin este molde.
+    prendas = _traducir_prendas([fila], prod, cat=_cargar_catalogo(), reg=reg, exigir_obligatorias=False)
     if not prendas:
         return None
     # ── NOMBRE Y NÚMERO, TAL CUAL SALEN EN LA PRENDA ─────────────────────────────────────────
@@ -6016,7 +6433,7 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     tmp = _tmp.mkdtemp()
     piezas = []
     try:
-        ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, _fuentes_para(pid), tmp,
+        ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, _fuentes_para(pid, _reempl_de_request()), tmp,
                                 mapeo_arte=mapeo, solo_piezas=True,
                                 asignacion_tela=(var or {}).get("asig"),
                                 telas_cfg=(var or {}).get("telas"),
@@ -6025,6 +6442,12 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
                                 editables_cfg=_editables_cfg(prod, diseno or "principal"),
                                 editables_tamano=_editables_tamano(prod),
                                 editables_color=_editables_color(prod, diseno or "principal"),
+                                editables_marca=_editables_marca(prod, diseno or "principal"),
+                                editables_sin_marca=_editables_sin_marca(prod, diseno or "principal"),
+                                referencia=(prod or {}).get("referencia_medida") or "alto",
+                                # …pero DIBUJADO: en la ficha el objeto se tiene que seguir viendo en
+                                # su lugar (la cruz es para la TELA). Ver el comentario de arriba.
+                                marcas_como_cruz=False,
                                 objetos_agregados=_objetos_agregados_motor(pid, sub))
         _vistas = set()   # con varias combinaciones de toggle, las piezas comunes vienen repetidas
         for _tela, pzs in (ppt or {}).items():
@@ -6073,7 +6496,10 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     # De quién es el nombre/número que se ve estampado (es UNA fila del pedido, no todas).
     _ej = " ".join(x for x in (_mu.get("nombre"), _mu.get("numero")) if x).strip() or None
     return {"nombre": (prod or {}).get("nombre", pid), "diseno": dnom, "variante": vnom,
-            "opciones": opciones, "ejemplo": _ej, "piezas": piezas}
+            "opciones": opciones, "ejemplo": _ej, "piezas": piezas,
+            # LO QUE NO SE SUBLIMA (TPU/Bordado/DTF): va debajo de las piezas, para que el taller
+            # sepa qué hay que aplicar aparte y sobre qué pieza.
+            "procesos": _procesos_ficha(pid, prod, diseno, variante, arte, talle, reg)}
 
 
 @app.post("/api/generar_multi")
@@ -6087,6 +6513,9 @@ def generar_multi():
     planilla_ficha = cuerpo.get("planilla") or None              # {columnas, filas} para la FICHA TÉCNICA
     perfil_forzado = cuerpo.get("perfil_forzado")  # archivo ICC para unificar perfiles distintos (o None)
     _ed_override = cuerpo.get("editables") or {}  # ajuste por pedido de objetos editables: {diseno_slug: {nombre: {talle: tf}}}
+    # Los reemplazos de fuente son DEL PEDIDO y viajan en el cuerpo: se leen ACÁ (el hilo que
+    # genera no tiene `request`, igual que las fuentes de la entrada 246).
+    _reempl = _reempl_de_request()
     if not prendas:
         return jsonify({"error": "el pedido no tiene prendas"}), 400
     if not pids:
@@ -6166,6 +6595,23 @@ def generar_multi():
         _vpd = {str(_sl): (_m or {}).get(pid) for _sl, _m in (cuerpo.get("vars_por_diseno") or {}).items()
                 if isinstance(_m, dict)}
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd)
+        # 🔴 FILAS SIN TALLE: se ignoran (antes salían como talle «M»), pero se DICE cuántas —
+        # callarlo es peor: la persona cuenta las prendas de la tizada y no le cierra con la
+        # planilla, y no sabe por qué.
+        _st = getattr(_traducir_prendas, "sin_talle", 0)
+        _flt = getattr(_traducir_prendas, "faltantes", {}) or {}
+        _obl = getattr(_traducir_prendas, "obligatorias", []) or []
+        _detalle = ", ".join(f"{k} ({v})" for k, v in sorted(_flt.items(), key=lambda x: -x[1]))
+        # (Las filas incompletas ya no se avisan ACÁ: la pantalla lo pregunta ANTES de armar la
+        #  tizada y la persona elige seguir sin ellas o completarlas — pedido del usuario
+        #  2026-08-31. Repetirlo después era ruido sobre una decisión ya tomada.)
+        if not translated:
+            return jsonify({"error": "ninguna fila está completa",
+                            "detalle": "Para fabricar, cada fila necesita: "
+                                       + ", ".join(_obl)
+                                       + ". Ninguna fila de la planilla las tiene todas. "
+                                       "(Qué columnas hacen falta se configura en "
+                                       "Configuración → Planillas.)"}), 422
         # AVISO (no traba): la posición de la etiqueta se guarda POR VARIABLE. Una fila que llega
         # sin variable —molde pedido entero, o variable cuyos valores no resuelven piezas— usa la
         # posición de la primera variable configurada (antes se iba al lugar por defecto, ver
@@ -6182,6 +6628,24 @@ def generar_multi():
                                      f"se generaron TODAS las piezas del molde y la etiqueta fue a la posición "
                                      f"de la primera variable configurada. Revisá que cada espacio tenga su "
                                      f"variable para este molde.")
+        # EDITABLES SIN VARIABLE: el motor resuelve la config del editable (marcas TPU/Bordado/DTF,
+        # posición, color) con la variable de la fila. Si la fila no eligió y hay UNA SOLA variable
+        # configurada, usa esa. Con VARIAS no adivina —elegir mal saca una prenda mal impresa— y
+        # entonces hay que decirlo: si no, las marcas simplemente no se aplican y nadie se entera.
+        # (Fue exactamente el bug del 2026-08-27: el objeto salía dibujado en la tizada.)
+        _sv = sum(1 for _t in translated if not _t.get("variante_clave"))
+        if _sv:
+            _eds = (prod or {}).get("editables") or {}
+            _dsl = {str(_t.get("_diseno") or "") for _t in translated if not _t.get("variante_clave")}
+            _amb = sorted({_d for _d in _dsl
+                           if len([_v for _v, _o in ((_eds.get(_d) or {})).items() if _o]) > 1})
+            if _amb:
+                avisos_pedido.append(
+                    f"«{nombre}»: {_sv} fila(s) sin variable elegida y el diseño tiene editables "
+                    f"configurados en VARIAS variables ({', '.join(_amb)}), así que no se puede "
+                    f"saber cuál va: esas filas salen SIN las marcas de proceso ni las posiciones "
+                    f"de los objetos. Elegí la variable en cada fila.")
+
         # ── TRABA ANTES DE FABRICAR ──────────────────────────────────────────────────────────
         # Una tizada mal sale igual de bien impresa que una bien: los dos errores de acá abajo NO
         # fallan, producen algo que PARECE correcto. Por eso se frena antes y se dice qué fila.
@@ -6303,7 +6767,7 @@ def generar_multi():
             molds_data.append({
                 "plantilla": _ruta_entrada("plantilla.ai", pid),
                 "arte": _ruta_entrada("arte.ai", pid, sub=sub),
-                "fuentes": _fuentes_para(pid),   # carpetas + reemplazos DE ESTE molde (arte=tizada)
+                "fuentes": _fuentes_para(pid, _reempl),   # carpetas + reemplazos DEL PEDIDO (arte=tizada)
                 "registro": reg, "pers": pers, "prendas": subset,
                 "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(dslug),
                 "borde_corte": (prod or {}).get("borde_corte"),
@@ -6311,6 +6775,11 @@ def generar_multi():
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
                 "editables_tamano": _editables_tamano(prod),
                 "editables_color": _editables_color(prod, dslug),
+                "editables_marca": _editables_marca(prod, dslug),   # TPU/Bordado/DTF → cruz en la tizada
+                # …y cuáles de esos NO dejan la cruz (el objeto igual no se sublima)
+                "editables_sin_marca": _editables_sin_marca(prod, dslug),
+                # qué dimensión manda en ESTE molde (cada molde puede tener la suya)
+                "referencia": (prod or {}).get("referencia_medida") or "alto",
                 "objetos_agregados": _objetos_agregados_motor(pid, sub),   # objetos que sumó el usuario (PNG/SVG/PDF/AI)
                 "_cfg_n": _cfg_n, "_telas": _telas, "_nombre": nombre,
                 # Clave del grupo: el id del grupo configurado, o "solo" el molde si no
@@ -6403,7 +6872,32 @@ def generar_multi():
                 # Las guías se anotaron molde por molde, ya con el diseño y la variable REALES.
                 # Si no quedó ninguna (pedido viejo o sin arte por diseño), se cae al de siempre:
                 # una guía por molde con el diseño que se editó en el Arte.
-                _specs = _guias_ficha or [{"pid": _p, "diseno": _slugify_diseno(default_diseno)} for _p in pids]
+                _specs = list(_guias_ficha)
+                # 🔴 LOS MOLDES DEL PEDIDO VAN SIEMPRE. Las guías salen de las PRENDAS, así que un
+                # molde cuyas filas se ignoraron (incompletas) desaparecía de la ficha —y la ficha
+                # es la referencia del trabajo, no sólo el resumen de lo impreso (reporte del
+                # usuario 2026-08-31). Se completa con lo que el pedido eligió: cada molde, con la
+                # variable que le tocó en cada diseño.
+                _vistos = {(g.get("pid"), g.get("diseno") or "", g.get("clave") or "") for g in _specs}
+                for _p in pids:
+                    _porDis = {}
+                    for _dslug, _porMolde in (cuerpo.get("vars_por_diseno") or {}).items():
+                        _cl = (_porMolde or {}).get(_p)
+                        if _cl:
+                            _porDis[_slugify_diseno(_dslug)] = _cl
+                    if not _porDis:
+                        _porDis = {_slugify_diseno(default_diseno): None}
+                    for _ds, _cl in _porDis.items():
+                        if (_p, _ds, _cl or "") in _vistos:
+                            continue
+                        # ¿ya hay una guía de ESE molde y diseño con otra variable? entonces no
+                        # hace falta otra: la ficha no repite el mismo molde sin motivo
+                        if any(g.get("pid") == _p and (g.get("diseno") or "") == _ds for g in _specs):
+                            continue
+                        _vistos.add((_p, _ds, _cl or ""))
+                        _specs.append({"pid": _p, "diseno": _ds, "clave": _cl})
+                if not _specs:
+                    _specs = [{"pid": _p, "diseno": _slugify_diseno(default_diseno)} for _p in pids]
                 if len(_specs) > _MAX_GUIAS_FICHA:
                     # Cada guía renderiza las piezas con el motor: con muchas combinaciones la ficha
                     # tardaría más que la tizada. Se recorta, pero se DICE (mismo `avisos` que ya
@@ -6469,23 +6963,51 @@ def _dibuja(fc, cp):
         return False
 
 
-def _fuentes_para(pid):
+def _fuentes_para(pid, reemplazos=None):
     """Fuentes visibles para ESTE molde/pedido: primero las suyas (`datos/<pid>/fuentes`,
     las subidas «solo para este pedido»), después el catálogo del sistema; más los
-    reemplazos elegidos (fuente faltante → interno del catálogo)."""
+    **reemplazos DEL PEDIDO** (fuente faltante → interno del catálogo).
+
+    🔴 EL REEMPLAZO ES DEL PEDIDO, NO DEL MOLDE (regla del usuario 2026-08-21): «si le asigna una
+    tipografía de las nuestras se asigna a ESE pedido; si empieza un pedido desde 0, esa tipografía
+    que eligió ya se olvidó». Antes vivía en `prod["fuentes_reemplazo"]` —del molde y para
+    siempre— y por eso un arte cuya fuente **sí estaba** en el catálogo se estampaba con otra:
+    una elección vieja seguía mandando meses después. Caso real del usuario: el molde tenía
+    `{'ClubAmerica2021-2022': 'Hawken Personal Use Only'}` y la ClubAmerica estaba instalada.
+    Lo guardado en el catálogo **ya no se lee** (queda como dato muerto, no se migra nada).
+    """
     pid = pid or _get_active_producto_id()
     d = os.path.join(DATOS, "productos", pid, "fuentes")
+    return {"carpetas": [d, FUENTES], "alias": dict(reemplazos or {})}
+
+
+def _reempl_de_request():
+    """Los reemplazos de fuente que manda el FRONT con el pedido en curso: `{faltante: interno}`."""
     try:
-        prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+        d = request.get_json(silent=True) if request.method in ("POST", "PUT", "PATCH") else None
+        if isinstance(d, dict):
+            r = d.get("fuentes_reemplazo")
+            if isinstance(r, dict):
+                return {str(k): str(v) for k, v in r.items() if k and v}
+        v = request.args.get("fuentes_reemplazo")
+        if v:
+            import json as _j
+            r = _j.loads(v)
+            if isinstance(r, dict):
+                return {str(k): str(v2) for k, v2 in r.items() if k and v2}
     except Exception:
-        prod = None
-    return {"carpetas": [d, FUENTES], "alias": dict((prod or {}).get("fuentes_reemplazo") or {})}
+        pass
+    return {}
 
 
 @app.get("/api/pedido/fuentes_estado")
 def fuentes_estado():
     """Fuentes que pide el arte del diseño vs las que el sistema puede resolver (catálogo +
-    las de este pedido + reemplazos). El paso Arte se traba si hay faltantes."""
+    las de este pedido + reemplazos).
+
+    ⚠️ Los faltantes AVISAN, no traban (2026-08-21): la tizada sale igual, sublimada con la
+    predeterminada. El front pinta el requisito en AMARILLO y, al avanzar, muestra el cartel con
+    «Seguir de todos modos»."""
     pid = request.args.get("pid") or _get_active_producto_id()
     sub = _diseno_sub(request.args.get("diseno"))
     arte = _ruta_entrada("arte.ai", pid, sub=sub)
@@ -6504,10 +7026,10 @@ def fuentes_estado():
             req = sorted((MP.fuentes_requeridas_arte(arte) or {}).keys())
     except Exception as e:
         return jsonify({"ok": False, "error": f"no se pudo leer el arte: {e}"}), 422
-    fx = _fuentes_para(pid)
+    fx = _fuentes_para(pid, _reempl_de_request())
     # REGLA (como Illustrator): TODA fuente del arte es reemplazable, esté instalada o no
     # (los textos de nombre/número son 100% manipulables). <faltantes> = las que no se
-    # pueden estampar ni con el reemplazo (cartel + traba). <originales> = con qué interno
+    # pueden estampar ni con el reemplazo (cartel AMARILLO, no traba). <originales> = con qué interno
     # del catálogo resuelve cada una SIN alias (el front marca «original del diseño»).
     fx0 = {"carpetas": fx.get("carpetas") or [], "alias": {}}
     _cat_fx = {r: i.get("interno") for r, i in MP.catalogo_fuentes(fx0).items()}
@@ -6523,9 +7045,15 @@ def fuentes_estado():
 
 @app.post("/api/pedido/fuente_resolver")
 def fuente_resolver():
-    """Resuelve una fuente NO reconocida del arte: subiéndola (destino `sistema` = catálogo
-    global, `pedido` = sólo este molde) o eligiendo un reemplazo del catálogo
-    (`{faltante, usar}` → se guarda en `prod.fuentes_reemplazo`)."""
+    """Resuelve una fuente NO reconocida del arte.
+
+    · **Subiéndola** (multipart): `destino=sistema` la deja en el catálogo global —el sistema la va
+      a reconocer siempre— y `destino=pedido` sólo en este molde, para el trabajo de ahora.
+    · **Eligiendo un reemplazo** del catálogo (`{faltante, usar}`): 🔴 **NO se guarda en el molde**
+      (regla del usuario 2026-08-21: la elección es **del pedido** y un pedido nuevo arranca de 0).
+      Se devuelve `{faltante, usar}` y el FRONT lo lleva con el pedido; el server lo recibe en cada
+      request (`fuentes_reemplazo`). Antes se persistía en `prod.fuentes_reemplazo` y una elección
+      vieja seguía pisando la fuente correcta meses después."""
     pid = request.form.get("pid") or (request.get_json(silent=True) or {}).get("pid") or _get_active_producto_id()
     f = request.files.get("archivo")
     if f:
@@ -6541,19 +7069,15 @@ def fuente_resolver():
         # Cargar el archivo de una fuente que tenía reemplazo ES elegir volver a ella
         # (regla Illustrator: la elección manda; esta subida es la elección más explícita).
         # Se limpian los alias cuyo nombre ORIGINAL resuelve ahora al archivo recién subido.
+        # Cargar el archivo de una fuente que tenía reemplazo ES elegir volver a ella: se avisa al
+        # front qué reemplazos del PEDIDO tiene que soltar (ya no se guarda nada en el molde).
         quitados = []
         try:
             fx0 = {"carpetas": [os.path.join(DATOS, "productos", pid, "fuentes"), FUENTES], "alias": {}}
-            cat = _cargar_catalogo_para_editar()
-            prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-            rr = dict((prod or {}).get("fuentes_reemplazo") or {})
-            for k in list(rr):
+            for k in list(_reempl_de_request().keys()):
                 _r = MP.resolver_fuente(k, fx0)
                 if _r and os.path.normcase(os.path.abspath(_r)) == os.path.normcase(os.path.abspath(tmp)):
-                    rr.pop(k); quitados.append(k)
-            if quitados and prod is not None:
-                prod["fuentes_reemplazo"] = rr
-            _guardar_catalogo(cat)
+                    quitados.append(k)
         except Exception:
             pass
         return jsonify({"ok": True, "destino": destino, "interno": res.get("interno"),
@@ -6563,23 +7087,41 @@ def fuente_resolver():
     usar = (cuerpo.get("usar") or "").strip()
     if not faltante or not usar:
         return jsonify({"error": "falta indicar la fuente faltante y cuál usar"}), 400
-    cat = _cargar_catalogo_para_editar()
-    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-    if prod is None:
-        return jsonify({"error": "molde no encontrado"}), 404
-    rr = dict(prod.get("fuentes_reemplazo") or {})
-    # Elegir la fuente ORIGINAL del texto = volver a ella: se borra el alias en vez de
-    # guardar un X→X (así <reemplazos> refleja sólo los cambios reales del usuario).
+    # Elegir la fuente ORIGINAL del texto = volver a ella: se devuelve `quitar` para que el front
+    # borre el reemplazo en vez de guardar un X→X.
     fx0 = {"carpetas": [os.path.join(DATOS, "productos", pid, "fuentes"), FUENTES], "alias": {}}
     _ro = MP.resolver_fuente(faltante, fx0)
     _ru = MP.resolver_fuente(usar, fx0)
-    if _ro and _ru and os.path.normcase(os.path.abspath(_ro)) == os.path.normcase(os.path.abspath(_ru)):
-        rr.pop(faltante, None)
-    else:
-        rr[faltante] = usar
-    prod["fuentes_reemplazo"] = rr
-    _guardar_catalogo(cat)
-    return jsonify({"ok": True, "reemplazos": rr})
+    _es_la_original = bool(_ro and _ru and os.path.normcase(os.path.abspath(_ro)) == os.path.normcase(os.path.abspath(_ru)))
+    # NO se guarda nada: el reemplazo vive en el PEDIDO (lo lleva el front).
+    return jsonify({"ok": True, "faltante": faltante, "usar": usar, "quitar": _es_la_original})
+
+
+@app.post("/api/pedido/fuentes_pedido_limpiar")
+def fuentes_pedido_limpiar():
+    """Borra las tipografías subidas «sólo para este pedido» (`datos/<pid>/fuentes`).
+
+    Regla del usuario (2026-08-21): «si carga una tipografía tiene la opción de guardarla para que
+    el sistema después la reconozca, o simplemente subirla en ese pedido — y después el sistema no
+    la reconocerá de nuevo». Sin esto, la subida «sólo este pedido» quedaba en el molde para
+    siempre y el pedido siguiente la seguía encontrando. Lo llama «Nuevo pedido».
+    Las del CATÁLOGO (destino `sistema`) no se tocan: ésas se cargaron para quedarse."""
+    pids = (request.get_json(silent=True) or {}).get("pids") or []
+    if not pids:
+        _p = _pid_de_request() or _get_active_producto_id()
+        pids = [_p] if _p else []
+    borradas = 0
+    for pid in pids:
+        d = os.path.join(DATOS, "productos", str(pid), "fuentes")
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            if f.lower().endswith((".ttf", ".otf")):
+                try:
+                    os.remove(os.path.join(d, f)); borradas += 1
+                except OSError:
+                    pass
+    return jsonify({"ok": True, "borradas": borradas})
 
 
 @app.get("/api/pedido/fuente_chars")
@@ -6595,7 +7137,7 @@ def fuente_chars():
     fuentes = sorted({c.get("fuente") for m in pers.values() for c in (m or {}).values() if c.get("fuente")})
     sets, ok_f, falta_f = [], [], []
     for f in fuentes:
-        ruta = MP.resolver_fuente(f, _fuentes_para(pid))
+        ruta = MP.resolver_fuente(f, _fuentes_para(pid, _reempl_de_request()))
         if not ruta:
             falta_f.append(f); continue
         try:
@@ -6854,7 +7396,6 @@ def get_productos():
             "piezas_registradas": n_piezas,
             # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla
             # puede ofrecer «Deshacer»: sin el dato, agregar una pieza parecía un camino de ida.
-            "piezas_agregadas": OA._ver_actual(os.path.join(ENTRADA, pid, "plantilla.ai")),
             # Qué opciones de cada toggle (manga/sisa/…) tiene REALMENTE este molde, y por variable:
             # la planilla no puede ofrecer «Larga» si ninguna pieza dice «larga» (ver §9 del mapa).
             "toggles_piezas": _toggles_disponibles_cached(p, cat),
@@ -7645,8 +8186,14 @@ def descargar_plantilla_producto(pid):
 @app.get("/api/plantillas_planillas")
 def get_plantillas_planillas():
     cat = _cargar_catalogo()
-    # Already initialized in _cargar_catalogo()
-    return jsonify(cat.get("plantillas_planillas", []))
+    # Con la columna de sistema CANTIDAD siempre presente (aunque el template sea viejo y no la
+    # tenga guardada): así el front la ve sin que haya que migrar ninguna planilla.
+    tpls = []
+    for t in cat.get("plantillas_planillas", []):
+        t = dict(t)
+        t["columnas"] = _con_cantidad(t.get("columnas"))
+        tpls.append(t)
+    return jsonify(tpls)
 
 
 @app.post("/api/plantillas_planillas/guardar")
@@ -7723,6 +8270,125 @@ def eliminar_plantilla_planilla():
 # ─────────────────────────────────────────────────────────────────────────────
 # Biblioteca de REGLAS de planilla (campos reutilizables)
 # ─────────────────────────────────────────────────────────────────────────────
+# ── TUTORIALES GRABADOS POR EL USUARIO ────────────────────────────────────────────────────────
+# Reemplazan a los guiones fijos que vivían en `frontend/src/guias.js` (eliminados 2026-08-27 a
+# pedido del usuario). Ahora el usuario aprieta «Grabar», hace el trabajo, para y le pone nombre:
+# el sistema guarda LOS PASOS (qué elemento tocó y en qué pantalla), no un video. Los carteles de
+# ayuda los arma el sistema con el DICCIONARIO (frontend/src/diccionario.js).
+#
+# Se guardan en el catálogo, como todo lo demás. Son COMPARTIDOS: un tutorial es para enseñarle a
+# otro cómo se hace, así que no tendría sentido que sólo lo viera quien lo grabó. Queda `creado_por`
+# para saber de quién es.
+_TUT_MAX_PASOS = 400          # una grabación sana no llega ni cerca; el tope frena un bucle
+
+
+def _tutoriales(cat=None):
+    return (cat or _cargar_catalogo()).get("tutoriales") or []
+
+
+def _guard_grabar_tutorial():
+    """SEGURIDAD: VER y seguir un tutorial lo puede hacer cualquiera (para eso está la ayuda), pero
+    GRABARLOS, editarlos o borrarlos es del administrador — un tutorial mal grabado se lo come todo
+    el taller (decisión del usuario, 2026-08-28). Devuelve la respuesta de error, o None si pasa.
+    Sin sistema de usuarios (taller sin base) no se puede exigir nada: se deja pasar, igual que el
+    resto del server."""
+    if not _USUARIOS_ON:
+        return None
+    try:
+        u = _usuario_actual()
+    except Exception:
+        return None                # la base parpadeó: la seguridad no tumba el sistema
+    if not u:
+        return jsonify({"error": "no hay sesión iniciada"}), 401
+    if "ayuda.grabar" not in (u.get("permisos") or []):
+        return jsonify({"error": "sólo un administrador puede grabar o editar los tutoriales"}), 403
+    return None
+
+
+@app.get("/api/tutoriales")
+def get_tutoriales():
+    """Los tutoriales grabados, para el menú de Ayuda. SIN permiso: la ayuda es para todos."""
+    return jsonify({"ok": True, "tutoriales": _tutoriales()})
+
+
+@app.post("/api/tutoriales")
+def guardar_tutorial():
+    """Guarda una grabación. Body: {nombre, desc?, pasos:[{ancla, accion, etiqueta, donde}]}.
+    Con `id` reemplaza uno existente (renombrar / regrabar). Sólo administradores."""
+    _no = _guard_grabar_tutorial()
+    if _no:
+        return _no
+    cuerpo = request.get_json(force=True) or {}
+    nombre = str(cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "el tutorial necesita un nombre"}), 400
+    pasos = cuerpo.get("pasos") or []
+    if not isinstance(pasos, list) or not pasos:
+        return jsonify({"error": "la grabación no tiene ningún paso"}), 400
+    if len(pasos) > _TUT_MAX_PASOS:
+        return jsonify({"error": f"la grabación es demasiado larga ({len(pasos)} pasos)"}), 400
+    limpios = []
+    for p in pasos:
+        if not isinstance(p, dict):
+            continue
+        anc = str(p.get("ancla") or "").strip()
+        acc = str(p.get("accion") or "click").strip().lower()
+        # Un paso sin ancla no se puede volver a mostrar — salvo el «esperar aviso» (modal),
+        # que marca una ventana del sistema y no un control de la pantalla.
+        if not anc and acc != "modal":
+            continue
+        item = {"ancla": anc, "accion": acc,
+                "etiqueta": str(p.get("etiqueta") or "")[:120],
+                "donde": p.get("donde") if isinstance(p.get("donde"), dict) else {}}
+        # ── Los campos del EDITOR de tutoriales (2026-08-28) ─────────────────────────────────
+        if p.get("texto"):                       # cartel corregido a mano (le gana al diccionario)
+            item["texto"] = str(p["texto"])[:240]
+        if acc == "modal":                       # qué aviso espera este paso
+            item["modal"] = str(p.get("modal") or "")[:80]
+        if p.get("ventana"):                     # el paso vive DENTRO de esta ventana emergente
+            item["ventana"] = str(p["ventana"])[:80]
+        limpios.append(item)
+    if not limpios:
+        return jsonify({"error": "ninguno de los pasos se pudo guardar"}), 400
+    cat = _cargar_catalogo_para_editar()
+    lista = cat.setdefault("tutoriales", [])
+    tid = str(cuerpo.get("id") or "").strip()
+    reg = {"id": tid or ("tut_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]),
+           "nombre": nombre[:80],
+           "desc": str(cuerpo.get("desc") or "")[:200],
+           "pasos": limpios,
+           "creado": time.time(),
+           "creado_por": (_usuario_actual() or {}).get("usuario") if _USUARIOS_ON else None}
+    i = next((k for k, t in enumerate(lista) if t.get("id") == reg["id"]), None)
+    if i is None:
+        lista.append(reg)
+    else:
+        reg["creado"] = lista[i].get("creado", reg["creado"])
+        reg["creado_por"] = lista[i].get("creado_por", reg["creado_por"])
+        lista[i] = reg
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "tutorial": reg})
+
+
+@app.post("/api/tutoriales/borrar")
+def borrar_tutorial():
+    """Saca un tutorial de la lista. Body: {id}. Sólo administradores."""
+    _no = _guard_grabar_tutorial()
+    if _no:
+        return _no
+    tid = str((request.get_json(force=True) or {}).get("id") or "").strip()
+    if not tid:
+        return jsonify({"error": "falta el id"}), 400
+    cat = _cargar_catalogo_para_editar()
+    lista = cat.setdefault("tutoriales", [])
+    quedan = [t for t in lista if t.get("id") != tid]
+    if len(quedan) == len(lista):
+        return jsonify({"error": "ese tutorial no existe"}), 404
+    cat["tutoriales"] = quedan
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True})
+
+
 @app.get("/api/reglas_planilla")
 def get_reglas_planilla():
     cat = _cargar_catalogo()

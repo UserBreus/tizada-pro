@@ -75,10 +75,21 @@ def cursor(commit=True):
         if commit:
             cn.commit()
     except Exception:
-        cn.rollback()
+        # ⚠️ El rollback va PROTEGIDO: si la conexión ya se cayó (la base se reinició, se cortó la
+        # red), `rollback()` lanza SU PROPIA excepción y ésa TAPA la original — te quedabas sin
+        # saber qué falló de verdad. La transacción no queda abierta igual: al cerrar la conexión,
+        # el motor descarta lo que no se confirmó.
+        try:
+            cn.rollback()
+        except Exception:
+            pass
         raise
     finally:
-        cn.close()
+        # SIEMPRE se cierra, pase lo que pase: es lo que impide que queden sesiones colgadas.
+        try:
+            cn.close()
+        except Exception:
+            pass
 
 
 def filas(sql, *args):

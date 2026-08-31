@@ -180,7 +180,7 @@ trabajos/<tid>/                   ← salidas generadas: HOJA_*.pdf, prev_*.svg,
   - **VARIANTE** = el **TALLE** (1..16 numéricos; XS..6XL letra) = *el tamaño*. `variante_guia` (ej "M") = talle de referencia. El picker "Elegí las **variantes**" muestra TALLES; `verVarianteOperario(talle)` cambia el talle visto. El editable se puede editar para todas las variantes / un rango / una (scope de TALLES).
 - **GRUPO:** grupo de piezas (`prod["grupos"]`, ej. "MP1-A2"). Adentro viven las VARIABLES. **CONJUNTO** (`prod["conjuntos"]`) = sub-armado con nombre (ej. "cuello polo V").
 - **TOGGLE DE PIEZA** (generalización de manga corta/larga): `{clave, opcion, opciones}`. `partes_de` incluye/excluye piezas según mencionen la clave+opción. Ver [[toggle-de-pieza-generalizado]].
-- **VAN JUNTAS:** vínculo atómico entre piezas (ej. vivo ↔ manga). Si el toggle saca un miembro, se sacan TODOS. `prod["variantes"][].juntas` → `juntas_piezas` en la prenda → filtrado en `partes_de` (~2289).
+- **VAN JUNTAS:** vínculo atómico entre piezas (ej. vivo ↔ manga). Si el toggle saca un miembro, se sacan TODOS. Vive en el **GRUPO** (`prod["grupos"][].juntas`, desde 2026-08-21; `prod["variantes"][].juntas` sigue leyéndose por compat) → `juntas_piezas` en la prenda → filtrado en `partes_de` (~2289). Es además lo ÚNICO que habilita dos piezas con el mismo nombre en una variable (§10.c).
 - **DISEÑO:** un arte con nombre (`arte.ai` en `disenos/<slug>/`). "Principal" = el base (raíz). Un molde tiene varios diseños. Ver [[multiples-disenos]].
 - **MESA (del arte):** una página del `arte.ai` = el diseño de una pieza. El **MAPEO** dice qué mesa va en qué pieza (`{pieza: mesa}`).
 - ⛔ **MAPEO POR VARIABLE (regla dura del usuario, 2026-07-13):** el mapeo se maneja **por VARIABLE**, nunca más por molde entero. `mapeo_arte.json = {mapeo: base, por_variable: {v_xxx: {pieza: mesa}}}`. El de la variable es **AUTORITATIVO** (quitar un diseño en una variable NO se resucita por la base); la base queda para datos viejos, filas sin variable y como semilla. Flujo: deteccion `?variante=` (devuelve `piezas_variable` = alcance), guardado con `variante` (validación acotada con `piezas_scope`), motor `mesa_arte(pieza, talle, variante)` resuelve por la `variante_clave` de cada fila, avisos de generación por variable. Al subir un arte, el auto-mapeo puebla `por_variable` con el recorte de cada variable y la completitud se mide contra la UNIÓN de las variables (`_alcance_variables`), no el molde.
@@ -791,6 +791,273 @@ Se hizo literal:
     36 rótulos de talle → **6**.
   - Aviso en la esquina del visor: «N sin rótulo · acercá el zoom» (`rotulosOcultos`), para que la
     falta de números no parezca un error del sistema.
+
+### LA BARRA DE CAPAS (columna izquierda del visor) — estilo Illustrator
+
+Vive **fuera** del visor, en su propia columna de **208 px** (`gridTemplateColumns` del
+`workspace-container`), y aparece en dos pantallas: **Moldería → Nombrar piezas** (`empModo &&
+empTodas`) y **Etiqueta** (`tabAjustesMolde === 'etiqueta'`). Fila por capa (= talle):
+
+| tik | 👁 | nombre | ▸ |
+|-----|----|--------|---|
+| selección (**abre la fila**, pedido 2026-08-21) | ojito, con **arrastre en cadena** (`pintaOjo`: apretar y pasar por encima aplica el mismo modo) | doble click = **renombrar la capa** (`POST /api/plantilla/variantes_nombrar`) | despliega las piezas (**20×22 px**, al final de la fila) |
+
+La fila de la capa **no lleva miniatura**; las de sus piezas (al desplegar ▸) sí, y su tik abre la
+fila igual que el de la capa — los dos caen en la **misma columna**. Lo mismo en «Ver piezas».
+
+- **Encabezado**: el **ojo GENERAL** (`toggleTodasCapas` — si hay alguna visible las apaga todas y
+  limpia la selección, misma regla que el ojito de a una; si estaban todas apagadas, las prende) y
+  el indicador de lo seleccionado (cantidad al nombrar; el nombre de la pieza en Etiqueta).
+- **Miniaturas** (`MiniCapa`): el **mismo `path_svg` que dibuja el visor** — no hay un segundo
+  dibujo que pueda diferir; cada una en su propio bbox (`miniPzVB`).
+  🔴 **Son de UNA pieza, nunca de un grupo (2026-08-21).** La fila de la CAPA junta 34 piezas
+  distintas: el dibujo combinado no identificaba nada, así que se sacó (con él se fue el memo
+  `capasMini`, que existía sólo para eso). Mismo criterio en «Ver piezas»: la fila lleva miniatura
+  **sólo si agrupa una única figura** («Tapa costura» = 1 pieza × 30 talles sí; «Cuello» = 11 formas
+  distintas, no — dibujar la primera sería mentir).
+- 🔴 **EL TIK (`TikSel`) NO TIENE ESTADO PROPIO.** Lee y escribe la selección **de la pantalla**:
+  `selNombrar` (múltiple) al nombrar, y `etqPiezaSel` + `etqPzTocada` en Etiqueta (`capasSelModo`,
+  `pzEstaSel`, `togglePzSel`). Con estado propio, el panel y el visor mostrarían cosas distintas.
+  Estados: **lleno** (todo), **parcial** (algo), **vacío**.
+- 🔴 **Qué selecciona cada cosa (2026-08-21, regla del usuario):** el tik de la **CAPA** = sus
+  piezas de una (`toggleCapaSel`; en Etiqueta, donde la selección es de a UNA, queda **informativo**,
+  sin click). **DENTRO de una capa, la selección es INDIVIDUAL**: tanto el tik como el NOMBRE de la
+  pieza eligen **sólo ésa** (`togglePzSel`) — tocar «Frente 1» en el talle 0 no toca los frentes de
+  los otros talles. **No hay** «seleccionar el grupo» desde la barra (el `toggleGrupoNombre` que lo
+  hacía se eliminó): el **grupo** vive en la lista «Ver piezas» del panel, que trabaja por nombre.
+  Todo es **toggle**: el mismo gesto pone y saca.
+- En Etiqueta el tik **lleno** es la pieza **dueña** de la etiqueta (`etqPzTocada`) y las otras del
+  mismo nombre quedan en **parcial** — se ve de un vistazo sobre cuál se está trabajando.
+- La lista **«Ver piezas»** del panel derecho (nombrar) tiene el mismo trato: miniatura (si aplica) +
+  tik que selecciona/quita el grupo por nombre genérico. Es la otra lista con ojitos del sistema y no
+  puede comportarse distinto.
+
+### 🔴 EL GESTO DE SELECCIÓN EN EL VISOR (Moldería → Nombrar piezas)
+
+**CLICK = UNA pieza. ARRASTRE = muchas.** Regla del usuario (2026-08-21), y es la que manda:
+
+- **Click sin arrastrar sobre una pieza** → se elige **sólo la de ADELANTE** (la capa más alta de
+  la barra), **sin importar cuántas tenga debajo**. Lo mismo para el click corto que entra por el
+  fondo (`iniciarRubber`): toma `bajo[0]`, no la pila.
+- **Arrastrando con el botón izquierdo** (>3 px) se pintan varias y ahí sí **cada punto se lleva
+  todo lo apilado** (`_piezasBajoPunto`, una vez por arrastre vía el set `tocadas`). El botón
+  **derecho sigue moviendo el lienzo** — elección explícita del usuario al preguntarle.
+- **Recuadro** (marquee) desde el fondo, y **agarre** (click quieto 350 ms) para mover la selección:
+  sin cambios.
+- ⚠️ El toggle del arrastre **exige `pintaSel.current.movio`** (el umbral de 3 px): si no, un
+  temblor de 1 px convertía el click de una pieza en «las 30 apiladas» y el gesto nuevo no existía.
+- **Por qué cambió**: la pila entera al primer click venía de que el clic caía en la pieza
+  EQUIVOCADA (el z-order estaba invertido, ver abajo) y hacía falta agarrar todo para llegar a la
+  que se quería. Con el apilado ya arreglado, el click preciso alcanza. (Historia: changelog 200 y
+  198 documentan el gesto anterior — quedan como registro, no como la regla vigente.)
+
+### 🔴 DOS PIEZAS CON EL MISMO NOMBRE EN UNA VARIABLE: SÓLO SI «VAN JUNTAS» (2026-08-21)
+
+**Regla del usuario:** en una variable **no pueden convivir dos piezas que se llamen igual**
+(mismo nombre GENÉRICO: «Cuello 9» y «Cuello 10»), **salvo** que estén declaradas como **«van
+juntas»** (ej. manga + su vivo). Y eso se declara **antes**, al configurar el **GRUPO**.
+
+- **El vínculo vive en el GRUPO** (`prod["grupos"][].juntas = [{id, nombre, piezas:[idx]}]`), no en
+  la variante. Se declara una vez y **lo heredan todas las variables de ese grupo**: al elegir una
+  de las piezas para una variable, **la compañera entra sola** (`togglePiezaEnTipo` /
+  `agregarPiezasATipo` expanden por el vínculo).
+- **Compat sin migración:** los moldes viejos guardaron el vínculo dentro de la variante
+  (`prod["variantes"][].juntas`). Se leen **los dos lados** (`juntasDeVariable` en el front;
+  grupo ∪ legacy en `_traducir_prendas`), y borrar uno lo saca de donde esté. Nada se migra a la
+  fuerza — un molde ya configurado sigue andando igual.
+- **Dónde está el botón**: en el **detalle del grupo** («⛓ Piezas que van juntas · ＋ Vincular
+  piezas»), debajo de «Elegir piezas del grupo». En la **variable** quedó sólo la **lectura** («se
+  definen en el grupo») para que se entienda por qué al tocar una pieza entran dos.
+- 🔴 **EL NOMBRE ES UN LUGAR, NO UN ERROR (2026-08-21, corrección del mismo día).** Elegir otra
+  pieza del mismo nombre **reemplaza** a la que estaba: sale «Cuello 9», entra «Cuello 10». **Uno
+  u el otro, sin ningún cartel** — el primer intento tiraba un aviso rojo de rechazo y el usuario
+  lo bajó enseguida: *«cuando selecciono una pieza no debe salir ese cartel; si selecciono un
+  frente y después el otro, se deselecciona el anterior»*. Elegir el otro frente es **cambiar de
+  frente**, no equivocarse.
+  - Si la pieza que sale está en un vínculo, **sale el vínculo entero** (es atómico).
+  - Con el **recuadro** entra **una por nombre** y **no se pisa** lo que el usuario ya había
+    elegido (para cambiar de pieza se la toca: ahí sí reemplaza). Sin carteles.
+  - `_desplazadasPorNombre` es quien decide qué sale; el toggle de siempre (tocar una elegida la
+    saca) no cambió.
+- Un molde configurado ANTES puede tener el choque ya guardado: el detalle de la variable lo
+  **muestra** (aviso naranja con las piezas y la salida), no lo borra solo.
+- ⚠️ **Ojo con la historia**: la «regla del slot» (un solo nombre genérico por variable) se había
+  **eliminado** en 2026-07-28 por descartar piezas **en silencio** (ver el comentario en `App.jsx`
+  y la memoria `bug-renumerado-nombres-piezas`). Lo que vuelve **no es aquella regla**: aquella era
+  automática e invisible; ésta es **del usuario**, explícita, avisada y con una salida clara
+  (vincular). El backend **no rechaza** nada: si rechazara, un molde viejo con el choque guardado
+  no se podría ni abrir para arreglarlo.
+- **Contrato**: `verificar_juntas_grupo.py` (raíz) — vínculo en el grupo, vínculo legacy en la
+  variante, los dos a la vez, y que `POST /api/productos/grupos` conserve el campo.
+
+### AGREGAR UNA PIEZA AL MOLDE — qué pasa con todo lo demás (estado a 2026-08-21)
+
+`POST /api/plantilla/pieza_agregar` (Config → Moldería → «Agregar una pieza»): **⧉ duplicar la
+elegida** o **subir un archivo**, marcar en el visor dónde va, **prepararla**, y **Guardar**.
+
+🔴 **LAS TRES REGLAS DEL USUARIO (2026-08-21)** — mandan sobre cualquier diseño anterior:
+
+1. **Nada se escribe hasta «Guardar».** Las piezas quedan **PREPARADAS** en la pantalla (`pzPend`,
+   fantasma ámbar en el visor, ✕ para sacarlas): el molde no se toca. «Mientras no se guarda podés
+   hacer lo que quieras». Todas las preparadas se guardan **juntas, en UNA sola versión**.
+2. **Lo guardado NO se borra.** No hay «deshacer» (el endpoint `pieza_deshacer` **se eliminó**, y
+   con él el contador `piezas_agregadas`): para sacar una pieza **se borra el molde entero** y se
+   sube de nuevo. El modal de Guardar lo dice antes de escribir.
+3. **Duplicar copia los VECTORES respetando los talles.** En cada talle se copia la geometría de la
+   **HOMÓLOGA** (`_homologas`, que la resuelve por el REGISTRO), **no** la del mismo número — el
+   número no se corresponde entre talles. **El nombre y el número NO se heredan**: entra como pieza
+   nueva y sin nombre. Si la pieza a duplicar todavía **no tiene nombre** no hay correspondencia:
+   se cae al mismo índice y **se avisa** (en el panel y en la respuesta).
+
+- Se escribe una **VERSIÓN** (`plantilla.v<N>.ai` + `plantilla.ver`): **el archivo del usuario no
+  se toca**.
+- La pieza entra en **TODOS los talles**. Duplicando, cada talle copia **su** geometría (acompaña
+  la progresión); por archivo se exige **una forma por talle** (menor→mayor área ↔ orden del
+  molde) y si no, **422** con el motivo. Una pieza que existiera sólo en algunos talles deja el
+  registro con un hueco y **la generación explota**.
+- 🟢 **NO RENUMERA NADA.** La geometría se agrega **al final** del contenido de la capa
+  (`page.contents_add`) y las piezas se leen en **orden de dibujo** → la nueva es **la última** de
+  cada talle. Medido con `verificar_agregar_pieza.py` sobre el molde real: **0 de 2760** entradas
+  cambian de índice (con el orden viejo por bbox eran 69 de 138). El remapeo del registro sigue
+  corriendo igual, como red.
+- Por eso **nada de lo configurado se desalinea**: registro, `piezas.json` (ids), variables
+  (`pieza_idx` + `pieza_id`), grupos y sus `juntas` (índices), `emparejado_talles.json → manual`
+  (índices), etiqueta / telas / arte / `acomodo_mm` (todos por NOMBRE) quedan como estaban.
+  ⚠️ Esa tranquilidad **depende del orden de dibujo**: si alguna vez se vuelve a ordenar por
+  posición, grupos, juntas y `manual` **sí** se corren y hoy **nadie los remapea** (sólo el
+  registro). Es el primer lugar a mirar si aparece un nombrado corrido.
+- La pieza nueva queda **SIN NOMBRE** a propósito: se nombra como cualquier otra. Después hay que
+  **sumarla al grupo** y **a las variables** que la lleven (y darle **tela** y **arte** si el molde
+  los usa, o la traba del pedido la va a frenar — que es lo que tiene que pasar).
+- Se invalidan las cachés derivadas (`_invalidar_cache_molde`: detección, nido en memoria y disco,
+  `piezas_cache`, toggles): el archivo vigente pasó a ser otro y ninguna se invalida sola.
+
+#### ⚠️ LO QUE ESTA MANERA PUEDE ROMPER — auditoría 2026-08-21
+
+Los 1, 2, 3 y 7 quedaron **CERRADOS** el mismo día con las reglas del usuario (ver arriba); los que
+siguen abiertos están marcados. Se deja la lista entera: el motivo de cada arreglo importa tanto
+como el arreglo.
+
+1. ✅ **CERRADO — «Sacar la última pieza agregada» podía borrar una versión que NO era una pieza.**
+   `get_productos` manda **`piezas_agregadas = OA._ver_actual(plantilla.ai)`** — o sea **el número de
+   VERSIÓN**, no cuántas piezas se agregaron. Pero la plantilla la versionan **también**
+   `variantes_molde.renombrar_capas` (nombrar los talles) y `separar_por_piezas` (partir el molde),
+   con el mismo mecanismo. Un molde al que sólo se le nombraron los talles muestra «Sacar la última
+   pieza agregada (1)», y tocarlo **borra el archivo vigente** (`os.remove`) y baja el puntero: el
+   molde vuelve a «Capa 1» y **se queda sin talles**, con el registro apuntando a talles que ya no
+   existen. Demostrado con `_ver_actual` sobre un temporal. Hoy **latente**: los 4 moldes del
+   usuario están en `.ver = 0`. **Plan:** que el alta de pieza deje su marca (p. ej.
+   `prod["piezas_agregadas"] = [{version, cuando}]`) y que el botón y `pieza_deshacer` miren ESO,
+   no el contador de versiones; si la versión vigente no es de una pieza, 409 con el motivo.
+
+2. ✅ **CERRADO — «Duplicar la elegida» copiaba por ÍNDICE en todos los talles.** `pieza_agregar` toma el `i`
+   del talle guía y en cada talle copia `antes[t][i]`, o sea **asume que el índice es la misma
+   pieza en todos los talles** — que es exactamente lo que NO siempre pasa (por eso existe el
+   emparejado). Medido sobre los moldes reales: «Camiseta de futbol» **0 de 986** entradas con
+   índice distinto al de la guía (ahí acierta), pero «camiseta asque» tiene **1**: «Frente 2» es
+   `M#2` y `0#1` → duplicando ese frente, en el talle «0» se copiaría **otra pieza**, y sale así
+   impreso. **Plan:** resolver la homóloga por el REGISTRO (`registro[nombre][talle].pieza_idx`)
+   cuando la pieza tiene nombre, caer al índice sólo si no lo tiene, y avisarlo en el panel.
+
+3. ✅ **CERRADO (ya no hay deshacer) — restauraba el registro de ANTES de agregar** (`.antes_pieza`), así que **se pierde
+   todo el nombrado hecho entre agregar y deshacer** — y el flujo natural es agregar → nombrar →
+   «no era» → deshacer. **Plan:** al deshacer, conservar lo nombrado que no sea de la pieza que se
+   saca (fusionar por nombre), o avisar en el modal qué se va a perder.
+
+4. 🟠 **ABIERTO — Archivo subido con contornos de más: «se usan los N más grandes», en silencio.** Guías,
+   marcas o texto convertido a curvas pueden entrar como pieza. **Plan:** mostrar los contornos
+   detectados con su medida y que el usuario confirme cuáles son.
+
+5. 🟠 **ABIERTO — Una pieza por debajo del mínimo detectable** (`area_min_cm2=0.25`, `lado_min_cm=0.3`) se
+   escribe en el molde pero **no se detecta**: queda una versión nueva y nada visible. **Plan:**
+   medir el contorno antes de escribir y rechazar con el motivo.
+
+6. 🟠 **ABIERTO — La copia es geométricamente IDÉNTICA a la original** → `_emparejar_por_forma` puede cruzar
+   los nombres entre las dos si quedan cerca. Se salva nombrándolas con el gesto de agrupar (queda
+   en `manual`, que manda sobre la heurística), pero conviene avisarlo.
+
+7. ✅ **CERRADO — `resumen_plantilla.json` no se actualizaba**: ahora el alta le suma las piezas
+   guardadas, así el conteo de la pantalla de estado deja de mentir.
+
+8. 🟡 **ABIERTO — Multi-mesa**: `remapear_registro` aplica el mapa de un talle a TODAS las entradas de ese
+   talle sin distinguir mesa. Hoy inocuo (el mapa es la identidad); volvería a importar si el orden
+   dejara de ser el de dibujo.
+
+9. 🟡 **MITIGADO — Disco**: cada **guardado** deja una copia completa del molde, pero ahora todas
+   las piezas preparadas entran en **una sola** versión (antes era una por pieza).
+
+
+### 🔴 ELEGIR LAS PIEZAS DE UNA VARIABLE VA SOBRE **UN** TALLE (2026-08-21)
+
+`canvasLayout` usa el **lienzo junto** (`empTodasData`, todos los talles) cuando hay una variable
+abierta… **salvo mientras se eligen las piezas** (`asignandoTipo`), que vuelve a **`etqData`** = el
+talle **guía** o el que el usuario eligió con los chips «Resaltar talle».
+
+**Por qué (bug real, reportado por el usuario):** las piezas del grupo se guardan con el
+`pieza_idx` **del talle guía**, y `aisladoSet` filtra el lienzo por esos índices. En el lienzo
+junto los índices son un correlativo **global**, así que esos números caen en el **bloque del
+PRIMER talle** (el «0»): el usuario creía estar tocando la guía y estaba eligiendo sobre otro
+talle. Peor: lo elegido se guardaba con `talle_origen` = el talle de `etqData`, o sea el índice de
+un talle traducido contra **otro** — si el orden de piezas no coincide entre esos dos talles, la
+variable quedaba con **piezas equivocadas**.
+
+- El **encabezado del visor** sigue la misma condición (decía «todas las tallas juntas» mientras
+  mostraba una sola: mentía).
+- `asignandoTipo` va en las **dependencias del memo** — si no, el cambio de fuente no se recalcula.
+- Al terminar («Listo») vuelve solo al lienzo junto para acomodar.
+- ⚠️ No lo introdujo el z-order de la 258: el filtro es por índice, no por profundidad. Es un bug
+  **viejo** que se hizo evidente ahora.
+- **Verificado**: con la variable abierta y «Cargar piezas», el `d` del path de la pieza 7 en el
+  DOM es **idéntico** al que devuelve `GET /api/plantilla/deteccion` para el talle guía (M) y
+  **distinto** del bloque del talle «0» del lienzo junto; tocando el chip «XL» pasa a coincidir
+  **exacto** con `?talle_ref=XL`; y al salir vuelven las 210 piezas (7 × 30) del lienzo junto.
+
+### ACOMODAR UNA VARIABLE — mover VARIAS piezas juntas (Variables → variable abierta)
+
+Con una variable abierta el visor muestra **sus piezas con todos los talles nesteados** y sirve
+para **acomodarlas**. El modo es `modoAcomodoVar` (= variable abierta y **ninguna** herramienta de
+asignación en curso: con una activa el clic es para asignar, no para mover).
+
+🔴 **Acá el OBJETO que se mueve es el NOMBRE, no la pieza suelta**: «una pieza de la variable» son
+sus ~30 talles, que se acomodan **juntos** y se guardan por nombre en **`acomodo_mm`**. Por eso
+seleccionar una la selecciona **entera** (`toggleSelVarNombre` marca todos sus talles).
+
+- **Click sin arrastrar** = selecciona/quita esa pieza (entera). Se resuelve en `endDrag` con
+  `varAcomodo && !hasMoved`, porque el mousedown ya armó el arrastre.
+- **Recuadro desde el fondo** = togglea las abarcadas, también por nombre entero (`iniciarRubber`
+  con `modoAcomodoVar`; el marquee **expande cada idx a su nombre** antes de togglear).
+- **Arrastrar una pieza QUE ESTÁ en la selección** = se mueven **todas las seleccionadas juntas**
+  (`dragInfo.varNombres` con los N nombres; `inis` con los idx de todos sus talles).
+- **Arrastrar una pieza que NO está en la selección** = se mueve **sólo ella** (lo de siempre); la
+  selección **no se pierde** — un arrastre no debería borrar lo que el usuario venía marcando.
+- **Una sola escritura por gesto**: al soltar, `guardarAcomodoVarMm` recibe **todos** los nombres
+  movidos de una (todas las piezas de un nombre comparten el mismo offset, así que alcanza con
+  leer el de la primera).
+- La selección se **limpia al abrir y al cerrar** una variable (el mismo efecto que siembra
+  `pzOffsets` desde `acomodo_mm`): si sobreviviera, la variable siguiente arrancaría con piezas
+  marcadas que ni están en el visor.
+- Reusa `selNombrar` a propósito: es la misma selección del resto del visor, con el mismo gesto —
+  no hay un segundo estado que pueda desincronizarse.
+
+- 🔴 **ORDEN DE APILADO DEL VISOR = LA BARRA DE CAPAS (2026-08-21).** La capa de más ARRIBA en la
+  barra de talles es la que va más **ADELANTE**, igual que en Illustrator. En SVG no hay `z-index`:
+  manda **lo último pintado**, así que el orden del DOM es el z-order — y el navegador entrega el
+  clic al que está adelante. `canvasLayout` devuelve **DOS listas de las mismas piezas**:
+  - **`layout`** = orden LÓGICO (adelante primero, el orden de `src.talles` = el de
+    `_ordenar_por_archivo`, que sale de `doc.layer_ui_configs()` = el panel de capas del .ai).
+    Lo consumen los **hit-tests por bbox** (`piezaBajoMouse`, el fallback de `_piezasBajoPunto`,
+    `alinearSeleccion`…): toman el **primer** match, o sea la pieza de adelante.
+  - **`dibujo`** = el mismo conjunto AL REVÉS por bloque de talle (`sort` estable: dentro de una
+    capa el orden relativo del archivo no se toca). Es lo que se pinta — **los 4 `.map()` de render
+    del visor usan `canvasLayout.dibujo`, nunca `layout`**; `MapeadorArteVisual` hace lo propio con
+    `piezasZ` (los CARTELES se siguen ubicando con `piezas`, en orden lógico: el acomodo greedy
+    depende del orden y no tiene por qué cambiar por esto).
+  - **Dónde se nota**: molde **ANIDADO** (los 30 talles dibujados uno encima del otro, el caso de
+    `prod_default` y de «Camiseta de futbol»). Antes el último talle de la lista tapaba a todos y
+    se quedaba con cada clic; ahora el talle chico (arriba de la lista) está al frente.
+  - ⚠️ Si algún día se agrega otro visor que dibuje piezas, tiene que salir de `dibujo`. Y si el
+    orden lógico cambiara (p. ej. reordenar capas a mano), `layout` y `dibujo` se derivan los dos
+    de `src.talles`: hay UN solo lugar que decide.
   - **Por qué esta salida y no otra**: mover la etiqueta al borde de cada pieza no alcanza (las
     piezas se solapan casi enteras, los bordes también se tocan) y esconder todo detrás del hover
     deja la pantalla muda. Ocultar **por falta de lugar real** es el criterio de los mapas: al zoom
@@ -1005,7 +1272,7 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 10.e AYUDA GUIADA — cómo decide avanzar (y por qué NO mira el DOM)
 
-**Motor `frontend/src/tutor.jsx` · guion `frontend/src/guias.js` · anclas `data-tour` en `App.jsx`.**
+**Motor `frontend/src/tutor.jsx` · explicaciones `frontend/src/diccionario.js` · anclas `data-tour` en `App.jsx` · los tutoriales los GRABA el usuario (§11 changelog 317).**
 
 - ⛔ **DOS COSAS DISTINTAS, Y NO SE MEZCLAN** (decisiones del usuario, entradas 118 y 121):
   - **UN solo PASO A PASO: «Armar una tizada»**, calcada del video `Como cargar un pedido.mp4` que
@@ -1028,7 +1295,7 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 - **Redes de seguridad:** «Seguir igual» a los 5 s si el ancla no aparece; «Ya está, seguir» a los
   15 s si `hecho` no se cumple. Y globo **final** («¡Listo!» / «Esto ya estaba hecho») en vez de
   cerrarse de golpe. El progreso se guarda en `localStorage` (`tizada_ayuda_progreso`) → **retomar**.
-- ⛔ **CONTRATO VERIFICADO EN EL BUILD:** `frontend/verificar_guias.mjs` corre en `npm run build`
+- ⛔ **CONTRATO VERIFICADO EN EL BUILD:** `frontend/verificar_diccionario.mjs` corre en `npm run build`
   (y suelto con `npm run guias`) y **corta** si una guía apunta a un ancla inexistente o si un
   predicado explota/miente. **Contempla las anclas dinámicas** (`data-tour={'ajuste-' + item.id}`) y
   las condicionales: un chequeo ingenuo da **9 falsos positivos**.
@@ -1062,6 +1329,2054 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   seguimos en el MISMO paso (entrada 118).
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-08-31 (371) — 🔴 LA CAUSA REAL: EL FILTRO DE OBLIGATORIAS SE COMÍA LAS FILAS DE
+  MUESTRA INTERNAS.** El usuario insistió («la ficha técnica es la ficha técnica») y tenía razón:
+  la 370 tapaba una parte, pero el agujero de fondo estaba más abajo. `_traducir_prendas` **no la
+  usa sólo el pedido**: el sistema arma **filas sintéticas** para DIBUJAR — el molde guía de la
+  ficha (`_molde_guia_ficha`, ~6395), el preview de piezas del arte (~3847) y el visor (~6118). Esas
+  filas traen lo mínimo (`talle`, `nombre`, `numero`, la variable) y **no tienen** las columnas que
+  el usuario marcó obligatorias — si marchó «Diseño», el filtro nuevo las descartaba: sin prendas
+  → sin piezas → **la ficha sin su molde guía**. FIX: `_traducir_prendas(..., exigir_obligatorias=True)`
+  — el pedido real (~6586) lo deja en True; las tres muestras internas lo apagan.
+  📌 LECCIÓN (la misma de la 370, un nivel más abajo): **antes de poner una regla de negocio
+  dentro de una función, mirar QUIÉN MÁS la llama.** «Qué se fabrica» es una regla DEL PEDIDO; meterla
+  en el traductor se la aplicó también a los dibujos internos, que no fabrican nada. Enumerar los
+  llamadores (`grep -n "_traducir_prendas("`) habría evitado las dos entradas. CONTRATO §4b en
+  `verificar_columnas_obligatorias.py` (verifica que la misma fila de muestra se descarte como
+  pedido y salga como muestra, y que las tres llamadas internas estén apagadas).
+  ✅ VERIFICADO CONTRA LOS DATOS REALES: la plantilla del usuario tiene marcadas «Talle», «Talle
+  short» y «Diseño»; con el filtro puesto, la fila de muestra de la ficha daba **0 prendas en los
+  dos moldes** («camiseta asque» y «Camiseta de futbol») y ahora da 1 en los dos.
+  ⚠️ COLATERAL QUE ESTO DESTAPÓ: la muestra del arte (~3848) es la que dibuja el **preview de
+  piezas** del paso Arte — también se quedaba sin prendas desde la 367. Y **tres verificadores
+  estaban rotos en silencio** por lo mismo, porque copian los `datos` reales del usuario a un
+  temporal y heredan sus obligatorias: `verificar_etiqueta_nombre.py`, `verificar_etiqueta_posicion.py`
+  y la herramienta `medir_nesting.py` — sus filas también son muestras y ahora pasan
+  `exigir_obligatorias=False`. 📌 Los contratos que copian datos reales cambian de resultado cuando
+  cambia la CONFIGURACIÓN del usuario: **hay que correrlos todos, no sólo el de la feature tocada**.
+- **2026-08-31 (370) — 🔴 LA FICHA PERDIÓ LOS MOLDES AL IGNORAR FILAS (efecto colateral de la
+  369).** Reporte del usuario: «¿por qué ahora en la ficha técnica no se ve todo lo que se veía,
+  información de los moldes y etc?». CAUSA: los **moldes guía** de la ficha se arman recorriendo
+  LAS PRENDAS (`_guias_ficha`, dentro del bucle de `translated`). Al empezar a ignorar las filas
+  incompletas, esas filas dejaron de generar prendas… y con ellas se fueron sus guías: la ficha
+  perdió moldes, variables y combinaciones de toggles que antes mostraba. Las dos cosas conviven y
+  no se contradicen: **la TABLA** de la ficha lista sólo lo que se fabricó (eso es lo que se pidió
+  en la 369 — la ficha es la hoja con la que el taller controla lo que salió), pero **los MOLDES
+  GUÍA son la referencia del trabajo** (qué prenda es, qué piezas lleva) y tienen que estar aunque
+  alguna fila se haya ignorado. FIX: las guías se arman igual que antes con las prendas —para
+  conservar su variable, sus toggles y su muestra de nombre/número— y después se COMPLETAN con los
+  moldes del pedido (`molds` + `vars_por_diseno`): si un molde no quedó representado, se agrega su
+  guía. No se duplica un molde que ya tiene guía para ese diseño. CONTRATO §5 en
+  `verificar_columnas_obligatorias.py`.
+  📌 LECCIÓN: filtrar la entrada de un pipeline afecta TODO lo que se derive de ella. Al sacar
+  filas hay que preguntarse qué más se calculaba a partir de esas filas — acá, la ficha entera.
+- **2026-08-31 (369) — UNA FILA VACÍA NO SE PREGUNTA, Y LO IGNORADO TAMPOCO VA A LA FICHA.** Dos
+  correcciones del usuario sobre el cartel de la 367:
+  **(a) «esas 3 que no tienen nada son ignorables por completo».** El cartel preguntaba por CADA
+  fila incompleta, incluidas las que están en blanco —las que quedan de más al agregar filas—. Una
+  fila vacía no es un olvido: sobra. Ahora sólo se pregunta por las **empezadas** a las que les
+  falta un dato; las vacías se ignoran sin ruido. 📌 Ya existía `filaVacia()` en App.jsx con el
+  criterio correcto (los BOTONES no cuentan: «Manga: corta» viene puesto solo, así que una fila en
+  blanco los tiene igual) — escribí una copia sin verlo y el parser lo cantó («Identifier
+  'filaVacia' has already been declared»): **antes de escribir un helper, buscar si ya está**.
+  **(b) «si ignora una fila la ignora para la ficha técnica también».** La ficha es la hoja con la
+  que el taller controla lo que salió: listar filas que no se imprimieron la vuelve mentirosa.
+  Ahora lo que se manda como planilla de la ficha son las MISMAS filas que se fabrican.
+  ⚠️ Para lograrlo, `generarMulti` **recibe** las filas útiles de quien la llama (`filasQueSalen()`)
+  en vez de calcularlas: sus helpers se declaran más abajo y usarlos ahí adentro es leerlos antes
+  de tiempo — lo cortó el candado de la 368 (2 casos nuevos). Es la forma correcta igual: la
+  función recibe lo que necesita.
+- **2026-08-31 (368) — 🔴 EL CANDADO DE PANTALLA NEGRA AHORA MIRA App.jsx (tope congelado).**
+  Hoy volvió a pasar y en el peor archivo: un `useMemo` nuevo usaba `cantidadVisible`, declarado 20
+  líneas más abajo → «No se pudo cargar la aplicación» (dos veces seguidas, porque la primera vez
+  lo moví a un lugar que TAMPOCO alcanzaba: hay que quedar debajo de TODO lo que se use, incluido
+  lo del array de dependencias, que se evalúa en el render). `verificar_tdz.mjs` no miraba App.jsx
+  porque arrastra **321 casos previos**, casi todos inofensivos (handlers leídos dentro de
+  callbacks, no en el render). Solución: **congelar la cuenta**. Uno nuevo corta el build; cuando
+  se limpie alguno hay que BAJAR el tope. Probado en negativo: reporta «1 caso NUEVO (tope 321,
+  ahora 322)». 📌 Y la lección de siempre, ahora con número: en App.jsx este error no es un aviso,
+  es la app que no abre.
+- **2026-08-31 (367) — SE PREGUNTA ANTES DE ARMAR LA TIZADA, NO SE AVISA DESPUÉS.** Pedido del
+  usuario sobre la 365/366: «no sólo que no active el botón: al menos tiene que llenar una fila. Y
+  si de 2 filas una está incompleta, que salga un cartel ANTES de armar la tizada — "falta el dato
+  de tal, ¿querés avanzar ignorando esa fila o cargar el dato?" con dos opciones: **Enviar igual**
+  (usa sólo las filas que cumplen) y **Cargar dato** (cierra y vuelve a la planilla). Y el cartel
+  de después, quitalo». Hecho tal cual:
+  · **el botón «Enviar» no se activa si NINGUNA fila está completa** (dice qué falta);
+  · con filas a medio llenar, al tocar «Enviar» sale el modal **«Faltan datos en la planilla»**:
+    lista qué le falta a cada fila (número de fila + columnas), dice con cuántas se armaría, y
+    ofrece «Cargar el dato» (cierra, seguís en la planilla) o «Enviar igual (N filas)»;
+  · **se eliminó el aviso posterior** («4 fila(s) sin completar…»): la decisión ya se tomó antes y
+    repetirla después era ruido sobre algo resuelto.
+  El front usa el MISMO criterio que el servidor (columnas `obligatoria` que este pedido usa de
+  verdad, `colActiva`), así que lo que muestra el cartel es exactamente lo que el motor va a
+  ignorar. El modal nuevo entró al diccionario con su ficha (17/17 ventanas dibujables) para que
+  el tutorial lo entienda.
+  ⚠️ NO VERIFICADO EN PANTALLA: el cartel en sí. Llegar a la planilla en el sandbox exige cargar un
+  arte (escritura) y ahí es sólo lectura. Verificado: que la app carga, que compila con los seis
+  contratos, y el comportamiento del servidor por contrato. **Falta probarlo con una planilla real
+  a medio llenar.**
+- **2026-08-31 (366) — 🔴 UNA COLUMNA OBLIGATORIA QUE EL MOLDE NO USA NO SE PIDE.** Pregunta del
+  usuario sobre la 365, y era un agujero de verdad: «¿y si pongo "Talle short" obligatoria pero la
+  variante que elijo no lleva esa columna y no aparece? ¿hay lógica que detecte que ahí no debe
+  pedirla?». NO la había: esa columna no se muestra en la planilla de ese molde, así que estaría
+  SIEMPRE vacía y **no se habría fabricado NINGUNA fila** (lo confirma la prueba en negativo: 0
+  prendas). AHORA el servidor exige sólo las obligatorias que ESE MOLDE usa, con el mismo criterio
+  que la pantalla aplica para mostrarlas (`colActiva`): las de rol mapeable
+  (talle/nombre/numero/manga) valen si el molde las mapea **por id** —«Talle» y «Talle short» son
+  las dos role `talle`, y cada molde mapea la suya—; las demás (Diseño, dato libre) van siempre. Si
+  después de filtrar no queda ninguna, vale el talle de ese molde. La Ayuda de la pantalla lo dice:
+  «Sólo se pide en los moldes que usan esta columna». CONTRATO §3 en
+  `verificar_columnas_obligatorias.py`: con «Talle short» obligatoria, un molde que usa «Talle» SÍ
+  fabrica (y sólo se le exige «Talle»); un molde que usa «Talle short» no fabrica la fila que la
+  tiene vacía. Probado en negativo.
+- **2026-08-31 (365) — COLUMNAS OBLIGATORIAS, CONFIGURABLES POR PLANILLA.** Pedido del usuario,
+  mejorando la 364: «debe tener en configuración cuáles son las columnas que debe tener sí o sí
+  cargadas para que aparezca en la tizada, porque puede ser 1 o varias; el molde de ahora debe ser
+  talle y diseño; eso se ajusta en la edición y creación de las planillas». La regla fija «sin
+  talle no se fabrica» pasa a ser **configurable**: cada columna de la plantilla puede marcarse
+  `obligatoria`, y la fila a la que le falte ALGUNA no se fabrica. Si la plantilla no marca
+  ninguna, sigue valiendo el TALLE —lo mínimo sin lo cual no se puede cortar— así que **ninguna
+  planilla vieja cambia de comportamiento sin que nadie lo pida**.
+  · **PANTALLA** (Configuración → Planillas → tocar la columna): interruptor «Obligatoria para
+    fabricar», con su Ayuda y un aviso en vivo («Las filas con "Talle" vacía se van a ignorar al
+    generar»). Sin esto la feature no existiría: no habría dónde decir «talle y diseño».
+  · **SERVIDOR**: `_traducir_prendas` descarta la fila incompleta y guarda QUÉ columna faltó en
+    cada una; el pedido avisa «N fila(s) sin completar — les falta: Diseño (2), Talle (1)», y si
+    ninguna fila está completa se frena con 422 explicando qué columnas hacen falta y dónde se
+    configuran.
+  CONTRATO **`verificar_columnas_obligatorias.py`** (reemplaza al `verificar_fila_sin_talle.py` de
+  la 364): sin configurar → vale el talle; con talle+diseño → sólo la fila completa, y se reporta
+  qué faltó en cada una; una fila con sólo lo obligatorio se fabrica igual (nombre y número son
+  opcionales). VERIFICADO EN LA PANTALLA REAL: el interruptor aparece en el panel de la columna y
+  al encenderlo avisa qué filas se van a ignorar.
+- **2026-08-31 (364) — 🔴🔴 UNA FILA SIN TALLE SE FABRICABA COMO TALLE «M».** Reporte del usuario:
+  «en la planilla cargué 1 solo talle pero hay 4 filas más con el dato de la manga y el diseño, y
+  me las creó del mismo talle; si no tiene el talle, ignorar». CAUSA, en `_traducir_prendas`:
+  `"talle": pr.get(talle_col, "") or … or "M"` — la fila sin talle **no se descartaba, se
+  rellenaba con «M»**. Las filas a medio llenar (con la manga y el diseño, que el sistema completa
+  solo) salían fabricadas. 🔴 Es de la peor familia de errores del sistema: NO FALLA, sale bien
+  impreso y de más (misma familia que [[traba-antes-de-fabricar]]). AHORA: la fila sin talle se
+  IGNORA, y **se dice cuántas** (`avisos_pedido`: «N fila(s) sin talle — no se fabricaron»); si
+  NINGUNA fila tiene talle, se frena con 422 y se explica. Callarlo sería casi tan malo: la
+  persona cuenta las prendas de la tizada, no le cierran con la planilla y no sabe por qué.
+  CONTRATO NUEVO **`verificar_fila_sin_talle.py`** con la planilla del reporte (1 fila con talle +
+  4 a medio llenar → 1 prenda), probado en negativo. ⚠️ La primera prueba negativa NO falló: hay
+  dos capas (el descarte y el `or "M"` que se sacó) y romper la segunda sola no cambia nada — hay
+  que romper el descarte para ver el contrato en rojo.
+  **Y el 404 de la consola** (`/api/productos/prod_default/preview`, en el server publicado): es
+  el «Molde 1» que crea la instalación, sin archivo todavía. No rompía nada (la tarjeta cae a su
+  ícono) pero ensuciaba la consola con rojo. Ahora ese caso devuelve **200 con la miniatura
+  vacía** (`sin_molde: true`), igual que ya hacía el mismo endpoint cuando falta nombrar las
+  variantes: un paso pendiente no es un error.
+- **2026-08-31 (363) — 🔴 «⏺ AGREGAR PASOS» DEL EDITOR NO HACÍA NADA (otra víctima del borrado
+  grande).** Reporte del usuario: «el grabar pasos en el editor no funciona». El botón prendía el
+  modo y se pintaba en rojo, pero **el efecto que escucha los clics ya no existía**: se lo llevó
+  por delante la limpieza de la lógica de 2 diseños (349), que cortó bloques del editor por sus
+  comentarios de inicio y fin — la misma trampa que dejó sin declarar `carga`, `modalAb` y
+  `ventanita` (351). Restaurado, y ahora identifica el paso con el MISMO localizador que el
+  grabador (así una lista de opciones queda como lista) y guarda la ventana emergente donde cayó
+  el clic. 🔴 DE PASO SE UNIFICÓ EL CRITERIO de qué NO se graba: **`sePuedeGrabar(el)`** en
+  localizar.js (barra lateral, `data-no-grabar`, el propio editor) lo usan el grabador Y el editor
+  — antes cada uno tenía el suyo y el editor anotaba pasos que el grabador descarta (se vio en la
+  prueba: agregó un «tocá Configuración» de la barra). El candado del contrato se movió a
+  `sePuedeGrabar` y ahora exige además que los DOS lo usen. VERIFICADO EN EL EDITOR REAL: con el
+  modo prendido, tocar la barra lateral NO suma (22 → 22) y tocar un control del trabajo sí (22 →
+  23, chip «Moldería»).
+  ⚠️ El candado `verificar_tdz.mjs` volvió a atajar el restaurado: el efecto quedó ARRIBA de
+  `dondeRef`/`selRef` y habría sido pantalla negra.
+  📌 LECCIÓN (tercera vez): después de un borrado grande hay que **listar lo que quedó dentro del
+  tramo** y probar cada función del editor a mano — los contratos no ejecutan React y estas cosas
+  sólo se ven usando la pantalla.
+- **2026-08-31 (362) — 🔴 EL GRABADOR SE COMÍA EL SEGUNDO CLIC DE UNA LISTA (bug MÍO, de la
+  361).** Reporte del usuario tras subir la actualización: «grabé un tutorial y no me detectó los
+  2 botones que presioné en diseño». CAUSA: el grabador descarta clics repetidos seguidos
+  —`if (prev.ancla === ancla && prev.accion === accion) return;`, para no anotar dobles clics ni
+  tipeo letra a letra—, y al marcar las listas con `data-opciones` **todos sus botones pasaron a
+  dar el MISMO identificador** (es la lista, no el botón). Resultado: el segundo diseño se
+  descartaba como «repetido» y el tutorial salía pidiendo uno solo. FIX: dentro de una lista de
+  opciones, lo que se compara es **el BOTÓN tocado** (`ultCtrlGrab`), no el identificador: dos
+  botones distintos son dos pasos; tocar dos veces el MISMO sigue siendo uno. Fuera de esas listas
+  todo queda igual. VERIFICADO GRABANDO DE VERDAD (sandbox): tres diseños distintos → «1 paso, 2
+  pasos, 3 pasos», y volver a tocar el mismo → sigue en 3.
+  ⚠️ LO YA GRABADO NO SE PUEDE ARREGLAR SOLO: un tutorial grabado con el código de la 361 guardó
+  UN solo clic donde hubo dos, y esa información no está en ninguna parte. Hay que regrabar ese
+  tramo.
+  📌 LECCIÓN: cambiar CÓMO se identifica un control toca también al GRABADOR, no sólo a la
+  reproducción. La regla de «no repetir» daba por sentado que dos clics con el mismo identificador
+  eran el mismo control — dejó de ser cierto el día que un identificador pasó a representar a toda
+  una lista.
+- **2026-08-31 (361) — LAS LISTAS DE OPCIONES SE MARCAN EN LA PANTALLA (`data-opciones`).**
+  Pedido del usuario: «en el paso de elegir molde también es multiopción, hay más de un botón o
+  tarjeta para elegir: no debe ir a uno directo». La regla de la 359 vivía sólo en `aGuion`, así
+  que el GRABADOR seguía afinando dentro de esas listas y el paso quedaba atado a la tarjeta que
+  se tocó («txt:camiseta de futbol · 7 pzas#pedido-variables»). AHORA la lista se marca en el JSX
+  con **`data-opciones`** y el localizador NO afina ahí: el paso es la lista, aunque se haya
+  grabado un solo clic («Tocá la prenda que lleva ese diseño», no «Tocá "Cuello redondo"»). Marcadas:
+  los diseños del pedido, los chips de diseño (pedido y arte), las prendas y —nueva, no tenía
+  marca— **la lista de prendas del paso Arte** (`arte-variables`, con su explicación).
+  Y los tutoriales YA grabados se des-afinan al reproducirlos.
+  **DOS COSAS MÁS que mostró el tutorial «2 colores» del usuario (36 pasos grabados):**
+  (a) **pasos repetidos** — escribir en dos filas de la misma columna daba `col:nombre` ×2 y el
+  tutorial repetía el cartel: dos clics seguidos EN EL MISMO LUGAR ya no son dos pasos (36 → 32).
+  ⚠️ Ese descarte va DESPUÉS de contar las opciones (si no, se comía la cuenta del «elegí 2») y
+  exige ancla de verdad (dos «esperar aviso» seguidos NO son un duplicado: son dos ventanas
+  distintas) — las dos cosas las agarró el contrato.
+  (b) **un cartel mostraba el ancla cruda** («Tocá «txt:camiseta de futbol · 7 pzas#pedido-…»»)
+  cuando el paso venía afinado y sin etiqueta: `explicar()` ya no cae nunca al identificador, sólo
+  a su parte legible.
+  CONTRATOS: §10a suma «un solo clic en una lista tampoco ata el tutorial a esa tarjeta», «dos
+  clics seguidos en la misma columna son UN paso» y «dos ventanas distintas seguidas siguen siendo
+  dos pasos». VERIFICADO con los dos tutoriales reales del usuario.
+  ⚠️ LO QUE NO SE PUDO ARREGLAR SOLO: en «2 colores» hay pasos `txt:cuello redondo` sin sección
+  (grabados cuando la lista de prendas del Arte todavía no tenía marca). Al reproducir marcan esa
+  tarjeta si está; si el molde es otro, no la encuentran y hay que seguir con «Siguiente →».
+  Regrabar ese tramo los deja como «elegí la prenda».
+- **2026-08-31 (360) — LA AYUDA NO SE GRABA A SÍ MISMA.** Pedido del usuario: «el botón de parar
+  y guardar para terminar el tutorial no saldrá en el tutorial: eso es del grabador». El clic en
+  «Parar y guardar» quedaba como un paso más (se veía en su tutorial «2 diseños», paso 4), así que
+  el tutorial terminaba enseñando a tocar un botón del grabador que quien lo sigue nunca ve. FIX:
+  el cartel de grabación lleva **`data-no-grabar`** y el grabador ignora todo lo que esté adentro
+  de algo así (igual que ya ignoraba la barra lateral) — sirve para cualquier control del propio
+  sistema de ayuda que se agregue después. Y los tutoriales YA grabados se limpian al
+  reproducirlos: `aGuion` descarta los pasos de la ayuda (`txt:parar y guardar`, «Grabar un
+  tutorial», el botón «Ayuda»…). CONTRATO en `verificar_guion.mjs`, probado con el caso real.
+- **2026-08-31 (359) — 🔴 OPCIONES INTERCAMBIABLES: «elegí 2», no «tocá estos 2».** Pedido del
+  usuario: «cuando tengo un modal con varias opciones —ejemplo, diseño— yo grabo el tutorial
+  presionando 2 botones random, pero quien pide ayuda puede elegir otros 2». Su tutorial «2
+  diseños» tenía grabados JUGADOR y GOLERO como dos pasos atados a ESOS botones: quien lo siguiera
+  quedaba obligado a elegir los mismos. En una lista de opciones lo que importa es CUÁNTAS, no
+  cuáles. FIX: (1) las listas de opciones equivalentes se DECLARAN en el diccionario con
+  **`opciones: true`** (`pedido-diseno-lista`, `pedido-diseno-chips`, `pedido-variables`,
+  `arte-diseno-chips`) — no se adivina, porque «Descargar sólo la hoja 1» y «Descargar la ficha
+  técnica» son dos botones del mismo panel y NO son intercambiables (358); (2) `aGuion` junta los
+  clics CONSECUTIVOS sobre la misma lista en UN paso con `cuantas: N`, que marca LA LISTA y dice
+  «Elegí 2 de esta lista (las que necesites)»; (3) el motor cuenta los clics de adentro y avanza
+  al llegar a N, sean los que sean, con el contador del globo («1 de 2»).
+  ⚠️ TRES DETALLES QUE COSTARON: el ancla ya puede venir afinada (`txt:jugador#pedido-diseno-lista`,
+  entrada 358), así que hay un helper único **`seccionDe(paso)`** y se compara SECCIÓN contra
+  SECCIÓN — comparar el ancla cruda no juntaba nada; el completado de etapas también tiene que
+  reconocer los pasos afinados (si no, agregaba de nuevo la etapa del diseño); y las anclas
+  grabadas se registran por ancla Y por sección.
+  CONTRATO §10a (dos clics en la lista = un paso «elegí 2» que marca la lista; y dos botones de
+  acciones distintas NO se juntan). VERIFICADO EN VIVO con su tutorial «2 diseños»: el guion queda
+  en 2 pasos («Elegí 2 de esta lista» + «Tocá "Elegir los moldes"»), y al tocar **GOLERO y DISEÑO
+  1** —ninguno de los que él grabó— el tutorial pasó de 1/2 a 2/2. Con diseños ya elegidos, el
+  paso se saltea solo (no repite lo hecho). ⚠️ NO VERIFICADO EN PANTALLA: el contador «0 de 2» del
+  globo (el código está y el avance funciona, pero no llegué a verlo dibujado: el pedido de prueba
+  ya tenía diseños y el paso se salteaba).
+- **2026-08-31 (358) — 🔴 DOS BOTONES DE LA MISMA VENTANA SON DOS PASOS DISTINTOS.** Reporte del
+  usuario: «si en un modal presiono 2 botones, el tutorial tiene que respetar eso y esperar a que
+  presione los 2». EL CASO REAL, en su tutorial «Camiseta»: los pasos 21 y 22 eran los DOS
+  `resultados-mesas` —«Descargar sólo la hoja 1» y «Descargar la ficha técnica completa»—. CAUSA:
+  `identificar` prefería el `data-tour` del ANCESTRO y perdía CUÁL control se tocó; con la marca
+  puesta en un PANEL, todos sus botones daban el mismo ancla → dos pasos idénticos, el tutorial
+  marcando el panel entero («en vez de marcar el botón que le puse marca todo el modal») y sin
+  forma de esperar los dos. FIX: formato de ancla nuevo **`txt:<nombre>#<sección>`** = ese control,
+  dentro de esa sección marcada. Reglas: el `data-tour` puesto EN el control manda (lo eligió una
+  persona); si está en un CONTENEDOR y el control tiene nombre propio, se guardan los dos; al
+  reproducir se busca ese control dentro de esa sección y, si ya no está, **se cae a la sección**
+  (mejor marcar la zona que nada). 🔴 Y LOS TUTORIALES YA GRABADOS SE ARREGLAN SOLOS: `aGuion`
+  afina el ancla con la `etiqueta` que el grabador guardó en cada paso —sin regrabar— y reescribe
+  el cartel para que nombre EL BOTÓN (si no, dos pasos distintos decían «Esperá a que termine de
+  armar la tizada»); un cartel escrito a mano en el editor no se pisa (`_aMano`).
+  ⚠️ DOS TRAMPAS DEL CAMINO: (a) afinar el ancla ANTES del completado de etapas le saca al paso su
+  etapa y desordena todo el guion — lo agarró el contrato §1 y por eso el afinado va AL FINAL;
+  (b) el paso del guion no llevaba la `etiqueta` del grabado, así que el afinado no hacía nada:
+  ahora viaja como `_etq`. CONTRATO §10b con el caso del usuario (dos «resultados-mesas» dan
+  anclas distintas, cada uno recuerda su sección, y un botón ya marcado a mano se queda con su
+  marca); el helper `anclas()` de los contratos mide ahora `seccion || ancla`, que es la identidad
+  semántica. VERIFICADO EN VIVO con su tutorial: los pasos finales son **«20/23 Tocá "Descargar
+  todo (1)" · 21/23 Abrí la "Ficha técnica" · 22/23 Tocá "Descargar sólo la hoja 1" · 23/23 Tocá
+  "Descargar la ficha técnica completa"»** — dos paradas distintas, cada una con su nombre.
+- **2026-08-31 (357) — 🔴 EL MODAL DEL PASO GANA A LA CARGA + UN MODAL DE UN SOLO BOTÓN SE MARCA
+  POR SU BOTÓN.** Segunda vuelta del reporte del usuario, con la misma captura: «esa ventana tiene
+  un botón de Entendido pero la ayuda lee un modal que está por detrás… y dentro de ficha técnica,
+  en vez de marcar el botón que le puse marca todo el modal; el modal sólo se marca si hay un
+  montón de botones entre los que elegir, acá tengo uno solo».
+  **(1) LO QUE FALTABA DE LA 355.** El arreglo anterior hacía ganar al modal sólo cuando era
+  AJENO al paso. Pero acá el paso ES el «Entendido» de esa ventana: `bloqueoModal` daba null (bien:
+  no hay que frenar, hay que hacerlo) y entonces, con una carga atrás, ganaba la CARGA → «Debés
+  esperar a que esto termine» con el botón a la vista. `queAtender` recibe ahora
+  **`modalDelPasoAbierto`**: si el modal de adelante es donde va el paso, se atiende EL PASO.
+  **(2) UN SOLO BOTÓN, SE MARCA EL BOTÓN.** Cuando el tutorial frena por un modal ajeno contaba
+  siempre la ventana entera. Ahora mira sus botones de acción (el aspa de cerrar no cuenta): con
+  UNO SOLO ilumina ESE botón y el cartel dice «Tocá "Entendido"»; con VARIOS ilumina la ventana y
+  explica, que es cuando de verdad hay que leer y elegir. ⚠️ El cálculo va SIN `useMemo`: el
+  contenido de un modal cambia sin que cambie el objeto del modal, y un memo se quedaba con la
+  cuenta vieja.
+  CONTRATO: §11a de `verificar_guion.mjs` sube a 8 casos (incluidos los dos nuevos), probado en
+  negativo. VERIFICADO EN VIVO con las dos superficies inyectadas sobre el tutorial corriendo:
+  modal de UN botón → cartel «Tocá "Entendido"» e iluminado 112×51 px (**el botón**, no el modal de
+  470×210); modal de DOS botones («Tipografía no encontrada») → cartel «Cargá la tipografía que
+  falta, o seguí igual…» e iluminado 456×216 (**la ventana**). ⚠️ Nota de la prueba: agregarle un
+  botón a un modal por DOM crudo no re-renderiza React, así que ese caso hay que probarlo con el
+  modal ya nacido con sus dos botones — como pasa en la app de verdad.
+- **2026-08-31 (356) — AUDITORÍA: QUE NADA QUEDE FUERA DEL TUTORIAL.** Pedido del usuario:
+  «chequeá que no quede nada del tutorial por fuera: todo lo que se cree, todo mini botón, espacio
+  de trabajo, visual, espacio de rellenar — todo lo manipulable tiene que ser grabable y los
+  tutoriales entenderlo; del lado del cliente y de configuración, todo». Se midió en la app REAL
+  (sandbox, 13 pantallas, **301 controles**: 115 con marca propia, 47 campos de escritura). Tres
+  agujeros encontrados y cerrados:
+  **(1) LO TOCADO NO SIEMPRE ES EL CONTROL.** El clic cae en el `<svg>`/`<path>` del ícono de un
+  botón; ese nodo no tiene nombre y `identificar` devolvía `null` → ese paso NO SE PODÍA GRABAR.
+  Ahora se sube al control que lo contiene.
+  **(2) HOMÓNIMOS.** 7 botones «Editar», 13 «Eliminar esta fuente del catálogo», 7 «Eliminar»…
+  todos daban el MISMO ancla, así que el tutorial marcaba el primero de la lista y no el que se
+  tocó. Ahora el ancla lleva el contexto de su fila (`txt:editar@manga`) y al reproducir se busca
+  entre los homónimos el de esa fila (si esa fila ya no está, cae al primero: mejor marcar algo
+  parecido que nada). ⚠️ El contexto es el texto de la fila **sin el de sus botones**: la primera
+  versión devolvía «eliminar» (el botón de al lado) para los 7 «Editar» — lo agarró la prueba en
+  la app real, no el contrato.
+  **(3) EL ESPACIO DE TRABAJO VISUAL.** El visor de piezas (un `<svg>` con 36 piezas clickeables,
+  donde se mapea el diseño y se asignan las telas) no tenía NADA con qué identificarse. Ahora el
+  lienzo lleva `data-tour="molde-visor"` (con su explicación) y cada pieza `data-pieza="<nombre>"`;
+  el localizador entiende **`pieza:<nombre>`** igual que `col:<id>` → tocar una pieza graba ESA
+  pieza («pieza:frente 1», «pieza:sisa izquierda») y el tutorial la ilumina a ella.
+  Además: 3 botones de sólo ícono SIN nombre (renombrar moldería, borrar planilla y el `Switch`)
+  ahora tienen `title` — sin nombre no se pueden grabar ni volver a encontrar.
+  CONTRATOS: §4b en `verificar_localizar.mjs` (tocar el ícono cuenta como el botón; dos «Editar» de
+  filas distintas dan anclas distintas y cada uno se reencuentra) y §8b en
+  `verificar_diccionario.mjs` (**ningún botón de sólo ícono sin nombre**, hoy 0; probado en
+  negativo). El DOM de juguete del contrato tuvo que crecer (selectores con coma, `innerText`,
+  `parentElement`, `querySelectorAll` por elemento) para poder ejecutar esta lógica de verdad.
+  📌 El candado `verificar_tdz.mjs` se ganó el sueldo en el camino: me atajó un `CONTROLES` usado
+  antes de declararse, ANTES de compilar.
+- **2026-08-31 (355) — 🔴 CON DOS VENTANAS ENCIMA, MANDA LA DE ADELANTE.** Reporte del usuario:
+  «me hace esperar por una ventana emergente que se encuentra detrás de otra ventana emergente;
+  reparalo para que marque la de atrás DESPUÉS de que se cierra la de adelante — en este caso se
+  cierra al presionar "Entendido", que ya es un paso del tutorial». La captura: el modal «Perfil de
+  color del diseño» ENCIMA de la carga «Se está poniendo el diseño sobre el molde», y el globo
+  diciendo «Debés esperar a que esto termine» sobre algo tapado. CAUSA: la carga ganaba dos veces
+  — `bloqueoModal` se anulaba con `if (!modalAb || carga) return null;` y en la cadena de `paso` la
+  carga iba primera. FIX: la decisión pasa a una función pura **`queAtender({modalTapando,
+  hayCarga, cargaEsDelPaso})`** en guion.js — *lo de adelante primero* — y la usan tanto el cartel
+  como lo que se ilumina (antes eran dos cadenas separadas que podían discrepar). Al cerrarse el
+  modal, si la carga sigue, el tutorial vuelve solo a la espera. CONTRATO §11a en
+  `verificar_guion.mjs` (los 5 casos de la tabla), probado en negativo. VERIFICADO EN VIVO
+  (sandbox, con el tutorial corriendo y las dos superficies inyectadas en el orden real): sólo la
+  carga → «ESPERÁ UN MOMENTO»; con el modal encima → **«PRIMERO ESTE AVISO — Leé el aviso y tocá
+  "Entendido" para seguir»** (la explicación real del modal, del diccionario); al cerrar el modal
+  → vuelve a la espera de la carga; al terminar la carga → sigue el paso normal.
+- **2026-08-31 (354) — EN LA PLANILLA EL PASO SE TERMINA A MANO.** Reporte del usuario, efecto
+  colateral de la 353: «no me deja escribir ni elegir sobre un desplegable porque salta a la otra
+  columna; sólo en la planilla el salto entre columna debe de ser manual». Con el clic cumpliendo
+  el paso y cada COLUMNA siendo un paso (345), el primer toque en una celda saltaba a la columna
+  siguiente antes de dejar cargar nada. La planilla no se toca: **se carga**, y un paso de columna
+  abarca todas las filas. FIX: `aGuion` marca `manual: true` los pasos cuyo ancla es `col:<id>` o
+  `planilla-tabla` (helper `esDeLaPlanilla`); el motor no los avanza por clic (sí por su regla
+  `listo`, si la tienen, o con «Siguiente →») y el globo lo dice: «Cargá lo que necesites en esta
+  columna y, cuando termines, tocá "Siguiente →"». Los botones de la planilla («Enviar el pedido»,
+  «Agregar fila») NO son manuales: ésos sí avanzan al tocarlos. CONTRATO §11b en
+  `verificar_guion.mjs` (columna y tabla manuales; el botón de enviar y un paso de otra pantalla,
+  no), probado en negativo.
+  🔴 DE PASO, OTRO CARTEL CON NOMBRE VIEJO, en un lugar que el candado de la 353 no miraba: los
+  puentes de NAVEGACIÓN viven en las RUTAS de `tutor.jsx`, no en el diccionario, y uno decía
+  «Volvé a la planilla con "← Atrás"» cuando el botón dice **«← Planilla»**. Corregido, y el
+  candado ahora **revisa las dos fuentes** (84 nombres citados en total); probado en negativo.
+  ⚠️ NO SE PUDO PROBAR EN LA PLANILLA REAL: llegar a ella exige cargar un arte, que es escritura, y
+  el sandbox es de sólo lectura. Queda cubierto por los contratos (el guion marca `manual`, el
+  motor tiene la guarda antes de enganchar el clic) pero **falta un ojo humano cargando una
+  columna con el tutorial corriendo**.
+- **2026-08-31 (353) — 🔴 EL PASO CON REGLA `listo` NO AVANZABA AL TOCARLO + LOS CARTELES
+  NOMBRABAN BOTONES QUE YA NO EXISTEN.** Reporte del usuario sobre «Asignar telas»: «presionás el
+  botón, abre una nueva barra donde están las telas, pero la ayuda no detecta eso y queda ahí
+  siempre… todo lo que sea similar también, que muestre todo como es». DOS problemas distintos en
+  la misma pantalla:
+  **(1) EL CLIC NO CONTABA.** El avance por acción arrancaba con
+  `if (fin || carga || bloqueoModal || esperaEstado) return;` — o sea que **con una regla `listo`
+  del diccionario «mandaba el estado» y el clic ni se escuchaba**. La regla de `arte-telas` es *no
+  falta ninguna tela*, algo que recién se cumple varias pantallas después: el tutorial quedaba
+  pegado al botón mientras el panel de telas se abría atrás, sin explicar nada de lo que hay que
+  hacer adentro. AHORA **tocar el control marcado cumple el paso, tenga o no regla**; el estado
+  sigue sirviendo para SALTEAR lo ya hecho y para avanzar sin clic cuando se cumple por otro lado
+  (se carga un archivo, se completa un campo). Lo que ya no hace es clavar un paso que la persona
+  efectivamente hizo. (Complementa la 352: allá el clic no se detectaba por el tipo de ancla, acá
+  ni se escuchaba por tener condición.)
+  **(2) EL CARTEL NOMBRABA UN BOTÓN INEXISTENTE:** decía «Tocá "Ver telas de pieza"» y el botón
+  dice **«Asignar telas»**. Se barrieron las 134 entradas comparando cada nombre citado entre
+  comillas contra App.jsx: 5 estaban viejos — `arte-telas` («Ver telas de pieza» → «Asignar
+  telas»), `planilla-cantidad` («Mostrar columna de cantidad» → «Columna cantidad»),
+  `agrupar-activar` («Agrupar piezas» → «Nombrar piezas»), `pieza-agregar` («Agregar pieza» →
+  «Agregar una pieza») y `resultados-volver-planilla` («← Atrás» → «← Planilla»).
+  CONTRATOS: §9a nueva en `verificar_diccionario.mjs` — **todo nombre entre comillas de un cartel
+  tiene que existir tal cual en App.jsx** (64 citados; los EJEMPLOS de datos como «con capucha» o
+  «capucha = sí» van exentos por lista con su motivo, para que el candado no se vuelva ruido); y
+  en `verificar_localizar.mjs`, que el avance por clic no vuelva a apagarse con `esperaEstado`.
+  Los dos probados en negativo. VERIFICADO EN VIVO (sandbox 8060, tutorial real del usuario): el
+  paso 10/24 muestra «Tocá "Asignar telas"», se toca el botón y **pasa a 11/24 explicando lo que
+  se abrió** («Asigná la tela a las piezas: 1) elegí la tela de la lista…»).
+- **2026-08-31 (352) — 🔴🔴 EL PASO NO AVANZABA AL TOCAR EL CONTROL MARCADO (bug viejo, de todos
+  los pasos sin `data-tour`).** Reporte del usuario con la tarjeta «Cuello redondo»: «presionás y
+  no salta al siguiente paso». CAUSA: el detector del clic era
+
+      const dentro = (t) => anclas.some(a => t.closest(`[data-tour="${a}"]`));
+
+  o sea **sólo entendía anclas con `data-tour`**. Pero la MAYORÍA de los controles no la tienen y
+  se identifican por su texto (`txt:camiseta asque · 6 pzas`) —lo dice el propio comentario de
+  `useAncla`—, así que para todos ésos el selector no matcheaba nada y el clic NO CONTABA NUNCA.
+  Lo mismo con las columnas de la planilla (`col:<id>`, entrada 345). No se veía siempre porque
+  muchos pasos avanzan por otro camino (cambian de pantalla, o su regla `listo` se cumple sola):
+  quedaba clavado justo en los que se resuelven tocando y nada más — elegir la prenda de un molde,
+  por ejemplo. FIX: **`esDelAncla(el, ancla)`** en `localizar.js`, el único lugar donde se decide
+  si lo tocado es el control del paso, con las tres formas de ancla: `data-tour` (closest),
+  `txt:` (el control tocado —o el que lo contiene— se llama así, o lo tocado está DENTRO del que
+  resuelve `buscar`: un clic en el dibujito de la tarjeta cuenta como clic en la tarjeta) y `col:`
+  (celda, encabezado o desplegable de esa columna). Mismo camino que `rectDeAncla`: un solo
+  resolutor, para que ILUMINAR y DETECTAR no puedan discrepar. De paso, `valorDe()` (los pasos de
+  «escribir») también usaba `querySelector('[data-tour=…]')` y dejaba afuera los campos sin marca:
+  ahora usa `buscar`. CONTRATO `verificar_localizar.mjs` §4 con el caso exacto del reporte (botón
+  con `title`, clic en un hijo, otro botón que no cuenta, celda de columna y celda de otra
+  columna); probado en negativo. VERIFICADO sobre la tarjeta REAL en el sandbox: su ancla es
+  `txt:camiseta asque · 6 pzas`, hay UN solo candidato en pantalla y es ella, y el clic en su hijo
+  («Cuello redondo») cae adentro → cuenta.
+- **2026-08-28 (351) — 🔴🔴 «modalAb is not defined»: BORRÉ DECLARACIONES AL SACAR LA LÓGICA DE 2
+  DISEÑOS.** Reporte del usuario con la consola. Al cortar bloques enteros de `tutor.jsx` (entrada
+  349) me llevé por delante **cuatro cosas que estaban en el medio y no eran del ciclo**:
+  `const carga = useCargando(!fin)` y `const modalAb = useModalAbierto(!fin)` (quedaron dentro del
+  tramo del desvío que borré) y el helper **`ventanita()`** que dibuja las ventanas emergentes
+  (quedó dentro del tramo de la vista real). Compiló igual —Vite no valida símbolos— y reventó al
+  abrir la ayuda: `ReferenceError: X is not defined`, que en React es la pantalla NEGRA. Las tres
+  se restauraron. 🔴 EL CANDADO AHORA MIRA ESO: `verificar_tdz.mjs` suma la regla **`no-undef`**
+  (con las globales de navegador y Node, en `eslint.tdz.config.mjs`) a la que ya tenía —«usado
+  antes de declarar»—: las dos revientan React entero y ninguna la ve un contrato que no ejecuta
+  el componente. Probado en negativo borrando `modalAb` a propósito: reporta las 3 líneas que lo
+  usan y corta el build. DE PASO, el candado nuevo destapó **un cuarto problema que NO era de esta
+  tanda**: el efecto que mide cuánto dura un cartel usaba `pregunta` y `llevan`, que son PROPS del
+  Globo y no existen en el Tour — sólo se alcanzaba en pasos de tipo «ver»/«gesto», por eso nunca
+  había explotado; ahora usa `preguntando` y `cuantas[idx]`, que son los reales. VERIFICADO EN
+  VIVO (sandbox 8060): el tutorial arranca y muestra su cartel, el editor abre con sus 23 chips y
+  24 huecos —sin marcas ni vista real—, el catálogo dibuja las 16 ventanas, el botón «Ayuda» del
+  Panel de Producción abre el menú, y la consola no tiene un solo error.
+  📌 LECCIÓN: **cortar por marcadores de texto («desde este comentario hasta aquel») se lleva lo
+  que haya en el medio.** Cuando el borrado es grande, listar los símbolos que quedan dentro del
+  tramo ANTES de cortar — o, más barato, correr el candado después de cada corte y no sólo al
+  final.
+- **2026-08-28 (350) — LA AYUDA ES PARA TODOS; GRABARLA, SÓLO EL ADMIN.** Pedido del usuario:
+  «para los usuarios que no son admin y no tienen acceso a la barra, cambiá el botón de ayuda a
+  otro lugar donde puedan acceder todos; pero los tutoriales los puede crear un admin nomás». El
+  botón de Ayuda vivía SÓLO en la barra lateral, que existe únicamente en modo diseñador
+  (`modoDisenador`, ruta `/admin`): el operario —el que más necesita el tutorial— no llegaba
+  nunca. AHORA: (1) botón «Ayuda» en la barra superior del **Panel de Producción**, con el MISMO
+  `data-tour="nav-ayuda"` (nunca están los dos a la vez, así que el localizador no se confunde y
+  no hace falta otra entrada del diccionario). (2) Permiso nuevo **`ayuda.grabar`** (módulo
+  config, `auth.py`): sin él, el menú de ayuda esconde «Grabar un tutorial», «Editar» y «Borrar»
+  —y el cartel de «todavía no hay ninguno» dice que los graba el administrador—, pero **la
+  seguridad NO es esconder el botón**: `_guard_grabar_tutorial()` en servidor.py rechaza el POST y
+  el borrado (401 sin sesión, 403 sin permiso); VER y seguir tutoriales no pide nada. (3) 🔴 DOS
+  ARREGLOS DE FONDO que hacían falta para que esto funcionara en una instalación YA HECHA:
+  `bootstrap()` sólo corre al INSTALAR, así que un permiso agregado después no existía en la base
+  y la función quedaba inaccesible para todos —ahora el server **sincroniza permisos y roles al
+  arrancar** (idempotente, no borra ni pisa los roles del usuario)—; y `sincronizar_roles` no
+  tocaba los roles ya creados, así que el rol **admin** (de sistema) nunca recibía los permisos
+  nuevos: ahora se pone al día con todos (su pantalla no deja editarlo, así que no pisa nada
+  elegido a mano). CONTRATO en `verificar_tutorial_ventana.py`: sin sesión→401, con
+  `pedido.crear`→403, con `ayuda.grabar`→200, borrar sin permiso→403, y GET sin permiso→200.
+  VERIFICADO en la base real (sólo lectura): `ayuda.grabar` sembrado (id 18) y asignado al rol
+  admin.
+- **2026-08-28 (349) — 🔴🔴 SE ELIMINÓ TODA LA LÓGICA AUTOMÁTICA DE «2 DISEÑOS».** Decisión del
+  usuario: «lo que hacemos de 2 diseños eliminalo por completo; si se quiere para 2 diseños se
+  debe de grabar para 2 diseños y listo». Se probó durante un día entero y el resultado era
+  impredecible para quien seguía el tutorial. SE FUE: en `guion.js` —`vistaReal`,
+  `bloquesPorDiseno`, `etapaIncompleta`, `conAntes`, `TRANSICIONES`, el bucle `{desde, etapa}`, las
+  marcas `vuelta`/`vuelta2`/`mid`/`repite` y la condición `solo`— (314 → 163 líneas); en
+  `diccionario.js` los tres desvíos `antes` y la pregunta «¿cuántos diseños vas a cargar?»; en
+  `App.jsx` los campos `activoConVariable`/`activoArteCargado`/`activoTelasListas` que sólo
+  alimentaban eso; en `tutor.jsx` el bucle al avanzar, los desvíos, el replay de las marcas, el
+  salteo de pasos no pintados, y en el EDITOR las marcas «↻», el pintado, el modo «elegir pasos»,
+  la vista real de 2 diseños y el selector «Sólo con 2+ diseños»; en `servidor.py` los campos
+  `vuelta2`/`mid`/`repite`/`solo` del sanitizador y la excepción que dejaba guardar pasos sin
+  ancla. QUEDA (y es lo que hace falta): las palabras del diccionario, el completado de etapas
+  que la grabación no tiene, `pasoSuperado` (arrancar desde donde está la persona), las ventanas
+  emergentes, el texto a mano y la pregunta «¿cuántas prendas?» de la planilla —que NO es del
+  ciclo—. COMPATIBILIDAD: un tutorial viejo con marcas sigue sirviendo — `aGuion` las descarta y
+  lo reproduce plano; el editor las saca al abrirlo y al guardar quedan limpias. CONTRATOS:
+  `verificar_guion.mjs` perdió las secciones 7 (ciclo), 9 (bucle) y 12 (vista real) y ganó una
+  §12 nueva que **prohíbe que la lógica vuelva** (ninguna de las 8 palabras clave puede reaparecer
+  en `guion.js`, y un tutorial viejo con marcas tiene que reproducirse plano); el del diccionario
+  perdió la validación de `antes` y el fixture MITAD; el del servidor exige que esos campos ya no
+  se guarden. Todo probado en negativo. 📌 LECCIÓN: la inteligencia automática que ADIVINA lo que
+  el usuario quiere repetir es peor que no tener nada — lo que se graba es lo que se muestra.
+- **2026-08-28 (348) — 🔴🔴 PANTALLA NEGRA AL CARGAR EL ARTE CON LA AYUDA ABIERTA (bug MÍO,
+  introducido hoy).** Reporte del usuario con la consola: `Uncaught ReferenceError: Cannot access
+  'ge' before initialization`. CAUSA: en `tutor.jsx`, `const paso = (carga && !modalDelPaso) ? …`
+  leía **`modalDelPaso`, que se declaraba 19 líneas más abajo**. Leer una `const` antes de su
+  declaración no da `undefined`: tira ReferenceError (zona muerta temporal), y en React eso no es
+  un aviso — se cae el árbol entero y la pantalla queda NEGRA. **POR QUÉ NO SALTÓ EN NINGUNA
+  PRUEBA:** el `&&` corta. Sin ventana de carga a la vista, `modalDelPaso` no se evaluaba nunca;
+  reventaba SÓLO con una carga en pantalla, o sea justo al cargar el arte — el momento exacto que
+  esta misma tanda había agregado (el tutorial frena y explica la espera). Lo introduje al mover
+  esa expresión y no lo vi porque probé el editor y el catálogo, nunca el flujo con una carga
+  activa. FIX: `avisoAb` y `modalDelPaso` se declaran ANTES de `paso` (dependen sólo de `carga`,
+  `modalAb` y `pasoGuion`, ya declarados arriba). Se ordenaron además `alternarPintado` y
+  `ventanita` (tutor.jsx) y `TRANSICIONES` (guion.js), que hoy no rompían —se leen recién al tocar
+  o al dibujar— pero son la misma bomba a un movimiento de distancia.
+  CONTRATO NUEVO **`frontend/verificar_tdz.mjs`** (en el build): corre ESLint
+  (`no-use-before-define`) sobre `tutor.jsx`, `guion.js`, `localizar.js` y `diccionario.js` y CORTA
+  si algo se lee antes de declararse. Probado en negativo con el archivo real de esta mañana:
+  reporta `tutor.jsx:536 — 'modalDelPaso' was used before it was defined` — o sea, el linter
+  habría atajado la pantalla negra antes de que la viera el usuario. ⚠️ Usa
+  `eslint.tdz.config.mjs` propio porque **`npm run lint` del proyecto HOY NO ARRANCA**
+  (`reactHooks.configs.flat.recommended` es `undefined` con la versión instalada del plugin) —
+  pendiente arreglarlo aparte; `App.jsx` queda fuera del candado por ahora (arrastra usos previos
+  que taparían lo nuevo). VERIFICADO EN VIVO (sandbox 8060): con el tutorial corriendo se inyectó
+  una ventana `data-cargando` real; la pantalla sigue viva y el tutorial muestra «Debés esperar a
+  que esto termine» — sin ReferenceError en consola.
+  📌 LECCIÓN: un cambio en el tutorial no está probado hasta correrlo **con una ventana de carga a
+  la vista**; los contratos no ejecutan React y no ven este tipo de error, el linter sí.
+- **2026-08-28 (347) — 🔴 UN SOLO RESOLUTOR DEL RECUADRO (el editor marcaba sólo el TÍTULO).**
+  Reporte del usuario: «cuando te digo marcar toda la columna es el título y todas las casillas de
+  todas las filas de esa columna». El Tour ya iluminaba la columna entera (346), pero el EDITOR
+  tiene su propio resaltado y medía `buscar(ancla).getBoundingClientRect()` a secas → como
+  `buscar('col:x')` devuelve el ENCABEZADO, marcaba sólo el título. Dos lugares dibujando lo mismo
+  con reglas distintas: la misma clase de bug que ya se pagó en el motor con `_encaje()` (ver
+  [[referencia-medida-alto-ancho]]). FIX: **`rectDeAncla(ancla, el)`** en `localizar.js` es el
+  ÚNICO que decide el recuadro de un paso — columna entera (título + todas las casillas + su
+  desplegable) para `col:`, el elemento para todo lo demás — y lo usan el Tour (`useAncla`) y el
+  editor. CONTRATO (`verificar_localizar.mjs` §3): un paso de columna NO puede medir lo mismo que
+  su encabezado solo, un paso normal sigue siendo su control, y **`tutor.jsx` tiene que llamar a
+  `rectDeAncla` al menos dos veces** (si uno vuelve a medir por su cuenta, falla) — probado en
+  negativo.
+  ⚠️ **TRAMPA DE MEDICIÓN QUE COSTÓ UNA HORA (anotar y no repetir):** al verificar en el navegador
+  embebido, `getBoundingClientRect()` de un elemento del PORTAL daba `x:223 w:868` (la tabla)
+  mientras el elemento tenía `style.left:542.75px; width:162px` (la columna). El pane aplica un
+  zoom propio, así que las coordenadas medidas NO son las que dibuja la página: parecía que el
+  recuadro estaba congelado en la tabla y estuve buscando un bug que no existía (revisé closures,
+  deps del efecto, doble montaje del portal, caché del bundle). Lo que destrabó el diagnóstico fue
+  un `console.log` temporal dentro del efecto —mostró `col:nombre {x:547.75, w:152, h:202}`, o sea
+  el cálculo SIEMPRE estuvo bien— y después comparar `style` crudo contra el rect medido.
+  **Para verificar posiciones en ese navegador: leer `el.style` (lo que la app dibuja), no
+  `getBoundingClientRect` (lo que el pane muestra).**
+- **2026-08-28 (346) — LA COLUMNA SE ILUMINA CON SU DESPLEGABLE.** Reporte del usuario: «debe de
+  seleccionar toda la columna y el desplegable también». La lista de opciones de una celda (Talle,
+  Diseño…) NO vive dentro de la tabla: `ComboCell` la monta con `createPortal` en el body,
+  `position: fixed`, z-index 3000. Como el recuadro de la columna se arma con los `[data-col]`, la
+  lista quedaba afuera — y afuera del hueco está el velo del tutorial (z-index 100000), así que la
+  lista se veía OSCURECIDA justo cuando hay que elegir en ella. (Tocarla siempre se pudo: el
+  recorte es `pointerEvents:none` — el problema era de vista, no de clic.) FIX: `ComboCell` recibe
+  `colId` y su portal se marca con **`data-col-lista`**; `rectDeColumna` suma
+  `[data-col-lista="<id>"]` a `[data-col="<id>"]`. Como el recuadro se re-mide solo cada 250 ms, el
+  hueco CRECE al abrirse la lista y se achica al cerrarla. CONTRATO (`verificar_localizar.mjs`):
+  con la lista abierta el alto pasa de 50 a 130 sin mover el techo, la lista de una columna no
+  agranda a las otras, y al cerrarse vuelve — probado en negativo; + candado en
+  `verificar_diccionario.mjs` de que el portal siga marcando su columna (probado en negativo).
+  ⚠️ LO QUE NO SE PUDO VERIFICAR EN VIVO Y POR QUÉ: abrir ese desplegable con eventos fabricados
+  desde la consola NO funciona (React ignora los clics sintéticos para este flujo: probé
+  click/dblclick, PointerEvent + MouseEvent completos y Enter; la celda nunca entró en edición), y
+  el navegador de la sesión no compone frames (no hay screenshot ni clics reales). Se verificó lo
+  que sí se puede: el `data-col` de encabezado y celdas en la planilla REAL (columna Nombre = 6
+  celdas, 152 px dentro de una tabla de 858), el mecanismo completo en el contrato, y que
+  `data-col-lista` llega al bundle compilado. Falta un ojo humano abriendo la lista con el tutorial
+  corriendo.
+- **2026-08-28 (345) — 🔴 UN PASO DE LA PLANILLA MARCA SU COLUMNA, NO LA TABLA ENTERA.** Reporte
+  del usuario: «ese paso marcado en realidad debe de marcar la columna que estamos trabajando, no
+  la planilla completa». CAUSA: `identificar()` sube al `[data-tour]` más cercano y la ÚNICA marca
+  de la planilla está en la `<table data-tour="planilla-tabla">` → tocar Talle, Nombre o Número
+  grababa **el mismo paso** (por eso el tutorial del usuario tiene cinco «Planilla del pedido»
+  seguidos, indistinguibles) y al reproducir se iluminaba la tabla completa. FIX en cuatro puntas:
+  (1) **App.jsx**: el `<th>` y el `<td>` de la planilla llevan `data-col={c.id}` +
+  `data-col-label` + `data-col-role`. (2) **localizar.js**: `identificar` devuelve `col:<id>`
+  cuando el `data-col` está MÁS ADENTRO que el `data-tour` (si una celda tuviera un control
+  marcado, ese control gana); `buscar('col:x')` devuelve el encabezado (para el scroll) y la nueva
+  **`rectDeColumna(id)`** une encabezado + celdas; + `etiquetaColumna(id)`. (3) **tutor.jsx**:
+  `useAncla` ilumina con `rectDeColumna` cuando el ancla es `col:`. (4) **diccionario.js**: qué es
+  cada columna (`col:talle|nombre|numero|cantidad|diseno|manga`); una columna propia del molde
+  («Talle short», una sisa) cae al fallback con su LABEL. Además, **los pasos YA grabados no hay
+  que regrabarlos**: en el detalle del paso hay un selector de columna que reescribe su ancla
+  (`planilla-tabla` ↔ `col:<id>`), con las columnas leídas de la planilla en pantalla (son
+  configurables por molde) o las conocidas (`COLUMNAS_CONOCIDAS`). CONTRATO NUEVO
+  **`frontend/verificar_localizar.mjs`** (en el build): arma una planilla de juguete en memoria —
+  no hay navegador — y exige que tres columnas den TRES pasos distintos, que un control marcado
+  adentro de una celda le gane a la columna, y que el recuadro abarque del encabezado a la última
+  celda con el ancho de ESA columna; probado en negativo (4 fallas). Candado extra en
+  `verificar_diccionario.mjs`: las claves `col:` no son texto muerto pero su columna debe existir
+  en App.jsx (agarró dos inventadas: `variable` y `tela` NO son columnas — la variable se elige por
+  fila y la tela por pieza), y el `data-col` tiene que estar en el `<th>` **y** en el `<td>` (con
+  uno solo el candado no detectaba nada: probado). VERIFICADO en la planilla real (sandbox 8060):
+  la columna Nombre son 6 celdas y su recuadro mide 152 px dentro de una tabla de 858; el selector
+  del editor trajo las columnas reales del molde (Talle, Talle short, Nombre, Número, Manga,
+  Diseño) y cambiarlo convirtió el paso 18 de «Planilla del pedido» a «Columna Nombre».
+  ⚠️ Trampa: `rectDeColumna` quedó sin cerrar la llave y lo agarró el contrato del guion (que
+  importa `localizar.js`) ANTES de compilar — por eso los contratos van antes del build.
+- **2026-08-28 (344) — LAS VENTANAS DEL CATÁLOGO SE DIBUJAN (no se nombran).** Pedido del
+  usuario: «¿se puede hacer visual las ventanas emergentes a elegir? así sé cuáles son, porque no
+  sé por nombre». RAÍZ: de las 16 ventanas de `AVISOS_CONOCIDOS`, **sólo 1 tenía ficha** en el
+  diccionario — las otras 15 eran un título suelto, y por eso también el tutorial las explicaba
+  con el texto genérico de `explicarModal` («Apareció X, leelo y respondé lo que pide») cuando se
+  abrían solas. FIX en dos partes: (1) **las 16 fichas completas** en `diccionario.js`
+  (`que`/`como` + el campo nuevo **`ventana: {contenido, botones, cuando, paso, trabajo}`**),
+  relevadas del JSX real de App.jsx — los BOTONES son los textos exactos de cada modal; nueva
+  `fichaVentana(titulo)` exportada. (2) el catálogo del editor (tutor.jsx `ventanita(titulo,
+  activa, grande)`) dibuja **la ventana**: barra de título, lo que se ve adentro, dos renglones
+  grises de cuerpo y **sus botones reales** (o la barra de progreso si es de trabajo), y debajo
+  «Aparece al cargar un diseño» con el punto del color de su etapa (`COLOR_ETAPA[f.paso]`). En la
+  línea de tiempo el chip sigue compacto (40 px). BENEFICIO EXTRA: como el cartel del tutorial sale
+  del mismo diccionario, ahora esas 15 ventanas se explican de verdad al abrirse (verificado:
+  «Tipografía no encontrada» → «Cargá la tipografía que falta, o seguí igual…»). CONTRATO §10 en
+  `verificar_diccionario.mjs`: toda ventana de `AVISOS_CONOCIDOS` necesita `que`+`como`+
+  `ventana.contenido`+`ventana.cuando`, un `paso` de la lista válida, y `trabajo` coherente con
+  ser carga o no (16/16); probado en negativo. VERIFICADO en la UI real (sandbox 8060): las 16
+  tarjetas con su contenido, botones y «Aparece …», y al elegir una queda en la posición exacta
+  del «+» (la ventana «Tipografía no encontrada» quedó de paso 6).
+- **2026-08-28 (343) — 🔴 LOS DESPLEGABLES SE ABRÍAN EN BLANCO (todos, desde siempre).** Reporte
+  del usuario con la captura de una lista vacía con una sola línea azul: «repará todos los
+  desplegables que al abrir se vean así». CAUSA: la lista que se abre al tocar un `<select>` la
+  dibuja el **sistema operativo**, no la app. La página nunca declaró `color-scheme`, así que
+  Windows la pintaba con el tema CLARO (fondo blanco) mientras las `option` heredaban el
+  `color: var(--text-primary)` (casi blanco) de la regla `input, select` → **texto blanco sobre
+  blanco**: la lista parecía vacía y sólo se leía la opción bajo el mouse (la resaltada azul del
+  sistema). No era del editor de tutoriales: afectaba a los **14 desplegables** del sistema
+  (unidades, fuente faltante, grupo de empaque, regla de columna, comportamiento, rotación…) desde
+  siempre. FIX en `index.css`, global y de una sola vez: `:root { color-scheme: dark }` (el popup,
+  los scrollbars y **todo** control nativo se dibujan oscuros — de paso arregla el calendario y el
+  reloj de los `input type=date/time` y el `type=color`, que tenían el mismo problema) + `select
+  option`/`select optgroup` con `background-color: var(--bg-dark)` y color propio, por si un
+  navegador ignora lo primero. CONTRATO NUEVO **`frontend/verificar_estilo_ui.mjs`**, sumado a
+  `npm run build` (y a `build:publicado` y `npm run diccionario`): vigila las reglas de CSS que al
+  caerse rompen la pantalla EN SILENCIO — nada explota, algo se vuelve ilegible y nadie se entera
+  hasta que llega una captura. Ignora lo comentado (una regla comentada NO cuenta como puesta) y
+  se probó en negativo. VERIFICADO en el navegador (sandbox 8060): `color-scheme` computado
+  `dark`, y las `option` del select del reporte (14 opciones) con fondo `rgb(12,12,14)` y texto
+  `rgb(250,250,250)`.
+- **2026-08-28 (342) — LAS VENTANAS SE PONEN EN LA LÍNEA DE TIEMPO (un «+» entre paso y paso).**
+  Pedido del usuario con la captura de «Poniendo el diseño sobre el molde…»: «ese tipo de ventana
+  debe de poder también poner en la línea de tiempo de paso para indicar que ahí aparecerá esa
+  ventana y antes de seguir mostrará esa ventana». El paso «esperar aviso» YA existía (entrada
+  334) pero estaba escondido: había que seleccionar un paso, tocar «+ ventana» y recién ahí
+  elegirla de un desplegable. Ahora: (a) entre cada par de pasos —y en los dos extremos— hay un
+  **«+»** que abre el CATÁLOGO de las 16 ventanas que el sistema conoce (`AVISOS_CONOCIDOS`),
+  agrupadas en **«Mientras el sistema trabaja (esperar)»** (las 3 `data-cargando`) y **«Avisos que
+  se responden»** (los 13 `data-modal`), cada una con su dibujo; se elige una y queda insertada EN
+  ESE HUECO ya nombrada, con el título diciendo entre qué pasos va. (b) La ventana de TRABAJO se
+  dibuja como lo que es —barra de progreso y SIN ✕ (no se cierra a mano)—; el dibujo lo hace un
+  solo helper `ventanita()` que comparten el catálogo y la línea, así lo que elegís es igual a lo
+  que queda puesto. (c) `aGuion` distingue trabajo de aviso: el cartel de una carga dice **esperar**
+  («el sistema se pone a trabajar… esperá a que termine», nota «no hay nada que tocar») en vez del
+  genérico «respondé lo que pide», que mandaba a buscar un botón inexistente; campo `esTrabajo`.
+  CONTRATO en `verificar_guion.mjs` («la ventana de TRABAJO pide ESPERAR; la de aviso, responder»),
+  probado en negativo. VERIFICADO EN LA UI REAL (sandbox 8060 sobre el tutorial «Camiseta» del
+  usuario, 32 pasos): 33 huecos «+», catálogo con los 2 grupos y 16 ventanas, insertar deja la
+  ventanita con barra de progreso y sin ✕ en la posición 4, el detalle queda con ella elegida, y la
+  **vista real** la muestra en su lugar del tiempo («🗔 Se está poniendo el diseño sobre el molde.»
+  entre «Elegir los moldes» y «Diseños del pedido»). ⚠️ Trampa de la verificación: el label «Así
+  corre:» va en `text-transform: uppercase` → buscarlo por `innerText` exige comparar en MAYÚSCULAS
+  (parecía que la vista real no se prendía y sí funcionaba).
+- **2026-08-28 (341) — EL PASO QUE VIVE EN UNA VENTANA EMERGENTE MUESTRA SU VENTANA.** Pedido del
+  usuario (captura del chip «Entendido»): «este paso se hace en una ventana emergente y no la veo a
+  la ventana» — el clic grabado dentro del modal «Perfil de color del diseño» aparecía como un chip
+  suelto, sin rastro de la ventana a la que pertenece. Nuevo campo del paso: **`ventana`** (el
+  título del `[data-modal]` donde cayó el clic). (a) GRABADOR (App.jsx `pasosGrab` y la captura «⏺
+  Agregar pasos» del editor): `el.closest('[data-modal]')` → `ventana: <título>`. (b) SERVER
+  (`guardar_tutorial`): persiste `ventana` (80 chars). (c) EDITOR (tutor.jsx): el chip con
+  `ventana` se dibuja como VENTANITA ámbar — mini barra de título con el nombre de la ventana y el
+  botón adentro («Perfil de color del diseño › Entendido»); y en el detalle de cualquier paso de
+  clic hay un selector «Sin ventana / en: …» (títulos de `AVISOS_CONOCIDOS.modales`) para asignarla
+  A MANO a los tutoriales YA grabados sin el dato (el del usuario). (d) REPRODUCCIÓN (Tour): si al
+  llegar al paso su ventana NO está abierta, el cartel explica «este paso va en la ventana “X”, que
+  se abre sola en este punto… si no te salió, Siguiente →» (paso con `esVentanaFalta`; se suprime
+  el «Buscando ese lugar…» que lo contradecía) en vez de buscar un botón que no existe; cuando la
+  ventana aparece, el flujo normal la señala adentro (la exención de `bloqueoModal` ya cubría ese
+  caso). (e) GUION (`aGuion`): copia `ventana` al paso. CONTRATOS: `verificar_guion.mjs` («el paso
+  grabado dentro de una ventana conserva `ventana`», probado en negativo) y **nuevo
+  `verificar_tutorial_ventana.py`** (backend con doble de `db`: POST/GET persisten
+  ventana/texto/mid/repite, la basura se recorta; ⚠️ el catálogo ahora vive en la base → el doble
+  necesita `get_doc`/`set_doc` EN MEMORIA + `proyectar_catalogo` no-op, y hay que sabotear
+  `api_usuarios` en `sys.modules` para que no exija sesión — mismo patrón que
+  `verificar_config_concurrente.py`/`srv_visor.py`). Al reiniciar quedó un server HUÉRFANO de la
+  mañana sin puerto (el 8050 lo tenía el nuevo): matado por PID específico — verificar SIEMPRE
+  quién tiene el puerto con `Get-NetTCPConnection` antes de asumir cuál corre.
+- **2026-08-28 (340) — LA MARCA «↻»: rango DE MARCA A MARCA y selección EN LA LÍNEA REAL.**
+  Correcciones del usuario sobre la 339: (a) los pasos elegibles van desde la marca ANTERIOR hasta
+  ésta (lo previo pertenece a la vuelta de la otra marca); (b) la lista de píldoras se eliminó —
+  al presionar la marca aparece el botón «Elegir pasos del siguiente diseño» y, habilitado, los
+  pasos se seleccionan APRETANDO LOS CHIPS DE LA LÍNEA: los del rango quedan ofrecidos (contorno
+  punteado violeta), el resto atenuado (35%) y sin efecto. «Todos»/«Ninguno» operan sobre el
+  rango. Salir de la marca apaga el modo.
+  🔴 **Casi-desastre evitado**: creí que un parche a medias había ensuciado tutor.jsx e intenté
+  `git checkout --` — el clasificador lo bloqueó, y MENOS MAL: todo el trabajo del día está SIN
+  COMMITEAR y eso lo borraba entero. El parche nunca se había ejecutado; el archivo estaba sano.
+  **Lección: verificar el estado real ANTES de revertir, y nunca `git checkout --` sobre trabajo
+  sin commitear.** Build y salud ok; sólo frontend.
+
+- **2026-08-28 (339) — LA HERRAMIENTA DE LA MARCA «↻».** Pedido del usuario: al presionar la
+  marca, una herramienta para SELECCIONAR los pasos que se vuelven a hacer en el siguiente diseño.
+  El detalle de la marca ahora ES esa herramienta: la lista de los pasos ANTERIORES a la marca,
+  cada uno como píldora con su tilde — se tocan para entrar/salir de la repetición — más los
+  botones «Todos» / «Ninguno». Todo pasa por `alternarPintado(k, mid)`, el mismo camino que el
+  pintado tocando los chips de la línea (las dos formas conviven). Sólo se listan los pasos de
+  ANTES de la marca (lo de después no puede repetirse desde ahí). Build y salud ok; sólo frontend.
+
+- **2026-08-28 (338) — 🔴 CADA MARCA «↻» ELIGE SUS PASOS, y quedan PINTADOS.** Pedido del
+  usuario: al tocar una marca, poder marcar QUÉ pasos arrancan desde ahí; se repiten en el mismo
+  orden y quedan pintados. Marcas: todas las que se quieran.
+  **Modelo**: cada marca lleva identidad (`mid`); cada paso pintado guarda `repite: [mid,…]`
+  (puede estar en varias marcas). El servidor persiste los dos campos.
+  **Editor**: con una marca elegida, TOCAR un paso lo pinta/despinta para esa marca. Pintado =
+  lavado violeta suave (+ insignia ↻) siempre visible; con su marca elegida, fuerte. El detalle de
+  la marca dice cuántos pasos repite y cómo pintar. Las marcas nacen con `mid` (al materializar y
+  al insertar con «+ ↻ marca»).
+  **Reproducción** (Tour): al llegar a una marca con pasos pintados y trabajo pendiente, se salta
+  al PRIMER pintado y los no pintados del medio se pasan de largo hasta volver a la marca
+  (`replayRef`); otra marca en el medio del replay se ignora. Se repite mientras falte algún
+  diseño — misma regla para N. **Sin pintar ninguno**: vuelve al principio y el salteo inteligente
+  pide sólo lo necesario (el modo de la 337, que queda como automático).
+  **Vista real**: la 2ª vuelta muestra EXACTAMENTE los pintados, en su orden.
+  Contratos: servidor guarda `mid`/`repite`; la vista real repite exactamente los pintados
+  (verificado ejecutando el guion). Server reiniciado y verificado; build y salud ok.
+
+- **2026-08-28 (337) — 🔴 LA MARCA «↻» ES LIBRE: un ítem más de la línea, y su significado es
+  «hasta acá».** Corrección del usuario sobre la 336: la marca tiene que poder acomodarse
+  «libremente entre medio de cualquier paso», y lo que indica es que «hasta ahí pedirá todos los
+  pasos anteriores que sean necesarios o que sean doble de hacer».
+  **Modelo nuevo**: la marca es un PASO más (`accion:'vuelta'`, sin ancla — el servidor la acepta
+  como al «esperar aviso»). En el editor es un chip violeta punteado que se arrastra como
+  cualquier otro, a CUALQUIER lugar; se materializa sola al abrir un tutorial sin marcas (una por
+  bloque, al final del bloque). La restricción «sólo dentro de su bloque» se eliminó.
+  **Semántica en la reproducción** (Tour): al llegar a la marca, si a algún diseño le falta lo
+  suyo en las etapas que la PRECEDEN (la marca las aprende al armar el guion), se **vuelve al
+  principio** — y como lo ya hecho se saltea solo (superado/hecho/listo), se piden exactamente
+  los pasos NECESARIOS. Si no falta nada, se pasa de largo. Misma regla para 2, 10 o 100 diseños.
+  🔴 Con marcas a mano, el bucle automático por bloques NO corre (gobiernan ellas); sin marcas,
+  el automático sigue (compat). La marca no navega ni arma puentes (no es un lugar de la pantalla).
+  **Agilidad**: umbral del arrastre 6→3 px. La vista real muestra la repetición desde cada marca.
+  Contratos: el servidor guarda `accion:'vuelta'` sin ancla y en su lugar; el guion aprende las
+  etapas y apaga el bucle automático. Server reiniciado y verificado; build y salud ok.
+
+- **2026-08-28 (336) — 🔴 EL MARCADOR «↻ DISEÑO 2» NO SE PODÍA MOVER: el drag nativo de HTML5
+  se corta al re-dibujar.** Reporte del usuario: «te dije que tengo que poder mover dónde empieza
+  el diseño 2». La causa NO era la lógica (vuelta2 andaba, contrato en verde): era el
+  **`draggable` nativo** — cuando el elemento arrastrado se re-monta (y la línea se reacomoda EN
+  VIVO, o sea siempre), el navegador CORTA el drag. El gesto moría al primer movimiento.
+  **Arreglo**: todo el arrastre del editor pasó a **MOUSE** (mousedown/mousemove/mouseup +
+  `elementsFromPoint` sobre `data-chip-idx`), que es inmune al re-render — el mismo mecanismo de
+  las filas de la planilla, que ya está probado en pantalla. Umbral de 6 px: clic corto = elegir
+  el paso; más que eso = arrastrar. El marcador sólo acepta caer dentro de su propio bloque.
+  **Semántica confirmada para N diseños**: el bucle de reproducción salta a `bucle.desde` (la
+  marca) MIENTRAS la etapa siga incompleta → con 2, 10 o 100 diseños, CADA vuelta siguiente
+  arranca donde diga la marca. Es una sola regla, como pidió el usuario.
+  🔴 **Lección para el mapa**: en esta app, drag & drop = SIEMPRE por mouse, nunca `draggable`
+  nativo — dos veces ya (planilla 2026-08-27, editor hoy) el nativo murió por el re-render en vivo.
+  Build en verde; sólo frontend, sin reinicio.
+
+- **2026-08-28 (335) — EDITOR v3: una sola línea, el marcador «↻ diseño 2» movible y las
+  VENTANITAS en su lugar.** Correcciones del usuario sobre la 334: la fila «CON 2+ DISEÑOS» se
+  ELIMINÓ; en su lugar, **dentro de la línea única**, cada paso real del armado (moldes, arte)
+  muestra un marcador violeta punteado «↻ diseño 2 arranca acá» en el punto donde el bloque se
+  repite — y **se arrastra a otro paso del mismo bloque** para cambiar desde dónde arranca la
+  segunda vuelta. Se guarda como **`vuelta2`** en el paso (servidor lo persiste; `aGuion` lo copia
+  — 🔴 el contrato agarró que NO lo copiaba — y `bloquesPorDiseno()` lo respeta: `bucle.desde` =
+  la marca). La vista real despliega la 2ª vuelta desde ahí.
+  Los pasos de MODAL se dibujan como **VENTANITAS** ámbar (barra de título con puntitos y ✕)
+  en su posición exacta de la línea — «ver los modales reales en sus respectivos pasos».
+  La condición «sólo con 2+ / sólo con 1» volvió al detalle del paso (ya no la codifica la fila).
+  Contratos: guion (vuelta2 mueve el `desde`), servidor (vuelta2 se guarda y no se inventa).
+  Build en verde, server reiniciado y verificado, salud ok.
+
+- **2026-08-28 (334) — EDITOR DE PASOS: la VISTA REAL y los AVISOS se ELIGEN (no se tipean).**
+  Tres pedidos del usuario sobre la 333:
+  · **«▶ Vista real (2 diseños)»**: una tira extra bajo las pistas que muestra **el orden del
+  tiempo al reproducir con 2 diseños** — `vistaReal()` (guion.js) toma el guion completo (etapas
+  agregadas, avisos convertidos) y despliega cada bloque por diseño dos veces con el marcador
+  «↻ siguiente diseño» entre vueltas; lo agregado por el sistema va con borde punteado, la
+  segunda vuelta con ②, los avisos con ⏳.
+  · **AVISOS_CONOCIDOS** (diccionario.js): el sistema ya sabe qué modales y cargas existen — 13
+  modales + 3 cargas — así que el paso «esperar aviso» se elige de un selector (con «Otro…»
+  para escribir uno raro). 🔴 Contrato: cada título de la lista tiene que existir LETRA POR
+  LETRA en App.jsx — si alguien renombra un modal sin tocar la lista, el build corta (un paso
+  esperando un aviso renombrado esperaría para siempre).
+  · El «esperar aviso» ahora también espera **CARGAS** (`data-cargando`): `avisoAb` = modal O
+  carga; si la carga visible ES la que el paso espera, se muestra el cartel del paso (no el
+  genérico), y el avance exige que se haya ido (ni modal ni carga).
+  Contrato del guion §12 (vista real, ejecutada): marcador presente, aviso en las dos vueltas,
+  cargar-arte dos veces, orden alrededor de SU marcador (ojo: moldes también bucla → hay varios
+  marcadores), lo agregado marcado. Build en verde; sólo frontend.
+
+- **2026-08-28 (333) — EDITOR DE PASOS: el sistema se ESCALA, no se tapa.** Pedido del usuario:
+  al entrar al modo diseño, en vez de que la barra inferior se sobreponga, **todo el sistema se
+  achica proporcionalmente** (`#root` con `transform: scale`, origen arriba-centro, transición
+  suave) para que la línea de tiempo quede DEBAJO y se vea todo — como la vista previa de un
+  editor de video. La escala se recalcula al cambiar el alto de la barra (aparece la fila 2+) y al
+  redimensionar la ventana; al salir se restaura.
+  🔴 Por qué funciona sin tocar nada más: los PORTALES (modales, la propia barra, el resaltado)
+  viven en `<body>`, fuera de `#root`, así que no se escalan; y el resaltado se mide con
+  `getBoundingClientRect` sobre lo ya dibujado → sus coordenadas coinciden con lo que se ve.
+  Build en verde; sólo frontend. ⚠️ Sin probar en pantalla con sesión.
+
+- **2026-08-28 (332) — EDITOR DE PASOS v2: dos PISTAS con colores y «Agregar pasos» tocando la
+  app.** Pedidos del usuario sobre la 331: poder AGREGAR pasos desde el editor, una visual más
+  intuitiva, y que la condición «2+ diseños» sea una FILA nueva con los casilleros marcados,
+  dividida por colores.
+  · **Dos pistas** como un editor de video: «SIEMPRE» (cian) y «CON 2+ DISEÑOS» (violeta), con
+  rótulo propio a la izquierda. Cada columna es un lugar de la secuencia: la fila que no tiene el
+  paso muestra su **casillero punteado** — arrastrar un chip a un casillero lo cambia de lugar
+  y/o de fila, y **la fila ES la condición** (soltarlo en la violeta = `solo:{minDisenos:2}`;
+  volverlo a la cian la borra). La fila 2+ aparece al marcar el primer paso o con «+ fila 2+
+  diseños». Columna extra al final para soltar «al final»; número de orden bajo cada columna.
+  · **«⏺ Agregar pasos»**: con el botón prendido (rojo, punto que late), cada control que se toca
+  en la app se agrega como paso después del elegido (o al final) — la app responde normal, así se
+  navega de verdad; identificado con el mismo `identificar` del grabador; doble clic = un paso; los
+  toques a la propia barra no se graban (`[data-diseno-pasos]`).
+  · El detalle del paso elegido (cartel, aviso, borrar) sigue arriba de la barra; la condición ya
+  no es un select: es la fila.
+  Build en verde; sólo frontend, sin reinicio. ⚠️ Arrastre y captura sin probar en pantalla (sin
+  sesión); el usuario prueba en vivo.
+
+- **2026-08-28 (331) — MODO DISEÑO DE PASOS: el editor de la grabación es VISUAL, estilo editor
+  de video.** Pedido del usuario sobre la 330: «el acomodar la grabación debe ser visual… entrás
+  a los pasos como lo harías real, y abajo muestra los pasos en el orden que están y los
+  acomodás». El editor en modal de la 330 se REEMPLAZÓ (mismo componente `EditorTutorial`, otra
+  forma): ahora, al tocar «Editar» en Ayuda, la app queda **usable de verdad** y abajo aparece una
+  **LÍNEA DE TIEMPO** fija con los pasos como chips (numerados, coloreados por etapa:
+  diseño/moldes/arte/planilla/resultados; ámbar para «esperar aviso»).
+  · **Arrastrar un chip lo cambia de lugar**, reacomodándose EN VIVO (mismo gesto que las filas de
+  la planilla, que el usuario ya aprobó).
+  · **Tocar un chip** lo elige: la pantalla VA a donde ese paso vive (`ir(p.donde)`), su control se
+  RESALTA con un borde (sin oscurecer nada — la app se sigue usando) y arriba de la barra aparece
+  su detalle: cartel corregible, condición «sólo con 2+ diseños», borrar, «+ aviso».
+  · Nada se guarda hasta «Guardar» (mismo POST de la 330; los campos ya estaban soportados).
+  Build en verde, salud ok; sólo frontend, sin reinicio.
+  ⚠️ Sin probar el arrastre en pantalla (necesita sesión y en el sandbox no se dibuja la barra
+  lateral para abrir Ayuda). El usuario está probando en vivo.
+
+- **2026-08-28 (330) — 🔴 TUTORIAL: el bug del ORDEN, el botón «Siguiente →» y el EDITOR de
+  tutoriales.** El usuario reportó «está todo mal» con tres síntomas y pidió tres cosas.
+  **(1) EL BUG DEL ORDEN** («me manda a hacer un paso después que era antes»): al completar
+  etapas faltantes, un botón de TRANSICIÓN («A la planilla») sólo exigía lo anterior a SU etapa
+  → la etapa de telas (que es del arte) se insertaba DESPUÉS del botón y su `ir` arrastraba de la
+  planilla al arte. Arreglo: `AVANZA_A` en guion.js — una transición exige TODO lo anterior a su
+  etapa DESTINO. Contrato §10: telas queda ANTES de «A la planilla».
+  **(2) «SIGUIENTE →» en el globo**: pasar el paso sin hacer lo que pide, siempre disponible
+  (salvo en preguntas y esperas). Va DIRECTO al paso siguiente, sin el bucle por diseño.
+  De paso: el pie del globo en las esperas decía «Tocá lo que está marcado» (se veía en la
+  captura del usuario) → ahora dice «Cerralo y seguimos» / «Esperando…».
+  **(3) EL EDITOR DE TUTORIALES** (`EditorTutorial`, tutor.jsx; botón «Editar» en el menú de
+  Ayuda): ver los pasos grabados y corregirlos — subir/bajar (cambiar de lugar), borrar, corregir
+  el CARTEL a mano (`paso.texto`, le gana al diccionario), la CONDICIÓN («sólo con 2+ diseños» /
+  «sólo con 1» → `paso.solo`) e insertar un paso «ESPERAR AVISO» (`accion:'modal'` + título →
+  en la reproducción espera a que ese modal aparezca Y se cierre, iluminado y explicado;
+  `modalPaso` en el Tour). La cantidad de diseños para `solo` toma el MAYOR entre lo elegido y lo
+  respondido a «¿cuántos?» (la intención cuenta antes de tocar).
+  **Servidor**: el sanitizador de `/api/tutoriales` guarda `texto`/`solo`/`modal` y acepta pasos
+  sin ancla si son `modal`. Python → reiniciado y verificado por hora de arranque.
+  **USADO EL SISTEMA DE VERDAD**: sandbox 8060 → elegí un diseño, fui a moldes, abrí el modal
+  «Subir mi propio molde» y `[data-modal]` lo encontró con su título — la detección de modales
+  confirmada en el DOM real. Los 25 modales del componente + 2 artesanales quedan cubiertos.
+  **Verificado**: e2e endpoints (campos del editor sobreviven, condición rota no explota),
+  contrato del guion §10/§11 en verde, build ok, salud ok.
+  ⚠️ Sobre «di un paso que no me registró»: sin saber cuál fue no se puede arreglar a ciegas —
+  ahora el EDITOR muestra exactamente qué se grabó, así que la próxima vez se ve ahí qué faltó
+  (y el cartel «N sin grabar» durante la grabación avisa en el momento).
+
+- **2026-08-28 (329) — 🔴 EL BUCLE POR DISEÑO: lo hecho antes de «siguiente» es el trabajo de UN
+  diseño, y se repite para cada uno.** El usuario ofreció dos caminos (un editor de tutoriales o la
+  inteligencia automática) y definió la semántica exacta: *«todo lo que se haga en cada paso antes
+  de darle al botón siguiente —ese inferior que salta de diseño a arte, de arte a planilla— es el
+  paso de un solo diseño. Si elige 2, saltará al segundo después de hacer todos los pasos, antes de
+  presionar siguiente»*. Se implementó la automática.
+  **Cómo**: `aGuion` marca el BLOQUE de cada etapa (los pasos seguidos de moldes/arte, con los
+  botones de transición —`TRANSICIONES`— como frontera, fuera del bloque). El último paso lleva
+  `bucle: {desde, etapa}`. En `avanzar()` (Tour): al salir de ese paso, si
+  **`etapaIncompleta(etapa, E)`** (alguna regla `listo` de la SECUENCIA de esa etapa no se cumple)
+  → **se vuelve al inicio del bloque** en vez de seguir, 🔴 rebobinando `desde.current` (sin eso
+  los pasos repetidos no podrían avanzar: el guard anti-doble-avance los bloqueaba). El ciclo
+  `antes` hace el resto: el diseño a la vista está completo → manda al chip del siguiente.
+  Con 1 diseño la etapa cierra a la primera pasada → no hay vuelta: nada cambia.
+  **Además**: las TELAS tienen ahora su propio ciclo (`arte-telas.antes` → chips del arte; faltaba)
+  con el estado nuevo `activoTelasListas` (arte del diseño a la vista cargado y sin piezas sin
+  tela, filtrando `telasFaltantesDet` por `disenoActivo`).
+  **Contrato** (`verificar_guion.mjs` §9, ejecutado de verdad): el bloque del arte marca su bucle
+  hacia `arte-cargar`, el «siguiente» queda fuera, moldes también bucla, `etapaIncompleta` da la
+  vuelta con un solo arte cargado y cierra con los dos + telas completas. Build en verde; sólo
+  frontend, sin reinicio.
+
+- **2026-08-28 (328) — 🔴 Barrido de overlays: la carga «Poniendo el diseño sobre el molde…»
+  y 2 modales artesanales quedaron marcados.** El usuario cazó al tutorial pasando por encima de
+  ese panel (saltó al desvío «siguiente diseño» con la carga en pantalla): era una carga SIN
+  `data-cargando` — sólo había marcado 2 de 3. Esta vez se barrió TODO `position:fixed; inset:0`
+  de App.jsx: además de esa carga aparecieron **dos modales que no pasan por el componente Modal**
+  («Elegí las variantes» y «Registrar capa editable») → marcados con `data-modal` a mano. Los dos
+  que NO se marcan, a propósito: el catcher invisible de los popovers de Ayuda (transparente, no es
+  un modal) y el editor de diseño a pantalla completa (es un espacio de trabajo con anclas adentro).
+  El contrato ahora exige **3** superficies `data-cargando`. ⚠️ Trampa propia: el script de parche
+  murió en el 2º reemplazo y el 1º quedó sin escribir (el write va al final) — verificar SIEMPRE
+  re-escaneando, no por el OK del script.
+
+- **2026-08-28 (327) — 🔴 EL TUTORIAL RESPETA TODOS LOS MODALES.** Reporte en pantalla: cargado
+  el arte del primer diseño, el sistema abrió el aviso «Perfil de color del diseño» — y el
+  tutorial le pasó por encima (saltó al desvío «tocá el SIGUIENTE diseño» con el modal abierto).
+  Pedido textual: *«no puede avanzar a otros pasos si hay modales abiertos y debe explicar qué es
+  ese modal»*.
+  **La marca, en UN solo lugar**: el componente `Modal` (por el que pasan TODOS los modales del
+  sistema) pone `data-modal={titulo}` en su caja → los presentes y los futuros quedan cubiertos
+  sin tocar nada más.
+  **El freno** (`useModalAbierto` + `bloqueoModal`, tutor.jsx): con un modal abierto que NO es del
+  paso en curso, ningún camino avanza (estado, clic, nav, `ir`, salteo por `superado`, desvío,
+  pregunta). El globo marca EL MODAL — rótulo «Primero este aviso» — y lo explica: con entrada
+  del diccionario (**clave `modal:<título normalizado>`**, la primera es la del perfil de color) o,
+  sin entrada, con su propio título («Apareció ‹X›. Leelo y respondé lo que pide» —
+  `explicarModal`, guion.js). Cerrado el modal, retoma solo donde estaba.
+  🔴 **Un paso cuyo control vive DENTRO del modal no se frena** (cargar por lote, asignar telas,
+  un «Entendido» grabado): se detecta con `buscar(ancla)` ∈ modal — ése es justamente el paso a
+  hacer. Sinergia: `elegirEntre` (localizar.js) ya prefería candidatos dentro de `[data-modal]`.
+  **Contrato**: dos candados nuevos en `verificar_diccionario.mjs` (el Modal marca / el motor
+  frena) + las claves `modal:` exentas del chequeo de sobrantes. Build en verde; sólo frontend.
+  ⚠️ Cabo suelto conocido: un paso grabado apuntando adentro de un modal que al reproducir no se
+  abre (ej. el «Entendido» de un aviso que al otro no le sale) queda esperando hasta el escape
+  «Seguir igual». Si molesta en la práctica, el próximo paso es saltear solo los `txt:` no
+  encontrados tras un tiempo.
+
+- **2026-08-28 (326) — 🔴 «¿CUÁNTOS?» CUENTA EL TOTAL: lo ya presionado también se reconoce.**
+  Reporte en pantalla del usuario: tenía **2 diseños ya marcados** (✓ JUGADOR, ✓ GOLERO),
+  respondió «2» y el contador decía «0 de 2» — la cuenta era RELATIVA («N más desde que
+  respondió», decisión mía del changelog 318) y encima **tocar un botón ya presionado lo
+  desmarca**: no había forma de avanzar.
+  **Regla corregida**: `hecho = mide(E) >= n` — contra el TOTAL del sistema. Si dijo 2 y ya hay 2
+  elegidos, el paso se cumple al instante; el contador muestra el total real («2 de 2»). El
+  contador del globo también pasó a absoluto.
+  **Y `telas-panel` dejó de preguntar**: preguntaba algo que el sistema SÍ sabe (cuántas piezas
+  quedan sin tela) con una cuenta en negativo que no funciona en absoluto — violaba la propia
+  regla «sólo se pregunta lo que no se puede deducir». La etapa de telas ya se controla con el
+  `listo` de `arte-telas`. Quedan 2 preguntas: diseños y filas de la planilla.
+  Build en verde; sólo frontend, sin reinicio.
+
+- **2026-08-28 (325) — TUTORIAL: respeta los carteles de CARGA y arranca DESDE DONDE ESTÁS.**
+  Dos pedidos del usuario en la misma sesión de prueba.
+  **(1) Los carteles de carga.** *«No mandará al siguiente paso: marcará el modal de carga y dirá
+  que hay que esperar, y ahí salta al paso correcto.»* Mecanismo GENÉRICO: toda superficie de
+  carga se marca con **`data-cargando="<texto>"`** (hoy: el overlay «Procesando…» de subir
+  molde/arte y el panel «Armando la tizada») y el motor la vigila (`useCargando`, tutor.jsx).
+  Mientras está visible: se marca EL CARTEL con globo ámbar ⏳ «Esperá un momento · Debés esperar
+  a que esto termine» y **ningún camino avanza** (ni estado, ni clic, ni `esPasoNav`, ni el `ir`
+  automático, ni la pregunta ¿cuántas?). Al desaparecer, la evaluación retoma sola y lo cumplido
+  se saltea → cae en el paso correcto. **Un cartel nuevo = ponerle el atributo, nada más.**
+  **(2) Arranca desde donde estás.** *«Si pongo el tutorial ya avanzado —ya elegí un diseño, ya
+  estoy en el arte o en la planilla— debe reconocer dónde está y qué paso ya di, y mostrar desde
+  ahí en adelante.»* Antes un paso de una etapa anterior sin condición propia (un clic grabado) se
+  mostraba igual y su `ir` te ARRASTRABA de vuelta. Ahora — **`pasoSuperado(paso, E, donde)`** en
+  guion.js: un paso queda atrás sólo si (a) su etapa es ANTERIOR a la pantalla en la que estás
+  parado y (b) esa etapa está CUMPLIDA según el estado real (las reglas `listo` de la SECUENCIA).
+  🔴 **La (b) es la red**: parado en la planilla con telas faltando, el paso del arte NO se
+  saltea — el tutorial te lleva de vuelta a terminarlo. Un paso superado tampoco dispara su
+  puente/`ir` ni su pregunta.
+  **Contratos**: `verificar_diccionario.mjs` §8 (los 2 candados de la carga) y
+  `verificar_guion.mjs` §8 (8 casos de `pasoSuperado`, ejecutados de verdad). Build en verde,
+  salud ok; sólo frontend — sin reinicio.
+  ⚠️ Sin probar en pantalla con sesión; el usuario está probando en vivo y reportando.
+
+- **2026-08-28 (324) — 🔴 EL CICLO DENTRO DEL PASO: con varios diseños, el tutorial manda al
+  siguiente.** Reporte del usuario probando en pantalla: grabó un tutorial subiendo UNA camiseta y
+  lo reprodujo con 2 diseños. La pregunta «¿cuántos?» y el contador anduvieron, pero tras elegir
+  la prenda del primer diseño *«ahí quedó y tenía que haber saltado otra vez a diseños para
+  elegir el próximo»*. El paso esperaba (su `listo` mira `sinVariable === 0`, correcto) pero
+  seguía iluminando las prendas, sin decir que primero había que tocar el chip del OTRO diseño.
+  **La regla nueva — `antes` en el diccionario** (tercera del juego, junto a `listo` y `cuantos`):
+  un paso que abarca varios diseños declara `{ ancla, cuando(E), texto }` — cuando el diseño a la
+  vista ya quedó listo pero el paso no se cumple, el Tour marca el chip del siguiente (un DESVÍO,
+  como el puente: no avanza nada; al tocar el chip `cuando` se apaga y la iluminación vuelve sola).
+  Declarados: la PRENDA (`pedido-variables` → chips `pedido-diseno-chips`) y el ARTE
+  (`arte-cargar` → chips `arte-diseno-chips`, ancla nueva — esos chips no tenían).
+  **Estado nuevo en `ayudaEstado`**: `activoConVariable` y `activoArteCargado` (¿el diseño A LA
+  VISTA ya tiene lo suyo?). 🔴 **Trampa que casi me como**: en el paso MOLDES el diseño «en
+  armado» es **`asignDiseno`** (ahí va la prenda tocada), no `disenoActivo` (que es del paso Arte).
+  Mirar el equivocado dejaba el desvío encendido aunque ya hubieras pasado al siguiente.
+  **Contratos**: `verificar_diccionario.mjs` ejecuta cada `antes` contra tres fotos (vacío / a
+  mitad / terminado) y exige que se encienda sólo a mitad de camino; `verificar_guion.mjs` §7
+  reproduce el caso exacto del usuario (grabado con 1, reproducido con 2). Probado en negativo:
+  borrando el ciclo del diccionario, los contratos lo agarran.
+  El desvío NO dispara el avance por clic del DOM (guarda `esDesvio`); sólo Python no se tocó →
+  sin reinicio, build en verde, salud ok.
+
+- **2026-08-28 (323) — 🔴 «ANCHO MANDA» NO LLEGABA AL MOTOR: la tizada escalaba siempre por el
+  alto.** Reportado por el usuario: *«cuando ponen en el molde ancho manda, en el pedido no respeta
+  eso y usa el alto predeterminado»*. Confirmado: `referencia_medida` sólo se usaba para las
+  medidas de la PLANTILLA y para la pantalla — **nunca llegaba a `generar_pedido`**, y `cm_encajar`
+  tenía la escala por alto **fija**. O sea: el diseñador hacía el arte con una medida y el motor lo
+  escalaba con otra.
+  **El arreglo, en un solo lugar — `_encaje(aw, ah, pw, ph, referencia)`**: devuelve
+  `(awf, ahf, offx, offy)`, o sea cuánto ocupa el DISEÑO sobre la pieza y cuánto se corre.
+  Con «alto» da `ahf=1, offy=0` → **exactamente las cuentas de antes**; con «ancho» es el espejo.
+  De ahí toman: `cm_encajar`, `cm_tamano_editable`, `_pos_en_pieza`, `pos_agregado_en_diseno`,
+  `_centro_editable` y `_matriz_editable` (el mover ahora se mide contra `ahf*H`, no contra `H`).
+  🔴 **Y la copia que tiene el SERVIDOR** (la que usa el editor) pasó a llamar a `MP._encaje`: si
+  el editor y el motor calcularan distinto se rompería la ley «el arte se ve igual que la tizada».
+  **La referencia viaja por los cuatro caminos**: preview del arte, molde guía de la ficha, el otro
+  camino de generación y el pedido multi-molde (`md["referencia"]`, porque **cada molde puede tener
+  la suya**). Y entra en la **clave del caché del visor (v14)**: sin eso, cambiar el ajuste servía
+  el render viejo — la trampa de siempre.
+  **Contrato nuevo `verificar_referencia_medida.py`**, con la NO-REGRESIÓN primero: con «alto» las
+  cuentas dan **idénticas a las de antes** (los moldes que no usan «ancho manda» no cambian un
+  píxel). Además: la escala es uniforme en los dos casos, un objeto centrado en el arte cae
+  centrado en la pieza con cualquiera de las dos referencias, y **no queda ninguna escala por alto
+  suelta** (las dos que hay están dentro del `if` de la referencia).
+  ⚠️ **Lo que el contrato me corrigió a mí**: (1) mi primera prueba asumía que la dimensión que NO
+  manda nunca se pasa de la pieza — falso: según la proporción del arte a veces sobra y **la
+  recorta el contorno**, que es lo correcto; (2) me había **olvidado `cm_tamano_editable`**, que
+  coloca los editables con tamaño configurado y también tenía la escala por alto fija — lo
+  encontró el chequeo de «no queda ninguna suelta».
+  No-regresión: medidas, marcas, cantidad, etiqueta y agregar-pieza siguen en verde.
+
+- **2026-08-28 (322) — 🔴 LA PLANTILLA PEDÍA UNA MEDIDA CORTA: hasta 0,5 mm de tela SIN
+  ESTAMPAR.** El usuario lo notó: *«hay algunos artes que no llegan a cubrir el ancho completo si
+  pongo en default … me debería de dar un ancho que cubra todos los anchos»*. Tenía razón.
+  **El cálculo estaba BIEN, el redondeo no.** `medidas_diseno` resuelve la proporción crítica
+  correctamente (el motor escala igualando el ALTO de la pieza en cada talle, así que el diseño
+  necesita ancho/alto >= el mayor w/h de todos los talles), pero cerraba con `round(x, 1)`, que
+  **redondea para abajo**. Medido con el molde real del usuario: **11 de 34 piezas quedaban entre
+  0,1 y 0,5 mm cortas** — esa franja sale sin estampar en el borde, y **sale bien impresa**: nadie
+  se entera hasta que la prenda está cortada.
+  **El arreglo — `_cm_arriba()`**: al milímetro y **siempre hacia arriba**. Sobrar no molesta: lo
+  que sobra lo recorta el contorno de la pieza. La dimensión derivada se calcula sobre la base **ya
+  redondeada**, así la proporción que ve el diseñador nunca queda por debajo de la necesaria.
+  Aplicado a las dos referencias (alto y ancho) y también al modo **rango** de `_guia_capas_data`,
+  que tenía el mismo `round`.
+  **Medido después del arreglo, con el mismo molde: 34 de 34 cubren. 0 sin cubrir.**
+  **Qué alto manda** (la otra pregunta del usuario): en `default`, el del **talle guía** del molde
+  (`variante_guia`). La medida se da en esa escala para que el recuadro dibujado coincida con la
+  pieza que se ve en el visor; el motor después escala a cada talle, y como la proporción es
+  invariante a la escala, la cobertura vale para todos.
+  **Contrato nuevo `verificar_medidas_diseno.py`**: la regla de oro (el ancho cubre todos los
+  talles) con piezas que se ensanchan y que se angostan, el talle crítico correcto, las dos
+  referencias, la base en la escala del talle guía, y que **nunca redondee para abajo**.
+  **Probado en negativo**: se puso de vuelta el `round()` viejo y **el contrato lo agarra**.
+  No-regresión: marcas, cantidad y etiqueta siguen en verde.
+
+- **2026-08-27 (321) — 🔴 EL TUTORIAL COMPLETA SOLO LOS PASOS QUE LA GRABACIÓN NO TIENE.**
+  Reporte del usuario, y era un agujero de fondo: *«cargué 2 diseños pero en el tutorial, como puse
+  1 solo, obvio que no presioné en el diseño porque no era necesario; después en la ayuda no me
+  mandó a eso. Leé los pasos coherentes y hacé que se pongan automático.»*
+  **El problema**: una grabación sólo guarda lo que la persona **llegó a hacer**. Lo que ya tenía
+  resuelto al grabar no queda grabado → el tutorial salía **con agujeros** y no llevaba a nadie a
+  hacer algo imprescindible.
+  **La solución — `SECUENCIA` en `diccionario.js`**: el orden real del trabajo escrito una vez
+  (diseño → molde → arte → telas → planilla → enviar), cada etapa con su ancla y su `listo`. Al
+  REPRODUCIR, `aGuion` mira hasta dónde llega la grabación y **mete las etapas anteriores que
+  falten, justo antes del paso que las necesita**. Y como cada una trae su `listo`, **a quien ya la
+  tenga resuelta no se le muestra**: se completa lo que falta, no se repite lo hecho.
+  🔴 Se hace **al reproducir, no al grabar**: corregir la secuencia arregla **todos los tutoriales
+  ya grabados**, sin regrabar nada. Misma propiedad que el diccionario.
+  **`frontend/src/guion.js` (nuevo)**: `aGuion` salió de `tutor.jsx` a un módulo propio. `tutor.jsx`
+  importa React y sólo corre en el navegador, así que la lógica que arma el guion **no se podía
+  ejecutar ni verificar**. Ahora es JS puro. ⚠️ Sus imports llevan `.js` sí o sí: node lo exige.
+  **Contrato nuevo `verificar_guion.mjs`** (corre en cada `npm run build`), y **ejecuta el código de
+  verdad**. Cubre el caso del usuario tal cual: grabación con sólo el paso del molde → el guion
+  agrega el del diseño **antes**; el paso agregado se saltea a quien ya tiene el diseño; no se
+  duplica lo que la grabación ya trae; una grabación que arranca al final trae **toda la cadena**;
+  y un tutorial de Configuración **no** se contamina con la secuencia del pedido.
+  **Probado en negativo**: sacando una etapa de la SECUENCIA y dando vuelta el orden → **el
+  contrato agarra los dos**.
+  ⚠️ Sin probar en pantalla con sesión iniciada.
+
+- **2026-08-27 (320) — LA BARRA LATERAL NO APARECE EN LOS TUTORIALES.** Pedido del usuario.
+  Moverse entre secciones no es el trabajo que el tutorial enseña, y ensuciaba cada grabación con
+  un «tocá Pedidos» antes de lo importante.
+  **Son DOS candados y hacen falta los dos** — si se cae uno, la barra vuelve a salir por ese lado
+  y nadie se entera hasta ver un tutorial que arranca mal:
+  · **el GRABADOR** no anota los clics dentro de `aside.sidebar`;
+  · **el MOTOR** ya no MARCA el botón de la barra cuando el paso está en otra sección: **cambia de
+  pantalla solo** (`{ llevarSolo }` → `ir(destino)`) y el tutorial arranca directo en lo que
+  importa. Mientras viaja, el paso no pide nada.
+  🔴 **Los puentes de ADENTRO de una pantalla se siguen marcando** («Entrá a Moldedería»): ésos
+  no son la barra y sí son parte del trabajo. La distinción es el prefijo `nav-` de la ruta.
+  **Contrato**: `verificar_diccionario.mjs` verifica los dos candados, y se probó **en negativo**
+  quitando cada uno: los agarra a los dos.
+  ⚠️ **De paso se descubrió que un parche anterior NO se había aplicado**: el grabador seguía
+  mirando sólo `[data-tour]` (o sea, 82 de 477 controles) porque el reemplazo había fallado en un
+  lote y yo había seguido adelante. **Lección: cuando un parche por lotes falla a la mitad, revisar
+  QUÉ quedó sin aplicar, no sólo re-correr lo que falló.** Ya está corregido: el grabador usa el
+  localizador.
+  ⚠️ Sin probar en pantalla con sesión: en el sandbox la barra lateral no se dibuja.
+
+- **2026-08-27 (319) — EL TUTORIAL YA PUEDE APUNTAR A CUALQUIER CONTROL (no sólo a los 82 con
+  ancla).** El usuario pidió arrancar con la cobertura completa. Medido primero:
+  **477 controles, 395 sin `data-tour`, y 241 de ellos sin siquiera un texto** — poner 395 anclas a
+  mano en JSX es lento y, sobre todo, riesgoso.
+  **La solución — `frontend/src/localizar.js`**: dos clases de identificador, siempre se prefiere
+  el primero. `nav-pedidos` (el `data-tour` de siempre) · **`txt:guardar`** (el TEXTO VISIBLE del
+  control, normalizado). Lo que la persona lee es lo que la persona toca: es lo más estable que hay
+  sin tocar el JSX. 🔴 **NO se usan selectores de CSS ni caminos del DOM** (`div > div:nth-child(3)`):
+  con React se rompen apenas alguien toca el layout y el tutorial marcaría el botón equivocado, que
+  es peor que no marcar nada.
+  · Los CAMPOS no tienen texto propio → su identidad sale del `placeholder` o de su RÓTULO, buscado
+  subiendo hasta 3 niveles. Sin eso los 88 campos del sistema no se podían grabar (**se descubrió
+  probando en la pantalla real**, no leyendo código).
+  · Al reproducir, un CAMPO le gana a su rótulo: los dos matchean «Usuario», pero lo que hay que
+  iluminar es el campo.
+  · Lo que no tiene ni ancla ni texto no se graba, **y el grabador lo dice** («3 sin grabar» en el
+  cartel): mejor avisar que grabar un paso que después apunte a cualquier lado.
+  **`srv_visor.py` (nuevo)** — sandbox de SÓLO LECTURA en el 8060: la UI real sin login (contesta
+  404 en `/api/auth/yo`, que el front lee como «sin usuarios») y **con todo lo que no sea GET
+  rechazado**. Es lo que permite medir sobre las pantallas de verdad sin la contraseña del usuario
+  y sin poder tocarle nada. Verificado: entra sin login (200), auth/yo 404, POST → 405.
+  **`verificar_cobertura_ayuda.mjs` (nuevo)** — genera un medidor para correr EN EL NAVEGADOR.
+  Contar `<button>` en el código miente (un mismo botón se dibuja 12 veces, y muchos nunca están
+  juntos en pantalla): lo único que vale es medir lo que se ve.
+  **MEDIDO en la pantalla real (Pedidos)**: **17 controles visibles → 17 identificados, 17
+  recuperados, 17 con explicación. 0 sin identificar, 0 sin explicar.**
+  🔴 **Un punto ciego del contrato, encontrado por la medición**: hay anclas que se pasan **POR
+  PROP** (`<BtnSiguiente ancla="pedido-ir-moldes">`) y mi regex sólo miraba `data-tour=`. Quedaban
+  fuera **los 8 botones que mueven el pedido de un paso al otro** — los más importantes de
+  cualquier tutorial. Ya había pasado con el verificador viejo (changelog 269). Corregido, y sus 8
+  explicaciones escritas. **126/126.**
+  El diccionario ahora acepta claves **`txt:…`** (controles sin ancla), que el contrato no cuenta
+  como sobrantes.
+  ⚠️ **Hasta dónde llegué**: en el sandbox **no se dibuja la barra lateral** (sin usuario no hay
+  navegación), así que sólo pude medir el circuito del pedido. Las pantallas de Configuración hay
+  que medirlas **con sesión iniciada en el 8050**, con el mismo medidor. El procedimiento queda
+  escrito en `verificar_cobertura_ayuda.mjs`.
+
+- **2026-08-27 (318) — PASOS INTELIGENTES: el tutorial se adapta a quien lo sigue.** Pedido del
+  usuario, y su confirmación de qué tiene que lograr: *«sí tiene que llevarlo hasta terminar»* —
+  el paso a paso guía **hasta que el pedido queda completo**, no repite lo que se grabó.
+  Dos comportamientos, declarados **en el diccionario** (así valen para todos los tutoriales
+  grabados, viejos y nuevos):
+  · **`cuantos`** — donde una acción se hace varias veces, el globo **PREGUNTA** («¿Cuántos
+  diseños vas a cargar?»), y no avanza hasta que se hicieron ésas, con contador («2 de 3
+  diseños»). 🔴 **Se cuenta DESDE QUE SE RESPONDE**, no «llegar a N»: lo que la persona ya tenía
+  cargado es asunto suyo. Por eso la foto del estado (`e0Ref`) se re-toma al responder.
+  · **`listo(E)`** — el paso que **ya no hace falta no se muestra**. Es el caso que planteó el
+  usuario: un tutorial grabado cargando una fuente (porque a quien grabó le faltaba) **no le pide
+  eso a quien ya la tiene**. Puestas hoy: `arte-fuente`, `arte-cargar`, `arte-telas`,
+  `pedido-variables`. Con `cuantos`: `pedido-diseno-lista`, `planilla-agregar`, `telas-panel`.
+  🔴 **Sólo se pregunta lo que el sistema NO puede deducir.** Cuántos diseños lleva el trabajo lo
+  sabe la persona; si falta el arte o si faltan telas lo sabe el sistema, y eso **no se pregunta:
+  se mira**.
+  **El motor casi no cambió**: ya tenía `hecho` y ya saltaba el paso cumplido. Lo que faltaba era
+  que los pasos grabados declararan la condición. `aGuion` la engancha desde el diccionario.
+  **App.jsx**: `ayudaEstado` suma `pedido.fuentesFaltan` — y 🔴 **hubo que MOVER el bloque
+  entero** más abajo, porque `fuentesFaltantesItems` se calcula después: un `const` leído antes de
+  su declaración deja **la pantalla en blanco**, que es un bug que este archivo ya nos regaló.
+  **Contrato ampliado — y ahora EJECUTA las reglas**: `diccionario.js` es JS plano, así que
+  `verificar_diccionario.mjs` lo **importa** y corre cada `listo`/`mide` contra dos fotos del
+  estado (pedido vacío y pedido terminado). Verifica que no exploten, que devuelvan booleano/número,
+  que **los campos que miran existan de verdad en `ayudaEstado`** (si no, la regla lee `undefined` y
+  el paso se saltea o insiste **en silencio**) y avisa si una regla da lo mismo en los dos extremos.
+  **Probado en negativo**: se rompió una regla a propósito de tres formas (campo inexistente,
+  regla que explota, `cuantos` sin pregunta) y **el contrato agarró las tres**. Un contrato que
+  nunca falla no sirve.
+  ⚠️ **La trampa, otra vez**: `` dentro de una **plantilla de JS** es un **BACKSPACE**, no un
+  límite de palabra — el chequeo acusaba a todos los campos de no existir. Ya había pasado
+  (changelog 269) con Python. Ahora el regex se arma con comillas y concatenación, y queda avisado
+  en el propio archivo.
+  ⚠️ **Sin probar en pantalla** (no puedo iniciar sesión): la pregunta del globo y el contador se
+  verificaron por código y contrato, no a mano.
+
+- **2026-08-27 (317) — LOS TUTORIALES LOS GRABA EL USUARIO (los guiones fijos se eliminaron).**
+  Pedido textual: *«existen unos tutoriales eliminálos … el usuario los creará. Habilitará un
+  botón como de grabar, pero no graba un video: el sistema irá guardando todos los pasos que hace
+  hasta que lo pare. Le pondrá un nombre, pero los carteles de ayuda los hará el sistema, así que
+  cada botón, cada espacio y cada cosa del sistema debe tener una explicación de para qué es y
+  cómo se usa»*.
+  **Qué se fue**: `frontend/src/guias.js` (los guiones escritos a mano) y `verificar_guias.mjs`.
+  **Qué se quedó**: el MOTOR (`tutor.jsx`) entero — iluminar el elemento, esperar la acción real,
+  el puente entre pantallas, retomar lo que quedó a medias. Es lo que el usuario pidió conservar.
+  **Lo nuevo**:
+  · **`frontend/src/diccionario.js`** — la explicación de cada elemento (`nombre` · `que` = para
+  qué es · `como` = qué hacer). **118 de 118 anclas cubiertas.** Los textos NO son inventados:
+  salieron de los guiones viejos, que se habían escrito mirando las pantallas y el video del
+  usuario.
+  · **El grabador** (App.jsx): escucha `click` y `change` en **fase de captura sobre `document`**
+  (si no, un botón que corta la propagación no se grabaría) y sube por el DOM hasta el `data-tour`
+  más cercano. Guarda ancla + acción + etiqueta + **en qué pantalla estaba**. 🔴 El «dónde» sale
+  de un **ref espejo**: un listener no puede leer el estado de React, quedaría congelado en el del
+  primer render.
+  · **Backend**: `GET/POST /api/tutoriales` y `POST /api/tutoriales/borrar`; se guardan en el
+  catálogo (`tutoriales`) y son **compartidos** (un tutorial es para enseñarle a otro).
+  · **UI**: botón grabar/parar en el menú de Ayuda, cartel fijo mientras graba (con el contador de
+  pasos y un «Parar» a mano), y el modal del nombre.
+  🔴 **La decisión de diseño que importa**: el cartel se arma **al REPRODUCIR**, no al grabar. Por
+  eso mejorar una explicación del diccionario **mejora todos los tutoriales ya grabados**, sin que
+  nadie tenga que regrabar nada.
+  **Contrato nuevo `verificar_diccionario.mjs`** (corre en cada `npm run build` y **corta**): que
+  ningún `data-tour` quede sin explicación, que no sobren entradas muertas, que cada una esté
+  completa y que `explicar()` conserve su fallback. **118/118, 0 avisos.**
+  **Verificado**: contrato en verde · build OK · circuito completo por los endpoints reales
+  (`scratchpad/e2e_tutoriales.py`: guardar, listar, regrabar sin duplicar, borrar, y los cuatro
+  rechazos — sin nombre, sin pasos, paso sin ancla, grabación desbocada) · la app levanta sin
+  errores de consola · `/api/tutoriales` pasó a pedirse **al abrir la Ayuda** (al arrancar daba 401
+  antes del login).
+  ⚠️ **Falta probarlo EN PANTALLA con sesión**: no puedo loguearme, así que el grabador no se
+  tocó a mano. Y **falta la ENTREGA 2**: hoy sólo 118 elementos tienen ancla, sobre **374 botones y
+  88 campos**. Lo que no tiene ancla **no se graba**; lo que tiene ancla pero no explicación cae al
+  texto del botón. Plan: ir pantalla por pantalla poniendo `data-tour` + su entrada, empezando por
+  el circuito del pedido.
+
+- **2026-08-27 (316) — VIGILANTE: sin ventanas que aparecen y se van, y vuelve en segundos.** Dos
+  quejas del usuario: *«cuando estaba levantado el localhost me abría una ventana y desaparecía»* y
+  *«se me volvió a cerrar»*.
+  **(1) La ventana**: la tarea ejecutaba `cmd.exe` y, al correr con `InteractiveToken`, Windows le
+  abría una consola. 🔴 **`<Hidden>true</Hidden>` NO tapa la consola** — sólo esconde la tarea de
+  la lista del Programador. Ahora la acción es `wscript.exe //B //Nologo _vigilante.vbs`, y el
+  vigilante lanza el `.bat` con `sh.Run(..., 0, True)`. Verificado: **ningún proceso de la cadena
+  tiene ventana** (`python → py → cmd → wscript → svchost`).
+  **(2) Los 2 minutos sin sistema**: la tarea sólo revisaba cada 2 min, así que una caída dejaba el
+  sistema abajo hasta 2 minutos (pasó: murió 15:08:25, volvió 15:10). Ahora `_vigilante.vbs`
+  **espera al servidor** y lo relevanta apenas termina. Medido: **4,7 s**. La repetición de la tarea
+  bajó a 1 min y queda sólo como red por si el vigilante también muriera. Freno anti-bucle: 5
+  arranques seguidos de menos de 20 s → se rinde y lo anota (si no, con el código roto quemaría la
+  máquina).
+  🔴 **Y se quitó algo peligroso que yo había puesto**: `_arrancar-oculto.bat` mataba lo que
+  estuviera en el 8050 si `/api/salud` no contestaba **en 5 segundos**. Armando una tizada el
+  servidor puede tardar más que eso → **el vigilante lo habría matado en plena producción**. Ahora
+  no mata a nadie: si algo escucha el 8050, se respeta.
+  **`logs/caidas.log`** anota ahora **cuánto duró** cada corrida: es lo que va a dejar ver el patrón
+  de por qué se cierra (la caída de las 15:08 no dejó traceback y el servidor estaba ocioso —
+  causa aún **sin identificar**).
+  **`actualizador.py`**: en Windows `parar()` **pone la bandera `logs/apagado.flag` ANTES** del
+  `schtasks /end` y `arrancar()` la saca. Sin eso el vigilante reviviría el servidor por debajo del
+  ayudante y la actualización se aplicaría sobre un servidor vivo. Contrato de Linux sigue en verde.
+  **Verificado**: sin ventanas · vuelve en 4,7 s · `CERRAR-SERVIDOR.bat` lo apaga y **sigue apagado
+  100 s** pese a la tarea (y cierra también el vigilante) · `REINICIAR-SERVIDOR.bat` lo enciende y
+  borra la bandera · `/api/salud` ok.
+
+- **2026-08-27 (315) — 🔴 MIS REINICIOS NO REINICIABAN NADA: 2 h 30 de código Python que nunca
+  corrió.** El usuario reportaba que «Sin marca» no guardaba. El código estaba bien: **el servidor
+  que atendía era de las 12:00:05** y los arreglos eran de las 13:58 / 14:05 / 14:06.
+  **La causa**: yo reiniciaba con `schtasks /end` + `schtasks /run`. El `/end` termina la TAREA pero
+  **no siempre se lleva al proceso de Python** que cuelga de ella; y `_arrancar-oculto.bat` es
+  idempotente a propósito (si el 8050 contesta, no hace nada) → el `/run` no arrancaba nada y el
+  servidor VIEJO seguía atendiendo. Yo daba el reinicio por bueno porque **`/api/salud` contestaba
+  200** — pero ese 200 lo contestaba el proceso viejo.
+  **El daño**: el usuario probó contra el endpoint viejo, que al recibir un cuerpo **sin `marca`**
+  (el que manda el botón «Sin marca») le **borraba la marca de proceso** recién puesta. De ahí
+  «pongo sin marca, vuelvo y está como si nunca lo hubiese dicho»: era literalmente cierto.
+  **El arreglo**: **`REINICIAR-SERVIDOR.bat`** — mata el proceso del puerto ANTES del `/run` y no
+  deja la bandera de apagado (esa es de `CERRAR-SERVIDOR.bat`). Verificado: PID nuevo, arrancado
+  14:29:12, posterior al `servidor.py` de 14:05:35.
+  🔴 **REGLA: el reinicio se verifica por la HORA DE ARRANQUE del proceso, no porque `/api/salud`
+  conteste.** `StartTime` del proceso del 8050 tiene que ser POSTERIOR al `LastWriteTime` de
+  `servidor.py`. Y la regla general, que vale para todo el sistema: **«el servicio responde» no
+  prueba que responda el código nuevo**. Cuando un arreglo «no funciona» y el código se ve bien, lo
+  primero es confirmar **qué código está vivo** — antes de tocar una línea más.
+
+- **2026-08-27 (314) — 🔴 QUÉ ES «SIN MARCA» (definición del usuario — la anterior era mía y
+  estaba mal).** Sus palabras: *«en la tizada no saldrá ninguna marca ni el diseño, pero en el
+  VISOR y en la FICHA TÉCNICA sí lo mostrará y dirá la información de qué va, en qué material y
+  qué tamaño»*.
+  | | tizada | visor | ficha técnica |
+  |---|---|---|---|
+  | **sin marca** | **nada**: ni cruz ni diseño | se ve entero | **se lista**: dibujo + material + tamaño |
+  Lo que faltaba era **la ficha**: `_procesos_ficha` sólo listaba objetos con proceso, así que un
+  «sin marca» **desaparecía del sistema entero** y nadie se enteraba de que ese objeto hay que
+  hacerlo aparte. Ahora entra tenga proceso o no.
+  **Sin material elegido la ficha lo PIDE, no lo inventa**: sale «Falta indicar en qué material se
+  hace» en rojo y negrita. El objeto igual no se imprime, así que alguien tiene que decidirlo.
+  El encabezado de la sección se adapta a los tres casos (todos con cruz / mezcla / todos sin
+  marca) — verificado generando el PDF real y leyendo su texto.
+  **Verificado**: contrato → **60 comprobaciones, 0 fallas**; ida y vuelta por endpoints → verde;
+  PDF de ficha generado de verdad con los tres casos y leído con PyMuPDF.
+  ⚠️ **Lección**: en dos vueltas seguidas me inventé la semántica de esta feature (primero
+  «exige proceso», después «desaparece del todo») en vez de preguntar qué tenía que pasar en CADA
+  superficie — tizada, visor y ficha son tres respuestas distintas y el usuario las tenía claras.
+  Cuando una feature toca varias salidas, la pregunta es «¿qué pasa en cada una?», no «¿qué hace?».
+
+- **2026-08-27 (313) — 🔴 «SIN MARCA» ES AUTÓNOMO (corrección de un error MÍO).** El usuario:
+  «sigue estando ahí el maldito objeto … si presiono en sin marca es sin marca. vuelvo para atrás
+  y está como si nunca lo hubiese dicho».
+  **Qué había hecho mal**: le puse a «Sin marca» una condición que nadie pidió — *que el objeto
+  tuviera antes TPU/Bordado/DTF*. El objeto que el usuario sólo quería hacer desaparecer no tenía
+  proceso, así que el botón **rechazaba la orden y no guardaba nada**: de ahí «vuelvo para atrás y
+  está como si nunca lo hubiese dicho». Encima el endpoint **borraba el flag al sacar el proceso**,
+  lo que borraba la decisión sin avisar.
+  **La regla ahora, en sus palabras**: **«Sin marca» = en la tizada NO queda NADA en ese lugar.**
+  · con proceso → no va la cruz (el objeto ya no se sublimaba) · **sin proceso → el objeto
+  simplemente no se imprime**. Las dos decisiones son INDEPENDIENTES: sacar el proceso ya no toca
+  el flag.
+  **Dónde se tocó**: `_editables_sin_marca` ya no exige `marca`; el endpoint desacopló los campos;
+  el motor suma los «sin marca» a `_marcados_nombres` — 🔴 **sin eso el objeto se queda dentro del
+  diseño base y se imprime igual, que era el síntoma** — y el dibujo resuelve las cuatro
+  combinaciones con una sola regla (`if (_mk or _sin) and marcas_como_cruz`). La pantalla habilita
+  el botón con cualquier objeto elegido.
+  **Verificado**: contrato → **54 comprobaciones, 0 fallas** (con el caso «flag sin proceso» y el
+  cerrojo de que salga del diseño base); ida y vuelta por los endpoints reales → todo verde,
+  incluido «sin marca» sobre un objeto que **nunca** tuvo proceso.
+  ⚠️ **Cómo se diagnosticó, que es lo que vale para la próxima**: el log del servidor mostraba
+  los `POST /api/productos/editable_marca` **con 200**, o sea que la pantalla llamaba bien y el
+  backend guardaba — el problema estaba en que el front **no llegaba a llamar** para esos objetos.
+  Y `db.get_doc("catalogo")` mostró que el objeto de la queja no tenía ninguna marca guardada.
+  Comparar «lo que se ve» con «lo que está guardado» y «lo que se pidió por HTTP» ubicó el error
+  en tres pasos.
+
+- **2026-08-27 (312) — 🔴 BUG REAL: las marcas de proceso NO se aplicaban y el objeto salía
+  IMPRESO en la tizada.** Reportado por el usuario con su molde «Camiseta de futbol» / diseño
+  «jugador»: asignó TPU y DTF y en la tizada aparecían los dos escudos dibujados, sin ninguna cruz.
+  **La causa** (no era la feature nueva de «sin marca»; era de antes y salió a la luz recién ahora,
+  porque hasta hoy **ningún arte cargado tenía capas «Editable …»** para probarlo de verdad):
+  la config del editable se guarda **por variable** (`{v_bu8p7gy: {escudo: tpu}}`), pero la fila
+  del pedido venía con **`variante_clave = None`**. El motor resolvía
+  `_emarca.get(variante) or _emarca.get("*")` → los dos fallaban → `{}` → **ninguna marca**.
+  Y como el objeto SÍ se saca del diseño base (eso mira todas las variables), se lo volvía a
+  dibujar entero: exactamente el síntoma.
+  **Diagnosticado con los datos reales del usuario** (sólo lectura): el catálogo tenía la marca
+  bien guardada, los nombres del arte (`escudo`, `logo`, `Escudo_Mar_de_Fondo_Fútbol_Club_v2`)
+  coincidían exactamente con las claves guardadas, y `trabajos/…/pedido.json` mostró el
+  `variante_clave: None` de las 5 filas. Buscarlo en el nombre o en la cruz habría sido perder el
+  tiempo: el problema estaba en la RESOLUCIÓN DE LA VARIABLE.
+  **El arreglo — un único resolutor `_cfg_var(mapa, variante)`** que usan **las cuatro** config del
+  editable (color, marca, sin_marca y transforms/posición; antes cada una lo resolvía a mano y
+  todas tenían el mismo agujero). La regla es la misma que ya usaba la ETIQUETA para las filas sin
+  variable: fila con variable → esa (o el `"*"` legacy) · fila sin variable y **UNA sola**
+  configurada → esa, que es inequívoca · **varias y la fila sin elegir → NO se adivina**, y el
+  pedido lo **avisa** (`avisos_pedido`). Elegir una al azar sacaría una prenda mal y bien impresa.
+  **Verificado**: con el molde real, `escudo` ahora encuentra su `tpu` con `variante=None`;
+  el caso ambiguo sigue devolviendo vacío. Contrato `verificar_marcas_proceso.py` → **51
+  comprobaciones, 0 fallas**, e incluye un cerrojo: **el patrón `.get(variante) or` no puede
+  aparecer fuera del resolutor** (si alguien lo reintroduce, vuelve el bug). `verificar_cantidad`
+  y `verificar_etiqueta_nombre` siguen en verde.
+  ⚠️ **Lo que sigue sin probarse**: la cruz DIBUJADA en una tizada real. Se verificó la
+  resolución de la marca con los datos del usuario, no el PDF final.
+
+- **2026-08-27 (311) — MARCAS DE PROCESO: la cruz se puede APAGAR («sin marca»).** Pedido del
+  usuario: un objeto con TPU/Bordado/DTF puede dejar la cruz de 3 cm **o no dejar nada**.
+  🔴 **Son DOS decisiones distintas y por eso van en dos campos**: `marca` (el objeto **no se
+  sublima**) y `sin_marca` (**no queda nada en su lugar**). Mezclarlas en un solo valor obligaba a
+  tocar todo el circuito de `MARCAS_PROCESO` y hubiera hecho que apagar la cruz volviera a imprimir
+  el objeto — justo lo contrario de lo que se pide.
+  **Dónde vive**: en el catálogo, junto a `marca`, dentro del mismo objeto (`sin_marca: true`);
+  se lee con `_editables_sin_marca()` (espejo exacto de `_editables_marca`, con los tres formatos:
+  plano viejo → «*», capa de 1 objeto, capa multi-objeto).
+  **Motor**: `generar_pedido(..., editables_sin_marca=)` + `_sin_marca_de()`. El `continue` que saca
+  el objeto del dibujo quedó **fuera** del `if` de la cruz: por eso apagar la marca **no** hace que
+  el objeto se sublime. Viaja también por `generar_pedido_multi` (`md["editables_sin_marca"]`).
+  **Pantalla**: botón **«Sin marca»** dentro del grupo «No se sublima» (con su Ayuda al lado, e
+  ícono propio: la cruz tachada). Se habilita sólo si lo seleccionado ya tiene proceso, y se apaga
+  tocándolo de nuevo. **No invalida el caché del visor a propósito**: el preview del arte muestra
+  el objeto entero en los dos casos (`marcas_como_cruz=False`), así que rehacerlo sería trabajo al
+  pedo — ojo, esto es lo contrario de asignar la marca, que **sí** lo invalida.
+  **Ficha técnica**: el encabezado ya no afirma que siempre va una cruz (se adapta a todos/algunos/
+  ninguno) y cada objeto sin marca dice **«SIN MARCA en la tela»**. Si no, el operario busca en la
+  tela una cruz que nadie imprimió.
+  **Verificado**: `verificar_marcas_proceso.py` ampliado (38 comprobaciones, 0 fallas) + prueba de
+  ida y vuelta por los **endpoints reales** (`scratchpad/e2e_sin_marca.py`, catálogo en memoria y
+  doble de `db` que explota): guarda, se lee, el flag no pisa el proceso ni al revés, y **sacar el
+  proceso se lleva el flag** (un `sin_marca` huérfano se reactivaría solo al reasignar el proceso).
+  ⚠️ **Falta la prueba EN PANTALLA**: ningún arte cargado tiene capas «Editable …», así que el
+  botón no se pudo tocar de verdad (misma limitación que arrastran TPU/Bordado/DTF desde 2026-08-26).
+  Sí verificado: compila, la app levanta sin errores de consola y los textos están en el build.
+  ⚠️ **Trampa de herramienta**: la primera versión del contrato daba FALLA porque buscaba la
+  palabra `continue` en el código y la encontraba **en un comentario mío**. Ahora busca la sentencia
+  (`^\s*continue\s*$`) y compara su indentación con la del dibujo de la cruz.
+
+- **2026-08-27 (310) — 🔴 «SE ME CAE SOLO»: el servidor del TALLER colgaba del programa que lo
+  arrancaba. RESUELTO con la tarea de Windows.**
+  **El síntoma**: el sistema se caía cada media hora y el `logs/servidor.log` **cortaba en seco, sin
+  una sola línea de error**. No había evento en el Visor de eventos ni «Application Error» de Python.
+  **La causa** (confirmada mirando la cadena de padres del proceso): un servidor lanzado desde una
+  consola es HIJO de esa consola. Windows agrupa el árbol y, cuando el que lo lanzó se cierra, se
+  lleva puesto TODO — con `TerminateProcess`, que no deja traza ni excepción. La cadena era
+  `python → py → cmd → wscript → powershell → **claude.exe**`. O sea: **el sistema se apagaba
+  cuando se cerraba la terminal desde la que yo lo arrancaba.** No era el código, ni SQL Server, ni
+  la memoria. Buscarlo en el código era buscarlo donde no estaba.
+  **El arreglo**: `INSTALAR-ARRANQUE-AUTOMATICO.bat` registra la tarea de Windows **«TIZADA PRO»**
+  (`_instalar-tarea.ps1`) — la misma protección que `instalar_servidor.py` le ponía al servidor
+  PUBLICADO y que al del taller nunca se le había puesto. Ahora la cadena termina en **svchost
+  (Programador de tareas)**: el servidor no cuelga de nadie. La tarea además arranca al iniciar
+  sesión, **se revisa cada 2 minutos** y lo levanta si se cayó, no tiene límite de tiempo (si no,
+  Windows lo mata a los 3 días) y es oculta.
+  **Piezas**: `_arrancar-oculto.bat` pasó a ser **idempotente** (si `/api/salud` contesta no hace
+  nada → nunca dos servidores; si el puerto está tomado pero no contesta, lo saca); guarda el log
+  anterior como `logs/servidor.anterior.log` (antes se pisaba en cada arranque y no se podía
+  investigar la caída) y anota cada final en **`logs/caidas.log`**, que es lo que distingue «se
+  cayó» de «lo apagaron». `CERRAR-SERVIDOR.bat` deja `logs/apagado.flag` para que el vigilante NO
+  lo reviva (sin eso no habría forma de apagarlo); la bandera **caduca a los 15 minutos**, así que
+  una bandera colgada no deja el sistema muerto. `INICIAR-SIN-VENTANA.vbs` ahora arranca **por la
+  tarea** (`schtasks /run`) y sólo cae al arranque directo si la tarea no está.
+  **Verificado de verdad**: matado a mano → **volvió solo en 48 s**; apagado con
+  `CERRAR-SERVIDOR.bat` → siguió apagado 2:30 pese al vigilante; encendido de nuevo → arriba y con
+  la bandera borrada; cadena de padres sin `claude.exe`; `/api/salud` ok, 0 fallas.
+  🔴 **REGLA para mí: para reiniciar el server NUNCA más lanzar `py servidor.py` desde la
+  terminal** — eso reintroduce el bug. Va **`schtasks /end /tn "TIZADA PRO"` y después
+  `schtasks /run /tn "TIZADA PRO"`**, y verificar `/api/salud`.
+  ⚠️ **Trampas de herramienta que costaron dos vueltas** (para no repetirlas):
+  • Los `.bat` van en **ASCII puro y CRLF**. `cmd` los lee con la página de códigos OEM: los
+  caracteres de caja y los acentos le parten la línea y termina ejecutando basura
+  (`"pagado.flag)" no se reconoce como un comando`). Los `.bat` que funcionan en este repo son ASCII.
+  • En Python, escribir la ruta `logspagado.flag` sin `r""` convierte `` en **BEL (0x07)**: la
+  ruta queda rota y no se ve a simple vista. Y «arreglarlo» con `replace` por heredoc **vuelve a
+  colapsar a BEL** — hubo que usar `bytes([92, 97])`.
+  • En PowerShell 5.1, **`2>&1` sobre `schtasks`** convierte cada línea de error en excepción: con
+  `ErrorActionPreference=Stop` el instalador moría en el `/delete`, que **falla a propósito** la
+  primera vez.
+  • `timeout /t` falla con «No es compatible la redirección de entradas» si la entrada no es una
+  consola → `ping -n 4 127.0.0.1 >nul`.
+  **Limitación honesta**: la tarea corre con `InteractiveToken` (como el usuario, sin guardar
+  contraseña, para conservar sus permisos de Windows sobre MSSQL) → **arranca al iniciar sesión**,
+  no con la máquina prendida sin nadie logueado. Para el taller es lo correcto.
+
+- **2026-08-27 (309) — LINUX SE ACTUALIZA SOLO SIN PEDIR ROOT (modo «reinicio»); los dos modos
+  conviven.** El usuario vio el cartel «este servidor no puede instalarse solo (KillMode=mixed…)» y
+  pidió que el sistema lo resuelva: «que funcione y que convivan los dos».
+  **La idea**: el problema era el `systemctl stop` que pedía el ayudante — el que lo mataba a él
+  mismo. Pero el unit ya tiene **`Restart=always`**, así que no hace falta parar nada: se
+  **descomprime con el servidor todavía vivo** (Python ya tiene sus módulos en memoria: reemplazar
+  los `.py` no lo tumba) y, cuando el servidor se apaga solo —como venía haciendo—, **systemd lo
+  levanta con la versión nueva**. Sin `systemctl stop`, el `KillMode` deja de importar y **no hace
+  falta root ni el drop-in**.
+  **Cómo se elige** (`actualizaciones.como_se_instala()`, reemplaza a `puede_instalarse_solo`, que
+  queda como compatibilidad): `Restart=always|on-failure|on-abnormal` → **`reinicio`** ·
+  `KillMode=process` → **`systemd`** (el clásico) · ninguno → **None**, y ahí sí queda para aplicar
+  a mano. El modo viaja al ayudante como quinto argumento; sin él, `actualizador.py` asume el
+  clásico (un ayudante lanzado por una versión vieja sigue funcionando). En `main()` la rama
+  «reinicio» **no llama a `parar()`** y descomprime ANTES de esperar el apagado — al revés no
+  serviría: systemd revivía el código viejo. Mantiene respaldo y vuelta atrás.
+  **El estado que ve la pantalla** ahora informa `modo_instalacion`.
+  **Contrato `verificar_actualizador_linux.py` ampliado**: exige que exista la rama «reinicio», que
+  NO pare el servicio, que descomprima antes de esperar, que tenga rollback, que el modo clásico
+  siga parando primero, y que la decisión mire `Restart` de verdad.
+  **Verificado** simulando las cinco configuraciones posibles del unit: el **VPS de hoy**
+  (`Restart=always`, `KillMode=mixed`) → **modo reinicio**, o sea que **ya puede actualizarse solo
+  sin tocar nada**; con el drop-in → clásico; sin ninguno de los dos → a mano, diciendo qué falta.
+  `DESPLIEGUE.md` §11.b actualizado: el drop-in pasó de obligatorio a opcional.
+
+- **2026-08-27 (308) — Arrancar el sistema SIN VENTANA (`INICIAR-SIN-VENTANA.vbs`).** «Se me cerró la
+  ventana» — y con razón: la consola negra **ERA** el servidor, así que cerrarla lo apagaba. Ahora hay
+  tres piezas: **`INICIAR-SIN-VENTANA.vbs`** (doble clic → cierra lo que hubiera en el 8050, arranca
+  el servidor **oculto**, espera hasta 20 s a que `/api/salud` conteste y avisa con un cartelito que
+  se va solo; si no levanta, dice dónde mirar), **`_arrancar-oculto.bat`** (el arranque en sí, sin
+  `pause`, con todo el registro a `logs\servidor.log`) y **`CERRAR-SERVIDOR.bat`** para apagarlo —
+  hace falta justamente porque ya no hay ventana que cerrar. `iniciar.bat` queda como estaba, para
+  cuando se quiere ver la consola.
+  ⚠️ **Trampa**: la primera versión adivinaba el intérprete desde el VBS
+  (`If Not fso.FileExists("C:\Windows\py.exe") Then py = "python"`) y terminó llamando al **alias
+  de la Microsoft Store** → `logs\servidor.log`: «no se encontró Python». El arranque usa ahora el
+  MISMO criterio que `iniciar.bat` (`where py` y si no `python`), en el .bat.
+  **Verificado**: lanzado como lo va a hacer el usuario (doble clic en el .vbs) → `/api/salud`
+  **200, ok: true, 0 fallas**, el registro escribiéndose en `logs\servidor.log` y **ninguna consola
+  con ventana visible**. `logs/` agregado al `.gitignore`.
+
+- **2026-08-26 (307) — ARTE POR RANGO: la ficha muestra la medida de CADA rango.** Corrección del
+  usuario a la 306: su diseño tiene **un arte por rango**, y ahí cada mesa puede traer el objeto con
+  otra medida — hay que mostrarlas **todas**, diciendo qué talles abarca cada una. La medida del
+  **talle guía** es sólo para el modo *default* o para un arte *por talle* (una sola mesa).
+  `_procesos_ficha` ahora recibe el **registro** y usa `MP.mapeo_variantes_arte` para invertir
+  `{pieza: {talle: mesa}}` → `{mesa: [talles]}`; agrupa las mesas del objeto **por medida** y arma
+  una línea por tramo, ordenando los talles como el molde (`_orden_var`) para poder decir «XS a S».
+  Prioridad final: **tamaño configurado** > **rangos del arte** > **talle guía**.
+  **Verificado** (contrato ampliado, 26 comprobaciones): con 3 mesas (XS-S · M-L · XL-2XL) sale
+  **un solo renglón** con `XS a S → 6.5 cm`, `M a L → 7.5 cm`, `XL a 2XL → 8.5 cm`; con una sola
+  mesa, `talle M → 7.5 cm`; y con tamaño configurado manda la config (`XS a M → 8.0`, `L a 2XL →
+  10.0`). Server reiniciado tras tocar Python: `/api/salud` **ok: true, 0 fallas**.
+- **2026-08-26 (306) — La ficha lista cada objeto UNA vez, con la medida que corresponde.** El
+  usuario vio el mismo «escudo» **cuatro veces** (7,5 · 7,5 · 7,5 · 6,5 cm): `extraer_editables`
+  devuelve el objeto **una vez por MESA del arte** —una por rango de talles— y la ficha los listaba
+  todos. Ahora `_procesos_ficha` **agrupa por nombre** y resuelve las medidas así:
+  · **con tamaño configurado por rangos** (`editables_config`) → **una línea por rango**, diciendo
+    qué talles abarca: «XS a M · 8,0 × 8,0 cm» / «L a 2XL · 10,0 × 10,0 cm». Es la medida que la
+    tizada va a respetar, así que es la que hay que mostrar.
+  · **sin configurar** (default o talle por talle) → la medida que el objeto tiene **en el TALLE
+    GUÍA**, y si el arte lo trae en varias medidas se aclara con una nota.
+  El bloque de la ficha **crece** si el objeto tiene varios rangos (antes era de alto fijo).
+  ⚠️ En `servidor.py` **`_norm_nombre` no existe suelto**: es `MP._norm_nombre` (se coló en la
+  primera versión y habría explotado al generar la ficha).
+  **Verificado** con una ficha REAL generada y leída de vuelta: «escudo» aparece **1 vez**, con sus
+  dos rangos; el de una sola medida sale con «talle M» y su nota. Server reiniciado tras tocar
+  Python — `/api/salud` **ok: true, 0 fallas** (regla del usuario).
+
+- **2026-08-26 (305) — Marcas de proceso, segunda vuelta: cruz gruesa, letra adentro y la ficha
+  muestra el objeto.** Correcciones del usuario sobre la 304:
+  **(a) La cruz**, mucho más gruesa: `CRUZ_TRAZO_MM` **0,35 → 1,6 mm** (tiene que verse de lejos en
+  la mesa), con puntas rectas (`0 J`).
+  **(b) La letra va DENTRO de un cuadrante**, no al costado: se centra en el punto medio entre el
+  cruce y la punta de los brazos de arriba-derecha (`CRUZ_LETRA_MM = 7`), así toda la marca entra en
+  los 3 cm y el cruce —el punto exacto donde va el objeto— queda libre.
+  **(c) La FICHA vuelve a mostrar el objeto en el molde**: `_molde_guia_ficha` genera con
+  **`marcas_como_cruz=False`** — la cruz es para la TELA; en la ficha el molde tiene que verse con
+  su diseño completo.
+  **(d) La lista de abajo ya no muestra letras**: por cada objeto va **su DIBUJO** (el SVG del arte;
+  si no se puede convertir, la miniatura PNG) en una caja de 54×48, y al lado el nombre, **«Se hace
+  en: TPU/Bordado/DTF»**, la medida y sobre qué pieza. `_procesos_ficha` ahora devuelve `svg` y
+  `thumb` en vez de la letra.
+  **Verificado** (contrato, 22 comprobaciones en verde): trazo **1,6 mm**, y con una fuente real los
+  **9 puntos** del trazado de la letra caen **dentro del cuadrante** y ninguno se sale de los 3 cm.
+  ⚠️ Sigue sin poderse probar en pantalla (ningún arte cargado tiene capas «Editable …»).
+  🔁 **Regla nueva del usuario**: «cada vez que toques python termina y inicia todo **pero el sistema
+  debe de estar funcionando bien**» → tras esta tanda: server reiniciado y `/api/salud` con
+  **ok: true, 0 fallas**, base respondiendo y frontend al día. Ver [[reiniciar-server-python]].
+
+- **2026-08-26 (304) — MARCAS DE PROCESO: TPU · Bordado · DTF (lo que NO se sublima).** Pedido del
+  usuario: en el editor, tres botones arriba; se eligen uno o varios objetos editables y se les
+  asigna un proceso. Ese objeto **no se imprime**: en la tizada, en su lugar, va una **cruz de 3 cm**
+  centrada donde estaba, y en la ficha técnica se lista qué hay que aplicar ahí.
+  **Decisiones del usuario**: cruz de **3 cm punta a punta**, línea fina · **las tres en negro** con
+  la **letra** al lado (T/B/D) en vez de tres colores (podían confundirse con el diseño) · se quita
+  **tocando el mismo botón** otra vez · en la ficha van **dibujo/letra + nombre + medida + en qué
+  pieza**.
+  **Motor** (`motor_pedido.py`): `MARCAS_PROCESO`, `CRUZ_MM=30`, `_ops_cruz_proceso` (cruz negro puro
+  `0 0 0 1 K` + la letra en curvas) y **`_centro_editable`**, que devuelve el mismo punto que usa
+  `_matriz_editable` como pivote — así la cruz cae exactamente donde quedó el objeto, movido o no.
+  `generar_pedido(..., editables_marca, marcas_como_cruz=True)`: el marcado entra en
+  `_redibujar_nombres` (se saca del diseño base, como un recoloreado) y **no se vuelve a dibujar**.
+  🔴 **`marcas_como_cruz=False` en el preview del arte**: es la **única excepción consciente** a la
+  ley «el arte se ve igual que la tizada», y es a pedido del usuario — el diseñador tiene que seguir
+  viendo el objeto entero. La marca **sí** entra en la clave del caché (`_piezas_base_clave` **v13**):
+  aunque el dibujo no cambie, cambia lo que se saca del diseño base.
+  **Servidor**: `_editables_marca` (espejo de `_editables_color`, lee los 3 formatos guardados),
+  `POST /api/productos/editable_marca` (asigna/quita, por variable y por objeto),
+  `GET /api/productos/editables_marcas`, y la marca viaja en los tres caminos de generación
+  (preview, generar y `generar_multi`).
+  **Front**: tres íconos nuevos (`tpu` plancha · `bordado` aguja · `dtf` película) y la barra
+  **«No se sublima»** arriba del editor, que se enciende cuando TODOS los objetos elegidos tienen ese
+  proceso; al asignar se invalida la caché del visor.
+  **Ficha técnica**: `_procesos_ficha` + sección **«NO SE SUBLIMA · se aplica aparte»** debajo de las
+  piezas de cada diseño, con la letra de la cruz, el nombre, el proceso, la medida y la pieza.
+  **Contrato `verificar_marcas_proceso.py`** (18 comprobaciones, verde): la cruz mide **30,00 mm** en
+  los dos brazos, es negro puro, la línea 0,35 mm, cada opción con su letra; una marca desconocida
+  no dibuja nada; la marca se lee en los **tres formatos** (plano viejo → «*», capa de 1 objeto, y
+  **por figura** en capas multi-objeto); y el centro sigue al objeto cuando se lo mueve.
+  ⚠️ **Lo que NO se pudo probar en pantalla**: los tres botones. Ninguno de los artes cargados tiene
+  capas «Editable …», así que el botón «Editar diseño» no aparece y el editor no se puede abrir en el
+  sandbox. Falta probarlo con un arte que traiga editables.
+
+- **2026-08-26 (303) — El REBOTE al soltar las filas.** «¿Por qué hace un efecto de retroceso cuando
+  suelto si ya están acomodadas?» — dos causas, las dos del ciclo de React:
+  1. En `onUp` se llamaba a `setFilasSel` **dentro del updater** de `setFilas`. Eso corre en plena
+     fase de render y provoca un **render intermedio** con las filas todavía viejas y los
+     desplazamientos ya en cero: por un instante se veían volver a su lugar original. Ahora el
+     reordenamiento se calcula **antes** y los `setState` se aplican de una (`filas`, `filasSel`,
+     `dragFilas`), sin nada anidado.
+  2. Las `key` de las filas son el **índice**, así que al reordenar React **reutiliza el mismo
+     `<tr>`** para otra fila: el navegador veía pasar su `translateY` de 99 px a 0 y lo **animaba**.
+     Se agregó `soltandoFilas`: el frame en que se suelta va con `transition: 'none'` (60 ms) y
+     después todo vuelve a la normalidad.
+  **Verificado** midiendo **un frame después** de soltar (16 ms), que es donde se veía el rebote:
+  las filas ya están en el orden final, **0 con `transform`** y **0 con transición activa** —
+  todas en `transition: none`.
+
+- **2026-08-26 (302) — Arrastre de filas: queda el PRIMER efecto (la fila real se mueve) + números en
+  vivo.** Tercera vuelta sobre lo mismo, con la aclaración del usuario: *«cuando arrastrás no deja
+  las filas como ocultas, arrastra las filas reales en tiempo real; ves cómo se va arrastrando la
+  fila pero va cambiando su ítem»*. Se **eliminó el hueco punteado** (entradas 300-301) y volvió el
+  efecto de la entrada 299: la fila **se ve y viaja** con el cursor (`translateY`, fondo de acento y
+  sombra) y las demás se corren para dejarle lugar; **cero bordes punteados**. Se conserva lo único
+  que se agregó después y sí quedó: **`numeroFila(i)`**, la numeración que se recalcula en vivo.
+  Como las filas vuelven a moverse con `transform`, el destino se calcula otra vez con las
+  posiciones **congeladas** del arranque (`tops`) — preguntarle al DOM daría la posición ya
+  desplazada y el destino se perseguiría a sí mismo. Se sacaron el FLIP y `numerosDelHueco`, que
+  eran del hueco.
+  **Verificado en la UI**: arrastrando la 1ª al lugar 4 → la fila M queda **visible** (`oculta:
+  false`) con `translateY(99px)` y su número ya dice **04**, mientras L/S/XL se corren `-33px` y
+  pasan a **01/02/03** en vivo, XS queda en 05; **0 elementos punteados**; al soltar,
+  `01:L 02:S 03:XL 04:M 05:XS`.
+  📌 Historial de esta feature, para no volver a girar en círculos: **299** filas que se mueven →
+  **300** hueco punteado (rechazado: «efecto horrible») → **301** hueco + FLIP + números →
+  **302 (esto)** vuelta al 299 **con** los números. Lo que el usuario quiere es: **la fila real
+  moviéndose y su número cambiando**.
+
+- **2026-08-26 (301) — Arrastre de filas: números EN VIVO, el deslizamiento de vuelta y soltar la
+  selección al tocar afuera.** Tres pedidos del usuario sobre la entrada 300.
+  **(a) Números en vivo**: `numeroFila(i)` calcula el número que le VA A TOCAR a cada fila cuando se
+  suelte, y el hueco muestra el suyo (`04` o `04-06` si viajan varias). Verificado: arrastrando la
+  1ª al lugar 4, durante el gesto se ve `01:L · 02:S · 03:XL · [HUECO 04] · 05:XS` y al soltar queda
+  exactamente así.
+  **(b) Vuelve el movimiento**, pero sin el «va y viene»: el hueco se queda (entrada 300) y las filas
+  **se deslizan** a su nuevo lugar con **FLIP** (`useLayoutEffect` mide dónde estaba cada fila, la
+  devuelve con un `transform` y la suelta con transición de .18 s). ⚠️ `requestAnimationFrame` **no
+  corre con la pestaña en segundo plano** — sin un `setTimeout` de respaldo, una fila podía quedarse
+  desplazada para siempre. Verificado: **5 filas animándose** durante el gesto y **0 corridas** al
+  terminar.
+  **(c) Tocar en otro lado suelta la selección** (celda, fondo, lo que sea) salvo con shift/ctrl o
+  sobre la propia columna del número (`data-numfila`). Verificado paso a paso: clic simple → 1 ·
+  shift → 3 · tocar una celda → 0 · elegir otra → 1 · tocar el fondo → 0.
+  🔴 **Dos bugs de carrera encontrados al verificar** (los dos por el orden de los eventos):
+  1. El `onClick` del número se salteaba si `dragFilas` seguía activo — y el `mousedown` lo activa
+     SIEMPRE. Ahora el clic se ignora sólo si hubo arrastre de verdad (`clickTrasDrag`).
+  2. Los listeners del gesto se montaban en un `useEffect`, o sea **un render tarde**: un clic corto
+     (soltar antes de ese render) no encontraba su `mouseup`, el gesto quedaba abierto y la tabla
+     seguía «arrastrando» sin ningún botón apretado. Ahora se enganchan **dentro del propio
+     `mousedown`** y se sueltan en el `mouseup`.
+  🔧 **Y una lección de entorno**: el server 8050 se cayó cuatro veces. No era el código ni la base
+  (SQL Server estuvo `RUNNING` y el log terminaba **sin una sola excepción**): **el entorno mata todo
+  proceso que nace de un comando mío** al terminar ese comando — con `run_in_background`, con
+  `Start-Process` y hasta creándolo por WMI. Lo que SÍ funciona: lanzarlo desde el **Programador de
+  tareas** (`schtasks /create` + `/run`, y después `/delete` para no dejar nada puesto), que lo
+  ejecuta el servicio de tareas, fuera de mi árbol. Verificado: sobrevive a varios comandos
+  seguidos. Ver [[reiniciar-server-python]].
+
+- **2026-08-26 (300) — El arrastre de filas ahora ABRE UN HUECO (y el toggle responde en el
+  interruptor).** Dos correcciones del usuario sobre lo de la entrada 299.
+  **(a) «El botón funciona sólo en las letras»**: el `Switch` de *Columna cantidad* traía su propio
+  `onClick` y estaba dentro de una fila que también lo tenía → tocar el interruptor disparaba el
+  toggle **dos veces** y volvía al estado anterior; tocando el texto, una sola vez. Ahora el switch
+  va con `pointerEvents: none` y **el click lo maneja la fila entera**. Verificado: tocando el
+  interruptor la columna aparece/desaparece, y tocando el texto también.
+  **(b) «El efecto va y viene»**: la primera versión movía TODAS las filas con `translateY` — se veía
+  como un baile. Se reemplazó por lo que pidió: **la fila sale de su lugar** (`display: none`) y en el
+  destino aparece un **HUECO EN BLANCO** del alto de lo que se está moviendo (borde punteado en el
+  acento), que se va corriendo con el cursor. **Ninguna fila se transforma**: cero movimiento
+  lateral, sólo el espacio que se abre. Además el punto de inserción se calcula con las **posiciones
+  del DOM de ahora** (filas visibles, sin las que viajan): como el hueco ocupa lugar, mover el cursor
+  dentro del hueco no cambia nada — con las posiciones congeladas del arranque, parpadeaba.
+  **Verificado**: (1) arrastrando 1 fila → durante el gesto `(fuera) · L · S · XL · XS · [HUECO]`,
+  **0 filas con transform**, y al soltar `L S XL XS M`; (2) con **2 filas** elegidas por shift → las
+  dos `(fuera)`, un hueco de **67 px** (2 × 33 + margen) arriba de todo, y al soltar `XS M L S XL`
+  — juntas y en orden.
+
+- **2026-08-26 (299) — Reordenar filas ARRASTRANDO desde la columna «#», con la animación en vivo.**
+  Se toca el número para elegir una fila (**shift** = rango, **ctrl/cmd** = de a una) y se arrastra
+  para moverla; mientras se arrastra, **las filas se corren en tiempo real** para abrir el hueco
+  donde van a caer. El **número del ítem no viaja con la fila**: se pinta por posición (`i + 1`), así
+  que siempre queda 1, 2, 3… de arriba abajo.
+  **Cómo está hecho**: `filasSel` (Set de índices) + `dragFilas` = `{sel, destino, alto, tops}`.
+  Las posiciones (`tops`) se capturan **al empezar** el gesto: el punto de inserción se calcula
+  contra ellas y no contra el DOM, que en ese momento se está moviendo por la propia animación.
+  `desplazoFila(i)` devuelve cuánto se corre cada fila —el bloque arrastrado hacia su destino, el
+  resto abriendo el hueco— y eso va a un `translateY` con `transition` de .16 s **sólo mientras dura
+  el arrastre**: al soltar, el array ya está reordenado y una transición ahí haría un salto. El
+  gesto vive en el **documento** (mousemove/mouseup), así que sigue aunque el mouse se salga de la
+  tabla; al terminar se limpia la selección de CELDAS (`plSel`), que apuntaba a los índices viejos.
+  ⚠️ **Bug encontrado al verificarlo**: `empezarDragFilas` reseteaba la selección a la fila tocada, y
+  como el **`mousedown` corre ANTES que el `click`**, el shift+click perdía lo elegido y se arrastraba
+  una sola fila. Ahora el arranque **no toca la selección** (y con shift/ctrl ni siquiera arranca:
+  eso es elegir, no arrastrar); la selección se actualiza al soltar, siguiendo al bloque movido.
+  **Verificado en la UI** con 5 filas `M L S XL XS`: (1) arrastrando la 1ª a la 4ª posición →
+  `L S XL M XS`, con `translateY(99px)` en la que viaja y `-33px` en las tres que se corren;
+  (2) eligiendo dos con shift y llevándolas al final → **2 filas marcadas**, las dos con
+  `translateY(99px)` y el resto `-66px`, resultado `S XL XS M L` — viajaron **juntas y en orden**;
+  (3) en los dos casos los números quedaron **01…05**.
+  ⚠️ Trampa de la verificación: entre el `mousedown` sintético y el primer `mousemove` hay que
+  **esperar un tick** — el listener de documento lo monta un `useEffect`, que corre después del
+  render; sin esa espera el movimiento se pierde y parece que la feature no anda.
+
+- **2026-08-26 (298) — El lote aprovecha las filas vacías, y el filtro de los desplegables ordena por
+  el principio de la palabra.** Dos pedidos del usuario.
+  **(a) Cargar por lote** dejaba los renglones en blanco arriba y ponía lo suyo abajo. Ahora
+  **rellena primero las filas vacías** que ya están —en su lugar, sin moverlas— y sólo agrega al
+  final lo que no entró (`filaVacia` por fila; los toggles no cuentan como «cargado» porque nacen
+  con una opción puesta). El modal lo dice antes de confirmar: «7 prendas · 5 en las 5 filas vacías
+  · 2 al final». **Verificado**: planilla recién abierta (5 vacías) + `M=3`, `L=4` ⇒ **7 filas**
+  `M M M L L L L`, **ninguna en blanco**.
+  **(b) El filtro de los desplegables** usaba `includes` pelado: escribiendo **«L»** la lista abría
+  con `XL`, `2XL`… y la **L** quedaba perdida en el medio. Ahora se ordena en tres tramos —
+  **exacta → empieza con → contiene** — sin perder la búsqueda por dentro. **Verificado** con los 30
+  talles del molde: «L» → `L · Lfem · XLfem · 2XLfem … XL · 2XL`; «S» → `S · Sfem · XSfem · XS`;
+  y «fem» sigue encontrando las 10 (ninguna empieza así, caen en el tercer tramo).
+  ℹ️ Nota de sesión: el server 8050 se había caído (el proceso de fondo terminó con código 127 por
+  quedar lanzado desde `frontend/`); se relanzó **desde la raíz del repo** y quedó en verde
+  (`ok: true`, base OK, 26 tablas). **Lanzar `py servidor.py` siempre desde la raíz.**
+
+- **2026-08-26 (297) — Fuera el spinner de las casillas de número (en TODA la app).** El usuario
+  mandó el recorte de las flechitas ▲▼ del navegador: un `input[type=number]` las dibuja de fábrica
+  **con su propio fondo claro**, y dentro de una interfaz oscura se ve como un parche pegado. Se
+  ocultan de una vez en `index.css` (`::-webkit-inner/outer-spin-button { appearance: none }` +
+  `input[type=number] { appearance: textfield }` para Firefox), así que vale para los **13**
+  `input[type=number]` del sistema, no sólo el de «Agregar filas»: la casilla queda con el fondo que
+  le pone la app y el número centrado. Donde hace falta subir/bajar de a uno ya hay botones propios
+  (los ± del «Cargar por lote», el menú de `NumeroConMenu`). **Verificado en la UI**: las dos reglas
+  viajan en el CSS compilado y el `appearance` computado del input es `textfield`.
+
+- **2026-08-26 (296) — La planilla, CENTRADA; y el modal del lote, POR GRUPOS.** Dos cosas que marcó
+  el usuario mirando la pantalla.
+  **(a) «La planilla sigue hacia un lado y queda feo»**: desde que la tabla mide `max-content`
+  (entrada 293) quedaba pegada a la izquierda de una tarjeta que ocupaba todo el ancho, con medio
+  panel vacío al lado. Ahora **la tarjeta acompaña al contenido** (`width: max-content`,
+  `minWidth: min(100%, 780px)` para que el título no se apriete) y va **centrada**, igual que el
+  marco de la tabla adentro. Medido a 1440 px: tarjeta de 918, con **233 px de aire a cada lado**, y
+  la tabla con **54 a cada lado** dentro de la tarjeta. El aire quedó afuera y repartido, no adentro
+  y de un solo lado.
+  **(b) El modal «Cargar por lote» era una pared de 30 casilleros** con los nombres **cortados**
+  («1..», «X.», «S.»): no se sabía cuál era cuál. Ahora se separa en **grupos** con encabezado y
+  subtotal — `_grupoTalle` mira lo que queda DESPUÉS del talle en sí (`6XLfem` → sufijo «fem»), y los
+  puramente numéricos van aparte; si un molde no usa sufijos queda **un solo grupo** y se ve como
+  antes. Celdas de 178 px y el nombre **sin recorte** (`nowrap`, sin ellipsis); el modal pasó a
+  760 px; los ± miden 26 y el número se pinta en el acento cuando hay carga.
+  **Verificado** con el molde de 30 talles: **0 nombres cortados**, tres grupos —**NUMÉRICOS ·
+  FEM · ADULTO**— y, cargando `10 = 2`, `Mfem = 3` y `M = 5`, cada encabezado muestra su subtotal
+  («Numéricos 2 prendas · Fem 3 · Adulto 5») y el total dice **«Se van a cargar 10 fila(s)»**.
+
+- **2026-08-26 (295) — El paso PLANILLA, reacomodado (barra de herramientas arriba).** El usuario
+  mandó una captura: «que no se sienta como sistema trucho». Lo que estaba mal, punto por punto:
+  el toggle de Cantidad era un **botón enorme** con un párrafo suelto al lado; las acciones vivían
+  **abajo** de la tabla, todas del mismo peso visual y con **flechitas de texto** («⬆ ⬇») en lugar de
+  íconos; el contador quedaba perdido a la derecha; y el título decía «3 ·» cuando la barra de pasos
+  marca **4**.
+  **Cómo quedó**: una **barra de herramientas ARRIBA de la tabla**, en una sola línea y agrupada por
+  lo que hace cada cosa, con separadores finos entre grupos —
+  **[+ Agregar fila |n|] [Cargar por lote]** │ **[Importar] [Exportar]** │ **[⏻ Columna cantidad + ?]**
+  │ …y a la derecha las **pastillas** `N filas` / `M prendas` (la segunda sólo cuando difieren).
+  Todos los controles miden **exactamente 36 px** de alto — con alturas distintas la fila se ve
+  desprolija, que era buena parte de la sensación de «trucho». El toggle pasó a `Switch` + un «?»
+  con el ejemplo (regla del proyecto: control corto, explicación en la ayuda de al lado), y los
+  íconos son SVG del set (`plus`, `planilla`, `upload`, `download`).
+  ⚠️ **Trampa al hacerlo**: al sacar el bloque de botones de abajo quedó un `</div>` de más y el
+  build tiró «Expected ")" but found "{"» apuntando 40 líneas más abajo. Se ubicó comparando la
+  estructura con `git show HEAD:frontend/src/App.jsx`. Y **medir con el tab en segundo plano da
+  `window.innerWidth = 0`** (todo apilado y la card en 32 px): hay que fijar el viewport con
+  `resize_window` antes de sacar conclusiones de una medición.
+  **Verificado en la UI** (1440 px): los 5 controles en la **misma línea** (top 243) y **todos de
+  36 px**, la barra por encima de la tabla, y la guía en verde.
+
+- **2026-08-26 (294) — «CARGAR POR LOTE»: cuántas prendas de cada talle → una fila por prenda.** Un
+  botón en la planilla abre un modal con **todos los talles del molde** (`estado.talles`), cada uno
+  con − / número / +; al confirmar crea **UNA FILA POR PRENDA**: M = 5 ⇒ 5 filas de M, cada una lista
+  para su nombre y su número.
+  🔴 **No confundir con la columna Cantidad** (entrada 291): esa hace **1 fila = N prendas iguales**;
+  el lote arma **N filas separadas**, que es lo que sirve cuando cada prenda lleva un nombre distinto.
+  Detalle de comportamiento: si la planilla está **en blanco** (todas las celdas vacías; los toggles
+  no cuentan, que nacen con un valor puesto) el lote la **reemplaza** — si no, **agrega al final**, y
+  el modal lo dice antes de confirmar. El talle se escribe en la primera columna con `role: 'talle'`
+  que esté visible; el resto de la fila sale de `_defaultRow()`.
+  **Verificado en la UI** (sandbox 8060, molde de 30 talles): el modal lista los **30**; poniendo
+  **M = 5** y **L = 2** el resumen dice «Se van a cargar 7 fila(s)» y quedan `M M M M M L L`
+  (7 filas, reemplazando las vacías); con datos ya cargados, **S = 3** avisa «Se van a **agregar** 3
+  fila(s) al final de las 7 que ya hay» y el resultado es `M M M M M L L S S S` (10).
+
+- **2026-08-26 (293) — Columnas de la planilla con ANCHO INTELIGENTE.** Pedido del usuario: las
+  numéricas **finas** (que entren 5 números) y que **crezcan si el texto las supera**; vacías, un
+  ancho predeterminado. **El problema**: la tabla era `width: 100%` **sin anchos**, así que el
+  navegador repartía el sobrante entre todas — una columna de números terminaba midiendo **219 px**.
+  **Cómo se resolvió**: `ANCHO_COL` (memo) calcula el ancho de cada columna visible **midiendo el
+  texto de verdad** con un canvas 2D y la MISMA tipografía de la celda (monoespaciada en los
+  números, 600 en el nombre, que además va en mayúsculas) — contar caracteres erraba por el doble
+  entre «MMMM» y «iiii». Se toma el máximo entre el **encabezado**, el **valor más largo** de las
+  filas y, en los toggles, **la suma de sus opciones** (tienen que entrar aunque nadie las haya
+  elegido); después se aplica el **piso** (numérica = 5 dígitos; desplegable 96; nombre 130; texto
+  110 — eso es lo que se ve con la planilla vacía) y un techo de 280 px para que una sola columna no
+  se coma la pantalla. Los anchos van en un **`<colgroup>`**.
+  ⚠️ **Corrección en el mismo día**: la primera versión resolvía el sobrante con una **columna de
+  relleno**, y el usuario la vio enseguida — quedaba «una columna vacía» con el fondo y las líneas
+  de las filas hasta el borde. Se sacó: ahora la **tabla mide `max-content`** (termina donde
+  terminan sus columnas) y el **marco** también (`max-content` + `maxWidth: 100%`), así a la derecha
+  se ve el fondo del panel y nada más. Con la pantalla angosta el marco se limita al ancho
+  disponible y la tabla **scrollea adentro**, como antes.
+  **Verificado en la UI**: vacía → Número **76 px** y Cantidad 87 (el encabezado manda), Nombre 152;
+  al importar «MAXIMILIANO DE LA CRUZ» y `99999999`, Nombre pasó a **192** y Número a **79**, y la
+  columna sobrante se achicó sola (384 → 341). **Ningún texto queda cortado**: el ancho medido da
+  191/192, 78/79 y 86/87 contra lo que cada celda necesita.
+
+- **2026-08-26 (292) — El botón de Cantidad sube arriba de la planilla + EXPORTAR CSV.** Pedido del
+  usuario: el botón de cantidad **arriba de la planilla**, más llamativo y que diga **«Mostrar
+  columna de cantidad»**; y **al lado de Importar, un Exportar** que baje una planilla de Excel que
+  después se pueda volver a subir por Importar, **con las columnas VISIBLES** (o sea: Cantidad se
+  exporta sólo si se está viendo).
+  **Botón**: salió de la barra de abajo y quedó **arriba de la tabla**, 44 px de alto, en el acento
+  del sistema y encendido cuando está activo (fondo lleno + glow), con el texto completo —
+  «Mostrar columna de cantidad» / «Ocultar columna de cantidad» — y al lado, en chico, un ejemplo de
+  qué hace.
+  **`exportarPlanillaCSV`**: encabezados = el **label** de cada columna (es lo que `importarCSVTexto`
+  matchea) y **sólo las visibles** (`cols.filter(colActiva)`). Separador **`;`** y **BOM UTF-8**:
+  Excel lo abre en columnas y con los acentos bien; y como `_parseCSV` **detecta solo el
+  delimitador** (`,` / `;` / tab), si después se guarda con comas entra igual. Nombre del archivo:
+  `planilla_<molde>.csv`.
+  **Verificado en la UI, ciclo completo** (sandbox 8060): el botón está **arriba de la tabla**
+  (`rect.top` menor que el de la tabla) y con el texto correcto en los dos estados; exportando **con**
+  la columna a la vista el encabezado sale `Cantidad;Talle;Nombre;Número;Manga;Diseño`, y **sin**
+  ella `Talle;Nombre;Número;Manga;Diseño` (0 rastros de «Cantidad»); y al **volver a importar** ese
+  mismo archivo con `5` y `2`, la planilla quedó con las dos filas, sus cantidades, y el contador
+  mostrando **«2 fila(s) → 7 prendas»** — que es la comprobación del cálculo del front que había
+  quedado pendiente en la entrada 291.
+  ℹ️ De paso, en el log del server se ve que el usuario ya usó la feature: `POST /api/generar_multi`
+  y un `POST /api/plantillas_planillas/guardar` con el que dejó la columna Cantidad **primera** en su
+  planilla — la posición sale del template, así que el sistema la respeta tal cual.
+
+- **2026-08-26 (291) — COLUMNA «CANTIDAD»: una fila puede valer varias prendas.** Pedido del
+  usuario: una columna que esté **en todas las planillas**, que el operario **prenda con un botón**
+  (o se muestre siempre, según se configure), ubicable donde se quiera, y que **repita la fila**:
+  «M · pepe · 12 · cantidad 5» ⇒ **5 remeras M con pepe y 12**.
+  **Decisiones que tomó él**: **sin tope** (250 es 250); si la columna está **oculta NO se aplica**
+  (vale 1, pero el valor queda guardado por si la vuelve a mostrar); en la **ficha técnica** va
+  **una fila con su columna Cantidad**, no cinco renglones.
+  **Backend** (`servidor.py`): `COL_CANTIDAD` + **`_con_cantidad(columnas)`** — garantiza la columna
+  **sin migrar ninguna planilla**, y se aplica en las **dos puntas** (`GET /api/plantillas_planillas`
+  y `_traducir_prendas`), que es lo que evita que la planilla que ve el usuario y la que lee el motor
+  digan cosas distintas. `_cantidad_de_fila` (entero ≥ 1; vacío/basura/0/negativo → 1) y la fila se
+  **repite en `_traducir_prendas`** con `copy.deepcopy` — ⚠️ sin la copia profunda las 5 prendas
+  compartirían las mismas listas. Se repite **ahí y no en el motor** a propósito: de ese punto para
+  abajo todo (nesting, numerado `#01…#05`, consumo de tela, ficha) ve prendas de verdad. La cantidad
+  **no se estampa** (se excluye de la personalización, como el diseño).
+  **Front**: `cols` inyecta la columna con la config del template; `colActiva` decide si se ve
+  (`mostrar: 'siempre'` o el botón **Cantidad** del paso Planilla, estado `cantidadOn` que vive en el
+  wizard y se apaga con «Nuevo pedido»); contador **«N fila(s) → M prendas»** cuando difieren; al
+  enviar, si está oculta **se borra el valor del payload** (lo que no se ve no puede multiplicar); la
+  ficha técnica la hereda porque ya se arma con `cols.filter(colActiva)`. En **Configuración →
+  Planillas**, al tocar la columna aparece su panel propio: explica qué hace, deja elegir *«sólo si
+  el operario la pide»* / *«siempre a la vista»*, y **no se puede borrar** (es del sistema); la
+  posición se cambia arrastrando su letra, como cualquier otra.
+  **Contrato nuevo `verificar_cantidad.py`** (21 comprobaciones, verde): 5 → 5 prendas con los mismos
+  datos; sin clave/vacía/basura/0/negativa → 1; **250 → 250** (sin tope); no viaja en la
+  personalización; las copias son **independientes** (tocar una no toca a las otras); 2+3+1 = 6 en
+  orden; y `_con_cantidad` no duplica ni pisa lo configurado.
+  **Verificado también en la UI** (sandbox 8060): la columna llega en `/api/plantillas_planillas`
+  (`('Cantidad','cantidad','boton')`), y en el paso Planilla el botón **Cantidad** la hace aparecer
+  y desaparecer del encabezado.
+  ⚠️ **Lo que NO se pudo probar en vivo**: escribir un número en la celda y ver el contador
+  «→ N prendas», porque en este entorno el panel del navegador no compone frames y `computer` no
+  puede hacer clics por coordenadas (los eventos sintéticos no disparan la edición de la planilla,
+  que usa foco real). La multiplicación en sí está verificada de punta a punta en el contrato.
+
+- **2026-08-26 (290) — 🔴 La BASE CAÍDA se avisa; antes el sistema mentía por todos lados.** El
+  usuario mostró la consola llena de rojos: `yo` en **500** y `activar`, `fuentes_estado`, `telas`,
+  `editables` en **401**. **Causa raíz: NO era el código** — el servicio **SQL Server (SQLEXPRESS)
+  se cayó** (`STOPPED`, código 1067; en el visor de eventos: «El servicio SQL Server (SQLEXPRESS) se
+  terminó de manera inesperada», 26/8 10:31:45, 19 s después de arrancar la base). Sin base no hay
+  login. **No se pudo levantar desde acá: arrancar un servicio pide administrador** (`Start-Service`
+  y `net start` → «Acceso denegado»); lo tiene que hacer el usuario.
+  🔧 **Lo que sí era del sistema y se arregló** (tres mentiras encadenadas):
+  1. **`/api/auth/yo` devolvía un 500 crudo** (HTML de Flask). El front hacía `r.json()`, explotaba,
+     caía en el `catch` **junto con el caso 404** y concluía **«esta instalación no tiene
+     usuarios»**: entraba igual y después **todo** daba 401. Ahora contesta **503 + `base: false`**
+     con el motivo. ⚠️ Ojo: `usuario_actual()` **corta antes de tocar la base si no hay sesión**, así
+     que sin cookie contestaba 200 diciendo `base: true` con la base muerta → se agregó un
+     `SELECT 1` explícito en ese caso.
+  2. **`/api/salud` decía `ok: true` con la base muerta**: el chequeo `base` era `critico=False`,
+     herencia de cuando la migración a MSSQL recién empezaba y el sistema corría con archivos. Hoy
+     los usuarios y el registro de piezas viven en la base → ahora es **crítico si hay driver ODBC**
+     (sin driver sigue sin ser falla). Efecto a tener en cuenta: el **actualizador** usa este `ok`
+     como semáforo, así que una base caída puede hacerle revertir una publicación — es correcto, esa
+     versión no es utilizable.
+  3. **El front entraba igual**: nuevo estado `sinBase` y **`PantallaSinBase`** — se muestra ANTES
+     del login (mostrar el login sería mentir: no hay contra qué validar la contraseña), con el
+     motivo técnico y el paso concreto (Servicios → *SQL Server (SQLEXPRESS)* → Iniciar) y un botón
+     **Reintentar**.
+  **Verificado en el localhost real, con la base caída**: `/api/auth/yo` → **503** `base:false`;
+  `/api/salud` → **503** `ok:false` con `base` y `esquema_base` en rojo; la app muestra la pantalla
+  nueva y la consola quedó con **un solo error explicado** (el 503) en vez de siete crípticos.
+
+- **2026-08-21 (289) — La guía .ai que se descarga sale con LAS capas que hacen falta y en el orden
+  correcto.** Pedido del usuario: «que la plantilla que descargamos sea real de lo que necesitamos,
+  por rango o default, las capas en el orden correspondiente y con los nombres que en realidad
+  necesitamos; molde no es una capa que necesitemos, es **guía**; las guías siempre van **arriba del
+  diseño**; y creá dos editables más: escudo y logo».
+  🔴 **El bug de fondo**: `ai_guia_medidas` escribía primero `molde` y `guias` y **después** las
+  capas del arte → en un `.ai` la capa escrita primero queda ABAJO, así que **el diseño tapaba la
+  guía** y había que reordenar a mano en Illustrator.
+  **Cómo quedó** (de abajo hacia arriba): **`diseño` · `Editable escudo` · `Editable logo` ·
+  `Nombre` · `Número` · `guias`**. Ya **no existe la capa «molde»**: los contornos, los recuadros de
+  medida, el título y los nombres de pieza van todos en **`guias`**, arriba de todo.
+  ⚠️ **Los editables se llaman «Editable escudo» / «Editable logo», no «escudo editable»**: el
+  sistema los reconoce por el **prefijo** del nombre de capa (`_es_capa_editable`), así que al revés
+  no se detectarían. Constante `EDITABLES_GUIA` en `motor_pedido.py`; el endpoint acepta
+  `?editables=[…]` para cambiarlas. El front (`capasArteNombres`) ya no manda `guias` ni `molde` —
+  esas las arma el servidor— y el `diseño` se fuerza al fondo aunque venga en otro orden.
+  **Verificado generando la guía REAL** (sandbox de sólo lectura, molde «Camiseta de futbol»):
+  las 6 capas salen en ese orden exacto, **0 duplicadas**, ninguna se llama «molde»,
+  `_es_capa_editable` dice **True** para las dos nuevas, el archivo abre y cierra bien
+  (`%!PS-Adobe` … `%%EOF`) y las capas están balanceadas (6 begin / 6 end). **Por modo**: en
+  *default* los rótulos salen `Cuello`; en *rango XS-L*, `#XS-L Cuello` — que es lo que después lee
+  el auto-mapeo.
+
+- **2026-08-21 (288) — «¿Por qué el Administrador no tiene contraseña?» — sí tiene; el modal lo
+  explicaba mal.** El campo salía **vacío** al editar y se leía como «no tiene». La contraseña
+  **no se puede mostrar**: se guarda hasheada (PBKDF2-SHA256 + salt por usuario, `auth.hashear`), y
+  el hash es de una sola dirección — sirve para comprobar, no para recuperar. Comprobado en la base
+  (sólo lectura): `admin` → `password_hash` 32 bytes + `password_salt` 32 bytes. **Arreglo en la
+  UI**: al **editar**, el paso 2 ya no muestra un campo vacío sino el campo **con puntos** (`••••••••••••`), un candado y el pill **PROTEGIDA**, más un botón **«Cambiar»**. ⚠️ Los puntos son **relleno fijo de 12**: no salen de la contraseña real, así que no dejan adivinar su largo. Debajo, la explicación de por qué no se puede ver; recién ahí aparece el campo (con foco), y un **«Dejarla como está»** para volver
+  atrás limpiando lo escrito. Al **crear** un usuario el campo va directo, como siempre. Verificado
+  en la UI (sandbox 8062).
+
+- **2026-08-21 (287) — «Usuarios y permisos» rehecha de cero + contraseña con ojo.** Pedido del
+  usuario: rehacerla entera para que se entienda, **arreglar los modales de elegir permisos** (el del
+  usuario y el del rol) y que la contraseña se escriba **con puntos y con un ojo para verla**.
+  **Qué estaba mal**: los roles se elegían con chips que mostraban la **clave** (`operario`) y nada
+  más —no había forma de saber qué habilitaba cada uno sin irse a otra pestaña—; al asignar roles
+  **no se veía qué terminaba pudiendo hacer** el usuario; el selector de permisos del rol era una
+  lista de checkboxes nativos chiquitos, **sin buscador, sin marcar un módulo entero y sin
+  contador**; y la contraseña se escribía a ciegas.
+  **Cómo quedó**: encabezado con ícono + subtítulo; pestañas **Usuarios / Roles / Acciones** con
+  **buscador** que filtra las tres; usuarios como tarjetas (avatar, `@usuario`, pills VOS/INACTIVO,
+  último acceso, **cuántas acciones tiene**, chips de rol con el **nombre legible**); roles con el
+  desglose **por módulo** (`arte 2 · config 4 · molde 5…`) en vez de una tira de claves cortada en
+  «+12»; y la pestaña Acciones muestra, por cada permiso, **qué roles lo tienen**.
+  🔧 **Modal de USUARIO** en 4 pasos numerados: *quién es* · **contraseña** (`CampoPass`: puntos +
+  ojo `eye`/`eyeOff`, `letterSpacing` para que los puntos respiren) · *roles como tarjetas* con
+  descripción y nº de acciones · **«CON ESO VA A PODER»**, el resumen de permisos efectivos agrupado
+  por módulo que se recalcula al marcar/desmarcar (y si no hay rol, avisa en amarillo que el usuario
+  «puede entrar pero no hacer nada»). El «activo» pasó de checkbox nativo a `Switch`.
+  🔧 **Modal de ROL**: selector con **buscador**, contador `X de Y`, botones **Marcar todo / Ninguna**
+  (que respetan el filtro), y por módulo un encabezado con **`CajaCheck` de tres estados**
+  (vacío/parcial/lleno) que marca o saca el bloque entero; cada acción es una fila grande con nombre,
+  clave y descripción. El rol de **sistema** queda bloqueado con el motivo escrito.
+  **Coherencia**: la pantalla de **login** usa el mismo `CampoPass` (o hay ojo en todos lados o en
+  ninguno).
+  **Verificado en la UI real** con los datos del usuario, en un sandbox nuevo
+  (`scratchpad/srv_visor_usuarios.py`, puerto 8062: `api_usuarios` va ENTERO y se reemplaza
+  `usuario_actual()` por un admin ficticio; `SIN_SESION=1` muestra el login; todo método ≠ GET →
+  403): Usuarios 1 · Roles 3 · Acciones 17; el buscador del modal de rol deja sólo las 2 acciones que
+  matchean «tizada»; el check del módulo ARTE lleva el contador de **5 → 7** y vuelve a 5;
+  el ojo cambia `password → text` conservando el valor (en el modal **y** en el login, centrado
+  dentro del campo); el resumen de permisos va **17 → aviso amarillo → 5** al cambiar los roles.
+  Consola sin errores. ⚠️ Guardar no se pudo probar (el sandbox no escribe): los `fetch` de guardado
+  quedaron **idénticos** a los que ya funcionaban.
+
+- **2026-08-21 (286) — Un ícono propio para CADA ajuste del molde, ninguno parecido a otro.**
+  El usuario lo pidió mirando la lista: había dibujos **prestados** de otras cosas y hasta
+  **repetidos** — «Borde de corte» y «Editable» usaban el MISMO (`distribucion`), «Variables» el de
+  columnas y «Telas» una hoja con líneas casi igual a la grilla de «Planilla». Ocho íconos nuevos en
+  `Icon`: **`molderia`** (hoja con una pieza adentro = el archivo del molde), **`variables`** (un
+  tronco que se abre en dos ramas), **`etiqueta`** (la etiqueta colgante; la «T» vuelve a ser sólo de
+  Fuentes), **`nestingPiezas`** (piezas encastradas dentro de la tela), **`telaRollo`** (el rollo con
+  la tela saliendo), **`bordeCorte`** (la pieza + la línea punteada por donde se corta),
+  **`editable`** (las cuatro flechas de mover/transformar) y **`nombres`** («Aa»). Con `planilla`
+  (grilla) y `plantilla` (camiseta) de la entrada 285, los **10 botones tienen dibujo propio**.
+  **Coherencia fuera del menú** (mismo concepto = mismo ícono): las cards «Moldería», «Telas» y
+  «Reglas de Nesting» del panel de Configuración y los dos «Asignar telas» del paso Arte. Quedaron
+  como estaban los usos donde `productos` es un *placeholder* de imagen o la «Ficha técnica».
+  **Verificado en la UI** (sandbox 8060 → /admin → Moldería → molde): los 10 `<svg>` de
+  `ajuste-*` son distintos entre sí (0 duplicados, 0 vacíos) y el «Aa» de Nombres se pinta en el
+  acento (14×14 px, `rgb(0,212,255)`).
+- **2026-08-21 (285) — Íconos propios para «Planilla» y «Plantilla».** Los dos usaban íconos
+  genéricos (`columnas` y `distribucion`, prestados de otras cosas) y no ayudaban a distinguirlos.
+  Dos íconos nuevos en `Icon`: **`planilla`** = grilla de hoja de cálculo (encabezado + filas y
+  columnas) y **`plantilla`** = **silueta de camiseta** con cuello redondo y mangas — la plantilla es
+  la moldería de la prenda. Se usan en los botones de ajustes del molde y, por coherencia, la card
+  **«Planillas»** del panel de Configuración pasó al mismo `planilla` (un ícono por concepto).
+  Verificado en la UI (sandbox 8060 → /admin → Moldería → molde): los `<svg>` de `ajuste-planilla`,
+  `ajuste-diseno` y `ajuste-etiqueta` son los tres distintos y son los nuevos.
+
+- **2026-08-21 (284) — «Plantilla» y «Planilla» ya no van pegadas en los ajustes del molde.** Estaban
+  una debajo de la otra y los nombres se diferencian en **una letra**: el usuario se equivocaba de
+  botón. Se **intercambiaron** con «Etiqueta» — el menú queda: Moldería · Variables · **Etiqueta** ·
+  Planilla · Nesting · Telas asignadas · Borde de corte · **Plantilla** · Editable · Nombres. Además
+  «Etiqueta» cambió de ícono (`columnas` → `fuentes`) para no repetir el de Planilla justo al lado.
+  Los `data-tour` (`ajuste-<id>`) no dependen del orden: la ayuda guiada sigue en verde. **Verificado
+  en la UI** (sandbox 8060 → /admin → Moldería → «Camiseta de futbol»): las 10 anclas salen en el
+  orden nuevo, con 5 posiciones entre Plantilla y Planilla.
+
+- **2026-08-21 (283) — «Perfiles de color» rediseñada (referencia visual del usuario).** Mandó una
+  captura del layout que quería: encabezado con la **rueda de color** + título grande + una línea de
+  subtítulo, **toggle RGB | CMYK/Impresión** arriba y una **grilla de tarjetas simples** con un tick
+  en la elegida — «así, pero con nuestros colores». Antes la pantalla apilaba **las dos listas**
+  (CMYK arriba, RGB abajo) y había que scrollear para ver la segunda. Ahora `perfilEspacio`
+  ('cmyk' por defecto — es el que manda para sublimar) decide cuál se muestra, y todo el acento sale
+  de **`var(--accent)`** (el cian del sistema, `hsl(190,100%,50%)`), no del azul de la referencia.
+  La tarjeta quedó: nombre centrado + tick circular a la derecha… y la **franja de colores reales
+  del perfil** —que la referencia no tenía— se conservó como una **línea de 3 px abajo**: es
+  información de color que ya estaba y sacarla sería perder referencia. Se mantuvo el ancla
+  `perfil-card` de la ayuda guiada (+ `perfil-esp-rgb` / `perfil-esp-cmyk`).
+  **Verificado en la UI real** (sandbox de sólo lectura en 8060, entrando por `/admin` →
+  Configuración → Perfil de color): el toggle CMYK activo tiene borde `rgb(0,212,255)` = `--accent`
+  y fondo cian al 8 %; 22 tarjetas CMYK con «U.S. Web Coated (SWOP) v2» marcada (borde accent, tick
+  con ✓ y franja de 6 colores); al tocar **RGB** pasa a 11 tarjetas con «IEC 61966-2.1 … sRGB»
+  marcada; grilla responsive (4 columnas a 1280 px, 3 a ~1024 como en la referencia); consola sin
+  errores de JS. ⚠️ No pude adjuntar captura: en este entorno el panel del navegador no compone
+  frames y `screenshot` da timeout — se verificó leyendo el DOM y los estilos computados.
+
+- **2026-08-21 (282) — La ETIQUETA rotula el nombre GENERAL de la pieza, sin el número.** Pedido del
+  usuario: «en la etiqueta de talle sólo debe aparecer el nombre general, sin el número al lado» —
+  «Frente 9» se estampa **«Frente»**. Las piezas homónimas se siguen distinguiendo por el `#nro` que
+  la etiqueta ya trae. **Motor** (`motor_pedido.py`): `_pieza_txt` = `_pieza_limpia` sin el número
+  final (regex `_re_etq`, compilado al lado de `_norm_generico`); se usa en el texto de la etiqueta
+  **única** y en el de las **zonas** (`_eops_zonas`). ⚠️ No sirve `_norm_generico` para esto: ésa
+  normaliza a minúsculas para **comparar**, no para mostrar. La búsqueda de config (`piezas_off`,
+  `zonas`, `posiciones`) sigue con `_pieza_limpia` — ya resuelven por genérico, no cambia nada.
+  **Front** (LEY «el arte se ve igual que la tizada»): los **4** lugares que previsualizan el texto
+  pasaron por el genérico — visor del pedido/mapeo (ya tenía `_genN`), lista de piezas de la config
+  de Etiqueta, visor de la pantalla Etiqueta y etiqueta **por zonas**.
+  **Contrato nuevo `verificar_etiqueta_nombre.py`**: corre el MOTOR REAL sobre el molde del usuario
+  (copia en un temporal, `db` reemplazado por un doble que explota) y **espía `_eops_borde`**, que es
+  quien recibe el texto que se dibuja. Verde con «Camiseta de futbol» (34 piezas, 28 numeradas): los
+  28 textos salen `M-Cuello-#01`, `M-Frente-#01`, `M-Espalda-#01`… ninguno numerado; y los controles
+  («pieza» apagado → `M-#01`; sólo «pieza» → `Cuello`, sin un solo dígito) siguen funcionando.
+  ⚠️ **Lo que NO se pudo verificar en la UI**: la pantalla de Etiqueta vive en Configuración y el
+  sandbox de sólo lectura no llega ahí (no hay sesión, no se dibuja el menú lateral) — el cambio del
+  front quedó verificado por compilación y por usar el mismo `nombreGenerico` de siempre.
+  🔧 **PENDIENTE encontrado de paso**: `verificar_etiqueta_posicion.py` **está roto desde la
+  migración a MSSQL** — elige el molde buscando `datos/productos/<pid>/registro_producto.json`, que
+  ya no existe (el registro vive en la base), así que siempre corta con «No hay ningún molde con
+  plantilla + registro». Arreglo: copiarle el preámbulo de `verificar_etiqueta_nombre.py` (leer el
+  registro con `db.leer_registro` ANTES de reemplazar el módulo y volcarlo al temporal).
+
+- **2026-08-21 (281) — CORRECCIÓN: se nombra la VARIABLE, no el molde.** Yo había leído al revés el
+  pedido de la entrada 280 y puse el molde. La regla es: **la VARIABLE que se está usando** —
+  `«VARIABLE» · diseño «DISEÑO»`. `_arteLbl(did, item)` toma el **ítem del paso Arte** (el `label`
+  de la variable; si el ítem es un molde entero —los moldes propios no tienen Variables— su label ya
+  es el nombre del molde, así que la misma función sirve). La unidad de aviso pasó de (diseño,
+  molde) a **ítem**: `itemsPedido` / `itemsSinArte`, las telas volvieron al detalle **por variable**
+  (`telasFaltantesDet` = `[{did, it, n}]`, sin sumar por molde) y los faltantes de tipografía —que
+  el server informa por (diseño, molde)— se **expanden** a las variables de ese molde. `irAlArte`
+  ahora salta a la variable exacta (molde + clave) y el botón dice «Ir a esta variable».
+  🔴 **FORMATO FINAL: `«MOLDE» · variable «VARIABLE» · diseño «DISEÑO»` — los tres, SIEMPRE.** Se
+  probó primero la variable sola y después «el molde sólo si el nombre de la variable se repite»:
+  las dos se descartaron. La misma variable la pueden usar **muchos** diseños (el usuario habló de
+  100): lo que separa un caso de otro es el **diseño**, y el molde es el contexto — mostrarlo a
+  veces sí y a veces no era demasiado sutil. Si el ítem es un molde ENTERO (sin Variables) se omite
+  la parte de variable. **Verificado en la UI** (sandbox 8061, 2 moldes · 2 diseños · 3 variables):
+  «Rebars-Regular» en *camiseta asque · variable Cuello redondo · diseño JUGADOR*, *Camiseta de
+  futbol · variable Cuello redondo · diseño JUGADOR*, *Camiseta de futbol · variable cuello V ·
+  diseño JUGADOR*; y «Falta el arte de «Camiseta de futbol» · variable «cuello V» · diseño
+  «GOLERO»».
+- **2026-08-21 (280) — Lo que falta dice DE QUÉ ARTE es (⚠️ corregido por la 281: va la VARIABLE).**
+  Cada aviso de faltante tiene que identificar el arte: cuál y en qué **diseño**. Una sola función,
+  `_arteLbl`, la usan **los tres requisitos** del paso Arte,
+  el detalle del progreso, el `title` del botón **Enviar** y el error de `generarMulti`. Cambios de
+  fondo: (1) **Tipografías de TODO el pedido, no sólo del arte en pantalla** — `fuentesEstado` es del
+  arte que estás mirando, así que con dos moldes/diseños no se podía decir de cuál era el faltante
+  (y de los otros te enterabas recién al llegar). Nuevo `fuentesPorArte` = `{ "<diseño>|<MOLDE>":
+  [fuentes] }`, con `cargarFuentesDeArte(did, mid)` y `cargarFuentesTodas()` (GET en paralelo por
+  cada arte cargado; se dispara al entrar al paso, al subir un arte y al resolver una fuente).
+  `fuentesFaltantesItems` es la lista derivada que consumen el cartel, el modal y `pasoItems`, y es
+  la que decide si sale el cartel al avanzar. (2) **Telas con detalle por molde**: `telasFaltantesDet`
+  = `[{did, mid, n}]` — las variables del mismo molde se **suman** (el operario piensa en moldes);
+  `telasFaltantesTotal` ahora se deriva de ahí. Antes decía «faltan 3 piezas sin tela» sin decir
+  dónde. (3) El **arte faltante** en el paso Planilla y en `generarMulti` pasó de mirar
+  `moldesSeleccionados` a mirar **(diseño, molde)**: el mismo molde en dos diseños ahora se
+  distingue. (4) El cartel del paso Arte y el de avanzar listan **una línea por arte** y traen
+  **«Ir a este arte»** / **«Resolver»**, que saltan al molde+diseño del problema (`irAlArte`).
+  **Verificado en la UI real** (sandbox 8061 que finge un faltante, con 2 moldes y 2 diseños): el
+  cartel lista los 3 artes por separado («Rebars-Regular» en *camiseta asque* · diseño *JUGADOR* /
+  en *Camiseta de futbol* · diseño *JUGADOR* / … · diseño *GOLERO*), el detalle del progreso dice
+  «Falta el arte de «Camiseta de futbol» · diseño «GOLERO»», y el effect no entra en bucle (10 GET
+  en toda la sesión). ⚠️ No pude forzar el caso «piezas sin tela» en el sandbox (necesita POST): ese
+  texto quedó verificado sólo por código.
+
+- **2026-08-21 (279) — La TIPOGRAFÍA avisa, no traba: amarillo + «Seguir de todos modos».** Regla del
+  usuario: de los tres requisitos del paso Arte, la fuente es el **único que no frena** (sin ella la
+  tizada igual sale, sublimada con «Anton Regular»). Cambios: (1) `MarcaPaso` tiene un **tercer
+  estado** — un ítem de `pasoItems` con `aviso: true` se pinta **AMARILLO con «!»** en vez de rojo
+  con cruz, y el borde del conjunto sigue el mismo código (verde listo · amarillo avisa · rojo
+  traba); helpers `_pasoTraba` / `_pasoAvisa` / `textoAvisoPaso`, que también cambian el texto sutil
+  de arriba de la barra («Lo que está en amarillo no frena el pedido, pero te lo vamos a recordar
+  antes de avanzar»). (2) El ítem `fuentes` lleva `aviso: true`, así que **el botón «A la planilla»
+  queda habilitado** aunque falte la tipografía. (3) `irAPlanillaDesdeArte({forzarFuente})`: la traba
+  vieja (abría el modal «Resolver fuente» y cortaba) pasó a ser un **cartel** —`fuenteAvanzar`— con
+  el mismo texto que el aviso del paso y tres salidas: *Cancelar*, **«Seguir de todos modos»**
+  (llama con `forzarFuente: true`) y *«Cargar la tipografía»* (abre el modal de siempre). (4) El
+  cartel del paso Arte pasó de rojo a **amarillo** para no contradecir a su propia marca, y dice
+  «se va a **sublimar**» (no «estampar»). **Verificado en la UI real** (sandbox de sólo lectura en
+  8061 que miente un faltante `Rebars-Regular`): marca amarilla `rgba(245,158,11,.6)` sólo en
+  «Cargar fuente», arte y tela en verde, botón `disabled = false`, el cartel aparece con los tres
+  botones y «Seguir de todos modos» deja el wizard en `pedidoPaso = 'planilla'`.
+
+- **2026-08-21 (278) — AUDITORÍA de «transacciones fantasma» en la base: NO hay. Se arregló otra cosa que sí estaba mal.** El usuario pidió revisar a fondo y reparar sólo si hacía falta. **Revisión del código**: TODO lo que toca MSSQL pasa por `db.cursor()` —un context manager con `commit` al salir bien, `rollback` si algo falla y `close()` en un `finally`— y no hay una sola conexión fuera del módulo (verificado con grep en todo el repo: sólo `instalar_servidor.py`, que también lo usa). No hay conexión global, ni caché de conexiones, ni transacciones que crucen requests. **Medición sobre la base REAL en tres escenarios**: (a) en reposo, (b) bajo carga —24 requests concurrentes que leen catálogo/estado/config— y (c) después de matar el server de golpe (`taskkill /F`) y reiniciarlo: **0 sesiones dormidas con transacción abierta y 0 peticiones bloqueadas** en los tres. **Lo que parece una fuga y no lo es**: `sys.dm_tran_active_transactions` muestra ~14 transacciones «abiertas hace 3 días», pero todas son **internas del motor** (`worktable`, `WorkFileGroup_fake_worktable`, `QDS nested transaction`) y **sin sesión asociada** (`session_id = NULL`) — existen con la app apagada. Y la sesión `sleeping` del server es el **pooling de ODBC** (pyodbc lo trae activado): la conexión vuelve al pool para reusarse, con **`open_transaction_count = 0`** y sin locks. 🔧 **Lo que SÍ se arregló** (real, aunque no era la fuga): en `db.cursor()` el `rollback` iba **sin proteger** — si la conexión ya se había caído (base reiniciada, red cortada), `rollback()` lanzaba **su propia** excepción y ésa **tapaba la original**, dejándote sin saber qué falló de verdad; ahora va en `try/except` y el error real llega arriba (el `close()` también). La transacción no quedaba abierta igual: al cerrar la conexión el motor descarta lo no confirmado. **Contrato nuevo `verificar_db_conexiones.py`**: corre contra la base real sin escribir nada — mide sesiones y fantasmas antes/después de 30 consultas, fuerza un error **en medio de una transacción** y comprueba que no queda nada abierto, y verifica que el error de SQL llegue tal cual a quien llamó.
+
+- **2026-08-21 (277) — El cartel de «tipografía no encontrada» va ARRIBA y se va solo al resolverla.** Pedido del usuario: «ese cartel debe aparecer en la parte superior que tenemos vacía al pedo, y si ya seleccioné una fuente nueva debe desaparecer». **(1)** Salió del `aviso` del visor —donde tapaba el arte— y entró en la **fila de los diseños**, que deja todo ese ancho libre: caja compacta a la derecha (⚠ rojo + el texto + botón **«Resolver»** que abre el modal de tipografías). **(2)** 🔴 **No desaparecía**: `resolverFuente` llamaba a `cargarFuentesEstado()` **antes** de que React actualizara el estado, así que el server recalculaba los faltantes con el mapa de reemplazos **viejo** y el cartel seguía puesto (mismo error de tick que la 276, en el otro lado). FIX: `cargarFuentesEstado(reemplOverride)` toma el mapa **recién elegido**; se sacó además la llamada duplicada que quedaba con el mapa viejo (un viaje al server al pedo). **VERIFICADO**: build en verde y el cartel ya no existe en el visor. ⚠️ La posición final y el «desaparece» quedan al ojo del usuario: hace falta un arte con una fuente que falte, y el sandbox de solo lectura no deja cargarlo.
+
+- **2026-08-21 (276) — Cambiar la tipografía se ve EN EL ACTO, esté o no la original.** Seguimiento de la 275: «capaz que leyó la fuente original, pero si después la quiere cambiar por una de nuestro catálogo lo puede hacer sin problema; debe cambiarse en tiempo real». **🔴 Un bug que introduje YO en la 275**: al mudar el reemplazo del molde al pedido, `resolverFuente` hacía `setFuentesReempl(...)` y **acto seguido** `cargarPreviewPiezas()` — que leía el estado **viejo** (React no lo actualiza en el mismo tick), así que el visor pedía el render **sin** la tipografía recién elegida y no cambiaba nada hasta el próximo render. FIX: `cargarPreviewPiezas(mapeoOverride, reemplOverride)` acepta el mapa **ya actualizado** y quien elige la fuente se lo pasa explícito. Además: **(a)** la clave del caché en memoria del front (`_pvKeyCon`) incluye ahora los reemplazos —sin eso, mismo mapeo + mismo talle devolvía el **hit anterior** y parecía que no pasaba nada—; **(b)** las **dos precargas** de talles (la de «Asignando…» y la de fondo) firman y mandan los mismos reemplazos, si no el talle vecino quedaba cacheado con la tipografía vieja; **(c)** el botón pasó a llamarse **«Tipografía»** (antes «Reemplazar fuente», que sonaba a que sólo servía cuando faltaba) y **ya estaba siempre disponible** — se puede cambiar aunque la original esté, que es la regla desde la 245. **VERIFICADO** con `verificar_fuentes_pedido.py` ampliado: la **clave del render cambia** con la tipografía elegida (y es estable con los mismos datos), o sea que el dibujo se rehace en vez de servirse del caché. ⚠️ Falta el ojo del usuario sobre el cambio en pantalla: el sandbox de solo lectura no deja cargar el arte.
+
+- **2026-08-21 (275) — 🔴 «Le puse un arte con una tipografía que YA tenemos y no la usó, puso otra»: era un reemplazo VIEJO guardado en el molde.** Reporte del usuario. **DIAGNÓSTICO (medido, no supuesto)**: la tipografía del arte —`ClubAmerica2021-2022`— **sí estaba** en el catálogo (`subida_ClubAmerica2021-2022.ttf`) y el resolver la encontraba bien: `resolver_fuente` **sin alias** devolvía el archivo correcto. Lo que la pisaba era un **alias guardado en el molde**: `prod["fuentes_reemplazo"] = {'ClubAmerica2021-2022': 'Hawken Personal Use Only Regula'}`, de alguna prueba anterior — y por la regla de la 245 («la elección manda») ese alias ganaba **siempre**, aunque la fuente original estuviera. De ahí las dos cosas que vio: ni la original, ni la predeterminada, sino «una random». **LA REGLA NUEVA (del usuario)**: *«si le asigna una tipografía de las nuestras se asigna a ESE pedido; si empieza un pedido desde 0, esa tipografía que eligió ya se olvidó»*. Implementado: **(1)** el reemplazo **es del PEDIDO** — vive en el front (`fuentesReempl`, dentro del estado del pedido), **viaja en cada request** (`fuentes_reemplazo` en preview, generar, `fuentes_estado`) y `_fuentes_para(pid, reemplazos)` sólo arma alias con eso: **lo guardado en el catálogo ya no se lee** (queda como dato muerto; no se migra nada). **(2)** `POST /api/pedido/fuente_resolver` **dejó de persistir**: devuelve `{faltante, usar, quitar}` y el front lo guarda en el pedido (elegir la original devuelve `quitar` y se borra el reemplazo). **(3)** La **clave del caché** de piezas firma los reemplazos **del pedido** (si siguiera firmando los del molde, cambiar de fuente serviría el render viejo — el bug de la 243). **(4)** «Nuevo pedido» **olvida** el reemplazo y además **borra las tipografías subidas «sólo para este pedido»** (`POST /api/pedido/fuentes_pedido_limpiar`): antes quedaban en `datos/<pid>/fuentes` para siempre y el pedido siguiente las seguía encontrando — las del **catálogo** no se tocan. **(5)** El **cartel fijo** del paso Arte dice lo que pidió: «Tipografía no encontrada: X. Se va a estampar con «Anton Regular» (la predeterminada). Cargá la tipografía que usó el diseño, o elegí una de nuestro catálogo — si no, la tizada sale con la predeterminada». **VERIFICADO** con el contrato nuevo **`verificar_fuentes_pedido.py`**: las **13** tipografías del catálogo resuelven **exactamente a su propio archivo** (o sea, con la fuente instalada no hay «random»), el reemplazo del pedido manda y **sin él vuelve la original**, el molde que tiene el reemplazo viejo guardado (**«Camiseta de futbol»**) **ya no lo impone**, y la predeterminada existe. Server reiniciado y sano.
+
+- **2026-08-21 (274) — El panel de TELAS, rehecho de cero + el progreso con ✓/✕ y texto completo.** Dos pedidos del usuario. **(A) TELAS** («muy básico y para nada intuitivo… remodelalo por completo desde 0, más aplicación y menos página web»): el panel dejó de ser un formulario de dos vistas con lista larga y buscador, y cuenta la historia como la piensa el operario — **1) esta prenda va en TAL tela · 2) salvo estas piezas, que van en tal otra**. Quedó: **cabecera** compacta; **estado** en una tarjeta (verde «Las N piezas tienen tela» / ámbar «Faltan N de M» **con los nombres**); **«La tela de esta prenda»** = una card grande con la muestra de color, el nombre y «N de M piezas», que se toca para cambiarla (la principal se deduce: la más usada); **«Piezas en otra tela»** = una card por excepción con su color, sus piezas y una ✕ para devolverlas a la principal; el gesto de excepción invertido a lo natural (**tocás las piezas en el visor → «Elegir tela»**, antes era al revés); y abajo **«⧉ Usar estas telas en otros moldes»**. **El selector salió a un MODAL**: las 34 telas en grilla de cards con su **muestra de color** (la misma del visor), el **ancho útil en cm** y buscador arriba — en la columna de 210 px era una tira ilegible. Un toque elige **y aplica**: no hay «guardar» aparte. **(B) PROGRESO**: marcas más grandes y modernas (SVG en badge circular), **✓ verde** cuando está y **✕ ROJA** cuando falta (era un «○» ámbar: lo que falta **frena** el pedido, no es una advertencia tibia), **nombres completos** («Asignar arte», «Asignar tela», «Cargar fuente» en vez de «Arte/Telas/Fuentes»), y **arriba, sutil y centrado**: «Tenés que completar todo lo de este paso para pasar al siguiente». **VERIFICADO en la UI**: el chip muestra «Asignar arte · Asignar tela · Cargar fuente 2/3» con la primera marca en **✕ #ef4444** y las otras en **✓ #10b981** (badges de 20 px), y el aviso arriba; el panel de telas abre en «La tela de esta prenda → Elegí la tela», y el selector lista **34 telas** con su color y «157 cm útiles». ⚠️ Falta el ojo del usuario sobre el flujo completo con arte cargado (el sandbox de solo lectura corta los POST).
+
+- **2026-08-21 (273) — FALSA ALARMA: «El visor del arte no puede dibujar: falta plantilla/arte/registro» apenas entrar al paso Arte.** Reporte del usuario con captura. CAUSA: al entrar, el visor pide el render real de las piezas (`POST /api/arte/preview_piezas`); `_piezas_base` devuelve `None` si falta **plantilla, arte o registro** y el endpoint contestaba **409 con los tres juntos** en el mensaje. Como el arte de ese diseño **todavía no está cargado** —que es exactamente a lo que se viene a este paso—, el 409 era el estado NORMAL… y el front lo mostraba como **cartel rojo de error** apenas entrar. FIX: **(1)** el server dice **cuál** de los tres falta (`{"error": "todavía no cargaste el arte de este diseño", "falta": "arte"}`, o «este molde todavía no tiene plantilla cargada» / «el molde no tiene piezas registradas»); **(2)** el front **ni siquiera pide** el preview si ese `(diseño, molde)` no tiene arte cargado — sin pedido no hay 409 ni cartel; **(3)** si igual llega un 409 con `falta: 'arte'`, **no se avisa**: los otros dos sí, porque ésos sí son un problema. **VERIFICADO en la UI**: entrando al paso Arte con el arte sin cargar, **cero carteles** (antes salía siempre). Server reiniciado por PID y sano.
+
+- **2026-08-21 (272) — Telas del pedido: se llama ASIGNAR, el default es «una tela para todas», y lo elegido se COPIA a los otros moldes.** Pedido del usuario: «la parte de ver telas en realidad es asignar telas; debe tener la opción por defecto de seleccionar a todas las piezas 1 tela, y opcional elegir tela para ciertas piezas; y debe tener la opción de clonar la selección para todos los moldes o elegir a qué moldes, sin la necesidad de navegar de molde en molde». **(1)** El botón del visor pasó de **«Ver telas de pieza» a «Asignar telas»** (y los avisos que mandaban ahí, con él). **(2) EL CAMINO POR DEFECTO ES UNA TELA PARA TODAS**: en el panel, un desplegable **«Una tela para todas»** que asigna esa tela a todas las piezas de la prenda de un saque; elegir pieza por pieza quedó como la excepción, detrás de **«Tela por pieza…»** (el modo de antes, intacto: elegir tela → tocar piezas → Asignar). **(3) COPIAR A OTROS MOLDES**: botón **«⧉ Copiar estas telas a…»** → modal con **todos los ítems (molde en diseño) del pedido**, con tildes, **«Todos los moldes del pedido»** de un toque, y marca cuáles ya tenían telas asignadas (avisa que se pisan). Copia el mapa `{pieza → tela}` a los ítems elegidos (`telaPorPieza[diseño|molde]`); las piezas que en el destino se llamen distinto no reciben nada y quedan como faltantes, que es lo correcto. **(4)** Elegir una tela **sin piezas a la vista** (prenda todavía armándose o sin arte) **avisa** en vez de no hacer nada: antes fallaba en silencio y parecía roto. **VERIFICADO en la UI**: el botón dice «Asignar telas»; el panel muestra «UNA TELA PARA TODAS» con el desplegable de las 35 telas del registro y el botón «Tela por pieza…»; el aviso de «todavía no se ven las piezas» sale al elegir una tela sin piezas. ⚠️ **NO verificado a mano**: la asignación efectiva y el modal de copiado — necesitan **arte cargado**, y el sandbox de solo lectura corta los POST. Queda al ojo del usuario.
+
+- **2026-08-21 (271) — El progreso va CENTRADO, con el tick y el nombre corto de cada requisito + 🔴 FIX de un error MÍO que dejaba la pantalla en blanco.** **(1)** Pedido del usuario sobre la 270: «lo mismo pero centrado en la misma línea, y ahí mismo debe mostrar el tick y el paso reducido: decir qué le falta pero no un texto largo; al presionar te muestra más detallado, pero sólo de ese paso y no de todos». Ahora el progreso es una línea de chips **«○ Arte · ✓ Telas · ✓ Fuentes 2/3»** (cada requisito con su tick y su nombre CORTO, sin frases), **centrada respecto de la barra**: `BarraPaso` tiene una zona `centro` en `position: absolute; left: 50%` — centrarla con el flex la habría dejado bailando, porque lo que sobra entre los botones cambia de ancho en cada paso. El modal dice **de qué paso es** en el título («Paso 3 · Arte — qué falta») y muestra **sólo ese**. **(2) 🔴 EL ERROR (mío, lo vio el usuario en consola)**: `Uncaught ReferenceError: Cannot access 'iv' before initialization` al entrar al pedido. El memo `pasoItems` estaba declarado ~1000 líneas ANTES de `planillaInvalidos`, y **un `useMemo` se EJECUTA durante el render, en la línea donde está**: al llegar a la rama de la planilla tocaba un `const` que todavía estaba en la zona muerta (TDZ) y la pantalla quedaba en blanco. Se movió el memo **debajo** de `planillaInvalidos`, con el porqué escrito al lado. **LECCIÓN**: un `useMemo` no es «código que corre después» — corre ahí mismo; toda dependencia suya tiene que estar declarada **antes** de esa línea, y el build **no lo detecta** (compila perfecto). **VERIFICADO en la UI**: consola **sin el error**, el chip queda centrado (centro del botón = centro de la barra, 628 = 628), en Arte muestra «○ Arte · ✓ Telas · ✓ Fuentes 2/3» y el modal abre en «Paso 3 · Arte — qué falta» con «Falta el arte de «camiseta asque» en «JUGADOR»».
+
+- **2026-08-21 (270) — Barra de PROGRESO por paso: qué está hecho, qué falta, y el detalle en un modal.** Pedido del usuario: «en ese espacio que haya una barra de progreso y le vaya tildando todo lo que ya va haciendo y lo que le falta dentro de cada paso —ejemplo en el paso arte: cargar el arte de todos los moldes y diseños, elegir tela, cargar fuente no encontrada—, y al presionar debe abrir un modal mostrándole más a detalle lo que le falta: cargar arte de molde tal en JUGADOR». Hecho: **`pasoItems`** (un memo) arma la lista de requisitos del paso en curso —`{label, hecho, faltan[], ok[]}`, cada pendiente **con nombre y apellido**— y de ahí comen **las dos** vistas (si fueran dos fuentes, una diría «todo listo» mientras la otra muestra pendientes). **En la barra**: `ProgresoPaso` en el hueco de la derecha — un tramo por requisito (pintado = cumplido), «N/M» y el **primer pendiente escrito**; se toca y abre el modal. **En el modal**: barra de avance, y por requisito ✓/○ con el detalle (lo que falta, o lo que ya está resuelto). **Qué mira cada paso** — *Diseño*: haber elegido uno · *Moldes*: diseño elegido + la prenda de cada diseño · *Arte*: arte de cada (molde, diseño) + la tela de cada pieza + las fuentes del arte · *Planilla*: filas cargadas + valores válidos + arte de todos los moldes · *Tizadas*: la generación terminada. **Los avisos sueltos de la barra se fueron adentro**: eran textos largos («⚠ Faltan 14 pieza(s) sin tela — asigná su tela en…») que empujaban el botón de avanzar. **VERIFICADO en la UI**: paso 1 «0/1 · Falta: elegir el diseño» → tocando JUGADOR pasa a «1/1 · Todo listo ✓»; paso 2 «1/2 · Falta: la prenda de cada diseño» y el modal muestra «✓ Elegir el diseño · «JUGADOR»» + «○ La prenda de cada diseño · «JUGADOR» no tiene ninguna prenda elegida»; paso Arte «2/3 · Falta: cargar el arte» con el detalle **«Falta el arte de «camiseta asque» en «JUGADOR»»** (el ejemplo textual del pedido) y las telas y fuentes en ✓.
+
+- **2026-08-21 (269) — Paso 1 centrado (campo arriba, botones de a 3 abajo) y UNA sola barra inferior para los 5 pasos.** Pedido del usuario sobre la 268: «los botones a seleccionar quitalos de ahí y ponelos abajo del campo de escribir; el campo de escribir debe estar centrado, y los botones también, y que haya 3 por línea. Y estos botones y el de volver atrás que estén todos abajo de la pantalla y en los 5 pasos ubicados en el mismo lado: no puede variar el orden en ningún paso». **(1) Paso 1**: el campo para escribir quedó **arriba y centrado** (texto centrado incluido) y los **12 diseños abajo**, en una grilla de **3 columnas** centrada (`maxWidth 620`); los elegidos, en chips centrados debajo. **(2) UNA barra para todos**: componente **`BarraPaso`** + `BtnVolver` + `BtnSiguiente` — orden fijo **← volver · ↺ Nuevo pedido · acciones del paso … avisos · botón que avanza**. Los 5 pasos la usan (6 usos: el paso 5 tiene dos estados) y **no queda ninguna barra hecha a mano**: antes cada paso armaba la suya y el orden bailaba (en Moldes «Nuevo pedido» iba primero y no había «volver»; en Arte no había «Nuevo pedido»; en Tizadas los botones estaban **arriba**, en el encabezado). El «← Diseño» que estaba arriba en Moldes se fue a la barra. **(3)** `verificar_guias.mjs` aprendió a leer las anclas que se pasan **por prop** (`ancla="…"`), porque ahora el `data-tour` lo pone el componente: sin eso el build fallaba diciendo que faltaba `pedido-ir-moldes`. **VERIFICADO en la UI**: el input va antes que los botones y está centrado, la grilla mide `200px 200px 200px` (3 por línea), y las barras salen `[↺ Nuevo pedido … Elegir los moldes →]` en el paso 1 y `[← Diseño · ↺ Nuevo pedido · Subir mi propio molde … Cargar el arte →]` en el 2 — mismo orden, mismo lugar. Build con los chequeos de la ayuda en verde. ⚠️ Trampa: al escribir el regex del verificador desde Python, `` en una cadena normal se volvió un **backspace real** dentro del archivo (`/ancla=…/`) y el chequeo no matcheaba nada — se vio con `cat -A`.
+
+- **2026-08-21 (268) — El pedido arranca eligiendo el DISEÑO (lista de botones), y los moldes pasan a ser el paso 2.** Pedido del usuario: «primer paso será elegir el diseño; ahí no verá moldes ni nada, sólo una lista de diseños preestablecidos para elegirlos como botón. Segundo paso, elegir el o los moldes de cada diseño como hace actualmente. Del 3º en adelante sigue como estaba». El wizard pasó de 4 a **5 pasos**: **1 Diseño · 2 Moldes · 3 Arte · 4 Planilla · 5 Tizadas**. **(1)** Paso nuevo `pedidoPaso = 'diseno'` (el inicial, también al que vuelve «Nuevo pedido»): los **12 diseños** de `DISENOS_PRESET` como botones que se tocan (JUGADOR, GOLERO, CUERPO TECNICO, DISEÑO 1-5, ALTERNATIVA, PRINCIPAL, LOCAL, VISITANTE), los elegidos abajo con su ✕, y **ningún molde a la vista**. ⏳ La lista está **en el código a propósito** (decisión del usuario: «de mientras crea en el código los siguientes… después vemos de que puedan crear en configuración y crearle una tabla»). El campo para **escribir** un diseño suelto quedó, abajo, para lo que no está en la lista («se usará sólo para ese trabajo»). **(2)** El paso `moldes` es el de siempre —la grilla de variables, sin filtrar por diseño (regla del usuario: «los moldes se muestran para todos los diseños»)— menos el input del nombre, que se fue al paso 1; arriba quedó «← Diseño» y los chips para elegir a cuál se le cargan los moldes. **(3)** El modelo de datos **no cambió**: `disenosPedido` / `disenoMoldes` / `disenoVars` son los mismos y el resto del pedido (arte, planilla, motor) no se entera. El id del diseño sale de **`_slugDiseno`**, el MISMO que usa el motor para agrupar las filas — un slug propio habría dejado filas sin diseño. **(4)** Ayuda guiada al día: ancla nueva `pedido-diseno-lista` + `pedido-ir-moldes` + `pedido-volver-diseno`, ruta `paso:diseno` en `tutor.jsx`, el tutorial «Armar una tizada» ahora empieza tocando el diseño de la lista, y **`verificar_guias.mjs` describe el flujo nuevo** (el arranque del wizard es `diseno`; la secuencia esperada arranca en `pedido-diseno-lista` → `pedido-ir-moldes`). **VERIFICADO en la UI real**: la barra muestra los 5 pasos; el paso 1 lista los 12 botones con «¿No está en la lista?» abajo y el botón «Elegir los moldes» apagado hasta tocar uno; tocando JUGADOR y GOLERO quedan los dos en «ESTE TRABAJO LLEVA» y el botón se habilita; en el paso 2 están «← Diseño», los dos chips y la grilla de moldes de siempre, y al tocar una prenda se le asignó al diseño activo (el chip pasó a «1» y el aviso quedó en «Falta elegir variable en «JUGADOR»»). Build con los chequeos de la ayuda en verde (79 anclas, 22 pasos en orden).
+
+- **2026-08-21 (267) — Agregar piezas: BORRADOR hasta «Guardar», duplicado por vectores homólogos, y lo guardado no se borra.** Las tres reglas las puso el usuario sobre la auditoría de la 266: «lo subido nuevo no se guardará hasta que le den a guardar ni se nombre, y después de guardar ya no se puede borrar más; si no se guarda podés hacer lo que quieras. Lo de duplicar debe tomar los vectores, respetar los talles, pero el nombre ni el número no: eso se registra como nuevo. Y todo lo que ya esté guardado, o borrás el molde completo o no podés borrar piezas». Implementado: **(1) PREPARADAS**: el panel acumula las piezas (`pzPend`) con fantasma **ámbar** en el visor y ✕ para sacarlas; el molde **no se toca** hasta «Guardar», y todas entran en **UNA sola versión** (`agregar_pieza` acepta varias colocaciones por talle; `pieza_archivo` pasa a guardar con **nombre único** para que dos preparadas no se pisen). El modal de Guardar avisa que después **no se pueden borrar**. **(2) DUPLICAR POR HOMÓLOGA**: `_homologas` resuelve, por el REGISTRO, cuál es esa pieza en cada talle y copia **esa** geometría (antes copiaba la del mismo número: en un molde real «Frente 2» es la #2 en M y la #1 en el talle 0 → metía otra figura, y eso sale impreso); si la pieza no tiene nombre no hay correspondencia y se **avisa** en el panel y en la respuesta. El nombre y el número **no se heredan**. **(3) SIN DESHACER**: se eliminaron `pieza_deshacer` y el contador `piezas_agregadas` (que además contaba las versiones de «nombrar talles» y «partir por piezas» y podía borrarlas). De yapa: el alta ahora **actualiza `resumen_plantilla.json`** (riesgo 7) y el cartel del panel dice la verdad — «va a quedar como la última pieza, no le mueve el número a ninguna» (decía que corría el número a las de la derecha, que era del orden viejo por posición). **VERIFICADO**: `verificar_agregar_pieza.py` ampliado y en verde — duplicar toma la homóloga con un registro **desalineado a propósito** (`0#0 → 1#1`), 3 piezas preparadas dejan **1 sola versión** (138 → 141 contornos), y el **endpoint real** con 2 piezas en un POST deja 1 versión y en el 2º talle copia la **homóloga** (#2, ancho 609.4) y no la del mismo número (#0, ancho 496.1); además comprueba que `plantilla_pieza_deshacer` ya no existe. **Y en la UI real**: el botón de deshacer no está, «Duplicando Tapa costura — se copian sus vectores en cada talle; el nombre y el número NO se copian», el lugar se marca, el cartel dice «última pieza (35)», «Listo, prepararla» deja «1 pieza preparada · sin guardar» con su ✕ y el fantasma ámbar, y el modal de Guardar dice que no se podrá borrar. ⚠️ Trampa de la prueba: `app.test_request_context(json=…)` arma un **GET**, y `_pid_de_request` sólo mira el body en POST/PUT/… — sin `method="POST"` el endpoint contestaba «primero subí el molde».
+
+- **2026-08-21 (266) — AUDITORÍA de «agregar una pieza»: 9 riesgos, 3 de ellos serios (anotados, no arreglados).** El usuario preguntó cómo funciona agregar una pieza y **qué bugs puede generar esa manera**. Primero se corrigió la doc, que estaba vieja: hoy la pieza se escribe **al final** del contenido de la capa y las piezas se leen en **orden de dibujo**, así que **no renumera nada** — medido con `verificar_agregar_pieza.py` sobre el molde real: **0 de 2760** entradas cambian de índice (con el orden por bbox eran 69 de 138; el mapa y el módulo seguían contando esa historia). Lo encontrado, con evidencia: **(1)** `piezas_agregadas` es el **número de versión**, no la cantidad de piezas, y la plantilla la versionan también `renombrar_capas` y `separar_por_piezas` → «Sacar la última pieza agregada» puede **borrar el renombrado de talles** y dejar el molde en «Capa 1» (demostrado con `_ver_actual`; hoy latente: los 4 moldes están en `.ver = 0`). **(2)** «Duplicar» copia `antes[t][i]` en cada talle, **asumiendo que el índice es la misma pieza en todos** — medido: «Camiseta de futbol» 0/986, pero «camiseta asque» tiene «Frente 2» como `M#2` y `0#1`, o sea que ahí duplicaría **otra pieza** en ese talle. **(3)** Deshacer restaura el registro de antes de agregar → **se pierde el nombrado hecho en el medio**. Y cinco más (contornos de más «los N más grandes» en silencio, pieza bajo el mínimo detectable, la copia idéntica que puede cruzar nombres en el emparejado, `resumen_plantilla.json` sin actualizar, multi-mesa, disco). Cada uno con su plan en §10.c («LO QUE ESTA MANERA PUEDE ROMPER»). Herramienta de la auditoría: `scratchpad/medir_duplicar.py` (sólo lectura, mide si el `pieza_idx` se corresponde entre talles en los moldes reales).
+
+- **2026-08-21 (265) — BUG: al elegir las piezas de una variable, el visor mostraba el talle «0» y no el guía.** Reporte: «entro para seleccionar las piezas a una variable ya creada y no me sale en el visor la capa (talle) guía o el que tengo seleccionado; se ve el de más arriba, el 0». CAUSA: con una variable abierta el visor usa el **lienzo junto** (todos los talles), y `aisladoSet` lo filtra por los `pieza_idx` **del talle guía** — pero en ese lienzo los índices son un correlativo **global**, así que caen en el **bloque del primer talle**. O sea: mostraba las 11 piezas del grupo… **del talle «0»**. Y lo elegido se guardaba con `talle_origen` = el talle de `etqData` (M), es decir el índice de un talle traducido contra otro: si el orden de piezas difiere entre ellos, la variable quedaba con **piezas equivocadas** (bug de datos, no sólo visual). FIX: `_varAbierta` ahora excluye `asignandoTipo` → mientras se eligen piezas la fuente vuelve a **`etqData`** (el talle guía, o el que se elija con los chips), que es de donde salen esos índices; el **encabezado** usa la misma condición (decía «todas las tallas juntas» mostrando una sola) y `asignandoTipo` entró en las dependencias del memo. Al terminar, vuelve solo al lienzo junto para acomodar. ⚠️ **No lo introdujo el z-order de la 258** (el filtro es por índice, no por profundidad): es un bug viejo que recién ahora se reportó. **VERIFICADO en la UI real**: con «Cargar piezas» abierto, el `d` de la pieza 7 en el DOM es **idéntico** al de `GET /api/plantilla/deteccion` (talle guía **M**) y **distinto** del bloque del talle «0»; tocando el chip **XL** pasa a coincidir **exacto** con `?talle_ref=XL` y el encabezado dice «Talle: XL»; al salir vuelven las **210** piezas (7 × 30) del lienzo junto. Ver §10.c.
+
+- **2026-08-21 (264) — Un nombre = un lugar: elegir el otro frente CAMBIA de frente (fuera el cartel).** Corrección de la 263 el mismo día. El aviso rojo («no puede ir en esta variable…») saltaba al tocar la segunda pieza del mismo nombre; el usuario lo bajó: «cuando selecciono una pieza no debe salir ese cartel; si selecciono un frente y después el otro, se deselecciona el anterior y se selecciona el nuevo. Uno u el otro». Ahora el nombre genérico funciona como un **lugar**: la pieza que entra **desplaza** a la que lo ocupaba (`_desplazadasPorNombre`), sin cartel ninguno. Si la desplazada está en un vínculo «van juntas», sale el **vínculo entero** (atómico). Las **vinculadas siguen conviviendo** aunque compartan nombre — para eso existe el vínculo. Con el **recuadro** entra **una por nombre** y **no se pisa** lo ya elegido (cambiar de pieza es tocarla). Se borraron `_choqueDeNombre` y `_avisoChoque` (el aviso naranja de choques ya guardados, para moldes viejos, queda). **VERIFICADO en la UI real** (grupo «Manga comun»): tocar «Cuello 9» → queda «Cuello 9»; tocar «Cuello 10» → queda **sólo «Cuello 10»** y **cero carteles**; con el vínculo «Frente 1 + Frente 2» creado en el grupo, tocar «Frente 1» mete **las dos** y tocar «Frente 2» **saca las dos**; el recuadro sobre las 11 piezas dejó **8** (una por nombre) respetando el «Cuello 10» ya elegido.
+
+- **2026-08-21 (263) — «Van juntas» pasa al GRUPO, y dos piezas con el mismo nombre sólo entran juntas en una variable.** Pedido del usuario: «cuando estamos creando variables no se pueden poner 2 piezas con el mismo nombre a una misma variable a no ser que se indique que son 2 piezas que siempre van juntas; así que el botón de vincular piezas en vez de ir dentro de variable va donde configuramos el grupo, y cuando seleccionamos una de esas 2 piezas la otra se selecciona automático». Implementado tal cual: **(1)** el vínculo ahora vive en **`prod["grupos"][].juntas`** y el botón «⛓ ＋ Vincular piezas» está en el **detalle del grupo**, debajo de «Elegir piezas del grupo»; en la variable quedó la **lectura** («se definen en el grupo · Frente 1 + Frente 2 · al elegir una entra la otra sola»). **(2)** Todas las variables del grupo **heredan** el vínculo: elegir una pieza vinculada mete a las dos (`juntasDeVariable` = grupo ∪ legacy de la variante). **(3)** Regla nueva al armar la variable: si la pieza que entra se llama **igual** (nombre genérico) que una que ya está y **no** están vinculadas, **no entra y se avisa** con nombre, motivo y salida; el recuadro mete lo que puede y avisa por el resto. **(4)** Un molde configurado antes puede tener el choque ya guardado → el detalle de la variable lo **muestra** en un aviso naranja (no se toca solo). **(5)** Backend: `_traducir_prendas` arma `juntas_piezas` con las juntas del **grupo** de esa variable **más** las legacy de la variante — **compat sin migración forzada**. ⚠️ Esto **restaura una restricción que se había eliminado** en 2026-07-28 («la regla del slot»), pero **no es la misma**: aquella era automática, invisible y **descartaba piezas en silencio**; ésta la pide el usuario, es explícita, avisa, y el backend **no rechaza** nada (si rechazara, un molde viejo con el choque no se podría ni abrir para arreglarlo). **VERIFICADO**: contrato nuevo **`verificar_juntas_grupo.py`** (vínculo en el grupo → llega al motor · vínculo legacy en la variante → sigue llegando · los dos a la vez → se suman · sin vínculos → None · `POST /api/productos/grupos` conserva `juntas`), y **en la UI real** con el molde del usuario (grupo «Manga comun», 11 piezas): se creó el vínculo «Frente = Frente 1 + Frente 2» desde el grupo, en una variable nueva tocar «Frente 1» metió **las dos**, tocar «Cuello 9» y después «Cuello 10» dejó **una sola** con el aviso exacto, y el recuadro sobre las 11 piezas dejó **9** (afuera «Cuello 10» y «Cuello», los otros dos del mismo nombre). Server reiniciado por PID (17784 → nuevo) y sano.
+
+- **2026-08-21 (262) — Acomodar una variable: mover VARIAS piezas juntas, con la misma selección del otro espacio.** Pedido: «en la parte de variable debo poder mover varias piezas a la vez usando la misma selección de arrastre que usamos en el otro espacio». Antes el visor de la variable abierta sólo dejaba arrastrar **una** pieza por vez (se movía con todos sus talles) — no había selección. Ahora (`modoAcomodoVar` = variable abierta y ninguna herramienta de asignación activa): **click** sobre una pieza la selecciona/quita **entera** (sus ~30 talles: acá el objeto es el NOMBRE, que es la unidad del `acomodo_mm`), **recuadro desde el fondo** togglea las abarcadas —expandiendo cada pieza a su nombre completo—, y **arrastrar una pieza que está en la selección mueve TODAS las seleccionadas juntas**; arrastrar una que NO está sigue moviendo sólo ésa **sin perder la selección**. Al soltar se guarda **UNA sola vez** con todos los nombres movidos (`guardarAcomodoVarMm` acepta el dict entero). Reusa `selNombrar` y `iniciarRubber` — el mismo gesto y el mismo estado que en Nombrar piezas, sin un segundo estado que pueda desincronizarse. La selección se limpia al abrir y al cerrar una variable (si no, la siguiente arrancaría con piezas marcadas que no están en el visor); lo seleccionado va en **cyan** por encima del coloreo de estado y el cursor pasa a mano. Texto de ayuda del panel actualizado. **VERIFICADO en la UI real** (variable «Cuello redondo», 7 piezas × 30 talles = 210 en el visor): click en «Frente 2» → 30 marcadas (la pieza entera); click en «Espalda 1» → 60; arrastre desde «Frente 2» → **las dos se movieron el mismo delta** y «Cuello 9» (no seleccionada) quedó quieta; **un solo POST** cuyo `acomodo_mm` trae «Frente 2» y «Espalda 1» actualizados junto a los acomodos previos; recuadro sobre todo el lienzo → toggle correcto (salieron las 2 marcadas, entraron las otras 5); y arrastrar una pieza NO seleccionada movió sólo a ella. ⚠️ Detalle de verificación: el toggle por click ocurre en el **mouseup** (`endDrag`, enganchado al `<svg>`), así que un `mouseup` sintético despachado en `window`/`document` **no** lo dispara — hay que despacharlo sobre el elemento del SVG. 📌 **Observado de paso (NO tocado)**: en esta vista los `<title>`/rótulos de las piezas que no son del talle guía dicen «Pieza #N (sin asignar)» porque `nombrePz` sale de `etqNombres` (que es de UN talle) y no de `p.name` — el dato correcto está en la pieza. Es cosmético pero confunde; arreglarlo es cambiar el fallback, con cuidado de no pintar como «ya nombradas» piezas con nombre provisorio.
+
+- **2026-08-21 (261) — La barra de capas: el tik abre la fila, la flecha la cierra, y adentro de una capa la selección es INDIVIDUAL.** Dos pedidos. **(1)** «la flecha de expandir capa cambiala de lugar con el click de seleccionar»: la fila de la capa quedó **tik · 👁 · nombre · ▸**. Por coherencia de columnas, el tik también abre la fila de las **piezas** (tik · miniatura · nombre) y la de **«Ver piezas»** — los tres caen en la misma columna, que es lo que hace legible la selección de un vistazo. **(2)** «si selecciono la pieza Frente dentro del talle 0 se selecciona esa sola, no todos los frentes; la selección desde ahí es individual»: el **NOMBRE** de una pieza dentro de una capa dejó de elegir el grupo y ahora hace lo mismo que su tik (`togglePzSel`). Con eso `toggleGrupoNombre` quedó sin uso y **se eliminó**: el grupo (la misma pieza en todos los talles) se elige desde **«Ver piezas»**, que trabaja por nombre, y la capa entera desde su propio tik. Es la misma regla que ya rige en el visor desde la 260 — **tocar una cosa elige una cosa**. **VERIFICADO en la UI real** (molde del usuario, 30 capas × 34 piezas): orden de la fila de capa `TIK · OJO · nombre · FLECHA` y de la de pieza `TIK · MINI · nombre`; click en «Frente 1» del talle **0** → **1 seleccionada**, y en el visor es exactamente `0 / Frente 1` (antes 30, una por talle); el tik de la capa 0 sigue dando **34**; y el grupo «Frente» desde «Ver piezas» suma los **180** (6 frentes × 30 talles) — quitarlo devuelve la capa a 28/34 (parcial). ⚠️ Trampa de medición: leer `elemento.textContent` dentro del objeto que se serializa al final de una cadena de `setTimeout` devuelve el valor FINAL, no el del momento — capturar el string en una variable en cada paso.
+
+- **2026-08-21 (260) — CLICK = una pieza · ARRASTRE = muchas + la barra de capas afinada.** Dos pedidos del usuario sobre lo de la 259. **(1) BARRA**: la fila de la CAPA **ya no muestra miniatura** («el que sostiene muchas piezas del mismo talle no muestra miniatura, sólo la capa de la pieza sola») — junta 34 figuras distintas y no identificaba nada; con ella se fue el memo `capasMini`, que existía sólo para eso. La **flecha** ▸/▾ pasó de 11×~14 px / fuente 9 a **20×22 px / fuente 15** (es el control que más se usa). Mismo criterio aplicado a «Ver piezas»: miniatura **sólo si la fila agrupa una única figura** (`_unaFigura`: «Tapa costura» = 1 pieza × 30 talles sí; «Cuello» = 11 formas distintas, no). **(2) GESTO DEL VISOR** (Moldería → Nombrar piezas): un **click sin arrastrar elige SÓLO la pieza de adelante**, sin importar cuántas tenga debajo — antes el apretón toggleaba **toda la pila** (`_piezasBajoPunto`), que en un molde anidado son 30 piezas de un saque. Eso venía de que el clic caía en la pieza equivocada (z-order invertido, arreglado en la 258): con el apilado bien, el click preciso alcanza. Varias piezas se eligen **arrastrando** y ahí sí cada punto se lleva **todo lo apilado** (respuesta explícita del usuario a la pregunta) con el **botón izquierdo**; el **derecho sigue moviendo el lienzo** (también elegido por él). ⚠️ El toggle del arrastre ahora exige `pintaSel.current.movio` (umbral de 3 px): sin eso, un temblor de 1 px devolvía el comportamiento viejo y el gesto nuevo no existía. También el click corto que entra por el fondo (`iniciarRubber`) toma `bajo[0]` en vez de la pila. **VERIFICADO en la UI real** (molde del usuario, 30 capas × 34 piezas, todos los ojitos abiertos): sobre un punto con **30 piezas apiladas**, el click dejó **1 seleccionada** y es la del talle **«0»** = la primera capa del panel, o sea la de adelante; el arrastre sobre ese mismo punto pasó a **29** (soltó la del click y se llevó el resto de la pila); flecha medida en 20×22 px y **0 miniaturas** en las filas de capa (34 al desplegar una); «Ver piezas» muestra los 8 grupos y sólo «Tapa costura» (30 = 1 × 30) lleva miniatura. Ver §10.c («EL GESTO DE SELECCIÓN EN EL VISOR»). Los changelog **198 y 200** describen el gesto anterior: quedan como historia, la regla vigente es ésta.
+
+- **2026-08-21 (259) — La barra de capas, como el panel de capas de Illustrator: tik de selección, miniaturas y ojo general.** Pedido del usuario: «un tik estilo Illustrator que marca lo que está seleccionado y que sirva para seleccionar desde la capa; más grande; que muestre miniatura de las figuras; seleccionar y deseleccionar por grupo o unitaria; y un ojito general de mostrar/ocultar todo». Quedó (ver §10.c «LA BARRA DE CAPAS»): columna **128 → 208 px**; **encabezado** con el **ojo GENERAL** (`toggleTodasCapas`: si hay alguna capa visible las apaga TODAS —y limpia la selección, misma regla que el ojito de a una—, si estaban todas apagadas las prende) y el indicador de lo seleccionado (cantidad al nombrar, nombre de la pieza en Etiqueta); **miniatura** del contorno REAL por capa y por pieza (`MiniCapa`, memo `capasMini`: los contornos de una capa concatenados en UN solo path — cada `d` arranca con «M», así que son subtrazados válidos — con el bbox del bloque como viewBox; **es el mismo `path_svg` que dibuja el visor**, no un segundo dibujo que pueda diferir); y el **TIK** (`TikSel`) con tres estados (lleno / parcial / vacío) en cada fila. 🔴 **El tik NO tiene estado propio**: lee y escribe la selección de la pantalla (`selNombrar` al nombrar; `etqPiezaSel`+`etqPzTocada` en Etiqueta) — con estado propio, panel y visor mostrarían cosas distintas. **Qué selecciona cada cosa**: tik de la CAPA = sus piezas de una (informativo, sin click, en Etiqueta, donde la selección es de a UNA); NOMBRE de la pieza = el GRUPO (la misma pieza en todos los talles: nombre completo al nombrar, genérico en Etiqueta, que es lo que filtra ese visor); tik de la PIEZA = sólo ésa. Todo toggle. En Etiqueta el tik LLENO es la pieza dueña de la etiqueta (`etqPzTocada`) y las otras del grupo van en parcial. **Coherencia**: la lista «Ver piezas» del panel derecho (la otra lista con ojitos) recibió miniatura + tik de grupo por nombre genérico. **VERIFICADO en la UI real** con el molde del usuario (30 capas × 34 piezas = 1020) en los DOS modos: panel de 208 px con 30 miniaturas y 30 tiks; ojo general apaga (visor a 0 piezas) y prende (~470 ms); desplegar una capa da 34 miniaturas + 34 tiks unitarios; tik de capa → 34 seleccionadas y tik lleno; nombre «Frente 1» → 63 (34 + 29 frentes de las otras capas) con 29 capas en parcial y 1 llena; tik unitario «Cuello 2» → 62; volver a tocar «Frente 1» → 32; **el visor pintó exactamente esas 32** (panel y lienzo en sincronía); en Etiqueta, tik de «Espalda 3» → dueña en lleno, las otras 3 espaldas en parcial, encabezado «Espalda 3»; «Ver piezas» → «Cuello» (330 = 11 × 30). Consola sin errores de JS (sólo los 403 del propio sandbox de solo lectura). ⚠️ Trampa del entorno: con el panel del navegador oculto **`requestAnimationFrame` no corre** — medir con `setTimeout` (un rAF anidado dejó colgada la herramienta 30 s).
+
+- **2026-08-21 (258) — El visor apila los talles como la BARRA DE CAPAS: el de más arriba, adelante.** Pedido del usuario con captura de la barra «TALLES»: «estas capas en el visor deben estar en este mismo orden; la de más arriba es la que va más hacia adelante». En SVG no hay `z-index` — manda lo último pintado — y el visor dibujaba `canvasLayout.layout` tal cual viene de `deteccion_todas` (talle por talle en el orden del panel), o sea **al revés**: el ÚLTIMO de la lista (6XL) quedaba al frente, tapando a los demás y quedándose con cada clic. En un molde ANIDADO (30 talles uno encima del otro) eso significa que el talle 0 —el de arriba de la barra, y el más chico, que queda dentro de todos— era inalcanzable. FIX en **un solo lugar**: `canvasLayout` devuelve ahora `layout` (orden LÓGICO, adelante primero → los hit-tests por bbox toman el primer match y aciertan) **y `dibujo`** (el mismo conjunto invertido por bloque de talle, `sort` estable: dentro de una capa el orden del archivo no se toca). Los **4** `.map()` de render del visor pasaron a `canvasLayout.dibujo` y `MapeadorArteVisual` dibuja con `piezasZ` (los carteles se siguen ubicando con `piezas`: el acomodo greedy depende del orden y no tenía por qué cambiar). El orden sale de `src.talles` = `_ordenar_por_archivo` = `doc.layer_ui_configs()` = el panel de capas del .ai — la misma fuente que ya ordenaba la barra, así que barra y visor no pueden divergir. **VERIFICADO en la UI real** (molde «Camiseta de futbol», 30 talles × 34 piezas, anidado, pantalla Etiqueta con la barra de capas y todos los ojitos abiertos; el visor mostraba las 330 piezas del nombre elegido —11 «Cuello» × 30 talles— porque esa pantalla filtra por la pieza que se está ubicando): el DOM se pinta `6XL → 5XL → … → 1 → 0` (el 0 último = al frente) y `document.elementsFromPoint` sobre un punto del talle 0 devuelve la pila `0, 1, 2, 4, 6, 8, 10, 12…` — exactamente el orden de la barra. ⚠️ La verificación se hizo con un **sandbox de SOLO LECTURA** en 8060 (`api_usuarios` saboteado → `/api/auth/yo` 404 → el front se saltea el login; `before_request` que corta todo método ≠ GET y `_guardar_catalogo` no-op) contra los datos reales: no se escribió un byte, y el proceso se mató por PID al terminar. Ver §10.c.
 
 - **2026-08-21 (257) — Pedidos ya no ofrece moldes a medio configurar (el catálogo vive en la BASE y los archivos en DISCO: pueden no coincidir).** Reporte desde el VPS: aparecían moldes de una versión anterior que «no deberían mostrarse porque no están configurados». CAUSA ESTRUCTURAL: la lista de moldes y toda su config salen de `db.get_doc("catalogo")` (base), mientras que `plantilla.ai`/`arte.ai` viven en `entrada/<pid>/` (disco). Un servidor al que le restauraron la base pero no le copiaron las carpetas muestra moldes **que no existen**: el operario los elige, arma el pedido y recién ahí falla — y de paso son los 404 de `productos/<pid>/preview` («sin molde») y los 409 de `arte/preview_piezas` que se veían en la consola. FIX (front): `_moldeUsable(mid)` = tiene ARCHIVO de molde (`plantilla`) **y** al menos una pieza NOMBRADA (`piezas_nombradas`, que ya venían de `/api/productos`); filtra la grilla del catálogo y la pestaña «Mis artículos» (también su contador). **No se esconde en silencio**: si quedó alguno afuera, un aviso dice cuántos y por qué, y que se terminan en Configuración → Moldes. `variablesDisponibles` NO se filtra a propósito — lo usa `varByClave` para resolver lo que un pedido YA eligió; filtrar ahí dejaría filas huérfanas. VERIFICADO con el catálogo real del taller: los 2 moldes (19 y 34 piezas nombradas, con archivo) siguen visibles, 0 ocultos — el filtro sólo actúa donde falta algo. ⚠️ Recordatorio operativo que esto deja claro: **restaurar la base sin copiar `entrada/`+`datos/` deja el sistema incoherente**; van juntas (DESPLIEGUE.md §6).
 

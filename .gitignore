@@ -55,3 +55,6 @@ secret.txt
 # Clave de sesion del modo publicado (secreto de esta maquina)
 config_publicado.env
 certificados/
+
+# registro del servidor cuando arranca sin ventana (INICIAR-SIN-VENTANA.vbs)
+logs/

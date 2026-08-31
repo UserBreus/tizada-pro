@@ -50,7 +50,9 @@ mapeo = {"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None
 talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
 filas = [{"talle": talles[i % len(talles)], "dise_o": "Jugador", "__variante": VAR, "manga": "corta"}
          for i in range(N_PRENDAS)]
-prendas = S._traducir_prendas(filas, prod, cat, DISENO, reg=reg)
+# filas de MUESTRA para medir (no es un pedido): sin el filtro de columnas obligatorias de la
+# plantilla, que si no las descarta y la medicion se queda sin piezas.
+prendas = S._traducir_prendas(filas, prod, cat, DISENO, reg=reg, exigir_obligatorias=False)
 tmp = tempfile.mkdtemp()
 ppt = MP.generar_pedido(S._ruta_entrada("plantilla.ai", PID), S._ruta_entrada("arte.ai", PID, sub=sub),
                         reg, MP.extraer_personalizacion(S._ruta_entrada("arte.ai", PID, sub=sub)),

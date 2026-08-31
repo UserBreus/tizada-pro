@@ -44,32 +44,59 @@ def _escribir(path, obj):
     os.replace(tmp, path)                      # atómico: nunca queda un json a medio escribir
 
 
-def puede_instalarse_solo():
-    """¿Este servidor puede aplicar una actualización SIN que nadie lo ayude? → (ok, detalle).
+# Cómo se aplica una actualización sin ayuda de nadie:
+#   "windows"  → el ayudante va DETACHED y la tarea programada no lo toca.
+#   "systemd"  → el de siempre en Linux: parar el servicio, descomprimir, arrancarlo. Necesita
+#                `KillMode=process` (drop-in, root) o el `systemctl stop` mata al ayudante.
+#   "reinicio" → SIN root: se descomprime con el servidor vivo y, cuando éste se apaga,
+#                `Restart=always` lo revive con el código nuevo. Nunca se llama a `systemctl stop`,
+#                así que el `KillMode` no importa. Es el que permite que el VPS se actualice solo
+#                aunque nadie haya puesto el drop-in.
+MODO_WINDOWS, MODO_SYSTEMD, MODO_REINICIO = "windows", "systemd", "reinicio"
 
-    En Windows sí: el ayudante se lanza `DETACHED` y la tarea programada no lo toca. En Linux
-    depende del **`KillMode` del servicio**: el ayudante nace dentro del cgroup de la unidad, así
-    que con el valor por defecto (`control-group`) el `systemctl stop` que él mismo pide lo mata
-    a él también — servidor apagado, archivos a medio reemplazar y sin rollback (pasó el
-    2026-08-21). Con `KillMode=process` systemd mata sólo el proceso principal y el ayudante
-    sobrevive. Se PREGUNTA en vez de confiar: `systemctl show` es de sólo lectura y no pide sudo.
-    Ante la duda (no se puede consultar) se contesta NO: mejor pedir que lo apliquen a mano que
-    apagar un servidor de producción."""
+
+def _prop_servicio(servicio, prop):
+    """Una propiedad del unit, tal como la reporta systemd (sólo lectura, no pide sudo)."""
+    r = subprocess.run(["systemctl", "show", "-p", prop, "--value", servicio],
+                       capture_output=True, text=True, timeout=15)
+    return (r.stdout or "").strip().lower()
+
+
+def como_se_instala():
+    """¿Cómo puede aplicarse una actualización acá? → (modo|None, detalle).
+
+    En Windows, siempre. En Linux hay DOS caminos y se prefiere el que no necesita permisos:
+
+      · **`Restart=always`** (o `on-failure`) → modo **«reinicio»**: se descomprime con el servidor
+        todavía vivo y, cuando se apaga, systemd lo levanta solo con la versión nueva. No hace falta
+        el drop-in ni root.
+      · **`KillMode=process`** → modo **«systemd»**, el clásico: parar, descomprimir, arrancar.
+
+    Si no se puede consultar el servicio, se contesta NO: mejor pedir que lo apliquen a mano que
+    apagar un servidor de producción (pasó el 2026-08-21)."""
     if os.name == "nt":
-        return True, "windows"
+        return MODO_WINDOWS, "windows"
     servicio = os.environ.get("TIZADA_SERVICIO") or "tizadapro"
     try:
-        r = subprocess.run(["systemctl", "show", "-p", "KillMode", "--value", servicio],
-                           capture_output=True, text=True, timeout=15)
-        valor = (r.stdout or "").strip().lower()
+        restart = _prop_servicio(servicio, "Restart")
+        kill = _prop_servicio(servicio, "KillMode")
     except Exception as e:
-        return False, f"no se pudo consultar el servicio ({e})"
-    if not valor:
-        return False, f"el servicio «{servicio}» no contestó su KillMode"
-    if valor != "process":
-        return False, (f"KillMode={valor} en «{servicio}»: instalar solo apagaría el servidor. "
-                       f"Falta el drop-in con KillMode=process (ver DESPLIEGUE.md §11.b)")
-    return True, "KillMode=process"
+        return None, f"no se pudo consultar el servicio ({e})"
+    if restart in ("always", "on-failure", "on-abnormal"):
+        return MODO_REINICIO, f"Restart={restart} (systemd lo vuelve a levantar solo)"
+    if kill == "process":
+        return MODO_SYSTEMD, "KillMode=process"
+    if not (restart or kill):
+        return None, f"el servicio «{servicio}» no contestó cómo está configurado"
+    return None, (f"«{servicio}» no se puede actualizar solo: Restart={restart or '?'} y "
+                  f"KillMode={kill or '?'}. Alcanza con cualquiera de las dos — `Restart=always` "
+                  f"(recomendado) o `KillMode=process` (ver DESPLIEGUE.md §11.b)")
+
+
+def puede_instalarse_solo():
+    """Compatibilidad: (ok, detalle). El modo lo decide `como_se_instala()`."""
+    modo, detalle = como_se_instala()
+    return (modo is not None), detalle
 
 
 def token_ok(recibido):
@@ -85,13 +112,14 @@ def token_ok(recibido):
 def estado(version_actual):
     """Lo que ve la pantalla: qué versión corre, si hay una pendiente y cuánto falta."""
     p = _leer(PENDIENTE)
-    # `so` = dónde corre ESTE servidor. La pantalla del taller lo usa para avisar que en Linux
-    # el modo automático depende de `KillMode=process` en el unit (ver DESPLIEGUE.md §11.b).
-    _solo_ok, _solo_det = puede_instalarse_solo()
+    # `so` = dónde corre ESTE servidor. En Linux hay DOS caminos para actualizarse solo y basta con
+    # uno: `Restart=always` (modo «reinicio», sin root) o `KillMode=process` (modo clásico).
+    _modo, _solo_det = como_se_instala()
+    _solo_ok = _modo is not None
     out = {"version": version_actual, "so": ("windows" if os.name == "nt" else "linux"),
            # `puede_solo` = si este servidor sabe aplicar una actualización sin ayuda humana.
            # La pantalla del taller lo muestra ANTES de publicar, para no elegir a ciegas.
-           "puede_solo": _solo_ok, "puede_solo_detalle": _solo_det,
+           "puede_solo": _solo_ok, "puede_solo_detalle": _solo_det, "modo_instalacion": _modo,
            "pendiente": None, "ultima": _leer(ULTIMA),
            "en_curso": bool(_leer(EN_CURSO))}
     if p:
@@ -178,7 +206,8 @@ def aplicar(puerto, version_actual):
     # 🔴 NO APAGAR UN SERVIDOR QUE NO VA A SABER VOLVER. Si el ayudante no sobreviviría al
     # `systemctl stop`, aplicar sola es garantizar la caída: se APARCA y queda para aplicar a
     # mano (el paquete está sano, no se pierde nada).
-    _ok, _det = puede_instalarse_solo()
+    _modo, _det = como_se_instala()
+    _ok = _modo is not None
     if not _ok:
         p["cuando"] = MANUAL
         p["aparcada"] = True
@@ -190,7 +219,7 @@ def aplicar(puerto, version_actual):
     _escribir(EN_CURSO, {"desde": version_actual, "hacia": p.get("version"), "inicio": time.time()})
     exe = sys.executable or "py"
     cmd = [exe, os.path.join(AQUI, "actualizador.py"), AQUI, PAQUETE, str(puerto),
-           str(p.get("version") or "")]
+           str(p.get("version") or ""), _modo]
     # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: el ayudante tiene que SOBREVIVIR a que el
     # servidor se apague. Si fuese hijo normal, se lo llevaría puesto y quedaría todo a medias.
     flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0

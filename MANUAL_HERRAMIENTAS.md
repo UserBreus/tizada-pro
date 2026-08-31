@@ -9,7 +9,7 @@
 > Regla: si cambia una herramienta, se actualiza **su entrada acá** + la sección del MAPA + el
 > changelog del MAPA, en la misma tanda.
 >
-> Los guiones de la **ayuda guiada in-app** viven en `frontend/src/guias.js` y cuentan la versión
+> Las explicaciones de la **ayuda guiada in-app** viven en `frontend/src/diccionario.js` y cuentan la versión
 > corta de varias de estas herramientas: si acá se cambian los pasos, hay que revisar si el guion
 > de esa guía quedó mintiendo.
 
@@ -48,7 +48,7 @@ MOLDERÍA (por molde)           ┐  se hace UNA vez por molde
   → variables → plantilla      │
   → telas/borde/etiqueta       ┘
 
-PEDIDO (todos los días)        ┐  diseño → variables → arte → planilla → enviar
+PEDIDO (todos los días)        ┐  diseño → moldes → arte → planilla → enviar
                                ┘  (§5)
 ```
 
@@ -205,6 +205,30 @@ está verificado.
 > En **modo «mi molde»** (venido del pedido) se recorta **Variables** y «⬅ Molderías» se convierte
 > en **«← Volver al pedido»**.
 
+### 2.3 **Agregar una pieza** al molde ya cargado
+
+- **Dónde:** dentro del molde → ajuste **Moldería** → bloque **«Agregar una pieza»**.
+- **Dos caminos:** **⧉ Duplicar la elegida** (tocás la pieza en el visor) o **Subir un archivo**
+  (`.ai`/`.pdf`, que tiene que traer la pieza **dibujada en todos los talles**, una forma por talle,
+  del más chico al más grande — si no, se rechaza y te dice por qué).
+- **Pasos:** elegir el camino → **tocar en el visor dónde va** (se ve la cruz y el contorno en
+  tamaño real) → **«Listo, prepararla»** → repetir si querés más → **«Guardar»**.
+- 🔴 **Nada se escribe hasta que tocás Guardar.** Las preparadas se ven en **ámbar** en el visor y
+  se sacan con la ✕: hasta ahí el molde está intacto. Todas se guardan **juntas**.
+- 🔴 **Lo guardado no se puede borrar.** Para sacar una pieza hay que **borrar el molde entero** y
+  subirlo de nuevo. No hay «deshacer» (el modal te lo avisa antes de guardar).
+- **Duplicar copia los vectores respetando los talles**: en cada talle se copia **esa misma pieza**
+  (la homóloga del registro), no la que tenga el mismo número. El **nombre y el número NO se
+  copian**: entra como pieza nueva. ⚠️ Si la pieza que duplicás **todavía no tiene nombre**, no hay
+  correspondencia entre talles y se copia la del mismo número — conviene nombrarla antes.
+- **Después de guardar:** la pieza queda **sin nombre** → nombrala en **Moldería · Nombrar piezas**,
+  sumala al **grupo** y a las **variables** que la lleven, y dale **tela** y **arte** si el molde
+  los usa (si no, la traba del pedido lo frena antes de fabricar).
+- **La numeración no se mueve:** la pieza nueva es **la última** de cada talle.
+- **Guarda:** `POST /api/plantilla/pieza_archivo` (sube el archivo, no toca el molde) y
+  `POST /api/plantilla/pieza_agregar` (**es el Guardar**) → `entrada/<pid>/plantilla.v<N>.ai` +
+  `plantilla.ver`; tu archivo original **no se toca**. Contrato: `verificar_agregar_pieza.py`.
+
 ### 3.1 Variables · Paso 1 — **Nombrar las piezas**
 
 - **Para qué:** decirle al sistema cuál es el frente, la espalda, la manga. Es la base de TODO
@@ -248,9 +272,14 @@ está verificado.
 - **Detalle de una variable** (tocar su tarjeta): renombrar, **Cargar piezas**,
   **Guardar cambios**, y ver sus piezas **con todos los talles nesteados** (arrastrar una pieza
   acomoda las de todos los talles juntas; se guarda sola).
-- **⛓ Piezas que van juntas:** dentro de la variable → **＋ Vincular piezas** → tocar 2 o más piezas
-  que van SIEMPRE juntas (ej. manga corta + su vivo) → elegir el nombre común → **Crear vínculo**.
-  Si un toggle saca un miembro, se sacan **todos**.
+- **⛓ Piezas que van juntas (se declaran en el GRUPO):** detalle del grupo → **＋ Vincular piezas**
+  → tocar 2 o más piezas que van SIEMPRE juntas (ej. manga corta + su vivo) → elegir el nombre
+  común → **Crear vínculo**. Después, al armar cualquier variable de ese grupo, **elegir una trae
+  la otra sola**. Si un toggle saca un miembro, se sacan **todos**.
+- **Un nombre = un lugar:** si elegís «Cuello 9» y después «Cuello 10», queda **el último** (el
+  anterior se saca solo, sin avisos). La única forma de que dos piezas del mismo nombre **convivan**
+  es **vincularlas** en el grupo. Con el **recuadro** entra una por nombre y no se pisa lo que ya
+  habías elegido. Si un molde viejo ya tenía dos, el detalle de la variable te lo **avisa**.
 - **Guarda:** `POST /api/productos/variantes` (+ `/grupos`) → `prod["variantes"]` /
   `prod["grupos"]` en el catálogo. `juntas` viaja a la prenda como `juntas_piezas` y se filtra en
   `partes_de`.
@@ -346,6 +375,9 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
 
 ### 3.9 **Etiqueta** (el textito de corte sobre cada pieza)
 
+- **Lo que dice**: `talle · nombre · #nro`, y el **nombre va GENERAL, sin el número** («Frente 9»
+  se estampa «Frente») — las piezas iguales se distinguen por el `#nro`. Contrato:
+  `verificar_etiqueta_nombre.py`.
 - **Se trabaja POR PIEZA** (2026-08-18). La etiqueta **es de la pieza** y vale para todo el molde:
   donde la pongas en el «Frente 1», queda en el «Frente 1» de **todos los talles y todas las
   variables**. ⛔ **«Frente 1» y «Frente 2» son piezas DISTINTAS:** cada una lleva su etiqueta y
@@ -355,6 +387,8 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
   1. **Elegir la pieza** en la lista de la derecha (`etq-piezas`): una entrada por pieza
      («Frente», «Cuello»…, ~9 — no una por talle). Cada fila muestra cuántos talles tiene, un
      **✓** si ya tiene su lugar marcado, y un **sí/no** para apagarle la etiqueta a esa pieza.
+     También se puede elegir desde la **barra de capas** de la izquierda: desplegá un talle (▸) y
+     tocá el **tik** de la pieza (ver 6.2) — el tik lleno es la que estás ubicando.
   2. El **visor** pasa a mostrar **esa pieza en todos sus talles**, una al lado de la otra, y se
      **centra y encuadra solo** en ella (si son varias, el encuadre las abarca a todas). Al entrar,
      la primera pieza de la lista queda elegida sola.
@@ -369,9 +403,10 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
   8. **Guardar etiqueta** (`etq-guardar`).
 - **Guarda:** `GET/POST /api/productos/etiqueta` → `prod["etiqueta"]`. La clave de cada posición es
   el **nombre genérico** de la pieza («Frente»), sin namespace.
-- **Molde ANIDADO** (talles dibujados uno encima del otro): no existe la vista de todos los talles
-  juntos, así que el visor muestra el talle en pantalla. Se configura igual — la posición es
-  relativa al contorno.
+- **Molde ANIDADO** (talles dibujados uno encima del otro): la pantalla **sí** muestra todos los
+  talles (arranca con sólo el de guía visible y el resto apagado en la barra de capas; el 👁 general
+  los prende). Lo que no se dibuja son los rótulos por bloque, que ahí caerían todos en el mismo
+  punto. Se configura igual — la posición es relativa al contorno.
 - ⚠️ **Lo que ya estaba configurado por variable se MIGRA solo** al abrir la pantalla (y se guarda
   al Guardar). Si una pieza tenía la etiqueta en **lugares distintos según la variable**, sólo
   puede quedar uno: queda el de la primera variable y la pantalla **avisa cuáles** para revisarlas.
@@ -461,6 +496,67 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
   `POST /api/productos/grupo_tizada`. Un molde fuera de todo grupo se arma en su **propia tizada**.
 - **Config global** (ancho/alto por defecto, etc.): `GET/POST /api/config`.
 
+### 4.5b **Usuarios y permisos**
+- **Dónde:** Configuración → *Usuarios y permisos*. Tres pestañas con **un buscador común**:
+  **Usuarios**, **Roles** y **Acciones** (el catálogo que define el código).
+- **El modelo, en una línea:** un usuario **no** tiene permisos sueltos → tiene **roles**, y cada rol
+  trae un paquete de **acciones**. Todo se valida en el **servidor**.
+- **Nuevo/editar usuario** (modal en 4 pasos): 1) quién es · 2) **contraseña** (puntos + **ojo** para
+  verla; vacía = no se cambia) · 3) **roles** como tarjetas con su descripción y cuántas acciones
+  traen · 4) **«con eso va a poder»**: el resumen real de lo habilitado, que se recalcula al marcar.
+  Sin ningún rol, avisa que el usuario entra pero no hace nada. El interruptor **«Puede entrar»**
+  desactiva el acceso sin borrar el historial.
+- **Nuevo/editar rol:** datos + selector de acciones con **buscador**, contador `X de Y`,
+  **Marcar todo / Ninguna** (sobre lo filtrado) y, por módulo, una **caja de tres estados** que marca
+  o saca el bloque entero. El rol **de sistema** no se puede tocar (si le sacaran «gestionar
+  usuarios», nadie podría devolvérselo).
+- **Trampa:** para revisar esta pantalla sin credenciales está `scratchpad/srv_visor_usuarios.py`
+  (8062, sólo lectura). El sandbox común (`srv_visor.py`) **no sirve**: sabotea `api_usuarios` y con
+  eso desaparecen `/api/usuarios`, `/api/roles` y `/api/permisos`.
+
+### 4.5c **Columna «Cantidad»** (una fila = varias prendas)
+- **Qué hace:** repite la fila tantas veces como diga el número. `M · pepe · 12 · **5**` ⇒ la tizada
+  arma **5 remeras M con «pepe» y «12»**. No se estampa: sólo multiplica.
+- **Está en TODAS las planillas** (columna de sistema, `role: 'cantidad'`): no hay que crearla ni
+  migrar nada, y **no se puede borrar**.
+- **Cuándo se ve** — se configura en *Configuración → Planillas*, tocando la columna:
+  · **«Sólo si el operario la pide»** (por defecto): en el paso Planilla hay un botón **Cantidad**
+    que la muestra/oculta. · **«Siempre a la vista»**: la planilla la trae puesta.
+  La **posición** se cambia arrastrando su letra, como cualquier columna.
+- 🔴 **Oculta = no se aplica** (vale 1). El valor cargado no se borra: vuelve a valer al mostrarla.
+- **Sin tope** (decisión del usuario): 250 son 250 prendas. Al lado de los botones se ve
+  **«N fila(s) → M prendas»** cuando difieren — ése es el número que le importa al taller.
+- **El botón** para prenderla está **arriba de la planilla** (grande, dice «Mostrar columna de
+  cantidad»), no abajo con los otros.
+- **Dónde vive:** `_con_cantidad` (servidor) garantiza la columna en las dos puntas y
+  `_traducir_prendas` es quien **repite** la prenda. Contrato: `verificar_cantidad.py`.
+
+### 4.5c-bis **Mover filas de lugar**
+- Desde la **columna del número (#)**: se toca para elegir la fila (**shift** = un rango ·
+  **ctrl/cmd** = de a una) y se **arrastra** para moverla. Se pueden mover **varias juntas**, y
+  mantienen su orden.
+- Mientras arrastrás, las filas **se corren solas** mostrando dónde va a caer el bloque.
+- 🔴 **El número es la POSICIÓN, no la fila**: siempre queda 1, 2, 3… de arriba abajo, sin importar
+  cuánto muevas.
+
+### 4.5d **Cargar por lote** (cuántas de cada talle)
+- **Botón «Cargar por lote»**, abajo de la planilla. Abre un modal con **todos los talles del
+  molde**; se pone cuántas prendas lleva cada uno (− / número / +) y se crea **UNA FILA POR
+  PRENDA**: `M = 5` ⇒ **5 filas de M**, cada una lista para su nombre y su número.
+- 🔴 **No es lo mismo que la columna Cantidad**: esa hace *una fila = N prendas iguales*; el lote
+  arma *N filas separadas* — que es lo que sirve cuando cada prenda lleva un nombre distinto.
+- Si la planilla está **en blanco**, el lote la **reemplaza**; si ya tiene datos, **agrega al final**
+  (el modal lo avisa antes de confirmar).
+
+### 4.5e **Exportar / Importar la planilla (CSV para Excel)**
+- **⬇ Exportar CSV** (al lado de Importar, abajo de la planilla) baja la planilla tal cual está:
+  **sólo las columnas que se ven** — si la de Cantidad está oculta, no va en el archivo.
+- El archivo se abre en **Excel** (separador `;` + BOM, así entra en columnas y con acentos), se
+  completa afuera y se vuelve a subir con **⬆ Importar CSV**: los encabezados son los **labels** de
+  las columnas, que es justo lo que el importador matchea.
+- El importador **detecta solo el separador** (`,` `;` tab), así que si Excel lo guarda distinto
+  entra igual. En talle/diseño/toggles sólo acepta valores válidos.
+
 ### 4.6 **Catálogo de Fuentes**
 - **Pasos:** **Subir** (`fuentes-subir`) el `.ttf`/`.otf` → escribir un texto de prueba
   (`fuentes-probar`) para ver cómo queda **en todas las fuentes** sin generar una tizada.
@@ -504,16 +600,32 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 
 ## 5. El PEDIDO — armar una tizada (uso de todos los días)
 
-Wizard `pedidoPaso`: **moldes → arte → planilla → (generar) → resultados**.
+Wizard `pedidoPaso`: **diseno → moldes → arte → planilla → (generar) → resultados** (5 pasos en la barra: Diseño · Moldes · Arte · Planilla · Tizadas).
 
-### 5.1 Paso «Diseños» — diseño(s) + variables
+🔴 **La barra de abajo es LA MISMA en los 5 pasos** (componente `BarraPaso`), siempre en este orden: **← volver · ↺ Nuevo pedido · lo propio del paso** … **progreso · el botón que avanza**. Ningún paso arma su barra por su cuenta.
 
-**El orden real es: primero se CREA EL DISEÑO y después se le eligen las VARIABLES.** No se elige un
-molde: se eligen variables, que ya traen su molde detrás.
+**El PROGRESO del paso** (`ProgresoPaso`), **centrado** en la barra: cada requisito con su **marca** y su nombre **completo** («✓ Asignar arte · ✓ Asignar tela · ! Cargar fuente 2/3»). Verde = hecho · rojo con cruz = falta y **frena** · **amarillo con «!» = falta pero deja avanzar** (`aviso: true` en `pasoItems`; hoy sólo la tipografía). **Se toca y abre el detalle de ESE paso**: qué falta, con nombre y apellido («Falta el arte de «camiseta asque» en «JUGADOR»»). Qué mira cada paso — **Diseño**: haber elegido uno · **Moldes**: la prenda de cada diseño · **Arte**: el arte de cada molde+diseño, la tela de cada pieza y las fuentes · **Planilla**: filas, valores válidos y arte de todos los moldes · **Tizadas**: la generación terminada.
+
+### 5.0 Paso 1 «Diseño» — elegir el o los diseños
+
+**Acá no se ve ningún molde**: sólo los diseños, para tocarlos.
+
+- Arriba, **centrado**, el campo para **escribir** un diseño que no esté en la lista (vale sólo
+  para ese trabajo) y el botón **+ Diseño**.
+- Debajo, la **lista de siempre** (`pedido-diseno-lista`), **de a 3 por línea**: JUGADOR · GOLERO ·
+  CUERPO TECNICO · DISEÑO 1-5 · ALTERNATIVA · PRINCIPAL · LOCAL · VISITANTE. Se tocan (podés elegir
+  varios); se vuelven a tocar para sacarlos. ⏳ La lista vive **en el código** (`DISENOS_PRESET` en
+  `App.jsx`) hasta que se puedan crear desde Configuración.
+- Los elegidos quedan en **«Este trabajo lleva»**, con su ✕.
+- **«Elegir los moldes»** (`pedido-ir-moldes`) pasa al paso 2 — apagado hasta que elijas uno.
+
+### 5.1 Paso 2 «Moldes» — las variables de cada diseño
+
+**No se elige un molde: se eligen variables, que ya traen su molde detrás.** Se muestran **todas**,
+para cualquier diseño.
 
 - **Pasos:**
-  1. Escribir el nombre del diseño (`pedido-diseno-input`) — ej. «River titular» — y **Enter** o el
-     botón **Diseño** (`pedido-diseno-agregar`). Un pedido puede llevar **varios**.
+  1. **← Diseño** (`pedido-volver-diseno`) vuelve al paso 1 si hay que agregar o sacar alguno.
   2. Los chips (`pedido-diseno-chips`) muestran cada diseño con su color y **cuántas variables** le
      asignaste; tocar uno = trabajar sobre ese (**Todos** aplica a todos a la vez).
   3. Pestañas (`pedido-tabs`): **Catálogo** (variables de los moldes compartidos) o **Mis
@@ -550,9 +662,24 @@ propio); el ✓ verde marca las que ya tienen arte.
   3. Revisar en el visor que **cada pieza tenga su parte del diseño**. Si algo no quedó bien,
      **arrastrar el diseño hasta la pieza**. Arriba se cambia de diseño y de variable: **hay que
      cargar el arte de todas**.
-  4. **Ver telas de pieza** (`arte-telas`) → decir en qué tela va cada una. **Todas las piezas
-     necesitan tela**: si falta alguna, no deja seguir.
-  5. **A la planilla →** (`arte-siguiente`).
+  4. **Asignar telas** (`arte-telas`) → en qué tela va cada pieza. **Todas necesitan tela**: si
+     falta alguna, no deja seguir.
+     - **Lo normal: una sola tela.** La card **«La tela de esta prenda»** → se toca, se elige del
+       selector (grilla con la muestra de color y el ancho útil) y queda en **todas** las piezas.
+     - **Si alguna va en otra:** **«+ Otra tela para algunas piezas»** → **tocás esas piezas en el
+       visor** y después **«Elegir tela»**. Quedan listadas como *excepciones*, con su color y una
+       ✕ para devolverlas a la tela principal.
+     - **No repetir el trabajo:** **«⧉ Copiar estas telas a…»** copia lo elegido a los otros moldes
+       del pedido — *Todos los moldes* de un toque, o marcando cuáles. Avisa si el destino ya tenía
+       telas (se pisan). Las piezas que allá se llamen distinto quedan sin tela y te lo marca.
+  5. **Tipografía** (`arte-fuente`) → si el arte pide una que el sistema no tiene, sale un cartel
+     **AMARILLO** arriba: *«Tipografía no encontrada: X. Se va a sublimar con «Anton Regular»…»*.
+     🔸 **Es el único requisito del paso que NO traba** (2026-08-21): se puede avanzar igual.
+     Al tocar **A la planilla** aparece el cartel con tres salidas: *Cancelar*, **«Seguir de todos
+     modos»** y *«Cargar la tipografía»* (el modal de siempre: subirla al sistema o sólo a este
+     pedido, o elegir un reemplazo del catálogo). El cartel de arriba **desaparece solo** cuando la
+     tipografía queda resuelta, y el visor se re-dibuja **al instante** con la elegida.
+  6. **A la planilla →** (`arte-siguiente`).
 - **Guarda:** `POST /api/arte` (multipart `archivo` + `diseno` + `pid`) →
   `entrada/<pid>/disenos/<slug>/arte.ai` + `validacion_arte.json` + `mapeo_arte.json` +
   `registro_personalizacion.json`. Si el auto-mapeo cubre el alcance de las variables, **se aprueba
@@ -560,7 +687,15 @@ propio); el ✓ verde marca las que ya tienen arte.
   `POST /api/disenos/guardar` para que aparezca en la columna «Diseño».
   Después: `POST /api/arte/asignar_todo` (+ `GET /api/arte/asignar_estado`) y
   `POST /api/arte/preview_piezas` (render real cacheado en `piezas_cache/`).
-- **Contador y bloqueos:** «X/Y con arte» + «⚠ Faltan N pieza(s) sin tela».
+- **Contador y bloqueos:** el progreso del paso y su detalle. Código de colores: **✓ verde** hecho ·
+  **✕ rojo** falta y **frena** (arte, telas) · **! amarillo** falta pero **deja avanzar** (hoy, sólo
+  la tipografía). El texto de arriba de la barra cambia según haya rojo o sólo amarillo.
+- **Todo lo que falta se nombra igual** (`_arteLbl`): **«MOLDE» · variable «VARIABLE» · diseño
+  «DISEÑO»** — los tres, siempre (la misma variable la usan muchos diseños; lo que distingue es el
+  diseño). Si el ítem es un molde entero (sin Variables) se omite la parte de variable.
+  Vale para el arte, las telas y la tipografía: en la barrita, en
+  el detalle, en el `title` de **Enviar** y en el error de generar. Las tipografías se chequean en
+  **todos** los artes del pedido, no sólo en el que estás mirando.
 - **LEY: el arte se ve igual que la tizada.** Lo que muestra el visor **es** el render del motor
   cacheado — no se re-dibuja en JS (el re-dibujo quedó sólo como placeholder mientras carga).
 
@@ -667,19 +802,47 @@ Es el mismo componente en casi todas las pantallas; lo que **cambia es el modo**
 
 | Modo | Se activa en | Gesto |
 |---|---|---|
-| Nombrar piezas | Variables paso 1 | clic = elegir · **recuadro** = varias |
+| Nombrar piezas | Variables paso 1 | **clic = UNA pieza** (la de adelante, aunque haya otras debajo) · **arrastrar** = varias, apiladas incluidas · **recuadro** desde el fondo = varias |
 | Elegir piezas de variable/grupo | Variables paso 2 | idem |
-| Vincular «van juntas» | detalle de variable | clic sobre 2+ piezas |
+| Vincular «van juntas» | detalle del **GRUPO** | clic sobre 2+ piezas del grupo |
 | Telas por pieza | ajuste Telas | clic = pieza lleva esa tela |
 | Etiqueta | ajuste Etiqueta | clic **sobre el borde** = posición |
 | Mapeo del arte | Plantilla / paso Arte | arrastrar mesa → pieza |
 | Acomodar / reacomodar | Moldería | arrastrar piezas |
+| Acomodar una VARIABLE | Variables → variable abierta | clic = elegir la pieza **entera** (todos sus talles) · **recuadro** = varias · arrastrar una **marcada** = se mueven **todas juntas** · arrastrar una suelta = sólo ésa |
 | Asignar variantes por piezas | Moldería | clic / recuadro + nombre |
 
 - **Navegación:** rueda = zoom, **clic derecho arrastrado** = mover. Botones **Ver todo** y **100%**.
+- **Elegir piezas (2026-08-21):** un **clic** elige **una sola** — la de la capa de más arriba, sin
+  importar cuántas haya debajo. Para elegir **varias**, **arrastrá** con el botón izquierdo (ahí sí
+  se lleva todo lo que esté apilado bajo el cursor) o hacé un **recuadro** desde el fondo. El mismo
+  gesto pone y saca. Mantener el clic **quieto** sobre una elegida (medio segundo) pasa a **mover**.
 - **Escala real fija (mm)**: el visor **no** se reescala por cantidad de piezas — como Illustrator.
 
-### 6.2 **Ayuda guiada** (botón `nav-ayuda`, «Te guío paso a paso»)
+### 6.2 **La barra de capas** (columna izquierda del visor — estilo Illustrator)
+
+Aparece en **Moldería → Nombrar piezas** y en **ajuste Etiqueta**. Es la lista de los talles del
+molde, con el mismo lenguaje que el panel de capas de Illustrator:
+
+| Control | Qué hace |
+|---|---|
+| **👁 general** (arriba de todo) | muestra u **oculta TODAS** las capas de una. Al ocultar, suelta la selección |
+| **👁 de la fila** | muestra/oculta esa capa. **Se puede arrastrar**: apretar y pasar por encima aplica lo mismo a las que toque |
+| **miniatura** | el contorno real de **la pieza** — el mismo dibujo del visor. La fila del **talle** no lleva (junta muchas piezas distintas): se ven al desplegar |
+| **nombre** | **doble click = renombrar la capa**. En una fila de PIEZA, un click elige **esa pieza sola** (la de ese talle) |
+| **tik** (cuadradito, **al principio de la fila**) | **lleno** = todo seleccionado · **medio** = una parte · **vacío** = nada. Click = seleccionar/quitar. En la fila de la capa, sus piezas de una; en la de una pieza, **sólo ésa** |
+| **▸ / ▾** (**al final de la fila**) | despliega las piezas de esa capa (es grande a propósito: es lo que más se toca) |
+
+- **El orden manda**: la capa de más arriba es la que va **más adelante** en el visor (y la que se
+  lleva el clic cuando las piezas están encimadas). Ese orden sale del archivo `.ai`.
+- En **Etiqueta** la selección es de a una: el tik **lleno** marca la pieza cuya etiqueta se está
+  ubicando y las otras del mismo nombre quedan a medio marcar. El tik de la capa ahí sólo informa.
+- **Adentro de una capa la selección es INDIVIDUAL**: tocar «Frente 1» en el talle 0 elige esa sola,
+  no los frentes de los demás talles. Para elegir **la misma pieza en todos los talles** está la
+  lista **«Ver piezas»** del panel de nombrar (funciona igual, con tik, pero por **nombre**); para
+  **toda una capa**, su propio tik.
+
+### 6.3 **Ayuda guiada** (botón `nav-ayuda`, «Te guío paso a paso»)
 
 - **Hay dos cosas distintas y el menú las separa:**
   - **«Hacerlo paso a paso» → «Armar una tizada»** (22 pasos): el único tutorial de verdad, calcado
@@ -697,7 +860,7 @@ Es el mismo componente en casi todas las pantallas; lo que **cambia es el modo**
   pedido son **función de dónde estás**. A **Resultados no se llega con ningún botón** (se llega
   generando): las guías que lo necesitan lo declaran con **`requiere(E)`** y **no arrancan** si no
   hay tizada — muestran un candado y el motivo. Sin eso, la ayuda sacaba a la persona de su pedido.
-- **27 guías** en 4 áreas (moldes · ajustes · pedido · configuración), en `guias.js`.
+- 🔴 **Los tutoriales ya NO se escriben: los GRABA el usuario** (2026-08-27). Botón «Grabar un tutorial» en Ayuda → hace el trabajo → «Parar» → le pone un nombre. El sistema no graba video: anota **qué elemento tocó y en qué pantalla**, y los carteles los escribe él con `frontend/src/diccionario.js`. Se guardan en el catálogo (`tutoriales`) y son compartidos. Endpoints: `GET/POST /api/tutoriales` y `POST /api/tutoriales/borrar`.
 - **NO toca datos del usuario**: la acción la hace siempre la persona.
 
 **Cómo avanza un paso** — hay dos mecanismos y el orden importa:
@@ -717,13 +880,15 @@ Si `hecho` ya da true al empezar el paso, **el paso se saltea** (no se pide lo y
 de seguridad: «Seguir igual» si el ancla no aparece en 5 s, y «Ya está, seguir» si `hecho` no se
 cumple en 15 s.
 
-**Agregar/mover un control ⇒ tocar la ayuda.** El ancla es `data-tour="id"` en el JSX y ese `id` es
-el `ancla` del guion. **Está verificado por `frontend/verificar_guias.mjs`, que corre en cada
-`npm run build`** (`npm run guias` para correrlo suelto) y **corta el build** si:
-- una guía pide un ancla que no existe en `App.jsx` (contempla las **dinámicas**
-  `data-tour={'ajuste-' + item.id}` y las **condicionales**);
-- un predicado `hecho`/`falta`/`listo` explota, o miente en los casos que importan (orden de las
-  tareas, «no avanzar si el guardado falló», «no dar por hecho el gesto sin gesto»).
+🔴 **Un control nuevo ⇒ su ancla Y su explicación.** El ancla es `data-tour="id"` en el JSX;
+la explicación, una entrada con ese mismo id en `frontend/src/diccionario.js` (`nombre` · `que` =
+para qué es · `como` = qué hay que hacer). Sin ancla el paso **no se puede grabar**; sin
+explicación el cartel sale pobre.
+**Lo verifica `frontend/verificar_diccionario.mjs`, que corre en cada `npm run build`**
+(`npm run diccionario` para correrlo suelto) y **corta el build** si:
+- algún `data-tour` de `App.jsx` no tiene entrada en el diccionario;
+- sobra una entrada cuyo ancla ya no existe (texto muerto);
+- una entrada está incompleta, o `explicar()` perdió su fallback.
 
 **Cómo se dibuja el resaltado** (regla dura): el hueco deja ver el control **tal cual**; el resalte
 (aro + resplandor) va **siempre por afuera**. Nada de sombras `inset`: se dibujan adentro del hueco y
@@ -739,7 +904,7 @@ arriba → al costado → o se achica al hueco (`frontend/src/tutor_pos.js`, ver
 - El Enter **es del campo, no del tutorial**: con la ayuda abierta tiene que hacer exactamente lo
   mismo que sin ella. El tutorial se entera por el **efecto** (el campo se vacía).
 
-### 6.3 Modales y avisos
+### 6.4 Modales y avisos
 - Nada de `alert`/`confirm` del navegador: la UI usa su componente **`Modal`** y sus propios avisos.
 - **Los editores van en modal aparte**, nunca inline dentro de la lista.
 - ⚠️ Un modal montado **dentro** de una pantalla no se abre desde otra: los modales globales
@@ -830,7 +995,7 @@ arriba → al costado → o se achica al hueco (`frontend/src/tutor_pos.js`, ver
 | El filtro por variable no filtra nada | Se pasó el **label** en vez de la **clave `v_xxx`** |
 | Un objeto editable «gigante» que no se puede mover solo | Dos capas con el **mismo nombre** → el bbox es la unión. Renombrar una |
 | No puedo recolorear un editable | Pinta vía **XObject/imagen**: el color vive adentro (control deshabilitado a propósito) |
-| El tutorial se queda congelado tras escribir | Ver §6.2: la detección es por **poll del valor**, no por evento |
+| El tutorial se queda congelado tras escribir | Ver §6.3: la detección es por **poll del valor**, no por evento |
 | «Mis artículos» vacío | El catálogo se pidió **sin sesión** (server reiniciado) → re-pedir con `[yo?.id]` |
 | El talle no llega a la fila | Molde **sin `columnas`** → fallback `nombre/numero/talle` |
 
