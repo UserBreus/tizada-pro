@@ -1342,6 +1342,18 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-08-31 (372) — CAMINO B, E1: LAS PIEZAS DE UN MOLDE CON EL DISEÑO ADENTRO.** Módulo
+  `piezas_con_diseno.py` + contrato `verificar_molde_con_diseno.py`. **La detección de hoy no sirve
+  para ese archivo**: `extraer_piezas_mesa` trata cada trazado como una pieza, así que una prenda
+  con el diseño adentro da **619 «piezas»** en vez de 9 (medido con `CAMISETA JUGADOR.ai`). El
+  hallazgo: **la forma de la pieza ya está en el archivo** — Illustrator la guarda como MÁSCARA DE
+  RECORTE y PyMuPDF la entrega en `get_drawings(extended=True)`. Se leen los recortes de la capa del
+  talle, se descarta el marco de la mesa, se agrupan por solape (union-find sobre bounding boxes:
+  son 3 a 7 por mesa, no hace falta rasterizar) y el de mayor área es el contorno. Salida con la
+  MISMA forma que `molde_real._contorno_de_drawing`, para que registro, nido, visor y motor no se
+  enteren. 🔴 Trampa: descartar el marco «por área > 95 %» **se come piezas reales** (una tira de
+  28,7 cm en una mesa de 29,0; un frente que ocupa el 97 %) → se compara contra el rectángulo de la
+  página con 1 pt de tolerancia. **Todo el camino B está en `MOLDE_CON_DISENO.md`** (§0.b).
 - **2026-08-31 (371) — 🔴 LA CAUSA REAL: EL FILTRO DE OBLIGATORIAS SE COMÍA LAS FILAS DE
   MUESTRA INTERNAS.** El usuario insistió («la ficha técnica es la ficha técnica») y tenía razón:
   la 370 tapaba una parte, pero el agujero de fondo estaba más abajo. `_traducir_prendas` **no la

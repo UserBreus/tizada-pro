@@ -103,8 +103,9 @@ mezclar dos cambios grandes en la misma entrega.
 - [ ] ¿Lleva **toggles** (manga corta/larga, capucha)? Si el diseño ya está adentro, cada opción
       tendría que venir dibujada en el archivo.
 - [ ] ¿Cómo se asigna la **tela** por pieza en este camino?
-- [ ] Las 9 mesas: ¿es **una pieza por mesa** siempre, o una mesa puede traer varias piezas?
-      (se responde solo al correr la detección de E1 sobre el archivo real)
+- [x] ~~Las 9 mesas: ¿una pieza por mesa?~~ **SÍ**, en este archivo: 9 mesas = 9 piezas por talle
+      (frente, espalda, dos mangas, dos tiras, cuello y dos vivos). Igual el detector **no lo
+      asume**: agrupa por solape, así que una mesa con varias piezas daría varias.
 
 ---
 
@@ -127,15 +128,43 @@ mezclar dos cambios grandes en la misma entrega.
     congelada y dejaría de servir para comparar.
 - Este archivo + la memoria persistente `molde-con-diseno` + el puntero en el MAPA (§0.b).
 
-### [ ] E1 — Detectar las piezas del archivo nuevo (backend)
-- Módulo nuevo `piezas_con_diseno.py`: **aislar la capa del talle** → ensamblado por solape
-  (union-find sobre grilla) → **borde externo = trazado de la máscara**.
-- Salida por pieza: contorno real, qué trozos la componen, bbox en mm.
-- El molde queda registrado **igual que hoy** → todo lo que ya existe (nombrar, agrupar homólogas
-  entre talles, visor) sigue andando sin cambios.
-- **Contrato** `verificar_molde_con_diseno.py` contra `CAMISETA JUGADOR.ai`: cuántas piezas por
-  talle, ninguna pieza partida en dos, ninguna pieza pegada a su vecina, y **los 20 talles
-  separados** (el error que este archivo provoca si no se aísla la capa).
+### [x] E1 — Detectar las piezas del archivo nuevo — **HECHA 2026-08-31**
+
+Módulo **`piezas_con_diseno.py`** + contrato **`verificar_molde_con_diseno.py`** (verde contra el
+archivo real).
+
+**El hallazgo que simplificó todo: la forma de la pieza YA ESTÁ EN EL ARCHIVO.** Illustrator mete
+el dibujo de cada pieza dentro de una **máscara de recorte** cuyo trazado es la silueta. No hay que
+reconstruir ningún contorno: hay que *leerlo*. Y PyMuPDF lo entrega
+(`page.get_drawings(extended=True)` devuelve los items `clip`). Por eso el algoritmo terminó siendo
+más simple que el del proyecto de referencia:
+
+1. Los recortes **de esa capa** (talle). Aislar por capa es **obligatorio**: los talles están
+   apilados y sin aislar se funden en una mancha.
+2. Descartar el **marco de la mesa** que agrega Illustrator al exportar.
+3. **Agrupar por solape** (union-find). Como son un puñado de recortes por mesa y talle (3 a 7),
+   alcanza con los bounding boxes: **no hace falta rasterizar nada**. De paso se traga los recortes
+   anidados del dibujo interno sin mirar el nivel de anidamiento.
+4. El contorno de la pieza es el recorte **de mayor área** del grupo, con su trazado vectorial
+   exacto.
+
+Si el archivo no trae recortes hay un **respaldo** que agrupa los trazados pintados por solape.
+⚠️ Ese camino **no está verificado contra un archivo real** (no hay ninguno sin máscaras a mano) y
+así está marcado en el código.
+
+**Medido contra `CAMISETA JUGADOR.ai`:**
+
+| | |
+|---|---|
+| Piezas de un talle | **9** (una por mesa) — lo que tiene el archivo |
+| Lo que daría la detección de HOY | **619 «piezas»** para el mismo talle |
+| Los 20 talles | separados y creciendo: 28×41 → 81×96 cm |
+| El molde entero (9 mesas × 20 talles) | 180 piezas en **50 s** |
+
+🔴 **Trampa que costó y quedó en el código:** para descartar el marco de la mesa, la regla «ocupa
+más del 95 % del área» **se comía piezas reales** — la tira del talle 0 mide 28,7 cm en una mesa de
+29,0 cm, y el frente 6XL ocupa el 97 % de la suya. Se compara contra el rectángulo de la página
+**con tolerancia de 1 pt**, nunca por porcentaje.
 
 ### [ ] E2 — El alta desde el Pedido
 - Botón **«Subir molde con diseño»** en Pedido → Mis artículos (al lado del que ya existe).
@@ -212,6 +241,16 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 ---
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
+
+- **2026-08-31 (E1)** — Detección hecha y verde contra el archivo real. Lo que se aprendió: **la
+  máscara de recorte ES la pieza**, así que no hubo que portar el rasterizado del proyecto de
+  referencia — con agrupar los recortes por solape alcanza. Lo que falló: la regla del 95 % de área
+  para descartar el marco de la mesa **se comía piezas reales**; se cambió por comparar contra el
+  rectángulo de la página con 1 pt de tolerancia.
+  ⚠️ Trampa de herramienta, dos veces en la misma sesión: los parches con **heredoc de bash** le
+  comieron los escapes a un `print` y dejaron el contrato sin compilar, y después un script de
+  parche perdió los guiones largos al leerse. **Los archivos se escriben con la herramienta de
+  escritura y se editan con reemplazo exacto**, no con heredocs ([[escrituras-atomicas]]).
 
 - **2026-08-31** — Estudiado el proyecto `Prueba para tizada` y decidido el camino. Medido el
   archivo real `CAMISETA JUGADOR.ai` (§3): 123 MB, 9 mesas, 20 talles en capas, cada pieza es una
