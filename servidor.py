@@ -1755,6 +1755,7 @@ def subir_plantilla():
     # pantalla ya lo contempla y es el enganche si algún día se decide volver a transferirlos.
     dxf_resumen = None
     _corresp_nueva = None          # correspondencia pieza↔talle del DXF (se escribe con el commit)
+    _con_diseno, _motivo_b = False, ""   # ¿camino B? se decide más abajo, sobre el temporal
     if nombre.endswith(".dxf"):
         # Molde en DXF (AAMA/ASTM de Optitex, Gerber, Lectra…): se CONVIERTE a un PDF
         # con una capa por talle + los contornos de cada pieza, igual que un .ai.
@@ -1791,8 +1792,28 @@ def subir_plantilla():
                 "completos": [], "registro": {}, "problemas": [], "advertencias": [],
                 "piezas_detalle": {}}
     else:
+        # ── ¿CAMINO B? El molde puede traer el diseño YA ESTAMPADO adentro de cada pieza ─────────
+        # Se decide ACÁ, una sola vez, sobre el temporal, y queda escrito al lado del archivo. No
+        # se vuelve a adivinar en cada lectura. Ver `MOLDE_CON_DISENO.md`.
+        _con_diseno = False
         try:
-            alta = MP.alta_plantilla(tmp)          # se valida ANTES de pisar el molde bueno
+            import pymupdf as fitz
+            import piezas_con_diseno as PD
+            _d = fitz.open(tmp)
+            _con_diseno, _motivo_b = PD.parece_molde_con_diseno(_d)
+            PD.olvidar(_d)
+            _d.close()
+        except Exception as e:
+            print(f"[subir_plantilla] no se pudo mirar si trae diseño adentro: {e}")
+            _motivo_b = ""
+        try:
+            if _con_diseno:
+                # Alta EXACTA: los talles son capas de la misma mesa, así que la correspondencia
+                # entre talles no se empareja, se sabe. Las piezas entran con nombre provisorio y
+                # el usuario las nombra en el visor.
+                alta = PD.alta_molde_con_diseno(tmp)
+            else:
+                alta = MP.alta_plantilla(tmp)      # se valida ANTES de pisar el molde bueno
         except Exception as e:
             _descartar_tmp(tmp)
             return jsonify({"error": f"no se pudo procesar la plantilla: {e}"}), 422
@@ -1833,6 +1854,18 @@ def subir_plantilla():
     except Exception as e:
         _descartar_tmp(tmp)
         return jsonify({"error": f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}"}), 422
+    # ── LA MARCA DEL CAMINO, CON EL ARCHIVO YA EN SU LUGAR ──────────────────────────────────────
+    # Va DESPUÉS del `os.replace` a propósito: si se marcara el temporal y la subida fallara,
+    # quedaría marcado el molde VIEJO, que es de otro camino. Y se BORRA cuando el archivo nuevo
+    # no trae diseño: re-subir un molde pelado encima de uno del camino B tiene que devolverlo al
+    # camino A, no dejarlo leyendo máscaras que ya no existen.
+    if not (nombre.endswith(".dxf")):
+        try:
+            import piezas_con_diseno as PD
+            PD.marcar(destino, con_diseno=bool(_con_diseno))
+            PD.olvidar()
+        except Exception as e:
+            print(f"[subir_plantilla] no se pudo marcar el camino del molde: {e}")
     # Molde nuevo = se descartan las versiones del anterior (p. ej. el renombrado de variantes),
     # o quedaría vigente una versión que ya no corresponde a este archivo. Va DESPUÉS del
     # reemplazo: si la subida falla, el molde viejo y sus versiones quedan intactos.
@@ -1858,6 +1891,13 @@ def subir_plantilla():
             for _k in ("variantes", "grupos", "conjuntos"):
                 if prod_r.get(_k):
                     prod_r[_k] = []
+            # De qué camino es este molde, en el catálogo: es lo que mira la UI para saber que NO
+            # hay que pedirle un arte ni un mapeo. La marca de disco manda para el motor; ésta es
+            # para las pantallas.
+            if _con_diseno:
+                prod_r["origen"] = "con_diseno"
+            else:
+                prod_r.pop("origen", None)
             _guardar_catalogo(cat_r)
     except Exception as e:
         print(f"[subir_plantilla] no se pudieron resetear las variables: {e}")
@@ -1875,6 +1915,8 @@ def subir_plantilla():
                "advertencias": alta.get("advertencias", []),
                "piezas_detalle": alta.get("piezas_detalle", {}),
                "nombres_conservados": nombres_conservados,
+               "origen": "con_diseno" if _con_diseno else "molde",
+               "motivo_origen": _motivo_b,
                "dxf": dxf_resumen}
     json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
     # El lienzo de «Nombrar piezas» se arma YA, en segundo plano: cuando el usuario entre
@@ -1989,8 +2031,13 @@ def plantilla_deteccion():
             _nombres = set(_piezas_de_variable(prod, _var, reg) or [])
             if _nombres:
                 _tref, _mesa = res.get("talle_ref"), res.get("mesa")
+                # El visor de UNA mesa acota por mesa (con otra, los índices no son comparables).
+                # El visor del CAMINO B muestra todas las mesas juntas y devuelve `mesa: None`:
+                # ahí no hay nada que acotar, y filtrar por una mesa que no existe dejaba la
+                # pantalla VACÍA en vez de mostrar las piezas de la variable.
                 _idxs = {int((reg[_nm][_tref])["pieza_idx"]) for _nm in _nombres
-                         if _tref in (reg.get(_nm) or {}) and reg[_nm][_tref].get("mesa") == _mesa
+                         if _tref in (reg.get(_nm) or {})
+                         and (_mesa is None or reg[_nm][_tref].get("mesa") == _mesa)
                          and reg[_nm][_tref].get("pieza_idx") is not None}
                 res["piezas"] = [p for p in (res.get("piezas") or []) if p.get("idx") in _idxs]
                 res["medidas_diseno"] = {k: v for k, v in (res.get("medidas_diseno") or {}).items() if k in _nombres}

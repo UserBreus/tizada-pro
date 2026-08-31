@@ -577,7 +577,12 @@ def detectar_piezas(path, talle_ref=None, ancho_preview=1100, capas_candidatas=F
         _mt = int(os.path.getmtime(path))
     except OSError:
         _mt = None
-    _k = (path, _mt, talle_ref, ancho_preview, capas_candidatas)
+    # 🔴 LA MARCA DEL CAMINO B VA EN LA CLAVE. El alta DETECTA y recién después MARCA el molde, así
+    # que la misma ruta con el mismo mtime da resultados distintos antes y después de marcarlo: sin
+    # esto, el visor servía la detección vieja (245 «piezas» en vez de 9) y no había forma de
+    # refrescarla salvo tocar el archivo. Ya pasó en la propia prueba de este cambio.
+    import piezas_con_diseno as _PD
+    _k = (path, _mt, talle_ref, ancho_preview, capas_candidatas, _PD.es_camino_b(path))
     if _mt is not None and _k in _DET_CACHE:
         return _copy.deepcopy(_DET_CACHE[_k])
     _res = _detectar_piezas_impl(path, talle_ref, ancho_preview, capas_candidatas)
@@ -596,6 +601,15 @@ def _detectar_piezas_impl(path, talle_ref=None, ancho_preview=1100, capas_candid
     piezas:[{idx, px,py,pw,ph (en MILÍMETROS reales), w_cm, h_cm, path_svg(en mm)}]}.
     La escala es REAL y fija (1 unidad = 1 mm), no depende de la cantidad de piezas."""
     doc = _abrir(path)
+    # ── CAMINO B ────────────────────────────────────────────────────────────────────────────────
+    # Un molde con el diseño adentro tiene UNA pieza por mesa, así que el camino de abajo —que
+    # elige la mesa con más trazos y muestra sólo esa— mostraría una sola pieza y no habría nada
+    # que nombrar. Su visor muestra todas las mesas juntas. Además así se lee el archivo UNA vez:
+    # el camino de abajo recorre los dibujos de todas las mesas tres veces (censo de capas, ranking
+    # y extracción), que en un archivo de 123 MB son minutos.
+    import piezas_con_diseno as _PD
+    if _PD.es_camino_b(path):
+        return _PD.detectar_para_visor(doc, talle_ref)
     talles_mesas = _talles_con_molde(doc)
     sin_variantes = False
     if capas_candidatas and not talles_mesas:
@@ -4108,7 +4122,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _pm = _piezas_mesa_cache.get(_pmk)
             if _pm is None:
                 _pm = extraer_piezas_mesa(base_doc, mesa, talle); _piezas_mesa_cache[_pmk] = _pm
-            cont = _pm[info["pieza_idx"]]
+            # 🔴 ACÁ SE INDEXA DENTRO DE LA MESA, y `pieza_idx` es la posición dentro del TALLE
+            # (invariante §8.9). En un molde de UNA mesa son el mismo número y por eso convivieron
+            # siempre; en uno de varias mesas (camino B) no: por eso el registro guarda además
+            # `idx_mesa`, que es el que corresponde acá. Sin `idx_mesa` (todo el camino A) se usa
+            # `pieza_idx` como siempre.
+            cont = _pm[info.get("idx_mesa", info["pieza_idx"])]
         else:                                   # etiquetas de texto: el contorno mayor
             cont = extraer_contorno_mesa(base_doc, mesa=mesa, talle=talle)
         x0, y0, _, _ = cont["bbox_raw"]

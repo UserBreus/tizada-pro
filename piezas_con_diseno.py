@@ -344,8 +344,24 @@ def alta_molde_con_diseno(path, avisar=None):
                 if avisar:
                     avisar(hecho, total, f"mesa {mesa} · talle {talle}")
 
-        # 2) un nombre provisorio por pieza; el índice DENTRO de la mesa la identifica en todos
-        #    los talles
+        # 2) 🔴 LOS DOS ÍNDICES, Y POR QUÉ SON DOS
+        #    `pieza_idx` es, por invariante del sistema (MAPA §8.9), **la posición dentro de un
+        #    TALLE**. En el camino A eso coincide con la posición dentro de la mesa porque el molde
+        #    tiene UNA sola mesa. Acá hay 9, y si se guardara la posición dentro de la mesa las
+        #    nueve piezas tendrían `pieza_idx = 0`: el mapa `pieza_idx → nombre` que resuelve las
+        #    VARIABLES (`motor_pedido`, `_idx_a_nombre`) las colapsaría en una sola y ocho piezas
+        #    quedarían invisibles — en silencio, que es la peor forma.
+        #    Pero el motor SÍ necesita la posición dentro de la mesa para agarrar el contorno
+        #    (`_armar_base` hace `extraer_piezas_mesa(mesa, talle)[idx]`). Así que se guardan los
+        #    dos, cada uno con un significado: `pieza_idx` (dentro del talle, ÚNICO) e `idx_mesa`
+        #    (dentro de la mesa). Un molde del camino A no trae `idx_mesa` y sigue como estaba.
+        antes = {}                                   # cuántas piezas van antes, en ese talle
+        acum = {}
+        for mesa in sorted(por_mesa):
+            for talle in talles:
+                antes[(talle, mesa)] = acum.get(talle, 0)
+                acum[talle] = acum.get(talle, 0) + len(por_mesa[mesa].get(talle, []))
+
         n = 0
         for mesa in sorted(por_mesa):
             cuantas = max(len(v) for v in por_mesa[mesa].values())
@@ -357,7 +373,9 @@ def alta_molde_con_diseno(path, avisar=None):
                         continue                     # este talle no tiene esa pieza: no se inventa
                     cont = pzs[i]
                     registro.setdefault(nombre, {})[talle] = {
-                        "mesa": mesa, "pieza_idx": i,
+                        "mesa": mesa,
+                        "pieza_idx": antes[(talle, mesa)] + i,   # dentro del TALLE (único)
+                        "idx_mesa": i,                           # dentro de la MESA (para el motor)
                         "w_cm": round(cont["w"] / cont["user_unit"] / CM, 1),
                         "h_cm": round(cont["h"] / cont["user_unit"] / CM, 1),
                         "bbox_mu": [round(v, 2) for v in cont["bbox_mu"]],
