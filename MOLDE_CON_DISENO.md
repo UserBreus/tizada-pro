@@ -113,12 +113,19 @@ mezclar dos cambios grandes en la misma entrega.
 > Regla del proyecto: **nada a medias.** Si una entrega no entra en una sesión, se parte en
 > entregas que funcionen, nunca a medio hacer.
 
-### [ ] E0 — Andamiaje (esta sesión)
-- Rama `pruebas-tizada-con-diseno` + commit de partida (local, sin push).
-- **Dos localhost a la vez:** segunda carpeta (`git worktree`) clavada en el commit de partida =
-  **EL ACTUAL en 8050**; esta carpeta (la rama) = **LA PRUEBA en 8051**. Las dos ven los mismos
-  moldes.
-- Este archivo + su memoria persistente.
+### [x] E0 — Andamiaje — **HECHA 2026-08-31**
+- Rama `pruebas-tizada-con-diseno` + **commit de partida `e6a505a`** (local, sin push).
+- **Dos localhost a la vez** (verificado, los dos contestan):
+  - **8050** — carpeta principal `TIZADA PRO`, la RAMA: **acá se desarrolla el camino B**. Es el
+    puerto de siempre, con la tarea de arranque automático y los `.bat` que ya usás.
+  - **8051** — `..\TIZADA PRO - ACTUAL`, un `git worktree` **congelado en `e6a505a`**: el sistema
+    tal como quedó hoy, para comparar contra la prueba. Se levanta con `INICIAR-ACTUAL-8051.bat`.
+  - Los dos miran **los mismos `datos/`, `entrada/` y la misma base**, así que ven los mismos
+    moldes; los `trabajos/` van separados para no mezclar salidas.
+  - `node_modules` va por **junction** al de la carpeta principal (no se duplican 61 MB); el
+    `dist` es **copia propia** — si fuera enlace, recompilar el desarrollo cambiaría la copia
+    congelada y dejaría de servir para comparar.
+- Este archivo + la memoria persistente `molde-con-diseno` + el puntero en el MAPA (§0.b).
 
 ### [ ] E1 — Detectar las piezas del archivo nuevo (backend)
 - Módulo nuevo `piezas_con_diseno.py`: **aislar la capa del talle** → ensamblado por solape

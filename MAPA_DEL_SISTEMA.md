@@ -60,6 +60,18 @@
 
 ---
 
+## 0.b 🧵 CAMINO B — MOLDE CON EL DISEÑO ADENTRO (en curso, rama `pruebas-tizada-con-diseno`)
+
+Se está construyendo un **segundo camino de alta**: el cliente sube **UN archivo que ya trae el
+diseño estampado adentro de cada pieza** (sin arte aparte ni mapeo). Convive con el de hoy; el
+camino A **no se toca**.
+
+🧠 **Todo lo de ese camino —plan, decisiones, preguntas abiertas y bitácora— vive en
+`MOLDE_CON_DISENO.md` (raíz del repo).** Leerlo antes de tocar nada de esa feature y actualizarlo
+en la misma tanda. Acá sólo queda el puntero, para que no se dupliquen dos verdades.
+
+---
+
 ## 1. Qué es el sistema (en una frase)
 
 App **local** que toma un **MOLDE** (Illustrator `.ai` / PDF / DXF) + un **ARTE** (el diseño) y produce **TIZADAS**: hojas PDF vectoriales con las piezas acomodadas para cortar e imprimir (sublimación). Todo en **medidas reales (cm)**.
