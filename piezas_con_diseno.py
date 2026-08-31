@@ -39,6 +39,8 @@ La salida es **el mismo dict que `molde_real._contorno_de_drawing`** (`segmentos
 y el motor siguen funcionando sin enterarse de que la pieza vino por otro camino.
 """
 
+import os
+
 import pymupdf as fitz
 
 from molde_real import _contorno_de_drawing
@@ -79,6 +81,49 @@ def olvidar(doc=None):
 def _rect_de(d):
     """El rectángulo de un item. Un recorte NO trae `rect` (viene en None): trae `scissor`."""
     return d.get("scissor") or d.get("rect")
+
+
+# ─────────────────────────────────────────────────────────────────
+# LA MARCA: qué molde es del camino B
+# ─────────────────────────────────────────────────────────────────
+# Un molde del camino B se detecta al SUBIRLO y queda MARCADO EN DISCO, al lado del archivo. No se
+# vuelve a adivinar en cada lectura, y eso es a propósito:
+#   · **explícito**: el camino se decide una vez, cuando el usuario sube el archivo y el sistema le
+#     avisa qué entendió. Un molde del camino A que algún día exporte con una máscara no se cambia
+#     de camino solo, en silencio, a mitad de un pedido.
+#   · **en disco y no en memoria**: el nesting paraleliza con PROCESOS (PyMuPDF no es thread-safe),
+#     y una marca en una variable global no existiría del otro lado. Un archivito sí.
+MARCA = "molde.origen"
+
+
+def _ruta_marca(path_molde):
+    return os.path.join(os.path.dirname(os.path.abspath(path_molde)), MARCA)
+
+
+def marcar(path_molde, con_diseno=True):
+    """Deja escrito de qué camino es este molde. Se llama UNA vez, al darlo de alta."""
+    ruta = _ruta_marca(path_molde)
+    try:
+        if con_diseno:
+            tmp = ruta + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as g:
+                g.write("con_diseno\n")
+            os.replace(tmp, ruta)          # atómica, como todo lo que se escribe acá
+        elif os.path.exists(ruta):
+            os.remove(ruta)
+        return True
+    except OSError:
+        return False
+
+
+def es_camino_b(path_molde):
+    """¿Este archivo de molde ya trae el diseño adentro? Lo dice la marca que dejó el alta."""
+    if not path_molde:
+        return False
+    try:
+        return os.path.exists(_ruta_marca(path_molde))
+    except (OSError, TypeError):
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -261,6 +306,156 @@ def registro_del_molde(doc, talles=None, avisar=None):
             if avisar:
                 avisar(hecho, total, f"mesa {mesa} · talle {talle}")
     return salida
+
+
+def alta_molde_con_diseno(path, avisar=None):
+    """Da de alta un molde del camino B: arma el registro de TODAS sus piezas, en todos los talles.
+
+    🔴 **Acá no se empareja nada, y esa es la gran diferencia con el camino A.** `alta_plantilla`
+    necesita etiquetas de texto «Talle-Pieza-#» en el archivo, y `alta_plantilla_manual` empareja
+    las piezas entre talles por centroide, forma y solape — heurísticas que a veces cruzan piezas
+    parecidas (de ahí salieron varios bugs del sistema). En el camino B **la correspondencia es
+    exacta por construcción**: los talles son CAPAS de la misma mesa, así que la pieza *i* de la
+    mesa *m* en el talle T es la misma que la pieza *i* de la mesa *m* en el talle T'. No hay nada
+    que adivinar.
+
+    Las piezas salen con nombre PROVISORIO («Pieza 1», «Pieza 2»…) porque el usuario todavía no las
+    nombró: se cargan TODAS igual (regla del 2026-08-18 — una pieza sin nombre tiene que entrar al
+    molde o no hay forma de nombrarla después) y él las renombra en el visor.
+    """
+    doc = fitz.open(path)
+    try:
+        talles = talles_del_molde(doc)
+        registro, problemas = {}, []
+        if not talles:
+            problemas.append("El archivo no declara ninguna capa: no se pueden separar los talles. "
+                             "Cada talle tiene que ser una capa con su nombre (M, 3XL, 16…).")
+
+        # 1) las piezas de cada mesa en cada talle
+        por_mesa = {}
+        total = doc.page_count * max(1, len(talles))
+        hecho = 0
+        for mesa in range(1, doc.page_count + 1):
+            for talle in talles:
+                pzs = piezas_de_mesa(doc, mesa, talle)
+                if pzs:
+                    por_mesa.setdefault(mesa, {})[talle] = pzs
+                hecho += 1
+                if avisar:
+                    avisar(hecho, total, f"mesa {mesa} · talle {talle}")
+
+        # 2) un nombre provisorio por pieza; el índice DENTRO de la mesa la identifica en todos
+        #    los talles
+        n = 0
+        for mesa in sorted(por_mesa):
+            cuantas = max(len(v) for v in por_mesa[mesa].values())
+            for i in range(cuantas):
+                n += 1
+                nombre = f"Pieza {n}"
+                for talle, pzs in por_mesa[mesa].items():
+                    if i >= len(pzs):
+                        continue                     # este talle no tiene esa pieza: no se inventa
+                    cont = pzs[i]
+                    registro.setdefault(nombre, {})[talle] = {
+                        "mesa": mesa, "pieza_idx": i,
+                        "w_cm": round(cont["w"] / cont["user_unit"] / CM, 1),
+                        "h_cm": round(cont["h"] / cont["user_unit"] / CM, 1),
+                        "bbox_mu": [round(v, 2) for v in cont["bbox_mu"]],
+                        "ancla": _ancla_por_defecto(cont)}
+
+        if not registro and not problemas:
+            problemas.append("No se detectó ninguna pieza. ¿El archivo trae el diseño adentro de "
+                             "cada pieza, con su máscara de recorte?")
+
+        completos = [t for t in talles if all(t in registro.get(p, {}) for p in registro)]
+        detalle = {}
+        for pieza, por_talle in registro.items():
+            mayor = max(por_talle.values(), key=lambda v: v["h_cm"])
+            detalle[pieza] = {"mesas": sorted({v["mesa"] for v in por_talle.values()}),
+                              "talles": [t for t in talles if t in por_talle],
+                              "talle_mayor_cm": {"w": mayor["w_cm"], "h": mayor["h_cm"]}}
+        return {"mesas": doc.page_count, "talles": talles, "piezas": sorted(registro),
+                "completos": completos, "registro": registro, "problemas": problemas,
+                "advertencias": [], "piezas_detalle": detalle, "origen": "con_diseno"}
+    finally:
+        olvidar(doc)
+        doc.close()
+
+
+def detectar_para_visor(doc, talle_ref=None, sep_cm=2.0):
+    """Lo que dibuja el visor de «Nombrar piezas» para un molde del camino B.
+
+    🔴 **Muestra TODAS LAS MESAS JUNTAS.** El visor de hoy elige UNA mesa (la de más trazos) porque
+    en el camino A una mesa trae muchas piezas. Acá es al revés: **cada mesa es una pieza**, así que
+    mostrar una sola mesa mostraría una sola pieza y no habría nada que nombrar. Se acomodan en una
+    grilla, cada una en su tamaño REAL (mm), que es lo mismo que hace el proyecto de referencia
+    («las mesas se cargan todas juntas en un solo espacio de trabajo, no de a una»).
+
+    Y va **sólo con los contornos**: ni un trazo del diseño. Es el pedido del usuario — el archivo
+    real pesa 123 MB y mandarle el dibujo al navegador es exactamente lo que hace lento el sistema.
+
+    Devuelve la misma estructura que `motor_pedido.detectar_piezas`, así el visor no cambia.
+    """
+    from motor_pedido import _item_visor            # diferido: motor_pedido importa de molde_real
+
+    talles = talles_del_molde(doc)
+    if not talles:
+        raise ValueError("El archivo no declara capas: no se pueden separar los talles.")
+    # el talle de referencia por defecto: el del medio, que es el que mejor representa al molde
+    talle_ref = talle_ref if talle_ref in talles else talles[len(talles) // 2]
+
+    sep = sep_cm * CM
+    zoom = 10.0 / CM                                 # 1 unidad de salida = 1 mm (igual que hoy)
+
+    # 1) las piezas de cada mesa, en el talle elegido
+    items, cursor_x, cursor_y, alto_fila = [], sep, sep, 0.0
+    ancho_max = 0.0
+    piezas_mesa = []
+    for mesa in range(1, doc.page_count + 1):
+        for i, cont in enumerate(piezas_de_mesa(doc, mesa, talle_ref)):
+            piezas_mesa.append((mesa, i, cont))
+    if not piezas_mesa:
+        raise ValueError(f"No se detectaron piezas en el talle {talle_ref!r}.")
+
+    # 2) ancho de la grilla: la raíz del área total da filas y columnas parejas, y nunca menos que
+    #    la pieza más ancha (si no, esa pieza se saldría de la grilla)
+    area = sum(c["w"] * c["h"] for _, _, c in piezas_mesa)
+    objetivo = max(max(c["w"] for _, _, c in piezas_mesa), (area ** 0.5) * 1.4)
+
+    for idx, (mesa, i, cont) in enumerate(piezas_mesa):
+        page = doc[mesa - 1]
+        cb = page.cropbox
+        U = page.rect.width / cb.width if cb.width else 1.0
+        x0, y0, x1, y1 = cont["bbox_mu"]
+        w, h = x1 - x0, y1 - y0
+        if cursor_x > sep and cursor_x + w > objetivo:      # no entra en la fila: renglón nuevo
+            cursor_x = sep
+            cursor_y += alto_fila + sep
+            alto_fila = 0.0
+        # `_item_visor` ubica la pieza restándole el origen del recorte: se le pasa un recorte
+        # sintético para que la pieza caiga justo en su casillero de la grilla.
+        clip = fitz.Rect(x0 - cursor_x, y0 - cursor_y, x0 - cursor_x + 1, y0 - cursor_y + 1)
+        it = _item_visor(cont, idx, clip, cb, U, zoom)
+        it["mesa"] = mesa
+        it["t_idx"] = i                              # su índice DENTRO de la mesa = el del registro
+        items.append(it)
+        cursor_x += w + sep
+        alto_fila = max(alto_fila, h)
+        ancho_max = max(ancho_max, cursor_x)
+
+    return {"mesa": None, "talle_ref": talle_ref, "talles": talles, "unidad": "mm",
+            "img_w": round((ancho_max + sep) * zoom, 1),
+            "img_h": round((cursor_y + alto_fila + sep) * zoom, 1),
+            "piezas": items, "sin_variantes": False, "origen": "con_diseno"}
+
+
+def _ancla_por_defecto(cont):
+    """La etiqueta de corte arranca centrada y pegada al borde de abajo, como en el camino A
+    (`motor_pedido._ancla_sintetica`). Después el usuario la mueve pieza por pieza (E4)."""
+    x0, _y0, x1, y1 = cont["bbox_mu"]
+    size = 3.0 * (CM / 10.0)                        # 3 mm
+    return {"x": round((x0 + x1) / 2, 1), "y": round(y1 - size * 0.25, 1),
+            "angulo": 0.0, "size_pt": round(size, 2), "fuente": "Arial-BoldMT"}
 
 
 def parece_molde_con_diseno(doc, mesas_a_mirar=2):

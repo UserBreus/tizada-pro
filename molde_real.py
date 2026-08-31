@@ -107,6 +107,23 @@ def extraer_piezas_mesa(doc_molde, mesa, talle, area_min_cm2=0.25, lado_min_cm=0
     no solo la mayor — para moldería con varias piezas en la misma mesa.
     Orden DETERMINISTA por bounding box (x0, y0): el índice de cada pieza es
     estable para un mismo archivo+talle, así se puede referenciar por índice."""
+    # ── CAMINO B: el molde ya trae el diseño adentro ────────────────────────────────────────────
+    # Acá abajo cada TRAZADO es una pieza, que es lo correcto para un molde pelado. Pero si el
+    # molde trae el diseño estampado, esa cuenta explota: una prenda da 619 "piezas" (cada franja,
+    # cada logo, cada letra) en vez de 9. En ese caso la pieza se lee de su MÁSCARA DE RECORTE.
+    #
+    # El enrutado está ACÁ y no en cada llamador a propósito: por esta función pasan el visor de
+    # nombrado, el registro, el nido y el motor. Ponerlo acá es lo que hace que el camino B
+    # funcione en todo el sistema en vez de en la pantalla donde se lo probó.
+    #
+    # La decisión NO se adivina en cada lectura: la dejó escrita el alta al lado del archivo
+    # (`piezas_con_diseno.marcar`). Ver `MOLDE_CON_DISENO.md`.
+    try:
+        import piezas_con_diseno as _PD          # import diferido: `piezas_con_diseno` importa de acá
+        if _PD.es_camino_b(getattr(doc_molde, "name", None)):
+            return _PD.piezas_de_mesa(doc_molde, mesa, talle, area_min_cm2, lado_min_cm)
+    except ImportError:
+        pass
     CM = 28.3465
     page = doc_molde[mesa - 1]
     cb = page.cropbox
