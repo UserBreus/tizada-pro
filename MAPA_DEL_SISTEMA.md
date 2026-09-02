@@ -1353,6 +1353,27 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-02 (377) — CAMINO B, EL FRONT DEL PEDIDO: SUBIR Y NOMBRAR SIN SALIR DEL WIZARD.**
+  Tarjeta «Molde con el diseño adentro» en Pedido → Mis artículos (el mismo modal sirve para las
+  dos formas), con **espera honesta en dos tramos**: el % REAL de la subida por XHR —`fetch` no da
+  progreso de subida y el archivo pesa >100 MB— y después «leyendo y detectando» con el reloj
+  corriendo. Nunca un porcentaje inventado. El molde queda **elegido** y NO se sale del wizard
+  (`subirMiMolde` termina en `abrirConfigMiMolde`, que te lleva a Configuración; ésta no).
+  El **nombrado va en el paso Arte**, en el panel derecho: prop nueva `panelFijo` del visor, que en
+  camino B reemplaza al panel de «Diseños» (estaría pidiendo un arte que el molde no lleva). La
+  lista muestra la **miniatura del contorno** de cada pieza: con nueve «sin nombre» es lo único
+  que deja saber cuál es cuál. El predicado `_itemListo(did, mid)` reemplaza a `arteCargado[...]`
+  en los cuatro gates globales; 🔴 **no se reusa `arteCargado` para el camino B** — su cortocircuito
+  en `cargarPreviewPiezas` es lo que impide pedir el dibujo pesado, y marcarlo dispararía
+  `preview_piezas` sin arte, en loop.
+  🔴 Después de renombrar hay que **volver a pedir la detección**: los nombres del panel salen de
+  `nombres_existentes` (la detección), no del catálogo — sin eso el nombre se guardaba bien y la
+  pantalla seguía diciendo «sin nombre», y el usuario lo escribía dos veces.
+  📌 `verificar_tdz.mjs` (tope congelado de «usado antes de definirse») **cortó el build dos veces**:
+  la función nueva quedaba arriba de `plantillaComun`, `toggleMoldeEnDiseno` y `showError`. Se
+  MUEVE la función debajo de lo que usa; el tope no se sube nunca.
+  Verificado en el navegador de punta a punta: subir → nombrar 9 → el gate a verde → las telas
+  reconocen los 6 genéricos.
 - **2026-09-02 (376) — CAMINO B, E5: UNA SOLA CONFIGURACIÓN PARA TODOS LOS MOLDES CON DISEÑO, Y
   VIVA.** El cliente que sube uno desde el pedido no configura borde, etiqueta ni nesting: lo deja
   el admin UNA vez en `cat["config_con_diseno"]` y vale para todos — **también para los ya

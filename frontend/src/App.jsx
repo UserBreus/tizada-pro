@@ -292,6 +292,11 @@ function Icon({ name, className = "", style }) {
 // (`FuenteCurvas.size_para_alto`). Sin esto el visor mostraría la etiqueta un 28 % más chica que
 // la tizada, y la ley del sistema es que se vean IGUAL.
 const CAP_RATIO_ETQ = 0.716;
+// Una pieza que TODAVÍA NO TIENE NOMBRE: así las deja el alta de un molde con el diseño adentro
+// («Pieza 3»). 🔴 Es la MISMA regla que usa el servidor para contar `piezas_nombradas`: si la
+// pantalla y el servidor contaran distinto, el botón de seguir quedaría apagado sin que se
+// entienda por qué (o al revés, dejaría pasar un molde a medio nombrar).
+const _ES_PIEZA_SIN_NOMBRE = /^Pieza( extra)? \d+'*$/;
 
 // El DIBUJO de una mesa del arte se pide por URL (`m.img`), no viene dentro del JSON. Un arte de
 // vector pesado son 1098 KB por mesa (11,6 MB en total) que el navegador tenía que parsear y
@@ -2621,7 +2626,7 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, aviso, cargando }) {
+function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, aviso, cargando }) {
   // Desplegables de la barra de Diseños, agrupados por RANGO (#… en el nombre de la mesa)
   const [rangosCerrados, setRangosCerrados] = React.useState(new Set());
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
@@ -2950,7 +2955,10 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
             <div style={{ color: 'var(--text-muted)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Cargando el molde…</div>
           )}
         </div>
-        {telaModo ? panelTela : (
+        {/* `panelFijo` (camino B: nombrar las piezas) MANDA sobre todo: en un molde que trae
+            el diseno adentro no hay diseno que cargar, y el panel de «Diseños · Sin diseño»
+            estaría pidiendo un arte que no existe. */}
+        {telaModo ? panelTela : panelFijo ? panelFijo : (
         <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Diseños</div>
@@ -3949,6 +3957,18 @@ export default function App() {
   const [subirMoldeNombre, setSubirMoldeNombre] = useState('');
   const [subirMoldeFile, setSubirMoldeFile] = useState(null);
   const [subirMoldeBusy, setSubirMoldeBusy] = useState(false);
+  // ── CAMINO B: el molde que YA TRAE EL DISEÑO adentro de cada pieza ──────────────────────────
+  // El mismo modal sirve para las dos subidas; este flag cambia el texto, el `accept` y qué se
+  // manda al servidor. `subirBFase` es el avance HONESTO de la espera: el archivo pesa >100 MB y
+  // procesarlo lleva su tiempo, así que se dice en qué anda y hace cuánto — nunca un porcentaje
+  // inventado (regla del proyecto: tardar con un cartel honesto sí, aproximar no).
+  const [subirMoldeConDiseno, setSubirMoldeConDiseno] = useState(false);
+  const [subirBFase, setSubirBFase] = useState(null);   // {fase, pct, seg}
+  // Moldes efímeros de ESTE pedido: {pid: {nombre, creado}}. Se borran al terminar o reiniciar.
+  const [moldesEfimeros, setMoldesEfimeros] = useState(_wizRef.current?.moldesEfimeros || {});
+  // Nombrado de las piezas de un molde del camino B, dentro del pedido.
+  const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} de la pieza elegida
+  const [nombreBInput, setNombreBInput] = useState('');
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
   const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0, 0, 0, 0.85], alineacion: 'fuera' });  // borde de corte del molde
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
@@ -7709,9 +7729,12 @@ export default function App() {
       localStorage.setItem('tizada_wizard', JSON.stringify({
         pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
         telaBaseMolde, telaPorPieza, cantidadOn,
+        // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
+        // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
+        moldesEfimeros,
       }));
     } catch (e) { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, moldesEfimeros]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
@@ -7792,8 +7815,13 @@ export default function App() {
     if (id !== productosCat.activo) handleActivarProducto(id);
     if (clave && verVariante !== clave) setVerVariante(clave);   // el visor de arte muestra SOLO las piezas de la variable
     if (!clave && verVariante) setVerVariante(null);             // molde entero → sin filtro de variable
+    // CAMINO B: no hay arte que detectar ni mesas que mapear — el diseño ya está adentro de las
+    // piezas, y el trabajo acá es NOMBRARLAS. Pedir el mapeador dispararía `/api/arte/deteccion`
+    // sobre un molde sin arte. (Se resuelve inline y no con `_esConDiseno`, que se define más
+    // abajo: leer una `const` antes de su definición corta el build — ver `verificar_tdz.mjs`.)
+    const _idEsB = (productosCat.productos.find(x => x.id === id) || {}).origen === 'con_diseno';
     // Siempre se ve el MOLDE (vacío). El DISEÑO solo si en ESTE pedido ya se subió (para ESTE diseño).
-    if (arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(id); else { setMapeoData(null); cargarMoldeOperario(id); }
+    if (!_idEsB && arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(id); else { setMapeoData(null); cargarMoldeOperario(id); }
   }, [activoTab, pedidoPaso, arteIdx, productosCat.activo, _idsCat, arteCargado, disenoActivo, disenoVars, disenoMoldes, verVariante]);
 
   // CADA DISEÑO ES UN ESPACIO PROPIO. Al cambiar de diseño —o de prenda dentro del diseño— se
@@ -8910,6 +8938,21 @@ export default function App() {
     const p = productosCat.productos.find(x => x.id === mid);
     return !!p && !!p.plantilla && (p.piezas_nombradas || 0) > 0;
   };
+  // ── CAMINO B: el molde trae el DISEÑO ADENTRO de cada pieza ────────────────────────────────
+  // No lleva arte aparte, así que todo lo que hoy pregunta «¿ya cargó el arte?» tiene que
+  // preguntar otra cosa: si sus piezas ya tienen nombre. Es un predicado y no un `arteCargado`
+  // trucho a propósito — marcar el ítem como «arte cargado» dispararía `preview_piezas` sin arte
+  // (el cortocircuito de `cargarPreviewPiezas` es lo que hoy impide pedir el dibujo pesado).
+  const _esConDiseno = (mid) => (productosCat.productos.find(x => x.id === mid) || {}).origen === 'con_diseno';
+  const _piezasSinNombre = (mid) => {
+    const p = productosCat.productos.find(x => x.id === mid) || {};
+    return Math.max(0, (p.piezas_registradas || 0) - (p.piezas_nombradas || 0));
+  };
+  // ¿Este ítem del paso Arte ya está listo para seguir? Camino A: tiene su arte. Camino B: ya
+  // sabemos qué es cada pieza (sin eso no hay etiqueta, ni telas, ni toggles que funcionen).
+  const _itemListo = (did, mid) => _esConDiseno(mid)
+    ? (_moldeUsable(mid) && _piezasSinNombre(mid) === 0)
+    : !!arteCargado[did + '|' + mid];
   // 🔴 ACÁ VAN **TODAS** LAS VARIABLES QUE SE PUEDEN USAR, incluidas las de los moldes propios.
   // Antes se excluían los propios («tienen su pestaña»), pero `propio` lo calcula el server
   // **según QUIÉN MIRA** (`propio and creado_por == vos`): para el DUEÑO daba true y para
@@ -8992,7 +9035,7 @@ export default function App() {
   const puedeIrAArte = disenosPedido.length > 0 && disenosSinMolde.length === 0;
   // Tareas de arte: un (diseño, molde) por cada asignación.
   const tareasArte = disenosPedido.flatMap(d => (disenoMoldes[d.id] || []).map(mid => ({ did: d.id, mid })));
-  const todasArteCargadas = tareasArte.length > 0 && tareasArte.every(t => arteCargado[t.did + '|' + t.mid]);
+  const todasArteCargadas = tareasArte.length > 0 && tareasArte.every(t => _itemListo(t.did, t.mid));
   // ── TELAS OBLIGATORIAS: no se avanza a la planilla si alguna pieza quedó sin tela ──
   const _genTelaP = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
   // Piezas (genéricas) que el operario VE Y PUEDE TOCAR en el visor del Arte: las del canvas, con el
@@ -9067,7 +9110,7 @@ export default function App() {
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
-  const arteEnPedido = (mid) => disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
+  const arteEnPedido = (mid) => _esConDiseno(mid) || disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
 
   const moldesDeDiseno = (did) => disenoMoldes[did] || [];
 
@@ -9729,10 +9772,19 @@ export default function App() {
   };
 
   // Empezar un pedido nuevo desde 0: limpia toda la selección y vuelve al paso 1.
-  const reiniciarPedido = () => abrirConfirmar({
-    titulo: 'Empezar un pedido nuevo', ok: 'Empezar de 0',
-    texto: 'Se borra TODO lo de este pedido: diseños, prendas, telas asignadas, filas de la planilla y lo que quedó en memoria. Las tizadas ya generadas y la configuración de los moldes no se tocan.',
-    onOk: _reiniciarPedido });
+  const reiniciarPedido = () => {
+    // Si hay moldes con el diseño adentro, se van con el pedido y con ellos el nombrado de las
+    // piezas: eso se dice ANTES, no después. Es el único trabajo de este paso que no se recupera.
+    const _ef = Object.values(moldesEfimeros || {});
+    const _extra = _ef.length
+      ? ` También se borra ${_ef.length === 1 ? 'el molde que subiste con el diseño adentro' : `los ${_ef.length} moldes que subiste con el diseño adentro`} (${_ef.map(m => `«${m.nombre}»`).join(', ')}) y los nombres que les pusiste a sus piezas: se subieron sólo para este pedido.`
+      : '';
+    abrirConfirmar({
+      titulo: 'Empezar un pedido nuevo', ok: 'Empezar de 0',
+      texto: 'Se borra TODO lo de este pedido: diseños, prendas, telas asignadas, filas de la planilla y lo que quedó en memoria.'
+        + _extra + ' Las tizadas ya generadas y la configuración de los moldes no se tocan.',
+      onOk: _reiniciarPedido });
+  };
   // «NUEVO PEDIDO» = ARRANCAR DE CERO, DE VERDAD. Si sobrevive algo del pedido anterior —una tela
   // asignada, un diseño, el arte marcado como cargado, una caché de piezas— el pedido nuevo sale
   // con datos del viejo y eso se descubre recién con la tela CORTADA. Por eso se limpia TODO lo
@@ -9759,6 +9811,21 @@ export default function App() {
       try {
         await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
       } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+      // ── LOS MOLDES CON EL DISEÑO ADENTRO SE VAN CON EL PEDIDO ──────────────────────────────
+      // Se subieron «sólo para este pedido»: acá se borran de verdad (archivo, datos y base). Si
+      // no, cada pedido dejaría más de 100 MB en el servidor para siempre. El servidor sólo
+      // borra los que están marcados `efimero`, así que mandar un pid de más no hace daño.
+      try {
+        const _ef = Object.keys(moldesEfimeros || {});
+        if (_ef.length) {
+          await fetch('/api/pedido/limpiar_efimeros', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pids: _ef })
+          });
+          setMoldesEfimeros({});
+          fetchProductos();
+        }
+      } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }
     })();
     setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
     setEtqData(null); setEtqNombres({}); setVerVariante(null);
@@ -9797,6 +9864,106 @@ export default function App() {
     setAdvertenciaInformativa(txt);
     setTimeout(() => setAdvertenciaInformativa(prev => prev === txt ? '' : prev), 10000);
   };
+
+  // ── CAMINO B: subir un molde que YA TRAE EL DISEÑO adentro ───────────────────────────────────
+  // Hermana de `subirMiMolde`, con tres diferencias que importan:
+  //   · el molde se crea `efimero` (es de ESTE pedido y no queda guardado) y hereda la planilla
+  //     del pedido, para que se pueda combinar con los moldes que ya estén elegidos;
+  //   · la subida va por XHR para poder mostrar el avance REAL (con `fetch` no hay progreso de
+  //     subida, y son >100 MB: sin eso la pantalla parece colgada);
+  //   · NO se sale del wizard. `subirMiMolde` termina en `abrirConfigMiMolde`, que te manda a
+  //     Configuración; acá el nombrado de las piezas se hace en el mismo paso Arte.
+  // ── CAMINO B: nombrar UNA pieza ─────────────────────────────────────────────────────────────
+  // 🔴 Va por un endpoint propio, NO por el nombrado de siempre. `/api/plantilla/etiquetas` y
+  // `grupo_pieza` RE-ARMAN el registro para emparejar los talles por forma; acá los talles son
+  // capas de la misma mesa y ya están pareados desde el alta, así que re-armarlo sólo puede
+  // romperlo. `mesa` y `t_idx` son los que el visor ya trae en cada pieza.
+  const renombrarPiezaB = async (pid, mesa, t_idx, nombre) => {
+    const n = (nombre || '').trim();
+    if (!n) return false;
+    try {
+      const r = await fetch('/api/plantilla/pieza_renombrar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, mesa, t_idx, nombre: n })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo poner el nombre');
+      await fetchProductos();          // el conteo de piezas nombradas es lo que destraba el paso
+      // 🔴 Y se vuelve a pedir la DETECCIÓN: los nombres que muestra el panel salen de ahí
+      // (`nombres_existentes`), no del catálogo. Sin esto el nombre se guardaba bien y la
+      // pantalla seguía diciendo «sin nombre» — el usuario lo escribiría dos veces.
+      await cargarMoldeOperario(pid);
+      return true;
+    } catch (err) {
+      showError(err.message);
+      return false;
+    }
+  };
+
+  const subirMoldeConDisenoPedido = async () => {
+    const nombre = subirMoldeNombre.trim();
+    if (!nombre || !subirMoldeFile) return;
+    setSubirMoldeBusy(true);
+    setSubirBFase({ fase: 'subiendo', pct: 0, seg: 0 });
+    const t0 = Date.now();
+    const reloj = setInterval(() => setSubirBFase(f => f ? { ...f, seg: Math.round((Date.now() - t0) / 1000) } : f), 1000);
+    let pid = null;
+    try {
+      const r = await fetch('/api/productos/crear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo crear el molde');
+      pid = d.id;
+      const fd = new FormData();
+      fd.append('archivo', subirMoldeFile);
+      fd.append('pid', pid);
+      const d2 = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        // `rutaApi` y no '/api/plantilla' pelado: el XHR NO pasa por el envoltorio de `fetch`,
+        // así que publicado en una sub-ruta iría a la raíz del dominio (ver `base.js`).
+        xhr.open('POST', rutaApi('/api/plantilla'));
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.round(e.loaded * 100 / e.total);
+          // Al llegar al 100 % de la subida el servidor recién EMPIEZA a leer el archivo: se
+          // cambia de fase para no dejar una barra llena y quieta, que parece colgada.
+          setSubirBFase(f => ({ ...(f || {}), fase: pct >= 100 ? 'procesando' : 'subiendo', pct }));
+        };
+        xhr.onload = () => {
+          try {
+            const j = JSON.parse(xhr.responseText || '{}');
+            xhr.status >= 200 && xhr.status < 300 ? resolve(j) : reject(new Error(j.error || 'No se pudo procesar el molde'));
+          } catch { reject(new Error('El servidor respondió algo que no se entiende')); }
+        };
+        xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor'));
+        xhr.send(fd);
+      });
+      if (d2.origen !== 'con_diseno') {
+        // El archivo no trae el diseño adentro: se dice por qué y se deja el molde igual (el
+        // servidor ya lo dio de alta por el camino de siempre), para no perder la subida.
+        showError('Este archivo no parece traer el diseño adentro de las piezas'
+          + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '')
+          + '. Quedó cargado como molde común: necesita que le cargues el arte aparte.');
+      }
+      setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now() } }));
+      avisarAltaMolde(d2);
+      toggleMoldeEnDiseno(pid);          // queda ELEGIDO en el diseño activo: ya es parte del pedido
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      clearInterval(reloj);
+      setSubirBFase(null);
+      setSubirMoldeBusy(false);
+      await fetchProductos();
+      setMoldeReload(v => v + 1);
+      invalidarNido(); setSembrarGen(v => v + 1);
+      setSubirMoldeOpen(false); setSubirMoldeNombre(''); setSubirMoldeFile(null);
+      setSubirMoldeConDiseno(false);
+    }
+  };
+
 
   // Aviso (no bloqueante) al subir el diseño: si la planilla cargó un dato que se
   // estampa (nombre/número) pero el diseño NO trae su capa, avisar que no se va a
@@ -10444,7 +10611,7 @@ export default function App() {
     return `«${mol}»${va} · diseño «${_nomDiseno(did)}»`;
   };
   // Variables cuyo arte todavía no se cargó (el arte es del MOLDE, pero se avisa por variable).
-  const itemsSinArte = itemsPedido.filter(x => !arteCargado[x.did + '|' + x.moldeId]);
+  const itemsSinArte = itemsPedido.filter(x => !_itemListo(x.did, x.moldeId));
   // Variables cuya tipografía no está: el estado es por (diseño, molde) — se expande a sus
   // variables para poder nombrar la que estás usando.
   const fuentesFaltantesItems = itemsPedido
@@ -11478,7 +11645,7 @@ export default function App() {
 
                 {/* Pestañas: el catálogo compartido vs. lo que subió este usuario */}
                 {(() => {
-                  const nMios = productosCat.productos.filter(p => p.propio && _moldeUsable(p.id)).length;
+                  const nMios = productosCat.productos.filter(p => p.propio && (_moldeUsable(p.id) || p.efimero)).length;
                   const tabs = [{ k: 'catalogo', n: 'Catálogo', c: varsCatalogo.length }, { k: 'mios', n: 'Mis artículos', c: nMios }];
                   return (
                     <div data-tour="pedido-tabs" style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
@@ -11539,7 +11706,10 @@ export default function App() {
                       (ese paso se les recorta), así que se eligen ENTEROS: el motor genera
                       todas sus piezas. ── */}
                   {pedidoTabMoldes === 'mios' && (() => {
-                    const mios = productosCat.productos.filter(p => p.propio && _moldeUsable(p.id));
+                    // `|| p.efimero`: el molde con el diseño adentro entra con sus piezas todavía sin
+                    // nombrar («Pieza 1»…) y es JUSTAMENTE lo que el cliente va a hacer ahora. Con el
+                    // filtro de siempre desaparecía de su propia pestaña apenas se subía.
+                    const mios = productosCat.productos.filter(p => p.propio && (_moldeUsable(p.id) || p.efimero));
                     return (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                         {mios.map(p => {
@@ -11612,10 +11782,22 @@ export default function App() {
                           );
                         })}
                         {/* Tarjeta "+" para sumar otro artículo propio */}
-                        <button type="button" onClick={() => { setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                        <button type="button" onClick={() => { setSubirMoldeConDiseno(false); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
                           style={{ minHeight: 150, borderRadius: 12, border: '1.5px dashed var(--border-light)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 12.5, fontWeight: 700 }}>
                           <Icon name="plus" style={{ width: 18, height: 18 }} />
                           Subir mi propio molde
+                        </button>
+                        {/* LA OTRA FORMA DE CARGAR: un solo archivo que YA TRAE EL DISEÑO adentro
+                            de cada pieza. No hay arte aparte ni mapeo, y el molde vale sólo para
+                            este pedido (no queda guardado). */}
+                        <button type="button" data-tour="pedido-subir-con-diseno"
+                          onClick={() => { setSubirMoldeConDiseno(true); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                          style={{ minHeight: 150, borderRadius: 12, border: '1.5px dashed var(--accent, #6c8cff)', background: 'rgba(108,140,255,0.06)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, padding: '10px 12px', textAlign: 'center' }}>
+                          <Icon name="plus" style={{ width: 18, height: 18 }} />
+                          Molde con el diseño adentro
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                            Un solo archivo, sin arte aparte.<br />Vale para este pedido.
+                          </span>
                         </button>
                       </div>
                     );
@@ -12347,6 +12529,107 @@ export default function App() {
                   aplicar: (id) => { if (telaPicker?.destino === 'seleccion') { setTelaSelPiezas(telaPicker.piezas); } aplicarTela(id); setTelaAsignMode(false); },
                 };
                 const _abrirPicker = (destino) => { setTelaPickerQ(''); setTelaPicker({ destino, piezas: destino === 'seleccion' ? [...telaSelPiezas] : [] }); };
+                // ── CAMINO B: PANEL DE NOMBRAR LAS PIEZAS ─────────────────────────────────────
+                // El molde trae el diseño adentro, así que acá no se carga ningún arte: lo que
+                // falta es decir QUÉ ES cada pieza. Sin eso no hay etiqueta que diga «Espalda», no
+                // hay telas (se asignan por nombre) y —lo que menos se ve— no funcionan los
+                // toggles: el motor arma la prenda mirando los TOKENS DEL NOMBRE, así que con una
+                // pieza llamada «Manga 1» elegir corta o larga da exactamente la misma tizada.
+                const _esB = _esConDiseno(_id);
+                const _piezasB = (etqData?.piezas || []);
+                const _nomB = (pz) => etqNombres[pz.idx] || '';
+                const _sinNombreB = _piezasB.filter(pz => _ES_PIEZA_SIN_NOMBRE.test(_nomB(pz)));
+                // Nombres sugeridos: los del catálogo del sistema. Ahorran teclado y, sobre todo,
+                // hacen que los toggles de la planilla encuentren su palabra («Manga Corta»).
+                const _sugeridos = [...new Set((catalogoGrupos || []).flatMap(g => g.piezas || []))].slice(0, 12);
+                const panelNombrarJSX = !_esB ? null : (
+                  <div data-tour="pieza-b-lista" style={{ width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 11 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>¿Qué es cada pieza?</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
+                      background: _sinNombreB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)',
+                      border: '1px solid ' + (_sinNombreB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)') }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: _sinNombreB.length ? 'var(--warning)' : 'var(--success)' }}>
+                        {_sinNombreB.length ? `Faltan ${_sinNombreB.length} de ${_piezasB.length}` : `Las ${_piezasB.length} piezas tienen nombre`}
+                      </span>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        {_sinNombreB.length
+                          ? 'El nombre es lo que hace que la etiqueta, las telas y la manga corta/larga funcionen.'
+                          : 'Listo: ya se puede seguir con las telas.'}
+                      </span>
+                    </div>
+                    {_sugeridos.length > 0 && piezaBSel && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {_sugeridos.map(n => (
+                          <button key={n} type="button" className="btn ghost"
+                            style={{ padding: '3px 8px', fontSize: 10.5, borderRadius: 7 }}
+                            onClick={() => setNombreBInput(n)}>{n}</button>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 5, minHeight: 0 }}>
+                      {_piezasB.map(pz => {
+                        const _nom = _nomB(pz);
+                        const _sin = _ES_PIEZA_SIN_NOMBRE.test(_nom);
+                        const _sel = piezaBSel && piezaBSel.mesa === pz.mesa && piezaBSel.t_idx === pz.t_idx;
+                        return (
+                          <div key={`${pz.mesa}-${pz.t_idx}`}
+                            onClick={() => { setPiezaBSel({ mesa: pz.mesa, t_idx: pz.t_idx }); setNombreBInput(_sin ? '' : _nom); }}
+                            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 9, cursor: 'pointer',
+                              border: '1px solid ' + (_sel ? 'var(--accent)' : 'var(--border-light)'),
+                              background: _sel ? 'rgba(0,216,245,0.10)' : 'rgba(0,0,0,0.2)' }}>
+                            {/* La miniatura del contorno: con nueve «Pieza 3» es lo único que deja
+                                saber cuál es cuál sin ir tocando el visor una por una. */}
+                            <svg viewBox={`${pz.px || 0} ${pz.py || 0} ${Math.max(pz.pw || 1, 1)} ${Math.max(pz.ph || 1, 1)}`}
+                              width="26" height="30" style={{ flexShrink: 0 }} preserveAspectRatio="xMidYMid meet">
+                              <path d={pz.path_svg}
+                                fill={_sin ? 'rgba(255,255,255,0.12)' : 'rgba(0,216,245,0.18)'}
+                                stroke={_sel ? 'var(--accent)' : 'rgba(255,255,255,0.45)'} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                            </svg>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: _sin ? 500 : 800, fontStyle: _sin ? 'italic' : 'normal',
+                                color: _sin ? 'var(--text-muted)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {_sin ? 'sin nombre' : _nom}
+                              </div>
+                              <div style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>
+                                {Math.round(pz.w_cm || 0)} × {Math.round(pz.h_cm || 0)} cm
+                              </div>
+                            </div>
+                            {!_sin && <span style={{ fontSize: 11, color: 'var(--success)' }}>✓</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {piezaBSel && (
+                      <div style={{ display: 'flex', gap: 6 }} data-tour="pieza-b-nombre">
+                        <input value={nombreBInput} autoFocus
+                          onChange={(e) => setNombreBInput(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key !== 'Enter' || !nombreBInput.trim()) return;
+                            if (await renombrarPiezaB(_id, piezaBSel.mesa, piezaBSel.t_idx, nombreBInput)) {
+                              setNombreBInput(''); setPiezaBSel(null);
+                            }
+                          }}
+                          placeholder="Ej. Espalda"
+                          style={{ flex: 1, minWidth: 0, padding: '7px 9px', fontSize: 12.5, borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                        <button type="button" data-tour="pieza-b-asignar" className="btn success" disabled={!nombreBInput.trim()}
+                          style={{ padding: '7px 11px', fontSize: 12, borderRadius: 8 }}
+                          onClick={async () => {
+                            if (await renombrarPiezaB(_id, piezaBSel.mesa, piezaBSel.t_idx, nombreBInput)) {
+                              setNombreBInput(''); setPiezaBSel(null);
+                            }
+                          }}>Poner</button>
+                      </div>
+                    )}
+                  </div>
+                );
+
+                // CAMINO B: mientras falte nombrar alguna pieza, el panel lateral es el de
+                // nombrar. Las telas se asignan POR NOMBRE, así que ofrecerlas antes sería peor
+                // que inútil: las nueve «Pieza N» comparten el mismo genérico («Pieza») y una
+                // sola tela se las llevaría a todas de una.
                 const panelTelaJSX = (
                   <div data-tour="telas-panel" style={{ width: 244, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 12 }}>
                     {/* CABECERA */}
@@ -12449,6 +12732,14 @@ export default function App() {
                     )}
                   </div>
                 );
+                // Qué se muestra al costado del visor. En el camino B, mientras falte nombrar
+                // alguna pieza el panel es el de nombrar y NO se puede pasar a otra cosa: el
+                // panel de «Diseños» pediría un arte que este molde no lleva, y el de telas
+                // asigna POR NOMBRE (las nueve «Pieza N» comparten genérico: una sola tela se las
+                // llevaría a todas). Con todo nombrado, sigue el flujo de siempre.
+                // En el camino B el panel de nombrar QUEDA, aunque ya estén todas nombradas: es
+                // por donde se corrige un nombre. Lo único que lo tapa es el modo telas.
+                const _panelFijoB = _esB ? panelNombrarJSX : null;
                 return (
                 <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                   {/* Navegación por DISEÑO (chips con progreso) */}
@@ -12584,9 +12875,14 @@ export default function App() {
                             onClick={() => { setFuenteArchivo(null); setFuenteFaltanteSel((fuentesEstado?.faltantes || [])[0] || ''); setFuenteModal(true); cargarFuentesEstado(); }}>
                             Tipografía{fuentesEstado?.faltantes?.length ? ` (${fuentesEstado.faltantes.length})` : ''}
                           </button>
+                          {/* CAMINO B: este molde NO lleva arte aparte (ya lo trae adentro). El
+                              botón se esconde porque cargarle un arte acá no haría nada: el motor
+                              dibuja la pieza con el diseño del propio archivo. */}
+                          {!_esB && (
                           <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
                           </button>
+                          )}
                           {/* El botón depende SÓLO de que haya telas en el sistema. Antes miraba la
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
@@ -12602,6 +12898,7 @@ export default function App() {
                         onTelaClick={(gen) => setTelaSelPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen])}
                         onTelaVacio={() => setTelaSelPiezas([])}
                         panelTela={panelTelaJSX}
+                        panelFijo={_panelFijoB}
                         aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -18578,8 +18875,10 @@ export default function App() {
       </Modal>
 
       <Modal open={subirMoldeOpen} onClose={() => { if (!subirMoldeBusy) setSubirMoldeOpen(false); }} centrado maxWidth={520}
-        titulo="Subir mi propio molde"
-        subtitulo="Queda en «Mis artículos», sólo para vos. Después indicás qué es cada pieza.">
+        titulo={subirMoldeConDiseno ? 'Subir el molde con el diseño adentro' : 'Subir mi propio molde'}
+        subtitulo={subirMoldeConDiseno
+          ? 'Un solo archivo, con el diseño ya estampado en cada pieza. Vale para ESTE pedido: no queda guardado.'
+          : 'Queda en «Mis artículos», sólo para vos. Después indicás qué es cada pieza.'}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' }}>Nombre del artículo</label>
@@ -18599,16 +18898,44 @@ export default function App() {
                 ? <div style={{ fontSize: 22, lineHeight: 1, color: 'var(--success, #2ecc71)' }}>✓</div>
                 : <Icon name="upload" className="upload-icon" />}
               <div style={{ fontSize: 12.5, fontWeight: 700, color: subirMoldeFile ? 'var(--success, #2ecc71)' : undefined }}>
-                {subirMoldeFile ? subirMoldeFile.name : 'Elegí el molde (.ai · .pdf · .dxf)'}
+                {subirMoldeFile ? subirMoldeFile.name : (subirMoldeConDiseno ? 'Elegí el archivo (.ai · .pdf)' : 'Elegí el molde (.ai · .pdf · .dxf)')}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                {subirMoldeFile ? 'Archivo cargado · tocá para cambiarlo' : 'Illustrator, Corel/PDF o DXF (Optitex, Gerber…)'}
+                {subirMoldeFile ? 'Archivo cargado · tocá para cambiarlo'
+                  : (subirMoldeConDiseno ? 'Illustrator o PDF, con una capa por talle y el diseño adentro de cada pieza'
+                                         : 'Illustrator, Corel/PDF o DXF (Optitex, Gerber…)')}
               </div>
             </div>
-            <input type="file" ref={fileInputMiMoldeRef} accept=".ai,.pdf,.dxf" hidden
+            <input type="file" ref={fileInputMiMoldeRef} accept={subirMoldeConDiseno ? '.ai,.pdf' : '.ai,.pdf,.dxf'} hidden
               onChange={(e) => { const f = e.target.files[0]; setSubirMoldeFile(f || null); if (f && !subirMoldeNombre.trim()) setSubirMoldeNombre((f.name || '').replace(/\.(ai|pdf|dxf)$/i, '')); e.target.value = ''; }} />
           </div>
-          <Ayuda ancho={330}>Al subirlo se abre su configuración: ahí les ponés nombre a los {term.variante.toLowerCase()}s (si vinieron sin nombre) e indicás qué es cada pieza. Con eso ya se puede usar en el pedido.</Ayuda>
+          {subirMoldeConDiseno
+            ? <Ayuda ancho={340}>El archivo tiene que traer <b>una capa por {term.variante.toLowerCase()}</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva nombre y número— una capa <b>«nombre»</b> y otra <b>«00»</b> con los textos de muestra. Al subirlo te vamos a pedir que digas qué es cada pieza.</Ayuda>
+            : <Ayuda ancho={330}>Al subirlo se abre su configuración: ahí les ponés nombre a los {term.variante.toLowerCase()}s (si vinieron sin nombre) e indicás qué es cada pieza. Con eso ya se puede usar en el pedido.</Ayuda>}
+          {/* ESPERA HONESTA: el archivo puede pesar >100 MB y procesarlo lleva su tiempo. Se dice
+              en qué anda y hace cuánto; el porcentaje es el REAL de la subida, y cuando termina
+              se cambia de fase para no dejar una barra llena y quieta (parece colgada). */}
+          {subirBFase && (
+            <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 9, padding: '11px 13px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 7 }}>
+                <span>{subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}</span>
+                <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                  {subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0} %` : `${Math.floor((subirBFase.seg || 0) / 60)}:${String((subirBFase.seg || 0) % 60).padStart(2, '0')}`}
+                </span>
+              </div>
+              <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 4, background: 'var(--success, #2ecc71)',
+                              width: subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0}%` : '100%',
+                              opacity: subirBFase.fase === 'subiendo' ? 1 : 0.45,
+                              transition: 'width .2s linear' }} />
+              </div>
+              {subirBFase.fase !== 'subiendo' && (
+                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
+                  Con un archivo grande esto puede llevar un par de minutos. No cierres la ventana.
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button type="button" className="btn ghost" disabled={subirMoldeBusy} onClick={() => setSubirMoldeOpen(false)}>Cancelar</button>
             {/* El botón se PINTA cuando ya está todo listo (archivo elegido + nombre): es la
@@ -18618,8 +18945,11 @@ export default function App() {
               disabled={subirMoldeBusy || !subirMoldeNombre.trim() || !subirMoldeFile}
               style={subirMoldeFile && subirMoldeNombre.trim() && !subirMoldeBusy
                 ? { fontWeight: 700, boxShadow: '0 0 0 3px rgba(46,204,113,0.18)' } : { opacity: 0.55 }}
-              onClick={subirMiMolde}>
-              {subirMoldeBusy ? 'Subiendo…' : (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir y configurar' : 'Subir y configurar')}
+              onClick={subirMoldeConDiseno ? subirMoldeConDisenoPedido : subirMiMolde}>
+              {subirMoldeBusy ? 'Subiendo…'
+                : (subirMoldeConDiseno
+                    ? (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir el molde' : 'Subir el molde')
+                    : (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir y configurar' : 'Subir y configurar'))}
             </button>
           </div>
         </div>

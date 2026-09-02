@@ -203,8 +203,14 @@ más del 95 % del área» **se comía piezas reales** — la tira del talle 0 mi
   B en las claves de `_PZS_CACHE` y del caché de detección en disco, el visor precargando los
   nombres ya puestos, y el pre-warm de `deteccion_todas` salteado.
 
-**Falta (front):** el botón «Subir molde con el diseño adentro» en Pedido → Mis artículos, el
-modal con el progreso de la subida, y la pantalla de nombrado dentro del wizard.
+**Front (hecho 2026-09-02, probado en el navegador):** tarjeta **«Molde con el diseño adentro»** en
+Pedido → Mis artículos; el mismo modal de subida sirve para las dos formas (`subirMoldeConDiseno`
+cambia texto, `accept` —sin `.dxf`— y a dónde va) con **espera honesta en dos tramos** (el % real
+de la subida por XHR, y después «leyendo y detectando» con el reloj corriendo: nunca un porcentaje
+inventado). Al terminar el molde queda **ya elegido** en el diseño activo, sin salir del wizard —
+`subirMiMolde` termina en `abrirConfigMiMolde`, que te manda a Configuración; ésta no.
+El molde se borra al **«Nuevo pedido»** (el modal avisa que se pierde el nombrado) y `moldesEfimeros`
+viaja en `localStorage` con el resto del wizard, para que un F5 no deje 118 MB huérfanos.
 
 ### [x] E3 — Nombrar las piezas — **HECHO (backend)** (2026-09-02)
 
@@ -222,7 +228,17 @@ molde B lo destruyen, o revientan con el `mesa=None` que devuelve su visor. Las 
 - `POST /api/plantilla/pieza_renombrar {pid, mesa, t_idx, nombre}` — `mesa`/`t_idx` son los que el
   visor ya devuelve en cada pieza. Arrastra etiqueta/telas/mapeo con `_migrar_nombres_pieza`.
 
-**Falta (front):** el panel de nombrado dentro del paso Arte del pedido.
+**Front (hecho 2026-09-02, probado en el navegador):** el nombrado vive **en el paso Arte**, en el
+panel de la derecha (`panelNombrarJSX`, prop nueva `panelFijo` del visor: en el camino B ese panel
+reemplaza al de «Diseños», que estaría pidiendo un arte que este molde no lleva). Lista con la
+**miniatura del contorno** de cada pieza —con nueve «sin nombre» es lo único que deja saber cuál es
+cuál—, su medida, chips con los nombres del catálogo del sistema, y un contador «Faltan N de 9».
+El botón «Cargar arte» se esconde. Verificado de punta a punta: nombrar «Frente», «Espalda» y dos
+«Manga Corta» dejó **«Manga Corta 1» y «Manga Corta 2»** (el desambiguado del camino A), el gate
+«Asignar arte» pasó a verde con 9/9 y el panel de telas reconoció los 6 genéricos.
+🔴 Después de renombrar hay que **volver a pedir la detección** (`cargarMoldeOperario`): los
+nombres que muestra el panel salen de ahí (`nombres_existentes`), no del catálogo — sin eso el
+nombre se guardaba bien y la pantalla seguía diciendo «sin nombre».
 
 ### [x] E4 — El motor: la tizada desde el molde con diseño — **HECHO** (2026-09-02)
 

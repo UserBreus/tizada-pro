@@ -219,6 +219,26 @@ export const DICCIONARIO = {
     que: 'Sube un molde sin pasar por la configuración del catálogo. Sólo hay que decirle qué es cada pieza.',
     como: 'Tocá para subir tu propio molde.',
   },
+  'pedido-subir-con-diseno': {
+    nombre: 'Molde con el diseño adentro',
+    que: 'La otra forma de cargar: un solo archivo que ya trae el diseño estampado en cada pieza, sin arte aparte ni mapeo. Vale para este pedido y no queda guardado.',
+    como: 'Tocá para subir el archivo que ya trae el diseño adentro.',
+  },
+  'pieza-b-lista': {
+    nombre: 'Las piezas del molde',
+    que: 'Las piezas que trae el archivo, con su miniatura y su medida. Las que todavía dicen «sin nombre» son las que falta identificar: el nombre es lo que hace que después funcionen la etiqueta, las telas y la manga corta o larga.',
+    como: 'Tocá la pieza que querés nombrar.',
+  },
+  'pieza-b-nombre': {
+    nombre: 'Nombre de la pieza',
+    que: 'Cómo se llama la pieza que elegiste: Frente, Espalda, Manga Corta… Es el nombre con el que la vas a ver en la etiqueta de corte y en el panel de telas.',
+    como: 'Escribí qué es esa pieza y apretá Enter.',
+  },
+  'pieza-b-asignar': {
+    nombre: 'Poner el nombre',
+    que: 'Guarda el nombre en la pieza elegida, en todos los talles de una vez.',
+    como: 'Tocá para guardar el nombre.',
+  },
 
   'pedido-ir-arte': {
     nombre: 'Cargar el arte',
