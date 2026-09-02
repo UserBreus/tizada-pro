@@ -584,6 +584,22 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 - **Pendiente real:** hoy **ningún endpoint de configuración valida permisos** (ver
   `molde-propio-desde-pedido`, entrega 4).
 
+### 4.9b **Molde con diseño** (la config de los moldes que traen el diseño adentro)
+
+- **Dónde:** Configuración → tarjeta **«Molde con diseño»** (`cfg-con-diseno`).
+- **Qué se deja acá:** el **borde de corte** (grosor, si va por fuera/centro/dentro, si se dibuja),
+  la **etiqueta** (tamaño de letra, separador, si muestra talle / nombre / número) y la **regla de
+  nesting**. Es lo que el cliente NO configura cuando sube su molde desde el pedido.
+- 🔴 **Es VIVA: vale para todos esos moldes, también para los que ya están cargados.** Una tizada
+  hecha antes del cambio y otra después salen distintas. La pantalla lo avisa y dice a cuántos
+  moldes alcanza.
+- **Lo que NO se toca acá:** *dónde* va la etiqueta en cada pieza — eso lo marca el cliente en su
+  pedido (§5.2.b), y guardar acá no se lo pisa.
+- **Guarda:** `POST /api/config_con_diseno` → `cat["config_con_diseno"]`. Pide `config.editar`.
+- **Dónde se aplica:** un único lugar lo resuelve (`_borde_de` / `_etiqueta_de` en `servidor.py`),
+  y por ahí pasan el preview del Arte, la ficha y las llamadas al motor. Si se agrega otro lugar
+  que lea el borde o la etiqueta, **tiene que pasar por ahí**.
+
 ### 4.9 **Publicación**
 - Manda las mejoras de **esta máquina** al servidor publicado en internet. Los moldes, artes y
   pedidos **no viajan**.
@@ -649,6 +665,33 @@ para cualquier diseño.
   de nombrado) y con **«← Volver al pedido»**. **No hay pantallas nuevas de config.**
 - **Un molde propio no tiene variables** → en el pedido se elige **entero** y el motor genera
   **todas** sus piezas.
+
+### 5.2.b Subir un **molde que YA TRAE EL DISEÑO ADENTRO** (camino B)
+
+La otra forma de cargar: **un solo archivo** con el diseño estampado en cada pieza. No lleva arte
+aparte ni mapeo.
+
+- **Dónde:** pestaña **Mis artículos** → tarjeta **«Molde con el diseño adentro»**
+  (`pedido-subir-con-diseno`).
+- **Qué tiene que traer el archivo** (`.ai`/`.pdf`, sin DXF): una **capa por talle**, cada pieza
+  dentro de su **máscara de recorte**, y —si la prenda lleva nombre y número— una capa **`nombre`**
+  y otra **`00`** con los textos de muestra (pueden ser subcapas y estar dentro de la máscara).
+  🔴 **Sin esas dos capas la tizada sale igual**, con el texto del diseño en todas las prendas.
+- **Pasos:** nombre + archivo → se sube (con el % real y después el reloj mientras el servidor lo
+  lee: un archivo de 100+ MB tarda un par de minutos) → el molde **queda elegido** en el diseño
+  activo, **sin salir del pedido**.
+- **Después, en el paso Arte**, el panel de la derecha tiene las dos tareas del cliente:
+  1. **Piezas** — tocá cada pieza de la lista (van con su miniatura y su medida) y escribí qué es.
+     🔴 **El nombre es lo que hace funcionar todo lo demás**: la etiqueta, las telas (se asignan por
+     nombre) y la manga corta/larga — el motor arma la prenda mirando los tokens del NOMBRE, así
+     que una pieza llamada «Manga 1» hace que elegir corta o larga dé la misma tizada.
+  2. **Etiqueta** — se destraba con todas nombradas: tocá el borde de la pieza donde quieras que
+     salga impresa. Las que no toques salen abajo y centradas.
+- **El molde es de ESE pedido y no queda guardado.** Se borra con **«Terminar pedido»** o
+  «Nuevo pedido» (el aviso dice qué se pierde), y si quedó colgado lo junta el servidor solo.
+  Las tizadas ya generadas **no se tocan**.
+- **Lo que NO configura el cliente:** el borde de corte, el tamaño/tipografía de la etiqueta y el
+  nesting. Eso lo deja el taller una vez en **Configuración → Molde con diseño** (§4.9b).
 
 ### 5.3 Paso «Arte» — cargar el diseño y mapearlo
 

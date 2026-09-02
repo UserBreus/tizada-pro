@@ -187,7 +187,7 @@ más del 95 % del área» **se comía piezas reales** — la tira del talle 0 mi
 29,0 cm, y el frente 6XL ocupa el 97 % de la suya. Se compara contra el rectángulo de la página
 **con tolerancia de 1 pt**, nunca por porcentaje.
 
-### [x] E2 — El alta desde el Pedido — **BACKEND HECHO** (2026-08-31 y 2026-09-02)
+### [x] E2 — El alta desde el Pedido — **HECHA** (2026-08-31 y 2026-09-02)
 **Backend (listo y probado por HTTP con el archivo real):**
 - `POST /api/plantilla` detecta el camino sobre el temporal, da de alta con
   `alta_molde_con_diseno`, marca en disco DESPUÉS del `os.replace` y escribe `origen: "con_diseno"`.
@@ -212,7 +212,7 @@ inventado). Al terminar el molde queda **ya elegido** en el diseño activo, sin 
 El molde se borra al **«Nuevo pedido»** (el modal avisa que se pierde el nombrado) y `moldesEfimeros`
 viaja en `localStorage` con el resto del wizard, para que un F5 no deje 118 MB huérfanos.
 
-### [x] E3 — Nombrar las piezas — **HECHO (backend)** (2026-09-02)
+### [x] E3 — Nombrar las piezas — **HECHA** (2026-09-02)
 
 🔴 **En el camino B nombrar NO es agrupar: es RENOMBRAR.** El registro ya está completo desde el
 alta y la correspondencia entre talles es exacta por construcción (son capas de la misma mesa).
@@ -292,7 +292,7 @@ primero perfilarlo sobre esta hoja y ver si el costo está en el parseo del cont
 escritura o en el des-anidado. ⚠️ **La salida NUNCA es rasterizar ni bajar la calidad** (ley del
 proyecto): si hay que elegir, se tarda con un cartel honesto — que es lo que hace hoy.
 
-### [x] E5 — La configuración estable del admin (VIVA) — **HECHO (backend)** (2026-09-02)
+### [x] E5 — La configuración estable del admin (VIVA) — **HECHA** (2026-09-02)
 
 **Cómo quedó:** `cat["config_con_diseno"]` (borde + forma de la etiqueta + regla de nesting) y **un
 solo lugar donde se resuelve**: `_cfg_con_diseno` / `_borde_de` / `_etiqueta_de`. Por ahí pasan
@@ -307,7 +307,14 @@ POST de la etiqueta conserva las posiciones aunque el cuerpo traiga otra cosa, p
 es *replace* y guardar una posición desde el pedido habría clavado la forma en el molde.
 🔴 Que el valor **resuelto** entre en `_piezas_base_clave` es lo que hace que el cambio del admin
 se vea solo en el paso Arte; si no, saldría bien en la tizada y viejo en la pantalla.
-Contrato: `verificar_config_con_diseno.py`. **Falta la pantalla** en Configuración.
+Contrato: `verificar_config_con_diseno.py`.
+
+**La pantalla (hecha 2026-09-02, probada):** tarjeta **«Molde con diseño»** en Configuración, con
+el borde (grosor, dónde va, si se dibuja), la etiqueta (tamaño de letra, separador, qué muestra) y
+la regla de nesting. Arriba, el aviso de que **lo que se cambia vale para todos, también para los
+ya cargados**, y a cuántos alcanza — porque no es lo que uno espera de una pantalla de config.
+Verificado end-to-end: se cambió el borde a 3,5 mm y el molde con diseño pasó a leer 3,5 mientras
+que un molde del camino A siguió en 2,0.
 
 *(lo que sigue es el plan original de esta entrega)*
 - Borde de corte, etiqueta y nesting por defecto **para este camino**, en el catálogo
@@ -320,11 +327,23 @@ Contrato: `verificar_config_con_diseno.py`. **Falta la pantalla** en Configuraci
   `prod.get(...)` directo — incluida **la clave del caché del preview**, o el cambio no se ve.
 - Pantalla en Configuración (no la ve el cliente).
 
-### [ ] E6 — La etiqueta: el cliente sólo marca dónde va
-- Sobre el **contorno** (liviano), pieza por pieza, **dentro del pedido**.
-- Reusa el sistema de posiciones que ya existe (`etiqueta.posiciones`) — ojo con la cascada de
-  claves y con [[etiqueta-baseline-no-romper]].
-- Tipografía, tamaño y contenido: del admin (E5).
+### [x] E6 — La etiqueta: el cliente sólo marca dónde va — **HECHO** (2026-09-02)
+
+Segunda solapa del panel del pedido («1 · Piezas» / «2 · Etiqueta»), que **se destraba con todo
+nombrado**: sin nombre no hay qué escribir en la etiqueta. El cliente toca el borde de la pieza y
+el punto se **apoya en el contorno** (punto más cercano + ángulo de la tangente, con la normal
+hacia adentro para que el texto entre en la pieza). El panel lleva la cuenta («1 de 9 ubicadas»),
+marca con un punto verde dónde quedó cada una y deja sacarla; las que no se tocan salen abajo y
+centradas.
+
+🔴 **La función del snap vive a nivel de módulo (`_snapAContorno`) y la usan LAS DOS pantallas** —
+Configuración y el pedido. Con una copia en cada una, la etiqueta habría caído distinto según
+dónde se la ubicara.
+🔴 Se manda **sólo `posiciones`**: la forma es del admin y el POST de la etiqueta es *replace*.
+Verificado: tras guardar desde el pedido, `size_mm` seguía siendo el del admin y `forma_global`
+`true`. Y se tira el caché del preview, o el paso Arte mostraría la etiqueta en el lugar viejo.
+⚠️ La cascada de posiciones del motor no se tocó ([[etiqueta-baseline-no-romper]]): estas claves
+son el **nombre completo de la pieza**, que es el nivel que ya manda (§10.c del MAPA).
 
 ### [~] E7 — Que todo lo demás siga igual — **la traba de tela, HECHA** (2026-09-02)
 
@@ -341,8 +360,14 @@ jugador" no contiene manga larga»*, deducido de los nombres que puso el cliente
   propia, diría una cosa y el motor haría otra). Se aplican los toggles, así que **no** se reclama
   tela para la manga larga en un pedido de manga corta. Contrato: `verificar_traba_pedido.py` §3.
 
-**Falta:** la pantalla del admin para la configuración estable (E5), que el cliente ubique la
-etiqueta desde el pedido (E6), «Terminar pedido» en Resultados, y la ayuda guiada.
+**«Terminar pedido»** (2026-09-02): botón propio en Resultados, que aparece **sólo si el pedido
+tiene un molde con diseño**. Cierra el pedido y lo borra. 🔴 La lista de qué borrar **no sale sólo
+de `moldesEfimeros`** (lo que subió esa pantalla): se le suman los moldes del pedido que el
+catálogo marca `efimero`, porque si se recargó la página con el localStorage vacío ese estado no
+los tiene y el archivo de 100+ MB se quedaría hasta que lo junte el barrido. Borrar de más no es
+riesgo: el servidor sólo toca los que llevan la marca.
+Verificado de punta a punta: el modal avisa qué molde se pierde y con él los nombres; al confirmar,
+no queda nada (ni datos, ni base) **y las tizadas generadas siguen ahí**.
 - Ficha técnica, trabas antes de fabricar, ayuda guiada, permisos.
 - 🔴 **La traba «pieza sin tela»**: `_validar_pedido` itera `variante_piezas`, que en el camino B
   viene vacío (el molde va entero, sin variables) → ninguna pieza se valida y todas caerían a la

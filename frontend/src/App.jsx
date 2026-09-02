@@ -298,6 +298,35 @@ const CAP_RATIO_ETQ = 0.716;
 // entienda por qué (o al revés, dejaría pasar un molde a medio nombrar).
 const _ES_PIEZA_SIN_NOMBRE = /^Pieza( extra)? \d+'*$/;
 
+// APOYAR LA ETIQUETA EN EL CONTORNO: del punto que se tocó al punto del borde más cercano, con el
+// ángulo de la tangente y la normal hacia ADENTRO (para que el texto entre en la pieza y no salga).
+// Vive a nivel de módulo porque la usan DOS pantallas —Configuración y el pedido (camino B)— y si
+// cada una tuviera su copia, la etiqueta caería distinto según dónde la hayas puesto.
+// Devuelve `{rx, ry, ang, t, …}` o null. 🔴 `t` es la posición RELATIVA en el contorno (0..1) y NO
+// el largo de arco: es lo que hace que la etiqueta caiga en el mismo lugar en todos los talles,
+// que están gradados y no miden lo mismo.
+function _snapAContorno(d, cx, cy, pc) {
+  try {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'path'); el.setAttribute('d', d);
+    const len = el.getTotalLength(); if (!len) return null;
+    let best = null; const N = 160;
+    for (let i = 0; i <= N; i++) {
+      const l = len * i / N; const pt = el.getPointAtLength(l);
+      const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2;
+      if (!best || dd < best.dd) best = { dd, l, x: pt.x, y: pt.y };
+    }
+    const p2 = el.getPointAtLength(Math.min(len, best.l + 1.5));
+    let tx = p2.x - best.x, ty = p2.y - best.y; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    let nx = -ty, ny = tx;
+    const ccx = pc.px + pc.pw / 2, ccy = pc.py + pc.ph / 2;
+    if ((ccx - best.x) * nx + (ccy - best.y) * ny < 0) { nx = -nx; ny = -ny; }   // normal hacia el centro
+    const ang = Math.atan2(nx, -ny) * 180 / Math.PI;   // «arriba» del texto = normal hacia adentro
+    return { rx: Math.max(0, Math.min(1, (best.x - pc.px) / pc.pw)),
+             ry: Math.max(0, Math.min(1, (best.y - pc.py) / pc.ph)),
+             ang: Math.round(ang * 10) / 10, x: best.x, y: best.y, l: best.l, len, t: best.l / len };
+  } catch { return null; }
+}
+
 // El DIBUJO de una mesa del arte se pide por URL (`m.img`), no viene dentro del JSON. Un arte de
 // vector pesado son 1098 KB por mesa (11,6 MB en total) que el navegador tenía que parsear y
 // rasterizar de golpe: el paso Arte tardaba casi un minuto. Pedido así, el navegador baja sólo las
@@ -2626,7 +2655,7 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, aviso, cargando }) {
+function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta, aviso, cargando }) {
   // Desplegables de la barra de Diseños, agrupados por RANGO (#… en el nombre de la mesa)
   const [rangosCerrados, setRangosCerrados] = React.useState(new Set());
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
@@ -2826,7 +2855,22 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       /* `data-pieza`: sin esto, un paso grabado tocando una pieza no se podía volver
                          a encontrar (el SVG no tiene texto ni controles). Ver `pieza:` en localizar.js */
                       data-pieza={pzName || _genN || ('pieza ' + p.idx)}
-                      style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
+                      style={{ cursor: 'pointer' }} onClick={(e) => {
+                        // UBICAR LA ETIQUETA (camino B, desde el pedido): el punto que se tocó se
+                        // «apoya» en el contorno más cercano. Se calcula en coordenadas del SVG y
+                        // restando el traslado de la pieza (en «ver variante» están reacomodadas).
+                        if (etqPickModo) {
+                          e.stopPropagation();
+                          try {
+                            const svg = e.currentTarget.ownerSVGElement || e.currentTarget.closest('svg');
+                            const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+                            const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+                            const snap = _snapAContorno(p.path_svg, q.x - (p._dx || 0), q.y - (p._dy || 0), p);
+                            if (snap && onPickEtiqueta) onPickEtiqueta(pzName, snap);
+                          } catch { /* sin geometría no se ubica nada: mejor no hacer nada que poner mal */ }
+                          return;
+                        }
+                        if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
                       <title>{pzName} {mappedMesaIdx ? `(Mesa ${mappedMesaIdx})` : '(sin diseño)'}</title>
                       <defs><clipPath id={`clipmapv-${p.idx}`}><path d={p.path_svg} /></clipPath></defs>
                       {/* RENDER REAL del motor (la pieza tal cual sale en la tizada). Si está, NO se re-dibuja nada. */}
@@ -3914,6 +3958,8 @@ export default function App() {
   // Biblioteca de reglas (campos reutilizables) + columna seleccionada en el editor
   const [reglasPlanilla, setReglasPlanilla] = useState([]);
   const [nestingPresets, setNestingPresets] = useState([]); // presets de nesting (reglas de acomodo)
+  // La config de los moldes que traen el DISEÑO ADENTRO: una sola, para todos ellos.
+  const [cfgConDiseno, setCfgConDiseno] = useState(null);
   const [colSeleccionada, setColSeleccionada] = useState(null); // índice de columna en edición (panel izq)
   const [reglaEditando, setReglaEditando] = useState(null); // regla en edición en el espacio de Reglas
   const [nestingEditando, setNestingEditando] = useState(null); // preset de nesting en edición
@@ -3969,6 +4015,8 @@ export default function App() {
   // Nombrado de las piezas de un molde del camino B, dentro del pedido.
   const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} de la pieza elegida
   const [nombreBInput, setNombreBInput] = useState('');
+  // ¿El visor está en modo «tocá dónde va la etiqueta»? (2ª tarea del cliente en el camino B)
+  const [etqPickB, setEtqPickB] = useState(false);
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
   const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0, 0, 0, 0.85], alineacion: 'fuera' });  // borde de corte del molde
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
@@ -4905,6 +4953,7 @@ export default function App() {
       console.error("Error al obtener presets de nesting", e);
     }
   };
+
 
   const fetchPerfiles = async () => {
     try {
@@ -9343,8 +9392,10 @@ export default function App() {
     } catch { showError('No se pudo guardar el borde'); }
   };
   // Etiqueta de identificación del molde: cargar / guardar.
-  const cargarEtiqueta = async () => {
-    const pid = pidCfg; if (!pid) return;
+  // `pidEx` = molde EXPLÍCITO. Desde el PEDIDO el molde no es `pidCfg` (ése es el que está abierto
+  // en Configuración): sin esto, ubicar la etiqueta de un molde con diseño leería la de otro.
+  const cargarEtiqueta = async (pidEx = null) => {
+    const pid = pidEx || pidCfg; if (!pid) return;
     try { const r = await fetch(`/api/productos/etiqueta?pid=${pid}`); if (r.ok) setEtiquetaConfig(await r.json()); } catch { }
   };
   const cargarTalleEtq = async (talle) => {
@@ -9772,10 +9823,23 @@ export default function App() {
   };
 
   // Empezar un pedido nuevo desde 0: limpia toda la selección y vuelve al paso 1.
+  // Los moldes EFÍMEROS de este pedido. No alcanza con `moldesEfimeros` (lo que subió ESTA
+  // pantalla): si se recargó la página con el localStorage vacío, o el molde se subió desde otro
+  // lado, ese estado no los tiene y el archivo —más de 100 MB— se quedaría en el servidor hasta
+  // que lo junte el barrido. Así que se suman los moldes DEL PEDIDO que el catálogo marca
+  // `efimero`. Borrar de más no es un riesgo: el servidor sólo toca los que llevan la marca.
+  const efimerosDelPedido = () => {
+    const _ids = new Set(Object.keys(moldesEfimeros || {}));
+    (moldesSeleccionados || []).forEach(id => {
+      if ((productosCat.productos || []).find(p => p.id === id && p.efimero)) _ids.add(id);
+    });
+    return [...(_ids)];
+  };
   const reiniciarPedido = () => {
     // Si hay moldes con el diseño adentro, se van con el pedido y con ellos el nombrado de las
     // piezas: eso se dice ANTES, no después. Es el único trabajo de este paso que no se recupera.
-    const _ef = Object.values(moldesEfimeros || {});
+    const _ef = efimerosDelPedido().map(id => (moldesEfimeros || {})[id]
+      || { nombre: ((productosCat.productos || []).find(p => p.id === id) || {}).nombre || 'sin nombre' });
     const _extra = _ef.length
       ? ` También se borra ${_ef.length === 1 ? 'el molde que subiste con el diseño adentro' : `los ${_ef.length} moldes que subiste con el diseño adentro`} (${_ef.map(m => `«${m.nombre}»`).join(', ')}) y los nombres que les pusiste a sus piezas: se subieron sólo para este pedido.`
       : '';
@@ -9816,7 +9880,7 @@ export default function App() {
       // no, cada pedido dejaría más de 100 MB en el servidor para siempre. El servidor sólo
       // borra los que están marcados `efimero`, así que mandar un pid de más no hace daño.
       try {
-        const _ef = Object.keys(moldesEfimeros || {});
+        const _ef = efimerosDelPedido();
         if (_ef.length) {
           await fetch('/api/pedido/limpiar_efimeros', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9863,6 +9927,68 @@ export default function App() {
   const showWarn = (txt) => {
     setAdvertenciaInformativa(txt);
     setTimeout(() => setAdvertenciaInformativa(prev => prev === txt ? '' : prev), 10000);
+  };
+
+  // ── La config de los moldes con el diseño adentro (la deja el taller, una vez) ───────────────
+  const cargarCfgConDiseno = async () => {
+    fetchNestingPresets();          // el desplegable de «cómo se acomodan» sale de ahí
+    try {
+      const r = await fetch('/api/config_con_diseno');
+      if (r.ok) setCfgConDiseno(await r.json());
+    } catch { /* sin config no se puede editar: la pantalla muestra «Cargando…» */ }
+  };
+  const guardarCfgConDiseno = async () => {
+    if (!cfgConDiseno) return;
+    try {
+      const r = await fetch('/api/config_con_diseno', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfgConDiseno)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo guardar');
+      setCfgConDiseno(d);
+      // El preview de las piezas incluye el borde y la etiqueta: sin tirar el caché del navegador,
+      // el paso Arte seguiría mostrando la medida vieja (la tizada ya saldría con la nueva).
+      _pvCache.current = {};
+      showMsg(d.moldes
+        ? `Guardado. Vale para ${d.moldes} molde${d.moldes === 1 ? '' : 's'} con diseño, también los ya cargados.`
+        : 'Guardado.');
+    } catch (err) { showError(err.message); }
+  };
+
+  // ── CAMINO B: ubicar la ETIQUETA DE CORTE desde el pedido ────────────────────────────────────
+  // El cliente sólo dice DÓNDE va en cada pieza. El tamaño, la tipografía y qué dice los deja el
+  // admin una sola vez para todos estos moldes (`/api/config_con_diseno`), así que acá se manda
+  // SÓLO `posiciones`: el servidor conserva la forma y no deja que el pedido se la pise.
+  const ubicarEtiquetaB = (nombrePieza, snap) => {
+    if (!nombrePieza || !snap) return;
+    setEtiquetaConfig(prev => ({
+      ...(prev || {}),
+      posiciones: { ...((prev || {}).posiciones || {}),
+                    [nombrePieza]: { rx: snap.rx, ry: snap.ry, ang: snap.ang, t: snap.t } },
+    }));
+  };
+  const quitarEtiquetaB = (nombrePieza) => {
+    setEtiquetaConfig(prev => {
+      const _p = { ...((prev || {}).posiciones || {}) };
+      delete _p[nombrePieza];
+      return { ...(prev || {}), posiciones: _p };
+    });
+  };
+  const guardarEtiquetaPosicionesB = async (pid) => {
+    try {
+      const r = await fetch('/api/productos/etiqueta', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, posiciones: (etiquetaConfig || {}).posiciones || {} })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo guardar dónde va la etiqueta');
+      setEtiquetaConfig(d);
+      // El render de la pieza incluye la etiqueta: si el preview no se rehace, el paso Arte
+      // mostraría la etiqueta en el lugar viejo aunque la tizada ya la ponga en el nuevo.
+      _pvCache.current = {};
+      showMsg('Listo: la etiqueta va donde la marcaste.');
+    } catch (err) { showError(err.message); }
   };
 
   // ── CAMINO B: subir un molde que YA TRAE EL DISEÑO adentro ───────────────────────────────────
@@ -12542,12 +12668,82 @@ export default function App() {
                 // Nombres sugeridos: los del catálogo del sistema. Ahorran teclado y, sobre todo,
                 // hacen que los toggles de la planilla encuentren su palabra («Manga Corta»).
                 const _sugeridos = [...new Set((catalogoGrupos || []).flatMap(g => g.piezas || []))].slice(0, 12);
+                // Cuántas piezas ya tienen ubicada su etiqueta (la del molde, no la global).
+                const _etqPos = (etiquetaConfig?.posiciones) || {};
+                const _etqPuestas = _piezasB.filter(pz => _etqPos[_nomB(pz)]).length;
                 const panelNombrarJSX = !_esB ? null : (
                   <div data-tour="pieza-b-lista" style={{ width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 11 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
-                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>¿Qué es cada pieza?</span>
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>
+                        {etqPickB ? '¿Dónde va la etiqueta?' : '¿Qué es cada pieza?'}
+                      </span>
                     </div>
+                    {/* LAS DOS TAREAS DEL CLIENTE, en orden. La etiqueta se destraba con todo
+                        nombrado: sin nombre no hay qué escribir en ella. El tamaño, la tipografía
+                        y qué dice los deja el admin una vez para todos estos moldes. */}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button" className={`btn ${!etqPickB ? 'primary' : 'ghost'}`}
+                        style={{ flex: 1, padding: '5px 8px', fontSize: 11.5, borderRadius: 8 }}
+                        onClick={() => setEtqPickB(false)}>1 · Piezas</button>
+                      <button type="button" data-tour="etqb-piezas" className={`btn ${etqPickB ? 'primary' : 'ghost'}`}
+                        style={{ flex: 1, padding: '5px 8px', fontSize: 11.5, borderRadius: 8, ...(_sinNombreB.length ? { opacity: 0.45 } : {}) }}
+                        disabled={!!_sinNombreB.length}
+                        title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : 'Marcá dónde va la etiqueta de corte'}
+                        onClick={() => { setEtqPickB(true); cargarEtiqueta(_id); }}>2 · Etiqueta</button>
+                    </div>
+                    {etqPickB ? (
+                      <>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
+                          background: _etqPuestas < _piezasB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)',
+                          border: '1px solid ' + (_etqPuestas < _piezasB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)') }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: _etqPuestas < _piezasB.length ? 'var(--warning)' : 'var(--success)' }}>
+                            {_etqPuestas} de {_piezasB.length} ubicadas
+                          </span>
+                          <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                            Tocá el borde de la pieza, ahí donde quieras que salga impreso el talle y
+                            el nombre. Las que no toques salen abajo, centradas.
+                          </span>
+                        </div>
+                        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 5, minHeight: 0 }}>
+                          {_piezasB.map(pz => {
+                            const _nom = _nomB(pz);
+                            const _puesta = !!_etqPos[_nom];
+                            return (
+                              <div key={`e-${pz.mesa}-${pz.t_idx}`}
+                                style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 9,
+                                  border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.2)' }}>
+                                <svg viewBox={`${pz.px || 0} ${pz.py || 0} ${Math.max(pz.pw || 1, 1)} ${Math.max(pz.ph || 1, 1)}`}
+                                  width="26" height="30" style={{ flexShrink: 0 }} preserveAspectRatio="xMidYMid meet">
+                                  <path d={pz.path_svg} fill="rgba(0,216,245,0.14)" stroke="rgba(255,255,255,0.45)"
+                                    strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                                  {_puesta && (
+                                    <circle cx={(pz.px || 0) + (_etqPos[_nom].rx ?? 0.5) * (pz.pw || 1)}
+                                      cy={(pz.py || 0) + (_etqPos[_nom].ry ?? 0.92) * (pz.ph || 1)}
+                                      r={Math.max(2, (pz.pw || 20) * 0.07)} fill="var(--success)" />
+                                  )}
+                                </svg>
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div style={{ fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{_nom}</div>
+                                  <div style={{ fontSize: 9.5, color: _puesta ? 'var(--success)' : 'var(--text-muted)' }}>
+                                    {_puesta ? 'ubicada' : 'abajo, centrada'}
+                                  </div>
+                                </div>
+                                {_puesta && (
+                                  <button type="button" className="btn ghost" style={{ padding: '2px 7px', fontSize: 10 }}
+                                    title="Sacar la etiqueta de esta pieza (vuelve al lugar por defecto)"
+                                    onClick={() => quitarEtiquetaB(_nom)}>✕</button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <button type="button" data-tour="etqb-guardar" className="btn success"
+                          style={{ padding: '8px 10px', fontSize: 12, borderRadius: 9 }}
+                          onClick={() => guardarEtiquetaPosicionesB(_id)}>Guardar dónde va</button>
+                      </>
+                    ) : (<></>)}
+                    {!etqPickB && (<>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
                       background: _sinNombreB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)',
                       border: '1px solid ' + (_sinNombreB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)') }}>
@@ -12623,6 +12819,7 @@ export default function App() {
                           }}>Poner</button>
                       </div>
                     )}
+                    </>)}
                   </div>
                 );
 
@@ -12899,6 +13096,8 @@ export default function App() {
                         onTelaVacio={() => setTelaSelPiezas([])}
                         panelTela={panelTelaJSX}
                         panelFijo={_panelFijoB}
+                        etqPickModo={_esB && etqPickB}
+                        onPickEtiqueta={ubicarEtiquetaB}
                         aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -13851,6 +14050,16 @@ export default function App() {
                         </button>
                       );
                     })()}
+                    {/* TERMINAR: lo mismo que «Nuevo pedido», pero dicho desde el final. Existe
+                        porque el molde con el diseño adentro se subió SÓLO para este pedido y hay
+                        que darle a la persona un lugar claro donde cerrarlo — si no, ese archivo
+                        (>100 MB) se queda en el servidor hasta que lo junte el barrido. */}
+                    {efimerosDelPedido().length > 0 && (
+                      <button className="btn" data-tour="pedido-terminar"
+                        style={{ padding: '8px 14px', fontSize: 12.5, fontWeight: 700 }}
+                        title="Cerrar el pedido y borrar el molde que subiste para él"
+                        onClick={reiniciarPedido}>✓ Terminar pedido</button>
+                    )}
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={reiniciarPedido} title="Empezar un pedido nuevo desde 0">↺ Nuevo pedido</button>
                   </div>
                 </div>
@@ -14098,6 +14307,25 @@ export default function App() {
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Telas</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
                         Registrá tus telas (nombre + ancho) y armá grupos de telas que se pueden combinar entre sí.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Card: la configuración de los moldes que traen el DISEÑO ADENTRO. La deja el
+                      taller UNA vez y la usan todos: el cliente que sube uno desde el pedido no
+                      configura el borde ni la etiqueta, sólo ubica dónde va. */}
+                  <div className="crm-config-card cyan" data-tour="cfg-con-diseno" onClick={() => {
+                    setAdminSubView('con_diseno');
+                    cargarCfgConDiseno();
+                  }}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="edit" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Molde con diseño</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        El borde de corte, la etiqueta y el nesting de los moldes que ya traen el diseño
+                        adentro. Se configura una vez y vale para todos.
                       </p>
                     </div>
                   </div>
@@ -16841,25 +17069,9 @@ export default function App() {
                             const nombrePc = (p) => p.name || etqNombres[p.idx] || ('Pieza ' + (p.idx + 1));
                             const muestraDe = (p) => [ec.mostrar?.talle && (etqData.talle_ref || '2XL'), ec.mostrar?.pieza && nombreGenerico(nombrePc(p)), ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
                             // Apoyar el texto en el CONTORNO: punto más cercano del path + ángulo de la tangente.
-                            const snapContorno = (d, cx, cy, pc) => {
-                              try {
-                                const el = document.createElementNS('http://www.w3.org/2000/svg', 'path'); el.setAttribute('d', d);
-                                const len = el.getTotalLength(); if (!len) return null;
-                                let best = null; const N = 160;
-                                for (let i = 0; i <= N; i++) { const l = len * i / N; const pt = el.getPointAtLength(l); const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2; if (!best || dd < best.dd) best = { dd, l, x: pt.x, y: pt.y }; }
-                                const p2 = el.getPointAtLength(Math.min(len, best.l + 1.5));
-                                // tangente del borde + normal hacia ADENTRO de la pieza, para que el
-                                // texto se APOYE en el borde y entre hacia la pieza (no hacia afuera).
-                                let tx = p2.x - best.x, ty = p2.y - best.y; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
-                                let nx = -ty, ny = tx;
-                                const ccx = pc.px + pc.pw / 2, ccy = pc.py + pc.ph / 2;
-                                if ((ccx - best.x) * nx + (ccy - best.y) * ny < 0) { nx = -nx; ny = -ny; }   // normal hacia el centro
-                                const ang = Math.atan2(nx, -ny) * 180 / Math.PI;   // "arriba" del texto = normal hacia adentro
-                                // `t` = posición RELATIVA en el contorno (0..1). Se guarda esta (no el largo de
-                                // arco absoluto) para que la etiqueta caiga en el MISMO lugar en todos los talles.
-                                return { rx: Math.max(0, Math.min(1, (best.x - pc.px) / pc.pw)), ry: Math.max(0, Math.min(1, (best.y - pc.py) / pc.ph)), ang: Math.round(ang * 10) / 10, x: best.x, y: best.y, l: best.l, len, t: best.l / len };
-                              } catch { return null; }
-                            };
+                            // La misma que usa el pedido (camino B): vive a nivel de módulo para que
+                            // la etiqueta caiga igual, se ubique desde acá o desde el pedido.
+                            const snapContorno = _snapAContorno;
                             const piezaBajoMouse = (e) => {
                               const svg = e.currentTarget; let p;
                               try { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; p = pt.matrixTransform(svg.getScreenCTM().inverse()); } catch { return null; }
@@ -18295,6 +18507,120 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                </div>
+              );
+            })()}
+
+            {/* Configuración de los moldes que traen el DISEÑO ADENTRO (camino B) ─────────────
+                🔴 Es VIVA: al guardarla, los moldes YA CARGADOS también salen con la medida nueva
+                (apuntan a esto, no tienen copia). La pantalla lo dice, porque no es lo que uno
+                espera de una pantalla de configuración. */}
+            {adminSubView === 'con_diseno' && (() => {
+              const c = cfgConDiseno;
+              const inputStyle = { height: 40, width: '100%', fontSize: 14, padding: '0 11px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
+              const labelStyle = { fontSize: 13, color: 'var(--text-secondary)', display: 'block', marginBottom: 6, fontWeight: 600 };
+              const setB = (k, v) => setCfgConDiseno(p => ({ ...p, borde_corte: { ...(p.borde_corte || {}), [k]: v } }));
+              const setE = (k, v) => setCfgConDiseno(p => ({ ...p, etiqueta: { ...(p.etiqueta || {}), [k]: v } }));
+              return (
+                <div className="panel animate-fade">
+                  <div style={{ marginBottom: 20 }}>
+                    <button className="btn ghost" onClick={() => setAdminSubView('dashboard')} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '6px 12px' }}>
+                      ⬅ Volver al Panel de Configuración
+                    </button>
+                  </div>
+                  <h2 style={{ marginBottom: 4 }}>Molde con diseño</h2>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    Cómo salen los moldes que ya traen el diseño adentro de cada pieza. Esto se configura
+                    una sola vez: el cliente que sube uno desde el pedido sólo dice qué es cada pieza y
+                    dónde va la etiqueta.
+                  </p>
+                  {!c ? <p style={{ color: 'var(--text-muted)' }}>Cargando…</p> : (<>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 13px', borderRadius: 11, marginBottom: 20,
+                      background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.35)' }}>
+                      <Icon name="alert" style={{ width: 15, height: 15, color: 'var(--warning)', flexShrink: 0 }} />
+                      <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        Lo que cambies acá vale para <b>todos</b> estos moldes, también para los que ya
+                        están cargados{c.moldes ? ` (ahora mismo, ${c.moldes})` : ''}. Una tizada hecha antes
+                        del cambio y otra hecha después salen distintas.
+                      </span>
+                    </div>
+
+                    <h3 style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>Borde de corte</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 26 }}>
+                      <div>
+                        <label style={labelStyle}>Grosor (mm)</label>
+                        <input data-tour="cfgb-borde-mm" type="number" step="0.1" min="0.2" max="20" style={inputStyle}
+                          value={(c.borde_corte || {}).ancho_mm ?? 2}
+                          onChange={(e) => setB('ancho_mm', e.target.value)} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Dónde va</label>
+                        <select data-tour="cfgb-borde-alin" style={inputStyle} value={(c.borde_corte || {}).alineacion || 'fuera'}
+                          onChange={(e) => setB('alineacion', e.target.value)}>
+                          <option value="fuera">Por fuera del contorno</option>
+                          <option value="centro">Centrado en el contorno</option>
+                          <option value="dentro">Por dentro del contorno</option>
+                        </select>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={(c.borde_corte || {}).activo !== false}
+                            onChange={(e) => setB('activo', e.target.checked)} />
+                          Dibujar el borde de corte
+                        </label>
+                      </div>
+                    </div>
+
+                    <h3 style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>Etiqueta de corte</h3>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                      El texto que va impreso al borde de cada pieza. <b>Dónde</b> va lo marca el cliente,
+                      pieza por pieza, cuando arma su pedido.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 14 }}>
+                      <div>
+                        <label style={labelStyle}>Tamaño de letra (mm)</label>
+                        <input data-tour="cfgb-etq-mm" type="number" step="0.5" min="1" max="40" style={inputStyle}
+                          value={(c.etiqueta || {}).size_mm ?? 3}
+                          onChange={(e) => setE('size_mm', e.target.value)} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Separador</label>
+                        <input style={inputStyle} maxLength={3} value={(c.etiqueta || {}).separador ?? '-'}
+                          onChange={(e) => setE('separador', e.target.value)} />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', marginBottom: 26 }}>
+                      {[['talle', 'el talle'], ['pieza', 'el nombre de la pieza'], ['numero', 'el número de prenda']].map(([k, t]) => (
+                        <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={((c.etiqueta || {}).mostrar || {})[k] !== false}
+                            onChange={(e) => setE('mostrar', { ...((c.etiqueta || {}).mostrar || {}), [k]: e.target.checked })} />
+                          Mostrar {t}
+                        </label>
+                      ))}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={(c.etiqueta || {}).activo !== false}
+                          onChange={(e) => setE('activo', e.target.checked)} />
+                        Poner etiqueta
+                      </label>
+                    </div>
+
+                    <h3 style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>Cómo se acomodan en la tela</h3>
+                    <div style={{ maxWidth: 380, marginBottom: 26 }}>
+                      <select data-tour="cfgb-nesting" style={inputStyle} value={c.nesting_preset_id || 'nesting_default'}
+                        onChange={(e) => setCfgConDiseno(p => ({ ...p, nesting_preset_id: e.target.value }))}>
+                        {(nestingPresets || []).map(n => (
+                          <option key={n.id} value={n.id}>{n.nombre}</option>
+                        ))}
+                      </select>
+                      <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
+                        La regla de nesting (separación, margen y giro) con la que se acomodan estas piezas.
+                        Se editan en «Reglas de Nesting».
+                      </p>
+                    </div>
+
+                    <button className="btn success" data-tour="cfgb-guardar" style={{ padding: '10px 18px', fontWeight: 700 }}
+                      onClick={guardarCfgConDiseno}>Guardar</button>
+                  </>)}
                 </div>
               );
             })()}

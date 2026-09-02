@@ -239,6 +239,51 @@ export const DICCIONARIO = {
     que: 'Guarda el nombre en la pieza elegida, en todos los talles de una vez.',
     como: 'Tocá para guardar el nombre.',
   },
+  'etqb-piezas': {
+    nombre: 'Ubicar la etiqueta',
+    que: 'La segunda tarea, cuando ya están todas las piezas nombradas: marcar en qué parte del borde de cada pieza sale impresa la etiqueta de corte (el talle, el nombre y el número). El tamaño y la tipografía los deja configurados el taller.',
+    como: 'Tocá para pasar a ubicar la etiqueta.',
+  },
+  'pedido-terminar': {
+    nombre: 'Terminar el pedido',
+    que: 'Cierra el pedido y borra el molde que subiste con el diseño adentro: se cargó sólo para este trabajo. Las tizadas que ya bajaste no se tocan.',
+    como: 'Tocá para cerrar el pedido.',
+  },
+  'cfg-con-diseno': {
+    nombre: 'Molde con diseño',
+    que: 'La configuración de los moldes que ya traen el diseño adentro de cada pieza: el borde de corte, la etiqueta y cómo se acomodan en la tela. Se deja una vez y vale para todos, también para los que ya están cargados.',
+    como: 'Tocá para configurar cómo salen esos moldes.',
+  },
+  'cfgb-borde-mm': {
+    nombre: 'Grosor del borde de corte',
+    que: 'El ancho, en milímetros, de la línea de corte que rodea cada pieza de estos moldes.',
+    como: 'Escribí el grosor en milímetros.',
+  },
+  'cfgb-borde-alin': {
+    nombre: 'Dónde va el borde',
+    que: 'Si la línea de corte se dibuja por fuera del contorno de la pieza, centrada sobre él, o por dentro. Cambia cuánta tela queda alrededor.',
+    como: 'Elegí dónde se dibuja el borde.',
+  },
+  'cfgb-etq-mm': {
+    nombre: 'Tamaño de la etiqueta',
+    que: 'La altura de la letra, en milímetros, del texto que se imprime al borde de cada pieza (talle, nombre y número).',
+    como: 'Escribí el tamaño de letra en milímetros.',
+  },
+  'cfgb-nesting': {
+    nombre: 'Cómo se acomodan en la tela',
+    que: 'Qué regla de nesting —separación entre piezas, margen y giros— se usa para acomodar estos moldes. Las reglas se crean en «Reglas de Nesting».',
+    como: 'Elegí la regla de acomodo.',
+  },
+  'cfgb-guardar': {
+    nombre: 'Guardar la configuración',
+    que: 'Guarda estos valores para TODOS los moldes con diseño, incluidos los que ya están cargados: una tizada hecha antes del cambio y otra después salen distintas.',
+    como: 'Tocá para guardar.',
+  },
+  'etqb-guardar': {
+    nombre: 'Guardar dónde va la etiqueta',
+    que: 'Guarda en el molde la posición que marcaste en cada pieza. Las que no toques llevan la etiqueta abajo y centrada.',
+    como: 'Tocá para guardar las posiciones.',
+  },
 
   'pedido-ir-arte': {
     nombre: 'Cargar el arte',

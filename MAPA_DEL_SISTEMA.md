@@ -1353,6 +1353,23 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-02 (379) — CAMINO B, LO QUE FALTABA: LA ETIQUETA DESDE EL PEDIDO, LA PANTALLA DEL
+  ADMIN Y «TERMINAR PEDIDO».** Con esto el camino B queda completo de punta a punta.
+  **(a) La etiqueta la ubica el cliente**, en la 2ª solapa del panel del pedido, que se destraba
+  con todo nombrado (sin nombre no hay qué escribir en ella). Toca el borde y el punto se apoya en
+  el contorno. 🔴 **`_snapAContorno` pasó a vivir a nivel de módulo y la usan LAS DOS pantallas**
+  (Configuración y el pedido): con una copia en cada una, la etiqueta caía distinto según dónde se
+  la ubicara. Se manda **sólo `posiciones`** (el POST es *replace* y la forma es del admin), y se
+  tira `_pvCache` o el paso Arte mostraría la etiqueta vieja.
+  **(b) Pantalla «Molde con diseño»** en Configuración: borde, etiqueta y regla de nesting, con el
+  aviso de que **alcanza a los moldes ya cargados** y a cuántos. Verificado: 3,5 mm en el molde con
+  diseño y 2,0 en uno del camino A.
+  **(c) «Terminar pedido»** en Resultados, sólo si el pedido tiene un molde con diseño. 🔴 Qué
+  borrar **no sale sólo del estado del navegador**: se le suman los moldes del pedido marcados
+  `efimero`, porque tras un F5 con el localStorage vacío ese estado no los tiene y el archivo de
+  100+ MB se quedaría. Borrar de más no es riesgo: el servidor sólo toca los marcados.
+  📌 El tope de `verificar_tdz.mjs` volvió a cortar el build: las funciones nuevas quedaban arriba
+  de `showMsg`/`showError`. **Se mueven debajo de lo que usan; el tope no se sube nunca.**
 - **2026-09-02 (378) — CAMINO B: EL PEDIDO COMPLETO, Y LA TRABA DE TELA QUE NO TRABABA.**
   Verificado desde la pantalla de punta a punta: subir → nombrar → tela → planilla → generar, y sale
   la hoja con su ficha. Los toggles salen gratis: la planilla mostró «Larga» **deshabilitado** con
