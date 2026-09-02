@@ -19,6 +19,19 @@ Los dos caminos **conviven**: el A no se toca.
 
 ---
 
+## 0. ESTADO (2026-09-02) — **el camino funciona de punta a punta**
+
+Subir → nombrar → ubicar la etiqueta → tela → planilla → **tizada**, probado en el navegador con
+el archivo real de 123 MB. Lo que queda abierto, con su detalle más abajo:
+
+| Pendiente | Dónde |
+|---|---|
+| 🔴 **Rendimiento**: una tizada de 1 prenda tarda ~21 min, y **19 son del aplanado para el RIP** | §7-E4 |
+| **El nombre y el número** necesitan un archivo con las capas `nombre` y `00` para probarse | §3.b |
+| El nesting mejor del proyecto de referencia (13 % menos de tela) | §5 |
+
+---
+
 ## 2. EL RECORRIDO DEL CLIENTE (lo que va a ver)
 
 Todo esto pasa **desde el Pedido**, **no** desde Configuración:
@@ -425,6 +438,25 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 ---
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
+
+- **2026-09-02 (cierre: E5 pantalla, E6 y «Terminar pedido»)** — El camino queda **completo de
+  punta a punta**, probado en el navegador: subir → nombrar 9 piezas → ubicar la etiqueta → tela →
+  planilla → generar → cerrar. Lo que se aprendió en esta última tanda:
+  · **Una regla, un solo lugar.** El snap de la etiqueta al contorno se movió a nivel de módulo
+    (`_snapAContorno`) porque ahora lo usan dos pantallas; con una copia en cada una, la etiqueta
+    caía distinto según dónde se la ubicara. Mismo criterio que ya se había aplicado a
+    `partes_de_libre` en el motor.
+  · **Lo que se manda importa tanto como lo que se guarda.** El POST de la etiqueta es *replace*:
+    mandar el objeto entero desde el pedido habría clavado la forma en el molde y ese molde habría
+    dejado de seguir al admin **en silencio**. Se manda sólo `posiciones`.
+  · **No confiar en el estado del navegador para borrar.** «Terminar pedido» calcula qué borrar
+    sumando los moldes del pedido marcados `efimero`, no sólo los que registró esa pantalla: tras
+    un F5 con el localStorage vacío, el archivo de 100+ MB se habría quedado.
+  · ⚠️ `verificar_tdz.mjs` cortó el build **tres veces** en la sesión, siempre por lo mismo:
+    funciones nuevas escritas arriba de `showError`/`showMsg`/`plantillaComun`. **Se mueven debajo
+    de lo que usan; el tope no se sube.** Conviene escribirlas directamente al lado de `showWarn`.
+  · ⚠️ Y dos veces más la trampa de los **heredocs de bash**: JSX con comillas y `<>` no sobrevive.
+    Los archivos se escriben con la herramienta de escritura ([[escrituras-atomicas]]).
 
 - **2026-09-02 (E2 y E3, backend)** — El alta desde el pedido y el nombrado, probados **por HTTP
   con el archivo real de 123 MB**: alta completa en ~95 s (subida incluida), 9 piezas · 20/20
