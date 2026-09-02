@@ -262,7 +262,24 @@ y 9 piezas está bien; con un pedido grande hay que medirlo. `copy_foreign` trae
 con sus recursos: si hiciera falta, la salida es compartir el XObject entre piezas de la misma
 mesa — **nunca rasterizar**.
 
-### [ ] E5 — La configuración estable del admin (VIVA)
+### [x] E5 — La configuración estable del admin (VIVA) — **HECHO (backend)** (2026-09-02)
+
+**Cómo quedó:** `cat["config_con_diseno"]` (borde + forma de la etiqueta + regla de nesting) y **un
+solo lugar donde se resuelve**: `_cfg_con_diseno` / `_borde_de` / `_etiqueta_de`. Por ahí pasan
+ahora los seis puntos que antes leían `prod.get("borde_corte")` a mano: la clave del caché del
+preview, el preview, `generar`, `generar_multi`, la ficha y los GET del molde. El nesting se
+resuelve en `_config_produccion`, que ya era el único lugar que elegía el preset.
+Endpoints `GET/POST /api/config_con_diseno` (el POST pide `config.editar` y devuelve **a cuántos
+moldes alcanza**). `POST /api/productos/borde_corte` sobre un molde B devuelve **409**: si dejara
+guardar, la pantalla parecería guardar y el motor seguiría leyendo el global.
+🔴 Lo global es la **forma**; el **dónde** (`posiciones`) es del molde y lo marca el cliente — el
+POST de la etiqueta conserva las posiciones aunque el cuerpo traiga otra cosa, porque ese endpoint
+es *replace* y guardar una posición desde el pedido habría clavado la forma en el molde.
+🔴 Que el valor **resuelto** entre en `_piezas_base_clave` es lo que hace que el cambio del admin
+se vea solo en el paso Arte; si no, saldría bien en la tizada y viejo en la pantalla.
+Contrato: `verificar_config_con_diseno.py`. **Falta la pantalla** en Configuración.
+
+*(lo que sigue es el plan original de esta entrega)*
 - Borde de corte, etiqueta y nesting por defecto **para este camino**, en el catálogo
   (`cat["config_con_diseno"]`), con el patrón de `nesting_presets`.
 - **Viva** (decisión del usuario, 2026-09-02): el admin la cambia y **afecta a todos** los moldes

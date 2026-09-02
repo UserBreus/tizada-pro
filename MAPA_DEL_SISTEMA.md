@@ -1353,6 +1353,23 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-02 (376) — CAMINO B, E5: UNA SOLA CONFIGURACIÓN PARA TODOS LOS MOLDES CON DISEÑO, Y
+  VIVA.** El cliente que sube uno desde el pedido no configura borde, etiqueta ni nesting: lo deja
+  el admin UNA vez en `cat["config_con_diseno"]` y vale para todos — **también para los ya
+  cargados** (el molde APUNTA ahí, no se le copia nada: decisión del usuario). Patrón calcado de
+  `nesting_presets`. **Punto único de resolución**: `_cfg_con_diseno` / `_borde_de` /
+  `_etiqueta_de`, por donde ahora pasan los seis lugares que leían `prod.get("borde_corte")` a
+  mano (clave del caché del preview, preview, `generar`, `generar_multi`, ficha y los GET del
+  molde) — si uno leyera el del molde y otro el global, lo que se ve dejaría de ser lo que se
+  estampa. 🔴 **Lo global es la FORMA de la etiqueta; el DÓNDE (`posiciones`) es del molde**, lo
+  marca el cliente pieza por pieza: `set_etiqueta` es *replace*, así que en camino B conserva las
+  posiciones y descarta el resto del cuerpo (si no, guardar una posición desde el pedido clavaba
+  la forma en el molde y ese molde dejaba de seguir al admin, en silencio).
+  🔴 **El valor RESUELTO entra en `_piezas_base_clave`**: es lo que hace que el cambio del admin se
+  vea solo en el paso Arte. Sin eso salía bien en la tizada y viejo en la pantalla.
+  `POST /api/productos/borde_corte` sobre un molde B → **409** (una pantalla que parece guardar y
+  no cambia nada es peor que un error). Nuevos: `GET/POST /api/config_con_diseno` (el POST pide
+  `config.editar` y devuelve a cuántos moldes alcanza). Contrato: `verificar_config_con_diseno.py`.
 - **2026-09-02 (375) — CAMINO B, E4: LA TIZADA SALE DEL PROPIO MOLDE (sin arte y sin mapeo).**
   Verificado generando la hoja del archivo real **y mirándola**: 180 × 77 cm con las 9 piezas
   estampadas, su borde de corte y su etiqueta. `generar_pedido` acepta `arte=None` y la rama se

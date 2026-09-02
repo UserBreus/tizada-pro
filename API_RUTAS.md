@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **119 endpoints**. Generado automáticamente del código.
+Total: **121 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -42,6 +42,8 @@ Total: **119 endpoints**. Generado automáticamente del código.
 | GET | `/api/grupos_tizada` |  | — |
 | POST | `/api/grupos_tizada/eliminar` |  | body: id |
 | POST | `/api/grupos_tizada/guardar` |  | body: id, moldes, nombre |
+| GET | `/api/config_con_diseno` | La configuración que usan TODOS los moldes que traen el diseño adentro (borde de corte, forma de la etiqueta, regla de nesting) + a cuántos moldes alcanza. | — |
+| POST | `/api/config_con_diseno` | La guarda el admin (pide `config.editar`). ⚠️ Es VIVA: al cambiarla, los moldes YA CARGADOS también salen con la medida nueva. Sólo la FORMA de la etiqueta: el dónde va (`posiciones`) es de cada molde y lo marca el cliente. | body: borde_corte, etiqueta, nesting_preset_id |
 | GET | `/api/nesting_presets` |  | — |
 | POST | `/api/nesting_presets/eliminar` |  | body: id |
 | POST | `/api/nesting_presets/guardar` |  | body: alto_max_cm, espaciado_mm, id, margen_mm, nombre, rotacion |

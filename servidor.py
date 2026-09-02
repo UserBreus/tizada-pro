@@ -3912,8 +3912,8 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
             # molde, cambiar de fuente en el pedido serviría el render cacheado con la anterior.
             _sha1_corto(reempl or {}), _sha1_corto(_firma_fuentes()),
             _reg_rev(pid),   # versión del registro EN LA BASE (antes: mtime del espejo)
-            _sha1_corto(mapeo or {}), _sha1_corto((prod or {}).get("borde_corte") or {}),
-            _sha1_corto((prod or {}).get("etiqueta") or {}), _sha1_corto(edit_cfg or {}),
+            _sha1_corto(mapeo or {}), _sha1_corto(_borde_de(prod, cat)),
+            _sha1_corto(_etiqueta_de(prod, cat)), _sha1_corto(edit_cfg or {}),
             _sha1_corto(edit_tam or {}), _sha1_corto(_oa_cargar(pid, sub) or {}),
             _sha1_corto(edit_color or {}),
             # v13: las MARCAS DE PROCESO (TPU/Bordado/DTF). Aunque el visor dibuje el objeto igual,
@@ -4035,7 +4035,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
             ppt = MP.generar_pedido(pl, (None if _cb else arte), reg, _pers, prendas,
                                     _fuentes_para(pid, _reempl), tmp,
                                     mapeo_arte=(None if _cb else (mapeo or None)), solo_piezas=True,
-                                    borde_corte=prod.get("borde_corte"), etiqueta=prod.get("etiqueta"),
+                                    borde_corte=_borde_de(prod, cat), etiqueta=_etiqueta_de(prod, cat),
                                     editables_cfg=edit_cfg, editables_tamano=edit_tam,
                                     editables_color=edit_color,   # color override (LEY arte=tizada)
                                     # MARCAS DE PROCESO (TPU/Bordado/DTF): en el VISOR el objeto se
@@ -4364,9 +4364,12 @@ _BORDE_DEFAULT = {"activo": True, "ancho_mm": 2.0, "color": [0, 0, 0, 0.85], "al
 @app.get("/api/productos/borde_corte")
 def get_borde_corte():
     pid = request.args.get("pid") or _get_active_producto_id()
-    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
-    bc = dict(_BORDE_DEFAULT, **((prod or {}).get("borde_corte") or {}))
-    return jsonify(bc)
+    _cat = _cargar_catalogo()
+    prod = next((p for p in _cat["productos"] if p["id"] == pid), None)
+    # `global: True` = este molde usa la config del camino B (la deja el admin, una vez, para
+    # todos): la pantalla lo muestra pero no lo deja editar acá.
+    _glob = (prod or {}).get("origen") == "con_diseno"
+    return jsonify(dict(_borde_de(prod, _cat), **({"global": True} if _glob else {})))
 
 
 @app.post("/api/productos/borde_corte")
@@ -4377,6 +4380,11 @@ def set_borde_corte():
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if prod is None:
         return jsonify({"error": "molde no encontrado"}), 404
+    if (prod or {}).get("origen") == "con_diseno":
+        # El borde de estos moldes es UNO SOLO para todos y lo deja el admin: guardarlo por molde
+        # daría una pantalla que parece guardar y no cambia nada (el motor lee el global).
+        return jsonify({"error": "El borde de corte de los moldes con el diseño adentro se "
+                                 "configura una sola vez, en Configuración → Molde con diseño."}), 409
     try:
         color = [max(0.0, min(1.0, float(x))) for x in (cuerpo.get("color") or [0, 0, 0, 0.85])][:4]
         while len(color) < 4:
@@ -4411,6 +4419,47 @@ _ETIQUETA_DEFAULT = {
     "piezas_off": [],
     "zonas": {},
 }
+
+# ── CONFIGURACIÓN ESTABLE DE LOS MOLDES CON EL DISEÑO ADENTRO (camino B) ──────────────────────
+# El admin la deja UNA vez y la usan TODOS esos moldes: el cliente que sube uno desde el pedido no
+# configura el borde ni la etiqueta, sólo ubica dónde va cada una.
+# Es VIVA (decisión del usuario, 2026-09-02): el molde APUNTA acá, no se le copia nada, así que
+# cambiarla afecta también a los que ya están cargados. Mismo patrón que `nesting_presets`.
+# 🔴 La división que importa: lo GLOBAL es la FORMA de la etiqueta (tamaño, color, qué muestra);
+# el DÓNDE (`posiciones`, `piezas_off`, `zonas`) es de cada molde — lo marca el cliente pieza por
+# pieza y se va con su pedido. Si el admin pisara las posiciones, borraría ese trabajo.
+_ETQ_FORMA = ("activo", "mostrar", "separador", "align", "size_mm", "color",
+              "borde_activo", "borde_color", "borde_mm", "posicion")
+
+
+def _cfg_con_diseno(cat=None):
+    """La config del camino B, con los defaults ya aplicados. No escribe nada."""
+    _c = (cat if cat is not None else _cargar_catalogo()).get("config_con_diseno") or {}
+    return {
+        "borde_corte": dict(_BORDE_DEFAULT, **(_c.get("borde_corte") or {})),
+        "etiqueta": {k: v for k, v in dict(_ETIQUETA_DEFAULT, **(_c.get("etiqueta") or {})).items()
+                     if k in _ETQ_FORMA},
+        "nesting_preset_id": _c.get("nesting_preset_id") or "nesting_default",
+    }
+
+
+def _borde_de(prod, cat=None):
+    """El borde de corte que rige para ESTE molde. Camino B → el del admin; A → el del molde.
+
+    🔴 ÚNICO lugar donde se decide. El preview del Arte, la ficha y las cuatro llamadas al motor
+    tienen que leer LO MISMO: si uno lee el del molde y otro el global, lo que se ve deja de ser
+    lo que se estampa (la ley del proyecto)."""
+    if (prod or {}).get("origen") == "con_diseno":
+        return _cfg_con_diseno(cat)["borde_corte"]
+    return dict(_BORDE_DEFAULT, **((prod or {}).get("borde_corte") or {}))
+
+
+def _etiqueta_de(prod, cat=None):
+    """La etiqueta que rige para ESTE molde: la FORMA del admin + el DÓNDE del propio molde."""
+    base = dict(_ETIQUETA_DEFAULT, **((prod or {}).get("etiqueta") or {}))
+    if (prod or {}).get("origen") == "con_diseno":
+        base.update(_cfg_con_diseno(cat)["etiqueta"])     # sólo la forma; las posiciones quedan
+    return base
 
 
 # OJO con el NOMBRE: más abajo hay otro `_clamp_color(color)` (colores de editables, 1 argumento)
@@ -4504,8 +4553,12 @@ def _etq_piezas_del_molde(reg):
 @app.get("/api/productos/etiqueta")
 def get_etiqueta():
     pid = request.args.get("pid") or _get_active_producto_id()
-    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
-    et = {**_ETIQUETA_DEFAULT, **((prod or {}).get("etiqueta") or {})}
+    _cat = _cargar_catalogo()
+    prod = next((p for p in _cat["productos"] if p["id"] == pid), None)
+    # Camino B: la FORMA la pone el admin (global) y el DÓNDE es de este molde. `forma_global`
+    # se lo dice a la pantalla para que muestre esos campos bloqueados y deje sólo ubicar.
+    et = _etiqueta_de(prod, _cat)
+    et["forma_global"] = (prod or {}).get("origen") == "con_diseno"
     et["mostrar"] = {**_ETIQUETA_DEFAULT["mostrar"], **(et.get("mostrar") or {})}
     et["posicion"] = {**_ETIQUETA_DEFAULT["posicion"], **(et.get("posicion") or {})}
     # La pantalla trabaja POR PIEZA: se devuelve ya migrado (en memoria; se persiste cuando el
@@ -4585,6 +4638,16 @@ def set_etiqueta():
     # lugar de antes aunque la pantalla mostrara el nuevo — el bug clásico de esta pantalla:
     # se ve bien y sale movida (ver changelog 146).
     et["posiciones"], _conf_mig = _etq_posiciones_por_pieza(et.get("posiciones"))
+    if (prod or {}).get("origen") == "con_diseno":
+        # 🔴 En el camino B el cliente SÓLO ubica la etiqueta: la forma (tamaño, color, qué
+        # muestra) es del admin y vale para todos los moldes. Este POST es replace —escribe el
+        # dict entero— así que sin esto, guardar una posición desde el pedido dejaría clavada en
+        # el molde la forma que tuviera la pantalla en ese momento, y el molde dejaría de seguir
+        # al admin sin que nadie lo note.
+        _guardado = dict((prod or {}).get("etiqueta") or {})
+        for _k in ("posiciones", "piezas_off", "zonas"):
+            _guardado[_k] = et.get(_k)
+        et = _guardado
     prod["etiqueta"] = et
     _guardar_catalogo(cat)
     # La respuesta lleva TAMBIÉN la lista de piezas (como el GET): el front reemplaza su
@@ -6012,8 +6075,13 @@ def _config_produccion(pid=None):
     cat = _cargar_catalogo()
     prod = next((p for p in cat.get("productos", []) if p["id"] == (pid or _get_active_producto_id())), None)
     try:
-        # Si el molde no tiene preset asignado, usa el DEFAULT (Estándar).
-        _pid = (prod or {}).get("nesting_preset_id") or "nesting_default"
+        # Si el molde no tiene preset asignado, usa el DEFAULT (Estándar). Y si es del CAMINO B
+        # (trae el diseño adentro), el que dejó el admin para todos esos moldes: el cliente que
+        # sube uno desde el pedido no configura el nesting.
+        _pid = ((prod or {}).get("nesting_preset_id")
+                or (_cfg_con_diseno(cat)["nesting_preset_id"]
+                    if (prod or {}).get("origen") == "con_diseno" else None)
+                or "nesting_default")
         preset = next((n for n in cat.get("nesting_presets", []) if n.get("id") == _pid), None)
         if preset:
             espaciado_mm = preset.get("espaciado_mm", espaciado_mm)
@@ -6338,8 +6406,8 @@ def generar():
                                     reg, pers, translated_prendas, _fuentes_para(pid, _reempl_de_request()), salida, progreso=prog,
                                     mapeo_arte=mapeo, config_nesting=cfg_nesting,
                                      rotaciones=rotaciones, asignacion_tela=asignacion,
-                                     telas_cfg=telas_cfg, borde_corte=(prod or {}).get("borde_corte"),
-                                     etiqueta=(prod or {}).get("etiqueta"),
+                                     telas_cfg=telas_cfg, borde_corte=_borde_de(prod, cat),
+                                     etiqueta=_etiqueta_de(prod, cat),
                                      editables_cfg=_editables_cfg(prod, "principal", (cuerpo.get("editables") or {}).get("principal")),
                                      editables_tamano=_editables_tamano(prod),
                                      editables_color=_editables_color(prod, "principal"),
@@ -6623,8 +6691,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
                                 mapeo_arte=mapeo, solo_piezas=True,
                                 asignacion_tela=(var or {}).get("asig"),
                                 telas_cfg=(var or {}).get("telas"),
-                                borde_corte=(prod or {}).get("borde_corte"),
-                                etiqueta=(prod or {}).get("etiqueta"),
+                                borde_corte=_borde_de(prod),
+                                etiqueta=_etiqueta_de(prod),
                                 editables_cfg=_editables_cfg(prod, diseno or "principal"),
                                 editables_tamano=_editables_tamano(prod),
                                 editables_color=_editables_color(prod, diseno or "principal"),
@@ -6967,8 +7035,8 @@ def generar_multi():
                 "fuentes": _fuentes_para(pid, _reempl),   # carpetas + reemplazos DEL PEDIDO (arte=tizada)
                 "registro": reg, "pers": pers, "prendas": subset,
                 "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(dslug),
-                "borde_corte": (prod or {}).get("borde_corte"),
-                "etiqueta": (prod or {}).get("etiqueta"),
+                "borde_corte": _borde_de(prod, cat),
+                "etiqueta": _etiqueta_de(prod, cat),
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
                 "editables_tamano": _editables_tamano(prod),
                 "editables_color": _editables_color(prod, dslug),
@@ -8790,6 +8858,76 @@ def eliminar_regla_planilla():
 def get_nesting_presets():
     cat = _cargar_catalogo()
     return jsonify(cat.get("nesting_presets", []))
+
+
+@app.get("/api/config_con_diseno")
+def get_config_con_diseno():
+    """La configuración que usan TODOS los moldes que traen el diseño adentro."""
+    cat = _cargar_catalogo()
+    _c = _cfg_con_diseno(cat)
+    # Cuántos moldes la están usando: la pantalla tiene que poder decir a cuántos afecta el cambio.
+    _c["moldes"] = sum(1 for p in cat.get("productos", []) if p.get("origen") == "con_diseno")
+    return jsonify(_c)
+
+
+@app.post("/api/config_con_diseno")
+def set_config_con_diseno():
+    """La guarda el ADMIN, una vez, para todos esos moldes.
+
+    ⚠️ Es VIVA: al cambiarla, los moldes YA CARGADOS también salen con la medida nueva (apuntan
+    acá, no tienen copia). Es lo que se pidió; la pantalla lo avisa. El preview del paso Arte se
+    regenera solo porque el valor resuelto entra en `_piezas_base_clave`."""
+    _u = _usuario_actual()
+    if _u and "config.editar" not in (_u.get("permisos") or []):
+        return jsonify({"error": "No tenés permiso para editar la configuración (config.editar)."}), 403
+    cuerpo = request.get_json(force=True) or {}
+    cat = _cargar_catalogo_para_editar()
+    _prev = _cfg_con_diseno(cat)
+
+    def _num(v, d, lo, hi):
+        try:
+            x = float(str(v).replace(",", ".")) if isinstance(v, str) else float(v)
+            if x != x:
+                raise ValueError
+        except (TypeError, ValueError):
+            x = float(d)
+        return max(lo, min(hi, x))
+
+    _bc = cuerpo.get("borde_corte")
+    if isinstance(_bc, dict):
+        _alin = _bc.get("alineacion") or _prev["borde_corte"]["alineacion"]
+        if _alin not in ("fuera", "centro", "dentro"):
+            return jsonify({"error": "alineación de borde inválida"}), 400
+        _prev["borde_corte"] = {
+            "activo": bool(_bc.get("activo", _prev["borde_corte"]["activo"])),
+            "ancho_mm": _num(_bc.get("ancho_mm"), _prev["borde_corte"]["ancho_mm"], 0.2, 20.0),
+            "color": _clamp_color_etq(_bc.get("color"), _prev["borde_corte"]["color"]),
+            "alineacion": _alin}
+    _et = cuerpo.get("etiqueta")
+    if isinstance(_et, dict):
+        _mos = _et.get("mostrar") or {}
+        _prev["etiqueta"].update({
+            "activo": bool(_et.get("activo", _prev["etiqueta"]["activo"])),
+            "mostrar": {k: bool(_mos.get(k, _prev["etiqueta"]["mostrar"].get(k, True)))
+                        for k in ("talle", "pieza", "numero")},
+            "separador": (str(_et.get("separador", _prev["etiqueta"]["separador"])) or "-")[:3],
+            "align": _et.get("align") if _et.get("align") in ("izquierda", "centro", "derecha")
+                     else _prev["etiqueta"]["align"],
+            "size_mm": _num(_et.get("size_mm"), _prev["etiqueta"]["size_mm"], 1.0, 40.0),
+            "color": _clamp_color_etq(_et.get("color"), _prev["etiqueta"]["color"]),
+            "borde_activo": bool(_et.get("borde_activo", _prev["etiqueta"]["borde_activo"])),
+            "borde_color": _clamp_color_etq(_et.get("borde_color"), _prev["etiqueta"]["borde_color"]),
+            "borde_mm": _num(_et.get("borde_mm"), _prev["etiqueta"]["borde_mm"], 0.0, 10.0)})
+    _np = cuerpo.get("nesting_preset_id")
+    if _np:
+        if not any(n.get("id") == _np for n in cat.get("nesting_presets", [])):
+            return jsonify({"error": "esa regla de nesting no existe"}), 404
+        _prev["nesting_preset_id"] = str(_np)
+
+    cat["config_con_diseno"] = _prev
+    _guardar_catalogo(cat)
+    _prev["moldes"] = sum(1 for p in cat.get("productos", []) if p.get("origen") == "con_diseno")
+    return jsonify(_prev)
 
 
 @app.post("/api/nesting_presets/guardar")
