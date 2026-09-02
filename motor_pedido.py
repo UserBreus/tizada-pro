@@ -36,7 +36,16 @@ def extraer_piezas_mesa(doc, mesa, talle, **kw):
         _path, _mt = "", None
     if not _path or _mt is None or kw:
         return _extraer_piezas_mesa_cruda(doc, mesa, talle, **kw)
-    _fk = (_path, _mt)
+    # La MARCA del camino B entra en la clave por el mismo motivo que en `_DET_CACHE`: el alta
+    # DETECTA el camino y recién después marca el molde, así que la misma ruta con el mismo mtime
+    # da contornos distintos antes y después de marcar. Sin esto, el proceso que ya leyó el molde
+    # sin marca sigue sirviendo la detección vieja (cada trazado = una pieza) para siempre.
+    try:
+        import piezas_con_diseno as _PD
+        _cb = _PD.es_camino_b(_path)
+    except ImportError:
+        _cb = False
+    _fk = (_path, _mt, _cb)
     if _fk not in _PZS_CACHE:
         while len(_PZS_CACHE) >= 3:                      # FIFO: fuera el archivo más viejo
             _PZS_CACHE.pop(next(iter(_PZS_CACHE)))

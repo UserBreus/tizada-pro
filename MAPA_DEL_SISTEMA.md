@@ -70,6 +70,16 @@ camino A **no se toca**.
 `MOLDE_CON_DISENO.md` (raíz del repo).** Leerlo antes de tocar nada de esa feature y actualizarlo
 en la misma tanda. Acá sólo queda el puntero, para que no se dupliquen dos verdades.
 
+Lo mínimo que hay que saber si se toca CUALQUIER otra cosa del sistema (2026-09-02):
+
+| Qué | Dónde se decide | Por qué importa afuera de la feature |
+|---|---|---|
+| «¿este molde es del camino B?» | **la marca `molde.origen` en disco**, al lado de `plantilla.ai` (`piezas_con_diseno.es_camino_b`) | el nesting paraleliza con **procesos**: una global de módulo no cruzaría. Y entra en la clave de **todos** los cachés que dependen del archivo (`_DET_CACHE`, `_PZS_CACHE`, el caché de detección en disco): el alta detecta y marca DESPUÉS, así que misma ruta + mismo mtime da resultados distintos |
+| el flag para las pantallas | `prod["origen"] == "con_diseno"` (lo devuelve `/api/productos`) | la marca de disco manda para el motor; ésta es para la UI |
+| **`idx_mesa`** | `registro[pieza][talle]`, columna nueva en `dbo.pieza_talle` | `pieza_idx` = posición dentro del **TALLE** (identidad, §8.9) · `idx_mesa` = posición dentro de la **MESA** (lo que indexa `extraer_piezas_mesa`). En el camino A coinciden; con 9 mesas, no. Al leer de la base la clave se pone **sólo si no es NULL** |
+| moldes **efímeros** | `prod["efimero"]` | se borran solos («Nuevo pedido», «Terminar pedido» y el barrido al arrancar). 🔴 Sólo por el flag y la fecha — ver §8 |
+| nombrar sus piezas | `POST /api/plantilla/pieza_renombrar` | las herramientas del camino A (`etiquetas`, `grupo_pieza`, `emparejado`) devuelven **409** sobre un molde B: re-armarían el registro asumiendo una sola mesa |
+
 ---
 
 ## 1. Qué es el sistema (en una frase)
@@ -396,6 +406,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 - `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref][&candidatas=1]` (→ `detectar_piezas`, piezas del molde; `candidatas=1` = molde ORIGINAL + capas que aún no son talle, para la herramienta de variantes por piezas) · `GET /api/plantilla/nido` (geometría nesteada).
 - `GET /api/plantilla/deteccion_todas` (→ `detectar_piezas_todas`: TODAS las piezas de TODOS los talles en un lienzo + `formato`; es la vista del agrupado por selección — ver §10.c).
 - `GET/POST /api/plantilla/variantes` (variantes POR CAPA) · `POST /api/plantilla/variantes_piezas` (variantes POR PIEZAS) — ver §10.c.
+- `POST /api/plantilla/pieza_renombrar` (**CAMINO B**: le pone nombre a UNA pieza por `(mesa, t_idx)`; no re-arma el registro) · `POST /api/pedido/limpiar_efimeros` (borra los moldes efímeros del pedido) — ver §0.b.
 - `POST /api/plantilla/grupo_pieza` (**agrupar piezas homólogas**: nombre + correspondencia entre talles en UN gesto) · `GET/POST /api/plantilla/emparejado` (el ajuste avanzado: acomodo virtual + corrección por índice) — ver §10.c.
 - `GET /api/arte/deteccion?diseno=` (→ `detectar_arte`, mesas + mapeo) · `POST /api/arte/mapeo` (guarda `mapeo_arte.json` + `prod["mapeo_arte"]` fijo; corre `validar_arte_separado`; **pre-warm** de `_piezas_base` en background).
 - `POST /api/arte/preview_piezas` (→ `_piezas_base`, render real cacheado por pieza).
@@ -1342,6 +1353,39 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-02 (374) — CAMINO B, E2+E3: EL ALTA EFÍMERA DESDE EL PEDIDO Y EL NOMBRADO.** Probado
+  por HTTP con el archivo real (123 MB): alta en ~95 s, 9 piezas · 20/20 talles, visor de 7 KB,
+  nombres que persisten y borrado que no deja nada. **Decisión del usuario: el molde del camino B
+  es EFÍMERO** — se sube para ESE pedido y no queda guardado (`efimero: true` + `efimero_visto`;
+  lo borra `POST /api/pedido/limpiar_efimeros` y, si quedó huérfano, `_barrer_efimeros` al
+  arrancar). 🔴 El barrido borra **por el flag y por la fecha, nunca «los que sobran» ni por
+  nombre** (§8 dice por qué: ya costó 3 moldes del usuario). Va DENTRO del catálogo a propósito:
+  +20 puntos del camino caliente resuelven por catálogo y el primero que se olvidara daría un
+  `prod = None` silencioso. **Nombrar en el camino B es RENOMBRAR**, no agrupar
+  (`PD.renombrar` + `POST /api/plantilla/pieza_renombrar`): el registro ya está completo y los
+  talles son capas de la misma mesa, así que `alta_plantilla_manual` —que asume UNA mesa y
+  empareja por forma— lo destruiría; `etiquetas`, `grupo_pieza` y `emparejado` devuelven **409**
+  sobre un molde B. Detalle completo en `MOLDE_CON_DISENO.md`.
+- **2026-09-02 (373) — 🔴 TRES AGUJEROS QUE HABRÍAN APARECIDO RECIÉN AL GENERAR LA TIZADA.**
+  (a) **`idx_mesa` no se persistía.** Desde que el registro vive **sólo en MSSQL** (sin espejo en
+  disco), lo que no tiene columna no existe: `dbo.pieza_talle` no la tenía, así que el índice
+  DENTRO de la mesa se evaporaba en el primer round-trip y `_armar_base` volvía a indexar por
+  `pieza_idx` (el índice dentro del TALLE) → con 9 mesas de 1 pieza, `IndexError` o pieza
+  equivocada. Columna nueva (`ALTER … NULL`, idempotente) + chequeo cacheado `COL_LENGTH` para que
+  una base sin migrar **degrade** en vez de tumbar el camino A. 🔴 Al leer, la clave se escribe
+  **sólo si no es NULL**: `info.get("idx_mesa", info["pieza_idx"])` cae al default sólo si la
+  clave **falta**; un `None` haría `_pm[None]` → TypeError en TODOS los moldes del camino A.
+  (b) **Dos cachés servían la detección vieja para siempre**: el alta detecta y marca DESPUÉS, así
+  que misma ruta + mismo mtime da 9 piezas o 619 según la marca. `_DET_CACHE` ya lo tenía;
+  `_PZS_CACHE` y el caché **en disco** (`{mtime}_dv2_…` → `dv3` + sufijo `_b`) no. Y el mtime es un
+  entero de SEGUNDOS: dos subidas en el mismo segundo se servían la detección de la otra.
+  (c) **El visor no precargaba los nombres puestos** (`nombres_existentes` vacío): filtraba
+  `info["mesa"] == mesa` y en el camino B `mesa` es `None` — la misma guarda que ya tenía el filtro
+  por variable diez líneas más abajo.
+  📌 **Bug preexistente ENCONTRADO Y NO TOCADO:** en `/api/plantilla/etiquetas` (`servidor.py`) el
+  `_guardar_registro` quedó **después de un `return`**, o sea inalcanzable: ese endpoint hoy **no
+  persiste nada** (el nombrado real lo hace `grupo_pieza`). Moverlo resucita un camino de escritura
+  viejo que nadie está probando → se decide aparte, no dentro de esta feature.
 - **2026-08-31 (372) — CAMINO B, E1: LAS PIEZAS DE UN MOLDE CON EL DISEÑO ADENTRO.** Módulo
   `piezas_con_diseno.py` + contrato `verificar_molde_con_diseno.py`. **La detección de hoy no sirve
   para ese archivo**: `extraer_piezas_mesa` trata cada trazado como una pieza, así que una prenda

@@ -1565,6 +1565,11 @@ def _guardia_moldes():
         pid = _pid_de_request()
         if not pid:
             return None            # sin molde explícito no hay nada que proteger acá
+        # De paso: si es un molde EFÍMERO del camino B, marcarlo como visto. Es el único punto por
+        # el que pasan TODAS las requests que trabajan sobre un molde, así que un pedido abierto
+        # lo refresca solo y la limpieza de abandonados no se lo lleva por debajo. Barato: se
+        # reescribe como mucho cada 15 minutos.
+        _tocar_efimero(pid)
         # 3) ESCRIBIR EL CATÁLOGO PIDE PERMISO. Una moldería del catálogo la VE todo el mundo (un
         #    Operario la necesita para trabajar), pero tocarla es otra cosa. Antes lo que hacía de
         #    candado era el DUEÑO, y al arreglar «lo que subo desde Configuración es de todos» ese
@@ -1657,6 +1662,32 @@ def _cargar(nombre, pid=None, sub=None):
         return json.load(open(_ruta_datos(nombre, pid, sub=sub), encoding="utf-8"))
     except Exception:
         return None
+
+
+# Una pieza que TODAVÍA NO TIENE NOMBRE: así las deja el alta («Pieza 3»), y así las cuenta
+# `/api/productos` para decidir si el molde ya se puede pedir. Vive en un solo lugar para que el
+# servidor y la pantalla no cuenten distinto — si no, el botón «siguiente» queda apagado sin que
+# se entienda por qué.
+_ES_PROVISORIO = re.compile(r"^Pieza( extra)? \d+'*$")
+
+
+def _no_es_camino_b(pid, que="Esta herramienta"):
+    """Corta las herramientas del camino A sobre un molde que trae el diseño adentro.
+
+    Todas ellas RE-ARMAN el registro con `alta_plantilla_manual`, que asume un molde de UNA sola
+    mesa y empareja los talles por forma. Un molde del camino B tiene varias mesas y sus talles
+    son capas de la misma mesa: la correspondencia ya está resuelta desde el alta. Dejarlas correr
+    no da un error prolijo — destruye el registro, o revienta con `mesa=None`. Devuelve la
+    respuesta a devolver, o None si el molde no es del camino B."""
+    try:
+        import piezas_con_diseno as PD
+        if not PD.es_camino_b(_ruta_entrada("plantilla.ai", pid)):
+            return None
+    except ImportError:
+        return None
+    return jsonify({"error": f"{que} no se usa en un molde que trae el diseño adentro: sus talles "
+                             f"son capas de la misma mesa y la correspondencia entre ellos ya está "
+                             f"resuelta. Las piezas se nombran desde el pedido."}), 409
 
 
 def _guardar_registro(pid, reg, reset=False):
@@ -1943,8 +1974,16 @@ def _deteccion_base_cached(pid, talle_ref, candidatas=False):
     # servir una por la otra dejaría el visor mostrando cualquier cosa
     # `dv2`: el ORDEN de las piezas cambió (entrada 182, ya no se reordena por posición) sin
     # cambiar el mtime del archivo → un caché sin versión seguiría sirviendo los índices viejos.
+    # `dv3` + la MARCA del camino B: el alta DETECTA el camino y marca DESPUÉS, así que el mismo
+    # archivo con el mismo mtime da 9 piezas o 619 según esté marcado o no. Y el mtime es un
+    # entero de SEGUNDOS: dos subidas en el mismo segundo servirían la detección equivocada.
+    try:
+        import piezas_con_diseno as _PD
+        _cb = "_b" if _PD.es_camino_b(pl) else ""
+    except ImportError:
+        _cb = ""
     fp = os.path.join(cdir, re.sub(r"[^A-Za-z0-9_-]+", "_",
-                                   f"{mt}_dv2_{talle_ref or 'auto'}{'_cand' if candidatas else ''}") + ".json")
+                                   f"{mt}_dv3{_cb}_{talle_ref or 'auto'}{'_cand' if candidatas else ''}") + ".json")
     try:
         return json.load(open(fp, encoding="utf-8"))
     except Exception:
@@ -2002,7 +2041,12 @@ def plantilla_deteccion():
             for nombre_pieza, por_talle in reg.items():
                 if talle_ref in por_talle:
                     info = por_talle[talle_ref]
-                    if info.get("mesa") == mesa:
+                    # `mesa is None` = visor del CAMINO B: muestra TODAS las mesas juntas, así que
+                    # no hay una mesa contra la cual comparar. Sin esta guarda el filtro nunca
+                    # matcheaba y la pantalla mostraba las piezas SIN los nombres ya puestos (el
+                    # cliente los volvía a escribir encima). Es la misma guarda del filtro por
+                    # variable, unas líneas más abajo.
+                    if mesa is None or info.get("mesa") == mesa:
                         idx = info.get("pieza_idx")
                         if idx is not None:
                             nombres_existentes[idx] = nombre_pieza
@@ -2076,6 +2120,17 @@ def _prewarm_deteccion_todas(pid):
     pagaba ~12 s de extracción en frío). Best-effort: si falla, el endpoint lo arma."""
     try:
         pl = _ruta_entrada("plantilla.ai", pid)
+        # CAMINO B: no hay nada que pre-calentar y sí mucho que romper. El lienzo TODAS existe
+        # para EMPAREJAR talles a ojo, y en el camino B la correspondencia ya es exacta (los
+        # talles son capas de la misma mesa). Además `detectar_piezas_todas` lee UNA sola mesa
+        # (la de más trazos) — con 9 mesas daría una respuesta equivocada — y correría PyMuPDF
+        # sobre 123 MB en un HILO, que es justo lo que el proyecto no hace (no es thread-safe).
+        try:
+            import piezas_con_diseno as _PD
+            if _PD.es_camino_b(pl):
+                return
+        except ImportError:
+            pass
         mt = int(os.path.getmtime(pl))
         cdir = _ruta_datos("deteccion_cache", pid)
         fp = os.path.join(cdir, f"{mt}_dv2_TODAS.json")
@@ -2110,6 +2165,17 @@ def plantilla_deteccion_todas():
     pl = _ruta_entrada("plantilla.ai", pid)
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí el molde"}), 409
+    # CAMINO B: esta vista no aplica y sería una respuesta ERRÓNEA, no una vacía. Sirve para
+    # emparejar talles a ojo; acá la correspondencia ya es exacta (los talles son capas de la
+    # misma mesa) y `detectar_piezas_todas` mira una sola mesa. Mejor decirlo que dibujar mal.
+    try:
+        import piezas_con_diseno as _PD
+        if _PD.es_camino_b(pl):
+            return jsonify({"error": "este molde trae el diseño adentro: sus talles son capas de la "
+                                     "misma mesa y la correspondencia entre ellos ya está resuelta, "
+                                     "así que no hay nada que emparejar"}), 409
+    except ImportError:
+        pass
     try:
         mt = int(os.path.getmtime(pl))
     except OSError:
@@ -2494,6 +2560,9 @@ def plantilla_etiquetas():
     pl = _ruta_entrada("plantilla.ai")
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí la plantilla base"}), 409
+    _no = _no_es_camino_b(_get_active_producto_id(), "El nombrado por posición")
+    if _no:
+        return _no
     _indices = _cargar("correspondencia_piezas.json") or None
     _emp = _emparejado_cfg()
     _pid = _get_active_producto_id()
@@ -2547,6 +2616,47 @@ def plantilla_etiquetas():
                "excluidos": alta.get("excluidos") or []}
     json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
     return jsonify(resumen)
+
+
+@app.post("/api/plantilla/pieza_renombrar")
+def plantilla_pieza_renombrar():
+    """Le pone nombre a UNA pieza de un molde del CAMINO B (el que trae el diseño adentro).
+
+    Cuerpo: `{pid, mesa, t_idx, nombre}` — `mesa` y `t_idx` son los que el visor devuelve en cada
+    pieza (`detectar_para_visor`), o sea exactamente lo que el usuario tocó en la pantalla.
+
+    🔴 POR QUÉ NO SE USA EL NOMBRADO DE SIEMPRE: `/api/plantilla/etiquetas` y
+    `/api/plantilla/grupo_pieza` RE-ARMAN el registro con `alta_plantilla_manual`, que asume UN
+    molde de UNA sola mesa y empareja los talles por forma. Acá el molde tiene 9 mesas y los
+    talles son capas de la misma mesa: la correspondencia ya está resuelta desde el alta, y
+    re-armar el registro la destruiría (o revienta, porque `mesa` viene en None). Nombrar es
+    cambiar la clave del registro, y nada más."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    pl = _ruta_entrada("plantilla.ai", pid)
+    import piezas_con_diseno as PD
+    if not PD.es_camino_b(pl):
+        return jsonify({"error": "este molde no trae el diseño adentro: sus piezas se nombran "
+                                 "desde la moldería"}), 409
+    try:
+        mesa, t_idx = int(cuerpo.get("mesa")), int(cuerpo.get("t_idx"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "falta decir qué pieza (mesa y t_idx)"}), 400
+    reg = _cargar("registro_producto.json", pid) or {}
+    try:
+        reg2, ren = PD.renombrar(reg, mesa, t_idx, cuerpo.get("nombre"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
+    if ren:
+        # Lo que colgaba del nombre viejo (etiqueta, telas, mapeo) se muda con la pieza.
+        _migrar_nombres_pieza(pid, ren)
+    _guardar_registro(pid, reg2)
+    _nombres = list(reg2.keys())
+    return jsonify({"ok": True, "renombradas": ren, "piezas": _nombres,
+                    # `sin_nombrar` es lo que traba el paso siguiente: la MISMA regla que usa
+                    # `/api/productos` (`piezas_nombradas`), para que la pantalla y el servidor
+                    # no cuenten distinto y el botón no quede apagado «porque sí».
+                    "sin_nombrar": [n for n in _nombres if _ES_PROVISORIO.match(n or "")]})
 
 
 # ── EMPAREJADO ENTRE TALLES: reacomodar a mano + corregir la pieza homóloga ────────────
@@ -2653,6 +2763,9 @@ def plantilla_emparejado_post():
     pid = _get_active_producto_id()
     if not os.path.exists(_ruta_entrada("plantilla.ai", pid)):
         return jsonify({"error": "primero subí el molde"}), 409
+    _no = _no_es_camino_b(pid, "El ajuste del emparejado entre talles")
+    if _no:
+        return _no
     cfg = _emparejado_cfg(pid)
     talle = cuerpo.get("talle")
     reset = cuerpo.get("reset")
@@ -3007,6 +3120,10 @@ def plantilla_grupo_pieza():
     pid = _get_active_producto_id()
     if not os.path.exists(_ruta_entrada("plantilla.ai", pid)):
         return jsonify({"error": "primero subí el molde"}), 409
+    # En el camino B se nombra con `/api/plantilla/pieza_renombrar`: no hay homólogas que agrupar.
+    _no = _no_es_camino_b(pid, "Agrupar piezas homólogas")
+    if _no:
+        return _no
     try:
         _pl, _det, _mesa, guia, asign, _reg = _guia_y_asignaciones(pid)
     except Exception as e:
@@ -7171,6 +7288,100 @@ def fuentes_pedido_limpiar():
     return jsonify({"ok": True, "borradas": borradas})
 
 
+# Cuánto sobrevive un molde efímero al que nadie volvió a tocar. Es el caso «cerró la pestaña»:
+# el front NO borra al cerrar (a propósito: un cierre por accidente no puede destruir el nombrado
+# que la persona acaba de hacer), así que la red que los junta es ésta.
+_EFIMERO_TTL_H = float(os.environ.get("TIZADA_EFIMERO_TTL_H") or 24)
+
+
+def _barrer_efimeros(horas=None):
+    """Borra los moldes efímeros abandonados. Corre al arrancar el servidor.
+
+    🔴 BORRA POR EL FLAG Y POR LA FECHA, NUNCA «los que sobran» ni por nombre. No toca:
+       · nada que no tenga `efimero: true` (un molde del catálogo o un «Mi artículo» de verdad,
+         aunque su nombre parezca de prueba y aunque haya varios iguales);
+       · un efímero visto hace poco: puede haber un pedido abierto ahora mismo en otra pantalla.
+    Ya se borraron 3 moldes del usuario, con su nombrado adentro, por confundir estas dos cosas."""
+    try:
+        horas = _EFIMERO_TTL_H if horas is None else horas
+        cat = _cargar_catalogo()
+        limite = time.time() - horas * 3600
+        viejos = [p["id"] for p in cat.get("productos", [])
+                  if p.get("efimero") is True
+                  and float(p.get("efimero_visto") or p.get("creado") or 0) < limite]
+        if not viejos:
+            return 0
+        print(f"[efimeros] limpiando {len(viejos)} molde(s) de pedidos abandonados "
+              f"(sin usarse hace más de {horas:g} h): {viejos}")
+        cat = _cargar_catalogo_para_editar()
+        for pid in viejos:
+            prod = next((p for p in cat["productos"] if p.get("id") == pid), None)
+            if prod is None or prod.get("efimero") is not True:
+                continue                       # cambió entre las dos lecturas: no se toca
+            cat["productos"] = [p for p in cat["productos"] if p.get("id") != pid]
+            _borrar_molde_entero(cat, pid, efimero=True)
+        return len(viejos)
+    except Exception as e:
+        print(f"[efimeros] no se pudo barrer: {e}")
+        return 0
+
+
+def _tocar_efimero(pid):
+    """Refresca `efimero_visto` para que el barrido no se lleve un molde que se está usando."""
+    try:
+        cat = _cargar_catalogo()
+        prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+        if not prod or prod.get("efimero") is not True:
+            return
+        if time.time() - float(prod.get("efimero_visto") or 0) < 900:
+            return                             # ya se refrescó hace poco: no reescribir por gusto
+        cat = _cargar_catalogo_para_editar()
+        prod = next((p for p in cat["productos"] if p.get("id") == pid), None)
+        if prod is not None and prod.get("efimero") is True:
+            prod["efimero_visto"] = time.time()
+            _guardar_catalogo(cat)
+    except Exception:
+        pass
+
+
+@app.post("/api/pedido/limpiar_efimeros")
+def limpiar_efimeros():
+    """Borra los moldes EFÍMEROS del camino B que mandó el pedido (los que trajeron el diseño
+    adentro y se subieron «sólo para este pedido»). Lo llaman «Nuevo pedido» y «Terminar pedido».
+
+    🔴 SÓLO borra los que están marcados `efimero: true`. Un pid que no lo esté se IGNORA en
+    silencio: el front manda la lista de lo que había en el pedido y ahí puede venir un molde del
+    catálogo. Nunca «los que sobran», nunca por nombre — así se perdieron 3 moldes del usuario
+    con su nombrado adentro, y no se pudieron recuperar.
+    Las tizadas ya generadas NO se tocan: viven en `trabajos/` y son archivos independientes."""
+    pids = [str(p) for p in ((request.get_json(silent=True) or {}).get("pids") or [])]
+    if not pids:
+        return jsonify({"ok": True, "borrados": []})
+    cat = _cargar_catalogo_para_editar()
+    borrados, ignorados = [], []
+    for pid in pids:
+        prod = next((p for p in cat["productos"] if p.get("id") == pid), None)
+        if prod is None:
+            continue                     # ya no está: nada que hacer
+        if not prod.get("efimero"):
+            ignorados.append(pid)        # molde de verdad: NO se toca
+            continue
+        # Un trabajo en curso está LEYENDO `entrada/<pid>/plantilla.ai` para armar la tizada:
+        # borrarlo debajo lo rompe a mitad de camino.
+        # `producto_id` es UN pid en `generar` y los pids separados por coma en `generar_multi`.
+        if any(isinstance(t, dict) and t.get("estado") in ("en cola", "generando")
+               and pid in str(t.get("producto_id") or "").split(",")
+               for t in trabajos.values()):
+            ignorados.append(pid)
+            continue
+        cat["productos"] = [p for p in cat["productos"] if p.get("id") != pid]
+        _borrar_molde_entero(cat, pid, efimero=True)
+        borrados.append(pid)
+    if ignorados:
+        print(f"[limpiar_efimeros] no se tocaron (no son efímeros o están generando): {ignorados}")
+    return jsonify({"ok": True, "borrados": borrados, "ignorados": ignorados})
+
+
 @app.get("/api/pedido/fuente_chars")
 def fuente_chars():
     """Caracteres que SOPORTA la tipografía de personalización del diseño (la que estampa
@@ -7396,7 +7607,7 @@ def get_productos():
         # NOMBRADAS POR EL USUARIO (sin las provisorias «Pieza N» / «Pieza extra N»): el gate del
         # front — hasta que no haya al menos una, los demás ajustes del molde quedan DESACTIVADOS
         # (regla del usuario 2026-08-19: sin nombrar no se avanza a nada).
-        n_nombradas = sum(1 for _k in _reg_conteo if not re.match(r"^Pieza( extra)? \d+'*$", _k))
+        n_nombradas = sum(1 for _k in _reg_conteo if not _ES_PROVISORIO.match(_k))
         val_path = os.path.join(DATOS, "productos", pid, "validacion_arte.json")
         has_arte = False
         if os.path.exists(val_path):
@@ -7447,6 +7658,12 @@ def get_productos():
             # la planilla no puede ofrecer «Larga» si ninguna pieza dice «larga» (ver §9 del mapa).
             "toggles_piezas": _toggles_disponibles_cached(p, cat),
             "arte": has_arte,
+            # CAMINO B: el molde trae el diseño estampado ADENTRO de cada pieza (no hay arte
+            # aparte ni mapeo). La pantalla necesita el flag para ramificar: sin esto el front
+            # no puede distinguirlo de un molde normal y le pediría un arte que no existe.
+            # `efimero` = se subió para UN pedido y no queda guardado (ver MOLDE_CON_DISENO.md).
+            "origen": p.get("origen") or "molde",
+            "efimero": bool(p.get("efimero")),
             "planilla_template_id": tid or "plan_default",
             "nesting_preset_id": p.get("nesting_preset_id") or "nesting_default",
             "grupo_tizada": p.get("grupo_tizada") or "General",
@@ -7560,6 +7777,12 @@ def crear_producto():
     
     cat = _cargar_catalogo_para_editar()
     propio = bool(cuerpo.get("propio"))
+    # EFÍMERO = molde del CAMINO B: se sube para ESTE pedido y no queda guardado (se borra al
+    # terminar o reiniciar el pedido). Es `propio` igual —privado de quien lo sube— pero además
+    # no se reusa, no se ofrece en ninguna lista fuera del pedido y lo barre la limpieza.
+    efimero = bool(cuerpo.get("efimero"))
+    if efimero:
+        propio = True
 
     # 🔴 UN «MI ARTÍCULO» SIN DUEÑO ES UN ESTADO IMPOSIBLE — no se crea.
     # `propio: true` + `creado_por: null` es contradictorio y se comporta pésimo: `_es_privado` da
@@ -7585,10 +7808,14 @@ def crear_producto():
     # front y se caía sola: si el catálogo del navegador se había pedido sin sesión, la lista venía
     # sin los moldes propios (el server los oculta a quien no está identificado) y cada intento
     # creaba un artículo nuevo — así aparecieron cuatro «Molde short» iguales.
-    if propio:
+    # 🔴 UN MOLDE EFÍMERO NUNCA SE REUSA. Es el del CAMINO B: se sube para UN pedido y no queda
+    # guardado, así que subir el mismo archivo mañana tiene que empezar de cero. Reusarlo traería
+    # el nombrado de piezas y las etiquetas del pedido de ayer sobre un archivo que puede ser otro
+    # (mismo nombre ≠ mismo molde) — exactamente lo contrario de lo que se decidió.
+    if propio and not efimero:
         dueno = _uid_actual()
         ya = next((p for p in cat["productos"]
-                   if p.get("propio")
+                   if p.get("propio") and not p.get("efimero")
                    and (p.get("nombre") or "").strip().lower() == nombre.lower()
                    and p.get("creado_por") == dueno), None)
         if ya:
@@ -7605,9 +7832,15 @@ def crear_producto():
     #     la unicidad fuera por dueño dos personas podrían dejar dos «Camiseta» en la misma grilla.
     _dueno_nuevo = _uid_actual()
     _mismo_nombre = lambda p: (p.get("nombre") or "").strip().lower() == nombre.lower()
-    if propio:
+    if efimero:
+        # Un efímero no compite por el nombre con nadie: no se lista fuera de su pedido y se va
+        # con él. Exigirle un nombre único haría fallar el caso más común — subir «Camiseta» hoy
+        # y «Camiseta» mañana, en dos pedidos distintos.
+        _choque = None
+    elif propio:
         _choque = next((p for p in cat["productos"] if _mismo_nombre(p)
-                        and _es_privado(p) and p.get("creado_por") == _dueno_nuevo), None)
+                        and _es_privado(p) and not p.get("efimero")
+                        and p.get("creado_por") == _dueno_nuevo), None)
     else:
         _choque = next((p for p in cat["productos"] if _mismo_nombre(p)
                         and not _es_privado(p)), None)
@@ -7639,7 +7872,14 @@ def crear_producto():
         "creado_por": (_uid_actual() if propio else None),
         "alta_por": _uid_actual(),
         "propio": propio,
-        "planilla_template_id": "plan_default",
+        # CAMINO B: molde de UN pedido. `efimero_visto` es la última vez que alguien lo usó — lo
+        # mira la limpieza de huérfanos (pestaña cerrada, pedido abandonado) para no borrar uno
+        # que se está usando ahora mismo.
+        **({"efimero": True, "efimero_visto": time.time()} if efimero else {}),
+        # La planilla la manda el pedido cuando ya eligió una: si el molde nuevo se quedara con
+        # `plan_default` no se podría combinar con los que ya están en el pedido (sólo se juntan
+        # moldes de la MISMA planilla) y las columnas del pedido cambiarían de golpe.
+        "planilla_template_id": str(cuerpo.get("planilla_template_id") or "plan_default"),
         "mapeo_columnas": {
             "talle": "talle",
             "nombre": "nombre",
@@ -7694,6 +7934,35 @@ def _limpiar_activo_si_borrado(cat, pid):
         cat["activo"] = otros[0] if otros else "prod_default"
 
 
+def _borrar_molde_entero(cat, pid, efimero=False):
+    """Borra TODO lo de un molde: catálogo, archivos y base. `cat` ya viene SIN el producto.
+
+    Está aparte del endpoint porque lo usan dos caminos —el botón de borrar y la limpieza de los
+    moldes EFÍMEROS del camino B (los que se suben para un pedido y no quedan guardados)— y la
+    limpieza tiene que borrar exactamente lo mismo: un molde a medio borrar deja el archivo de
+    123 MB en `entrada/` y las piezas en la base, que es peor que no borrarlo.
+    🔴 QUIÉN puede borrar se decide ANTES de llamar acá (`_guard_id` / el flag `efimero`): esta
+    función no pregunta, ejecuta."""
+    # el activo (global Y el de la sesión) no puede quedar apuntando al molde borrado
+    _limpiar_activo_si_borrado(cat, pid)
+    _guardar_catalogo(cat)
+
+    import shutil
+    try:
+        shutil.rmtree(os.path.join(DATOS, "productos", pid), ignore_errors=True)
+        shutil.rmtree(os.path.join(ENTRADA, pid), ignore_errors=True)   # plantilla.ai + molde.origen
+    except Exception:
+        pass
+    # BORRAR MOLDE = BORRAR TODO, también en la base (piezas, geometría, variables, talles).
+    # Un EFÍMERO se lleva además su fila de `producto`: como se sube uno por pedido, el borrado
+    # lógico de siempre iría acumulando una fila muerta por cada subida.
+    try:
+        db.borrar_producto(pid) if efimero else db.borrar_piezas_molde(pid)
+    except Exception as e:
+        print(f"[borrar_molde] no se pudo borrar en la base: {e}")
+    _REG_DB_CACHE.pop(pid, None)
+
+
 @app.post("/api/productos/eliminar")
 def eliminar_producto():
     cuerpo = request.get_json(force=True) or {}
@@ -7715,23 +7984,7 @@ def eliminar_producto():
         return jsonify({"error": "Producto inexistente"}), 404
         
     cat["productos"].pop(p_index)
-    # el activo (global Y el de la sesión) no puede quedar apuntando al molde borrado
-    _limpiar_activo_si_borrado(cat, pid)
-    _guardar_catalogo(cat)
-    
-    import shutil
-    try:
-        shutil.rmtree(os.path.join(DATOS, "productos", pid), ignore_errors=True)
-        shutil.rmtree(os.path.join(ENTRADA, pid), ignore_errors=True)
-    except Exception:
-        pass
-    # BORRAR MOLDE = BORRAR TODO, también en la base (piezas, geometría, variables, talles).
-    try:
-        db.borrar_piezas_molde(pid)
-    except Exception as e:
-        print(f"[eliminar_producto] no se pudo borrar en la base: {e}")
-    _REG_DB_CACHE.pop(pid, None)
-        
+    _borrar_molde_entero(cat, pid)
     return jsonify({"ok": True})
 
 
@@ -8805,6 +9058,7 @@ if __name__ == "__main__":
         except Exception:
             pass
     _en_hilo(_precalentar_nido)
+    _en_hilo(_barrer_efimeros)
     # ⚡ DUAL-STACK IPv4 + IPv6 — CRÍTICO para la velocidad. En Windows "localhost" resuelve a
     # ::1 (IPv6) ANTES que a 127.0.0.1: si el server solo escucha IPv4, CADA request a
     # http://localhost paga ~2s de retry (con ~40 requests al asignar variantes = >1 minuto de

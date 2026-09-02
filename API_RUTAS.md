@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **117 endpoints**. Generado automáticamente del código.
+Total: **119 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -90,9 +90,10 @@ Total: **117 endpoints**. Generado automáticamente del código.
 | POST | `/api/productos/activar` |  | body: id |
 | POST | `/api/productos/config_columnas` |  | body: columnas, id, role |
 | POST | `/api/productos/config_mapeo` |  | body: id, mapeo_columnas, planilla_template_id |
-| POST | `/api/productos/crear` |  | body: nombre, propio |
+| POST | `/api/productos/crear` | `efimero: true` = molde del CAMINO B, para UN pedido: no se reusa, no le exige nombre único y lo borra la limpieza del pedido. `planilla_template_id` lo manda el pedido para que el molde nuevo se pueda combinar con los que ya tiene. | body: nombre, propio, efimero, planilla_template_id |
 | GET | `/api/productos/diagnostico` | Por qué CADA moldería se ve o no se ve, para el usuario que está logueado AHORA. Existe porque «no me aparece» no se puede diagnosticar a ciegas: el sistema pub | — |
 | POST | `/api/productos/eliminar` |  | body: id |
+| POST | `/api/pedido/limpiar_efimeros` | Borra los moldes EFÍMEROS del camino B que mandó el pedido («Nuevo pedido» / «Terminar pedido»). 🔴 Sólo toca los marcados `efimero: true`; cualquier otro pid se ignora en silencio, y tampoco borra uno cuya tizada se está generando. | body: pids |
 | GET | `/api/productos/objetos_agregados` |  | q: diseno, pid |
 | POST | `/api/productos/referencia_medida` | Guarda la dimensión de referencia del diseño ('alto' o 'ancho') del molde. | body: id, referencia |
 | POST | `/api/productos/renombrar` |  | body: id, nombre |
@@ -109,6 +110,7 @@ Total: **117 endpoints**. Generado automáticamente del código.
 | GET | `/api/plantilla/emparejado` | Estado del emparejado entre talles: guía, talles, qué pieza le tocó a cada nombre en cada talle, y el ajuste a mano guardado (acomodo + correcciones). | — |
 | POST | `/api/plantilla/emparejado` | Guarda el ajuste a mano del emparejado y RE-PROPAGA el nombrado con él. Body: `{pid?, talle, acomodo?: {idx:[dx_mm,dy_mm]}, manual?: {nombre: idx|null}, reset?: | body: acomodo, manual, reset, talle |
 | POST | `/api/plantilla/etiquetas` | Recibe los nombres puestos a mano en el talle que se está mirando y arma el registro propagándolos a todos los talles por posición. ⚠️ El registro se re-arma SI | body: asignaciones, mesa, talle_ref |
+| POST | `/api/plantilla/pieza_renombrar` | **CAMINO B** (molde con el diseño adentro): le pone nombre a UNA pieza, ubicada por `(mesa, t_idx)` — los que devuelve el visor. NO re-arma el registro: los talles son capas de la misma mesa y ya están pareados. 409 si el molde no es del camino B. | body: pid, mesa, t_idx, nombre |
 | POST | `/api/plantilla/grupo_pieza` | UN SOLO GESTO: «estas piezas son la misma y se llama Frente». Body: `{pid?, nombre, guia_idx, piezas?: {talle: idx|null}, renombrar_de?, eliminar?}`. En un solo | body: eliminar, guia_idx, nombre, piezas, renombrar_de |
 | GET | `/api/plantilla/medidas_variantes` | Medidas reales (w_cm/h_cm) de CADA pieza en CADA variante, leídas del registro (sin re-detectar). Para la visual de referencia «piezas en fila por talle» que mu | — |
 | GET | `/api/plantilla/nido` | Geometría NESTEADA de cada pieza nombrada en TODOS los talles (para acomodar en el visor). | — |

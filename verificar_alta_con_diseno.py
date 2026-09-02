@@ -128,6 +128,41 @@ ok(len(_pos) == len(det["piezas"]), "ninguna pieza queda encima de otra en la gr
 ok(all(p["px"] >= 0 and p["py"] >= 0 for p in det["piezas"]), "ninguna queda fuera del lienzo")
 
 # ─────────────────────────────────────────────────────────────────
+print("\n2b · 🔴 LO QUE VE EL VISOR ES LO MISMO QUE DICE EL REGISTRO")
+# Ésta es la igualdad sobre la que se apoya NOMBRAR una pieza: la pantalla manda el par
+# (mesa, t_idx) de lo que el usuario tocó y el servidor tiene que encontrar con eso una única
+# pieza del registro. Si el visor numerara distinto que el alta —por ejemplo porque el talle que
+# muestra no es el mismo que el de la guía, o porque a un talle le falta una pieza en una mesa—
+# el cliente escribiría un nombre y se lo pondría a OTRA pieza, sin error y sin forma de notarlo
+# hasta ver la tizada. Se verifica contra el talle que el visor está mostrando.
+_tv = det.get("talle_ref")
+print(f"    talle que muestra el visor: {_tv}")
+_por_par = {}                       # (mesa, idx_mesa) → nombre, según el REGISTRO
+for _nom, _pt in reg.items():
+    _i = (_pt or {}).get(_tv) or {}
+    if _i.get("mesa") is not None and _i.get("idx_mesa") is not None:
+        _por_par.setdefault((int(_i["mesa"]), int(_i["idx_mesa"])), []).append(_nom)
+ok(all(len(v) == 1 for v in _por_par.values()),
+   "🔴 el par (mesa, idx_mesa) identifica UNA sola pieza en el registro "
+   f"({[k for k, v in _por_par.items() if len(v) > 1][:3]} está repetido)")
+_huerfanas = [(p["mesa"], p["t_idx"]) for p in det["piezas"]
+              if (int(p["mesa"]), int(p["t_idx"])) not in _por_par]
+ok(not _huerfanas,
+   f"🔴 toda pieza del visor se encuentra en el registro por su (mesa, t_idx) "
+   f"— {len(_huerfanas)} no se encuentran (ej. {_huerfanas[:3]})")
+_desalineadas = []
+for p in det["piezas"]:
+    _nom = (_por_par.get((int(p["mesa"]), int(p["t_idx"]))) or [None])[0]
+    if _nom is None:
+        continue
+    if int(reg[_nom][_tv]["pieza_idx"]) != int(p["idx"]):
+        _desalineadas.append((p["idx"], _nom, reg[_nom][_tv]["pieza_idx"]))
+ok(not _desalineadas,
+   f"🔴 el `idx` del visor es el mismo `pieza_idx` del registro — {len(_desalineadas)} no coinciden "
+   f"(ej. visor={_desalineadas[:2]})")
+print(f"    OK    las {len(det['piezas'])} piezas del visor caen sobre las mismas del registro")
+
+# ─────────────────────────────────────────────────────────────────
 print("\n3 · EL VISOR ES LIVIANO (contornos y nada más)")
 import json                                                    # noqa: E402
 peso = len(json.dumps(det))

@@ -476,6 +476,77 @@ def _ancla_por_defecto(cont):
             "angulo": 0.0, "size_pt": round(size, 2), "fuente": "Arial-BoldMT"}
 
 
+# ─────────────────────────────────────────────────────────────────
+#  NOMBRAR UNA PIEZA
+# ─────────────────────────────────────────────────────────────────
+# 🔴 EN EL CAMINO B, NOMBRAR NO ES AGRUPAR: ES RENOMBRAR.
+#
+# En el camino A el registro se RE-ARMA cada vez que se nombra (`alta_plantilla_manual`): hay que
+# emparejar la pieza del talle que se está mirando con su homóloga en los demás, y eso se resuelve
+# por forma y posición. Acá no hay nada que emparejar: los talles son CAPAS DE LA MISMA MESA, así
+# que la correspondencia ya está resuelta desde el alta y volver a armar el registro sólo puede
+# empeorarlo (de hecho lo rompe: `alta_plantilla_manual` asume UNA sola mesa).
+#
+# Nombrar es, literalmente, cambiar la clave de un dict.
+
+
+def renombrar(reg, mesa, idx_mesa, nombre):
+    """Le pone `nombre` a la pieza que ocupa (`mesa`, `idx_mesa`). Devuelve `(reg_nuevo, ren)`,
+    con `ren = {nombre_viejo: nombre_nuevo}` para que el llamador arrastre lo que colgaba del
+    nombre (etiqueta, telas, acomodos) con `_migrar_nombres_pieza`.
+
+    La pieza se busca por el par (mesa, índice dentro de la mesa) porque es el único identificador
+    que NO depende del talle: `pieza_idx` es la posición dentro del talle y podría no coincidir con
+    la que muestra el visor si se está mirando otro talle.
+
+    No toca `mesa`/`idx_mesa`/`pieza_idx`/`bbox_mu`/`ancla` de nadie, y conserva el ORDEN de las
+    piezas: de ese orden salen los `id_en_molde` con los que se numeran las piezas en la base.
+    """
+    import motor_pedido as MP
+
+    if not reg:
+        raise ValueError("el molde todavía no tiene piezas registradas")
+    nombre = (nombre or "").strip()
+    if not nombre:
+        raise ValueError("el nombre no puede estar vacío")
+
+    # 1. Encontrar la pieza. Basta con que UN talle la ubique en ese (mesa, idx_mesa): la posición
+    #    es la misma en todos los talles (son capas de la misma mesa).
+    objetivo = None
+    for clave, por_t in reg.items():
+        for inf in (por_t or {}).values():
+            if not isinstance(inf, dict):
+                continue
+            if inf.get("mesa") == mesa and inf.get("idx_mesa") == idx_mesa:
+                objetivo = clave
+                break
+        if objetivo:
+            break
+    if objetivo is None:
+        raise ValueError(f"no hay ninguna pieza en la mesa {mesa}, posición {idx_mesa}")
+    if objetivo == nombre:
+        return reg, {}
+
+    # 2. El nombre final lo decide la MISMA regla del camino A (`nombres_normalizados`): lo que ya
+    #    es único se respeta tal cual, y sólo los repetidos se desambiguan con el primer número
+    #    libre. Si acá se usara otra regla, dos piezas podrían terminar con el mismo nombre y el
+    #    registro —que es un dict POR NOMBRE— perdería una en silencio.
+    orden = list(reg.keys())
+    asign = [{"idx": i, "nombre": (nombre if c == objetivo else c)} for i, c in enumerate(orden)]
+    finales = MP.nombres_normalizados(asign)
+
+    # 3. Reconstruir conservando el orden de inserción.
+    nuevo, ren = {}, {}
+    for i, viejo in enumerate(orden):
+        fin = finales.get(i, viejo)
+        nuevo[fin] = reg[viejo]
+        if fin != viejo:
+            ren[viejo] = fin
+    if len(nuevo) != len(reg):
+        raise ValueError("el nombre elegido pisa a otra pieza; probá con otro")
+    return nuevo, ren
+
+
 def parece_molde_con_diseno(doc, mesas_a_mirar=2):
     """¿Este archivo es del camino B? Devuelve `(sí/no, motivo)`.
 

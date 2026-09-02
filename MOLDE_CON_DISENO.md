@@ -166,33 +166,77 @@ más del 95 % del área» **se comía piezas reales** — la tira del talle 0 mi
 29,0 cm, y el frente 6XL ocupa el 97 % de la suya. Se compara contra el rectángulo de la página
 **con tolerancia de 1 pt**, nunca por porcentaje.
 
-### [ ] E2 — El alta desde el Pedido
-- Botón **«Subir molde con diseño»** en Pedido → Mis artículos (al lado del que ya existe).
-- Marca `origen: "con_diseno"` en el producto.
-- **Visor de contornos liviano**: endpoint que devuelve SÓLO los trazados de contorno (sin el
-  diseño) → sobre eso el cliente **nombra las piezas**.
-- **Elegir la planilla** en el mismo paso.
-- Al terminar, el molde ya aparece para elegir en el pedido.
+### [x] E2 — El alta desde el Pedido — **BACKEND HECHO** (2026-08-31 y 2026-09-02)
+**Backend (listo y probado por HTTP con el archivo real):**
+- `POST /api/plantilla` detecta el camino sobre el temporal, da de alta con
+  `alta_molde_con_diseno`, marca en disco DESPUÉS del `os.replace` y escribe `origen: "con_diseno"`.
+- **Visor de contornos liviano**: `/api/plantilla/deteccion` enruta a `detectar_para_visor` →
+  **7 KB** con las 9 piezas de las 9 mesas (el archivo pesa 123 MB).
+- `/api/productos` devuelve **`origen`** y **`efimero`** (sin eso el front no puede ramificar).
+- **EL MOLDE ES EFÍMERO** (decisión del usuario, 2026-09-02): se sube para ESE pedido y no queda
+  guardado. `POST /api/productos/crear` acepta `efimero: true` (+ hereda `planilla_template_id`
+  del pedido), no lo reusa nunca y no le exige nombre único. Lo borra
+  `POST /api/pedido/limpiar_efimeros` («Nuevo pedido» / «Terminar pedido») y, si quedó huérfano,
+  `_barrer_efimeros` al arrancar el servidor.
+- **Cimientos que faltaban** (ver bitácora): `idx_mesa` persistido en la base, la marca del camino
+  B en las claves de `_PZS_CACHE` y del caché de detección en disco, el visor precargando los
+  nombres ya puestos, y el pre-warm de `deteccion_todas` salteado.
 
-### [ ] E3 — El motor: la tizada desde el molde con diseño
+**Falta (front):** el botón «Subir molde con el diseño adentro» en Pedido → Mis artículos, el
+modal con el progreso de la subida, y la pantalla de nombrado dentro del wizard.
+
+### [x] E3 — Nombrar las piezas — **HECHO (backend)** (2026-09-02)
+
+🔴 **En el camino B nombrar NO es agrupar: es RENOMBRAR.** El registro ya está completo desde el
+alta y la correspondencia entre talles es exacta por construcción (son capas de la misma mesa).
+Las herramientas del camino A (`/api/plantilla/etiquetas`, `grupo_pieza`, `emparejado`) re-arman
+el registro con `alta_plantilla_manual`, que asume UNA sola mesa y empareja por forma: sobre un
+molde B lo destruyen, o revientan con el `mesa=None` que devuelve su visor. Las tres devuelven
+**409** ahora.
+
+- `piezas_con_diseno.renombrar(reg, mesa, idx_mesa, nombre)` — función pura: ubica la pieza por el
+  par `(mesa, idx_mesa)` (el único identificador que no depende del talle), aplica
+  `MP.nombres_normalizados` para que dos piezas nunca queden con el mismo nombre (el registro es
+  un dict POR NOMBRE: dos iguales pierden una en silencio) y conserva el orden de inserción.
+- `POST /api/plantilla/pieza_renombrar {pid, mesa, t_idx, nombre}` — `mesa`/`t_idx` son los que el
+  visor ya devuelve en cada pieza. Arrastra etiqueta/telas/mapeo con `_migrar_nombres_pieza`.
+
+**Falta (front):** el panel de nombrado dentro del paso Arte del pedido.
+
+### [ ] E4 — El motor: la tizada desde el molde con diseño
 - Variante de `_armar_base`: **sin arte y sin mapeo**. El contenido de la pieza es el del propio
   archivo, recortado a su contorno. Sin escalado ni `cm_encajar`: ya está en su lugar.
 - Más el **borde de corte** (el que dejó el admin) y el **nombre/número** leídos del propio molde.
 - Nesting y hojas: los de siempre.
 - **Contrato**: la pieza generada tiene que ser idéntica al recorte del archivo original.
 
-### [ ] E4 — La etiqueta: el cliente sólo marca dónde va
-- Sobre el **contorno** (liviano), pieza por pieza.
-- Reusa el sistema de posiciones que ya existe (`etiqueta.posiciones`) — ojo con la cascada de
-  claves y con [[etiqueta-baseline-no-romper]].
-- Tipografía, tamaño y contenido: del admin.
-
-### [ ] E5 — La configuración del admin
-- Borde de corte por defecto, etiqueta por defecto y nesting por defecto **para este camino**.
+### [ ] E5 — La configuración estable del admin (VIVA)
+- Borde de corte, etiqueta y nesting por defecto **para este camino**, en el catálogo
+  (`cat["config_con_diseno"]`), con el patrón de `nesting_presets`.
+- **Viva** (decisión del usuario, 2026-09-02): el admin la cambia y **afecta a todos** los moldes
+  con diseño, también a los ya cargados. Nada de copiar la config al molde en el alta.
+- Lo GLOBAL es la **forma** de la etiqueta (tamaño, tipografía, color, qué muestra); lo del molde
+  es el **dónde** (`posiciones`), que lo pone el cliente y muere con el pedido.
+- Un único punto de resolución (`_borde_de` / `_etiqueta_de`) que lean los 8 lugares que hoy leen
+  `prod.get(...)` directo — incluida **la clave del caché del preview**, o el cambio no se ve.
 - Pantalla en Configuración (no la ve el cliente).
 
-### [ ] E6 — Que todo lo demás siga igual
+### [ ] E6 — La etiqueta: el cliente sólo marca dónde va
+- Sobre el **contorno** (liviano), pieza por pieza, **dentro del pedido**.
+- Reusa el sistema de posiciones que ya existe (`etiqueta.posiciones`) — ojo con la cascada de
+  claves y con [[etiqueta-baseline-no-romper]].
+- Tipografía, tamaño y contenido: del admin (E5).
+
+### [ ] E7 — Que todo lo demás siga igual
 - Ficha técnica, trabas antes de fabricar, ayuda guiada, permisos.
+- 🔴 **La traba «pieza sin tela»**: `_validar_pedido` itera `variante_piezas`, que en el camino B
+  viene vacío (el molde va entero, sin variables) → ninguna pieza se valida y todas caerían a la
+  tela fantasma «Principal» de 180 cm, que es lo que esa traba existe para evitar. Hay que validar
+  sobre las piezas que REALMENTE entran en la fila (`partes_de`, con los toggles ya aplicados).
+- **Talles y toggles NO necesitan trabajo**: `piezas_de` sin variable devuelve `partes_de`, o sea
+  todas las piezas filtradas por los toggles, que se resuelven por los tokens del NOMBRE de cada
+  pieza. Por eso el nombrado es lo que los habilita (una pieza «Manga 1» hace que elegir Corta o
+  Larga dé lo mismo) y conviene avisarlo al nombrar, no al generar.
 - Contratos verdes y el MAPA actualizado.
 
 ---
@@ -241,6 +285,52 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 ---
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
+
+- **2026-09-02 (E2 y E3, backend)** — El alta desde el pedido y el nombrado, probados **por HTTP
+  con el archivo real de 123 MB**: alta completa en ~95 s (subida incluida), 9 piezas · 20/20
+  talles, visor de 7 KB, nombrado que persiste, y el borrado del efímero que no deja nada
+  (ni archivo, ni datos, ni filas en la base).
+
+  **Lo que estaba roto y no se veía** (los tres habrían aparecido recién al generar la tizada):
+  1. 🔴 **`idx_mesa` no se persistía.** El registro ya no tiene espejo en disco: vive **sólo** en
+     MSSQL, y `dbo.pieza_talle` no tenía columna para él. Se evaporaba en el primer round-trip y
+     `_armar_base` volvía a indexar por `pieza_idx` → con 9 mesas de 1 pieza, `IndexError` o la
+     pieza equivocada. Se agregó la columna (`ALTER … NULL`, idempotente) y un chequeo cacheado
+     `COL_LENGTH` para que una base sin migrar **degrade** en vez de reventar el camino A.
+     🔴 Al LEER, la clave se pone **sólo si no es NULL**: el motor hace
+     `info.get("idx_mesa", info["pieza_idx"])` y `.get` cae al default sólo si la clave **falta** —
+     un `None` haría `_pm[None]` (TypeError) en **todos** los moldes del camino A.
+  2. 🔴 **Dos cachés servían la detección vieja para siempre.** El alta DETECTA y marca DESPUÉS,
+     así que la misma ruta con el mismo mtime da 9 piezas o 619 según esté marcada. `_DET_CACHE`
+     ya lo contemplaba; `_PZS_CACHE` (contornos, en memoria) y el caché de detección **en disco**
+     (`{mtime}_dv2_…`, ahora `dv3` + sufijo) no. Y el mtime es un entero de **segundos**: dos
+     subidas en el mismo segundo servían lo del otro.
+  3. **El visor no precargaba los nombres ya puestos** (`nombres_existentes` salía vacío): filtraba
+     `info["mesa"] == mesa` y en el camino B `mesa` es `None`. Es la misma guarda que ya se le
+     había puesto al filtro por variable, un poco más arriba, en la sesión anterior.
+
+  **Lo que se aprendió (y cambia el diseño):** en el camino B **nombrar no es agrupar**. Todo el
+  nombrado de hoy re-arma el registro para emparejar los talles por forma; acá los talles son
+  capas de la misma mesa y ya están pareados desde el alta, así que re-armarlo sólo puede
+  romperlo. Nombrar quedó en cambiar la clave de un dict, con las tres herramientas del camino A
+  devolviendo 409 sobre un molde B.
+
+  **Dos cosas que encontramos de paso y NO se tocaron** (son del camino A; anotarlas es la
+  entrega): (a) en `/api/plantilla/etiquetas` el `_guardar_registro` quedó **después de un
+  `return`**, o sea inalcanzable — ese endpoint hoy no persiste nada; moverlo resucitaría un
+  camino de escritura viejo que nadie prueba, así que se decide aparte; (b) el pre-warm de
+  `detectar_piezas_todas` corre PyMuPDF **en un hilo** sobre el molde recién subido (no es
+  thread-safe) — para el camino B se saltea, para el A sigue igual.
+
+  ⚠️ **Trampas de herramienta de esta sesión:** el `py` de Windows **no ve el `/tmp` de Git Bash**
+  (`/tmp/x.json` lo busca en `C:\tmp\`), así que pasar archivos de bash a Python por ahí falla en
+  silencio; y `curl ... | tail` desde una tarea en background no muestra nada hasta que el proceso
+  termina (buffering), lo que parece que se colgó cuando en realidad está trabajando.
+
+  🔧 **El entorno de prueba (8051) ahora tiene su PROPIA base** (`TizadaProCaminoB`, creada en esta
+  sesión con su admin propio). Antes compartía la del taller: cada molde de prueba aparecía en el
+  catálogo de verdad — exactamente el riesgo que el `.bat` ya advertía. Los `datos/` ya estaban
+  separados; ahora la base también.
 
 - **2026-08-31 (E1)** — Detección hecha y verde contra el archivo real. Lo que se aprendió: **la
   máscara de recorte ES la pieza**, así que no hubo que portar el rasterizado del proyecto de

@@ -425,6 +425,25 @@ def _proyectar_un_producto(pid, p):
             cur.execute("UPDATE pedido_fila SET diseno_id=NULL WHERE diseno_id=?", did)
             cur.execute("DELETE FROM diseno WHERE id=?", did)     # mapeo_arte/editable: CASCADE
 
+_PT_IDX_MESA = None
+
+
+def _pt_tiene_idx_mesa():
+    """¿La base ya tiene la columna `idx_mesa` (camino B)? Cacheado: es una pregunta por proceso.
+
+    Se pregunta en vez de asumir porque un servidor publicado puede estar corriendo con el
+    esquema viejo (el arranque AVISA que faltan tablas, no las aplica — ver `_faltan_tablas`).
+    Sin la columna, escribir el INSERT nuevo tiraría «Invalid column name» en CADA guardado y
+    rompería el camino A entero; así, degrada a lo que hacía antes."""
+    global _PT_IDX_MESA
+    if _PT_IDX_MESA is None:
+        try:
+            _PT_IDX_MESA = valor("SELECT COL_LENGTH('dbo.pieza_talle','idx_mesa')") is not None
+        except Exception:
+            _PT_IDX_MESA = False
+    return _PT_IDX_MESA
+
+
 def guardar_registro(legacy_pid, piezas, reg):
     """Reconstruye las piezas del molde en la base. `piezas` = piezas.json['piezas'] (ids 1..N
     numéricos), `reg` = el registro {clave: {talle: {...}}}. Idempotente: upsert por
@@ -470,6 +489,7 @@ def guardar_registro(legacy_pid, piezas, reg):
         cur.execute("UPDATE producto SET registro_rev = registro_rev + 1 WHERE id=?", pid)
         # EN LOTE: con 30 talles son ~1000 filas; de a una eran ~1000 idas y vueltas al
         # server por cada guardado de un nombre. `fast_executemany` las manda juntas.
+        _con_im = _pt_tiene_idx_mesa()
         _filas_pt = []
         for clave, por_t in (reg or {}).items():
             fid = fila_id.get(clave)
@@ -479,17 +499,20 @@ def guardar_registro(legacy_pid, piezas, reg):
                 tid = t_id.get(t)
                 if tid is None or not isinstance(inf, dict):
                     continue
-                _filas_pt.append((fid, tid, inf.get("mesa"), inf.get("pieza_idx"),
-                                  _j.dumps(inf.get("ancla"), ensure_ascii=False) if inf.get("ancla") is not None else None,
-                                  _j.dumps(inf.get("bbox_mu")) if inf.get("bbox_mu") is not None else None,
-                                  inf.get("w_cm"), inf.get("h_cm")))
+                _f = (fid, tid, inf.get("mesa"), inf.get("pieza_idx"),
+                      _j.dumps(inf.get("ancla"), ensure_ascii=False) if inf.get("ancla") is not None else None,
+                      _j.dumps(inf.get("bbox_mu")) if inf.get("bbox_mu") is not None else None,
+                      inf.get("w_cm"), inf.get("h_cm"))
+                _filas_pt.append((_f + (inf.get("idx_mesa"),)) if _con_im else _f)
         if _filas_pt:
             try:
                 cur.fast_executemany = True
             except Exception:
                 pass
-            cur.executemany("INSERT INTO pieza_talle (pieza_id, talle_id, mesa, pieza_idx, ancla, bbox_mu, ancho_cm, alto_cm) "
-                            "VALUES (?,?,?,?,?,?,?,?)", _filas_pt)
+            cur.executemany(
+                "INSERT INTO pieza_talle (pieza_id, talle_id, mesa, pieza_idx, ancla, bbox_mu, ancho_cm, alto_cm"
+                + (", idx_mesa) VALUES (?,?,?,?,?,?,?,?,?)" if _con_im else ") VALUES (?,?,?,?,?,?,?,?)"),
+                _filas_pt)
             try:
                 cur.fast_executemany = False
             except Exception:
@@ -504,9 +527,11 @@ def leer_registro(legacy_pid):
     pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
     if pid is None:
         return None
+    _con_im = _pt_tiene_idx_mesa()
     rows = filas(
         "SELECT p.nombre AS clave, t.nombre AS talle, pt.mesa, pt.pieza_idx, pt.ancla, "
-        "pt.bbox_mu, pt.ancho_cm, pt.alto_cm "
+        "pt.bbox_mu, pt.ancho_cm, pt.alto_cm"
+        + (", pt.idx_mesa " if _con_im else " ") +
         "FROM pieza p JOIN pieza_talle pt ON pt.pieza_id=p.id JOIN talle t ON t.id=pt.talle_id "
         "WHERE p.producto_id=? ORDER BY p.id_en_molde", pid)
     if not rows:
@@ -516,6 +541,11 @@ def leer_registro(legacy_pid):
         inf = {"mesa": r["mesa"], "pieza_idx": r["pieza_idx"],
                "w_cm": float(r["ancho_cm"]) if r["ancho_cm"] is not None else None,
                "h_cm": float(r["alto_cm"]) if r["alto_cm"] is not None else None}
+        # 🔴 La clave va SÓLO si tiene valor. El motor hace `info.get("idx_mesa", info["pieza_idx"])`
+        # y `.get` cae al default sólo si la clave NO ESTÁ: escribir None acá haría `_pm[None]`
+        # (TypeError) en TODOS los moldes del camino A.
+        if _con_im and r["idx_mesa"] is not None:
+            inf["idx_mesa"] = int(r["idx_mesa"])
         for k in ("bbox_mu", "ancla"):
             if r[k]:
                 try:
@@ -539,6 +569,33 @@ def borrar_piezas_molde(legacy_pid):
         cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)
         cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
         return 1
+
+
+def borrar_producto(legacy_pid):
+    """Borra el molde ENTERO de la base, incluida su fila en `producto`. Devuelve 1 si la borró.
+
+    `sync_productos` hace borrado LÓGICO (`activo=0`) porque un molde sacado del catálogo puede
+    tener historia. Un molde EFÍMERO del camino B no: se sube para un pedido y no existe después,
+    así que dejar su fila acumularía una por cada subida para siempre.
+    🔴 La fila NO se borra si algún pedido la referencia (`dbo.pedido` no tiene cascade): ahí se
+    cae al borrado lógico de siempre. Hoy nadie escribe pedidos, pero el día que se escriban,
+    borrar un efímero no puede llevarse un pedido histórico por delante."""
+    pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
+    if pid is None:
+        return 0
+    borrar_piezas_molde(legacy_pid)
+    with cursor() as cur:
+        for t in ("diseno", "producto_tela", "config"):
+            try:
+                cur.execute(f"DELETE FROM {t} WHERE producto_id=?", pid)
+            except Exception:
+                pass                     # tabla ausente en una base a medio migrar: no es fatal
+        cur.execute("DELETE FROM producto WHERE id=? AND NOT EXISTS "
+                    "(SELECT 1 FROM pedido WHERE producto_id=?)", pid, pid)
+        if cur.rowcount == 0:
+            cur.execute("UPDATE producto SET activo=0 WHERE id=?", pid)
+            return 0
+    return 1
 
 
 def registro_rev(legacy_pid):

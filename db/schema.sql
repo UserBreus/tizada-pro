@@ -311,3 +311,14 @@ GO
 IF COL_LENGTH('dbo.producto','registro_rev') IS NULL
     ALTER TABLE dbo.producto ADD registro_rev INT NOT NULL CONSTRAINT DF_producto_regrev DEFAULT 0;
 GO
+
+GO
+/* 2026-09-02 (camino B): un molde que trae el diseno adentro tiene VARIAS mesas, asi que la
+   posicion dentro del TALLE (pieza_idx, invariante §8.9 del MAPA: es la identidad que resuelve
+   las variables) deja de coincidir con la posicion dentro de la MESA, que es la unica que sirve
+   para indexar `extraer_piezas_mesa`. Con 9 mesas, guardar la de la mesa daria pieza_idx=0 para
+   las 9 piezas y el mapa pieza_idx->nombre se quedaria con UNA: ocho invisibles, en silencio.
+   NULL = camino A (una sola mesa): el motor cae a pieza_idx como siempre. */
+IF COL_LENGTH('dbo.pieza_talle','idx_mesa') IS NULL
+    ALTER TABLE dbo.pieza_talle ADD idx_mesa INT NULL;
+GO
