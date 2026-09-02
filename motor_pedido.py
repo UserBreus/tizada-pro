@@ -2202,6 +2202,18 @@ def _color_op(pl):
 
 _PERS_CACHE = {}   # memoización por (arte, mtime): extraer_personalizacion es talle/variable-INDEP
                    # y CARA (parsea el content-stream de todo el arte); se llamaba 1× POR TALLE (×19)
+# Cómo se puede llamar la CAPA de un campo, y con qué campo se corresponde. La prenda trae
+# «nombre» y «numero» (o las columnas de la planilla): si la capa se rotula de otra forma, el
+# texto no se estampa y no falla nada — por eso los rótulos habituales se aceptan por nombre.
+# «00» es como se rotula el placeholder del número en los moldes que traen el diseño adentro.
+# (las claves van YA normalizadas: `_norm_nombre` baja a minúsculas y saca los acentos, así que
+#  «Número» entra como «numero» y no hace falta listarlo)
+# ⚠️ «0» NO es alias de nada: en un molde con el diseño adentro «0» es un TALLE (y `CAPAS_NO_PERS`
+# ya lo descarta). Sólo «00», que es el rótulo del placeholder del número.
+_CAMPO_ALIAS = {"00": "numero", "nro": "numero", "num": "numero",
+                "jugador": "nombre", "apellido": "nombre"}
+
+
 def extraer_personalizacion(path_arte, campos=None):
     """Lee los placeholders de personalización SOLO por CAPA: si hay una capa llamada
     como un campo (`nombre`, `numero`, `palabra`, `numero 2`, …) TODO el texto de esa
@@ -2286,6 +2298,11 @@ def extraer_personalizacion(path_arte, campos=None):
         cn = _norm_nombre(campo)
         if not any(_norm_nombre(name) == cn for name, _ in capas):
             continue                                   # el diseño no trae esa capa
+        # El campo se guarda con su nombre CANÓNICO: el estampado busca `persona[campo]`, y la
+        # prenda trae «nombre» y «numero». Una capa llamada «00» (así se rotula el placeholder
+        # del número en los moldes que traen el diseño adentro) apuntaría a un campo «00» que la
+        # prenda no tiene, y el número no se estamparía — sin error, que es lo peor.
+        _campo = _CAMPO_ALIAS.get(cn, campo)
         d = fitz.open(path_arte)
         for c in d.layer_ui_configs():
             d.set_layer_ui_config(c["number"], action=0 if _norm_nombre(c["text"]) == cn else 1)
@@ -2295,7 +2312,7 @@ def extraer_personalizacion(path_arte, campos=None):
                     continue
                 for l in b["lines"]:
                     if "".join(s["text"] for s in l["spans"]).strip():
-                        _registrar(mesa, campo, l)
+                        _registrar(mesa, _campo, l)
         d.close()
 
     # El modo viejo "por texto en la capa Personalizable" (adivinar NOMBRE/00 por

@@ -58,6 +58,24 @@ de corte**, tamaño y tipografía de la **etiqueta**, separación y márgenes de
 
 ---
 
+## 3.b 📋 QUÉ TIENE QUE TRAER EL ARCHIVO (el requisito, para el manual)
+
+| Qué | Cómo | Por qué |
+|---|---|---|
+| **Una capa por talle** | `0 1 2 4 …` / `XS S M …` | de ahí salen los talles; es el mismo formato de la plantilla de hoy |
+| **Cada pieza dentro de su máscara de recorte** | como la exporta Illustrator | la máscara **es** el contorno de la pieza: no se reconstruye, se lee |
+| **Una capa `nombre` y una capa `00`** | pueden ser **subcapas**, y pueden estar **dentro de la máscara de recorte** | son los placeholders que se reemplazan por el nombre y el número de cada prenda |
+
+🔴 **Sin las capas `nombre` y `00` la tizada SALE IGUAL, con el texto del diseño en todas las
+prendas.** No hay error, no hay aviso: 40 camisetas con el mismo «NOMBRE». Por eso el requisito
+está escrito acá y lo cuida `verificar_personalizacion_con_diseno.py`.
+El rótulo `00` se traduce solo al campo `numero` (`_CAMPO_ALIAS` en `motor_pedido.py`): el
+estampado busca `persona[campo]` **por el nombre de la capa**, y la prenda trae `nombre` y
+`numero` — una capa rotulada `00` apuntaría a un campo que no existe. También se aceptan `nro`,
+`num`, `jugador` y `apellido`. ⚠️ `0` **no** es alias de nada: en estos moldes es un TALLE.
+
+---
+
 ## 4. DECISIONES TOMADAS (con su porqué)
 
 | Fecha | Decisión | Por qué |
@@ -98,16 +116,8 @@ mezclar dos cambios grandes en la misma entrega.
 
 ## 6. PREGUNTAS ABIERTAS (lo que falta decidir)
 
-- [ ] 🔴 **¿CÓMO SE MARCA EL NOMBRE Y EL NÚMERO?** (2026-09-02, sale de generar la tizada real)
-      La decisión de §4 —«nombre y número siguen, como hoy»— asumía que
-      `extraer_personalizacion` iba a encontrarlos igual que en el arte: **por una CAPA llamada
-      `nombre` / `numero`**. Pero el archivo real tiene 20 capas y **las 20 son talles**. Sin esa
-      capa no hay placeholder que reemplazar: la tizada sale con el «NOMBRE» que está dibujado
-      adentro del diseño, para todas las prendas. Las salidas posibles:
-      **(a)** que el archivo traiga las capas `nombre` y `numero` (la convención de siempre —
-      no hace falta código nuevo, ya funcionaría); **(b)** detectar el texto por su contenido
-      («NOMBRE», «00») — frágil, y el proyecto ya decidió no adivinar; **(c)** que el cliente
-      marque en el visor dónde va, como con la etiqueta (es la más trabajo).
+- [x] ~~¿Cómo se marca el nombre y el número?~~ **RESUELTO 2026-09-02 (decisión del usuario):
+      LO TRAE EL ARCHIVO.** Ver el requisito en §3.b.
 
 - [ ] ¿Un molde del camino B tiene **variables** (modelos), o va **entero** como los «Mis
       artículos» de hoy? (hoy un molde propio no tiene variables y el motor genera todas sus piezas)
@@ -239,12 +249,13 @@ de corte y su etiqueta («XS · Espalda · #01»). Contrato: `verificar_tizada_c
   motor se rompe la LEY «el arte se ve igual que la tizada». La clave del caché sube a `v15` con
   el camino B adentro.
 
-⚠️ **PENDIENTE ABIERTO — el nombre y el número no se estampan todavía.** El archivo real tiene
-**20 capas y las 20 son talles**: no hay ninguna capa `nombre` ni `numero`, que es de donde
-`extraer_personalizacion` los saca. Al generar con «GONZALEZ / 10» sale igual el «NOMBRE» que está
-DIBUJADO adentro del diseño de la espalda. (Y el auto-descubrimiento de capas hubo que apagarlo
-para el camino B: tomaría los 20 talles como campos y estamparía cualquier texto.) **Hay que
-decidir con el usuario cómo se marca el nombre/número en estos archivos** — ver §6.
+**El nombre y el número: LOS TRAE EL ARCHIVO** (decisión del usuario, 2026-09-02, ver el requisito
+en §3.b). El archivo con el que se probó tiene 20 capas y las 20 son talles, así que la tizada
+salió con el «NOMBRE» dibujado en el diseño: no hay de dónde sacar el placeholder. La convención
+queda: capas `nombre` y `00` (pueden ser subcapas y estar dentro de la máscara). El rótulo `00` se
+traduce solo al campo `numero`, porque el estampado busca `persona[campo]` por el nombre de la
+capa. ⚠️ **Falta probarlo contra un archivo que las traiga** — cuando exista, correr
+`verificar_tizada_con_diseno.py` y mirar que salgan estampados.
 
 ⚠️ **Peso a vigilar**: la hoja del ejemplo pesa 117 MB (el archivo original, 123). Con una prenda
 y 9 piezas está bien; con un pedido grande hay que medirlo. `copy_foreign` trae la mesa del molde
