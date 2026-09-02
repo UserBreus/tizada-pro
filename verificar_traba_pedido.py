@@ -149,6 +149,29 @@ ok(_e2 is not None and "tela" in _e2[0].lower(),
    f"una pieza SIN TELA no trabo el pedido (el motor le inventaba la hoja «Principal»): {_e2}")
 
 
+# ══ 3. SIN VARIABLES (molde entero) LA TRABA TIENE QUE SEGUIR TRABANDO ════════════════════════
+# 🔴 Un molde del CAMINO B (el que trae el diseño adentro) va ENTERO: no tiene variables, así que
+# sus filas llegan SIN `variante_piezas`. La traba de tela recorría justamente esa lista, o sea que
+# no validaba NADA: todas las piezas se iban a la tela inventada «Principal» de 180 cm — que es
+# exactamente la hoja fantasma que esta traba existe para evitar. Ahora, sin variable, las piezas
+# de la fila se calculan con `partes_de_libre` DEL MOTOR (la misma regla que se va a generar).
+_fila_sin_var = lambda op: {"talle": "M", "toggles": [{"clave": "manga", "opcion": op,
+                                                       "opciones": ["Corta", "Larga"]}]}
+_e3 = S._validar_pedido(PID, "x", PROD, CAT, [_fila_sin_var("Corta")], _medias, _reg)
+ok(_e3 is not None and "tela" in _e3[0].lower(),
+   f"🔴 sin variable, una pieza SIN TELA no traba el pedido: la tizada saldria con la hoja "
+   f"fantasma «Principal» de 180 cm ({_e3})")
+# …y con todas las telas puestas, pasa
+ok(S._validar_pedido(PID, "x", PROD, CAT, [_fila_sin_var("Corta")], _tela, _reg) is None,
+   "se trabo un pedido SIN VARIABLE que tenia todas las telas asignadas")
+# …y NO se reclama tela para una pieza que el TOGGLE deja afuera: la manga larga no se corta en un
+# pedido de manga corta, asi que pedirle tela seria trabar el pedido por algo que no se fabrica.
+_sin_larga = {n: "Dry Basket" for n in _reg if "larga" not in n.lower()}
+ok(S._validar_pedido(PID, "x", PROD, CAT, [_fila_sin_var("Corta")], _sin_larga, _reg) is None,
+   f"🔴 se reclamo tela para una pieza que el toggle deja AFUERA (las de manga larga en un pedido "
+   f"de manga corta): {S._validar_pedido(PID, 'x', PROD, CAT, [_fila_sin_var('Corta')], _sin_larga, _reg)}")
+
+
 # ══ Veredicto ════════════════════════════════════════════════════════════════════════════════
 import shutil
 shutil.rmtree(_TMP, ignore_errors=True)

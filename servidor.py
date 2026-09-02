@@ -3532,7 +3532,15 @@ def _validar_pedido(pid, nombre_molde, prod, cat, translated, asig, reg):
                                  f" — ninguna de sus piezas de {tg.get('clave')} distingue esa opción"))
         _a = asig(pr.get("_diseno") or "principal") if callable(asig) else asig
         if _a:
-            for _p in (pr.get("variante_piezas") or []):
+            # Qué piezas lleva DE VERDAD esta fila. Con variable, las suyas. Sin variable —el
+            # camino B va entero, sin modelos— serían TODAS las del molde… pero no: hay que
+            # aplicarles los toggles, o se reclamaría tela para la manga larga en un pedido de
+            # manga corta. Se usa `partes_de_libre` del MOTOR, no una regla propia: si acá se
+            # filtrara distinto, la traba hablaría de piezas que la tizada no va a generar.
+            _piezas_fila = pr.get("variante_piezas")
+            if not _piezas_fila:
+                _piezas_fila = MP.partes_de_libre(pr, sorted(reg.keys()))
+            for _p in (_piezas_fila or []):
                 if not _a.get(str(_p)):
                     _sin_tela.add(str(_p))
     if _malas:

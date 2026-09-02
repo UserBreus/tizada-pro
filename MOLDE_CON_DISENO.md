@@ -273,10 +273,24 @@ traduce solo al campo `numero`, porque el estampado busca `persona[campo]` por e
 capa. ⚠️ **Falta probarlo contra un archivo que las traiga** — cuando exista, correr
 `verificar_tizada_con_diseno.py` y mirar que salgan estampados.
 
-⚠️ **Peso a vigilar**: la hoja del ejemplo pesa 117 MB (el archivo original, 123). Con una prenda
-y 9 piezas está bien; con un pedido grande hay que medirlo. `copy_foreign` trae la mesa del molde
-con sus recursos: si hiciera falta, la salida es compartir el XObject entre piezas de la misma
-mesa — **nunca rasterizar**.
+🔴 **EL PESO Y EL TIEMPO — MEDIDO DE PUNTA A PUNTA, ES EL PENDIENTE MÁS SERIO DE ESTE CAMINO.**
+Una tizada de **UNA prenda** (9 piezas, talle 1) desde la pantalla tardó **~21 minutos**:
+
+| Fase | Tiempo |
+|---|---|
+| El motor entero (armar las 9 piezas, acomodar, escribir el PDF y las vistas previas) | **134 s** |
+| **Aplanar la hoja para el RIP** (`aplanar_rip.py`) | **~19 min** ← el 90 % |
+
+La hoja pesa **114 MB** y el archivo original 123. Y **ese peso no es basura**: se midió aislando
+una mesa (7,6 MB) y `remove_unreferenced_resources()` no baja **nada** (0 %) — lo que pesa es el
+dibujo, que en este archivo es un patrón vectorial densísimo. Cada pieza trae su mesa, y son 9
+mesas distintas, así que compartir el XObject entre piezas de la misma mesa (la salida que se
+había pensado) **acá no ayuda**.
+Lo que hay que atacar es el **aplanado**, que es donde se van los 19 minutos, y es código del
+camino A (des-anida los XObjects para que el RIP resuelva el color). **Sin medirlo no se toca**:
+primero perfilarlo sobre esta hoja y ver si el costo está en el parseo del content-stream, en la
+escritura o en el des-anidado. ⚠️ **La salida NUNCA es rasterizar ni bajar la calidad** (ley del
+proyecto): si hay que elegir, se tarda con un cartel honesto — que es lo que hace hoy.
 
 ### [x] E5 — La configuración estable del admin (VIVA) — **HECHO (backend)** (2026-09-02)
 
@@ -312,7 +326,23 @@ Contrato: `verificar_config_con_diseno.py`. **Falta la pantalla** en Configuraci
   claves y con [[etiqueta-baseline-no-romper]].
 - Tipografía, tamaño y contenido: del admin (E5).
 
-### [ ] E7 — Que todo lo demás siga igual
+### [~] E7 — Que todo lo demás siga igual — **la traba de tela, HECHA** (2026-09-02)
+
+**Pedido completo verificado desde la pantalla**: subir → nombrar 9 piezas → asignar la tela →
+cargar una fila → generar. Sale la hoja (1,60 × 0,48 m) con su ficha técnica. Y **los toggles
+funcionan solos**: la planilla mostró «Larga» deshabilitado con el aviso *«El molde "Camiseta
+jugador" no contiene manga larga»*, deducido de los nombres que puso el cliente.
+
+- 🔴 **La traba «pieza sin tela»** recorría `variante_piezas`, que en un molde sin variables viene
+  vacío: no validaba **nada** y todas las piezas se habrían ido a la tela fantasma «Principal» de
+  180 cm — justo lo que esa traba existe para evitar. Ahora, sin variable, las piezas de la fila
+  se calculan con **`MP.partes_de_libre`**, que es `partes_de` sacado del motor a nivel de módulo
+  (como ya estaba `tokens_pieza`, y por el mismo motivo: si el servidor validara con una regla
+  propia, diría una cosa y el motor haría otra). Se aplican los toggles, así que **no** se reclama
+  tela para la manga larga en un pedido de manga corta. Contrato: `verificar_traba_pedido.py` §3.
+
+**Falta:** la pantalla del admin para la configuración estable (E5), que el cliente ubique la
+etiqueta desde el pedido (E6), «Terminar pedido» en Resultados, y la ayuda guiada.
 - Ficha técnica, trabas antes de fabricar, ayuda guiada, permisos.
 - 🔴 **La traba «pieza sin tela»**: `_validar_pedido` itera `variante_piezas`, que en el camino B
   viene vacío (el molde va entero, sin variables) → ninguna pieza se valida y todas caerían a la

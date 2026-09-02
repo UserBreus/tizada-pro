@@ -119,6 +119,69 @@ def opciones_soportadas(piezas_nombres, clave, opciones):
     return out
 
 
+def partes_de_libre(prenda, piezas_nombres):
+    """Piezas que entran en una prenda según sus TOGGLES DE PIEZA (generalización de la
+    manga). Cada toggle = {clave, opcion, opciones}. Para una pieza que menciona la CLAVE
+    (ej. 'manga', 'sisa'):
+      • si menciona la OPCIÓN elegida (ej. 'corta') → entra;
+      • si menciona OTRA opción del toggle (ej. 'larga') → NO entra (es de esa otra);
+      • si NO menciona ninguna opción → entra igual (es una pieza normal, no se adivina
+        nada: 'manga derecha' sin opción sale siempre, como cualquier pieza).
+    Las piezas que no mencionan ninguna clave entran siempre. Acepta varios toggles.
+
+    Vive a nivel de módulo (y no sólo adentro de `generar_pedido`) por el mismo motivo que
+    `tokens_pieza`: el SERVIDOR necesita saber qué piezas entran DE VERDAD en una fila para poder
+    avisar antes de generar — por ejemplo, cuáles quedaron sin tela. Si usara una regla propia,
+    diría una cosa y el motor haría otra."""
+    toggles = prenda.get("toggles") if isinstance(prenda, dict) else None
+    if not toggles:   # compat: prenda con 'manga' corta/larga, o string suelto
+        mval = prenda.get("manga") if isinstance(prenda, dict) else prenda
+        if mval:
+            toggles = [{"clave": "manga", "opcion": mval, "opciones": ["corta", "larga"]}]
+        else:
+            return list(piezas_nombres)
+    norm = []   # (clave, [tokens opción elegida], [[tokens] de las OTRAS opciones])
+    for tg in toggles:
+        clave = str(tg.get("clave", "")).strip().lower()
+        opcion = str(tg.get("opcion", "")).strip().lower()
+        opciones = [str(o).strip().lower() for o in (tg.get("opciones") or []) if str(o).strip()]
+        if opcion and opcion not in opciones:
+            opciones = opciones + [opcion]
+        if not clave or not opcion:
+            continue
+        sel = opcion.split()
+        otras = [o.split() for o in opciones if o != opcion]
+        norm.append((clave, sel, otras))
+    if not norm:
+        return list(piezas_nombres)
+    out = []
+    for p in piezas_nombres:
+        tset = set(tokens_pieza(p))
+        incluir = True
+        for clave, sel, otras in norm:
+            if clave not in tset:
+                continue                                   # esta clave no la afecta
+            if all(t in tset for t in sel):
+                continue                                   # tiene la opción elegida → entra
+            if any(all(t in tset for t in o) for o in otras):
+                incluir = False; break                     # tiene OTRA opción → afuera
+            # else: no menciona ninguna opción → pieza normal → entra
+        if incluir:
+            out.append(p)
+    # VÍNCULOS "van juntas" (ej. manga corta + su vivo): el vínculo es ATÓMICO frente al toggle.
+    # Si algún miembro quedó AFUERA (ej. la manga larga cuando se eligió corta), se saca TODO el
+    # vínculo — así el vivo NO aparece en las líneas que no llevan esa manga (antes salía en todas).
+    juntas = prenda.get("juntas_piezas") if isinstance(prenda, dict) else None
+    if juntas:
+        _names = set(piezas_nombres); _outset = set(out)
+        for _grp in juntas:
+            _miembros = [m for m in _grp if m in _names]
+            if len(_miembros) >= 2 and not all(m in _outset for m in _miembros):
+                out = [p for p in out if p not in _miembros]
+                _outset = set(out)
+    return out
+
+
 
 # --- Handles de PDF: cierre garantizado -------------------------------------------------------
 # En Windows un archivo que quedó abierto NO se puede reemplazar ni borrar (WinError 5). Varias
@@ -3671,61 +3734,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _toks_pieza = tokens_pieza      # (vive a nivel de módulo: lo comparte la validación del pedido)
 
     def partes_de(prenda):
-        """Piezas que entran en una prenda según sus TOGGLES DE PIEZA (generalización de la
-        manga). Cada toggle = {clave, opcion, opciones}. Para una pieza que menciona la CLAVE
-        (ej. 'manga', 'sisa'):
-          • si menciona la OPCIÓN elegida (ej. 'corta') → entra;
-          • si menciona OTRA opción del toggle (ej. 'larga') → NO entra (es de esa otra);
-          • si NO menciona ninguna opción → entra igual (es una pieza normal, no se adivina
-            nada: 'manga derecha' sin opción sale siempre, como cualquier pieza).
-        Las piezas que no mencionan ninguna clave entran siempre. Acepta varios toggles."""
-        toggles = prenda.get("toggles") if isinstance(prenda, dict) else None
-        if not toggles:   # compat: prenda con 'manga' corta/larga, o string suelto
-            mval = prenda.get("manga") if isinstance(prenda, dict) else prenda
-            if mval:
-                toggles = [{"clave": "manga", "opcion": mval, "opciones": ["corta", "larga"]}]
-            else:
-                return list(piezas_nombres)
-        norm = []   # (clave, [tokens opción elegida], [[tokens] de las OTRAS opciones])
-        for tg in toggles:
-            clave = str(tg.get("clave", "")).strip().lower()
-            opcion = str(tg.get("opcion", "")).strip().lower()
-            opciones = [str(o).strip().lower() for o in (tg.get("opciones") or []) if str(o).strip()]
-            if opcion and opcion not in opciones:
-                opciones = opciones + [opcion]
-            if not clave or not opcion:
-                continue
-            sel = opcion.split()
-            otras = [o.split() for o in opciones if o != opcion]
-            norm.append((clave, sel, otras))
-        if not norm:
-            return list(piezas_nombres)
-        out = []
-        for p in piezas_nombres:
-            tset = set(_toks_pieza(p))
-            incluir = True
-            for clave, sel, otras in norm:
-                if clave not in tset:
-                    continue                                   # esta clave no la afecta
-                if all(t in tset for t in sel):
-                    continue                                   # tiene la opción elegida → entra
-                if any(all(t in tset for t in o) for o in otras):
-                    incluir = False; break                     # tiene OTRA opción → afuera
-                # else: no menciona ninguna opción → pieza normal → entra
-            if incluir:
-                out.append(p)
-        # VÍNCULOS "van juntas" (ej. manga corta + su vivo): el vínculo es ATÓMICO frente al toggle.
-        # Si algún miembro quedó AFUERA (ej. la manga larga cuando se eligió corta), se saca TODO el
-        # vínculo — así el vivo NO aparece en las líneas que no llevan esa manga (antes salía en todas).
-        juntas = prenda.get("juntas_piezas") if isinstance(prenda, dict) else None
-        if juntas:
-            _names = set(piezas_nombres); _outset = set(out)
-            for _grp in juntas:
-                _miembros = [m for m in _grp if m in _names]
-                if len(_miembros) >= 2 and not all(m in _outset for m in _miembros):
-                    out = [p for p in out if p not in _miembros]
-                    _outset = set(out)
-        return out
+        """Los toggles de la prenda, contra las piezas de ESTE molde. La regla vive suelta
+        (`partes_de` a nivel de módulo) para que el servidor valide con la MISMA."""
+        return partes_de_libre(prenda, piezas_nombres)
     def piezas_de(prenda):
         """Piezas a generar para una prenda: `partes_de` (toggles) INTERSECTADO con la
         VARIABLE de configuración elegida. La variable llega como `variante_piezas` = lista de

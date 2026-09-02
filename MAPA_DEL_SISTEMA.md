@@ -1353,6 +1353,22 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-02 (378) — CAMINO B: EL PEDIDO COMPLETO, Y LA TRABA DE TELA QUE NO TRABABA.**
+  Verificado desde la pantalla de punta a punta: subir → nombrar → tela → planilla → generar, y sale
+  la hoja con su ficha. Los toggles salen gratis: la planilla mostró «Larga» **deshabilitado** con
+  «el molde no contiene manga larga», deducido de los nombres que puso el cliente.
+  🔴 **`_validar_pedido` no validaba nada sin variables**: recorría `variante_piezas`, que en un
+  molde que va entero viene vacío → ninguna pieza se miraba y todas se habrían ido a la tela
+  fantasma «Principal» de 180 cm, que es exactamente lo que esa traba existe para evitar. Ahora
+  usa **`MP.partes_de_libre`**: `partes_de` sacado del motor a nivel de módulo (como ya estaba
+  `tokens_pieza`, y por el mismo motivo — el servidor tiene que validar con LA MISMA regla con la
+  que después se genera). Con los toggles aplicados, así que no reclama tela para una pieza que la
+  fila no lleva.
+  🔴 **RENDIMIENTO MEDIDO, pendiente serio**: una tizada de UNA prenda tardó **~21 min**, de los
+  cuales el motor entero fueron **134 s** y el **aplanado para el RIP ~19 min** sobre una hoja de
+  114 MB. El peso NO es basura: aislando una mesa da 7,6 MB y `remove_unreferenced_resources()` no
+  baja nada — es el dibujo. Hay que perfilar `aplanar_rip.py` antes de tocarlo, y la salida nunca
+  es rasterizar. Detalle en `MOLDE_CON_DISENO.md` §7-E4.
 - **2026-09-02 (377) — CAMINO B, EL FRONT DEL PEDIDO: SUBIR Y NOMBRAR SIN SALIR DEL WIZARD.**
   Tarjeta «Molde con el diseño adentro» en Pedido → Mis artículos (el mismo modal sirve para las
   dos formas), con **espera honesta en dos tramos**: el % REAL de la subida por XHR —`fetch` no da
