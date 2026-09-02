@@ -1353,6 +1353,28 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-02 (375) — CAMINO B, E4: LA TIZADA SALE DEL PROPIO MOLDE (sin arte y sin mapeo).**
+  Verificado generando la hoja del archivo real **y mirándola**: 180 × 77 cm con las 9 piezas
+  estampadas, su borde de corte y su etiqueta. `generar_pedido` acepta `arte=None` y la rama se
+  elige por **la marca en disco** (no por «no vino arte»: así sobrevive al ProcessPool y no se
+  adivina nada). La rama de `_armar_base` es el ramal del ARTE CLÁSICO con la página sacada del
+  molde — misma traslación, mismo clip, misma escala —, salteando todo lo del arte separado
+  (`cm_encajar`, editables, objetos agregados): la pieza ya está en su lugar y a tamaño real
+  (medido: 48,7 × 73,8 cm contra 48,5 × 73,6 del registro; la diferencia es el borde).
+  🔴 **`pagina_molde` nueva, NO reusar `pagina_arte`**: ése llama a
+  `limpiar_capas_conservando_talle` + `geometrias_base`, que descarta los trazados que coinciden
+  con la moldería base y TODO el texto de la capa — en el camino B la moldería base **es** el
+  dibujo, así que borraría la pieza y los placeholders. Va `aislar_capa`, que conserva lo pintado
+  del OCG del talle **con sus recortes** (que son la pieza). Destrabado además el servidor:
+  `generar_multi` descartaba el molde **en silencio** (`continue` por no tener
+  `validacion_arte.json`) y la tizada llegaba sin sus piezas; `_piezas_base` también, y ése no es
+  opcional (si el preview no pasa por la misma rama del motor se rompe la LEY «arte = tizada»).
+  Clave del caché del preview a **v15** con el camino B adentro.
+  ⚠️ **Pendiente que destapó la prueba: el nombre/número NO se estampan.** El archivo real tiene
+  20 capas y las 20 son TALLES: no hay capa `nombre`/`numero`, que es de donde
+  `extraer_personalizacion` los saca, así que sale el «NOMBRE» dibujado en el diseño. (El
+  auto-descubrimiento de capas se apagó para el camino B: si no, tomaría los 20 talles como campos
+  y estamparía cualquier texto.) A decidir con el usuario — ver `MOLDE_CON_DISENO.md` §6.
 - **2026-09-02 (374) — CAMINO B, E2+E3: EL ALTA EFÍMERA DESDE EL PEDIDO Y EL NOMBRADO.** Probado
   por HTTP con el archivo real (123 MB): alta en ~95 s, 9 piezas · 20/20 talles, visor de 7 KB,
   nombres que persisten y borrado que no deja nada. **Decisión del usuario: el molde del camino B

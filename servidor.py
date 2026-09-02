@@ -1671,6 +1671,15 @@ def _cargar(nombre, pid=None, sub=None):
 _ES_PROVISORIO = re.compile(r"^Pieza( extra)? \d+'*$")
 
 
+def _es_camino_b(pid):
+    """¿El molde trae el diseño adentro? Lo dice la MARCA en disco, al lado de `plantilla.ai`."""
+    try:
+        import piezas_con_diseno as PD
+        return PD.es_camino_b(_ruta_entrada("plantilla.ai", pid))
+    except Exception:
+        return False
+
+
 def _no_es_camino_b(pid, que="Esta herramienta"):
     """Corta las herramientas del camino A sobre un molde que trae el diseño adentro.
 
@@ -1679,11 +1688,7 @@ def _no_es_camino_b(pid, que="Esta herramienta"):
     son capas de la misma mesa: la correspondencia ya está resuelta desde el alta. Dejarlas correr
     no da un error prolijo — destruye el registro, o revienta con `mesa=None`. Devuelve la
     respuesta a devolver, o None si el molde no es del camino B."""
-    try:
-        import piezas_con_diseno as PD
-        if not PD.es_camino_b(_ruta_entrada("plantilla.ai", pid)):
-            return None
-    except ImportError:
+    if not _es_camino_b(pid):
         return None
     return jsonify({"error": f"{que} no se usa en un molde que trae el diseño adentro: sus talles "
                              f"son capas de la misma mesa y la correspondencia entre ellos ya está "
@@ -1748,7 +1753,9 @@ def estado_general():
         "arte": val,
         "fuentes": list(MP.catalogo_fuentes(FUENTES).values()),
         "talles": talles,
-        "listo_para_pedidos": bool(reg) and bool(val and val.get("aprobado")),
+        # CAMINO B: no hay arte que aprobar — con el registro alcanza para poder pedirlo.
+        "listo_para_pedidos": bool(reg) and (_es_camino_b(_get_active_producto_id())
+                                             or bool(val and val.get("aprobado"))),
     })
 
 
@@ -3896,7 +3903,11 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
             except OSError:
                 pass
         return fs
-    return ["v14", _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
+    # v15: el CAMINO B entra en la clave. Sin esto, dos moldes distintos (uno con arte y otro con
+    # el diseño adentro) podían firmar igual, y un molde que cambia de camino al re-subirse
+    # seguiría sirviendo el render viejo: el mtime del arte inexistente es siempre 0.
+    return ["v15", _es_camino_b(pid),
+            _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
             # ⚠️ Los reemplazos son DEL PEDIDO (2026-08-21): si la clave siguiera firmando los del
             # molde, cambiar de fuente en el pedido serviría el render cacheado con la anterior.
             _sha1_corto(reempl or {}), _sha1_corto(_firma_fuentes()),
@@ -3925,7 +3936,11 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
     sub = _diseno_sub(diseno)
     pl = _ruta_entrada("plantilla.ai", pid)
     arte = _ruta_entrada("arte.ai", pid, sub=sub)
-    if not (prod and os.path.exists(pl) and os.path.exists(arte) and reg):
+    # CAMINO B: no hay arte, y NO se puede saltear el preview por eso. La LEY del proyecto es que
+    # el Arte se vea igual que la tizada porque los dibuja EL MISMO motor: si acá se devolviera
+    # None, la pantalla tendría que mostrar otra cosa y la ley se rompe.
+    _cb = _es_camino_b(pid)
+    if not (prod and os.path.exists(pl) and reg and (_cb or os.path.exists(arte))):
         return None
     edit_cfg = _editables_cfg(prod, (diseno or "principal"), override)
     edit_tam = _editables_tamano(prod)
@@ -4012,12 +4027,14 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
         prendas = _traducir_prendas(filas, prod, cat, reg=reg, exigir_obligatorias=False)
         if not prendas:
             return {"piezas": {}, "talle": talle, "cache": False}
-        try: _pers = MP.extraer_personalizacion(arte)   # placeholders (dónde caen nombre/número)
+        # Los placeholders de nombre/número: en el camino B están en el MOLDE (no hay arte).
+        try: _pers = MP.extraer_personalizacion(pl if _cb else arte)
         except Exception: _pers = {}
         tmp = tempfile.mkdtemp()
         try:
-            ppt = MP.generar_pedido(pl, arte, reg, _pers, prendas, _fuentes_para(pid, _reempl), tmp,
-                                    mapeo_arte=(mapeo or None), solo_piezas=True,
+            ppt = MP.generar_pedido(pl, (None if _cb else arte), reg, _pers, prendas,
+                                    _fuentes_para(pid, _reempl), tmp,
+                                    mapeo_arte=(None if _cb else (mapeo or None)), solo_piezas=True,
                                     borde_corte=prod.get("borde_corte"), etiqueta=prod.get("etiqueta"),
                                     editables_cfg=edit_cfg, editables_tamano=edit_tam,
                                     editables_color=edit_color,   # color override (LEY arte=tizada)
@@ -6278,10 +6295,15 @@ def generar():
     reg = _cargar("registro_producto.json", pid)
     # Personalización FRESCA del arte (incluye trazo/borde + color exacto).
     try:
-        pers = MP.extraer_personalizacion(_ruta_entrada("arte.ai", pid)) or {}
+        # CAMINO B: los placeholders están en el molde (no hay arte).
+        pers = MP.extraer_personalizacion(
+            _ruta_entrada("plantilla.ai" if _es_camino_b(pid) else "arte.ai", pid)) or {}
     except Exception:
         pers = _cargar("registro_personalizacion.json", pid) or {}
     val = _cargar("validacion_arte.json", pid)
+    _cb1 = _es_camino_b(pid)
+    if _cb1:
+        val = {"aprobado": True, "modo": "con_diseno"}     # el diseño ya viene adentro del molde
     if not reg or not val or not val.get("aprobado"):
         return jsonify({"error": "falta plantilla registrada o arte aprobado"}), 409
 
@@ -6312,7 +6334,7 @@ def generar():
             def prog(fase, a, b):
                 trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
             res = MP.generar_pedido(_ruta_entrada("plantilla.ai", pid),
-                                    _ruta_entrada("arte.ai", pid),
+                                    (None if _cb1 else _ruta_entrada("arte.ai", pid)),
                                     reg, pers, translated_prendas, _fuentes_para(pid, _reempl_de_request()), salida, progreso=prog,
                                     mapeo_arte=mapeo, config_nesting=cfg_nesting,
                                      rotaciones=rotaciones, asignacion_tela=asignacion,
@@ -6837,9 +6859,17 @@ def generar_multi():
                 sub = _diseno_sub(dslug)
                 val = _cargar("validacion_arte.json", pid, sub=sub)
             dnom = "Principal" if dslug == "principal" else next((d["nombre"] for d in ((prod or {}).get("disenos") or []) if d["id"] == dslug), dslug)
-            if not val:
+            # CAMINO B: el molde trae el diseño adentro. No hay `validacion_arte.json` ni mapeo
+            # que revisar; TODO LO DEMÁS del bloque (fuentes, telas, rotaciones, la ficha, el
+            # grupo de tizada) es igual y se reusa tal cual. Sólo se saltean los pedazos que
+            # miran el arte. 🔴 Sin esto el molde salía del pedido EN SILENCIO (el `continue` de
+            # abajo) y la tizada llegaba sin sus piezas.
+            _cb = _es_camino_b(pid)
+            if not val and not _cb:
                 # ningún diseño del molde tiene arte cargado → no hay nada que aplicar.
                 continue
+            if _cb:
+                val = {"aprobado": True, "modo": "con_diseno"}
             if not val.get("aprobado"):
                 # El diseño EXISTE pero no está 100% mapeado. Se genera IGUAL: las piezas SIN
                 # diseño salen en blanco (con su borde de corte + etiqueta). Solo se AVISA cuáles.
@@ -6877,7 +6907,8 @@ def generar_multi():
                 # (no se saltea: sigue y genera con lo que haya mapeado)
             # Re-extraer la personalización FRESCA del arte (trazo/borde + color exacto)
             # para no depender del registro guardado al subir (que puede ser viejo).
-            _artp = _ruta_entrada("arte.ai", pid, sub=sub)
+            # CAMINO B: los placeholders viven en el MOLDE (no hay arte del que leerlos).
+            _artp = _ruta_entrada("plantilla.ai" if _cb else "arte.ai", pid, sub=(None if _cb else sub))
             try:
                 pers = MP.extraer_personalizacion(_artp)
             except Exception:
@@ -6930,7 +6961,9 @@ def generar_multi():
                                      "muestra": _muestra_de(_prg)})
             molds_data.append({
                 "plantilla": _ruta_entrada("plantilla.ai", pid),
-                "arte": _ruta_entrada("arte.ai", pid, sub=sub),
+                # CAMINO B: sin arte. El motor lo detecta por la marca del molde, pero mandarle
+                # la ruta de un `arte.ai` que no existe lo haría abrirlo igual para leer sus capas.
+                "arte": (None if _cb else _ruta_entrada("arte.ai", pid, sub=sub)),
                 "fuentes": _fuentes_para(pid, _reempl),   # carpetas + reemplazos DEL PEDIDO (arte=tizada)
                 "registro": reg, "pers": pers, "prendas": subset,
                 "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(dslug),

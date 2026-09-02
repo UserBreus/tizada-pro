@@ -98,6 +98,17 @@ mezclar dos cambios grandes en la misma entrega.
 
 ## 6. PREGUNTAS ABIERTAS (lo que falta decidir)
 
+- [ ] 🔴 **¿CÓMO SE MARCA EL NOMBRE Y EL NÚMERO?** (2026-09-02, sale de generar la tizada real)
+      La decisión de §4 —«nombre y número siguen, como hoy»— asumía que
+      `extraer_personalizacion` iba a encontrarlos igual que en el arte: **por una CAPA llamada
+      `nombre` / `numero`**. Pero el archivo real tiene 20 capas y **las 20 son talles**. Sin esa
+      capa no hay placeholder que reemplazar: la tizada sale con el «NOMBRE» que está dibujado
+      adentro del diseño, para todas las prendas. Las salidas posibles:
+      **(a)** que el archivo traiga las capas `nombre` y `numero` (la convención de siempre —
+      no hace falta código nuevo, ya funcionaría); **(b)** detectar el texto por su contenido
+      («NOMBRE», «00») — frágil, y el proyecto ya decidió no adivinar; **(c)** que el cliente
+      marque en el visor dónde va, como con la etiqueta (es la más trabajo).
+
 - [ ] ¿Un molde del camino B tiene **variables** (modelos), o va **entero** como los «Mis
       artículos» de hoy? (hoy un molde propio no tiene variables y el motor genera todas sus piezas)
 - [ ] ¿Lleva **toggles** (manga corta/larga, capucha)? Si el diseño ya está adentro, cada opción
@@ -203,12 +214,42 @@ molde B lo destruyen, o revientan con el `mesa=None` que devuelve su visor. Las 
 
 **Falta (front):** el panel de nombrado dentro del paso Arte del pedido.
 
-### [ ] E4 — El motor: la tizada desde el molde con diseño
-- Variante de `_armar_base`: **sin arte y sin mapeo**. El contenido de la pieza es el del propio
-  archivo, recortado a su contorno. Sin escalado ni `cm_encajar`: ya está en su lugar.
-- Más el **borde de corte** (el que dejó el admin) y el **nombre/número** leídos del propio molde.
-- Nesting y hojas: los de siempre.
-- **Contrato**: la pieza generada tiene que ser idéntica al recorte del archivo original.
+### [x] E4 — El motor: la tizada desde el molde con diseño — **HECHO** (2026-09-02)
+
+**La tizada sale.** Verificado generando la hoja completa del archivo real y **mirándola**:
+`HOJA_Principal.pdf` de 180 × 77 cm con las 9 piezas estampadas (patrón, escudo, logos), su borde
+de corte y su etiqueta («XS · Espalda · #01»). Contrato: `verificar_tizada_con_diseno.py`.
+
+- `generar_pedido(plantilla, arte=None, …)`. La rama se elige por **la marca en disco**, nunca por
+  «no vino arte»: sobrevive al ProcessPool del nesting y no adivina nada del archivo.
+- **`pagina_molde(mesa, talle)`** — la mesa del propio molde con sólo la capa del talle
+  (`aislar_capa` + `sanear_oc`). 🔴 **NO se puede reusar `pagina_arte`**: ése llama a
+  `limpiar_capas_conservando_talle(..., geometrias_base(...))`, que descarta los trazados que
+  coinciden con la moldería base **y todo el texto** — y acá la moldería base ES el dibujo, así
+  que borraría la pieza entera. Medido sobre la mesa 1: de 140 recortes / 1320 rellenos (las 20
+  capas encimadas) quedan 7 / 66 y los textos del talle.
+- La rama de `_armar_base` es, paso por paso, **el ramal del arte clásico** con la página sacada
+  del molde: misma traslación, mismo clip, misma escala. Se saltea todo lo del arte separado
+  (`mesa_arte`, `cm_encajar`, editables, objetos agregados): la pieza ya está en su lugar y a
+  tamaño real. Verificado: 48,7 × 73,8 cm contra 48,5 × 73,6 del registro (la diferencia es el
+  borde de corte).
+- Servidor destrabado: `generar_multi` (antes descartaba el molde **en silencio** por no tener
+  `validacion_arte.json` → la tizada llegaba sin sus piezas), `generar`, `estado_general` y
+  **`_piezas_base`** — este último no es opcional: si el preview no pasa por la misma rama del
+  motor se rompe la LEY «el arte se ve igual que la tizada». La clave del caché sube a `v15` con
+  el camino B adentro.
+
+⚠️ **PENDIENTE ABIERTO — el nombre y el número no se estampan todavía.** El archivo real tiene
+**20 capas y las 20 son talles**: no hay ninguna capa `nombre` ni `numero`, que es de donde
+`extraer_personalizacion` los saca. Al generar con «GONZALEZ / 10» sale igual el «NOMBRE» que está
+DIBUJADO adentro del diseño de la espalda. (Y el auto-descubrimiento de capas hubo que apagarlo
+para el camino B: tomaría los 20 talles como campos y estamparía cualquier texto.) **Hay que
+decidir con el usuario cómo se marca el nombre/número en estos archivos** — ver §6.
+
+⚠️ **Peso a vigilar**: la hoja del ejemplo pesa 117 MB (el archivo original, 123). Con una prenda
+y 9 piezas está bien; con un pedido grande hay que medirlo. `copy_foreign` trae la mesa del molde
+con sus recursos: si hiciera falta, la salida es compartir el XObject entre piezas de la misma
+mesa — **nunca rasterizar**.
 
 ### [ ] E5 — La configuración estable del admin (VIVA)
 - Borde de corte, etiqueta y nesting por defecto **para este camino**, en el catálogo

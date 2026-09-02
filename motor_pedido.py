@@ -2221,10 +2221,21 @@ def extraer_personalizacion(path_arte, campos=None):
         # campo = el nombre de la capa.
         _sys = CAPAS_NO_PERS
         _d = fitz.open(path_arte)
+        # 🔴 CAMINO B: en un molde que trae el diseño adentro, las capas son LOS TALLES (20 en el
+        # archivo real). Auto-descubriéndolas, cada talle se tomaría como un campo y el motor
+        # estamparía cualquier texto que encontrara adentro. Los talles nunca son campos.
+        _talles = set()
+        try:
+            import piezas_con_diseno as _PD
+            if _PD.es_camino_b(path_arte):
+                _talles = {_norm_nombre(t) for t in _PD.talles_del_molde(_d)}
+        except Exception:
+            pass
         # Las capas "Editable …" son OBJETOS editables (mover/rotar/escalar), NO campos de
         # personalización: se excluyen para que no se estampen como texto.
         campos = [c["text"] for c in _d.layer_ui_configs()
-                  if _norm_nombre(c["text"]) not in _sys and not _es_capa_editable(c["text"])]
+                  if _norm_nombre(c["text"]) not in _sys and _norm_nombre(c["text"]) not in _talles
+                  and not _es_capa_editable(c["text"])]
         _d.close()
     nativos = _colores_personalizable(path_arte)   # color exacto por mesa y por texto
     trazos = _trazo_personalizable(path_arte)       # borde/trazo por mesa y por texto (compat)
@@ -3602,7 +3613,18 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     B = (_bc_mm if _bc_activo else 2.0) * MM
     base_doc = _abrir(plantilla)
     TODAS = set(i["name"] for i in base_doc.get_ocgs().values())
-    CAPAS_ARTE = set(i["name"] for i in _abrir(arte).get_ocgs().values())
+    # ── CAMINO B: el molde YA TRAE EL DISEÑO ADENTRO de cada pieza ────────────────────────────
+    # No hay arte aparte ni mapeo: el dibujo de la pieza es el del propio archivo, ya en su lugar
+    # y en su escala. Se decide por la MARCA en disco y no por «no vino arte»: la marca sobrevive
+    # al ProcessPool del nesting (son procesos, no hilos) y no se adivina nada por la forma del
+    # archivo, que es regla del proyecto. Ver `MOLDE_CON_DISENO.md`.
+    try:
+        import piezas_con_diseno as _PD
+        _camino_b = _PD.es_camino_b(plantilla)
+    except ImportError:
+        _camino_b = False
+    CAPAS_ARTE = set() if (_camino_b or not arte) else set(
+        i["name"] for i in _abrir(arte).get_ocgs().values())
 
     fuentes_cache = {}
     def fuente(nombre_ps):
@@ -3716,6 +3738,32 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         if rotaciones and p in rotaciones and rotaciones[p]:
             return rotaciones[p]                      # ninguna / 90 / 180 / libre — para TODAS
         return "ninguna"
+
+    # ── CAMINO B: la mesa DEL MOLDE con sólo la capa de este talle ────────────────────────────
+    _molde_por_talle, _molde_limpias = {}, set()
+    def pagina_molde(mesa, talle):
+        """La mesa del MOLDE con SÓLO la capa de este talle, y su dibujo INTACTO.
+
+        🔴 NO se puede reusar `pagina_arte` para esto. Ése llama a
+        `limpiar_capas_conservando_talle(..., geometrias_base(...))`, que dentro de la capa
+        conservada descarta (a) todo trazado cuyo bbox coincide con uno de la moldería base y
+        (b) TODO el texto. En el camino A eso está bien: saca el contorno del molde que viene
+        repetido en el arte. Acá la moldería base **es** el dibujo de la pieza → borraría la
+        pieza entera y, de paso, los placeholders de nombre/número.
+
+        `aislar_capa` conserva lo pintado dentro del OCG del talle con el estado gráfico intacto
+        (CMYK exacto) y **deja sus recortes**, que en el camino B SON la pieza. Medido sobre la
+        mesa 1 del archivo real: de 140 recortes / 1320 rellenos (las 20 capas encimadas) quedan
+        7 / 66 y los 3 textos del talle — el 95 % que se va es el de los otros 19 talles."""
+        if talle not in _molde_por_talle:
+            _molde_por_talle[talle] = _abrir_pike(plantilla)
+        pdf = _molde_por_talle[talle]
+        if (talle, mesa) not in _molde_limpias:
+            pag = pdf.pages[mesa - 1]
+            aislar_capa(pdf, pag, talle)
+            sanear_oc(pdf, pag)
+            _molde_limpias.add((talle, mesa))
+        return pdf.pages[mesa - 1]
 
     _arte_por_talle, _limpias = {}, set()
     def pagina_arte(mesa, talle):
@@ -4147,7 +4195,26 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         page = out.add_blank_page(page_size=(W + 2*B, H + 2*B))
 
         # ── Arte: contorno (clip) y dibujo, en coordenadas finales de la pieza ──
-        if mapeo_arte and not _mesa_a:          # esta variante quedó SIN diseño en esta pieza
+        if _camino_b:
+            # CAMINO B: el diseño ya está adentro de la pieza, en su lugar y en su escala. Se
+            # trae la mesa del propio molde (con sólo la capa del talle) como Form XObject y se
+            # la recorta al contorno. NO se escala (`cm_encajar` no va: no hay nada que encajar,
+            # la pieza ya está a tamaño real) y NO hay editables ni objetos agregados, que son
+            # cosas del arte separado.
+            # Es, paso por paso, el ramal del ARTE CLÁSICO de más abajo (el diseño ya viene sobre
+            # la misma mesa que el molde) con una sola diferencia: la página sale del MOLDE, no
+            # del arte. Misma escala para todo (`S` del XObject), misma traslación, mismo clip.
+            pag = pagina_molde(mesa, talle)
+            xo = out.copy_foreign(pag.as_form_xobject())
+            if "/OC" in xo:
+                del xo["/OC"]
+            S = float(xo.Matrix[0]) if "/Matrix" in xo else 1.0
+            ops = ops_cont(cont, S)
+            clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)
+            nom = page.add_resource(xo, Name.XObject, prefix="A")
+            arte_draw = (f"q\n1 0 0 1 {B-x0*S:.3f} {B-y0*S:.3f} cm\n"
+                         f"q\n{ops}\nW n\n{nom} Do\nQ\nQ\n")
+        elif mapeo_arte and not _mesa_a:        # esta variante quedó SIN diseño en esta pieza
             arte_draw = ""                      # pieza sin arte (el aviso de cobertura lo da el servidor)
             S = cont["user_unit"]
             clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)   # igual necesita clip para el borde/etiqueta
