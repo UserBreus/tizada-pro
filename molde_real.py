@@ -215,6 +215,9 @@ _PAINT_PATH = {"S", "s", "f", "F", "f*", "B", "B*", "b", "b*"}   # -> se reempla
 _PAINT_TEXT = {"Tj", "TJ", "'", '"'}                            # -> se eliminan (glifos)
 _PAINT_DROP = {"Do", "sh"}                                      # XObject / sombreado
 _CLIP_OPS = {"W", "W*"}                                          # recorte
+# CONSTRUCCIÓN del trazado (dónde va la línea). No pintan nada por sí solos: sin su operador de
+# pintura, lo único que hacen es ocupar lugar en el archivo.
+_PATH_BUILD = {"m", "l", "c", "v", "y", "re", "h"}
 
 
 def _norm_capa(s):
@@ -227,17 +230,59 @@ def _norm_capa(s):
     return " ".join(s.lower().replace("-", " ").split())
 
 
-def _raspar_pintado(pdf, page, suprimir_fn):
+def _raspar_pintado(pdf, page, suprimir_fn, podar=False):
     """Núcleo: reescribe el content-stream conservando TODO el estado gráfico (color, CTM,
     q/Q, estado de texto) en su orden ORIGINAL, y suprimiendo SOLO el PINTADO del contenido
     para el cual `suprimir_fn(pila_de_capas)` da True (`pila` = lista de sets de nombres OC
     abiertos). Conservar las órdenes de color/estado es CLAVE: borrar bloques enteros
     desbalancea el estado y le cambia el color HEREDADO a otras capas (ej. el editable sin
     color propio que terminaba verde/negro). Los trazos suprimidos se descartan con `n`, los
-    glifos/imágenes/sombreados se omiten, los recortes ajenos se quitan."""
+    glifos/imágenes/sombreados se omiten, los recortes ajenos se quitan.
+
+    `podar=True` **además borra los trazados suprimidos**, en vez de dejarlos escritos con un `n`.
+    🔴 Medido sobre el molde con el diseño adentro: la mesa trae **398.653 operadores** (los 20
+    talles encimados) y, aislado un talle, **sólo 75 pintan**. Sin podar, cada pieza de la tizada
+    arrastra los 398 mil —7,6 MB— y una hoja de 5 prendas terminó en **586 MB**, con el aplanado
+    para el RIP sin terminar a los 20 minutos.
+    ⚠️ Por qué NO es el modo por defecto: el camino A depende de que el estado gráfico quede
+    intacto, y su salida está verificada pixel a pixel. Acá se borran SÓLO los operadores de
+    construcción de trazado (`m l c v y re h`) y su pintura — nunca `q/Q`, `cm`, `gs` ni los
+    colores, que son estado y sí se heredan."""
     instrucciones = parse_content_stream(page)
+    # ── PODA FUERTE: los BLOQUES OC que no se usan se borran ENTEROS ────────────────────────────
+    # Podar sólo los trazados deja igual todo el estado gráfico de los otros 19 talles: medido, de
+    # 398.653 operadores quedaban 25.070 para dibujar 75 cosas. Ese resto son `q/Q/cm` y colores
+    # que ya no pintan nada, pero que el RIP igual tiene que leer y des-anidar — y ahí se iban
+    # minutos por hoja.
+    # 🔴 Un bloque sólo se borra si queda BALANCEADO en `q`/`Q`: si abre un estado y no lo cierra,
+    # lo que viene después lo hereda y borrarlo cambiaría el dibujo (es el bug del editable que
+    # salía verde). Los desbalanceados se podan como antes, operador por operador.
+    _saltar, _nivel = set(), 0
+    if podar:
+        _prof, _ini, _bal = 0, None, 0
+        for _i, _inst in enumerate(instrucciones):
+            _o = str(_inst.operator)
+            if _o in ("BDC", "BMC"):
+                _prof += 1
+                if _ini is None and _o == "BDC" and len(_inst.operands) == 2 and str(_inst.operands[0]) == "/OC":
+                    _n = {_norm_capa(x) for x in _nombres_oc(_inst.operands[1], page)}
+                    if _n and suprimir_fn([_n]):        # bloque de una capa que NO se usa
+                        _ini, _bal, _nivel = _i, 0, _prof
+            elif _o == "EMC":
+                if _ini is not None and _prof == _nivel:
+                    if _bal == 0:                        # abrió y cerró todo lo que tocó
+                        _saltar.update(range(_ini, _i + 1))
+                    _ini = None
+                _prof -= 1
+            elif _ini is not None:
+                if _o == "q":
+                    _bal += 1
+                elif _o == "Q":
+                    _bal -= 1
     salida, pila = [], []
-    for inst in instrucciones:
+    for _idx, inst in enumerate(instrucciones):
+        if _idx in _saltar:
+            continue
         op = str(inst.operator)
         if op in ("BDC", "BMC"):
             nombres = set()
@@ -252,8 +297,12 @@ def _raspar_pintado(pdf, page, suprimir_fn):
         if op in ("MP", "DP"):
             continue
         if suprimir_fn(pila):
+            if podar and op in _PATH_BUILD:
+                continue          # el trazado ni se escribe: no lo pinta nadie
             if op in _PAINT_PATH:
-                salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
+                # Con poda no hace falta ni el `n`: no quedó ningún trazado abierto que cerrar.
+                if not podar:
+                    salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
                 continue
             if op in _PAINT_TEXT:
                 if op == "'":                                   # avanzar línea sin pintar
@@ -271,12 +320,13 @@ def _raspar_pintado(pdf, page, suprimir_fn):
     page.Contents = pdf.make_stream(unparse_content_stream(salida))
 
 
-def aislar_capa(pdf, page, objetivo):
+def aislar_capa(pdf, page, objetivo, podar=False):
     """AÍSLA una capa OCG dejando SOLO su contenido pintado (suprime el pintado de TODO lo
     demás), conservando el estado gráfico → el objeto se pinta con su color EXACTO (CMYK/spot).
     `objetivo` = nombre(s) de la capa a conservar (str o set)."""
     obj = {_norm_capa(objetivo)} if isinstance(objetivo, str) else {_norm_capa(o) for o in objetivo}
-    _raspar_pintado(pdf, page, lambda pila: not any(frame and (obj & frame) for frame in pila))
+    _raspar_pintado(pdf, page, lambda pila: not any(frame and (obj & frame) for frame in pila),
+                    podar=podar)
 
 
 _FILL_PATH = {"f", "F", "f*", "b", "b*", "B", "B*"}   # ops que RELLENAN (llevan color de fill)

@@ -3788,7 +3788,11 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         pdf = _molde_por_talle[talle]
         if (talle, mesa) not in _molde_limpias:
             pag = pdf.pages[mesa - 1]
-            aislar_capa(pdf, pag, talle)
+            # 🔴 `podar=True`: además de no pintarlos, BORRA los trazados de los otros talles.
+            # Medido: la mesa trae 398.653 operadores (los 20 talles encimados) y de un talle
+            # aislado sólo 75 pintan. Sin podar, cada pieza arrastra los 398 mil (7,6 MB) y una
+            # hoja de 5 prendas dio 586 MB, con el aplanado para el RIP sin terminar a los 20 min.
+            aislar_capa(pdf, pag, talle, podar=True)
             sanear_oc(pdf, pag)
             _molde_limpias.add((talle, mesa))
         return pdf.pages[mesa - 1]

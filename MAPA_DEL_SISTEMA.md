@@ -1353,6 +1353,32 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (383) — ⚡ LA TIZADA DEL CAMINO B ARRASTRABA LOS 20 TALLES EN CADA PIEZA (586 MB →
+  46 MB).** Reporte del usuario: «va 6 minutos y paso por poco la mitad», contra el proyecto de
+  referencia que «lo hace en segundos». **CAUSA, medida:** el content-stream de una mesa trae
+  **398.653 operadores** (los 20 talles encimados) y, aislado un talle, **sólo 75 pintan**.
+  `_raspar_pintado` convertía el pintado ajeno en `n` pero **dejaba los trazados escritos**, así
+  que cada pieza copiaba los 398 mil (7,6 MB). **FIX:** `aislar_capa(..., podar=True)` —opt-in,
+  sólo camino B— borra los operadores de construcción de trazado suprimidos y, además, los
+  **bloques OC completos que quedan balanceados en `q/Q`** (los desbalanceados se podan operador a
+  operador: si un bloque abre estado y no lo cierra, lo de después lo hereda y borrarlo cambiaría
+  el dibujo — es el bug del editable que salía verde).
+  Resultado: 398.347 → **20.186** operadores por pieza · pieza de 23,1 → **1,6 MB** · hoja de 1
+  prenda 117 → **9 MB** · hoja de 5 prendas 586 → **46 MB** · el pedido pasó de no terminar en 18
+  min a **11,5 min**. 🔴 Con **0 píxeles distintos** de 6.475.275 comparados
+  (`verificar_poda_camino_b.py` §2). El camino A no cambia: sus contratos (`marcas_proceso`,
+  `mesa_larga`, `referencia_medida`) siguen verdes.
+  También: **`aplanar_rip._flatten` memoizado** — aplanaba el MISMO XObject una vez por colocación
+  (45 veces en ese pedido), parseando y reescribiendo su stream cada vez.
+  📌 **LO QUE QUEDA, y por qué el otro sistema tarda segundos:** de los 11,5 min, **402 s son el
+  aplanado** y ya no hay basura que sacar (los 20.186 restantes son el trazado real: 16.505 curvas
+  para 66 rellenos). La diferencia es estructural: `Prueba para tizada` parsea el PDF una vez y
+  **escribe un PDF plano** emitiendo los paths (`pdfExport.js`); nosotros componemos con XObjects y
+  los des-anidamos para el RIP, y eso mete el contenido inline una vez por colocación (~900.000
+  operadores en la hoja). La salida sería **aplanar un solo nivel** (piezas como XObject de la
+  página, 27 objetos y 45 `Do`), pero eso toca la política del archivo que va a la imprenta —
+  `aplanar_rip.py` existe porque los XObjects anidados daban «error RIP» — así que **se decide con
+  el usuario, no por cuenta propia**.
 - **2026-09-03 (382) — LAS DOS FORMAS, MITAD Y MITAD · LA ESPERA ES UN CÍRCULO · Y UN MOLDE QUE
   YA NO ESTÁ SE SACA DEL PEDIDO.** Pedido del usuario, más un bug que él encontró usándolo.
   **(a)** Las dos formas de armar el pedido pasan a ser **dos tarjetas que ocupan el espacio libre,

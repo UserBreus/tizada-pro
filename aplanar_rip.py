@@ -62,7 +62,26 @@ def _remap_ops(ops, remap):
     return out
 
 
-def _flatten(pdf, container, es_pagina=False):
+def _flatten(pdf, container, es_pagina=False, _hechos=None):
+    """Des-anida los XObject de Form: su contenido pasa al stream que los usaba.
+
+    🔴 `_hechos` evita aplanar DOS VECES el mismo objeto. Una tizada coloca la misma pieza una vez
+    por prenda —45 colocaciones de 27 piezas en un pedido real— y cada `Do` disparaba un
+    `_flatten` completo del mismo XObject: parsear y reescribir su stream, una vez por colocación.
+    Con piezas de ~20.000 operadores eso son cientos de miles de operadores procesados de más, y
+    este paso ya era el que más tardaba de todo el pedido (minutos por hoja).
+    Es sólo memoria: aplanar un objeto ya aplanado da lo mismo, pero cuesta.
+    """
+    if _hechos is None:
+        _hechos = set()
+    try:
+        _id = container.objgen if hasattr(container, "objgen") else None
+    except Exception:
+        _id = None
+    if _id and _id != (0, 0):
+        if _id in _hechos:
+            return
+        _hechos.add(_id)
     res = container.get("/Resources")
     if res is None:
         return
@@ -79,7 +98,7 @@ def _flatten(pdf, container, es_pagina=False):
             nm = str(operands[0])
             xo = xobjs.get(nm) if nm in xobjs else None
             if xo is not None and xo.get("/Subtype") == Name("/Form"):
-                _flatten(pdf, xo, es_pagina=False)
+                _flatten(pdf, xo, es_pagina=False, _hechos=_hechos)
                 remap = _merge_res(res, xo.get("/Resources", pikepdf.Dictionary()))
                 sub = _remap_ops(list(parse_content_stream(xo)), remap)
                 _num = lambda v: pikepdf.Object.parse(f"{float(v):.6f}".encode("ascii"))

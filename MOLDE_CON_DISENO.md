@@ -348,7 +348,50 @@ traduce solo al campo `numero`, porque el estampado busca `persona[campo]` por e
 capa. ⚠️ **Falta probarlo contra un archivo que las traiga** — cuando exista, correr
 `verificar_tizada_con_diseno.py` y mirar que salgan estampados.
 
-🔴 **EL PESO Y EL TIEMPO — MEDIDO DE PUNTA A PUNTA, ES EL PENDIENTE MÁS SERIO DE ESTE CAMINO.**
+## ⚡ EL PESO Y EL TIEMPO (2026-09-03) — la causa encontrada, y lo que falta
+
+**Reporte del usuario:** «arme una tizada con un molde con diseño incluido, va 6 minutos y paso por
+poco la mitad del proceso… y este sistema `Prueba para tizada` lo hace en segundos».
+
+**La causa, medida:** el content-stream de una mesa trae **398.653 operadores** —los 20 talles
+encimados— y, aislado un talle, **sólo 75 pintan**. El aislado convertía el pintado de los otros
+talles en «no pintar» pero **dejaba los trazados escritos**, así que cada pieza de la tizada
+arrastraba los 398 mil (7,6 MB). Una hoja de 5 prendas dio **586 MB** y el aplanado para el RIP
+seguía sin terminar a los 20 minutos.
+
+**Lo que se hizo** (`aislar_capa(..., podar=True)`, sólo camino B):
+
+| | antes | ahora |
+|---|---|---|
+| Operadores por pieza | 398.347 | **20.186** (−94,9 %) |
+| La pieza más pesada | 23,1 MB | **1,6 MB** |
+| Hoja de 1 prenda | 117 MB | **9 MB** |
+| Hoja de 5 prendas | 586 MB | **46 MB** |
+| Pedido de 5 prendas | no terminaba en 18 min | **11,5 min** |
+
+🔴 Y **no cambia un pixel**: el contrato compara el render de la página podada contra la sin podar
+—6.475.275 píxeles— y da **0 distintos** (`verificar_poda_camino_b.py`). Se borran sólo los
+operadores de construcción de trazado y los bloques OC **balanceados en `q/Q`**; nunca el estado
+gráfico, que sí se hereda. Es *opt-in*: el camino A no cambió (sus contratos siguen verdes).
+También se memoizó `_flatten` en `aplanar_rip.py`: aplanaba **el mismo XObject una vez por
+colocación** (45 veces en ese pedido).
+
+**Lo que quedó, y por qué el otro sistema tarda segundos.** De los 11,5 min, **402 s son el
+aplanado para el RIP** y 288 s armar las piezas. Ya no hay basura que sacar: los 20.186 operadores
+que quedan son **el trazado real del diseño** (16.505 curvas para 66 rellenos). La diferencia con
+`Prueba para tizada` es estructural: él **parsea el PDF una vez y escribe un PDF plano** emitiendo
+los paths de cada pieza (`pdfExport.js` → `pathToPdfOps`); nosotros componemos con XObjects y
+después los **des-anidamos** para el RIP, y ese des-anidado mete el contenido *inline* una vez por
+colocación (45 × 20.000 ≈ 900.000 operadores en el stream de la hoja).
+📌 **La salida está identificada pero es DECISIÓN DEL USUARIO**: aplanar **un solo nivel** —dejar
+las piezas como XObject de la página, aplanando sólo lo de adentro— daría 27 objetos y 45 `Do`,
+sin anidamiento profundo y con el stream de la hoja chico. Toca la política del archivo que va a
+la imprenta (`aplanar_rip.py` existe porque los XObjects anidados daban «error RIP»), así que **no
+se cambia sin decidirlo con él**.
+
+---
+
+🔴 **EL PESO Y EL TIEMPO — MEDIDO DE PUNTA A PUNTA (registro de la medición vieja).**
 Una tizada de **UNA prenda** (9 piezas, talle 1) desde la pantalla tardó **~21 minutos**:
 
 | Fase | Tiempo |
