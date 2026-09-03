@@ -1671,6 +1671,43 @@ def _cargar(nombre, pid=None, sub=None):
 _ES_PROVISORIO = re.compile(r"^Pieza( extra)? \d+'*$")
 
 
+# ── EL VISOR DEL CAMINO B, YA ARMADO ─────────────────────────────────────────────────────────
+# Lo deja el alta (que de todos modos recorre las 9 mesas × 20 talles) y con eso las pantallas de
+# nombrar piezas y de ubicar la etiqueta abren **al instante**, por pesado que sea el diseño:
+# medido, armarlo a demanda cuesta 52 s por talle y son enteros leer los dibujos del archivo.
+# Es liviano: ~5 KB por talle (sólo contornos), ~100 KB el molde entero.
+_VISOR_JSON = "visor_contornos.json"
+
+
+def _visor_guardar(pid, visor):
+    if not visor:
+        return
+    try:
+        _p = _ruta_datos(_VISOR_JSON, pid)
+        os.makedirs(os.path.dirname(_p), exist_ok=True)
+        _tmp = _p + ".tmp"
+        json.dump(visor, open(_tmp, "w", encoding="utf-8"), ensure_ascii=False)
+        os.replace(_tmp, _p)     # atómico: media escritura dejaría el visor roto
+    except Exception as e:
+        print(f"[camino B] no se pudo guardar el visor: {e}")
+
+
+def _visor_leer(pid, talle_ref=None):
+    """El visor ya armado de ese talle, o None si no está (entonces se calcula como antes)."""
+    try:
+        _d = json.load(open(_ruta_datos(_VISOR_JSON, pid), encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(_d, dict) or not _d:
+        return None
+    if talle_ref and talle_ref in _d:
+        return _d[talle_ref]
+    if talle_ref:
+        return None              # pidieron un talle que no está: que lo calcule el motor
+    _ts = list(_d)               # sin talle pedido: el del medio, igual que `detectar_para_visor`
+    return _d[_ts[len(_ts) // 2]]
+
+
 def _es_camino_b(pid):
     """¿El molde trae el diseño adentro? Lo dice la MARCA en disco, al lado de `plantilla.ai`."""
     try:
@@ -1902,6 +1939,14 @@ def subir_plantilla():
             import piezas_con_diseno as PD
             PD.marcar(destino, con_diseno=bool(_con_diseno))
             PD.olvidar()
+            if not _con_diseno:
+                # Se re-subió por el camino de siempre encima de uno con diseño: el visor guardado
+                # es de OTRO archivo. Dejarlo haría que «nombrar piezas» mostrara las piezas del
+                # molde anterior — y como no se abre el PDF, nadie se enteraría.
+                try:
+                    os.remove(_ruta_datos(_VISOR_JSON, _pid_de_request() or _get_active_producto_id()))
+                except OSError:
+                    pass
         except Exception as e:
             print(f"[subir_plantilla] no se pudo marcar el camino del molde: {e}")
     # Molde nuevo = se descartan las versiones del anterior (p. ej. el renombrado de variantes),
@@ -1946,6 +1991,10 @@ def subir_plantilla():
     except Exception as e:
         print(f"[subir_plantilla] no se pudo resetear la base: {e}")
     _guardar_registro(_pid_reset, alta["registro"], reset=True)
+    # CAMINO B: el alta ya armó el visor de todos los talles (le salió gratis: los contornos
+    # estaban en la mano). Se guarda para que nombrar piezas y ubicar la etiqueta abran al
+    # instante en vez de releer el archivo, que es lo que cuesta 52 s por talle.
+    _visor_guardar(_pid_reset, alta.get("visor"))
     resumen = {"archivo": f.filename, "mesas": alta["mesas"], "piezas": alta["piezas"],
                "talles": alta["talles"],
                "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
@@ -1973,6 +2022,13 @@ def _deteccion_base_cached(pid, talle_ref, candidatas=False):
     (mtime plantilla, talle). NO depende de la variable ni del diseño → un solo cálculo por
     (molde, talle) sirve a todas. Antes se recalculaba en CADA `/api/plantilla/deteccion` (19×
     al asignar variantes = ~85s). El caché lo baja a 1× por talle (y el pool los pre-genera)."""
+    # CAMINO B: si el alta ya dejó el visor armado, sale de ahí y NO se abre el archivo. Es la
+    # diferencia entre que «nombrar piezas» abra al instante o tarde ~52 s (medido) mientras
+    # PyMuPDF lee los dibujos de todas las mesas para quedarse con los contornos.
+    if not candidatas:
+        _v = _visor_leer(pid, talle_ref)
+        if _v is not None:
+            return _v
     pl = _ruta_entrada("plantilla.ai", pid, original=candidatas)
     try: mt = int(os.path.getmtime(pl))
     except OSError: mt = 0

@@ -19,6 +19,36 @@ Los dos caminos **conviven**: el A no se toca.
 
 ---
 
+## 0.a ⚡ NOMBRAR PIEZAS Y LA ETIQUETA ABREN AL INSTANTE (2026-09-03)
+
+Pedido del usuario, textual: *«debe de funcionar super flash, no puede tardar ni andar super lento
+sin importar el diseño de cada molde… debe de funcionar solo con los bordes para detectar las
+piezas al igual que la etiqueta y ahí ignorar lo pesado del diseño»*.
+
+**Lo que costaba, medido:** armar el visor de UN talle = **52 s**, y los 52 son `get_drawings()`
+leyendo los dibujos de las 9 mesas (1.516 items por mesa) para quedarse con 140 recortes. No es el
+acomodo ni el tamaño de la respuesta (que ya era de 5 KB): es **abrir el archivo pesado**. Cambiar
+de talle después costaba 0 s, porque los dibujos ya estaban en memoria de ese proceso.
+
+**La salida:** el **alta** ya recorre las 9 mesas × 20 talles, así que arma ahí mismo el visor de
+**todos** los talles —con los contornos que ya tiene en la mano, gratis— y lo guarda en
+`datos/productos/<pid>/visor_contornos.json`. Después, nombrar piezas y ubicar la etiqueta **no
+abren el PDF nunca más**.
+
+| | antes | ahora |
+|---|---|---|
+| Abrir «nombrar piezas» | **46 s** | **0,002 s** |
+| Peso de lo guardado | — | 103 KB los 20 talles (5,2 KB cada uno) |
+| Lo que tarda el alta | 58 s | 58 s (no cambió: los contornos ya estaban leídos) |
+
+🔴 **Rápido y equivocado sería peor que lento**: el contrato compara lo guardado contra lo que
+saldría de leer el archivo, pieza por pieza y contorno por contorno
+(`verificar_visor_rapido.py` §3). Y si el molde se re-sube por el camino de siempre, el visor
+guardado se borra: si no, «nombrar piezas» mostraría las piezas del archivo anterior y —como ya no
+se abre el PDF— nadie se enteraría.
+
+---
+
 ## 0. ESTADO (2026-09-02) — **el camino funciona de punta a punta**
 
 Subir → nombrar → ubicar la etiqueta → tela → planilla → **tizada**, probado en el navegador con

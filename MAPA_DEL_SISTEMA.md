@@ -1353,6 +1353,20 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (380) — ⚡ CAMINO B: NOMBRAR PIEZAS ABRE AL INSTANTE (46 s → 0,002 s).** Pedido del
+  usuario: esa pantalla tiene que andar «súper flash sin importar el diseño de cada molde»,
+  trabajando **sólo con los bordes**. **Lo que costaba, medido:** armar el visor de UN talle = 52 s,
+  y los 52 son `get_drawings()` leyendo los dibujos de las 9 mesas (1.516 items por mesa) para
+  quedarse con 140 recortes — no era el tamaño de la respuesta, que ya eran 5 KB: era **abrir el
+  archivo**. **La salida:** el ALTA ya recorre las 9 mesas × 20 talles, así que arma ahí mismo el
+  visor de TODOS los talles (gratis: los contornos ya están leídos) y lo guarda en
+  `visor_contornos.json` (103 KB los 20 talles). El visor lo sirve de ahí y **no abre el PDF nunca
+  más**; el alta no tardó más por esto. `detectar_para_visor` quedó partida: `layout_visor` acomoda
+  contornos YA LEÍDOS y la otra los lee del archivo.
+  🔴 **Rápido y equivocado es peor que lento**: el contrato compara lo guardado contra lo que
+  saldría del archivo, pieza por pieza y contorno por contorno. Y al re-subir por el camino A el
+  visor guardado **se borra** — si no, mostraría las piezas del archivo anterior y, como ya no se
+  abre el PDF, nadie se enteraría. Contrato: `verificar_visor_rapido.py`.
 - **2026-09-02 (379) — CAMINO B, LO QUE FALTABA: LA ETIQUETA DESDE EL PEDIDO, LA PANTALLA DEL
   ADMIN Y «TERMINAR PEDIDO».** Con esto el camino B queda completo de punta a punta.
   **(a) La etiqueta la ubica el cliente**, en la 2ª solapa del panel del pedido, que se destraba

@@ -191,18 +191,26 @@ ok(det_b.get("origen") == "con_diseno", "y lo que se sirve después de marcar es
 print("\n5 · 🔴 LOS MOLDES DEL CAMINO A NO CAMBIAN EN NADA")
 import glob                                                    # noqa: E402
 import pymupdf as pdfmod                                       # noqa: E402
-_probados = 0
-for pl in sorted(glob.glob(os.path.join(RAIZ, "entrada", "*", "plantilla.ai")))[:4]:
+_probados, _saltados = 0, 0
+for pl in sorted(glob.glob(os.path.join(RAIZ, "entrada", "*", "plantilla.ai")))[:6]:
+    # Los moldes que YA están marcados son del camino B a propósito (alguien los subió por ese
+    # camino): no son la no-regresión que se quiere medir acá, que es «un molde de siempre no se
+    # confunde». Sin este salto, el contrato se ponía rojo por un molde correcto — y un contrato
+    # que falla cuando todo está bien deja de mirarse.
+    if PD.es_camino_b(pl):
+        _saltados += 1
+        continue
     d = pdfmod.open(pl)
     es, _ = PD.parece_molde_con_diseno(d)
-    marcado = PD.es_camino_b(pl)
     PD.olvidar(d)
     d.close()
-    ok(not es and not marcado,
-       f"«{os.path.basename(os.path.dirname(pl))}» sigue siendo del camino A (y sin marca)")
+    ok(not es, f"«{os.path.basename(os.path.dirname(pl))}» sigue siendo del camino A (y sin marca)")
     _probados += 1
-if not _probados:
-    print("  (no hay moldes en entrada/: no se pudo probar la no-regresión)")
+if _probados:
+    print(f"  OK    {_probados} molde(s) del camino A no se confunden"
+          + (f" ({_saltados} del camino B, salteados)" if _saltados else ""))
+else:
+    print("  (no hay moldes del camino A en entrada/: no se pudo probar la no-regresión)")
 
 MP.cerrar_abiertos()
 PD.olvidar()

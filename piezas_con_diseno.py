@@ -385,6 +385,26 @@ def alta_molde_con_diseno(path, avisar=None):
             problemas.append("No se detectó ninguna pieza. ¿El archivo trae el diseño adentro de "
                              "cada pieza, con su máscara de recorte?")
 
+        # 3) 🔴 EL VISOR DE TODOS LOS TALLES, ACÁ MISMO — es lo que hace que «nombrar piezas» y
+        #    «ubicar la etiqueta» anden al instante por pesado que sea el diseño.
+        #    Leer los dibujos del archivo es lo único caro de esas pantallas: 52 s para UN talle
+        #    (medido), y son enteros `get_drawings` de las 9 mesas. Pero acá esos contornos YA
+        #    están leídos —es lo que acaba de hacer el bucle de arriba—, así que acomodarlos en la
+        #    grilla de cada talle no cuesta nada. Se guardan y el visor no vuelve a abrir el PDF.
+        visor = {}
+        for talle in talles:
+            _pm = [(mesa, i, cont)
+                   for mesa in sorted(por_mesa)
+                   for i, cont in enumerate(por_mesa[mesa].get(talle) or [])]
+            if not _pm:
+                continue
+            try:
+                visor[talle] = layout_visor(doc, _pm, talle, talles)
+            except Exception as e:
+                # Que falle el layout de UN talle no puede tumbar el alta: sin su entrada, el
+                # visor de ese talle se calcula a demanda como antes (lento, pero anda).
+                print(f"[camino B] no se pudo preparar el visor del talle {talle}: {e}")
+
         completos = [t for t in talles if all(t in registro.get(p, {}) for p in registro)]
         detalle = {}
         for pieza, por_talle in registro.items():
@@ -394,7 +414,9 @@ def alta_molde_con_diseno(path, avisar=None):
                               "talle_mayor_cm": {"w": mayor["w_cm"], "h": mayor["h_cm"]}}
         return {"mesas": doc.page_count, "talles": talles, "piezas": sorted(registro),
                 "completos": completos, "registro": registro, "problemas": problemas,
-                "advertencias": [], "piezas_detalle": detalle, "origen": "con_diseno"}
+                "advertencias": [], "piezas_detalle": detalle, "origen": "con_diseno",
+                # el visor ya armado, talle por talle (lo guarda el servidor: ver `_visor_guardar`)
+                "visor": visor}
     finally:
         olvidar(doc)
         doc.close()
@@ -414,26 +436,37 @@ def detectar_para_visor(doc, talle_ref=None, sep_cm=2.0):
 
     Devuelve la misma estructura que `motor_pedido.detectar_piezas`, así el visor no cambia.
     """
-    from motor_pedido import _item_visor            # diferido: motor_pedido importa de molde_real
-
     talles = talles_del_molde(doc)
     if not talles:
         raise ValueError("El archivo no declara capas: no se pueden separar los talles.")
     # el talle de referencia por defecto: el del medio, que es el que mejor representa al molde
     talle_ref = talle_ref if talle_ref in talles else talles[len(talles) // 2]
-
-    sep = sep_cm * CM
-    zoom = 10.0 / CM                                 # 1 unidad de salida = 1 mm (igual que hoy)
-
-    # 1) las piezas de cada mesa, en el talle elegido
-    items, cursor_x, cursor_y, alto_fila = [], sep, sep, 0.0
-    ancho_max = 0.0
     piezas_mesa = []
     for mesa in range(1, doc.page_count + 1):
         for i, cont in enumerate(piezas_de_mesa(doc, mesa, talle_ref)):
             piezas_mesa.append((mesa, i, cont))
     if not piezas_mesa:
         raise ValueError(f"No se detectaron piezas en el talle {talle_ref!r}.")
+    return layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm)
+
+
+def layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm=2.0):
+    """Acomoda en una grilla los contornos YA LEÍDOS y devuelve lo que dibuja el visor.
+
+    🔴 Está separada de `detectar_para_visor` porque leer los dibujos del archivo es lo ÚNICO caro
+    de esta pantalla: medido sobre el archivo real, armar el visor de un talle cuesta 52 s y **los
+    52 son `get_drawings` de las 9 mesas** (1.516 items leídos para quedarse con 140 recortes);
+    acomodarlos después es instantáneo. Como el ALTA ya recorre todas las mesas y todos los talles,
+    puede llamar a esto con los contornos que ya tiene en la mano y dejar el visor de los 20 talles
+    listo — y así nombrar piezas y ubicar la etiqueta no vuelven a abrir el PDF nunca más.
+    `piezas_mesa` = [(mesa, idx_en_la_mesa, contorno), …].
+    """
+    from motor_pedido import _item_visor            # diferido: motor_pedido importa de molde_real
+
+    sep = sep_cm * CM
+    zoom = 10.0 / CM                                 # 1 unidad de salida = 1 mm (igual que hoy)
+    items, cursor_x, cursor_y, alto_fila = [], sep, sep, 0.0
+    ancho_max = 0.0
 
     # 2) ancho de la grilla: la raíz del área total da filas y columnas parejas, y nunca menos que
     #    la pieza más ancha (si no, esa pieza se saldría de la grilla)
