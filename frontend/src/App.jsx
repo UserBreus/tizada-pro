@@ -1075,6 +1075,39 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
   );
 }
 
+/** El círculo de carga de la subida del camino B.
+ *
+ * 🔴 POR QUÉ NO ES UNA BARRA: cuando el archivo termina de viajar, el servidor RECIÉN empieza a
+ * leerlo, y con 100+ MB eso son minutos. Una barra llena y quieta se lee como «colgado», y llenarla
+ * de a poco con un tiempo estimado sería inventar. Así que hay dos estados y se pasa de uno a otro:
+ * mientras sube, el anillo marca el **porcentaje real**; cuando llegó, **gira** y muestra el reloj.
+ *
+ * `fase`: 'subiendo' → determinado con `pct` · cualquier otra cosa → girando con `seg`.
+ */
+function CargaCircular({ fase, pct = 0, seg = 0 }) {
+  const R = 40, C = 2 * Math.PI * R;
+  const subiendo = fase === 'subiendo';
+  const _p = Math.max(0, Math.min(100, pct));
+  const mm = Math.floor((seg || 0) / 60), ss = (seg || 0) % 60;
+  return (
+    <div className={`carga-circular ${subiendo ? 'determinado' : 'girando'}`}
+         role="progressbar" aria-valuemin={0} aria-valuemax={100}
+         aria-valuenow={subiendo ? Math.round(_p) : undefined}>
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle className="pista" cx="50" cy="50" r={R} strokeWidth="7" />
+        <circle className="arco" cx="50" cy="50" r={R} strokeWidth="7"
+          strokeDasharray={subiendo ? C : undefined}
+          strokeDashoffset={subiendo ? C * (1 - _p / 100) : undefined} />
+      </svg>
+      <div className="centro">
+        {subiendo
+          ? <><span className="valor">{Math.round(_p)}</span><span className="unidad">%</span></>
+          : <><span className="valor">{mm}:{String(ss).padStart(2, '0')}</span><span className="unidad">leyendo</span></>}
+      </div>
+    </div>
+  );
+}
+
 function AyudaExportMolde({ term }) {
   const V = (term?.variante || 'talle').toLowerCase();
   const secc = {
@@ -7848,6 +7881,7 @@ export default function App() {
   // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
   const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
 
+
   // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
   // molde por detrás, MÁS cada molde elegido ENTERO. Los moldes propios que sube el usuario no
   // tienen Variables (ese paso se les recorta) → sin esto no tendrían pantalla de arte.
@@ -9952,6 +9986,41 @@ export default function App() {
     setTimeout(() => setAdvertenciaInformativa(prev => prev === txt ? '' : prev), 10000);
   };
 
+  // ── UN MOLDE DEL PEDIDO QUE YA NO EXISTE SE SACA, NO SE ESPERA ──────────────────────────────
+  // 🔴 El pedido vive en el navegador (`localStorage`) y los moldes con el diseño adentro son
+  // EFÍMEROS: si se subió el archivo de nuevo, o se cerró el pedido en otra pestaña, o pasó el
+  // barrido del servidor, el pid guardado ya no está. Pasó de verdad: la pantalla se quedaba en
+  // «Cargando el molde…» para siempre mientras el servidor contestaba 404 y 409, sin decir nada.
+  // Se limpia y se avisa, que es lo único que la persona puede accionar.
+  const _limpiezaAviso = useRef(false);
+  useEffect(() => {
+    if (!productosCat.productos.length) return;          // el catálogo todavía no llegó
+    const vivos = new Set(productosCat.productos.map(p => p.id));
+    const _faltan = [...new Set(Object.values(disenoMoldes).flat())].filter(id => !vivos.has(id));
+    if (!_faltan.length) { _limpiezaAviso.current = false; return; }
+    const _nom = _faltan.map(id => (moldesEfimeros || {})[id]?.nombre).filter(Boolean);
+    setDisenoMoldes(prev => {
+      const n = {};
+      Object.entries(prev).forEach(([did, ids]) => { n[did] = (ids || []).filter(id => vivos.has(id)); });
+      return n;
+    });
+    setDisenoVars(prev => {
+      const n = {};
+      Object.entries(prev).forEach(([did, m]) => {
+        n[did] = Object.fromEntries(Object.entries(m || {}).filter(([mid]) => vivos.has(mid)));
+      });
+      return n;
+    });
+    setMoldesEfimeros(prev => Object.fromEntries(Object.entries(prev || {}).filter(([id]) => vivos.has(id))));
+    setMoldesBDiseno(prev => Object.fromEntries(Object.entries(prev || {}).filter(([id]) => vivos.has(id))));
+    if (!_limpiezaAviso.current) {
+      _limpiezaAviso.current = true;
+      showWarn(_nom.length
+        ? `${_nom.length === 1 ? 'El molde' : 'Los moldes'} ${_nom.map(n => `«${n}»`).join(', ')} ya no ${_nom.length === 1 ? 'está' : 'están'} en el servidor (se sube para un pedido y no queda guardado). Volvé a cargarlo si lo necesitás.`
+        : 'Un molde de este pedido ya no está en el servidor y se sacó del pedido.');
+    }
+  }, [_idsCat, disenoMoldes]);
+
   // ── CAMINO B: elegir piezas y nombrarlas, como en la pantalla de edición ────────────────────
   const togglePiezaNombrarB = (pz) => {
     setSelNombrarB(prev => {
@@ -11845,31 +11914,33 @@ export default function App() {
                 un mismo pedido puede llevar de las dos (una camiseta con el diseño adentro y un
                 short del catálogo con su arte van a la misma tizada). */}
             {pedidoPaso === 'diseno' && !mapeandoOperario && !vistaDiseno && (
-              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22 }}>
-                <span style={{ fontSize: 16, fontWeight: 800 }}>¿Cómo vas a armar este trabajo?</span>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 320px))', gap: 16, justifyContent: 'center' }}>
-                  <button type="button" data-tour="pedido-armar-base" onClick={() => setVistaDiseno('base')}
-                    style={{ padding: '26px 22px', borderRadius: 14, cursor: 'pointer', textAlign: 'left',
-                             background: 'rgba(0,216,245,0.06)', border: '1.5px solid var(--accent)' }}>
-                    <Icon name="nestingPiezas" style={{ width: 22, height: 22, color: 'var(--accent)' }} />
-                    <div style={{ fontSize: 15.5, fontWeight: 800, marginTop: 12 }}>Armar con base</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 7, lineHeight: 1.5 }}>
-                      Elegís el diseño y la prenda de la moldería, y le cargás el arte. Los pasos de siempre.
+              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 6 }}>
+                <span style={{ fontSize: 16, fontWeight: 800, textAlign: 'center', flexShrink: 0 }}>¿Cómo vas a armar este trabajo?</span>
+                {/* LAS DOS FORMAS, MITAD Y MITAD. Ocupan todo el espacio libre: es LA decisión de
+                    esta pantalla, y con dos tarjetas chicas en el medio no se leía así. Un color
+                    sutil para cada una (los del sistema: cian y magenta) para distinguirlas de un
+                    vistazo sin que compitan con el resto de la interfaz. */}
+                <div className="dos-caminos" style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <button type="button" data-tour="pedido-armar-base" className="camino-card camino-cyan"
+                    onClick={() => setVistaDiseno('base')}>
+                    <Icon name="nestingPiezas" className="camino-icon" />
+                    <div className="camino-titulo">Armar con base</div>
+                    <div className="camino-texto">
+                      Elegís el diseño y la prenda de la moldería, y le cargás el arte.<br />Los pasos de siempre.
                     </div>
                   </button>
-                  <button type="button" data-tour="pedido-armar-con-diseno" onClick={() => setVistaDiseno('con_diseno')}
-                    style={{ padding: '26px 22px', borderRadius: 14, cursor: 'pointer', textAlign: 'left',
-                             background: 'rgba(255,255,255,0.03)', border: '1.5px solid var(--border-light)' }}>
-                    <Icon name="upload" style={{ width: 22, height: 22, color: 'var(--text-secondary)' }} />
-                    <div style={{ fontSize: 15.5, fontWeight: 800, marginTop: 12 }}>Cargar molde con diseño incluido</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 7, lineHeight: 1.5 }}>
-                      Subís los archivos que ya traen el diseño estampado en cada pieza. Sin arte aparte
-                      ni mapeo: sólo decís qué es cada pieza.
+                  <button type="button" data-tour="pedido-armar-con-diseno" className="camino-card camino-magenta"
+                    onClick={() => setVistaDiseno('con_diseno')}>
+                    <Icon name="upload" className="camino-icon" />
+                    <div className="camino-titulo">Cargar molde con diseño incluido</div>
+                    <div className="camino-texto">
+                      Subís los archivos que ya traen el diseño estampado en cada pieza.<br />
+                      Sin arte aparte ni mapeo: sólo decís qué es cada pieza.
                     </div>
                   </button>
                 </div>
                 {(disenosPedido.length > 0 || Object.keys(moldesEfimeros || {}).length > 0) && (
-                  <button className="btn ghost" style={{ fontSize: 12.5 }} onClick={() => setVistaDiseno('base')}>
+                  <button className="btn ghost" style={{ fontSize: 12.5, alignSelf: 'center', flexShrink: 0 }} onClick={() => setVistaDiseno('base')}>
                     ← Seguir con lo que ya venías armando
                   </button>
                 )}
@@ -11974,23 +12045,24 @@ export default function App() {
                   {/* AVANCE HONESTO: el % real de la subida y después el reloj mientras el
                       servidor lee el archivo (que con 100+ MB son un par de minutos). */}
                   {subirBFase && (
-                    <div style={{ width: '100%', maxWidth: 620, background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: '11px 13px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 7 }}>
-                        <span>{subirBFase.nombre ? `«${subirBFase.nombre}» · ` : ''}{subirBFase.fase === 'subiendo' ? 'Subiendo…' : 'Leyendo el archivo y detectando las piezas…'}</span>
-                        <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                          {subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0} %` : `${Math.floor((subirBFase.seg || 0) / 60)}:${String((subirBFase.seg || 0) % 60).padStart(2, '0')}`}
+                    <div style={{ width: '100%', maxWidth: 620, display: 'flex', alignItems: 'center', gap: 18,
+                                  background: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: '18px 20px' }}>
+                      <CargaCircular fase={subirBFase.fase} pct={subirBFase.pct} seg={subirBFase.seg} />
+                      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 800 }}>
+                          {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}
+                        </span>
+                        {subirBFase.nombre && (
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            «{subirBFase.nombre}»{subirBFase.total > 1 ? ` · archivo ${subirBFase.i} de ${subirBFase.total}` : ''}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                          {subirBFase.fase === 'subiendo'
+                            ? 'No cierres la ventana.'
+                            : 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.'}
                         </span>
                       </div>
-                      <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', borderRadius: 4, background: 'var(--success, #2ecc71)',
-                                      width: subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0}%` : '100%',
-                                      opacity: subirBFase.fase === 'subiendo' ? 1 : 0.45, transition: 'width .2s linear' }} />
-                      </div>
-                      {subirBFase.total > 1 && (
-                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
-                          Archivo {subirBFase.i} de {subirBFase.total}. No cierres la ventana.
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -13463,7 +13535,22 @@ export default function App() {
                       />
                     </div>
                   ) : (
+                    /* 🔴 SIN MOLDE NO SE «CARGA» NADA: se dice y se ofrece la salida. Si el molde
+                       del pedido dejó de existir (los del camino B son de un solo pedido), acá
+                       quedaba un «Cargando el molde…» eterno — pasó de verdad. */
+                    !_id ? (
+                      <div className="card" style={{ padding: 22, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 700 }}>Este diseño se quedó sin molde</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', maxWidth: 380, lineHeight: 1.5 }}>
+                          El molde que tenía ya no está en el servidor. Los moldes con el diseño adentro
+                          se cargan para un pedido y no quedan guardados.
+                        </span>
+                        <button className="btn primary" style={{ padding: '8px 16px', fontSize: 12.5 }}
+                          onClick={() => setPedidoPaso('moldes')}>Elegir el molde</button>
+                      </div>
+                    ) : (
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Cargando el molde…</div>
+                    )
                   )}
 
                   {/* (La asignación de tela por pieza ahora vive dentro del panel lateral, en 2 vistas.) */}
@@ -19583,25 +19670,23 @@ export default function App() {
           {/* ESPERA HONESTA: el archivo puede pesar >100 MB y procesarlo lleva su tiempo. Se dice
               en qué anda y hace cuánto; el porcentaje es el REAL de la subida, y cuando termina
               se cambia de fase para no dejar una barra llena y quieta (parece colgada). */}
+          {/* ESPERA HONESTA: mientras el archivo viaja, el anillo marca el % REAL; cuando llega,
+              el servidor recién empieza a leerlo (con 100+ MB son minutos) y el anillo pasa a
+              GIRAR. Una barra llena y quieta se lee como «colgado», y estimar el resto sería
+              inventar. Ver `CargaCircular`. */}
           {subirBFase && (
-            <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 9, padding: '11px 13px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 7 }}>
-                <span>{subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}</span>
-                <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                  {subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0} %` : `${Math.floor((subirBFase.seg || 0) / 60)}:${String((subirBFase.seg || 0) % 60).padStart(2, '0')}`}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: '16px 18px' }}>
+              <CargaCircular fase={subirBFase.fase} pct={subirBFase.pct} seg={subirBFase.seg} />
+              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 800 }}>
+                  {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  {subirBFase.fase === 'subiendo'
+                    ? 'No cierres la ventana.'
+                    : 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.'}
                 </span>
               </div>
-              <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', borderRadius: 4, background: 'var(--success, #2ecc71)',
-                              width: subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0}%` : '100%',
-                              opacity: subirBFase.fase === 'subiendo' ? 1 : 0.45,
-                              transition: 'width .2s linear' }} />
-              </div>
-              {subirBFase.fase !== 'subiendo' && (
-                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
-                  Con un archivo grande esto puede llevar un par de minutos. No cierres la ventana.
-                </div>
-              )}
             </div>
           )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>

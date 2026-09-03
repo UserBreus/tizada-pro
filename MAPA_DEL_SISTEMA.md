@@ -1353,6 +1353,26 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (382) — LAS DOS FORMAS, MITAD Y MITAD · LA ESPERA ES UN CÍRCULO · Y UN MOLDE QUE
+  YA NO ESTÁ SE SACA DEL PEDIDO.** Pedido del usuario, más un bug que él encontró usándolo.
+  **(a)** Las dos formas de armar el pedido pasan a ser **dos tarjetas que ocupan el espacio libre,
+  mitad y mitad**, con un color sutil del sistema cada una (cian / magenta) en el borde y en un
+  resplandor de fondo — no en un relleno plano, que taparía el texto.
+  **(b)** 🔴 **La espera de la subida es un CÍRCULO y no una barra** (`CargaCircular`): mientras el
+  archivo viaja marca el **% real**; cuando llega, el servidor recién empieza a leerlo (minutos con
+  100+ MB) y el anillo **gira** con el reloj corriendo. Una barra llena y quieta se lee como
+  «colgado» y estimar el resto sería inventar: o es el número real, o gira.
+  **(c)** 🔴 **BUG QUE ENCONTRÓ EL USUARIO: el pedido quedaba colgado en «Cargando el molde…».** El
+  pedido vive en `localStorage` y los moldes del camino B son EFÍMEROS: al re-subir el archivo, el
+  pid guardado dejó de existir y la pantalla esperaba para siempre mientras el servidor contestaba
+  404 y 409, sin decir nada. Ahora un efecto **saca del pedido los moldes que ya no están en el
+  catálogo** (de `disenoMoldes`, `disenoVars`, `moldesEfimeros` y `moldesBDiseno`) y lo avisa una
+  vez; y el paso Arte, sin molde, **dice qué pasó y ofrece ir a elegir uno** en vez de «Cargando».
+  Estaba anotado en el plan como «reconciliación al montar» y no se había hecho: la lección es que
+  un estado guardado en el navegador que apunta a algo borrable **necesita** su reconciliación.
+  📌 **`frontend/src/App.css` NO LO IMPORTA NADIE** (sólo `index.css`, desde `main.jsx`).
+  Comprobado: sus selectores no están en el bundle. Escribir estilos ahí compila sin error y no
+  aplica nada — pasó en esta tanda y costó un rato de búsqueda. **El CSS va en `index.css`.**
 - **2026-09-03 (381) — EL PEDIDO ARRANCA CON DOS BOTONES, Y LA CARGA DEL CAMINO B ES SU PROPIO
   ESPACIO.** Pedido del usuario. Al entrar al pedido: **«Armar con base»** (los pasos de siempre) y
   **«Cargar molde con diseño incluido»**. **No son excluyentes**: un pedido puede llevar de los dos

@@ -93,7 +93,20 @@ una camiseta con el diseño adentro y un short del catálogo con su arte van a l
 de corte**, tamaño y tipografía de la **etiqueta**, separación y márgenes del **nesting**.
 
 ⚠️ Del gesto de edición falta el **arrastre de recuadro** para seleccionar varias de un tirón; el
-clic múltiple sí está. Con 9 piezas alcanza, pero queda anotado.
+clic múltiple sí está.
+
+**Cómo se ve** (2026-09-03): las dos formas son **dos tarjetas mitad y mitad** que ocupan el
+espacio libre —es LA decisión de esa pantalla— con un color sutil del sistema cada una (cian /
+magenta) puesto en el borde y en un resplandor de fondo, no en un relleno plano.
+
+🔴 **La espera de la subida es un CÍRCULO, no una barra** (`CargaCircular`). Mientras el archivo
+viaja, el anillo marca el **porcentaje real**; cuando llega, el servidor **recién empieza a
+leerlo** (con 100+ MB son minutos) y el anillo pasa a **girar**, con el reloj corriendo. Una barra
+llena y quieta se lee como «colgado», y estimar lo que falta sería inventar: o es el número real,
+o gira.
+📌 **El CSS va en `frontend/src/index.css`.** `frontend/src/App.css` **no lo importa nadie** — se
+comprobó: sus selectores no están en el bundle. Escribir ahí compila sin error y no aplica nada
+(pasó, y costó un rato de búsqueda). Con 9 piezas alcanza, pero queda anotado.
 
 ---
 

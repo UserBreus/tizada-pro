@@ -1364,3 +1364,99 @@ input[type="number"] {
 @keyframes tizada-latido { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .grabando-punto { animation: tizada-latido 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .grabando-punto { animation: none; } }
+
+/* ── LAS DOS FORMAS DE ARMAR EL PEDIDO ──────────────────────────────────────────────────────
+   Ocupan el espacio libre mitad y mitad: es LA decisión de esa pantalla. Cada una con un color
+   sutil del sistema (cian / magenta) para distinguirlas de un vistazo, con el color puesto en un
+   resplandor de fondo y en el borde — no en un relleno plano, que taparía el texto. */
+.camino-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 34px 32px;
+  border-radius: 18px;
+  cursor: pointer;
+  text-align: left;
+  min-height: 0;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1.5px solid var(--border-light);
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.camino-card:hover { transform: translateY(-2px); }
+.camino-card:active { transform: translateY(0); }
+.camino-icon { width: 30px; height: 30px; flex-shrink: 0; }
+.camino-titulo { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.camino-texto { font-size: 13px; color: var(--text-secondary); line-height: 1.6; max-width: 42ch; }
+
+.camino-cyan {
+  background: radial-gradient(120% 120% at 0% 0%, hsl(190 100% 50% / 0.10) 0%, rgba(255,255,255,0.02) 60%);
+  border-color: hsl(190 100% 50% / 0.45);
+}
+.camino-cyan .camino-icon { color: var(--cmyk-cyan); }
+.camino-cyan:hover {
+  border-color: var(--cmyk-cyan);
+  box-shadow: 0 0 0 1px hsl(190 100% 50% / 0.35), 0 12px 34px hsl(190 100% 50% / 0.14);
+}
+
+.camino-magenta {
+  background: radial-gradient(120% 120% at 0% 0%, hsl(320 100% 50% / 0.10) 0%, rgba(255,255,255,0.02) 60%);
+  border-color: hsl(320 100% 50% / 0.45);
+}
+.camino-magenta .camino-icon { color: var(--cmyk-magenta); }
+.camino-magenta:hover {
+  border-color: var(--cmyk-magenta);
+  box-shadow: 0 0 0 1px hsl(320 100% 50% / 0.35), 0 12px 34px hsl(320 100% 50% / 0.14);
+}
+
+/* En pantallas angostas dejan de ser mitad y mitad: una arriba de la otra, o el texto no entra. */
+@media (max-width: 720px) {
+  .dos-caminos { grid-template-columns: 1fr !important; }
+  .camino-card { padding: 22px 20px; gap: 10px; }
+  .camino-titulo { font-size: 17px; }
+}
+
+/* ── EL CÍRCULO DE CARGA ─────────────────────────────────────────────────────────────────────
+   Dos estados, y el cambio entre ellos es la razón de existir de este componente:
+     · SUBIENDO   → el anillo se llena con el % REAL del archivo que va viajando.
+     · PROCESANDO → cuando el archivo llegó, el servidor recién empieza a leerlo (con 100+ MB son
+       un par de minutos). Ahí el anillo NO puede quedarse lleno y quieto: parece colgado. Pasa a
+       un arco que gira, que es la forma honesta de decir «esto sigue, pero no sé cuánto falta».
+   Nada de porcentajes inventados: o es el real, o gira. */
+.carga-circular { position: relative; width: 92px; height: 92px; flex-shrink: 0; }
+.carga-circular svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.carga-circular .pista { fill: none; stroke: rgba(255, 255, 255, 0.09); }
+.carga-circular .arco {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px hsl(190 100% 50% / 0.45));
+}
+/* SUBIENDO: el arco crece con el %; la transición corta evita el salto entre lecturas. */
+.carga-circular.determinado .arco { transition: stroke-dashoffset .18s linear; }
+/* PROCESANDO: gira, y además el arco se estira y encoge — así no se lee como un % clavado. */
+.carga-circular.girando svg { animation: carga-girar 1.1s linear infinite; }
+.carga-circular.girando .arco { animation: carga-latir 1.6s ease-in-out infinite; }
+@keyframes carga-girar { to { transform: rotate(270deg); } }
+@keyframes carga-latir {
+  0%   { stroke-dasharray: 30 210; }
+  50%  { stroke-dasharray: 150 210; }
+  100% { stroke-dasharray: 30 210; }
+}
+.carga-circular .centro {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.carga-circular .centro .valor {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.carga-circular .centro .unidad { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
