@@ -1354,6 +1354,44 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (386) — LA SUBIDA DEL CAMINO B RESPONDE EN 26 s (era 64), Y NOMBRAR / ETIQUETA COMO
+  EN MOLDERÍA.** Reporte: «cargué el archivo y demoró 1 minuto en cargarlo y detectar las piezas»
+  + «nombrar las piezas y la etiqueta debe ser tal cual la configuración: primero nombramos todas
+  las piezas de todos los talles y después elegimos el talle guía y ahí colocamos la etiqueta».
+  **(a) El minuto, medido mesa por mesa** (`scratchpad/medir_alta.py`): 12,5 s adivinando si el
+  archivo trae diseño (`parece_molde_con_diseno`, `get_drawings` de dos mesas) ANTES del alta; 54 s
+  de contornos (`get_drawings`, 10 s la mesa más pesada) y 107 s de páginas por talle (pikepdf,
+  20 s la más pesada) — en paralelo, el tiempo es la mesa más pesada haciendo las dos cosas.
+  **FIX:** el front manda `con_diseno=1` cuando el archivo entra por «Cargar molde con diseño
+  incluido» y el servidor no adivina (el alta avisa igual si no hay piezas con máscara); y el
+  desplegado quedó en **dos etapas** (`desplegar_mesa(contornos=, paginas=)`): la subida hace sólo
+  los contornos (`alta_molde_con_diseno(..., paginas=False)`) y las páginas por talle las arma
+  `_prewarm_desplegado` en un hilo después de responder (una mesa por proceso). El JSON lleva
+  `paginas: true` sólo cuando el PDF está; `_leer_desplegado` devuelve `pdf: None` si no, y
+  `ruta_desplegada` arma esa mesa en el momento si la tizada llega antes. Medido por HTTP: **26 s**
+  la respuesta, las páginas listas 40 s después sin que nadie espere.
+  **(b) Nombrar sobre TODOS los talles.** `GET /api/plantilla/deteccion_todas` para el camino B ya
+  no da 409: devuelve `piezas_con_diseno.visor_junto(_visor_leer(pid, todo=True), registro)` — los
+  20 visores por talle acomodados en una grilla casi cuadrada (5×4; apilados en una columna daban
+  una tira de 1,5 × 26 m ilegible), con `talle`, `mesa`, `t_idx`, `pieza_idx`, `idx` global, `name`
+  y `filas` (dónde va cada talle, para rotularlo). Front: estado `todasB` (lo carga
+  `cargarMoldeOperario` junto con la detección), `canvasLayout` lo toma como fuente en el pedido
+  mientras no se ubica la etiqueta (`_todasB_on`), la columna de talles pasa a **ojitos** (oculta /
+  muestra, con ojo general `arteb-ojo-todos`), tocar una pieza elige sus **homólogas en todos los
+  talles** (`_homologasB`: misma mesa + mismo índice — en el camino B la correspondencia es
+  exacta), `MapeadorArteVisual` tiene **recuadro de selección** en modo nombrar
+  (`iniciarRubberVisor` + `onRubberNombrar`; Shift+arrastre sigue siendo pan) y `data-idx` en cada
+  pieza, el rótulo de cada pieza deja de ser rojo en ese modo, y `nombrarSeleccionB` renombra UNA
+  vez por pieza aunque la selección la traiga 20 veces. ⚠️ `etqNombres` va vacío en ese modo: sus
+  claves son idx del talle guía y en el lienzo junto pisarían las primeras 9 piezas.
+  **(c) Etiqueta sobre el talle guía.** Con todo nombrado, «2 · Etiqueta» vuelve al visor de un
+  talle; la columna dice «Talle guía» y el talle que se toca es sobre el que se ubica (la posición
+  es relativa: vale para todos). Verificado en el navegador de punta a punta: ojo (180 → 171
+  piezas), recuadro (2 elegidas en todos los talles), nombrar (20 «Espalda», una por talle, con un
+  solo POST), cambiar guía a M y ubicar (1 de 9). **Lo que salió mal en la prueba:** un molde
+  efímero de OTRO usuario en la lista daba 403 al renombrar (guarda de dueño, correcto) y una
+  selección que quedó viva de un recuadro anterior se toggleó con los clicks siguientes — es el
+  gesto de Illustrator, no un bug, pero hay que mirar el contador antes de nombrar.
 - **2026-09-03 (385) — «VOLVER» EN TODO EL PEDIDO.** Pedido del usuario: poder navegar entre el
   inicio (las dos formas de armar el trabajo) y los pasos. Faltaban dos: la pantalla «Armar con
   base» no tenía forma de volver a la bifurcación (una vez elegida, no se podía pasar a cargar

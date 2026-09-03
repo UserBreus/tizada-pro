@@ -82,18 +82,23 @@ una camiseta con el diseño adentro y un short del catálogo con su arte van a l
    camiseta de un short cuando la planilla lleva «Talle» y «Talle short». 🔴 Sin esto el short
    tomaría el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
    (Se guarda en `mapeo_columnas.talle` del molde, que es de donde el motor ya lo lee.)
-4. **Nombra las piezas** con **el gesto de la pantalla de edición**: toca las piezas en el visor
-   (se suman) o en la lista, escribe **un** nombre y las nombra todas — si son varias se numeran
-   solas («Tira» → «Tira 1», «Tira 2»). El visor abre **al instante** (§0.a) y muestra **sólo
+4. **Nombra las piezas, con TODOS los talles a la vista** (regla del usuario 2026-09-03: «tal cual
+   la configuración: primero nombramos todas las piezas de todos los talles»). El visor muestra el
+   lienzo de **los 20 talles en grilla** (una caja por talle, con su nombre), como la vista «todas
+   las variantes juntas» de Moldería. La columna de la izquierda tiene un **ojo por talle** (y uno
+   general). Tocar una pieza elige **sus homólogas en todos los talles** de una (en este camino la
+   correspondencia es exacta: misma mesa, mismo índice); también hay **arrastre de recuadro**, y
+   con Shift el arrastre es pan. Se escribe **un** nombre y se nombran todas — si son varias se
+   numeran solas («Tira» → «Tira 1», «Tira 2»), y aunque la selección traiga la pieza 20 veces se
+   renombra **una vez** por pieza. El visor abre **al instante** (§0.a) y muestra **sólo
    contornos**: ni un trazo del diseño.
-5. **Marca dónde va la etiqueta** en cada pieza (mismo visor, mismos contornos).
+5. Con todo nombrado, **elige el talle guía** (la misma columna, ahora dice «Talle guía») y **marca
+   dónde va la etiqueta** tocando el borde de cada pieza sobre ese talle. La posición es relativa
+   al contorno: vale para todos los talles.
 6. Telas, planilla y tizada: **iguales que en el otro camino**.
 
 **Lo que NO hace el cliente** (lo deja configurado el admin, una vez): grosor y color del **borde
 de corte**, tamaño y tipografía de la **etiqueta**, separación y márgenes del **nesting**.
-
-⚠️ Del gesto de edición falta el **arrastre de recuadro** para seleccionar varias de un tirón; el
-clic múltiple sí está.
 
 **Cómo se ve** (2026-09-03): las dos formas son **dos tarjetas mitad y mitad** que ocupan el
 espacio libre —es LA decisión de esa pantalla— con un color sutil del sistema cada una (cian /
@@ -393,6 +398,13 @@ del archivo y no del pedido. Ésa es la idea del otro proyecto, y acá se guard�
   (`ruta_desplegada`); si el desplegado falta o el sello no coincide, **se arma en el momento** y
   sigue — un molde viejo se vuelve rápido la primera vez que se usa. Se borra con la carpeta del
   molde y al re-subir uno del camino A encima.
+  🔴 **Son DOS ETAPAS** (2026-09-03, segunda tanda): la subida hace sólo los **contornos**
+  (`paginas=False`; 54 s en serie, 10 s la mesa más pesada) y responde; las **páginas por talle**
+  (107 s en serie, 20 s la más pesada) las arma `servidor._prewarm_desplegado` en un hilo, una
+  mesa por proceso, cuando el archivo ya está en su lugar. El JSON lleva `paginas: true` sólo
+  cuando el PDF está; si la tizada llega antes, `ruta_desplegada` arma esa mesa sola. Y el front
+  manda `con_diseno=1`: el servidor deja de adivinar el camino (12,5 s). Medido por HTTP: la
+  subida responde en **26 s** (era 64) y las páginas quedan 40 s después.
 - **El alta, una mesa por proceso** (`desplegar_molde`, ProcessPool). Cada proceso lee los
   contornos de su mesa (`get_drawings`, como siempre) y parsea el content-stream **una vez** para
   filtrar los 20 talles (`molde_real._mapa_oc` + `_bloques_oc`, el árbol de bloques OC, +
@@ -645,6 +657,17 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
 
+- **2026-09-03 (segunda tanda: la subida en 26 s, y nombrar / etiqueta como en Moldería)** — Ver
+  changelog 386 del mapa. Lo que se aprendió:
+  · **No adivinar lo que el usuario ya dijo.** 12,5 s de cada subida eran mirar dos mesas para
+    saber si el archivo traía diseño… cuando el archivo entraba por el botón «molde con diseño».
+  · **Separar lo que la respuesta necesita de lo que necesita el motor.** Las páginas por talle
+    (107 s en serie) no las mira nadie hasta la tizada: van en segundo plano. El desplegado quedó
+    en dos etapas con un flag en el JSON, y el motor arma la mesa si llega antes.
+  · **El lienzo de todos los talles se acomoda en grilla**, no en columna: 20 talles apilados eran
+    una tira de 26 m y al «ver todo» no se veía nada.
+  · **Probar en el navegador con la sesión correcta.** El primer renombrado dio 403: la lista
+    mostraba un molde efímero de otro usuario (el del taller) y la guarda de dueño hizo lo suyo.
 - **2026-09-03 (el molde desplegado: de 15 min a 63 s)** — Se estudió `Prueba para tizada` entero y
   se replicó su idea central —**leer el archivo una vez y escribir plano**— guardándola en disco
   (`desplegado/`), sin copiar lo que rompería las leyes del proyecto (RGB, degradados

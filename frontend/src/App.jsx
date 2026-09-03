@@ -2689,7 +2689,12 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
 }
 
 function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
-                                  nombrarModo, selNombrarB, onPiezaNombrarClick, aviso, cargando }) {
+                                  nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando }) {
+  // RECUADRO DE SELECCIÓN (modo nombrar, camino B): arrastrar sobre el fondo elige todas las
+  // piezas que abarca — el mismo gesto que Moldería. En coords de pantalla; se traduce a piezas
+  // por el `data-idx` de cada <g> al soltar. Con Shift, el arrastre sigue siendo pan.
+  const [rubber, setRubber] = React.useState(null);
+  const rubberRecien = React.useRef(false);   // el click que cierra un recuadro NO toggle-a la pieza de abajo
   // Desplegables de la barra de Diseños, agrupados por RANGO (#… en el nombre de la mesa)
   const [rangosCerrados, setRangosCerrados] = React.useState(new Set());
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
@@ -2719,6 +2724,28 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
     const base = artVB || _domVB(); const sx = e.clientX, sy = e.clientY;
     const mv = (ev) => setArtVB({ ...base, x: base.x - (ev.clientX - sx) / box.width * base.w, y: base.y - (ev.clientY - sy) / box.height * base.h });
     const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  };
+  const iniciarRubberVisor = (e) => {
+    if (e.button !== 0 || !artWrapRef.current) return;
+    if (e.shiftKey) return artPanStart(e);
+    const x0 = e.clientX, y0 = e.clientY;
+    setRubber({ x0, y0, x1: x0, y1: y0 });
+    const mv = (ev) => setRubber({ x0, y0, x1: ev.clientX, y1: ev.clientY });
+    const up = (ev) => {
+      window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up);
+      setRubber(null);
+      const rx0 = Math.min(x0, ev.clientX), ry0 = Math.min(y0, ev.clientY);
+      const rx1 = Math.max(x0, ev.clientX), ry1 = Math.max(y0, ev.clientY);
+      if (rx1 - rx0 <= 3 && ry1 - ry0 <= 3) return;          // fue un click: lo resuelve la pieza
+      const idxs = [];
+      artWrapRef.current.querySelectorAll('[data-idx]').forEach(g => {
+        const b = g.getBoundingClientRect();
+        if (b.right >= rx0 && b.left <= rx1 && b.bottom >= ry0 && b.top <= ry1) idxs.push(parseInt(g.getAttribute('data-idx'), 10));
+      });
+      rubberRecien.current = true; setTimeout(() => { rubberRecien.current = false; }, 0);
+      if (idxs.length && onRubberNombrar) onRubberNombrar(idxs);
+    };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   };
   React.useEffect(() => {   // rueda = zoom (listener no-pasivo para poder preventDefault)
@@ -2766,7 +2793,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
       </div>
       <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
         {panelIzquierdo}
-        <div ref={artWrapRef} onMouseDown={artPanStart} style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', cursor: 'grab' }}>
+        <div ref={artWrapRef} onMouseDown={nombrarModo ? iniciarRubberVisor : artPanStart} style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', cursor: 'grab' }}>
           {/* AVISO sobre el molde (ej. el tope de telas): donde el operario está mirando, no en un
               cartel al costado de la pantalla. */}
           {aviso && (
@@ -2777,6 +2804,14 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
               <span style={{ fontSize: 13, fontWeight: 700, color: '#ffd9d9', lineHeight: 1.35 }}>{aviso}</span>
             </div>
           )}
+          {rubber && (() => {
+            const b = artWrapRef.current && artWrapRef.current.getBoundingClientRect();
+            if (!b) return null;
+            return <div style={{ position: 'absolute', zIndex: 5, pointerEvents: 'none',
+              left: Math.min(rubber.x0, rubber.x1) - b.left, top: Math.min(rubber.y0, rubber.y1) - b.top,
+              width: Math.abs(rubber.x1 - rubber.x0), height: Math.abs(rubber.y1 - rubber.y0),
+              border: '1px dashed var(--accent)', background: 'rgba(0,216,245,0.10)' }} />;
+          })()}
           {canvasLayout?.layout?.length ? (() => {
             // VER VARIANTE: si viene `vf`, se muestran SOLO sus piezas y se ACOMODAN (translate por `vf.pos`,
             // el mismo orden guardado en Variables). `px/py` quedan en coords YA acomodadas (para labels y encuadre);
@@ -2892,6 +2927,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       /* `data-pieza`: sin esto, un paso grabado tocando una pieza no se podía volver
                          a encontrar (el SVG no tiene texto ni controles). Ver `pieza:` en localizar.js */
                       data-pieza={pzName || _genN || ('pieza ' + p.idx)}
+                      data-idx={p.idx}
                       style={{ cursor: 'pointer' }} onClick={(e) => {
                         // UBICAR LA ETIQUETA (camino B, desde el pedido): el punto que se tocó se
                         // «apoya» en el contorno más cercano. Se calcula en coordenadas del SVG y
@@ -2912,6 +2948,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                         // numeran solas (Frente 1, Frente 2…) en vez de escribir nueve veces.
                         if (nombrarModo) {
                           e.stopPropagation();
+                          if (rubberRecien.current) return;       // ese click cerró un recuadro
                           onPiezaNombrarClick && onPiezaNombrarClick(p);
                           return;
                         }
@@ -3026,10 +3063,12 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                 })}
                 {labels.map((l) => {
                   const pzName = l.nombre;
-                  const isSelected = selectedPiezaMapeo === pzName;
+                  // En modo NOMBRAR (camino B) el cartel sigue a la selección de nombrar y no
+                  // habla de diseño (no hay mapeo): rojo «sin diseño» sobre 180 piezas era ruido.
+                  const isSelected = nombrarModo ? !!(selNombrarB && selNombrarB.has(l.p.idx)) : selectedPiezaMapeo === pzName;
                   const mesa = mapeoValores[pzName];
                   const lcx = l.r.x + l.r.w / 2, lcy = l.r.y + l.r.h / 2;
-                  const col = isSelected ? 'var(--accent)' : mesa ? 'var(--success)' : '#ff4d4d';
+                  const col = isSelected ? 'var(--accent)' : nombrarModo ? 'rgba(255,255,255,0.45)' : mesa ? 'var(--success)' : '#ff4d4d';
                   return (
                     <g key={'lbl' + l.p.idx} style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_gen(pzName)); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
                       <line x1={l.ax} y1={l.ay} x2={lcx} y2={lcy} stroke={col} strokeWidth={1} strokeDasharray="3 2" />
@@ -3038,6 +3077,14 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                     </g>
                   );
                 })}
+                {/* LIENZO DE TODOS LOS TALLES (camino B): el nombre de cada talle al inicio de su
+                    fila, como el bloque por variante de Moldería. */}
+                {(canvasLayout.filas || []).map((f) => (
+                  <g key={'fila-' + f.talle} style={{ pointerEvents: 'none' }}>
+                    <rect x={f.x - 4} y={f.y - 4} width={(f.w || 0) + 8} height={(f.h || 0) + 8} rx={6} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={0.8} />
+                    <text x={f.x + 2} y={f.y + 14} style={{ fill: 'var(--accent)', fontSize: 16, fontWeight: 800, fontFamily: 'sans-serif' }}>{f.talle}</text>
+                  </g>
+                ))}
               </svg>
             );
           })() : (
@@ -4062,6 +4109,9 @@ export default function App() {
   // eligiendo las dos mangas juntas y escribiendo «Manga Corta» quedan numeradas solas.
   const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} (compat: la última tocada)
   const [selNombrarB, setSelNombrarB] = useState(new Set());   // idx de las piezas elegidas
+  // El lienzo de TODOS los talles del molde con diseño (`/api/plantilla/deteccion_todas`), para
+  // nombrar como en Moldería: una fila por talle. Lleva `pid` para no mostrar el de otro molde.
+  const [todasB, setTodasB] = useState(null);
   const [nombreBInput, setNombreBInput] = useState('');
   // ¿El visor está en modo «tocá dónde va la etiqueta»? (2ª tarea del cliente en el camino B)
   const [etqPickB, setEtqPickB] = useState(false);
@@ -4570,7 +4620,12 @@ export default function App() {
     // creyendo ver la guía y estaba tocando otro talle. Con `asignandoTipo` se vuelve a `etqData`
     // (el talle guía o el que eligió con los chips), que es de donde salen esos índices.
     const _varAbierta = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado && !asignandoTipo;
-    const src = (((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData;
+    // CAMINO B en el pedido, mientras se NOMBRA: el lienzo de TODOS los talles (una fila por
+    // talle), el mismo gesto que Moldería. Para la etiqueta (`etqPickB`) se vuelve al talle guía.
+    const _todasB_on = activoTab === 'pedidos' && pedidoPaso === 'arte' && !etqPickB
+      && !!todasB?.piezas?.length && todasB.pid === etqPid;
+    const src = _todasB_on ? todasB
+      : ((((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData);
     if (!src?.piezas) return { layout: [], dibujo: [], zTalle: new Map(), width: 850, height: 400, vb: '0 0 850 400' };
 
     // Siempre usar las posiciones originales del PDF
@@ -4653,8 +4708,10 @@ export default function App() {
     const _z = (p) => (p.talle != null && zTalle.has(p.talle) ? zTalle.get(p.talle) : -1);
     const dibujo = layout.slice().sort((a, b) => _z(b) - _z(a));
 
-    return { layout, dibujo, zTalle, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
-  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo]);
+    return { layout, dibujo, zTalle, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters,
+             filas: src.filas || null };   // `filas`: dónde empieza cada talle en el lienzo junto del camino B
+  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo,
+      activoTab, pedidoPaso, etqPickB, todasB, etqPid]);
 
   // Las variantes del MOLDE. `etqData.talles` es de la DETECCIÓN que se está mostrando: en la
   // vista «asignar variantes por piezas» son las capas del archivo original (una sola, «Capa 1»).
@@ -7997,6 +8054,15 @@ export default function App() {
         setEtqData(data); setEtqNombres(data.nombres_existentes || {}); setEtqPid(_p);
       }
     } catch (e) { /* sin molde */ }
+    // CAMINO B: además, el lienzo de TODOS los talles (para nombrar como en Moldería). Se pide
+    // cada vez —no del caché— porque trae los nombres, y esta función corre justo después de
+    // renombrar. Sale de los visores ya armados: es un JSON, no abre el archivo.
+    if ((productosCat.productos.find(x => x.id === _p) || {}).origen === 'con_diseno') {
+      try {
+        const r2 = await fetch(`/api/plantilla/deteccion_todas?pid=${encodeURIComponent(_p)}`);
+        if (r2.ok) { const d2 = await r2.json(); if (d2?.piezas) setTodasB({ ...d2, pid: _p }); }
+      } catch (e) { /* sin el lienzo junto se nombra sobre un talle, como antes */ }
+    }
   };
 
   // Carga el mapeador (diseño sobre el molde) del molde ACTIVO, inline en el paso
@@ -10022,13 +10088,27 @@ export default function App() {
   }, [_idsCat, disenoMoldes]);
 
   // ── CAMINO B: elegir piezas y nombrarlas, como en la pantalla de edición ────────────────────
+  // En el lienzo de TODOS los talles, una pieza es la MISMA en cada talle (misma mesa, mismo
+  // índice: en el camino B la correspondencia es exacta). Tocar una elige sus homólogas de una:
+  // es lo que en Moldería se hace a mano seleccionando «las que son la misma pieza».
+  const _todasBActivo = () => !etqPickB && !!todasB?.piezas?.length && todasB.pid === etqPid;
+  const _homologasB = (pz) => (todasB?.piezas || []).filter(p => p.mesa === pz.mesa && p.t_idx === pz.t_idx).map(p => p.idx);
+  const _toggleGrupoB = (n, ids) => { const on = ids.some(i => n.has(i)); ids.forEach(i => (on ? n.delete(i) : n.add(i))); };
   const togglePiezaNombrarB = (pz) => {
-    setSelNombrarB(prev => {
-      const n = new Set(prev);
-      if (n.has(pz.idx)) n.delete(pz.idx); else n.add(pz.idx);
-      return n;
-    });
+    const ids = _todasBActivo() ? _homologasB(pz) : [pz.idx];
+    setSelNombrarB(prev => { const n = new Set(prev); _toggleGrupoB(n, ids.length ? ids : [pz.idx]); return n; });
     setPiezaBSel({ mesa: pz.mesa, t_idx: pz.t_idx });
+  };
+  // El RECUADRO del visor devuelve idx del lienzo junto: se agrupan por pieza y cada grupo se
+  // invierte entero (mismo gesto que el click, muchas veces).
+  const rubberNombrarB = (idxs) => {
+    if (!_todasBActivo()) return;
+    const pares = new Map();
+    (todasB.piezas || []).filter(p => idxs.includes(p.idx)).forEach(p => pares.set(`${p.mesa}|${p.t_idx}`, p));
+    if (!pares.size) return;
+    setSelNombrarB(prev => { const n = new Set(prev); pares.forEach(p => _toggleGrupoB(n, _homologasB(p))); return n; });
+    const _ult = [...pares.values()].pop();
+    setPiezaBSel({ mesa: _ult.mesa, t_idx: _ult.t_idx });
   };
 
 
@@ -10118,6 +10198,7 @@ export default function App() {
         const fd = new FormData();
         fd.append('archivo', f);
         fd.append('pid', d.id);
+        fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
         const d2 = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', rutaApi('/api/plantilla'));   // el XHR no pasa por el envoltorio de fetch
@@ -10251,7 +10332,15 @@ export default function App() {
   const nombrarSeleccionB = async (pid) => {
     const nom = nombreBInput.trim();
     if (!nom || !selNombrarB.size) return;
-    const _pzs = (etqData?.piezas || []).filter(p => selNombrarB.has(p.idx));
+    // En el lienzo de todos los talles la selección trae la misma pieza 20 veces (una por
+    // talle): se renombra UNA vez por pieza —el registro es por pieza, para todos sus talles.
+    const _src = (!etqPickB && todasB?.piezas?.length && todasB.pid === pid) ? todasB.piezas : (etqData?.piezas || []);
+    const _vistos = new Set();
+    const _pzs = [];
+    _src.filter(p => selNombrarB.has(p.idx)).forEach(p => {
+      const k = `${p.mesa}|${p.t_idx}`;
+      if (!_vistos.has(k)) { _vistos.add(k); _pzs.push(p); }
+    });
     let _ok = 0;
     for (const pz of _pzs) {
       if (await renombrarPiezaB(pid, pz.mesa, pz.t_idx, nom, { recargar: false })) _ok++;
@@ -10283,6 +10372,7 @@ export default function App() {
       const fd = new FormData();
       fd.append('archivo', subirMoldeFile);
       fd.append('pid', pid);
+      fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
       const d2 = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         // `rutaApi` y no '/api/plantilla' pelado: el XHR NO pasa por el envoltorio de `fetch`,
@@ -13076,6 +13166,16 @@ export default function App() {
                 const _esB = _esConDiseno(_id);
                 const _piezasB = (etqData?.piezas || []);
                 const _selNomB = selNombrarB || new Set();
+                // NOMBRAR sobre el lienzo de TODOS los talles (como Moldería). La selección vive en
+                // idx de ese lienzo; el panel lista las piezas del talle guía, así que se comparan
+                // por (mesa, índice en la mesa), que es la identidad de la pieza en el camino B.
+                const _todasBOn = _esB && !etqPickB && !!todasB?.piezas?.length && todasB.pid === _id;
+                const _clavePz = (pz) => `${pz.mesa}|${pz.t_idx}`;
+                const _selPares = new Set((_todasBOn ? todasB.piezas : _piezasB).filter(p => _selNomB.has(p.idx)).map(_clavePz));
+                // Los talles con el ojo cerrado no se dibujan (columna de la izquierda).
+                const _vfTodasB = _todasBOn
+                  ? { show: new Set(todasB.piezas.filter(p => !tallesOcultos.has(p.talle)).map(p => p.idx)), pos: new Map(), vb: null }
+                  : null;
                 const _nomB = (pz) => etqNombres[pz.idx] || '';
                 const _sinNombreB = _piezasB.filter(pz => _ES_PIEZA_SIN_NOMBRE.test(_nomB(pz)));
                 // Nombres sugeridos: los del catálogo del sistema. Ahorran teclado y, sobre todo,
@@ -13103,7 +13203,7 @@ export default function App() {
                         style={{ flex: 1, padding: '5px 8px', fontSize: 11.5, borderRadius: 8, ...(_sinNombreB.length ? { opacity: 0.45 } : {}) }}
                         disabled={!!_sinNombreB.length}
                         title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : 'Marcá dónde va la etiqueta de corte'}
-                        onClick={() => { setEtqPickB(true); cargarEtiqueta(_id); }}>2 · Etiqueta</button>
+                        onClick={() => { setEtqPickB(true); setSelNombrarB(new Set()); cargarEtiqueta(_id); }}>2 · Etiqueta</button>
                     </div>
                     {etqPickB ? (
                       <>
@@ -13114,8 +13214,9 @@ export default function App() {
                             {_etqPuestas} de {_piezasB.length} ubicadas
                           </span>
                           <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                            Tocá el borde de la pieza, ahí donde quieras que salga impreso el talle y
-                            el nombre. Las que no toques salen abajo, centradas.
+                            Sobre el <b>talle guía «{etqData?.talle_ref || ''}»</b> (elegilo a la izquierda): tocá el
+                            borde de la pieza, ahí donde quieras que salga impreso el talle y el nombre. La
+                            posición vale para todos los talles. Las que no toques salen abajo, centradas.
                           </span>
                         </div>
                         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 5, minHeight: 0 }}>
@@ -13182,7 +13283,7 @@ export default function App() {
                       {_piezasB.map(pz => {
                         const _nom = _nomB(pz);
                         const _sin = _ES_PIEZA_SIN_NOMBRE.test(_nom);
-                        const _sel = _selNomB.has(pz.idx);
+                        const _sel = _selPares.has(_clavePz(pz));
                         return (
                           <div key={`${pz.mesa}-${pz.t_idx}`}
                             onClick={() => togglePiezaNombrarB(pz)}
@@ -13214,11 +13315,12 @@ export default function App() {
                     {/* EL GESTO DE LA PANTALLA DE EDICIÓN: se eligen las piezas —en el visor o en
                         la lista, se suman— y se escribe UN nombre para todas. Si son varias, se
                         numeran solas (Frente 1, Frente 2…). Es lo que evita escribir nueve veces. */}
-                    {_selNomB.size > 0 && (
+                    {_selPares.size > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} data-tour="pieza-b-nombre">
                         <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                          {_selNomB.size} pieza{_selNomB.size === 1 ? '' : 's'} elegida{_selNomB.size === 1 ? '' : 's'}
-                          {_selNomB.size > 1 ? ' · se numeran solas' : ''}
+                          {_selPares.size} pieza{_selPares.size === 1 ? '' : 's'} elegida{_selPares.size === 1 ? '' : 's'}
+                          {_todasBOn ? ' (en todos los talles)' : ''}
+                          {_selPares.size > 1 ? ' · se numeran solas' : ''}
                         </div>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <input value={nombreBInput} autoFocus
@@ -13229,7 +13331,7 @@ export default function App() {
                           <button type="button" data-tour="pieza-b-asignar" className="btn success" disabled={!nombreBInput.trim()}
                             style={{ padding: '7px 11px', fontSize: 12, borderRadius: 8, whiteSpace: 'nowrap' }}
                             onClick={() => nombrarSeleccionB(_id)}>
-                            Nombrar {_selNomB.size}
+                            Nombrar {_selPares.size}
                           </button>
                         </div>
                       </div>
@@ -13455,14 +13557,14 @@ export default function App() {
                         setSelectedPiezaMapeo={setSelectedPiezaMapeo}
                         objetosEditables={editablesOverlay}
                         editablesRaw={editableData?.objetos || []}
-                        etqNombres={etqNombres}
+                        etqNombres={_todasBOn ? {} : etqNombres}
                         bordeConfig={bordeConfig}
                         etiquetaConfig={etiquetaConfig}
                         talleRef={etqData?.talle_ref}
                         previewPiezas={previewPiezas}
                         onGuardar={guardarMapeo}
                         onCerrar={null}
-                        vf={vfArte}
+                        vf={_todasBOn ? _vfTodasB : vfArte}
                         onCargarDiseno={() => fileInputArteRef.current.click()}
                         titulo={(
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -13516,15 +13618,31 @@ export default function App() {
                         nombrarModo={_esB && !etqPickB}
                         selNombrarB={_selNomB}
                         onPiezaNombrarClick={togglePiezaNombrarB}
+                        onRubberNombrar={rubberNombrarB}
                         aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)' }}>{term.variante === 'Talle' ? 'Talles' : term.variante}</div>
+                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ flex: 1 }}>{_esB && etqPickB ? 'Talle guía' : (term.variante === 'Talle' ? 'Talles' : term.variante)}</span>
+                              {_todasBOn && (() => {
+                                // OJO GENERAL: el mismo gesto de un talle, aplicado a todos (como en Moldería).
+                                const _todosOn = !(estado.talles || []).some(t => tallesOcultos.has(t));
+                                return (
+                                  <span title={_todosOn ? 'Ocultar todos los talles' : 'Mostrar todos los talles'} data-tour="arteb-ojo-todos"
+                                    onClick={() => setTallesOcultos(_todosOn ? new Set(estado.talles) : new Set())}
+                                    style={{ cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>{_todosOn ? '👁' : '◡'}</span>
+                                );
+                              })()}
+                            </div>
                             <div style={{ overflowY: 'auto', flex: 1 }}>
                               {estado.talles.map(t => {
-                                const on = (etqData?.talle_ref || '') === t;
+                                // NOMBRAR (camino B, todos los talles juntos): el ojo muestra u oculta ese
+                                // talle. ETIQUETA y camino A: se elige UN talle (el guía) y se ve solo ése.
+                                const on = _todasBOn ? !tallesOcultos.has(t) : (etqData?.talle_ref || '') === t;
                                 return (
-                                  <button key={t} type="button" onClick={() => verVarianteOperario(t)}
+                                  <button key={t} type="button" onClick={() => _todasBOn
+                                      ? setTallesOcultos(prev => { const n = new Set(prev); if (n.has(t)) n.delete(t); else n.add(t); return n; })
+                                      : verVarianteOperario(t)}
                                     style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', border: 'none', borderLeft: on ? '3px solid var(--accent)' : '3px solid transparent', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: on ? 'rgba(0,216,245,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: on ? 700 : 500, fontSize: 13 }}>
                                     <Icon name="eye" style={{ width: 13, height: 13, opacity: on ? 1 : 0.35, flexShrink: 0 }} />
                                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t}</span>
@@ -13533,7 +13651,10 @@ export default function App() {
                                 );
                               })}
                             </div>
-                            <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '9px 12px', borderTop: '1px solid var(--border-light)', lineHeight: 1.4 }}>Tocá un talle para verlo en esa variante.</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '9px 12px', borderTop: '1px solid var(--border-light)', lineHeight: 1.4 }}>
+                              {_todasBOn ? 'El ojo muestra u oculta ese talle. Se nombran todos a la vez.'
+                                : (_esB && etqPickB ? 'El talle que elijas es el guía: la etiqueta se ubica sobre él.' : 'Tocá un talle para verlo en esa variante.')}
+                            </div>
                           </div>
                         ) : null}
                       />

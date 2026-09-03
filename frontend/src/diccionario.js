@@ -289,6 +289,11 @@ export const DICCIONARIO = {
     que: 'Vuelve a la pantalla de las dos formas de armar el trabajo (con base, o cargando un molde con diseño). Lo que ya elegiste queda.',
     como: 'Tocá «← Inicio».',
   },
+  'arteb-ojo-todos': {
+    nombre: 'Mostrar u ocultar todos los talles',
+    que: 'En «Nombrar piezas» del molde con diseño se ven todos los talles juntos, uno debajo del otro. Este ojo los muestra u oculta todos de una; el de cada talle, uno solo.',
+    como: 'Tocá el ojo. Ocultar un talle no lo saca del molde: sólo deja de dibujarse mientras nombrás.',
+  },
   'arte-volver-cargar-b': {
     nombre: 'Volver a cargar moldes',
     que: 'Vuelve a la pantalla donde se cargan los moldes con diseño, para agregar otro archivo o cambiar a qué diseño va cada uno. Los nombres de las piezas quedan.',

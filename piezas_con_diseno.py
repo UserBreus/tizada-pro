@@ -325,7 +325,7 @@ def registro_del_molde(doc, talles=None, avisar=None):
     return salida
 
 
-def alta_molde_con_diseno(path, avisar=None, procesos=None):
+def alta_molde_con_diseno(path, avisar=None, procesos=None, paginas=True):
     """Da de alta un molde del camino B: arma el registro de TODAS sus piezas, en todos los talles.
 
     `procesos` = cuántas mesas desplegar a la vez (None = de a una, en este proceso). El servidor
@@ -356,7 +356,9 @@ def alta_molde_con_diseno(path, avisar=None, procesos=None):
         #    ya aislada y podada, escritos al lado del archivo. El archivo se lee UNA vez, acá, y
         #    el motor no vuelve a abrir el dibujo nunca más (ver «EL MOLDE DESPLEGADO»). Con
         #    `procesos` va una mesa por proceso: PyMuPDF/pikepdf no son thread-safe.
-        por_mesa = desplegar_molde(path, talles, avisar=avisar, procesos=procesos) if talles else {}
+        #    `paginas=False` (el servidor): la subida responde con los contornos y las páginas por
+        #    talle se arman después, en segundo plano (`_prewarm_desplegado`).
+        por_mesa = desplegar_molde(path, talles, avisar=avisar, procesos=procesos, paginas=paginas) if talles else {}
 
         # 2) 🔴 LOS DOS ÍNDICES, Y POR QUÉ SON DOS
         #    `pieza_idx` es, por invariante del sistema (MAPA §8.9), **la posición dentro de un
@@ -512,6 +514,77 @@ def layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm=2.0):
             "img_w": round((ancho_max + sep) * zoom, 1),
             "img_h": round((cursor_y + alto_fila + sep) * zoom, 1),
             "piezas": items, "sin_variantes": False, "origen": "con_diseno"}
+
+
+def _trasladar_path(d, dx, dy):
+    """Corre un `path_svg` de `_item_visor` (M/L/C absolutos, `h`/`v` relativos, Z)."""
+    out, toks, i, cmd = [], d.split(), 0, None
+    while i < len(toks):
+        t = toks[i]
+        if t in ("M", "L", "C", "h", "v", "Z"):
+            cmd = t
+            out.append(t)
+            i += 1
+            continue
+        if cmd in ("M", "L", "C"):
+            out.append(f"{float(t) + dx:.1f}")
+            out.append(f"{float(toks[i + 1]) + dy:.1f}")
+            i += 2
+        else:                                   # h / v: relativos, no se corren
+            out.append(t)
+            i += 1
+    return " ".join(out)
+
+
+def visor_junto(visor, registro=None, sep_cm=2.0):
+    """TODOS los talles en UN lienzo: una fila por talle, apiladas. Es la vista de «Nombrar piezas»
+    de la configuración (Moldería, «todas las variantes juntas»), traída al pedido: el cliente ve
+    el frente del XS, el del S, el del M… y nombra todo de una. Sale de los visores por talle que
+    ya dejó el alta (`visor_contornos.json`), sin abrir el archivo.
+
+    Cada pieza lleva `talle`, `mesa` y `t_idx` (su índice dentro de la MESA, lo que usa
+    `pieza_renombrar`), `pieza_idx` (su índice dentro del TALLE, la clave del registro), un `idx`
+    global para el visor y `name` (el nombre puesto, o el provisorio). `filas` dice dónde empieza
+    cada talle, para rotularlo."""
+    import math
+    sep = sep_cm * 10.0                         # el visor está en mm
+    nombres = {}
+    for nom, por_t in (registro or {}).items():
+        for t, inf in (por_t or {}).items():
+            if (inf or {}).get("pieza_idx") is not None:
+                nombres[(t, int(inf["pieza_idx"]))] = nom
+    talles = [t for t in visor.keys() if (visor[t] or {}).get("piezas")]
+    # Los talles van en una GRILLA casi cuadrada (como acomoda las mesas el proyecto de
+    # referencia, `layoutArtboards`): apilados en una sola columna, 20 talles daban una tira de
+    # 1,5 × 26 m y al «ver todo» no se distinguía nada.
+    cols = max(1, int(math.ceil(math.sqrt(len(talles)))))
+    w_max = max((float((visor[t] or {}).get("img_w") or 0) for t in talles), default=0.0)
+    h_max = max((float((visor[t] or {}).get("img_h") or 0) for t in talles), default=0.0)
+    filas, piezas, g = [], [], 0
+    for k, t in enumerate(talles):
+        lay = visor[t]
+        items = lay["piezas"]
+        x = sep + (k % cols) * (w_max + sep)
+        y = sep + (k // cols) * (h_max + sep)
+        for it in items:
+            p = dict(it)
+            p["px"] = round(float(it["px"]) + x, 1)
+            p["py"] = round(float(it["py"]) + y, 1)
+            p["path_svg"] = _trasladar_path(it["path_svg"], x, y)
+            p["talle"] = t
+            p["pieza_idx"] = it["idx"]
+            p["idx"] = g
+            p["name"] = nombres.get((t, it["idx"]))
+            piezas.append(p)
+            g += 1
+        filas.append({"talle": t, "x": round(x, 1), "y": round(y, 1),
+                      "w": round(float(lay.get("img_w") or 0), 1), "h": round(float(lay.get("img_h") or 0), 1),
+                      "n": len(items)})
+    n_filas = int(math.ceil(len(talles) / cols)) if talles else 0
+    return {"mesa": None, "talles": talles, "unidad": "mm",
+            "img_w": round(sep + cols * (w_max + sep), 1), "img_h": round(sep + n_filas * (h_max + sep), 1),
+            "piezas": piezas, "filas": filas, "por_talle": {f["talle"]: f["n"] for f in filas},
+            "formato": "extendido", "origen": "con_diseno"}
 
 
 def visor_todos(path, avisar=None):
@@ -719,7 +792,7 @@ def _leer_desplegado(path_molde, mesa):
         return hit
     fj = os.path.join(carpeta, f"m{mesa}.json")
     fp = os.path.join(carpeta, f"m{mesa}.pdf")
-    if not (os.path.exists(fj) and os.path.exists(fp)):
+    if not os.path.exists(fj):
         return None
     try:
         import json
@@ -730,7 +803,10 @@ def _leer_desplegado(path_molde, mesa):
     if d.get("sello") != sello:
         return None
     conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (d.get("talles") or {}).items()}
-    hit = {"sello": sello, "orden": list(d.get("orden") or []), "contornos": conts, "pdf": fp}
+    # `pdf` sólo si las páginas por talle YA están (el JSON lo dice): el alta escribe primero los
+    # contornos y las páginas llegan después, en segundo plano — ver `desplegar_mesa`.
+    hit = {"sello": sello, "orden": list(d.get("orden") or []), "contornos": conts,
+           "pdf": fp if (d.get("paginas") and os.path.exists(fp)) else None}
     _CONT_CACHE[clave] = hit
     return hit
 
@@ -786,26 +862,64 @@ def _pagina_desplegada(out, pag, salida):
     return out.pages[-1]
 
 
-def desplegar_mesa(path_molde, mesa, talles, carpeta=None):
-    """Despliega UNA mesa: escribe `m{mesa}.pdf` + `m{mesa}.json` y devuelve `{talle: [contornos]}`
-    (sólo los talles con piezas). Es lo que corre en cada proceso del alta."""
+def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, paginas=True):
+    """Despliega UNA mesa y devuelve `{talle: [contornos]}` (sólo los talles con piezas). Es lo que
+    corre en cada proceso del alta.
+
+    Son DOS etapas, y por eso los dos flags:
+      · `contornos` — `get_drawings` de la mesa (2-10 s) → `m{mesa}.json`. Es lo que necesitan
+        el registro y el visor: sin esto la subida no puede responder.
+      · `paginas`   — parsear el content-stream y filtrar los 20 talles (1-20 s) → `m{mesa}.pdf`.
+        Lo usa SÓLO el motor, en la tizada, y hasta ahí el usuario tiene minutos (nombrar las
+        piezas, ubicar la etiqueta). Medido: 107 s en serie contra 54 de los contornos, y la mesa
+        más pesada 20 s contra 10 — con las dos etapas en la subida, el usuario esperaba el
+        doble. El servidor pide los contornos al subir y las páginas en segundo plano, después
+        de responder; si la tizada llega antes, `ruta_desplegada` arma esa mesa en el momento.
+    El JSON lleva `paginas: true` sólo cuando el PDF ya está: con contornos nuevos y un PDF viejo
+    del archivo anterior, el motor no lo puede tomar por bueno."""
     import json
     import molde_real as MR
     carpeta = carpeta or _carpeta_desplegado(path_molde)
     os.makedirs(carpeta, exist_ok=True)
     sello = _sello(path_molde)
+    fj = os.path.join(carpeta, f"m{mesa}.json")
+    fp = os.path.join(carpeta, f"m{mesa}.pdf")
 
-    # 1) los contornos, como siempre (get_drawings de la mesa, una vez para los 20 talles)
-    doc = fitz.open(path_molde)
-    try:
-        conts = {}
-        for talle in talles:
-            pzs = _piezas_de_mesa_cruda(doc, mesa, talle)
-            if pzs:
-                conts[talle] = pzs
-    finally:
-        olvidar(doc)
-        doc.close()
+    def _escribir_json(d):
+        with open(fj + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(d, fh)
+        os.replace(fj + ".tmp", fj)
+        _CONT_CACHE.pop((carpeta, mesa), None)
+
+    conts = None
+    if contornos:
+        # 1) los contornos, como siempre (get_drawings de la mesa, una vez para los 20 talles)
+        doc = fitz.open(path_molde)
+        try:
+            conts = {}
+            for talle in talles:
+                pzs = _piezas_de_mesa_cruda(doc, mesa, talle)
+                if pzs:
+                    conts[talle] = pzs
+        finally:
+            olvidar(doc)
+            doc.close()
+        _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": False})
+        if not paginas:
+            return conts
+    else:
+        # sólo las páginas: los contornos ya están (o no hacen falta acá)
+        try:
+            with open(fj, encoding="utf-8") as fh:
+                _prev = json.load(fh)
+            if _prev.get("sello") == sello:
+                conts = _prev.get("talles") or {}
+                if list(_prev.get("orden") or []) != list(talles):
+                    _prev = None       # otro orden de talles: las páginas no corresponderían
+        except Exception:
+            _prev = None
+        if _prev is None:
+            return desplegar_mesa(path_molde, mesa, talles, carpeta, contornos=True, paginas=True)
 
     # 2) la página de cada talle. Se parsea la mesa UNA vez y se filtra veinte; el filtrado es,
     #    instrucción por instrucción, el mismo de `aislar_capa(..., podar=True)`.
@@ -823,33 +937,29 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None):
             salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
             npag = _pagina_desplegada(out, pag, salida)
             MR.sanear_oc(out, npag)
-        fp = os.path.join(carpeta, f"m{mesa}.pdf")
         out.save(fp + ".tmp")
         out.close()
         os.replace(fp + ".tmp", fp)
     finally:
         pdf.close()
 
-    fj = os.path.join(carpeta, f"m{mesa}.json")
-    with open(fj + ".tmp", "w", encoding="utf-8") as fh:
-        json.dump({"sello": sello, "orden": list(talles), "talles": conts}, fh)
-    os.replace(fj + ".tmp", fj)
-    _CONT_CACHE.pop((carpeta, mesa), None)
+    _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True})
     return conts
 
 
 def _desplegar_mesa_worker(args):
     """Worker de proceso (spawn-safe: recibe y devuelve tipos simples)."""
-    path, mesa, talles = args
-    return mesa, desplegar_mesa(path, mesa, list(talles))
+    path, mesa, talles, contornos, paginas = args
+    return mesa, desplegar_mesa(path, mesa, list(talles), contornos=contornos, paginas=paginas)
 
 
-def desplegar_molde(path_molde, talles, avisar=None, procesos=None):
+def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=True, paginas=True):
     """Despliega TODAS las mesas y devuelve `{mesa: {talle: [contornos]}}`.
 
     Con `procesos` > 1 va una mesa por proceso (ProcessPool: PyMuPDF/pikepdf no son thread-safe).
     Si el pool no arranca o se cae, las mesas que falten se hacen acá, en serie: se pierde la
-    velocidad, no el alta. `avisar(hecho, total, texto)` recibe el avance mesa a mesa."""
+    velocidad, no el alta. `avisar(hecho, total, texto)` recibe el avance mesa a mesa.
+    `contornos` / `paginas`: las dos etapas de `desplegar_mesa` (el servidor las separa)."""
     _d = fitz.open(path_molde)
     n = _d.page_count
     _d.close()
@@ -870,7 +980,7 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None):
         try:
             from concurrent.futures import ProcessPoolExecutor, as_completed
             with ProcessPoolExecutor(max_workers=min(n, procesos)) as ex:
-                futs = {ex.submit(_desplegar_mesa_worker, (path_molde, m, list(talles))): m for m in mesas}
+                futs = {ex.submit(_desplegar_mesa_worker, (path_molde, m, list(talles), contornos, paginas)): m for m in mesas}
                 for f in as_completed(futs):
                     mesa, conts = f.result()
                     _listo(mesa, conts)
@@ -879,7 +989,7 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None):
             print(f"[camino B] el desplegado en paralelo falló ({type(e).__name__}: {e}); "
                   f"sigo en serie con {len(pendientes)} mesa(s)")
     for mesa in pendientes:
-        _listo(mesa, desplegar_mesa(path_molde, mesa, list(talles)))
+        _listo(mesa, desplegar_mesa(path_molde, mesa, list(talles), contornos=contornos, paginas=paginas))
     return por_mesa
 
 
@@ -918,16 +1028,20 @@ def ruta_desplegada(path_molde, mesa, talle, armar=True):
     """`(ruta_pdf, índice_de_página)` de la mesa con sólo ese talle, o None si el talle no está.
     Si la mesa no está desplegada (molde viejo, archivo cambiado) y `armar`, la despliega ahora."""
     d = _leer_desplegado(path_molde, mesa)
-    if d is None and armar:
-        doc = fitz.open(path_molde)
-        try:
-            talles = talles_del_molde(doc)
-        finally:
-            doc.close()
-        if not talles:
-            return None
-        desplegar_mesa(path_molde, mesa, talles)
+    if (d is None or d["pdf"] is None) and armar:
+        if d is None:
+            doc = fitz.open(path_molde)
+            try:
+                talles = talles_del_molde(doc)
+            finally:
+                doc.close()
+            if not talles:
+                return None
+            desplegar_mesa(path_molde, mesa, talles)
+        else:
+            # los contornos ya están (los dejó la subida); faltan las páginas por talle
+            desplegar_mesa(path_molde, mesa, d["orden"], contornos=False, paginas=True)
         d = _leer_desplegado(path_molde, mesa)
-    if d is None or talle not in d["orden"]:
+    if d is None or d["pdf"] is None or talle not in d["orden"]:
         return None
     return d["pdf"], d["orden"].index(talle)

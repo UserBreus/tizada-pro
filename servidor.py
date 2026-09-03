@@ -1695,8 +1695,9 @@ def _visor_guardar(pid, visor):
 _VISOR_LOCK = threading.Lock()
 
 
-def _visor_leer(pid, talle_ref=None):
-    """El visor ya armado de ese talle, o None si no está (entonces se calcula como antes)."""
+def _visor_leer(pid, talle_ref=None, todo=False):
+    """El visor ya armado de ese talle, o None si no está (entonces se calcula como antes).
+    `todo=True` devuelve el dict entero `{talle: visor}` (el lienzo de todos los talles)."""
     try:
         _d = json.load(open(_ruta_datos(_VISOR_JSON, pid), encoding="utf-8"))
     except Exception:
@@ -1724,6 +1725,8 @@ def _visor_leer(pid, talle_ref=None):
                     _d = None
     if not isinstance(_d, dict) or not _d:
         return None
+    if todo:
+        return _d
     if talle_ref and talle_ref in _d:
         return _d[talle_ref]
     if talle_ref:
@@ -1898,10 +1901,16 @@ def subir_plantilla():
         try:
             import pymupdf as fitz
             import piezas_con_diseno as PD
-            _d = fitz.open(tmp)
-            _con_diseno, _motivo_b = PD.parece_molde_con_diseno(_d)
-            PD.olvidar(_d)
-            _d.close()
+            if str(request.form.get("con_diseno") or "") == "1":
+                # El usuario ya lo dijo: vino por «Cargar molde con diseño incluido». Adivinarlo
+                # costaba 12,5 s (leer los dibujos de dos mesas) antes de empezar el alta, y el alta
+                # misma avisa si el archivo no trae piezas con máscara. Ver changelog 386.
+                _con_diseno, _motivo_b = True, "lo eligió el usuario al cargarlo"
+            else:
+                _d = fitz.open(tmp)
+                _con_diseno, _motivo_b = PD.parece_molde_con_diseno(_d)
+                PD.olvidar(_d)
+                _d.close()
         except Exception as e:
             print(f"[subir_plantilla] no se pudo mirar si trae diseño adentro: {e}")
             _motivo_b = ""
@@ -1913,7 +1922,10 @@ def subir_plantilla():
                 # `procesos`: una mesa por proceso. El alta despliega el molde (contornos y
                 # página por talle, ver `piezas_con_diseno` «EL MOLDE DESPLEGADO»); medido, 9
                 # mesas en serie son ~2 min y en paralelo bajan a lo que tarda la más pesada.
-                alta = PD.alta_molde_con_diseno(tmp, procesos=procesos_render())
+                # `paginas=False`: la subida responde con los contornos; las páginas por talle
+                # (lo que usa el motor) se arman en segundo plano apenas el archivo está en su
+                # lugar (`_prewarm_desplegado`). Medido: eran 107 s de 161 en serie.
+                alta = PD.alta_molde_con_diseno(tmp, procesos=procesos_render(), paginas=False)
             else:
                 alta = MP.alta_plantilla(tmp)      # se valida ANTES de pisar el molde bueno
         except Exception as e:
@@ -2040,7 +2052,24 @@ def subir_plantilla():
     # El lienzo de «Nombrar piezas» se arma YA, en segundo plano: cuando el usuario entre
     # está listo (el alta recién calentó el caché de extracción, así que cuesta poco).
     threading.Thread(target=_prewarm_deteccion_todas, args=(_pid_reset,), daemon=True).start()
+    if _con_diseno:
+        # CAMINO B: las páginas por talle del molde desplegado, ahora que el archivo ya está en
+        # su lugar (el sello es el mismo: `os.replace` conserva la fecha). El usuario mientras
+        # tanto nombra las piezas; si genera antes de que termine, el motor arma esa mesa solo.
+        threading.Thread(target=_prewarm_desplegado, args=(destino, list(alta.get("talles") or [])), daemon=True).start()
     return jsonify(resumen)
+
+
+def _prewarm_desplegado(path, talles):
+    """Segunda etapa del desplegado del camino B (ver `piezas_con_diseno.desplegar_mesa`): las
+    páginas por talle, una mesa por proceso, después de responder la subida. Best-effort."""
+    try:
+        import piezas_con_diseno as PD
+        _t0 = time.time()
+        PD.desplegar_molde(path, talles, procesos=procesos_render(), contornos=False, paginas=True)
+        print(f"[camino B] páginas por talle listas ({time.time()-_t0:.0f}s): {path}")
+    except Exception as e:
+        print(f"[camino B] no se pudieron preparar las páginas por talle de {path}: {e}")
 
 
 def _deteccion_base_cached(pid, talle_ref, candidatas=False):
@@ -2259,15 +2288,19 @@ def plantilla_deteccion_todas():
     pl = _ruta_entrada("plantilla.ai", pid)
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí el molde"}), 409
-    # CAMINO B: esta vista no aplica y sería una respuesta ERRÓNEA, no una vacía. Sirve para
-    # emparejar talles a ojo; acá la correspondencia ya es exacta (los talles son capas de la
-    # misma mesa) y `detectar_piezas_todas` mira una sola mesa. Mejor decirlo que dibujar mal.
+    # CAMINO B: el lienzo de todos los talles se arma con los visores por talle que dejó el alta
+    # (`visor_junto`), sin abrir el archivo — `detectar_piezas_todas` mira UNA mesa y acá son
+    # nueve. Es la pantalla de nombrar del pedido, igual que la de Moldería (regla del usuario
+    # 2026-09-03: «primero nombramos todas las piezas de todos los talles»). Acá no se empareja
+    # nada: la correspondencia entre talles es exacta y el front la usa para seleccionar la
+    # homóloga en cada talle de una.
     try:
         import piezas_con_diseno as _PD
         if _PD.es_camino_b(pl):
-            return jsonify({"error": "este molde trae el diseño adentro: sus talles son capas de la "
-                                     "misma mesa y la correspondencia entre ellos ya está resuelta, "
-                                     "así que no hay nada que emparejar"}), 409
+            _v = _visor_leer(pid, todo=True)
+            if not _v:
+                return jsonify({"error": "el visor de este molde todavía no está preparado"}), 422
+            return jsonify(_PD.visor_junto(_v, _cargar("registro_producto.json", pid) or {}))
     except ImportError:
         pass
     try:
