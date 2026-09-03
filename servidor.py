@@ -1692,12 +1692,36 @@ def _visor_guardar(pid, visor):
         print(f"[camino B] no se pudo guardar el visor: {e}")
 
 
+_VISOR_LOCK = threading.Lock()
+
+
 def _visor_leer(pid, talle_ref=None):
     """El visor ya armado de ese talle, o None si no está (entonces se calcula como antes)."""
     try:
         _d = json.load(open(_ruta_datos(_VISOR_JSON, pid), encoding="utf-8"))
     except Exception:
-        return None
+        _d = None
+    if not _d and _es_camino_b(pid):
+        # Molde del camino B cargado ANTES de que el alta dejara esto preparado. Se arma AHORA y
+        # entero: leer los dibujos cuesta lo mismo para un talle que para los veinte (son capas
+        # del mismo archivo), así que hacerlo de a uno significaría pagar ~50 s por CADA talle que
+        # se mire. Con el lock, dos pestañas a la vez no lo generan dos veces.
+        with _VISOR_LOCK:
+            try:
+                _d = json.load(open(_ruta_datos(_VISOR_JSON, pid), encoding="utf-8"))
+            except Exception:
+                _d = None
+            if not _d:
+                try:
+                    import piezas_con_diseno as PD
+                    print(f"[camino B] preparando el visor de {pid} (molde cargado antes; se hace una vez)…")
+                    _t0 = time.time()
+                    _d = PD.visor_todos(_ruta_entrada("plantilla.ai", pid))
+                    _visor_guardar(pid, _d)
+                    print(f"[camino B] visor de {pid} listo: {len(_d)} talles en {time.time()-_t0:.0f}s")
+                except Exception as e:
+                    print(f"[camino B] no se pudo preparar el visor de {pid}: {e}")
+                    _d = None
     if not isinstance(_d, dict) or not _d:
         return None
     if talle_ref and talle_ref in _d:

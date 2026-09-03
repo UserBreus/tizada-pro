@@ -668,11 +668,22 @@ para cualquier diseño.
 
 ### 5.2.b Subir un **molde que YA TRAE EL DISEÑO ADENTRO** (camino B)
 
-La otra forma de cargar: **un solo archivo** con el diseño estampado en cada pieza. No lleva arte
-aparte ni mapeo.
+La otra forma de cargar: archivos con el diseño estampado en cada pieza. No llevan arte aparte
+ni mapeo.
 
-- **Dónde:** pestaña **Mis artículos** → tarjeta **«Molde con el diseño adentro»**
-  (`pedido-subir-con-diseno`).
+- **Dónde:** al entrar al pedido, botón **«Cargar molde con diseño incluido»**
+  (`pedido-armar-con-diseno`). El otro botón, **«Armar con base»**, es el flujo de siempre — y **no
+  son excluyentes**: un pedido puede llevar de los dos.
+- **En el espacio de carga:**
+  1. Soltá **varios archivos** de una vez (`cargar-b-zona`). El **nombre del molde sale del
+     archivo**: no hay que escribirlo.
+  2. Tocá los moldes **que van juntos** y escribí **el nombre del diseño** una sola vez
+     (`cargar-b-diseno`).
+  3. Si la planilla tiene más de una columna de talle («Talle», «Talle short»), elegí de cuál toma
+     cada molde (`cargar-b-columna`). 🔴 Sin esto un short tomaría el talle de la camiseta.
+  4. **Nombrar las piezas** (`cargar-b-siguiente`) lleva al visor.
+- **También** se puede subir de a uno desde la pestaña **Mis artículos** → tarjeta **«Molde con el
+  diseño adentro»** (`pedido-subir-con-diseno`).
 - **Qué tiene que traer el archivo** (`.ai`/`.pdf`, sin DXF): una **capa por talle**, cada pieza
   dentro de su **máscara de recorte**, y —si la prenda lleva nombre y número— una capa **`nombre`**
   y otra **`00`** con los textos de muestra (pueden ser subcapas y estar dentro de la máscara).
@@ -681,7 +692,10 @@ aparte ni mapeo.
   lee: un archivo de 100+ MB tarda un par de minutos) → el molde **queda elegido** en el diseño
   activo, **sin salir del pedido**.
 - **Después, en el paso Arte**, el panel de la derecha tiene las dos tareas del cliente:
-  1. **Piezas** — tocá cada pieza de la lista (van con su miniatura y su medida) y escribí qué es.
+  1. **Piezas** — **el mismo gesto que en la moldería** (§3.1): tocá las piezas **en el visor** (se
+     van sumando) o en la lista, escribí **un** nombre y tocá «Nombrar N». Si elegiste varias se
+     numeran solas («Tira» → «Tira 1», «Tira 2»). El visor abre al instante y muestra **sólo
+     contornos**. *(De ese gesto falta el arrastre de recuadro; el clic múltiple sí está.)*
      🔴 **El nombre es lo que hace funcionar todo lo demás**: la etiqueta, las telas (se asignan por
      nombre) y la manga corta/larga — el motor arma la prenda mirando los tokens del NOMBRE, así
      que una pieza llamada «Manga 1» hace que elegir corta o larga dé la misma tizada.

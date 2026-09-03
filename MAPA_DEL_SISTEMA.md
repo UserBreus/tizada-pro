@@ -1353,6 +1353,26 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (381) — EL PEDIDO ARRANCA CON DOS BOTONES, Y LA CARGA DEL CAMINO B ES SU PROPIO
+  ESPACIO.** Pedido del usuario. Al entrar al pedido: **«Armar con base»** (los pasos de siempre) y
+  **«Cargar molde con diseño incluido»**. **No son excluyentes**: un pedido puede llevar de los dos
+  (una camiseta con el diseño adentro y un short del catálogo con su arte, en la misma tizada), así
+  que la bifurcación es una VISTA del paso 1 (`vistaDiseno`) y no un paso nuevo — tocar las claves
+  de `pedidoPaso` habría roto la persistencia del wizard, `pasoItems` y los tutoriales grabados.
+  **El espacio de carga:** se sueltan **varios archivos** de una vez y **el nombre del molde sale
+  del archivo** (no se escribe). Se suben de a uno —cada uno son 100+ MB y los procesa PyMuPDF:
+  mandarlos juntos sólo haría que todos tarden más y que la barra no signifique nada—. Después
+  aparecen como botones: se tocan los que van juntos y se escribe **el nombre del diseño una sola
+  vez** (escribirlo por molde invita a «JUGADOR» y «jugador», que serían dos diseños).
+  🔴 **Y de cada molde se elige DE QUÉ COLUMNA DE TALLE toma sus medidas** (`mapeo_columnas.talle`,
+  vía `/api/productos/config_mapeo`). Es lo que distingue una camiseta de un short cuando la
+  planilla lleva «Talle» y «Talle short» —la planilla real del usuario las tiene—: sin eso el short
+  tomaría el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
+  **El nombrado pasa a ser el gesto de la pantalla de edición**: tocar las piezas en el visor (se
+  suman) o en la lista, escribir UN nombre y nombrarlas todas; si son varias se numeran solas con
+  la regla de siempre («Tira» → «Tira 1», «Tira 2»). El lote se manda **de a una y en orden**: cada
+  renombrado reescribe el registro entero, así que dos a la vez se pisan y una se pierde.
+  ⚠️ Falta el arrastre de recuadro de esa pantalla; el clic múltiple sí está.
 - **2026-09-03 (380) — ⚡ CAMINO B: NOMBRAR PIEZAS ABRE AL INSTANTE (46 s → 0,002 s).** Pedido del
   usuario: esa pantalla tiene que andar «súper flash sin importar el diseño de cada molde»,
   trabajando **sólo con los bordes**. **Lo que costaba, medido:** armar el visor de UN talle = 52 s,

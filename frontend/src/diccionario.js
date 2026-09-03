@@ -244,6 +244,46 @@ export const DICCIONARIO = {
     que: 'La segunda tarea, cuando ya están todas las piezas nombradas: marcar en qué parte del borde de cada pieza sale impresa la etiqueta de corte (el talle, el nombre y el número). El tamaño y la tipografía los deja configurados el taller.',
     como: 'Tocá para pasar a ubicar la etiqueta.',
   },
+  'pedido-armar-base': {
+    nombre: 'Armar con base',
+    que: 'La forma de siempre: elegís el diseño, la prenda de la moldería y le cargás el arte aparte.',
+    como: 'Tocá para armar el trabajo con la moldería del sistema.',
+  },
+  'pedido-armar-con-diseno': {
+    nombre: 'Cargar molde con diseño incluido',
+    que: 'La otra forma: subís los archivos que ya traen el diseño estampado en cada pieza. No hay arte aparte ni mapeo; sólo decís qué es cada pieza y dónde va la etiqueta.',
+    como: 'Tocá para subir los moldes que ya traen el diseño.',
+  },
+  'cargar-b-zona': {
+    nombre: 'Los archivos',
+    que: 'Acá van los moldes que ya traen el diseño adentro. Podés soltar varios de una vez (la camiseta, el short…); el nombre de cada molde sale del propio archivo.',
+    como: 'Tocá o soltá acá los archivos .ai o .pdf.',
+  },
+  'cargar-b-moldes': {
+    nombre: 'Los moldes cargados',
+    que: 'Los archivos que ya subiste. Se tocan los que van juntos en un mismo diseño para nombrarlos de una sola vez.',
+    como: 'Tocá los moldes que llevan el mismo diseño.',
+  },
+  'cargar-b-diseno': {
+    nombre: 'Nombre del diseño',
+    que: 'Cómo se llama el diseño que llevan los moldes que elegiste (ej. JUGADOR). Es el mismo nombre que usa el resto del pedido para agrupar.',
+    como: 'Escribí el nombre del diseño y apretá Enter.',
+  },
+  'cargar-b-columna': {
+    nombre: 'De qué talle toma las medidas',
+    que: 'Cuando la planilla lleva más de una columna de talle (por ejemplo «Talle» y «Talle short»), acá se dice de cuál toma sus medidas este molde. Sin esto, un short tomaría el talle de la camiseta y saldría del tamaño equivocado.',
+    como: 'Elegí la columna de talle que le corresponde.',
+  },
+  'cargar-b-siguiente': {
+    nombre: 'Nombrar las piezas',
+    que: 'Pasa al visor para decir qué es cada pieza de los moldes que cargaste. Se habilita cuando todos tienen su diseño.',
+    como: 'Tocá para pasar a nombrar las piezas.',
+  },
+  'cargar-b-volver': {
+    nombre: 'Volver',
+    que: 'Vuelve a elegir cómo armar el trabajo. Los moldes que ya subiste quedan cargados.',
+    como: 'Tocá para volver.',
+  },
   'pedido-terminar': {
     nombre: 'Terminar el pedido',
     que: 'Cierra el pedido y borra el molde que subiste con el diseño adentro: se cargó sólo para este trabajo. Las tizadas que ya bajaste no se tocan.',

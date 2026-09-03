@@ -2655,7 +2655,8 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta, aviso, cargando }) {
+function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
+                                  nombrarModo, selNombrarB, onPiezaNombrarClick, aviso, cargando }) {
   // Desplegables de la barra de Diseños, agrupados por RANGO (#… en el nombre de la mesa)
   const [rangosCerrados, setRangosCerrados] = React.useState(new Set());
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
@@ -2825,7 +2826,10 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                 )}
                 {piezasZ.map((p) => {
                   const pzName = p.nombre;
-                  const isSelected = selectedPiezaMapeo === pzName;
+                  // En modo NOMBRAR, «seleccionada» es la del gesto de nombrar (varias a la vez);
+                  // en el resto, la única del mapeo. Es el mismo resaltado, no uno nuevo.
+                  const isSelected = nombrarModo ? !!(selNombrarB && selNombrarB.has(p.idx))
+                                                 : selectedPiezaMapeo === pzName;
                   // ARTE POR RANGO (#talle/#rango): el diseño mostrado es el del TALLE que se ve
                   // (mapeo_talles), no el default del 1er rango (bug "primero aparece el 6XL").
                   const _mtz = mapeoData?.mapeo_talles?.[pzName];
@@ -2868,6 +2872,14 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                             const snap = _snapAContorno(p.path_svg, q.x - (p._dx || 0), q.y - (p._dy || 0), p);
                             if (snap && onPickEtiqueta) onPickEtiqueta(pzName, snap);
                           } catch { /* sin geometría no se ubica nada: mejor no hacer nada que poner mal */ }
+                          return;
+                        }
+                        // NOMBRAR (camino B): tocar suma o saca la pieza de la selección, como en
+                        // la pantalla de edición. Así se eligen varias y se nombran de una: se
+                        // numeran solas (Frente 1, Frente 2…) en vez de escribir nueve veces.
+                        if (nombrarModo) {
+                          e.stopPropagation();
+                          onPiezaNombrarClick && onPiezaNombrarClick(p);
                           return;
                         }
                         if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
@@ -4012,11 +4024,22 @@ export default function App() {
   const [subirBFase, setSubirBFase] = useState(null);   // {fase, pct, seg}
   // Moldes efímeros de ESTE pedido: {pid: {nombre, creado}}. Se borran al terminar o reiniciar.
   const [moldesEfimeros, setMoldesEfimeros] = useState(_wizRef.current?.moldesEfimeros || {});
-  // Nombrado de las piezas de un molde del camino B, dentro del pedido.
-  const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} de la pieza elegida
+  // Nombrado de las piezas de un molde del camino B, dentro del pedido. La selección es MÚLTIPLE
+  // —el gesto de la pantalla de edición— porque nombrar de a una son nueve idas y vueltas:
+  // eligiendo las dos mangas juntas y escribiendo «Manga Corta» quedan numeradas solas.
+  const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} (compat: la última tocada)
+  const [selNombrarB, setSelNombrarB] = useState(new Set());   // idx de las piezas elegidas
   const [nombreBInput, setNombreBInput] = useState('');
   // ¿El visor está en modo «tocá dónde va la etiqueta»? (2ª tarea del cliente en el camino B)
   const [etqPickB, setEtqPickB] = useState(false);
+  // ── POR DÓNDE SE EMPIEZA EL PEDIDO ──────────────────────────────────────────────────────────
+  // null = todavía no eligió · 'base' = los pasos de siempre · 'con_diseno' = subir los archivos
+  // que ya traen el diseño. NO es excluyente: un pedido puede llevar de los dos.
+  const [vistaDiseno, setVistaDiseno] = useState(_wiz.vistaDiseno || null);
+  const [moldesBSel, setMoldesBSel] = useState([]);            // moldes tildados para ponerles diseño
+  const [moldesBDiseno, setMoldesBDiseno] = useState(_wiz.moldesBDiseno || {});   // {pid: nombre del diseño}
+  const [disenoBInput, setDisenoBInput] = useState('');
+  const fileInputMoldeBRef = useRef(null);
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
   const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0, 0, 0, 0.85], alineacion: 'fuera' });  // borde de corte del molde
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
@@ -9929,6 +9952,17 @@ export default function App() {
     setTimeout(() => setAdvertenciaInformativa(prev => prev === txt ? '' : prev), 10000);
   };
 
+  // ── CAMINO B: elegir piezas y nombrarlas, como en la pantalla de edición ────────────────────
+  const togglePiezaNombrarB = (pz) => {
+    setSelNombrarB(prev => {
+      const n = new Set(prev);
+      if (n.has(pz.idx)) n.delete(pz.idx); else n.add(pz.idx);
+      return n;
+    });
+    setPiezaBSel({ mesa: pz.mesa, t_idx: pz.t_idx });
+  };
+
+
   // ── La config de los moldes con el diseño adentro (la deja el taller, una vez) ───────────────
   const cargarCfgConDiseno = async () => {
     fetchNestingPresets();          // el desplegable de «cómo se acomodan» sale de ahí
@@ -9991,6 +10025,117 @@ export default function App() {
     } catch (err) { showError(err.message); }
   };
 
+  // ── CAMINO B: cargar VARIOS archivos, uno tras otro ─────────────────────────────────────────
+  // Se suben de a uno (no en paralelo): cada uno son 100+ MB y el servidor los procesa con
+  // PyMuPDF, así que mandarlos todos juntos sólo haría que todos tarden más y que la barra no
+  // signifique nada. El nombre del molde sale del ARCHIVO: el usuario no lo escribe.
+  const subirMoldesConDiseno = async (fileList) => {
+    const files = [...(fileList || [])].filter(f => /\.(ai|pdf)$/i.test(f.name || ''));
+    if (!files.length) { showError('Elegí archivos .ai o .pdf.'); return; }
+    setSubirMoldeBusy(true);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const nombre = (f.name || 'Molde').replace(/\.(ai|pdf)$/i, '').trim() || 'Molde';
+      const t0 = Date.now();
+      setSubirBFase({ fase: 'subiendo', pct: 0, seg: 0, nombre, i: i + 1, total: files.length });
+      const reloj = setInterval(() => setSubirBFase(x => x ? { ...x, seg: Math.round((Date.now() - t0) / 1000) } : x), 1000);
+      try {
+        const r = await fetch('/api/productos/crear', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'No se pudo crear el molde');
+        const fd = new FormData();
+        fd.append('archivo', f);
+        fd.append('pid', d.id);
+        const d2 = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', rutaApi('/api/plantilla'));   // el XHR no pasa por el envoltorio de fetch
+          xhr.upload.onprogress = (e) => {
+            if (!e.lengthComputable) return;
+            const pct = Math.round(e.loaded * 100 / e.total);
+            setSubirBFase(x => ({ ...(x || {}), fase: pct >= 100 ? 'procesando' : 'subiendo', pct }));
+          };
+          xhr.onload = () => {
+            try {
+              const j = JSON.parse(xhr.responseText || '{}');
+              xhr.status >= 200 && xhr.status < 300 ? resolve(j) : reject(new Error(j.error || 'No se pudo procesar el molde'));
+            } catch { reject(new Error('El servidor respondió algo que no se entiende')); }
+          };
+          xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor'));
+          xhr.send(fd);
+        });
+        if (d2.origen !== 'con_diseno') {
+          showError(`«${nombre}» no parece traer el diseño adentro de las piezas`
+            + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '') + '. Quedó cargado igual, pero necesita el arte aparte.');
+        }
+        setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
+      } catch (err) {
+        showError(`«${nombre}»: ${err.message}`);
+      } finally {
+        clearInterval(reloj);
+      }
+    }
+    setSubirBFase(null);
+    setSubirMoldeBusy(false);
+    await fetchProductos();
+    setMoldeReload(v => v + 1);
+    invalidarNido(); setSembrarGen(v => v + 1);
+  };
+  // A qué DISEÑO va cada molde. Se elige tildando varios y escribiendo el nombre una sola vez:
+  // con una camiseta y un short del mismo diseño, escribirlo dos veces invita a que queden
+  // distintos («JUGADOR» / «jugador») y entonces son dos diseños.
+  const ponerDisenoB = () => {
+    const nom = disenoBInput.trim();
+    if (!nom || !moldesBSel.length) return;
+    setMoldesBDiseno(m => { const n = { ...m }; moldesBSel.forEach(id => { n[id] = nom; }); return n; });
+    setDisenoBInput(''); setMoldesBSel([]);
+  };
+  // DE QUÉ COLUMNA DE TALLE toma sus medidas este molde. Es lo que distingue una camiseta de un
+  // short cuando la planilla lleva las dos («Talle» y «Talle short»): sin esto el short tomaría
+  // el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
+  const ponerColumnaTalleB = async (colId) => {
+    const ids = [...moldesBSel];
+    if (!ids.length) return;
+    try {
+      for (const id of ids) {
+        const p = (productosCat.productos || []).find(x => x.id === id) || {};
+        await fetch('/api/productos/config_mapeo', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, planilla_template_id: p.planilla_template_id,
+                                 mapeo_columnas: { ...(p.mapeo_columnas || {}), talle: colId } })
+        });
+      }
+      await fetchProductos();
+    } catch (err) { showError(err.message); }
+  };
+  // Del espacio de carga al de nombrar: los moldes entran al pedido con su diseño y se sigue en
+  // el paso de siempre, que es donde vive el visor.
+  const irANombrarB = () => {
+    const _mios = (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno');
+    if (!_mios.length) return;
+    const _dis = [...new Set(_mios.map(p => moldesBDiseno[p.id]).filter(Boolean))];
+    setDisenosPedido(prev => {
+      const n = [...prev];
+      _dis.forEach(nom => { const id = _slugDiseno(nom); if (!n.some(d => d.id === id)) n.push({ id, nombre: nom }); });
+      return n;
+    });
+    setDisenoMoldes(prev => {
+      const n = { ...prev };
+      _mios.forEach(p => {
+        const nom = moldesBDiseno[p.id]; if (!nom) return;
+        const id = _slugDiseno(nom);
+        n[id] = [...new Set([...(n[id] || []), p.id])];
+      });
+      return n;
+    });
+    const _prim = _dis[0] ? _slugDiseno(_dis[0]) : '';
+    if (_prim) setDisenoActivo(_prim);
+    setArteIdx(0);
+    setPedidoPaso('arte');
+  };
+
   // ── CAMINO B: subir un molde que YA TRAE EL DISEÑO adentro ───────────────────────────────────
   // Hermana de `subirMiMolde`, con tres diferencias que importan:
   //   · el molde se crea `efimero` (es de ESTE pedido y no queda guardado) y hereda la planilla
@@ -10004,7 +10149,9 @@ export default function App() {
   // `grupo_pieza` RE-ARMAN el registro para emparejar los talles por forma; acá los talles son
   // capas de la misma mesa y ya están pareados desde el alta, así que re-armarlo sólo puede
   // romperlo. `mesa` y `t_idx` son los que el visor ya trae en cada pieza.
-  const renombrarPiezaB = async (pid, mesa, t_idx, nombre) => {
+  // `recargar: false` cuando se nombra un LOTE: recargar el catálogo y la detección entre pieza y
+  // pieza son N idas y vueltas para tirar N-1; el llamador lo hace UNA vez al final.
+  const renombrarPiezaB = async (pid, mesa, t_idx, nombre, { recargar = true } = {}) => {
     const n = (nombre || '').trim();
     if (!n) return false;
     try {
@@ -10014,16 +10161,38 @@ export default function App() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'No se pudo poner el nombre');
-      await fetchProductos();          // el conteo de piezas nombradas es lo que destraba el paso
-      // 🔴 Y se vuelve a pedir la DETECCIÓN: los nombres que muestra el panel salen de ahí
-      // (`nombres_existentes`), no del catálogo. Sin esto el nombre se guardaba bien y la
-      // pantalla seguía diciendo «sin nombre» — el usuario lo escribiría dos veces.
-      await cargarMoldeOperario(pid);
+      if (recargar) {
+        await fetchProductos();        // el conteo de piezas nombradas es lo que destraba el paso
+        // 🔴 Y se vuelve a pedir la DETECCIÓN: los nombres que muestra el panel salen de ahí
+        // (`nombres_existentes`), no del catálogo. Sin esto el nombre se guardaba bien y la
+        // pantalla seguía diciendo «sin nombre» — el usuario lo escribiría dos veces.
+        await cargarMoldeOperario(pid);
+      }
       return true;
     } catch (err) {
       showError(err.message);
       return false;
     }
+  };
+
+  // Nombra TODAS las elegidas con el mismo nombre. Si son varias, el servidor las desambigua con
+  // la regla de siempre (`nombres_normalizados`): «Manga Corta» → «Manga Corta 1» y «Manga Corta 2».
+  // Se mandan de a una y EN ORDEN, no en paralelo: cada renombrado reescribe el registro entero,
+  // así que dos a la vez se pisarían y una de las dos se perdería.
+  const nombrarSeleccionB = async (pid) => {
+    const nom = nombreBInput.trim();
+    if (!nom || !selNombrarB.size) return;
+    const _pzs = (etqData?.piezas || []).filter(p => selNombrarB.has(p.idx));
+    let _ok = 0;
+    for (const pz of _pzs) {
+      if (await renombrarPiezaB(pid, pz.mesa, pz.t_idx, nom, { recargar: false })) _ok++;
+    }
+    setNombreBInput('');
+    setSelNombrarB(new Set());
+    setPiezaBSel(null);
+    await fetchProductos();
+    await cargarMoldeOperario(pid);       // los nombres del panel salen de la detección
+    if (_ok) showMsg(_ok === 1 ? `Listo: «${nom}».` : `Listo: ${_ok} piezas nombradas.`);
   };
 
   const subirMoldeConDisenoPedido = async () => {
@@ -11671,7 +11840,43 @@ export default function App() {
                 (2026-08-21): el campo para escribir arriba y CENTRADO, y debajo los botones,
                 también centrados y de a TRES por línea. Los botones de acción, todos en la barra
                 de abajo — la misma de los otros 4 pasos. */}
-            {pedidoPaso === 'diseno' && !mapeandoOperario && (
+            {/* ── POR DÓNDE SE EMPIEZA ──────────────────────────────────────────────────────
+                Dos formas de armar el trabajo. No son excluyentes: se elige por dónde empezar y
+                un mismo pedido puede llevar de las dos (una camiseta con el diseño adentro y un
+                short del catálogo con su arte van a la misma tizada). */}
+            {pedidoPaso === 'diseno' && !mapeandoOperario && !vistaDiseno && (
+              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 22 }}>
+                <span style={{ fontSize: 16, fontWeight: 800 }}>¿Cómo vas a armar este trabajo?</span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 320px))', gap: 16, justifyContent: 'center' }}>
+                  <button type="button" data-tour="pedido-armar-base" onClick={() => setVistaDiseno('base')}
+                    style={{ padding: '26px 22px', borderRadius: 14, cursor: 'pointer', textAlign: 'left',
+                             background: 'rgba(0,216,245,0.06)', border: '1.5px solid var(--accent)' }}>
+                    <Icon name="nestingPiezas" style={{ width: 22, height: 22, color: 'var(--accent)' }} />
+                    <div style={{ fontSize: 15.5, fontWeight: 800, marginTop: 12 }}>Armar con base</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 7, lineHeight: 1.5 }}>
+                      Elegís el diseño y la prenda de la moldería, y le cargás el arte. Los pasos de siempre.
+                    </div>
+                  </button>
+                  <button type="button" data-tour="pedido-armar-con-diseno" onClick={() => setVistaDiseno('con_diseno')}
+                    style={{ padding: '26px 22px', borderRadius: 14, cursor: 'pointer', textAlign: 'left',
+                             background: 'rgba(255,255,255,0.03)', border: '1.5px solid var(--border-light)' }}>
+                    <Icon name="upload" style={{ width: 22, height: 22, color: 'var(--text-secondary)' }} />
+                    <div style={{ fontSize: 15.5, fontWeight: 800, marginTop: 12 }}>Cargar molde con diseño incluido</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 7, lineHeight: 1.5 }}>
+                      Subís los archivos que ya traen el diseño estampado en cada pieza. Sin arte aparte
+                      ni mapeo: sólo decís qué es cada pieza.
+                    </div>
+                  </button>
+                </div>
+                {(disenosPedido.length > 0 || Object.keys(moldesEfimeros || {}).length > 0) && (
+                  <button className="btn ghost" style={{ fontSize: 12.5 }} onClick={() => setVistaDiseno('base')}>
+                    ← Seguir con lo que ya venías armando
+                  </button>
+                )}
+              </div>
+            )}
+
+            {pedidoPaso === 'diseno' && !mapeandoOperario && vistaDiseno === 'base' && (
               <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, paddingTop: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -11731,6 +11936,137 @@ export default function App() {
                     disabled={!disenosPedido.length} onClick={() => setPedidoPaso('moldes')} />} />
               </div>
             )}
+
+            {/* ── CARGAR MOLDES QUE YA TRAEN EL DISEÑO ADENTRO ────────────────────────────────
+                Se suben VARIOS archivos (camiseta, short…). El nombre del molde sale del propio
+                archivo. Después, de cada uno se dice a qué diseño va y de qué columna de talle
+                toma sus medidas (camiseta / short), que es lo que la tizada necesita saber. */}
+            {pedidoPaso === 'diseno' && !mapeandoOperario && vistaDiseno === 'con_diseno' && (() => {
+              const _mios = (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno');
+              // Las columnas de TALLE de la planilla del pedido. Cuando hay más de una («Talle» y
+              // «Talle short»), cada molde tiene que decir de cuál toma sus medidas.
+              const _tplPed = (plantillasPlanillas || []).find(t => t.id === plantillaComun) || {};
+              const _colsTalle = (_tplPed.columnas || []).filter(c => c.role === 'talle');
+              const _selN = moldesBSel.length;
+              return (
+              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, paddingTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>Cargá los moldes con el diseño adentro</span>
+                    <Ayuda ancho={340}>Cada archivo tiene que traer <b>una capa por talle</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva nombre y número— una capa <b>«nombre»</b> y otra <b>«00»</b>. Podés cargar varios (camiseta, short…).</Ayuda>
+                  </div>
+
+                  {/* ZONA DE CARGA — acepta varios archivos de una */}
+                  <div className="upload-zone" data-tour="cargar-b-zona"
+                    onClick={() => !subirMoldeBusy && fileInputMoldeBRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); if (!subirMoldeBusy) subirMoldesConDiseno(e.dataTransfer.files); }}
+                    style={{ width: '100%', maxWidth: 620, padding: '26px 18px', cursor: subirMoldeBusy ? 'default' : 'pointer' }}>
+                    <Icon name="upload" className="upload-icon" />
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>Elegí los archivos (.ai · .pdf)</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                      Podés soltar varios de una vez. El nombre del molde sale del archivo.
+                    </div>
+                  </div>
+                  <input type="file" ref={fileInputMoldeBRef} accept=".ai,.pdf" hidden multiple
+                    onChange={(e) => { subirMoldesConDiseno(e.target.files); e.target.value = ''; }} />
+
+                  {/* AVANCE HONESTO: el % real de la subida y después el reloj mientras el
+                      servidor lee el archivo (que con 100+ MB son un par de minutos). */}
+                  {subirBFase && (
+                    <div style={{ width: '100%', maxWidth: 620, background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: '11px 13px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 7 }}>
+                        <span>{subirBFase.nombre ? `«${subirBFase.nombre}» · ` : ''}{subirBFase.fase === 'subiendo' ? 'Subiendo…' : 'Leyendo el archivo y detectando las piezas…'}</span>
+                        <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                          {subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0} %` : `${Math.floor((subirBFase.seg || 0) / 60)}:${String((subirBFase.seg || 0) % 60).padStart(2, '0')}`}
+                        </span>
+                      </div>
+                      <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', borderRadius: 4, background: 'var(--success, #2ecc71)',
+                                      width: subirBFase.fase === 'subiendo' ? `${subirBFase.pct || 0}%` : '100%',
+                                      opacity: subirBFase.fase === 'subiendo' ? 1 : 0.45, transition: 'width .2s linear' }} />
+                      </div>
+                      {subirBFase.total > 1 && (
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 6 }}>
+                          Archivo {subirBFase.i} de {subirBFase.total}. No cierres la ventana.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* LO YA CARGADO: se seleccionan uno o varios y se les pone el diseño */}
+                  {_mios.length > 0 && (
+                    <div style={{ width: '100%', maxWidth: 620, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-secondary)' }}>
+                        Cargados ({_mios.length}) · tocá los que van juntos en un diseño
+                      </div>
+                      <div data-tour="cargar-b-moldes" data-opciones="1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 9 }}>
+                        {_mios.map(p => {
+                          const on = moldesBSel.includes(p.id);
+                          const _dis = (moldesBDiseno || {})[p.id];
+                          const _col = (p.mapeo_columnas || {}).talle || 'talle';
+                          return (
+                            <button key={p.id} type="button"
+                              onClick={() => setMoldesBSel(s => s.includes(p.id) ? s.filter(x => x !== p.id) : [...s, p.id])}
+                              style={{ padding: '11px 12px', borderRadius: 11, cursor: 'pointer', textAlign: 'left',
+                                background: on ? 'rgba(0,216,245,0.12)' : 'rgba(255,255,255,0.03)',
+                                border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)') }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                                {p.piezas_registradas || 0} piezas
+                                {_dis ? <> · <span style={{ color: 'var(--accent)' }}>{_dis}</span></> : ' · sin diseño'}
+                              </div>
+                              {_colsTalle.length > 1 && (
+                                <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>
+                                  talle: <b>{(_colsTalle.find(c => c.id === _col) || {}).label || _col}</b>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {_selN > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, padding: '12px 13px', borderRadius: 12,
+                          background: 'rgba(0,216,245,0.06)', border: '1px solid var(--accent)' }}>
+                          <div style={{ fontSize: 12, fontWeight: 800 }}>{_selN} molde{_selN === 1 ? '' : 's'} seleccionado{_selN === 1 ? '' : 's'}</div>
+                          <div style={{ display: 'flex', gap: 7 }}>
+                            <input data-tour="cargar-b-diseno" value={disenoBInput} onChange={(e) => setDisenoBInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && disenoBInput.trim()) ponerDisenoB(); }}
+                              placeholder="Nombre del diseño (ej. JUGADOR)"
+                              style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13 }} />
+                            <button className="btn success" disabled={!disenoBInput.trim()} onClick={ponerDisenoB}
+                              style={{ padding: '8px 13px', fontSize: 12.5, borderRadius: 9 }}>Poner diseño</button>
+                          </div>
+                          {/* DE QUÉ COLUMNA SALE EL TALLE. Es lo que distingue una camiseta de un
+                              short cuando la planilla lleva las dos: sin esto, el short tomaría
+                              el talle de la camiseta y saldría del tamaño equivocado. */}
+                          {_colsTalle.length > 1 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>El talle lo toman de:</span>
+                              {_colsTalle.map(c => (
+                                <button key={c.id} type="button" className="btn ghost" data-tour="cargar-b-columna"
+                                  style={{ padding: '4px 10px', fontSize: 11.5, borderRadius: 8 }}
+                                  onClick={() => ponerColumnaTalleB(c.id)}>{c.label || c.id}</button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <BarraPaso
+                  volver={<BtnVolver texto="Atrás" ancla="cargar-b-volver" onClick={() => { setVistaDiseno(null); setMoldesBSel([]); }} />}
+                  acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
+                  centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={_mios.length && _mios.some(p => !(moldesBDiseno || {})[p.id]) ? 'Falta decir a qué diseño va cada molde' : ''}
+                  siguiente={<BtnSiguiente texto="Nombrar las piezas" ancla="cargar-b-siguiente"
+                    disabled={!_mios.length || _mios.some(p => !(moldesBDiseno || {})[p.id])}
+                    onClick={irANombrarB} />} />
+              </div>
+              );
+            })()}
 
             {/* Paso 1 · Escribir diseños + asignar moldes (columna de alto fijo, sin scroll de página) */}
             {pedidoPaso === 'moldes' && !mapeandoOperario && (
@@ -12663,6 +12999,7 @@ export default function App() {
                 // pieza llamada «Manga 1» elegir corta o larga da exactamente la misma tizada.
                 const _esB = _esConDiseno(_id);
                 const _piezasB = (etqData?.piezas || []);
+                const _selNomB = selNombrarB || new Set();
                 const _nomB = (pz) => etqNombres[pz.idx] || '';
                 const _sinNombreB = _piezasB.filter(pz => _ES_PIEZA_SIN_NOMBRE.test(_nomB(pz)));
                 // Nombres sugeridos: los del catálogo del sistema. Ahorran teclado y, sobre todo,
@@ -12769,10 +13106,10 @@ export default function App() {
                       {_piezasB.map(pz => {
                         const _nom = _nomB(pz);
                         const _sin = _ES_PIEZA_SIN_NOMBRE.test(_nom);
-                        const _sel = piezaBSel && piezaBSel.mesa === pz.mesa && piezaBSel.t_idx === pz.t_idx;
+                        const _sel = _selNomB.has(pz.idx);
                         return (
                           <div key={`${pz.mesa}-${pz.t_idx}`}
-                            onClick={() => { setPiezaBSel({ mesa: pz.mesa, t_idx: pz.t_idx }); setNombreBInput(_sin ? '' : _nom); }}
+                            onClick={() => togglePiezaNombrarB(pz)}
                             style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 9, cursor: 'pointer',
                               border: '1px solid ' + (_sel ? 'var(--accent)' : 'var(--border-light)'),
                               background: _sel ? 'rgba(0,216,245,0.10)' : 'rgba(0,0,0,0.2)' }}>
@@ -12798,25 +13135,27 @@ export default function App() {
                         );
                       })}
                     </div>
-                    {piezaBSel && (
-                      <div style={{ display: 'flex', gap: 6 }} data-tour="pieza-b-nombre">
-                        <input value={nombreBInput} autoFocus
-                          onChange={(e) => setNombreBInput(e.target.value)}
-                          onKeyDown={async (e) => {
-                            if (e.key !== 'Enter' || !nombreBInput.trim()) return;
-                            if (await renombrarPiezaB(_id, piezaBSel.mesa, piezaBSel.t_idx, nombreBInput)) {
-                              setNombreBInput(''); setPiezaBSel(null);
-                            }
-                          }}
-                          placeholder="Ej. Espalda"
-                          style={{ flex: 1, minWidth: 0, padding: '7px 9px', fontSize: 12.5, borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
-                        <button type="button" data-tour="pieza-b-asignar" className="btn success" disabled={!nombreBInput.trim()}
-                          style={{ padding: '7px 11px', fontSize: 12, borderRadius: 8 }}
-                          onClick={async () => {
-                            if (await renombrarPiezaB(_id, piezaBSel.mesa, piezaBSel.t_idx, nombreBInput)) {
-                              setNombreBInput(''); setPiezaBSel(null);
-                            }
-                          }}>Poner</button>
+                    {/* EL GESTO DE LA PANTALLA DE EDICIÓN: se eligen las piezas —en el visor o en
+                        la lista, se suman— y se escribe UN nombre para todas. Si son varias, se
+                        numeran solas (Frente 1, Frente 2…). Es lo que evita escribir nueve veces. */}
+                    {_selNomB.size > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} data-tour="pieza-b-nombre">
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                          {_selNomB.size} pieza{_selNomB.size === 1 ? '' : 's'} elegida{_selNomB.size === 1 ? '' : 's'}
+                          {_selNomB.size > 1 ? ' · se numeran solas' : ''}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input value={nombreBInput} autoFocus
+                            onChange={(e) => setNombreBInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && nombreBInput.trim()) nombrarSeleccionB(_id); }}
+                            placeholder="Ej. Espalda"
+                            style={{ flex: 1, minWidth: 0, padding: '7px 9px', fontSize: 12.5, borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                          <button type="button" data-tour="pieza-b-asignar" className="btn success" disabled={!nombreBInput.trim()}
+                            style={{ padding: '7px 11px', fontSize: 12, borderRadius: 8, whiteSpace: 'nowrap' }}
+                            onClick={() => nombrarSeleccionB(_id)}>
+                            Nombrar {_selNomB.size}
+                          </button>
+                        </div>
                       </div>
                     )}
                     </>)}
@@ -13098,6 +13437,9 @@ export default function App() {
                         panelFijo={_panelFijoB}
                         etqPickModo={_esB && etqPickB}
                         onPickEtiqueta={ubicarEtiquetaB}
+                        nombrarModo={_esB && !etqPickB}
+                        selNombrarB={_selNomB}
+                        onPiezaNombrarClick={togglePiezaNombrarB}
                         aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>

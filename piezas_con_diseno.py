@@ -500,6 +500,39 @@ def layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm=2.0):
             "piezas": items, "sin_variantes": False, "origen": "con_diseno"}
 
 
+def visor_todos(path, avisar=None):
+    """El visor de TODOS los talles de un molde ya dado de alta: `{talle: layout}`.
+
+    Existe para los moldes que se cargaron ANTES de que el alta empezara a dejarlo preparado. Sale
+    más caro que hacerlo en el alta, pero **se paga una sola vez y para todos los talles**: leer
+    los dibujos de las 9 mesas cuesta lo mismo se pida un talle o los veinte, porque los talles
+    son capas del mismo archivo. Sin esto, un molde viejo pagaba ~50 s **por cada talle** que se
+    mirara."""
+    doc = fitz.open(path)
+    try:
+        talles = talles_del_molde(doc)
+        if not talles:
+            return {}
+        out = {}
+        for k, talle in enumerate(talles):
+            _pm = []
+            for mesa in range(1, doc.page_count + 1):
+                for i, cont in enumerate(piezas_de_mesa(doc, mesa, talle)):
+                    _pm.append((mesa, i, cont))
+            if not _pm:
+                continue
+            try:
+                out[talle] = layout_visor(doc, _pm, talle, talles)
+            except Exception as e:
+                print(f"[camino B] no se pudo armar el visor del talle {talle}: {e}")
+            if avisar:
+                avisar(k + 1, len(talles), talle)
+        return out
+    finally:
+        olvidar(doc)
+        doc.close()
+
+
 def _ancla_por_defecto(cont):
     """La etiqueta de corte arranca centrada y pegada al borde de abajo, como en el camino A
     (`motor_pedido._ancla_sintetica`). Después el usuario la mueve pieza por pieza (E4)."""

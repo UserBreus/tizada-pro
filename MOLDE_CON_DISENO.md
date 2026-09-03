@@ -62,19 +62,38 @@ el archivo real de 123 MB. Lo que queda abierto, con su detalle más abajo:
 
 ---
 
-## 2. EL RECORRIDO DEL CLIENTE (lo que va a ver)
+## 2. EL RECORRIDO DEL CLIENTE (lo que va a ver) — reformulado 2026-09-03
 
-Todo esto pasa **desde el Pedido**, **no** desde Configuración:
+Todo esto pasa **desde el Pedido**, **no** desde Configuración. Al empezar hay **dos botones**
+(decisión del usuario, 2026-09-03) y **no son excluyentes**: un pedido puede llevar de los dos —
+una camiseta con el diseño adentro y un short del catálogo con su arte van a la misma tizada.
 
-1. **Sube el archivo** (`.ai` / `.pdf`: una capa por talle, el diseño ya adentro).
-2. El sistema **detecta las piezas** y le muestra **sólo los contornos** (liviano).
-3. **Nombra las piezas** — para que el sistema sepa qué es cada una.
-4. **Elige la planilla** que va a usar ese molde.
-5. **Marca dónde va la etiqueta** en cada pieza (sobre el contorno).
-6. Listo: el molde queda usable en el pedido como cualquier otro.
+| | |
+|---|---|
+| **Armar con base** | los pasos de siempre: diseño → prenda de la moldería → arte → planilla → tizada |
+| **Cargar molde con diseño incluido** | lo de abajo |
+
+1. **Suelta los archivos** — **varios de una vez** (la camiseta, el short…). El **nombre del molde
+   sale del propio archivo**: no se escribe. Se suben de a uno, con el % real y después el reloj.
+2. Con los archivos cargados aparecen como **botones**: se tocan **los que van juntos** y se
+   escribe **el nombre del diseño una sola vez** para todos (así no quedan «JUGADOR» y «jugador»,
+   que serían dos diseños).
+3. Y de cada molde se dice **de qué columna de talle** toma sus medidas — lo que distingue una
+   camiseta de un short cuando la planilla lleva «Talle» y «Talle short». 🔴 Sin esto el short
+   tomaría el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
+   (Se guarda en `mapeo_columnas.talle` del molde, que es de donde el motor ya lo lee.)
+4. **Nombra las piezas** con **el gesto de la pantalla de edición**: toca las piezas en el visor
+   (se suman) o en la lista, escribe **un** nombre y las nombra todas — si son varias se numeran
+   solas («Tira» → «Tira 1», «Tira 2»). El visor abre **al instante** (§0.a) y muestra **sólo
+   contornos**: ni un trazo del diseño.
+5. **Marca dónde va la etiqueta** en cada pieza (mismo visor, mismos contornos).
+6. Telas, planilla y tizada: **iguales que en el otro camino**.
 
 **Lo que NO hace el cliente** (lo deja configurado el admin, una vez): grosor y color del **borde
 de corte**, tamaño y tipografía de la **etiqueta**, separación y márgenes del **nesting**.
+
+⚠️ Del gesto de edición falta el **arrastre de recuadro** para seleccionar varias de un tirón; el
+clic múltiple sí está. Con 9 piezas alcanza, pero queda anotado.
 
 ---
 
