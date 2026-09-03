@@ -284,6 +284,16 @@ export const DICCIONARIO = {
     que: 'Vuelve a elegir cómo armar el trabajo. Los moldes que ya subiste quedan cargados.',
     como: 'Tocá para volver.',
   },
+  'pedido-volver-inicio': {
+    nombre: 'Volver al inicio',
+    que: 'Vuelve a la pantalla de las dos formas de armar el trabajo (con base, o cargando un molde con diseño). Lo que ya elegiste queda.',
+    como: 'Tocá «← Inicio».',
+  },
+  'arte-volver-cargar-b': {
+    nombre: 'Volver a cargar moldes',
+    que: 'Vuelve a la pantalla donde se cargan los moldes con diseño, para agregar otro archivo o cambiar a qué diseño va cada uno. Los nombres de las piezas quedan.',
+    como: 'Tocá «← Cargar moldes».',
+  },
   'pedido-terminar': {
     nombre: 'Terminar el pedido',
     que: 'Cierra el pedido y borra el molde que subiste con el diseño adentro: se cargó sólo para este trabajo. Las tizadas que ya bajaste no se tocan.',

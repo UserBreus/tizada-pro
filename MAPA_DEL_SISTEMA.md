@@ -1354,6 +1354,16 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (385) — «VOLVER» EN TODO EL PEDIDO.** Pedido del usuario: poder navegar entre el
+  inicio (las dos formas de armar el trabajo) y los pasos. Faltaban dos: la pantalla «Armar con
+  base» no tenía forma de volver a la bifurcación (una vez elegida, no se podía pasar a cargar
+  un molde con diseño sin reiniciar el pedido) → `BtnVolver` «← Inicio» (`setVistaDiseno(null)`,
+  ancla `pedido-volver-inicio`); y en «Nombrar piezas» del camino B el volver decía «← Moldes»
+  y mandaba al paso 2, que ese camino no usa → si el molde activo es del camino B (`_esB`) va
+  «← Cargar moldes» (`setVistaDiseno('con_diseno')` + `setPedidoPaso('diseno')`, ancla
+  `arte-volver-cargar-b`); en los demás sigue «← Moldes». Los otros pasos ya tenían el suyo en
+  `BarraPaso`. Entradas nuevas en `diccionario.js`. Verificado en el navegador el «← Inicio»
+  (ida y vuelta); el de «Cargar moldes» sólo por build (requiere subir el archivo de 123 MB).
 - **2026-09-03 (384) — ⚡⚡ EL MOLDE DESPLEGADO: el archivo se lee UNA vez, al cargar (el pedido de
   5 prendas pasa de 15 min a 63 s).** Pedido del usuario: estudiar cómo `Prueba para tizada` carga
   el archivo y arma la tizada en segundos, y replicarlo o mejorarlo. **Lo que hace el otro:** parsea

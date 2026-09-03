@@ -11997,7 +11997,11 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                {/* «← Inicio» vuelve a la pantalla de las dos formas de armar el trabajo. Sin esto,
+                    una vez elegido «Armar con base» no había forma de volver a cargar un molde con
+                    diseño (pedido del usuario 2026-09-03: poder navegar entre el inicio y los pasos). */}
                 <BarraPaso
+                  volver={<BtnVolver texto="Inicio" ancla="pedido-volver-inicio" onClick={() => setVistaDiseno(null)} />}
                   acciones={disenosPedido.length > 0 ? (
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
                   ) : null}
@@ -13556,8 +13560,13 @@ export default function App() {
                   {/* (La asignación de tela por pieza ahora vive dentro del panel lateral, en 2 vistas.) */}
 
                   {/* Barra inferior fija */}
+                  {/* Volver: en un molde con el diseño adentro, atrás está la pantalla donde se
+                      cargaron los archivos (el paso «Moldes» no tuvo parte en ese camino); en los
+                      demás, el paso de los moldes, como siempre. */}
                   <BarraPaso
-                    volver={<BtnVolver texto="Moldes" ancla="pedido-volver-moldes" onClick={() => setPedidoPaso('moldes')} />}
+                    volver={_esB
+                      ? <BtnVolver texto="Cargar moldes" ancla="arte-volver-cargar-b" onClick={() => { setVistaDiseno('con_diseno'); setPedidoPaso('diseno'); }} />
+                      : <BtnVolver texto="Moldes" ancla="pedido-volver-moldes" onClick={() => setPedidoPaso('moldes')} />}
                     acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
                     centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
