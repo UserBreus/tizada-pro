@@ -78,6 +78,7 @@ Lo mínimo que hay que saber si se toca CUALQUIER otra cosa del sistema (2026-09
 | el flag para las pantallas | `prod["origen"] == "con_diseno"` (lo devuelve `/api/productos`) | la marca de disco manda para el motor; ésta es para la UI |
 | **`idx_mesa`** | `registro[pieza][talle]`, columna nueva en `dbo.pieza_talle` | `pieza_idx` = posición dentro del **TALLE** (identidad, §8.9) · `idx_mesa` = posición dentro de la **MESA** (lo que indexa `extraer_piezas_mesa`). En el camino A coinciden; con 9 mesas, no. Al leer de la base la clave se pone **sólo si no es NULL** |
 | moldes **efímeros** | `prod["efimero"]` | se borran solos («Nuevo pedido», «Terminar pedido» y el barrido al arrancar). 🔴 Sólo por el flag y la fecha — ver §8 |
+| **el molde desplegado** | `entrada/<pid>/desplegado/` (`m{mesa}.pdf` + `m{mesa}.json` + `personalizacion.json`), lo escribe el alta (`piezas_con_diseno.desplegar_molde`) | el archivo se lee **una vez**: el motor toma de ahí la página de cada (mesa, talle) ya aislada y podada, y los contornos. Validado por **sello** (tamaño + fecha del `plantilla.ai`): si no coincide se rehace solo. Se borra con la carpeta del molde y al re-subir uno del camino A. Changelog 384 |
 | nombrar sus piezas | `POST /api/plantilla/pieza_renombrar` | las herramientas del camino A (`etiquetas`, `grupo_pieza`, `emparejado`) devuelven **409** sobre un molde B: re-armarían el registro asumiendo una sola mesa |
 
 ---
@@ -1353,6 +1354,53 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-03 (384) — ⚡⚡ EL MOLDE DESPLEGADO: el archivo se lee UNA vez, al cargar (el pedido de
+  5 prendas pasa de 15 min a 63 s).** Pedido del usuario: estudiar cómo `Prueba para tizada` carga
+  el archivo y arma la tizada en segundos, y replicarlo o mejorarlo. **Lo que hace el otro:** parsea
+  el PDF una sola vez a una escena en memoria (`sceneBuilder.js`), detecta y acomoda sobre eso en
+  un worker, y exporta un PDF **plano** escribiendo cada trazado por colocación (`pdfExport.js`).
+  **Lo que hacíamos nosotros, medido con cProfile sobre el pedido real (motor 356 s + RIP 542 s):**
+  de los 356 s del motor, **328 eran RE-LEER EL ARCHIVO** por pedido — 119 s aislando el talle de
+  cada (mesa, talle) (parsear de 398 mil a 1,2 millones de operadores por mesa, 3-13 s cada vez),
+  109 s de `get_drawings` de las 9 mesas y 100 s de `extraer_personalizacion` (tres recorridos del
+  archivo). De los 542 s del aplanado, **367 eran `unparse_content_stream` con TUPLAS**: acepta
+  `(operandos, op)` y `ContentStreamInstruction`, pero con tuplas tarda **40×** (322 mil ops: 16,6
+  s vs 0,4 s) y `aplanar_rip` armaba todo con tuplas; además cada nivel de anidado (página →
+  envoltorio de `show_pdf_page` → pieza → mesa) re-parseaba lo que el de abajo acababa de escribir.
+  **FIX (1) — el desplegado** (`piezas_con_diseno.py`, «EL MOLDE DESPLEGADO»): el alta deja en
+  `entrada/<pid>/desplegado/` un `m{mesa}.pdf` con **una página por talle, ya aislada y podada**
+  (byte a byte lo que hacía `aislar_capa(podar=True)` en cada tizada, verificado) y sólo con los
+  recursos que usa (22 fuentes → 3-4), más `m{mesa}.json` con el **sello** del archivo (tamaño +
+  fecha), el orden de los talles y los **contornos** de cada talle. `piezas_de_mesa` lee de ahí;
+  `pagina_molde` del motor toma la página de ahí (`ruta_desplegada`, que la arma si falta o el
+  sello cambió: un molde viejo se vuelve rápido la primera vez); `extraer_personalizacion` guarda
+  su resultado en `desplegado/personalizacion.json` por sello y, sin capas de campo, devuelve `{}`
+  sin recorrer nada. El alta va **una mesa por proceso** (`desplegar_molde`, ProcessPool; el
+  servidor pasa `procesos_render()`, los scripts van en serie porque el spawn de Windows re-importa
+  el módulo principal). En `molde_real`, `_raspar_pintado` quedó partido en `_mapa_oc` +
+  `_bloques_oc` (árbol de bloques OC, una vez por mesa) + `_saltar_bloques` + `_raspar_instrucciones`,
+  con **bytes idénticos** al código anterior en 6 casos (mesas 1/3/9, con y sin poda).
+  **FIX (2) — el aplanado** (`aplanar_rip.py`): `_instr` (siempre `ContentStreamInstruction`, nunca
+  tuplas), `_flatten` memoiza las **instrucciones** aplanadas por objeto y las devuelve (no
+  reescribe los XObjects, que quedan huérfanos y se borran), `_procesar_contenido` recibe las
+  instrucciones de la página en memoria (no re-parsea). **Pixel-idéntico** a la salida anterior en
+  la hoja del camino B (46 MB, 1,6 millones de ops) y en una hoja real del camino A (molde + arte
+  de producción, copiados a un temporal, registro leído de la base). Y **sin cambiar la política
+  del archivo**: sigue saliendo totalmente plano, que es además lo que hace el proyecto de
+  referencia — la «decisión de aplanar un solo nivel» de (383) ya no hace falta.
+  **RESULTADO (pedido real de 5 prendas):** motor 356 → **24 s** · aplanado 542 → **36 s** ·
+  personalización 100 → **0 s** · alta ~60 s en serie → **55-71 s con 6 procesos, desplegado
+  incluido** (en serie serían minutos: 13-45 s por mesa) · subir + tizada + RIP = **115 s**; con
+  el molde ya cargado, tizada + RIP = **63 s**. El desplegado ocupa **118 MB** por molde (9 mesas
+  × 20 talles, 7,6 MB por mesa) y se borra con el molde (vive en su carpeta de `entrada/`) y al
+  re-subir uno del camino A encima. Contrato nuevo: `verificar_desplegado.py` (bytes, píxeles,
+  contornos, sello, alta en paralelo = en serie, recursos podados). Los demás contratos siguen
+  verdes. **Lo que salió mal:** el primer perfil del alta en serie dio 403 s porque corrió junto a
+  otras dos pruebas pesadas y antes de dos optimizaciones (juntar los nombres de recursos por regex
+  sobre los bytes en vez de operando por operando: 9 s por mesa; y no recorrer 398 mil
+  instrucciones por talle: 6 s por mesa) — medir con la máquina ocupada engaña. Y el servidor de
+  prueba «8051» estaba en realidad escuchando en **8070** (`netstat` lo dice; `curl` a 8051 daba
+  000): se mató por PID y se relanzó en 8051 con las variables del `.bat`.
 - **2026-09-03 (383) — ⚡ LA TIZADA DEL CAMINO B ARRASTRABA LOS 20 TALLES EN CADA PIEZA (586 MB →
   46 MB).** Reporte del usuario: «va 6 minutos y paso por poco la mitad», contra el proyecto de
   referencia que «lo hace en segundos». **CAUSA, medida:** el content-stream de una mesa trae

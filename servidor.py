@@ -1910,7 +1910,10 @@ def subir_plantilla():
                 # Alta EXACTA: los talles son capas de la misma mesa, así que la correspondencia
                 # entre talles no se empareja, se sabe. Las piezas entran con nombre provisorio y
                 # el usuario las nombra en el visor.
-                alta = PD.alta_molde_con_diseno(tmp)
+                # `procesos`: una mesa por proceso. El alta despliega el molde (contornos y
+                # página por talle, ver `piezas_con_diseno` «EL MOLDE DESPLEGADO»); medido, 9
+                # mesas en serie son ~2 min y en paralelo bajan a lo que tarda la más pesada.
+                alta = PD.alta_molde_con_diseno(tmp, procesos=procesos_render())
             else:
                 alta = MP.alta_plantilla(tmp)      # se valida ANTES de pisar el molde bueno
         except Exception as e:
@@ -1971,6 +1974,10 @@ def subir_plantilla():
                     os.remove(_ruta_datos(_VISOR_JSON, _pid_de_request() or _get_active_producto_id()))
                 except OSError:
                     pass
+                # Lo mismo con el molde DESPLEGADO (páginas por talle + contornos): es del archivo
+                # anterior. El sello lo invalidaría igual, pero son decenas de MB que no sirven.
+                import shutil as _sh
+                _sh.rmtree(os.path.join(os.path.dirname(destino), PD.DESPLEGADO), ignore_errors=True)
         except Exception as e:
             print(f"[subir_plantilla] no se pudo marcar el camino del molde: {e}")
     # Molde nuevo = se descartan las versiones del anterior (p. ej. el renombrado de variantes),

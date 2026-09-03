@@ -2290,6 +2290,22 @@ def extraer_personalizacion(path_arte, campos=None):
     _hit = _PERS_CACHE.get(_ck)
     if _hit is not None:
         return _hit
+    # ── CAMINO B: lo que depende sólo del archivo se guarda EN DISCO, con el molde desplegado ──
+    # Medido: esta función tardaba 100 s sobre el molde real (tres recorridos completos del
+    # archivo con PyMuPDF), y la memoria de arriba sólo vale mientras viva el proceso — un molde
+    # efímero se sube por pedido, así que cada pedido la pagaba entera. Se guarda por sello del
+    # archivo en `desplegado/personalizacion.json`, al lado de las páginas por talle.
+    _cb_pers = None
+    _auto = campos is None            # sólo el resultado auto-descubierto se guarda/lee del disco
+    try:
+        import piezas_con_diseno as _PD
+        if _auto and _PD.es_camino_b(path_arte):
+            _cb_pers = _PD.personalizacion_guardada(path_arte)
+            if _cb_pers is not None:
+                _PERS_CACHE[_ck] = _cb_pers
+                return _cb_pers
+    except Exception:
+        pass
     if campos is None:
         # AUTO-DESCUBRIR: cualquier capa que NO sea del sistema es un campo de
         # personalización (nombre, numero, palabra, numero 2, …). El nombre del
@@ -2312,6 +2328,16 @@ def extraer_personalizacion(path_arte, campos=None):
                   if _norm_nombre(c["text"]) not in _sys and _norm_nombre(c["text"]) not in _talles
                   and not _es_capa_editable(c["text"])]
         _d.close()
+        if _talles and not campos:
+            # Camino B sin capa de nombre/número: no hay nada que estampar. Los tres recorridos
+            # de abajo sólo sirven para los campos, y sin campos daban {} después de 100 s.
+            pers = {}
+            _PERS_CACHE[_ck] = pers
+            try:
+                _PD.personalizacion_guardar(path_arte, pers)
+            except Exception:
+                pass
+            return pers
     nativos = _colores_personalizable(path_arte)   # color exacto por mesa y por texto
     trazos = _trazo_personalizable(path_arte)       # borde/trazo por mesa y por texto (compat)
     pasadas = _pasadas_personalizable(path_arte)    # PILA de apariencias ORDENADA (manda ésta)
@@ -2404,6 +2430,13 @@ def extraer_personalizacion(path_arte, campos=None):
     if len(_PERS_CACHE) > 24:
         _PERS_CACHE.clear()
     _PERS_CACHE[_ck] = pers
+    if _cb_pers is None and _auto:
+        try:
+            import piezas_con_diseno as _PD
+            if _PD.es_camino_b(path_arte):
+                _PD.personalizacion_guardar(path_arte, pers)
+        except Exception:
+            pass
     return pers
 
 
@@ -3768,7 +3801,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         return "ninguna"
 
     # ── CAMINO B: la mesa DEL MOLDE con sólo la capa de este talle ────────────────────────────
-    _molde_por_talle, _molde_limpias = {}, set()
+    _molde_por_talle, _molde_limpias, _despl_abiertos = {}, set(), {}
     def pagina_molde(mesa, talle):
         """La mesa del MOLDE con SÓLO la capa de este talle, y su dibujo INTACTO.
 
@@ -3782,7 +3815,24 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         `aislar_capa` conserva lo pintado dentro del OCG del talle con el estado gráfico intacto
         (CMYK exacto) y **deja sus recortes**, que en el camino B SON la pieza. Medido sobre la
         mesa 1 del archivo real: de 140 recortes / 1320 rellenos (las 20 capas encimadas) quedan
-        7 / 66 y los 3 textos del talle — el 95 % que se va es el de los otros 19 talles."""
+        7 / 66 y los 3 textos del talle — el 95 % que se va es el de los otros 19 talles.
+
+        🔴 Y NO SE AÍSLA ACÁ: se toma del MOLDE DESPLEGADO que dejó el alta (`piezas_con_diseno`,
+        «EL MOLDE DESPLEGADO»): una página por talle, ya aislada y podada con este mismo código.
+        Aislar en cada tizada costaba de 3 a 13 s por (mesa, talle) —119 s en un pedido de 5
+        prendas— por parsear entre 398 mil y 1,2 millones de operadores cada vez. Si el molde no
+        está desplegado (uno viejo, o el archivo cambió), `ruta_desplegada` lo despliega en el
+        momento; y si eso tampoco se pudiera, queda el camino de siempre, más abajo."""
+        try:
+            _rd = _PD.ruta_desplegada(plantilla, mesa, talle)
+        except Exception as e:
+            print(f"  [camino B] no se pudo usar el molde desplegado (mesa {mesa}, talle {talle}): {e}")
+            _rd = None
+        if _rd is not None:
+            _fp, _idx = _rd
+            if _fp not in _despl_abiertos:
+                _despl_abiertos[_fp] = _abrir_pike(_fp)
+            return _despl_abiertos[_fp].pages[_idx]
         if talle not in _molde_por_talle:
             _molde_por_talle[talle] = _abrir_pike(plantilla)
         pdf = _molde_por_talle[talle]

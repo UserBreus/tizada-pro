@@ -348,7 +348,89 @@ traduce solo al campo `numero`, porque el estampado busca `persona[campo]` por e
 capa. ⚠️ **Falta probarlo contra un archivo que las traiga** — cuando exista, correr
 `verificar_tizada_con_diseno.py` y mirar que salgan estampados.
 
-## ⚡ EL PESO Y EL TIEMPO (2026-09-03) — la causa encontrada, y lo que falta
+## ⚡⚡ EL MOLDE DESPLEGADO (2026-09-03) — el archivo se lee UNA vez, al cargar
+
+**Pedido del usuario:** estudiar a fondo cómo `Prueba para tizada` maneja el archivo al cargarlo,
+cómo hace para ser veloz y cómo arma la tizada en segundos; replicarlo o mejorarlo.
+
+**Lo que hace el proyecto de referencia** (leído entero: `main.js`, `sceneBuilder.js`,
+`assembly.js`, `nesting.js`, `pdfExport.js`, `heavy.worker.js`):
+1. **Parsea el PDF una sola vez** con pdf.js a una *escena* en memoria: cada trazado con su matriz
+   ya aplicada, las máscaras como contenedores, las capas por OCG (`sceneBuilder.js`). Todo lo
+   demás —detectar objetos, acomodar, exportar— trabaja sobre esa escena y **no vuelve a abrir el
+   archivo**.
+2. Lo pesado (detectar por grilla, acomodar por silueta) corre en un **worker** con OffscreenCanvas.
+3. La tizada en pantalla son **referencias** al dibujo original (`<use>`), no copias.
+4. Exporta escribiendo un PDF **plano**: emite los trazados de cada pieza por colocación
+   (`pdfExport.js` → `pathToPdfOps`), sin XObjects. ⚠️ Pierde cosas que acá son ley: pdf.js
+   convierte a **RGB** (no CMYK exacto), aproxima degradados y patrones a un gris, ignora SMask.
+
+**Lo que hacíamos nosotros, medido con cProfile sobre el pedido real de 5 prendas** (motor 356 s +
+aplanado 542 s = 15 min):
+
+| Dónde se iba | s | qué era |
+|---|---|---|
+| aislar el talle de cada (mesa, talle) | 119 | parsear de 398 mil a 1,2 millones de operadores por mesa, **una vez por talle, en cada tizada** |
+| `get_drawings` de las 9 mesas | 109 | los mismos contornos que el alta ya había leído |
+| `extraer_personalizacion` | 100 | tres recorridos del archivo entero, para no encontrar campos |
+| `unparse_content_stream` en el aplanado | 367 | 🔴 acepta tuplas `(operandos, op)` y `ContentStreamInstruction`; con tuplas tarda **40×** (322 mil ops: 16,6 s vs 0,4 s) y todo se armaba con tuplas |
+| re-parsear en cada nivel de anidado | 85 | página → envoltorio de `show_pdf_page` → pieza → mesa: cada nivel volvía a parsear lo que el de abajo acababa de escribir |
+
+Es decir: **328 de los 356 s del motor eran re-leer el archivo por pedido**, cosa que depende sólo
+del archivo y no del pedido. Ésa es la idea del otro proyecto, y acá se guardó **en disco**.
+
+**Lo que se hizo:**
+- **El desplegado** (`piezas_con_diseno.py`, sección «EL MOLDE DESPLEGADO»). El alta deja en
+  `entrada/<pid>/desplegado/`:
+  - `m{mesa}.pdf` — **una página por talle**, con sólo ese talle, aislado y podado: **byte a byte**
+    lo que `aislar_capa(podar=True)` producía en cada tizada (mismo código, corrido una vez), y
+    sólo con los recursos que el contenido nombra (de 22 fuentes a 3 o 4).
+  - `m{mesa}.json` — el **sello** del archivo (tamaño + fecha), el orden de los talles (= el de las
+    páginas) y los **contornos** de cada talle, tal como los da `piezas_de_mesa`.
+  - `personalizacion.json` — lo que calcula `extraer_personalizacion`, por sello. Y sin capas de
+    campo (`nombre`/`00`) devuelve `{}` sin recorrer nada.
+  `piezas_de_mesa` lee del JSON; `pagina_molde` del motor toma la página del PDF
+  (`ruta_desplegada`); si el desplegado falta o el sello no coincide, **se arma en el momento** y
+  sigue — un molde viejo se vuelve rápido la primera vez que se usa. Se borra con la carpeta del
+  molde y al re-subir uno del camino A encima.
+- **El alta, una mesa por proceso** (`desplegar_molde`, ProcessPool). Cada proceso lee los
+  contornos de su mesa (`get_drawings`, como siempre) y parsea el content-stream **una vez** para
+  filtrar los 20 talles (`molde_real._mapa_oc` + `_bloques_oc`, el árbol de bloques OC, +
+  `_saltar_bloques` + `_raspar_instrucciones` — `_raspar_pintado` partido en piezas, con bytes
+  idénticos al código anterior). El servidor pasa `procesos_render()`; los scripts van en serie.
+- **El aplanado** (`aplanar_rip.py`): `_instr` (siempre instrucciones, nunca tuplas), `_flatten`
+  memoiza las instrucciones ya aplanadas por objeto y las devuelve al nivel de arriba, y
+  `_procesar_contenido` las recibe en memoria. **Pixel-idéntico** a la salida anterior en la hoja
+  del camino B y en una hoja real del camino A. Sigue saliendo **totalmente plano**, como siempre
+  y como el proyecto de referencia: la «decisión de aplanar un solo nivel» de más abajo **ya no
+  hace falta**.
+
+**Resultado (el mismo pedido de 5 prendas, 27 piezas distintas):**
+
+| | antes | ahora |
+|---|---|---|
+| Motor (piezas + nesting + hoja) | 356 s | **24 s** (las 27 piezas se arman en 1 s) |
+| Aplanado para el RIP | 542 s | **36 s** (hoja 46 → 28,7 MB, igual que antes) |
+| `extraer_personalizacion` | 100 s | **0 s** |
+| Alta (subir el molde) | ~60 s en serie | **55-71 s con 6 procesos**, desplegado incluido (en serie: 13-45 s por mesa) |
+| **Subir + tizada + RIP** | no terminaba / 15 min | **115 s** |
+| **Tizada + RIP con el molde cargado** | 15 min | **63 s** |
+| Camino A, aplanar una hoja real | 10,6 s | **0,8 s** |
+
+Costo: el desplegado ocupa **118 MB** por molde (9 mesas × 20 talles, 7,6 MB por mesa).
+Contrato: `verificar_desplegado.py`. 🔴 Lo que NO se replicó del otro proyecto, a propósito:
+convertir a RGB, aproximar degradados, rasterizar para acomodar. Acá el vector es exacto y CMYK
+(leyes del proyecto); lo que se copió es **leer una vez** y **escribir plano**.
+
+**Lo que queda para ir más abajo** (no hecho, medido): del motor, `validar_salida` recorre la hoja
+(9 s) y `_barrer_fuentes` la reabre y reescribe; del aplanado, el `save` de 28 MB son 9 s y la
+pasada de `_procesar_contenido` sobre 1,6 millones de instrucciones en Python otros ~10. Se puede
+seguir, pero ya no es «re-leer el archivo»: es el trabajo real de escribir una hoja de 45 piezas
+con un patrón de 16.505 curvas cada una.
+
+---
+
+## ⚡ EL PESO Y EL TIEMPO (2026-09-03) — la causa encontrada, y lo que falta *(superado por la sección de arriba)*
 
 **Reporte del usuario:** «arme una tizada con un molde con diseño incluido, va 6 minutos y paso por
 poco la mitad del proceso… y este sistema `Prueba para tizada` lo hace en segundos».
@@ -503,8 +585,10 @@ no queda nada (ni datos, ni base) **y las tizadas generadas siguen ahí**.
 
 | Qué | Dónde |
 |---|---|
-| Detección nueva | `piezas_con_diseno.py` *(a crear, E1)* |
-| Parsing del molde y capas OCG | `molde_real.py` (`extraer_piezas_mesa`, `aislar_capa`) |
+| Detección nueva | `piezas_con_diseno.py` |
+| **El molde desplegado** (una página por talle + contornos, escrito al cargar) | `piezas_con_diseno.py` («EL MOLDE DESPLEGADO»: `desplegar_molde`, `desplegar_mesa`, `ruta_desplegada`, `personalizacion_guardada`) → `entrada/<pid>/desplegado/` |
+| Parsing del molde y capas OCG | `molde_real.py` (`extraer_piezas_mesa`, `aislar_capa`, `_mapa_oc`/`_bloques_oc`/`_saltar_bloques`/`_raspar_instrucciones`) |
+| Aplanado para el RIP (instrucciones, nunca tuplas; memo por objeto) | `aplanar_rip.py` (`_instr`, `_flatten`, `_procesar_contenido`) |
 | Armado de la pieza y estampado | `motor_pedido.py` (`_armar_base`, `generar_pieza`) |
 | Acomodo y hoja final | `nesting_contorno.py` |
 | Alta del molde propio | `servidor.py` (`/api/productos/crear`, `/api/plantilla`) + `App.jsx` (`modoMiMolde`) |
@@ -519,6 +603,23 @@ no queda nada (ni datos, ni base) **y las tizadas generadas siguen ahí**.
 
 ```bash
 py verificar_molde_con_diseno.py
+```
+
+El desplegado (bytes idénticos al aislado de siempre, píxeles, contornos, sello, alta en paralelo;
+tarda unos minutos):
+
+```bash
+py verificar_desplegado.py
+```
+
+La tizada de punta a punta (alta + motor + hoja) y la poda:
+
+```bash
+py verificar_tizada_con_diseno.py
+```
+
+```bash
+py verificar_poda_camino_b.py
 ```
 
 ```bash
@@ -544,6 +645,23 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
 
+- **2026-09-03 (el molde desplegado: de 15 min a 63 s)** — Se estudió `Prueba para tizada` entero y
+  se replicó su idea central —**leer el archivo una vez y escribir plano**— guardándola en disco
+  (`desplegado/`), sin copiar lo que rompería las leyes del proyecto (RGB, degradados
+  aproximados, rasterizar). Lo que se aprendió:
+  · **Perfilar antes de tocar.** La intuición decía «el aplanado es lento porque des-anida 900 mil
+    operadores»; cProfile dijo que **367 de 542 s eran `unparse_content_stream` con tuplas** (40×
+    más lento que con instrucciones) y que el motor gastaba 328 de 356 s **re-leyendo el archivo**
+    por pedido. Ninguna de las dos se veía leyendo el código.
+  · **Medir con la máquina ocupada engaña.** El alta en serie dio 403 s corriendo junto a otras dos
+    pruebas pesadas; sola y optimizada, la mesa 1 tarda 13 s.
+  · **«Bytes idénticos» es el contrato correcto para un refactor de content-stream**: partir
+    `_raspar_pintado` en cuatro funciones se verificó comparando la salida del módulo viejo (de
+    git) contra el nuevo, con y sin poda, en tres mesas. Para el aplanado, que cambia nombres de
+    recursos, el contrato es **pixel-idéntico** (camino B y camino A).
+  · ⚠️ El servidor de prueba «8051» escuchaba en **8070**: `curl` a 8051 daba 000 y `netstat -ano`
+    lo mostró. Comprobar el puerto con `netstat`, no con lo que dijo la sesión anterior.
+  · ⚠️ `py -` con heredoc funciona; `python -` no (no está en el PATH: abre la tienda de Windows).
 - **2026-09-02 (cierre: E5 pantalla, E6 y «Terminar pedido»)** — El camino queda **completo de
   punta a punta**, probado en el navegador: subir → nombrar 9 piezas → ubicar la etiqueta → tela →
   planilla → generar → cerrar. Lo que se aprendió en esta última tanda:

@@ -249,46 +249,92 @@ def _raspar_pintado(pdf, page, suprimir_fn, podar=False):
     construcción de trazado (`m l c v y re h`) y su pintura — nunca `q/Q`, `cm`, `gs` ni los
     colores, que son estado y sí se heredan."""
     instrucciones = parse_content_stream(page)
-    # ── PODA FUERTE: los BLOQUES OC que no se usan se borran ENTEROS ────────────────────────────
-    # Podar sólo los trazados deja igual todo el estado gráfico de los otros 19 talles: medido, de
-    # 398.653 operadores quedaban 25.070 para dibujar 75 cosas. Ese resto son `q/Q/cm` y colores
-    # que ya no pintan nada, pero que el RIP igual tiene que leer y des-anidar — y ahí se iban
-    # minutos por hoja.
-    # 🔴 Un bloque sólo se borra si queda BALANCEADO en `q`/`Q`: si abre un estado y no lo cierra,
-    # lo que viene después lo hereda y borrarlo cambiaría el dibujo (es el bug del editable que
-    # salía verde). Los desbalanceados se podan como antes, operador por operador.
-    _saltar, _nivel = set(), 0
-    if podar:
-        _prof, _ini, _bal = 0, None, 0
-        for _i, _inst in enumerate(instrucciones):
-            _o = str(_inst.operator)
-            if _o in ("BDC", "BMC"):
-                _prof += 1
-                if _ini is None and _o == "BDC" and len(_inst.operands) == 2 and str(_inst.operands[0]) == "/OC":
-                    _n = {_norm_capa(x) for x in _nombres_oc(_inst.operands[1], page)}
-                    if _n and suprimir_fn([_n]):        # bloque de una capa que NO se usa
-                        _ini, _bal, _nivel = _i, 0, _prof
-            elif _o == "EMC":
-                if _ini is not None and _prof == _nivel:
-                    if _bal == 0:                        # abrió y cerró todo lo que tocó
-                        _saltar.update(range(_ini, _i + 1))
-                    _ini = None
-                _prof -= 1
-            elif _ini is not None:
-                if _o == "q":
-                    _bal += 1
-                elif _o == "Q":
-                    _bal -= 1
+    ops, oc = _mapa_oc(instrucciones, page)
+    saltar = _saltar_bloques(ops, oc, suprimir_fn) if podar else set()
+    salida = _raspar_instrucciones(instrucciones, ops, oc, suprimir_fn, podar, saltar)
+    page.Contents = pdf.make_stream(unparse_content_stream(salida))
+
+
+def _mapa_oc(instrucciones, page):
+    """Una pasada barata sobre las instrucciones ya parseadas: el operador de cada una como `str`
+    y, para cada `BDC /OC`, el set de nombres de capa normalizados.
+
+    Está separado de `_raspar_pintado` porque es lo que se consulta **talle por talle** al
+    desplegar un molde del camino B (`piezas_con_diseno.desplegar_mesa`): parsear la mesa cuesta
+    1,3 s y resolver el nombre de cada BDC toca los recursos de la página. Hacerlo una vez y
+    filtrar veinte veces sobre listas de Python es lo que deja el molde entero desplegado en
+    segundos, en vez de re-parsear 398 mil operadores por cada talle."""
+    ops = [str(i.operator) for i in instrucciones]
+    oc = {}
+    for i, o in enumerate(ops):
+        if o == "BDC":
+            inst = instrucciones[i]
+            if len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
+                oc[i] = {_norm_capa(x) for x in _nombres_oc(inst.operands[1], page)}
+    return ops, oc
+
+
+def _bloques_oc(ops, oc):
+    """El ÁRBOL de bloques de contenido marcado (BDC/BMC … EMC): por bloque, `(inicio, fin,
+    nombres de capa o None, balanceado en q/Q, hijos)`. Se arma UNA vez por mesa y
+    `_saltar_bloques` lo recorre por talle: veinte recorridos de 20 bloques en vez de veinte de
+    398 mil operadores (medido: 2,3 s por mesa que pasan a nada)."""
+    raiz, abiertos = [], []              # abiertos: [inicio, nombres, balance q/Q, hijos]
+    for i, o in enumerate(ops):
+        if o in ("BDC", "BMC"):
+            abiertos.append([i, oc.get(i) if o == "BDC" else None, 0, []])
+        elif o == "EMC":
+            if abiertos:
+                ini, nombres, bal, hijos = abiertos.pop()
+                (abiertos[-1][3] if abiertos else raiz).append((ini, i, nombres, bal == 0, hijos))
+        elif o == "q":
+            for b in abiertos:
+                b[2] += 1
+        elif o == "Q":
+            for b in abiertos:
+                b[2] -= 1
+    return raiz
+
+
+def _saltar_bloques(ops, oc, suprimir_fn, bloques=None):
+    """PODA FUERTE: los índices de los BLOQUES OC que no se usan, para borrarlos ENTEROS.
+
+    Podar sólo los trazados deja igual todo el estado gráfico de los otros 19 talles: medido, de
+    398.653 operadores quedaban 25.070 para dibujar 75 cosas. Ese resto son `q/Q/cm` y colores
+    que ya no pintan nada, pero que el RIP igual tiene que leer y des-anidar — y ahí se iban
+    minutos por hoja.
+    🔴 Un bloque sólo se borra si queda BALANCEADO en `q`/`Q`: si abre un estado y no lo cierra,
+    lo que viene después lo hereda y borrarlo cambiaría el dibujo (es el bug del editable que
+    salía verde). Los desbalanceados se podan como antes, operador por operador.
+    Un bloque suprimido no se mira por dentro (sus hijos van con él, se borre o no)."""
+    if bloques is None:
+        bloques = _bloques_oc(ops, oc)
+    saltar = set()
+
+    def caminar(lista):
+        for ini, fin, nombres, balanceado, hijos in lista:
+            if nombres and suprimir_fn([nombres]):      # bloque de una capa que NO se usa
+                if balanceado:                           # abrió y cerró todo lo que tocó
+                    saltar.update(range(ini, fin + 1))
+                continue
+            caminar(hijos)
+    caminar(bloques)
+    return saltar
+
+
+def _raspar_instrucciones(instrucciones, ops, oc, suprimir_fn, podar, saltar):
+    """La pasada que decide instrucción por instrucción (ver `_raspar_pintado`). Devuelve la lista
+    de instrucciones que quedan; no toca la página."""
     salida, pila = [], []
-    for _idx, inst in enumerate(instrucciones):
-        if _idx in _saltar:
-            continue
-        op = str(inst.operator)
+    n = len(instrucciones)
+    # Sólo se recorren las instrucciones que quedan: con la poda fuerte se saltea el 95 % y
+    # pasar igual por las 398 mil costaba 0,2 s por talle.
+    indices = range(n) if not saltar else [i for i in range(n) if i not in saltar]
+    for _idx in indices:
+        inst = instrucciones[_idx]
+        op = ops[_idx]
         if op in ("BDC", "BMC"):
-            nombres = set()
-            if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
-                nombres = {_norm_capa(x) for x in _nombres_oc(inst.operands[1], page)}
-            pila.append(nombres)
+            pila.append(oc.get(_idx) or set())
             continue
         if op == "EMC":
             if pila:
@@ -317,7 +363,7 @@ def _raspar_pintado(pdf, page, suprimir_fn, podar=False):
             if op in _CLIP_OPS:
                 continue                                        # no dejar recortes ajenos
         salida.append(inst)
-    page.Contents = pdf.make_stream(unparse_content_stream(salida))
+    return salida
 
 
 def aislar_capa(pdf, page, objetivo, podar=False):

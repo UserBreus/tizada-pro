@@ -51,76 +51,98 @@ def _merge_res(dst_res, src_res):
     return remap
 
 
+def _instr(operands, op):
+    """Una instrucción de content-stream. 🔴 SIEMPRE `ContentStreamInstruction`, nunca la tupla
+    `(operandos, op)`: `unparse_content_stream` acepta las dos, pero con tuplas tarda **40 veces
+    más** (medido: 322 mil ops → 0,4 s como instrucciones, 16,6 s como tuplas). Este módulo
+    armaba TODO con tuplas y la hoja de 900 mil operadores pasaba por ahí dos veces: de los 542 s
+    que tardaba el aplanado de un pedido real, 367 eran eso."""
+    return pikepdf.ContentStreamInstruction(operands, op if isinstance(op, pikepdf.Operator) else pikepdf.Operator(op))
+
+
 def _remap_ops(ops, remap):
+    """Renombra los recursos que `remap` dice, dejando las demás instrucciones TAL CUAL (el mismo
+    objeto, sin copiar): sólo se crea una instrucción nueva cuando un operando cambia."""
+    if not remap:
+        return ops
     out = []
-    for operands, op in ops:
-        k = _OPKIND.get(str(op))
+    for inst in ops:
+        k = _OPKIND.get(str(inst.operator))
         if k and k in remap:
-            operands = [pikepdf.Name(remap[k].get(str(o), str(o))) if isinstance(o, pikepdf.Name) else o
-                        for o in operands]
-        out.append((operands, op))
+            r = remap[k]
+            operands = [pikepdf.Name(r.get(str(o), str(o))) if isinstance(o, pikepdf.Name) else o
+                        for o in inst.operands]
+            inst = _instr(operands, inst.operator)
+        out.append(inst)
     return out
 
 
 def _flatten(pdf, container, es_pagina=False, _hechos=None):
-    """Des-anida los XObject de Form: su contenido pasa al stream que los usaba.
+    """Des-anida los XObject de Form: su contenido pasa al stream que los usaba. Devuelve las
+    instrucciones ya aplanadas del contenedor (la página las recibe en memoria y
+    `_procesar_contenido` sigue con ellas sin volver a parsear 900 mil operadores).
 
-    🔴 `_hechos` evita aplanar DOS VECES el mismo objeto. Una tizada coloca la misma pieza una vez
-    por prenda —45 colocaciones de 27 piezas en un pedido real— y cada `Do` disparaba un
-    `_flatten` completo del mismo XObject: parsear y reescribir su stream, una vez por colocación.
-    Con piezas de ~20.000 operadores eso son cientos de miles de operadores procesados de más, y
-    este paso ya era el que más tardaba de todo el pedido (minutos por hoja).
-    Es sólo memoria: aplanar un objeto ya aplanado da lo mismo, pero cuesta.
+    🔴 `_hechos` guarda, por objeto, sus instrucciones YA aplanadas. Una tizada coloca la misma
+    pieza una vez por prenda —45 colocaciones de 27 piezas en un pedido real— y cada `Do`
+    disparaba un `_flatten` completo del mismo XObject: parsear y reescribir su stream, una vez
+    por colocación. Y cada nivel de anidado (la página → el envoltorio de `show_pdf_page` → la
+    pieza → la mesa del molde) volvía a parsear lo que el nivel de abajo acababa de escribir.
+    Ahora cada XObject se parsea UNA vez y sus instrucciones se reusan tal cual: aplanar un
+    objeto ya aplanado da lo mismo, pero cuesta. Los XObjects no se reescriben: al terminar
+    quedan huérfanos y `_procesar_contenido` los saca de los recursos.
     """
     if _hechos is None:
-        _hechos = set()
+        _hechos = {}
     try:
         _id = container.objgen if hasattr(container, "objgen") else None
     except Exception:
         _id = None
-    if _id and _id != (0, 0):
-        if _id in _hechos:
-            return
-        _hechos.add(_id)
-    res = container.get("/Resources")
-    if res is None:
-        return
-    xobjs = res.get("/XObject")
-    if xobjs is None:
-        return
+    if _id == (0, 0):
+        _id = None
+    if _id is not None and _id in _hechos:
+        return _hechos[_id]
     try:
         ops = list(parse_content_stream(container))
     except Exception:
-        return
+        if not es_pagina:
+            raise                     # un XObject ilegible aborta el aplanado (best-effort, como siempre)
+        return None                   # la página no se toca; `_procesar_contenido` lo reintenta y saltea
+    res = container.get("/Resources")
+    xobjs = res.get("/XObject") if res is not None else None
+    if xobjs is None or not ops:
+        if _id is not None:
+            _hechos[_id] = ops
+        return ops
     new_ops = []
-    for operands, op in ops:
-        if str(op) == "Do" and operands and isinstance(operands[0], pikepdf.Name):
+    _num = lambda v: pikepdf.Object.parse(f"{float(v):.6f}".encode("ascii"))
+    for inst in ops:
+        operands = inst.operands
+        if str(inst.operator) == "Do" and len(operands) and isinstance(operands[0], pikepdf.Name):
             nm = str(operands[0])
             xo = xobjs.get(nm) if nm in xobjs else None
             if xo is not None and xo.get("/Subtype") == Name("/Form"):
-                _flatten(pdf, xo, es_pagina=False, _hechos=_hechos)
+                sub = _flatten(pdf, xo, es_pagina=False, _hechos=_hechos)
                 remap = _merge_res(res, xo.get("/Resources", pikepdf.Dictionary()))
-                sub = _remap_ops(list(parse_content_stream(xo)), remap)
-                _num = lambda v: pikepdf.Object.parse(f"{float(v):.6f}".encode("ascii"))
-                new_ops.append(([], pikepdf.Operator("q")))
+                sub = _remap_ops(sub, remap)
+                new_ops.append(_instr([], "q"))
                 mtx = xo.get("/Matrix")
                 if mtx is not None:
-                    new_ops.append(([_num(x) for x in mtx], pikepdf.Operator("cm")))
+                    new_ops.append(_instr([_num(x) for x in mtx], "cm"))
                 bbox = xo.get("/BBox")
                 if bbox is not None:
                     x0, y0, x1, y1 = [float(v) for v in bbox]
-                    new_ops.append(([_num(v) for v in (min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))], pikepdf.Operator("re")))
-                    new_ops.append(([], pikepdf.Operator("W")))
-                    new_ops.append(([], pikepdf.Operator("n")))
+                    new_ops.append(_instr([_num(v) for v in (min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0))], "re"))
+                    new_ops.append(_instr([], "W"))
+                    new_ops.append(_instr([], "n"))
                 new_ops.extend(sub)
-                new_ops.append(([], pikepdf.Operator("Q")))
+                new_ops.append(_instr([], "Q"))
                 continue
-        new_ops.append((operands, op))
-    data = unparse_content_stream(new_ops)
+        new_ops.append(inst)
+    if _id is not None:
+        _hechos[_id] = new_ops
     if es_pagina:
-        container.Contents = pdf.make_stream(data)
-    else:
-        container.write(data)
+        container.Contents = pdf.make_stream(unparse_content_stream(new_ops))
+    return new_ops
 
 
 def _limpiar_huerfanos(page):
@@ -257,13 +279,14 @@ def _declarar_estado_grafico(pdf, page):
     page.Contents = pdf.make_stream(b"/GSflat gs\n" + cont.read_bytes())
 
 
-def _procesar_contenido(pdf, page):
+def _procesar_contenido(pdf, page, ops=None):
     """UNA sola pasada por el content-stream de la página (ya aplanada) que hace lo que antes eran
     4 pasadas separadas (cada una re-parseaba el stream GIGANTE): (1) saca los bloques de texto
     fantasma (fuente inexistente / sin glifos), (2) saca los marcadores de capa OCG (BMC/BDC/EMC/
     MP/DP), (3) remapea los ColorSpace ICCBased duplicados a uno canónico, (4) junta los XObjects
     realmente usados para borrar los huérfanos. Mismo resultado byte a byte que las 4 pasadas, pero
-    parseando el stream una vez → ~4× menos parse/unparse en hojas con muchas piezas."""
+    parseando el stream una vez → ~4× menos parse/unparse en hojas con muchas piezas.
+    `ops` = las instrucciones que `_flatten` acaba de armar: con ellas no se parsea nada."""
     import hashlib
     res = page.get("/Resources")
     # ICC: dedup por contenido → remap {nombre_dup: canónico}
@@ -284,30 +307,34 @@ def _procesar_contenido(pdf, page):
                 pass
     fonts = set(str(k) for k in (res.get("/Font", {}) or {}).keys()) if res else set()
     _CS_OPS = ("cs", "CS", "scn", "SCN")   # operadores que referencian un ColorSpace por Name
-    def _rmp(operands, op):
-        if remap and str(op) in _CS_OPS:
-            operands = [pikepdf.Name(remap.get(str(o), str(o))) if isinstance(o, pikepdf.Name) else o for o in operands]
-        return (operands, op)
-    try:
-        ops = list(parse_content_stream(page))
-    except Exception:
-        ops = None
+    def _rmp(inst, o):
+        if remap and o in _CS_OPS:
+            operands = [pikepdf.Name(remap.get(str(x), str(x))) if isinstance(x, pikepdf.Name) else x for x in inst.operands]
+            return _instr(operands, inst.operator)
+        return inst                                        # sin cambio: la MISMA instrucción, sin copiar
+    if ops is None:
+        try:
+            ops = list(parse_content_stream(page))
+        except Exception:
+            ops = None
     usados = set()
     if ops is not None:
         out, block, in_bt = [], [], False
         falta_fuente = tiene_texto = False
         _MC = ("BDC", "BMC", "EMC", "MP", "DP")
-        for operands, op in ops:
-            o = str(op)
+        for inst in ops:
+            o = str(inst.operator)
             if o in _MC:
                 continue                                   # marcador de capa/estructura → fuera (no marca nada)
             if o == "BT":
-                in_bt = True; block = [(operands, op)]; falta_fuente = tiene_texto = False
+                in_bt = True; block = [inst]; falta_fuente = tiene_texto = False
                 continue
             if in_bt:
-                block.append(_rmp(operands, op))
-                if o == "Tf" and operands and isinstance(operands[0], Name) and str(operands[0]) not in fonts:
-                    falta_fuente = True
+                block.append(_rmp(inst, o))
+                if o == "Tf":
+                    operands = inst.operands
+                    if len(operands) and isinstance(operands[0], Name) and str(operands[0]) not in fonts:
+                        falta_fuente = True
                 elif o in ("Tj", "TJ", "'", '"'):
                     tiene_texto = True
                 if o == "ET":
@@ -316,9 +343,11 @@ def _procesar_contenido(pdf, page):
                         out.extend(block)                  # bloque de texto válido → se conserva
                     block = []
                 continue
-            if o == "Do" and operands and isinstance(operands[0], Name):
-                usados.add(str(operands[0]))
-            out.append(_rmp(operands, op))
+            if o == "Do":
+                operands = inst.operands
+                if len(operands) and isinstance(operands[0], Name):
+                    usados.add(str(operands[0]))
+            out.append(_rmp(inst, o))
         page.Contents = pdf.make_stream(unparse_content_stream(out))
     # huérfanos: quitar los XObjects que ya no se referencian con Do
     xo = res.get("/XObject") if res else None
@@ -342,8 +371,10 @@ def _aplanar_archivo(path):
     estado gráfico + Creator/Producer + PDF 1.6, colores CMYK EXACTOS). Lanza si algo falla."""
     pdf = pikepdf.open(path, allow_overwriting_input=True)
     for page in pdf.pages:
-        _flatten(pdf, page, es_pagina=True)      # des-anida los Form XObjects (inline byte a byte)
-        _procesar_contenido(pdf, page)           # 1 pasada: sanea texto + saca OCG + consolida ICC + huérfanos
+        # `_hechos` es por página: en la hoja cada página es independiente y así el memo de las
+        # piezas no crece con las páginas.
+        ops = _flatten(pdf, page, es_pagina=True)            # des-anida los Form XObjects (inline byte a byte)
+        _procesar_contenido(pdf, page, ops)                  # 1 pasada, sobre las instrucciones en memoria
         _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
     if "/OutputIntents" in pdf.Root:
         del pdf.Root["/OutputIntents"]           # Illustrator no lo tiene; el ICCBased de la página alcanza
