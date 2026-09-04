@@ -7255,9 +7255,12 @@ def generar_multi():
                     # dos tienen que salir en la ficha).
                     _g0 = next((g for g in _guias_ficha if (g["pid"], g["diseno"], g["clave"] or "") == _kg), None)
                     if _g0 is not None:
-                        _cb = _combo_toggles(_prg)
-                        if _cb not in _g0["_combos_vistos"]:
-                            _g0["_combos_vistos"].add(_cb)
+                        # `_cbt`, NO `_cb`: `_cb` es el flag «camino B» de más arriba y esta tupla
+                        # lo pisaba (truthy) → en un pedido del camino A con toggles el arte se
+                        # mandaba como None (bug encontrado 2026-09-04).
+                        _cbt = _combo_toggles(_prg)
+                        if _cbt not in _g0["_combos_vistos"]:
+                            _g0["_combos_vistos"].add(_cbt)
                             _g0["combos"].append(_prg.get("toggles") or [])
                         # Si la guía todavía no tiene un nombre/número de ejemplo, se toma de esta
                         # fila: la ficha muestra la personalización tal como sale estampada.
@@ -7331,6 +7334,28 @@ def generar_multi():
             res["moldes"] = nombres
             res["avisos"] = avisos   # combos (molde,diseño) que no se generaron por mapeo sin aprobar
             res["avisos_pedido"] = avisos_pedido   # cosas del pedido (no del arte) — ver arriba
+            # ⚠️ ORDEN (2026-09-04): primero el aplanado y DESPUÉS el perfil. Antes iba al revés y
+            # `aplanar_rip` borraba el OutputIntent recién puesto: el archivo salía sin perfil.
+            # APLANAR cada hoja para el RIP: la deja como el PDF de Illustrator (des-anida las piezas,
+            # 1 solo perfil ICC, estado gráfico declarado, PDF 1.6) preservando el CMYK EXACTO. Sin
+            # esto, los XObjects anidados + perfiles repetidos daban "error RIP". Best-effort.
+            try:
+                from aplanar_rip import aplanar_para_rip
+                # AVISAR hoja por hoja: es lo que MÁS tarda de todo el pedido (minutos con hojas
+                # grandes) y la pantalla se quedaba en «vistas previas 100%» sin decir nada más
+                # durante ese rato → parecía colgada aunque estuviera trabajando.
+                _hs = res.get("hojas", [])
+                for _i, h in enumerate(_hs):
+                    try:
+                        prog("rip", f"{_i + 1}/{len(_hs)}", None)
+                    except Exception:
+                        pass
+                    _tr = time.time()
+                    aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
+                          f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
+            except Exception as _ea:
+                print("  [!] aplanar RIP:", _ea)
             # Embeber el perfil ICC en cada hoja: el que vino en el arte, o el
             # predeterminado del sistema si el arte no traía. Tagea (OutputIntent),
             # NO convierte los colores.
@@ -7356,26 +7381,23 @@ def generar_multi():
                     res["perfil_icc"] = _icc_nom
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
-            # APLANAR cada hoja para el RIP: la deja como el PDF de Illustrator (des-anida las piezas,
-            # 1 solo perfil ICC, estado gráfico declarado, PDF 1.6) preservando el CMYK EXACTO. Sin
-            # esto, los XObjects anidados + perfiles repetidos daban "error RIP". Best-effort.
+            # COMPATIBILIDAD RIP (2026-09-04): la hoja final se verifica como PDF/X-1a-like (sin
+            # capas ni transparencia, un nivel de objetos, fuentes embebidas, CMYK, perfil de
+            # salida). Si algo falla, se avisa en pantalla — no se frena la tizada.
             try:
-                from aplanar_rip import aplanar_para_rip
-                # AVISAR hoja por hoja: es lo que MÁS tarda de todo el pedido (minutos con hojas
-                # grandes) y la pantalla se quedaba en «vistas previas 100%» sin decir nada más
-                # durante ese rato → parecía colgada aunque estuviera trabajando.
-                _hs = res.get("hojas", [])
-                for _i, h in enumerate(_hs):
-                    try:
-                        prog("rip", f"{_i + 1}/{len(_hs)}", None)
-                    except Exception:
-                        pass
-                    _tr = time.time()
-                    aplanar_para_rip(os.path.join(salida, h["archivo"]))
-                    print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
-                          f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
-            except Exception as _ea:
-                print("  [!] aplanar RIP:", _ea)
+                from verificar_rip_compatible import verificar as _verif_rip
+                _rip_fallas = []
+                for h in res.get("hojas", []):
+                    _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]))
+                    if not _okr:
+                        _rip_fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
+                res["rip_compatible"] = not _rip_fallas
+                if _rip_fallas:
+                    res["avisos_pedido"] = list(res.get("avisos_pedido") or []) + [
+                        "La hoja tiene algo que un RIP podría rechazar: " + " · ".join(_rip_fallas[:4])]
+                    print("  [rip] ⚠️ " + " | ".join(_rip_fallas[:6]), flush=True)
+            except Exception as _er:
+                print("  [rip] no se pudo verificar la compatibilidad:", _er)
             # FICHA TÉCNICA (A4): la planilla del pedido arriba y, abajo, UN MOLDE GUÍA POR CADA
             # DISEÑO del pedido (diseño estampado + piezas nombradas + su tela). Sale JUNTO con la
             # tizada. Best-effort: si falla, la tizada igual queda.

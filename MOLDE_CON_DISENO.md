@@ -387,6 +387,66 @@ traduce solo al campo `numero`, porque el estampado busca `persona[campo]` por e
 capa. ⚠️ **Falta probarlo contra un archivo que las traiga** — cuando exista, correr
 `verificar_tizada_con_diseno.py` y mirar que salgan estampados.
 
+## ⚡⚡⚡ LA HOJA COMPARTIDA (2026-09-04) — la tizada deja de ser lineal en prendas
+
+**El problema.** 5 prendas = 180 s en el servidor (70 s en frío). Cada prenda repetía TODO el
+trabajo: la pieza se serializaba y reabría (`out.save` + `fitz.open`), la hoja llevaba **una copia
+entera de la mesa por colocación** (45 copias, 29 MB) y el aplanado para el RIP las des-anidaba
+inline (900.000 operadores, 87 s). A 100 prendas eran más de 40 minutos y 580 MB.
+
+**La idea (del usuario): «primero se acomoda el contorno y después se le pone el diseño adentro,
+guardando información».** Se separa lo invariante de lo que cambia por prenda:
+
+| | qué es | cuántas veces |
+|---|---|---|
+| **Base** | pieza de un (pieza, talle): la página desplegada metida adentro por concatenación de bytes + clip al contorno + borde de corte. UN Form XObject plano. | una por base (9 × talles usados) |
+| **Colocación** | `q <cm> /B_k Do Q` + `q <cm> <estampado> Q` — el estampado son los trazos por prenda (nombre/número en curvas, etiqueta) | una por prenda |
+| **Máscara del nesting** | el polígono del contorno pintado a 4× (+ borde), sin dibujar el arte | una por geometría |
+| **Aplanado RIP** | un nivel: la página conserva sus `Do`; el interior de cada base se sanea una vez | una por base |
+| **Preview** | `<symbol>` por base + `<use>` por colocación | una por base |
+
+Archivos: `hoja_pike.py` (compositor, preview), `motor_pedido.py` (`_armar_base` deja `despl`/`nom`,
+`generar_pieza` devuelve `{base, estampado}`, `_DocPerezoso`, `_nestear_y_componer` elige compositor),
+`nesting_contorno.py` (`_mascara_contorno`, `poligonos_contorno`), `aplanar_rip.py`
+(`_aplanar_un_nivel`, `_unificar_icc`, OutputIntent conservado), `servidor.py` (ICC después del
+aplanado, verificación RIP al final, `_cbt`). Switches: `TIZADA_HOJA_LEGACY`, `TIZADA_MASCARA_LEGACY`,
+`TIZADA_APLANADO_TOTAL`.
+
+**Lo que va al RIP** (decisión del usuario 2026-09-04: «que lo lea cualquier RIP desde 2020 y el
+perfil y el CMYK estén incrustados de verdad»): estructura PDF/X-1a-like — PDF 1.6, sin capas, sin
+transparencia, XObjects de UN nivel, fuentes embebidas o en curvas, sólo CMYK/Gray/ICC-4, un ICC
+por perfil, OutputIntent GTS_PDFX. `verificar_rip_compatible.py` lo chequea al terminar cada tizada
+(aviso en pantalla si algo falla). El «error RIP» que originó `aplanar_rip` era con TRES niveles
+anidados + capas; eso ya no existe por construcción. Pendiente: probar una hoja en una imprenta real
+(`py verificar_rip_compatible.py HOJA.pdf --muestra` deja `HOJA_muestra_rip.pdf`).
+
+**Medido (5 prendas, 3 talles, en frío)**: 70 s → 40 s; hoja 46 → 21 MB; previews 64 → 39 MB;
+mismas colocaciones → 0,1 % de píxeles distintos (bordes de piezas giradas, redondeo de la `cm`);
+aplanar no cambia un píxel. Y de paso se cerró una grieta de la ley «se ve = sale»: `_barrer_fuentes`
+borraba las fuentes de la hoja y el aplanado eliminaba los textos vivos del diseño (1836 píxeles
+distintos entre antes y después de aplanar la hoja de siempre; la nueva da 0, porque las bases
+conservan sus fuentes embebidas).
+
+**Lo que se aprendió**
+· **MuPDF no dibuja `<symbol>`/`<use>`**: para verificar el preview hay que mirarlo en un navegador.
+· Los ids de PyMuPDF en SVG (`cp0`, …) chocan entre documentos: prefijarlos por símbolo.
+· `copy_foreign` exige objetos INDIRECTOS: `src.make_indirect(res)` antes de copiar.
+· El signo del giro de `show_pdf_page` es +1 en PDF (y-up) y −1 en SVG (y-down): calibrado con el
+  render, no asumido (con el signo al revés: 1,6 millones de píxeles distintos).
+· 6 decimales también en la traslación de la `cm`; con 3, las piezas giradas caían medio punto corridas.
+· Un contrato pesado que «se cuelga» puede ser el lanzador `py.exe` (0 % CPU) esperando a su hijo
+  `python.exe` (100 %): mirar el hijo antes de matar nada. Y las cadenas de contratos matadas dejan
+  huérfanos que ensucian toda medición: `wmic process where "commandline like '%verificar%'"`.
+· 🔴 Matar procesos por «la línea de comando contiene X» desde un shell cuya propia línea de
+  comando contiene X **mata al shell** (varias mediciones «fallaron» con exit 1 y sin traza por
+  eso). Matar por PID, nunca por patrón; y nunca desde el mismo comando que lanza lo nuevo.
+· Un objeto perezoso usado como booleano (`if p["doc"]:`) tiene que definir `__bool__`: si no,
+  Python cae a `__len__` y materializa lo que quería evitar (170 s a 100 prendas).
+
+Lo que sigue (plan E6/E7): bases pre-armadas en el alta (por procesos), la tizada entera en un
+proceso, y el nesting a 300+ prendas (convolución incremental, bloques de idénticas, memoria de
+tizada).
+
 ## ⚡⚡ EL MOLDE DESPLEGADO (2026-09-03) — el archivo se lee UNA vez, al cargar
 
 **Pedido del usuario:** estudiar a fondo cómo `Prueba para tizada` maneja el archivo al cargarlo,
@@ -691,6 +751,13 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
 
+- **2026-09-04 quinquies (la hoja compartida)** — Ver changelog 393 del mapa y la sección «LA HOJA
+  COMPARTIDA». Plan aprobado por el usuario (bases compartidas, aplanado de un nivel, PDF/X-1a-like,
+  preview con símbolos, escala a 300+). Entregadas E0-E5 en una tanda; medido 5 prendas 70 → 40 s
+  en frío. Lo que salió mal en el camino: el ancla del parche del motor era ambigua (el ramal del
+  arte clásico tiene las mismas líneas); `copy_foreign` con un dict directo; el signo del giro al
+  revés; MuPDF sin `<use>` (la comparación automática del SVG daba basura y el navegador lo dibuja
+  bien); y cuatro contratos huérfanos comiendo CPU que hacían parecer lento todo.
 - **2026-09-04 quater (el servidor congelado un minuto)** — Ver changelog 392 del mapa. Lo que
   se aprendió:
   · 🔴 **pikepdf y PyMuPDF retienen el GIL.** Cualquier trabajo pesado con ellos dentro de un

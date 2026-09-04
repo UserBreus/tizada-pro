@@ -3695,12 +3695,59 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
 
 
 # ════════════════ GENERACIÓN DEL PEDIDO ════════════════
+class _DocPerezoso:
+    """El documento de UNA pieza de la hoja compartida, armado recién cuando alguien lo pide.
+
+    En la hoja compartida la pieza no se serializa por prenda (ahí estaban 18 de los 180 s del
+    pedido de 5 prendas). Pero el Arte (`_piezas_base` → `pz["doc"][0].get_svg_image()`), el
+    nesting de siempre (`_mascara(doc)`) y los contratos siguen pidiendo un `fitz.Document`: se
+    arma acá, una vez, con la MISMA base y el MISMO estampado que van a la hoja (ley «lo que se ve
+    es lo que sale»)."""
+    def __init__(self, base, estampado):
+        self._b, self._est, self._doc = base, estampado, None
+
+    def real(self):
+        if self._doc is None:
+            b = self._b
+            b["cstream"].write((b["base_stream"] + self._est).encode())
+            buf = io.BytesIO()
+            b["out"].save(buf)
+            self._doc = fitz.open("pdf", buf.getvalue())
+        return self._doc
+
+    def __getitem__(self, i):
+        return self.real()[i]
+
+    def __len__(self):
+        return len(self.real())
+
+    def __bool__(self):
+        # `if p["doc"]:` NO tiene que armar el documento: sin esto, cerrar los docs después de
+        # componer materializaba las 900 piezas (170 s a 100 prendas) para tirarlas.
+        return True
+
+    def __iter__(self):
+        return iter(self.real())
+
+    def close(self):
+        if self._doc is not None:
+            try:
+                self._doc.close()
+            except Exception:
+                pass
+            self._doc = None
+
+    def __getattr__(self, nombre):
+        # cualquier otra cosa de `fitz.Document` (tobytes, page_count, save…): el documento real
+        return getattr(self.real(), nombre)
+
+
 def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, salida,
                    config_nesting=None, progreso=None, mapeo_arte=None, rotaciones=None,
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
                    etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None,
                    editables_color=None, editables_marca=None, editables_sin_marca=None,
-                   marcas_como_cruz=True, referencia="alto"):
+                   marcas_como_cruz=True, referencia="alto", modo_hoja=None):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -3738,6 +3785,11 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         _camino_b = False
     CAPAS_ARTE = set() if (_camino_b or not arte) else set(
         i["name"] for i in _abrir(arte).get_ocgs().values())
+    # LA HOJA COMPARTIDA (2026-09-04, `hoja_pike.py`): en el camino B cada pieza se arma UNA vez y
+    # en la hoja va como un objeto referenciado por prenda; lo que cambia por prenda (nombre,
+    # número, etiqueta) va aparte, como trazos chicos. `TIZADA_HOJA_LEGACY=1` vuelve al armado de
+    # siempre (una copia entera de la pieza por prenda).
+    _modo_hoja = modo_hoja or ("legacy" if os.environ.get("TIZADA_HOJA_LEGACY") else "pike")
 
     fuentes_cache = {}
     def fuente(nombre_ps):
@@ -3801,7 +3853,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         return "ninguna"
 
     # ── CAMINO B: la mesa DEL MOLDE con sólo la capa de este talle ────────────────────────────
-    _molde_por_talle, _molde_limpias, _despl_abiertos = {}, set(), {}
+    _molde_por_talle, _molde_limpias, _despl_abiertos, _despl_src = {}, set(), {}, {}
     def pagina_molde(mesa, talle):
         """La mesa del MOLDE con SÓLO la capa de este talle, y su dibujo INTACTO.
 
@@ -3832,6 +3884,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _fp, _idx = _rd
             if _fp not in _despl_abiertos:
                 _despl_abiertos[_fp] = _abrir_pike(_fp)
+            _despl_src[(mesa, talle)] = (_despl_abiertos[_fp], _idx, _fp)
             return _despl_abiertos[_fp].pages[_idx]
         if talle not in _molde_por_talle:
             _molde_por_talle[talle] = _abrir_pike(plantilla)
@@ -4276,6 +4329,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         out = pikepdf.Pdf.new()
         page = out.add_blank_page(page_size=(W + 2*B, H + 2*B))
 
+        _despl, _nom_xo = None, None          # camino B: de dónde salió la mesa y cómo se llama
         # ── Arte: contorno (clip) y dibujo, en coordenadas finales de la pieza ──
         if _camino_b:
             # CAMINO B: el diseño ya está adentro de la pieza, en su lugar y en su escala. Se
@@ -4296,6 +4350,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             nom = page.add_resource(xo, Name.XObject, prefix="A")
             arte_draw = (f"q\n1 0 0 1 {B-x0*S:.3f} {B-y0*S:.3f} cm\n"
                          f"q\n{ops}\nW n\n{nom} Do\nQ\nQ\n")
+            _despl, _nom_xo = _despl_src.get((mesa, talle)), str(nom)
         elif mapeo_arte and not _mesa_a:        # esta variante quedó SIN diseño en esta pieza
             arte_draw = ""                      # pieza sin arte (el aviso de cobertura lo da el servidor)
             S = cont["user_unit"]
@@ -4423,7 +4478,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         _base_stream = (f"{borde}{arte_draw}" if _bc_alin == "fuera" else f"{arte_draw}{borde}")
         return {"out": out, "page": page, "cstream": cstream, "base_stream": _base_stream,
                 "clip": clip, "cont": cont, "W": W, "H": H, "x0": x0, "y0": y0, "x0m": x0m,
-                "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info}
+                "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info,
+                # para la HOJA COMPARTIDA (`hoja_pike`): la mesa desplegada de la que salió el
+                # dibujo, el nombre con el que la referencia `base_stream`, y el margen
+                "despl": _despl, "nom": _nom_xo, "B": B, "pieza": pieza, "talle": talle}
 
     def generar_pieza(pieza, talle, persona, nro, grupo=None, variante=None):
         _bk = (pieza, talle, variante)
@@ -4669,8 +4727,13 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 _tcol = " ".join(f"{v:g}" for v in (_et.get("color") or [0.15, 0.15, 0.15, 0.30])[:4]) + " k"
                 bloques.append(f"q {_tcol}\n{eops}\nf\nQ\n")
 
-        stream = (b["base_stream"] +
-                  f"q\n{clip}\nW n\n" + "".join(bloques) + "Q\n")
+        estampado = f"q\n{clip}\nW n\n" + "".join(bloques) + "Q\n"
+        if _modo_hoja == "pike" and b.get("despl"):
+            # HOJA COMPARTIDA: la base no se vuelve a serializar por prenda. Lo que cambia por
+            # prenda viaja como texto de operadores; el documento de la pieza (si alguien lo
+            # necesita: el Arte, el nesting de siempre) se arma recién al pedirlo.
+            return {"base": b, "estampado": estampado}
+        stream = b["base_stream"] + estampado
         b["cstream"].write(stream.encode())
         buf = io.BytesIO()
         out.save(buf)
@@ -4684,12 +4747,19 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             persona = pr.get("personalizacion") or {"nombre": pr.get("nombre", ""), "numero": pr.get("numero", "")}
             datos = generar_pieza(pieza, pr["talle"], persona, nro, grupo=(pr.get("_grupo") if isinstance(pr, dict) else None),
                                   variante=(pr.get("variante_clave") if isinstance(pr, dict) else None))
-            doc = _abrir("pdf", datos)
-            r = doc[0].rect
-            piezas_por_tela.setdefault(TELA(pieza), []).append(
-                {"doc": doc, "w": r.width, "h": r.height, "pieza": pieza, "talle": pr["talle"],
-                 "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
-                 "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
+            if isinstance(datos, dict):
+                # hoja compartida: sin documento por prenda (se arma sólo si alguien lo pide)
+                _b = datos["base"]
+                ent = {"doc": _DocPerezoso(_b, datos["estampado"]), "w": float(_b["W"]) + 2 * float(_b["B"]),
+                       "h": float(_b["Hp"]), "base": _b, "estampado": datos["estampado"]}
+            else:
+                doc = _abrir("pdf", datos)
+                r = doc[0].rect
+                ent = {"doc": doc, "w": r.width, "h": r.height}
+            ent.update({"pieza": pieza, "talle": pr["talle"],
+                        "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
+                        "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
+            piezas_por_tela.setdefault(TELA(pieza), []).append(ent)
             hechas += 1
             if progreso:
                 progreso("piezas", f"{hechas}/{total} - {pieza} (Prenda {nro}, Talle {pr['talle']})", None)
@@ -4717,7 +4787,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
     # CRONÓMETRO por etapa: sin esto, cuando un pedido tarda de más hay que adivinar en qué paso
     # se fue el tiempo. Se imprime al final, en la ventana del servidor.
     _crono = {"armar piezas": time.time() - t0, "acomodar en la tela": 0.0,
-              "escribir el PDF": 0.0, "vistas previas": 0.0}
+              "escribir el PDF": 0.0, "vistas previas": 0.0, "validar": 0.0}
     for tela, piezas in piezas_por_tela.items():
         if not piezas:
             continue
@@ -4731,7 +4801,17 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         coloc, area = anidar_contorno(piezas, cfg_t)
         _crono["acomodar en la tela"] += time.time() - _t_et; _t_et = time.time()
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
-        consumo, alturas_cm = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
+        # HOJA COMPARTIDA si TODAS las piezas de esta tela traen su base (camino B); si no —camino
+        # A, o una tela que mezcla moldes de los dos caminos— el compositor de siempre.
+        _pike = all(("base" in p and (p["base"] or {}).get("despl")) for p in piezas)
+        if _pike:
+            from hoja_pike import componer_hoja_pike
+            consumo, alturas_cm = componer_hoja_pike(coloc, cfg_t, path)
+        else:
+            for p in piezas:
+                if hasattr(p.get("doc"), "real"):
+                    p["doc"] = p["doc"].real()
+            consumo, alturas_cm = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
         _crono["escribir el PDF"] += time.time() - _t_et; _t_et = time.time()
         for p in piezas:
             if "doc" in p and p["doc"]:
@@ -4739,9 +4819,40 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                     p["doc"].close()
                 except Exception:
                     pass
-        _barrer_fuentes(path)
-        d = fitz.open(path)
-        try:
+        if not _pike:
+            _barrer_fuentes(path)     # la hoja compartida no tiene fuentes fuera de las bases
+        if _pike:
+            # PREVIEW LIVIANO (hoja compartida): un `<symbol>` por base y un `<use>` por colocación.
+            # `get_svg_image()` de la hoja entera expandía cada colocación (64 MB por hoja de 5
+            # prendas; 1,3 GB a 100). Los símbolos salen de un documento de la base SOLA.
+            from hoja_pike import preview_svg, altos_de_hojas
+            _docs_base_cache = {}
+            def _doc_base(b):
+                d = _docs_base_cache.get(id(b))
+                if d is None:
+                    b["cstream"].write(b["base_stream"].encode())
+                    _buf = io.BytesIO(); b["out"].save(_buf)
+                    d = fitz.open("pdf", _buf.getvalue()); _docs_base_cache[id(b)] = d
+                return d
+            prevs, _simbolos = [], {}
+            _altos = altos_de_hojas(coloc, cfg_t)
+            _hojas_no_vacias = [h for h in coloc if h]
+            paginas = len(_hojas_no_vacias)
+            for i, (hoja_c, alto_pt) in enumerate(zip(_hojas_no_vacias, _altos)):
+                if progreso:
+                    progreso("previews", f"{i + 1}/{paginas} - {tela}", None)
+                pv = f"prev_{slug}_h{i+1}.svg"
+                with open(os.path.join(salida, pv), "w", encoding="utf-8") as f:
+                    f.write(preview_svg(hoja_c, cfg_t, alto_pt, _simbolos, _doc_base))
+                prevs.append(pv)
+            for d in _docs_base_cache.values():
+                try:
+                    d.close()
+                except Exception:
+                    pass
+        else:
+          d = fitz.open(path)
+          try:
             prevs = []
             paginas = len(d)
             for i, pg in enumerate(d):
@@ -4758,7 +4869,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                 with open(os.path.join(salida, pv), "w", encoding="utf-8") as f:
                     f.write(svg)
                 prevs.append(pv)
-        finally:
+          finally:
             d.close()
         _crono["vistas previas"] += time.time() - _t_et
         # El aprovechamiento puede no calcularse si la hoja salió vacía (consumo 0):
@@ -4778,7 +4889,9 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         if telas_cfg and tela in telas_cfg:
             cfg_t.update(telas_cfg[tela])
         telas_spacing[tela] = float(cfg_t.get("espaciado_cm", 0.5)) * 10.0
+    _t_v = time.time()
     validaciones = validar_salida(salida, hojas, telas_spacing)
+    _crono["validar"] += time.time() - _t_v
     # Queda escrito en la ventana del servidor: cuando un pedido tarda de más, se ve en QUÉ paso
     # se fue el tiempo, en vez de tener que adivinar. (El contador de piezas se imprime en
     # `generar_pedido`, que es donde vive: acá esa variable NO existe.)
@@ -4821,7 +4934,7 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
     (cada grupo arma sus propias hojas). Cada hoja queda etiquetada con su grupo."""
     t0 = time.time()
     os.makedirs(salida, exist_ok=True)
-    todas, total = [], 0
+    todas, total, validaciones = [], 0, []
     for gi, grupo in enumerate(grupos):
         acc = {}
         for md in grupo["moldes"]:
@@ -4848,9 +4961,11 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
             h["grupo"] = grupo.get("nombre", f"Grupo {gi + 1}")
             h["moldes"] = grupo.get("nombres", [])
             todas.append(h)
-    telas_spacing = {}
-    return {"hojas": todas,
-            "validaciones": validar_salida(salida, todas, telas_spacing),
+        # `_nestear_y_componer` YA validó estas hojas, con el espaciado real de cada tela. Volver
+        # a validar acá costaba ~26 s por pedido (parsea toda la hoja tres veces) y encima lo
+        # hacía con `telas_spacing = {}`, reportando un espaciado inventado (2026-09-04).
+        validaciones.extend(res_g.get("validaciones") or [])
+    return {"hojas": todas, "validaciones": validaciones,
             "duracion_s": round(time.time() - t0, 1), "piezas": total}
 
 

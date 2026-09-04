@@ -21,6 +21,7 @@ Cómo funciona:
 import numpy as np
 import pymupdf as fitz
 import math
+import os
 from math import ceil
 from scipy import ndimage
 from scipy.signal import fftconvolve
@@ -55,6 +56,78 @@ def _mascara(doc, cell_pt, sobre=4):
     rell[:fino.shape[0], :fino.shape[1]] = fino
     m = rell.reshape(H // sobre, sobre, W // sobre, sobre).any(axis=(1, 3))
     return m if m.any() else np.ones((H // sobre, W // sobre), bool)
+
+
+def poligonos_contorno(cont, S, x0, y0, B):
+    """El contorno de una pieza como polilíneas en coordenadas de PÁGINA (pt, y hacia arriba),
+    con la MISMA transformación que el clip y el borde del motor: (vx·S + B − x0·S, vy·S + B − y0·S).
+    Las curvas se aplanan en 8 tramos (igual que el text-on-path de la etiqueta, `_eops_borde`)."""
+    def _P(vx, vy):
+        return (vx * S + B - x0 * S, vy * S + B - y0 * S)
+    polis, pts, cur = [], [], None
+    for sg in cont.get("segmentos") or []:
+        op = sg[0]
+        if op == "m":
+            if len(pts) > 2:
+                polis.append(pts)
+            cur = _P(sg[1], sg[2]); pts = [cur]
+        elif op == "l":
+            cur = _P(sg[1], sg[2]); pts.append(cur)
+        elif op == "c":
+            p0 = cur or _P(sg[1], sg[2]); p1 = _P(sg[1], sg[2]); p2 = _P(sg[3], sg[4]); p3 = _P(sg[5], sg[6])
+            for k in range(1, 9):
+                u = k / 8.0; mu = 1 - u
+                pts.append((mu*mu*mu*p0[0] + 3*mu*mu*u*p1[0] + 3*mu*u*u*p2[0] + u*u*u*p3[0],
+                            mu*mu*mu*p0[1] + 3*mu*mu*u*p1[1] + 3*mu*u*u*p2[1] + u*u*u*p3[1]))
+            cur = p3
+        elif op == "re":
+            X, Y, Wd, Ht = sg[1], sg[2], sg[3], sg[4]
+            if len(pts) > 2:
+                polis.append(pts)
+            pts = [_P(X, Y), _P(X + Wd, Y), _P(X + Wd, Y + Ht), _P(X, Y + Ht)]
+            cur = pts[0]
+        elif op == "h":
+            if len(pts) > 2:
+                polis.append(pts)
+            pts = []
+    if len(pts) > 2:
+        polis.append(pts)
+    return polis
+
+
+def _mascara_contorno(b, cell_pt, sobre=4):
+    """La máscara de ocupación de una pieza a partir de su CONTORNO (la base `b` del motor: `cont`,
+    `S`, `x0`, `y0`, `B`, `W`, `Hp`), sin dibujar el arte.
+
+    Hasta 2026-09-04 la máscara salía de rasterizar el documento de la pieza con el diseño adentro
+    (`_mascara(doc)`): con el molde con diseño eso costaba 0,5-1 s por pieza distinta y obligaba a
+    serializar un documento sólo para mirar su silueta. La silueta ES el contorno relleno más el
+    borde de corte (B por fuera): se pinta el polígono a `sobre`× la resolución, se dilata el
+    borde y se reduce a celdas con `any`, exactamente como la versión rasterizada. Mismo criterio
+    de sobre-cobertura (una celda cuenta si CUALQUIER submuestra está adentro)."""
+    from PIL import Image, ImageDraw
+    zoom = float(sobre) / cell_pt
+    Wp, Hp, B = float(b["W"]) + 2 * float(b["B"]), float(b["Hp"]), float(b["B"])
+    w_px, h_px = max(1, ceil(Wp * zoom)), max(1, ceil(Hp * zoom))
+    img = Image.new("1", (w_px, h_px), 0)
+    dr = ImageDraw.Draw(img)
+    for poli in poligonos_contorno(b["cont"], b["S"], b["x0"], b["y0"], B):
+        pts = [(x * zoom, (Hp - y) * zoom) for x, y in poli]      # y hacia abajo, como el pixmap
+        if len(pts) > 2:
+            dr.polygon(pts, fill=1, outline=1)
+    fino = np.array(img, dtype=bool)
+    r = int(ceil(B * zoom))
+    if r > 0:
+        fino = ndimage.binary_dilation(fino, _disco(r))              # el borde de corte, por fuera
+    H = (fino.shape[0] + sobre - 1) // sobre * sobre
+    W = (fino.shape[1] + sobre - 1) // sobre * sobre
+    rell = np.zeros((H, W), bool)
+    rell[:fino.shape[0], :fino.shape[1]] = fino
+    m = rell.reshape(H // sobre, sobre, W // sobre, sobre).any(axis=(1, 3))
+    return m if m.any() else np.ones((H // sobre, W // sobre), bool)
+
+
+_DEBUG = {}     # contadores del nesting (bloques vs FFT), para medir
 
 
 def _angulos(modo, paso_libre):
@@ -118,13 +191,20 @@ def _preparar(piezas, cfg):
             continue
         geo_key = (p.get("pieza"), p.get("talle"), p.get("variante"), p["rotacion"],
                    p.get("borde_cm", 0), cell_pt, esp_c, paso)
+        p["_geo_key"] = geo_key
         hit = _geo.get(geo_key)
         if hit is not None:                                # otra instancia con MISMA geometría
             p["_mask"] = hit["_mask"]; p["_borde_c"] = hit["_borde_c"]
             p["_cell_pt"] = hit["_cell_pt"]; p["_candidatos_angulo"] = hit["_candidatos_angulo"]
             p["_cache_key"] = cache_key
             continue
-        p["_mask"] = _mascara(p["doc"], cell_pt)
+        # Con base (camino B, hoja compartida) la máscara sale del contorno, sin tocar el arte;
+        # `TIZADA_MASCARA_LEGACY=1` vuelve a rasterizar el documento de la pieza.
+        _b = p.get("base")
+        if _b and _b.get("cont") is not None and not os.environ.get("TIZADA_MASCARA_LEGACY"):
+            p["_mask"] = _mascara_contorno(_b, cell_pt)
+        else:
+            p["_mask"] = _mascara(p["doc"], cell_pt)
         p["_borde_c"] = ceil(p.get("borde_cm", 0) * CM / cell_pt)
         p["_cell_pt"] = cell_pt
 
@@ -222,6 +302,40 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
 
     nueva_hoja()
     area_piezas_c2 = 0
+    # BLOQUES DE PIEZAS IDÉNTICAS (2026-09-04, plan E7): un pedido grande repite la misma pieza del
+    # mismo talle decenas de veces (100 camisetas = 900 piezas de 72 geometrías). Cada colocación
+    # costaba una convolución FFT por ángulo candidato sobre la hoja entera (con rotación libre, 24
+    # FFT por pieza): a 900 piezas, minutos. Para una pieza cuya geometría ya se colocó se prueba
+    # PRIMERO, sin FFT, al lado de la última igual (a la derecha, debajo, o al inicio de la fila
+    # siguiente) con una comprobación local de solapamiento; y si no entra, la FFT se hace sólo con
+    # el ángulo que usó la anterior (las idénticas comparten el mejor ángulo) antes de barrer todos.
+    # `TIZADA_NESTING_SIN_BLOQUES=1` vuelve al barrido completo (para comparar layouts).
+    _bloques = not os.environ.get("TIZADA_NESTING_SIN_BLOQUES")
+    ultimo = {}                     # geo_key → (h_idx, ang, y, x, mr_col, mr_test)
+    _DEBUG.update({"bloque": 0, "fft": 0, "sin_geo": 0, "sin_ultimo": 0, "sin_lugar": 0})
+
+    def _cabe(G, yy, xx, mr_test):
+        hh, ww = mr_test.shape
+        if yy < 0 or xx < 0 or yy + hh > alto_c or xx + ww > ancho_c:
+            return False
+        return not (G[yy:yy + hh, xx:xx + ww] & mr_test).any()
+
+    def _x_en_fila(G, yy, mr_test, desde=0):
+        """El menor x ≥ `desde` en el que la máscara entra en la fila `yy` (o None): la fila entera
+        de una vez, con una ventana deslizante sobre la banda de la hoja (una prueba local de
+        solapamiento por posición, sin FFT)."""
+        hh, ww = mr_test.shape
+        if yy < 0 or yy + hh > alto_c or ww > ancho_c:
+            return None
+        banda = G[yy:yy + hh, :]
+        try:
+            from numpy.lib.stride_tricks import sliding_window_view
+            v = sliding_window_view(banda, (hh, ww))[0]          # (ancho_c-ww+1, hh, ww)
+            choca = (v & mr_test).any(axis=(1, 2))
+        except Exception:
+            return None
+        libres = np.flatnonzero(~choca[desde:])
+        return int(libres[0]) + desde if libres.size else None
 
     for i in orden:
         p = piezas[i]
@@ -230,10 +344,72 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
             raise ValueError(f"La pieza {p['etiqueta']} no entra en la hoja con ninguna rotación permitida.")
 
         colocada = False
-        for h_idx in range(len(hojas_G)):
+        _u = ultimo.get(p.get("_geo_key")) if _bloques else None
+        if _u is not None:
+            h_u, ang_u, y_u, x_u, mr_col_u, mr_test_u = _u
+            G = hojas_G[h_u]
+            hh, ww = mr_test_u.shape
+            # candidatos: la misma fila (a la derecha de la última), la fila siguiente desde el
+            # borde izquierdo, y una fila más abajo — el primer lugar libre de cada una
+            _pos = []
+            for yy, desde in ((y_u, x_u + ww), (y_u + hh, 0), (y_u + 2 * hh, 0)):
+                xx = _x_en_fila(G, yy, mr_test_u, desde)
+                if xx is not None:
+                    _pos.append((yy, xx))
+                    break
+            for yy, xx in _pos:
+                if _cabe(G, yy, xx, mr_test_u):
+                    dy, dx = (hh - mr_col_u.shape[0]) // 2, (ww - mr_col_u.shape[1]) // 2
+                    G[yy + dy:yy + dy + mr_col_u.shape[0], xx + dx:xx + dx + mr_col_u.shape[1]] |= mr_col_u
+                    hojas_sky[h_u] = max(hojas_sky[h_u], yy + hh)
+                    th = math.radians(ang_u)
+                    bw = abs(p["w"] * math.cos(th)) + abs(p["h"] * math.sin(th))
+                    bh = abs(p["w"] * math.sin(th)) + abs(p["h"] * math.cos(th))
+                    colocaciones[h_u].append({"pieza": p, "ang": ang_u, "cx": (xx + ww / 2) * cell_pt,
+                                              "cy": (yy + hh / 2) * cell_pt, "bw": bw, "bh": bh})
+                    area_piezas_c2 += int(p["_mask"].sum())
+                    ultimo[p["_geo_key"]] = (h_u, ang_u, yy, xx, mr_col_u, mr_test_u)
+                    colocada = True
+                    _DEBUG["bloque"] += 1
+                    break
+            if not colocada:
+                _DEBUG["sin_lugar"] += 1
+        elif p.get("_geo_key") is None:
+            _DEBUG["sin_geo"] += 1
+        else:
+            _DEBUG["sin_ultimo"] += 1
+        if colocada:
+            continue
+        _DEBUG["fft"] += 1
+        # Qué ángulos se evalúan con FFT:
+        #  · una geometría REPETIDA: sólo el ángulo de su anterior (las idénticas comparten el
+        #    mejor ángulo; barrer los 24 en cada hoja llena era el 60 % de las FFT);
+        #  · la PRIMERA de una geometría con rotación libre: de GRUESO a FINO — primero los
+        #    múltiplos de 90°, después ±2 pasos alrededor del mejor (8 FFT en vez de 24, misma
+        #    calidad en la práctica: los ángulos vecinos casi no cambian la altura resultante);
+        #  · el resto: todos sus candidatos.
+        if _u:
+            _fases = [[c for c in candidatos_por_angulo if c[0] == _u[1]] or candidatos_por_angulo]
+        elif p.get("rotacion") == "libre" and len(candidatos_por_angulo) > 8:
+            _grueso = [c for c in candidatos_por_angulo if c[0] % 90 == 0] or candidatos_por_angulo[:4]
+            _fases = [_grueso, None]                       # None = «los vecinos del mejor», se arma después
+        else:
+            _fases = [candidatos_por_angulo]
+        # una repetida que no entró al lado de su anterior busca desde la hoja de esa anterior
+        # en adelante (las de antes ya están llenas: probarlas era una FFT por hoja, 15 hojas a
+        # 100 prendas, para no encontrar nada)
+        for h_idx in range(_u[0] if _u else 0, len(hojas_G)):
             G, sky = hojas_G[h_idx], hojas_sky[h_idx]
             mejor = None
-            for ang, mr_col, mr_test in candidatos_por_angulo:
+            for _cands in _fases:
+              if _cands is None:
+                  if mejor is None:
+                      continue
+                  _vistos = {c[0] for c in _fases[0]}
+                  _ang0 = mejor[1]
+                  _cands = [c for c in candidatos_por_angulo if c[0] not in _vistos
+                            and min(abs(c[0] - _ang0), 360 - abs(c[0] - _ang0)) <= 2 * max(1, int(paso))]
+              for ang, mr_col, mr_test in _cands:
                 hh, ww = mr_test.shape
                 ylim = min(alto_c, sky + hh)
                 if ylim < hh:
@@ -253,6 +429,8 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
                 dy, dx = (hh - mr_col.shape[0]) // 2, (ww - mr_col.shape[1]) // 2
                 G[y + dy:y + dy + mr_col.shape[0], x + dx:x + dx + mr_col.shape[1]] |= mr_col
                 hojas_sky[h_idx] = max(hojas_sky[h_idx], y + hh)
+                if p.get("_geo_key") is not None:
+                    ultimo[p["_geo_key"]] = (h_idx, ang, y, x, mr_col, mr_test)
                 # bbox matemático exacto del vector rotado, centrado en la celda de la máscara
                 th = math.radians(ang)
                 bw = abs(p["w"] * math.cos(th)) + abs(p["h"] * math.sin(th))
@@ -274,6 +452,8 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
             dy, dx = (hh - mr_col.shape[0]) // 2, (ww - mr_col.shape[1]) // 2
             G[y + dy:y + dy + mr_col.shape[0], x + dx:x + dx + mr_col.shape[1]] |= mr_col
             hojas_sky[h_idx] = y + hh
+            if p.get("_geo_key") is not None:
+                ultimo[p["_geo_key"]] = (h_idx, ang, y, x, mr_col, mr_test)
             th = math.radians(ang)
             bw = abs(p["w"] * math.cos(th)) + abs(p["h"] * math.sin(th))
             bh = abs(p["w"] * math.sin(th)) + abs(p["h"] * math.cos(th))

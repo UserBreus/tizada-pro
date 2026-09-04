@@ -1,0 +1,274 @@
+# -*- coding: utf-8 -*-
+"""LA HOJA COMPARTIDA (camino B) — la tizada compuesta con pikepdf, con cada pieza UNA sola vez.
+
+Por qué existe (2026-09-04, ver changelog 393 del mapa y `MOLDE_CON_DISENO.md` «LA HOJA
+COMPARTIDA»): una tizada de 5 prendas tardaba 180 s porque CADA PRENDA repetía todo el trabajo —
+la pieza se serializaba y se reabría por prenda, la hoja llevaba 45 copias enteras de la mesa
+(una por colocación, 29 MB) y el aplanado para el RIP las des-anidaba inline (900.000 operadores,
+87 s). Lineal en prendas: 100 camisetas eran más de 40 minutos.
+
+La idea del usuario, formalizada: «primero se acomoda el contorno y después se le pone el diseño
+adentro, guardando información». Se separa lo INVARIANTE de lo que cambia por prenda:
+
+  · BASE  = una por (pieza, talle[, variante]): la página del molde desplegado metida ADENTRO por
+    concatenación de bytes (la receta exacta de `aplanar_rip._flatten`: `q [Matrix cm] [BBox re
+    W n] <contenido> Q`, ya verificada pixel-idéntica) + el clip al contorno + el borde de corte.
+    Es UN Form XObject plano (profundidad 1), armado una vez y referenciado N veces.
+  · COLOCACIÓN = `q <cm> /B_k Do Q` + `q <cm> <estampado> Q`, donde el estampado son los trazos
+    chicos por prenda (nombre/número en curvas + etiqueta) que ya genera `generar_pieza`.
+
+Lo que sale es 100 % vectorial, con los bytes del dibujo del usuario tal cual (no se re-serializa
+ni un operador de la mesa), en CMYK exacto. El archivo queda con estructura «PDF/X-1a-like»:
+XObjects de un solo nivel, sin capas, sin transparencia, fuentes embebidas o en curvas.
+
+⚠️ pikepdf copia perezoso (`copy_foreign`): los PDF de las mesas desplegadas tienen que seguir
+ABIERTOS hasta después del `save` — el que llama los tiene vivos en `b["despl"]`.
+"""
+import io
+import math
+import os
+from math import ceil
+
+import pikepdf
+from pikepdf import Name
+
+CM = 72 / 2.54
+
+
+def _contenido_pagina(pag):
+    """Los bytes del content-stream de una página (uno o varios streams, unidos por '\\n')."""
+    c = pag.obj.get("/Contents")
+    if c is None:
+        return b""
+    if isinstance(c, pikepdf.Array):
+        return b"\n".join(s.read_bytes() for s in c)
+    return c.read_bytes()
+
+
+def _num(v):
+    t = f"{float(v):.6f}".rstrip("0").rstrip(".")
+    return t if t not in ("", "-0") else "0"
+
+
+def xobject_base(pdf, b, memo):
+    """El Form XObject de UNA base, dentro de `pdf`: la mesa desplegada inline + clip + borde.
+
+    `b` es lo que devuelve `_armar_base` del motor (camino B): `base_stream` (str: borde +
+    `q cm q <clip> W n <nom> Do Q Q`), `despl` = (pdf_fuente, índice_de_página), `nom` (el nombre
+    del XObject de la mesa en ese stream), `W`, `H`, `Hp`, `B`. `memo` cachea por id(b).
+    """
+    k = id(b)
+    hit = memo.get(k)
+    if hit is not None:
+        return hit
+    src, idx = b["despl"][0], b["despl"][1]
+    try:
+        pag = src.pages[idx]
+    except Exception:
+        # el motor cerró el PDF de la mesa (cerrar_abiertos): se reabre por su ruta y se deja
+        # vivo hasta después del save (copy_foreign es perezoso)
+        src = pikepdf.open(b["despl"][2])
+        memo.setdefault("__abiertos__", []).append(src)
+        pag = src.pages[idx]
+    # La misma lectura que hace el motor: `as_form_xobject()` sólo para saber cómo hay que
+    # posicionar la mesa (Matrix) y recortarla (BBox). No se copia ese objeto: la mesa entra
+    # INLINE, que es lo que el aplanado para el RIP hacía después con cada copia.
+    xo_tmp = pag.as_form_xobject()
+    mtx = xo_tmp.get("/Matrix")
+    bbox = xo_tmp.get("/BBox")
+    partes = [b"q\n"]
+    if mtx is not None:
+        partes.append((" ".join(_num(float(x)) for x in mtx) + " cm\n").encode("ascii"))
+    if bbox is not None:
+        x0, y0, x1, y1 = [float(v) for v in bbox]
+        partes.append(f"{_num(min(x0, x1))} {_num(min(y0, y1))} {_num(abs(x1 - x0))} {_num(abs(y1 - y0))} re\nW\nn\n".encode("ascii"))
+    partes.append(_contenido_pagina(pag))
+    partes.append(b"\nQ\n")
+    inline = b"".join(partes)
+    base = b["base_stream"].encode("latin-1")
+    ref = f"{b['nom']} Do".encode("ascii")
+    if base.count(ref) != 1:
+        raise RuntimeError(f"la base de {b.get('pieza')} no referencia la mesa una sola vez ({base.count(ref)})")
+    contenido = base.replace(ref, inline)
+    # Los recursos son los de la página desplegada (fuentes embebidas, ICC, imágenes…). Se
+    # conservan las fuentes: un texto vivo del diseño que no sea placeholder tiene que salir en
+    # la hoja igual que se ve en el Arte (ley del proyecto; antes `_barrer_fuentes` lo borraba).
+    res_src = xo_tmp.get("/Resources")
+    # `copy_foreign` sólo acepta objetos INDIRECTOS: los recursos de la página vienen directos.
+    # Volverlos indirectos en el PDF de la mesa (en memoria, nunca se guarda) los deja copiables
+    # y deduplicados: dos talles de la misma mesa comparten fuentes e ICC en la hoja.
+    res = pdf.copy_foreign(src.make_indirect(res_src)) if res_src is not None else pikepdf.Dictionary()
+    xo = pdf.make_stream(contenido)
+    xo["/Type"] = Name("/XObject")
+    xo["/Subtype"] = Name("/Form")
+    xo["/BBox"] = pikepdf.Array([0, 0, float(b["W"]) + 2 * float(b["B"]), float(b["Hp"])])
+    xo["/Resources"] = res
+    memo[k] = xo
+    return xo
+
+
+def matriz_colocacion(c, m, s, alto_pag, W, H, signo=1):
+    """La `cm` que deja la base (BBox 0 0 W H, y hacia arriba) donde `componer_pdf_contorno` la
+    ponía con `show_pdf_page(rect, doc, 0, rotate=ang)`: el rect es la caja del contorno ROTADO
+    (`bw`×`bh`), centrada en (cx, cy) en coordenadas de la hoja con el origen arriba a la
+    izquierda. En PDF (origen abajo) el centro es (x, alto − y). `signo` es el sentido de giro
+    que reproduce a PyMuPDF: +1, calibrado contra `show_pdf_page` con rotación libre (2026-09-04:
+    con −1 las piezas giradas salían para el otro lado; 1,6 M de píxeles distintos)."""
+    cx = (m["izq"] * CM + c["cx"]) * s
+    cy = alto_pag * s - (m["sup"] * CM + c["cy"]) * s
+    th = math.radians(signo * c["ang"])
+    ca, sa = math.cos(th), math.sin(th)
+    a, b_, c_, d = s * ca, s * sa, -s * sa, s * ca
+    # trasladar el centro de la base (W/2, H/2) al centro de la colocación
+    e = cx - (a * W / 2 + c_ * H / 2)
+    f = cy - (b_ * W / 2 + d * H / 2)
+    # 6 decimales también en la traslación: con 3, las piezas giradas caían hasta medio punto
+    # más allá que en `show_pdf_page` y el render difería en los bordes (0,14 % de píxeles).
+    return f"{a:.6f} {b_:.6f} {c_:.6f} {d:.6f} {e:.6f} {f:.6f} cm"
+
+
+def componer_hoja_pike(colocaciones, cfg, path_salida, signo_rotacion=1):
+    """Escribe la hoja (una página por mesa física) y devuelve `(consumo_cm, alturas_cm)`, igual
+    que `nesting_contorno.componer_pdf_contorno`. Cada `c["pieza"]` trae `base` y `estampado`."""
+    m = cfg["margenes_cm"]
+    ancho_pag = cfg["ancho_cm"] * CM
+    pdf = pikepdf.new()
+    memo = {}
+    consumo_cm, alturas_cm = 0.0, []
+    for hoja in colocaciones:
+        if not hoja:
+            continue
+        alto_usado = max(c["cy"] + c["bh"] / 2 for c in hoja)
+        alto_pag = alto_usado + (m["sup"] + m["inf"]) * CM
+        # Mesas de más de 5,08 m: /UserUnit, como en el compositor de siempre (ver ahí).
+        uu = max(1, ceil(max(ancho_pag, alto_pag) / 14400.0))
+        s = 1.0 / uu
+        page = pdf.add_blank_page(page_size=(ancho_pag * s, alto_pag * s))
+        if uu > 1:
+            page.obj["/UserUnit"] = int(uu)
+        xobjs = pikepdf.Dictionary()
+        nombres = {}
+        partes = []
+        for c in hoja:
+            pz = c["pieza"]
+            b = pz["base"]
+            xo = xobject_base(pdf, b, memo)
+            nm = nombres.get(id(xo))
+            if nm is None:
+                nm = f"/B{len(nombres) + 1}"
+                nombres[id(xo)] = nm
+                xobjs[nm] = xo
+            W = float(b["W"]) + 2 * float(b["B"])
+            H = float(b["Hp"])
+            cm = matriz_colocacion(c, m, s, alto_pag, W, H, signo_rotacion)
+            partes.append(f"q\n{cm}\n{nm} Do\nQ\n".encode("ascii"))
+            est = pz.get("estampado") or ""
+            if est:
+                partes.append(f"q\n{cm}\n".encode("ascii") + est.encode("latin-1") + b"Q\n")
+        page.obj["/Contents"] = pdf.make_stream(b"".join(partes))
+        page.obj["/Resources"] = pikepdf.Dictionary({"/XObject": xobjs})
+        alturas_cm.append(round(alto_pag / CM, 1))
+        consumo_cm += alto_pag / CM
+    pdf.save(path_salida)
+    pdf.close()
+    for d in memo.get("__abiertos__", []):
+        try:
+            d.close()
+        except Exception:
+            pass
+    return consumo_cm, alturas_cm
+
+
+# ── VISTA PREVIA LIVIANA ─────────────────────────────────────────────────────────────────────
+def _svg_interior(svg, prefijo=""):
+    """Lo que hay adentro del `<svg …>…</svg>` que devuelve PyMuPDF (sin la envoltura).
+
+    `prefijo`: PyMuPDF numera sus recortes y máscaras (`id="cp0"`, `url(#cp0)`) desde cero en
+    CADA documento. Metidos varios en un mismo SVG, los ids chocan y el recorte de una pieza se
+    aplica a otra (2026-09-04: el preview mostraba las mesas enteras sin recortar). Se les pone
+    un prefijo por símbolo."""
+    i = svg.find("<svg")
+    if i >= 0:
+        j = svg.index(">", i) + 1
+        k = svg.rfind("</svg>")
+        svg = svg[j:k if k > 0 else len(svg)]
+    if prefijo:
+        svg = (svg.replace('id="', f'id="{prefijo}')
+                  .replace("url(#", f"url(#{prefijo}")
+                  .replace('href="#', f'href="#{prefijo}'))
+    return svg
+
+
+def _svg_de_ops(W, H, ops_bytes, fitz, prefijo=""):
+    """Un pedazo de content-stream (los trazos del estampado de una prenda) convertido a SVG por
+    PyMuPDF, en coordenadas de página (pt, y hacia abajo). Sin recursos: son sólo trazados."""
+    pdf = pikepdf.new()
+    pg = pdf.add_blank_page(page_size=(W, H))
+    pg.obj["/Contents"] = pdf.make_stream(ops_bytes)
+    buf = io.BytesIO()
+    pdf.save(buf)
+    pdf.close()
+    d = fitz.open("pdf", buf.getvalue())
+    svg = d[0].get_svg_image()
+    d.close()
+    return _svg_interior(svg, prefijo)
+
+
+def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1):
+    """El SVG de UNA página de la hoja: `<symbol>` por base (una sola vez, cacheado en `simbolos`
+    por id(base)) y `<use>` por colocación, más el estampado de cada prenda como trazos.
+
+    Hasta 2026-09-04 el preview era `page.get_svg_image()` de la hoja entera: PyMuPDF expande cada
+    colocación → 64 MB por hoja de 5 prendas, 1,3 GB a 100. Con símbolos reutilizados, cada base
+    pesa una vez. Es vectorial y sale del MISMO documento de base que va a la hoja (ley «se ve =
+    sale»); el visor (`<img src=prev_*.svg>`) lo muestra tal cual.
+    `docs_base(b)` devuelve un `fitz.Document` de la base sola (sin estampado)."""
+    import pymupdf as fitz
+    m = cfg["margenes_cm"]
+    ancho_pag = cfg["ancho_cm"] * CM
+    defs, cuerpo, ids = [], [], {}
+    # Los estampados de TODAS las prendas de la hoja se convierten a SVG de UNA vez (un documento
+    # con todos, en coordenadas de página): a 100 prendas eran 900 idas y vueltas por PyMuPDF
+    # (183 s); ahora es una por hoja.
+    ops_est = []
+    for c in hoja:
+        pz = c["pieza"]
+        b = pz["base"]
+        W = float(b["W"]) + 2 * float(b["B"])
+        H = float(b["Hp"])
+        k = id(b)
+        sid = ids.get(k)
+        if sid is None:
+            sid = f"B{len(ids) + 1}"
+            ids[k] = sid
+            sym = simbolos.get(k)
+            if sym is None:
+                d = docs_base(b)
+                sym = _svg_interior(d[0].get_svg_image(), prefijo=sid + "_")
+                simbolos[k] = sym
+            defs.append(f'<symbol id="{sid}" viewBox="0 0 {W:.3f} {H:.3f}" overflow="visible">{sym}</symbol>')
+        cx = m["izq"] * CM + c["cx"]
+        cy = m["sup"] * CM + c["cy"]                     # y hacia abajo, como el SVG
+        # en SVG (y hacia abajo) el mismo giro que en PDF (y hacia arriba) lleva el signo opuesto
+        tr = f'translate({cx:.3f} {cy:.3f}) rotate({-signo_rotacion * c["ang"]:.3f}) translate({-W/2:.3f} {-H/2:.3f})'
+        cuerpo.append(f'<use href="#{sid}" x="0" y="0" width="{W:.3f}" height="{H:.3f}" transform="{tr}"/>')
+        est = pz.get("estampado") or ""
+        if est.strip():
+            cm_pdf = matriz_colocacion(c, m, 1.0, alto_pag, W, H, signo_rotacion)
+            ops_est.append(("q\n" + cm_pdf + "\n").encode("ascii") + est.encode("latin-1") + b"Q\n")
+    if ops_est:
+        cuerpo.append('<g>' + _svg_de_ops(ancho_pag, alto_pag, b"".join(ops_est), fitz, "est_") + '</g>')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+            f'viewBox="0 0 {ancho_pag:.3f} {alto_pag:.3f}" width="{ancho_pag:.3f}pt" height="{alto_pag:.3f}pt">'
+            f'<rect width="100%" height="100%" fill="#ffffff"/><defs>{"".join(defs)}</defs>{"".join(cuerpo)}</svg>')
+
+
+def altos_de_hojas(colocaciones, cfg):
+    """El alto (pt) de cada página, con la misma cuenta que `componer_hoja_pike`."""
+    m = cfg["margenes_cm"]
+    out = []
+    for hoja in colocaciones:
+        if not hoja:
+            continue
+        out.append(max(c["cy"] + c["bh"] / 2 for c in hoja) + (m["sup"] + m["inf"]) * CM)
+    return out

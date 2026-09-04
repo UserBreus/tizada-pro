@@ -1354,6 +1354,75 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-04 (393) — LA HOJA COMPARTIDA: la tizada del camino B deja de ser lineal en prendas.**
+  Pedido del usuario: «5 camisetas tardan 2:30; 100 tienen que tardar 2 minutos; buscá el mejor
+  método». Plan aprobado en `~/.claude/plans/dapper-cuddling-dahl.md`; diseño en
+  `MOLDE_CON_DISENO.md` «LA HOJA COMPARTIDA». Medido antes (5 prendas, en frío): motor 29 s +
+  aplanado 26 s = **70 s** (en el servidor, con ICC y máquina cargada, 180 s). Cada prenda
+  repetía TODO: serializar la pieza, copiar la mesa entera a la hoja (45 copias, 29 MB) y
+  des-anidarla inline para el RIP (900.000 operadores).
+  **Lo que cambia** (`hoja_pike.py` nuevo; `motor_pedido.py`, `nesting_contorno.py`,
+  `aplanar_rip.py`, `servidor.py`):
+  · **Base compartida**: `_armar_base` (camino B) deja en la base de dónde salió la mesa
+    (`despl` = pdf desplegado + página) y el nombre del XObject; `generar_pieza` ya no serializa:
+    devuelve `{base, estampado}` (el estampado = clip + nombre/número en curvas + etiqueta, lo
+    que cambia por prenda). El documento por pieza sólo existe si alguien lo pide
+    (`_DocPerezoso`: el Arte, el nesting de siempre, los contratos).
+  · **`hoja_pike.componer_hoja_pike`**: la hoja se compone con pikepdf. Por base, UN Form XObject
+    plano: la mesa desplegada metida INLINE (bytes tal cual, la receta de `_flatten`: `q [Matrix
+    cm] [BBox re W n] <contenido> Q`) + clip + borde, con los recursos de la página (fuentes
+    incluidas). Por colocación: `q <cm> /B_k Do Q` + `q <cm> <estampado> Q`. La `cm` reproduce a
+    `show_pdf_page` (signo de giro +1, calibrado: con −1 las piezas libres giraban al revés).
+  · **Máscaras por contorno** (`nesting_contorno._mascara_contorno`): el nesting ya no rasteriza
+    el arte de cada pieza; pinta el polígono del contorno (+ borde) a 4× y reduce a celdas con el
+    mismo criterio. `TIZADA_MASCARA_LEGACY=1` vuelve al raster.
+  · **Aplanado de UN nivel** (`aplanar_rip._aplanar_un_nivel`, default): la página conserva sus
+    `Do`; el interior de cada base se des-anida y sanea UNA vez (memo por objgen); ICC unificado
+    por hash en todo el archivo (`_unificar_icc`); el **OutputIntent ya no se borra** y el
+    servidor lo incrusta DESPUÉS del aplanado (antes lo ponía antes y el aplanado lo borraba: el
+    archivo salía sin perfil). `TIZADA_APLANADO_TOTAL=1` = inline como siempre.
+  · **Validar una vez**: `generar_pedido_grupos` reusa las validaciones de `_nestear_y_componer`
+    (la segunda pasada costaba 26 s y reportaba un espaciado inventado).
+  · **Preview liviano** (`hoja_pike.preview_svg`): `<symbol>` por base + `<use>` por colocación +
+    el estampado convertido por PyMuPDF. Los ids de PyMuPDF (`cp0`…) se prefijan por símbolo: sin
+    eso el recorte de una pieza se aplicaba a otra. ⚠️ MuPDF NO dibuja `<use>`/`<symbol>`: para
+    verificar el SVG hay que mirarlo en un navegador (Chromium lo dibuja igual que la hoja).
+  · **Compatibilidad RIP** (`verificar_rip_compatible.py`): PDF ≤ 1.6, sin capas, sin
+    transparencia, profundidad 1, fuentes embebidas, colores CMYK/Gray/ICC-4/Separation, un ICC
+    por perfil, OutputIntent GTS_PDFX N=4, streams balanceados, segundo lector (PyMuPDF). Corre al
+    terminar cada tizada; si falla, aviso en `avisos_pedido`.
+  · Bug adyacente: `servidor.py` `_cb = _combo_toggles(...)` pisaba el flag camino B → `_cbt`.
+  · Las fuentes del diseño se CONSERVAN en las bases (antes `_barrer_fuentes` las borraba y el
+    aplanado eliminaba los textos vivos: un rótulo del diseño se veía en el Arte y no salía en la
+    hoja — 1836 píxeles de diferencia medidos en la hoja de siempre; la nueva da 0).
+  · **Nesting a escala (E7)** (`nesting_contorno._anidar_estrategia`): a 100 prendas (900 piezas,
+    72 geometrías) el nesting viejo no terminó en 25 min (una FFT por ángulo candidato y por
+    hoja, 24 ángulos con rotación libre). Ahora: (1) **bloques de idénticas** — una geometría ya
+    colocada busca primero, SIN FFT, el primer lugar libre de su fila, de la siguiente y de una
+    más (barrido vectorizado con `sliding_window_view`, prueba local de solapamiento); (2) una
+    repetida que no entra usa la FFT sólo con el ángulo de su anterior y sólo desde su hoja en
+    adelante; (3) la primera de una geometría con rotación libre va de grueso a fino (múltiplos
+    de 90° y después ±2 pasos alrededor del mejor: 8 FFT en vez de 24). Medido: 30 prendas 69 →
+    14 s (FFT 2997 → 681, mismas 5 hojas); 100 prendas: más de 25 min → 38 s (1497 FFT).
+    `TIZADA_NESTING_SIN_BLOQUES=1` vuelve al barrido completo. Contadores en `_DEBUG`.
+  · 🔴 Trampa de `_DocPerezoso`: `if p["doc"]:` llamaba `__len__` → `real()` → serializaba la
+    pieza (1,6 MB) para las 900 piezas sólo para cerrarlas: 170 de los 269 s a 100 prendas. Ahora
+    `__bool__` es True sin armar nada. Un objeto perezoso que se usa como booleano tiene que
+    decirlo explícitamente.
+  · Preview: los estampados de TODA la hoja se convierten a SVG en UNA pasada (un documento con
+    los 900, en coordenadas de página) en vez de una por prenda.
+  **Medido (5 prendas, 3 talles, en frío)**: 70 s → **40 s** (motor 28: nesting 6, hoja 5,
+  previews 13, validar 4; aplanado 11) · hoja 46 MB → 21 MB (18 aplanada) · previews 64 → 39 MB
+  · con las MISMAS colocaciones la hoja nueva y la de siempre difieren en 0,1 % de píxeles (bordes
+  de las piezas giradas, redondeo) · aplanar no cambia un píxel. Contratos nuevos:
+  `verificar_hoja_compartida.py`, `verificar_rip_compatible.py`; medidor `medir_tizada_b.py`.
+  **Medido (100 prendas, 8 talles, en frío)**: de **más de 40 min** (extrapolado; el nesting solo
+  no terminó en 25) a **138 s = 1,4 s/prenda** (motor 91: nesting 37, hoja 14, previews 21,
+  validar 16; aplanado 47) · hoja 51 MB (48 aplanada) · 15 hojas de 5 m · previews 264 MB en
+  total (una por hoja).
+  Lo que sigue (plan E6): bases y sus SVG pre-armados en el alta (por procesos; hoy 72 bases =
+  ~14 s de armar documentos para el preview), la tizada entera en un proceso, memoria de tizada;
+  y el aplanado/validación por hoja en paralelo (47 + 16 s a 100 prendas).
 - **2026-09-04 (392) — EL SERVIDOR SE CONGELABA UN MINUTO: NADA CONSTRUYE EL DESPLEGADO EN UN
   HILO DEL REQUEST.** Reporte del usuario: «entro al molde con diseño y no me muestra las piezas,
   y ponerle nombre a una tarda más de un minuto». Medido en su sesión: `/api/productos` (3 KB)

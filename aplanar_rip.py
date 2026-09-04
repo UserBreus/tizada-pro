@@ -318,6 +318,7 @@ def _procesar_contenido(pdf, page, ops=None):
         except Exception:
             ops = None
     usados = set()
+    _es_xobj = isinstance(page, pikepdf.Stream)   # un Form XObject: su contenido es el propio stream
     if ops is not None:
         out, block, in_bt = [], [], False
         falta_fuente = tiene_texto = False
@@ -348,7 +349,10 @@ def _procesar_contenido(pdf, page, ops=None):
                 if len(operands) and isinstance(operands[0], Name):
                     usados.add(str(operands[0]))
             out.append(_rmp(inst, o))
-        page.Contents = pdf.make_stream(unparse_content_stream(out))
+        if _es_xobj:
+            page.write(unparse_content_stream(out))
+        else:
+            page.Contents = pdf.make_stream(unparse_content_stream(out))
     # huérfanos: quitar los XObjects que ya no se referencian con Do
     xo = res.get("/XObject") if res else None
     if xo is not None and ops is not None:
@@ -366,18 +370,111 @@ def _procesar_contenido(pdf, page, ops=None):
         del pdf.Root["/OCProperties"]
 
 
+def _aplanar_un_nivel(pdf, page, _hechos):
+    """UN SOLO NIVEL (2026-09-04, la hoja compartida): la página CONSERVA sus `Do` y se sanea el
+    interior de cada Form XObject UNA vez —lo de adentro se des-anida y se limpia como siempre—,
+    en vez de expandir cada colocación inline. Con 45 colocaciones de 27 piezas el aplanado total
+    escribía 900.000 operadores (87 s); a 100 prendas eran ~30 min. Acá cada pieza se procesa una
+    vez y la página queda con 900 `Do`.
+
+    Lo que va al RIP es PDF/X-1a-like: XObjects de un nivel (permitidos por la norma y por
+    cualquier RIP), sin capas, sin transparencia, fuentes embebidas o en curvas, ICC consolidado.
+    El «error RIP» que originó este módulo era con tres niveles anidados + capas OCG: eso ya no
+    existe por construcción. `TIZADA_APLANADO_TOTAL=1` vuelve al inline de siempre."""
+    res = page.get("/Resources")
+    xobjs = res.get("/XObject") if res is not None else None
+    if xobjs is not None:
+        for nm in [str(k) for k in xobjs.keys()]:
+            xo = xobjs[nm]
+            if xo.get("/Subtype") != Name("/Form"):
+                continue
+            try:
+                _id = xo.objgen
+            except Exception:
+                _id = None
+            if _id is not None and _id in _hechos:
+                continue
+            sub_ops = _flatten(pdf, xo, es_pagina=False, _hechos=_hechos)   # des-anida lo de ADENTRO
+            _procesar_contenido(pdf, xo, sub_ops)                              # y lo sanea, una vez
+            if _id is not None:
+                _hechos[_id] = sub_ops
+            if "/OC" in xo:
+                del xo["/OC"]
+            if "/Group" in xo:
+                del xo["/Group"]              # sin grupos de transparencia (lo inline tampoco los tenía)
+    try:
+        ops = list(parse_content_stream(page))
+    except Exception:
+        ops = None
+    _procesar_contenido(pdf, page, ops)       # la página: sus propios trazos (estampados) + los Do
+    _declarar_estado_grafico(pdf, page)
+
+
+def _unificar_icc(pdf):
+    """Un solo stream ICC por perfil en TODO el archivo (página y XObjects): las bases copian el
+    perfil de su mesa y con 9 mesas había hasta 9 copias del mismo perfil. Se reemplaza el stream
+    dentro de cada `[/ICCBased s]` por el canónico; los nombres no cambian, así que ningún
+    content-stream se reescribe."""
+    import hashlib
+    canon, vistos = {}, set()
+
+    def _res(d):
+        try:
+            cs = d.get("/ColorSpace") if d is not None else None
+        except Exception:
+            cs = None
+        if cs:
+            for k in [str(x) for x in cs.keys()]:
+                v = cs[k]
+                try:
+                    if isinstance(v, pikepdf.Array) and str(v[0]) == "/ICCBased":
+                        h = hashlib.sha1(bytes(v[1].read_raw_bytes())).hexdigest()
+                        if h in canon:
+                            if v[1].objgen != canon[h].objgen:
+                                v[1] = canon[h]
+                        else:
+                            canon[h] = v[1]
+                except Exception:
+                    pass
+        try:
+            xs = d.get("/XObject") if d is not None else None
+        except Exception:
+            xs = None
+        if xs:
+            for k in [str(x) for x in xs.keys()]:
+                xo = xs[k]
+                try:
+                    og = xo.objgen
+                except Exception:
+                    og = None
+                if og in vistos:
+                    continue
+                vistos.add(og)
+                _res(xo.get("/Resources"))
+    for page in pdf.pages:
+        _res(page.get("/Resources"))
+
+
 def _aplanar_archivo(path):
     """Núcleo SERIAL: aplana TODAS las páginas del PDF in-place (des-anida + 1 pasada de saneo +
-    estado gráfico + Creator/Producer + PDF 1.6, colores CMYK EXACTOS). Lanza si algo falla."""
+    estado gráfico + Creator/Producer + PDF 1.6, colores CMYK EXACTOS). Lanza si algo falla.
+    Default: UN NIVEL (ver `_aplanar_un_nivel`); `TIZADA_APLANADO_TOTAL=1`: todo inline."""
     pdf = pikepdf.open(path, allow_overwriting_input=True)
+    _total = bool(os.environ.get("TIZADA_APLANADO_TOTAL"))
+    _hechos = {}
     for page in pdf.pages:
-        # `_hechos` es por página: en la hoja cada página es independiente y así el memo de las
-        # piezas no crece con las páginas.
-        ops = _flatten(pdf, page, es_pagina=True)            # des-anida los Form XObjects (inline byte a byte)
-        _procesar_contenido(pdf, page, ops)                  # 1 pasada, sobre las instrucciones en memoria
-        _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
-    if "/OutputIntents" in pdf.Root:
-        del pdf.Root["/OutputIntents"]           # Illustrator no lo tiene; el ICCBased de la página alcanza
+        if _total:
+            # `_hechos` es por página: en la hoja cada página es independiente y así el memo de las
+            # piezas no crece con las páginas.
+            ops = _flatten(pdf, page, es_pagina=True)            # des-anida los Form XObjects (inline byte a byte)
+            _procesar_contenido(pdf, page, ops)                  # 1 pasada, sobre las instrucciones en memoria
+            _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
+        else:
+            _aplanar_un_nivel(pdf, page, _hechos)
+    _unificar_icc(pdf)
+    # El OutputIntent (perfil de salida) se CONSERVA: es lo que le dice al RIP con qué perfil
+    # se armó el archivo. Antes se borraba acá («Illustrator no lo tiene») y el servidor lo había
+    # incrustado justo antes → el archivo final salía sin perfil (2026-09-04).
     try:
         with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
             meta["dc:creator"] = ["TIZADA PRO"]
