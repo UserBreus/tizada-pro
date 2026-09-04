@@ -1354,6 +1354,247 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-04 (392) — EL SERVIDOR SE CONGELABA UN MINUTO: NADA CONSTRUYE EL DESPLEGADO EN UN
+  HILO DEL REQUEST.** Reporte del usuario: «entro al molde con diseño y no me muestra las piezas,
+  y ponerle nombre a una tarda más de un minuto». Medido en su sesión: `/api/productos` (3 KB)
+  **9,4 s**, `emparejado` 3,1 s, `etiqueta` 3,7 s, `deteccion_todas` 2,9 s — y la pantalla pide
+  varios por acción. La radiografía con **py-spy** del proceso del servidor mostró el hilo
+  activo en `fuentes_estado → extraer_personalizacion → personalizacion_con_diseno →
+  desplegar_mesa → pikepdf.save` **con el GIL**: el chequeo de tipografía del camino B (389),
+  llamado apenas se entra al Arte —antes de que el hilo de fondo termine las páginas por
+  talle— armaba las 9 mesas EN EL HILO DEL REQUEST y en serie, en paralelo con el hilo de fondo
+  que hacía lo mismo por procesos. `pikepdf.save` no suelta el GIL, así que TODO el servidor
+  esperaba: por eso el visor tardaba en mostrar las piezas y nombrar costaba un minuto.
+  Arreglo, en tres capas:
+  1. `fuentes_estado` (camino B) **nunca construye**: si `PD.desplegado_listo()` es falso responde
+     `preparando: true` (sin fuentes) y el front re-pregunta cada 6 s hasta 2 min
+     (`_reintentoFuentes`). Lee los placeholders con `personalizacion_con_diseno(armar=False)`.
+  2. `personalizacion_con_diseno(armar=True)` y `ruta_desplegada(armar=True)` (lo que usa el
+     motor) construyen **por procesos** (`desplegar_molde`, una sola pasada por todas las mesas),
+     nunca en el hilo que llama.
+  3. **Un candado por molde** (`_candado(path)` en `desplegar_molde`): el segundo que necesita
+     las páginas ESPERA al que las está armando (el hilo de fondo de la subida) y al re-mirar las
+     encuentra hechas. Se acabó el doble trabajo.
+  4. La vista previa de piezas del Arte (`_piezas_base`) tampoco construye: si el molde no está
+     listo responde `preparando` y el front vuelve a pedir (sin cachear el vacío).
+  5. `_leer_desplegado` **no cachea una entrada sin páginas**: se guardaba en `_CONT_CACHE`
+     mientras el hilo de fondo las armaba y, como el sello del archivo no cambia, el servidor
+     decía «preparando» para siempre (el chequeo de tipografía re-preguntaba cada 7 s sin fin).
+  Después del arreglo, en frío: `/api/productos` 0,09-0,2 s, `deteccion_todas` 0,08 s,
+  `emparejado`/`etiqueta` 0,08 s; entrar a nombrar y ponerle nombre a una pieza: ~3-4 s de
+  servidor en total (antes, más de un minuto). Regla nueva para el mapa (§6 gotchas): **pikepdf y PyMuPDF
+  retienen el GIL — cualquier trabajo pesado con ellos va en un proceso, y nunca dentro de un
+  request**.
+- **2026-09-04 (391) — BUGS DEL PEDIDO CON MOLDE CON DISEÑO (la parte que toca configuración).**
+  Pedido del usuario: «repará los bugs que se generan en el pedido de moldes cargados con diseño;
+  hay varios que se bugean con la configuración». Se recorrió el flujo entero en el navegador
+  (subir → nombrar → volver → etiqueta → color del cliente → volver → requisitos) y esto es lo
+  que estaba roto y cómo quedó:
+  1. **Pantalla EN BLANCO al salir de la herramienta por la barra.** Desde nombrar/etiqueta
+     (`desdePedidoB` puesto), tocar «Pedidos» o «Configuración» en la barra dejaba todo vacío: el
+     pedido se oculta con `!desdePedidoB` y el panel de Configuración también, y nadie limpiaba
+     `desdePedidoB` salvo «← Volver al pedido». Ahora los dos botones llaman
+     `cerrarHerramientaB()` (cierra el modo nombrar, limpia `desdePedidoB`/`pendienteNombrarB`/
+     `empTodasData`, cierra la moldería y vacía `_talleDetCache`).
+  2. **El conteo de etiquetas era del molde anterior.** `etiquetaConfig` es UN solo estado y la
+     tarjeta del paso Arte sólo recargaba la detección: con dos moldes con diseño, «Etiqueta: N
+     de 9 ubicadas» y el botón «Ubicar la etiqueta» mostraban lo del molde que se miró antes. El
+     efecto de la tarjeta ahora trae `/api/productos/etiqueta` del molde elegido (fetch inline: la
+     const `cargarEtiqueta` se define más abajo y sumaría un use-before-define al tope de
+     `verificar_tdz.mjs`).
+  3. **La tipografía faltante NO contaba en el requisito «Cargar fuente».** Dos causas:
+     `cargarFuentesTodas` y `fuentesFaltantesItems` filtraban por `arteCargado[…]` (un molde con
+     diseño no tiene arte cargado → nunca se consultaba), y el efecto que dispara el chequeo
+     corría **antes de que llegara el catálogo** al recargar la página parado en el Arte (los
+     moldes no se reconocían como camino B y el activo era `prod_default`). Ahora los moldes con
+     diseño entran en las dos listas y el efecto depende también de `_idsCat`. Verificado:
+     «Tipografía (1)», 0/3, y el detalle por molde con «se va a sublimar con Anton — podés
+     avanzar igual».
+  4. **«Falta el arte de «X»» para un molde con diseño.** El requisito «Asignar arte» ya sabía que
+     en el camino B lo que falta es NOMBRAR (`_itemListo`), pero el texto decía «falta el arte».
+     Ahora: «Faltan nombrar las piezas de «X» · diseño «Y» (N sin nombre)».
+  5. **«Nombrar las piezas» abría la GRILLA de molderías del taller** («Molde 1», «Nueva
+     Moldería», «Volver al Panel de Configuración» — captura del usuario). `abrirNombrarB` /
+     `abrirEtiquetaB` ponían `adminSubView='productos'` y recién DESPUÉS de `await
+     handleActivarProducto()` (activar + recargar catálogo + estado) abrían la moldería: mientras
+     tanto se renderizaba la grilla, y si esa espera tardaba o fallaba el cliente quedaba ahí,
+     dentro del taller. Ahora la moldería y la pestaña se abren ANTES del await (`pidCfg` toma
+     `molderiaAbierta` explícito, no depende del activo del servidor), y además la rama de render
+     tiene guardia: con `desdePedidoB` puesto **nunca** se muestra la grilla — si el molde todavía
+     no está en el catálogo del navegador sale «Abriendo el molde…» con «← Volver al pedido».
+     Verificado en la ruta del cliente sondeando el DOM cada 100 ms durante la apertura: la
+     grilla no aparece ni un instante, ni para nombrar ni para la etiqueta.
+  6. **El pedido listaba los efímeros de OTROS usuarios** (un admin ve los de todos por
+     `molde.ver_todos`), y `irANombrarB` abría el primero sin nombrar aunque fuera ajeno.
+     `_mios` filtra `!p.de_otro` (los dos sitios).
+  7. **`limpiar_efimeros` («Nuevo pedido») borraba efímeros ajenos** — el pendiente del changelog
+     387. Ahora ignora todo molde con `creado_por` distinto del usuario actual.
+  8. **Carpetas huérfanas de 118 MB en `entrada/`** (la `prod_20260903_112000_55ad` y una de
+     prueba de hoy): `_borrar_molde_entero` hacía `rmtree(ignore_errors=True)`, que en Windows
+     falla EN SILENCIO si `plantilla.ai` está abierto un instante por el propio servidor (caché
+     de documentos, una detección en curso, el hilo de páginas). Medido: minutos después el
+     archivo se borraba sin problema — el bloqueo es transitorio. Ahora cierra los documentos
+     abiertos (`MP.cerrar_abiertos()`), reintenta 5 veces, y si sigue trabado reintenta en un
+     hilo hasta dos minutos; si aun así no puede, lo dice en el log con la carpeta.
+  Verificado que NO eran bugs: el molde activo es POR SESIÓN (`session["pid_activo"]`, no se
+  cruza entre usuarios); «Re-subir Plantilla» sigue en el DOM tras «Salir» pero con
+  `display:none` (no se ve); «Cambiar» talle guía en la herramienta anda (guarda `variante_guia`,
+  el lienzo sigue con las 180 piezas); ubicar + guardar la etiqueta y el color del cliente
+  funcionan de punta a punta (el molde queda cian, el admin sigue con el suyo).
+  ⚠️ Latente y preexistente (está en HEAD): `zdef` no está definido en el overlay de zonas
+  (`editZonas` es `false` constante → código muerto). Cuenta en el tope de `verificar_tdz.mjs`:
+  si alguien suma OTRO use-before-define, el build lo muestra a él aunque no tenga nada que ver.
+- **2026-09-04 (390) — LA PANTALLA DEL TALLER, REHECHA; Y TRES COSAS DE LA ETIQUETA PASAN AL
+  CLIENTE.** Pedido del usuario sobre la 389: «este campo hacerlo moderno, 100 % moderno, menos
+  palabras y más iconos» + «el color del texto y del contorno que lo pueda modificar el cliente,
+  igual que la alineación, en la etiqueta nomás».
+  **La pantalla** (`Configuración → Molde con diseño`): era una lista de labels y campos; ahora
+  son **tarjetas con icono** — Borde de corte · Etiqueta · Así sale · Planilla · Acomodo — con
+  interruptor en la cabecera de cada una, números con la unidad **adentro** (sin label aparte),
+  **segmented** para «fuera/centro/dentro» y para la alineación (◧ ◫ ◨), **chips** para qué
+  muestra la etiqueta, y la **muestra de color como control** (el CMYK va en el `title`).
+  «Guardar» y el aviso de «vale para N» suben a la cabecera. Y una tarjeta **«Así sale»**: la
+  pieza dibujada en vivo con su borde, su etiqueta, su halo y su alineación — reemplaza tres
+  párrafos por algo que se mira.
+  🔴 Los controles son **componentes de módulo** (`CfgCard`, `CfgNum`, `CfgSeg`, `CfgColor`,
+  `CfgChip`, `CfgSw`, `CfgPreview`), no helpers dentro del render: (1) definidos adentro, React
+  los remonta en cada tecleo y el input **pierde el foco**; (2) `verificar_diccionario.mjs` sólo
+  ve el ancla en el JSX (`data-tour="x"` / `ancla="x"`) — pasarla como argumento a un helper la
+  dejaba invisible para el tutorial, que es justamente quien la necesita. 8 entradas nuevas en el
+  diccionario; las tarjetas (contenedores) van sin ancla.
+  **Los tres campos del cliente** (`_ETQ_CLIENTE = ("color", "borde_color", "align")`): el admin
+  sigue fijando el punto de partida, y el molde manda **sólo si el cliente los tocó** —
+  `_etiqueta_de` mira `prod["etiqueta"]` **crudo** (no el ya mezclado con los defaults: si no, el
+  default del sistema ganaría siempre y lo del admin no se vería nunca). `set_etiqueta` los
+  acepta en camino B junto con `posiciones`/`piezas_off`/`zonas`. En la pantalla del pedido se
+  apaga **bloque por bloque** lo que decide el taller, no con un envolvente: la opacidad de un
+  padre no se puede revertir en el hijo y `pointer-events: none` se hereda. Verificado por API:
+  el cliente cambia color/halo/alineación y quedan; el `size_mm`, el `mostrar` y el `activo` que
+  mande se **ignoran** y siguen los del taller.
+- **2026-09-04 (389) — LA PANTALLA DEL TALLER, COMPLETA; Y LA TIPOGRAFÍA DEL «00»/«NOMBRE»
+  AVISA.** Dos pedidos del usuario: (a) «no me agregaste un espacio para configurar desde admin
+  ese tipo de cosas: qué plantilla le asignaremos, el color de etiqueta, color de borde, etc.,
+  **sin tener el molde cargado**»; (b) «si la fuente del nombre y el 00 no la detecta, que
+  funcione como la otra parte: que dé un aviso y puedas cargarla o cambiarla por una nuestra, y
+  si no, que use la predeterminada».
+  **(a)** La pantalla ya existía (`Configuración → Molde con diseño`, `adminSubView ===
+  'con_diseno'`, es global: no necesita ningún molde cargado) pero estaba a medias: sólo grosor y
+  alineación del borde, tamaño/separador/qué muestra de la etiqueta, y el nesting. Le faltaba
+  **todo lo que el usuario nombró**. Ahora tiene: **color del borde de corte**; de la etiqueta,
+  **alineación, color del texto, color del halo, grosor del halo** y el interruptor del halo; y
+  la **planilla del pedido** — `config_con_diseno.planilla_template_id`, que `subir_plantilla`
+  le aplica a TODO molde con diseño al confirmarse el camino (no en `crear_producto`: ahí
+  todavía no se sabe si el archivo trae el diseño adentro). Los colores usan el mismo
+  `ColorPickerModal` CMYK del resto. `_ETQ_FORMA` ya incluía `align`/`color`/`borde_*`, así que
+  el motor los toma sin tocar nada más. Verificado: guardar y releer devuelve los valores, y un
+  molde subido después queda con la planilla configurada.
+  **(b)** `GET /api/pedido/fuentes_estado` miraba **el arte**, que en el camino B no existe → el
+  paso Arte decía «Cargar fuente ✓» aunque la tipografía del archivo no estuviera en el catálogo,
+  y la prenda salía con la de reemplazo **sin avisar**. Ahora, para un molde del camino B, las
+  fuentes requeridas salen de los **placeholders del desplegado** (`extraer_personalizacion`,
+  incluido el `por_talle`). Todo lo demás ya servía tal cual: el modal lista el catálogo para
+  cambiarla, `POST /api/pedido/fuente_resolver` sube la del diseño o guarda el reemplazo **del
+  pedido**, y el motor cae a Anton si no hay nada. Verificado en la pantalla con el archivo real:
+  «Tipografía (1)» en amarillo, «No se encontraron las fuentes: MoreFont1-CL», elegir una del
+  catálogo la saca de faltantes. Contrato: `verificar_placeholders_con_diseno.py` §5 (el
+  reemplazo cambia lo estampado).
+- **2026-09-04 (388) — LA HERRAMIENTA, SIN ENTRAR A CONFIGURACIÓN; Y LAS PIEZAS EN EL ORDEN DEL
+  ARCHIVO.** Dos correcciones del usuario sobre la 387, con captura: (a) «¿te parece a vos que
+  están así ordenadas las piezas? mirá el PDF»; (b) «que use la misma herramienta, pero **no debe
+  entrar a ajustes reales: a ese espacio no puede tener acceso el cliente**».
+  **(a) El acomodo del visor: NO SE ACOMODA NADA.** Aclaración del usuario en la misma tanda, con
+  las dos capturas al lado: «que respete cómo viene en el archivo… **no hablo de las mesas sino de
+  los objetos: que no separe los que están uno arriba del otro. Todos los frentes están juntos,
+  que los deje así — ya están en diferente capa**». Los talles vienen dibujados **uno encima del
+  otro** (la gradación anidada) y así tienen que verse; se distinguen por su CAPA (el ojito de la
+  columna de talles), no por su posición. Lo ÚNICO que se acomoda son las **mesas**, y sólo porque
+  el PDF las guarda todas en el mismo lugar (medido: las 9 páginas arrancan en (0,0)).
+  Implementación: **`acomodo_mesas(por_mesa)`** calcula, con la unión de TODOS los talles, la caja
+  de cada mesa y su lugar en filas tipo estante, en el orden del archivo, con el ancho de fila que
+  deja el lienzo más parecido a 16:9. Se calcula **una sola vez** y se le pasa a todos los talles
+  (`layout_visor(..., acomodo=)`): si se calculara por talle, el molde se movería al cambiar de
+  talle. Dentro de la mesa, cada pieza queda donde el archivo la puso — el recorte que se le pasa a
+  `_item_visor` es el de la MESA, no el de la pieza. `visor_junto` ya no acomoda nada: los talles
+  comparten lienzo, sólo los concatena. Los dos devuelven **`formato: "anidado"`** y el front no
+  dibuja el rótulo por talle (caerían los 20 en el mismo lugar); `canvasLayout.filas` se fue.
+  Verificado en pantalla: se ve la gradación (espalda con sus 20 talles anidados, frente igual,
+  mangas, tiras), 0 piezas que se pisen **dentro de un talle**, y tocar la pila nombra la pieza en
+  los **20 talles** de una.
+  ⚠️ Un molde subido ANTES de esto conserva su `visor_contornos.json` con el acomodo viejo (se ve
+  chico y separado): se corrige al volver a subirlo. Los efímeros duran un pedido, así que se
+  arregla solo.
+  **(b) La herramienta sin Configuración.** `abrirNombrarB`/`abrirEtiquetaB` ya **no hacen
+  `setActivoTab('config')`**: el espacio de trabajo del molde se renderiza desde la pestaña
+  **Pedidos** (`{(activoTab === 'config' || desdePedidoB) && …}`, y el pedido se tapa con
+  `activoTab === 'pedidos' && !desdePedidoB`). Con `_soloHerramienta` (= `!!desdePedidoB`) quedan
+  fuera **todos** los accesos al espacio del taller: el menú de ajustes, «⬅ Volver a ajustes»,
+  «Re-subir Plantilla», «Nombrar talles» (`NombrarVariantes`, que reescribe las capas del
+  archivo), «Agregar una pieza» y la ayuda de exportación. Queda el visor, la herramienta, el
+  talle de guía y «← Volver al pedido», con un subtítulo que dice qué se está haciendo. 🔴 No es
+  sólo estética: el deep-link a `activoTab='config'` **renderizaba la pantalla de configuración a
+  alguien sin `config.ver`** (el permiso gatea el botón del menú, no el render).
+  **Y el orden en las listas de la etiqueta**: `et["piezas"]` y `_etq_piezas_del_molde` van sin
+  ordenar para el camino B → «Espalda, Frente, Manga, Cuello, Costadillo, Tira» (archivo), no
+  alfabético. Verificado en el navegador de punta a punta: nombrar 9 piezas, la lista de la
+  etiqueta en orden, y ningún botón que lleve a los ajustes.
+- **2026-09-04 (387) — CAMINO B: NOMBRAR Y ETIQUETA CON LAS PANTALLAS DE CONFIGURACIÓN, «00» /
+  «NOMBRE» POR TEXTO, Y EL CUELGUE DEL SERVIDOR.** Tres pedidos del usuario: (1) «el nombrar
+  piezas del molde con diseño tiene que ser exactamente la misma herramienta que usa Moldería»,
+  (2) «lo mismo la etiqueta», (3) «el archivo trae el número como 00 y el nombre como NOMBRE: se
+  detectan y se les pone el valor de la columna número y nombre; y las piezas en el orden del
+  archivo». La versión propia del pedido de la 386 (lienzo junto, recuadro, homólogas) queda
+  sin uso en el pedido; el lienzo junto (`visor_junto`) pasó a servir a Moldería.
+  **(1) Nombrar = Moldería.** Desde el pedido, «Nombrar las piezas» (`abrirNombrarB`) activa el
+  molde y abre Configuración → Moldería con el modo «nombrar» prendido (efecto
+  `pendienteNombrarB`: `activarEmparejar` lee el molde ACTIVO, así que se prende recién cuando
+  la pantalla está sobre ese molde), con **«← Volver al pedido»** (`desdePedidoB`,
+  `volverAlPedidoB`: cierra, vuelve al paso Arte y recarga nombres y etiqueta). Para que esa
+  herramienta funcione con el camino B: `GET /api/plantilla/emparejado` devuelve
+  `_emparejado_camino_b` (guía, talles, `nombres_guia` por `pieza_idx` del guía —sin los
+  provisorios «Pieza N», que para la pantalla son «sin nombre»—, `asignacion` completa y todo en
+  `manual`: no hay pendientes), `POST grupo_pieza` en camino B es **renombrar** la pieza
+  (`PD.renombrar` por mesa + idx_mesa; `eliminar` = volver a un provisorio libre), `POST
+  emparejado` es no-op, y `deteccion_todas` devuelve `visor_junto` con **`t_idx` = pieza_idx**
+  (el contrato del lienzo junto: «su índice dentro del talle»; el índice dentro de la mesa va en
+  `idx_mesa`). En el front, `crearGrupoTodas` con `empData.origen === 'con_diseno'` nombra cada
+  pieza seleccionada por su `t_idx` sin exigir la del guía (`sinGuia` no aplica), y `_postGrupo`
+  vuelve a pedir el lienzo junto (trae los nombres del registro). Moldería esconde «Agregar una
+  pieza» y «Acomodar piezas» para el camino B (no aplican).
+  **(2) Etiqueta = la pestaña Etiqueta.** `abrirEtiquetaB` abre `tabAjustesMolde='etiqueta'`
+  (+ `cargarEtiqueta(pid)`/`cargarBorde()`, lo que hace el menú). Para el camino B la sección de
+  FORMA (mostrar, qué muestra, tamaño, color, borde) se ve pero no se edita —es la config viva
+  del taller, `set_etiqueta` sólo toma posiciones— con una nota que lo dice. Las listas de piezas
+  (`et["piezas"]`, `_etq_piezas_del_molde(ordenar=False)`) van en el **orden del archivo** para
+  el camino B. 🔴 `abrirEtiquetaB`/`abrirNombrarB`/`volverAlPedidoB` limpian `empTodasData`: la
+  pestaña filtra el lienzo junto POR NOMBRE y con el lienzo de antes de nombrar (nombres en
+  blanco) el visor salía vacío — pasó. El panel del pedido quedó en dos botones + estado
+  (`panelNombrarJSX`), sin el nombrado propio.
+  **(3) «00» y «NOMBRE» por texto.** `piezas_con_diseno.quitar_placeholders` corre en la etapa de
+  páginas del desplegado, sobre las instrucciones de cada talle: decodifica cada `Tj`/`TJ` con la
+  codificación de la fuente (`_decodificador`: WinAnsi + `/Differences`; ToUnicode para Type0)
+  —⚠️ el «00» de este archivo viene como `\x1f\x1f` con `/Differences [31 /0]` y PyMuPDF lo
+  descarta como control—, y si dice «00»/«NOMBRE» guarda `cx`/`baseline_y` (dispositivo, como
+  `bbox_mu`, con `marco`+`U` que ahora deja la etapa de contornos en el JSON), `size`, `fuente`,
+  `ancho` (por `/Widths`), `colorn` y `pasadas` (relleno/trazo nativos en orden) y **saca el
+  operador del dibujo**. Queda en `m{mesa}.json["placeholders"][talle][campo]`;
+  `personalizacion_con_diseno` lo arma como `pers` con `por_talle` y `generar_pieza` toma el del
+  talle (cada talle tiene su «00» a su tamaño). `extraer_personalizacion` para el camino B ya no
+  mira capas. Verificado: mesa 1 talle M → nombre 200 pt, número 1150 pt, dos pasadas (negro,
+  blanco); la pieza generada con «Jugador / 10» estampa JUGADOR y 10 en vector y no queda
+  «NOMBRE» ni «00» como texto (`scratchpad/prueba_pers.py`, render `pieza_pers.png`).
+  **EL CUELGUE (visto con py-spy).** Al abrir Moldería, el acordeón «Nombrar talles» pide
+  `GET /api/plantilla/variantes` → `variantes_molde.analizar` → `get_drawings()` del molde
+  ENTERO dentro del servidor, con el GIL: 4,5 GB, 690 s de CPU y el servidor sin aceptar
+  conexiones (`curl` 000, `ERR_CONNECTION_REFUSED`) durante minutos. Pasó dos veces antes de
+  encontrarlo. FIX: para el camino B el endpoint responde con los talles del registro sin abrir
+  el archivo. **Regla:** en un molde de 123 MB, cualquier `get_drawings()` del archivo entero
+  dentro de un request cuelga el servidor; se busca con `py-spy dump --pid` (ahora instalado).
+  Quedan otros dos puntos que abren el archivo (`_falta_nombrar_variantes`, `agregar pieza`) que
+  el camino B no toca. También: los `print` del servidor lanzado con `nohup` se perdían por el
+  buffer (`PYTHONUNBUFFERED=1` al lanzar). Y **la 386 de ayer sí borró un efímero del usuario**:
+  «Nuevo pedido» desde la sesión de prueba mandó a `limpiar_efimeros` los moldes del pedido
+  anterior del navegador, y uno era el «CAMISETA JUGADOR» del taller (efímero, 24 h de vida;
+  sin nombres puestos) — el endpoint no mira dueño. Anotado para el usuario.
 - **2026-09-03 (386) — LA SUBIDA DEL CAMINO B RESPONDE EN 26 s (era 64), Y NOMBRAR / ETIQUETA COMO
   EN MOLDERÍA.** Reporte: «cargué el archivo y demoró 1 minuto en cargarlo y detectar las piezas»
   + «nombrar las piezas y la etiqueta debe ser tal cual la configuración: primero nombramos todas

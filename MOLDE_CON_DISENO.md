@@ -82,23 +82,52 @@ una camiseta con el diseño adentro y un short del catálogo con su arte van a l
    camiseta de un short cuando la planilla lleva «Talle» y «Talle short». 🔴 Sin esto el short
    tomaría el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
    (Se guarda en `mapeo_columnas.talle` del molde, que es de donde el motor ya lo lee.)
-4. **Nombra las piezas, con TODOS los talles a la vista** (regla del usuario 2026-09-03: «tal cual
-   la configuración: primero nombramos todas las piezas de todos los talles»). El visor muestra el
-   lienzo de **los 20 talles en grilla** (una caja por talle, con su nombre), como la vista «todas
-   las variantes juntas» de Moldería. La columna de la izquierda tiene un **ojo por talle** (y uno
-   general). Tocar una pieza elige **sus homólogas en todos los talles** de una (en este camino la
-   correspondencia es exacta: misma mesa, mismo índice); también hay **arrastre de recuadro**, y
-   con Shift el arrastre es pan. Se escribe **un** nombre y se nombran todas — si son varias se
-   numeran solas («Tira» → «Tira 1», «Tira 2»), y aunque la selección traiga la pieza 20 veces se
-   renombra **una vez** por pieza. El visor abre **al instante** (§0.a) y muestra **sólo
-   contornos**: ni un trazo del diseño.
-5. Con todo nombrado, **elige el talle guía** (la misma columna, ahora dice «Talle guía») y **marca
-   dónde va la etiqueta** tocando el borde de cada pieza sobre ese talle. La posición es relativa
-   al contorno: vale para todos los talles.
+4. **Nombra las piezas con LA HERRAMIENTA DE MOLDERÍA** (regla del usuario 2026-09-04:
+   «exactamente la misma herramienta que nombrar pieza en configuración» — y, en la misma tanda:
+   «pero **no debe entrar a ajustes reales: a ese espacio no puede tener acceso el cliente**»).
+   «Nombrar las piezas» abre **esa misma pantalla dentro del pedido**: el lienzo de **los 20
+   talles** (cada talle en una fila, las piezas en el orden del archivo), la columna de talles con
+   ojito, selección por clic o recuadro, el campo «Frente, Espalda, Manga…» y ✓. En este camino no
+   hace falta tocar la pieza del talle guía: la pieza *i* es la misma en todos los talles, así que
+   cualquiera que toques la nombra en todos. Los provisorios «Pieza N» cuentan como «sin nombre»
+   (0/9 nombradas). **«← Volver al pedido»** vuelve al paso Arte con los nombres frescos.
+   🔴 **Lo que el cliente NO ve** (`_soloHerramienta`): el menú de ajustes, «volver a ajustes»,
+   re-subir el molde, «nombrar talles», «agregar una pieza» y la ayuda de exportación. Nunca se
+   cambia de pestaña: la pantalla se renderiza desde **Pedidos**.
+5. Con todo nombrado, «Ubicar la etiqueta» abre **la herramienta de la pestaña Etiqueta**, también
+   dentro del pedido: la lista de piezas (en el **orden del archivo**), el talle guía y los ojitos
+   por talle, «Aplicar a todas», y el visor donde se toca el borde de cada pieza. La **forma** de
+   la etiqueta (qué muestra, tamaño, color, borde) se ve pero no se edita: es la config viva del
+   taller (`Configuración → Moldes con diseño`) y el servidor sólo toma las posiciones. «Guardar
+   etiqueta» y «← Volver al pedido». Del panel puede cambiar además el **color del texto**, el
+   **color del halo** y la **alineación** (lo demás se ve apagado: lo decide el taller).
+   📐 **Cómo se ve el molde en el visor: TAL CUAL EL ARCHIVO.** Los talles vienen dibujados **uno
+   encima del otro** (la gradación) y así se muestran — no se separan ni se acomodan: ya se
+   distinguen por su capa (el ojito de la columna de talles). Dentro de cada mesa, cada pieza
+   queda donde el archivo la puso. Lo único que se acomoda son las **mesas**, porque el PDF las
+   guarda todas en (0,0) (medido): `acomodo_mesas` les da su lugar en filas, en el orden del
+   archivo, **una sola vez para todos los talles** — si se calculara por talle, el molde se
+   movería al cambiar de talle. Tocar una pieza (que es la pila de sus 20 talles) la nombra en
+   todos.
 6. Telas, planilla y tizada: **iguales que en el otro camino**.
 
-**Lo que NO hace el cliente** (lo deja configurado el admin, una vez): grosor y color del **borde
-de corte**, tamaño y tipografía de la **etiqueta**, separación y márgenes del **nesting**.
+**Lo que NO hace el cliente** — lo deja el taller **una vez** en `Configuración → Molde con
+diseño` (es global: no hace falta tener ningún molde cargado):
+
+| | |
+|---|---|
+| **Borde de corte** | grosor, de qué lado del contorno, **color**, y si se dibuja |
+| **Etiqueta** | tamaño de letra, separador, qué muestra (talle · pieza · número), grosor del halo y si va. La **alineación**, el **color del texto** y el **color del halo** se fijan acá como punto de partida, pero **el cliente los puede cambiar en su molde** (`_ETQ_CLIENTE`) |
+| **Planilla del pedido** | las columnas del Excel que se le ponen a TODO molde con diseño al subirlo (`config_con_diseno.planilla_template_id`) |
+| **Nesting** | con qué regla (separación, margen, giro) se acomodan estas piezas |
+
+Es **viva**: cambiarla afecta también a los moldes ya cargados (la pantalla lo avisa).
+
+🔤 **La tipografía del «NOMBRE» y el «00»**: si la del archivo no está en el catálogo, el paso Arte
+lo avisa igual que en el camino de siempre («Tipografía (1)» en amarillo) y desde ahí se puede
+**cargarla** o **cambiarla por una nuestra**. Si no se hace nada, la prenda sale con la
+predeterminada (Anton). Las fuentes que se piden salen de los placeholders del desplegado
+(`fuentes_estado` tiene su ramal camino B: sin arte no había nada que mirar y no avisaba).
 
 **Cómo se ve** (2026-09-03): las dos formas son **dos tarjetas mitad y mitad** que ocupan el
 espacio libre —es LA decisión de esa pantalla— con un color sutil del sistema cada una (cian /
@@ -144,15 +173,20 @@ comprobó: sus selectores no están en el bundle. Escribir ahí compila sin erro
 |---|---|---|
 | **Una capa por talle** | `0 1 2 4 …` / `XS S M …` | de ahí salen los talles; es el mismo formato de la plantilla de hoy |
 | **Cada pieza dentro de su máscara de recorte** | como la exporta Illustrator | la máscara **es** el contorno de la pieza: no se reconstruye, se lee |
-| **Una capa `nombre` y una capa `00`** | pueden ser **subcapas**, y pueden estar **dentro de la máscara de recorte** | son los placeholders que se reemplazan por el nombre y el número de cada prenda |
+| **El texto «00» donde va el número y «NOMBRE» donde va el nombre** (2026-09-04) | como TEXTO, dentro de la pieza de cada talle, con su fuente, tamaño y color (y su apariencia: relleno, borde) | son los placeholders: se detectan **por texto** y se reemplazan por el valor de las columnas `numero` y `nombre` de la planilla, talle por talle, con la fuente y el color del archivo. Ya no importa la capa |
+| ~~Una capa `nombre` y una capa `00`~~ | (criterio anterior, superado) | ~~son los placeholders que se reempla~~zan por el nombre y el número de cada prenda |
 
-🔴 **Sin las capas `nombre` y `00` la tizada SALE IGUAL, con el texto del diseño en todas las
-prendas.** No hay error, no hay aviso: 40 camisetas con el mismo «NOMBRE». Por eso el requisito
-está escrito acá y lo cuida `verificar_personalizacion_con_diseno.py`.
-El rótulo `00` se traduce solo al campo `numero` (`_CAMPO_ALIAS` en `motor_pedido.py`): el
-estampado busca `persona[campo]` **por el nombre de la capa**, y la prenda trae `nombre` y
-`numero` — una capa rotulada `00` apuntaría a un campo que no existe. También se aceptan `nro`,
-`num`, `jugador` y `apellido`. ⚠️ `0` **no** es alias de nada: en estos moldes es un TALLE.
+🔴 **Sin los textos «00» y «NOMBRE» la tizada SALE IGUAL, con el texto del diseño en todas las
+prendas.** No hay error, no hay aviso. Por eso el requisito está escrito acá y lo cuida
+`verificar_personalizacion_con_diseno.py`.
+Cómo se leen (`piezas_con_diseno.quitar_placeholders`, en la etapa de páginas del desplegado): se
+decodifica cada texto del content-stream con la codificación de su fuente —⚠️ el «00» del archivo
+real viene como código 31 con `/Differences [31 /0]` y PyMuPDF no lo lee—; si dice «00» o
+«NOMBRE» se guarda posición, tamaño, fuente, color nativo y pasadas de apariencia
+(`m{mesa}.json["placeholders"]`) y **se saca del dibujo**. El motor (`generar_pieza`) usa el
+placeholder **del talle** (`por_talle`): cada talle tiene el suyo a su tamaño. La fuente del
+archivo tiene que estar en el catálogo (si no, Anton como siempre). El criterio anterior por
+CAPAS (`_CAMPO_ALIAS`) queda sin uso en el camino B.
 
 ---
 
@@ -657,6 +691,71 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
 
+- **2026-09-04 quater (el servidor congelado un minuto)** — Ver changelog 392 del mapa. Lo que
+  se aprendió:
+  · 🔴 **pikepdf y PyMuPDF retienen el GIL.** Cualquier trabajo pesado con ellos dentro de un
+    hilo del servidor (un request, o un `threading.Thread` «de fondo») congela TODOS los
+    requests. Va en un proceso (`ProcessPoolExecutor`) o no va. El hilo de fondo sólo debe
+    ESPERAR procesos.
+  · **«Si falta, lo armo acá» es una trampa dentro de un request**: parece cómodo y es lo que
+    congeló todo. Un request responde «preparando» y el front re-pregunta; construye sólo el
+    que tiene que construir (el hilo de fondo por procesos, o el motor de la tizada).
+  · **Un candado por recurso** cuando dos caminos pueden construir lo mismo: el segundo espera y
+    encuentra hecho. Sin eso hubo doble trabajo y un `m1.json.tmp → m1.json` con «Acceso
+    denegado» (dos escritores).
+  · **Un caché de «todavía no está» es un caché que miente**: si la clave no cambia cuando la
+    cosa aparece, el caché lo esconde para siempre. No cachear la ausencia.
+  · **py-spy es la herramienta**: `py-spy dump --pid <servidor>` mostró el hilo culpable en un
+    segundo, cuando el log no decía nada.
+- **2026-09-04 ter (los bugs del pedido con la configuración)** — Ver changelog 391 del mapa. Lo
+  que se aprendió:
+  · **Todo estado que «tapa» una pantalla necesita TODAS sus salidas.** `desdePedidoB` oculta el
+    pedido y el panel de configuración a la vez; con una sola salida («← Volver al pedido»), la
+    barra dejaba la app en blanco. Al agregar un modo así, listar cada botón que cambia de
+    pantalla y hacer que lo cierre.
+  · **Un estado único por pantalla (`etiquetaConfig`) se desactualiza al cambiar de molde**: lo
+    que lo lea tiene que recargarlo al elegir otro molde, o muestra lo del anterior.
+  · **Los filtros «por arte cargado» excluyen al camino B sin querer** (`arteCargado[…]`): cada
+    vez que algo se filtre así, preguntarse qué pasa con un molde que trae el diseño adentro.
+  · **Un efecto que corre al montar puede correr ANTES de que llegue el catálogo**: si decide
+    algo según `productosCat`, tiene que depender de él (`_idsCat`).
+  · **Nunca dejar una pantalla intermedia visible detrás de un `await`.** Abrir la moldería
+    DESPUÉS de esperar al servidor mostraba la grilla del taller mientras tanto; si la espera
+    fallaba, el cliente quedaba adentro de Configuración. Primero el estado que define la
+    pantalla, después la espera — y una guardia en el render por si igual falta algo.
+  · **«Los míos» no es «los que veo»**: un admin ve los efímeros de todos; el pedido tiene que
+    filtrar por dueño (`de_otro`) o abre y nombra moldes ajenos.
+- **2026-09-04 bis (la herramienta sin Configuración, y el orden del archivo)** — Ver changelog
+  388 del mapa. Lo que se aprendió:
+  · **«La misma herramienta» y «que no entre a los ajustes» son compatibles**: se renderiza la
+    MISMA pantalla desde la pestaña Pedidos y se apaga todo lo que es del taller
+    (`_soloHerramienta`). El deep-link anterior encima le mostraba Configuración a alguien sin
+    permiso `config.ver` — el permiso gatea el botón del menú, no el render.
+  · 🔴 **«Que respete cómo viene» era literal: NO ACOMODAR.** Dos intentos fallidos antes de
+    entenderlo —grilla compacta por talle, después una fila por talle— y los dos partían de la
+    misma idea equivocada: que había que *acomodar* las piezas. No. Los talles vienen encimados
+    (la gradación) y así se muestran; se distinguen por la CAPA. Lo único que se acomoda son las
+    mesas, y sólo porque el PDF las guarda todas en (0,0). **Cuando el usuario dice «tal cual el
+    archivo», la respuesta correcta suele ser sacar código, no agregar otro acomodo.**
+  · **El acomodo de las mesas se calcula una vez con todos los talles**: por talle, el molde se
+    movería al cambiar de talle en el visor.
+- **2026-09-04 (las pantallas de configuración, «00»/«NOMBRE» por texto, y el cuelgue)** — Ver
+  changelog 387 del mapa. Lo que se aprendió:
+  · **«La misma herramienta» quiere decir la misma pantalla, no una parecida.** La versión propia
+    del pedido (386) se reemplazó por abrir Moldería y la pestaña Etiqueta con «← Volver al
+    pedido». Lo que hubo que hacer fue que los endpoints de esa herramienta entendieran el
+    camino B (`emparejado`, `grupo_pieza`, `variantes`, `deteccion_todas`), no copiar la UI.
+  · **El «00» no se ve con PyMuPDF.** Viene como código 31 con `/Differences [31 /0]`; hay que
+    decodificar el content-stream con la codificación de la fuente. Se detecta por texto, en la
+    etapa de páginas, y se saca del dibujo ahí mismo.
+  · **Un `get_drawings()` del archivo entero dentro de un request cuelga el servidor** (GIL,
+    4,5 GB, minutos): `py-spy dump` lo mostró en `/api/plantilla/variantes`. Antes de dar por
+    «colgado» un servidor, mirar la pila.
+  · **`nohup` sin `PYTHONUNBUFFERED=1` se come los prints** hasta que el proceso muere: los
+    «[camino B] …» del log no aparecían.
+  · ⚠️ **«Nuevo pedido» desde otra sesión borra los efímeros del pedido que había en ESE
+    navegador**, sean de quien sean (`limpiar_efimeros` no mira dueño). Se llevó el efímero del
+    taller de ayer. Pendiente: filtrar por dueño en ese endpoint.
 - **2026-09-03 (segunda tanda: la subida en 26 s, y nombrar / etiqueta como en Moldería)** — Ver
   changelog 386 del mapa. Lo que se aprendió:
   · **No adivinar lo que el usuario ya dijo.** 12,5 s de cada subida eran mirar dos mesas para

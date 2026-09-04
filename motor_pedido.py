@@ -4458,6 +4458,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 sp = H / ha                        # escala uniforme (alto manda)
                 aw_arte = wa * sp                  # ancho del arte ya escalado
             for campo, pl in ph.items():           # N campos: nombre, numero, palabra, numero 2, …
+                # CAMINO B: cada talle trae su propio «00»/«NOMBRE», a su tamaño y en su lugar
+                # (`por_talle`, ver `piezas_con_diseno.personalizacion_con_diseno`).
+                pl = (pl.get("por_talle") or {}).get(str(talle)) or pl
                 texto = str(persona_n.get(_norm_nombre(campo), "")).strip().upper()
                 if texto == "":
                     continue

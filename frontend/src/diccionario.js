@@ -229,16 +229,6 @@ export const DICCIONARIO = {
     que: 'Las piezas que trae el archivo, con su miniatura y su medida. Las que todavía dicen «sin nombre» son las que falta identificar: el nombre es lo que hace que después funcionen la etiqueta, las telas y la manga corta o larga.',
     como: 'Tocá la pieza que querés nombrar.',
   },
-  'pieza-b-nombre': {
-    nombre: 'Nombre de la pieza',
-    que: 'Cómo se llama la pieza que elegiste: Frente, Espalda, Manga Corta… Es el nombre con el que la vas a ver en la etiqueta de corte y en el panel de telas.',
-    como: 'Escribí qué es esa pieza y apretá Enter.',
-  },
-  'pieza-b-asignar': {
-    nombre: 'Poner el nombre',
-    que: 'Guarda el nombre en la pieza elegida, en todos los talles de una vez.',
-    como: 'Tocá para guardar el nombre.',
-  },
   'etqb-piezas': {
     nombre: 'Ubicar la etiqueta',
     que: 'La segunda tarea, cuando ya están todas las piezas nombradas: marcar en qué parte del borde de cada pieza sale impresa la etiqueta de corte (el talle, el nombre y el número). El tamaño y la tipografía los deja configurados el taller.',
@@ -284,6 +274,16 @@ export const DICCIONARIO = {
     que: 'Vuelve a elegir cómo armar el trabajo. Los moldes que ya subiste quedan cargados.',
     como: 'Tocá para volver.',
   },
+  'pieza-b-nombrar': {
+    nombre: 'Nombrar las piezas',
+    que: 'Abre la Moldería de este molde con la herramienta de nombrar de Configuración: todos los talles a la vista, tocás las que son la misma pieza y escribís qué es. Con «← Volver al pedido» seguís acá.',
+    como: 'Tocá el botón. En Moldería, tocá o encerrá con un recuadro las piezas y escribí el nombre.',
+  },
+  'volver-pedido-b': {
+    nombre: 'Volver al pedido',
+    que: 'Cierra la pantalla de configuración y vuelve al paso Arte del pedido con los nombres y la etiqueta ya guardados.',
+    como: 'Tocá «← Volver al pedido».',
+  },
   'pedido-volver-inicio': {
     nombre: 'Volver al inicio',
     que: 'Vuelve a la pantalla de las dos formas de armar el trabajo (con base, o cargando un molde con diseño). Lo que ya elegiste queda.',
@@ -324,6 +324,61 @@ export const DICCIONARIO = {
     que: 'La altura de la letra, en milímetros, del texto que se imprime al borde de cada pieza (talle, nombre y número).',
     como: 'Escribí el tamaño de letra en milímetros.',
   },
+  'cfgb-borde-on': {
+    nombre: 'Dibujar el borde de corte',
+    que: 'Si las piezas de estos moldes salen con la línea de corte alrededor o sin ella.',
+    como: 'Tocá el interruptor.',
+  },
+  'cfgb-borde-color': {
+    nombre: 'Color del borde de corte',
+    que: 'El color CMYK de la línea de corte que rodea cada pieza.',
+    como: 'Tocá la muestra y elegí el color.',
+  },
+  'cfgb-etq-on': {
+    nombre: 'Poner etiqueta',
+    que: 'Si las piezas llevan impreso el rótulo con el talle, el nombre de la pieza y el número de prenda.',
+    como: 'Tocá el interruptor. Apagado, ninguna pieza de estos moldes lleva etiqueta.',
+  },
+  'cfgb-etq-mostrar': {
+    nombre: 'Qué dice la etiqueta',
+    que: 'Las tres partes del rótulo: el talle, el nombre de la pieza y el número de prenda. Se prenden y apagan por separado.',
+    como: 'Tocá cada chip para incluirlo o sacarlo.',
+  },
+  'cfgb-etq-sep': {
+    nombre: 'Separador de la etiqueta',
+    que: 'El carácter que va entre el talle, el nombre de la pieza y el número de prenda del rótulo.',
+    como: 'Escribí el separador (hasta 3 caracteres).',
+  },
+  'cfgb-etq-color': {
+    nombre: 'Color del texto de la etiqueta',
+    que: 'El color CMYK con el que se imprime el rótulo. El cliente lo puede cambiar en su molde.',
+    como: 'Tocá la muestra y elegí el color.',
+  },
+  'cfgb-etq-halo-color': {
+    nombre: 'Color del halo',
+    que: 'El color del contorno que rodea al texto de la etiqueta y lo hace legible sobre un diseño con mucho dibujo. El cliente lo puede cambiar en su molde.',
+    como: 'Tocá la muestra y elegí el color.',
+  },
+  'cfgb-etq-halo-on': {
+    nombre: 'Dibujar el halo',
+    que: 'Si el texto de la etiqueta lleva contorno alrededor o va limpio.',
+    como: 'Tocá el interruptor.',
+  },
+  'cfgb-etq-align': {
+    nombre: 'Alineación de la etiqueta',
+    que: 'De qué lado del punto que marca el cliente se escribe el texto de la etiqueta: a la izquierda, centrado o a la derecha.',
+    como: 'Elegí una de las tres. Vale para todos los moldes con diseño.',
+  },
+  'cfgb-etq-halo-mm': {
+    nombre: 'Grosor del halo',
+    que: 'El ancho, en milímetros, del contorno que rodea al texto de la etiqueta. El halo es lo que hace que se lea sobre un diseño oscuro o con mucho dibujo.',
+    como: 'Escribí el grosor en milímetros. Con 0 (o apagando «Dibujar el halo») el texto va sin contorno.',
+  },
+  'cfgb-planilla': {
+    nombre: 'Planilla de estos moldes',
+    que: 'Las columnas del Excel (talle, nombre, número…) que se le ponen a todo molde con diseño al subirlo. El cliente no la elige: la deja el taller acá.',
+    como: 'Elegí una de las planillas armadas en «Columnas de la planilla». Vale para los moldes que se suban de ahora en más.',
+  },
   'cfgb-nesting': {
     nombre: 'Cómo se acomodan en la tela',
     que: 'Qué regla de nesting —separación entre piezas, margen y giros— se usa para acomodar estos moldes. Las reglas se crean en «Reglas de Nesting».',
@@ -333,11 +388,6 @@ export const DICCIONARIO = {
     nombre: 'Guardar la configuración',
     que: 'Guarda estos valores para TODOS los moldes con diseño, incluidos los que ya están cargados: una tizada hecha antes del cambio y otra después salen distintas.',
     como: 'Tocá para guardar.',
-  },
-  'etqb-guardar': {
-    nombre: 'Guardar dónde va la etiqueta',
-    que: 'Guarda en el molde la posición que marcaste en cada pieza. Las que no toques llevan la etiqueta abajo y centrada.',
-    como: 'Tocá para guardar las posiciones.',
   },
 
   'pedido-ir-arte': {

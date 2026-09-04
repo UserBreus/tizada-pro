@@ -83,16 +83,23 @@ def main():
         ok(os.path.exists(fp) and os.path.exists(fp[:-3] + "json"), f"deja m{MESA}.pdf + m{MESA}.json ({t_despl:.0f}s)")
         d = pikepdf.open(fp)
         ok(len(d.pages) == len(talles), f"una página por talle ({len(d.pages)})")
+        # Desde el changelog 387 la página desplegada es `aislar_capa(podar=True)` MENOS los textos
+        # «00»/«NOMBRE» (`quitar_placeholders`): se les aplica lo mismo a las páginas de control.
+        _j = json.load(open(fp[:-3] + "json", encoding="utf-8"))
         iguales = 0
         for tl in (talles[0], TALLE, talles[-1]):
             src = pikepdf.open(COPIA)
             pg = src.pages[MESA - 1]
             MR.aislar_capa(src, pg, tl, podar=True)
-            a = pg.Contents.read_bytes()
+            _ins = list(pikepdf.parse_content_stream(pg))
+            _ins, _ph = PD.quitar_placeholders(_ins, pg, _j["marco"], _j["U"])
+            a = pikepdf.unparse_content_stream(_ins)
             b = d.pages[talles.index(tl)].Contents.read_bytes()
             iguales += a == b
+            if a != b:
+                print(f"          {tl}: {len(a)} vs {len(b)} bytes · placeholders vistos: {sorted(_ph)}")
             src.close()
-        ok(iguales == 3, "contenido idéntico a `aislar_capa(podar=True)` en 3 talles")
+        ok(iguales == 3, "contenido idéntico a `aislar_capa(podar=True)` + `quitar_placeholders` en 3 talles")
         pg_d = d.pages[talles.index(TALLE)]
         res = pg_d.get("/Resources") or {}
         fuentes = len(res.get("/Font") or {})

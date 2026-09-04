@@ -408,6 +408,7 @@ def alta_molde_con_diseno(path, avisar=None, procesos=None, paginas=True):
         #    están leídos —es lo que acaba de hacer el bucle de arriba—, así que acomodarlos en la
         #    grilla de cada talle no cuesta nada. Se guardan y el visor no vuelve a abrir el PDF.
         visor = {}
+        _aco = acomodo_mesas(por_mesa)          # UNA vez: el mismo lugar para la mesa en todos los talles
         for talle in talles:
             _pm = [(mesa, i, cont)
                    for mesa in sorted(por_mesa)
@@ -415,7 +416,7 @@ def alta_molde_con_diseno(path, avisar=None, procesos=None, paginas=True):
             if not _pm:
                 continue
             try:
-                visor[talle] = layout_visor(doc, _pm, talle, talles)
+                visor[talle] = layout_visor(doc, _pm, talle, talles, acomodo=_aco)
             except Exception as e:
                 # Que falle el layout de UN talle no puede tumbar el alta: sin su entrada, el
                 # visor de ese talle se calcula a demanda como antes (lento, pero anda).
@@ -457,16 +458,80 @@ def detectar_para_visor(doc, talle_ref=None, sep_cm=2.0):
         raise ValueError("El archivo no declara capas: no se pueden separar los talles.")
     # el talle de referencia por defecto: el del medio, que es el que mejor representa al molde
     talle_ref = talle_ref if talle_ref in talles else talles[len(talles) // 2]
-    piezas_mesa = []
+    piezas_mesa, por_mesa = [], {}
     for mesa in range(1, doc.page_count + 1):
-        for i, cont in enumerate(piezas_de_mesa(doc, mesa, talle_ref)):
-            piezas_mesa.append((mesa, i, cont))
+        # TODOS los talles: es lo que define dónde va cada mesa (ver `acomodo_mesas`), y no cuesta
+        # nada — `_dibujos` cachea por mesa, así que leer los 20 talles es una sola lectura.
+        for t in talles:
+            pzs = piezas_de_mesa(doc, mesa, t)
+            if pzs:
+                por_mesa.setdefault(mesa, {})[t] = pzs
+            if t == talle_ref:
+                piezas_mesa.extend((mesa, i, c) for i, c in enumerate(pzs))
     if not piezas_mesa:
         raise ValueError(f"No se detectaron piezas en el talle {talle_ref!r}.")
-    return layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm)
+    return layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm, acomodo_mesas(por_mesa, sep_cm))
 
 
-def layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm=2.0):
+def acomodo_mesas(por_mesa, sep_cm=2.0):
+    """Dónde va cada MESA en el lienzo del visor: `{"mesas": {mesa: (x0, y0, dx, dy)}, "w", "h"}`.
+
+    🔴 LA REGLA (usuario, 2026-09-04): **el molde se muestra tal cual viene en el archivo**. Los
+    talles están dibujados UNO ENCIMA DEL OTRO (la gradación) y así tienen que quedar: no se
+    separan, no se acomodan, no se reparten en bloques — ya se distinguen por su CAPA (el ojito
+    de la columna de talles). Lo único que hay que acomodar son las MESAS, y sólo porque el PDF
+    las guarda todas en el mismo lugar: medido, las 9 páginas del archivo real arrancan en (0,0),
+    así que dibujadas tal cual caerían una encima de la otra.
+
+    Por eso el acomodo se calcula **una sola vez con TODOS los talles**: la caja de cada mesa es
+    la unión de todas sus piezas en todos sus talles. Si se calculara por talle, el mismo molde
+    se movería al cambiar de talle en el visor.
+
+    Las mesas van en filas tipo estante, **en el orden del archivo** (mesa 1, 2, 3…), con el
+    ancho de fila que deja el lienzo más parecido a una pantalla.
+    `por_mesa` = `{mesa: {talle: [contornos]}}`.
+    """
+    sep = sep_cm * CM
+    cajas = {}
+    for mesa, por_t in (por_mesa or {}).items():
+        xs0, ys0, xs1, ys1 = [], [], [], []
+        for conts in (por_t or {}).values():
+            for c in conts or []:
+                x0, y0, x1, y1 = c["bbox_mu"]
+                xs0.append(x0); ys0.append(y0); xs1.append(x1); ys1.append(y1)
+        if xs0:
+            cajas[mesa] = (min(xs0), min(ys0), max(xs1), max(ys1))
+    if not cajas:
+        return {"mesas": {}, "w": 1.0, "h": 1.0}
+    orden = sorted(cajas)
+    sep = max(sep, max(c[3] - c[1] for c in cajas.values()) * 0.05)
+
+    def _armar(ancho_objetivo):
+        pos, x, y, alto_fila, ancho = {}, sep, sep, 0.0, 0.0
+        for m in orden:
+            x0, y0, x1, y1 = cajas[m]
+            w, h = x1 - x0, y1 - y0
+            if x > sep and x + w > ancho_objetivo:
+                x, y, alto_fila = sep, y + alto_fila + sep, 0.0
+            pos[m] = (x0, y0, x, y)
+            x += w + sep
+            alto_fila = max(alto_fila, h)
+            ancho = max(ancho, x)
+        return pos, ancho + sep - sep, y + alto_fila + sep
+
+    anchos = [cajas[m][2] - cajas[m][0] for m in orden]
+    total = sum(anchos) + sep * (len(anchos) + 1)
+    mejor = None
+    for k in range(1, len(orden) + 1):                # k = filas «objetivo»
+        pos, w, h = _armar(max(max(anchos) + 2 * sep, total / k))
+        r = abs((w / max(h, 1e-9)) - 16 / 9)
+        if mejor is None or r < mejor[0]:
+            mejor = (r, pos, w, h)
+    _r, pos, w, h = mejor
+    return {"mesas": pos, "w": w, "h": h}
+
+
+def layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm=2.0, acomodo=None):
     """Acomoda en una grilla los contornos YA LEÍDOS y devuelve lo que dibuja el visor.
 
     🔴 Está separada de `detectar_para_visor` porque leer los dibujos del archivo es lo ÚNICO caro
@@ -479,112 +544,78 @@ def layout_visor(doc, piezas_mesa, talle_ref, talles, sep_cm=2.0):
     """
     from motor_pedido import _item_visor            # diferido: motor_pedido importa de molde_real
 
-    sep = sep_cm * CM
     zoom = 10.0 / CM                                 # 1 unidad de salida = 1 mm (igual que hoy)
-    items, cursor_x, cursor_y, alto_fila = [], sep, sep, 0.0
-    ancho_max = 0.0
-
-    # 2) ancho de la grilla: la raíz del área total da filas y columnas parejas, y nunca menos que
-    #    la pieza más ancha (si no, esa pieza se saldría de la grilla)
-    area = sum(c["w"] * c["h"] for _, _, c in piezas_mesa)
-    objetivo = max(max(c["w"] for _, _, c in piezas_mesa), (area ** 0.5) * 1.4)
+    acomodo = acomodo or acomodo_mesas({m: {talle_ref: [c for mm, _i, c in piezas_mesa if mm == m]}
+                                        for m, _i, _c in piezas_mesa}, sep_cm)
+    items = []
 
     for idx, (mesa, i, cont) in enumerate(piezas_mesa):
         page = doc[mesa - 1]
         cb = page.cropbox
         U = page.rect.width / cb.width if cb.width else 1.0
-        x0, y0, x1, y1 = cont["bbox_mu"]
-        w, h = x1 - x0, y1 - y0
-        if cursor_x > sep and cursor_x + w > objetivo:      # no entra en la fila: renglón nuevo
-            cursor_x = sep
-            cursor_y += alto_fila + sep
-            alto_fila = 0.0
-        # `_item_visor` ubica la pieza restándole el origen del recorte: se le pasa un recorte
-        # sintético para que la pieza caiga justo en su casillero de la grilla.
-        clip = fitz.Rect(x0 - cursor_x, y0 - cursor_y, x0 - cursor_x + 1, y0 - cursor_y + 1)
+        cx0, cy0, dx, dy = acomodo["mesas"].get(mesa) or (0.0, 0.0, 0.0, 0.0)
+        # 🔴 EL RECORTE ES EL DE LA MESA, NO EL DE LA PIEZA: así cada pieza cae donde el archivo
+        # la puso DENTRO de su mesa, y las de distintos talles quedan una encima de la otra —
+        # que es como vienen (la gradación). Lo único que se mueve es la MESA entera.
+        clip = fitz.Rect(cx0 - dx, cy0 - dy, cx0 - dx + 1, cy0 - dy + 1)
         it = _item_visor(cont, idx, clip, cb, U, zoom)
         it["mesa"] = mesa
         it["t_idx"] = i                              # su índice DENTRO de la mesa = el del registro
         items.append(it)
-        cursor_x += w + sep
-        alto_fila = max(alto_fila, h)
-        ancho_max = max(ancho_max, cursor_x)
 
     return {"mesa": None, "talle_ref": talle_ref, "talles": talles, "unidad": "mm",
-            "img_w": round((ancho_max + sep) * zoom, 1),
-            "img_h": round((cursor_y + alto_fila + sep) * zoom, 1),
-            "piezas": items, "sin_variantes": False, "origen": "con_diseno"}
-
-
-def _trasladar_path(d, dx, dy):
-    """Corre un `path_svg` de `_item_visor` (M/L/C absolutos, `h`/`v` relativos, Z)."""
-    out, toks, i, cmd = [], d.split(), 0, None
-    while i < len(toks):
-        t = toks[i]
-        if t in ("M", "L", "C", "h", "v", "Z"):
-            cmd = t
-            out.append(t)
-            i += 1
-            continue
-        if cmd in ("M", "L", "C"):
-            out.append(f"{float(t) + dx:.1f}")
-            out.append(f"{float(toks[i + 1]) + dy:.1f}")
-            i += 2
-        else:                                   # h / v: relativos, no se corren
-            out.append(t)
-            i += 1
-    return " ".join(out)
+            "img_w": round(acomodo["w"] * zoom, 1),
+            "img_h": round(acomodo["h"] * zoom, 1),
+            "piezas": items, "sin_variantes": False, "origen": "con_diseno",
+            # `anidado`: los talles están dibujados uno ENCIMA del otro, como en el archivo. El
+            # visor lo usa para no rotular 20 bloques de talle en el mismo lugar.
+            "formato": "anidado"}
 
 
 def visor_junto(visor, registro=None, sep_cm=2.0):
-    """TODOS los talles en UN lienzo: una fila por talle, apiladas. Es la vista de «Nombrar piezas»
-    de la configuración (Moldería, «todas las variantes juntas»), traída al pedido: el cliente ve
-    el frente del XS, el del S, el del M… y nombra todo de una. Sale de los visores por talle que
-    ya dejó el alta (`visor_contornos.json`), sin abrir el archivo.
+    """TODOS los talles en UN lienzo, **uno encima del otro, como vienen en el archivo**.
 
-    Cada pieza lleva `talle`, `mesa` y `t_idx` (su índice dentro de la MESA, lo que usa
-    `pieza_renombrar`), `pieza_idx` (su índice dentro del TALLE, la clave del registro), un `idx`
-    global para el visor y `name` (el nombre puesto, o el provisorio). `filas` dice dónde empieza
-    cada talle, para rotularlo."""
-    import math
-    sep = sep_cm * 10.0                         # el visor está en mm
+    Regla del usuario (2026-09-04): «que respete cómo viene en el archivo… no hablo de las mesas
+    sino de los objetos: que no separe los que están uno arriba del otro. Todos los frentes están
+    juntos, que los deje así — ya están en diferente capa». Así que acá **no se acomoda nada**:
+    los visores por talle ya comparten el mismo lienzo (ver `acomodo_mesas`, el acomodo de las
+    mesas se calcula una sola vez para todos los talles), y esto sólo los junta. Los talles se
+    distinguen por su CAPA (el ojito de la columna), no por su posición.
+
+    Cada pieza lleva `talle`, `mesa`, `idx_mesa` (su índice dentro de la MESA, lo que usa
+    `pieza_renombrar`), `t_idx`/`pieza_idx` (su índice dentro del TALLE, la clave del registro y
+    lo que `grupo_pieza` recibe como `guia_idx`), un `idx` global para el visor y `name`.
+    """
+    import re
     nombres = {}
     for nom, por_t in (registro or {}).items():
+        if re.match(r"^\s*Pieza\s+\d+\s*$", str(nom or ""), re.I):
+            continue                    # provisorio del alta = sin nombre (la pantalla lo rotula por número)
         for t, inf in (por_t or {}).items():
             if (inf or {}).get("pieza_idx") is not None:
                 nombres[(t, int(inf["pieza_idx"]))] = nom
     talles = [t for t in visor.keys() if (visor[t] or {}).get("piezas")]
-    # Los talles van en una GRILLA casi cuadrada (como acomoda las mesas el proyecto de
-    # referencia, `layoutArtboards`): apilados en una sola columna, 20 talles daban una tira de
-    # 1,5 × 26 m y al «ver todo» no se distinguía nada.
-    cols = max(1, int(math.ceil(math.sqrt(len(talles)))))
-    w_max = max((float((visor[t] or {}).get("img_w") or 0) for t in talles), default=0.0)
-    h_max = max((float((visor[t] or {}).get("img_h") or 0) for t in talles), default=0.0)
-    filas, piezas, g = [], [], 0
-    for k, t in enumerate(talles):
-        lay = visor[t]
-        items = lay["piezas"]
-        x = sep + (k % cols) * (w_max + sep)
-        y = sep + (k // cols) * (h_max + sep)
+    piezas, g, por_talle = [], 0, {}
+    for t in talles:
+        items = visor[t]["piezas"]
         for it in items:
             p = dict(it)
-            p["px"] = round(float(it["px"]) + x, 1)
-            p["py"] = round(float(it["py"]) + y, 1)
-            p["path_svg"] = _trasladar_path(it["path_svg"], x, y)
             p["talle"] = t
+            p["idx_mesa"] = it.get("t_idx")
             p["pieza_idx"] = it["idx"]
+            p["t_idx"] = it["idx"]
             p["idx"] = g
             p["name"] = nombres.get((t, it["idx"]))
             piezas.append(p)
             g += 1
-        filas.append({"talle": t, "x": round(x, 1), "y": round(y, 1),
-                      "w": round(float(lay.get("img_w") or 0), 1), "h": round(float(lay.get("img_h") or 0), 1),
-                      "n": len(items)})
-    n_filas = int(math.ceil(len(talles) / cols)) if talles else 0
+        por_talle[t] = len(items)
     return {"mesa": None, "talles": talles, "unidad": "mm",
-            "img_w": round(sep + cols * (w_max + sep), 1), "img_h": round(sep + n_filas * (h_max + sep), 1),
-            "piezas": piezas, "filas": filas, "por_talle": {f["talle"]: f["n"] for f in filas},
-            "formato": "extendido", "origen": "con_diseno"}
+            "img_w": max((float((visor[t] or {}).get("img_w") or 0) for t in talles), default=1.0),
+            "img_h": max((float((visor[t] or {}).get("img_h") or 0) for t in talles), default=1.0),
+            "piezas": piezas, "por_talle": por_talle,
+            # `anidado` = los talles van uno encima del otro: el visor NO rotula un bloque por
+            # talle (caerían los 20 rótulos en el mismo lugar).
+            "formato": "anidado", "origen": "con_diseno"}
 
 
 def visor_todos(path, avisar=None):
@@ -600,16 +631,22 @@ def visor_todos(path, avisar=None):
         talles = talles_del_molde(doc)
         if not talles:
             return {}
+        por_mesa = {}
+        for mesa in range(1, doc.page_count + 1):
+            for t in talles:
+                pzs = piezas_de_mesa(doc, mesa, t)
+                if pzs:
+                    por_mesa.setdefault(mesa, {})[t] = pzs
+        _aco = acomodo_mesas(por_mesa)          # el mismo lugar para la mesa en todos los talles
         out = {}
         for k, talle in enumerate(talles):
-            _pm = []
-            for mesa in range(1, doc.page_count + 1):
-                for i, cont in enumerate(piezas_de_mesa(doc, mesa, talle)):
-                    _pm.append((mesa, i, cont))
+            _pm = [(mesa, i, cont)
+                   for mesa in sorted(por_mesa)
+                   for i, cont in enumerate(por_mesa[mesa].get(talle) or [])]
             if not _pm:
                 continue
             try:
-                out[talle] = layout_visor(doc, _pm, talle, talles)
+                out[talle] = layout_visor(doc, _pm, talle, talles, acomodo=_aco)
             except Exception as e:
                 print(f"[camino B] no se pudo armar el visor del talle {talle}: {e}")
             if avisar:
@@ -788,7 +825,10 @@ def _leer_desplegado(path_molde, mesa):
     carpeta = _carpeta_desplegado(path_molde)
     clave = (carpeta, mesa)
     hit = _CONT_CACHE.get(clave)
-    if hit is not None and hit["sello"] == sello:
+    # 🔴 Una entrada SIN páginas no vale como caché: se guardó mientras el hilo de fondo las
+    # armaba y, como el sello del archivo no cambia, el servidor seguía diciendo «preparando»
+    # para siempre (2026-09-04: el chequeo de tipografía re-preguntaba cada 7 s sin fin).
+    if hit is not None and hit["sello"] == sello and hit.get("pdf") is not None:
         return hit
     fj = os.path.join(carpeta, f"m{mesa}.json")
     fp = os.path.join(carpeta, f"m{mesa}.pdf")
@@ -862,6 +902,279 @@ def _pagina_desplegada(out, pag, salida):
     return out.pages[-1]
 
 
+# ─────────────────────────────────────────────────────────────────
+# «00» Y «NOMBRE»: los placeholders del número y el nombre, POR TEXTO
+# ─────────────────────────────────────────────────────────────────
+# Regla del usuario (2026-09-04): el molde con diseño trae, dentro de cada talle, el texto «00»
+# donde va el número y «NOMBRE» donde va el nombre; el sistema los detecta y pone el valor de la
+# columna «numero» y el de la columna «nombre» de la planilla. Es por TEXTO, no por capa.
+# Se hace acá, en la etapa de páginas del desplegado, porque ahí ya se está recorriendo el
+# content-stream de cada talle: se decodifica cada `Tj`/`TJ`, y si dice «00» o «NOMBRE» se guarda
+# dónde está, con qué tamaño, fuente y color NATIVO (CMYK exacto, con sus pasadas de apariencia)
+# y se SACA del dibujo (si quedara, se imprimiría «NOMBRE» debajo del nombre estampado).
+# ⚠️ PyMuPDF no sirve para leer el «00» de este archivo: viene con un `/Differences [31 /0]`
+# (código 31 → glifo «0») y `get_text` lo descarta como carácter de control. Decodificar a mano
+# con la codificación de la fuente es lo único que lo ve.
+_PLACEHOLDERS = {"00": "numero", "NOMBRE": "nombre"}
+_GLIFO_DIGITO = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+                 "six": "6", "seven": "7", "eight": "8", "nine": "9", "space": " "}
+
+
+def _decodificador(fuente):
+    """Función bytes → texto para una fuente SIMPLE del PDF (WinAnsi/Standard + /Differences).
+    Para Type0 se intenta el ToUnicode (bfchar/bfrange simples); si no se puede, None."""
+    import re
+    try:
+        st = str(fuente.get("/Subtype", ""))
+        if st == "/Type0":
+            tu = fuente.get("/ToUnicode")
+            if tu is None:
+                return None
+            data = tu.read_bytes().decode("latin-1", "replace")
+            mapa = {}
+            for src, dst in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", data):
+                if len(src) <= 4:
+                    try:
+                        mapa[int(src, 16)] = bytes.fromhex(dst).decode("utf-16-be", "replace")
+                    except Exception:
+                        pass
+            for lo, hi, dst in re.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", data):
+                try:
+                    a, b, d0 = int(lo, 16), int(hi, 16), int(dst, 16)
+                    for k in range(a, min(b, a + 255) + 1):
+                        mapa.setdefault(k, chr(d0 + (k - a)))
+                except Exception:
+                    pass
+            def _dec0(b):
+                return "".join(mapa.get(int.from_bytes(b[i:i + 2], "big"), "?") for i in range(0, len(b) - 1, 2))
+            return _dec0
+        dif = {}
+        enc = fuente.get("/Encoding")
+        if isinstance(enc, pikepdf.Dictionary) and "/Differences" in enc:
+            code = 0
+            for it in enc["/Differences"]:
+                if isinstance(it, pikepdf.Name):
+                    nm = str(it)[1:]
+                    if nm in _GLIFO_DIGITO:
+                        dif[code] = _GLIFO_DIGITO[nm]
+                    elif len(nm) == 1:
+                        dif[code] = nm
+                    elif re.fullmatch(r"uni[0-9A-Fa-f]{4}", nm):
+                        dif[code] = chr(int(nm[3:], 16))
+                    else:
+                        dif[code] = "?"
+                    code += 1
+                else:
+                    code = int(it)
+        def _dec(b):
+            return "".join(dif.get(c, chr(c)) for c in b)
+        return _dec
+    except Exception:
+        return None
+
+
+def _texto_mostrado(op, operands, dec):
+    """El texto de un operador de mostrar (`Tj`, `TJ`, `'`, `"`), decodificado."""
+    try:
+        if op in ("Tj", "'"):
+            b = bytes(operands[-1])
+        elif op == '"':
+            b = bytes(operands[2])
+        elif op == "TJ":
+            b = b"".join(bytes(x) for x in operands[0] if isinstance(x, pikepdf.String))
+        else:
+            return ""
+        return dec(b) if dec else b.decode("latin-1", "replace")
+    except Exception:
+        return ""
+
+
+def _mul(a, b):
+    """Producto de matrices PDF [a b c d e f] (a × b)."""
+    return [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3],
+            a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3],
+            a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]]
+
+
+def _ancho_texto(fuente, b, dec):
+    """Ancho del texto en unidades de texto (1/1000 em), con los /Widths de la fuente simple."""
+    try:
+        fc = int(fuente.get("/FirstChar", 0))
+        ws = fuente.get("/Widths")
+        if ws is None:
+            return None
+        tot = 0.0
+        for c in b:
+            i = c - fc
+            tot += float(ws[i]) if 0 <= i < len(ws) else 500.0
+        return tot / 1000.0
+    except Exception:
+        return None
+
+
+def quitar_placeholders(salida, page, marco, U):
+    """Saca de `salida` (instrucciones de UN talle) los textos «00»/«NOMBRE» y devuelve
+    `(salida_sin_ellos, {campo: placeholder})`.
+
+    El placeholder tiene la forma que espera `motor_pedido.generar_pieza` (la misma de
+    `extraer_personalizacion`): `cx`/`baseline_y` en coordenadas de dispositivo de la mesa (las
+    de `bbox_mu`, y hacia abajo, escaladas por `U`), `size` en puntos, `fuente` (nombre PostScript
+    sin el prefijo de subset), `pasadas` (relleno/trazo nativos, en orden) y `colorn`.
+    `marco` = [x0, y0, x1, y1] del CropBox (unidades crudas), `U` = escala de dispositivo."""
+    fuentes = {}
+    try:
+        for k, v in (page.obj.get("/Resources") or {}).get("/Font", {}).items():
+            fuentes[str(k)] = v
+    except Exception:
+        pass
+    _cs = {}
+    try:
+        for k, v in (page.obj.get("/Resources") or {}).get("/ColorSpace", {}).items():
+            _cs[str(k)] = v
+    except Exception:
+        pass
+
+    def _n_de_cs(name):
+        o = _cs.get(name)
+        try:
+            if o is None:
+                return {"/DeviceCMYK": 4, "/DeviceRGB": 3, "/DeviceGray": 1}.get(name)
+            if isinstance(o, pikepdf.Array):
+                base = str(o[0])
+                if base == "/ICCBased" and len(o) > 1:
+                    return int(o[1].get("/N", 0)) or None
+                return {"/CalRGB": 3, "/CalGray": 1, "/Separation": 1, "/DeviceN": None}.get(base)
+            return {"/DeviceCMYK": 4, "/DeviceRGB": 3, "/DeviceGray": 1}.get(str(o))
+        except Exception:
+            return None
+    _op_n = {4: "k", 3: "rg", 1: "g"}
+
+    x0c, y0c, x1c, y1c = marco
+    def _dev(x, y):                       # crudas (y arriba) → dispositivo (y abajo), como `_contorno_de_drawing.pt` al revés
+        return ((x - x0c) * U, (y1c - y) * U)
+
+    ctm = [1, 0, 0, 1, 0, 0]
+    pila = []
+    fcol = scol = None
+    fcs_n = scs_n = None
+    sw = 1.0
+    tr = 0
+    tf, tfs = None, 1.0
+    tm = tlm = None
+    tl, tc, tw, th = 0.0, 0.0, 0.0, 1.0
+    encontrados = {}                      # campo → placeholder
+    quitar = set()
+    for i, inst in enumerate(salida):
+        op = str(inst.operator)
+        ops = inst.operands
+        try:
+            if op == "q":
+                pila.append((ctm, fcol, fcs_n, scol, scs_n, sw, tr, tf, tfs))
+            elif op == "Q":
+                if pila:
+                    ctm, fcol, fcs_n, scol, scs_n, sw, tr, tf, tfs = pila.pop()
+            elif op == "cm":
+                ctm = _mul([float(v) for v in ops], ctm)
+            elif op == "cs":
+                fcs_n = _n_de_cs(str(ops[0]))
+            elif op == "CS":
+                scs_n = _n_de_cs(str(ops[0]))
+            elif op in ("k", "rg", "g"):
+                fcol = (op, [round(float(v), 4) for v in ops])
+            elif op in ("K", "RG", "G"):
+                scol = (op.lower(), [round(float(v), 4) for v in ops])
+            elif op in ("sc", "scn"):
+                nums = [round(float(v), 4) for v in ops if not isinstance(v, pikepdf.Name)]
+                o2 = _op_n.get(fcs_n) or _op_n.get(len(nums))
+                if o2:
+                    fcol = (o2, nums)
+            elif op in ("SC", "SCN"):
+                nums = [round(float(v), 4) for v in ops if not isinstance(v, pikepdf.Name)]
+                o2 = _op_n.get(scs_n) or _op_n.get(len(nums))
+                if o2:
+                    scol = (o2, nums)
+            elif op == "w":
+                sw = float(ops[0])
+            elif op == "Tr":
+                tr = int(ops[0])
+            elif op == "BT":
+                tm = tlm = [1, 0, 0, 1, 0, 0]
+            elif op == "ET":
+                tm = tlm = None
+            elif op == "Tf":
+                tf, tfs = str(ops[0]), float(ops[1])
+            elif op == "Tm":
+                tm = tlm = [float(v) for v in ops]
+            elif op in ("Td", "TD"):
+                tlm = _mul([1, 0, 0, 1, float(ops[0]), float(ops[1])], tlm or [1, 0, 0, 1, 0, 0])
+                tm = list(tlm)
+                if op == "TD":
+                    tl = -float(ops[1])
+            elif op == "TL":
+                tl = float(ops[0])
+            elif op == "Tc":
+                tc = float(ops[0])
+            elif op == "Tw":
+                tw = float(ops[0])
+            elif op == "Tz":
+                th = float(ops[0]) / 100.0
+            elif op in ("T*", "'", '"') or op in ("Tj", "TJ"):
+                if op in ("T*", "'", '"'):
+                    if op == '"':
+                        tw, tc = float(ops[0]), float(ops[1])
+                    tlm = _mul([1, 0, 0, 1, 0, -tl], tlm or [1, 0, 0, 1, 0, 0])
+                    tm = list(tlm)
+                if op == "T*":
+                    continue
+                f = fuentes.get(tf)
+                dec = _decodificador(f) if f is not None else None
+                txt = _texto_mostrado(op, ops, dec)
+                campo = _PLACEHOLDERS.get(txt.strip().upper().replace(" ", ""))
+                if campo is None or tm is None:
+                    continue
+                # posición y tamaño en el espacio de usuario → dispositivo
+                m = _mul(_mul([tfs, 0, 0, tfs, 0, 0], tm), ctm)
+                esc = (m[0] ** 2 + m[1] ** 2) ** 0.5           # tamaño del texto en puntos (crudos)
+                ox, oy = m[4], m[5]
+                if op in ("Tj", "'"):
+                    b = bytes(ops[-1])
+                elif op == '"':
+                    b = bytes(ops[2])
+                else:
+                    b = b"".join(bytes(x) for x in ops[0] if isinstance(x, pikepdf.String))
+                an = _ancho_texto(f, b, dec) if f is not None else None
+                if an is None:
+                    an = 0.6 * len(txt.strip())
+                ancho = an * esc * th
+                dx, dy = _dev(ox, oy)
+                ph = encontrados.get(campo)
+                if ph is None:
+                    ph = {"cx": round(dx + ancho * U / 2.0, 2), "baseline_y": round(dy, 2),
+                          "size": round(esc * U, 3), "fuente": str(f.get("/BaseFont", "")).lstrip("/").split("+")[-1] if f is not None else "",
+                          "ancho": round(ancho * U, 2), "color": 0, "colorn": None, "trazo": None,
+                          "pasadas": [], "baseline_pts": [], "texto": txt.strip()}
+                    encontrados[campo] = ph
+                # pasadas de apariencia, en orden: relleno y/o trazo según el modo de texto
+                def _add(p):
+                    if not ph["pasadas"] or ph["pasadas"][-1] != p:
+                        ph["pasadas"].append(p)
+                if tr in (0, 2, 4, 6) and fcol:
+                    _add({"t": "f", "color": [fcol[0], list(fcol[1])]})
+                    if ph["colorn"] is None:
+                        ph["colorn"] = [fcol[0], list(fcol[1])]
+                if tr in (1, 2, 5, 6) and scol:
+                    _w = sw * ((ctm[0] ** 2 + ctm[1] ** 2) ** 0.5) * U     # ancho real del trazo, en dispositivo
+                    _add({"t": "S", "color": [scol[0], list(scol[1])], "w": round(_w, 4)})
+                    if ph["trazo"] is None:
+                        ph["trazo"] = [scol[0], list(scol[1]), round(_w, 4)]
+                quitar.add(i)
+        except Exception:
+            continue
+    if not quitar:
+        return salida, {}
+    return [inst for i, inst in enumerate(salida) if i not in quitar], encontrados
+
+
 def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, paginas=True):
     """Despliega UNA mesa y devuelve `{talle: [contornos]}` (sólo los talles con piezas). Es lo que
     corre en cada proceso del alta.
@@ -901,10 +1214,17 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
                 pzs = _piezas_de_mesa_cruda(doc, mesa, talle)
                 if pzs:
                     conts[talle] = pzs
+            # el marco de la mesa (CropBox) y la escala de dispositivo: lo necesitan los
+            # placeholders «00»/«NOMBRE» para expresar su posición como la de `bbox_mu`
+            _pg = doc[mesa - 1]
+            _cb = _pg.cropbox
+            marco = [_cb.x0, _cb.y0, _cb.x1, _cb.y1]
+            U = _pg.rect.width / _cb.width if _cb.width else 1.0
         finally:
             olvidar(doc)
             doc.close()
-        _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": False})
+        _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": False,
+                        "marco": marco, "U": U})
         if not paginas:
             return conts
     else:
@@ -914,8 +1234,9 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
                 _prev = json.load(fh)
             if _prev.get("sello") == sello:
                 conts = _prev.get("talles") or {}
-                if list(_prev.get("orden") or []) != list(talles):
-                    _prev = None       # otro orden de talles: las páginas no corresponderían
+                marco, U = _prev.get("marco"), _prev.get("U")
+                if list(_prev.get("orden") or []) != list(talles) or not marco:
+                    _prev = None       # otro orden de talles (o JSON viejo): las páginas no corresponderían
         except Exception:
             _prev = None
         if _prev is None:
@@ -930,11 +1251,16 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         ops, oc = MR._mapa_oc(ins, pag)
         bloques = MR._bloques_oc(ops, oc)
         out = pikepdf.Pdf.new()
+        placeholders = {}
         for talle in talles:
             obj = {MR._norm_capa(talle)}
             fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
             saltar = MR._saltar_bloques(ops, oc, fn, bloques)
             salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
+            # «00» y «NOMBRE»: se leen y se SACAN del dibujo de este talle (ver arriba)
+            salida, ph = quitar_placeholders(salida, pag, marco, U)
+            if ph:
+                placeholders[talle] = ph
             npag = _pagina_desplegada(out, pag, salida)
             MR.sanear_oc(out, npag)
         out.save(fp + ".tmp")
@@ -943,7 +1269,8 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     finally:
         pdf.close()
 
-    _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True})
+    _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
+                    "marco": marco, "U": U, "placeholders": placeholders})
     return conts
 
 
@@ -951,6 +1278,21 @@ def _desplegar_mesa_worker(args):
     """Worker de proceso (spawn-safe: recibe y devuelve tipos simples)."""
     path, mesa, talles, contornos, paginas = args
     return mesa, desplegar_mesa(path, mesa, list(talles), contornos=contornos, paginas=paginas)
+
+
+import threading as _threading
+_ARMANDO = {}                      # path → Lock: un solo constructor por molde a la vez
+_ARMANDO_GUARD = _threading.Lock()
+
+
+def _candado(path_molde):
+    """El candado de ESTE molde (el mismo objeto para todos los hilos del proceso)."""
+    k = os.path.normcase(os.path.abspath(path_molde))
+    with _ARMANDO_GUARD:
+        c = _ARMANDO.get(k)
+        if c is None:
+            c = _ARMANDO[k] = _threading.Lock()
+        return c
 
 
 def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=True, paginas=True):
@@ -965,6 +1307,20 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
     _d.close()
     mesas = list(range(1, n + 1))
     por_mesa = {}
+    hecho = 0
+    # 🔴 UN CONSTRUCTOR POR MOLDE. Medido 2026-09-04: el hilo de fondo de la subida armaba las
+    # páginas por proceso mientras un request, al ver que faltaban, las armaba de nuevo en su
+    # hilo — el doble de trabajo y el servidor congelado. El segundo ahora ESPERA al primero
+    # (el candado se suelta al terminar) y, al re-mirar, encuentra todo hecho.
+    _cand = _candado(path_molde)
+    _cand.acquire()
+    try:
+        return _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos, paginas, n, mesas, por_mesa)
+    finally:
+        _cand.release()
+
+
+def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos, paginas, n, mesas, por_mesa):
     hecho = 0
 
     def _listo(mesa, conts):
@@ -996,32 +1352,91 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
 _PERS_JSON = "personalizacion.json"
 
 
-def personalizacion_guardada(path_molde):
-    """Los placeholders de nombre/número que `motor_pedido.extraer_personalizacion` ya calculó
-    para ESTE archivo (por sello), o None. Vive en el desplegado porque depende sólo del archivo
-    y costaba 100 s por proceso."""
+def desplegado_listo(path_molde):
+    """¿Todas las mesas tienen sus páginas por talle (y del archivo actual)? Es lo que dice si
+    los placeholders ya se pueden leer sin construir nada."""
     try:
-        import json
-        fj = os.path.join(_carpeta_desplegado(path_molde), _PERS_JSON)
-        if not os.path.exists(fj):
-            return None
-        with open(fj, encoding="utf-8") as fh:
-            d = json.load(fh)
-        if d.get("sello") != _sello(path_molde):
-            return None
-        return d.get("pers")
+        doc = fitz.open(path_molde)
+        try:
+            n = doc.page_count
+        finally:
+            doc.close()
     except Exception:
-        return None
+        return False
+    for mesa in range(1, n + 1):
+        d = _leer_desplegado(path_molde, mesa)
+        if d is None or d["pdf"] is None:
+            return False
+    return True
+
+
+def personalizacion_con_diseno(path_molde, armar=True, procesos=None):
+    """Los placeholders «00» / «NOMBRE» del molde con diseño, en la forma que consume
+    `motor_pedido` (`{mesa: {campo: placeholder}}`), con `por_talle` adentro de cada campo: en
+    este camino cada talle tiene el suyo, a su tamaño y en su lugar. Salen del desplegado
+    (`m{mesa}.json["placeholders"]`, que deja la etapa de páginas). Sin placeholders → `{}` (no
+    se estampa nada, la tizada sigue).
+
+    🔴 `armar`: si a alguna mesa le faltan las páginas, con `armar=True` se arman ACÁ — pero
+    **por procesos** (`desplegar_molde`), nunca en este hilo: `pikepdf.save` retiene el GIL y
+    congelaba el servidor ENTERO (medido con py-spy, 2026-09-04: `fuentes_estado` armaba las 9
+    mesas en serie en el hilo del request, en paralelo con el hilo de fondo que hacía lo mismo, y
+    `/api/productos` tardaba 9 s y nombrar una pieza un minuto). Con `armar=False` (lo que usa
+    cualquier request) las mesas sin páginas se saltan y el que llama decide qué hacer
+    (ver `desplegado_listo`)."""
+    import json
+    doc = fitz.open(path_molde)
+    try:
+        n = doc.page_count
+        talles = talles_del_molde(doc)
+    finally:
+        doc.close()
+    if armar and talles and not desplegado_listo(path_molde):
+        # una sola pasada por todas las mesas, una mesa por proceso (las que ya están se saltan
+        # por sello adentro de `desplegar_mesa`)
+        desplegar_molde(path_molde, talles, procesos=procesos or max(2, (os.cpu_count() or 2) - 1),
+                        contornos=False, paginas=True)
+    pers = {}
+    for mesa in range(1, n + 1):
+        d = _leer_desplegado(path_molde, mesa)
+        if d is None or d["pdf"] is None:
+            continue
+        try:
+            with open(os.path.join(_carpeta_desplegado(path_molde), f"m{mesa}.json"), encoding="utf-8") as fh:
+                por_talle = json.load(fh).get("placeholders") or {}
+        except Exception:
+            por_talle = {}
+        if not por_talle:
+            continue
+        campos = {}
+        for talle, ph_t in por_talle.items():
+            for campo, ph in (ph_t or {}).items():
+                c = campos.setdefault(campo, {"por_talle": {}})
+                c["por_talle"][talle] = ph
+        for campo, c in campos.items():
+            # los valores «de arriba» son los del talle del medio (o el primero que lo tenga):
+            # son los que se usan si a un talle no le encontraron el placeholder
+            _ts = [t for t in (d["orden"] or []) if t in c["por_talle"]] or list(c["por_talle"])
+            base = c["por_talle"][_ts[len(_ts) // 2]]
+            pers.setdefault(str(mesa), {})[campo] = {**base, "por_talle": c["por_talle"]}
+    return pers
+
+
+def personalizacion_guardada(path_molde, armar=True):
+    """Lo que `motor_pedido.extraer_personalizacion` usa para un molde con diseño: los
+    placeholders por texto (ver `personalizacion_con_diseno`). Nunca None: sin placeholders es
+    `{}`, y eso también es una respuesta (no hay nada que estampar)."""
+    try:
+        return personalizacion_con_diseno(path_molde, armar=armar)
+    except Exception as e:
+        print(f"[camino B] no se pudieron leer los placeholders de {path_molde}: {e}")
+        return {}
 
 
 def personalizacion_guardar(path_molde, pers):
-    import json
-    carpeta = _carpeta_desplegado(path_molde)
-    os.makedirs(carpeta, exist_ok=True)
-    fj = os.path.join(carpeta, _PERS_JSON)
-    with open(fj + ".tmp", "w", encoding="utf-8") as fh:
-        json.dump({"sello": _sello(path_molde), "pers": pers}, fh)
-    os.replace(fj + ".tmp", fj)
+    """Ya no hace falta: los placeholders viven en el desplegado, por sello. Se deja por
+    compatibilidad con el motor."""
+    return None
 
 
 def ruta_desplegada(path_molde, mesa, talle, armar=True):
@@ -1029,18 +1444,17 @@ def ruta_desplegada(path_molde, mesa, talle, armar=True):
     Si la mesa no está desplegada (molde viejo, archivo cambiado) y `armar`, la despliega ahora."""
     d = _leer_desplegado(path_molde, mesa)
     if (d is None or d["pdf"] is None) and armar:
-        if d is None:
-            doc = fitz.open(path_molde)
-            try:
-                talles = talles_del_molde(doc)
-            finally:
-                doc.close()
-            if not talles:
-                return None
-            desplegar_mesa(path_molde, mesa, talles)
-        else:
-            # los contornos ya están (los dejó la subida); faltan las páginas por talle
-            desplegar_mesa(path_molde, mesa, d["orden"], contornos=False, paginas=True)
+        # Por PROCESOS y con el candado del molde (ver `desplegar_molde`): armar acá, en el hilo
+        # que pide la página, retenía el GIL y congelaba el servidor.
+        doc = fitz.open(path_molde)
+        try:
+            talles = talles_del_molde(doc)
+        finally:
+            doc.close()
+        if not talles:
+            return None
+        desplegar_molde(path_molde, talles, procesos=max(2, (os.cpu_count() or 2) - 1),
+                        contornos=(d is None), paginas=True)
         d = _leer_desplegado(path_molde, mesa)
     if d is None or d["pdf"] is None or talle not in d["orden"]:
         return None
