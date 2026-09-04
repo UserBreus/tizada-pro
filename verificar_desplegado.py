@@ -120,6 +120,10 @@ def main():
         pg = src.pages[MESA - 1]
         MR.aislar_capa(src, pg, TALLE, podar=True)
         MR.sanear_oc(src, pg)
+        # la página de control también sin «00»/«NOMBRE» (changelog 387: el desplegado los saca)
+        _ins2 = list(pikepdf.parse_content_stream(pg))
+        _ins2, _ = PD.quitar_placeholders(_ins2, pg, _j["marco"], _j["U"])
+        pg.Contents = src.make_stream(pikepdf.unparse_content_stream(_ins2))
         ref = os.path.join(tmp, "ref.pdf")
         src.save(ref)
         src.close()
