@@ -1415,6 +1415,13 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   Contratos: `verificar_desplegado`, `verificar_hoja_compartida` (peso tras aplanar),
   `verificar_tizada_con_diseno`, `verificar_placeholders_con_diseno`, `verificar_molde_con_diseno`,
   `verificar_poda_camino_b`, `verificar_registro_idx_mesa`; comparación de contornos 180/180.
+  · **Bug encontrado por el usuario al tizar (10:20): `'NoneType' object has no attribute 'get'`**
+    en `texto_curvas._glifo`. La fuente que subió al catálogo («MoreggiTFont4-Camiseta.ttf») no
+    trae tabla cmap unicode —sólo Mac Roman (1,0) y símbolo (3,0)— y `TTFont.getBestCmap()`
+    devuelve None. `FuenteCurvas._cmap_de_respaldo` arma el mapa con lo que hay (símbolo =
+    0xF000 + código; Mac Roman decodificado a unicode; nunca None: el servidor recorre
+    `fc.cmap.keys()`). Y un ESPACIO sin glifo (fuentes decorativas con letras y números nada
+    más) ya no tumba «MESSI 10»: avanza el glifo `space` si existe por nombre o un tercio del em.
   **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
   plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
   contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra

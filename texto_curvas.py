@@ -12,10 +12,45 @@ class FuenteCurvas:
     def __init__(self, fuente_bytes):
         self.tt = TTFont(io.BytesIO(fuente_bytes))
         self.glyphset = self.tt.getGlyphSet()
-        self.cmap = self.tt.getBestCmap()
+        self.cmap = self.tt.getBestCmap() or self._cmap_de_respaldo()
         self.upem = self.tt["head"].unitsPerEm
         self._cache = {}
         self._cap = None
+
+    def _cmap_de_respaldo(self):
+        """Un `cmap` unicode para fuentes que NO traen tabla unicode. `getBestCmap` sólo mira las
+        tablas (3,1)/(0,x)/(3,10) y devuelve None si no hay: pasó con una fuente que el usuario
+        subió al catálogo («MoreggiTFont4-Camiseta»: sólo Mac Roman (1,0) y símbolo (3,0)) y la
+        tizada se caía con `'NoneType' object has no attribute 'get'` (2026-09-07). Acá se arma
+        el mapa con lo que hay: la tabla símbolo guarda los caracteres en 0xF000 + código, la
+        Mac Roman en su propia codificación de un byte; se pasan los dos a unicode. Nunca
+        devuelve None: sin nada, un dict vacío (= todos los glifos «faltantes», que es lo que el
+        resto del sistema ya sabe manejar)."""
+        mapa = {}
+        try:
+            tablas = list(self.tt["cmap"].tables) if "cmap" in self.tt else []
+        except Exception:
+            tablas = []
+        for t in tablas:                                   # 1) Mac Roman, un byte → unicode
+            if (t.platformID, t.platEncID) == (1, 0):
+                for code, gname in t.cmap.items():
+                    try:
+                        cp = ord(bytes([code]).decode("mac_roman")) if 0 <= code < 256 else None
+                    except Exception:
+                        cp = None
+                    if cp is not None and gname not in (".notdef", ".null", "nonmarkingreturn"):
+                        mapa.setdefault(cp, gname)
+        for t in tablas:                                   # 2) símbolo: 0xF000 + código (pisa al anterior)
+            if (t.platformID, t.platEncID) == (3, 0):
+                for code, gname in t.cmap.items():
+                    cp = code - 0xF000 if 0xF000 <= code <= 0xF0FF else code
+                    if gname not in (".notdef", ".null", "nonmarkingreturn"):
+                        mapa[cp] = gname
+        if not mapa:                                       # 3) lo que sea, tal cual
+            for t in tablas:
+                for code, gname in t.cmap.items():
+                    mapa.setdefault(code, gname)
+        return mapa
 
     @property
     def cap_ratio(self):
@@ -57,6 +92,14 @@ class FuenteCurvas:
         if ch in self._cache:
             return self._cache[ch]
         gname = self.cmap.get(ord(ch))
+        if gname is None and ch.isspace():
+            # Un espacio sin glifo (fuentes decorativas de camiseta que sólo traen letras y
+            # números) no puede tumbar «MESSI 10»: no tiene contorno, así que sólo hace falta
+            # un avance. Se usa el del glifo `space` si existe por nombre; si no, un tercio del em.
+            gname = "space" if "space" in self.glyphset else None
+            if gname is None:
+                self._cache[ch] = ([], self.upem // 3)
+                return self._cache[ch]
         if gname is None:
             raise ValueError(f"glifo faltante: {ch!r}")
         pen = DecomposingRecordingPen(self.glyphset)
