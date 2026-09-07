@@ -44,6 +44,17 @@ import os
 import pikepdf
 import pymupdf as fitz
 
+# ⚡ NIVEL DE COMPRESIÓN al escribir PDFs (2026-09-07). qpdf deflatea con el nivel por defecto de
+# zlib (6): guardar la hoja aplanada del pedido de 5 prendas costaba 6,9 s; con nivel 1 son 1,7 s
+# y el archivo pasa de 18,0 a 20,4 MB. Es SIN PÉRDIDA (flate es flate: ni un byte del contenido
+# cambia, sólo cuánto se empaqueta), así que el color y el vector siguen exactos. Vale para todo
+# el proceso (es un ajuste global de pikepdf). `TIZADA_FLATE=6` vuelve al de siempre.
+try:
+    pikepdf.settings.set_flate_compression_level(int(os.environ.get("TIZADA_FLATE") or 1))
+except Exception:
+    pass
+
+
 from molde_real import _contorno_de_drawing
 
 CM = 28.3465          # puntos PDF por centímetro
@@ -65,7 +76,15 @@ def _dibujos(doc, mesa):
     """
     clave = (id(doc), mesa)
     if clave not in _CACHE:
-        _CACHE[clave] = doc[mesa - 1].get_drawings(extended=True)
+        if os.environ.get("TIZADA_DIBUJOS_LEGACY") == "1":
+            _CACHE[clave] = doc[mesa - 1].get_drawings(extended=True)
+        else:
+            # ⚡ (2026-09-07) `get_cdrawings`: lo mismo que `get_drawings` pero CRUDO — tuplas en
+            # vez de Point/Rect/Quad. Medido en el archivo real: la mesa 2 pasa de 9,0 s a 2,2 s,
+            # porque los 7 s eran PyMuPDF envolviendo en objetos los miles de puntos del DISEÑO,
+            # que acá no se miran (sólo se quieren los recortes del talle). Los pocos trazados
+            # que sí se usan se convierten al vuelo (`_rect_de`, `_items_objetos`).
+            _CACHE[clave] = doc[mesa - 1].get_cdrawings(extended=True)
     return _CACHE[clave]
 
 
@@ -80,8 +99,33 @@ def olvidar(doc=None):
 
 
 def _rect_de(d):
-    """El rectángulo de un item. Un recorte NO trae `rect` (viene en None): trae `scissor`."""
-    return d.get("scissor") or d.get("rect")
+    """El rectángulo de un item. Un recorte NO trae `rect` (viene en None): trae `scissor`.
+    Con `get_cdrawings` viene como tupla: se devuelve siempre un `fitz.Rect`."""
+    r = d.get("scissor") or d.get("rect")
+    if r is None or isinstance(r, fitz.Rect):
+        return r
+    return fitz.Rect(*r)
+
+
+def _items_objetos(items):
+    """Los items de un trazado crudo (`get_cdrawings`) con la forma de `get_drawings`: puntos
+    como `fitz.Point`, rectángulos como `fitz.Rect`, cuadriláteros como `fitz.Quad`. Es lo que
+    espera `molde_real._contorno_de_drawing` (`p.x`, `rr.x0`, `q.ul`). Se aplica SÓLO al trazado
+    elegido de cada pieza: convertir todos era lo que costaba 7 s por mesa."""
+    out = []
+    for it in items or []:
+        op = it[0]
+        if op == "l":
+            out.append(("l", fitz.Point(it[1]), fitz.Point(it[2])))
+        elif op == "c":
+            out.append(("c", fitz.Point(it[1]), fitz.Point(it[2]), fitz.Point(it[3]), fitz.Point(it[4])))
+        elif op == "re":
+            out.append(it if isinstance(it[1], fitz.Rect) else ("re", fitz.Rect(*it[1]), it[2]))
+        elif op == "qu":
+            out.append(it if isinstance(it[1], fitz.Quad) else ("qu", fitz.Quad(it[1])))
+        else:
+            out.append(it)
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -243,7 +287,7 @@ def _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
         if w_cm * h_cm < area_min_cm2 or min(w_cm, h_cm) < lado_min_cm:
             continue
         piezas.append((min(grupo), _contorno_de_drawing(
-            {"items": cands[i]["items"], "rect": r}, cb, U, mesa, talle)))
+            {"items": _items_objetos(cands[i]["items"]), "rect": r}, cb, U, mesa, talle)))
 
     # el orden del archivo = el orden en que aparece el PRIMER recorte de cada pieza
     piezas.sort(key=lambda p: p[0])
@@ -278,7 +322,8 @@ def _respaldo_por_trazados(doc, mesa, talle, page, cb, U, area_min_cm2, lado_min
         w_cm, h_cm = r.width / U / CM, r.height / U / CM
         if w_cm * h_cm < area_min_cm2 or min(w_cm, h_cm) < lado_min_cm:
             continue
-        piezas.append((min(grupo), _contorno_de_drawing(dibujos[idx[i]], cb, U, mesa, talle)))
+        piezas.append((min(grupo), _contorno_de_drawing(
+            {"items": _items_objetos(dibujos[idx[i]].get("items")), "rect": r}, cb, U, mesa, talle)))
     piezas.sort(key=lambda p: p[0])
     return [p for _, p in piezas]
 
@@ -1201,10 +1246,21 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     def _escribir_json(d):
         with open(fj + ".tmp", "w", encoding="utf-8") as fh:
             json.dump(d, fh)
-        os.replace(fj + ".tmp", fj)
+        _reemplazar(fj + ".tmp", fj)
         _CONT_CACHE.pop((carpeta, mesa), None)
 
     conts = None
+    if contornos:
+        # (2026-09-07) Si el desplegado de ESTE archivo ya tiene los contornos (mismo sello,
+        # mismo orden de talles), no se relee el dibujo: el alta repetida sobre el mismo archivo
+        # (la caché por hash del servidor, `medir_tizada_b`, un re-alta) costaba 16 s por nada.
+        _prev = _json_vigente(fj, sello, talles)
+        if _prev is not None:
+            conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (_prev.get("talles") or {}).items()}
+            marco, U = _prev.get("marco"), _prev.get("U")
+            if not paginas or (_prev.get("paginas") and os.path.exists(fp)):
+                return conts
+            contornos = False              # los contornos están: siguen sólo las páginas
     if contornos:
         # 1) los contornos, como siempre (get_drawings de la mesa, una vez para los 20 talles)
         doc = fitz.open(path_molde)
@@ -1227,20 +1283,13 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
                         "marco": marco, "U": U})
         if not paginas:
             return conts
-    else:
+    elif conts is None:
         # sólo las páginas: los contornos ya están (o no hacen falta acá)
-        try:
-            with open(fj, encoding="utf-8") as fh:
-                _prev = json.load(fh)
-            if _prev.get("sello") == sello:
-                conts = _prev.get("talles") or {}
-                marco, U = _prev.get("marco"), _prev.get("U")
-                if list(_prev.get("orden") or []) != list(talles) or not marco:
-                    _prev = None       # otro orden de talles (o JSON viejo): las páginas no corresponderían
-        except Exception:
-            _prev = None
+        _prev = _json_vigente(fj, sello, talles)
         if _prev is None:
             return desplegar_mesa(path_molde, mesa, talles, carpeta, contornos=True, paginas=True)
+        conts = _prev.get("talles") or {}
+        marco, U = _prev.get("marco"), _prev.get("U")
 
     # 2) la página de cada talle. Se parsea la mesa UNA vez y se filtra veinte; el filtrado es,
     #    instrucción por instrucción, el mismo de `aislar_capa(..., podar=True)`.
@@ -1265,13 +1314,45 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             MR.sanear_oc(out, npag)
         out.save(fp + ".tmp")
         out.close()
-        os.replace(fp + ".tmp", fp)
+        _reemplazar(fp + ".tmp", fp)
     finally:
         pdf.close()
 
     _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
                     "marco": marco, "U": U, "placeholders": placeholders})
     return conts
+
+
+def _reemplazar(origen, destino, intentos=8):
+    """`os.replace` con reintento. En Windows falla con «Acceso denegado» si OTRO proceso tiene
+    el destino abierto en ese instante (el servidor leyendo `m{mesa}.json` mientras un worker lo
+    reescribe): visto 2026-09-07 — el pool «fallaba» por eso y las 9 mesas seguían EN SERIE, tres
+    veces más lento, sin que nadie se enterara. Esperar unas décimas y volver a probar alcanza."""
+    import time
+    for i in range(intentos):
+        try:
+            os.replace(origen, destino)
+            return
+        except PermissionError:
+            if i == intentos - 1:
+                raise
+            time.sleep(0.25 * (i + 1))
+
+
+def _json_vigente(fj, sello, talles):
+    """El índice `m{mesa}.json` si es de ESTE archivo (sello) y de este orden de talles; si no,
+    None. Un JSON viejo, de otro archivo o con otro orden, no vale: las páginas no corresponderían."""
+    import json
+    try:
+        with open(fj, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        return None
+    if d.get("sello") != sello or not d.get("marco"):
+        return None
+    if list(d.get("orden") or []) != list(talles):
+        return None
+    return d
 
 
 def _desplegar_mesa_worker(args):

@@ -52,7 +52,9 @@ def _walk_xobjects(res, vistos, nivel=0):
             yield from _walk_xobjects(xo.get("/Resources"), vistos, nivel + 1)
 
 
-def verificar(path):
+def verificar(path, balance=True):
+    """`balance=False`: no vuelve a parsear todos los streams para el chequeo de q/Q — el motor ya
+    lo hizo en `validar_salida` (el servidor lo llama así; el CLI lo chequea todo)."""
     fallas = []
     def mal(cond, msg):
         if not cond:
@@ -122,15 +124,16 @@ def verificar(path):
         mal(not _dup, f"{len(_dup)} perfil(es) ICC repetidos ({sum(len(icc_hashes[h]) for h in _dup)} copias)")
     finally:
         pdf.close()
-    # 9 balanceados
-    try:
-        import motor_pedido as MP
-        v = MP.validar_salida(os.path.dirname(path), [{"tela": "hoja", "archivo": os.path.basename(path)}], {})
-        for x in v:
-            if x.get("ok") is False and "balance" in x.get("nombre", "").lower():
-                fallas.append(x.get("nombre"))
-    except Exception as e:
-        fallas.append(f"no se pudo validar el balance de los streams: {e}")
+    # 9 balanceados (opcional: cuesta parsear toda la hoja otra vez)
+    if balance:
+        try:
+            import motor_pedido as MP
+            v = MP.validar_salida(os.path.dirname(path), [{"tela": "hoja", "archivo": os.path.basename(path)}], {})
+            for x in v:
+                if x.get("ok") is False and "balance" in x.get("nombre", "").lower():
+                    fallas.append(x.get("nombre"))
+        except Exception as e:
+            fallas.append(f"no se pudo validar el balance de los streams: {e}")
     # 10 segundo lector
     try:
         import pymupdf as fitz

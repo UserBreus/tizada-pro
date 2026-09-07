@@ -143,8 +143,9 @@ def main():
         bases = len({id(p["base"]) for p in piezas})
         ok(n_new == bases, f"la hoja nueva tiene {n_new} Form XObjects = {bases} bases (colocaciones: {len(piezas)})")
         ok(prof_new <= 1, "ninguna base anida otro Form XObject (profundidad 1)")
-        mb_new, mb_old = os.path.getsize(h_new) / 1e6, os.path.getsize(h_old) / 1e6
-        ok(mb_new < mb_old / 2, f"pesa {mb_new:.1f} MB contra {mb_old:.1f} MB de la de siempre")
+        # El peso se mide DESPUÉS del aplanado (sección 4): la hoja intermedia se escribe sin
+        # comprimir a propósito (changelog 394) y lo que recibe el usuario es la aplanada.
+        mb_old = os.path.getsize(h_old) / 1e6
 
         # ══ 4. EL APLANADO DE UN NIVEL NO CAMBIA NADA Y DEJA EL PERFIL ═════════════════════════
         print("\n4 · APLANAR PARA EL RIP (un nivel): mismo píxel, perfil conservado")
@@ -159,6 +160,8 @@ def main():
         t = time.time(); aplanar_para_rip(h_new); t_ap = time.time() - t
         c2 = comparar(r_antes, render(h_new))
         ok(c2 is not None and c2["px"] == 0, f"aplanar no cambió un píxel ({c2 and c2['px']} distintos) · {t_ap:.0f}s")
+        mb_new = os.path.getsize(h_new) / 1e6
+        ok(mb_new < mb_old / 2, f"aplanada pesa {mb_new:.1f} MB contra {mb_old:.1f} MB de la de siempre")
         n2, prof2, oi = xobjects_form(h_new)
         ok(n2 == bases and prof2 <= 1, f"después de aplanar siguen las {n2} bases de un nivel")
         ok(oi, "el OutputIntent (perfil de salida) sigue en el archivo")

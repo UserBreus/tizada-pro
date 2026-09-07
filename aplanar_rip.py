@@ -16,6 +16,17 @@ import os
 import pikepdf
 from pikepdf import Name, parse_content_stream, unparse_content_stream
 
+# ⚡ NIVEL DE COMPRESIÓN al escribir PDFs (2026-09-07). qpdf deflatea con el nivel por defecto de
+# zlib (6): guardar la hoja aplanada del pedido de 5 prendas costaba 6,9 s; con nivel 1 son 1,7 s
+# y el archivo pasa de 18,0 a 20,4 MB. Es SIN PÉRDIDA (flate es flate: ni un byte del contenido
+# cambia, sólo cuánto se empaqueta), así que el color y el vector siguen exactos. Vale para todo
+# el proceso (es un ajuste global de pikepdf). `TIZADA_FLATE=6` vuelve al de siempre.
+try:
+    pikepdf.settings.set_flate_compression_level(int(os.environ.get("TIZADA_FLATE") or 1))
+except Exception:
+    pass
+
+
 _RES_KINDS = ["/ColorSpace", "/XObject", "/Font", "/ExtGState", "/Shading", "/Pattern", "/Properties"]
 _OPKIND = {"Do": "/XObject", "gs": "/ExtGState", "cs": "/ColorSpace", "CS": "/ColorSpace",
            "scn": "/ColorSpace", "SCN": "/ColorSpace", "sh": "/Shading", "Tf": "/Font",
@@ -393,6 +404,16 @@ def _aplanar_un_nivel(pdf, page, _hechos):
             except Exception:
                 _id = None
             if _id is not None and _id in _hechos:
+                continue
+            if xo.get("/TizadaBase") is not None and "/XObject" not in (xo.get("/Resources") or {}):
+                # Base de la hoja compartida: nace de una página desplegada, sin marcadores de
+                # capa y con las fuentes declaradas (contrato del desplegado). Parsear sus
+                # 20.000 operadores para no cambiar nada costaba ~0,3 s por base.
+                if _id is not None:
+                    _hechos[_id] = True
+                for _k in ("/OC", "/Group"):
+                    if _k in xo:
+                        del xo[_k]
                 continue
             sub_ops = _flatten(pdf, xo, es_pagina=False, _hechos=_hechos)   # des-anida lo de ADENTRO
             _procesar_contenido(pdf, xo, sub_ops)                              # y lo sanea, una vez

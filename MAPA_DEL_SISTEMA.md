@@ -1354,6 +1354,72 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (394) — SEGUNDOS, NO MINUTOS: la carga del molde con diseño 56 → ~8 s y la tizada de
+  5 prendas 51 → ~15 s.** Pedido del usuario: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá
+  todos los caminos para que sean segundos y milisegundos; y la tizada de 5 tardó 45 s». Estudio
+  completo (caminos, pros/contras, medidas) en `MOLDE_CON_DISENO.md` «SEGUNDOS, NO MINUTOS».
+  **Medido antes** (servidor 8051, 2026-09-07 9:16): subida `POST /api/plantilla` 25 s (contornos
+  de 9 mesas con 6 procesos: 16 s de pared, todo atado a la mesa 2) + páginas por talle 31 s en
+  segundo plano; pedido de 5 prendas 51 s = motor 21 (hoja 6, previews 8, validar 6) + aplanado
+  RIP 15 + perfil/verificación/ficha 15.
+  **La carga** (`piezas_con_diseno.py`, `servidor.py`):
+  · 🔴 **`get_cdrawings` en vez de `get_drawings`** (`_dibujos`): mismo resultado, crudo (tuplas).
+    Medido: mesa 2 de 9,0 s a 2,2 s — **7 de los 9 s eran PyMuPDF envolviendo en `Point`/`Rect`
+    los miles de puntos del DISEÑO**, que el alta no mira (sólo quiere los recortes del talle).
+    `_rect_de` devuelve `fitz.Rect`; `_items_objetos` convierte SÓLO el trazado elegido de cada
+    pieza (lo que espera `molde_real._contorno_de_drawing`). Verificado: 180/180 contornos
+    (9 mesas × 20 talles) byte a byte iguales a los de `get_drawings`. `TIZADA_DIBUJOS_LEGACY=1`
+    vuelve. Contornos de las 9 mesas: 39 → 12 s en serie; **16 → 5 s en paralelo**.
+  · **Contornos por sello** (`desplegar_mesa`, `_json_vigente`): con `contornos=True` se rehacían
+    SIEMPRE aunque `m{mesa}.json` fuera de ese archivo (el alta repetida costaba 16 s por nada).
+  · **Caché por hash del archivo** (`servidor._cache_desplegado_tomar/_guardar`,
+    `datos/desplegado_cache/<sha1>_v394/`): el mismo archivo subido otra vez (re-subir, otro
+    molde con el mismo .ai) copia el desplegado COMPLETO (contornos + páginas) y el `alta`
+    guardado; el sha1 de 123 MB cuesta 0,2 s. Se guarda cuando `_prewarm_desplegado` termina las
+    páginas; quedan los últimos 6 archivos distintos (~120 MB cada uno). El sello sigue valiendo
+    porque al temporal se le pone la fecha con la que se armó la caché (`os.utime`). ⚠️ Cambiar
+    el formato del desplegado exige subir `_CACHE_DESPL_VERSION`.
+  · **Procesos del alta = mesas** (`_procesos_alta`: núcleos − 1, tope 12; antes `procesos_render`
+    = 6 → 9 mesas en dos tandas). `TIZADA_PROCESOS` manda.
+  **La tizada** (`hoja_pike.py`, `aplanar_rip.py`, `motor_pedido.py`, `verificar_rip_compatible.py`,
+  `servidor.py`):
+  · **Bases marcadas `/TizadaBase`** (`xobject_base`): nacen de una página desplegada sin capas
+    y con sus fuentes declaradas → el aplanado (`_aplanar_un_nivel`) no las re-parsea (sólo les
+    saca `/OC`/`/Group`) y `validar_salida.caminar` no las chequea. Aplanado 15 → 4 s; validar
+    6 → 0 s.
+  · **Hoja intermedia sin comprimir** (`componer_hoja_pike`: `compress_streams=False`): el
+    aplanado la vuelve a escribir igual. Escribir el PDF 6 → 0 s. ⚠️ Por eso
+    `verificar_hoja_compartida.py` mide el peso DESPUÉS de aplanar.
+  · **SVG de cada base cacheado en disco** (`svg_base_cacheado`, `desplegado/svg/<clave>.svg`).
+    🔴 La clave NO puede llevar el nombre del XObject: `page.add_resource` lo genera AL AZAR y la
+    caché no acertaba nunca (27 SVG nuevos por corrida). Previews 8 → 3 s.
+  · **Flate nivel 1** (`pikepdf.settings.set_flate_compression_level`, en `aplanar_rip` y
+    `piezas_con_diseno`; `TIZADA_FLATE=6` vuelve): guardar la hoja aplanada 6,9 → 1,7 s
+    (18,0 → 20,4 MB). Sin pérdida: cambia cuánto se empaqueta, no un byte del contenido.
+  · Servidor: sin arte no hay RGB que rastrear (`_pdf_tiene_rgb` se salta con moldes con diseño);
+    `verificar_rip_compatible.verificar(path, balance=False)` no re-corre `validar_salida`
+    (el CLI sí); cronómetro del pedido ENTERO en `correr()` (`[tiempos] pedido <tid>: motor · rip ·
+    perfil · verificar · ficha · total`).
+  **Medido después** (`medir_tizada_b.py 5`, mismo molde, en frío): 35 → **10 s** (motor 6:
+  nesting 2, previews 3; aplanado 4) · hoja aplanada 20,4 MB. Carga (`medir_alta2.py`, 9
+  procesos): alta completa 15,5 → **5,2 s**; con contornos ya hechos 18 → 3,1 s; páginas por talle
+  en segundo plano 32,6 → 28,8 s. **Por HTTP contra el 8051** (`prueba_cache.py`, molde efímero
+  propio): `POST /api/plantilla` 25 → **11,4 s** la primera vez (páginas listas a los 34 s, caché
+  guardada 4 s después) y **1,0 s** la segunda vez con el mismo archivo, con el desplegado
+  COMPLETO (páginas y placeholders incluidos). Cronómetro: `[tiempos] subida de <archivo>`.
+  ⚠️ **Lo que salió mal**: un medidor sin `if __name__ == "__main__"` en Windows (spawn) se
+  re-ejecuta entero en cada worker: la medición «con 6/9/12 procesos» corrió en SERIE, en loop
+  y dejó 11 procesos huérfanos que inflaron TODAS las cifras (mesa 2: 15 s en vez de 8). Regla:
+  todo script que llame a `desplegar_molde(procesos=n)` lleva el guardián, y antes de medir se
+  listan los `python.exe` vivos con su línea de comando (`Get-CimInstance Win32_Process`).
+  Contratos: `verificar_desplegado`, `verificar_hoja_compartida` (peso tras aplanar),
+  `verificar_tizada_con_diseno`, `verificar_placeholders_con_diseno`, `verificar_molde_con_diseno`,
+  `verificar_poda_camino_b`, `verificar_registro_idx_mesa`; comparación de contornos 180/180.
+  **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
+  plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
+  contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra
+  `get_cdrawings`; páginas por talle sólo de los talles del pedido cuando la tizada llega antes
+  que el segundo plano; previews después de marcar el trabajo listo; E6/E7 del changelog 393.
 - **2026-09-04 (393) — LA HOJA COMPARTIDA: la tizada del camino B deja de ser lineal en prendas.**
   Pedido del usuario: «5 camisetas tardan 2:30; 100 tienen que tardar 2 minutos; buscá el mejor
   método». Plan aprobado en `~/.claude/plans/dapper-cuddling-dahl.md`; diseño en

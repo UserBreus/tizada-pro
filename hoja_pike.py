@@ -103,6 +103,11 @@ def xobject_base(pdf, b, memo):
     xo["/Subtype"] = Name("/Form")
     xo["/BBox"] = pikepdf.Array([0, 0, float(b["W"]) + 2 * float(b["B"]), float(b["Hp"])])
     xo["/Resources"] = res
+    # Marca propia: la base viene de una página desplegada (sin marcadores de capa, con todas
+    # sus fuentes declaradas, balanceada por contrato) → el aplanado para el RIP y la validación
+    # no tienen que volver a parsear sus 20.000 operadores. Una clave privada en un XObject es
+    # PDF válido; los lectores la ignoran.
+    xo["/TizadaBase"] = True
     memo[k] = xo
     return xo
 
@@ -169,7 +174,9 @@ def componer_hoja_pike(colocaciones, cfg, path_salida, signo_rotacion=1):
         page.obj["/Resources"] = pikepdf.Dictionary({"/XObject": xobjs})
         alturas_cm.append(round(alto_pag / CM, 1))
         consumo_cm += alto_pag / CM
-    pdf.save(path_salida)
+    # Sin comprimir: esta hoja es intermedia — el aplanado para el RIP la vuelve a escribir (y
+    # ahí sí comprime). Deflatear 27 mesas de 1,6 MB acá costaba 5 s por nada.
+    pdf.save(path_salida, compress_streams=False)
     pdf.close()
     for d in memo.get("__abiertos__", []):
         try:
@@ -214,6 +221,39 @@ def _svg_de_ops(W, H, ops_bytes, fitz, prefijo=""):
     return _svg_interior(svg, prefijo)
 
 
+def svg_base_cacheado(b, docs_base, prefijo):
+    """El SVG de una base, cacheado EN DISCO al lado del desplegado del molde
+    (`desplegado/svg/<clave>.svg`). La clave es el contenido de la base (mesa, talle, contorno,
+    borde y su config): cambia el borde → otra clave. Armar el documento de la base y convertirlo
+    costaba ~0,4 s por base y por tizada (8 s en un pedido de 5 prendas): con la caché, la segunda
+    tizada del mismo molde lo lee en milisegundos."""
+    import hashlib
+    try:
+        carpeta = os.path.join(os.path.dirname(b["despl"][2]), "svg")
+        # ⚠️ `base_stream` nombra la mesa con el nombre que le puso `page.add_resource`, y pikepdf
+        # lo genera AL AZAR (`/A3f9c…`): con él adentro la clave cambiaba en cada tizada y la caché
+        # no acertaba nunca (medido: 27 SVG nuevos por corrida, 7 s). Se lo saca de la clave.
+        _cuerpo = b["base_stream"].replace(str(b.get("nom") or "\x00"), "@XO")
+        clave = hashlib.sha1((_cuerpo + "|" + str(b["despl"][1])).encode("latin-1")).hexdigest()[:20]
+        ruta = os.path.join(carpeta, f"{clave}.svg")
+        if os.path.exists(ruta):
+            with open(ruta, encoding="utf-8") as fh:
+                return _svg_interior(fh.read(), prefijo)
+    except Exception:
+        ruta = None
+    d = docs_base(b)
+    svg = d[0].get_svg_image()
+    if ruta:
+        try:
+            os.makedirs(carpeta, exist_ok=True)
+            with open(ruta + ".tmp", "w", encoding="utf-8") as fh:
+                fh.write(svg)
+            os.replace(ruta + ".tmp", ruta)
+        except Exception:
+            pass
+    return _svg_interior(svg, prefijo)
+
+
 def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1):
     """El SVG de UNA página de la hoja: `<symbol>` por base (una sola vez, cacheado en `simbolos`
     por id(base)) y `<use>` por colocación, más el estampado de cada prenda como trazos.
@@ -243,8 +283,7 @@ def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1):
             ids[k] = sid
             sym = simbolos.get(k)
             if sym is None:
-                d = docs_base(b)
-                sym = _svg_interior(d[0].get_svg_image(), prefijo=sid + "_")
+                sym = svg_base_cacheado(b, docs_base, sid + "_")
                 simbolos[k] = sym
             defs.append(f'<symbol id="{sid}" viewBox="0 0 {W:.3f} {H:.3f}" overflow="visible">{sym}</symbol>')
         cx = m["izq"] * CM + c["cx"]

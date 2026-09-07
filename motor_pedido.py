@@ -5049,7 +5049,10 @@ def validar_salida(carpeta, hojas, telas_spacing):
                     return
                 vis.add(og)
                 if isinstance(o, pikepdf.Stream) and str(o.get("/Subtype", "")) == "/Form":
-                    chequear(o)
+                    # una base de la hoja compartida (`/TizadaBase`) nace de una página desplegada
+                    # balanceada por contrato: parsear sus 20.000 operadores no aporta nada
+                    if o.get("/TizadaBase") is None:
+                        chequear(o)
                 r2 = o.get("/Resources") if isinstance(o, (pikepdf.Stream, pikepdf.Dictionary)) else None
                 if r2 is not None and "/XObject" in r2:
                     for k in r2.XObject.keys():

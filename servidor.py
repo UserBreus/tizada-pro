@@ -1838,6 +1838,7 @@ def subir_plantilla():
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
     destino = _ruta_entrada("plantilla.ai", original=True)
+    _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
     # ── SUBIDA ATÓMICA ───────────────────────────────────────────────────────────────────────
     # El archivo entra a un TEMPORAL y sólo reemplaza al molde bueno si se pudo procesar.
     # Antes se guardaba encima y recién después se procesaba: si el alta fallaba (422), el molde
@@ -1925,7 +1926,16 @@ def subir_plantilla():
                 # `paginas=False`: la subida responde con los contornos; las páginas por talle
                 # (lo que usa el motor) se arman en segundo plano apenas el archivo está en su
                 # lugar (`_prewarm_desplegado`). Medido: eran 107 s de 161 en serie.
-                alta = PD.alta_molde_con_diseno(tmp, procesos=procesos_render(), paginas=False)
+                # CACHÉ POR ARCHIVO (2026-09-07): el mismo archivo subido de nuevo (probar, re-subir,
+                # otro pedido con el mismo molde) no se vuelve a desplegar: se copia lo que ya se
+                # armó, con sus páginas por talle. La clave es el sha1 del archivo (0,2 s en 123 MB).
+                alta = _cache_desplegado_tomar(tmp)
+                if alta is None:
+                    # `procesos`: una mesa por proceso, hasta los núcleos de la máquina — la etapa
+                    # dura lo que tarda la mesa más pesada (8 s medidos) sólo si todas van a la vez.
+                    alta = PD.alta_molde_con_diseno(tmp, procesos=_procesos_alta(), paginas=False)
+                else:
+                    _motivo_b += " · desplegado tomado de la caché"
             else:
                 alta = MP.alta_plantilla(tmp)      # se valida ANTES de pisar el molde bueno
         except Exception as e:
@@ -2063,18 +2073,105 @@ def subir_plantilla():
         # CAMINO B: las páginas por talle del molde desplegado, ahora que el archivo ya está en
         # su lugar (el sello es el mismo: `os.replace` conserva la fecha). El usuario mientras
         # tanto nombra las piezas; si genera antes de que termine, el motor arma esa mesa solo.
-        threading.Thread(target=_prewarm_desplegado, args=(destino, list(alta.get("talles") or [])), daemon=True).start()
+        threading.Thread(target=_prewarm_desplegado, args=(destino, list(alta.get("talles") or []), alta), daemon=True).start()
+    print(f"  [tiempos] subida de {f.filename}: {time.time() - _t_subida:.1f}s"
+          + (f" ({_motivo_b})" if _con_diseno else ""), flush=True)
     return jsonify(resumen)
 
 
-def _prewarm_desplegado(path, talles):
+def _procesos_alta():
+    """Cuántos procesos para desplegar un molde: uno por mesa hasta los núcleos de la máquina
+    (`TIZADA_PROCESOS` manda si está). Cada uno pesa ~200 MB."""
+    try:
+        n = int(os.environ.get("TIZADA_PROCESOS") or 0)
+    except ValueError:
+        n = 0
+    return max(1, n) if n else min(max(2, (os.cpu_count() or 4) - 1), 12)
+
+
+_CACHE_DESPL = os.path.join(DATOS, "desplegado_cache")
+_CACHE_DESPL_MAX = 6          # los últimos N archivos distintos (~120 MB cada uno)
+_CACHE_DESPL_VERSION = "v394"
+
+
+def _sha1_archivo(path):
+    import hashlib
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for bloque in iter(lambda: fh.read(1 << 22), b""):
+            h.update(bloque)
+    return h.hexdigest()
+
+
+def _cache_desplegado_tomar(tmp):
+    """Si este archivo ya se desplegó alguna vez, copia su desplegado al lado del temporal y
+    devuelve el `alta` guardado; si no, None. El sello del desplegado es [tamaño, mtime]: se le
+    pone al archivo la fecha que tenía cuando se armó la caché, y todo coincide."""
+    try:
+        import json as _json
+        clave = _sha1_archivo(tmp) + "_" + _CACHE_DESPL_VERSION
+        carpeta = os.path.join(_CACHE_DESPL, clave)
+        fa = os.path.join(carpeta, "alta.json")
+        if not os.path.exists(fa) or not os.path.isdir(os.path.join(carpeta, "desplegado")):
+            return None
+        with open(fa, encoding="utf-8") as fh:
+            alta = _json.load(fh)
+        import shutil
+        import piezas_con_diseno as PD
+        destino = PD._carpeta_desplegado(tmp)
+        shutil.rmtree(destino, ignore_errors=True)
+        shutil.copytree(os.path.join(carpeta, "desplegado"), destino)
+        os.utime(tmp, (time.time(), float(alta["mtime"])))
+        print(f"[camino B] desplegado tomado de la caché {clave[:12]}…")
+        return alta["alta"]
+    except Exception as e:
+        print(f"[camino B] caché del desplegado no usable: {e}")
+        return None
+
+
+def _cache_desplegado_guardar(path, alta):
+    """Guarda el desplegado COMPLETO (contornos + páginas) y el `alta` bajo el sha1 del archivo,
+    y deja sólo los últimos `_CACHE_DESPL_MAX`."""
+    try:
+        import json as _json
+        import shutil
+        import piezas_con_diseno as PD
+        if not PD.desplegado_listo(path):
+            print(f"[camino B] caché del desplegado: no se guarda, el desplegado de {path} no está completo")
+            return
+        clave = _sha1_archivo(path) + "_" + _CACHE_DESPL_VERSION
+        carpeta = os.path.join(_CACHE_DESPL, clave)
+        if os.path.exists(os.path.join(carpeta, "alta.json")):
+            return
+        os.makedirs(_CACHE_DESPL, exist_ok=True)
+        tmp = carpeta + ".tmp"
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.copytree(PD._carpeta_desplegado(path), os.path.join(tmp, "desplegado"))
+        with open(os.path.join(tmp, "alta.json"), "w", encoding="utf-8") as fh:
+            _json.dump({"alta": alta, "mtime": os.stat(path).st_mtime}, fh)
+        os.replace(tmp, carpeta)
+        # los más viejos, afuera
+        vivos = sorted((os.path.join(_CACHE_DESPL, d) for d in os.listdir(_CACHE_DESPL)
+                        if os.path.isdir(os.path.join(_CACHE_DESPL, d)) and not d.endswith(".tmp")),
+                       key=os.path.getmtime)
+        for viejo in vivos[:-_CACHE_DESPL_MAX]:
+            shutil.rmtree(viejo, ignore_errors=True)
+        print(f"[camino B] desplegado guardado en la caché {clave[:12]}…")
+    except Exception as e:
+        print(f"[camino B] no se pudo guardar la caché del desplegado: {e}")
+
+
+def _prewarm_desplegado(path, talles, alta=None):
     """Segunda etapa del desplegado del camino B (ver `piezas_con_diseno.desplegar_mesa`): las
-    páginas por talle, una mesa por proceso, después de responder la subida. Best-effort."""
+    páginas por talle, una mesa por proceso, después de responder la subida. Best-effort.
+    Al terminar, el desplegado completo va a la caché por archivo (`_cache_desplegado_guardar`)."""
     try:
         import piezas_con_diseno as PD
         _t0 = time.time()
-        PD.desplegar_molde(path, talles, procesos=procesos_render(), contornos=False, paginas=True)
+        PD.desplegar_molde(path, talles, procesos=_procesos_alta(), contornos=False, paginas=True)
         print(f"[camino B] páginas por talle listas ({time.time()-_t0:.0f}s): {path}")
+        if alta is not None:
+            _cache_desplegado_guardar(path, alta)
     except Exception as e:
         print(f"[camino B] no se pudieron preparar las páginas por talle de {path}: {e}")
 
@@ -7328,8 +7425,15 @@ def generar_multi():
             trabajos[tid]["estado"] = "generando"
             def prog(fase, a, b):
                 trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
+            # Cronómetro del PEDIDO entero (el motor imprime el suyo): lo que pasa después del
+            # motor —aplanado, perfil, verificación, ficha— era la mitad del tiempo y no se veía.
+            _crono, _tc = {}, time.time()
+            def _marca(nombre):
+                nonlocal _tc
+                _crono[nombre] = _crono.get(nombre, 0.0) + (time.time() - _tc); _tc = time.time()
             res = MP.generar_pedido_grupos(grupos, FUENTES, salida,
                                            config_nesting=cfg_nesting, telas_cfg=telas_cfg, progreso=prog)
+            _marca("motor")
             res["id"] = tid
             res["moldes"] = nombres
             res["avisos"] = avisos   # combos (molde,diseño) que no se generaron por mapeo sin aprobar
@@ -7356,6 +7460,7 @@ def generar_multi():
                           f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
             except Exception as _ea:
                 print("  [!] aplanar RIP:", _ea)
+            _marca("rip")
             # Embeber el perfil ICC en cada hoja: el que vino en el arte, o el
             # predeterminado del sistema si el arte no traía. Tagea (OutputIntent),
             # NO convierte los colores.
@@ -7371,7 +7476,9 @@ def generar_multi():
                             # el del perfil elegido (RGB en salida CMYK, o CMYK en salida
                             # RGB). Si ya está todo en ese modo, NO se toca: los valores
                             # quedan EXACTOS y solo se ASIGNA el perfil (OutputIntent).
-                            _mixto = _pdf_tiene_rgb(_p) if _esp == "CMYK" else _pdf_tiene_cmyk(_p)
+                            # Sin arte (moldes con el diseño adentro) la hoja es CMYK por
+                            # construcción: recorrer sus streams para buscar RGB costaba segundos
+                            _mixto = False if not arts else (_pdf_tiene_rgb(_p) if _esp == "CMYK" else _pdf_tiene_cmyk(_p))
                             if _mixto:
                                 prog("perfil", "unificando color " + h["archivo"], None)
                                 _unificar_modo_gs(_p, _esp)       # a un solo modo (sin diálogo de Illustrator)
@@ -7381,6 +7488,7 @@ def generar_multi():
                     res["perfil_icc"] = _icc_nom
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
+            _marca("perfil")
             # COMPATIBILIDAD RIP (2026-09-04): la hoja final se verifica como PDF/X-1a-like (sin
             # capas ni transparencia, un nivel de objetos, fuentes embebidas, CMYK, perfil de
             # salida). Si algo falla, se avisa en pantalla — no se frena la tizada.
@@ -7388,7 +7496,7 @@ def generar_multi():
                 from verificar_rip_compatible import verificar as _verif_rip
                 _rip_fallas = []
                 for h in res.get("hojas", []):
-                    _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]))
+                    _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]), balance=False)
                     if not _okr:
                         _rip_fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
                 res["rip_compatible"] = not _rip_fallas
@@ -7398,6 +7506,7 @@ def generar_multi():
                     print("  [rip] ⚠️ " + " | ".join(_rip_fallas[:6]), flush=True)
             except Exception as _er:
                 print("  [rip] no se pudo verificar la compatibilidad:", _er)
+            _marca("verificar")
             # FICHA TÉCNICA (A4): la planilla del pedido arriba y, abajo, UN MOLDE GUÍA POR CADA
             # DISEÑO del pedido (diseño estampado + piezas nombradas + su tela). Sale JUNTO con la
             # tizada. Best-effort: si falla, la tizada igual queda.
@@ -7467,6 +7576,9 @@ def generar_multi():
                         res["ficha_paginas"] = 1
             except Exception as _ef:
                 print("  [!] ficha técnica:", repr(_ef))
+            _marca("ficha")
+            print("  [tiempos] pedido " + tid + ": " + " · ".join(f"{k}: {v:.0f}s" for k, v in _crono.items())
+                  + f" · total: {sum(_crono.values()):.0f}s", flush=True)
             json.dump({"prendas": prendas, "moldes": nombres,
                        "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res["hojas"]}},
                       open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)

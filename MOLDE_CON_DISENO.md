@@ -387,6 +387,80 @@ traduce solo al campo `numero`, porque el estampado busca `persona[campo]` por e
 capa. ⚠️ **Falta probarlo contra un archivo que las traiga** — cuando exista, correr
 `verificar_tizada_con_diseno.py` y mirar que salgan estampados.
 
+## ⚡⚡⚡⚡ SEGUNDOS, NO MINUTOS (2026-09-07) — la carga y la tizada de 5, con todos los caminos
+
+**El pedido**: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá todos los caminos posibles
+para que demore segundos y milisegundos; y la tizada de 5 camisetas tardó 45 s». Changelog 394.
+
+### Dónde se iba el minuto de la carga (medido en el 8051, 2026-09-07 a la mañana)
+
+| tramo | s | causa |
+|---|---|---|
+| `POST /api/plantilla` (lo que el usuario espera) | **25** | contornos de 9 mesas con 6 procesos: 16 s de pared |
+| · de esos, la mesa 2 sola (`get_drawings`) | 8,4 (15 con la máquina cargada) | 5.796 trazados, la mayoría del DISEÑO |
+| · registro + visor + guardar + copiar | ~3 | |
+| páginas por talle (segundo plano) | 31 | `_raspar_instrucciones` × 20 talles × 9 mesas |
+| sha1 del archivo (123 MB) | 0,2 | lo que cuesta reconocerlo |
+
+Los 16 s no eran «muchas mesas»: eran **una** (la más pesada) y PyMuPDF haciendo un trabajo que
+no hacía falta. `get_drawings` devuelve cada punto como `fitz.Point` y cada rectángulo como
+`fitz.Rect`; con 400.000 operadores de diseño por mesa eso son millones de objetos Python para
+quedarse con 140 recortes. `get_cdrawings` (la misma función, cruda) tarda 2,2 s en la misma
+mesa. Los 7 s de diferencia eran envoltorios.
+
+### Los caminos de la carga (todos), con lo que dan y lo que cuestan
+
+| # | camino | qué da | contras | estado |
+|---|---|---|---|---|
+| 1 | **`get_cdrawings`** y convertir sólo el trazado elegido | contornos 16 → 5 s (9 procesos); 180/180 iguales | ninguno (switch `TIZADA_DIBUJOS_LEGACY=1`) | **hecho** |
+| 2 | **caché por hash del archivo** (`datos/desplegado_cache/<sha1>/`) | el mismo archivo otra vez: sin desplegar nada, ni contornos ni páginas | 120 MB por archivo (se guardan 6); hay que subir `_CACHE_DESPL_VERSION` si cambia el formato | **hecho** |
+| 3 | contornos por sello no se rehacen; un proceso por mesa (núcleos − 1) | el re-alta 18 → 3 s; las 9 mesas a la vez | 9 × ~200 MB de RAM durante 5 s | **hecho** |
+| 4 | responder la subida **al instante** y desplegar en segundo plano con avance en pantalla | subida percibida ~1 s; «nombrar piezas» espera lo que falte (5 s) con cartel honesto | front: estado «preparando el molde» + polling en `subirPlantilla`; el registro/visor llegan después | pendiente (plan: `POST` devuelve `preparando: true`, `_prewarm` arma alta+registro, `GET /api/plantilla/estado`) |
+| 5 | contornos desde el **content-stream parseado** (pikepdf, sin MuPDF) | parsear la mesa 2 cuesta 1,8 s y ya se hace para las páginas: contornos «gratis» | reimplementar CTM (`q/Q/cm`), rutas y `W n` por capa: es el intérprete de MuPDF en chico; contrato obligatorio contra `get_cdrawings` | pendiente, sólo si el 5 s molesta |
+| 6 | páginas por talle **sólo de los talles del pedido** cuando la tizada llega antes que el segundo plano | el motor no espera 30 s si el usuario tiza enseguida | dos formatos de `m{mesa}.pdf` (parcial/total) y sello por talle | pendiente |
+| 7 | flate nivel 1 al escribir el desplegado | páginas 32,6 → 28,8 s | +10 % de disco | **hecho** |
+| 8 | la transferencia de 123 MB | en local es 1 s; en la app web será EL cuello (depende de la conexión) | no se resuelve en el servidor: subida directa al almacenamiento + alta asincrónica (camino 4) | anotado |
+
+No hay camino a «milisegundos» para la PRIMERA carga de un archivo de 123 MB: hay que leerlo por
+lo menos una vez. Milisegundos es lo que cuesta la segunda (camino 2: reconocerlo son 0,2 s).
+
+**Medido por HTTP contra el 8051 después de todo esto** (`prueba_cache.py`, molde efímero propio):
+`POST /api/plantilla` **25 → 11,4 s** la primera vez que se ve el archivo (contornos 5 s + 123 MB
+por la red local + registro/visor/DB + arrancar 9 procesos); páginas por talle listas a los 34 s
+y la caché guardada 4 s después; **1,0 s** la segunda subida del mismo archivo, ya con las páginas
+y los placeholders (la tizada no tiene que esperar nada). El servidor imprime
+`[tiempos] subida de <archivo>: N s`.
+
+### Dónde se iban los 45-51 s de la tizada de 5 (y qué quedó)
+
+| etapa | antes | después | cómo |
+|---|---|---|---|
+| armar bases | 1 | 1 | ya estaba (hoja compartida) |
+| nesting | 1-2 | 2 | — (E7: memoria de tizada) |
+| escribir la hoja | 6 | 0 | intermedia sin comprimir (`compress_streams=False`): la aplana el RIP igual |
+| previews | 8 | 3 | SVG de cada base cacheado en disco; 🔴 la clave llevaba el nombre AL AZAR del XObject y no acertaba nunca |
+| validar | 5-6 | 0 | las bases `/TizadaBase` no se re-parsean |
+| aplanado RIP | 15 | 4 | bases no se re-parsean + flate nivel 1 (guardar 6,9 → 1,7 s) |
+| perfil ICC (rastrear RGB + incrustar) | ~5 | ~1 | sin arte no hay RGB que buscar |
+| verificación RIP | ~6 | ~1 | sin re-correr `validar_salida` (el CLI sí lo hace) |
+| ficha técnica | ? | medido ahora | cronómetro del pedido entero: `[tiempos] pedido <tid>` |
+| **total** | **51 (motor 21 + rip 15 + post 15)** | **~15** | |
+
+Lo que queda por sacar (con plan): previews 3 s = leer 27 SVG (39 MB) + escribir el archivo
+→ armarlos DESPUÉS de marcar el trabajo listo (el usuario abre la preview unos segundos más
+tarde; `trabajos[tid]["preview"] = "armando"`); la tizada entera en un proceso (E6) para que el
+servidor no se bloquee mientras tanto; memoria de tizada (E7).
+
+**Lo que se aprendió**
+· 🔴 En Windows un script que use `ProcessPoolExecutor` sin `if __name__ == "__main__"` se
+  re-ejecuta entero en cada worker: la primera medición «con 6/9/12 procesos» corrió en serie, en
+  loop, y dejó 11 procesos huérfanos que inflaron todas las cifras (mesa 2: 15 s en vez de 8).
+  Antes de medir: listar los `python.exe` vivos con su línea de comando.
+· `get_drawings` vs `get_cdrawings`: cuando lo caro es el diseño y lo que se busca son los
+  recortes, la conversión a objetos es el costo, no MuPDF.
+· Una clave de caché no puede llevar nada que se genere al azar (`add_resource` sin nombre).
+· `pikepdf.settings.set_flate_compression_level(1)`: 4× más rápido al guardar, sin pérdida.
+
 ## ⚡⚡⚡ LA HOJA COMPARTIDA (2026-09-04) — la tizada deja de ser lineal en prendas
 
 **El problema.** 5 prendas = 180 s en el servidor (70 s en frío). Cada prenda repetía TODO el
@@ -751,6 +825,15 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
 
 ## 10. BITÁCORA (una línea por sesión — qué se hizo, qué falló, qué se aprendió)
 
+- **2026-09-07 (segundos, no minutos)** — Ver changelog 394 del mapa y la sección «SEGUNDOS, NO
+  MINUTOS». Carga: `get_cdrawings` (7 de los 9 s de la mesa 2 eran envoltorios `Point`/`Rect`
+  del diseño), contornos por sello, caché por hash del archivo, un proceso por mesa; tizada:
+  bases `/TizadaBase` sin re-parsear, hoja intermedia sin comprimir, SVG de base cacheado con
+  clave estable, flate nivel 1, servidor sin rastreo RGB ni re-validación. Lo que salió mal: el
+  primer medidor sin `__main__` corrió en serie y dejó huérfanos (cifras infladas ×2); la caché de
+  SVG no acertaba por el nombre al azar del XObject; un `os.replace` del worker choca con quien
+  tenga el JSON abierto (Windows) y el pool «fallaba» en silencio a serie → `_reemplazar` con
+  reintento.
 - **2026-09-04 quinquies (la hoja compartida)** — Ver changelog 393 del mapa y la sección «LA HOJA
   COMPARTIDA». Plan aprobado por el usuario (bases compartidas, aplanado de un nivel, PDF/X-1a-like,
   preview con símbolos, escala a 300+). Entregadas E0-E5 en una tanda; medido 5 prendas 70 → 40 s
