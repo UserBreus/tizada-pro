@@ -234,7 +234,10 @@ def svg_base_cacheado(b, docs_base, prefijo):
         # lo genera AL AZAR (`/A3f9c…`): con él adentro la clave cambiaba en cada tizada y la caché
         # no acertaba nunca (medido: 27 SVG nuevos por corrida, 7 s). Se lo saca de la clave.
         _cuerpo = b["base_stream"].replace(str(b.get("nom") or "\x00"), "@XO")
-        clave = hashlib.sha1((_cuerpo + "|" + str(b["despl"][1])).encode("latin-1")).hexdigest()[:20]
+        # …y la MESA va en la clave: dos piezas de mesas distintas con el mismo contorno (cuello
+        # derecho / izquierdo) tendrían el mismo `base_stream` y compartirían el SVG equivocado.
+        _mesa = os.path.basename(str(b["despl"][2]))
+        clave = hashlib.sha1((_cuerpo + "|" + _mesa + "|" + str(b["despl"][1])).encode("latin-1")).hexdigest()[:20]
         ruta = os.path.join(carpeta, f"{clave}.svg")
         if os.path.exists(ruta):
             with open(ruta, encoding="utf-8") as fh:

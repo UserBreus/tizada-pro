@@ -278,10 +278,18 @@ def _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
     if not cands:
         return _respaldo_por_trazados(doc, mesa, talle, page, cb, U, area_min_cm2, lado_min_cm)
 
+    rellenos = _rellenos_por_clip(_dibujos(doc, mesa), talle)
     piezas = []
     for grupo in _agrupar_por_solape(rects):
-        # el recorte de MAYOR ÁREA es el borde externo: el que cubre a todos los del grupo
-        i = max(grupo, key=lambda k: rects[k].width * rects[k].height)
+        # 🔴 El contorno es el recorte de mayor área ENTRE LOS QUE TIENEN EL DISEÑO ADENTRO
+        # (rellenos). Antes era el mayor del grupo a secas, y en el archivo real el mayor es la
+        # LÍNEA DE CORTE dibujada: un recorte 1 mm más alto (cuello, costadillo) o 3,5 mm más
+        # ancho (cuello curvo) con sólo TRAZOS adentro. La pieza salía más grande que el diseño:
+        # una franja blanca entre el estampado y el borde de corte, «borde de más de 3 mm» y
+        # piezas «por fuera de lo que deberían ser» (reporte del usuario 2026-09-07). Si ningún
+        # recorte del grupo tiene rellenos, vale el mayor, como siempre.
+        con_diseno = [k for k in grupo if rellenos.get(id(cands[k]), 0) > 0]
+        i = max(con_diseno or grupo, key=lambda k: rects[k].width * rects[k].height)
         r = rects[i]
         w_cm, h_cm = r.width / U / CM, r.height / U / CM
         if w_cm * h_cm < area_min_cm2 or min(w_cm, h_cm) < lado_min_cm:
@@ -292,6 +300,27 @@ def _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
     # el orden del archivo = el orden en que aparece el PRIMER recorte de cada pieza
     piezas.sort(key=lambda p: p[0])
     return [p for _, p in piezas]
+
+
+def _rellenos_por_clip(dibujos, talle):
+    """Cuántos RELLENOS hay adentro de cada recorte de la capa `talle`: `{id(clip): n}`.
+    `get_drawings(extended=True)` devuelve los dibujos EN ORDEN con su `level`: lo que sigue a un
+    recorte de nivel L con nivel mayor está adentro de él, hasta el próximo dibujo de nivel ≤ L.
+    Se cuentan también los rellenos de los recortes anidados (siguen adentro del externo)."""
+    seq = [d for d in dibujos if d.get("layer") == talle]
+    out = {}
+    for k, d in enumerate(seq):
+        if d.get("type") != "clip":
+            continue
+        L = d.get("level") or 0
+        n = 0
+        for y in seq[k + 1:]:
+            if (y.get("level") or 0) <= L:
+                break
+            if y.get("type") in ("f", "fs"):
+                n += 1
+        out[id(d)] = n
+    return out
 
 
 def _respaldo_por_trazados(doc, mesa, talle, page, cb, U, area_min_cm2, lado_min_cm):
@@ -832,6 +861,10 @@ def parece_molde_con_diseno(doc, mesas_a_mirar=2):
 # cuando se re-sube uno del camino A encima.
 DESPLEGADO = "desplegado"
 _CONT_CACHE = {}          # {(carpeta, mesa): índice ya leído}  — no releer el JSON en cada pieza
+# Versión de la REGLA DE CONTORNOS. Un `m{mesa}.json` con otra versión tiene contornos viejos:
+# se rehacen (5 s por mesa, en paralelo) y sus páginas por talle se conservan (no dependen de
+# la regla). 2 = el recorte con el diseño adentro, no el mayor del grupo (2026-09-07).
+_V_CONTORNOS = 2
 # Lo que se copia de la página original a la desplegada. Lista CERRADA a propósito: `/PieceInfo`
 # (los datos privados de Illustrator), `/Metadata`, `/Annots` o `/Thumb` no dibujan nada y pesan.
 _CLAVES_PAGINA = ("/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate",
@@ -885,7 +918,7 @@ def _leer_desplegado(path_molde, mesa):
             d = json.load(fh)
     except Exception:
         return None
-    if d.get("sello") != sello:
+    if d.get("sello") != sello or d.get("v") != _V_CONTORNOS:
         return None
     conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (d.get("talles") or {}).items()}
     # `pdf` sólo si las páginas por talle YA están (el JSON lo dice): el alta escribe primero los
@@ -1261,6 +1294,11 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             if not paginas or (_prev.get("paginas") and os.path.exists(fp)):
                 return conts
             contornos = False              # los contornos están: siguen sólo las páginas
+    # Un índice de ESTE archivo pero con contornos de otra versión: las páginas por talle siguen
+    # valiendo (no dependen de la regla de contornos) y se conservan al reescribir el JSON.
+    _viejo = _json_mismo_archivo(fj, sello, talles) if contornos else None
+    if _viejo is not None and not (_viejo.get("paginas") and os.path.exists(fp)):
+        _viejo = None
     if contornos:
         # 1) los contornos, como siempre (get_drawings de la mesa, una vez para los 20 talles)
         doc = fitz.open(path_molde)
@@ -1279,9 +1317,10 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         finally:
             olvidar(doc)
             doc.close()
-        _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": False,
-                        "marco": marco, "U": U})
-        if not paginas:
+        _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "v": _V_CONTORNOS,
+                        "paginas": bool(_viejo), "marco": marco, "U": U,
+                        **({"placeholders": _viejo.get("placeholders") or {}} if _viejo else {})})
+        if not paginas or _viejo:
             return conts
     elif conts is None:
         # sólo las páginas: los contornos ya están (o no hacen falta acá)
@@ -1319,7 +1358,7 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         pdf.close()
 
     _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
-                    "marco": marco, "U": U, "placeholders": placeholders})
+                    "v": _V_CONTORNOS, "marco": marco, "U": U, "placeholders": placeholders})
     return conts
 
 
@@ -1339,9 +1378,9 @@ def _reemplazar(origen, destino, intentos=8):
             time.sleep(0.25 * (i + 1))
 
 
-def _json_vigente(fj, sello, talles):
-    """El índice `m{mesa}.json` si es de ESTE archivo (sello) y de este orden de talles; si no,
-    None. Un JSON viejo, de otro archivo o con otro orden, no vale: las páginas no corresponderían."""
+def _json_mismo_archivo(fj, sello, talles):
+    """El índice `m{mesa}.json` si es de ESTE archivo (sello) y de este orden de talles, SEA CUAL
+    SEA su versión de contornos; si no, None."""
     import json
     try:
         with open(fj, encoding="utf-8") as fh:
@@ -1351,6 +1390,15 @@ def _json_vigente(fj, sello, talles):
     if d.get("sello") != sello or not d.get("marco"):
         return None
     if list(d.get("orden") or []) != list(talles):
+        return None
+    return d
+
+
+def _json_vigente(fj, sello, talles):
+    """Como `_json_mismo_archivo`, pero además con la regla de contornos ACTUAL (`_V_CONTORNOS`).
+    Un JSON viejo, de otro archivo, con otro orden u otra versión no vale."""
+    d = _json_mismo_archivo(fj, sello, talles)
+    if d is None or d.get("v") != _V_CONTORNOS:
         return None
     return d
 

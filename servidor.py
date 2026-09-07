@@ -2091,7 +2091,7 @@ def _procesos_alta():
 
 _CACHE_DESPL = os.path.join(DATOS, "desplegado_cache")
 _CACHE_DESPL_MAX = 6          # los últimos N archivos distintos (~120 MB cada uno)
-_CACHE_DESPL_VERSION = "v394"
+_CACHE_DESPL_VERSION = "v394b"     # b: regla de contornos 2 (el recorte con el diseño adentro)
 
 
 def _sha1_archivo(path):
@@ -2159,6 +2159,40 @@ def _cache_desplegado_guardar(path, alta):
         print(f"[camino B] desplegado guardado en la caché {clave[:12]}…")
     except Exception as e:
         print(f"[camino B] no se pudo guardar la caché del desplegado: {e}")
+
+
+_DESPL_FONDO, _DESPL_FONDO_LOCK = set(), threading.Lock()
+
+
+def _desplegar_en_fondo(path):
+    """Un molde ya cargado cuyo desplegado no está listo (contornos de una regla vieja —
+    `_V_CONTORNOS`—, carpeta borrada, sello cambiado) se rehace EN SEGUNDO PLANO, una sola vez
+    por molde a la vez. Sin esto, los endpoints que responden `preparando` esperaban a un hilo
+    que nadie había lanzado (el de la subida ya pasó) y la pantalla se quedaba en «preparando»
+    para siempre. Los contornos se rehacen (5 s por mesa, en paralelo); las páginas por talle
+    que ya estaban se conservan."""
+    k = os.path.normcase(os.path.abspath(path))
+    with _DESPL_FONDO_LOCK:
+        if k in _DESPL_FONDO:
+            return
+        _DESPL_FONDO.add(k)
+
+    def _run():
+        try:
+            import piezas_con_diseno as PD
+            import pymupdf as fitz
+            d = fitz.open(path)
+            try:
+                talles = PD.talles_del_molde(d)
+            finally:
+                d.close()
+            _prewarm_desplegado(path, talles, None)
+        except Exception as e:
+            print(f"[camino B] no se pudo rehacer el desplegado de {path}: {e}")
+        finally:
+            with _DESPL_FONDO_LOCK:
+                _DESPL_FONDO.discard(k)
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _prewarm_desplegado(path, talles, alta=None):
@@ -4350,6 +4384,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
         if _cb:
             import piezas_con_diseno as _PDp
             if not _PDp.desplegado_listo(pl):
+                _desplegar_en_fondo(pl)          # alguien tiene que armarlo: en segundo plano, una vez
                 return {"piezas": {}, "talle": talle, "cache": False, "preparando": True}
         try: _pers = (MP.extraer_personalizacion(pl) if _cb else MP.extraer_personalizacion(arte))
         except Exception: _pers = {}
@@ -6987,17 +7022,26 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
         diseno = var["diseno"]
     sub = _diseno_sub(diseno)
     pl = _ruta_entrada("plantilla.ai", pid)
-    arte = _ruta_entrada("arte.ai", pid, sub=sub)
-    if not os.path.exists(arte):
-        diseno, sub = "principal", _diseno_sub("principal")
+    # CAMINO B (2026-09-07): el diseño está ADENTRO del molde, no hay `arte.ai` ni mapeo. Antes
+    # esta función devolvía None por no encontrar el arte y la ficha salía SIN el molde guía
+    # (sólo la tabla de talles). Mismo criterio que el Arte del pedido (`_piezas_base`).
+    _cbf = _es_camino_b(pid)
+    if _cbf:
+        if not os.path.exists(pl):
+            return None
+        arte, mapeo = None, None
+    else:
         arte = _ruta_entrada("arte.ai", pid, sub=sub)
-    if not (os.path.exists(pl) and os.path.exists(arte)):
-        return None
-    # Mapeo POR VARIABLE (mismo criterio que la tizada).
-    _b, _pv = _mapeo_estructura(pid, sub=sub)
-    if not _b and not _pv:
-        _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(arte, reg) or {}).items() if v}
-    mapeo = ({"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None)
+        if not os.path.exists(arte):
+            diseno, sub = "principal", _diseno_sub("principal")
+            arte = _ruta_entrada("arte.ai", pid, sub=sub)
+        if not (os.path.exists(pl) and os.path.exists(arte)):
+            return None
+        # Mapeo POR VARIABLE (mismo criterio que la tizada).
+        _b, _pv = _mapeo_estructura(pid, sub=sub)
+        if not _b and not _pv:
+            _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(arte, reg) or {}).items() if v}
+        mapeo = ({"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None)
     # Una prenda de muestra con la variable del pedido: el motor arma sus piezas igual que la tizada.
     fila = {"__variante": variante, "talle": talle, "nombre": "", "numero": ""}
     # la prenda de muestra del MOLDE GUÍA: no lleva las columnas obligatorias del pedido y no
@@ -7025,7 +7069,7 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     if _combos:
         prendas = [{**prendas[0], "toggles": list(_c)} for _c in _combos]
     try:
-        pers = MP.extraer_personalizacion(arte)
+        pers = MP.extraer_personalizacion(pl if _cbf else arte)   # camino B: los «00»/«NOMBRE» viven en el molde
     except Exception:
         pers = {}
     solo = set((var or {}).get("piezas") or [])
@@ -7674,6 +7718,7 @@ def fuentes_estado():
         # congelaba un minuto y todo lo demás (nombrar, `/api/productos`) esperaba. Medido con
         # py-spy 2026-09-04. Si todavía no está, se responde `preparando` y el front re-pregunta.
         if not PD.desplegado_listo(_plb):
+            _desplegar_en_fondo(_plb)            # alguien tiene que armarlo: en segundo plano, una vez
             return jsonify({"ok": True, "preparando": True, "requeridas": [], "faltantes": [],
                             "reemplazables": [], "originales": {}, "catalogo": _catalogo,
                             "reemplazos": _fuentes_para(pid, _reempl_de_request()).get("alias") or {}})

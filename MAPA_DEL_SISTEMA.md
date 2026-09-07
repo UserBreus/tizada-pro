@@ -1422,6 +1422,25 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     0xF000 + código; Mac Roman decodificado a unicode; nunca None: el servidor recorre
     `fc.cmap.keys()`). Y un ESPACIO sin glifo (fuentes decorativas con letras y números nada
     más) ya no tumba «MESSI 10»: avanza el glifo `space` si existe por nombre o un tercio del em.
+  · 🔴 **Reporte del usuario (10:30): «hay piezas que se ven por fuera de lo que debería ser, el
+    borde parece de más de 3 mm, y a la ficha le faltan las piezas».** Tres causas:
+    (1) **El contorno era el recorte equivocado.** `_piezas_de_mesa_cruda` tomaba el recorte de
+    MAYOR ÁREA del grupo, y en el archivo real ése es la LÍNEA DE CORTE dibujada: un clip con
+    sólo trazos adentro, 0,5-1 mm más alto (camiseta, cuello recto, costadillo) y hasta 4 mm más
+    ancho (cuello curvo, mesa 7) que la máscara del diseño. La pieza salía con una franja blanca
+    entre el estampado y el borde de corte. Ahora el contorno es el recorte de mayor área ENTRE
+    LOS QUE TIENEN RELLENOS adentro (`_rellenos_por_clip`, por el `level` de
+    `get_drawings(extended=True)`); sin rellenos en ninguno, el mayor como antes. Cambian
+    179/180 contornos del archivo real (misma cantidad de piezas). El desplegado lleva
+    `v = _V_CONTORNOS` (2): un JSON con otra versión rehace los contornos y CONSERVA las páginas
+    por talle (`_json_mismo_archivo` vs `_json_vigente`); `_CACHE_DESPL_VERSION` → `v394b`.
+    (2) **La ficha sin molde guía**: `_molde_guia_ficha` devolvía None por no encontrar
+    `arte.ai`; en el camino B el diseño está en el molde (`arte=None`, `mapeo=None`, `pers` del
+    molde, mismo criterio que `_piezas_base`).
+    (3) **`_desplegar_en_fondo`**: un molde ya cargado con desplegado no listo (regla vieja,
+    carpeta borrada) lo rehace un hilo de fondo UNA vez por molde; antes los endpoints decían
+    `preparando` y nadie lo armaba. Y la clave de la caché de SVG lleva la mesa (dos piezas de
+    mesas distintas con el mismo contorno compartían el SVG).
   **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
   plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
   contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra

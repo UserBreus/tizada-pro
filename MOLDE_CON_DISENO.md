@@ -833,7 +833,11 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
   primer medidor sin `__main__` corrió en serie y dejó huérfanos (cifras infladas ×2); la caché de
   SVG no acertaba por el nombre al azar del XObject; un `os.replace` del worker choca con quien
   tenga el JSON abierto (Windows) y el pool «fallaba» en silencio a serie → `_reemplazar` con
-  reintento.
+  reintento. Después, con la primera tizada del usuario: la fuente Moreggi sin cmap unicode
+  (`_cmap_de_respaldo`), y **el contorno era la línea de corte dibujada y no la máscara del
+  diseño** (0,5-4 mm de más: franja blanca entre estampado y borde) → el recorte con rellenos
+  adentro manda (`_rellenos_por_clip`), desplegado con versión de contornos, ficha con molde
+  guía en el camino B, `_desplegar_en_fondo` para moldes ya cargados.
 - **2026-09-04 quinquies (la hoja compartida)** — Ver changelog 393 del mapa y la sección «LA HOJA
   COMPARTIDA». Plan aprobado por el usuario (bases compartidas, aplanado de un nivel, PDF/X-1a-like,
   preview con símbolos, escala a 300+). Entregadas E0-E5 en una tanda; medido 5 prendas 70 → 40 s
