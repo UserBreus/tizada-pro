@@ -2199,6 +2199,11 @@ def _prewarm_desplegado(path, talles, alta=None):
     """Segunda etapa del desplegado del camino B (ver `piezas_con_diseno.desplegar_mesa`): las
     páginas por talle, una mesa por proceso, después de responder la subida. Best-effort.
     Al terminar, el desplegado completo va a la caché por archivo (`_cache_desplegado_guardar`)."""
+    # Se anota en `_DESPL_FONDO` para que `_desplegar_en_fondo` (un endpoint que ve el molde
+    # «preparando» mientras esto corre) no lance OTRO hilo para el mismo molde.
+    _k = os.path.normcase(os.path.abspath(path))
+    with _DESPL_FONDO_LOCK:
+        _DESPL_FONDO.add(_k)
     try:
         import piezas_con_diseno as PD
         _t0 = time.time()
@@ -2208,6 +2213,9 @@ def _prewarm_desplegado(path, talles, alta=None):
             _cache_desplegado_guardar(path, alta)
     except Exception as e:
         print(f"[camino B] no se pudieron preparar las páginas por talle de {path}: {e}")
+    finally:
+        with _DESPL_FONDO_LOCK:
+            _DESPL_FONDO.discard(_k)
 
 
 def _deteccion_base_cached(pid, talle_ref, candidatas=False):

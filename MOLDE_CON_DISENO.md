@@ -466,11 +466,13 @@ Regla:
 2. **La línea se saca del dibujo** al desplegar (`quitar_linea_de_corte`: el `S` pasa a `n`) y
    se guarda su ancho y color exactos en `m{mesa}.json["linea_corte"]`.
 3. **La base la vuelve a trazar UNA sola vez**: con el borde configurado (ancho, color y de qué
-   lado: «fuera» = todo hacia afuera sin tapar el diseño; «centro» = mitad y mitad; «dentro» =
-   todo sobre el diseño), o, con el borde APAGADO, tal cual venía en el archivo.
-4. Consecuencia: con «fuera», entre la máscara del diseño y la línea de corte puede quedar la
-   franja que el diseñador dejó (0,5-1 mm) — es del archivo, no del sistema; «centro» con 2 mm
-   reproduce exactamente lo que se ve en Illustrator.
+   lado: «fuera» = hacia afuera; «centro» = mitad y mitad; «dentro» = todo sobre el diseño), o,
+   con el borde APAGADO, tal cual venía en el archivo (después del diseño, donde estaba).
+4. **Sin franja blanca.** Entre la máscara del diseño y la línea de corte el diseñador dejó
+   0,5-2 mm que en el archivo tapaba la mitad interior de su trazo. Con «fuera», la base traza
+   también esa mitad interior (ancho de la línea original, color del borde): el borde arranca
+   donde arrancaba el del archivo y sigue hacia afuera con el ancho configurado. Reporte del
+   usuario 12:10 («queda ese desfasaje»); antes de esto la franja se veía blanca.
 
 **Lo que se aprendió**
 · 🔴 En Windows un script que use `ProcessPoolExecutor` sin `if __name__ == "__main__"` se

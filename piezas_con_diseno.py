@@ -1483,6 +1483,12 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             return desplegar_mesa(path_molde, mesa, talles, carpeta, contornos=True, paginas=True)
         conts = _prev.get("talles") or {}
         marco, U = _prev.get("marco"), _prev.get("U")
+        if _prev.get("paginas") and _prev.get("vp") == _V_PAGINAS and os.path.exists(fp):
+            # las páginas de ESTE archivo ya están (y con la regla actual): no se rehacen. Sin
+            # esto, un segundo `desplegar_molde(paginas=True)` sobre un molde listo (el hilo de
+            # fondo que arrancó un endpoint mientras corría el de la subida) las reescribía
+            # enteras: 44 s de CPU por nada, con la pantalla de nombrar esperando (2026-09-07).
+            return {t: [_cont_de_json(c) for c in lst] for t, lst in conts.items()}
 
     # 2) la página de cada talle. Se parsea la mesa UNA vez y se filtra veinte; el filtrado es,
     #    instrucción por instrucción, el mismo de `aislar_capa(..., podar=True)`.

@@ -4476,22 +4476,36 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # hacia afuera (default): trazo 2B clipado al EXTERIOR (par-impar) → B visible afuera
                 borde = (f"q\n{-3*B:.3f} {-3*B:.3f} {W+8*B:.3f} {H+8*B:.3f} re\n{clip}\nW* n\n{clip}\n"
                          f"{2*B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
-        elif isinstance(cont.get("linea_corte"), dict) and cont["linea_corte"].get("w"):
-            # Borde APAGADO y la pieza trae su propia línea de corte (camino B): se traza tal
-            # cual venía en el archivo —mismo trazado, mismo ancho, mismo color, centrada—, que
-            # el desplegado la sacó del dibujo para que el borde configurado la reemplace.
-            _lc = cont["linea_corte"]
-            _lop, _lv = (_lc.get("color") or ["k", [0, 0, 0, 1]])
-            _lcol = " ".join(f"{float(v):g}" for v in _lv) + " " + {"k": "K", "rg": "RG", "g": "G"}.get(str(_lop), "K")
-            borde = f"q\n{clip}\n{float(_lc['w']) * S:.3f} w 0 j 0 J 10 M {_lcol}\nS\nQ\n"
         else:
             borde = ""
+        # ── LA LÍNEA DE CORTE DEL ARCHIVO (camino B, 2026-09-07) ─────────────────────────────
+        # El desplegado la sacó del dibujo y dejó su estilo en `cont["linea_corte"]` ({w, color}).
+        # Su trazo iba CENTRADO en el contorno: la mitad interior tapaba la franja que el diseñador
+        # dejó entre la máscara del diseño y la línea de corte (0,5-2 mm, medido). Por eso:
+        #   · borde APAGADO → la línea se traza tal cual venía (ancho, color, centrada), DESPUÉS
+        #     del diseño, que es donde estaba en el archivo;
+        #   · borde «fuera» → además del trazo exterior se traza la mitad interior de la línea
+        #     original con el color del borde: el borde arranca donde arrancaba la del archivo y
+        #     sigue hacia afuera con el ancho configurado. Sin esto quedaba una franja blanca
+        #     entre el estampado y el borde («desfasaje», reporte del usuario 12:10).
+        #   · «centro» y «dentro» ya cubren el interior: no hace falta nada.
+        _lc = cont.get("linea_corte") if isinstance(cont.get("linea_corte"), dict) else None
+        borde_post = ""
+        if _lc and _lc.get("w"):
+            _wl = float(_lc["w"]) * S
+            if not _bc_activo:
+                _lop, _lv = (_lc.get("color") or ["k", [0, 0, 0, 1]])
+                _lcol = " ".join(f"{float(v):g}" for v in _lv) + " " + {"k": "K", "rg": "RG", "g": "G"}.get(str(_lop), "K")
+                borde_post = f"q\n{clip}\n{_wl:.3f} w 0 j 0 J 10 M {_lcol}\nS\nQ\n"
+            elif _bc_alin == "fuera":
+                borde_post = (f"q\n{clip}\nW n\n{clip}\n"
+                              f"{_wl:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
 
         # Stream de contenido REUSABLE: la base va fija y el estampado (texto/etiqueta) se reescribe
         # por prenda con `cstream.write()` → no se acumulan objetos aunque se comparta la base.
         cstream = out.make_stream(b"")
         page.Contents = cstream
-        _base_stream = (f"{borde}{arte_draw}" if _bc_alin == "fuera" else f"{arte_draw}{borde}")
+        _base_stream = (f"{borde}{arte_draw}{borde_post}" if _bc_alin == "fuera" else f"{arte_draw}{borde}{borde_post}")
         return {"out": out, "page": page, "cstream": cstream, "base_stream": _base_stream,
                 "clip": clip, "cont": cont, "W": W, "H": H, "x0": x0, "y0": y0, "x0m": x0m,
                 "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info,

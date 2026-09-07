@@ -1473,6 +1473,20 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     tardaba 10 minutos y parecía colgado). Verificado en el archivo real: las 9 mesas × 20
     talles detectan su línea (w 5,669 pt, color k [0 0 0 1]) y la página desplegada queda sin
     ese trazo; con el borde apagado la base la traza tal cual (un solo `S` de 5,669 pt).
+    **Segunda vuelta (12:10, «queda ese desfasaje» + subida de 30 s + nombrar lento):** (a) entre
+    la máscara del diseño y la línea de corte hay 0,5-2 mm que en el archivo tapaba la mitad
+    interior del trazo; con el borde «fuera» quedaba una franja blanca → `_armar_base` traza
+    además esa mitad interior (ancho original, color del borde) DESPUÉS del diseño (`borde_post`);
+    apagado, la línea original también va después del diseño (antes iba antes, y el diseño la
+    tapaba a medias). (b) La subida de 30 s y el nombrar lento fueron CPU ajena: los contratos
+    corriendo en la misma máquina (4 procesos + renders) justo cuando el usuario subía, más el
+    `_desplegar_en_fondo` del molde viejo, más un SEGUNDO hilo de páginas para el molde nuevo
+    (`_desplegar_en_fondo` no sabía del hilo de la subida): ahora `_prewarm_desplegado` se
+    anota en `_DESPL_FONDO`, y `desplegar_mesa(contornos=False)` devuelve enseguida si las
+    páginas ya están con su versión (antes reescribía las 20 páginas otra vez: 44 s). Regla
+    para mí: no correr contratos pesados mientras el usuario prueba en el 8051. (c) Un pedido
+    sobre un molde que ya no existe (re-subido como producto nuevo) cae en `pagina_arte(None)`
+    con `TypeError` en vez de un aviso claro — pendiente.
   **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
   plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
   contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra
