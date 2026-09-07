@@ -6758,12 +6758,18 @@ export default function App() {
   const _nidoGen = useRef(0);
   const invalidarNido = () => { _nidoGen.current++; setNidoData(null); setNidoError(null); };
 
+  // Nº de ediciones locales de las variables. `guardarGruposCon` aplica la respuesta del server
+  // (que enriquece cada valor con su `pieza_id`) SÓLO si nadie tocó nada mientras viajaba: si no,
+  // la respuesta de un guardado automático pisaba la pieza que el usuario acababa de elegir.
+  const _varEdit = useRef(0);
+  const _varSaveT = useRef(null);
   const guardarGruposCon = async (arr, silencioso) => {
     if (!pidCfg) return;
     // Dos gestos seguidos = dos POST en vuelo. Si la respuesta del PRIMERO llega después de que
     // el segundo ya actualizó el estado, aplicarla devuelve el array viejo y la pieza que
     // acabás de tocar se "des-toca" sola. Sólo se aplica la respuesta del guardado MÁS NUEVO.
     const _mi = ++_seqVar.current;
+    const _ed = _varEdit.current;      // foto de las ediciones locales al salir
     try {
       const r = await fetch('/api/productos/variantes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6772,7 +6778,8 @@ export default function App() {
       const d = await leerJson(r); if (!r.ok) throw new Error(d.error || 'No se pudo guardar');
       // El server DEVUELVE las variantes enriquecidas (les resuelve el `pieza_id` estable). Antes
       // se tiraba la respuesta y el front seguía con valores a medias hasta recargar.
-      if (_mi === _seqVar.current && Array.isArray(d.variantes)) setVariantesEdit(d.variantes);
+      // …y sólo si el usuario no siguió editando mientras la respuesta viajaba (autoguardado).
+      if (_mi === _seqVar.current && _ed === _varEdit.current && Array.isArray(d.variantes)) setVariantesEdit(d.variantes);
       // ⛔ ACÁ NO SE INVALIDA EL NIDO. El nido es la GEOMETRÍA de las piezas del registro (todos los
       // talles): tocar qué piezas tiene una variable NO lo cambia — sólo cambia cuáles se muestran,
       // y eso `nidoVarPiezas` lo recalcula solo con `variantesEdit`. Invalidarlo acá lo dejaba en
@@ -6781,6 +6788,20 @@ export default function App() {
       if (!silencioso) showMsg('Variable guardada ✓');
     } catch (err) { showError(err.message || 'No se pudo guardar'); }
   };
+
+  // Cambiar las variables Y GUARDARLAS SOLO (300 ms de respiro), igual que `aplicarGruposPz`.
+  // 🔴 Antes las piezas de una variable vivían únicamente en el estado del navegador hasta que se
+  // tocaba «Listo»: salir con «⬅ Volver a los grupos», cambiar de pestaña o que algo llamara a
+  // `fetchProductos()` las borraba SIN AVISAR — y la variable quedaba creada y vacía (reporte del
+  // usuario 2026-09-07: «cuando voy a crear variable queda bugiado con las piezas seleccionadas»).
+  const aplicarVariantes = (fn) => setVariantesEdit(prev => {
+    const nueva = fn(prev || []);
+    _varEdit.current++;
+    clearTimeout(_varSaveT.current);
+    _varSaveT.current = setTimeout(() => guardarGruposCon(nueva, true), 300);
+    return nueva;
+  });
+
 
   // Guardar los modelos (grupos de variables). Acepta el array a persistir (estado quizá no actualizado aún).
 
@@ -7426,7 +7447,7 @@ export default function App() {
     const afectadas = b ? (b.piezas || []) : [idx];    // "van juntas": la unidad entera entra/sale junta
     const yaEsta = (t0?.valores || []).some(v => v.pieza_idx === idx);
     // MULTIGRUPO: togglea la pieza SOLO en este grupo; no la saca de los demas.
-    setVariantesEdit(prev => prev.map(t => {
+    aplicarVariantes(prev => prev.map(t => {
       if (t.clave !== clave) return t;
       let vals;
       if (yaEsta) { const quitar = new Set(afectadas); vals = (t.valores || []).filter(v => !quitar.has(v.pieza_idx)); }
@@ -7442,9 +7463,9 @@ export default function App() {
       return { ...t, valores: vals };
     }));
   };
-  const quitarPieza = (idx) => setVariantesEdit(prev => prev.map(t => ({ ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) })));
-  const quitarPiezaDeGrupo = (clave, idx) => setVariantesEdit(prev => prev.map(t => t.clave === clave ? { ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) } : t));
-  const renombrarPieza = (idx, label) => setVariantesEdit(prev => prev.map(t => ({ ...t, valores: (t.valores || []).map(v => v.pieza_idx === idx ? { ...v, label } : v) })));
+  const quitarPieza = (idx) => aplicarVariantes(prev => prev.map(t => ({ ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) })));
+  const quitarPiezaDeGrupo = (clave, idx) => aplicarVariantes(prev => prev.map(t => t.clave === clave ? { ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) } : t));
+  const renombrarPieza = (idx, label) => aplicarVariantes(prev => prev.map(t => ({ ...t, valores: (t.valores || []).map(v => v.pieza_idx === idx ? { ...v, label } : v) })));
   // Agregar VARIAS piezas de una al grupo destino (selección por recuadro). MULTIGRUPO:
   // solo agrega al grupo destino (no las saca de los otros grupos). Expande los vínculos.
   const agregarPiezasATipo = (clave, idxs) => {
@@ -7470,7 +7491,7 @@ export default function App() {
       if (gen) ocupados.add(gen);
     });
     if (!entran.length) return;
-    setVariantesEdit(prev => prev.map(t => {
+    aplicarVariantes(prev => prev.map(t => {
       if (t.clave !== clave) return t;
       const ya = new Set((t.valores || []).map(v => v.pieza_idx));
       const nuevos = entran.filter(idx => !ya.has(idx)).map(idx => _valorDeIdx(idx, juntas));
@@ -7643,6 +7664,14 @@ export default function App() {
       varPzUltimo.current = null; setVarPzEstado('');
     }
   }, [pidCfg]);
+
+  // Salir de Moldería con «elegir piezas» (variantes por piezas) prendido tiene que CERRARLO:
+  // si queda activo, el visor sigue mostrando el archivo ORIGINAL y el botón del talle de guía
+  // no responde — el usuario se quedaba sin poder cambiarlo (reporte 2026-09-07). Mismo criterio
+  // que el emparejado, unas líneas más arriba.
+  useEffect(() => {
+    if (varPzModo && tabAjustesMolde !== 'molderia') activarVarPz(false);
+  }, [tabAjustesMolde]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // AUTOGUARDADO: cada cambio de la asignación se persiste solo (con un respiro de 500 ms para no
   // pegarle al server en cada clic). Sólo guarda el BORRADOR: partir el PDF sigue siendo manual.
@@ -16284,16 +16313,24 @@ export default function App() {
                                   type="button"
                                   className="btn"
                                   data-tour="molde-guia"
-                                  disabled={varPzModo}
-                                  title={varPzModo ? 'Terminá de asignar las piezas para cambiar la guía' : ''}
-                                  style={{ width: '100%', justifyContent: 'space-between', padding: '10px 14px', fontSize: 13, opacity: varPzModo ? 0.65 : 1, cursor: varPzModo ? 'not-allowed' : 'pointer' }}
-                                  onClick={() => { if (!varPzModo) setModalTalleGuiaOpen(true); }}
+                                  title={varPzModo ? 'Sale de «elegir piezas» y abre el selector' : ''}
+                                  style={{ width: '100%', justifyContent: 'space-between', padding: '10px 14px', fontSize: 13 }}
+                                  onClick={async () => {
+                                    // 🔴 Antes esto quedaba DESHABILITADO mientras durara el modo «por
+                                    // piezas» — y ese modo se prende solo (ver `NombrarVariantes`) y no
+                                    // se apagaba al cambiar de pestaña: el talle de guía quedaba
+                                    // imposible de cambiar sin recargar (reporte del usuario
+                                    // 2026-09-07). Ahora el botón SALE del modo (que recarga la
+                                    // detección normal, con los talles de verdad) y abre el selector.
+                                    if (varPzModo) await activarVarPz(false);
+                                    setModalTalleGuiaOpen(true);
+                                  }}
                                 >
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <span style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600 }}>Actual:</span>
                                     <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 14 }}>{etqData.guia || etqData.talle_ref}</span>
                                   </span>
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{varPzModo ? '' : 'Cambiar ▾'}</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cambiar ▾</span>
                                 </button>
                               </div>
 

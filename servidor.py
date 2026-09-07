@@ -2051,6 +2051,15 @@ def subir_plantilla():
     except Exception as e:
         print(f"[subir_plantilla] no se pudo resetear la base: {e}")
     _guardar_registro(_pid_reset, alta["registro"], reset=True)
+    # EL TALLE DE GUÍA, PUESTO (2026-09-07). Un molde subido (o RE-subido) quedaba sin
+    # `variante_guia` en el catálogo: la pantalla mostraba como guía la que eligió la detección,
+    # que no está guardada en ningún lado — elegir en el selector ESA misma no cambiaba nada y
+    # parecía que el molde no dejaba tocarla. Si la que había ya no existe en el molde nuevo,
+    # también se corrige acá (`_ajustar_variante_guia` sólo escribe cuando hace falta).
+    try:
+        _ajustar_variante_guia(_pid_reset, alta.get("talles") or [])
+    except Exception as e:
+        print(f"[subir_plantilla] no se pudo ajustar el talle de guía: {e}")
     # CAMINO B: el alta ya armó el visor de todos los talles (le salió gratis: los contornos
     # estaban en la mano). Se guarda para que nombrar piezas y ubicar la etiqueta abran al
     # instante en vez de releer el archivo, que es lo que cuesta 52 s por talle.

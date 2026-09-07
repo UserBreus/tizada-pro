@@ -1354,6 +1354,37 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (395) — CONFIGURACIÓN DEL MOLDE: las piezas de una variable ya no se pierden, y el
+  talle de guía se puede cambiar siempre.** Dos bugs que reportó el usuario en un molde que había
+  re-subido.
+  **(a) 🔴 «Cuando voy a crear variable queda bugiado con las piezas seleccionadas».** Las piezas
+  que se eligen para una VARIABLE vivían SÓLO en el estado del navegador hasta tocar «Listo»:
+  salir con «⬅ Volver a los grupos», cambiar de pestaña o cualquier `fetchProductos()` las
+  borraba sin avisar, y la variable quedaba creada y VACÍA (así estaba su «cUELLO REDONDO»:
+  `valores: []` después de seis guardados). Reproducido y arreglado: `aplicarVariantes(fn)` —
+  hermano de `aplicarGruposPz`— cambia `variantesEdit` **y guarda solo** a los 300 ms; lo usan
+  `togglePiezaEnTipo`, `agregarPiezasATipo` (recuadro), `quitarPieza`, `quitarPiezaDeGrupo` y
+  `renombrarPieza`. Para que el autoguardado no se pise con el usuario, `guardarGruposCon` aplica
+  la respuesta del server (que enriquece cada valor con su `pieza_id`) sólo si NADIE editó
+  mientras viajaba (`_varEdit`, además del `_seqVar` que ya descartaba respuestas viejas).
+  **(b) 🔴 «No me deja elegir el talle guía».** Dos causas, las dos arregladas:
+  · el botón estaba `disabled={varPzModo}` — y ese modo («elegir piezas», variantes por piezas) se
+    **prende solo** (`NombrarVariantes` lo activa cuando el molde ya se definió por piezas) y no se
+    apagaba al cambiar de pestaña: el talle de guía quedaba imposible de tocar sin recargar. Ahora
+    el botón nunca se bloquea: si el modo está activo, SALE de él (`activarVarPz(false)`, que
+    recarga la detección normal) y abre el selector. Y un efecto lo apaga al salir de Moldería,
+    igual que ya se hacía con el emparejado.
+  · un molde subido o RE-subido quedaba **sin `variante_guia` en el catálogo** (`subir_plantilla`
+    nunca la ponía): la pantalla mostraba como guía la que eligiera la detección, que no estaba
+    guardada — elegir esa misma en el selector no cambiaba nada y parecía que el molde no dejaba
+    tocarla. Ahora `subir_plantilla` llama a `_ajustar_variante_guia` (que sólo escribe si falta o
+    si la que había ya no existe en el molde nuevo). Verificado por HTTP con un molde propio
+    (`prueba_guia_resubida.py`): subida y re-subida dejan la guía puesta, la pantalla la muestra y
+    elegir otra a mano anda.
+  ⚠️ **Lo que costó encontrarlo**: los dos síntomas se reproducen sólo con el gesto exacto del
+  usuario. La evidencia útil no fue el log del servidor (todos 200) sino **el estado que quedó en
+  el catálogo** (grupo con `piezas: []` y variable con `valores: []` después de seis POST): cuando
+  algo «se bugea» en una pantalla de configuración, mirar primero qué quedó guardado.
 - **2026-09-07 (394) — SEGUNDOS, NO MINUTOS: la carga del molde con diseño 56 → ~8 s y la tizada de
   5 prendas 51 → ~15 s.** Pedido del usuario: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá
   todos los caminos para que sean segundos y milisegundos; y la tizada de 5 tardó 45 s». Estudio
