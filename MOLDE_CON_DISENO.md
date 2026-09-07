@@ -870,6 +870,12 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
   al desplegar y la base la traza una sola vez con la configuración (o tal cual, apagada).
   Verificado en las 180 piezas del archivo real (9 mesas × 20 talles): línea detectada, estilo
   guardado (2 mm, K=1) y ninguna queda dibujada en las páginas.
+  **Y «Armar con base» (camino A) a la misma velocidad** (pedido de las 14:00): la clave de la
+  caché de previews llevaba una tupla (bug mío del mediodía) y nada acertaba → 5 s por talle;
+  arreglado (string), sin conversiones duplicadas y en paralelo: 1,3 s un talle nuevo, 0,1 s en
+  caché. La tizada del camino A usa la misma preview por símbolos que el camino B, con caché de
+  SVG al lado del arte (`svg_cache/`) y bases en paralelo: 15 → 10 s la primera vez, 2,3 s
+  después. Ver changelog 394 del mapa.
 - **2026-09-04 quinquies (la hoja compartida)** — Ver changelog 393 del mapa y la sección «LA HOJA
   COMPARTIDA». Plan aprobado por el usuario (bases compartidas, aplanado de un nivel, PDF/X-1a-like,
   preview con símbolos, escala a 300+). Entregadas E0-E5 en una tanda; medido 5 prendas 70 → 40 s

@@ -33,6 +33,7 @@ import pikepdf
 from pikepdf import Name
 
 CM = 72 / 2.54
+_MAX_SVG_CACHE = 400        # SVG de bases cacheados por arte o por molde desplegado (~1 MB cada uno)
 
 
 def _contenido_pagina(pag):
@@ -221,6 +222,117 @@ def _svg_de_ops(W, H, ops_bytes, fitz, prefijo=""):
     return _svg_interior(svg, prefijo)
 
 
+def svg_de_pdf_bytes(pdf_bytes):
+    """WORKER (proceso): el SVG de la primera página de un PDF en memoria. Sólo PyMuPDF."""
+    import pymupdf as fitz
+    d = fitz.open("pdf", pdf_bytes)
+    try:
+        return d[0].get_svg_image()
+    finally:
+        d.close()
+
+
+def _ruta_cache_svg(b):
+    """`(carpeta, ruta)` del SVG cacheado de una base del camino B (al lado del desplegado), o
+    `(None, None)` si la base no viene de un molde desplegado (camino A: no hay dónde)."""
+    import hashlib
+    import re as _re
+    try:
+        if b.get("despl"):
+            carpeta = os.path.join(os.path.dirname(b["despl"][2]), "svg")
+            _cuerpo = b["base_stream"].replace(str(b.get("nom") or "\x00"), "@XO")
+            _mesa = os.path.basename(str(b["despl"][2]))
+            clave = hashlib.sha1((_cuerpo + "|" + _mesa + "|" + str(b["despl"][1])).encode("latin-1")).hexdigest()[:20]
+            return carpeta, os.path.join(carpeta, f"{clave}.svg")
+        if b.get("svg_cache"):
+            # CAMINO A (2026-09-07): la caché vive al lado del arte (`svg_cache/`). La clave es el
+            # `base_stream` con los nombres AL AZAR de los XObjects (`/A…`, `/E…`, `/OA…`, 22
+            # caracteres que pone `page.add_resource`) reemplazados, más la firma del arte y de la
+            # plantilla (fecha y tamaño): cambia el arte, el contorno, el borde o un editable →
+            # otra clave.
+            carpeta, firma = b["svg_cache"]
+            _cuerpo = _re.sub(r"/[A-Z]{1,2}[A-Za-z0-9_-]{20,24}\b", "/@XO", b["base_stream"])
+            clave = hashlib.sha1((_cuerpo + "|" + str(firma)).encode("latin-1")).hexdigest()[:20]
+            return carpeta, os.path.join(carpeta, f"{clave}.svg")
+    except Exception:
+        pass
+    return None, None
+
+
+def svgs_de_bases(bases, docs_base, procesos=None):
+    """`{id(base): svg crudo}` de todas las bases de una tizada, de una vez.
+
+    Lo caro de la preview es convertir cada base a SVG: PyMuPDF recorre el arte entero de la mesa
+    recortado a la pieza (~0,3-0,4 s por base en el camino A, cuyo arte no está podado). Con 5
+    prendas de 5 talles son 45 bases distintas: 13 s en serie, que eran 13 de los 15 s de la
+    tizada (2026-09-07). Acá: (1) las que están en la caché de disco (camino B) se leen; (2) las
+    demás se convierten en PARALELO si `procesos` es un ejecutor (el pool de render del servidor)
+    o un número > 1 (pool propio, sólo desde un script con guardián `__main__`); None = en serie.
+    Los documentos de las bases se serializan acá (bytes, ~20 ms cada uno) y viajan al worker."""
+    out, pendientes = {}, []
+    for b in bases:
+        k = id(b)
+        if k in out or k in {p[0] for p in pendientes}:
+            continue
+        carpeta, ruta = _ruta_cache_svg(b)
+        if ruta and os.path.exists(ruta):
+            try:
+                with open(ruta, encoding="utf-8") as fh:
+                    out[k] = fh.read()
+                continue
+            except Exception:
+                pass
+        pendientes.append((k, b, carpeta, ruta))
+    if not pendientes:
+        return out
+    ejecutor, propio = None, None
+    if procesos is not None and hasattr(procesos, "submit"):
+        ejecutor = procesos
+    elif isinstance(procesos, int) and procesos > 1 and len(pendientes) > 1:
+        try:
+            from concurrent.futures import ProcessPoolExecutor
+            propio = ejecutor = ProcessPoolExecutor(max_workers=min(procesos, len(pendientes)))
+        except Exception:
+            ejecutor = None
+    svgs = {}
+    if ejecutor is not None:
+        try:
+            futs = {k: ejecutor.submit(svg_de_pdf_bytes, docs_base(b).tobytes()) for k, b, _c, _r in pendientes}
+            for k, f in futs.items():
+                svgs[k] = f.result(timeout=300)
+        except Exception as e:
+            print(f"[preview] SVG de bases en paralelo falló ({e}); sigo en serie", flush=True)
+            svgs = {}
+        finally:
+            if propio is not None:
+                propio.shutdown(wait=False)
+    for k, b, carpeta, ruta in pendientes:
+        svg = svgs.get(k)
+        if svg is None:
+            svg = docs_base(b)[0].get_svg_image()
+        out[k] = svg
+        if ruta:
+            try:
+                os.makedirs(carpeta, exist_ok=True)
+                with open(ruta + ".tmp", "w", encoding="utf-8") as fh:
+                    fh.write(svg)
+                os.replace(ruta + ".tmp", ruta)
+            except Exception:
+                pass
+    # la caché no crece sin límite: cada arte/desplegado guarda a lo sumo `_MAX_SVG_CACHE`
+    # bases (las más viejas se van). Un molde de 20 talles × 9 piezas son 180.
+    for carpeta in {c for _k, _b, c, _r in pendientes if c}:
+        try:
+            svgs_disco = [os.path.join(carpeta, f) for f in os.listdir(carpeta) if f.endswith(".svg")]
+            if len(svgs_disco) > _MAX_SVG_CACHE:
+                svgs_disco.sort(key=os.path.getmtime)
+                for viejo in svgs_disco[:len(svgs_disco) - _MAX_SVG_CACHE]:
+                    os.remove(viejo)
+        except Exception:
+            pass
+    return out
+
+
 def svg_base_cacheado(b, docs_base, prefijo):
     """El SVG de una base, cacheado EN DISCO al lado del desplegado del molde
     (`desplegado/svg/<clave>.svg`). La clave es el contenido de la base (mesa, talle, contorno,
@@ -257,7 +369,7 @@ def svg_base_cacheado(b, docs_base, prefijo):
     return _svg_interior(svg, prefijo)
 
 
-def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1):
+def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1, crudos=None):
     """El SVG de UNA página de la hoja: `<symbol>` por base (una sola vez, cacheado en `simbolos`
     por id(base)) y `<use>` por colocación, más el estampado de cada prenda como trazos.
 
@@ -286,7 +398,8 @@ def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1):
             ids[k] = sid
             sym = simbolos.get(k)
             if sym is None:
-                sym = svg_base_cacheado(b, docs_base, sid + "_")
+                _raw = (crudos or {}).get(k)          # ya convertida (en paralelo, `svgs_de_bases`)
+                sym = _svg_interior(_raw, sid + "_") if _raw is not None else svg_base_cacheado(b, docs_base, sid + "_")
                 simbolos[k] = sym
             defs.append(f'<symbol id="{sid}" viewBox="0 0 {W:.3f} {H:.3f}" overflow="visible">{sym}</symbol>')
         cx = m["izq"] * CM + c["cx"]

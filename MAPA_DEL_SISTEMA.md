@@ -1487,6 +1487,27 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     para mí: no correr contratos pesados mientras el usuario prueba en el 8051. (c) Un pedido
     sobre un molde que ya no existe (re-subido como producto nuevo) cae en `pagina_arte(None)`
     con `TypeError` en vez de un aviso claro — pendiente.
+  · 🔴 **«ARMAR CON BASE» (camino A) A LA MISMA VELOCIDAD (pedido del usuario, 14:00).** Medido
+    con `prod_default` + diseño «jugador» (`medir_camino_a.py`, scratchpad): el paso Arte
+    (`_piezas_base`) tardaba **5,3 s por talle y SIEMPRE regeneraba**: (a) 🔴 bug mío de la
+    mañana — la clave v16 llevaba una TUPLA `(3, 3)` que vuelve del `manifest.json` como lista y
+    nunca coincidía → cada preview se rehacía (el usuario lo vio como «nombrar/arte lento»);
+    ahora es el string `despl3.3`; (b) 12 conversiones a SVG para 6 piezas (la misma pieza por
+    cada combinación de toggles, misma base) → una por nombre; (c) las conversiones (0,4 s cada
+    una: MuPDF recorre el arte entero recortado) van al pool de render en paralelo
+    (`_svgs_de_piezas`, `_svg_worker`) cuando lo pide el usuario (`fg`); el prewarm y los
+    workers siguen en serie. Resultado: talle nuevo 5,3 → 1,3 s; talle en caché 0,1 s.
+    **La tizada del camino A**: 15 s de los cuales 13 eran `get_svg_image()` de la hoja entera.
+    Ahora la preview por símbolos también en la hoja de siempre: `generar_pieza` devuelve
+    `{pdf, base, estampado}` (el documento por prenda sigue igual; `base` sin `despl` → hoja de
+    siempre, nesting con máscara por contorno), y `_nestear_y_componer` arma los `<symbol>` con
+    `hoja_pike.svgs_de_bases`: caché de disco (camino A: `<arte>/svg_cache/<sha1>.svg`, clave =
+    `base_stream` con los nombres al azar `/A…`/`/E…` normalizados + firma de arte y plantilla;
+    camino B: junto al desplegado) y las que faltan al pool en paralelo (`procesos` = ejecutor
+    del servidor o un número; None = serie). Tope 400 SVG por caché. `generar_pedido`,
+    `generar_pedido_grupos` y `_nestear_y_componer` reciben `procesos`; el servidor pasa
+    `_get_render_pool()`. Medido: 5 prendas de 5 talles 15 s → **10 s** la primera vez (pool
+    propio del script incluido) → **2,3 s** con la caché caliente; aplanado 0,6 s.
   **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
   plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
   contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra

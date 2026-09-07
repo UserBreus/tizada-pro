@@ -3747,7 +3747,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
                    etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None,
                    editables_color=None, editables_marca=None, editables_sin_marca=None,
-                   marcas_como_cruz=True, referencia="alto", modo_hoja=None):
+                   marcas_como_cruz=True, referencia="alto", modo_hoja=None, procesos=None):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -4313,6 +4313,17 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # PIEZA generada (9+) con los MISMOS args → extraía las 135 N veces. Cacheado = 1 sola extracción
     # por (mesa, talle), las piezas toman su índice. Gran ahorro en el preview/tizada (todos los talles).
     _piezas_mesa_cache = {}
+    # Dónde cachear el SVG de cada base de la PREVIEW en el camino A (con arte aparte): al lado
+    # del arte, firmado con la fecha y el tamaño del arte y de la plantilla (ver
+    # `hoja_pike._ruta_cache_svg`). En el camino B la caché vive junto al desplegado.
+    _svg_cache_info = None
+    try:
+        if arte and os.path.exists(arte):
+            _sa, _sp = os.stat(arte), os.stat(plantilla)
+            _svg_cache_info = (os.path.join(os.path.dirname(arte), "svg_cache"),
+                               f"{int(_sa.st_mtime)}:{_sa.st_size}:{int(_sp.st_mtime)}:{_sp.st_size}")
+    except OSError:
+        _svg_cache_info = None
     def _armar_base(pieza, talle, variante):
         info = registro[pieza][talle]
         mesa = info["mesa"]
@@ -4511,7 +4522,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info,
                 # para la HOJA COMPARTIDA (`hoja_pike`): la mesa desplegada de la que salió el
                 # dibujo, el nombre con el que la referencia `base_stream`, y el margen
-                "despl": _despl, "nom": _nom_xo, "B": B, "pieza": pieza, "talle": talle}
+                "despl": _despl, "nom": _nom_xo, "B": B, "pieza": pieza, "talle": talle,
+                "svg_cache": _svg_cache_info}
 
     def generar_pieza(pieza, talle, persona, nro, grupo=None, variante=None):
         _bk = (pieza, talle, variante)
@@ -4767,7 +4779,11 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         b["cstream"].write(stream.encode())
         buf = io.BytesIO()
         out.save(buf)
-        return buf.getvalue()
+        # El documento de la pieza (lo que se coloca en la hoja de siempre) Y, aparte, la base y
+        # el estampado: con ellos la vista previa de la hoja se arma con símbolos (`preview_svg`)
+        # también en el camino A — convertir la hoja entera costaba 13 de los 15 s de una
+        # tizada de 5 prendas (2026-09-07). `base` sin `despl` → la hoja sigue siendo la de siempre.
+        return {"pdf": buf.getvalue(), "base": b, "estampado": estampado}
 
     piezas_por_tela = {}                              # tela -> lista de piezas (claves dinámicas)
     total = sum(len(piezas_de(p)) for p in prendas)
@@ -4777,15 +4793,19 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             persona = pr.get("personalizacion") or {"nombre": pr.get("nombre", ""), "numero": pr.get("numero", "")}
             datos = generar_pieza(pieza, pr["talle"], persona, nro, grupo=(pr.get("_grupo") if isinstance(pr, dict) else None),
                                   variante=(pr.get("variante_clave") if isinstance(pr, dict) else None))
-            if isinstance(datos, dict):
+            if isinstance(datos, dict) and "pdf" not in datos:
                 # hoja compartida: sin documento por prenda (se arma sólo si alguien lo pide)
                 _b = datos["base"]
                 ent = {"doc": _DocPerezoso(_b, datos["estampado"]), "w": float(_b["W"]) + 2 * float(_b["B"]),
                        "h": float(_b["Hp"]), "base": _b, "estampado": datos["estampado"]}
             else:
-                doc = _abrir("pdf", datos)
+                # modo de siempre: el documento por prenda + la base y el estampado para la preview
+                _pdf = datos["pdf"] if isinstance(datos, dict) else datos
+                doc = _abrir("pdf", _pdf)
                 r = doc[0].rect
                 ent = {"doc": doc, "w": r.width, "h": r.height}
+                if isinstance(datos, dict):
+                    ent["base"] = datos["base"]; ent["estampado"] = datos["estampado"]
             ent.update({"pieza": pieza, "talle": pr["talle"],
                         "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
                         "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
@@ -4802,10 +4822,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # que un pedido MULTI-MOLDE junte las piezas de varios moldes y las anide juntas.
     if solo_piezas:
         return piezas_por_tela
-    return _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso)
+    return _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso, procesos=procesos)
 
 
-def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso=None, prefijo=""):
+def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso=None, prefijo="", procesos=None):
     """Anida y compone las piezas (ya generadas) por TELA → una hoja por tela.
     Todas las piezas de una misma tela van JUNTAS (sin importar de qué molde son)."""
     cfg = {"ancho_cm": 180, "altura_max_cm": 500, "espaciado_cm": 0.5,
@@ -4851,11 +4871,14 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                     pass
         if not _pike:
             _barrer_fuentes(path)     # la hoja compartida no tiene fuentes fuera de las bases
-        if _pike:
+        # La preview por símbolos también para la hoja de siempre (camino A): cada pieza trae
+        # su base y su estampado desde 2026-09-07. Convertir la hoja entera eran 13 s de 15.
+        _simb = _pike or all((p.get("base") and p.get("estampado") is not None) for p in piezas)
+        if _simb:
             # PREVIEW LIVIANO (hoja compartida): un `<symbol>` por base y un `<use>` por colocación.
             # `get_svg_image()` de la hoja entera expandía cada colocación (64 MB por hoja de 5
             # prendas; 1,3 GB a 100). Los símbolos salen de un documento de la base SOLA.
-            from hoja_pike import preview_svg, altos_de_hojas
+            from hoja_pike import preview_svg, altos_de_hojas, svgs_de_bases
             _docs_base_cache = {}
             def _doc_base(b):
                 d = _docs_base_cache.get(id(b))
@@ -4868,12 +4891,20 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
             _altos = altos_de_hojas(coloc, cfg_t)
             _hojas_no_vacias = [h for h in coloc if h]
             paginas = len(_hojas_no_vacias)
+            # todas las bases de la tela a SVG de una vez: caché de disco + procesos en paralelo
+            if progreso:
+                progreso("previews", f"bases - {tela}", None)
+            _bases = {}
+            for _h in _hojas_no_vacias:
+                for _c in _h:
+                    _bb = _c["pieza"]["base"]; _bases.setdefault(id(_bb), _bb)
+            _crudos = svgs_de_bases(list(_bases.values()), _doc_base, procesos)
             for i, (hoja_c, alto_pt) in enumerate(zip(_hojas_no_vacias, _altos)):
                 if progreso:
                     progreso("previews", f"{i + 1}/{paginas} - {tela}", None)
                 pv = f"prev_{slug}_h{i+1}.svg"
                 with open(os.path.join(salida, pv), "w", encoding="utf-8") as f:
-                    f.write(preview_svg(hoja_c, cfg_t, alto_pt, _simbolos, _doc_base))
+                    f.write(preview_svg(hoja_c, cfg_t, alto_pt, _simbolos, _doc_base, crudos=_crudos))
                 prevs.append(pv)
             for d in _docs_base_cache.values():
                 try:
@@ -4957,7 +4988,7 @@ def generar_pedido_multi(molds, carpeta_fuentes, salida, config_nesting=None,
 
 
 def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
-                          telas_cfg=None, progreso=None):
+                          telas_cfg=None, progreso=None, procesos=None):
     """Genera por GRUPOS de tizada. `grupos` = lista de {nombre, moldes}, donde
     `moldes` es una lista de dicts de molde (como en generar_pedido_multi). Los
     moldes de un MISMO grupo se combinan (por tela); grupos distintos NO se mezclan
@@ -4986,7 +5017,7 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)
         res_g = _nestear_y_componer(acc, config_nesting, telas_cfg, salida, t0, total,
-                                    progreso, prefijo=f"g{gi}_")
+                                    progreso, prefijo=f"g{gi}_", procesos=procesos)
         for h in res_g["hojas"]:
             h["grupo"] = grupo.get("nombre", f"Grupo {gi + 1}")
             h["moldes"] = grupo.get("nombres", [])

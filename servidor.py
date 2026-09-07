@@ -4266,11 +4266,14 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
     # seguiría sirviendo el render viejo: el mtime del arte inexistente es siempre 0.
     # v16: la VERSIÓN DEL DESPLEGADO del camino B (regla de contornos y de páginas). Cambiarla
     # cambia las bases (la línea de corte del archivo, 2026-09-07) sin tocar el archivo.
+    # ⚠️ Como STRING: la clave se guarda en `manifest.json` y vuelve como lista — una tupla acá
+    # nunca era igual a lo leído del disco y TODOS los previews se regeneraban (5 s cada uno,
+    # «armar con base» lento el 2026-09-07 por la tarde).
     try:
         import piezas_con_diseno as _PDv
-        _vd = (_PDv._V_CONTORNOS, _PDv._V_PAGINAS)
+        _vd = f"despl{_PDv._V_CONTORNOS}.{_PDv._V_PAGINAS}"
     except Exception:
-        _vd = (0, 0)
+        _vd = "despl0.0"
     return ["v16", _es_camino_b(pid), _vd,
             _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
             # ⚠️ Los reemplazos son DEL PEDIDO (2026-08-21): si la clave siguiera firmando los del
@@ -4427,23 +4430,35 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
                 if f.endswith(".svg"):
                     try: os.remove(os.path.join(cdir, f))
                     except OSError: pass
-            out, piezas_man, idx = {}, {}, 0
+            # UNA pieza por nombre: la misma pieza vuelve por cada combinación de toggles (manga
+            # corta / larga) con la MISMA base, y convertirla otra vez a SVG era la mitad del
+            # tiempo del preview (12 conversiones de 0,4 s para 6 piezas; medido 2026-09-07).
+            unicas, vistas = [], set()
             for _tela, piezas in (ppt or {}).items():
                 for pz in piezas:
-                    try:
-                        svg = pz["doc"][0].get_svg_image()
-                        w_cm = round(pz["w"] / MP.CM, 2); h_cm = round(pz["h"] / MP.CM, 2)
-                        fn = f"p{idx:03d}.svg"; idx += 1
-                        with open(os.path.join(cdir, fn), "w", encoding="utf-8") as fh:
-                            fh.write(svg)
-                        out[pz["pieza"]] = {"svg": base64.b64encode(svg.encode("utf-8")).decode("ascii"),
-                                            "w_cm": w_cm, "h_cm": h_cm}
-                        piezas_man[pz["pieza"]] = {"archivo": fn, "w_cm": w_cm, "h_cm": h_cm}
-                    except Exception:
-                        pass
-                    finally:
+                    if pz["pieza"] in vistas:
                         try: pz["doc"].close()
                         except Exception: pass
+                        continue
+                    vistas.add(pz["pieza"]); unicas.append(pz)
+            svgs = _svgs_de_piezas(unicas, paralelo=(prioridad == "fg"))
+            out, piezas_man, idx = {}, {}, 0
+            for pz, svg in zip(unicas, svgs):
+                try:
+                    if not svg:
+                        continue
+                    w_cm = round(pz["w"] / MP.CM, 2); h_cm = round(pz["h"] / MP.CM, 2)
+                    fn = f"p{idx:03d}.svg"; idx += 1
+                    with open(os.path.join(cdir, fn), "w", encoding="utf-8") as fh:
+                        fh.write(svg)
+                    out[pz["pieza"]] = {"svg": base64.b64encode(svg.encode("utf-8")).decode("ascii"),
+                                        "w_cm": w_cm, "h_cm": h_cm}
+                    piezas_man[pz["pieza"]] = {"archivo": fn, "w_cm": w_cm, "h_cm": h_cm}
+                except Exception:
+                    pass
+                finally:
+                    try: pz["doc"].close()
+                    except Exception: pass
             json.dump({"clave": clave, "piezas": piezas_man},
                       open(manifest_path, "w", encoding="utf-8"), ensure_ascii=False)
             return {"piezas": out, "talle": talle, "cache": False}
@@ -4561,6 +4576,51 @@ def _get_render_pool():
             from concurrent.futures import ProcessPoolExecutor
             _RENDER_POOL = ProcessPoolExecutor(max_workers=procesos_render())
     return _RENDER_POOL
+
+
+def _svg_worker(pdf_bytes):
+    """WORKER de proceso: el SVG de la primera página de un PDF en memoria (una pieza)."""
+    import fitz as _fz
+    d = _fz.open("pdf", pdf_bytes)
+    try:
+        return d[0].get_svg_image()
+    finally:
+        d.close()
+
+
+def _svgs_de_piezas(piezas, paralelo=True):
+    """Los SVG de una lista de piezas del motor, en el mismo orden (None si una falla).
+
+    Convertir una pieza del camino A a SVG cuesta ~0,4 s (MuPDF recorre el arte entero de la
+    mesa, recortado a la pieza): 6 piezas en serie son 2,5 s de GIL retenido en el hilo del
+    request. En paralelo van a los procesos del pool de render (los mismos de la tizada): ~0,6 s
+    de pared. `paralelo=False` (prewarm en segundo plano, o ya adentro de un worker) va en serie
+    en este proceso: un pool adentro de un worker no se puede, y el prewarm no tiene apuro."""
+    import multiprocessing as _mp
+    n = len(piezas)
+    if n == 0:
+        return []
+    if paralelo and n >= 2 and _mp.current_process().name == "MainProcess":
+        try:
+            pool = _get_render_pool()
+            futs = [pool.submit(_svg_worker, pz["doc"].tobytes()) for pz in piezas]
+            out = []
+            for f in futs:
+                try:
+                    out.append(f.result(timeout=120))
+                except Exception:
+                    out.append(None)
+            if any(out):
+                return out
+        except Exception as e:
+            print(f"[preview] SVG en paralelo falló ({e}); sigo en serie")
+    out = []
+    for pz in piezas:
+        try:
+            out.append(pz["doc"][0].get_svg_image())
+        except Exception:
+            out.append(None)
+    return out
 
 
 def _render_talle_worker(args):
@@ -7490,8 +7550,11 @@ def generar_multi():
             def _marca(nombre):
                 nonlocal _tc
                 _crono[nombre] = _crono.get(nombre, 0.0) + (time.time() - _tc); _tc = time.time()
+            # `procesos`: el pool de render del servidor, para convertir las bases de la preview
+            # en paralelo (13 s → ~3 s en el camino A; ver `hoja_pike.svgs_de_bases`).
             res = MP.generar_pedido_grupos(grupos, FUENTES, salida,
-                                           config_nesting=cfg_nesting, telas_cfg=telas_cfg, progreso=prog)
+                                           config_nesting=cfg_nesting, telas_cfg=telas_cfg, progreso=prog,
+                                           procesos=_get_render_pool())
             _marca("motor")
             res["id"] = tid
             res["moldes"] = nombres
