@@ -1441,6 +1441,16 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     carpeta borrada) lo rehace un hilo de fondo UNA vez por molde; antes los endpoints decían
     `preparando` y nadie lo armaba. Y la clave de la caché de SVG lleva la mesa (dos piezas de
     mesas distintas con el mismo contorno compartían el SVG).
+  · 🔴🔴 **Segundo reporte (10:55): «sigue pasando, sólo en algunas piezas».** Las que seguían mal
+    eran las RECTANGULARES (cuello recto, mesas 5/6): su contorno es un solo segmento `("re", x,
+    y, ancho, alto)` y `generar_pedido.ops_cont` le sumaba el desplazamiento (`dx`, `dy`) a LOS
+    CUATRO valores, ancho y alto incluidos. El clip del borde de corte salía 104 pt (3,7 cm) más
+    angosto y 3 pt más alto que el diseño: la raya negra vertical DENTRO de la pieza, la franja
+    blanca arriba y el estampado que «se pasaba» del borde por la derecha (leído en la hoja real:
+    `9.921 9.921 600.112 141.981 re` con 600,112 = 704,976 − 104,864). El diseño en sí estaba
+    bien porque su clip va sin desplazamiento (`cm` aparte). En el camino A nunca se vio: sus
+    contornos son polilíneas/curvas. Los otros ocho manejos de `re` del motor y del nesting
+    estaban bien (revisados uno por uno). Ahora `re` desplaza x e y y escala ancho y alto.
   **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
   plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
   contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra

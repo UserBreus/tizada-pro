@@ -837,7 +837,11 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
   (`_cmap_de_respaldo`), y **el contorno era la línea de corte dibujada y no la máscara del
   diseño** (0,5-4 mm de más: franja blanca entre estampado y borde) → el recorte con rellenos
   adentro manda (`_rellenos_por_clip`), desplegado con versión de contornos, ficha con molde
-  guía en el camino B, `_desplegar_en_fondo` para moldes ya cargados.
+  guía en el camino B, `_desplegar_en_fondo` para moldes ya cargados. Y el que de verdad
+  explicaba la foto del usuario: `ops_cont` le sumaba el desplazamiento al ANCHO y ALTO de un
+  segmento `re` (piezas rectangulares): el clip del borde salía 3,7 cm más angosto. Lección:
+  cuando «sólo pasa en algunas piezas», leer el content-stream de la base de UNA de esas
+  piezas (los números cantan: 600,112 = 704,976 − 104,864) antes de tocar la detección.
 - **2026-09-04 quinquies (la hoja compartida)** — Ver changelog 393 del mapa y la sección «LA HOJA
   COMPARTIDA». Plan aprobado por el usuario (bases compartidas, aplanado de un nivel, PDF/X-1a-like,
   preview con símbolos, escala a 300+). Entregadas E0-E5 en una tanda; medido 5 prendas 70 → 40 s

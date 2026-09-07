@@ -4250,6 +4250,14 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
 
     def ops_cont(cont, S, dx=0.0, dy=0.0):
         def fseg(s):
+            if s[0] == "re":
+                # 🔴 (2026-09-07) `re` es (x, y, ANCHO, ALTO): el desplazamiento va SÓLO a x e y.
+                # Se le sumaba a todo, y una pieza rectangular (cuello recto del molde con
+                # diseño, `("re", …)` de `_contorno_de_drawing`) salía con el clip del borde
+                # 3-4 cm más angosto y 1 mm más alto que el diseño: raya negra dentro de la
+                # pieza, franja blanca arriba, «piezas por fuera de lo que deberían ser».
+                x, y, w, h = s[1:5]
+                return f"{x*S + dx:.3f} {y*S + dy:.3f} {w*S:.3f} {h*S:.3f} re"
             return (" ".join(f"{v*S + (dx if i % 2 == 0 else dy):.3f}"
                              for i, v in enumerate(s[1:])) + f" {s[0]}").strip()
         return "\n".join(fseg(s) for s in cont["segmentos"])
