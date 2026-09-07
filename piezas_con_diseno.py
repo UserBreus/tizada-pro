@@ -278,7 +278,9 @@ def _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
     if not cands:
         return _respaldo_por_trazados(doc, mesa, talle, page, cb, U, area_min_cm2, lado_min_cm)
 
-    rellenos = _rellenos_por_clip(_dibujos(doc, mesa), talle)
+    pintado = _pintado_por_clip(_dibujos(doc, mesa), talle)
+    trazos = [_rect_de(x) for x in _dibujos(doc, mesa) if x.get("type") == "s" and x.get("layer") == talle]
+    trazos = [t for t in trazos if t is not None and t.width > 0 and t.height > 0]
     piezas = []
     for grupo in _agrupar_por_solape(rects):
         # 🔴 El contorno es el recorte de mayor área ENTRE LOS QUE TIENEN EL DISEÑO ADENTRO
@@ -288,39 +290,70 @@ def _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
         # una franja blanca entre el estampado y el borde de corte, «borde de más de 3 mm» y
         # piezas «por fuera de lo que deberían ser» (reporte del usuario 2026-09-07). Si ningún
         # recorte del grupo tiene rellenos, vale el mayor, como siempre.
-        con_diseno = [k for k in grupo if rellenos.get(id(cands[k]), 0) > 0]
+        con_diseno = [k for k in grupo if pintado.get(id(cands[k]), (0, 0))[0] > 0]
         i = max(con_diseno or grupo, key=lambda k: rects[k].width * rects[k].height)
         r = rects[i]
+        # 🔴 LA LÍNEA DE CORTE DEL ARCHIVO (2026-09-07, pedido del usuario: «que los cambios los
+        # haga en el borde que viene»). Si en el grupo hay un recorte con TRAZOS y sin rellenos
+        # que envuelve al del diseño, es la línea de corte que dibujó el diseñador (medido: 0,5 a
+        # 4 mm más grande que la máscara del diseño, con un trazo de 2 mm centrado en ella). ESA
+        # es la pieza: su geometría es el contorno (nesting, clip, borde) y el trazo se saca del
+        # dibujo en la etapa de páginas (`quitar_linea_de_corte`) para volver a trazarlo con la
+        # configuración del borde. Sin línea en el archivo: la máscara del diseño, como siempre.
+        linea = None
+        if con_diseno:
+            # el trazo puede estar ADENTRO del recorte (cuello recto, camiseta) o ser el dibujo
+            # que le sigue, con su misma caja (cuello curvo: el grupo se cierra antes del trazo)
+            def _es_linea(k):
+                f, s = pintado.get(id(cands[k]), (0, 0))
+                if f > 0 or not _envuelve(rects[k], r):
+                    return False
+                return s > 0 or any(_envuelve(rects[k], tr, 1.0) and _envuelve(tr, rects[k], 1.0) for tr in trazos)
+            envol = [k for k in grupo if k != i and _es_linea(k)]
+            if envol:
+                linea = max(envol, key=lambda k: rects[k].width * rects[k].height)
+        if linea is not None:
+            i, r = linea, rects[linea]
         w_cm, h_cm = r.width / U / CM, r.height / U / CM
         if w_cm * h_cm < area_min_cm2 or min(w_cm, h_cm) < lado_min_cm:
             continue
-        piezas.append((min(grupo), _contorno_de_drawing(
-            {"items": _items_objetos(cands[i]["items"]), "rect": r}, cb, U, mesa, talle)))
+        cont = _contorno_de_drawing({"items": _items_objetos(cands[i]["items"]), "rect": r}, cb, U, mesa, talle)
+        if linea is not None:
+            cont["linea_corte"] = True          # el estilo (ancho, color) lo agrega la etapa de páginas
+        piezas.append((min(grupo), cont))
 
     # el orden del archivo = el orden en que aparece el PRIMER recorte de cada pieza
     piezas.sort(key=lambda p: p[0])
     return [p for _, p in piezas]
 
 
-def _rellenos_por_clip(dibujos, talle):
-    """Cuántos RELLENOS hay adentro de cada recorte de la capa `talle`: `{id(clip): n}`.
-    `get_drawings(extended=True)` devuelve los dibujos EN ORDEN con su `level`: lo que sigue a un
-    recorte de nivel L con nivel mayor está adentro de él, hasta el próximo dibujo de nivel ≤ L.
-    Se cuentan también los rellenos de los recortes anidados (siguen adentro del externo)."""
+def _pintado_por_clip(dibujos, talle):
+    """Cuántos RELLENOS y cuántos TRAZOS hay adentro de cada recorte de la capa `talle`:
+    `{id(clip): (rellenos, trazos)}`. `get_drawings(extended=True)` devuelve los dibujos EN ORDEN
+    con su `level`: lo que sigue a un recorte de nivel L con nivel mayor está adentro de él, hasta
+    el próximo dibujo de nivel ≤ L. Se cuenta también lo de los recortes anidados."""
     seq = [d for d in dibujos if d.get("layer") == talle]
     out = {}
     for k, d in enumerate(seq):
         if d.get("type") != "clip":
             continue
         L = d.get("level") or 0
-        n = 0
+        f = s = 0
         for y in seq[k + 1:]:
             if (y.get("level") or 0) <= L:
                 break
-            if y.get("type") in ("f", "fs"):
-                n += 1
-        out[id(d)] = n
+            t = y.get("type")
+            if t in ("f", "fs"):
+                f += 1
+            elif t == "s":
+                s += 1
+        out[id(d)] = (f, s)
     return out
+
+
+def _envuelve(a, b, tol=1.0):
+    """¿El rectángulo `a` contiene al `b` (con `tol` puntos de tolerancia)?"""
+    return (a.x0 <= b.x0 + tol and a.y0 <= b.y0 + tol and a.x1 >= b.x1 - tol and a.y1 >= b.y1 - tol)
 
 
 def _respaldo_por_trazados(doc, mesa, talle, page, cb, U, area_min_cm2, lado_min_cm):
@@ -864,7 +897,9 @@ _CONT_CACHE = {}          # {(carpeta, mesa): índice ya leído}  — no releer 
 # Versión de la REGLA DE CONTORNOS. Un `m{mesa}.json` con otra versión tiene contornos viejos:
 # se rehacen (5 s por mesa, en paralelo) y sus páginas por talle se conservan (no dependen de
 # la regla). 2 = el recorte con el diseño adentro, no el mayor del grupo (2026-09-07).
-_V_CONTORNOS = 2
+_V_CONTORNOS = 3          # 3 = la línea de corte del archivo es el contorno (2026-09-07)
+# Versión de la etapa de PÁGINAS. 3 = la línea de corte se saca del dibujo (`quitar_linea_de_corte`).
+_V_PAGINAS = 3
 # Lo que se copia de la página original a la desplegada. Lista CERRADA a propósito: `/PieceInfo`
 # (los datos privados de Illustrator), `/Metadata`, `/Annots` o `/Thumb` no dibujan nada y pesan.
 _CLAVES_PAGINA = ("/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate",
@@ -921,6 +956,13 @@ def _leer_desplegado(path_molde, mesa):
     if d.get("sello") != sello or d.get("v") != _V_CONTORNOS:
         return None
     conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (d.get("talles") or {}).items()}
+    # el estilo de la línea de corte del archivo (ancho, color), leído en la etapa de páginas
+    for t, por_idx in (d.get("linea_corte") or {}).items():
+        for k, info in (por_idx or {}).items():
+            try:
+                conts[t][int(k)]["linea_corte"] = info
+            except (KeyError, IndexError, ValueError, TypeError):
+                pass
     # `pdf` sólo si las páginas por talle YA están (el JSON lo dice): el alta escribe primero los
     # contornos y las páginas llegan después, en segundo plano — ver `desplegar_mesa`.
     hit = {"sello": sello, "orden": list(d.get("orden") or []), "contornos": conts,
@@ -1253,6 +1295,116 @@ def quitar_placeholders(salida, page, marco, U):
     return [inst for i, inst in enumerate(salida) if i not in quitar], encontrados
 
 
+def quitar_linea_de_corte(salida, page, contornos, marco, U):
+    """Saca de `salida` (instrucciones de UN talle) el TRAZO de la línea de corte de cada pieza que
+    la trae (`cont["linea_corte"]`) y devuelve `(salida_sin_el, {idx_pieza: {"w", "color"}})`.
+
+    La línea se reconoce por geometría: un trazado que se PINTA sólo con trazo (`S`/`s`) y cuya
+    caja, siguiendo la CTM, coincide con `bbox_raw` del contorno (la línea ES el contorno: el
+    recorte del grupo de trazos es su propio trazado). El operador de pintura se cambia por `n`
+    (fin de trazado sin pintar): la construcción queda, no dibuja nada. El ancho (`w`, en unidades
+    crudas, con la escala de la CTM) y el color de trazo se guardan tal cual vienen: el borde
+    apagado en la configuración los reproduce; el borde prendido los reemplaza."""
+    objetivos = [(i, tuple(float(v) for v in c["bbox_raw"])) for i, c in enumerate(contornos)
+                 if c.get("linea_corte")]
+    if not objetivos:
+        return salida, {}
+    _cs = {}
+    try:
+        for k, v in (page.obj.get("/Resources") or {}).get("/ColorSpace", {}).items():
+            _cs[str(k)] = v
+    except Exception:
+        pass
+
+    def _n_de_cs(name):
+        o = _cs.get(name)
+        try:
+            if o is None:
+                return {"/DeviceCMYK": 4, "/DeviceRGB": 3, "/DeviceGray": 1}.get(name)
+            if isinstance(o, pikepdf.Array):
+                base = str(o[0])
+                if base == "/ICCBased" and len(o) > 1:
+                    return int(o[1].get("/N", 0)) or None
+                return {"/CalRGB": 3, "/CalGray": 1, "/Separation": 1}.get(base)
+            return {"/DeviceCMYK": 4, "/DeviceRGB": 3, "/DeviceGray": 1}.get(str(o))
+        except Exception:
+            return None
+    _op_n = {4: "k", 3: "rg", 1: "g"}
+
+    ctm = [1, 0, 0, 1, 0, 0]
+    pila = []
+    scol, scs_n, sw = None, None, 1.0
+    pts = []                                     # puntos del trazado en curso, en crudas de la página
+    encontrados, reemplazar, candidatos = {}, {}, []
+    tol = 1.5
+
+    def _p(x, y):
+        return (ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5])
+
+    for i, inst in enumerate(salida):
+        op = str(inst.operator)
+        o = inst.operands
+        try:
+            if op == "q":
+                pila.append((ctm, scol, scs_n, sw))
+            elif op == "Q":
+                if pila:
+                    ctm, scol, scs_n, sw = pila.pop()
+            elif op == "cm":
+                ctm = _mul([float(v) for v in o], ctm)
+            elif op == "CS":
+                scs_n = _n_de_cs(str(o[0]))
+            elif op in ("K", "RG", "G"):
+                scol = (op.lower(), [round(float(v), 4) for v in o])
+            elif op in ("SC", "SCN"):
+                nums = [round(float(v), 4) for v in o if not isinstance(v, pikepdf.Name)]
+                o2 = _op_n.get(scs_n) or _op_n.get(len(nums))
+                if o2:
+                    scol = (o2, nums)
+            elif op == "w":
+                sw = float(o[0])
+            elif op == "re":
+                x, y, w, h = (float(v) for v in o)
+                pts += [_p(x, y), _p(x + w, y), _p(x + w, y + h), _p(x, y + h)]
+            elif op in ("m", "l"):
+                pts.append(_p(float(o[0]), float(o[1])))
+            elif op == "c":
+                pts += [_p(float(o[0]), float(o[1])), _p(float(o[2]), float(o[3])), _p(float(o[4]), float(o[5]))]
+            elif op in ("v", "y"):
+                pts += [_p(float(o[0]), float(o[1])), _p(float(o[2]), float(o[3]))]
+            elif op in ("S", "s", "n", "f", "F", "f*", "B", "B*", "b", "b*"):
+                if op in ("S", "s") and pts:
+                    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+                    caja = (min(xs), min(ys), max(xs), max(ys))
+                    esc = (ctm[0] ** 2 + ctm[1] ** 2) ** 0.5
+                    candidatos.append((i, caja, round(sw * esc, 4),
+                                       [scol[0], list(scol[1])] if scol else ["k", [0, 0, 0, 1]]))
+                pts = []
+        except Exception:
+            continue
+    # El trazado de la línea puede pasarse del recorte (el recorte lo corta contra el marco de
+    # la mesa: medido, hasta 37 pt en un costadillo que sale por arriba). Vale el trazo que
+    # CONTIENE la caja del contorno sin pasarse más de `exceso` por lado; entre varios (el marco
+    # de la mesa también la contiene), el más ajustado.
+    exceso = 60.0
+    for idx, bb in objetivos:
+        mejor = None
+        for i, caja, w, color in candidatos:
+            if i in reemplazar:
+                continue
+            if (caja[0] <= bb[0] + tol and caja[1] <= bb[1] + tol and caja[2] >= bb[2] - tol and caja[3] >= bb[3] - tol):
+                ex = (bb[0] - caja[0]) + (bb[1] - caja[1]) + (caja[2] - bb[2]) + (caja[3] - bb[3])
+                if ex <= 4 * exceso and (mejor is None or ex < mejor[0]):
+                    mejor = (ex, i, w, color)
+        if mejor is not None:
+            _, i, w, color = mejor
+            encontrados[idx] = {"w": w, "color": color}
+            reemplazar[i] = pikepdf.ContentStreamInstruction([], pikepdf.Operator("n"))
+    if not reemplazar:
+        return salida, {}
+    return [reemplazar.get(i, inst) for i, inst in enumerate(salida)], encontrados
+
+
 def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, paginas=True):
     """Despliega UNA mesa y devuelve `{talle: [contornos]}` (sólo los talles con piezas). Es lo que
     corre en cada proceso del alta.
@@ -1297,7 +1449,8 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     # Un índice de ESTE archivo pero con contornos de otra versión: las páginas por talle siguen
     # valiendo (no dependen de la regla de contornos) y se conservan al reescribir el JSON.
     _viejo = _json_mismo_archivo(fj, sello, talles) if contornos else None
-    if _viejo is not None and not (_viejo.get("paginas") and os.path.exists(fp)):
+    if _viejo is not None and not (_viejo.get("paginas") and os.path.exists(fp)
+                                   and _viejo.get("vp") == _V_PAGINAS):
         _viejo = None
     if contornos:
         # 1) los contornos, como siempre (get_drawings de la mesa, una vez para los 20 talles)
@@ -1319,7 +1472,8 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             doc.close()
         _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "v": _V_CONTORNOS,
                         "paginas": bool(_viejo), "marco": marco, "U": U,
-                        **({"placeholders": _viejo.get("placeholders") or {}} if _viejo else {})})
+                        **({"placeholders": _viejo.get("placeholders") or {}, "vp": _V_PAGINAS,
+                            "linea_corte": _viejo.get("linea_corte") or {}} if _viejo else {})})
         if not paginas or _viejo:
             return conts
     elif conts is None:
@@ -1340,6 +1494,7 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         bloques = MR._bloques_oc(ops, oc)
         out = pikepdf.Pdf.new()
         placeholders = {}
+        lineas = {}
         for talle in talles:
             obj = {MR._norm_capa(talle)}
             fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
@@ -1349,6 +1504,11 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             salida, ph = quitar_placeholders(salida, pag, marco, U)
             if ph:
                 placeholders[talle] = ph
+            # la línea de corte del archivo se saca del dibujo: la base la vuelve a trazar con
+            # la configuración del borde (o tal cual, si el borde está apagado)
+            salida, lc = quitar_linea_de_corte(salida, pag, conts.get(talle) or [], marco, U)
+            if lc:
+                lineas[talle] = {str(k): v for k, v in lc.items()}
             npag = _pagina_desplegada(out, pag, salida)
             MR.sanear_oc(out, npag)
         out.save(fp + ".tmp")
@@ -1358,7 +1518,8 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         pdf.close()
 
     _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
-                    "v": _V_CONTORNOS, "marco": marco, "U": U, "placeholders": placeholders})
+                    "v": _V_CONTORNOS, "vp": _V_PAGINAS, "marco": marco, "U": U,
+                    "placeholders": placeholders, "linea_corte": lineas})
     return conts
 
 

@@ -2091,7 +2091,7 @@ def _procesos_alta():
 
 _CACHE_DESPL = os.path.join(DATOS, "desplegado_cache")
 _CACHE_DESPL_MAX = 6          # los últimos N archivos distintos (~120 MB cada uno)
-_CACHE_DESPL_VERSION = "v394b"     # b: regla de contornos 2 (el recorte con el diseño adentro)
+_CACHE_DESPL_VERSION = "v394c"     # c: la línea de corte del archivo es el contorno y sale del dibujo
 
 
 def _sha1_archivo(path):
@@ -4256,7 +4256,14 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
     # v15: el CAMINO B entra en la clave. Sin esto, dos moldes distintos (uno con arte y otro con
     # el diseño adentro) podían firmar igual, y un molde que cambia de camino al re-subirse
     # seguiría sirviendo el render viejo: el mtime del arte inexistente es siempre 0.
-    return ["v15", _es_camino_b(pid),
+    # v16: la VERSIÓN DEL DESPLEGADO del camino B (regla de contornos y de páginas). Cambiarla
+    # cambia las bases (la línea de corte del archivo, 2026-09-07) sin tocar el archivo.
+    try:
+        import piezas_con_diseno as _PDv
+        _vd = (_PDv._V_CONTORNOS, _PDv._V_PAGINAS)
+    except Exception:
+        _vd = (0, 0)
+    return ["v16", _es_camino_b(pid), _vd,
             _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
             # ⚠️ Los reemplazos son DEL PEDIDO (2026-08-21): si la clave siguiera firmando los del
             # molde, cambiar de fuente en el pedido serviría el render cacheado con la anterior.

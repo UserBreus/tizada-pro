@@ -1451,6 +1451,28 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     bien porque su clip va sin desplazamiento (`cm` aparte). En el camino A nunca se vio: sus
     contornos son polilíneas/curvas. Los otros ocho manejos de `re` del motor y del nesting
     estaban bien (revisados uno por uno). Ahora `re` desplaza x e y y escala ancho y alto.
+  · 🔴 **LA LÍNEA DE CORTE DEL ARCHIVO ES EL BORDE DE LA PIEZA (pedido del usuario, 11:20: «en vez
+    de dibujar el borde por arriba, que los cambios los haga en el borde que viene»).** El
+    archivo real trae, por pieza, la máscara del diseño Y una línea de corte dibujada (trazo de
+    2 mm centrado en su propio trazado, 0,5-4 mm más grande que la máscara). Dibujar el borde
+    nuestro encima daba dos bordes (1 mm negro de ellos + 3,5 mm nuestros). Ahora:
+    (1) `_piezas_de_mesa_cruda`: si en el grupo hay un recorte SIN rellenos que envuelve al del
+    diseño y tiene un trazo (adentro, o el dibujo siguiente con su misma caja —cuello curvo—),
+    ESA es la pieza: su trazado es el contorno (`cont["linea_corte"] = True`). Sin línea, la
+    máscara del diseño como antes. (2) Etapa de páginas, `quitar_linea_de_corte`: sigue la CTM
+    del content-stream, arma la caja de cada trazado pintado sólo con trazo y, si coincide con
+    `bbox_raw` del contorno (±1 pt), cambia el `S` por `n` (queda sin pintar) y guarda ancho y
+    color EXACTOS (`m{mesa}.json["linea_corte"][talle][idx] = {w, color}`; `_leer_desplegado`
+    lo mete en `cont["linea_corte"]`). (3) `_armar_base`: borde ACTIVO → el borde configurado
+    (ancho, color, alineación) sobre ese trazado, único; borde APAGADO y la pieza trae línea →
+    se traza tal cual venía (mismo ancho, color, centrada). Versiones: `_V_CONTORNOS = 3`,
+    `_V_PAGINAS = 3` (las páginas viejas se rehacen: la línea hay que sacarla), caché `v394c`,
+    `_piezas_base_clave` v16 lleva las versiones del desplegado. Contrato: `verificar_desplegado`
+    §7 (y §1/§2: la página de control también pasa por `quitar_linea_de_corte`, como ya pasaba
+    por `quitar_placeholders`; el conteo de píxeles distintos va con numpy — en Python puro
+    tardaba 10 minutos y parecía colgado). Verificado en el archivo real: las 9 mesas × 20
+    talles detectan su línea (w 5,669 pt, color k [0 0 0 1]) y la página desplegada queda sin
+    ese trazo; con el borde apagado la base la traza tal cual (un solo `S` de 5,669 pt).
   **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
   plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
   contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra

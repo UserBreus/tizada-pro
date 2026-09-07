@@ -4476,6 +4476,14 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # hacia afuera (default): trazo 2B clipado al EXTERIOR (par-impar) → B visible afuera
                 borde = (f"q\n{-3*B:.3f} {-3*B:.3f} {W+8*B:.3f} {H+8*B:.3f} re\n{clip}\nW* n\n{clip}\n"
                          f"{2*B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
+        elif isinstance(cont.get("linea_corte"), dict) and cont["linea_corte"].get("w"):
+            # Borde APAGADO y la pieza trae su propia línea de corte (camino B): se traza tal
+            # cual venía en el archivo —mismo trazado, mismo ancho, mismo color, centrada—, que
+            # el desplegado la sacó del dibujo para que el borde configurado la reemplace.
+            _lc = cont["linea_corte"]
+            _lop, _lv = (_lc.get("color") or ["k", [0, 0, 0, 1]])
+            _lcol = " ".join(f"{float(v):g}" for v in _lv) + " " + {"k": "K", "rg": "RG", "g": "G"}.get(str(_lop), "K")
+            borde = f"q\n{clip}\n{float(_lc['w']) * S:.3f} w 0 j 0 J 10 M {_lcol}\nS\nQ\n"
         else:
             borde = ""
 

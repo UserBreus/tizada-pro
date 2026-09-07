@@ -451,6 +451,27 @@ Lo que queda por sacar (con plan): previews 3 s = leer 27 SVG (39 MB) + escribir
 tarde; `trabajos[tid]["preview"] = "armando"`); la tizada entera en un proceso (E6) para que el
 servidor no se bloquee mientras tanto; memoria de tizada (E7).
 
+### El borde de corte: cómo se dibuja y de dónde sale (2026-09-07, tarde)
+
+El archivo real trae, por pieza, DOS cosas: la máscara de recorte del diseño y una **línea de
+corte dibujada** (un trazo de 2 mm, negro CMYK, centrado en su propio trazado, que es 0,5 a 4 mm
+más grande que la máscara). Hasta hoy el sistema tomaba un recorte como contorno y dibujaba SU
+borde encima → dos bordes (1 mm negro de ellos + 3,5 mm nuestros), «el borde parece de más de
+3 mm». Decisión del usuario: **«que los cambios los haga en el borde que viene»**.
+
+Regla:
+1. **Contorno de la pieza = su línea de corte** (el recorte sin rellenos que envuelve a la
+   máscara y tiene un trazo). Es lo que se nestea, lo que recorta el diseño y por donde va el
+   borde. Si el archivo no trae línea, el contorno es la máscara del diseño.
+2. **La línea se saca del dibujo** al desplegar (`quitar_linea_de_corte`: el `S` pasa a `n`) y
+   se guarda su ancho y color exactos en `m{mesa}.json["linea_corte"]`.
+3. **La base la vuelve a trazar UNA sola vez**: con el borde configurado (ancho, color y de qué
+   lado: «fuera» = todo hacia afuera sin tapar el diseño; «centro» = mitad y mitad; «dentro» =
+   todo sobre el diseño), o, con el borde APAGADO, tal cual venía en el archivo.
+4. Consecuencia: con «fuera», entre la máscara del diseño y la línea de corte puede quedar la
+   franja que el diseñador dejó (0,5-1 mm) — es del archivo, no del sistema; «centro» con 2 mm
+   reproduce exactamente lo que se ve en Illustrator.
+
 **Lo que se aprendió**
 · 🔴 En Windows un script que use `ProcessPoolExecutor` sin `if __name__ == "__main__"` se
   re-ejecuta entero en cada worker: la primera medición «con 6/9/12 procesos» corrió en serie, en
@@ -842,6 +863,11 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
   segmento `re` (piezas rectangulares): el clip del borde salía 3,7 cm más angosto. Lección:
   cuando «sólo pasa en algunas piezas», leer el content-stream de la base de UNA de esas
   piezas (los números cantan: 600,112 = 704,976 − 104,864) antes de tocar la detección.
+  Al final, la decisión de fondo: **la línea de corte del archivo es el borde** (sección «El
+  borde de corte: cómo se dibuja y de dónde sale»): contorno = esa línea, se saca del dibujo
+  al desplegar y la base la traza una sola vez con la configuración (o tal cual, apagada).
+  Verificado en las 180 piezas del archivo real (9 mesas × 20 talles): línea detectada, estilo
+  guardado (2 mm, K=1) y ninguna queda dibujada en las páginas.
 - **2026-09-04 quinquies (la hoja compartida)** — Ver changelog 393 del mapa y la sección «LA HOJA
   COMPARTIDA». Plan aprobado por el usuario (bases compartidas, aplanado de un nivel, PDF/X-1a-like,
   preview con símbolos, escala a 300+). Entregadas E0-E5 en una tanda; medido 5 prendas 70 → 40 s

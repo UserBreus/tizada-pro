@@ -93,6 +93,8 @@ def main():
             MR.aislar_capa(src, pg, tl, podar=True)
             _ins = list(pikepdf.parse_content_stream(pg))
             _ins, _ph = PD.quitar_placeholders(_ins, pg, _j["marco"], _j["U"])
+            # y sin la línea de corte del archivo (changelog 394)
+            _ins, _ = PD.quitar_linea_de_corte(_ins, pg, [PD._cont_de_json(c) for c in _j["talles"].get(tl) or []], _j["marco"], _j["U"])
             a = pikepdf.unparse_content_stream(_ins)
             b = d.pages[talles.index(tl)].Contents.read_bytes()
             iguales += a == b
@@ -123,6 +125,9 @@ def main():
         # la página de control también sin «00»/«NOMBRE» (changelog 387: el desplegado los saca)
         _ins2 = list(pikepdf.parse_content_stream(pg))
         _ins2, _ = PD.quitar_placeholders(_ins2, pg, _j["marco"], _j["U"])
+        # …y sin la LÍNEA DE CORTE del archivo (changelog 394: el desplegado la saca y la base la
+        # vuelve a trazar con la configuración del borde)
+        _ins2, _ = PD.quitar_linea_de_corte(_ins2, pg, [PD._cont_de_json(c) for c in _j["talles"][TALLE]], _j["marco"], _j["U"])
         pg.Contents = src.make_stream(pikepdf.unparse_content_stream(_ins2))
         ref = os.path.join(tmp, "ref.pdf")
         src.save(ref)
@@ -130,7 +135,16 @@ def main():
         p1 = render(ref, MESA - 1)
         p2 = render(fp, talles.index(TALLE))
         mismo = (p1.width, p1.height) == (p2.width, p2.height) and p1.samples == p2.samples
-        dif = None if mismo else sum(1 for i in range(0, len(p1.samples), 3) if p1.samples[i:i+3] != p2.samples[i:i+3])
+        # el conteo de píxeles distintos va con numpy: en Python puro tardaba 10 minutos
+        if mismo:
+            dif = None
+        else:
+            try:
+                import numpy as _np
+                _a = _np.frombuffer(p1.samples, dtype=_np.uint8).reshape(-1, 3); _b = _np.frombuffer(p2.samples, dtype=_np.uint8).reshape(-1, 3)
+                dif = int((_a != _b).any(axis=1).sum()) if _a.shape == _b.shape else "tamaños distintos"
+            except Exception:
+                dif = "?"
         ok(mismo, f"render {p1.width}×{p1.height}: {'0' if mismo else dif} píxeles distintos")
 
         # ══ 3. LOS CONTORNOS SON LOS MISMOS ════════════════════════════════════════════════════
@@ -177,6 +191,22 @@ def main():
         par = json.load(open(os.path.join(tmp, PD.DESPLEGADO, f"m{MESA}.json"), encoding="utf-8"))["talles"]
         conts_serie = PD.desplegar_mesa(COPIA, MESA, talles)
         ok(json.dumps(conts_serie) == json.dumps(par), "la mesa 1 en serie da los mismos contornos que en paralelo")
+
+        # ══ 7. LA LÍNEA DE CORTE DEL ARCHIVO ES EL BORDE DE LA PIEZA (2026-09-07) ══════════════
+        print("\n7 · LA LÍNEA DE CORTE DEL ARCHIVO: es el contorno, sale del dibujo y guarda su estilo")
+        _jm = json.load(open(os.path.join(tmp, PD.DESPLEGADO, f"m{MESA}.json"), encoding="utf-8"))
+        _c0 = _jm["talles"][TALLE][0]
+        ok(_c0.get("linea_corte") is True, "el contorno de la pieza es su línea de corte (el archivo real la trae)")
+        _est = ((_jm.get("linea_corte") or {}).get(TALLE) or {}).get("0") or {}
+        ok(float(_est.get("w") or 0) > 0 and _est.get("color"), f"estilo guardado: ancho {_est.get('w')} pt · color {_est.get('color')}")
+        ok(_jm.get("vp") == PD._V_PAGINAS and _jm.get("v") == PD._V_CONTORNOS, "el JSON lleva las versiones de contornos y de páginas")
+        _dd = fitz.open(os.path.join(tmp, PD.DESPLEGADO, f"m{MESA}.pdf")); _pg = _dd[talles.index(TALLE)]
+        _bb = _c0["bbox_mu"]
+        _tr = [x for x in _pg.get_cdrawings() if x.get("type") == "s" and all(abs(x["rect"][k] - _bb[k]) < 1.5 for k in range(4))]
+        _dd.close()
+        ok(not _tr, "la página desplegada ya no trae el trazo de la línea de corte (lo traza la base con la configuración)")
+        _lc = PD._leer_desplegado(COPIA, MESA)["contornos"][TALLE][0].get("linea_corte")
+        ok(isinstance(_lc, dict) and _lc.get("w"), "`_leer_desplegado` entrega el estilo dentro del contorno")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
