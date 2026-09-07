@@ -11,6 +11,11 @@ RAIZ = r"C:\Users\user2\Documents\tincho\codigos\TIZADA PRO"
 sys.path.insert(0, RAIZ)
 os.chdir(RAIZ)
 sys.modules["api_usuarios"] = types.ModuleType("api_usuarios")   # sin usuarios: import limpio
+# 🔴 El registro de la prueba va a un temporal, y se engancha ANTES de importar `servidor`
+# (que espeja la consola al importarse): un test no puede ensuciar el registro del sistema
+# de verdad — si no, mañana alguien investiga una falla que provocó una prueba.
+import tempfile as _tmp_log, registro as _LOG_PRUEBA   # noqa: E402
+_LOG_PRUEBA.usar_carpeta(_tmp_log.mkdtemp(prefix="verif_logs_"))
 import servidor as S
 
 # ── registro ficticio: 3 piezas en el talle M, con sus pieza_idx ────────────────────────────

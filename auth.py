@@ -68,16 +68,23 @@ def verificar_password(password, hash_guardado, salt):
 # ── Seed ─────────────────────────────────────────────────────────────────────
 def sincronizar_permisos():
     """Deja en la base EXACTAMENTE los permisos del catálogo (agrega los nuevos, actualiza textos).
-    No borra los que ya no están: podrían estar asignados; se limpian a mano si hace falta."""
+    No borra los que ya no están: podrían estar asignados; se limpian a mano si hace falta.
+
+    UNA transacción y UNA conexión: antes era `valor` + `insertar`/`ejecutar` por cada permiso
+    (~40 conexiones nuevas a la base sólo para arrancar, y cada una con su propia transacción).
+    """
     n = 0
-    for clave, modulo, nombre, desc in PERMISOS:
-        if db.valor("SELECT id FROM permiso WHERE clave=?", clave) is None:
-            db.insertar("INSERT INTO permiso (clave, modulo, nombre, descripcion) VALUES (?,?,?,?)",
-                        clave, modulo, nombre, desc)
-            n += 1
-        else:
-            db.ejecutar("UPDATE permiso SET modulo=?, nombre=?, descripcion=? WHERE clave=?",
-                        modulo, nombre, desc, clave)
+    with db.cursor() as cur:
+        cur.execute("SELECT clave FROM permiso")
+        ya = {r[0] for r in cur.fetchall()}      # se lee TODO antes de escribir (un solo cursor)
+        for clave, modulo, nombre, desc in PERMISOS:
+            if clave in ya:
+                cur.execute("UPDATE permiso SET modulo=?, nombre=?, descripcion=? WHERE clave=?",
+                            modulo, nombre, desc, clave)
+            else:
+                cur.execute("INSERT INTO permiso (clave, modulo, nombre, descripcion) VALUES (?,?,?,?)",
+                            clave, modulo, nombre, desc)
+                n += 1
     return n
 
 
@@ -89,28 +96,35 @@ def sincronizar_roles():
     agreguen después. Sin esto, un permiso nuevo no le llegaba nunca al administrador —el rol ya
     existía y esta función lo saltea— y la función quedaba inaccesible para todos."""
     n = 0
-    for clave, nombre, desc, sistema, permisos in ROLES_DEFAULT:
-        rid = db.valor("SELECT id FROM rol WHERE clave=?", clave)
-        if rid is not None:
-            continue
-        rid = db.insertar("INSERT INTO rol (clave, nombre, descripcion, es_sistema) VALUES (?,?,?,?)",
-                          clave, nombre, desc, 1 if sistema else 0)
-        for p in permisos:
-            pid = db.valor("SELECT id FROM permiso WHERE clave=?", p)
-            if pid:
-                db.ejecutar("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
-        n += 1
-    # el rol de sistema se pone al día con los permisos nuevos (su pantalla no los deja editar)
-    for clave, _n, _d, sistema, _p in ROLES_DEFAULT:
-        if not sistema:
-            continue
-        rid = db.valor("SELECT id FROM rol WHERE clave=?", clave)
-        if rid is None:
-            continue
-        for pclave, *_ in PERMISOS:
-            pid = db.valor("SELECT id FROM permiso WHERE clave=?", pclave)
-            if pid and db.valor("SELECT 1 FROM rol_permiso WHERE rol_id=? AND permiso_id=?", rid, pid) is None:
-                db.ejecutar("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
+    with db.cursor() as cur:            # UNA transacción: antes eran ~40 conexiones sueltas
+        cur.execute("SELECT clave, id FROM rol")
+        rol_id = {r[0]: r[1] for r in cur.fetchall()}
+        cur.execute("SELECT clave, id FROM permiso")
+        permiso_id = {r[0]: r[1] for r in cur.fetchall()}
+        for clave, nombre, desc, sistema, permisos in ROLES_DEFAULT:
+            if clave in rol_id:
+                continue
+            cur.execute("INSERT INTO rol (clave, nombre, descripcion, es_sistema) "
+                        "OUTPUT INSERTED.id VALUES (?,?,?,?)",
+                        clave, nombre, desc, 1 if sistema else 0)
+            rid = int(cur.fetchone()[0])
+            rol_id[clave] = rid
+            for p in permisos:
+                pid = permiso_id.get(p)
+                if pid:
+                    cur.execute("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
+            n += 1
+        # el rol de sistema se pone al día con los permisos nuevos (su pantalla no los deja editar)
+        for clave, _n, _d, sistema, _p in ROLES_DEFAULT:
+            if not sistema or clave not in rol_id:
+                continue
+            rid = rol_id[clave]
+            cur.execute("SELECT permiso_id FROM rol_permiso WHERE rol_id=?", rid)
+            ya = {r[0] for r in cur.fetchall()}
+            for pclave, *_ in PERMISOS:
+                pid = permiso_id.get(pclave)
+                if pid and pid not in ya:
+                    cur.execute("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
     return n
 
 

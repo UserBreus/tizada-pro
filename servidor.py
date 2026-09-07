@@ -105,24 +105,31 @@ if PUBLICADO and not os.environ.get("TIZADA_TLS_CERT"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     except Exception as _e:
         print(f"[publicado] ProxyFix no disponible: {_e}")
+def _es_proceso_principal():
+    """¿Es ESTE el proceso del servidor, o un worker del ProcessPool de dibujo?
+
+    En Windows los workers se crean con `spawn`: el hijo **re-importa `servidor.py` entero** para
+    poder encontrar la función que tiene que correr. Todo lo que este módulo haga al importarse
+    (tocar la base, espejar la consola, escribir el catálogo) lo repite CADA worker. Esta pregunta
+    es la que separa «lo que va una vez, en el servidor» de «lo que puede correr en cualquiera»."""
+    try:
+        import multiprocessing as _mp
+        return _mp.parent_process() is None
+    except Exception:
+        return True       # ante la duda, comportarse como el principal (es lo de siempre)
+
+
 _USUARIOS_ON = False      # ¿está registrado el sistema de usuarios? (si no, no se puede exigir sesión)
 try:
     from api_usuarios import bp as _bp_usuarios
     app.register_blueprint(_bp_usuarios)
     _USUARIOS_ON = True
-    # LOS PERMISOS NUEVOS LLEGAN SOLOS. `bootstrap()` corre en la INSTALACIÓN, así que un permiso
-    # agregado después (ej. `ayuda.grabar`, 2026-08-28) no existía en las bases ya instaladas y la
-    # función quedaba inaccesible para todos, administrador incluido. Esto es idempotente: agrega
-    # lo que falta, no borra nada y no pisa los permisos que el usuario haya configurado en SUS
-    # roles (sólo el rol de SISTEMA se pone al día — su pantalla no deja editarlo).
-    try:
-        import auth as _auth
-        _n_perm = _auth.sincronizar_permisos()
-        _auth.sincronizar_roles()
-        if _n_perm:
-            print(f"[usuarios] {_n_perm} permiso(s) nuevo(s) agregados al catálogo")
-    except Exception as _e2:
-        print(f"[usuarios] no se pudieron sincronizar los permisos: {_e2}")
+    # ⚠️ ACÁ NO SE TOCA LA BASE. La sincronización de permisos vive en
+    # `_poner_base_al_dia_al_arrancar()` y corre UNA sola vez, desde `__main__`: este módulo lo
+    # re-importa entero cada worker del ProcessPool (Windows arranca los hijos con `spawn`), así
+    # que lo que se haga acá se multiplica por 6 — eran ~450 conexiones y 100 UPDATE simultáneos
+    # sobre `permiso` la primera vez que alguien pedía dibujar. El sandbox de sólo lectura
+    # (`srv_visor.py`) también importa este módulo: escribía en la base REAL sin que nada lo frene.
 except Exception as _e:   # sin base, el resto del sistema tiene que seguir andando
     print(f"[usuarios] API deshabilitada (¿base MSSQL sin levantar?): {_e}")
 trabajos = {}
@@ -392,6 +399,51 @@ def salud():
 # El taller sube el paquete acá y el servidor se actualiza solo a la hora indicada.
 # Ver `actualizaciones.py`, `actualizador.py` y PLAN_PUBLICACION.md §Etapa 2.
 import actualizaciones as ACT
+import registro as LOG
+
+# 🔴 TODO lo que el servidor imprima queda guardado en `logs/consola.log` con su fecha y hora.
+# Es lo mismo que se ve en la ventana de PowerShell, pero que sobrevive a cerrarla — y que existe
+# también cuando el servidor corre sin ventana (como servicio, o en el servidor publicado, donde
+# hasta ahora esa salida no la veía NADIE). Se engancha acá, en el import, y no en `__main__`,
+# porque el arranque de verdad (`actualizaciones`, la base, los avisos) imprime antes de eso.
+# ⚠️ Pero SÓLO en el servidor: los workers del pool re-importan este módulo (spawn) y quedaban
+# seis procesos escribiendo el MISMO `logs/consola.log` con un candado que es por proceso — o sea,
+# sin candado. Lo que imprime un worker igual llega al archivo: hereda la salida del servidor.
+if _es_proceso_principal():
+    LOG.espejar_consola()
+
+
+def _poner_base_al_dia_al_arrancar():
+    """Deja la base lista para ESTA versión del código. Corre UNA vez, al arrancar el servidor.
+
+    LOS PERMISOS NUEVOS LLEGAN SOLOS: `bootstrap()` corre en la INSTALACIÓN, así que un permiso
+    agregado después (ej. `ayuda.grabar`, 2026-08-28) no existía en las bases ya instaladas y la
+    función quedaba inaccesible para todos, administrador incluido. Es idempotente: agrega lo que
+    falta, no borra nada y no pisa los permisos que el usuario haya configurado en SUS roles
+    (sólo el rol de SISTEMA se pone al día — su pantalla no deja editarlo).
+
+    🔴 ESTO NO PUEDE VIVIR EN EL NIVEL DE MÓDULO. Cada worker del ProcessPool re-importa
+    `servidor.py` (spawn) y repetía la sincronización entera: hasta 6 procesos mandando UPDATE
+    sobre las mismas 18 filas de `permiso` a la vez. Y `srv_visor.py` —el sandbox de SÓLO
+    LECTURA— también importa este módulo, así que escribía en la base de verdad.
+
+    Un fallo NO impide arrancar (la base puede estar levantando todavía), pero queda en el
+    registro: antes era un `print` que en el servidor publicado no leía nadie."""
+    if not (_USUARIOS_ON and _es_proceso_principal()):
+        return
+    try:
+        import auth as _auth
+        n = _auth.sincronizar_permisos()
+        _auth.sincronizar_roles()
+        if n:
+            LOG.info("usuarios", f"{n} permiso(s) nuevo(s) agregados al catálogo",
+                     "El catálogo de permisos del código tenía entradas que la base no tenía "
+                     "(pasa al actualizar a una versión con funciones nuevas).")
+    except Exception as e:
+        LOG.error("usuarios", "No se pudieron sincronizar los permisos al arrancar",
+                  f"{type(e).__name__}: {e}. El sistema arranca igual, pero una función nueva "
+                  "puede no aparecerle ni al administrador hasta que esto corra bien.",
+                  error=str(e)[:300])
 
 
 def _apagarme():
@@ -521,6 +573,89 @@ def publicacion_cancelar():
             return jsonify(json.loads(r.read()))
     except Exception as e:
         return jsonify({"error": str(e)[:200]}), 502
+
+
+# ── EL REGISTRO DEL SISTEMA ───────────────────────────────────────────────────────────────────
+# Pedido del usuario (2026-09-01): «agregá logs en la parte de configuración para poder ver las
+# fallas y que deje registrado el por qué». Lo que motivó esto: una actualización dijo «falló» y el
+# motivo estaba en un archivo del VPS al que sólo se llega por SSH.
+@app.get("/api/registro")
+def registro_listar():
+    """Los últimos eventos. `tipo` (error/aviso/info), `area` y `limite` filtran.
+
+    Pide sesión (o el token del taller, para leer el publicado desde acá): lo que guarda no es del
+    trabajo de nadie, pero un traceback dice rutas y versiones del servidor."""
+    try:
+        limite = min(500, max(1, int(request.args.get("limite") or 200)))
+    except ValueError:
+        limite = 200
+    return jsonify({"ok": True, "eventos": LOG.leer(limite, request.args.get("tipo"),
+                                                    request.args.get("area")),
+                    "resumen": LOG.resumen()})
+
+
+@app.post("/api/registro/limpiar")
+def registro_limpiar():
+    LOG.limpiar()
+    LOG.limpiar_consola()                        # el botón es uno solo: vacía las dos cosas
+    LOG.info("sistema", "Se vació el registro", "Lo pidió alguien desde la pantalla.")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/consola")
+def consola_listar():
+    """LA CONSOLA DEL SERVIDOR: exactamente lo que se vería en la ventana de PowerShell, con la
+    fecha y la hora de cada línea. Sale de un ARCHIVO de texto (`logs/consola.log`), no de la base.
+    `buscar` filtra por texto y `limite` dice cuántas líneas traer (las últimas)."""
+    try:
+        limite = min(5000, max(1, int(request.args.get("limite") or 400)))
+    except ValueError:
+        limite = 400
+    lineas = LOG.leer_consola(limite, request.args.get("buscar") or "")
+    return jsonify({"ok": True, "lineas": lineas,
+                    "archivo": LOG.CONSOLA,
+                    "bytes": (os.path.getsize(LOG.CONSOLA) if os.path.exists(LOG.CONSOLA) else 0)})
+
+
+@app.get("/api/actualizacion/log")
+def actualizacion_log():
+    """El log del AYUDANTE (`_actualizacion/actualizador_log.txt`): la letra chica de la última
+    instalación — dónde se cortó, con horas. Es lo que hasta ahora sólo se podía leer por SSH."""
+    ruta = os.path.join(AQUI, "_actualizacion", "actualizador_log.txt")
+    try:
+        with open(ruta, encoding="utf-8", errors="replace") as fh:
+            lineas = fh.read().splitlines()
+    except OSError:
+        lineas = []
+    return jsonify({"ok": True, "lineas": lineas[-200:], "hay": bool(lineas)})
+
+
+@app.get("/api/publicacion/registro")
+def publicacion_registro():
+    """El registro y el log del ayudante DEL SERVIDOR PUBLICADO, para verlos desde el taller.
+    🔴 Esto es lo que faltaba el 2026-09-01: la actualización falló allá y desde acá no había forma
+    de saber por qué sin entrar por SSH."""
+    cfg = _pub_cfg()
+    out = {"url": cfg.get("url"), "eventos": None, "log": None, "consola": None, "error": None}
+    base = (cfg.get("url") or "").rstrip("/")
+    import urllib.request
+    for clave, ruta in (("eventos", "/api/registro?limite=100"),
+                        ("log", "/api/actualizacion/log"),
+                        ("consola", "/api/consola?limite=400")):
+        # Cada pedido va por su cuenta: si el publicado todavía no tiene la consola (versión
+        # anterior), igual se ven los eventos y el log. Antes uno que fallara tapaba a los otros.
+        try:
+            rq = urllib.request.Request(base + ruta, headers={
+                "User-Agent": _UA_PUB, "X-Token-Act": cfg.get("token") or ""})
+            with urllib.request.urlopen(rq, timeout=25) as r:
+                d = json.loads(r.read())
+                out[clave] = d.get("eventos") if clave == "eventos" else d.get("lineas")
+        except Exception as e:
+            # 404 = el publicado corre una versión anterior a esta pantalla: no es un error de red
+            if clave == "eventos":
+                out["sin_registro"] = "404" in str(e)
+                out["error"] = str(e)[:200]
+    return jsonify(out)
 
 
 @app.get("/api/actualizacion/estado")
@@ -1554,6 +1689,12 @@ def _guardia_moldes():
     en el resto del sistema (`pid` de la request → activo de la sesión)."""
     if not request.path.startswith("/api/") or any(request.path.startswith(p) for p in _API_SIN_SESION):
         return None
+    # El TALLER lee el registro del sistema publicado con el mismo token con el que le manda las
+    # actualizaciones. No se abre sin clave: el registro lleva tracebacks con rutas del servidor y
+    # dejarlos accesibles en internet sería regalar el mapa de la casa.
+    if request.path in ("/api/registro", "/api/consola") and \
+            ACT.token_ok(request.headers.get("X-Token-Act")):
+        return None
     if _USUARIOS_ON:
         try:
             _u = _usuario_actual()
@@ -1604,6 +1745,11 @@ def _error_no_controlado(e):
     if isinstance(e, HTTPException):
         return e
     traceback.print_exc()
+    # 🔴 Y QUEDA REGISTRADO. Antes el detalle vivía sólo en la ventana del servidor: si nadie la
+    # estaba mirando (o era el servidor publicado), el error se perdía y no había forma de saber
+    # qué pasó desde la pantalla (pedido del usuario 2026-09-01).
+    LOG.error("servidor", f"{type(e).__name__} en {request.path}",
+              traceback.format_exc(), ruta=request.path, metodo=request.method)
     return jsonify({"error": f"error interno del servidor: {e}"}), 500
 
 
@@ -8347,6 +8493,11 @@ def guardar_tutorial():
             item["modal"] = str(p.get("modal") or "")[:80]
         if p.get("ventana"):                     # el paso vive DENTRO de esta ventana emergente
             item["ventana"] = str(p["ventana"])[:80]
+        # ── UN MOVIMIENTO (arrastre) ─────────────────────────────────────────────────────────
+        # Sólo se guarda QUE FUE un arrastre: el recorrido NO. El cursor de la ayuda muestra un
+        # gesto GENÉRICO, siempre en el mismo lugar del elemento (decisión del usuario,
+        # 2026-09-01) — quien sigue el tutorial tiene otro molde y otras piezas, así que calcar el
+        # recorrido de quien grabó no enseña nada. Ver `GESTO_GENERICO` en localizar.js.
         limpios.append(item)
     if not limpios:
         return jsonify({"error": "ninguno de los pasos se pudo guardar"}), 400
@@ -8716,7 +8867,14 @@ def _atar_hijos_a_este_proceso():
         if not job:
             return False
         info = _EXT()
-        info.BasicLimitInformation.LimitFlags = 0x2000        # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        # KILL_ON_JOB_CLOSE: los hijos se mueren con el servidor (eso es lo que evita los procesos
+        # sueltos). BREAKAWAY_OK: **el AYUDANTE de actualización tiene que poder salirse**. Sin
+        # este segundo flag, `actualizador.py` —que se lanza justo antes del `os._exit(0)` para
+        # reemplazar los archivos— quedaba adentro del Job y Windows se lo llevaba puesto en el
+        # mismo instante: la actualización quedaba a medias y el servidor no volvía ni con la
+        # versión nueva ni con la vieja. Salirse hay que PEDIRLO (CREATE_BREAKAWAY_FROM_JOB): esto
+        # sólo lo habilita, no lo aplica a nadie más.
+        info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0800   # KILL_ON_JOB_CLOSE | BREAKAWAY_OK
         if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
             return False
         if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
@@ -8742,6 +8900,8 @@ if __name__ == "__main__":
     # Los procesos de dibujo tienen que morirse CON el servidor (si no, cada reinicio deja
     # ~1 GB de procesos sueltos y la máquina se va poniendo lenta sin que se note por qué).
     _atado = _atar_hijos_a_este_proceso()
+    # La base se pone al día ACÁ y no al importar el módulo: los workers del pool lo re-importan.
+    _poner_base_al_dia_al_arrancar()
     if not es_reload:
         _liberar_puerto(port)
         print("\n  USER · Motor de Sublimación")

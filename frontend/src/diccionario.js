@@ -46,6 +46,9 @@
  * artesTotal, artesCargadas, telasFaltan, nFilas, hayResultados, nEditables}. Si hace falta mirar
  * otra cosa, se agrega ahí.
  */
+// Una sola forma de comparar nombres en todo el sistema de ayuda (sin acentos, sin espacios de
+// más, en minúscula). `localizar.js` no importa este archivo, así que no hay ciclo.
+import { normalizar, partirAncla } from './localizar.js';
 
 /**
  * LOS AVISOS QUE EL SISTEMA TIENE — para que el editor de tutoriales los ofrezca al armar un paso
@@ -70,6 +73,11 @@ export const AVISOS_CONOCIDOS = {
     'Subir mi propio molde',
     'Registrar capa editable',
     'Cómo armar el .ai',
+    // Las de CONFIGURACIÓN, que estaban hechas a mano y la ayuda no veía (2026-09-01)
+    'Crear Nuevo Molde',
+    'Piezas del grupo',
+    'Vista previa del molde',
+    'Confirmar Tizada de Sublimación',
   ],
   // cargas (aparecen solas y se van solas: se espera a que terminen)
   cargas: [
@@ -141,6 +149,17 @@ export const DICCIONARIO = {
     nombre: 'Perfil de color',
     que: 'El perfil de color es la traducción entre lo que se ve en pantalla y lo que sale impreso.',
     como: 'Entrá a «Perfil de color».',
+  },
+  // El toggle de la pantalla de Perfil de color (familia dinámica `perfil-esp-<k>`).
+  'perfil-esp-rgb': {
+    nombre: 'RGB',
+    que: 'El color como se ve en PANTALLA. Es el espacio de los monitores, no el de la impresión.',
+    como: 'Tocá «RGB».',
+  },
+  'perfil-esp-cmyk': {
+    nombre: 'CMYK / Impresión',
+    que: 'El color como se IMPRIME: es el que manda para la sublimación. Acá se elige el perfil con el que el sistema traduce los colores del arte.',
+    como: 'Tocá «CMYK / Impresión».',
   },
   'cfg-usuarios': {
     nombre: 'Usuarios y permisos',
@@ -262,9 +281,12 @@ export const DICCIONARIO = {
     listo: (E) => !E.pedido.fuentesFaltan,
   },
   'visor-molde': {
+    // `lienzo`: acá se TRABAJA tocando piezas, no se aprieta un botón. El paso es el visor entero
+    // y nunca se afina a lo que haya adentro (ver `data-lienzo` en App.jsx y `identificar`).
+    lienzo: true,
     nombre: 'Visor del molde',
-    que: 'Muestra el diseño ya puesto sobre cada pieza y cada talle. La primera vez tarda un poco: se hace una sola vez.',
-    como: 'Esperá a que el visor termine de armar las piezas.',
+    que: 'El molde dibujado, pieza por pieza y talle por talle. Acá se tocan las piezas: para nombrarlas, para ponerles el diseño o para asignarles la tela. La primera vez tarda un poco: se hace una sola vez.',
+    como: 'Trabajá en el visor: tocá las piezas que necesites.',
   },
   'editar-diseno': {
     nombre: 'Editar diseño',
@@ -428,6 +450,23 @@ export const DICCIONARIO = {
     que: 'Suma algo propio (PNG, SVG, PDF o AI) y lo coloca sobre una pieza. Queda como un editable más.',
     como: 'Tocá «Agregar objeto».',
   },
+  // Las tres MARCAS DE PROCESO: el objeto no se sublima y en su lugar va una cruz de 3 cm, para
+  // que en el taller sepan que ahí va otro proceso. (Familia dinámica `edit-marca-<k>`.)
+  'edit-marca-tpu': {
+    nombre: 'TPU',
+    que: 'El objeto no se estampa: va en TPU (vinilo termoadhesivo). En la tizada queda una cruz de 3 cm marcando dónde va, y en la ficha técnica su material y su medida.',
+    como: 'Tocá «TPU».',
+  },
+  'edit-marca-bordado': {
+    nombre: 'Bordado',
+    que: 'El objeto no se estampa: va bordado. En la tizada queda una cruz de 3 cm marcando dónde va, y en la ficha técnica su material y su medida.',
+    como: 'Tocá «Bordado».',
+  },
+  'edit-marca-dtf': {
+    nombre: 'DTF',
+    que: 'El objeto no se estampa acá: va en DTF (transfer). En la tizada queda una cruz de 3 cm marcando dónde va, y en la ficha técnica su material y su medida.',
+    como: 'Tocá «DTF».',
+  },
   'edit-marca-visible': {
     nombre: 'Sin marca',
     que: 'Deja el lugar del objeto vacío en la tizada: ahí no se imprime nada. Si el objeto lleva TPU, Bordado o DTF, lo que se saca es la cruz de 3 cm; si no lleva ninguno, el objeto directamente no se imprime. Igual queda en la ficha técnica con su material y su medida.',
@@ -460,6 +499,7 @@ export const DICCIONARIO = {
   },
   // ── EL ESPACIO DE TRABAJO VISUAL ─────────────────────────────────────────────────────────
   'molde-visor': {
+    lienzo: true,
     nombre: 'La prenda armada',
     que: 'El dibujo de la prenda con todas sus piezas. Cada pieza se toca para trabajar sobre ella: ponerle el diseño, asignarle la tela o ver cómo va a salir.',
     como: 'Tocá la pieza sobre la que querés trabajar.',
@@ -600,10 +640,184 @@ export const DICCIONARIO = {
     que: 'El talle de referencia: sobre él se nombran las piezas y desde él se copian a los demás. Conviene uno del medio de la curva (M, 38…).',
     como: 'Elegí el talle de guía.',
   },
+  // ══ VENTANAS DE CONFIGURACIÓN (estaban sin marcar: la ayuda no las reconocía) ════════════════
+  'modal:crear nuevo molde': {
+    nombre: 'Crear Nuevo Molde',
+    que: 'Crea la moldería vacía: sólo se le pone el nombre. El archivo del molde se sube después, ya adentro.',
+    como: 'Escribí el nombre y tocá «Crear Molde».',
+    ventana: { contenido: 'El nombre de la moldería nueva',
+               botones: ['Cancelar', 'Crear Molde'], cuando: 'al crear una moldería', paso: 'config' },
+  },
+  'modal:talle de guia': {
+    nombre: 'Talle de Guía',
+    que: 'El talle con el que se mira y se etiqueta el molde. Conviene uno del medio de la curva: sobre él se nombran las piezas y desde él se copian a los demás.',
+    como: 'Elegí el talle con el que querés trabajar.',
+    ventana: { contenido: 'Todos los talles del molde, para elegir uno',
+               botones: [], cuando: 'al cambiar el talle de guía', paso: 'config' },
+  },
+  'modal:piezas del grupo': {
+    nombre: 'Piezas del grupo',
+    que: 'Las piezas que quedaron en ese grupo, para revisarlas o seguir asignando.',
+    como: 'Revisá las piezas del grupo.',
+    ventana: { contenido: 'La lista de piezas de ese grupo',
+               botones: ['Asignar piezas'], cuando: 'al terminar de nombrar un grupo', paso: 'config' },
+  },
+  'modal:vista previa del molde': {
+    nombre: 'Vista previa del molde',
+    que: 'El molde en grande, para mirarlo de cerca antes de seguir.',
+    como: 'Mirá el molde y cerrá la ventana cuando termines.',
+    ventana: { contenido: 'El dibujo del molde a pantalla completa',
+               botones: ['Cerrar'], cuando: 'al ampliar el molde', paso: 'config' },
+  },
+  'modal:confirmar tizada de sublimacion': {
+    nombre: 'Confirmar Tizada de Sublimación',
+    que: 'El último repaso antes de mandar a fabricar: qué se va a generar con lo cargado.',
+    como: 'Revisá lo que dice y confirmá.',
+    ventana: { contenido: 'El resumen de lo que se va a fabricar',
+               botones: ['Cancelar', 'Confirmar'], cuando: 'antes de armar la tizada', paso: 'planilla' },
+  },
+  // La lista de talles de esa ventana: son intercambiables (cada uno elige el suyo).
+  'molde-guia-talles': {
+    opciones: true,
+    nombre: 'Talles del molde',
+    que: 'Todos los talles que trae el molde. El elegido es con el que vas a ver y etiquetar las piezas.',
+    como: 'Elegí el talle de guía.',
+  },
+
+  // ══ REGISTRO DEL SISTEMA (Configuración) ════════════════════════════════════════════════════
+  // Nació de una actualización que dijo «falló» sin decir por qué: el motivo estaba en un archivo
+  // del servidor publicado, al que sólo se llega por SSH (pedido del usuario, 2026-09-01).
+  'cfg-registro': {
+    nombre: 'Registro del sistema',
+    que: 'Todo lo que falla queda anotado con su motivo, y además está la consola entera del servidor (lo mismo que se ve en la ventana negra) con la fecha y la hora de cada línea. Sirve para saber qué pasó sin entrar al servidor. No guarda nada de tu trabajo.',
+    como: 'Entrá a «Registro del sistema».',
+  },
+  'registro-donde': {
+    opciones: true,
+    nombre: 'De qué sistema',
+    que: 'El registro de ESTA máquina o el del sistema publicado en internet. El del publicado es el que antes no se podía ver desde acá.',
+    como: 'Elegí de qué sistema querés ver el registro.',
+  },
+  'registro-filtro': {
+    opciones: true,
+    nombre: 'Qué mostrar',
+    que: 'Filtra lo anotado: todo, sólo las fallas, los avisos (algo que no salió como se esperaba pero no rompió nada) o los movimientos normales.',
+    como: 'Elegí qué querés ver.',
+  },
+  'registro-evento': {
+    nombre: 'Lo anotado',
+    que: 'Cada línea dice QUÉ pasó y POR QUÉ, con la hora. Tocándola se abren los datos de esa vez (versión, archivo, cuánto tardó).',
+    como: 'Tocá una línea para ver el detalle.',
+  },
+  'registro-consola': {
+    nombre: 'Consola del servidor',
+    que: 'Lo mismo que se ve en la ventana negra del servidor, línea por línea y con la fecha y la hora de cada una. Queda guardado en un archivo de texto, así que sigue estando después de cerrar la ventana — y también cuando el sistema corre sin ninguna ventana.',
+    como: 'Mirá la consola del servidor.',
+  },
+  'registro-buscar': {
+    nombre: 'Buscar en la consola',
+    que: 'Deja sólo las líneas que dicen lo que escribas. Sirve para encontrar una falla puntual entre miles de líneas: el nombre de un archivo, una hora, la palabra «error».',
+    como: 'Escribí qué buscar en la consola.',
+  },
+  'registro-cuantas': {
+    nombre: 'Cuántas líneas',
+    que: 'Cuántas líneas de las últimas se traen. Más líneas es ir más atrás en el tiempo; menos, que cargue más rápido.',
+    como: 'Elegí cuántas líneas mostrar.',
+  },
+  'registro-ayudante': {
+    nombre: 'Detalle de la última actualización',
+    que: 'Lo que fue haciendo el ayudante paso por paso, con la hora de cada cosa: respaldar, descomprimir, levantar y comprobar. Si algo se cortó, acá se ve exactamente dónde.',
+    como: 'Mirá el detalle de la última actualización.',
+  },
+  'registro-refrescar': {
+    nombre: 'Actualizar',
+    que: 'Vuelve a leer el registro. Sirve mientras algo está pasando (una actualización, por ejemplo).',
+    como: 'Tocá «↻ Actualizar».',
+  },
+  'registro-limpiar': {
+    nombre: 'Vaciar el registro',
+    que: 'Borra lo anotado hasta ahora. Se usa después de resolver un problema, para que lo que aparezca de acá en más sea nuevo.',
+    como: 'Tocá «Vaciar el registro».',
+  },
+  'registro-volver': {
+    nombre: 'Volver a Configuración',
+    que: 'Sale del registro y vuelve al panel de Configuración.',
+    como: 'Tocá «⬅ Configuración».',
+  },
+
   'ajuste-volver': {
     nombre: 'Volver',
     que: 'Sale de los ajustes del molde y vuelve a la lista.',
     como: 'Tocá «Volver».',
+  },
+
+  // ══ LOS 10 AJUSTES DE UNA MOLDERÍA ══════════════════════════════════════════════════════════
+  // 🔴 FALTABAN TODOS (auditoría de Configuración, 2026-09-01). Se salvaban de casualidad, porque
+  // el cartel caía al texto del botón; pero esos botones son ÍCONO + título, así que tocando el
+  // ícono el tutorial decía «Tocá "Aa"» y, al arreglar eso, quedaba en «Tocá acá.». Son la puerta
+  // de entrada a TODA la configuración de un molde: sin explicación no hay tutorial de config.
+  // Los textos salen de la propia pantalla (el título y el renglón gris de cada tarjeta).
+  'ajuste-molderia': {
+    nombre: 'Moldería',
+    que: 'El archivo del molde y el nombre de cada pieza. Es lo primero: sin las piezas nombradas, los demás ajustes quedan apagados.',
+    como: 'Entrá a «Moldería».',
+  },
+  'ajuste-variables': {
+    nombre: 'Variables',
+    que: 'Los grupos de piezas y las variables de la prenda (cuello redondo, cuello V…). El talle va aparte.',
+    como: 'Entrá a «Variables».',
+  },
+  'ajuste-etiqueta': {
+    nombre: 'Etiqueta',
+    que: 'La etiqueta que se estampa en cada pieza: qué dice, dónde va, en qué piezas, con qué color y tamaño.',
+    como: 'Entrá a «Etiqueta».',
+  },
+  'ajuste-planilla': {
+    nombre: 'Planilla',
+    que: 'Qué columna de la planilla del pedido es el talle, cuál el nombre, cuál el número…',
+    como: 'Entrá a «Planilla».',
+  },
+  'ajuste-nestingsel': {
+    nombre: 'Nesting',
+    que: 'Con qué acomodo se arma la tizada de este molde: separación entre piezas y si pueden girar.',
+    como: 'Entrá a «Nesting».',
+  },
+  'ajuste-telas': {
+    nombre: 'Telas asignadas',
+    que: 'Qué telas del registro puede usar este molde. Las demás no aparecen al armar el pedido.',
+    como: 'Entrá a «Telas asignadas».',
+  },
+  'ajuste-borde': {
+    nombre: 'Borde de corte',
+    que: 'Si las piezas llevan borde de corte, de qué color y de qué tamaño (en mm).',
+    como: 'Entrá a «Borde de corte».',
+  },
+  'ajuste-diseno': {
+    nombre: 'Plantilla',
+    que: 'La medida de cada pieza y la carga del diseño que se estampa sobre ella.',
+    como: 'Entrá a «Plantilla».',
+  },
+  'ajuste-editable': {
+    nombre: 'Editable',
+    que: 'Los objetos de la capa «Editable» del diseño: se pueden mover, rotar y escalar sin tocar el archivo.',
+    como: 'Entrá a «Editable».',
+  },
+  'ajuste-terminologia': {
+    nombre: 'Nombres',
+    que: 'Cómo llama el sistema al talle y a la prenda en este molde. Sólo cambia los carteles.',
+    como: 'Entrá a «Nombres».',
+  },
+  // La grilla de molderías, marcada ENTERA: el tutorial dice «abrí la que vas a usar» y la elige
+  // quien lo sigue (marcar una tarjeta suelta mandaba a abrir la moldería equivocada).
+  'molde-grilla': {
+    nombre: 'Molderías',
+    que: 'Cada tarjeta es una moldería del sistema, con su molde, su diseño y su planilla.',
+    como: 'Abrí la moldería con la que vas a trabajar: tocá su tarjeta.',
+  },
+  'molde-volver': {
+    nombre: 'Volver a las molderías',
+    que: 'Sale de esta moldería y vuelve a la lista de todas.',
+    como: 'Tocá «⬅ Molderías».',
   },
 
   // ══ MI MOLDE (desde el pedido) ══════════════════════════════════════════════════════════════
@@ -1022,10 +1236,51 @@ export function explicar(ancla, etiqueta) {
   // el tutorial decía «Tocá «txt:camiseta de futbol · 7 pzas#pedido-variables»» (se vio en el
   // tutorial «2 colores»). Del ancla sólo se rescata la parte legible: el nombre del control.
   const legible = String(ancla || '').startsWith('txt:')
-    ? String(ancla).slice(4).split('#')[0].split('@')[0]
+    ? partirAncla(ancla).nombre
     : '';
   const nom = (etiqueta || legible || '').trim();
   return { nombre: nom, que: '', como: nom ? `Tocá «${nom}».` : 'Tocá acá.' };
+}
+
+/**
+ * LA EXPLICACIÓN DE UNA COLUMNA DE LA PLANILLA — por su ROL, no por su id.
+ *
+ * 🔴 POR QUÉ: las columnas las arma cada taller, así que el ID cambia («Diseño» es `dise_o` en la
+ * planilla del usuario, y hay dos columnas de talle: `talle` y `talle_short`). El diccionario las
+ * tenía indexadas por id, así que la explicación existía y NO SE USABA: el cartel caía a la
+ * etiqueta de lo que se tocó y salía **«Tocá "▾"»** — el símbolo del desplegable (auditoría
+ * 2026-08-31, los dos tutoriales reales). El ROL sí es estable: es el que usa el motor.
+ */
+export function explicarColumna(id, role, label) {
+  const propia = DICCIONARIO['col:' + id];
+  if (propia) return propia;
+  const porRol = role && DICCIONARIO['col:' + role];
+  // el nombre que se muestra es SIEMPRE el de la pantalla («Talle short», no «Talle»)
+  if (porRol) return { ...porRol, nombre: label || porRol.nombre };
+  const nom = label || id;
+  return { nombre: nom, que: 'Una columna de la planilla de este pedido.',
+           como: `Cargá lo que va en la columna «${nom}».` };
+}
+
+/**
+ * ¿ESTE BOTÓN ES DE UNA VENTANA QUE PUEDE NO APARECER? Devuelve el título de esa ventana.
+ *
+ * 🔴 EL CASO REAL: el tutorial «Camiseta» tiene un paso «Tocá "Entendido"» que es el botón del
+ * aviso «Perfil de color del diseño». A quien sigue el tutorial puede no salirle ese aviso: el
+ * paso quedaba 5 s en «No encuentro ese lugar en pantalla» y había que seguir a mano. Con esto el
+ * motor sabe que el paso VIVE EN esa ventana y lo dice (los grabados desde 2026-08-31 ya guardan
+ * `ventana`; esto arregla los anteriores, al reproducir).
+ */
+export function modalDeBoton(etiqueta) {
+  // se compara con la MISMA normalización que usa el localizador (una sola forma de comparar
+  // nombres en todo el sistema de ayuda): sin acentos, sin espacios de más, en minúscula
+  const e = normalizar(etiqueta);
+  if (!e) return '';
+  for (const [k, d] of Object.entries(DICCIONARIO)) {
+    if (!k.startsWith('modal:') || !d.ventana) continue;
+    if ((d.ventana.botones || []).some((b) => normalizar(b) === e)) return d.nombre || '';
+  }
+  return '';
 }
 
 export default DICCIONARIO;

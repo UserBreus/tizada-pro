@@ -29,6 +29,7 @@ class El {
   }
   add(hijo) { hijo.parentNode = this; this.children.push(hijo); return hijo; }
   getAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n] : null; }
+  hasAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n); }
   // soporta lo que usa el localizador: varias alternativas con coma, `[attr]`, `[attr="v"]`,
   // `tag[attr]` y nombres de etiqueta sueltos
   matches(sel) {
@@ -47,6 +48,12 @@ class El {
     return null;
   }
   get parentElement() { return this.parentNode; }
+  // el hermano de arriba: `rotuloDe` lo usa para encontrar el rótulo de un campo
+  get previousElementSibling() {
+    const h = this.parentNode ? this.parentNode.children : [];
+    const i = h.indexOf(this);
+    return i > 0 ? h[i - 1] : null;
+  }
   // el texto que se VE: el propio y el de los hijos, en líneas (como innerText)
   get innerText() {
     const mio = this.attrs._texto || '';
@@ -54,6 +61,7 @@ class El {
     return [mio, ...hijos].filter(Boolean).join('\n');
   }
   querySelectorAll(sel) { return this.todos([]).slice(1).filter((e) => e.matches(sel)); }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
   contains(o) { for (let n = o; n; n = n.parentNode) if (n === this) return true; return false; }
   getBoundingClientRect() {
     const r = this._rect;
@@ -86,10 +94,13 @@ global.document = {
     .some((alt) => alt.split(/(?<=\])(?=\[)/).every((s) => e.matches(s)))),
   querySelector: (sel) => global.document.querySelectorAll(sel)[0] || null,
 };
-global.window = { getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }) };
+global.window = { getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }),
+                  innerWidth: 1280, innerHeight: 900 };
 global.CSS = { escape: (s) => s };
 
-const { identificar, buscar, rectDeColumna, rectDeAncla, esDelAncla, etiquetaColumna } = await import('./src/localizar.js');
+const { identificar, buscar, rectDeColumna, rectDeAncla, esDelAncla, etiquetaColumna,
+        elegidasEn, estaApagado, motivoApagado, sinNumeros, anclaEfectiva, esCampo,
+        partirAncla, gestoGenerico, esArrastre } = await import('./src/localizar.js');
 
 console.log('\n1 · Un paso de la planilla es SU COLUMNA, no la tabla entera');
 for (const [id, label] of COLS) {
@@ -214,6 +225,214 @@ console.log('\n5 · Lo que se busca y cómo se llama');
 ok((buscar('col:nombre') || {}).tagName === 'TH', 'buscar una columna devuelve su encabezado (para el scroll)');
 ok(etiquetaColumna('numero') === 'Número', 'el nombre de la columna sale del molde, con su acento');
 ok(etiquetaColumna('inventada') === 'inventada', 'una columna desconocida cae a su id, sin explotar');
+
+console.log('\n6 · «ELEGÍ N DE ESTA LISTA» SE MIDE, NO SE CUENTAN CLICS (auditoría 2026-08-31)');
+// 🔴 EL CASO REAL, verificado en pantalla: dos clics en el AIRE de la lista daban el paso por
+// cumplido, y tocar dos opciones YA elegidas —que las DESMARCA— también: el tutorial avanzaba
+// dejando el pedido con MENOS diseños que antes.
+const listaOpc = raiz.add(new El('div', { 'data-tour': 'pedido-diseno-lista', 'data-opciones': '1' },
+  { left: 0, top: 700, right: 300, bottom: 800 }));
+const opA = listaOpc.add(new El('button', { _texto: 'JUGADOR', 'data-elegida': '1' }, { left: 0, top: 700, right: 100, bottom: 740 }));
+const opB = listaOpc.add(new El('button', { _texto: 'GOLERO', 'data-elegida': '0' }, { left: 100, top: 700, right: 200, bottom: 740 }));
+const opC = listaOpc.add(new El('button', { _texto: 'CUERPO TECNICO', 'data-elegida': '0' }, { left: 200, top: 700, right: 300, bottom: 740 }));
+todos.push(listaOpc, opA, opB, opC);
+ok(elegidasEn('pedido-diseno-lista') === 1, 'se cuenta lo que está ELEGIDO (1 de 3), no los toques');
+opB.attrs['data-elegida'] = '1';
+ok(elegidasEn('pedido-diseno-lista') === 2, 'al elegir otra, son 2');
+opA.attrs['data-elegida'] = '0';
+ok(elegidasEn('pedido-diseno-lista') === 1, '🔴 y al DESMARCAR una, vuelve a 1 (antes esto sumaba)');
+ok(elegidasEn('planilla-tabla') === null, 'una lista que no declara sus elegidas devuelve null (ahí manda el clic)');
+
+console.log('\n7 · LO QUE DESHACE NO CUMPLE EL PASO');
+const quitar = listaOpc.add(new El('button', { _texto: '✕', 'data-no-avanza': '1' }, { left: 90, top: 700, right: 100, bottom: 710 }));
+todos.push(quitar);
+ok(!esDelAncla(quitar, 'pedido-diseno-lista'),
+   '🔴 tocar la ✕ que QUITA un diseño no cuenta como elegir una opción');
+ok(esDelAncla(opC, 'pedido-diseno-lista'), 'pero tocar una opción de verdad, sí');
+
+console.log('\n8 · EL MISMO BOTÓN CON OTRO NÚMERO ADENTRO');
+// «Copiar a 1» pasa a decir «Copiar a 3» con tres moldes marcados: el ancla grabada no encontraba
+// nada y el tutorial quedaba en «No encuentro ese lugar» (tutorial «2 colores» del usuario).
+const copiar = raiz.add(new El('button', { _texto: 'Copiar a 3' }, { left: 0, top: 900, right: 120, bottom: 930 }));
+todos.push(copiar);
+ok(sinNumeros('copiar a 1') === sinNumeros('copiar a 3'), 'los números son comodín');
+ok(buscar('txt:copiar a 1') === copiar, '🔴 el paso grabado con «Copiar a 1» encuentra «Copiar a 3»');
+const otroExacto = raiz.add(new El('button', { _texto: 'Copiar a 1' }, { left: 0, top: 940, right: 120, bottom: 970 }));
+todos.push(otroExacto);
+ok(buscar('txt:copiar a 1') === otroExacto, '…pero si existe el exacto, gana el exacto');
+
+console.log('\n9 · EN UNA LISTA DE OPCIONES, EL PASO ES LA LISTA (también para lo ya grabado)');
+ok(buscar('txt:cuerpo tecnico') === listaOpc,
+   '🔴 un paso atado a UNA tarjeta se marca sobre la lista entera');
+ok(anclaEfectiva('txt:cuerpo tecnico') === 'pedido-diseno-lista',
+   '…y el cartel que se muestra es el de la lista, no el de esa tarjeta');
+ok(esDelAncla(opB, 'txt:cuerpo tecnico'),
+   'por eso vale elegir OTRA opción: quien sigue el tutorial no tiene por qué tener la misma');
+
+console.log('\n10 · UN BOTÓN APAGADO SE EXPLICA, NO SE MANDA A TOCAR');
+const barra = raiz.add(new El('div', {}, { left: 0, top: 1000, right: 600, bottom: 1100 }));
+const avisoBarra = barra.add(new El('div', { 'data-aviso-paso': '1', _texto: 'Falta elegir la prenda de «GOLERO».' },
+  { left: 0, top: 1000, right: 600, bottom: 1020 }));
+const btnOff = barra.add(new El('button', { 'data-tour': 'pedido-ir-arte', _texto: 'Cargar el arte', disabled: true },
+  { left: 480, top: 1040, right: 600, bottom: 1080 }));
+btnOff.disabled = true;
+todos.push(barra, avisoBarra, btnOff);
+ok(estaApagado(btnOff), 'se detecta que el botón del paso está apagado');
+ok(!estaApagado(opB), 'y que uno normal no lo está');
+ok((motivoApagado(btnOff) || {}).texto === 'Falta elegir la prenda de «GOLERO».',
+   '🔴 el motivo sale de la propia pantalla (el aviso del paso), con sus palabras');
+ok((motivoApagado(btnOff) || {}).el === avisoBarra,
+   '…y se sabe cuál es ese cartel, para iluminarlo junto al botón en vez de taparlo con el velo');
+
+console.log('');
+console.log('11 · CONFIGURACIÓN: LO QUE NO ES UN BOTÓN (auditoría 2026-09-01)');
+// 🔴 EL CASO REAL: las tarjetas de moldería son `<div>` clickeables. El grabador las graba (cae al
+// elemento tocado), pero `buscar` sólo miraba botones y campos: al reproducir, el tutorial decía
+// «No encuentro ese lugar en pantalla» con la tarjeta delante de los ojos.
+const tarjCfg = raiz.add(new El('div', { class: 'product-card' }, { left: 0, top: 1200, right: 300, bottom: 1360 }));
+const tarjTitulo = tarjCfg.add(new El('div', { _texto: 'Camiseta de futbol' }, { left: 10, top: 1210, right: 200, bottom: 1240 }));
+const tarjEstado = tarjCfg.add(new El('div', { _texto: 'MOLDE OK' }, { left: 10, top: 1250, right: 120, bottom: 1270 }));
+todos.push(tarjCfg, tarjTitulo, tarjEstado);
+ok(identificar(tarjCfg) === 'txt:camiseta de futbol', 'una tarjeta sin botón se puede grabar por su texto');
+ok(buscar('txt:camiseta de futbol') === tarjCfg,
+   '🔴 …y al reproducir se encuentra LA TARJETA, no su título (el clic cae en cualquier parte de ella)');
+ok(esDelAncla(tarjEstado, 'txt:camiseta de futbol'),
+   'tocar cualquier parte de la tarjeta cuenta como hacer ese paso');
+
+console.log('');
+console.log('12 · SI LA SECCIÓN **ES** EL CONTROL, EL PASO ES LA SECCIÓN');
+// 🔴 Los ajustes de una moldería son botones ÍCONO + título con su propio `data-tour`. Al tocarlos
+// por el ícono, el ancla quedaba afinada («txt:aa#ajuste-terminologia») y el cartel decía
+// **«Tocá "Aa"»** en vez de «Entrá a "Nombres"».
+const botonAjuste = raiz.add(new El('button', { 'data-tour': 'ajuste-terminologia' }, { left: 0, top: 1400, right: 300, bottom: 1470 }));
+const iconoAjuste = botonAjuste.add(new El('span', { _texto: 'Aa' }, { left: 5, top: 1405, right: 35, bottom: 1435 }));
+todos.push(botonAjuste, iconoAjuste);
+ok(anclaEfectiva('txt:aa#ajuste-terminologia') === 'ajuste-terminologia',
+   '🔴 el paso vuelve a ser el botón marcado (y usa SU explicación, no el nombre del ícono)');
+// …pero un PANEL con varios botones adentro sigue afinado: ahí sí importa cuál se tocó (358)
+const panel = raiz.add(new El('div', { 'data-tour': 'resultados-mesas' }, { left: 0, top: 1500, right: 400, bottom: 1600 }));
+panel.add(new El('button', { _texto: 'Descargar sólo la hoja 1' }, { left: 5, top: 1505, right: 200, bottom: 1535 }));
+panel.add(new El('button', { _texto: 'Descargar la ficha técnica completa' }, { left: 5, top: 1545, right: 200, bottom: 1575 }));
+todos.push(panel, ...panel.children);
+ok(anclaEfectiva('txt:descargar solo la hoja 1#resultados-mesas') === 'txt:descargar solo la hoja 1#resultados-mesas',
+   'en un panel con varios botones, el paso sigue siendo EL BOTÓN que se tocó');
+
+console.log('');
+console.log('13 · UN CAMPO SE ESCRIBE: NO AVANZA SOLO (pedido del usuario 2026-09-01)');
+// «cuando son campos de escribir no saltará automático, debe presionar Siguiente así puede
+// escribir. El automático solo es en botones y ventanas emergentes que no tenés que presionar nada»
+const campoTxt = raiz.add(new El('input', { placeholder: 'Nombre del diseño' }, { left: 0, top: 1700, right: 200, bottom: 1730 }));
+const areaTxt = raiz.add(new El('textarea', { placeholder: 'Notas' }, { left: 0, top: 1740, right: 200, bottom: 1800 }));
+const listaSel = raiz.add(new El('select', {}, { left: 0, top: 1810, right: 200, bottom: 1840 }));
+const botonComun = raiz.add(new El('button', { _texto: 'Guardar' }, { left: 0, top: 1850, right: 100, bottom: 1880 }));
+todos.push(campoTxt, areaTxt, listaSel, botonComun);
+ok(esCampo(campoTxt) && esCampo(areaTxt), 'un input y un textarea son campos de escritura');
+ok(!esCampo(listaSel), 'un desplegable NO: ahí se elige, no se escribe');
+ok(!esCampo(botonComun), 'y un botón tampoco (ésos sí avanzan solos)');
+// tocar el ícono/hijo de un campo también cuenta como campo
+const envoltorio = raiz.add(new El('div', {}, { left: 0, top: 1900, right: 200, bottom: 1930 }));
+const campoDentro = envoltorio.add(new El('input', {}, { left: 0, top: 1900, right: 200, bottom: 1930 }));
+todos.push(envoltorio, campoDentro);
+ok(esCampo(envoltorio), 'lo que CONTIENE un campo también se trata como campo');
+ok(!esCampo(null), 'sin elemento, no explota');
+
+// y en el motor: el clic sobre un campo NO cumple el paso (si no, se salta antes de escribir)
+{
+  const src = readFileSync(new URL('./src/tutor.jsx', import.meta.url), 'utf8');
+  const desde = src.indexOf('AVANCE POR ACCIÓN EN EL DOM');
+  const bloque = src.slice(desde, desde + 6000);
+  ok(desde > 0 && bloque.includes('if (esCampo(e.target)) return;'),
+     '🔴 el motor NO da por hecho el paso cuando el clic cae en un campo');
+  ok(bloque.includes('if (paso.manual) return;'),
+     '…y sigue sin escuchar los pasos que se terminan a mano (columna o campo)');
+}
+
+console.log('');
+console.log('14 · EL «?» DE AYUDA NO ES EL NOMBRE DE UN CAMPO (tutorial «Cargar molde», 2026-09-01)');
+// 🔴 EL CASO REAL: los rótulos de esta app llevan al lado el botón «?» del popover. El campo tomaba
+// ESE texto como su identidad y el paso quedaba guardado como «txt:?» — imposible de reencontrar.
+const filaCampo = raiz.add(new El('div', {}, { left: 0, top: 2000, right: 300, bottom: 2060 }));
+const rotulo = filaCampo.add(new El('div', { _texto: '?' }, { left: 0, top: 2000, right: 20, bottom: 2016 }));
+const campoConAyuda = filaCampo.add(new El('input', {}, { left: 0, top: 2020, right: 300, bottom: 2050 }));
+todos.push(filaCampo, rotulo, campoConAyuda);
+ok(identificar(campoConAyuda) !== 'txt:?',
+   '🔴 un campo cuyo vecino es el «?» ya NO se graba como «txt:?»');
+// y con un rótulo de verdad, ése manda
+const fila2 = raiz.add(new El('div', {}, { left: 0, top: 2100, right: 300, bottom: 2160 }));
+fila2.add(new El('div', { _texto: 'Nombre del molde ?' }, { left: 0, top: 2100, right: 200, bottom: 2116 }));
+const campo2 = fila2.add(new El('input', {}, { left: 0, top: 2120, right: 300, bottom: 2150 }));
+todos.push(fila2, campo2, ...fila2.children);
+ok(String(identificar(campo2)).startsWith('txt:nombre del molde'),
+   '…y el rótulo de verdad se usa SIN el «?» pegado');
+
+console.log('');
+console.log('15 · EL TUTORIAL NUNCA DICE QUE NO ENCUENTRA (regla del usuario 2026-09-01)');
+// «este tipo de cartel no quiero más. no me puede decir mas no encuentro. si me esta guiando y el
+//  tutorial esta grabado en el sistema debe de saber todo como va a salir»
+{
+  const src = readFileSync(new URL('./src/tutor.jsx', import.meta.url), 'utf8');
+  // el código VIVO: sin comentarios de bloque (`/* … */`, también los `{/* … */}` del JSX) ni de
+  // línea — lo que se prohíbe es que la frase vuelva a la PANTALLA, no que se cuente la historia
+  const vivo = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n')
+    .filter((l) => !l.trim().startsWith('//')).join('\n');
+  ok(!/No encuentro ese lugar/i.test(vivo),
+     '🔴 el cartel «No encuentro ese lugar en pantalla» no existe más en el motor');
+  ok(!/Buscando ese lugar/i.test(vivo),
+     '…ni el «Buscando ese lugar en pantalla» (el sistema sabe a dónde va: dice «Preparando este paso…»)');
+  ok(/noAplicaron/.test(src),
+     'en su lugar: los pasos que no están en la pantalla se pasan solos y se cuentan para el final');
+  ok(/paso\.elige/.test(src),
+     'y un puente que exige ELEGIR (abrir una moldería) ofrece saltear, no un «llevame» que no lleva');
+}
+
+console.log('');
+console.log('16 · EL `#` DEL NOMBRE NO ROMPE EL ANCLA (paso 16/37 de «Cargar molde»)');
+// «6XL · pieza #1 — Espalda…» adentro de `visor-molde`: partir por el PRIMER `#` daba una sección
+// inventada («1 — espalda…») y el paso no se podía encontrar NUNCA.
+{
+  const a = 'txt:6xl · pieza #1 — espalda 16xl · pieza #2 — frent#visor-molde';
+  const r = partirAncla(a);
+  ok(r.seccion === 'visor-molde', '🔴 la sección es lo que va después del ÚLTIMO «#»');
+  ok(r.nombre === '6xl · pieza #1 — espalda 16xl · pieza #2 — frent',
+     '…y el nombre conserva su propio «#» adentro');
+  const s = partirAncla('txt:editar@manga larga#panel-reglas');
+  ok(s.nombre === 'editar' && s.ctx === 'manga larga' && s.seccion === 'panel-reglas',
+     'con fila y sección a la vez, cada parte en su lugar');
+  const u = partirAncla('txt:guardar');
+  ok(u.nombre === 'guardar' && !u.seccion && !u.ctx, 'y un ancla simple sigue igual');
+}
+
+console.log('');
+console.log('');
+console.log('17 · EL GESTO QUE SE MUESTRA ES GENÉRICO (decisión del usuario 2026-09-01)');
+// «que no muestre el arrastrado real que hacemos cuando grabamos; debe ser un arrastrado genérico
+//  que siempre se muestra en la misma parte del campo» — quien sigue el tutorial tiene otro molde y
+//  otras piezas: lo que hay que enseñar es EL GESTO, no el recorrido de quien grabó.
+const lienzo = raiz.add(new El('div', { 'data-tour': 'visor-molde', 'data-lienzo': '1' },
+  { left: 100, top: 200, right: 500, bottom: 400 }));   // 400 × 200
+todos.push(lienzo);
+{
+  const g = gestoGenerico(lienzo);
+  ok(!!g, 'hay gesto para mostrar aunque nadie haya grabado un recorrido');
+  // 0,22 · 0,28  →  0,75 · 0,78 sobre un elemento de 400×200 que empieza en (100,200)
+  ok(Math.abs(g.desde.x - 188) < 1 && Math.abs(g.desde.y - 256) < 1,
+     'arranca siempre en el mismo punto del elemento');
+  ok(Math.abs(g.hasta.x - 400) < 1 && Math.abs(g.hasta.y - 356) < 1,
+     '…y termina siempre en el mismo, cruzando el área en diagonal');
+  ok(g.desde.x < g.hasta.x && g.desde.y < g.hasta.y,
+     'de arriba-izquierda a abajo-derecha, como se abarca un recuadro');
+  // 🔴 LO QUE IMPORTA: en OTRA pantalla el gesto se ve en el MISMO lugar relativo
+  const otro = new El('div', {}, { left: 0, top: 0, right: 800, bottom: 600 });
+  const g2 = gestoGenerico(otro);
+  ok(Math.abs(g2.desde.x / 800 - 0.22) < 0.01 && Math.abs(g2.desde.y / 600 - 0.28) < 0.01
+     && Math.abs(g2.hasta.x / 800 - 0.75) < 0.01 && Math.abs(g2.hasta.y / 600 - 0.78) < 0.01,
+     '🔴 en un visor más grande cae en la misma proporción (no en los mismos píxeles)');
+  ok(gestoGenerico(null) === null, 'sin elemento no se dibuja ningún gesto');
+}
+{
+  ok(esArrastre(10, 10, 60, 10) && esArrastre(10, 10, 10, 60), 'mover 50 px es un arrastre');
+  ok(!esArrastre(10, 10, 13, 12), '…y el temblor de un clic NO lo es (no se graba un gesto falso)');
+}
 
 console.log();
 if (fallos.length) {

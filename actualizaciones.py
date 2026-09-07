@@ -9,12 +9,30 @@ Lo que NUNCA se toca: `datos/` y `entrada/`. El paquete ni siquiera los trae.
 """
 import os, json, time, zipfile, hashlib, threading, subprocess, sys
 
+# EL REGISTRO (pedido del usuario 2026-09-01): que cada paso de una actualización deje dicho qué
+# pasó y POR QUÉ, para poder verlo desde la pantalla y no por SSH. Con guarda: si por lo que sea no
+# está, el updater tiene que seguir funcionando igual.
+try:
+    import registro as LOG
+except Exception:                                # pragma: no cover
+    class LOG:                                   # noqa: N801 - reemplazo mudo
+        @staticmethod
+        def error(*a, **k): pass
+        @staticmethod
+        def aviso(*a, **k): pass
+        @staticmethod
+        def info(*a, **k): pass
+
 AQUI = os.path.dirname(os.path.abspath(__file__))
 CARPETA = os.path.join(AQUI, "_actualizacion")
 PENDIENTE = os.path.join(CARPETA, "pendiente.json")
 PAQUETE = os.path.join(CARPETA, "pendiente.zip")
 ULTIMA = os.path.join(CARPETA, "ultima.json")
 EN_CURSO = os.path.join(CARPETA, "en_curso.json")
+# La SEÑAL del ayudante: «ya descomprimí, la versión nueva está en el disco». Hasta que
+# aparece, el servidor no se apaga (ver `esperar_al_ayudante`).
+LISTO = os.path.join(CARPETA, "listo.flag")
+ESPERA_AYUDANTE = 240        # s como mucho: si algo se colgó, igual se sigue
 
 # «Aplicación A MANO»: un `cuando` en el año 2100 (o más) significa que el paquete queda
 # esperando y NADIE lo aplica solo — lo aplican en el servidor (parar → descomprimir
@@ -167,6 +185,11 @@ def guardar(datos, version, sha256, cuando):
     os.replace(tmp, PAQUETE)
     _escribir(PENDIENTE, {"version": ver_zip or version, "sha256": real, "cuando": float(cuando),
                           "subido": time.time(), "tamano": len(datos)})
+    LOG.info("actualizacion", f"Llegó el paquete de la versión {ver_zip or version}",
+             f"{len(datos)} bytes, firma verificada. "
+             + ("Queda para aplicar A MANO." if float(cuando) >= MANUAL
+                else f"Se aplica {'ya' if float(cuando) <= time.time() else 'a la hora pedida'}."),
+             version=ver_zip or version, bytes=len(datos))
     return True, ver_zip
 
 
@@ -215,14 +238,30 @@ def aplicar(puerto, version_actual):
         _escribir(ULTIMA, {"ok": False, "version": p.get("version"), "cuando": time.time(),
                            "detalle": f"no se instaló sola para no dejar el servidor apagado "
                                       f"({_det}); el paquete quedó esperando para aplicarlo a mano"})
+        LOG.aviso("actualizacion", f"La versión {p.get('version')} NO se instaló sola",
+                  f"Este servidor no puede hacerlo sin ayuda: {_det}. El paquete quedó sano y "
+                  f"esperando para aplicarlo a mano — no se apagó nada.",
+                  version=p.get("version"))
         return False, _det
+    # ⚠️ Una señal de una actualización anterior haría que el servidor se apague AL INSTANTE,
+    # creyendo que la versión nueva ya está en el disco. Se limpia antes de empezar.
+    try:
+        os.remove(LISTO)
+    except OSError:
+        pass
     _escribir(EN_CURSO, {"desde": version_actual, "hacia": p.get("version"), "inicio": time.time()})
     exe = sys.executable or "py"
     cmd = [exe, os.path.join(AQUI, "actualizador.py"), AQUI, PAQUETE, str(puerto),
            str(p.get("version") or ""), _modo]
     # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP: el ayudante tiene que SOBREVIVIR a que el
     # servidor se apague. Si fuese hijo normal, se lo llevaría puesto y quedaría todo a medias.
-    flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
+    # 🔴 WINDOWS — Y ESO NO ALCANZABA: el servidor se mete a sí mismo en un JOB OBJECT con
+    # `KILL_ON_JOB_CLOSE` (para que los procesos de dibujo no queden sueltos al reiniciar) y los
+    # hijos HEREDAN el Job aunque nazcan «detached». Cuando el servidor hacía `os._exit(0)` para
+    # dejarse reemplazar, Windows mataba el Job entero y con él al ayudante, en el peor momento:
+    # a mitad de descomprimir. CREATE_BREAKAWAY_FROM_JOB lo saca del Job (el Job lo permite desde
+    # que lleva BREAKAWAY_OK, ver `servidor._atar_hijos_a_este_proceso`).
+    flags = (0x00000008 | 0x00000200 | 0x01000000) if os.name == "nt" else 0
     # 🔴 LINUX — LAS DOS MITADES, LAS DOS NECESARIAS (2026-08-21, se pagó en producción):
     #   (a) `start_new_session` = sesión propia (`setsid`): no le llegan las señales dirigidas al
     #       grupo del servidor.
@@ -232,9 +271,25 @@ def aplicar(puerto, version_actual):
     #       `systemctl stop` que el propio ayudante pide mata el grupo ENTERO, ayudante incluido.
     # Pasó en la primera publicación al VPS: el log del ayudante quedó en la primera línea y el
     # servicio se apagó sin versión nueva ni vieja (`Restart=always` no revive un stop deliberado).
-    subprocess.Popen(cmd, cwd=AQUI, creationflags=flags, close_fds=True,
-                     start_new_session=(os.name != "nt"),
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def _lanzar(_flags):
+        return subprocess.Popen(cmd, cwd=AQUI, creationflags=_flags, close_fds=True,
+                                start_new_session=(os.name != "nt"),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        _lanzar(flags)
+    except OSError as e:
+        # Si este proceso vive dentro de un Job que NO permite salirse (lo lanzó otra cosa: una
+        # tarea con su propio Job, un IDE), `CreateProcess` contesta «acceso denegado». Se
+        # reintenta sin pedir la salida: la actualización arranca igual, pero si el servidor se
+        # apaga el ayudante puede irse con él — por eso queda avisado en el registro.
+        LOG.aviso("actualizacion", "El ayudante no pudo salirse del grupo de procesos del servidor",
+                  f"{type(e).__name__}: {e}. Se lanzó igual. Si la actualización queda a medias, "
+                  "es por acá: este servidor corre dentro de un grupo que no deja salir a nadie.")
+        _lanzar(flags & ~0x01000000)
+    LOG.info("actualizacion", f"Empezó la instalación de la versión {p.get('version')}",
+             f"Modo «{_modo}» ({_det}). El servidor espera a que el ayudante avise que la versión "
+             f"nueva ya está en el disco, y recién ahí se apaga.",
+             version=p.get("version"), modo=_modo, desde=version_actual)
     return True, p.get("version")
 
 
@@ -245,9 +300,27 @@ def recuperar_si_quedo_a_medias():
     m = _leer(EN_CURSO)
     if not m:
         return
+    # 🔴 UN ARRANQUE EN EL MEDIO NO ES UN FRACASO. En el modo «reinicio» el servidor se apaga y
+    # `Restart=always` lo levanta enseguida MIENTRAS el ayudante todavía trabaja: ese arranque
+    # declaraba fallida una actualización que estaba saliendo bien, la aparcaba y dejaba la versión
+    # vieja corriendo (pasó con la 1.0.32, 2026-09-01). Si el ayudante empezó recién, se lo deja
+    # terminar: él escribe el resultado y borra esta marca. Recién si pasó el plazo se da por
+    # interrumpida — ahí sí no hay nadie del otro lado.
+    try:
+        _edad = time.time() - float(m.get("inicio") or 0)
+    except (TypeError, ValueError):
+        _edad = 1e9
+    if 0 <= _edad < ESPERA_AYUDANTE:
+        return
     _escribir(ULTIMA, {"ok": False, "version": m.get("hacia"), "cuando": time.time(),
                        "detalle": "la actualización quedó interrumpida; el paquete quedó "
                                   "APARCADO para aplicarlo a mano (no se reintenta solo)"})
+    LOG.error("actualizacion", f"La versión {m.get('hacia')} quedó a medias",
+              f"El servidor arrancó y encontró una actualización marcada como «en curso» desde "
+              f"hace {int(_edad)} s, sin noticias del ayudante. Se dio por interrumpida y el "
+              f"paquete se APARCÓ (no se reintenta solo, para no entrar en un bucle de caídas). "
+              f"El detalle de dónde se cortó está en _actualizacion/actualizador_log.txt.",
+              version=m.get("hacia"), desde=m.get("desde"), segundos=int(_edad))
     # 🔴 NO REINTENTAR SOLA. Si el intento anterior no terminó y la pendiente sigue
     # marcada para «ya», `vigilar()` la reaplica a los 5 s del arranque — y si lo que la
     # cortó sigue ahí (en Linux: el ayudante muere con el `systemctl stop` cuando al unit le
@@ -266,6 +339,27 @@ def recuperar_si_quedo_a_medias():
         pass
 
 
+def esperar_al_ayudante():
+    """🔴 NO APAGARSE HASTA QUE LA VERSIÓN NUEVA ESTÉ EN EL DISCO.
+
+    Antes se esperaban **2 segundos** y listo, dando por hecho que el ayudante ya había hecho su
+    trabajo. No alcanza: respaldar la carpeta y descomprimir tarda más. Con `Restart=always`,
+    systemd levantaba el servidor VIEJO en el medio, ese arranque veía la actualización «en curso»
+    y la declaraba interrumpida — versión sin aplicar y paquete aparcado (pasó con la 1.0.32,
+    2026-09-01: el fallo quedó marcado 14 segundos después de publicar).
+
+    Ahora se espera el `listo.flag` que el ayudante deja al terminar de descomprimir. Con tope, por
+    si el ayudante muriera: pasado ese tiempo se sigue igual y la red de abajo
+    (`recuperar_si_quedo_a_medias`) se encarga."""
+    t0 = time.time()
+    while time.time() - t0 < ESPERA_AYUDANTE:
+        if os.path.exists(LISTO):
+            time.sleep(1)                      # que termine de cerrar el archivo
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def vigilar(puerto, version_actual, apagar):
     """Hilo que mira cada 20 s si llegó la hora de una actualización programada."""
     def _loop():
@@ -278,7 +372,7 @@ def vigilar(puerto, version_actual, apagar):
                 if p and float(p.get("cuando", 0)) < MANUAL and time.time() >= float(p.get("cuando", 0)):
                     ok, _ = aplicar(puerto, version_actual)
                     if ok:
-                        time.sleep(2)          # que el ayudante levante antes de apagarnos
+                        esperar_al_ayudante()
                         apagar()
                         return
             except Exception:

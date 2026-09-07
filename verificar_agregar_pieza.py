@@ -337,6 +337,11 @@ if FALLOS:
 # Hasta acá se probó el módulo. Esto ejercita `POST /api/plantilla/pieza_agregar` con el cuerpo
 # NUEVO —una lista de piezas preparadas— sobre un pid temporal montado en el TIZADA_DATOS de la
 # prueba. Nada del usuario: el molde es una copia y el catálogo vive en memoria.
+# 🔴 El registro de la prueba va a un temporal, y se engancha ANTES de importar `servidor`
+# (que espeja la consola al importarse): un test no puede ensuciar el registro del sistema
+# de verdad — si no, mañana alguien investiga una falla que provocó una prueba.
+import tempfile as _tmp_log, registro as _LOG_PRUEBA   # noqa: E402
+_LOG_PRUEBA.usar_carpeta(_tmp_log.mkdtemp(prefix="verif_logs_"))
 import servidor as S
 
 _PID = "ZZ_test_pieza"

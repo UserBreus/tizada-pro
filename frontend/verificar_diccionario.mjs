@@ -47,6 +47,36 @@ const anclas = new Set([
   ...[...app.matchAll(/\sancla=["']([\w:.-]+)["']/g)].map((m) => m[1]),
 ]);
 
+// 🔴 TERCERA FORMA: las anclas que se ARMAN (`data-tour={'ajuste-' + item.id}`). Se le escapaban
+// enteras al contrato: los 10 ajustes de una moldería —la puerta a TODA la configuración de un
+// molde— no tenían explicación y nadie lo cantaba. El tutorial terminaba diciendo «Tocá "Aa"» (el
+// ícono del botón) y después «Tocá acá.» (auditoría de Configuración, 2026-09-01).
+// Cada familia dinámica se declara acá con DÓNDE están sus ids; si aparece una familia nueva sin
+// declarar, el contrato corta.
+const FAMILIAS = [
+  { prefijo: 'ajuste-', desde: 'Ajustes de la moldería', hasta: '].map(_lock)' },
+  { prefijo: 'edit-marca-', desde: 'const MARCAS_PROC = [', hasta: '];', clave: 'k' },
+  { prefijo: 'perfil-esp-', desde: 'const ESPACIOS = [', hasta: '];', clave: 'k' },
+];
+for (const f of FAMILIAS) {
+  const i = app.indexOf(f.desde);
+  const j = i >= 0 ? app.indexOf(f.hasta, i) : -1;
+  if (i < 0 || j < 0) {
+    falla(`no encuentro la lista de la familia «${f.prefijo}» en App.jsx (buscaba entre ` +
+          `«${f.desde}» y «${f.hasta}»): si cambió de forma, actualizá FAMILIAS acá.`);
+    continue;
+  }
+  const campo = f.clave || 'id';
+  const rx = new RegExp('\\{\\s*' + campo + ":\\s*'([\\w-]+)'", 'g');
+  for (const m of app.slice(i, j).matchAll(rx)) anclas.add(f.prefijo + m[1]);
+}
+const familiasEnApp = [...new Set([...app.matchAll(/data-tour=\{'([\w:-]+)'\s*\+/g)].map((m) => m[1]))];
+const sinDeclarar = familiasEnApp.filter((p2) => !FAMILIAS.some((f) => f.prefijo === p2));
+if (sinDeclarar.length) {
+  falla(`familia(s) de anclas dinámicas sin declarar en el contrato: ${sinDeclarar.join(', ')} — ` +
+        `agregalas a FAMILIAS o sus explicaciones nunca se van a verificar.`);
+}
+
 // ── las entradas del diccionario (con su contenido) ─────────────────────────────────────────
 const entradas = new Map();
 const re = /^ {2}'([\w:.-]+)':\s*\{([\s\S]*?)^ {2}\},$/gm;
@@ -285,6 +315,26 @@ for (const m of tutor.matchAll(/texto: '([^']*«[^»]{2,40}»[^']*)'/g)) {
   }
 }
 console.log(`  nombres de controles citados en los carteles: ${citados}`);
+
+// ── 9c · LAS ANCLAS DE LAS RUTAS EXISTEN, Y SE SABEN EXPLICAR ───────────────────────────────
+// Las RUTAS de `tutor.jsx` son el CAMINO: lo que el tutorial marca para llevarte de una pantalla a
+// otra («Abrí una moldería», «Volvé a los moldes»). Si una de esas anclas no existe en la app, el
+// puente no encuentra nada que marcar y el tutorial MUERE ahí: no hay forma de avanzar. Pasó en
+// Configuración (2026-09-01): no había ninguna ruta para volver a la lista de molderías, así que
+// quien quedaba dentro de una se quedaba sin tutorial.
+let rutas = 0;
+for (const m of tutor.matchAll(/ancla:\s*'([\w:.-]+)'/g)) {
+  const a = m[1];
+  if (a.includes('${') || a.startsWith('ajuste-')) continue;   // las de los ajustes se arman solas
+  rutas++;
+  if (!anclas.has(a)) {
+    falla(`la RUTA usa el ancla «${a}», que NO está en la app: ese puente no marcaría nada y el ` +
+          `tutorial se quedaría trabado sin salida.`);
+  } else if (!entradas.has(a)) {
+    falla(`la RUTA usa el ancla «${a}», que no tiene explicación en el diccionario.`);
+  }
+}
+console.log(`  anclas de los caminos (RUTAS) verificadas: ${rutas}`);
 
 // ── 9b · LAS COLUMNAS EXPLICADAS EXISTEN EN LA PLANILLA ─────────────────────────────────────
 // Un paso de la planilla se ancla a `col:<id de la columna>` para iluminar LA COLUMNA y no la

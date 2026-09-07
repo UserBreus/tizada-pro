@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import AyudaGuiada from './tutor';   // motor de tutoriales paso a paso
-import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, sePuedeGrabar } from './localizar';
+import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, sePuedeGrabar,
+         esArrastre } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 
@@ -1246,8 +1247,10 @@ function BarraPaso({ volver, acciones, centro, derecha, siguiente, aviso }) {
   return (
     <div style={{ flexShrink: 0, marginTop: 4, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
       {/* Aviso sutil: que se sepa que lo que falta FRENA el paso, sin gritarlo (2026-08-21). */}
+      {/* `data-aviso-paso`: es lo que la AYUDA lee para explicar por qué el botón de avanzar está
+          apagado (y para iluminarlo junto con el botón, en vez de dejarlo bajo el velo). */}
       {aviso && (
-        <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', marginBottom: 7, letterSpacing: '0.01em' }}>
+        <div data-aviso-paso="1" style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', marginBottom: 7, letterSpacing: '0.01em' }}>
           {aviso}
         </div>
       )}
@@ -1298,6 +1301,13 @@ function MarcaPaso({ ok, aviso }) {
 const _pasoTraba = (items) => (items || []).some(i => !i.hecho && !i.aviso);
 const _pasoAvisa = (items) => (items || []).some(i => !i.hecho && i.aviso);
 /** El texto sutil de arriba de la barra: distinto si lo que falta FRENA o sólo avisa. */
+/** LO QUE FALTA, EN CONCRETO. El aviso de la barra dice «completá todo lo de este paso», que no
+ *  alcanza cuando el botón está apagado y hay que saber QUÉ falta — la ayuda guiada lo lee del
+ *  `title` del botón para explicarlo en el globo (auditoría 2026-08-31). */
+function detalleFaltaPaso(items) {
+  const l = (items || []).filter(i => !i.hecho && !i.aviso).flatMap(i => i.faltan || []);
+  return l.length ? l.slice(0, 3).join(' ') : '';
+}
 function textoAvisoPaso(items) {
   if (_pasoTraba(items)) return 'Tenés que completar todo lo de este paso para pasar al siguiente';
   if (_pasoAvisa(items)) return 'Lo que está en amarillo no frena el pedido, pero te lo vamos a recordar antes de avanzar';
@@ -1341,7 +1351,10 @@ function BtnVolver({ texto, onClick, ancla }) {
 /** El botón que AVANZA: siempre el último de la derecha, siempre igual (apagado si no se puede). */
 function BtnSiguiente({ texto, onClick, disabled, ancla, title }) {
   return (
+    /* `data-motivo`: por qué está apagado, con las palabras de la pantalla. Lo lee la AYUDA para
+       decirlo en el globo en vez de pedir que se toque un botón que no se puede tocar. */
     <button data-tour={ancla} onClick={onClick} disabled={disabled} title={title || ''}
+      data-motivo={disabled && title ? title : undefined}
       style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none',
         cursor: disabled ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 800,
         background: disabled ? 'rgba(255,255,255,0.07)' : 'var(--accent)',
@@ -2779,7 +2792,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
             return (
               <svg viewBox={artVB ? `${artVB.x} ${artVB.y} ${artVB.w} ${artVB.h}` : vb}
                 preserveAspectRatio="xMidYMid meet"
-                data-tour="molde-visor"
+                data-tour="molde-visor" data-lienzo="1"
                 onClick={() => { if (telaModo) onTelaVacio && onTelaVacio(); }}
                 style={{ width: '100%', height: '100%', display: 'block', userSelect: 'none' }}>
                 {/* Sin piezas para dibujar (la prenda todavía se está resolviendo): se dice, en vez
@@ -3329,6 +3342,291 @@ function AvisoActualizacion() {
 /** PANTALLA DE PUBLICACIÓN (Config → Publicación). Todo el circuito en un botón: compara la versión
  *  de esta máquina con la que está publicada, arma el paquete, lo manda por internet y deja la
  *  actualización programada. El servidor se encarga del resto (ver PLAN_PUBLICACION.md §Etapa 2). */
+/**
+ * PANTALLA «REGISTRO DEL SISTEMA» (Configuración) — qué falló y POR QUÉ.
+ *
+ * 🔴 POR QUÉ EXISTE (pedido del usuario, 2026-09-01): una actualización al servidor publicado dijo
+ * «falló» y en pantalla no había más nada. El motivo estaba en un archivo del VPS al que sólo se
+ * llega por SSH, así que el diagnóstico dependió de atar cabos por las horas. Ahora cada cosa que
+ * sale mal deja escrito **qué pasó y por qué**, acá adentro — de este sistema y del PUBLICADO.
+ */
+function PantallaRegistro({ volver }) {
+  const [eventos, setEventos] = useState([]);
+  const [resumen, setResumen] = useState(null);
+  const [tipo, setTipo] = useState('');            // '' = todos · 'error' · 'aviso' · 'info'
+  const [cargando, setCargando] = useState(true);
+  const [abierto, setAbierto] = useState(null);    // índice del evento desplegado
+  const [donde, setDonde] = useState('aca');       // 'aca' | 'publicado'
+  const [remoto, setRemoto] = useState(null);      // {eventos, log, error}
+  const [logAyudante, setLogAyudante] = useState(null);
+  const [consola, setConsola] = useState(null);    // las líneas de la ventana del servidor
+  const [buscar, setBuscar] = useState('');        // filtro de texto sobre esas líneas
+  const [buscarUsado, setBuscarUsado] = useState('');
+  const [cuantas, setCuantas] = useState(400);
+  // Un respiro antes de buscar: si no, cada TECLA pide el archivo entero al servidor (y puede
+  // tener megas). Se espera a que la persona termine de escribir.
+  useEffect(() => {
+    const t = setTimeout(() => setBuscarUsado(buscar), 300);
+    return () => clearTimeout(t);
+  }, [buscar]);
+
+  const cargar = React.useCallback(async () => {
+    setCargando(true);
+    try {
+      if (donde === 'aca') {
+        const r = await fetch('/api/registro?limite=300' + (tipo ? `&tipo=${tipo}` : ''));
+        const d = await r.json();
+        setEventos(d.eventos || []);
+        setResumen(d.resumen || null);
+        const r2 = await fetch('/api/actualizacion/log');
+        const d2 = await r2.json();
+        setLogAyudante(d2.hay ? d2.lineas : []);
+        const r3 = await fetch(`/api/consola?limite=${cuantas}` +
+          (buscarUsado ? `&buscar=${encodeURIComponent(buscarUsado)}` : ''));
+        const d3 = await r3.json();
+        setConsola(d3.lineas || []);
+      } else {
+        const r = await fetch('/api/publicacion/registro');
+        const d = await r.json();
+        setRemoto(d);
+      }
+    } catch (e) {
+      setRemoto({ error: String(e.message || e) });
+    } finally {
+      setCargando(false);
+    }
+  }, [tipo, donde, cuantas, buscarUsado]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  // Fecha Y hora, siempre: esto es un registro, y «03:18» sin fecha no dice nada cuando se está
+  // buscando qué pasó anteayer.
+  const cuando = (t) => {
+    try {
+      const d = new Date((t || 0) * 1000);
+      return d.toLocaleDateString() + ' ' +
+        d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch { return ''; }
+  };
+  const COLOR = { error: 'var(--error, #e0503a)', aviso: 'var(--warning, #e0a020)', info: 'var(--text-muted)' };
+  const ROTULO = { error: 'FALLA', aviso: 'AVISO', info: 'INFO' };
+
+  const lista = donde === 'aca' ? eventos : ((remoto && remoto.eventos) || []);
+  const logMostrar = donde === 'aca' ? logAyudante : (remoto && remoto.log);
+
+  return (
+    <div className="animate-fade">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button className="btn ghost" data-tour="registro-volver" onClick={volver}
+          style={{ padding: '8px 12px', fontSize: 12.5 }}>⬅ Configuración</button>
+        <h2 style={{ margin: 0 }}>Registro del sistema</h2>
+        <Ayuda ancho={340}>Todo lo que falla queda anotado acá con su motivo: actualizaciones, errores
+          del servidor y avisos. Sirve para saber <b>qué pasó y por qué</b> sin tener que entrar al
+          servidor. No guarda nada de tu trabajo: ni moldes, ni pedidos, ni nombres.</Ayuda>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn ghost" data-tour="registro-refrescar" onClick={cargar}
+            style={{ padding: '6px 12px', fontSize: 12 }}>↻ Actualizar</button>
+        </span>
+      </div>
+
+      {/* DE DÓNDE: este sistema o el publicado en internet. Lo segundo es lo que no se podía ver. */}
+      <div data-tour="registro-donde" data-opciones="1" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {[['aca', 'Este sistema'], ['publicado', 'El sistema publicado']].map(([k, t]) => (
+          <button key={k} type="button" onClick={() => setDonde(k)} data-elegida={donde === k ? '1' : '0'}
+            style={{ padding: '7px 14px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+              border: `1px solid ${donde === k ? 'var(--accent)' : 'var(--border-light)'}`,
+              background: donde === k ? 'rgba(0,216,245,0.12)' : 'transparent',
+              color: donde === k ? 'var(--accent)' : 'var(--text-secondary)' }}>{t}</button>
+        ))}
+      </div>
+
+      {donde === 'aca' && resumen && (
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 12, fontSize: 12.5,
+          color: 'var(--text-secondary)' }}>
+          <span><b style={{ color: resumen.errores ? 'var(--error, #e0503a)' : 'var(--success, #2ecc71)' }}>
+            {resumen.errores}</b> falla{resumen.errores === 1 ? '' : 's'}</span>
+          <span>{resumen.total} evento{resumen.total === 1 ? '' : 's'} guardados</span>
+          {resumen.ultimo_error && <span>· la última: {cuando(resumen.ultimo_error.cuando)}</span>}
+          <button className="btn ghost" data-tour="registro-limpiar"
+            style={{ marginLeft: 'auto', padding: '5px 11px', fontSize: 11.5 }}
+            onClick={async () => { await fetch('/api/registro/limpiar', { method: 'POST' }); cargar(); }}>
+            Vaciar el registro
+          </button>
+        </div>
+      )}
+
+      {donde === 'aca' && (
+        <div data-tour="registro-filtro" data-opciones="1" style={{ display: 'flex', gap: 7, marginBottom: 12, flexWrap: 'wrap' }}>
+          {[['', 'Todo'], ['error', 'Sólo fallas'], ['aviso', 'Avisos'], ['info', 'Movimientos']].map(([k, t]) => (
+            <button key={k || 'todo'} type="button" onClick={() => setTipo(k)} data-elegida={tipo === k ? '1' : '0'}
+              style={{ padding: '5px 12px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+                border: `1px solid ${tipo === k ? 'var(--accent)' : 'var(--border-light)'}`,
+                background: tipo === k ? 'rgba(0,216,245,0.10)' : 'transparent',
+                color: tipo === k ? 'var(--accent)' : 'var(--text-secondary)' }}>{t}</button>
+          ))}
+        </div>
+      )}
+
+      {cargando && <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Leyendo el registro…</div>}
+
+      {!cargando && donde === 'publicado' && remoto && remoto.error && (
+        <div className="card" style={{ padding: 14, fontSize: 13, lineHeight: 1.55,
+          border: '1px solid var(--warning, #e0a020)', color: 'var(--text-secondary)' }}>
+          {remoto.sin_registro
+            ? <>El sistema publicado todavía <b>no tiene esta pantalla</b>: su registro empieza a
+                guardarse cuando se le aplique esta versión.</>
+            : <>No se pudo leer el registro del publicado: {remoto.error}</>}
+        </div>
+      )}
+
+      {!cargando && !lista.length && !(remoto && remoto.error) && (
+        <div className="card" style={{ padding: 16, fontSize: 13, color: 'var(--text-secondary)' }}>
+          No hay nada anotado{tipo ? ' de ese tipo' : ''}. Es una buena noticia: quiere decir que no
+          falló nada desde la última vez que se vació.
+        </div>
+      )}
+
+      {/* LOS EVENTOS. El motivo va SIEMPRE a la vista: es lo que se vino a buscar. */}
+      {!cargando && !!lista.length && <div data-tour="registro-evento">
+      {lista.map((e, i) => (
+        <div key={i} className="card"
+          style={{ padding: '11px 13px', marginBottom: 7, cursor: e.datos ? 'pointer' : 'default',
+            borderLeft: `3px solid ${COLOR[e.tipo] || COLOR.info}` }}
+          onClick={() => setAbierto(abierto === i ? null : i)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.05em', padding: '2px 7px',
+              borderRadius: 999, color: COLOR[e.tipo] || COLOR.info,
+              border: `1px solid ${COLOR[e.tipo] || COLOR.info}`, opacity: 0.9 }}>
+              {ROTULO[e.tipo] || 'INFO'}
+            </span>
+            <span style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>{e.que}</span>
+            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-muted)' }}>
+              {e.area} · {cuando(e.cuando)}
+            </span>
+          </div>
+          {!!e.porque && (() => {
+            // 🔴 De un traceback, lo que dice QUÉ falló es la ÚLTIMA línea; las primeras son rutas
+            // internas de Flask. Recortar por arriba mostraba justo lo que no sirve y escondía el
+            // motivo — que es lo único que se vino a buscar. Así que la conclusión va primero, en
+            // letra legible, y el detalle técnico queda abajo para el que lo necesite.
+            const lineas = e.porque.split(/\r?\n/).filter(l => l.trim());
+            const esTraceback = e.porque.includes('Traceback');
+            const conclusion = esTraceback ? (lineas[lineas.length - 1] || e.porque) : e.porque;
+            const largo = esTraceback || e.porque.length > 300;
+            return (<>
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5,
+                marginTop: 6, whiteSpace: 'pre-wrap',
+                fontFamily: esTraceback ? 'monospace' : 'inherit',
+                maxHeight: (abierto === i || !largo) ? 'none' : 60, overflow: 'hidden' }}>
+                {conclusion}
+              </div>
+              {largo && abierto === i && (
+                <div style={{ marginTop: 8, maxHeight: 240, overflowY: 'auto', fontFamily: 'monospace',
+                  fontSize: 11, lineHeight: 1.5, color: 'var(--text-muted)',
+                  background: 'rgba(0,0,0,0.25)', borderRadius: 6, padding: '8px 10px',
+                  whiteSpace: 'pre-wrap' }}>
+                  {e.porque}
+                </div>
+              )}
+            </>);
+          })()}
+          {/* Que se pueda abrir tiene que VERSE: sin esto el texto quedaba cortado a la mitad y
+              nadie adivinaba que la tarjeta se toca (se detectó mirándolo en pantalla). */}
+          {(!!e.datos || e.porque.includes('Traceback') || e.porque.length > 300) && (
+            <div style={{ marginTop: 7, fontSize: 11.5, color: 'var(--accent)', opacity: 0.85 }}>
+              {abierto === i ? '▴ Ocultar el detalle' : '▾ Ver el detalle completo'}
+            </div>
+          )}
+          {abierto === i && e.datos && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+              {Object.entries(e.datos).map(([k, v]) => (
+                <div key={k}>{k}: {typeof v === 'object' ? JSON.stringify(v) : String(v)}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      </div>}
+
+      {/* EL LOG DEL AYUDANTE: la letra chica de la última actualización, línea por línea. */}
+      {!cargando && !!(logMostrar && logMostrar.length) && (
+        <div className="card" data-tour="registro-ayudante" style={{ padding: 14, marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9 }}>
+            <h3 style={{ margin: 0, fontSize: 14 }}>Detalle de la última actualización</h3>
+            <Ayuda ancho={330}>Lo que fue haciendo el ayudante paso por paso, con la hora de cada
+              cosa: respaldar, descomprimir, levantar y comprobar. Si algo se cortó, acá se ve
+              exactamente dónde.</Ayuda>
+          </div>
+          <div style={{ maxHeight: 260, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11.5,
+            lineHeight: 1.55, color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)',
+            borderRadius: 8, padding: 10 }}>
+            {logMostrar.map((l, i) => (
+              <div key={i} style={{ color: /FALL|error|no se pudo|VOLVIENDO/i.test(l)
+                ? 'var(--error, #e0503a)' : undefined }}>{l}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* LA CONSOLA DEL SERVIDOR — lo mismo que se ve en la ventana negra, pero guardado.
+          Pedido del usuario: «todo lo que abriría en un PowerShell», en un archivo, con fecha y
+          hora reales. Sale de `logs/consola.log`; la base de datos no interviene. */}
+      {!cargando && (
+        <div className="card" data-tour="registro-consola" style={{ padding: 14, marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10, flexWrap: 'wrap' }}>
+            <h3 style={{ margin: 0, fontSize: 14 }}>Consola del servidor</h3>
+            <Ayuda ancho={350}>Es <b>lo mismo que se ve en la ventana negra</b> del servidor, línea
+              por línea y con la fecha y la hora de cada una. Queda guardado en un archivo de texto
+              (<code>logs/consola.log</code>), así que sigue estando después de cerrar la ventana —
+              y también cuando el sistema corre sin ninguna ventana, como el publicado en internet.</Ayuda>
+            <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input data-tour="registro-buscar" value={buscar} placeholder="Buscar en la consola…"
+                onChange={(ev) => setBuscar(ev.target.value)}
+                style={{ padding: '6px 10px', fontSize: 12, borderRadius: 8, width: 190,
+                  border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.25)',
+                  color: 'var(--text-primary)' }} />
+              <select data-tour="registro-cuantas" value={cuantas}
+                onChange={(ev) => setCuantas(Number(ev.target.value))}
+                style={{ padding: '6px 8px', fontSize: 12, borderRadius: 8,
+                  border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.25)',
+                  color: 'var(--text-primary)' }}>
+                {[200, 400, 1000, 3000].map(n => <option key={n} value={n}>{n} líneas</option>)}
+              </select>
+            </span>
+          </div>
+          {(() => {
+            const lineas = donde === 'aca' ? consola : (remoto && remoto.consola);
+            if (!lineas) return (
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                {donde === 'aca' ? 'No se pudo leer la consola.'
+                  : 'El sistema publicado todavía no guarda su consola: le falta esta versión.'}
+              </div>
+            );
+            if (!lineas.length) return (
+              <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                {buscarUsado ? <>No hay ninguna línea que diga «{buscarUsado}».</>
+                  : <>Todavía no hay nada anotado. Se llena solo, con cada cosa que hace el servidor.</>}
+              </div>
+            );
+            return (
+              <div data-lienzo="1" style={{ maxHeight: 380, overflowY: 'auto', overflowX: 'auto',
+                fontFamily: 'monospace', fontSize: 11.5, lineHeight: 1.55,
+                color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.3)',
+                borderRadius: 8, padding: 10, whiteSpace: 'pre' }}>
+                {lineas.map((l, i) => (
+                  // Se pinta por lo que DICE la línea, no por la vía por la que salió: werkzeug
+                  // escribe también los pedidos que salieron bien por la vía de errores.
+                  <div key={i} style={{ color: (/Traceback|Error\b|Exception|HTTP\/1\.[01]" [45]\d\d|FALL/.test(l))
+                    ? 'var(--error, #e0503a)' : undefined }}>{l}</div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PantallaPublicacion({ volver }) {
   const [est, setEst] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -3928,19 +4226,25 @@ export default function App() {
   // ── AYUDA GUIADA ── El tutorial pide «llevame a tal pantalla» y esto lo resuelve; así el guion
   // no sabe nada de los estados internos y se escribe en criollo (ver diccionario.js).
   const [ayudaAbierta, setAyudaAbierta] = useState(false);
-  const irPantallaAyuda = React.useCallback((d) => {
-    if (!d) return;
-    if (d.tab) setActivoTab(d.tab);
-    if (d.sub) setAdminSubView(d.sub);
-    if (d.paso) setPedidoPaso(d.paso);
-    if (d.ajuste) setTabAjustesMolde(d.ajuste);
-  }, []);
   // molderiaAbierta: id de la moldería en la que entramos a configurar (null = grilla)
   const [molderiaAbierta, setMolderiaAbierta] = useState(null);
   // modoMiMolde: pid del molde PROPIO que el usuario está configurando DESDE el pedido. No es
   // otra pantalla: es la misma config de Moldería en modo RECORTADO (sin el paso Variables, que
   // es de setup del catálogo) + salida directa de vuelta al pedido.
   const [modoMiMolde, setModoMiMolde] = useState(null);
+
+  const irPantallaAyuda = React.useCallback((d) => {
+    if (!d) return;
+    if (d.tab) setActivoTab(d.tab);
+    if (d.sub) setAdminSubView(d.sub);
+    if (d.paso) setPedidoPaso(d.paso);
+    if (d.ajuste) setTabAjustesMolde(d.ajuste);
+    // 🔴 SALIR de una moldería sí se puede hacer solo (entrar NO: hay que elegir cuál, y eso lo
+    // decide la persona). Sin esto, quien quedaba adentro de una moldería no tenía forma de que el
+    // tutorial lo llevara a la grilla: el paso pedía una tarjeta que no estaba en pantalla y se
+    // moría en «No encuentro ese lugar» (auditoría de Configuración, 2026-09-01).
+    if (d.molde === 'grilla') { setMolderiaAbierta(null); setTabAjustesMolde('menu'); }
+  }, []);
   // Pestaña de la grilla del paso "Diseños": el catálogo compartido o lo que subió el usuario.
   const [pedidoTabMoldes, setPedidoTabMoldes] = useState('catalogo'); // 'catalogo' | 'mios'
   // Modal "Subir mi propio molde" (nombre + archivo).
@@ -9088,17 +9392,23 @@ export default function App() {
   const [tutoriales, setTutoriales] = useState([]);
   const [grabando, setGrabando] = useState(false);
   const [guardandoTut, setGuardandoTut] = useState(null);   // {pasos} → abre el modal del nombre
+  const [descartarTut, setDescartarTut] = useState(false);  // confirmación antes de tirar la grabación
   const [nombreTut, setNombreTut] = useState('');
   const pasosGrab = useRef([]);
   const ultCtrlGrab = useRef(null);   // el último control tocado al grabar (para no colapsar dos opciones distintas)
+  const ignorarClick = useRef(false); // el clic que cierra un ARRASTRE no es un paso aparte
   const [nPasosGrab, setNPasosGrab] = useState(0);   // sólo para el cartel (un ref no redibuja)
   const [sinGrabar, setSinGrabar] = useState(0);     // clics sobre algo que no se puede volver a encontrar
   // Espejo de dónde está parado el usuario: el listener de clics no puede leer el estado de React
   // (quedaría congelado en el del primer render), así que se lo deja acá al día.
   const dondeRef = useRef({});
   React.useEffect(() => {
-    dondeRef.current = { tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde };
-  }, [activoTab, adminSubView, pedidoPaso, tabAjustesMolde]);
+    // 🔴 LA MISMA FOTO QUE MIRA EL REPRODUCTOR (ver `donde=` de <AyudaGuiada>): faltaba `molde`, o
+    // sea que un paso grabado DENTRO de una moldería no guardaba que había que abrirla, y al
+    // reproducirlo el tutorial pedía un botón de una pantalla que no estaba (auditoría 2026-08-31).
+    dondeRef.current = { tab: activoTab, sub: adminSubView, paso: pedidoPaso, ajuste: tabAjustesMolde,
+                         molde: (molderiaAbierta || modoMiMolde) ? 'abierto' : 'grilla' };
+  }, [activoTab, adminSubView, pedidoPaso, tabAjustesMolde, molderiaAbierta, modoMiMolde]);
 
   const cargarTutoriales = React.useCallback(async () => {
     try {
@@ -9152,13 +9462,40 @@ export default function App() {
       });
       setNPasosGrab(pasosGrab.current.length);
     };
-    const onClick = (e) => anotar(e, 'click');
+    const onClick = (e) => { if (ignorarClick.current) { ignorarClick.current = false; return; } anotar(e, 'click'); };
     const onChange = (e) => anotar(e, 'input');
+    // ── UN MOVIMIENTO TAMBIÉN ES UN PASO (2026-09-01) ──────────────────────────────────────
+    // En el visor, elegir varias piezas se hace ARRASTRANDO un recuadro. Eso no era un clic, así
+    // que no se grababa y el tutorial no lo podía enseñar. Se anota como `accion:'arrastre'` con
+    // el punto de inicio y de fin **en porcentajes del elemento** (`puntoRelativo`), para que se
+    // pueda volver a mostrar en otra pantalla, con otro zoom y con otro molde.
+    let ini = null;
+    const onDown = (e) => {
+      if (e.button !== 0) { ini = null; return; }
+      ini = { x: e.clientX, y: e.clientY, el: e.target };
+    };
+    const onUp = (e) => {
+      const d = ini; ini = null;
+      if (!d || !esArrastre(d.x, d.y, e.clientX, e.clientY)) return;
+      if (!sePuedeGrabar(d.el)) return;
+      const ancla = identificarControl(d.el);
+      if (!ancla) { setSinGrabar((n) => n + 1); return; }
+      ignorarClick.current = true;      // el clic que sigue al arrastre NO es un paso aparte
+      // 🔴 SÓLO SE GUARDA QUE FUE UN MOVIMIENTO, no por dónde: el cursor muestra un gesto genérico
+      // (decisión del usuario 2026-09-01; ver `GESTO_GENERICO` en localizar.js).
+      pasosGrab.current.push({ ancla, accion: 'arrastre',
+        etiqueta: etiquetaDeControl(d.el).slice(0, 120), donde: { ...dondeRef.current } });
+      setNPasosGrab(pasosGrab.current.length);
+    };
     document.addEventListener('click', onClick, true);
     document.addEventListener('change', onChange, true);
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('mouseup', onUp, true);
     return () => {
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('change', onChange, true);
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('mouseup', onUp, true);
     };
   }, [grabando]);
 
@@ -9174,6 +9511,7 @@ export default function App() {
     const pasos = pasosGrab.current.slice();
     if (!pasos.length) { showError('No se grabó ningún paso: no llegaste a tocar nada.'); return; }
     setNombreTut('');
+    setDescartarTut(false);
     setGuardandoTut({ pasos });
   };
   const guardarTutorial = async () => {
@@ -11402,7 +11740,10 @@ export default function App() {
                     {DISENOS_PRESET.map(nom => {
                       const on = disenosPedido.some(d => d.id === _slugDiseno(nom));
                       return (
-                        <button key={nom} type="button" onClick={() => toggleDisenoPreset(nom)}
+                        /* `data-elegida`: la AYUDA cuenta lo que está elegido, no los clics (si no,
+                           un paso «elegí 2» se cumplía tocando dos veces en el aire — o desmarcando
+                           dos que ya estaban puestos). Ver `elegidasEn` en localizar.js. */
+                        <button key={nom} type="button" onClick={() => toggleDisenoPreset(nom)} data-elegida={on ? '1' : '0'}
                           style={{ padding: '13px 10px', borderRadius: 11, fontSize: 13, fontWeight: 700, cursor: 'pointer',
                                    letterSpacing: '0.02em', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                    border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
@@ -11435,7 +11776,8 @@ export default function App() {
                   centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
                   siguiente={<BtnSiguiente texto="Elegir los moldes" ancla="pedido-ir-moldes"
-                    disabled={!disenosPedido.length} onClick={() => setPedidoPaso('moldes')} />} />
+                    disabled={!disenosPedido.length} onClick={() => setPedidoPaso('moldes')}
+                    title={disenosPedido.length ? '' : detalleFaltaPaso(pasoItems)} />} />
               </div>
             )}
 
@@ -11460,14 +11802,17 @@ export default function App() {
                         const on = disenoDestino() === d.id, col = colorDeDiseno(d.id), n = moldesDeDiseno(d.id).length;
                         return (
                           <div key={d.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                            <button type="button" onClick={() => setAsignDiseno(d.id)}
+                            <button type="button" onClick={() => setAsignDiseno(d.id)} data-elegida={on ? '1' : '0'}
                               style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, transition: 'all .18s',
                                 border: on ? `1.5px solid ${col}` : '1px solid var(--border-light)', background: on ? `${col}22` : 'rgba(255,255,255,0.03)', color: on ? '#fff' : 'var(--text-secondary)', boxShadow: on ? `0 0 14px ${col}33` : 'none' }}>
                               <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, flexShrink: 0 }} />
                               {d.nombre}
                               {n > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: col }}>{n}</span>}
                             </button>
-                            <button type="button" title="Quitar diseño" onClick={() => quitarDisenoPedido(d.id)}
+                            {/* `data-no-avanza`: QUITAR un diseño no es «elegir una opción». Sin
+                                esto, tocar la ✕ cumplía el paso del tutorial — que pedía justo lo
+                                contrario (auditoría 2026-08-31). */}
+                            <button type="button" title="Quitar diseño" data-no-avanza="1" onClick={() => quitarDisenoPedido(d.id)}
                               style={{ width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,0.04)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                           </div>
                         );
@@ -11554,7 +11899,8 @@ export default function App() {
                                 border: enActivo ? `1.5px solid ${colAct}` : '1px solid var(--border-light)',
                                 background: enActivo ? `${colAct === 'var(--accent)' ? 'rgba(0,216,245,0.08)' : colAct + '14'}` : 'rgba(255,255,255,0.02)',
                                 boxShadow: enActivo ? `0 0 16px ${colAct === 'var(--accent)' ? 'rgba(0,216,245,0.16)' : colAct + '2e'}` : 'none' }}>
-                              <button type="button" onClick={() => toggleMoldeEnDiseno(p.id)} title={p.plantilla ? 'Usar este artículo en el diseño' : 'Todavía no tiene el molde procesado'}
+                              <button type="button" onClick={() => toggleMoldeEnDiseno(p.id)} data-elegida={enActivo ? '1' : '0'}
+                                title={p.plantilla ? 'Usar este artículo en el diseño' : 'Todavía no tiene el molde procesado'}
                                 style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 7 }}>
                                   <span style={{ fontWeight: 700, fontSize: 12.5, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
@@ -11634,6 +11980,7 @@ export default function App() {
                         const colAct = _dDest ? colorDeDiseno(_dDest) : 'var(--accent)';
                         return (
                           <button key={v.clave} type="button" disabled={distintaPlanilla} onClick={() => toggleVarEnDiseno(v.clave)}
+                            data-elegida={enActivo ? '1' : '0'}
                             title={distintaPlanilla ? 'Usa otra planilla — no se puede combinar' : `${v.moldeNombre} · ${nPz} pza${nPz === 1 ? '' : 's'}`}
                             style={{ textAlign: 'left', cursor: distintaPlanilla ? 'not-allowed' : 'pointer', padding: 10, borderRadius: 12, transition: 'all .18s',
                               border: enActivo ? `1.5px solid ${colAct}` : '1px solid var(--border-light)',
@@ -11679,7 +12026,8 @@ export default function App() {
                   </>}
                   centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
-                  siguiente={<BtnSiguiente texto="Cargar el arte" ancla="pedido-ir-arte" onClick={irPasoArte} disabled={!puedeIrAArte} />} />
+                  siguiente={<BtnSiguiente texto="Cargar el arte" ancla="pedido-ir-arte" onClick={irPasoArte}
+                    disabled={!puedeIrAArte} title={puedeIrAArte ? '' : detalleFaltaPaso(pasoItems)} />} />
               </div>
             )}
 
@@ -12459,6 +12807,7 @@ export default function App() {
                       const full = ms.length > 0 && done === ms.length;
                       return (
                         <button key={d.id} type="button" onClick={() => { setDisenoActivo(d.id); setArteIdx(0); }}
+                          data-elegida={on ? '1' : '0'}
                           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 999, cursor: 'pointer', fontSize: 13, fontWeight: 700, transition: 'all .18s',
                             border: on ? `1.5px solid ${col}` : '1px solid var(--border-light)', background: on ? `${col}22` : 'rgba(255,255,255,0.03)', color: on ? '#fff' : 'var(--text-secondary)', boxShadow: on ? `0 0 14px ${col}33` : 'none' }}>
                           <span style={{ width: 9, height: 9, borderRadius: '50%', background: col }} />
@@ -12512,6 +12861,7 @@ export default function App() {
                       const on = idx === arteIdx, loaded = !!arteCargado[disenoActivo + '|' + it.moldeId];
                       return (
                         <button key={it.clave || 'm:' + it.moldeId} type="button" onClick={() => setArteIdx(idx)}
+                          data-elegida={on ? '1' : '0'}
                           style={{ position: 'relative', flexShrink: 0, width: 92, padding: 8, borderRadius: 12, cursor: 'pointer', transition: 'all .18s',
                             border: on ? `1.5px solid ${colAct}` : '1px solid var(--border-light)', background: on ? `${colAct}14` : 'rgba(255,255,255,0.02)' }}>
                           <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 8, padding: 4 }}>
@@ -13861,6 +14211,20 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* 🔴 EL REGISTRO (2026-09-01): que las fallas se puedan VER desde la pantalla,
+                      con su motivo, sin entrar al servidor. */}
+                  <div className="crm-config-card yellow" data-tour="cfg-registro" onClick={() => setAdminSubView('registro')}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="alert" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Registro del sistema</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        Qué falló y por qué, y la consola del servidor entera con fecha y hora — de este sistema y del publicado.
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="crm-config-card magenta" data-tour="cfg-perfil" onClick={() => { fetchPerfiles(); setAdminSubView('perfil'); }}>
                     <div>
                       <div className="crm-icon-container">
@@ -13910,7 +14274,10 @@ export default function App() {
                         MÍO» y lo calcula el server según quién mira, así que el artículo privado de
                         otro usuario llegaba con `propio: false` y se colaba acá — pasaba con un
                         admin (que por `molde.ver_todos` ve los ajenos). */}
-                    <div className="product-crm-grid" style={{ marginBottom: 24 }}>
+                    {/* `molde-grilla`: la ayuda marca TODA la grilla para decir «abrí la moldería
+                        con la que vas a trabajar». Antes marcaba la 1ª tarjeta (`molde-tarjeta`) y
+                        mandaba a abrir la equivocada. */}
+                    <div className="product-crm-grid" data-tour="molde-grilla" style={{ marginBottom: 24 }}>
                       {productosCat.productos.filter(p => !p.personal).map((p, _i) => {
                         const esActivo = p.id === productosCat.activo;
                         return (
@@ -13998,7 +14365,7 @@ export default function App() {
                             ← Volver al pedido
                           </button>
                         ) : (
-                          <button className="btn ghost" onClick={() => { setMolderiaAbierta(null); setTabAjustesMolde('menu'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 12px' }}>
+                          <button className="btn ghost" data-tour="molde-volver" onClick={() => { setMolderiaAbierta(null); setTabAjustesMolde('menu'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 12px' }}>
                             ⬅ Molderías
                           </button>
                         )}
@@ -16165,7 +16532,11 @@ export default function App() {
                         )}
                       </div>
 
-                      <div data-tour="visor-molde" style={{
+                      {/* `data-lienzo`: acá se TRABAJA (se tocan piezas), no se aprieta un
+                          botón. Sin esta marca el grabador guardaba el texto de ayuda que
+                          hay adentro y el tutorial decía «Tocá "Rueda: zoom · clic der.:
+                          mover"» (tutorial «Cargar molde» del usuario, 2026-09-01). */}
+                      <div data-tour="visor-molde" data-lienzo="1" style={{
                         flex: 1,
                         background: 'rgba(9, 9, 11, 0.4)',
                         backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px)',
@@ -16367,6 +16738,10 @@ export default function App() {
                                 return (
                                   <g
                                     key={p.idx}
+                                    /* `data-pieza`: tocar una pieza se graba como ESA pieza
+                                       (`pieza:<nombre>`) y el tutorial la vuelve a iluminar. Sin
+                                       esto el paso quedaba en «el visor» entero (2026-09-01). */
+                                    data-pieza={pzName}
                                     transform={vo ? `translate(${vo.dx} ${vo.dy})` : undefined}
                                     style={{ cursor: 'pointer' }}
                                     onClick={() => setSelectedPiezaMapeo(pzName)}
@@ -16501,7 +16876,7 @@ export default function App() {
                                 const hlAncho = !esTalle && guiaEsAncho, hlAlto = !esTalle && !guiaEsAncho;
                                 const vo = vf ? (vf.pos.get(p.idx) || { dx: 0, dy: 0 }) : null;   // Ver variante: juntar en grilla compacta
                                 return (
-                                  <g key={p.idx} transform={vo ? `translate(${vo.dx} ${vo.dy})` : undefined}>
+                                  <g key={p.idx} data-pieza={nombrePz || undefined} transform={vo ? `translate(${vo.dx} ${vo.dy})` : undefined}>
                                     {/* pieza del molde (contorno): resaltada en 'talle', tenue en el resto. Trazo de PANTALLA
                                         constante (non-scaling-stroke) para que se vea nítido a cualquier zoom. */}
                                     <path d={p.path_svg} vectorEffect="non-scaling-stroke" style={esTalle ? { fill: 'rgba(0,243,255,0.07)', stroke: 'var(--accent)', strokeWidth: 1.5 } : { fill: 'rgba(255,255,255,0.04)', stroke: 'rgba(255,255,255,0.25)', strokeWidth: 1.2 }} />
@@ -18311,6 +18686,7 @@ export default function App() {
             {/* 7. Catálogo de Fuentes Subview */}
             {/* Perfil de color (ICC) */}
             {adminSubView === 'publicacion' && <PantallaPublicacion volver={() => setAdminSubView('dashboard')} />}
+            {adminSubView === 'registro' && <PantallaRegistro volver={() => setAdminSubView('dashboard')} />}
 
             {adminSubView === 'perfil' && (
               <div className="panel animate-fade">
@@ -18817,7 +19193,10 @@ export default function App() {
 
       {creandoProducto && (
         <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setCreandoProducto(false); }}>
-          <form className="modal-content" onSubmit={handleCrearProducto} style={{ maxWidth: 450 }}>
+          {/* `data-modal`: sin esto la AYUDA no reconoce la ventana — no frena, no la explica y
+              no la puede ofrecer en el editor. Las 5 ventanas de esta pantalla estaban hechas a
+              mano (no pasan por el componente `Modal`) y ninguna la tenía (2026-09-01). */}
+          <form className="modal-content" data-modal="Crear Nuevo Molde" onSubmit={handleCrearProducto} style={{ maxWidth: 450 }}>
             <div className="modal-header">
               <h3>Crear Nuevo Molde</h3>
               <button type="button" className="quitar" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }} onClick={() => setCreandoProducto(false)}>×</button>
@@ -18846,7 +19225,7 @@ export default function App() {
       {/* --- MODAL 4: Confirmación antes de Generar Sublimación --- */}
       {modalConfirmOpen && (
         <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setModalConfirmOpen(false); }}>
-          <div className="modal-content" style={{ maxWidth: 480 }}>
+          <div className="modal-content" data-modal="Confirmar Tizada de Sublimación" style={{ maxWidth: 480 }}>
             <div className="modal-header">
               <h3>Confirmar Tizada de Sublimación</h3>
               <button className="quitar" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }} onClick={() => setModalConfirmOpen(false)}>×</button>
@@ -18900,7 +19279,7 @@ export default function App() {
         const piezas = (t.valores || []).filter(v => v.pieza_idx != null).sort((a, b) => a.pieza_idx - b.pieza_idx);
         return createPortal(
           <div className="modal-overlay" onMouseDown={(e) => { if (e.target.classList.contains('modal-overlay')) setModalTipoClave(null); }}>
-            <div className="modal-content" style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', maxHeight: '85vh' }}>
+            <div className="modal-content" data-modal="Piezas del grupo" style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', maxHeight: '85vh' }}>
               <div className="modal-header">
                 <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
                   Piezas del grupo “{t.label || 'sin nombre'}”
@@ -18941,7 +19320,7 @@ export default function App() {
       {/* --- MODAL: Selector de variante (Talle de Guía) en botones cuadrados --- */}
       {modalTalleGuiaOpen && etqData && (
         <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setModalTalleGuiaOpen(false); }}>
-          <div className="modal-content" style={{ maxWidth: 560 }}>
+          <div className="modal-content" data-modal={`${term.variante} de Guía`} style={{ maxWidth: 560 }}>
             <div className="modal-header">
               <h3>{term.variante} de Guía</h3>
               <button type="button" className="quitar" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-secondary)' }} onClick={() => setModalTalleGuiaOpen(false)}>×</button>
@@ -18949,7 +19328,9 @@ export default function App() {
             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 18 }}>
               Elegí con qué {term.variante.toLowerCase()} querés ver y etiquetar el molde.
             </p>
-            <div className="talle-grid">
+            {/* `data-opciones`: quien grabó eligió SU talle de guía; quien sigue el tutorial
+                elige el suyo. El paso es la lista, no el botón «M». */}
+            <div className="talle-grid" data-tour="molde-guia-talles" data-opciones="1">
               {/* las variantes REALES del molde: `talles` puede ser el de la vista «por piezas»
                   (las capas del archivo original), donde la única opción sería «Capa 1» */}
               {tallesMolde.map(t => (
@@ -18957,6 +19338,7 @@ export default function App() {
                   key={t}
                   type="button"
                   className={`talle-square ${(etqData.guia || etqData.talle_ref) === t ? 'active' : ''}`}
+                  data-elegida={(etqData.guia || etqData.talle_ref) === t ? '1' : '0'}
                   onClick={() => { cambiarTalleGuia(t); setModalTalleGuiaOpen(false); }}
                 >
                   {t}
@@ -18987,7 +19369,7 @@ export default function App() {
             padding: 20
           }}
         >
-          <div className="card animate-fade" style={{ width: '92vw', height: '92vh', padding: 20, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-dark)', border: '1px solid var(--border-light)' }}>
+          <div className="card animate-fade" data-modal="Vista previa del molde" style={{ width: '92vw', height: '92vh', padding: 20, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-dark)', border: '1px solid var(--border-light)' }}>
             
             {/* Header / Barra de Controles */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -19171,8 +19553,10 @@ export default function App() {
 
       {/* EL NOMBRE. Lo pone el usuario; las explicaciones de cada paso las escribe el sistema. */}
       {guardandoTut && (
+        /* 🔴 NO SE PIERDE UNA GRABACIÓN POR UN CLIC: cerrar acá tiraba a la basura todos los pasos
+           sin preguntar nada, y no hay forma de recuperarlos (auditoría 2026-08-31). */
         <Modal open titulo="Guardar el tutorial" maxWidth={520}
-          onClose={() => setGuardandoTut(null)}>
+          onClose={() => setDescartarTut(true)}>
           <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: '0 0 14px', lineHeight: 1.55 }}>
             Se grabaron <b>{guardandoTut.pasos.length} paso(s)</b>. Ponele un nombre con el que lo
             vayas a reconocer; las explicaciones de cada paso las escribe el sistema.
@@ -19182,8 +19566,25 @@ export default function App() {
             placeholder="Ej.: Cargar un pedido de camisetas"
             style={{ width: '100%', padding: '10px 12px', borderRadius: 9, fontSize: 14,
               border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.04)', color: '#fff' }} />
+          {descartarTut && (
+            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 9, lineHeight: 1.5,
+              background: 'rgba(224,80,58,0.10)', border: '1px solid rgba(224,80,58,0.35)' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--error, #e0503a)', fontWeight: 700 }}>
+                {guardandoTut.pasos.length === 1 ? '¿Descartar el paso grabado?'
+                  : `¿Descartar los ${guardandoTut.pasos.length} pasos grabados?`}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                No se pueden recuperar: habría que volver a hacer el trabajo grabando.
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+                <button className="btn ghost" onClick={() => setDescartarTut(false)}>Volver</button>
+                <button className="btn" style={{ color: 'var(--error, #e0503a)' }}
+                  onClick={() => { setDescartarTut(false); setGuardandoTut(null); }}>Sí, descartar</button>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <button className="btn ghost" onClick={() => setGuardandoTut(null)}>Descartar</button>
+            <button className="btn ghost" onClick={() => setDescartarTut(true)}>Descartar</button>
             <button className="btn primary" onClick={guardarTutorial}>Guardar tutorial</button>
           </div>
         </Modal>

@@ -161,9 +161,17 @@ def _plan_b(app):
     bat = os.path.join(app or os.getcwd(), "arrancar.bat")
     if not os.path.exists(bat):
         return False
-    flags = 0x00000008 | 0x00000200
-    subprocess.Popen(["cmd", "/c", bat], cwd=(app or os.getcwd()), creationflags=flags,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    # + CREATE_BREAKAWAY_FROM_JOB: el servidor nuevo NO puede quedar adentro del grupo de procesos
+    # del ayudante — si quedara, moriría con él en cuanto el ayudante termine su trabajo.
+    flags = 0x00000008 | 0x00000200 | 0x01000000
+    def _lanzar(_flags):
+        subprocess.Popen(["cmd", "/c", bat], cwd=(app or os.getcwd()), creationflags=_flags,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    try:
+        _lanzar(flags)
+    except OSError as e:
+        log(app, f"no se pudo arrancar fuera del grupo de procesos ({e}); se reintenta adentro")
+        _lanzar(flags & ~0x01000000)
     return True
 
 
@@ -194,13 +202,45 @@ def arrancar(app=None, puerto=None):
     return False
 
 
+def avisar_listo(carpeta):
+    """🔴 LA SEÑAL QUE FALTABA. En el modo «reinicio» el servidor se apagaba a los 2 segundos de
+    lanzar al ayudante, DANDO POR HECHO que ya había descomprimido. No alcanza: respaldar la
+    carpeta y descomprimir tarda más, así que `Restart=always` levantaba el servidor VIEJO en el
+    medio — y ese arranque marcaba la actualización como interrumpida y la aparcaba (pasó de
+    verdad con la 1.0.32, 2026-09-01). Ahora el servidor espera ESTE archivo: cuando aparece, la
+    versión nueva ya está en el disco y al reiniciar levanta con ella."""
+    d = os.path.join(carpeta, "_actualizacion")
+    os.makedirs(d, exist_ok=True)
+    try:
+        with open(os.path.join(d, "listo.flag"), "w", encoding="utf-8") as fh:
+            fh.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def registrar(carpeta, tipo, que, porque, **datos):
+    """Deja el evento en el REGISTRO del sistema (logs/eventos.jsonl), que es lo que se ve desde la
+    pantalla de Configuración. El ayudante corre suelto y puede no tener el módulo a mano: si algo
+    falla, sigue igual — su log de texto ya quedó escrito."""
+    try:
+        sys.path.insert(0, carpeta)
+        import registro as LOG
+        getattr(LOG, tipo, LOG.info)("actualizacion", que, porque, **datos)
+    except Exception:
+        pass
+
+
 def resultado(carpeta, ok, version, detalle):
     d = os.path.join(carpeta, "_actualizacion")
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "ultima.json"), "w", encoding="utf-8") as fh:
         json.dump({"ok": ok, "version": version, "cuando": time.time(), "detalle": detalle},
                   fh, ensure_ascii=False)
-    for f in ("en_curso.json", "pendiente.json"):
+    # 🔴 lo mismo, pero donde se puede VER sin entrar al servidor
+    registrar(carpeta, "info" if ok else "error",
+              (f"Versión {version} instalada" if ok else f"Falló la instalación de la versión {version}"),
+              detalle, version=version, ok=bool(ok))
+    for f in ("en_curso.json", "pendiente.json", "listo.flag"):
         try:
             os.remove(os.path.join(d, f))
         except OSError:
@@ -245,6 +285,11 @@ def main():
             restaurar(respaldo, app)
             resultado(app, False, version, f"no se pudo descomprimir: {e}")
             return
+        # 🔴 RECIÉN AHORA el servidor se puede apagar: en el disco ya está la versión nueva, así
+        # que cuando systemd lo levante va a levantar CON ELLA. Antes se apagaba a los 2 s de
+        # lanzarnos y revivía con la vieja, en el medio de este trabajo.
+        avisar_listo(app)
+        log(app, "descomprimido: el servidor ya puede apagarse")
         # el servidor se apaga solo; systemd lo revive con lo nuevo
         if not esperar_libre(puerto, ESPERA_APAGADO):
             log(app, "el servidor no se apagó solo; se lo pide por systemd")

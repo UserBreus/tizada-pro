@@ -18,8 +18,8 @@
  */
 // La extensión `.js` NO es opcional: este módulo lo importa también `node` (el contrato lo
 // ejecuta de verdad), y node exige la extensión. Vite acepta las dos formas.
-import { explicar, SECUENCIA, DICCIONARIO, AVISOS_CONOCIDOS } from './diccionario.js';
-import { normalizar } from './localizar.js';
+import { explicar, SECUENCIA, DICCIONARIO, AVISOS_CONOCIDOS, modalDeBoton } from './diccionario.js';
+import { normalizar, esNombreDeControl, partirAncla } from './localizar.js';
 
 /** Un paso armado desde una etapa de la SECUENCIA (uno que la grabación no tiene pero hace falta). */
 function pasoDeEtapa(et) {
@@ -64,7 +64,8 @@ function seccionDe(p) {
   if (!p) return '';
   if (p.seccion) return p.seccion;
   const a = String(p.ancla || '');
-  return a.includes('#') ? a.split('#')[1] : a;
+  // 🔴 por el ÚLTIMO `#`: el nombre de un control puede tener uno adentro («pieza #1»)
+  return a.startsWith('txt:') ? (partirAncla(a).seccion || a) : a;
 }
 
 /** ¿El paso es de CARGAR LA PLANILLA? (una columna, o la tabla entera) Esos no se dan por hechos
@@ -162,8 +163,47 @@ export function aGuion(t) {
     // puede darse por hecho con el primer clic — hacerlo saltaba a la columna siguiente antes de
     // dejar escribir o elegir en el desplegable (reporte del usuario 2026-08-31). Estos pasos se
     // terminan a mano, con «Siguiente →».
-    if (esDeLaPlanilla(p.ancla)) paso.manual = true;
+    // 🔴 UN PASO QUE NO SE PUEDE MOSTRAR NO PUEDE FRENAR EL TUTORIAL. Un tutorial viejo puede traer
+    // un ancla que no es el nombre de nada («txt:?», «txt:👁»): se grabó cuando el sistema leía mal
+    // el rótulo de un campo. Ya no se generan más, pero los guardados quedan — y con ellos el
+    // tutorial se comía 5 segundos en «No encuentro ese lugar» antes de dejar seguir. Marcado así,
+    // si no aparece en pantalla se pasa de largo solo.
+    const _a = String(p.ancla || '');
+    if (_a.startsWith('txt:') && !esNombreDeControl(partirAncla(_a).nombre)) paso.dudoso = true;
+    if (esDeLaPlanilla(p.ancla)) { paso.manual = true; paso.manualPor = 'planilla'; }
+    // 🔴 UN CAMPO DE ESCRITURA TAMPOCO SE DA POR HECHO SOLO (pedido del usuario 2026-09-01):
+    // «cuando son campos de escribir no saltará automático, debe presionar Siguiente así puede
+    // escribir». El avance solo queda para lo que NO hay que completar: los botones y las ventanas
+    // emergentes. Si no, el tutorial se iba al paso siguiente apenas se tocaba el campo —o a mitad
+    // de una palabra— y no dejaba cargar nada.
+    else if ((p.accion || '') === 'input') { paso.manual = true; paso.manualPor = 'campo'; }
+    // 🔴 UN MOVIMIENTO (arrastre): viaja con sus dos puntos, en porcentajes del elemento, y el
+    // motor lo MUESTRA con el cursor guía. El cartel lo dice con todas las letras: hay gestos que
+    // no se explican con palabras (pedido del usuario 2026-09-01, con el video del recuadro).
+    // 🔴 EL RECORRIDO NO SE GUARDA NI SE COPIA: el cursor muestra un gesto GENÉRICO, siempre en el
+    // mismo lugar del elemento (decisión del usuario, 2026-09-01 — quien sigue el tutorial tiene
+    // otro molde y otras piezas, así que calcar el arrastre de quien grabó no enseña nada). Del
+    // paso sólo importa QUE ES un movimiento. Esto además hace andar los que se grabaron cuando el
+    // servidor todavía descartaba los puntos.
+    if ((p.accion || '') === 'arrastre') {
+      paso.accion = 'arrastre';
+      if (!p.texto) {
+        paso.texto = 'Arrastrá como te muestra el cursor: apretá y, sin soltar, llevalo hasta el otro punto.';
+        paso.nota = (d.que ? d.que + ' ' : '')
+          + 'Con el recuadro elegís varias cosas de una vez, sin tocarlas una por una.';
+      }
+    }
     if (p.ventana) paso.ventana = p.ventana;   // el paso vive dentro de esta ventana
+    // 🔴 UN PASO QUE ES EL BOTÓN DE UN AVISO (tutoriales grabados ANTES de que se guardara la
+    // ventana). «Tocá "Entendido"» es el botón del aviso «Perfil de color del diseño»: a quien
+    // sigue el tutorial puede no salirle, y el paso se quedaba 5 s en «No encuentro ese lugar»
+    // (auditoría 2026-08-31). Si el diccionario sabe de qué ventana es ese botón, se dice.
+    // (vale también con el ancla afinada —«txt:crear molde#molde-crear-ok»—: lo que dice en qué
+    //  ventana vive el paso es el NOMBRE del botón, no la forma del ancla)
+    if (!paso.ventana && String(p.ancla || '').startsWith('txt:')) {
+      const v = modalDeBoton(p.etiqueta || partirAncla(p.ancla).nombre);
+      if (v) paso.ventana = v;
+    }
     if (d.que) paso.nota = d.que;
     if (p.donde && Object.keys(p.donde).length) paso.ir = p.donde;
     // PASOS INTELIGENTES (ver diccionario.js). `listo` sirve para las dos cosas a la vez: si ya da
@@ -186,6 +226,11 @@ export function aGuion(t) {
   // 🔴 también por SECCIÓN: un paso afinado («txt:jugador#pedido-diseno-lista») ES el paso de
   // esa etapa; sin esto el completado la agregaba de nuevo y el diseño aparecía dos veces.
   const anclasGrabadas = new Set(pasos.flatMap((p) => [p.ancla, seccionDe(p)]));
+  // 🔴 LAS COLUMNAS **SON** LA PLANILLA. Un tutorial que graba «Talle», «Nombre», «Número»… ya
+  // enseña a cargar la planilla: agregarle además el paso de la tabla entera (que es la etapa de
+  // la SECUENCIA) repetía lo mismo al final, después de las columnas — pasaba en los DOS
+  // tutoriales reales del usuario (auditoría 2026-08-31).
+  if (pasos.some((p) => String(p.ancla || '').startsWith('col:'))) anclasGrabadas.add('planilla-tabla');
   const yaEsta = (et) => anclasGrabadas.has(et.ancla);
   const completos = [];
   const puestas = new Set();
@@ -237,6 +282,14 @@ export function aGuion(t) {
     if ((explicar(p.ancla, '') || {}).opciones) continue;
     const etq = normalizar(p._etq || '');
     if (!etq) continue;
+    // 🔴 NO SE AFINA CON CUALQUIER TEXTO. El afinado sirve para decir CUÁL botón de un panel se
+    // tocó; pero lo que el grabador guardó puede ser un párrafo, un contador o un símbolo, y ahí el
+    // cartel resultante es inservible. En el tutorial «Cargar molde» del usuario salían cosas como
+    // «Tocá "✓ 120"» (la cuenta de piezas seleccionadas), «Tocá "?"», «Tocá "👁"» y hasta
+    // «Tocá "6XL · pieza #1 — Espalda 1…"» (el contenido entero del visor). En todos esos casos es
+    // mejor el cartel de la sección, que está escrito a mano en el diccionario.
+    // Se exige: nombre corto y con letras de verdad (un botón se llama «Guardar», no «✓ 120»).
+    if (etq.length > 40 || !/[a-z]{2}/.test(etq)) continue;
     const propio = normalizar(explicar(p.ancla, '').nombre || '');
     if (etq === propio) continue;              // la etiqueta ES la del elemento marcado
     p.seccion = p.ancla;                       // por si hace falta saber de dónde salió
@@ -256,8 +309,13 @@ export function aGuion(t) {
   for (const p of completos) {
     const a = String(p.ancla || '');
     if (!a.startsWith('txt:') || !a.includes('#')) continue;
-    const sec = a.split('#')[1];
-    if (!(explicar(sec, '') || {}).opciones) continue;
+    const sec = partirAncla(a).seccion;
+    // 🔴 DOS MOTIVOS PARA VOLVER A LA SECCIÓN: que sea una lista de opciones (no se apunta a una
+    // tarjeta) o que lo guardado NO SEA UN NOMBRE de control. Lo segundo es lo que salvaba al
+    // tutorial «Cargar molde» del usuario, lleno de pasos «Tocá "✓ 120"» y «Tocá "👁"».
+    const _nom = partirAncla(a).nombre;
+    const _d = explicar(sec, '') || {};
+    if (!_d.opciones && !_d.lienzo && esNombreDeControl(_nom)) continue;
     p.ancla = sec;
     delete p.seccion;
     if (!p._aMano) {
@@ -289,12 +347,53 @@ export function aGuion(t) {
     // veces seguidas (se vio en «2 colores»: `col:nombre` ×2, `col:numero` ×2). Va DESPUÉS de la
     // rama de opciones —si no, se comía la cuenta— y exige ancla de verdad: dos «esperar aviso»
     // seguidos no son un duplicado, son dos ventanas distintas.
-    if (ult && p.ancla && ult.ancla === p.ancla && !p._agregado && !ult._agregado
-        && !p.cuantas && !ult.cuantas) continue;
+    // 🔴 …PERO UN CLIC Y UN MOVIMIENTO EN EL MISMO LUGAR NO SON EL MISMO PASO. En el visor se toca
+    // una pieza y DESPUÉS se arrastra un recuadro: dos anclas iguales, dos cosas distintas. Al no
+    // mirar la acción, el arrastre se descartaba como «repetido» y el gesto no llegaba nunca al
+    // tutorial — «funciona cuando estás grabando pero no cuando estás siguiendo el tutorial»
+    // (reporte del usuario 2026-09-01).
+    const _mismaAccion = (ult && (ult.accion || 'click')) === (p.accion || 'click');
+    if (ult && p.ancla && ult.ancla === p.ancla && _mismaAccion && !p._agregado && !ult._agregado
+        && !p.cuantas && !ult.cuantas) {
+      continue;
+    }
     juntados.push(p);
   }
   completos.length = 0;
   completos.push(...juntados);
+
+  // 🔴 «¿NO ES EL MISMO PASO DE RECIÉN?» — SE DICE CUÁL VUELTA ES. Un tutorial grabado con dos
+  // diseños tiene DOS veces «Tocá el diseño…» y DOS veces «Tocá la prenda…», con carteles
+  // idénticos: quien lo sigue no sabe si está repitiendo o si el tutorial se colgó (auditoría
+  // 2026-08-31, tutorial «2 colores»). ⚠️ Esto NO es lógica de repetición —eso está prohibido y
+  // sigue estándolo—: es sólo rotular pasos que YA se grabaron, tal como se grabaron.
+  const cuantasVeces = {};
+  for (const p of completos) if (p.ancla) cuantasVeces[p.ancla] = (cuantasVeces[p.ancla] || 0) + 1;
+  const vaPor = {};
+  for (const p of completos) {
+    if (!p.ancla || cuantasVeces[p.ancla] < 2 || p._agregado) continue;
+    vaPor[p.ancla] = (vaPor[p.ancla] || 0) + 1;
+    const rotulo = `(Vez ${vaPor[p.ancla]} de ${cuantasVeces[p.ancla]} que el tutorial pasa por acá.)`;
+    p.nota = p.nota ? `${p.nota} ${rotulo}` : rotulo;
+  }
+
+  // 🔴 UN PASO GRABADO TAMBIÉN TIENE SU REGLA. Hasta acá, «no se pide lo que ya está hecho» valía
+  // sólo para los pasos que AGREGA el sistema: los grabados no heredaban el `listo` de la
+  // SECUENCIA aunque fueran exactamente la misma etapa. Por eso «Elegí el diseño» se le pedía a
+  // quien ya tenía los diseños cargados… y ahí tocar los que ya estaban elegidos los DESMARCABA
+  // (auditoría 2026-08-31, verificado en pantalla). Va AL FINAL, cuando el ancla ya es la
+  // definitiva (afinada o des-afinada), así que también repone la regla que el des-afinado de las
+  // listas de opciones se llevaba puesta.
+  //
+  // ⚠️ SALVO los pasos «elegí N de esta lista»: ésos no se miden con el `listo` de la etapa (que
+  // pregunta si hay AL MENOS UNO), sino contando cuántas opciones hay puestas — eso lo resuelve el
+  // motor mirando la pantalla.
+  for (const p of completos) {
+    if (p.hecho || p.cuantas || p._agregado) continue;
+    const et = SECUENCIA.find((e) => e.ancla === p.ancla || e.ancla === seccionDe(p));
+    if (!et) continue;
+    p.hecho = (E) => { try { return !!et.listo(E); } catch { return false; } };
+  }
 
   return { id: t.id, titulo: t.nombre, desc: t.desc || '', pasos: completos,
            minutos: Math.max(1, Math.round(completos.length / 4)) };

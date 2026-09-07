@@ -22,7 +22,20 @@ import sys
 PUERTO = int(os.environ.get("PORT_VISOR", "8060"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import registro as LOG  # noqa: E402
+
+# El sandbox lleva SU PROPIO registro: mirar las pantallas no puede ensuciar el registro del
+# sistema de verdad (si no, mañana alguien investiga una falla que provocó una prueba).
+LOG.usar_carpeta(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "sandbox"))
+
 import servidor as S  # noqa: E402
+
+
+@S.app.get("/api/_romper")
+def _romper_a_proposito():
+    """SÓLO EN EL SANDBOX: revienta a propósito, para comprobar que un error no previsto queda
+    en el registro con su traceback (y no se pierde en la ventana del servidor)."""
+    return {"nunca": 1 / 0}
 
 
 @S.app.before_request
@@ -45,5 +58,10 @@ if __name__ == "__main__":
     print("  Entra sin login y NO puede escribir nada (todo lo que no sea GET se rechaza).")
     print("  El servidor de verdad sigue en el 8050, intacto.")
     print("=" * 70)
+    # Los procesos de dibujo también hay que atarlos ACÁ: el sandbox usa el mismo motor y el mismo
+    # ProcessPool que el servidor. Sin esto, cada vez que se cierra el sandbox quedaban hasta 6
+    # procesos sueltos de ~200 MB (es exactamente lo que dejó la máquina a medio andar en su
+    # momento: 86 procesos, 4,8 GB).
+    S._atar_hijos_a_este_proceso()
     from werkzeug.serving import make_server
     make_server("127.0.0.1", PUERTO, S.app, threaded=True).serve_forever()

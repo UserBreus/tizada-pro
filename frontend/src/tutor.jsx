@@ -28,9 +28,12 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { aGuion, pasoSuperado, explicarModal, queAtender } from './guion';
-import { explicar, AVISOS_CONOCIDOS, fichaVentana, COLUMNAS_CONOCIDAS } from './diccionario';
-import { buscar, normalizar, identificar, etiquetaDe, rectDeAncla, esDelAncla, sePuedeGrabar, etiquetaColumna } from './localizar';
+import { explicar, AVISOS_CONOCIDOS, fichaVentana, COLUMNAS_CONOCIDAS, explicarColumna } from './diccionario';
+import { buscar, normalizar, identificar, etiquetaDe, rectDeAncla, esDelAncla, sePuedeGrabar, etiquetaColumna,
+         elegidasEn, estaApagado, motivoApagado, anclaEfectiva, roleDeColumna, esCampo,
+         gestoGenerico, esArrastre } from './localizar';
 import { ubicarGlobo } from './tutor_pos';
+import CursorGuia from './cursor';
 
 const MARGEN = 8;          // aire entre el elemento iluminado y el recorte
 const REINTENTO = 250;     // cada cuánto se busca el elemento que todavía no apareció
@@ -61,7 +64,17 @@ const RUTAS = {
 
   // ⚠️ A los AJUSTES de una moldería no se entra directo: primero hay que ABRIR una moldería de la
   // grilla. Sin este paso, el tutorial marcaba un botón del menú lateral que todavía no existe.
-  'molde:abierto':    { ancla: 'molde-tarjeta', texto: 'Abrí una moldería: tocá una de las tarjetas.', necesita: { tab: 'config', sub: 'productos' } },
+  // 🔴 SE MARCA LA GRILLA ENTERA, NO UNA TARJETA. `molde-tarjeta` es SIEMPRE la primera de la
+  // grilla: si el tutorial es de otra moldería, mandaba a abrir la equivocada y todos los pasos
+  // siguientes terminaban configurando el molde que no era (auditoría de Configuración,
+  // 2026-09-01). El paso que viene después ya dice cuál es —«Tocá "Camiseta de futbol"»—.
+  // `elige`: esto NO lo puede hacer el sistema por vos —hay que decidir CUÁL moldería— así que
+  // el globo no ofrece «Llevame igual» (no llevaría a ningún lado): ofrece saltear el paso.
+  'molde:abierto':    { ancla: 'molde-grilla', elige: true, texto: 'Abrí la moldería con la que vas a trabajar: tocá su tarjeta.', necesita: { tab: 'config', sub: 'productos' } },
+  // 🔴 Y EL CAMINO DE VUELTA. Si quedaste DENTRO de una moldería, un paso que necesita la grilla
+  // (elegir otra, o la tarjeta de ésta) no se podía cumplir nunca: no había ruta y el tutorial se
+  // quedaba en «No encuentro ese lugar» con la pantalla equivocada delante.
+  'molde:grilla':     { ancla: 'molde-volver', texto: 'Volvé a la lista de molderías con «⬅ Molderías».', necesita: { tab: 'config', sub: 'productos' } },
   'ajuste:menu':      { ancla: 'ajuste-volver', texto: 'Volvé al menú de ajustes tocando acá.' },
 
   // ── EL PEDIDO ES UN WIZARD EN FILA: diseño → moldes → arte → planilla → resultados ──────────
@@ -113,11 +126,27 @@ const rutaDe = (clave, donde) => {
 };
 
 /** Devuelve el paso-PUENTE que hay que hacer ahora para acercarse al destino, o null si ya llegó. */
+/**
+ * QUÉ PARTES DEL DESTINO IMPORTAN — según a qué SECCIÓN va el paso.
+ *
+ * 🔴 CADA PASO GUARDA LA PANTALLA ENTERA, incluida la del wizard del pedido (`paso`), aunque el
+ * trabajo sea en Configuración: es el estado en el que quedó el pedido, no algo que el paso
+ * necesite. Al tomarlo como destino, un tutorial de Configuración abría pidiendo **«Volvé al
+ * diseño con "← Diseño"»** — un botón que ahí ni existe (reporte del usuario 2026-09-01, con
+ * «Cargar molde» en 1/46). El `paso` del pedido sólo vale si el destino ES el pedido; y `sub`,
+ * `molde` y `ajuste` sólo valen dentro de Configuración.
+ */
+function clavesDe(destino) {
+  if (destino.tab === 'pedidos') return ['tab', 'paso'];
+  if (destino.tab === 'config') return ['tab', 'sub', 'molde', 'ajuste'];
+  return ['tab', 'sub', 'paso', 'molde', 'ajuste'];
+}
+
 function puente(destino, donde) {
   if (!destino) return null;
   // El ORDEN importa: primero la sección, después la pantalla, después abrir la moldería y recién
   // ahí su ajuste. Al revés, se marcaría un botón que todavía no está en pantalla.
-  const claves = ['tab', 'sub', 'paso', 'molde', 'ajuste'];
+  const claves = clavesDe(destino);
   for (const k of claves) {
     const q = destino[k];
     if (!q || donde[k] === q) continue;               // no pedido, o ya estamos
@@ -129,7 +158,7 @@ function puente(destino, donde) {
     // tutorial enseña: el motor lleva solo y arranca directo en lo que importa. Los puentes de
     // ADENTRO de una pantalla («Entrá a Moldedería») sí se marcan, porque ésos SÍ son el trabajo.
     if (String(r.ancla || '').startsWith('nav-')) return { llevarSolo: { [k]: q } };
-    return { ancla: r.ancla, texto: r.texto, accion: 'click', esPuente: true };
+    return { ancla: r.ancla, texto: r.texto, accion: 'click', esPuente: true, elige: !!r.elige };
   }
   return null;
 }
@@ -146,7 +175,9 @@ function esPasoNav(p, donde) {
   // → «Acá se dice qué telas puede usar este molde»), y saltearlo se comía justo la explicación
   // más importante, la que dice de qué se trata la pantalla.
   if (p.accion === 'ver') return false;
-  return Object.entries(p.ir).some(([k, v]) => (rutaDe(`${k}:${v}`, donde) || {}).ancla === p.ancla);
+  const utiles = clavesDe(p.ir);
+  return Object.entries(p.ir).some(([k, v]) => utiles.includes(k)
+    && (rutaDe(`${k}:${v}`, donde) || {}).ancla === p.ancla);
 }
 
 /** Texto que tiene ahora mismo el campo de ese ancla ('' si no hay campo). */
@@ -174,6 +205,20 @@ function vigilarVaciado(anclas, alConfirmar) {
     if (val) { tenia = true; return; }
     if (tenia) { tenia = false; alConfirmar(); }
   }, 150);
+}
+
+/**
+ * CUÁNTAS OPCIONES HAY PUESTAS AHORA en el paso «elegí N de esta lista» (null = no se puede medir).
+ *
+ * 🔴 SE MIDE LA PANTALLA, NO SE CUENTAN CLICS. Contando clics, dos toques en el AIRE de la lista
+ * cumplían el paso, y tocar dos opciones YA elegidas —que las DESMARCA— lo cumplía dejando el
+ * pedido con menos de lo que tenía: el tutorial daba por bien hecho justo lo contrario de lo que
+ * pedía (verificado en pantalla, auditoría 2026-08-31). Es la misma regla que ya valía para
+ * `cuantos`: lo que cuenta es el TOTAL que hay puesto.
+ */
+function elegidasDelPaso(paso) {
+  if (!paso || (paso.cuantas || 1) <= 1 || !paso.ancla) return null;
+  try { return elegidasEn(paso.ancla); } catch { return null; }
 }
 
 /** Evalúa `hecho` sin que un guion roto pueda tirar abajo la ayuda. */
@@ -230,7 +275,7 @@ function useAncla(ancla, activo) {
  * El PUENTE (ámbar) es una acción especial: llevar al usuario a la pantalla que corresponde.
  */
 function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, progreso, trabado, onSeguirIgual, escape,
-                pregunta, onResponder, llevan, onSaltear }) {
+                pregunta, onResponder, llevan, onSaltear, onSiguiente, apagado }) {
   const ANCHO = 340;
   const [n, setN] = useState('');   // la respuesta a «¿cuántas?», mientras se tipea
   const esInfo = !puente && paso.accion === 'ver';
@@ -265,12 +310,14 @@ function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, p
     setTam(prev => (Math.abs(h - prev.h) > 2 || Math.abs(w - prev.w) > 2) ? { w, h } : prev);
     // Se mide sólo cuando cambia lo que ocupa lugar (el texto del paso, los avisos, la ventana):
     // sin lista de dependencias corría en CADA render, que es justo lo que alimentaba el lazo.
-  }, [paso.texto, paso.nota, trabado, escape, esInfo, puente, vw, vh, !!pregunta, !!llevan]);
+  }, [paso.texto, paso.nota, trabado, escape, esInfo, puente, vw, vh, !!pregunta, !!llevan,
+      apagado && apagado.texto]);
   // La cuenta vive en `tutor_pos.js` (función pura) para poder probarla sin navegador: el chequeo
   // del build verifica que el globo NUNCA se solape con el elemento resaltado.
   const { top, left, flecha, maxAlto } = ubicarGlobo(rect, tam, vw, vh, MARGEN + 14, 12);
   return (
-    <div ref={cajaRef} style={{ position: 'fixed', top, left, width: ANCHO, zIndex: 100002, background: fondo,
+    <div ref={cajaRef} data-tutor-globo="1"
+      style={{ position: 'fixed', top, left, width: ANCHO, zIndex: 100002, background: fondo,
       border: `1.5px solid ${col}`, borderRadius: 14, padding: 16,
       // Si no entraba en ningún hueco, se achica y scrollea adentro (nunca encima del control).
       ...(maxAlto ? { maxHeight: maxAlto, overflowY: 'auto' } : null),
@@ -290,7 +337,11 @@ function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, p
         <span style={{ width: 20, height: 20, borderRadius: '50%', background: col, color: '#04141a',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, flexShrink: 0 }}>{icono}</span>
         <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.7, textTransform: 'uppercase', color: col }}>{rotulo}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-muted)' }}>{puente ? '' : `${idx + 1}/${total}`}</span>
+        {/* 🔴 EL CONTADOR SE VE SIEMPRE, TAMBIÉN EN UN PUENTE. Sin él, mientras el tutorial te
+            lleva de una pantalla a otra no se sabe en qué paso se está — y si el puente no se
+            puede resolver (el botón está apagado), cada «Siguiente» se comía un paso REAL sin que
+            se notara: en la prueba se comió los 7 de la planilla (auditoría 2026-08-31). */}
+        <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-muted)' }}>{`${idx + 1}/${total}`}</span>
         <button onClick={onCerrar} title="Salir de la ayuda"
           style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 15, lineHeight: 1 }}>✕</button>
       </div>
@@ -320,21 +371,41 @@ function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, p
           {Math.min(llevan.hechas, llevan.total)} de {llevan.total}{llevan.unidad ? ' ' + llevan.unidad + (llevan.total === 1 ? '' : 's') : ''}
         </div>
       )}
-      {esperando && !trabado && !paso.esVentanaFalta && <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', marginTop: 9 }}>Buscando ese lugar en pantalla…</div>}
+      {/* Mientras el paso se prepara: NO se dice «buscando» ni «no encuentro» — el sistema sabe a
+          dónde va y lo resuelve solo (ver el efecto que decide en el Tour). */}
+      {esperando && !paso.esVentanaFalta && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 9 }}>Preparando este paso…</div>}
       {paso.manual && !esperando && (
-        // el paso abarca toda la columna: se avisa que lo termina la persona, no el primer clic
+        // 🔴 ESTE PASO NO AVANZA SOLO, Y SE DICE. Una columna se carga fila por fila y un campo se
+        // escribe: el primer clic no es «hecho». Lo termina la persona con «Siguiente →».
         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 9 }}>
-          Cargá lo que necesites en esta columna y, cuando termines, tocá «Siguiente →».
+          {paso.manualPor === 'campo'
+            ? 'Escribí lo que necesites. El tutorial te espera: cuando termines, tocá «Siguiente →».'
+            : 'Cargá lo que necesites en esta columna y, cuando termines, tocá «Siguiente →».'}
         </div>
       )}
-      {trabado && (
+      {/* 🔴 EL BOTÓN ESTÁ APAGADO — Y SE DICE POR QUÉ. Antes el tutorial iluminaba un botón que no
+          se puede tocar, decía «Tocá lo que está marcado» y encima el velo TAPABA el aviso de la
+          pantalla que explica qué falta: no había forma de saber qué hacer (auditoría 2026-08-31,
+          paso 5/23 de «Camiseta» con «Cargar el arte» apagado porque faltaban prendas). */}
+      {apagado && !trabado && (
         <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 9, background: 'rgba(224,160,32,0.12)', border: '1px solid rgba(224,160,32,0.35)' }}>
-          <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', lineHeight: 1.4 }}>
-            No encuentro ese lugar en pantalla. Puede que falte abrir algo antes.
+          <div style={{ fontSize: 11.5, color: 'var(--warning, #e0a020)', fontWeight: 700, lineHeight: 1.4 }}>
+            Ese botón todavía está apagado.
           </div>
-          <button className="btn ghost" style={{ marginTop: 7, padding: '5px 11px', fontSize: 11.5 }} onClick={onSeguirIgual}>Seguir igual →</button>
+          {!!apagado.texto && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45, marginTop: 4 }}>
+              {apagado.texto}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4, marginTop: 4 }}>
+            Resolvé eso y se prende solo; el tutorial sigue acá esperando.
+          </div>
         </div>
       )}
+      {/* 🔴 ACÁ IBA «No encuentro ese lugar en pantalla». SE FUE (pedido del usuario 2026-09-01):
+          el tutorial está grabado, así que el sistema tiene que RESOLVER —llevar, esperar la
+          ventana o pasar al siguiente— y no confesarle a la persona que se perdió. La decisión
+          vive en el efecto de arriba; acá no queda ningún cartel de error. */}
       {/* ESCAPE de los pasos que esperan el ESTADO: si el sistema no llegó a registrarlo (o el
           usuario lo hizo por otro camino), no puede quedar preso del tutorial. */}
       {escape && !trabado && (
@@ -354,25 +425,50 @@ function Globo({ rect, paso, idx, total, onAtras, onCerrar, esperando, puente, p
             <div style={{ width: `${Math.round(progreso * 100)}%`, height: '100%', background: col, transition: 'width .2s linear' }} />
           </div>
         ) : (
-          <span style={{ flex: 1, fontSize: 11.5, color: col, fontWeight: 700 }}>
-            {esEspera ? (paso.esModal ? 'Cerralo y seguimos' : 'Esperando…')
+          <span style={{ flex: 1, fontSize: 11.5, color: apagado ? 'var(--warning, #e0a020)' : col, fontWeight: 700 }}>
+            {apagado ? 'Todavía no se puede tocar'
+              : esEspera ? (paso.esModal ? 'Cerralo y seguimos' : 'Esperando…')
               : esGesto ? 'Hacelo y sigo solo'
+              // un campo (o una columna) no avanza solo: lo cierra la persona
+              : paso.manual ? (paso.manualPor === 'campo' ? 'Escribí y tocá «Siguiente →»' : 'Cargalo y tocá «Siguiente →»')
               : paso.accion === 'input' ? 'Escribilo y seguimos' : 'Tocá lo que está marcado'}
           </span>
         )}
-        {/* SIGUIENTE A MANO (pedido del usuario): pasar el paso sin hacer lo que pide. */}
-        {onSaltear && !pregunta && !esEspera && (
-          <button className="btn ghost" title="Pasar este paso sin hacerlo"
-            style={{ padding: '5px 11px', fontSize: 11.5, flexShrink: 0 }} onClick={onSaltear}>Siguiente →</button>
-        )}
+        {/* SIGUIENTE A MANO (pedido del usuario): pasar el paso sin hacer lo que pide.
+            🔴 EN UN PUENTE NO SALTEA EL PASO: LLEVA. El puente no es un paso del tutorial, es el
+            camino hasta él; su «Siguiente» salteaba el paso de DESTINO —en silencio, porque el
+            puente seguía igual— y el tutorial terminaba con «¡Listo!» sin haber mostrado nada
+            (auditoría 2026-08-31). Ahora lleva a la pantalla y el guion sigue donde iba. */}
+        {onSaltear && !pregunta && !esEspera && (() => {
+          // 🔴 UN PUENTE QUE EXIGE ELEGIR NO SE PUEDE «LLEVAR» SOLO (abrir una moldería es una
+          // decisión de la persona): ahí el botón saltea el paso, en vez de no hacer nada — que
+          // era quedarse trabado con un botón que parecía funcionar.
+          const llevar = puente && !paso.elige;
+          return (
+            <button className="btn ghost"
+              title={(llevar ? 'Ir a esa pantalla sin tocar el botón' : 'Pasar este paso sin hacerlo') + ' (o tocá Enter)'}
+              style={{ padding: '5px 11px', fontSize: 11.5, flexShrink: 0 }}
+              /* el MISMO camino que la tecla Enter: una sola decisión, en el Tour */
+              onClick={onSiguiente}>{llevar ? 'Llevame igual →' : 'Siguiente →'}
+              <span style={{ marginLeft: 6, fontSize: 9.5, opacity: 0.6, fontWeight: 700 }}>Enter</span>
+            </button>
+          );
+        })()}
       </div>
     </div>
   );
 }
 
 /** Globo final: la guía terminó. Antes se cerraba de golpe y no quedaba claro si había terminado. */
-function GloboFin({ guia, onCerrar, saltada }) {
-  useEffect(() => { const t = setTimeout(onCerrar, 5000); return () => clearTimeout(t); }, [onCerrar]);
+function GloboFin({ guia, onCerrar, saltada, salteados = 0, noAplicaron = 0, onVerIgual }) {
+  // 🔴 Si quedaron pasos sin hacer, el cartel NO se va solo: la persona tiene que poder leer
+  // cuántos se salteó (antes decía «¡Listo!» y se cerraba a los 5 s, aunque no se hubiera hecho
+  // nada — auditoría 2026-08-31).
+  useEffect(() => {
+    if (salteados > 0 || noAplicaron > 0) return undefined;
+    const t = setTimeout(onCerrar, 5000);
+    return () => clearTimeout(t);
+  }, [onCerrar, salteados, noAplicaron]);
   return (
     <div style={{ position: 'fixed', left: '50%', bottom: 40, transform: 'translateX(-50%)', width: 380, zIndex: 100002,
       background: 'linear-gradient(180deg,#0d2119,#08150f)', border: '1.5px solid var(--success, #2ecc71)', borderRadius: 14, padding: 16,
@@ -383,17 +479,37 @@ function GloboFin({ guia, onCerrar, saltada }) {
         {/* Un RECORRIDO explicativo no «se hace»: se mira. Decirle «ya estaba hecho» (que es lo que
             salía, porque nunca hay interacción) no tiene ningún sentido ahí. */}
         <span style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>
-          {guia.explica ? 'Eso es todo' : saltada ? 'Esto ya estaba hecho' : '¡Listo!'}
+          {guia.explica ? 'Eso es todo' : salteados > 0 ? 'Terminó, pero quedaron pasos sin hacer'
+            : saltada ? 'Esto ya estaba hecho' : '¡Listo!'}
         </span>
         <button onClick={onCerrar} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 15 }}>✕</button>
       </div>
+      {/* Lo que NO estaba en la pantalla de quien lo siguió: se dice al final, en vez de frenarlo
+          paso por paso con un cartel de error. */}
+      {noAplicaron > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.45 }}>
+          {noAplicaron === 1
+            ? 'Un paso del tutorial no estaba en tu pantalla (tu molde o tu pedido son distintos) y se pasó solo.'
+            : `${noAplicaron} pasos del tutorial no estaban en tu pantalla (tu molde o tu pedido son distintos) y se pasaron solos.`}
+        </div>
+      )}
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.45 }}>
         {guia.explica
           ? <>Eso es «{guia.titulo}». Podés volver a verlo cuando quieras desde Ayuda.</>
-          : saltada
-            ? <>«{guia.titulo}» ya estaba resuelto en este molde, así que no había nada que pedirte.</>
-            : <>Terminaste «{guia.titulo}».</>}
+          : salteados > 0
+            ? <>De «{guia.titulo}» te salteaste <b>{salteados}</b> de {guia.pasos.length} paso{guia.pasos.length === 1 ? '' : 's'}.
+                Si algo quedó sin hacer, volvé a abrirlo desde Ayuda y seguí desde ahí.</>
+            : saltada
+              ? <>«{guia.titulo}» ya estaba resuelto en este molde, así que no había nada que pedirte.</>
+              : <>Terminaste «{guia.titulo}».</>}
       </div>
+      {/* 🔴 PEDIR AYUDA Y QUE NO TE MUESTREN NADA es la peor respuesta posible: si todo estaba
+          hecho, el tutorial se salteaba entero y se cerraba. Acá se puede VER igual, de corrido,
+          sin que pida hacer nada (auditoría 2026-08-31). */}
+      {saltada && !guia.explica && onVerIgual && (
+        <button className="btn ghost" style={{ marginTop: 11, padding: '6px 12px', fontSize: 12 }}
+          onClick={onVerIgual}>Verlo igual, de principio a fin →</button>
+      )}
     </div>
   );
 }
@@ -462,8 +578,11 @@ function useModalAbierto(activo) {
   return modal;
 }
 
-/** El tutorial en sí: recorte + globo + detección de la acción del usuario. */
-function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
+/** El tutorial en sí: recorte + globo + detección de la acción del usuario.
+ *  `soloVer` = MIRARLO, sin hacer nada: no se saltea ningún paso (aunque ya esté hecho) y cada uno
+ *  avanza solo después de leerse. Es la salida para cuando el tutorial se salteaba entero y la
+ *  persona se quedaba sin ver nada. */
+function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0, soloVer = false, onVerIgual }) {
   const [idx, setIdx] = useState(desdePaso);
   const [fin, setFin] = useState(null);            // null | {saltada:bool}
   // CUÁNTAS VECES. Lo que el sistema no puede deducir se pregunta: «¿cuántos diseños vas a
@@ -472,6 +591,12 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
   // OPCIONES INTERCAMBIABLES: cuántas se tocaron ya en este paso ({idx: n}). El paso pide N de una
   // lista y no le importa CUÁLES (ver `cuantas` en guion.js).
   const [elegidas, setElegidas] = useState({});
+  // 🔴 AVANCE EN CAMINO. El control de un paso casi siempre CAMBIA DE PANTALLA, y el `donde` que
+  // el paso guarda es el de ANTES de tocarlo. Mientras el avance viaja (200 ms), el motor veía
+  // «no estás donde este paso pide» y te DEVOLVÍA a la pantalla anterior: en Configuración,
+  // entrar a «Moldería» te rebotaba al panel (verificado 2026-09-01). Con esto, nada navega ni
+  // muestra puentes hasta que el paso termine de avanzar.
+  const [avanzando, setAvanzando] = useState(false);
   const crudo = guia.pasos[idx];
   const preguntando = crudo?.cuantos && cuantas[idx] == null && !pasoSuperado(crudo, estado, donde || {}) ? crudo.cuantos : null;
   // Con la respuesta puesta, el paso se cumple cuando el TOTAL llega a esa cantidad.
@@ -488,17 +613,19 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
   // ¿ESTE PASO YA QUEDÓ ATRÁS? La persona puede abrir el tutorial con el trabajo empezado (ya
   // eligió el diseño, ya está en la planilla): un paso de una etapa anterior YA CUMPLIDA se
   // saltea, y sobre todo NO se la arrastra de vuelta a esa pantalla (su `ir` no corre).
-  const superado = !fin && pasoSuperado(pasoGuion, estado, donde || {});
+  // en modo MIRAR no se saltea nada: la idea es justamente ver todos los pasos
+  const superado = !soloVer && !fin && pasoSuperado(pasoGuion, estado, donde || {});
   const omitir = superado;
   // AYUDA INTELIGENTE: si el usuario no está en la pantalla que el paso necesita, primero se le
   // marca el camino (un botón por vez) en vez de saltar solo. Cuando llega, sigue el guion.
-  const salto0 = (!omitir && pasoGuion?.ir) ? puente(pasoGuion.ir, donde || {}) : null;
+  const salto0 = (!omitir && !avanzando && pasoGuion?.ir) ? puente(pasoGuion.ir, donde || {}) : null;
   // Un puente de BARRA LATERAL no se le muestra a nadie: se hace solo y el tutorial sigue con lo
   // suyo. `ir()` es la misma función que ya usaba el botón «seguir igual».
   useEffect(() => {
     if (salto0 && salto0.llevarSolo && ir) ir(salto0.llevarSolo);
   }, [salto0 && JSON.stringify(salto0.llevarSolo)]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const salto = salto0 && salto0.llevarSolo ? null : salto0;
+  // MIRAR: no se le pide a nadie que toque el botón del camino — se lleva solo y se sigue
+  const salto = (soloVer || (salto0 && salto0.llevarSolo)) ? null : salto0;
   // Mientras el cambio de sección está en camino, el paso todavía no puede pedir nada.
   const enViaje = !!(salto0 && salto0.llevarSolo);
   // ¿HAY UNA VENTANA DE TRABAJO a la vista? (el sistema procesando algo) — el tutorial frena y
@@ -607,15 +734,20 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
   const retroceder = useCallback(() => { desde.current = -1; setIdx(i => Math.max(0, i - 1)); }, []);
   // SALTEAR A MANO (pedido del usuario): pasar el paso sin hacer lo que pide. Directo, sin el
   // bucle por diseño — si lo saltea es porque no lo quiere hacer ahora.
+  const salteados = useRef(0);       // cuántos pasos se pasaron sin hacer (para el cartel final)
+  // la acción de «Siguiente» SIEMPRE al día, para que la tecla no dispare una versión vieja
+  const irAlSiguienteRef = useRef(() => {});
+  const noAplicaron = useRef(0);     // cuántos no estaban en la pantalla de quien lo sigue
   const saltear = useCallback(() => {
     setIdx(i => {
       desde.current = i;
+      salteados.current += 1;
       if (i + 1 >= guia.pasos.length) { setTimeout(() => setFin({ saltada: !interaccion.current }), 0); return i; }
       return i + 1;
     });
   }, [guia.pasos.length]);
   // Al cambiar de paso se descarta cualquier avance que hubiera quedado en camino del paso anterior.
-  useEffect(() => { idxRef.current = idx; clearTimeout(tempRef.current); tempRef.current = null; }, [idx]);
+  useEffect(() => { idxRef.current = idx; clearTimeout(tempRef.current); tempRef.current = null; setAvanzando(false); }, [idx]);
   // La FOTO del estado se saca al empezar cada paso: así un guion puede pedir «que AUMENTE» y no
   // «que sea mayor a cero» (si no, un molde con 3 piezas ya nombradas cumpliría el paso de entrada).
   // La foto se toma al entrar al paso y TAMBIÉN al responder «cuántas»: si no, se contarían
@@ -640,17 +772,36 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
   // RED DE SEGURIDAD 2: un paso que espera el ESTADO y no se cumple nunca (lo hizo por otro camino,
   // o el dato no se refrescó) tampoco puede dejar preso al usuario.
   const [escape, setEscape] = useState(false);
-  useEffect(() => {
-    setTrabado(false);
-    if (rect || fin) return;
-    const t = setTimeout(() => setTrabado(true), 5000);
-    return () => clearTimeout(t);
-  }, [idx, !!rect, !!salto, !!fin]);
 
   // ── AVANCE POR ESTADO REAL (el mecanismo principal) ──────────────────────────────────────────
   // Si el paso declara `hecho`, ESTO es lo único que lo avanza. Se revisa con un latido corto
   // porque el estado llega por fetch (no hay un evento del DOM que avise «el POST salió bien»).
-  const esperaEstado = !salto && !enViaje && !carga && !bloqueoModal && !preguntando && typeof pasoGuion?.hecho === 'function';
+  const esperaEstado = !soloVer && !salto && !enViaje && !carga && !bloqueoModal && !preguntando && typeof pasoGuion?.hecho === 'function';
+
+  // 🔴 EL TUTORIAL NUNCA DICE «NO ENCUENTRO ESE LUGAR» (pedido del usuario 2026-09-01: «este tipo
+  // de cartel no quiero más; si me está guiando y el tutorial está grabado en el sistema, debe
+  // saber todo cómo va a salir»). Si el control del paso no está en pantalla, el motor RESUELVE:
+  //   · si el paso vive en una VENTANA que todavía no se abrió → lo dice y espera (más arriba);
+  //   · si pide otra PANTALLA → arma el puente y lleva (más arriba);
+  //   · y si no hay nada que hacer, **pasa al siguiente solo**, sin cartel de error y sin pedirle
+  //     nada a la persona. Al final se dice cuántos pasos no aplicaron.
+  // Un paso DUDOSO (ancla que no es el nombre de nada, de un tutorial viejo) se resuelve más rápido.
+  useEffect(() => {
+    setTrabado(false);
+    if (rect || fin || salto) return undefined;
+    // con una ventana de trabajo a la vista no se cuenta el tiempo: la pantalla está por cambiar
+    if (carga || bloqueoModal) return undefined;
+    // el paso ESPERA algo (una ventana, o que el estado se cumpla): no se pasa de largo
+    if (pasoGuion?.ventana || pasoGuion?.accion === 'modalPaso' || esperaEstado) return undefined;
+    const ms = pasoGuion?.dudoso ? 1200 : 5000;
+    const s = setTimeout(() => {
+      if (idxRef.current !== idx) return;
+      noAplicaron.current += 1;
+      desde.current = -1;
+      avanzar();
+    }, ms);
+    return () => clearTimeout(s);
+  }, [idx, !!rect, !!salto, !!fin, !!carga, !!bloqueoModal, esperaEstado]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setEscape(false);
     if (fin || !esperaEstado) return;
@@ -666,12 +817,33 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
     return () => { clearInterval(t); clearTimeout(esc); };
   }, [idx, !!salto, esperaEstado, !!fin]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── «ELEGÍ N DE ESTA LISTA»: SE MIRA LO ELEGIDO, NO LOS TOQUES ───────────────────────────────
+  // Mismo latido que el avance por estado: se cuenta cuántas opciones hay PUESTAS en la lista y se
+  // avanza al llegar a N (el TOTAL, no «N más»: lo que ya estaba elegido también vale). Si al
+  // entrar ya hay N o más, el paso se saltea — no se le pide a nadie que vuelva a elegir lo que ya
+  // tiene, que era justamente lo que terminaba DESMARCÁNDOLO.
+  useEffect(() => {
+    if (fin || salto || enViaje || carga || bloqueoModal || preguntando) return undefined;
+    const n = pasoGuion && (pasoGuion.cuantas || 1);
+    if (!n || n <= 1) return undefined;
+    const mirar = () => {
+      const m = elegidasDelPaso(pasoGuion);
+      if (m == null) return;                       // esta lista no se puede medir: manda el clic
+      setElegidas((c) => (c[idx] === m ? c : { ...c, [idx]: m }));
+      if (m >= n && idxRef.current === idx) { interaccion.current = true; avanzar(); }
+    };
+    mirar();
+    const t = setInterval(mirar, LATIDO);
+    return () => clearInterval(t);
+  }, [idx, !!salto, enViaje, !!carga, !!bloqueoModal, !!preguntando, !!fin, pasoGuion]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     setProgreso(0);
     if (fin || salto || !paso || preguntando) return;
     // 'gesto' NUNCA avanza por tiempo: el trabajo del visor se verifica o no se avanza. (Si un
     // guion se olvidó de ponerle `hecho`, cae al tiempo para no dejar el tutorial colgado.)
-    const porTiempo = paso.accion === 'ver' || (paso.accion === 'gesto' && !esperaEstado);
+    // MIRAR: todos los pasos avanzan solos, como un recorrido explicativo
+    const porTiempo = soloVer || paso.accion === 'ver' || (paso.accion === 'gesto' && !esperaEstado);
     if (!porTiempo || esperaEstado) return;
     const largo = (paso.texto || '').length + (paso.nota || '').length
       + (preguntando ? 90 : 0) + (cuantas[idx] != null ? 40 : 0);
@@ -708,7 +880,7 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
 
   // Si el paso pide una pantalla y NO hay camino marcado (no está en RUTAS), se navega solo para no
   // dejar al usuario colgado. Cuando sí hay camino, lo hace él tocando los botones (`salto`).
-  useEffect(() => { if (!fin && pasoGuion?.ir && !salto && !carga && !bloqueoModal && !omitir) ir(pasoGuion.ir); }, [idx, !!salto, !!fin, !!carga, !!bloqueoModal, omitir]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!fin && pasoGuion?.ir && !salto && !avanzando && !carga && !bloqueoModal && !omitir) ir(pasoGuion.ir); }, [idx, !!salto, !!fin, !!carga, !!bloqueoModal, omitir, avanzando]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // FOCO: si el paso pide escribir y el foco quedó en la nada (el body), se lo damos al campo que
   // estamos marcando. Sin foco la persona igual «escribe» —el navegador manda las teclas al último
@@ -767,13 +939,43 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
     // pantalla, un instante más tarde el paso viejo «pide» la pantalla anterior y se encendería un
     // puente que bloqueaba el avance para siempre (el tutorial quedaba trabado al tocar, por
     // ejemplo, «Cargar el arte»).
-    const avanzarDesde = (i, eraPuente) => { if (idxRef.current === i && !eraPuente) { interaccion.current = true; avanzar(); } };
+    const avanzarDesde = (i, eraPuente) => { setAvanzando(false); if (idxRef.current === i && !eraPuente) { interaccion.current = true; avanzar(); } };
+    // ── UN MOVIMIENTO SE CUMPLE MOVIENDO ────────────────────────────────────────────────────
+    // El cursor guía lo muestra; el paso se da por hecho cuando la persona arrastra de verdad
+    // dentro del mismo lugar (no alcanza con un clic: sería no haber hecho el gesto).
+    if (paso.accion === 'arrastre') {
+      let ini = null;
+      const dn = (e) => { ini = (e.button === 0 && dentro(e.target)) ? { x: e.clientX, y: e.clientY } : null; };
+      const up = (e) => {
+        const d = ini; ini = null;
+        if (!d || !esArrastre(d.x, d.y, e.clientX, e.clientY)) return;
+        interaccion.current = true;
+        clearTimeout(temp.current);
+        temp.current = setTimeout(() => avanzarDesde(idx, saltoRef.current), 250);
+      };
+      document.addEventListener('mousedown', dn, true);
+      document.addEventListener('mouseup', up, true);
+      return () => {
+        document.removeEventListener('mousedown', dn, true);
+        document.removeEventListener('mouseup', up, true);
+      };
+    }
     if (paso.accion === 'click') {
       const h = (e) => {
         if (!dentro(e.target)) return;
+        // 🔴 TOCAR UN CAMPO NO ES HABERLO COMPLETADO. Un campo se llena, y eso lo termina la
+        // persona con «Siguiente →» (pedido del usuario 2026-09-01: «cuando son campos de escribir
+        // no saltará automático»). El avance solo queda para botones y ventanas emergentes.
+        if (esCampo(e.target)) return;
         const eraPuente = saltoRef.current;
         // ¿el paso pide VARIAS opciones de una lista? Se cuentan; recién con todas, avanza.
         if ((paso.cuantas || 1) > 1) {
+          // 🔴 SI LA LISTA SE PUEDE MEDIR, EL CLIC NO CUENTA: manda lo que quedó ELEGIDO (lo
+          // resuelve el latido de abajo). Sólo se cuentan clics cuando la lista no declara sus
+          // opciones elegidas — y ahí, únicamente los que caen sobre una opción de verdad, no en
+          // el aire del contenedor.
+          if (elegidasDelPaso(paso) != null) return;
+          if (!e.target.closest || !e.target.closest('button, [role="button"], a[href], input, select, label')) return;
           setElegidas((c) => {
             const n = (c[idx] || 0) + 1;
             if (n >= paso.cuantas) {
@@ -785,6 +987,7 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
           return;
         }
         clearTimeout(temp.current);
+        setAvanzando(true);          // el paso ya se hizo: nada de puentes ni navegación hasta que avance
         temp.current = setTimeout(() => avanzarDesde(idx, eraPuente), 200);
       };
       document.addEventListener('click', h, true);
@@ -806,10 +1009,10 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
     document.addEventListener('input', h, true);
     // Y si confirma (Enter o botón) antes de esa pausa, el campo se vacía: también está hecho.
     const vig = vigilarVaciado(anclas, () => { clearTimeout(temp.current); avanzarDesde(idx, saltoRef.current); });
-    // EL ENTER ES DEL CAMPO, NO DEL TUTORIAL. Acá no se escucha la tecla: cuando la persona aprieta
-    // Enter está CONFIRMANDO el campo (agrega el diseño, aplica el nombre) y eso tiene que pasar
-    // igual que sin tutorial. El tutorial se entera por el EFECTO: el campo que confirma se vacía,
-    // y ese vaciado —de tener texto a quedar en blanco— es la señal de que la acción se hizo.
+    // ⚠️ EL ENTER YA NO LLEGA ACÁ. Mientras el tutorial está abierto, la tecla es del TUTORIAL y
+    // sólo acciona su «Siguiente →» (regla del usuario 2026-09-01; ver el listener de `keydown` más
+    // abajo). Lo que sigue valiendo es el resto: si la persona confirma con el BOTÓN, el campo se
+    // vacía —de tener texto a quedar en blanco— y ese vaciado es la señal de que la acción se hizo.
     // Salir del campo también es «ya terminé de escribir».
     const hb = (e) => { if (dentro(e.target) && (e.target.value || '').trim()) { clearTimeout(temp.current); avanzarDesde(idx, saltoRef.current); } };
     document.addEventListener('blur', hb, true);
@@ -823,9 +1026,102 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
     return () => window.removeEventListener('keydown', k);
   }, [onCerrar]);
 
-  if (fin) return createPortal(<GloboFin guia={guia} saltada={fin.saltada} onCerrar={onCerrar} />, document.body);
+  // ── EL ENTER, MIENTRAS EL TUTORIAL ESTÁ ABIERTO, ES DEL TUTORIAL ────────────────────────────
+  // 🔴 Regla del usuario (2026-09-01): «el enter cuando está activa la ayuda es exclusivamente
+  // para el botón siguiente del tutorial y más nada». Va en CAPTURA y con `preventDefault` +
+  // `stopPropagation`: si no, la app lo recibe igual y confirma un campo, manda un formulario o
+  // dispara el botón que tenga el foco — que es justo lo que no se quiere.
+  // Excepción: el campo del PROPIO globo (la pregunta «¿cuántas?»), que también es del tutorial.
+  useEffect(() => {
+    if (fin) return undefined;
+    const k = (e) => {
+      if (e.key !== 'Enter' || e.isComposing) return;
+      try { if (e.target && e.target.closest && e.target.closest('[data-tutor-globo]')) return; }
+      catch { /* nodo raro: se sigue con la regla general */ }
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      irAlSiguienteRef.current();
+    };
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
+  }, [!!fin]);
+
+  // 🔴 EL ENTER ES DEL TUTORIAL (regla del usuario 2026-09-01: «el enter cuando está activa la
+  // ayuda es exclusivamente para el botón Siguiente del tutorial y nada más»). Antes era del CAMPO
+  // —confirmaba lo que se estaba escribiendo, como sin tutorial—; ahora, con la ayuda abierta, la
+  // tecla es del tutorial y no llega a la app. Botón y tecla hacen EXACTAMENTE lo mismo: una sola
+  // función, para que no puedan discrepar.
+  const hayQueSeguir = !preguntando && !(paso && paso.esEspera);
+  const irAlSiguiente = () => {
+    if (!hayQueSeguir) return;
+    // en un puente que el sistema PUEDE resolver, lleva; en el resto, saltea el paso
+    if (salto && !(paso && paso.elige) && pasoGuion?.ir) ir(pasoGuion.ir);
+    else saltear();
+  };
+
+  irAlSiguienteRef.current = irAlSiguiente;
+
+  if (fin) return createPortal(<GloboFin guia={guia} saltada={fin.saltada} salteados={salteados.current}
+    noAplicaron={noAplicaron.current} onVerIgual={soloVer ? null : onVerIgual} onCerrar={onCerrar} />, document.body);
   if (!paso) return null;
-  const r = rect ? { x: rect.x - MARGEN, y: rect.y - MARGEN, w: rect.w + MARGEN * 2, h: rect.h + MARGEN * 2 } : null;
+  // ── LO QUE SE MUESTRA, YA MIRANDO LA PANTALLA ────────────────────────────────────────────────
+  // Va acá (en el render) y no en un estado: se lee el DOM de AHORA sin forzar re-dibujos extra.
+  //  · una COLUMNA se explica por su ROL, porque su id lo pone cada taller (el «Diseño» del
+  //    usuario es `dise_o`) y con el id suelto el cartel salía «Tocá "▾"»;
+  //  · si el paso terminó marcando una LISTA de opciones (ver `generalizar` en localizar.js), el
+  //    cartel tiene que ser el de la lista y no el de la tarjeta que se grabó.
+  const mostrar = (() => {
+    if (!paso.ancla || paso._aMano || paso.esEspera) return paso;
+    const a = String(paso.ancla);
+    if (a.startsWith('col:')) {
+      const id = a.slice(4);
+      let d = null;
+      try { d = explicarColumna(id, roleDeColumna(id), etiquetaColumna(id)); } catch { /* no-op */ }
+      return d ? { ...paso, texto: d.como, nota: d.que || paso.nota } : paso;
+    }
+    let ef = a;
+    try { ef = anclaEfectiva(a); } catch { /* no-op */ }
+    if (ef === a) return paso;
+    const d = explicar(ef, '');
+    return (d && d.como) ? { ...paso, texto: d.como, nota: d.que || undefined } : paso;
+  })();
+  // ── EL GESTO QUE HAY QUE MOSTRAR ────────────────────────────────────────────────────────────
+  // 🔴 SIEMPRE EL MISMO Y EN EL MISMO LUGAR (`gestoGenerico`), no el recorrido que hizo quien
+  // grabó: esa persona tenía otro molde y otras piezas, así que calcar su arrastre no enseña nada
+  // (decisión del usuario, 2026-09-01). Lo que se muestra es EL GESTO: apretar, arrastrar, soltar.
+  const gesto = (!bloqueado && !salto && mostrar.accion === 'arrastre')
+    ? gestoGenerico(elRef.current)
+    : null;
+  // ¿EL CONTROL DE ESTE PASO ESTÁ APAGADO? Entonces no se pide tocarlo: se dice qué falta para que
+  // se prenda (y se ilumina también el aviso de la pantalla que lo explica).
+  const apagado = (!bloqueado && !mostrar.esEspera && rect && estaApagado(elRef.current))
+    ? (motivoApagado(elRef.current) || { texto: '' }) : null;
+  // ¿Y ES UN CAMPO? Entonces el paso lo termina la persona: se lo avisa en el globo. (El guion ya
+  // marca `manual` los pasos de escribir; esto agarra además los que se grabaron como un CLIC
+  // sobre el campo, que son la mayoría.)
+  const mostrarCampo = (!mostrar.manual && !mostrar.esEspera && !salto && esCampo(elRef.current))
+    ? { ...mostrar, manual: true, manualPor: 'campo' } : mostrar;
+  // 🔴 Y SI EL SISTEMA YA SABE QUE ESTE PASO NO SE PUEDE MOSTRAR, NO MUESTRA BASURA. Un paso viejo
+  // guardado con un símbolo por nombre («👁», «?») no tiene cartel que valga: en vez de decir
+  // «Tocá "👁"» y quedarse, se avisa que no aplica y se sigue (pedido del usuario 2026-09-01).
+  const mostrarFinal = (mostrarCampo.dudoso && !rect && !salto)
+    ? { ...mostrarCampo, texto: 'Este paso no está en tu pantalla, así que lo salteo.',
+        nota: 'Puede que tu molde o tu pedido sean distintos de los que se grabaron.' }
+    : mostrarCampo;
+  // El hueco: el control… y, si está apagado, TAMBIÉN el aviso que dice qué falta — si no, el velo
+  // tapa justo lo único que explica por qué no se puede seguir. Sólo si están cerca (misma barra):
+  // unir dos cosas lejanas dejaría media pantalla sin velo y el resalte no señalaría nada.
+  const rectAviso = (apagado && apagado.el && apagado.el.getBoundingClientRect)
+    ? (() => { const q = apagado.el.getBoundingClientRect();
+               return (q.width || q.height) ? { x: q.left, y: q.top, w: q.width, h: q.height } : null; })()
+    : null;
+  const base = (rect && rectAviso && Math.abs((rectAviso.y + rectAviso.h / 2) - (rect.y + rect.h / 2)) < 160)
+    ? { x: Math.min(rect.x, rectAviso.x), y: Math.min(rect.y, rectAviso.y),
+        w: Math.max(rect.x + rect.w, rectAviso.x + rectAviso.w) - Math.min(rect.x, rectAviso.x),
+        h: Math.max(rect.y + rect.h, rectAviso.y + rectAviso.h) - Math.min(rect.y, rectAviso.y) }
+    : rect;
+  const r = base ? { x: base.x - MARGEN, y: base.y - MARGEN, w: base.w + MARGEN * 2, h: base.h + MARGEN * 2 } : null;
   return createPortal(
     <>
       {/* RECORTE: el `box-shadow` gigante oscurece TODO menos este rectángulo. `pointerEvents:none`
@@ -849,11 +1145,15 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
            se busca deja a la persona sin ver nada justo cuando algo no está saliendo bien. */
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,5,9,0.55)', zIndex: 100000, pointerEvents: 'none' }} />
       )}
-      <Globo rect={rect} paso={paso} idx={idx} total={guia.pasos.length} esperando={!rect} puente={!!salto}
+      {/* 🔴 EL CURSOR DEL SISTEMA: muestra el movimiento en bucle hasta que la persona lo hace.
+          No toca nada — es un dibujo (ver cursor.jsx). */}
+      {gesto && <CursorGuia desde={gesto.desde} hasta={gesto.hasta} />}
+      <Globo rect={base} paso={mostrarFinal} apagado={apagado} idx={idx} total={guia.pasos.length} esperando={!rect} puente={!!salto}
         onAtras={retroceder} onCerrar={onCerrar} progreso={progreso} trabado={trabado} escape={escape && !trabado}
         pregunta={bloqueado ? null : preguntando}
         onResponder={(n) => setCuantas((c) => ({ ...c, [idx]: n }))}
         onSaltear={saltear}
+        onSiguiente={irAlSiguiente}
         llevan={(paso?.cuantas || 1) > 1
           ? { hechas: elegidas[idx] || 0, total: paso.cuantas, unidad: '' }
           : cuantas[idx] != null && crudo?.cuantos
@@ -893,7 +1193,7 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0 }) {
  * ni vista de 2 diseños, ni condiciones por cantidad. Un tutorial es la lista de pasos que se
  * grabó; para dos diseños, se graba con dos diseños.
  */
-function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
+function EditorTutorial({ t, ir, donde, onCerrar, onGuardar, onProbar }) {
   const [nombre, setNombre] = useState(t.nombre || '');
   const [pasos, setPasos] = useState(() => {
     // Los tutoriales viejos pueden traer marcas de repetición y campos del ciclo: se DESCARTAN
@@ -906,6 +1206,7 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
   const [huecoVentana, setHuecoVentana] = useState(null);  // en qué hueco de la línea se inserta una ventana
   const [capturando, setCapturando] = useState(false);
   const arrastro = useRef(null);                 // { tipo: 'paso', i }
+  const omitirClick = useRef(false);             // el clic que cierra un arrastre no es un paso
   const [guardando, setGuardando] = useState(false);
   const [marca, setMarca] = useState(null);
   const dondeRef = useRef(donde);
@@ -940,6 +1241,7 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
     const alTocar = (e) => {
       const el = e.target;
       if (!el || !el.closest) return;
+      if (omitirClick.current) { omitirClick.current = false; return; }   // venía de un arrastre
       if (!sePuedeGrabar(el)) return;   // mismo criterio que el grabador (barra lateral, ayuda)
       const ancla = identificar(el);
       if (!ancla) return;                       // sin nombre no se puede volver a encontrar
@@ -956,8 +1258,32 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
       // el paso nuevo queda elegido, así el siguiente se agrega DESPUÉS de éste
       setSel((k) => (k == null ? null : k + 1));
     };
+    // …y los MOVIMIENTOS (arrastres), igual que el grabador: mismo criterio, mismos datos.
+    let ini = null;
+    const alBajar2 = (e) => { ini = (e.button === 0) ? { x: e.clientX, y: e.clientY, el: e.target } : null; };
+    const alSoltar = (e) => {
+      const d = ini; ini = null;
+      if (!d || !esArrastre(d.x, d.y, e.clientX, e.clientY)) return;
+      if (!sePuedeGrabar(d.el)) return;
+      const ancla = identificar(d.el);
+      if (!ancla) return;
+      omitirClick.current = true;
+      // del gesto sólo se guarda QUE FUE un arrastre: el recorrido que se muestra es el genérico
+      const nuevo = { ancla, accion: 'arrastre',
+                      etiqueta: etiquetaDe(d.el).slice(0, 120), donde: { ...(dondeRef.current || {}) } };
+      setPasos((ps) => { const m = ps.slice();
+        const at = selRef.current == null ? m.length : selRef.current + 1;
+        m.splice(at, 0, nuevo); return m; });
+      setSel((k) => (k == null ? null : k + 1));
+    };
     document.addEventListener('click', alTocar, true);
-    return () => document.removeEventListener('click', alTocar, true);
+    document.addEventListener('mousedown', alBajar2, true);
+    document.addEventListener('mouseup', alSoltar, true);
+    return () => {
+      document.removeEventListener('click', alTocar, true);
+      document.removeEventListener('mousedown', alBajar2, true);
+      document.removeEventListener('mouseup', alSoltar, true);
+    };
   }, [capturando]);
 
   const elegir = (i) => {
@@ -1031,7 +1357,9 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
   const nombreDe = (p) => {
     if ((p.accion || '') === 'modal') return p.modal || 'Ventana del sistema';
     const d = explicar(p.ancla, p.etiqueta);
-    return d.nombre || p.etiqueta || p.ancla;
+    const nom = d.nombre || p.etiqueta || p.ancla;
+    // un MOVIMIENTO se lee distinto de un clic: en la línea de tiempo tiene que notarse
+    return (p.accion || '') === 'arrastre' ? `✋ Arrastrar en ${nom}` : nom;
   };
   const AMBAR = 'var(--warning, #e0a020)';
   const inputCss = { padding: '6px 9px', borderRadius: 7, fontSize: 12, border: '1px solid var(--border-light)',
@@ -1183,8 +1511,17 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
       onMouseLeave={(e) => { if (huecoVentana !== h) e.currentTarget.style.opacity = 0.45; }}>+</button>
   );
 
+  // 🔴 UN MOVIMIENTO SE REVISA VIÉNDOLO. Al elegir un paso de arrastre en la línea de tiempo, el
+  // editor muestra el MISMO cursor que va a ver quien siga el tutorial: así se comprueba que el
+  // gesto quedó bien grabado sin tener que reproducir todo el tutorial.
+  const gestoSel = (() => {
+    if (!pSel || (pSel.accion || '') !== 'arrastre') return null;
+    return gestoGenerico(buscar(pSel.ancla));
+  })();
+
   return createPortal(
     <div data-diseno-pasos="1">
+      {gestoSel && <CursorGuia desde={gestoSel.desde} hasta={gestoSel.hasta} />}
       {marca && (
         <div style={{ position: 'fixed', left: marca.x - 5, top: marca.y - 5, width: marca.w + 10,
           height: marca.h + 10, border: '2px solid var(--accent)', borderRadius: 10,
@@ -1276,8 +1613,28 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar }) {
               borderRadius: '50%', background: capturando ? 'var(--error, #e0503a)' : 'var(--text-muted)' }} />
             {capturando ? 'Grabando… tocá la app' : '⏺ Agregar pasos'}
           </button>
+          {/* PROBARLO: el editor mostraba los pasos GRABADOS, pero lo que la gente ve es el GUION
+              (el sistema completa etapas y junta repetidos). Sin poder correrlo, se editaba a
+              ciegas y recién se veía el resultado después de guardar. */}
+          <button type="button" onClick={() => onProbar && onProbar({ ...t, nombre: nombre.trim() || t.nombre, pasos })}
+            title="Cerrar el editor y correr el tutorial tal como está (no se guarda nada)"
+            style={{ padding: '6px 12px', borderRadius: 9, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              border: '1px solid var(--accent)', background: 'rgba(0,216,245,0.12)', color: 'var(--accent)' }}>
+            ▶ Probar
+          </button>
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
             arrastrá los pasos para acomodarlos · tocá uno para ir a su pantalla y editarlo
+            {(() => {
+              // cuántos pasos AGREGA el sistema (etapas que la grabación no tiene) y cuántos junta
+              let g = null;
+              try { g = aGuion({ ...t, pasos }); } catch { /* no-op */ }
+              if (!g) return null;
+              const d = g.pasos.length - pasos.length;
+              if (!d) return null;
+              return d > 0
+                ? ` · el sistema agrega ${d} paso(s) que faltaban: se ven ${g.pasos.length}`
+                : ` · el sistema junta ${-d} paso(s) repetidos: se ven ${g.pasos.length}`;
+            })()}
           </span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexShrink: 0 }}>
             <button className="btn ghost" style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={onCerrar}>Cancelar</button>
@@ -1423,8 +1780,15 @@ function Menu({ onElegir, onCerrar, tutoriales, grabando, onGrabar, onParar, onB
               <button type="button" style={{ ...card, flex: 1 }} onClick={() => onElegir(t.id)}>
                 <span style={{ flex: 1 }}>
                   <span style={{ display: 'block', fontWeight: 700, fontSize: 14.5 }}>{t.nombre}</span>
+                  {/* Los pasos que se van a VER, no los que se grabaron: el sistema completa las
+                      etapas que faltan y junta las repetidas, así que el número era otro (decía
+                      «22 pasos» y el tutorial mostraba 23). */}
                   <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {(t.pasos || []).length} paso{(t.pasos || []).length === 1 ? '' : 's'}
+                    {(() => {
+                      let n = (t.pasos || []).length;
+                      try { n = (aGuion(t) || {}).pasos.length; } catch { /* el grabado, como antes */ }
+                      return `${n} paso${n === 1 ? '' : 's'}`;
+                    })()}
                     {t.desc ? ' · ' + t.desc : ''}
                   </span>
                 </span>
@@ -1461,8 +1825,10 @@ export function Ayuda({ abierto, setAbierto, ir, donde, estado, tutoriales = [],
   const [guiaId, setGuiaId] = useState(null);
   const [editando, setEditando] = useState(null);   // el tutorial abierto en el EDITOR
   const [desdePaso, setDesdePaso] = useState(0);
+  const [soloVer, setSoloVer] = useState(false);    // «verlo igual»: mirarlo entero, sin hacer nada
+  const [prueba, setPrueba] = useState(null);       // tutorial del editor corriendo SIN guardar
   const porId = (id) => aGuion((tutoriales || []).find((t) => t.id === id));
-  const guia = porId(guiaId);
+  const guia = prueba ? aGuion(prueba) : porId(guiaId);
   // Lo que quedó a medias en una sesión anterior (o al cerrar con la ✕).
   const [retomar, setRetomar] = useState(null);
   useEffect(() => {
@@ -1478,6 +1844,7 @@ export function Ayuda({ abierto, setAbierto, ir, donde, estado, tutoriales = [],
     <>
       {editando && (
         <EditorTutorial t={editando} ir={ir} donde={donde} onCerrar={() => setEditando(null)}
+          onProbar={(tt) => { setEditando(null); setSoloVer(false); setDesdePaso(0); setPrueba(tt); }}
           onGuardar={async (tt) => {
             const ok2 = onGuardarEdicion ? await onGuardarEdicion(tt) : false;
             if (ok2 !== false) setEditando(null);
@@ -1492,12 +1859,18 @@ export function Ayuda({ abierto, setAbierto, ir, donde, estado, tutoriales = [],
           onBorrar={(id) => onBorrar && onBorrar(id)}
           onEditar={(t) => setEditando(t)}
           onCerrar={() => setAbierto(false)}
-          onElegir={(id) => { olvidar(); setDesdePaso(0); setGuiaId(id); setAbierto(false); }}
-          onRetomar={() => { setDesdePaso(retomar.idx); setGuiaId(retomar.guia.id); setAbierto(false); }}
+          onElegir={(id) => { olvidar(); setDesdePaso(0); setSoloVer(false); setGuiaId(id); setAbierto(false); }}
+          onRetomar={() => { setDesdePaso(retomar.idx); setSoloVer(false); setGuiaId(retomar.guia.id); setAbierto(false); }}
           onOlvidar={olvidar} />
       )}
-      {guia && <Tour guia={guia} ir={ir} donde={donde} estado={estado} desdePaso={desdePaso}
-        onCerrar={() => setGuiaId(null)} />}
+      {/* `key`: al pedir «verlo igual» el tutorial se vuelve a montar desde cero, en modo mirar */}
+      {guia && <Tour key={(prueba ? 'prueba:' : '') + (guiaId || '') + (soloVer ? ':ver' : '')}
+        guia={guia} ir={ir} donde={donde} estado={estado}
+        desdePaso={soloVer ? 0 : desdePaso} soloVer={soloVer}
+        onVerIgual={() => setSoloVer(true)}
+        onCerrar={() => { setSoloVer(false); setGuiaId(null);
+          // al terminar la PRUEBA se vuelve al editor con lo que se estaba armando (nada se perdió)
+          if (prueba) { const t2 = prueba; setPrueba(null); setEditando(t2); } }} />}
     </>
   );
 }

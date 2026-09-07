@@ -104,6 +104,11 @@ _falso.borrar_piezas_molde = lambda pid: (_REG_MEM.pop(pid, None), 0)[-1]
 sys.modules["db"] = _falso
 
 import motor_pedido as MP      # noqa: E402
+# 🔴 El registro de la prueba va a un temporal, y se engancha ANTES de importar `servidor`
+# (que espeja la consola al importarse): un test no puede ensuciar el registro del sistema
+# de verdad — si no, mañana alguien investiga una falla que provocó una prueba.
+import tempfile as _tmp_log, registro as _LOG_PRUEBA   # noqa: E402
+_LOG_PRUEBA.usar_carpeta(_tmp_log.mkdtemp(prefix="verif_logs_"))
 import servidor as S           # noqa: E402
 
 FALLOS = []

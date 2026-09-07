@@ -264,9 +264,31 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
     **ver un molde del catálogo no habilita a escribirlo** — si se arregla la visibilidad sin la
     guarda de permiso, cualquiera con sesión puede re-subir o borrar el molde compartido.
 
+14. 🔴 **EL NIVEL DE MÓDULO DE `servidor.py` NO TOCA LA BASE (ni escribe nada).** Los workers del
+    ProcessPool se crean con **`spawn`**: cada uno **re-importa `servidor.py` entero**, así que todo
+    efecto colateral del import se multiplica por la cantidad de workers (hasta 6). Y `srv_visor.py`
+    —el sandbox de SÓLO LECTURA— importa el mismo módulo: lo que corra al importar se saltea su
+    candado de no-escritura. Lo que tenga que pasar UNA vez va en
+    **`_poner_base_al_dia_al_arrancar()`**, llamada desde `__main__`, o detrás de
+    **`_es_proceso_principal()`**. Contrato: `verificar_arranque_workers.py`.
+
 ---
 
 ## 9. 🐛 TRAMPAS CONOCIDAS (gotchas que ya me mordieron)
+
+- 🔴 **EL JOB OBJECT DE WINDOWS SE LLEVA PUESTO AL AYUDANTE DE ACTUALIZACIÓN.** El servidor se mete
+  a sí mismo en un Job con `KILL_ON_JOB_CLOSE` (para no dejar procesos de dibujo sueltos, entrada
+  170) y **los hijos heredan el Job aunque nazcan con `DETACHED_PROCESS`** — «detached» no es
+  «fuera del Job». Como el ayudante se lanza justo antes del `os._exit(0)`, moría a mitad de
+  descomprimir. Para que un hijo sobreviva hacen falta **las dos mitades**: `BREAKAWAY_OK` en el
+  Job (lo habilita) y `CREATE_BREAKAWAY_FROM_JOB` en el `Popen` (lo pide). Falta cualquiera de las
+  dos y `CreateProcess` o bien ignora el pedido o bien da «acceso denegado».
+
+- 🔴 **`registro.espejar_consola()` se engancha AL IMPORTAR `servidor`, también en los tests.** Un
+  contrato que importe `servidor` sin `LOG.usar_carpeta(<temporal>)` **antes** escribe en el
+  `logs/consola.log` del sistema de verdad. Y el espejo reemplaza `sys.stdout`: si le falta un
+  método del flujo, revienta lo que lo llame (pasó con `sys.stdout.reconfigure(...)`, la primera
+  línea de casi todos los `verificar_*.py`) — por eso delega en la salida real lo que no implementa.
 
 - 🔴 **EL SISTEMA VIVO PUEDE IR ADELANTE DEL CLON: no subas un archivo suelto sin comparar.**
   Pasó dos veces el mismo día, en las dos direcciones: (1) el repo tenía `actualizador.py`
@@ -391,6 +413,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 - `GET/POST /api/productos/etiqueta*` · guía PDF (`pdf_guia`, param `piezas`=nombres de la variante).
 - `POST /api/generar` (single) · `POST /api/generar_multi` (→ `generar_pedido_grupos`, multi-molde por tela). Salida a `TRABAJOS/<tid>/`. ⚠️ `generar_multi` recibe los moldes en la **lista `molds`** (que `_pid_de_request` no mira) → valida el DUEÑO **molde por molde** con un loop antes de armar nada (entrada 122).
 - **FICHA TÉCNICA** (`ficha_tecnica.py`, sale junto con la tizada en `correr()` de `generar_multi`, best-effort): tabla de talles = la `planilla` que manda el front, y abajo **un molde guía por cada (molde · diseño · variable)** del pedido. Las guías se anotan en `_guias_ficha` **dentro del bucle `por_diseno`** —después del `_fallback` de arte y con `_asig_de(dslug)` ya resuelta— porque `_asig_de` es una clausura del molde en curso y en el hilo apuntaría al último. Tope `_MAX_GUIAS_FICHA` (16) con aviso. Contrato: `verificar_ficha_disenos.py` (entrada 145).
+- **EL REGISTRO DEL SISTEMA** (`registro.py`, entrada 385): `GET /api/registro` (eventos: qué falló y **por qué**) · `POST /api/registro/limpiar` (vacía eventos + consola) · `GET /api/consola` (`limite`, `buscar`: la ventana del servidor guardada, con fecha y hora por línea) · `GET /api/actualizacion/log` (el log del ayudante) · `GET /api/publicacion/registro` (los tres, **del servidor publicado**, desde el taller). 🔴 Los dos primeros piden sesión **o** el token `X-Token-Act` (el mismo de las actualizaciones): un traceback dice rutas y versiones y no puede quedar abierto en internet. Contrato: `verificar_registro.py`.
 - `GET /api/productos` devuelve **`piezas_registradas`** (cuántas piezas tiene el registro, cacheado por mtime) además de `plantilla`: sirve para distinguir «molde cargado pero SIN piezas» de «molde OK». `plantilla` **no** se invirtió — un DXF entra a propósito con el registro vacío.
 
 ⚠️ **Coherencia molde-vs-variable (auditoría 2026-07-09, actualizada 2026-07-13):** el MAPEO ya es POR VARIABLE (regla dura, ver §5 y changelog 2026-07-13) — el conteo "faltan diseño" al guardar quedó acotado (`piezas_scope`). Gaps pendientes (menores): lista de mapeo en Config (`App.jsx` mapeador legacy con desplegables), `get_editables`/`get_etiqueta` devuelven `piezas: reg.keys()` (el front ya filtra los editables por variante). Global A PROPÓSITO: `detectar_arte` (las MESAS del arte son las mismas para todas), descargas de base, pantallas de Configuración.
@@ -1274,6 +1297,8 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 **Motor `frontend/src/tutor.jsx` · explicaciones `frontend/src/diccionario.js` · anclas `data-tour` en `App.jsx` · los tutoriales los GRABA el usuario (§11 changelog 317).**
 
+⚠️ **AUDITORÍA 2026-08-31 (changelog 372) → ARREGLADA (changelog 373).** Las 13 fallas y cómo se cerraron están ahí; la herramienta para volver a medirlo es `node auditar_tutoriales.mjs` (corre el guion REAL, no uno de juguete).
+
 - ⛔ **DOS COSAS DISTINTAS, Y NO SE MEZCLAN** (decisiones del usuario, entradas 118 y 121):
   - **UN solo PASO A PASO: «Armar una tizada»**, calcada del video `Como cargar un pedido.mp4` que
     grabó el usuario — ese video es la referencia de qué es "lo correcto". Pide acciones y las
@@ -1328,8 +1353,652 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   al paso anterior. Con el ref sobrevive; no puede pisar de más porque `avanzarDesde` sólo avanza si
   seguimos en el MISMO paso (entrada 118).
 
+- ⛔ **«ELEGÍ N DE ESTA LISTA» SE MIDE EN LA PANTALLA, NO SE CUENTAN CLICS** (373). Las opciones
+  llevan `data-elegida="1"|"0"` y el motor cuenta las puestas (`elegidasEn`), con el mismo latido
+  que `hecho`. Contar clics hacía que dos toques en el AIRE cumplieran el paso y que **tocar lo ya
+  elegido —que lo DESMARCA— lo diera por hecho**. Si al entrar ya hay N, el paso se saltea.
+- ⛔ **UN BOTÓN APAGADO NO SE MANDA A TOCAR: SE EXPLICA** (373). `estaApagado`/`motivoApagado` leen
+  el `title`/`data-motivo` del control o el aviso de la barra (`data-aviso-paso`), y **el hueco del
+  recorte incluye ese aviso** — antes el velo tapaba justo lo que decía qué faltaba.
+- ⛔ **UN PUENTE NO PUEDE COMERSE EL TUTORIAL** (373). El contador se ve siempre (también en el
+  puente) y su botón es «Llevame igual →»: LLEVA, no saltea el paso de destino. El globo final dice
+  cuántos pasos se saltearon.
+- ⛔ **UN PASO GRABADO HEREDA EL `listo` DE LA SECUENCIA** (373), no sólo los que agrega el sistema:
+  si no, se le pide a la persona algo que ya tiene hecho — y en una lista de opciones eso la lleva a
+  DESHACERLO. Los pasos «elegí N» quedan afuera (los mide la pantalla).
+- ⛔ **LO QUE SE RESUELVE POR APROXIMACIÓN, PARA QUE UN TUTORIAL VIEJO SIGA SIRVIENDO** (373):
+  el texto de un control con **números** se busca con comodín («Copiar a 1» → «Copiar a 3», siempre
+  después del exacto); un control dentro de una lista `data-opciones` **pasa a ser la lista**
+  (`anclaEfectiva`); un botón de un aviso conocido declara su `ventana` (`modalDeBoton`); y una
+  **columna se explica por su ROL** (`explicarColumna` + `roleDeColumna`), porque el id lo pone cada
+  taller (`dise_o`, `talle_short`) y con el id suelto el cartel salía «Tocá "▾"».
+- ⛔ **LO QUE DESHACE NO CUMPLE EL PASO**: `data-no-avanza` (la «✕» que quita un diseño).
+- ⛔ **CONFIGURACIÓN NO ES EL PEDIDO** (374). Ahí **cada clic cambia de pantalla** y se entra y se
+  sale de una moldería, así que: el motor no navega ni arma puentes mientras hay un avance en
+  camino (`avanzando`); hay ruta de ida Y DE VUELTA (`molde:abierto` marca la GRILLA entera,
+  `molde:grilla` vuelve con `molde-volver`, y `irPantallaAyuda` sabe SALIR de una moldería); y lo
+  que se toca ahí son TARJETAS (`<div>`), no botones — `buscar` las encuentra por texto y se queda
+  con **la más grande** (la tarjeta, no su título).
+- 🔴 **EL CONTRATO MIRA LAS ANCLAS QUE SE ARMAN** (`data-tour={'ajuste-' + item.id}`): las
+  FAMILIAS dinámicas se declaran en `verificar_diccionario.mjs` y sus ids tienen que estar
+  explicados; si aparece una familia nueva sin declarar, **corta el build**. Sin esto, 17 anclas
+  —entre ellas los 10 ajustes de una moldería— no tenían explicación y nadie lo cantaba. Y §9c:
+  toda ancla de las **RUTAS** tiene que existir en la app (una ruta rota = tutorial sin salida).
+- ⛔ **LO QUE SE COMPLETA NO AVANZA SOLO: LO CIERRA LA PERSONA** (375, pedido del usuario). Un
+  CAMPO de escritura (`accion: 'input'`, o un clic que cae sobre un `input`/`textarea`) y una
+  COLUMNA de la planilla quedan `manual`: el tutorial espera el «Siguiente →». **El avance
+  automático es sólo para lo que no hay que completar: los BOTONES y las VENTANAS emergentes.**
+  Un `select` no es un campo de escribir.
+- ⛔ **UN CARTEL NO MUESTRA CUALQUIER TEXTO** (375). El afinado «txt:\<lo tocado\>#\<sección\>» sólo
+  vale si lo tocado **parece el nombre de un control** (`esNombreDeControl`: corto y con letras).
+  Si no —un contador «✓ 120», un «?», el subtítulo de una pantalla— manda la marca del
+  contenedor, que tiene explicación escrita a mano. Y un **lienzo de trabajo** (`data-lienzo`: los
+  visores) nunca se afina: adentro se tocan PIEZAS, no botones.
+- ⛔ **EL TUTORIAL NUNCA DICE QUE NO ENCUENTRA ALGO** (377, regla del usuario). Si el control de
+  un paso no está en pantalla, el motor RESUELVE: dice en qué ventana vive y espera, arma el puente
+  y lleva, o **pasa al siguiente solo** y lo cuenta para el final. Ningún cartel de error, ningún
+  botón que no haga nada: una ruta que exige ELEGIR (`elige: true`, abrir una moldería) ofrece
+  saltear en vez de «llevame igual». Lo fija `verificar_localizar.mjs` §15.
+- ⛔ **UN SOLO LUGAR PARTE UN ANCLA: `partirAncla()`, POR EL ÚLTIMO `#`** (377). El nombre de un
+  control puede tener uno adentro («6XL · pieza #1 — Espalda…») y partir por el primero inventaba
+  una sección inexistente: el paso no se encontraba NUNCA. Es la causa que estuvo detrás del cartel
+  «No encuentro ese lugar».
+- ⛔ **UN MOVIMIENTO TAMBIÉN ES UN PASO** (378, 384). El arrastre (elegir varias piezas con un
+  recuadro) se graba como `accion:'arrastre'` — **sin el recorrido**: el cursor muestra un gesto
+  **GENÉRICO** (`GESTO_GENERICO`, siempre en el mismo lugar del elemento), porque quien sigue el
+  tutorial tiene otro molde. El motor lo MUESTRA con el **cursor del sistema** (`frontend/src/cursor.jsx`):
+  un PUNTERO propio —con forma de cursor, pero en el cian de la app: la flecha blanca se confundía
+  con la de Windows y un punto no se leía como cursor— que se hunde al apretar, con halo, pulso y
+  estela, en bucle. El cursor no toca nada — es un dibujo; la
+  acción la hace la persona. 🔴 Nunca en píxeles: la pantalla de quien sigue el tutorial tiene otro
+  tamaño y otro zoom. El paso se cumple ARRASTRANDO (un clic no alcanza), y el editor muestra el
+  mismo cursor al elegir el paso, para revisar lo grabado.
+- ⛔ **EL DESTINO DE UN PASO SE LEE SEGÚN SU SECCIÓN** (381). Cada paso guarda la pantalla entera,
+  y ahí va el `paso` del wizard del PEDIDO aunque el trabajo sea en Configuración. `clavesDe(destino)`
+  decide qué mirar: a `pedidos` → `tab` + `paso`; a `config` → `tab` + `sub` + `molde` + `ajuste`.
+  Sin eso, un tutorial de Configuración abría con **«Volvé al diseño con "← Diseño"»**, un botón que
+  ahí no existe.
+- ⛔ **EL ENTER, CON LA AYUDA ABIERTA, ES DEL TUTORIAL** (382, regla del usuario): acciona el
+  «Siguiente →» y **nada más** — se escucha en CAPTURA y se corta (`preventDefault` +
+  `stopPropagation` + `stopImmediatePropagation`) para que no confirme un campo ni mande un
+  formulario. Excepción: adentro del globo (`data-tutor-globo`), que es del propio tutorial. Botón y
+  tecla usan **la misma función** (`irAlSiguiente`).
+- 🔴 **PARA MEDIRLO DE VERDAD: `node auditar_tutoriales.mjs`** (con `py srv_visor.py` levantado).
+  Corre `aGuion` sobre los tutoriales REALES y lista lo que va a fallar. Los contratos prueban el
+  motor con casos de juguete; lo que rompe son los datos del taller.
+
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (386) — 🔴 EL ARRANQUE SE MULTIPLICABA POR 6: los workers del pool re-importaban
+  `servidor.py` ENTERO y repetían la sincronización de permisos contra la base.** Primera entrega
+  de la auditoría que pidió el usuario (*«quedan transacciones abiertas… procedimientos que ya no
+  deberían estar procesando por detrás… llamadas a la base que quedan activas y no se cierran»*).
+
+  **LO QUE PASABA.** La sincronización de permisos (`auth.sincronizar_permisos` +
+  `sincronizar_roles`) vivía en el **nivel de módulo** de `servidor.py` (líneas 113-125). En
+  Windows los workers del `ProcessPoolExecutor` se crean con **`spawn`**: el hijo **re-importa el
+  módulo entero** para encontrar la función que tiene que correr. O sea que la primera vez que
+  alguien pedía dibujar una variable, hasta **6 procesos** ejecutaban esa sincronización **a la
+  vez**: ~76 conexiones nuevas a MSSQL cada uno (era `valor` + `insertar`/`ejecutar` de a una por
+  permiso, cada una con su propia transacción) y **18 UPDATE simultáneos sobre las mismas filas de
+  `permiso`**. Y `srv_visor.py` —el sandbox de **SÓLO LECTURA**— también importa `servidor`: su
+  docstring promete que «es imposible escribir en la base» y **escribía en la base de verdad**
+  antes de que el `before_request` que filtra los no-GET pudiera hacer nada.
+
+  **LO QUE SE HIZO.**
+  1. `_es_proceso_principal()` (`multiprocessing.parent_process() is None`) separa el servidor de
+     un worker. Se usa en dos lugares: el espejo de consola (6 procesos escribían el MISMO
+     `logs/consola.log` con un candado que es **por proceso**, o sea sin candado) y la
+     sincronización.
+  2. La sincronización pasó a **`_poner_base_al_dia_al_arrancar()`**, que corre UNA vez desde
+     `__main__`. Un fallo ya no impide arrancar, pero **queda en el registro** (`LOG.error`): antes
+     era un `print` que en el servidor publicado no lee nadie.
+  3. `auth.sincronizar_permisos` y `sincronizar_roles`: **una transacción y una conexión** cada una
+     (se lee todo con un cursor y después se escribe), en vez de ~40 conexiones sueltas cada una.
+  4. **EL AYUDANTE DE ACTUALIZACIÓN SE MORÍA CON EL SERVIDOR (Windows).** El Job Object llevaba
+     sólo `KILL_ON_JOB_CLOSE`, y **los hijos heredan el Job aunque nazcan «detached»**: cuando el
+     servidor hacía `os._exit(0)` para dejarse reemplazar, Windows mataba el Job entero y con él a
+     `actualizador.py` **a mitad de descomprimir** (síntoma: «quedó a medias» en el arranque
+     siguiente). Ahora el Job lleva **`BREAKAWAY_OK`** y el ayudante se lanza con
+     **`CREATE_BREAKAWAY_FROM_JOB`** (con reintento sin el flag + aviso al registro si la máquina
+     no lo permite). El plan B de `actualizador.py` arranca el servidor nuevo igual, para que no
+     quede colgado del grupo del ayudante.
+  5. `srv_visor.py` **ata sus propios hijos** (`_atar_hijos_a_este_proceso`): usa el mismo motor y
+     el mismo pool, así que cada vez que se cerraba el sandbox quedaban hasta 6 procesos de ~200 MB
+     sueltos — exactamente lo de la entrada 170.
+  6. `registro._Espejo` delega a la salida real lo que no implementa (`__getattr__`) y `fileno()`
+     falla como falla un flujo sin descriptor. **Lo destapó esta misma tanda**:
+     `sys.stdout.reconfigure(encoding="utf-8")` —la primera línea de casi todos los contratos—
+     reventaba con `AttributeError` apenas importaban `servidor`.
+  7. **16 contratos `verificar_*.py` escribían en el registro DE VERDAD.** Ahora todos hacen
+     `LOG.usar_carpeta(<temporal>)` **antes** de `import servidor`. La regla ya estaba escrita; el
+     espejo se enganchaba igual porque vive en el import.
+
+  **VERIFICADO** con el contrato nuevo **`verificar_arranque_workers.py`**: importar `servidor` no
+  le pide NADA a la base (ni en el proceso principal ni dentro de un worker de verdad, lanzado con
+  un `ProcessPoolExecutor`), el worker se reconoce como worker, el Job tiene los dos flags
+  (`QueryInformationJobObject`) y un hijo lanzado con breakaway queda **fuera** del Job
+  (`IsProcessInJob` contra el handle real). Más `verificar_registro.py`,
+  `verificar_config_concurrente.py`, `verificar_db_conexiones.py`, `verificar_permisos_molde.py`,
+  `verificar_piezas.py` y `verificar_columnas_obligatorias.py` en verde, y el servidor 8050
+  reiniciado y comprobado por HORA DE ARRANQUE.
+
+  ⚠️ **Lo que NO era.** La auditoría anterior (278) concluyó «no hay transacciones fantasma» y era
+  cierto: `db.cursor()` cierra bien en todos los caminos. El problema nunca estuvo ahí, estuvo en
+  **cuántas veces se abre una conexión** y **desde qué proceso**. Medido de nuevo el 2026-09-07
+  contra la base real: 0 sesiones dormidas con transacción, 0 bloqueos, 0 locks de usuario.
+
+- **2026-09-01 (385) — EL REGISTRO DEL SISTEMA: qué falló, POR QUÉ, y la consola entera guardada.**
+  Pedido del usuario, en dos partes: *«agregá logs a este sistema en la parte de configuración para
+  poder ver las fallas y deje registrado el por qué»* y, después, *«los logs deben ser sólo del
+  sistema, o sea todo lo que abriría en un PowerShell; y lo que falle que quede registrado en algún
+  archivo que no sea base de datos, sino que tenga sólo eso, con fecha y hora real»*. El caso que lo
+  originó fue de esa misma mañana: una actualización al servidor publicado dijo «falló» y el motivo
+  estaba en un archivo del VPS al que sólo se llega por SSH — todo el diagnóstico salió de leer
+  código y atar cabos por las horas.
+
+  **DOS COSAS, las dos en archivos de texto, ninguna en la base:**
+  1. **Eventos** (`logs/eventos.jsonl`, uno por línea): `cuando · tipo (error/aviso/info) · area ·
+     que · **porque** · datos`. El `porque` es el punto: la causa con nombres y números.
+  2. **La consola** (`logs/consola.log`): TODO lo que el servidor imprime, con **fecha y hora reales
+     al principio de cada línea**. Es lo mismo que se ve en la ventana negra, pero que sobrevive a
+     cerrarla — y que existe cuando el servidor corre **sin ventana** (servicio, o el VPS), que es
+     justamente donde antes no lo veía nadie.
+
+  **Módulo `registro.py`** (nuevo): `error/aviso/info(area, que, porque, **datos)`, `leer()`,
+  `resumen()`, `limpiar()`; `espejar_consola()` engancha un `_Espejo` a `sys.stdout`/`sys.stderr`
+  que deja pasar todo a la ventana de siempre Y lo copia al archivo línea por línea; `leer_consola`,
+  `limpiar_consola`, y `usar_carpeta()` — la ÚNICA puerta para mandar el registro a otra carpeta.
+  Rotación por tamaño con `os.replace` (2 MB eventos / 4 MB consola) y `try/except` en todo: **el
+  registro nunca rompe lo que estaba registrando**.
+
+  **Servidor**: `LOG.espejar_consola()` en el import (temprano: lo que se imprime antes se pierde);
+  el `errorhandler` deja el traceback con la ruta y el método; `actualizaciones.py` y
+  `actualizador.py` anotan cada etapa de una actualización con su motivo. Endpoints:
+  `GET /api/registro`, `POST /api/registro/limpiar` (vacía las dos cosas), `GET /api/consola`
+  (`limite`, `buscar`), `GET /api/actualizacion/log` y `GET /api/publicacion/registro` (el registro,
+  el log del ayudante y la consola **del publicado**, leídos desde el taller — el agujero del día).
+
+  🔴 **NO se abre a internet.** `/api/registro` y `/api/consola` piden sesión, o el **mismo token**
+  (`X-Token-Act`) con el que el taller le manda las actualizaciones al publicado. Un traceback dice
+  rutas y versiones del servidor: dejarlo abierto sería regalar el mapa de la casa. El token deja
+  LEER, no vaciar.
+
+  **Pantalla** (Configuración → «Registro del sistema», `PantallaRegistro` + tarjeta `cfg-registro`):
+  toggle «Este sistema / El sistema publicado», filtros Todo/Sólo fallas/Avisos/Movimientos, tarjetas
+  con el **porqué a la vista**, «Ver el detalle completo» (datos + traceback con scroll propio), el
+  detalle de la última actualización, y el panel **Consola del servidor** con buscador (con respiro
+  de 300 ms: si no, cada tecla pedía el archivo entero) y selector de cuántas líneas. Las líneas se
+  pintan de rojo **por lo que dicen**, no por la vía por la que salieron: werkzeug escribe también
+  los pedidos que salieron bien por stderr.
+
+  **CONTRATO NUEVO: `verificar_registro.py`** (36 chequeos; `db` doblado, todo en un tmp): el porqué
+  se guarda, un dato imposible no tumba el registro, es texto y no base, la consola sale igual por la
+  ventana y queda con fecha y hora, la ventana puede fallar y el servidor sigue, rota sin esconder lo
+  anterior, y el candado del token.
+
+  **DOS COSAS QUE SALIERON MAL Y VALE ANOTAR:**
+  · **Un test escribió en el registro de verdad.** `verificar_actualizacion_carrera.py` simula una
+    actualización cortada; como `actualizaciones` ahora registra eso, la corrida dejó *«La versión
+    1.0.32 quedó a medias»* en el registro REAL — una falla inventada que mañana alguien investiga.
+    Arreglado con `usar_carpeta(TMP)` y un chequeo que lo verifica. Misma clase de error que
+    [[test-no-toca-mssql]]: el aislamiento tiene que cubrir TODO lo que el módulo escribe.
+  · **El contrato del registro se medía a sí mismo.** Como `import servidor` engancha el espejo, los
+    `print` del propio contrato iban al archivo: contar «cuántas líneas hay» daba un número que
+    cambiaba solo, y con el tope de rotación bajado un solo `OK` rotaba el archivo y borraba la
+    prueba. Se arregló con una marca propia en cada línea y midiendo TODO antes de imprimir nada.
+
+  **Y algo que ya existía y no alcanzaba**: `_arrancar-oculto.bat` redirige a `logs/servidor.log`,
+  pero lo **sobrescribe en cada arranque**, no pone hora por línea, no existe si se arranca a mano y
+  no se puede ver desde ninguna pantalla. El espejo cubre esos cuatro huecos.
+
+  También en esta tanda: `srv_visor.py` (el sandbox de sólo lectura) lleva su propio registro y una
+  ruta `/api/_romper` que revienta a propósito, para probar de punta a punta que un error no previsto
+  queda anotado. Y los eventos de la misma centésima de segundo ya no salían al revés: `leer()`
+  desempata por el lugar en el archivo.
+
+- **2026-09-01 (384) — EL GESTO QUE MUESTRA EL CURSOR ES **GENÉRICO**, SIEMPRE EN EL MISMO LUGAR.**
+  Decisión del usuario: *«que no muestre el arrastrado real que hacemos cuando grabamos; debe ser un
+  arrastrado genérico que siempre se muestra en la misma parte del campo»*. Y tiene razón: quien
+  sigue el tutorial tiene **otro molde, otras piezas y otro zoom**, así que calcar el recorrido de
+  quien grabó no enseña nada — puede hasta marcar una zona que en su pantalla no significa nada. Lo
+  que hay que mostrar es EL GESTO: apretar, arrastrar y soltar para abarcar varias cosas de una.
+  Es la MISMA regla que ya rige en el resto del sistema: en una lista de opciones el paso es la
+  LISTA y no la tarjeta que se tocó («elegí 2», no «tocá éstos dos»). Acá: el paso es EL MOVIMIENTO,
+  no el recorrido.
+  **`GESTO_GENERICO`** (localizar.js): una diagonal de **0,22·0,28 → 0,75·0,78** en proporciones del
+  elemento — se ve igual de clara en un visor grande que en uno chico.
+  🔴 **Y SE DEJÓ DE GUARDAR EL RECORRIDO**, en las tres puntas: el grabador y el «⏺ Agregar pasos»
+  sólo anotan QUE FUE un arrastre, el servidor ya no exige los puntos y `aGuion` no los propaga.
+  Menos datos que viajan, menos que puede quedar mal — y de paso **los dos pasos del tutorial del
+  usuario que se habían guardado sin recorrido** (con el server viejo) volvieron a funcionar solos:
+  ya no hace falta regrabarlos ni existe el aviso «MOVIMIENTO SIN GESTO».
+  VERIFICADO EN LA APP sobre uno de esos pasos: el cursor recorre 0,26·0,32 → **0,75·0,78** del
+  visor, exactamente el gesto genérico, sin ningún recorrido guardado detrás.
+  CONTRATOS: `verificar_localizar.mjs` §17 reescrito (el gesto sale siempre del mismo lugar, cruza en
+  diagonal y cae en la misma PROPORCIÓN en una pantalla más grande) y `verificar_guion.mjs` §20 (un
+  paso de movimiento sin recorrido sigue siendo un movimiento, con su cartel).
+  📌 LECCIÓN: grabar más detalle no es grabar mejor. El recorrido exacto era información de MÁS
+  —específica de quien grabó, inútil para quien mira— y encima tenía que viajar, guardarse y poder
+  faltar. Lo genérico enseña lo mismo y no se puede romper.
+- **2026-09-01 (383) — 🔴🔴 LA ACTUALIZACIÓN 1.0.32 «FALLÓ» SIN QUE FALLARA NADA: EL SERVIDOR SE
+  APAGABA ANTES DE QUE LA VERSIÓN NUEVA ESTUVIERA EN EL DISCO.** Reporte del usuario: publicó y le
+  salió «Última actualización: **falló** — versión 1.0.32; el paquete quedó APARCADO para aplicarlo a
+  mano», con el VPS todavía en 1.0.31.
+  DIAGNÓSTICO (estado del VPS + tiempos + código): es una **CARRERA del modo «reinicio»** (Linux con
+  `Restart=always`, el que no necesita root):
+  1. `vigilar()` aplica la pendiente: escribe `en_curso.json`, lanza al ayudante SUELTO y **se apaga
+     a los 2 segundos** (`time.sleep(2)` — «que el ayudante levante antes de apagarnos»);
+  2. systemd lo revive **enseguida**, con la versión VIEJA: el ayudante recién está respaldando la
+     carpeta y descomprimiendo;
+  3. ese arranque corre `recuperar_si_quedo_a_medias()`, ve la marca «en curso» y **declara
+     interrumpida una actualización que estaba saliendo bien**: la aparca (fecha centinela) y deja
+     la versión vieja corriendo;
+  4. y como el servidor volvió, **el puerto nunca se libera**: el ayudante espera 90 s en
+     `esperar_libre` y termina pidiendo un `systemctl restart` que sin root no puede hacer.
+  🔴 LA EVIDENCIA QUE LO CIERRA: el POST de publicar fue a las **13:17:03** y el fallo quedó
+  registrado a las **13:17:17** — catorce segundos: el tiempo exacto de ese ida y vuelta, no el de
+  una actualización que se rompe. Y el paquete llegó **entero y sano** (2,1 MB, sha verificado).
+  ARREGLO, LAS DOS MITADES:
+  **(a) EL SERVIDOR NO SE APAGA HASTA QUE LA VERSIÓN NUEVA ESTÁ EN EL DISCO.** El ayudante deja
+  `_actualizacion/listo.flag` **justo después de descomprimir** (`avisar_listo`) y el servidor espera
+  esa señal (`esperar_al_ayudante`, tope 240 s) en vez de contar 2 segundos a ciegas. Así, cuando
+  systemd lo levanta, levanta CON LA NUEVA. La señal se borra al empezar cada actualización —una
+  vieja haría que se apague al instante— y al terminar.
+  **(b) UN ARRANQUE EN EL MEDIO NO ES UN FRACASO.** `recuperar_si_quedo_a_medias()` mira cuándo
+  empezó el ayudante: si fue recién, lo deja terminar (él escribe el resultado). Recién pasado el
+  plazo se da por interrumpida — ahí sí no hay nadie del otro lado.
+  CONTRATO NUEVO: **`verificar_actualizacion_carrera.py`** (14 chequeos, en una carpeta temporal, sin
+  tocar nada real): que se espere la señal y no para siempre; que un reinicio en el medio no escriba
+  «falló» ni aparque; que una cortada de verdad SÍ se marque; que una señal vieja no apague antes de
+  tiempo; y que el ayudante avise **después** de descomprimir y no antes.
+  ⚠️ PARA DESBLOQUEAR EL VPS AHORA: el paquete está sano y aparcado allá, se aplica a mano con los
+  comandos de DESPLIEGUE.md §11.b (`unzip -o _actualizacion/pendiente.zip` + `systemctl restart`).
+  Este arreglo viaja en el próximo paquete: la primera vez hay que aplicarlo a mano igual.
+  📌 LECCIÓN: un `sleep(2)` es una suposición disfrazada de sincronización. Si algo tiene que
+  pasar antes de seguir, hay que **esperar la señal de que pasó**, no un rato que parezca suficiente.
+- **2026-09-01 (382) — 🔴 CON LA AYUDA ABIERTA, EL ENTER ES DEL TUTORIAL.** Regla del usuario:
+  *«el enter cuando esta activo la ayuda es esclusivamente para el boton siguiente del tutorial y mas
+  nada»*. Hasta hoy valía lo contrario y estaba escrito en el código («EL ENTER ES DEL CAMPO, NO DEL
+  TUTORIAL»): la tecla confirmaba lo que se estaba escribiendo, igual que sin tutorial. **Se invirtió
+  la regla**, y el comentario viejo se corrigió para que no quede contradiciendo al código.
+  CÓMO: un `keydown` en **fase de CAPTURA** con `preventDefault` + `stopPropagation` +
+  `stopImmediatePropagation` — si no, la app lo recibe igual y confirma un campo, manda un formulario
+  o dispara el botón que tenga el foco. Única excepción: **dentro del propio globo**
+  (`data-tutor-globo`), donde el Enter responde la pregunta «¿cuántas?» — que también es del tutorial.
+  🔴 BOTÓN Y TECLA COMPARTEN UNA SOLA FUNCIÓN (`irAlSiguiente`): con un puente resoluble LLEVA, y en
+  el resto SALTEA el paso. Dos caminos separados habrían terminado discrepando, como ya pasó con el
+  recuadro y con lo que se atiende primero. El botón ahora muestra la pista **«Enter»**.
+  VERIFICADO EN LA APP: con el foco en un campo y texto escrito, el Enter queda **cancelado**
+  (`defaultPrevented`), el valor sigue intacto, la ventana no se cierra — y el tutorial avanza del
+  paso 3 al 4. Sin tutorial abierto, nada cambia.
+  ⚠️ CONSECUENCIA A TENER EN CUENTA: un campo que se confirmaba SÓLO con Enter hay que confirmarlo
+  con su botón mientras el tutorial está abierto (todos los del sistema tienen uno al lado: «Agregar»,
+  el «✓» de nombrar piezas, «Crear Molde»…).
+  CONTRATO: `verificar_localizar.mjs` §18 (que la tecla se escuche en captura, que se corte del todo,
+  que el globo quede exento y que el botón use la MISMA función).
+- **2026-09-01 (381) — 🔴 UN TUTORIAL DE CONFIGURACIÓN ABRÍA MANDANDO AL PASO **DISEÑO** DEL
+  PEDIDO.** Reporte del usuario con la captura: abre «Cargar molde» (que es de Configuración) y el
+  primer cartel dice **«Volvé al diseño con "← Diseño"»** — un botón que en Configuración no existe:
+  el tutorial arrancaba con un puente imposible, en 1/46.
+  CAUSA: cada paso guarda la pantalla entera en `donde`, y ahí va también **`paso`, que es el paso
+  del WIZARD DEL PEDIDO** (`diseno`, `moldes`, `arte`…). Es el estado en que quedó el pedido cuando
+  se grabó, no algo que el paso necesite: los 47 pasos de ese tutorial dicen `paso: 'diseno'` con
+  `tab: 'config'`. El motor lo tomaba como destino y armaba el puente para volver al pedido.
+  FIX: **qué partes del destino importan depende de la SECCIÓN** (`clavesDe`): si el paso va a
+  `pedidos`, valen `tab` y `paso`; si va a `config`, valen `tab`, `sub`, `molde` y `ajuste` — el
+  `paso` del pedido se ignora. Lo usan el puente y `esPasoNav`. Arregla los tutoriales YA grabados
+  sin regrabar nada.
+  VERIFICADO EN VIVO tal cual el reporte: parado en el paso Diseño de un pedido, se abre «Cargar
+  molde» y ahora el primer cartel es **«Entrá a "Molderías"»** (1/46).
+  ✅ DE PASO, CONFIRMADO QUE EL CURSOR ANDA CON EL GESTO REAL DEL USUARIO: regrabó los dos arrastres
+  (ya con `desde`/`hasta` en la base) y en el paso 17/46 el cartel dice «Arrastrá como te muestra el
+  cursor…» con el puntero recorriendo y=338 → 667 apretado (`scale 0.86`, halo 11) y soltando al
+  final (`scale 1`, halo 15); el recuadro crece hasta 387 px. Su gesto era casi vertical y el cursor
+  lo reproduce así: exactamente lo que grabó.
+  📌 LECCIÓN: guardar «todo el contexto por las dudas» tiene precio. Un dato que no es del paso
+  —el estado del pedido en un tutorial de configuración— termina siendo interpretado como una orden.
+- **2026-09-01 (380) — EL CURSOR DE LA AYUDA: UN PUNTERO PROPIO (dos vueltas hasta acertar).**
+  Primer pedido del usuario: *«podemos cambiar el cursor por uno más moderno y más acorde al sistema,
+  y que quede diferente al básico para que no se mezcle con el cursor del usuario?»*. Tenía toda la
+  razón: la primera versión era la flechita blanca de siempre — **la misma que dibuja Windows**. En
+  pantalla había dos flechas idénticas y no se sabía cuál era la de uno.
+  🔴 **PRIMER INTENTO, RECHAZADO: un ORBE** (un punto con anillo). Inconfundible, sí, pero dejó de
+  leerse como un cursor: *«no me gusta ese punto. debe de ser un cursor, con forma de cursor pero
+  moderno»*. La tensión real es ésa: **tiene que parecerse a un puntero para que se entienda que
+  muestra un movimiento del mouse, y a la vez no parecerse al de la máquina.**
+  LO QUE QUEDÓ: la **silueta de un puntero** con las esquinas redondeadas (`strokeLinejoin: round`
+  sobre un trazo grueso del color del borde: se ve moderno sin un path lleno de curvas), pintada con
+  un degradado del **cian de la app** —claro en la punta—, borde oscuro, un filo brillante que le da
+  aspecto de vidrio, y **halo** propio para que se despegue de cualquier fondo. La punta del path
+  está en (0,0) del grupo, así que cae EXACTO en el punto del gesto.
+  Y el gesto se lee de un vistazo: **el puntero se hunde** al apretar (`scale 0.86`) y el **halo se
+  cierra y se enciende** (r 15 → 11); un **PULSO** se expande justo en el golpe (al apretar y al
+  soltar); una **ESTELA** punteada muestra de dónde viene; y el **recuadro** crece con él, igual que
+  el que dibuja la app de verdad.
+  Todo en UN SVG a pantalla completa (antes eran tres capas sueltas): estela, recuadro y puntero
+  comparten coordenadas y no se pueden desalinear. Sigue animándose con `requestAnimationFrame`
+  sobre atributos del SVG — **sin un `setState` por cuadro**.
+  VERIFICADO EN LA APP (medido en el DOM, ciclo completo): el puntero recorre y=214 → 459, se hunde
+  a `scale(0.86)` con el halo en 11 mientras arrastra, vuelve a `scale(1)` y halo 15 al soltar, el
+  pulso aparece en los dos golpes (0,45 y 0,22) y el recuadro crece hasta 245 px.
+  📌 LECCIÓN: un elemento que IMITA al del sistema operativo no es «familiar», es ambiguo; pero
+  uno que se aleja demasiado deja de decir lo que es. El punto justo es **la forma conocida con la
+  identidad propia**.
+
+- **2026-09-01 (379) — 🔴 EL MOVIMIENTO SE GRABABA PERO NO SE VEÍA AL SEGUIR EL TUTORIAL: DOS
+  CAUSAS.** Reporte del usuario: *«funciona cuando estas grabando pero no funciona cuando estas
+  siguiendo el tutorial»*. Eran dos cosas encimadas, y las dos tenían que arreglarse:
+  **(1) 🔴 EL GUION DESCARTABA EL ARRASTRE COMO SI FUERA UN CLIC REPETIDO.** En el visor primero se
+  TOCA una pieza y después se ARRASTRA el recuadro: dos pasos con la misma ancla (`visor-molde`). La
+  regla de «dos veces el mismo lugar seguidas = un solo paso» (361) no miraba la ACCIÓN, así que se
+  comía el gesto: **no llegaba al guion**. Sus dos arrastres eran los pasos 13 y 17, justo detrás de
+  un clic en el visor. FIX: el descarte compara también la acción — dos clics siguen siendo uno, un
+  clic y un movimiento son dos. CONTRATO §20 en `verificar_guion.mjs`, con ese caso exacto.
+  **(2) ⚠️ Y EL SERVER SEGUÍA CORRIENDO EL CÓDIGO VIEJO.** El tutorial se grabó antes de reiniciar,
+  así que el sanitizador de entonces —que no conocía el gesto— **guardó los pasos SIN `desde`/`hasta`**
+  (verificado en la base: los dos arrastres con los puntos en `None`). Sin recorrido no hay cursor
+  que mostrar. Server reiniciado (arranque 11:49 > `servidor.py` 11:25, comparado como manda la
+  regla). 🔴 **Esos dos pasos hay que REGRABARLOS**: el recorrido no está y no se puede adivinar.
+  **(3) LO QUE SE AGREGÓ PARA QUE ESTO NO SE VUELVA A ESCONDER:**
+  · un paso de movimiento **sin sus puntos** ya no exige un gesto que nadie ve: vale como paso
+    normal de ese lugar (se explica y se sigue), y queda marcado `_sinGesto`;
+  · el AUDITOR lo canta: **«MOVIMIENTO SIN GESTO: se guardó el paso pero no el recorrido —
+    regrabalo»**, y el aviso viaja con el paso (no por índice: el guion no coincide con la grabación
+    porque completa etapas y junta repetidos) y **sobrevive al juntado**.
+  📌 LECCIÓN: «anda al grabar pero no al reproducir» apunta al GUION, no al grabador — entre una
+  cosa y la otra hay una capa que transforma lo grabado, y ahí estaba el filtro que se lo comía. Y la
+  de siempre, otra vez: **un cambio en `servidor.py` no existe hasta reiniciar** (la memoria
+  `reiniciar-server-python` cuenta las 2h30 que costó aprenderlo).
+- **2026-09-01 (378) — 🔴🔴 EL CURSOR DEL SISTEMA: LA AYUDA YA PUEDE GRABAR **MOVIMIENTOS**, NO
+  SÓLO CLICS.** Pedido del usuario, con un video (`Muestra de curzor.mp4`): *«podemos hacer que cree
+  como un cursor del sistema para que en ayuda podamos grabar algunos movimientos como este
+  ejemplo»*. En el video: **arrastrar un recuadro en el visor** para elegir 6 piezas de una — el
+  gesto que más cuesta explicar por escrito y que el grabador no veía (sólo anotaba clics).
+  **(1) SE GRABA EL GESTO.** El grabador (y el «⏺ Agregar pasos» del editor) escuchan
+  `mousedown`→`mouseup`: si hubo desplazamiento de verdad (`esArrastre`, ≥14 px) se anota un paso
+  **`accion: 'arrastre'`** con sus dos puntos. El clic que cierra el gesto NO se anota aparte.
+  **(2) 🔴 EN PORCENTAJES DEL ELEMENTO, NUNCA EN PÍXELES** (`puntoRelativo` / `puntoEnPantalla`).
+  La pantalla de quien sigue el tutorial tiene otro tamaño, otro zoom y otro molde: un punto en
+  píxeles no significaría nada ahí. El contrato lo prueba con el caso exacto: el mismo gesto grabado
+  en 400×200 cae en el punto equivalente de una pantalla de 800×600.
+  **(3) EL CURSOR** (`frontend/src/cursor.jsx`): una mano dibujada que aparece en el punto de
+  inicio, **aprieta**, se desliza hasta el final **dibujando el recuadro** y suelta — en bucle, hasta
+  que la persona lo hace. No toca nada: es un dibujo (la acción real siempre la hace la persona,
+  como todo el resto de la ayuda). Se anima con `requestAnimationFrame` y `transform`, **sin un
+  `setState` por cuadro**: el tutorial corre encima de una pantalla pesada (el visor tiene cientos
+  de piezas) y no puede robarle fluidez justo a lo que está enseñando.
+  **(4) EL PASO SE CUMPLE MOVIENDO:** el motor espera un arrastre de verdad dentro del mismo lugar
+  (un clic no alcanza: sería no haber hecho el gesto).
+  **(5) Y SE PUEDE REVISAR:** al elegir el paso en la línea de tiempo, **el editor muestra el mismo
+  cursor**, así se comprueba que el gesto quedó bien grabado sin reproducir todo el tutorial. En la
+  línea de tiempo el chip se llama «✋ Arrastrar en …».
+  **(6) EL SERVIDOR** guarda `desde`/`hasta` **validando que estén entre 0 y 1**: un gesto fuera de
+  rango mandaría el cursor a cualquier lado de la pantalla, así que ese paso no se guarda.
+  VERIFICADO EN LA APP: se grabó el arrastre sobre el visor real (chip «✋ Arrastrar en Visor del
+  molde») y al elegirlo se ve el cursor haciendo el ciclo — medido en el DOM: la mano baja
+  (`scale(0.82)`), recorre de y=260 a y=505, suelta (`scale(1)`), vuelve al inicio y repite; el
+  recuadro crece con ella (9 → 56 → 245 px).
+  CONTRATO: `verificar_localizar.mjs` §17 (porcentajes, la misma grabación en otra pantalla, el
+  recorte al borde y que el temblor de un clic no se grabe como gesto).
+  ⚠️ POR AHORA SÓLO EL ARRASTRE. La rueda (zoom) y los movimientos con varias paradas quedan para
+  cuando hagan falta: el gesto que se pidió —y el que de verdad cuesta explicar— es el recuadro.
+  📌 LECCIÓN: cuando algo «no se puede explicar con palabras», la respuesta no es escribir mejor el
+  cartel: es MOSTRARLO. El video del usuario ahorró media discusión — se vio en 5 segundos qué gesto
+  era y por qué el sistema no lo podía contar.
+- **2026-09-01 (377) — 🔴🔴 SE ELIMINÓ EL CARTEL «NO ENCUENTRO ESE LUGAR EN PANTALLA» — Y LA
+  CAUSA QUE LO GENERABA.** Reporte del usuario con la captura del paso **16/37** de su tutorial
+  «Cargar molde»: *«este tipo de cartel no quiero más. no me puede decir mas no encuentro. si me esta
+  guiando y el tutorial esta grabado en el sistema debe de saber todo como va a salir»*.
+  **(1) 🔴 LA CAUSA: EL `#` DEL NOMBRE CHOCABA CON EL `#` DEL SEPARADOR.** El ancla afinada es
+  `txt:<nombre>#<sección>`, y ese paso se llamaba **«6XL · pieza #1 — Espalda…»**: al partir por el
+  PRIMER `#`, la «sección» salía `1 — espalda 16xl · pieza `, que no existe. Así el paso **no se
+  podía encontrar nunca**, ni caer a su sección, ni reconocerse como parte del visor — por eso
+  mostraba el texto crudo y el cartel de error. FIX: **`partirAncla()`**, el único lugar donde se
+  parte un ancla, y por el **ÚLTIMO** `#` (un `data-tour` nunca lleva uno). Lo usan `buscar`,
+  `esDelAncla`, `anclaEfectiva`, `seccionDe`, el des-afinado y `explicar`. Ese paso pasó de un
+  parágrafo ilegible a **«Trabajá en el visor: tocá las piezas que necesites»**.
+  **(2) 🔴 Y EL CARTEL SE FUE, EN SERIO.** Cuando el control de un paso no está en pantalla, el
+  motor ya no confiesa: **resuelve**. Si el paso vive en una VENTANA que no se abrió, lo dice y
+  espera; si pide otra PANTALLA, arma el puente y lleva; y si no hay nada que hacer, **pasa al
+  siguiente solo** (5 s; 1,2 s si el ancla es de las que no se pueden mostrar). Al final se dice
+  cuántos pasos no aplicaron («2 pasos del tutorial no estaban en tu pantalla y se pasaron solos»).
+  El «Buscando ese lugar en pantalla…» también se fue: ahora dice «Preparando este paso…».
+  **(3) NINGÚN ESTADO SIN SALIDA.** Un puente que exige ELEGIR (abrir una moldería: el sistema no
+  puede decidir cuál) marcaba «Llevame igual →» y ese botón **no hacía nada** — la sensación exacta
+  de tutorial trabado. Esas rutas se declaran con `elige: true` y ahí el botón saltea el paso.
+  **(4) UN PASO QUE NO SE PUEDE MOSTRAR NO MUESTRA BASURA:** si el ancla guardada es un símbolo
+  («👁», «?») y no está en pantalla, el cartel dice «Este paso no está en tu pantalla, así que lo
+  salteo» en vez de «Tocá "👁"».
+  VERIFICADO EN VIVO con «Cargar molde» corrido de punta a punta: **38 carteles, CERO «no
+  encuentro»**, y el tutorial llega al final solo.
+  CONTRATOS: `verificar_localizar.mjs` §15 (la frase no puede volver al motor — se mira el código
+  VIVO, sin comentarios — y existen el conteo de «no aplicaron» y el puente que exige elegir) y
+  §16 (el `#` del nombre no rompe el ancla, con el caso exacto del usuario).
+  📌 LECCIÓN: un cartel de error que el usuario ve DOS veces no es un cartel: es un síntoma. La
+  pregunta correcta no era «cómo lo redacto mejor» sino «por qué el sistema no sabe dónde está eso, si
+  el tutorial está grabado» — y ahí apareció el separador roto.
+- **2026-09-01 (376) — LO QUE FALTABA DE CONFIGURACIÓN: LAS 5 VENTANAS INVISIBLES, EL «?» QUE SE
+  ROBABA EL NOMBRE DE LOS CAMPOS, LOS TALLES Y LAS PIEZAS.** Cierre de los pendientes que dejó la
+  375, a pedido del usuario («agregale entonces lo que falta»):
+  **(1) 🔴 CINCO VENTANAS QUE LA AYUDA NO VEÍA.** «Crear Nuevo Molde», «Talle de Guía», «Piezas del
+  grupo», «Vista previa del molde» y «Confirmar Tizada de Sublimación» están hechas A MANO (no pasan
+  por el componente `Modal`) y **ninguna tenía `data-modal`**: el tutorial no las reconocía, no
+  frenaba ante ellas, no las explicaba y el editor no las podía ofrecer. Marcadas las 5, con su
+  explicación y su ficha dibujable (21/21) — y las de título fijo entran al catálogo del editor.
+  **(2) 🔴 EL «?» DE AYUDA SE ROBABA EL NOMBRE DE LOS CAMPOS.** Los rótulos de esta app llevan al
+  lado el botón «?» del popover, y `rotuloDe` tomaba ESE texto como identidad del campo: el tutorial
+  del usuario tiene dos pasos guardados como **`txt:?`**, imposibles de reencontrar. Ahora cada
+  candidato a rótulo tiene que parecer un NOMBRE (`esNombreDeControl`) y se le saca el «?» pegado.
+  **(3) UN PASO QUE NO SE PUEDE MOSTRAR YA NO FRENA.** Los `txt:?` ya grabados no se pueden adivinar,
+  pero se marcan **`dudoso`** y, si no aparecen en pantalla, el tutorial **pasa de largo solo**
+  (antes: 5 s de «No encuentro ese lugar» y seguir a mano).
+  **(4) LOS TALLES SON UNA LISTA DE OPCIONES.** La grilla del «Talle de Guía» lleva `data-opciones`
+  (+ `data-elegida`): el paso pasó de **«Tocá "M"»** a **«Elegí el talle de guía»**, marcando la lista
+  entera. Y arregla el paso YA GRABADO, sin regrabar (la generalización corre al reproducir).
+  **(5) LAS PIEZAS DEL VISOR SE GRABAN POR SU NOMBRE.** Los dos visores de la moldería (mapeo y
+  medidas) llevan **`data-pieza`**: tocar una pieza se graba como `pieza:<nombre>` y el tutorial la
+  vuelve a iluminar, en vez de marcar el visor entero.
+  VERIFICADO EN VIVO con el tutorial **«Cargar molde»** que grabó el usuario (46 pasos → 37):
+  1 «Entrá a "Molderías"» · 2 «Tocá "Nueva Moldería"» (la ventana ya se detecta) · 3 el campo del
+  nombre **espera** («Escribí y tocá "Siguiente →"») · 5 «Tocá "Subí el molde"» · **6 se saltea solo**
+  (era el `txt:?`) · 7 «Elegí el talle de guía» · 8 con la ventana abierta, **la lista entera
+  iluminada** (510×426) y el cartel «Elegí el talle de guía».
+  CONTRATOS: `verificar_localizar.mjs` §14 (el «?» no es el nombre de un campo; y el rótulo de verdad
+  se usa sin el «?» pegado). El DOM de juguete ganó `querySelector` y `previousElementSibling`, que
+  le faltaban — sin ellos ese camino del código **no se probaba**.
+  ⚠️ QUEDA: en el visor de «Nombrar piezas» (el de agrupar) las piezas todavía no tienen nombre
+  propio mientras se las nombra, así que ahí el paso sigue siendo el lienzo — que es lo correcto:
+  quien sigue el tutorial tiene otro molde y otras piezas.
+- **2026-09-01 (375) — 🔴 UN CAMPO SE ESCRIBE: EL TUTORIAL ESPERA. Y LOS CARTELES DEJARON DE
+  MOSTRAR BASURA.** Pedido del usuario: *«cuando son campos de escribir no saltará automático, debe
+  presionar Siguiente así puede escribir. El automático solo es en botones y ventanas emergentes que
+  no tenes que precionar nada»*. Hecho, y de paso se arregló lo que mostró su tutorial nuevo
+  **«Cargar molde» (46 pasos grabados)**, que es de Configuración:
+  **(1) LOS PASOS DE ESCRIBIR SE TERMINAN A MANO.** `aGuion` marca `manual` (con `manualPor:
+  'campo'`) todo paso `input`, igual que ya hacía con las columnas de la planilla; y el motor
+  **ignora el clic que cae sobre un campo** (`esCampo` en localizar.js), que es como se graban la
+  mayoría. El globo lo dice: «Escribí lo que necesites. El tutorial te espera: cuando termines,
+  tocá «Siguiente →»». Un `select` NO cuenta (ahí se elige, no se escribe) y los BOTONES y las
+  VENTANAS siguen avanzando solos, que es lo único que se automátiza.
+  VERIFICADO EN PANTALLA con su tutorial: en el paso 3/37 se toca el campo → no salta; se escribe
+  letra por letra → no salta; se sale del campo → no salta; se toca «Siguiente →» → 4/37.
+  **(2) 🔴 EL AFINADO YA NO CONVIERTE UN CONTROL MARCADO EN UN CARTEL INSERVIBLE.** Su tutorial
+  tenía pasos como **«Tocá "✓ 120"»** (la cuenta de piezas seleccionadas), **«Tocá "?"»**,
+  **«Tocá "👁"»**, **«Tocá "6XL · pieza #1 — Espalda 1…"»** (el contenido entero del visor) y
+  **«Tocá "Moldería s registradas: carga de moldes base (.ai)…"»** (el subtítulo de la pantalla).
+  Ahora se exige que lo guardado **parezca el nombre de un control** (`esNombreDeControl`: corto y
+  con letras); si no, vale la marca del contenedor, que tiene su explicación escrita a mano. Rige en
+  el GRABADOR (lo nuevo) y en `aGuion` (lo ya grabado, sin regrabar).
+  **(3) EL VISOR ES UN LIENZO, NO UN PANEL DE BOTONES.** Los dos visores llevan **`data-lienzo`** y
+  el localizador no afina ahí: adentro se tocan PIEZAS (`pieza:<nombre>`), y lo que quede suelto es
+  ayuda de la pantalla. Sus explicaciones se reescribieron para lo que de verdad se hace ahí
+  («Trabajá en el visor: tocá las piezas que necesites») en vez de «esperá a que termine de armar».
+  RESULTADO EN SU TUTORIAL, sin tocarlo: 1 «Entrá a "Molderías"» · 2 «Tocá "Nueva Moldería"» ·
+  3 «Escribí el nombre del molde» (a mano) · 4 «Confirmá para crearla» · 9 «Tocá "Nombrar piezas"» ·
+  10 y 13 «Trabajá en el visor» · 12 «Confirmá el agrupado».
+  CONTRATOS: `verificar_localizar.mjs` §13 (qué es un campo y qué no; y que el motor no dé el paso
+  por hecho con un clic en un campo) y `verificar_guion.mjs` §19 (un paso `input` sale manual, un
+  botón no, y la columna se distingue del campo por su cartel).
+  ⚠️ PENDIENTE: en el visor de «Nombrar piezas» las piezas todavía no llevan `data-pieza`, así que
+  el paso marca el visor entero y no la pieza que se tocó. Lo mismo para el botón «?» de ayuda y los
+  botones de talle («M»), que se graban sin sección a la que caer.
+- **2026-09-01 (374) — 🔴🔴 EL TUTORIAL EN **CONFIGURACIÓN**: 6 FALLAS PROPIAS, ARREGLADAS.**
+  Reclamo del usuario, con razón: «te pedí que te fijes TODO y en configuración no funciona
+  correcto; pedí que sirva para todos lados». La 373 se probó entera sobre el circuito del PEDIDO;
+  Configuración tenía problemas propios, y bastaba grabar cuatro pasos ahí para verlos:
+  **(C1) 🔴 EL TUTORIAL TE SACABA DE LA PANTALLA A LA QUE ACABABAS DE ENTRAR.** El `donde` de un
+  paso es el de ANTES de tocarlo; mientras el avance viaja (200 ms), el motor veía «no estás donde
+  este paso pide» y te DEVOLVÍA. En el pedido casi no se nota; en Configuración **cada clic cambia
+  de pantalla**, así que entrar a «Moldería» rebotaba al panel. FIX: estado `avanzando` — mientras
+  hay un avance en camino no se calculan puentes ni se navega.
+  **(C2) 🔴 LO QUE NO ES UN BOTÓN SE GRABABA PERO NO SE PODÍA ENCONTRAR.** Las tarjetas de moldería
+  son `<div>` clickeables: `identificar` las graba, pero `buscar` sólo miraba `CONTROLES` → al
+  reproducir, **«No encuentro ese lugar en pantalla» con la tarjeta a la vista**. FIX: si no hay
+  candidatos entre los controles, se busca por texto en el resto y gana **el más GRANDE** (la
+  tarjeta, no su título: el clic cae en cualquier parte de ella), con tope de media pantalla.
+  ⚠️ Sin `innerWidth` esa cuenta da **NaN** y elegía el más chico — lo agarró el contrato.
+  **(C3) NO HABÍA CAMINO DE VUELTA A LA GRILLA.** Si quedabas DENTRO de una moldería, un paso que
+  necesita la lista no se podía cumplir nunca. FIX: ruta **`molde:grilla`** (ancla `molde-volver`,
+  nueva en App.jsx) y `irPantallaAyuda` ahora sabe SALIR de una moldería (entrar no: hay que elegir
+  cuál, y eso lo decide la persona).
+  **(C4) EL PUENTE MANDABA A ABRIR LA MOLDERÍA EQUIVOCADA:** `molde-tarjeta` es SIEMPRE la primera
+  de la grilla, así que un tutorial de otra moldería terminaba configurando el molde que no era.
+  FIX: se marca **la grilla entera** (`molde-grilla`) y el paso siguiente dice cuál abrir.
+  **(C5) 🔴 LOS 10 AJUSTES DE UNA MOLDERÍA NO TENÍAN EXPLICACIÓN** (Moldería, Variables, Etiqueta,
+  Planilla, Nesting, Telas asignadas, Borde de corte, Plantilla, Editable, Nombres) — son la puerta
+  a TODA la configuración de un molde. Se salvaban de casualidad por el texto del botón, pero como
+  son ícono + título, tocando el ícono el tutorial decía **«Tocá "Aa"»**. Escritas las 10.
+  **(C6) Y EL AFINADO POR ETIQUETA EMPEORABA UN CONTROL YA MARCADO:** `anclaEfectiva` ahora mira la
+  pantalla — si la sección **es** el control, el paso es la sección (y usa SU cartel); si es un
+  PANEL con varios botones, sigue afinado (regla de la 358, intacta).
+  🔴 **POR QUÉ NO SE HABÍA VISTO: el contrato no miraba las anclas que se ARMAN**
+  (`data-tour={'ajuste-' + item.id}`). Ahora `verificar_diccionario.mjs` declara las FAMILIAS
+  dinámicas y exige su explicación — destapó **17 anclas** que nadie verificaba (los 10 ajustes, las
+  3 marcas de proceso TPU/Bordado/DTF y los 2 espacios de color RGB/CMYK, más las nuevas) — y
+  **corta si aparece una familia nueva sin declarar**. Suma también §9c: **toda ancla de las RUTAS
+  tiene que existir en la app y saberse explicar** (25 verificadas): una ruta rota deja al tutorial
+  sin salida, que es exactamente lo que pasaba.
+  MEDIDO EN LA APP (sandbox 8060): **9 pantallas de Configuración + los 10 ajustes de una moldería
+  = 693 controles, 100 % identificables y 100 % reencontrables, 0 sin id.** El medidor
+  (`verificar_cobertura_ayuda.mjs`) ahora cuenta también los **divs clickeables** — contarlos de
+  menos fue lo que dejó pasar C2 — y se le arregló el recorte del `export default` multilínea, que
+  lo tenía roto.
+  VERIFICADO EN VIVO, de punta a punta: Moldería → abrir «Camiseta de futbol» → «Borde de corte» →
+  «Afuera» → «¡Listo!»; y el caso duro — un tutorial que salta de un ajuste a OTRO sin haber grabado
+  el «Volver»: el motor arma solo el puente «Volvé al menú de ajustes» y sigue.
+  CONTRATOS: `verificar_localizar.mjs` §11 (un div clickeable se graba Y se reencuentra, y se marca
+  la tarjeta entera) y §12 (sección-que-es-control vs panel con varios botones).
+  📌 LECCIÓN: «probado» es por PANTALLA, no por sistema. El motor era el mismo, pero
+  Configuración tiene otra forma de navegar (cada clic cambia de vista, se entra y se sale de una
+  moldería) y otra forma de dibujar (tarjetas, no botones). Cuando el usuario dice «para todos
+  lados», hay que recorrer todos lados.
+- **2026-09-01 (373) — 🔴🔴 LAS 13 FALLAS DE LOS TUTORIALES, ARREGLADAS (y probadas en la app
+  real).** Es la ejecución completa del plan de la 372: «avanzá con todos los planes». Lo que
+  cambió, por qué y dónde:
+  **(1) 🔴 «ELEGÍ N DE ESTA LISTA» SE MIDE, NO SE CUENTAN CLICS.** `elegidasEn(ancla)` en
+  `localizar.js` cuenta las opciones con **`data-elegida="1"`** (marca nueva en las 5 listas
+  `data-opciones` de App.jsx) y el motor avanza por LATIDO, igual que `hecho` — no por el listener
+  del clic. Si al entrar ya hay N o más, el paso se saltea. Cuando una lista no declara sus
+  elegidas se sigue contando clics, pero sólo los que caen sobre una OPCIÓN (no en el aire).
+  VERIFICADO EN PANTALLA: dos clics en el vacío ya no cumplen el paso («0 de 2»), elegir dos de
+  verdad sí, y con dos ya elegidos el paso se saltea sin tocar el pedido.
+  **(2) 🔴 UN BOTÓN APAGADO SE EXPLICA.** `estaApagado()` + `motivoApagado()`: el globo dice «Ese
+  botón todavía está apagado» con **las palabras de la pantalla** (`title`/`data-motivo` del botón,
+  o el aviso de la barra, marcado `data-aviso-paso`), y el hueco del recorte **incluye ese aviso**
+  (antes el velo lo tapaba). `detalleFaltaPaso(pasoItems)` alimenta el `title` de los dos botones
+  que no lo tenían. VERIFICADO: ««DISEÑO 1» no tiene ninguna prenda elegida.» en el paso 5/22.
+  **(3) 🔴 EL PUENTE YA NO SE COME EL TUTORIAL.** El contador de pasos se ve **siempre** (antes
+  desaparecía en los puentes) y su botón pasó a ser **«Llevame igual →»**, que LLEVA a la pantalla
+  en vez de saltear el paso de destino. Y el globo final dice la verdad: «te salteaste 20 de 22
+  pasos», y no se cierra solo si quedó algo sin hacer.
+  **(4) UN PASO GRABADO HEREDA EL `listo` DE LA SECUENCIA** (`aGuion`, al final, cuando el ancla ya
+  es la definitiva): eso repone también la regla que el des-afinado de listas se llevaba puesta.
+  Los pasos «elegí N» quedan afuera a propósito: ésos los mide la pantalla.
+  **(5) LAS COLUMNAS **SON** LA PLANILLA:** con `col:*` grabadas ya no se agrega además
+  `planilla-tabla` (pasaba en los dos tutoriales reales; «Camiseta» bajó de 23 a 22 pasos).
+  **(6) ANCLAS ATADAS A LOS DATOS:** `buscar` reintenta con los **números como comodín**
+  («Copiar a 1» encuentra «Copiar a 3») — siempre después del texto exacto; y si el control cae
+  dentro de una lista `data-opciones`, **el paso pasa a ser LA LISTA** (`anclaEfectiva`), lo que
+  arregla los tutoriales viejos sin regrabar («txt:cuello redondo»).
+  **(7) EL BOTÓN DE UN AVISO SABE DÓNDE VIVE:** `modalDeBoton()` reconoce «Entendido» como botón
+  de «Perfil de color del diseño» y el paso avisa que esa ventana se abre sola (antes: 5 s de «No
+  encuentro ese lugar»).
+  **(8) LAS COLUMNAS SE EXPLICAN POR SU ROL** (`explicarColumna` + `roleDeColumna`): el id lo pone
+  cada taller (`dise_o`, `talle_short`) y el cartel salía **«Tocá "▾"»**; ahora dice «Elegí el
+  diseño de esa prenda». VERIFICADO en el paso 17/22.
+  **(9) LO QUE DESHACE NO CUMPLE EL PASO:** la «✕» que quita un diseño lleva `data-no-avanza` y
+  `esDelAncla` la ignora.
+  **(10) EL GRABADOR GUARDA LA MISMA FOTO QUE MIRA EL REPRODUCTOR** (`molde` en `dondeRef`).
+  **(11) EL MENÚ CUENTA LOS PASOS QUE SE VAN A VER** (el guion), no los grabados.
+  **(12) NO SE PIERDE UNA GRABACIÓN POR UN CLIC:** descartar pide confirmación.
+  **(13) «VERLO IGUAL, DE PRINCIPIO A FIN»:** un tutorial que se saltea entero ya no deja a la
+  persona sin nada — se puede mirar de corrido (`soloVer`: no saltea, no exige, avanza solo).
+  **DE PASO (mejoras del mismo plan):** si el tutorial pasa dos veces por el mismo lugar, el cartel
+  dice «Vez 1 de 2» (rotular lo grabado, NO es lógica de repetición: eso sigue prohibido); y el
+  EDITOR tiene **«▶ Probar»** (corre el tutorial sin guardar y vuelve al editor) y muestra cuántos
+  pasos agrega o junta el sistema.
+  CONTRATOS: `verificar_localizar.mjs` §6-10 (medición de elegidas, `data-no-avanza`, comodín de
+  números, generalización a la lista, botón apagado + su motivo) y `verificar_guion.mjs` §14-17
+  (herencia del `listo`, columnas = planilla, ventana del botón, «Vez N de M»). Más la herramienta
+  **`auditar_tutoriales.mjs`** (raíz): corre `aGuion` sobre los tutoriales REALES del server y lista
+  lo que va a fallar. Hoy: **0 errores, 13 avisos**.
+  📌 LECCIÓN: los seis contratos pasaban en verde con el sistema trabándose en pantalla. Un
+  contrato que prueba el MOTOR con casos de juguete no ve lo que rompe: los datos del taller. Por eso
+  el auditor corre sobre los tutoriales de verdad.
+  ⚠️ LO QUE NO SE PUDO PROBAR EN VIVO (sandbox de sólo lectura): el tramo de telas y planilla con un
+  arte cargado, y el guardado de un tutorial nuevo (POST). Falta pasarlo una vez en el 8050 con
+  sesión.
+- **2026-08-31 (372) — 🔴🔴 AUDITORÍA DEL SISTEMA DE TUTORIALES: 13 fallas, medidas en la app
+  REAL (PLAN — todavía no se tocó código).** Pedido del usuario: «tenemos un bug con los tutoriales;
+  estudiá a fondo, probá el sistema y pasame un plan que elimine TODOS los bugs». Se pasaron los
+  **3 tutoriales reales** (`Camiseta` 22 pasos, `2 colores` 36, `prueba` 3) por `aGuion` fuera del
+  navegador y se **corrieron en la UI real** (sandbox 8060, sólo lectura, con los datos del taller).
+  Los seis contratos del front pasan: **lo que falla no lo ve ningún contrato**, porque son
+  comportamientos de la pantalla con el estado del usuario. Lo encontrado, por gravedad:
+  **(B1) 🔴 «Elegí N de esta lista» CUENTA CLICS, NO SELECCIONES** (`tutor.jsx`, el `setElegidas`
+  del avance por clic). VERIFICADO EN VIVO: dos clics en el AIRE (el fondo del contenedor
+  `data-opciones`, sin tocar ningún diseño) dan el paso por cumplido; y tocando dos diseños que YA
+  estaban elegidos, el tutorial cuenta «1 de 2 → 2 de 2» y avanza mientras el pedido se queda SIN
+  esos diseños. Es la misma lección de la 2026-08-28 (`cuantos` mide el TOTAL del estado, no los
+  clics) que la feature nueva de opciones (359) no aplicó.
+  **(B2) 🔴 EL TUTORIAL PIDE TOCAR UN BOTÓN APAGADO Y NO DICE POR QUÉ.** VERIFICADO: paso 5/23 de
+  «Camiseta» — «Tocá "Cargar el arte"» con el botón `disabled` porque faltaba la prenda de otros
+  dos diseños. Y el velo del recorte **tapa justo el aviso de la app** que explica qué falta.
+  **(B3) 🔴 UN PUENTE IRRESOLUBLE MATA EL TUTORIAL, EN SILENCIO.** Con el botón de destino apagado,
+  el globo del puente no muestra el contador y su «Siguiente →» **no saltea el puente: saltea el
+  PASO de destino**. En la prueba se comió los pasos 13–19 (toda la planilla) sin mostrarlos y
+  terminó con «¡Listo! Terminaste «Camiseta»» sin que se hiciera nada.
+  **(B4) 🔴 UN PASO GRABADO NO HEREDA EL `listo` DE LA SECUENCIA** (sólo lo tienen los que agrega
+  el sistema): por eso «Elegí el diseño» se pide con el pedido ya lleno de diseños — y ahí es
+  donde B1 hace daño.
+  **(B5)** el des-afinado de listas de opciones **se come el `listo`**: en «2 colores» los dos pasos
+  `pedido-variables` quedan sin regla (los mismos pasos de «Camiseta» sí la tienen).
+  **(B6)** el completado agrega el paso `planilla-tabla` **aunque el tutorial ya tenga las columnas**
+  (`col:*`): pasa en los DOS tutoriales reales.
+  **(B7)** anclas atadas a los DATOS y sin sección a la que caer: `txt:copiar a 1` (el botón dice
+  «Copiar a N» según cuántos moldes se marquen), `txt:dry polo (1,83)`,
+  `txt:camiseta de futbol en «jugador»`, `txt:cuello redondo`, `txt:entendido`.
+  **(B8)** pasos que viven en un aviso que **puede no aparecer** («Entendido» del perfil de color):
+  5 s de «No encuentro ese lugar» y seguir a mano (VERIFICADO en vivo, paso 9/23).
+  **(B9)** las columnas de la planilla se explican por ID (`col:diseno`) y las del usuario son
+  `dise_o` y `talle_short` → el cartel sale **«Tocá "▾"»** (el símbolo del desplegable).
+  **(B10)** el GRABADOR guarda `donde` **sin `molde`** (`App.jsx:9100`) y el reproductor compara
+  contra un `donde` que SÍ lo tiene: los tutoriales de Configuración/moldería van a nacer cojos.
+  **(B11)** el clic en la «✕» de un chip (BORRAR el diseño del pedido) cuenta como «elegir una
+  opción» y avanza el paso.
+  **(B12)** el menú dice «22 pasos» y el tutorial muestra 23 (el menú cuenta lo grabado, no el guion).
+  **(B13)** si al parar la grabación se cierra el modal del nombre, **se pierden todos los pasos**
+  sin aviso ni borrador.
+  MEJORAS que salieron de la misma prueba: un tutorial que se saltea entero dice «no había nada que
+  pedirte» y se cierra (debería ofrecer «Verlo igual»); con dos vueltas de lo mismo los carteles son
+  idénticos y no dicen cuál vuelta es; el editor no deja PROBAR el tutorial ni ver los pasos que
+  agrega el sistema; y no hay ningún tutorial de Configuración.
+  📌 LECCIÓN: los seis contratos pasan y el sistema igual se traba — **lo que falta es un contrato
+  que corra `aGuion` sobre los tutoriales REALES** y falle si un paso queda sin ancla resoluble, sin
+  explicación o atado a un dato del taller. El auditor ya está escrito
+  (`scratchpad/_diag_anclas.mjs` + `_diag_tuts.mjs`): falta darle casa en el repo.
+  ⚠️ NADA DE ESTO ESTÁ ARREGLADO TODAVÍA: esta entrada es el plan.
 - **2026-08-31 (371) — 🔴 LA CAUSA REAL: EL FILTRO DE OBLIGATORIAS SE COMÍA LAS FILAS DE
   MUESTRA INTERNAS.** El usuario insistió («la ficha técnica es la ficha técnica») y tenía razón:
   la 370 tapaba una parte, pero el agujero de fondo estaba más abajo. `_traducir_prendas` **no la

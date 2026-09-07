@@ -331,6 +331,128 @@ console.log('\n12 · NO HAY LÓGICA DE «VARIOS DISEÑOS» (y no puede volver)')
      'pero sus pasos reales siguen ahí (no se pierde la grabación)');
 }
 
+
+console.log('');
+console.log('14 · UN PASO GRABADO TAMBIÉN TIENE SU REGLA (auditoría 2026-08-31)');
+// 🔴 EL DAÑO REAL, verificado en pantalla: «Elegí el diseño» se le pedía a quien YA tenía diseños
+// cargados; al tocarlos para cumplir el paso, los DESMARCABA y el pedido quedaba con menos.
+{
+  const g = aGuion({ id: 'r1', nombre: 'x', pasos: [
+    { ancla: 'pedido-diseno-lista', accion: 'click', donde: { tab: 'pedidos', paso: 'diseno' } },
+  ] });
+  const p0 = g.pasos.find((p) => p.ancla === 'pedido-diseno-lista');
+  ok(typeof p0.hecho === 'function', 'el paso grabado hereda el `listo` de la SECUENCIA');
+  ok(p0.hecho(VACIO) === false && p0.hecho(CON_DISENO) === true,
+     '🔴 con el diseño ya elegido, ese paso NO se pide (antes se pedía y desmarcaba lo puesto)');
+  // pero un paso «elegí N» NO se resuelve con esa regla: eso lo mide el motor sobre la pantalla
+  const g2 = aGuion({ id: 'r2', nombre: 'x', pasos: [
+    { ancla: 'pedido-diseno-lista', accion: 'click', etiqueta: 'JUGADOR', donde: { tab: 'pedidos', paso: 'diseno' } },
+    { ancla: 'pedido-diseno-lista', accion: 'click', etiqueta: 'GOLERO', donde: { tab: 'pedidos', paso: 'diseno' } },
+  ] });
+  const pN = g2.pasos.find((p) => p.cuantas);
+  ok(!!pN && pN.cuantas === 2 && !pN.hecho,
+     '…y el paso «elegí 2» no hereda la regla de «hay alguno» (se cuentan las que hay puestas)');
+}
+
+console.log('');
+console.log('15 · LAS COLUMNAS **SON** LA PLANILLA');
+{
+  const g = aGuion({ id: 'r3', nombre: 'x', pasos: [
+    { ancla: 'col:talle', accion: 'click', donde: { tab: 'pedidos', paso: 'planilla' } },
+    { ancla: 'col:nombre', accion: 'click', donde: { tab: 'pedidos', paso: 'planilla' } },
+    { ancla: 'planilla-enviar', accion: 'click', donde: { tab: 'pedidos', paso: 'resultados' } },
+  ] });
+  ok(!g.pasos.some((p) => p.ancla === 'planilla-tabla'),
+     '🔴 con las columnas grabadas no se agrega además «cargá la planilla» (pasaba en los 2 tutoriales reales)');
+  ok(g.pasos.some((p) => p.ancla === 'col:talle') && g.pasos.some((p) => p.ancla === 'col:nombre'),
+     'y las columnas grabadas siguen estando');
+}
+
+console.log('');
+console.log('16 · UN BOTÓN DE UN AVISO SABE EN QUÉ VENTANA VIVE');
+{
+  const g = aGuion({ id: 'r4', nombre: 'x', pasos: [
+    { ancla: 'txt:entendido', accion: 'click', etiqueta: 'Entendido', donde: { tab: 'pedidos', paso: 'arte' } },
+  ] });
+  const p = g.pasos.find((x) => x.ancla === 'txt:entendido');
+  ok(p.ventana === 'Perfil de color del diseño',
+     '🔴 «Tocá Entendido» se reconoce como el botón de ese aviso (a quien no le salga, el tutorial lo dice)');
+}
+
+console.log('');
+console.log('17 · SI EL TUTORIAL PASA DOS VECES POR EL MISMO LUGAR, SE DICE CUÁL VUELTA ES');
+{
+  const g = aGuion({ id: 'r5', nombre: 'x', pasos: [
+    { ancla: 'arte-diseno-chips', accion: 'click', donde: { tab: 'pedidos', paso: 'arte' } },
+    { ancla: 'arte-cargar', accion: 'click', donde: { tab: 'pedidos', paso: 'arte' } },
+    { ancla: 'arte-diseno-chips', accion: 'click', donde: { tab: 'pedidos', paso: 'arte' } },
+    { ancla: 'arte-cargar', accion: 'click', donde: { tab: 'pedidos', paso: 'arte' } },
+  ] });
+  const chips = g.pasos.filter((p) => p.ancla === 'arte-diseno-chips');
+  ok(chips.length === 2 && /Vez 1 de 2/.test(chips[0].nota) && /Vez 2 de 2/.test(chips[1].nota),
+     'dos pasos iguales dejan de tener el mismo cartel exacto (tutorial «2 colores»)');
+  const uno = aGuion({ id: 'r6', nombre: 'x', pasos: [
+    { ancla: 'arte-cargar', accion: 'click', donde: { tab: 'pedidos', paso: 'arte' } },
+  ] });
+  ok(!/Vez 1 de/.test(uno.pasos.find((p) => p.ancla === 'arte-cargar').nota || ''),
+     '…y un paso que va una sola vez no se ensucia con eso');
+}
+
+
+console.log('');
+console.log('19 · LOS PASOS DE ESCRIBIR SE TERMINAN A MANO (pedido del usuario 2026-09-01)');
+{
+  const g = aGuion({ id: 'c1', nombre: 'x', pasos: [
+    { ancla: 'pedido-diseno-input', accion: 'input', etiqueta: 'Escribir un diseño', donde: { tab: 'pedidos', paso: 'diseno' } },
+    { ancla: 'pedido-diseno-agregar', accion: 'click', donde: { tab: 'pedidos', paso: 'diseno' } },
+  ] });
+  const campo = g.pasos.find((p) => p.ancla === 'pedido-diseno-input');
+  const boton = g.pasos.find((p) => p.ancla === 'pedido-diseno-agregar');
+  ok(campo.manual === true && campo.manualPor === 'campo',
+     '🔴 un paso de escribir NO avanza solo: lo cierra la persona con «Siguiente →»');
+  ok(!boton.manual, '…y un BOTÓN sigue avanzando solo al tocarlo (eso es lo que se automatiza)');
+  const col = aGuion({ id: 'c2', nombre: 'x', pasos: [
+    { ancla: 'col:talle', accion: 'click', donde: { tab: 'pedidos', paso: 'planilla' } },
+  ] }).pasos.find((p) => p.ancla === 'col:talle');
+  ok(col.manual === true && col.manualPor === 'planilla',
+     'la columna de la planilla también se termina a mano, y se distingue del campo (otro cartel)');
+}
+
+
+console.log('');
+console.log('20 · UN MOVIMIENTO NO ES UN CLIC REPETIDO (reporte del usuario 2026-09-01)');
+// «funciona cuando estas grabando pero no funciona cuando estas siguiendo el tutorial»: en el
+// visor se toca una pieza y DESPUÉS se arrastra un recuadro — dos pasos con la MISMA ancla. El
+// descarte de duplicados no miraba la acción y se comía el arrastre: el gesto no llegaba al guion.
+{
+  const g = aGuion({ id: 'm1', nombre: 'x', pasos: [
+    { ancla: 'visor-molde', accion: 'click', donde: { tab: 'config', sub: 'productos' } },
+    { ancla: 'visor-molde', accion: 'arrastre', desde: { x: 0.2, y: 0.2 }, hasta: { x: 0.8, y: 0.8 },
+      donde: { tab: 'config', sub: 'productos' } },
+  ] });
+  const arr = g.pasos.filter((p) => p.accion === 'arrastre');
+  ok(arr.length === 1, '🔴 el arrastre SOBREVIVE aunque el paso anterior sea del mismo lugar');
+  ok(/cursor/i.test(arr[0].texto || ''), 'con un cartel que dice que mire el cursor');
+  // y dos clics seguidos en el mismo lugar SIGUEN siendo uno solo (regla de la 361)
+  const g2 = aGuion({ id: 'm2', nombre: 'x', pasos: [
+    { ancla: 'visor-molde', accion: 'click', donde: { tab: 'config' } },
+    { ancla: 'visor-molde', accion: 'click', donde: { tab: 'config' } },
+  ] });
+  ok(g2.pasos.filter((p) => p.ancla === 'visor-molde').length === 1,
+     'dos clics seguidos en el mismo lugar siguen siendo UN paso');
+}
+{
+  // 🔴 EL RECORRIDO NO HACE FALTA: el cursor muestra un gesto GENÉRICO (decisión del usuario
+  // 2026-09-01). Así funcionan también los que se grabaron cuando el servidor descartaba los puntos.
+  const g3 = aGuion({ id: 'm3', nombre: 'x', pasos: [
+    { ancla: 'visor-molde', accion: 'arrastre', donde: { tab: 'config' } },
+  ] });
+  const p3 = g3.pasos[0];
+  ok(p3.accion === 'arrastre', 'un paso de movimiento sin recorrido guardado SIGUE siendo un movimiento');
+  ok(!p3.desde && !p3.hasta, '…y no arrastra datos del recorrido: el gesto lo pone el motor');
+  ok(/cursor/i.test(p3.texto || ''), '…con su cartel de siempre');
+}
+
 console.log('\n13 · lo que no rompe');
 ok(aGuion(null) === null, 'sin tutorial, null (no explota)');
 ok(aGuion({ id: 'z', nombre: 'z', pasos: [] }).pasos.length === 0, 'sin pasos, guion vacío');
