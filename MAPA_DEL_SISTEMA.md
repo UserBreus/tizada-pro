@@ -1432,6 +1432,64 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (392) — 🔴 EL CANDADO DE LA CONFIGURACIÓN SE TENÍA TOMADO DURANTE EL TRABAJO PESADO
+  (y los procesos de dibujo escribían el catálogo sin él).** Séptima entrega de la auditoría.
+
+  El candado (`_LOCK_CAT_EDICION`, entrada 171) está bien y sigue igual: el catálogo es uno solo y
+  global, y sin él dos pantallas que guardan a la vez se pisan. Lo que estaba mal era **cuánto
+  tiempo se lo tenía** y **quiénes escribían sin él**.
+
+  **1. Trabajo pesado adentro del candado, hasta el final del request.**
+  - **Borrar un molde**: dos `shutil.rmtree` (el caché de piezas son miles de archivos: decenas de
+    segundos en Windows) + el borrado en la base, todo con el candado tomado.
+  - **Guardar los grupos de telas**: una consulta HTTP a la API de telas del sistema, con **12 s
+    de timeout**, adentro. Todo el taller esperando a un servidor ajeno.
+  - **Nombrar piezas** (`_migrar_nombres_pieza`): lo tomaba y lo arrastraba hasta el alta manual
+    del molde entero + `db.guardar_registro` (~1000 filas). El peor de todos.
+  - **Borrar un diseño**: otro `rmtree` adentro.
+  - **El espejo JSON**: hasta **7,2 s de `sleep`** reintentando el `os.replace` cuando OneDrive o
+    el antivirus tienen el archivo tomado — con el candado puesto, por un archivo que es **sólo
+    un respaldo** (la base ya guardó).
+
+  **2. Un GET tomaba el candado de ESCRITURA.** `/api/plantilla/deteccion` (~19 veces al asignar
+  variantes) llamaba a `_ajustar_variante_guia`, que tomaba el candado con
+  `_cargar_catalogo_para_editar` y lo soltaba recién en el `teardown_request` — incluso en sus dos
+  «no hay nada que hacer», que es el camino normal.
+
+  **3. 🔴 LEER EL CATÁLOGO ESCRIBE.** `_cargar_catalogo` completa lo que falta y guarda, en 8
+  lugares. Eso lo hace **cualquier** request (un GET incluido) **sin el candado**, y también
+  **los workers del ProcessPool de dibujo** — que son otros procesos, y el candado es un
+  `threading.RLock`: **por proceso**. Desde ahí se pisaba a ciegas lo que estuviera guardando una
+  pantalla. El sandbox de sólo lectura tenía el mismo agujero: su `before_request` rechaza lo que
+  no sea GET, pero un backfill no es un request.
+
+  **LO QUE SE HIZO.**
+  - **`_seccion_edicion()`**: sección CORTA que toma y suelta contando **de a una**.
+    `_soltar_edicion_catalogo()` suelta **todas** las tomas del hilo (es lo que corresponde en el
+    teardown), así que un helper anidado que la usara le soltaba el candado a quien lo llamó, en
+    medio de su sección crítica. Con la nueva, un helper devuelve lo suyo y nada más — y lo que
+    corre fuera de un request también tiene cómo hacerlo bien.
+  - `_cargar_catalogo` partido en **`_leer_catalogo_crudo()`** (no escribe) +
+    **`_normalizar_catalogo(cat)`** (completa en memoria y dice si cambió) + la decisión de
+    guardar: si hay que guardar, se hace **bajo el candado y releyendo lo fresco**.
+    **`_CATALOGO_SOLO_LECTURA`** (= no soy el proceso del servidor) apaga esa escritura en los
+    workers, y `srv_visor.py` lo apaga también. El catálogo que reciben **es el mismo, ya
+    normalizado**: lo único que se omite es el guardado, así que la clave del caché no cambia y
+    el dibujo sale igual.
+  - Los cinco lugares de arriba pasan a `_seccion_edicion`, con lo pesado **afuera**. El espejo
+    JSON intenta una vez y, si Windows lo bloquea, **los reintentos se van a un hilo** con un
+    número de serie: un reintento tardío nunca pisa a un guardado más nuevo.
+
+  **VERIFICADO** con `verificar_catalogo_candado.py` (nuevo): en modo sólo lectura no guarda pero
+  devuelve el catálogo completo igual; salir de una sección anidada **no** suelta la de afuera; el
+  GET de la detección suelta el candado también cuando no hace nada; mientras se borran los
+  archivos de un molde **otro hilo consigue editar**, y lo mismo durante la consulta a la API de
+  telas; y el espejo termina con el último estado, sin temporales y sin hacer esperar. Más
+  `verificar_config_concurrente.py` (el que probó que sin candado se pierden cambios) y **los 32
+  contratos del repo** en verde, servidor reiniciado y comprobado por hora de arranque, y la app
+  abierta de verdad en el sandbox: lista los moldes, con sus previews, sin errores en consola y
+  **sin escribir el catálogo**.
+
 - **2026-09-07 (391) — El esquema de la base LLEGA SOLO al arrancar, 12 índices que faltaban, y
   `/api/salud` deja de mentir cuando no hay driver.** Sexta entrega de la auditoría.
 

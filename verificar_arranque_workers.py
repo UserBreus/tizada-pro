@@ -102,12 +102,21 @@ if __name__ == "__main__":
     ok(_srv.count("sincronizar_permisos()") == 1,
        "`sincronizar_permisos()` se llama en UN solo lugar (dentro de esa funcion)")
     ok(hasattr(S, "_poner_base_al_dia_al_arrancar"), "la funcion existe")
-    # Sin `_USUARIOS_ON` no hace nada aunque la llamen: el sandbox lo apaga a propósito.
+    # Sin sistema de usuarios NO se sincronizan permisos (el sandbox lo apaga a propósito), pero
+    # el ESQUEMA sí se aplica: es lo que hace que una tabla o un índice nuevos lleguen a una base
+    # ya instalada, y eso no depende de que haya usuarios.
     _antes, S._USUARIOS_ON = S._USUARIOS_ON, False
     _PEDIDOS.clear()
     S._poner_base_al_dia_al_arrancar()
     S._USUARIOS_ON = _antes
-    ok(not _PEDIDOS, "sin sistema de usuarios registrado, no toca la base")
+    ok(_PEDIDOS == ["aplicar_schema"],
+       f"sin usuarios sólo pone el esquema al día, no toca los permisos (hizo: {_PEDIDOS})")
+    # Y desde un worker no hace NADA: ni esquema ni permisos.
+    _PEDIDOS.clear()
+    _princ, S._es_proceso_principal = S._es_proceso_principal, lambda: False
+    S._poner_base_al_dia_al_arrancar()
+    S._es_proceso_principal = _princ
+    ok(not _PEDIDOS, f"🔴 y desde un worker del pool no toca la base para nada (hizo: {_PEDIDOS})")
 
     print("\n4) El sandbox de solo lectura ata sus procesos de dibujo")
     ok("_atar_hijos_a_este_proceso()" in _fuente("srv_visor.py"),

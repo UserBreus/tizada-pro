@@ -53,6 +53,9 @@ def _solo_lectura():
 
 if __name__ == "__main__":
     S._USUARIOS_ON = False
+    # 🔴 Y el catálogo tampoco se escribe: los backfills que corren al LEERLO son escrituras, y
+    # el `before_request` que rechaza lo que no sea GET no las ve (no son requests).
+    S._CATALOGO_SOLO_LECTURA = True
     print("=" * 70)
     print(f"  SANDBOX DE SÓLO LECTURA  ·  http://localhost:{PUERTO}")
     print("  Entra sin login y NO puede escribir nada (todo lo que no sea GET se rechaza).")

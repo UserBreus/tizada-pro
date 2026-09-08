@@ -1217,9 +1217,14 @@ def _catalogo_desde_json():
     return cat
 
 
-def _cargar_catalogo():
-    # FUENTE DE VERDAD: la base (MSSQL). Ya NO se lee del JSON en cada request.
-    cat = None
+def _leer_catalogo_crudo():
+    """El catálogo TAL CUAL está, sin tocar nada. Devuelve `(cat, hay_que_sembrarlo)`.
+
+    🔴 NO ESCRIBE. Leer el catálogo lo hace CUALQUIER request (hasta un GET), y también los
+    workers del pool de dibujo, que son otros procesos: el candado de edición es por proceso, así
+    que una escritura desde ahí pisaría en silencio lo que estuviera guardando una pantalla.
+    Quién escribe y cuándo lo decide `_cargar_catalogo`."""
+    cat, sembrar = None, False
     try:
         cat = db.get_doc("catalogo")
         if cat is None:
@@ -1227,16 +1232,23 @@ def _cargar_catalogo():
             # depender del archivo. Esto NO es "migrar los datos de piezas": es traer la config
             # base (reglas de planilla, presets de nesting, plantillas) para no arrancar en cero.
             cat = _catalogo_desde_json()
-            if cat:
-                db.set_doc("catalogo", cat)
-                db.sync_productos(cat)
+            sembrar = bool(cat)
     except Exception as e:
-        # Si la base no está, se cae al JSON para no dejar el sistema muerto (y se avisa).
+        # Si la base no está, se cae al JSON para no dejar el sistema muerto (y se avisa). NO se
+        # siembra: sin base, guardar volvería a fallar.
         print(f"[catalogo] sin base, uso JSON: {e}")
         cat = _catalogo_desde_json()
     if not cat:
-        cat = {"activo": "prod_default", "productos": [{"id": "prod_default", "nombre": "Molde 1", "creado": time.time()}]}
-    
+        cat = {"activo": "prod_default",
+               "productos": [{"id": "prod_default", "nombre": "Molde 1", "creado": time.time()}]}
+    return cat, sembrar
+
+
+def _normalizar_catalogo(cat):
+    """Completa lo que falta y aplica las migraciones aditivas, EN MEMORIA. Devuelve si cambió
+    algo (quien llama decide si eso se guarda, y con qué candado)."""
+    tocado = False
+
     # Ensure plantillas_planillas is present
     if "plantillas_planillas" not in cat:
         cat["plantillas_planillas"] = [
@@ -1251,7 +1263,7 @@ def _cargar_catalogo():
                 ]
             }
         ]
-        _guardar_catalogo(cat)
+        tocado = True
 
     # Biblioteca de REGLAS de planilla (campos reutilizables). Cada regla define
     # cómo se carga en la planilla (texto/desplegable/toggle), sus opciones y qué
@@ -1264,7 +1276,7 @@ def _cargar_catalogo():
             {"id": "regla_manga", "nombre": "Manga", "tipo": "toggle", "opciones": "Corta, Larga", "comportamiento": "manga", "clave": "manga"},
             {"id": "regla_texto", "nombre": "Texto libre", "tipo": "texto", "opciones": "", "comportamiento": "none"},
         ]
-        _guardar_catalogo(cat)
+        tocado = True
 
     # Migración aditiva: las reglas "toggle de pieza" (comportamiento "manga") ahora
     # llevan palabra CLAVE. A las viejas sin clave les ponemos su nombre en minúsculas.
@@ -1274,7 +1286,7 @@ def _cargar_catalogo():
             r["clave"] = (r.get("nombre") or "manga").strip().lower()
             _mig_clave = True
     if _mig_clave:
-        _guardar_catalogo(cat)
+        tocado = True
 
     # Presets de NESTING (reglas de acomodo): espaciado, margen y giro. Cada molde
     # elige cuál usar (productos[*].nesting_preset_id). El primero es el estándar.
@@ -1282,14 +1294,14 @@ def _cargar_catalogo():
         cat["nesting_presets"] = [
             {"id": "nesting_default", "nombre": "Estándar", "espaciado_mm": 5, "margen_mm": 10, "rotacion": "ninguna"},
         ]
-        _guardar_catalogo(cat)
+        tocado = True
 
     # Catálogo de piezas organizado por GRUPOS (editable y persistido). El grupo
     # que ya existía (catálogo plano) pasa a llamarse "Prenda Superior".
     if "catalogo_grupos" not in cat:
         base = cat.get("catalogo_piezas") or ["Frente", "Espalda", "Manga", "Cuello", "Costadillo", "TC"]
         cat["catalogo_grupos"] = [{"nombre": "Prenda Superior", "piezas": list(base)}]
-        _guardar_catalogo(cat)
+        tocado = True
 
     # ── MIGRACIÓN: las molderías de CONFIGURACIÓN son del SISTEMA, no de quien las cargó ───────
     # Regla del usuario (2026-07-29): lo que se hace en Configuración es del taller y lo ve todo
@@ -1315,7 +1327,7 @@ def _cargar_catalogo():
             print(f"[migración] {len(_mig_dueno)} moldería/s de Configuración pasan a ser del sistema "
                   f"(las ve todo el mundo): {', '.join((p.get('nombre') or p['id']) for p in _mig_dueno)}")
         cat["migracion_dueno_config"] = True      # se marca SIEMPRE, haya encontrado o no
-        _guardar_catalogo(cat)
+        tocado = True
 
     # ── REPARACIÓN: «Mi artículo» SIN DUEÑO ───────────────────────────────────────────────────
     # Estado imposible (ver `crear_producto`): se comporta como del sistema para la privacidad y
@@ -1336,7 +1348,7 @@ def _cargar_catalogo():
                 print(f"[reparación] «{p.get('nombre')}» estaba marcado como artículo personal pero "
                       f"SIN dueño y sin saber quién lo cargó → pasa a ser del sistema (lo ven todos)")
         if _rotos:
-            _guardar_catalogo(cat)
+            tocado = True
 
     # Map existing products to the default template and set default mapeo_columnas if missing
     modificado = False
@@ -1360,7 +1372,35 @@ def _cargar_catalogo():
             }
             modificado = True
     if modificado:
-        _guardar_catalogo(cat)
+        tocado = True
+
+
+    return tocado
+
+
+# ¿Este proceso puede ESCRIBIR el catálogo? Los workers del ProcessPool de dibujo re-importan
+# `servidor.py` y leen el catálogo para dibujar: si además lo guardaran, pisarían lo que está
+# guardando una pantalla — y el candado no los alcanza, porque es por proceso. El sandbox de
+# sólo lectura (`srv_visor.py`) lo pone en True por su cuenta.
+_CATALOGO_SOLO_LECTURA = not _es_proceso_principal()
+
+
+def _cargar_catalogo(solo_lectura=None):
+    """El catálogo listo para usar. Si al normalizarlo hubo que completar algo, se guarda —pero
+    SIEMPRE bajo el candado de edición y releyendo lo fresco, para no pisar a quien esté
+    guardando en ese mismo momento."""
+    cat, sembrar = _leer_catalogo_crudo()
+    tocado = _normalizar_catalogo(cat) or sembrar
+    solo = _CATALOGO_SOLO_LECTURA if solo_lectura is None else solo_lectura
+    if not tocado or solo:
+        return cat
+    if getattr(_edicion_cat, "n", 0) > 0:
+        _guardar_catalogo(cat)         # ya estamos adentro de una sección de edición
+        return cat
+    with _seccion_edicion():           # sección CORTA: se toma y se suelta acá mismo
+        cat, sembrar = _leer_catalogo_crudo()      # fresco: entre medio pudo guardar otro
+        if _normalizar_catalogo(cat) or sembrar:
+            _guardar_catalogo(cat)
     return cat
 
 
@@ -1394,13 +1434,22 @@ def _guardar_catalogo(cat):
         pass
 
 
-def _guardar_catalogo_json_espejo(cat):
+_ESPEJO_SERIE = [0]      # cada guardado se lleva un número: el reintento tardío no pisa al nuevo
+
+
+def _escribir_espejo(cat, serie, reintentar=True):
     """Escritura ATÓMICA con backup: se escribe a un temporal, se respalda el
     archivo bueno anterior (.bak) y recién ahí se reemplaza. Así una escritura
     interrumpida o concurrente nunca deja el catálogo corrupto ni borra datos."""
     ruta = os.path.join(DATOS, "productos_catalogo.json")
     with _lock_catalogo:
-        tmp = ruta + ".tmp"
+        tmp = ruta + f".{serie}.tmp"
+        if serie < _ESPEJO_SERIE[0]:
+            try:                 # ya guardó uno más nuevo: este reintento sobra
+                os.remove(tmp)
+            except OSError:
+                pass
+            return True
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cat, f, ensure_ascii=False)
             f.flush()
@@ -1414,20 +1463,37 @@ def _guardar_catalogo_json_espejo(cat):
         # os.replace puede fallar con [WinError 5] "Acceso denegado" cuando OneDrive,
         # el antivirus o el indexador de Windows tienen el archivo tomado un instante
         # (muy típico si el proyecto está en Documentos/OneDrive). Casi siempre es
-        # transitorio → reintentamos unas veces; el .tmp y el .bak protegen los datos.
-        ultimo = None
-        for intento in range(8):
-            try:
-                os.replace(tmp, ruta)
-                ultimo = None
-                break
-            except PermissionError as e:
-                ultimo = e
-                time.sleep(0.2 * (intento + 1))
-        if ultimo is not None:
-            # El espejo es SOLO respaldo (la base ya guardó): si Windows bloquea el archivo,
-            # se avisa pero NO se rompe el guardado.
-            print(f"[catalogo] no se pudo escribir el espejo JSON (la base ya guardó): {ultimo}")
+        # transitorio; el .tmp y el .bak protegen los datos.
+        try:
+            os.replace(tmp, ruta)
+            return True
+        except PermissionError as e:
+            if not reintentar:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                LOG.aviso("catalogo", "No se pudo escribir el espejo JSON del catálogo",
+                          f"{e}. La base YA guardó, así que no se perdió nada: el espejo es sólo "
+                          "un respaldo por si algún día la base no está.")
+                print(f"[catalogo] no se pudo escribir el espejo JSON (la base ya guardó): {e}")
+                return False
+    # 🔴 LOS REINTENTOS VAN AFUERA DEL CANDADO. Eran hasta 7,2 s de `sleep` **con el candado de
+    # edición tomado** (esto lo llama `_guardar_catalogo`): toda la configuración del taller
+    # esperando a que OneDrive soltara un archivo de respaldo. Ahora el que guarda sigue de largo
+    # y los reintentos corren en un hilo aparte.
+    def _insistir():
+        for intento in range(7):
+            time.sleep(0.2 * (intento + 1))
+            if _escribir_espejo(cat, serie, reintentar=False):
+                return
+    _en_hilo(_insistir)
+    return False
+
+
+def _guardar_catalogo_json_espejo(cat):
+    _ESPEJO_SERIE[0] += 1
+    return _escribir_espejo(cat, _ESPEJO_SERIE[0])
 
 
 # ── EDITAR EL CATÁLOGO SIN PISARSE ────────────────────────────────────────────────────────────
@@ -1447,11 +1513,34 @@ _LOCK_CAT_EDICION = threading.RLock()
 _edicion_cat = threading.local()
 
 
-def _cargar_catalogo_para_editar():
-    """Catálogo FRESCO para modificar y volver a guardar, con el candado de edición ya tomado."""
+@contextlib.contextmanager
+def _seccion_edicion():
+    """Sección CORTA de edición del catálogo: toma el candado y lo suelta al salir, contando de a
+    UNO.
+
+    Existe porque `_soltar_edicion_catalogo()` suelta **todas** las tomas de este hilo —es lo que
+    corresponde en el `teardown_request`, que cierra el request entero—, así que un helper anidado
+    que la usara le soltaría el candado a quien lo llamó, en medio de su sección crítica. Con esto
+    un helper puede tomar y devolver lo suyo sin tocar lo del otro, y lo que corre FUERA de un
+    request (un hilo de fondo, un backfill) también tiene cómo hacerlo bien."""
     _LOCK_CAT_EDICION.acquire()
     _edicion_cat.n = getattr(_edicion_cat, "n", 0) + 1
     try:
+        yield
+    finally:
+        _edicion_cat.n = max(0, getattr(_edicion_cat, "n", 1) - 1)
+        _LOCK_CAT_EDICION.release()
+
+
+def _cargar_catalogo_para_editar():
+    """Catálogo FRESCO para modificar y volver a guardar, con el candado de edición ya tomado.
+
+    Lo suelta el `teardown_request` al terminar el request (o `_en_hilo`, fuera de uno): así
+    ningún endpoint tiene que acordarse, aunque corte antes por una validación."""
+    _LOCK_CAT_EDICION.acquire()
+    _edicion_cat.n = getattr(_edicion_cat, "n", 0) + 1
+    try:
+        # `fresco`: ya tenemos el candado, así que lo que se lea ahora es lo último bueno.
         return _cargar_catalogo()
     except Exception:
         _soltar_edicion_catalogo()   # si ni leerlo se pudo, no dejamos el candado tomado
@@ -2575,15 +2664,21 @@ def _ajustar_variante_guia(pid, talles):
     capa como guía y la detección trabajaba sobre una variante inexistente."""
     if not talles:
         return
-    cat = _cargar_catalogo_para_editar()
-    prod = next((x for x in cat.get("productos", []) if x.get("id") == pid), None)
-    if prod is None:
-        return
-    if prod.get("variante_guia") in talles:
-        return
-    prod["variante_guia"] = talles[0]
-    _guardar_catalogo(cat)
-    return prod["variante_guia"]
+    # `_seccion_edicion` y no `_cargar_catalogo_para_editar`: esto lo llama un **GET**
+    # (`/api/plantilla/deteccion`, ~19 veces al asignar variantes) y con el otro camino el candado
+    # de ESCRITURA quedaba tomado hasta el final del request, serializando la configuración de
+    # todo el taller detrás de una pantalla que sólo está mirando. Además los dos «no hay nada que
+    # hacer» de abajo salían sin soltar nada, confiando en el `teardown_request`.
+    with _seccion_edicion():
+        cat = _cargar_catalogo()
+        prod = next((x for x in cat.get("productos", []) if x.get("id") == pid), None)
+        if prod is None:
+            return
+        if prod.get("variante_guia") in talles:
+            return
+        prod["variante_guia"] = talles[0]
+        _guardar_catalogo(cat)
+        return prod["variante_guia"]
 
 
 def _talles_reales(pid=None):
@@ -3172,25 +3267,31 @@ def _migrar_nombres_pieza(pid, ren):
                 out[k2] = v
         return out, tocado
 
-    cat = _cargar_catalogo_para_editar()
-    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-    cambio = False
-    if prod:
-        et = prod.get("etiqueta") or {}
-        if isinstance(et.get("posiciones"), dict):
-            et["posiciones"], _t = _mueve(et["posiciones"]); cambio = cambio or _t
-        tc = prod.get("telas_cfg") or {}
-        if isinstance(tc.get("por_pieza"), dict):
-            tc["por_pieza"], _t = _mueve(tc["por_pieza"]); cambio = cambio or _t
-        if isinstance(prod.get("mapeo_arte"), dict):
-            prod["mapeo_arte"], _t = _mueve(prod["mapeo_arte"]); cambio = cambio or _t
-        # acomodos de las variables (por nombre de pieza): el manual nuevo (mm) y el del nido viejo
-        for _v in (prod.get("variantes") or []):
-            for _k in ("acomodo_mm", "acomodo"):
-                if isinstance(_v.get(_k), dict):
-                    _v[_k], _t = _mueve(_v[_k]); cambio = cambio or _t
-    if cambio:
-        _guardar_catalogo(cat)
+    # 🔴 SECCIÓN CORTA. Antes esto tomaba el candado con `_cargar_catalogo_para_editar` y no lo
+    # soltaba hasta el final del REQUEST, así que el llamador (`plantilla_grupo_pieza`) seguía
+    # después con el alta manual del molde y con `db.guardar_registro` (~1000 filas) **con toda la
+    # configuración del taller serializada detrás**. Acá se toca el catálogo, se guarda y se
+    # suelta; lo pesado va afuera.
+    with _seccion_edicion():
+        cat = _cargar_catalogo()
+        prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+        cambio = False
+        if prod:
+            et = prod.get("etiqueta") or {}
+            if isinstance(et.get("posiciones"), dict):
+                et["posiciones"], _t = _mueve(et["posiciones"]); cambio = cambio or _t
+            tc = prod.get("telas_cfg") or {}
+            if isinstance(tc.get("por_pieza"), dict):
+                tc["por_pieza"], _t = _mueve(tc["por_pieza"]); cambio = cambio or _t
+            if isinstance(prod.get("mapeo_arte"), dict):
+                prod["mapeo_arte"], _t = _mueve(prod["mapeo_arte"]); cambio = cambio or _t
+            # acomodos de las variables (por nombre de pieza): el manual nuevo (mm) y el del nido viejo
+            for _v in (prod.get("variantes") or []):
+                for _k in ("acomodo_mm", "acomodo"):
+                    if isinstance(_v.get(_k), dict):
+                        _v[_k], _t = _mueve(_v[_k]); cambio = cambio or _t
+        if cambio:
+            _guardar_catalogo(cat)
     # mapeo por diseño: un mapeo_arte.json por sub-carpeta del producto (+ el de la raíz)
     base = os.path.join(DATOS, "productos", pid)
     try:
@@ -4491,11 +4592,12 @@ def eliminar_diseno():
     did = cuerpo.get("id")
     if not did or did in ("principal", "default"):
         return jsonify({"error": "no se puede borrar el diseño Principal"}), 400
-    cat = _cargar_catalogo_para_editar()
-    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-    if prod is not None:
-        prod["disenos"] = [d for d in (prod.get("disenos") or []) if d["id"] != did]
-        _guardar_catalogo(cat)
+    with _seccion_edicion():          # el `rmtree` de abajo no necesita el candado
+        cat = _cargar_catalogo()
+        prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+        if prod is not None:
+            prod["disenos"] = [d for d in (prod.get("disenos") or []) if d["id"] != did]
+            _guardar_catalogo(cat)
     sub = _diseno_sub(did)
     if sub:
         for base in (os.path.join(DATOS, "productos", pid, sub), os.path.join(ENTRADA, pid, sub)):
@@ -5971,7 +6073,10 @@ def _telas_efectivas(cat, forzar=False):
         # configuración hecho mientras tanto — este `cat` se leyó ANTES de la consulta HTTP a la
         # API de telas, que puede tardar (y hasta agotar su timeout). Por eso tampoco se toma el
         # candado durante esa consulta: la sección crítica es sólo el guardado. Ver 171.A.
-        with _LOCK_CAT_EDICION:
+        # `_seccion_edicion` y no `with _LOCK_CAT_EDICION` pelado: el candado se cuenta por hilo,
+        # y una toma que no se cuenta se le escapa a `_soltar_edicion_catalogo` — el día que
+        # alguien lo llame desde acá adentro, el `with` reventaría al soltar algo que ya no tiene.
+        with _seccion_edicion():
             _cat = _cargar_catalogo()
             _cat["telas"] = merged
             _guardar_catalogo(_cat)
@@ -6048,15 +6153,19 @@ def set_telas():
     if _g:
         return _g
     cuerpo = request.get_json(force=True) or {}
-    cat = _cargar_catalogo_para_editar()
-    if isinstance(cuerpo.get("grupos"), list):
-        grupos = []
-        for g in cuerpo["grupos"]:
-            grupos.append({"id": g.get("id") or ("gt_" + uuid.uuid4().hex[:8]),
-                           "nombre": str(g.get("nombre", "")).strip() or "Grupo",
-                           "telas": [str(x) for x in (g.get("telas") or [])]})
-        cat["grupos_telas"] = grupos
-        _guardar_catalogo(cat)
+    # SECCIÓN CORTA: sólo el guardado de los grupos. `_telas_efectivas` va DESPUÉS, afuera: hace
+    # una consulta HTTP a la API de telas del sistema con hasta 12 s de timeout, y con el candado
+    # tomado eso dejaba la configuración de todo el taller esperando a un servidor ajeno.
+    with _seccion_edicion():
+        cat = _cargar_catalogo()
+        if isinstance(cuerpo.get("grupos"), list):
+            grupos = []
+            for g in cuerpo["grupos"]:
+                grupos.append({"id": g.get("id") or ("gt_" + uuid.uuid4().hex[:8]),
+                               "nombre": str(g.get("nombre", "")).strip() or "Grupo",
+                               "telas": [str(x) for x in (g.get("telas") or [])]})
+            cat["grupos_telas"] = grupos
+            _guardar_catalogo(cat)
     return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
 
 
@@ -8013,21 +8122,26 @@ def eliminar_producto():
     # (2026-08-19: `prod_default` DEJÓ de ser imborrable — era el molde semilla de la época sin
     #  base; hoy todo molde nace de una subida y el usuario puede borrar todos.)
     
-    cat = _cargar_catalogo_para_editar()
-    p_index = -1
-    for i, p in enumerate(cat["productos"]):
-        if p["id"] == pid:
-            p_index = i
-            break
-            
-    if p_index == -1:
-        return jsonify({"error": "Producto inexistente"}), 404
-        
-    cat["productos"].pop(p_index)
-    # el activo (global Y el de la sesión) no puede quedar apuntando al molde borrado
-    _limpiar_activo_si_borrado(cat, pid)
-    _guardar_catalogo(cat)
-    
+    # SECCIÓN CORTA: sacarlo del catálogo y guardar. Lo que viene después —borrar dos árboles de
+    # carpetas (el caché de piezas son miles de archivos: decenas de segundos en Windows) y
+    # limpiar la base— NO necesita el candado, y teniéndolo dejaba a todo el taller sin poder
+    # tocar la configuración durante todo ese rato.
+    with _seccion_edicion():
+        cat = _cargar_catalogo()
+        p_index = -1
+        for i, p in enumerate(cat["productos"]):
+            if p["id"] == pid:
+                p_index = i
+                break
+
+        if p_index == -1:
+            return jsonify({"error": "Producto inexistente"}), 404
+
+        cat["productos"].pop(p_index)
+        # el activo (global Y el de la sesión) no puede quedar apuntando al molde borrado
+        _limpiar_activo_si_borrado(cat, pid)
+        _guardar_catalogo(cat)
+
     import shutil
     try:
         shutil.rmtree(os.path.join(DATOS, "productos", pid), ignore_errors=True)
