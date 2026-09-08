@@ -1164,6 +1164,10 @@ aplicarla cuando se sube el mismo archivo en otro pedido (Moldería → tarjeta 
 - Guarda el **nombrado de las piezas** —por `(mesa, idx_mesa)`, la identidad que no depende del
   talle— más grupos, variables, conjuntos, telas, etiqueta, borde, planilla, talle de guía,
   referencia de medida, editables y la config de producción.
+- 🔴 **Al aplicarla entran SIEMPRE la ETIQUETA y los NOMBRES, y nada más** (regla del usuario): el
+  «dónde va la etiqueta» se marca pieza por pieza, es lo que más cuesta y cuelga del nombre de la
+  pieza. Lo que es decisión DEL PEDIDO —grupos y variables, telas, planilla, talle de guía, borde y
+  producción— entra sólo si se tilda en el modal.
 - **No se aplica sola.** La lista muestra el estado de cada una (`mismo archivo` / `parecida` /
   `distinta`) y el usuario elige; al aplicarla se informa qué entró y qué no, y se ve en el visor.
 - 🔴 **Los grupos y las variables se reubican por NOMBRE de pieza.** Sus `pieza_idx` son la posición

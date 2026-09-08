@@ -780,6 +780,11 @@ export const DICCIONARIO = {
     que: 'Guarda la configuración de este molde con ese nombre. Queda en la base, atada al archivo: el molde se puede borrar con el pedido y la configuración sigue.',
     como: 'Guardá la configuración de este molde.',
   },
+  'molde-cfg-partes': {
+    nombre: 'Aplicar además',
+    que: 'La etiqueta y los nombres de las piezas se aplican siempre. Lo demás —grupos y variables, telas, planilla, talle de guía, borde y producción— es del pedido y entra sólo si lo tildás.',
+    como: 'Tildá lo que además querés traer de esa configuración.',
+  },
   'molde-cfg-aplicar': {
     nombre: 'Aplicar',
     que: 'Le pone a este molde el nombrado, los grupos, las variables y las telas de esa configuración. No se aplica sola: la elegís vos y después mirás en el visor si acomodó bien.',

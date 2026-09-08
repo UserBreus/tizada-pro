@@ -8347,6 +8347,25 @@ _CAMPOS_CONFIG_MOLDE = ("grupos", "variantes", "conjuntos", "variante_guia", "et
                         "borde_corte", "telas_cfg", "telas_asignadas", "referencia_medida",
                         "editables_config", "mapeo_columnas", "planilla_template_id",
                         "terminologia", "nesting_preset_id", "grupo_tizada", "modelos")
+
+# QUÉ ENTRA AL APLICAR UNA CONFIGURACIÓN GUARDADA. La regla la puso el usuario (2026-09-08): «los
+# ajustes que quiero que se guarden son los de la ETIQUETA; los nombres de las piezas es obligatorio
+# siempre». Entonces:
+#   · SIEMPRE: el nombrado de las piezas y la ETIQUETA. El «dónde va la etiqueta» (`posiciones`,
+#     `piezas_off`, `zonas`) se marca pieza por pieza, es lo que más cuesta y lo que se perdía con
+#     el pedido — y va colgado del NOMBRE de la pieza, así que sin el nombrado no se puede aplicar.
+#   · OPCIONAL, sólo si el usuario lo tilda: lo que es decisión DEL PEDIDO (qué grupos y variables
+#     lleva, con qué telas, con qué planilla). Aplicarlo siempre le metía al pedido nuevo las
+#     decisiones del viejo sin que nadie las pidiera.
+_PARTES_CONFIG = {
+    "grupos_variables": ("grupos", "variantes", "conjuntos"),
+    "telas": ("telas_cfg", "telas_asignadas"),
+    "planilla": ("planilla_template_id", "mapeo_columnas", "terminologia"),
+    "guia": ("variante_guia",),
+    "produccion": ("borde_corte", "referencia_medida", "editables_config",
+                   "nesting_preset_id", "grupo_tizada", "modelos"),
+}
+_CAMPOS_SIEMPRE = ("etiqueta",)
 _SHA1_CACHE = {}
 
 
@@ -8456,8 +8475,17 @@ def molde_config_lista():
         else:
             estado, detalle = "distinta", (f"tiene {c.get('piezas_n')} pieza(s) en {c.get('mesas_n')} "
                                            f"mesa(s); este molde tiene {_n} en {_m}")
+        # QUÉ TRAE: la cuenta de posiciones de etiqueta es lo que se mira para elegir (es el
+        # trabajo que se guarda). Se lee del JSON sólo para eso; la lista no carga nada más.
+        _et = {}
+        try:
+            _et = ((db.leer_config_molde(c["id"]) or {}).get("datos") or {}).get("campos", {}).get("etiqueta") or {}
+        except Exception:
+            pass
         salida.append({"id": c["id"], "nombre": c["nombre"], "molde": c.get("molde"),
                        "piezas": c.get("piezas_n"), "mesas": c.get("mesas_n"),
+                       "etiqueta_posiciones": len(_et.get("posiciones") or {}),
+                       "etiqueta_apagadas": len(_et.get("piezas_off") or []),
                        "cuando": (c["creado_en"].isoformat() if hasattr(c.get("creado_en"), "isoformat")
                                   else str(c.get("creado_en") or "")),
                        "estado": estado, "detalle": detalle})
@@ -8501,7 +8529,10 @@ def molde_config_aplicar():
     _idx = _idx_por_nombre(reg)
     _nom_de_idx = {v: k for k, v in ((p["nombre"], p.get("pieza_idx")) for p in (datos.get("piezas") or []))
                    if v is not None}
-    campos = dict(datos.get("campos") or {})
+    # COPIA PROFUNDA: abajo se reubican los índices de grupos y variables, y hacerlo sobre los
+    # dicts que vinieron de la base reescribiría la configuración GUARDADA (aplicarla dos veces
+    # daba índices remapeados sobre índices remapeados → grupos con la pieza equivocada).
+    campos = json.loads(json.dumps(datos.get("campos") or {}))
     _perdidas = set()
 
     def _reubicar(idx_viejo):
@@ -8526,26 +8557,36 @@ def molde_config_aplicar():
                     vals.append({**val, "pieza_idx": _i})
             v["valores"] = vals
         campos["variantes"] = [v for v in campos["variantes"] if v.get("valores")]
-    # 3) EL RESTO DE LA CONFIGURACIÓN, tal cual (telas, etiqueta, borde, planilla, talle guía…)
+    # 3) LA ETIQUETA SIEMPRE; el resto, sólo lo que el usuario haya tildado (ver `_PARTES_CONFIG`).
+    _partes = [str(x) for x in (cuerpo.get("partes") or []) if str(x) in _PARTES_CONFIG]
+    _permitidos = set(_CAMPOS_SIEMPRE)
+    for _pt in _partes:
+        _permitidos.update(_PARTES_CONFIG[_pt])
     cat = _cargar_catalogo_para_editar()
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if prod is None:
         _soltar_edicion_catalogo()
         return jsonify({"error": "no está ese molde"}), 404
     for k, v in campos.items():
-        if k in _CAMPOS_CONFIG_MOLDE:
+        if k in _permitidos:
             prod[k] = v
     _guardar_catalogo(cat)
-    if datos.get("produccion"):
+    if datos.get("produccion") and "produccion" in _partes:
         json.dump(datos["produccion"], open(_ruta_datos("config_produccion.json", pid), "w",
                                             encoding="utf-8"), ensure_ascii=False)
+    _etq = campos.get("etiqueta") or {}
     return jsonify({"ok": True,
                     "nombre": cfg.get("nombre"),
                     "piezas_nombradas": puestos,
                     "piezas_totales": len(_piezas_del_registro(reg)),
-                    "grupos": len(campos.get("grupos") or []),
-                    "variables": len(campos.get("variantes") or []),
-                    "talle_guia": campos.get("variante_guia"),
+                    # LA ETIQUETA: cuántas piezas quedaron con su lugar marcado. Es el dato por el
+                    # que se guarda una configuración, así que se informa aparte.
+                    "etiqueta_posiciones": len(_etq.get("posiciones") or {}),
+                    "etiqueta_apagadas": len(_etq.get("piezas_off") or []),
+                    "partes": _partes,
+                    "grupos": len(campos.get("grupos") or []) if "grupos_variables" in _partes else 0,
+                    "variables": len(campos.get("variantes") or []) if "grupos_variables" in _partes else 0,
+                    "talle_guia": campos.get("variante_guia") if "guia" in _partes else None,
                     # Lo que NO entró: se dice, no se esconde. Es lo que el usuario tiene que
                     # revisar en pantalla antes de seguir.
                     "sin_lugar": sin_lugar[:10],

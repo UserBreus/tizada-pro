@@ -1365,6 +1365,12 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   vuelven a pasar por el instalador.
   · **Atada al ARCHIVO (sha1), no al molde** — el molde se borra con el pedido, la configuración
   queda. `_sha1_molde` memoriza por (tamaño, fecha): son 123 MB, leerlos en cada listado no.
+  · 🔴 **QUÉ ENTRA AL APLICARLA** (regla del usuario, 2026-09-08: «los ajustes que quiero que se
+  guarden son los de la ETIQUETA; los nombres de las piezas es obligatorio siempre»): **siempre** el
+  nombrado de las piezas y la **etiqueta** —`posiciones`, `piezas_off`, `zonas`, que se marcan pieza
+  por pieza y cuelgan del NOMBRE—; **sólo si se tilda**, lo que es decisión DEL PEDIDO: grupos y
+  variables, telas, planilla, talle de guía, borde y producción (`_PARTES_CONFIG`). Aplicar todo
+  junto le metía al pedido nuevo las decisiones del viejo sin que nadie las pidiera.
   · **La elige el usuario, nunca se aplica sola** (fue explícito). La lista dice qué tan bien calza:
   `igual` (mismo archivo), `parecida` (otro archivo con las mismas piezas y mesas) o `distinta` —
   y se puede aplicar igual: después se mira en el visor si acomodó bien.

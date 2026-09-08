@@ -4170,6 +4170,9 @@ export default function App() {
   const [cfgBusy, setCfgBusy] = useState(false);
   const [cfgNombre, setCfgNombre] = useState('');
   const [cfgInforme, setCfgInforme] = useState(null);   // qué entró y qué no, después de aplicar
+  // QUÉ SE APLICA ADEMÁS DE LA ETIQUETA Y LOS NOMBRES (que van siempre, regla del usuario
+  // 2026-09-08). Lo de acá es decisión DEL PEDIDO: se aplica sólo si la persona lo tilda.
+  const [cfgPartes, setCfgPartes] = useState([]);
   const [catalogoGrupos, setCatalogoGrupos] = useState([]);
   const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
   // Panel inline de selección de pieza en la barra lateral:
@@ -10323,7 +10326,7 @@ export default function App() {
     try {
       const r = await fetch('/api/molde/config/aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: pidCfg, id: c.id })
+        body: JSON.stringify({ pid: pidCfg, id: c.id, partes: cfgPartes })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
@@ -16621,11 +16624,11 @@ export default function App() {
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                                     <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>Configuración</span>
-                                    <Ayuda ancho={300}>Guardá cómo quedó configurado este molde —nombres de las
-                                      piezas, grupos, variables, telas y {term.variante.toLowerCase()} de guía— y
-                                      volvé a aplicarla cuando subas <b>el mismo archivo</b> en otro pedido, en vez
-                                      de rehacer todos los pasos. <b>No se aplica sola</b>: la elegís vos y después
-                                      mirás en el visor si acomodó bien.</Ayuda>
+                                    <Ayuda ancho={300}>Guardá <b>dónde va la etiqueta en cada pieza</b> y el
+                                      nombre de las piezas, y volvé a aplicarlo cuando subas <b>el mismo archivo</b>
+                                      en otro pedido, en vez de marcarlo todo de nuevo. Lo que es del pedido
+                                      (grupos, variables, telas, planilla) va sólo si lo tildás. <b>No se aplica
+                                      sola</b>: la elegís vos y después mirás en el visor si acomodó bien.</Ayuda>
                                   </span>
                                   <button type="button" className="btn ghost" data-tour="molde-cfg-abrir"
                                     style={{ padding: '4px 10px', fontSize: 11 }}
@@ -20595,8 +20598,9 @@ export default function App() {
               <button type="button" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-secondary)' }} onClick={() => setCfgModalOpen(false)}>×</button>
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Guardá cómo quedó este molde (nombres de las piezas, grupos, variables, telas y
-              {' '}{term.variante.toLowerCase()} de guía) y volvé a aplicarla cuando subas el mismo archivo.
+              Guardá <b>dónde va la etiqueta en cada pieza</b> y el nombre de las piezas, y volvé a
+              aplicarlo cuando subas el mismo archivo. Al aplicar, <b>la etiqueta y los nombres van
+              siempre</b>; lo que es del pedido (grupos, telas, planilla) sólo si lo tildás.
             </p>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
               <input type="text" value={cfgNombre} data-tour="molde-cfg-nombre"
@@ -20606,11 +20610,29 @@ export default function App() {
               <button type="button" className="btn primary" data-tour="molde-cfg-guardar"
                 disabled={cfgBusy || !cfgNombre.trim()} onClick={guardarCfgMolde}>Guardar esta</button>
             </div>
+            {cfgGuardadas.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 12,
+                fontSize: 12, color: 'var(--text-secondary)' }} data-tour="molde-cfg-partes">
+                <span>Aplicar además:</span>
+                {[['grupos_variables', 'grupos y variables'], ['telas', 'telas'],
+                  ['planilla', 'planilla'], ['guia', `${term.variante.toLowerCase()} de guía`],
+                  ['produccion', 'borde y producción']].map(([k, txt]) => (
+                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={cfgPartes.includes(k)}
+                      onChange={e => setCfgPartes(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))} />
+                    {txt}
+                  </label>
+                ))}
+              </div>
+            )}
             {cfgInforme && (
               <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, marginBottom: 14, fontSize: 12.5 }}>
                 <b>«{cfgInforme.nombre}» aplicada.</b>{' '}
-                {cfgInforme.piezas_nombradas} de {cfgInforme.piezas_totales} piezas con nombre ·
-                {' '}{cfgInforme.grupos} grupo(s) · {cfgInforme.variables} variable(s)
+                Etiqueta: {cfgInforme.etiqueta_posiciones} pieza(s) con su lugar marcado
+                {cfgInforme.etiqueta_apagadas ? `, ${cfgInforme.etiqueta_apagadas} sin etiqueta` : ''} ·
+                {' '}{cfgInforme.piezas_nombradas} de {cfgInforme.piezas_totales} piezas con nombre
+                {cfgInforme.grupos ? ` · ${cfgInforme.grupos} grupo(s)` : ''}
+                {cfgInforme.variables ? ` · ${cfgInforme.variables} variable(s)` : ''}
                 {cfgInforme.talle_guia ? ` · guía ${cfgInforme.talle_guia}` : ''}.
                 {(cfgInforme.sin_lugar || []).length > 0 && (
                   <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
@@ -20638,7 +20660,10 @@ export default function App() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{c.nombre}</div>
                     <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                      {c.molde ? `de «${c.molde}» · ` : ''}{c.piezas} piezas · {c.detalle}
+                      {c.molde ? `de «${c.molde}» · ` : ''}
+                      <b>etiqueta en {c.etiqueta_posiciones} pieza(s)</b>
+                      {c.etiqueta_apagadas ? ` (${c.etiqueta_apagadas} sin etiqueta)` : ''} ·
+                      {' '}{c.piezas} piezas · {c.detalle}
                     </div>
                   </div>
                   <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,

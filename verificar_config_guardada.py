@@ -106,7 +106,12 @@ CAT = {"activo": PID_A, "productos": [
                     "valores": [{"id": "v_0", "label": "Frente", "pieza_idx": 1},
                                 {"id": "v_1", "label": "Espalda", "pieza_idx": 0}]}],
      "telas_cfg": {"todas": ["Delta"], "por_pieza": {}, "max_var": {}},
-     "etiqueta": {"posiciones": {"Frente": {"x": 1, "y": 2}}},
+     # 🔴 LO QUE MÁS IMPORTA GUARDAR (pedido del usuario): DÓNDE VA LA ETIQUETA en cada pieza —se
+     # marca a mano, pieza por pieza, y cuelga del NOMBRE de la pieza— y cuáles no llevan.
+     "etiqueta": {"posiciones": {"Frente": {"rx": 0.5, "ry": 0.9},
+                                 "Espalda": {"rx": 0.5, "ry": 0.1},
+                                 "v_1§Manga derecha": {"rx": 0.2, "ry": 0.5}},
+                  "piezas_off": ["Manga izquierda"], "zonas": {}, "size_mm": 4.2},
      "referencia_medida": "alto"},
     # El molde NUEVO: el mismo archivo subido otra vez. Sus piezas todavía se llaman «Pieza N» y
     # 🔴 quedaron en OTRO ORDEN dentro del talle: si la configuración se aplicara por `pieza_idx`,
@@ -183,12 +188,32 @@ ok(d.get("piezas_nombradas") == 4, f"nombra las 4 piezas ({d.get('piezas_nombrad
 ok(sorted(REGISTROS[PID_B].keys()) == sorted(NOMBRES),
    f"el molde nuevo queda con los nombres de la configuración ({sorted(REGISTROS[PID_B].keys())})")
 _prod_b = next(p for p in CAT["productos"] if p["id"] == PID_B)
-ok(_prod_b.get("variante_guia") == "M", "y con su talle de guía")
-ok((_prod_b.get("telas_cfg") or {}).get("todas") == ["Delta"], "y con sus telas")
-ok(PRODUCCION.get(PID_B, {}).get("espaciado_mm") == 7 or
-   json.load(open(os.path.join(os.environ["TIZADA_DATOS"], "productos", PID_B, "config_produccion.json"),
+# 🔴 LA REGLA DEL USUARIO (2026-09-08): «los ajustes que quiero que se guarden son los de la
+# ETIQUETA; los nombres de las piezas es obligatorio siempre». Esas dos cosas entran SOLAS.
+ok(len((_prod_b.get("etiqueta") or {}).get("posiciones") or {}) == 3,
+   f"🔴 la ETIQUETA entra sin pedirla: 3 posiciones ({(_prod_b.get('etiqueta') or {}).get('posiciones')})")
+ok((_prod_b.get("etiqueta") or {}).get("piezas_off") == ["Manga izquierda"],
+   "…y también las piezas que NO llevan etiqueta")
+ok(d.get("etiqueta_posiciones") == 3 and d.get("etiqueta_apagadas") == 1,
+   f"y el informe lo dice ({d.get('etiqueta_posiciones')} posiciones, {d.get('etiqueta_apagadas')} apagadas)")
+# …y lo que es DEL PEDIDO no se mete solo: aplicarlo siempre le imponía al pedido nuevo las
+# decisiones del viejo sin que nadie las pidiera.
+ok(_prod_b.get("variante_guia") is None, f"el {'talle'} de guía NO entra sin tildarlo ({_prod_b.get('variante_guia')})")
+ok(_prod_b.get("telas_cfg") is None, f"las telas tampoco ({_prod_b.get('telas_cfg')})")
+ok(not _prod_b.get("grupos") and not _prod_b.get("variantes"),
+   f"ni los grupos y variables ({_prod_b.get('grupos')} · {_prod_b.get('variantes')})")
+print("    OK    entraron la etiqueta y los nombres; el resto quedó afuera")
+
+print("\n3b · …Y LO DEL PEDIDO ENTRA SI SE TILDA")
+d = (CLI.post("/api/molde/config/aplicar",
+              json={"pid": PID_B, "id": _id,
+                    "partes": ["grupos_variables", "telas", "guia", "produccion"]}).get_json() or {})
+_prod_b = next(p for p in CAT["productos"] if p["id"] == PID_B)
+ok(_prod_b.get("variante_guia") == "M", "con «talle de guía» tildado, entra")
+ok((_prod_b.get("telas_cfg") or {}).get("todas") == ["Delta"], "y las telas")
+ok(json.load(open(os.path.join(os.environ["TIZADA_DATOS"], "productos", PID_B, "config_produccion.json"),
                   encoding="utf-8")).get("espaciado_mm") == 7,
-   "y con la config de producción")
+   "y la config de producción")
 
 print("\n4 · 🔴 LOS GRUPOS Y LAS VARIABLES SE REUBICAN POR NOMBRE, NO POR ÍNDICE")
 # En el molde nuevo, «Espalda» quedó en el pieza_idx 2 y «Frente» en el 3 (ver REGISTROS[PID_B]).
