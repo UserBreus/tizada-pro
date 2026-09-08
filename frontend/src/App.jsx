@@ -6763,6 +6763,10 @@ export default function App() {
   // la respuesta de un guardado automático pisaba la pieza que el usuario acababa de elegir.
   const _varEdit = useRef(0);
   const _varSaveT = useRef(null);
+  // ENTRAR O SALIR DE «ELEGIR PIEZAS» (de un grupo, de una variable o de un conjunto) deja el
+  // visor LIMPIO. Sin esto quedaban piezas marcadas de la tanda anterior y, al pasar del grupo a
+  // la variable, no se distinguía lo recién elegido (reporte del usuario 2026-09-08).
+  useEffect(() => { setSelNombrar(new Set()); }, [asignandoTipo, asignandoGrupoPz, asignandoConjunto]);
   const guardarGruposCon = async (arr, silencioso) => {
     if (!pidCfg) return;
     // Dos gestos seguidos = dos POST en vuelo. Si la respuesta del PRIMERO llega después de que
@@ -18509,6 +18513,16 @@ export default function App() {
                                   else if (grupoPzActivoSet) { // eligiendo piezas de un GRUPO: las suyas en cyan, el resto neutro
                                     if (grupoPzActivoSet.has(p.idx)) { fillCol = 'rgba(0,243,255,0.22)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
                                     else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
+                                  }
+                                  else if (grupoPzAbierto && !asignandoTipo) {
+                                    // GRUPO ABIERTO, sin estar eligiendo nada: las piezas del grupo NO se
+                                    // pintan por ser del grupo — quedaban todas en verde y el usuario las
+                                    // leía como «seleccionadas para siempre» (reporte 2026-09-08). Verde
+                                    // sólo lo que YA está en alguna variable DE ESTE grupo (que es
+                                    // información: ya tiene lugar); el resto, neutro y listo para elegir.
+                                    const _vGrupo = claveP && (variantesEdit || []).some(v => v.clave === claveP && v.grupoId === grupoPzAbierto);
+                                    if (_vGrupo) { fillCol = 'rgba(16,185,129,0.26)'; badgeFill = '#10b981'; textFill = '#18181b'; }
+                                    else { fillCol = 'rgba(255,255,255,0.04)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
                                   }
                                   else if (comboVisor && comboVisor.length) { fillCol = 'rgba(16,185,129,0.30)'; badgeFill = '#10b981'; textFill = '#18181b'; } // pieza de la combinación mostrada
                                   else if (enActivo) { fillCol = 'rgba(0,243,255,0.22)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }

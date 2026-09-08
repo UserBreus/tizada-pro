@@ -1385,6 +1385,17 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   usuario. La evidencia útil no fue el log del servidor (todos 200) sino **el estado que quedó en
   el catálogo** (grupo con `piezas: []` y variable con `valores: []` después de seis POST): cuando
   algo «se bugea» en una pantalla de configuración, mirar primero qué quedó guardado.
+  **(c) 2026-09-08 — «Las piezas del grupo quedan seleccionadas para siempre».** Faltaba esto, que
+  es lo que el usuario estaba viendo: al terminar de elegir las piezas de un GRUPO, sus piezas
+  quedaban pintadas con `rgba(16,185,129,0.12)` — el mismo verde que el sistema usa para «pieza ya
+  asignada a una variable». Con el grupo abierto el visor muestra SÓLO sus piezas, así que se veían
+  TODAS verdes: marcadas, sin forma de distinguir después lo elegido para la variable. Ahora, con
+  un grupo abierto y sin ningún modo de asignación activo, sólo van en verde las piezas que ya
+  están en alguna variable DE ESE grupo; el resto queda neutro (`rgba(255,255,255,0.04)`), listo
+  para elegir. Y un efecto limpia `selNombrar` cada vez que cambia `asignandoTipo`,
+  `asignandoGrupoPz` o `asignandoConjunto`: entrar o salir de «elegir piezas» deja el visor sin
+  restos de la tanda anterior. Verificado leyendo el `fill` de cada pieza en el DOM (las capturas
+  reducidas engañan con estos colores: verde tenue sobre fondo negro se lee como cyan).
 - **2026-09-07 (394) — SEGUNDOS, NO MINUTOS: la carga del molde con diseño 56 → ~8 s y la tizada de
   5 prendas 51 → ~15 s.** Pedido del usuario: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá
   todos los caminos para que sean segundos y milisegundos; y la tizada de 5 tardó 45 s». Estudio
