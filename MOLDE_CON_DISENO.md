@@ -1100,3 +1100,29 @@ dibujo que esa no es la tipografía que se pidió.
 ⚠️ `_molde_guia_ficha` corre en el hilo que genera el pedido: ahí NO hay `request`, así que los
 reemplazos hay que **pasárselos** (`reempl=`). Cuando no se hacía, el molde guía se dibujaba con una
 tipografía y la tela salía con otra.
+
+## LA CACHÉ DEL DESPLEGADO ES POR ARCHIVO, NO POR MOLDE
+
+`datos/desplegado_cache/<sha1 del archivo>_<versión>/` guarda el desplegado completo + el `alta`.
+Es lo que hace que **subir el mismo molde por segunda vez tarde 1 s en vez de 25**: el sello del
+desplegado es `[tamaño, mtime]`, así que al copiarlo se le devuelve al archivo la fecha que tenía
+cuando se armó y todo coincide.
+
+Que sea **por archivo** significa que **dos pedidos distintos con el mismo molde comparten esa
+carpeta**. Cada uno tiene su `pid`, su `entrada/<pid>` y su propio `desplegado/` al lado del molde
+— lo único común es esta caché, y es de sólo lectura una vez escrita. Reglas para no pisarse:
+
+- **Un candado (`_CACHE_DESPL_LOCK`) para leer, reemplazar y barrer.** Nunca las tres a la vez.
+- **Temporal con nombre único** (`<clave>.tmp-<8 hex>`), borrado siempre en el `finally`. Con un
+  nombre fijo, dos subidas simultáneas se copiaban una adentro de la otra.
+- **`os.replace` sobre una carpeta que existe FALLA en Windows**: si otro pedido llegó primero, su
+  copia vale igual (mismo sha1) y la nuestra se descarta.
+- **Inventario (`contenido.json`)**: al usar la caché se comprueba que la copia tenga todos los
+  archivos, con sus tamaños. Media caché es peor que ninguna: el molde saldría sin mesas y eso
+  **sale bien impreso**.
+
+Contrato: `verificar_mismo_molde_dos_pedidos.py`.
+
+⚠️ **Consultar la ruta de un molde no lo crea.** `_ruta_datos`/`_ruta_entrada` hacían `makedirs`
+siempre —hasta para preguntar si un archivo existía— y una consulta sobre un molde borrado le
+resucitaba la carpeta vacía. Ahora sólo crean carpetas de un molde que ya está en disco.

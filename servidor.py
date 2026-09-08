@@ -1455,12 +1455,29 @@ def _diseno_sub(diseno):
     return None if slug == "principal" else os.path.join("disenos", slug)
 
 
+def _molde_en_disco(pid):
+    """¿Este molde existe en disco (su carpeta de datos o la de entrada)? Es lo que separa «pedir la
+    ruta de un molde de verdad» de «pedir la de uno que ya no está»."""
+    return (os.path.isdir(os.path.join(DATOS, "productos", pid))
+            or os.path.isdir(os.path.join(ENTRADA, pid)))
+
+
+def _crear_si_el_molde_existe(pid, pdir):
+    """Crea la carpeta SÓLO si el molde existe. 🔴 Antes acá había un `makedirs` incondicional y
+    CONSULTAR una ruta creaba la carpeta: cualquier pregunta sobre un molde ya borrado (una pantalla
+    de ayer, un pedido viejo) le resucitaba el esqueleto vacío en `entrada/` o en `datos/productos/`
+    — de ahí las carpetas huérfanas que había que limpiar a mano. La carpeta del molde la crea el
+    ALTA (`crear_producto`); acá sólo se agregan las subcarpetas (los diseños) de uno que ya está."""
+    if _molde_en_disco(pid):
+        os.makedirs(pdir, exist_ok=True)
+
+
 def _ruta_datos(nombre, pid=None, sub=None):
     pid = pid or _get_active_producto_id()
     pdir = os.path.join(DATOS, "productos", pid)
     if sub:
         pdir = os.path.join(pdir, sub)
-    os.makedirs(pdir, exist_ok=True)
+    _crear_si_el_molde_existe(pid, pdir)
     return os.path.join(pdir, nombre)
 
 
@@ -1472,7 +1489,7 @@ def _ruta_entrada(nombre, pid=None, sub=None, original=False):
     pdir = os.path.join(ENTRADA, pid)
     if sub:
         pdir = os.path.join(pdir, sub)
-    os.makedirs(pdir, exist_ok=True)
+    _crear_si_el_molde_existe(pid, pdir)
     p = os.path.join(pdir, nombre)
     # Archivos VERSIONADOS: el arte (al inyectar objetos) y la plantilla (al nombrar variantes).
     # En los dos casos el original del usuario queda intacto y el sistema usa la versión vigente.
@@ -2151,30 +2168,96 @@ def _sha1_archivo(path):
     return h.hexdigest()
 
 
+def _contenido_carpeta(carpeta):
+    """{ruta relativa: tamaño} de todos los archivos. Sirve para comparar dos copias sin abrirlas."""
+    salida = {}
+    for raiz, _, archivos in os.walk(carpeta):
+        for a in archivos:
+            f = os.path.join(raiz, a)
+            try:
+                salida[os.path.relpath(f, carpeta).replace("\\", "/")] = os.path.getsize(f)
+            except OSError:
+                pass
+    return salida
+
+
 def _cache_desplegado_tomar(tmp):
     """Si este archivo ya se desplegó alguna vez, copia su desplegado al lado del temporal y
     devuelve el `alta` guardado; si no, None. El sello del desplegado es [tamaño, mtime]: se le
-    pone al archivo la fecha que tenía cuando se armó la caché, y todo coincide."""
+    pone al archivo la fecha que tenía cuando se armó la caché, y todo coincide.
+
+    🔴 LA CACHÉ ES POR ARCHIVO (sha1), no por molde: la comparten dos pedidos que suban el MISMO
+    molde. Por eso se lee con el candado tomado (nadie la está reemplazando ni barriendo mientras
+    tanto) y la copia se verifica archivo por archivo: media copia es peor que ninguna — el molde
+    saldría sin algunas mesas y nadie lo notaría hasta ver la tizada."""
     try:
         import json as _json
+        import shutil
+        import piezas_con_diseno as PD
         clave = _sha1_archivo(tmp) + "_" + _CACHE_DESPL_VERSION
         carpeta = os.path.join(_CACHE_DESPL, clave)
         fa = os.path.join(carpeta, "alta.json")
-        if not os.path.exists(fa) or not os.path.isdir(os.path.join(carpeta, "desplegado")):
-            return None
-        with open(fa, encoding="utf-8") as fh:
-            alta = _json.load(fh)
-        import shutil
-        import piezas_con_diseno as PD
+        origen = os.path.join(carpeta, "desplegado")
         destino = PD._carpeta_desplegado(tmp)
-        shutil.rmtree(destino, ignore_errors=True)
-        shutil.copytree(os.path.join(carpeta, "desplegado"), destino)
+        with _CACHE_DESPL_LOCK:
+            if not os.path.exists(fa) or not os.path.isdir(origen):
+                return None
+            with open(fa, encoding="utf-8") as fh:
+                alta = _json.load(fh)
+            # QUÉ TENDRÍA QUE HABER: el inventario que dejó quien la guardó. Si la entrada es
+            # vieja y no lo tiene, se compara contra el original (detecta una copia mala, aunque
+            # no una caché ya mutilada).
+            try:
+                with open(os.path.join(carpeta, "contenido.json"), encoding="utf-8") as fh:
+                    _esperado = _json.load(fh)
+            except Exception:
+                _esperado = None
+            shutil.rmtree(destino, ignore_errors=True)
+            shutil.copytree(origen, destino)
+            if _esperado is None:
+                _esperado = _contenido_carpeta(origen)
+            _copiado = _contenido_carpeta(destino)
+        if _esperado != _copiado or not _esperado:
+            # La copia salió incompleta (disco lleno, archivo trabado): NO se usa. Se rehace el
+            # desplegado desde cero, que es lento pero correcto.
+            print(f"[camino B] caché {clave[:12]}… incompleta al copiar "
+                  f"({len(_copiado)}/{len(_esperado)} archivos): se rehace el desplegado")
+            shutil.rmtree(destino, ignore_errors=True)
+            return None
         os.utime(tmp, (time.time(), float(alta["mtime"])))
         print(f"[camino B] desplegado tomado de la caché {clave[:12]}…")
         return alta["alta"]
     except Exception as e:
         print(f"[camino B] caché del desplegado no usable: {e}")
         return None
+
+
+# Un solo candado para TODA la caché: es por archivo (sha1) y la comparten los pedidos, así que
+# leerla, reemplazarla y barrerla no pueden pasar a la vez. Copiar ~128 MB tarda ~1 s: esperar ese
+# segundo es infinitamente mejor que llevarse media caché.
+_CACHE_DESPL_LOCK = threading.Lock()
+
+
+def _cache_desplegado_barrer(clave_viva):
+    """Deja las últimas `_CACHE_DESPL_MAX` entradas y limpia lo que no sirve: los `.tmp-…` que dejó
+    una subida cortada y las entradas del MISMO archivo con una VERSIÓN vieja del desplegado (esas
+    ya no las lee nadie y son 128 MB cada una). Se llama con el candado tomado."""
+    import shutil
+    _sha_vivo = clave_viva.rsplit("_", 1)[0]
+    vivos = []
+    for d in os.listdir(_CACHE_DESPL):
+        ruta = os.path.join(_CACHE_DESPL, d)
+        if not os.path.isdir(ruta):
+            continue
+        if ".tmp-" in d or d.endswith(".tmp"):
+            shutil.rmtree(ruta, ignore_errors=True)      # basura de una subida que se cortó
+            continue
+        if d.rsplit("_", 1)[0] == _sha_vivo and d != clave_viva:
+            shutil.rmtree(ruta, ignore_errors=True)      # el mismo archivo, con el desplegado viejo
+            continue
+        vivos.append(ruta)
+    for viejo in sorted(vivos, key=os.path.getmtime)[:-_CACHE_DESPL_MAX]:
+        shutil.rmtree(viejo, ignore_errors=True)
 
 
 def _cache_desplegado_guardar(path, alta):
@@ -2192,19 +2275,32 @@ def _cache_desplegado_guardar(path, alta):
         if os.path.exists(os.path.join(carpeta, "alta.json")):
             return
         os.makedirs(_CACHE_DESPL, exist_ok=True)
-        tmp = carpeta + ".tmp"
-        shutil.rmtree(tmp, ignore_errors=True)
-        shutil.copytree(PD._carpeta_desplegado(path), os.path.join(tmp, "desplegado"))
-        with open(os.path.join(tmp, "alta.json"), "w", encoding="utf-8") as fh:
-            _json.dump({"alta": alta, "mtime": os.stat(path).st_mtime}, fh)
-        os.replace(tmp, carpeta)
-        # los más viejos, afuera
-        vivos = sorted((os.path.join(_CACHE_DESPL, d) for d in os.listdir(_CACHE_DESPL)
-                        if os.path.isdir(os.path.join(_CACHE_DESPL, d)) and not d.endswith(".tmp")),
-                       key=os.path.getmtime)
-        for viejo in vivos[:-_CACHE_DESPL_MAX]:
-            shutil.rmtree(viejo, ignore_errors=True)
-        print(f"[camino B] desplegado guardado en la caché {clave[:12]}…")
+        # 🔴 TEMPORAL CON NOMBRE ÚNICO. Antes era `<clave>.tmp`, el MISMO para todos: dos pedidos
+        # subiendo el mismo archivo a la vez se copiaban uno adentro del otro (y el `rmtree` del
+        # que llegaba segundo le vaciaba la carpeta al primero a mitad de copia).
+        tmp = carpeta + ".tmp-" + uuid.uuid4().hex[:8]
+        try:
+            shutil.copytree(PD._carpeta_desplegado(path), os.path.join(tmp, "desplegado"))
+            with open(os.path.join(tmp, "alta.json"), "w", encoding="utf-8") as fh:
+                _json.dump({"alta": alta, "mtime": os.stat(path).st_mtime}, fh)
+            # INVENTARIO: qué archivos tiene el desplegado y cuánto pesa cada uno. Es contra esto
+            # que se verifica la copia al usarla (ver `_cache_desplegado_tomar`).
+            with open(os.path.join(tmp, "contenido.json"), "w", encoding="utf-8") as fh:
+                _json.dump(_contenido_carpeta(os.path.join(tmp, "desplegado")), fh)
+            with _CACHE_DESPL_LOCK:
+                if os.path.exists(carpeta):
+                    # otro pedido con el mismo archivo llegó primero: su copia vale igual que la
+                    # nuestra (mismo sha1). `os.replace` sobre una carpeta que existe FALLA en
+                    # Windows, y así quedaban 128 MB de `.tmp` tirados.
+                    print(f"[camino B] caché {clave[:12]}… ya estaba (la guardó otro pedido)")
+                    return
+                os.replace(tmp, carpeta)
+                tmp = None
+                _cache_desplegado_barrer(clave)
+            print(f"[camino B] desplegado guardado en la caché {clave[:12]}…")
+        finally:
+            if tmp:
+                shutil.rmtree(tmp, ignore_errors=True)
     except Exception as e:
         print(f"[camino B] no se pudo guardar la caché del desplegado: {e}")
 

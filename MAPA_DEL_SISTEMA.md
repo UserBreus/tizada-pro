@@ -1354,6 +1354,38 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-08 (397) — EL MISMO MOLDE EN DOS PEDIDOS NO SE PISA, y consultar una ruta ya no
+  resucita moldes borrados.** Pregunta del usuario: «si subo 2 veces el mismo molde en 2 pedidos
+  diferentes, ¿no pueden colapsarse entre ellos?». Los archivos no: cada molde tiene su `pid` al
+  azar y su carpeta. Pero **sí compartían la caché del desplegado**, que se guarda por **sha1 del
+  archivo** (es lo que hace que la segunda subida tarde 1 s en vez de 25) — y ahí había tres
+  agujeros reales:
+  **(a) El temporal de escritura era `<clave>.tmp`, uno solo para todos.** Dos subidas del mismo
+  archivo a la vez: la segunda hacía `rmtree` de ese temporal mientras la primera copiaba adentro →
+  árbol a medias. Ahora el temporal lleva un sufijo único y se limpia siempre (`finally`).
+  **(b) `os.replace` de una CARPETA falla en Windows si el destino existe.** La excepción se
+  tragaba y quedaban ~128 MB de `.tmp` tirados para siempre. Ahora, si otro pedido ganó la carrera
+  (su copia vale igual: mismo sha1), se descarta la nuestra y se avisa por consola.
+  **(c) El barrido de entradas viejas podía borrar la carpeta que otra subida estaba copiando.**
+  Ahora hay **un candado para toda la caché** (`_CACHE_DESPL_LOCK`): leer, reemplazar y barrer no
+  pasan a la vez. Copiar ~128 MB tarda ~1 s; esperar ese segundo es mejor que llevarse media caché.
+  **(d) La caché guarda su INVENTARIO** (`contenido.json`: qué archivos tiene y cuánto pesa cada
+  uno) y al usarla se compara la copia contra él: una caché mutilada (borrado a medias, disco
+  lleno) **se descarta y el desplegado se rehace**, en vez de dar por bueno un molde al que le
+  faltan mesas — el peor error posible acá, porque sale bien impreso. El barrido también se lleva
+  ahora los `.tmp-…` huérfanos y las entradas del MISMO archivo con una versión vieja del
+  desplegado (había 256 MB de `v394`/`v394b` que ya no lee nadie).
+  **(e) 🔴 `_ruta_datos` / `_ruta_entrada` hacían `makedirs` SIEMPRE, aun para sólo CONSULTAR una
+  ruta.** Cualquier pregunta sobre un molde ya borrado (una pantalla abierta de ayer, un pedido
+  viejo, un script) le recreaba la carpeta vacía: de ahí las carpetas huérfanas de `entrada/` y
+  `datos/productos/` que hubo que limpiar a mano hoy (11, todas vacías). Ahora sólo se crean las
+  carpetas de un molde que YA existe en disco (`_molde_en_disco`); la del molde la crea el alta.
+  **Contrato nuevo: `verificar_mismo_molde_dos_pedidos.py`** (diez hilos guardando y leyendo la
+  caché del mismo archivo, caché mutilada, dos moldes con el mismo archivo, y la ruta de un molde
+  muerto). Y `verificar_alta_con_diseno.py` §5 ahora recorre **el catálogo** y no `entrada/*`: se
+  ponía rojo por una carpeta de un molde borrado (`prod_20260903_112000_55ad`, 123 MB de un alta
+  cortada el 3/9 que sigue ahí porque el `rmtree` no pudo con el archivo abierto).
+
 - **2026-09-08 (396) — CADA MOLDE EN SU DISEÑO: se acabaron las tizadas dobles y el molde repetido
   en la ficha (y la ficha dice con qué tipografía se estampa).** Reporte del usuario: un pedido con
   dos espacios («Camiseta» y «Campera»), uno por molde, salió con **cuatro hojas** —«Principal»,

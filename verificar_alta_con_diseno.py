@@ -192,7 +192,14 @@ print("\n5 · 🔴 LOS MOLDES DEL CAMINO A NO CAMBIAN EN NADA")
 import glob                                                    # noqa: E402
 import pymupdf as pdfmod                                       # noqa: E402
 _probados, _saltados = 0, 0
-for pl in sorted(glob.glob(os.path.join(RAIZ, "entrada", "*", "plantilla.ai")))[:6]:
+# 🔴 SÓLO LOS MOLDES DEL CATÁLOGO. En `entrada/` pueden quedar carpetas de moldes ya borrados (un
+# alta cortada, un borrado que no pudo con el archivo abierto); esos archivos no son moldes del
+# sistema y ponían el contrato rojo sin que nada estuviera mal.
+_cat_json = json.load(open(os.path.join(RAIZ, "datos", "productos_catalogo.json"), encoding="utf-8"))
+_pids_cat = [p["id"] for p in _cat_json.get("productos", [])]
+for pl in [os.path.join(RAIZ, "entrada", _p, "plantilla.ai") for _p in _pids_cat][:6]:
+    if not os.path.exists(pl):
+        continue
     # Los moldes que YA están marcados son del camino B a propósito (alguien los subió por ese
     # camino): no son la no-regresión que se quiere medir acá, que es «un molde de siempre no se
     # confunde». Sin este salto, el contrato se ponía rojo por un molde correcto — y un contrato
