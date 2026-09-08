@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **117 endpoints**. Generado automáticamente del código.
+Total: **118 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -62,7 +62,8 @@ Total: **117 endpoints**. Generado automáticamente del código.
 |---|---|---|---|
 | POST | `/api/generar` |  | body: asignacion, editables, prendas, producto_id |
 | POST | `/api/generar_multi` | Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA. Body: {molds: [pid, ...], prendas: [...]}. | body: asignaciones, default_diseno, editables, molds, perfil_forzado, planilla, prendas, productos, tela_base, vars_por_diseno |
-| GET | `/api/trabajo/<tid>` |  | — |
+| GET | `/api/trabajo/<tid>` | Cómo va esa tizada. Si el trabajo ya no existe: 404 con `estado: "desconocido"` y el motivo, para que la pantalla corte el sondeo y lo explique. | — |
+| POST | `/api/trabajo/<tid>/cancelar` | Para una tizada que se está armando. Se frena al terminar el paso en curso (nunca a mitad de escribir un PDF) y borra lo que alcanzó a generar. 404 si no existe, 409 si ya terminó. | — |
 | GET | `/api/trabajos/<tid>/mesa/<archivo>` | Descarga UNA mesa (la página `pi` de la hoja) como PDF PROPIO, con el NOMBRE que se ve en la tizada. Así cada mesa baja SEPARADA aunque varias sean páginas del  | q: nombre, pi |
 | GET | `/api/trabajos/<tid>/pagina_img/<archivo>` | Una página de un PDF del trabajo como PNG (para MOSTRARLO en el visor con el look del sistema: así el scroll es el de la app, no el del visor de PDF del navegad | q: pi, z |
 | GET | `/api/trabajos/zip` | Arma un ZIP con los PDF de todas las mesas de los trabajos pedidos (ids separados por coma), una carpeta por molde. | q: ids |

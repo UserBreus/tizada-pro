@@ -592,6 +592,11 @@ export const DICCIONARIO = {
     que: 'Cada hoja es una mesa de tela lista para el RIP.',
     como: 'Mirá las hojas que salieron.',
   },
+  'tizada-cancelar': {
+    nombre: 'Cancelar',
+    que: 'Para la tizada que se está armando. Se frena al terminar el paso en curso, así no queda ningún archivo a medias, y se borra lo que alcanzó a generar.',
+    como: 'Tocá «Cancelar» mientras se arma la tizada.',
+  },
   'resultados-descargar': {
     nombre: 'Descargar todo',
     que: 'Baja cada mesa como un archivo aparte, con su nombre.',

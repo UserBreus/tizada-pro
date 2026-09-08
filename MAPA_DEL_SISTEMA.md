@@ -1432,6 +1432,50 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (389) — LA TIZADA SE PUEDE PARAR, los trabajos se podan, y un trabajo que ya no
+  existe se DICE.** Cuarta entrega de la auditoría.
+
+  **LO QUE PASABA.** Cada generación queda anotada en memoria (`trabajos`) y la pantalla la sondea
+  hasta que está lista. Tres agujeros:
+  1. **No había forma de cancelar.** El usuario cerraba la pestaña, cambiaba de molde o se
+     arrepentía, y el servidor seguía armando la tizada **entera**: minutos de CPU, el aplanado
+     para el RIP y la ficha técnica, para un pedido que ya no le importaba a nadie. Y nada acotaba
+     cuántas a la vez: N clics = N generaciones peleándose la máquina.
+  2. **Nada se podaba.** Ni una sola línea sacaba entradas: cada resultado, con su lista de hojas
+     y sus validaciones, quedaba en memoria hasta reiniciar el servidor.
+  3. **Un trabajo que ya no existe no se distinguía de uno lento.** La pantalla guarda el pedido
+     en curso en el navegador y lo retoma al recargar; si el servidor se reinició en el medio, el
+     sondeo de una tizada sola daba vueltas **para siempre** contra un 404, y el de varias dejaba
+     la tarjeta **muda** (`estado: undefined`, ni armando ni lista ni con error).
+
+  **LO QUE SE HIZO.**
+  - `POST /api/trabajo/<tid>/cancelar` (404 si no existe, 409 si ya terminó). La generación se
+    entera **en el aviso de progreso** y no en cualquier lado: ahí está entre dos fases, con lo
+    anterior ya escrito en disco. Cortar a mitad de un `save` dejaría un PDF a medias. Al
+    cancelar se borra `trabajos/<id>` (es salida del sistema, no datos del usuario).
+  - `_podar_trabajos()` corre al crear un trabajo: saca los TERMINADOS de más de 6 h y, pasados
+    200, los más viejos. **Nunca toca uno que se está armando** — perderlo dejaría a la pantalla
+    sondeando un id que desapareció. Los PDFs del disco no se tocan.
+  - `GET /api/trabajo/<tid>` inexistente ahora contesta 404 **con `estado: "desconocido"` y el
+    motivo en castellano**, y ya no intenta serializar el aviso de cancelación.
+  - La pantalla: los dos sondeos miran `res.ok` y cortan explicando; botón **«Cancelar»** dentro
+    del cartel de «Armando la tizada» (nombre corto + «?» al lado, como manda la regla de
+    botones), y el estado `cancelado` se muestra con su texto.
+  - 🔴 **De paso, un bug que estaba servido:** los dos sondeos pedían `/api/trabajo/…` **sin
+    `rutaApi`**, o sea sin el prefijo donde vive la app publicada. En el servidor publicado (que
+    va bajo `/Tizadapro/`) ese sondeo pegaba a una ruta que no existe.
+
+  **VERIFICADO** con `verificar_trabajos_ciclo.py`: la poda saca los viejos y **deja** el que se
+  está armando; cancelar frena de verdad una generación que avisa progreso, la deja en
+  «cancelado» y borra su carpeta; cancelar dos veces da 409 y uno inexistente 404; el estado viaja
+  sin el objeto de Python; y la pantalla mira `res.ok` y usa `rutaApi`. Más `npm run build` en
+  verde (incluye los contratos del diccionario y el de «nada se usa antes de declararse»).
+
+  ⚠️ **Trampa del build:** un `data-tour` nuevo **corta el build** si no tiene su entrada en
+  `diccionario.js`, y una `const` usada antes de declararse también (`verificar_tdz.mjs`, tope
+  congelado en 321). Las dos saltaron en esta tanda y las dos están bien: el tutorial se arma solo
+  desde el diccionario, y leer una `const` antes de tiempo deja la app en «No se pudo cargar».
+
 - **2026-09-07 (388) — La precarga del visor esperaba SONDEANDO 20 veces por segundo, y su
   contador podía quedar trabado para siempre.** Tercera entrega de la auditoría.
 

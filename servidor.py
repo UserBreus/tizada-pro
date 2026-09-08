@@ -132,7 +132,65 @@ try:
     # (`srv_visor.py`) también importa este módulo: escribía en la base REAL sin que nada lo frene.
 except Exception as _e:   # sin base, el resto del sistema tiene que seguir andando
     print(f"[usuarios] API deshabilitada (¿base MSSQL sin levantar?): {_e}")
+# ── TRABAJOS DE TIZADA (en memoria, no en la base) ────────────────────────────────────────────
+# Cada generación es un `trabajo`: la pantalla lo sondea con `GET /api/trabajo/<id>` hasta que
+# queda `listo`. Vive en memoria a propósito (los PDFs están en `trabajos/<id>/` y la pantalla los
+# baja de ahí), pero eso trae dos deberes que antes no se cumplían:
+#   · **PODARLO.** Nunca se sacaba nada: cada resultado se guardaba entero (con la lista de hojas
+#     y las validaciones) hasta reiniciar el servidor.
+#   · **PODER PARARLO.** No había forma de cancelar. El usuario cerraba la pestaña o cambiaba de
+#     molde y la generación seguía hasta el final: minutos de CPU, el aplanado para el RIP y la
+#     ficha técnica, para un pedido que ya no le importaba a nadie. Y N clics = N generaciones.
 trabajos = {}
+_TRABAJOS_VIVOS = 200      # cuántos terminados se recuerdan
+_TRABAJOS_HORAS = 6        # y por cuánto tiempo
+
+
+class _TrabajoCancelado(Exception):
+    """El usuario paró la generación. Se levanta desde el aviso de progreso."""
+
+
+def _nuevo_trabajo(tid, **extra):
+    """Anota un trabajo nuevo (y aprovecha para podar los viejos)."""
+    _podar_trabajos()
+    trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
+                     "creado": time.time(), "cancelar": threading.Event(), **extra}
+    return trabajos[tid]
+
+
+def _podar_trabajos():
+    """Saca los trabajos TERMINADOS que ya nadie va a mirar. **Nunca toca uno que esté corriendo**
+    (perderlo dejaría a la pantalla sondeando un id que desapareció) ni los archivos del disco."""
+    ahora = time.time()
+    viejos = [t for t, v in trabajos.items()
+              if v.get("estado") in ("listo", "error", "cancelado")
+              and ahora - (v.get("creado") or 0) > _TRABAJOS_HORAS * 3600]
+    for t in viejos:
+        trabajos.pop(t, None)
+    terminados = sorted((v.get("creado") or 0, t) for t, v in trabajos.items()
+                        if v.get("estado") in ("listo", "error", "cancelado"))
+    for _, t in terminados[:max(0, len(terminados) - _TRABAJOS_VIVOS)]:
+        trabajos.pop(t, None)
+
+
+def _cancelado(tid):
+    """¿Pidieron parar este trabajo? Se pregunta en el aviso de PROGRESO y no en cualquier lado:
+    ahí estamos entre dos fases, con todo lo anterior ya escrito en disco — cortar a mitad de un
+    `save` dejaría un PDF a medias."""
+    t = trabajos.get(tid)
+    if t is not None and t.get("cancelar") is not None and t["cancelar"].is_set():
+        raise _TrabajoCancelado()
+
+
+def _marcar_cancelado(tid, salida):
+    """Deja el trabajo como cancelado y limpia lo que alcanzó a escribir (es salida del sistema,
+    no datos del usuario: la carpeta `trabajos/<id>` la hace la propia generación)."""
+    import shutil
+    t = trabajos.get(tid)
+    if t is not None:
+        t["estado"] = "cancelado"
+        t["progreso"] = "cancelado"
+    shutil.rmtree(salida, ignore_errors=True)
 
 # ── Perfiles ICC (color management real) ─────────────────────────────────────
 # Se leen los .icc/.icm REALES instalados en el sistema (Adobe + Windows). Los
@@ -6362,13 +6420,13 @@ def generar():
         asignacion = {str(p): str(t) for p, t in _asig_ped.items() if t}
     tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     salida = os.path.join(TRABAJOS, tid)
-    trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
-                     "producto_id": pid, "producto_nombre": (prod or {}).get("nombre", "")}
+    _nuevo_trabajo(tid, producto_id=pid, producto_nombre=(prod or {}).get("nombre", ""))
 
     def correr():
         try:
             trabajos[tid]["estado"] = "generando"
             def prog(fase, a, b):
+                _cancelado(tid)          # el único punto donde se puede parar sin dejar nada a medias
                 trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
             res = MP.generar_pedido(_ruta_entrada("plantilla.ai", pid),
                                     _ruta_entrada("arte.ai", pid),
@@ -6421,6 +6479,8 @@ def generar():
                        ensure_ascii=False)
             trabajos[tid]["resultado"] = res
             trabajos[tid]["estado"] = "listo"
+        except _TrabajoCancelado:
+            _marcar_cancelado(tid, salida)
         except Exception as e:
             trabajos[tid]["estado"] = "error"
             trabajos[tid]["error"] = f"{e}"
@@ -7027,13 +7087,13 @@ def generar_multi():
               for g, lst in grupos_map.items()]
     tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     salida = os.path.join(TRABAJOS, tid)
-    trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
-                     "producto_id": ",".join(pids), "producto_nombre": " + ".join(nombres)}
+    _nuevo_trabajo(tid, producto_id=",".join(pids), producto_nombre=" + ".join(nombres))
 
     def correr():
         try:
             trabajos[tid]["estado"] = "generando"
             def prog(fase, a, b):
+                _cancelado(tid)          # el único punto donde se puede parar sin dejar nada a medias
                 trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
             res = MP.generar_pedido_grupos(grupos, FUENTES, salida,
                                            config_nesting=cfg_nesting, telas_cfg=telas_cfg, progreso=prog)
@@ -7160,6 +7220,8 @@ def generar_multi():
                       open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)
             trabajos[tid]["resultado"] = res
             trabajos[tid]["estado"] = "listo"
+        except _TrabajoCancelado:
+            _marcar_cancelado(tid, salida)
         except Exception as e:
             trabajos[tid]["estado"] = "error"
             trabajos[tid]["error"] = f"{e}"
@@ -7173,8 +7235,28 @@ def generar_multi():
 def estado_trabajo(tid):
     t = trabajos.get(tid)
     if not t:
-        return jsonify({"error": "trabajo inexistente"}), 404
-    return jsonify(t)
+        # 🔴 Con `estado` adentro. La pantalla guarda el pedido en curso y lo retoma al recargar:
+        # si el servidor se reinició en el medio, ese id ya no existe y el sondeo se quedaba dando
+        # vueltas para siempre (o dejaba la tarjeta muda, sin decir qué pasó).
+        return jsonify({"error": "el trabajo ya no existe", "estado": "desconocido",
+                        "motivo": "se reinició el servidor o el trabajo es de hace rato"}), 404
+    # el aviso de cancelación es un objeto de Python: no viaja
+    return jsonify({k: v for k, v in t.items() if k != "cancelar"})
+
+
+@app.post("/api/trabajo/<tid>/cancelar")
+def cancelar_trabajo(tid):
+    """Para una tizada que se está armando. No corta a mitad de escribir: la generación se entera
+    en el próximo aviso de progreso, entre dos fases, y ahí larga."""
+    t = trabajos.get(tid)
+    if not t:
+        return jsonify({"error": "el trabajo ya no existe", "estado": "desconocido"}), 404
+    if t.get("estado") in ("listo", "error", "cancelado"):
+        return jsonify({"error": f"el trabajo ya está {t.get('estado')}", "estado": t.get("estado")}), 409
+    if t.get("cancelar") is not None:
+        t["cancelar"].set()
+    t["progreso"] = "cancelando…"
+    return jsonify({"ok": True, "estado": t.get("estado")})
 
 
 def _dibuja(fc, cp):

@@ -416,7 +416,7 @@ const _LOGO_INNER = `
 `;
 // Cada pieza del logo por separado (para resaltarlas de a una, en orden).
 const _LOGO_PATHS = (_LOGO_INNER.match(/d="[^"]+"/g) || []).map(s => s.slice(3, -1)).concat(["M505.6,437.8h7.8v79.1h-7.8Z"]);
-function TizadaLoader({ det }) {
+function TizadaLoader({ det, onCancelar }) {
   const [seg, setSeg] = useState(0);
   useEffect(() => {
     const t0 = Date.now();
@@ -470,6 +470,20 @@ function TizadaLoader({ det }) {
       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
         Armando la tizada<span style={{ animation: 'tzDots 1.4s infinite' }}>…</span> no cierres esta ventana
       </div>
+      {/* PARAR. Sin esto, cerrar la pestaña no frenaba nada: el servidor seguía armando la tizada
+          entera —minutos de trabajo, el aplanado para el RIP y la ficha— para un pedido que ya no
+          le importaba a nadie. La explicación va en el «?» de al lado (botón con nombre corto). */}
+      {onCancelar && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button className="btn ghost" data-tour="tizada-cancelar" style={{ padding: '6px 14px', fontSize: 12 }}
+                  onClick={onCancelar}>Cancelar</button>
+          <Ayuda ancho={300}>
+            Para la tizada que se está armando. Se frena al terminar el paso en curso, así no queda
+            ningún archivo a medias, y se borra lo que alcanzó a generar. Podés volver a generarla
+            cuando quieras.
+          </Ayuda>
+        </div>
+      )}
     </div>
   );
 }
@@ -5699,10 +5713,17 @@ export default function App() {
     if (trabajoId) {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`/api/trabajo/${trabajoId}`);
+          const res = await fetch(rutaApi(`/api/trabajo/${trabajoId}`));
           const data = await res.json();
+          // 🔴 Si el trabajo ya no existe (se reinició el servidor, o pasaron horas) hay que
+          // CORTAR y decirlo. Antes se sondeaba para siempre un id que nunca iba a contestar.
+          if (!res.ok) {
+            setTrabajoEstado({ estado: 'error', error: data.motivo || data.error || 'El trabajo ya no existe.' });
+            setTrabajoId(null);
+            return;
+          }
           setTrabajoEstado(data);
-          if (data.estado === 'listo' || data.estado === 'error') {
+          if (data.estado === 'listo' || data.estado === 'error' || data.estado === 'cancelado') {
             setTrabajoId(null);
             fetchEstado();
             fetchProductos();
@@ -5714,6 +5735,7 @@ export default function App() {
     }
     return () => clearInterval(interval);
   }, [trabajoId]);
+
 
   const handleCrearProducto = async (e) => {
     e.preventDefault();
@@ -7998,7 +8020,15 @@ export default function App() {
     const iv = setInterval(async () => {
       for (const t of pend) {
         try {
-          const d = await (await fetch('/api/trabajo/' + t.jobId)).json();
+          const r = await fetch(rutaApi('/api/trabajo/' + t.jobId));
+          const d = await r.json();
+          // 🔴 Sin esto, un trabajo que ya no existe dejaba `estado: undefined` y la tarjeta
+          // quedaba MUDA: ni armando, ni lista, ni con un error que explicara qué pasó.
+          if (!r.ok) {
+            setTrabajosMulti(prev => prev.map(x => x.jobId === t.jobId
+              ? { ...x, estado: 'error', error: d.motivo || d.error || 'El trabajo ya no existe.' } : x));
+            continue;
+          }
           setTrabajosMulti(prev => prev.map(x => x.jobId === t.jobId
             ? { ...x, estado: d.estado, progreso: d.progreso, resultado: d.resultado ?? x.resultado, error: d.error } : x));
         } catch (e) { /* reintenta al próximo tick */ }
@@ -10134,6 +10164,23 @@ export default function App() {
   const showWarn = (txt) => {
     setAdvertenciaInformativa(txt);
     setTimeout(() => setAdvertenciaInformativa(prev => prev === txt ? '' : prev), 10000);
+  };
+
+  // PARAR una tizada que se está armando. El servidor la frena al terminar el paso en curso (no a
+  // mitad de escribir un PDF) y borra lo que alcanzó a generar; el sondeo la ve pasar a
+  // «cancelado» y se corta solo.
+  // ⚠️ Va ACÁ, debajo de `showMsg`/`showError`, y no junto al sondeo: leer una `const` antes de su
+  // declaración deja la app en «No se pudo cargar» (contrato `verificar_tdz.mjs`).
+  const cancelarTrabajo = async (jobId) => {
+    if (!jobId) return;
+    try {
+      const r = await fetch(rutaApi(`/api/trabajo/${jobId}/cancelar`), { method: 'POST' });
+      const d = await leerJson(r);
+      if (r.ok) showMsg('Cancelando la tizada…');
+      else showError(d.error || 'No se pudo cancelar.');
+    } catch (e) {
+      showError('No se pudo cancelar: ' + e.message);
+    }
   };
 
   // Aviso (no bloqueante) al subir el diseño: si la planilla cargó un dato que se
@@ -13912,9 +13959,10 @@ export default function App() {
                   const job = trabajosMulti[0];
                   if (!job) return null;
                   if (job.estado === 'error') return <div style={{ color: 'var(--error)', fontSize: 13, marginTop: 14 }}>{job.error}</div>;
+                  if (job.estado === 'cancelado') return <div style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 14 }}>Cancelaste esta tizada. Podés volver a generarla cuando quieras.</div>;
                   if (job.estado !== 'listo') {
                     const det = getProgresoDetalle(job.progreso, job.estado);
-                    return <TizadaLoader det={det} />;
+                    return <TizadaLoader det={det} onCancelar={() => cancelarTrabajo(job.jobId)} />;
                   }
                   const hojas = job.resultado?.hojas || [];
                   const telas = [...new Set(hojas.map(h => h.tela))];
@@ -13997,8 +14045,13 @@ export default function App() {
                 
                 {trabajoEstado.estado === 'generando' || trabajoEstado.estado === 'en cola' ? (() => {
                   const det = getProgresoDetalle(trabajoEstado.progreso, trabajoEstado.estado);
-                  return <TizadaLoader det={det} />;
-                })() : trabajoEstado.estado === 'error' ? (
+                  return <TizadaLoader det={det} onCancelar={() => cancelarTrabajo(trabajoId)} />;
+                })() : trabajoEstado.estado === 'cancelado' ? (
+                  <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', color: 'var(--text-muted)' }}>
+                    <Icon name="alert" style={{ width: 18, height: 18 }} />
+                    <span>Cancelaste esta tizada. Podés volver a generarla cuando quieras.</span>
+                  </div>
+                ) : trabajoEstado.estado === 'error' ? (
                   <div style={{ color: 'var(--error)', marginTop: 8, display: 'flex', gap: 10, alignItems: 'center' }}>
                     <Icon name="alert" style={{ width: 18, height: 18 }} />
                     <span>Error al generar: {trabajoEstado.error}</span>
