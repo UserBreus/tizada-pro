@@ -1796,8 +1796,10 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
      `_mios` filtra `!p.de_otro` (los dos sitios).
   7. **`limpiar_efimeros` («Nuevo pedido») borraba efímeros ajenos** — el pendiente del changelog
      387. Ahora ignora todo molde con `creado_por` distinto del usuario actual.
-  8. **Carpetas huérfanas de 118 MB en `entrada/`** (la `prod_20260903_112000_55ad` y una de
-     prueba de hoy): `_borrar_molde_entero` hacía `rmtree(ignore_errors=True)`, que en Windows
+  8. **Carpetas huérfanas de 118 MB en `entrada/`** (la `prod_20260903_112000_55ad` —borrada a
+     mano el 2026-09-08, con el usuario, después de comprobar que no estaba ni en el catálogo ni
+     en la base y que su archivo seguía intacto en «CAMISETA JUGADOR»— y una de
+     prueba de ese día): `_borrar_molde_entero` hacía `rmtree(ignore_errors=True)`, que en Windows
      falla EN SILENCIO si `plantilla.ai` está abierto un instante por el propio servidor (caché
      de documentos, una detección en curso, el hilo de páginas). Medido: minutos después el
      archivo se borraba sin problema — el bloqueo es transitorio. Ahora cierra los documentos
