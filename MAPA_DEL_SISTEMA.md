@@ -1432,6 +1432,43 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (391) — El esquema de la base LLEGA SOLO al arrancar, 12 índices que faltaban, y
+  `/api/salud` deja de mentir cuando no hay driver.** Sexta entrega de la auditoría.
+
+  **1. `db/schema.sql` ahora se aplica AL ARRANCAR** (`_poner_base_al_dia_al_arrancar`, antes de
+  sincronizar los permisos). Sólo lo corría el instalador, así que **una tabla o un índice
+  agregados después no llegaban NUNCA** a una base ya instalada: `/api/salud` se quejaba de lo que
+  faltaba y el mensaje decía «aplicá `db/schema.sql` a mano» — pasó en el VPS recién publicado. Es
+  idempotente (cada trozo va guardado por su `IF NOT EXISTS`) y un fallo **no impide arrancar**:
+  queda un aviso en el registro. ⚠️ **NO va en el actualizador**: ahí el servidor viejo todavía
+  está vivo mientras se descomprime.
+
+  **2. DOCE ÍNDICES NUEVOS sobre las claves foráneas que se recorren DENTRO de una escritura.**
+  SQL Server indexa la PK y los UNIQUE; una FK **no** trae índice, y en varias de estas tablas la
+  columna que se busca es la **segunda** de una clave compuesta (o sea, inservible para buscar).
+  Sin ellos, borrar un molde o guardar el registro recorría tablas enteras **con los locks de
+  escritura tomados**: no rompe nada, pero el sistema se va poniendo lento sin motivo aparente y
+  desde la pantalla no había forma de verlo. Los que entraron: `pieza_talle(talle_id)` —la tabla
+  más grande, ~1000 filas por molde—, `variable_pieza(pieza_id)`, `junta_pieza(pieza_id)`,
+  `editable(variable_id)` y `(talle_id)`, `mapeo_arte(variable_id)` y `(pieza_id)`,
+  `pedido_fila(talle_id | variable_id | diseno_id)` —esa tabla no tenía **ninguno**— y
+  `usuario_rol(rol_id)` + `rol_permiso(permiso_id)`, que se recorren **en cada request** (
+  `usuario_actual` pide roles y permisos).
+
+  **3. `/api/salud` sin driver ODBC.** Tenía `if not db.driver_disponible(): return True, "sin
+  driver ODBC (el sistema corre con archivos)"` — **código muerto**: esa función devuelve el
+  nombre del driver o **levanta**, nunca algo falso. Y el mensaje era mentira desde que la base es
+  la fuente de verdad. Ahora sin driver sale en **rojo**, con el texto que dice qué instalar en
+  vez de un error de ODBC crudo. El chequeo del esquema, además, **compara los índices** contra el
+  propio `schema.sql` y avisa si faltan.
+
+  **VERIFICADO EN LA BASE REAL:** servidor reiniciado y comprobado por hora de arranque; los
+  **13 índices están creados** (comprobado contra `sys.indexes`), `/api/salud` dice «26 tablas ·
+  13 índices» y 0 transacciones fantasma. Contrato nuevo `verificar_schema_indices.py`: cada
+  índice sobre su tabla y su columna, cada uno guardado por su propio `IF NOT EXISTS`, el esquema
+  se aplica desde el arranque y **no** desde el actualizador, y sin driver la salud contesta 503
+  con el mensaje accionable.
+
 - **2026-09-07 (390) — 🔴 LO QUE EL USUARIO VE COMO UN CAMBIO ERAN VARIAS TRANSACCIONES SUELTAS: un
   rol mal escrito dejaba al usuario SIN NINGÚN ROL, guardado.** Quinta entrega de la auditoría.
 

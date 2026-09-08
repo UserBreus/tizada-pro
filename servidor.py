@@ -352,15 +352,18 @@ def salud():
         return True, DATOS
 
     def _base():
-        # Sin DRIVER ODBC no es una falla: esa máquina no usa base (queda de la etapa en que el
-        # sistema corría sólo con archivos, PLAN_MSSQL.md).
-        # 🔴 Pero si el driver ESTÁ, la máquina está configurada para usar MSSQL y una base que no
-        # responde es CRÍTICA: los usuarios y el registro de piezas viven ahí, así que nadie puede
-        # ni siquiera iniciar sesión. Antes esto era `critico=False` y `/api/salud` contestaba
-        # `ok: true` con la base muerta — el peor error es el que sale «bien». (2026-08-26)
-        if not db.driver_disponible():
-            return True, "sin driver ODBC (el sistema corre con archivos)"
-        return bool(db.valor("SELECT 1")), "responde"
+        # La base es CRÍTICA: los usuarios, el catálogo y el registro de piezas viven ahí, así que
+        # sin ella no se puede ni iniciar sesión. Antes esto era `critico=False` y `/api/salud`
+        # contestaba `ok: true` con la base muerta — el peor error es el que sale «bien».
+        # 🔴 Y sin DRIVER ODBC tampoco hay sistema. Acá había un `if not db.driver_disponible()`
+        # que devolvía «el sistema corre con archivos»: **código muerto** (esa función devuelve el
+        # nombre del driver o LEVANTA, nunca algo falso) y encima una mentira desde que la base es
+        # la fuente de verdad. El mensaje ahora dice qué instalar, en vez de un error de ODBC.
+        try:
+            drv = db.driver_disponible()
+        except Exception as e:
+            return False, f"{e}"
+        return bool(db.valor("SELECT 1")), f"responde ({drv})"
 
     def _esquema():
         """¿La base tiene las tablas que el código espera? `_base` sólo dice si CONTESTA, y con
@@ -372,21 +375,38 @@ def salud():
         se desactualiza solo. NO es crítico a propósito: el ayudante de actualizaciones usa el
         `ok` de esta pantalla como semáforo y una base a medias no tiene que disparar un rollback
         de una versión que está bien."""
-        if not db.driver_disponible():
-            return True, "sin base (el sistema corre con archivos)"
+        try:
+            db.driver_disponible()
+        except Exception as e:
+            return False, f"sin driver ODBC: no se puede comprobar el esquema ({e})"
         import re as _re
         ruta = os.path.join(AQUI, "db", "schema.sql")
         with open(ruta, encoding="utf-8") as fh:
-            esperadas = {m.lower() for m in _re.findall(
-                r"CREATE\s+TABLE\s+(?:\[?dbo\]?\.)?\[?(\w+)\]?", fh.read(), _re.I)}
+            _sql = fh.read()
+        esperadas = {m.lower() for m in _re.findall(
+            r"CREATE\s+TABLE\s+(?:\[?dbo\]?\.)?\[?(\w+)\]?", _sql, _re.I)}
         if not esperadas:
             return True, "no se pudo leer schema.sql (no se comprueba)"
         faltan = sorted(esperadas - {t.lower() for t in db.tablas()})
         if faltan:
             _lista = ", ".join(faltan[:4]) + (f" y {len(faltan) - 4} m\u00e1s" if len(faltan) > 4 else "")
             return False, (f"faltan {len(faltan)} tablas ({_lista}) — el sistema va a dar error 500 "
-                           f"en casi todo: hay que aplicar db/schema.sql (DESPLIEGUE.md §4)")
-        return True, f"{len(esperadas)} tablas"
+                           f"en casi todo: el servidor aplica `db/schema.sql` al arrancar, así que "
+                           f"esto significa que ESO falló (mirá «Registro del sistema»)")
+        # LOS ÍNDICES TAMBIÉN. Faltando, cada borrado de molde recorre tablas enteras con los
+        # locks tomados: no rompe nada, pero el sistema se va poniendo lento sin motivo aparente
+        # y no hay forma de verlo desde la pantalla. Se comparan contra el propio schema.sql.
+        _idx = {m.lower() for m in _re.findall(r"CREATE\s+INDEX\s+\[?(\w+)\]?", _sql, _re.I)}
+        try:
+            _hay = {r["name"].lower() for r in db.filas(
+                "SELECT name FROM sys.indexes WHERE name IS NOT NULL")}
+            _faltan_idx = sorted(_idx - _hay)
+        except Exception:
+            _faltan_idx = []
+        if _faltan_idx:
+            return True, (f"{len(esperadas)} tablas · faltan {len(_faltan_idx)} índice/s "
+                          f"({', '.join(_faltan_idx[:3])}…): la base va a andar cada vez más lenta")
+        return True, f"{len(esperadas)} tablas · {len(_idx)} índices"
 
     # Ghostscript NO es crítico: sólo se usa para unificar el modo de color cuando la hoja trae
     # contenido RGB. Con arte CMYK (lo normal) la tizada sale igual sin él.
@@ -487,8 +507,22 @@ def _poner_base_al_dia_al_arrancar():
 
     Un fallo NO impide arrancar (la base puede estar levantando todavía), pero queda en el
     registro: antes era un `print` que en el servidor publicado no leía nadie."""
-    if not (_USUARIOS_ON and _es_proceso_principal()):
+    if not _es_proceso_principal():
         return
+    # 1) EL ESQUEMA. `db/schema.sql` es idempotente (cada trozo va guardado por un `IF NOT
+    #    EXISTS`), así que aplicarlo al arrancar es lo que hace que una tabla o un índice nuevo
+    #    lleguen a una base YA INSTALADA. Antes sólo lo corría el instalador: lo que se agregara
+    #    después no llegaba nunca, y `/api/salud` se quejaba de las tablas que faltaban sin que
+    #    nadie supiera cómo ponerlas. NO va en el actualizador: ahí el servidor viejo sigue vivo.
+    try:
+        db.aplicar_schema()
+    except Exception as e:
+        LOG.aviso("base", "No se pudo poner el esquema al día al arrancar",
+                  f"{type(e).__name__}: {e}. El sistema arranca igual; si falta alguna tabla o "
+                  "índice, «Registro del sistema» y /api/salud lo muestran.", error=str(e)[:300])
+    if not _USUARIOS_ON:
+        return
+    # 2) LOS PERMISOS.
     try:
         import auth as _auth
         n = _auth.sincronizar_permisos()

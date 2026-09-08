@@ -311,3 +311,63 @@ GO
 IF COL_LENGTH('dbo.producto','registro_rev') IS NULL
     ALTER TABLE dbo.producto ADD registro_rev INT NOT NULL CONSTRAINT DF_producto_regrev DEFAULT 0;
 GO
+
+GO
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+   2026-09-07 — ÍNDICES DE LAS CLAVES FORÁNEAS QUE SE RECORREN DENTRO DE UNA ESCRITURA.
+
+   Sin estos, cada uno de estos SELECT/DELETE/UPDATE recorre la TABLA ENTERA **con los locks de
+   escritura tomados**: cuanto más crece la base, más tiempo se queda esperando todo el resto.
+   SQL Server indexa solo la PK y los UNIQUE — una FK NO trae índice, y en varias de estas tablas
+   la columna que se busca es la SEGUNDA de una clave compuesta, o sea inservible para buscar.
+
+   Todos van guardados por `IF NOT EXISTS` (igual que IX_pieza_nombre): correr esto de nuevo no
+   hace nada. Se aplica solo al arrancar el servidor (`_poner_base_al_dia_al_arrancar`).
+   ════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* `guardar_registro` y `borrar_piezas_molde` borran por acá, y la FK de `talle` se comprueba
+   contra esta tabla (es la más grande: ~1000 filas por molde). */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_pieza_talle_talle' AND object_id=OBJECT_ID('dbo.pieza_talle'))
+    CREATE INDEX IX_pieza_talle_talle ON dbo.pieza_talle (talle_id);
+GO
+/* La PK es (variable_id, pieza_id): buscar por pieza no la puede usar. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_variable_pieza_pieza' AND object_id=OBJECT_ID('dbo.variable_pieza'))
+    CREATE INDEX IX_variable_pieza_pieza ON dbo.variable_pieza (pieza_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_junta_pieza_pieza' AND object_id=OBJECT_ID('dbo.junta_pieza'))
+    CREATE INDEX IX_junta_pieza_pieza ON dbo.junta_pieza (pieza_id);
+GO
+/* UQ_editable es (diseno_id, variable_id, objeto, talle_id): ni `variable_id` ni `talle_id`
+   quedan primeros, así que ninguna de las dos búsquedas la aprovecha. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_editable_variable' AND object_id=OBJECT_ID('dbo.editable'))
+    CREATE INDEX IX_editable_variable ON dbo.editable (variable_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_editable_talle' AND object_id=OBJECT_ID('dbo.editable'))
+    CREATE INDEX IX_editable_talle ON dbo.editable (talle_id);
+GO
+/* Ídem: la PK de mapeo_arte es (diseno_id, variable_id, pieza_id). */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_mapeo_arte_variable' AND object_id=OBJECT_ID('dbo.mapeo_arte'))
+    CREATE INDEX IX_mapeo_arte_variable ON dbo.mapeo_arte (variable_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_mapeo_arte_pieza' AND object_id=OBJECT_ID('dbo.mapeo_arte'))
+    CREATE INDEX IX_mapeo_arte_pieza ON dbo.mapeo_arte (pieza_id);
+GO
+/* `pedido_fila` no tenía NINGÚN índice por estas tres, y al borrar un molde se le hace
+   `UPDATE ... SET x=NULL WHERE x=?`: eso recorría la tabla entera tomando locks. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_pedido_fila_talle' AND object_id=OBJECT_ID('dbo.pedido_fila'))
+    CREATE INDEX IX_pedido_fila_talle ON dbo.pedido_fila (talle_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_pedido_fila_variable' AND object_id=OBJECT_ID('dbo.pedido_fila'))
+    CREATE INDEX IX_pedido_fila_variable ON dbo.pedido_fila (variable_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_pedido_fila_diseno' AND object_id=OBJECT_ID('dbo.pedido_fila'))
+    CREATE INDEX IX_pedido_fila_diseno ON dbo.pedido_fila (diseno_id);
+GO
+/* Estas dos se recorren en CADA request (`usuario_actual` pide roles y permisos), y en las dos
+   la columna que se busca es la segunda de la PK. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_usuario_rol_rol' AND object_id=OBJECT_ID('dbo.usuario_rol'))
+    CREATE INDEX IX_usuario_rol_rol ON dbo.usuario_rol (rol_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_rol_permiso_permiso' AND object_id=OBJECT_ID('dbo.rol_permiso'))
+    CREATE INDEX IX_rol_permiso_permiso ON dbo.rol_permiso (permiso_id);
+GO
