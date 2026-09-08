@@ -38,6 +38,9 @@ import copy as _cp
 _DOCS = {}
 _falso_db.set_doc = lambda c, o: _DOCS.__setitem__(c, _cp.deepcopy(o))
 _falso_db.get_doc = lambda c, default=None: _cp.deepcopy(_DOCS.get(c, default))
+# Desde 2026-09-07 el catálogo se guarda con `guardar_catalogo` (documento + proyección a las
+# tablas, en UNA transacción). El doble imita el documento, que es lo que la app vuelve a leer.
+_falso_db.guardar_catalogo = lambda cat: _DOCS.__setitem__("catalogo", _cp.deepcopy(cat))
 _falso_db.proyectar_catalogo = lambda cat: None   # la proyeccion a tablas no aplica en memoria
 sys.modules["db"] = _falso_db
 

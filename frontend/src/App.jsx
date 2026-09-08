@@ -1719,7 +1719,10 @@ function PantallaUsuarios({ onVolver, showMsg, showError, yo }) {
     const d = await r.json();
     setConfirmar(null);
     if (!r.ok) { showError(d.error || 'No se pudo eliminar'); return; }
-    showMsg((c.tipo === 'usuario' ? 'Usuario' : 'Rol') + ' eliminado.'); recargar();
+    // A un usuario se lo DESACTIVA (no entra más y pierde sus roles) en vez de borrarlo: su
+    // nombre queda como autor de los moldes que dio de alta.
+    showMsg(c.tipo === 'usuario' ? 'Usuario desactivado: ya no puede entrar.' : 'Rol eliminado.');
+    recargar();
   };
 
   // ── Datos derivados ───────────────────────────────────────────────────────────────────────
@@ -1871,7 +1874,7 @@ function PantallaUsuarios({ onVolver, showMsg, showError, yo }) {
                         border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-secondary)' }}>
                       <Icon name="edit" style={{ width: 13, height: 13 }} />
                     </button>
-                    <button type="button" onClick={() => setConfirmar({ tipo: 'usuario', id: u.id, label: u.usuario })} title="Eliminar"
+                    <button type="button" onClick={() => setConfirmar({ tipo: 'usuario', id: u.id, label: u.usuario })} title="Desactivar (no entra más; su nombre sigue como autor de lo que dio de alta)"
                       style={{ width: 30, height: 30, borderRadius: 8, cursor: 'pointer', display: 'grid', placeItems: 'center',
                         border: '1px solid var(--border-light)', background: 'transparent', color: 'var(--text-muted)' }}>
                       <Icon name="trash" style={{ width: 13, height: 13 }} />
@@ -2208,15 +2211,24 @@ function PantallaUsuarios({ onVolver, showMsg, showError, yo }) {
       </Modal>
 
       {/* ── MODAL confirmar borrado (nada de diálogos del navegador) ── */}
-      <Modal open={!!confirmar} onClose={() => setConfirmar(null)} titulo="¿Eliminar?" maxWidth={420} centrado>
+      <Modal open={!!confirmar} onClose={() => setConfirmar(null)}
+             titulo={confirmar?.tipo === 'usuario' ? '¿Desactivar?' : '¿Eliminar?'} maxWidth={420} centrado>
         {confirmar && (
           <div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.5 }}>
-              Se va a eliminar {confirmar.tipo === 'usuario' ? 'el usuario' : 'el rol'} <b style={{ color: '#fff' }}>{confirmar.label}</b>. No se puede deshacer.
+              {confirmar.tipo === 'usuario' ? (
+                <>Se va a desactivar <b style={{ color: '#fff' }}>{confirmar.label}</b>: no va a poder entrar
+                  más y pierde todos sus roles. Su nombre queda como autor de los moldes que dio de alta,
+                  así no se pierde de quién era cada cosa. Para que vuelva a entrar, activalo de nuevo.</>
+              ) : (
+                <>Se va a eliminar el rol <b style={{ color: '#fff' }}>{confirmar.label}</b>. No se puede deshacer.</>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn ghost" onClick={() => setConfirmar(null)}>Cancelar</button>
-              <button className="btn" style={{ background: 'var(--danger, #ff4d4f)', color: '#fff' }} onClick={borrar}>Eliminar</button>
+              <button className="btn" style={{ background: 'var(--danger, #ff4d4f)', color: '#fff' }} onClick={borrar}>
+                {confirmar.tipo === 'usuario' ? 'Desactivar' : 'Eliminar'}
+              </button>
             </div>
           </div>
         )}

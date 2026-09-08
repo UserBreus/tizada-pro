@@ -1432,6 +1432,73 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (390) — 🔴 LO QUE EL USUARIO VE COMO UN CAMBIO ERAN VARIAS TRANSACCIONES SUELTAS: un
+  rol mal escrito dejaba al usuario SIN NINGÚN ROL, guardado.** Quinta entrega de la auditoría.
+
+  **LO QUE PASABA.** La entrada 278 comprobó que `db.cursor()` cierra bien y que no hay
+  transacciones fantasma. Era cierto, y no era el problema. El problema es **en cuántas
+  transacciones se parte una operación**:
+
+  1. 🔴 **Editar los roles de un usuario.** `DELETE FROM usuario_rol` se **confirmaba**, y recién
+     después se asignaban los roles de a uno, cada uno en su transacción. Si una clave no existía,
+     el endpoint contestaba «no existe el rol X» **con el usuario ya sin ningún rol**. Y si ese
+     usuario era el último administrador, nadie podía volver a entrar a arreglarlo. Mismo molde en
+     los permisos de un rol (quedaba **sin ninguno**) y en crear un usuario (podía quedar **sin
+     roles**) — justo el ejemplo que el docstring de `db.cursor()` decía que no podía pasar.
+  2. 🔴 **Borrar un usuario reventaba.** `DELETE FROM usuario` choca con la FK `producto.creado_por`
+     (y `diseno`/`pedido`/`trabajo`), que no tienen `ON DELETE`: error **547**, que salía como un
+     500 con el mensaje crudo de SQL Server, para cualquier usuario que hubiera subido un molde.
+  3. **Guardar la configuración eran ~4 conexiones POR MOLDE** (`sync_productos` preguntaba y
+     escribía de a una) **más una transacción por molde** para la proyección — y todo después de
+     confirmar el documento JSON. Con 30 moldes: ~120 conexiones nuevas por clic, y si fallaba en
+     el molde 7, el documento quedaba nuevo con las tablas viejas.
+  4. **Al borrar lo de un molde faltaba soltar lo que lo referencia.** `borrar_piezas_molde`
+     borraba `variable` y `talle` sin limpiar antes `mapeo_arte`, `editable` ni `pedido_fila`, y
+     `guardar_registro` borraba `pieza` sin limpiar `mapeo_arte` ni `junta_pieza`. Ninguna tiene
+     cascade: es el mismo error 547 que ya se pagó con `pieza_talle`→`talle` el 2026-08-19. Hoy no
+     salta porque esas tablas están vacías, pero `guardar_registro` es el guardado más caliente
+     del sistema.
+  5. Y **dos conexiones para una sola pregunta**: `SELECT id FROM producto` en una y el `INSERT` en
+     otra. Dos altas del mismo molde a la vez chocaban contra el UNIQUE de `legacy_id` (error 2627).
+
+  **LO QUE SE HIZO.**
+  - `auth.crear_usuario`, `auth.asignar_rol`, `editar_usuario`, `_set_permisos`, `crear_rol` y
+    `editar_rol`: **una transacción cada uno**. Las claves de rol se resuelven ANTES de escribir
+    (`auth.ids_de_roles`), así un nombre mal escrito corta sin haber tocado nada. El hasheo de la
+    contraseña (260k iteraciones, ~200 ms de CPU) queda **fuera** de la transacción a propósito.
+  - **Borrar un usuario ahora lo DESACTIVA** (`activo=0` + se le sacan los roles, en una
+    transacción). Dos razones: el 547, y que `creado_por` es **autoría** (§8) — borrar la fila
+    borra el rastro de quién dio de alta cada molde. Desactivado no puede entrar (`usuario_actual`
+    mira `activo` en cada request). La pantalla lo dice: el modal pregunta «¿Desactivar?» y explica
+    que su nombre queda como autor.
+  - `db.guardar_catalogo(cat)`: documento + proyección de TODOS los moldes en **una** transacción,
+    con un solo cursor (`sync_productos(cat, cur)`, `_proyectar_un_producto(pid, p, cur)`).
+  - `db._producto_id(cur, legacy, crear)` con `UPDLOCK, HOLDLOCK`: una sola transacción para
+    preguntar y crear.
+  - `borrar_piezas_molde` y `guardar_registro` limpian `mapeo_arte`, `editable`, `junta_pieza` y
+    sueltan `pedido_fila` (SET NULL, **no** se borran: el pedido es del usuario) **antes** de
+    borrar.
+  - Los dos `print` que se tragaban un fallo de la base pasaron al **registro**. Y el de
+    `subir_plantilla` ahora **corta con 500**: la subida de un molde es atómica (§8), y seguir con
+    la base a medio resetear deja las piezas apuntando a la geometría de otro archivo — eso sale
+    impreso sin que nadie lo note.
+
+  **VERIFICADO** con `verificar_db_transacciones.py` (nuevo): reemplaza `db.conectar` por una
+  conexión de mentira que anota cada sentencia **y en qué transacción**, sin tocar la base. Prueba
+  que un rol inexistente no llega a escribir nada, que cada operación escribe en UNA sola
+  transacción, que 3 moldes se proyectan en una (antes ~4 conexiones por molde), que borrar un
+  usuario no hace `DELETE FROM usuario`, y que en los dos borrados **lo que referencia se limpia
+  primero**. Más todos los contratos del repo en verde.
+
+  ⚠️ **Los dobles de `db` de los contratos hay que enseñarles el método nuevo**: tres contratos
+  reemplazan el módulo `db` entero y hubo que agregarles `guardar_catalogo` (uno reventaba a
+  propósito ante cualquier método desconocido — bien hecho, así se enteró).
+
+  ⚠️ **PENDIENTE, viene de antes:** `verificar_arte_liviano.py` no corre — usa el molde
+  `prod_20260729_163651_4d0d`, que **ya no existe** (los dos contratos de la ficha avisan lo mismo
+  y siguen). Comprobado que ya fallaba antes de esta tanda. Hay que apuntarlo a un molde vivo o
+  que arme el suyo.
+
 - **2026-09-07 (389) — LA TIZADA SE PUEDE PARAR, los trabajos se podan, y un trabajo que ya no
   existe se DICE.** Cuarta entrega de la auditoría.
 

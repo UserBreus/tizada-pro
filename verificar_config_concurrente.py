@@ -37,6 +37,9 @@ _DOCS = {}
 _falso = types.ModuleType("db")
 _falso.set_doc = lambda c, o: _DOCS.__setitem__(c, copy.deepcopy(o))
 _falso.get_doc = lambda c: copy.deepcopy(_DOCS.get(c))
+# Desde 2026-09-07 el catálogo se guarda con `guardar_catalogo` (documento + proyección a las
+# tablas, en UNA transacción). El doble imita sólo el documento, que es lo que la app vuelve a leer.
+_falso.guardar_catalogo = lambda cat: _DOCS.__setitem__("catalogo", copy.deepcopy(cat))
 _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 
 # ── LA "BASE" DEL REGISTRO, SIMULADA (2026-08-19: el server lee el registro SOLO de la base;

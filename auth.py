@@ -128,27 +128,56 @@ def sincronizar_roles():
     return n
 
 
+def ids_de_roles(cur, claves):
+    """Traduce claves de rol a ids CON EL MISMO CURSOR, y levanta si alguna no existe.
+
+    🔴 Se resuelven TODAS antes de escribir nada. Es la mitad del arreglo de 2026-09-07: editar
+    los roles de un usuario borraba los suyos y después iba asignando de a uno; si una clave no
+    existía, el endpoint contestaba «no existe el rol X» **con el usuario ya sin ningún rol**."""
+    ids = []
+    for c in (claves or []):
+        cur.execute("SELECT id FROM rol WHERE clave=?", c)
+        r = cur.fetchone()
+        if r is None:
+            raise ValueError(f"no existe el rol '{c}'")
+        ids.append(int(r[0]))
+    return ids
+
+
 def crear_usuario(usuario, nombre, password, roles=None, email=None, por=None):
+    """El usuario y sus roles entran en UNA transacción: o queda completo, o no queda nada.
+
+    Antes eran 3+ transacciones sueltas y podía quedar el usuario creado **sin ningún rol** —
+    justo el ejemplo que el docstring de `db.cursor()` decía que no podía pasar."""
     if not usuario or not password:
         raise ValueError("usuario y contraseña son obligatorios")
-    if db.valor("SELECT id FROM usuario WHERE usuario=?", usuario) is not None:
-        raise ValueError(f"ya existe un usuario '{usuario}'")
-    h, salt = hashear(password)
-    uid = db.insertar(
-        "INSERT INTO usuario (usuario, nombre, email, password_hash, password_salt, creado_por) "
-        "VALUES (?,?,?,?,?,?)", usuario, nombre or usuario, email, h, salt, por)
-    for r in (roles or []):
-        asignar_rol(uid, r)
+    h, salt = hashear(password)          # 260k iteraciones: FUERA de la transacción, a propósito
+    with db.cursor() as cur:
+        cur.execute("SELECT id FROM usuario WHERE usuario=?", usuario)
+        if cur.fetchone() is not None:
+            raise ValueError(f"ya existe un usuario '{usuario}'")
+        rids = ids_de_roles(cur, roles)  # valida TODO antes de insertar
+        cur.execute(
+            "INSERT INTO usuario (usuario, nombre, email, password_hash, password_salt, creado_por) "
+            "OUTPUT INSERTED.id VALUES (?,?,?,?,?,?)",
+            usuario, nombre or usuario, email, h, salt, por)
+        uid = int(cur.fetchone()[0])
+        for rid in rids:
+            cur.execute("INSERT INTO usuario_rol (usuario_id, rol_id) VALUES (?,?)", uid, rid)
     return uid
 
 
-def asignar_rol(usuario_id, rol_clave):
-    rid = db.valor("SELECT id FROM rol WHERE clave=?", rol_clave)
-    if rid is None:
-        raise ValueError(f"no existe el rol '{rol_clave}'")
-    if db.valor("SELECT COUNT(*) FROM usuario_rol WHERE usuario_id=? AND rol_id=?", usuario_id, rid):
+def asignar_rol(usuario_id, rol_clave, cur=None):
+    """Agrega un rol. Con `cur` participa de la transacción de quien llama (así el conjunto de
+    roles de un usuario se cambia entero o no se cambia)."""
+    if cur is None:
+        with db.cursor() as c2:
+            return asignar_rol(usuario_id, rol_clave, c2)
+    rid = ids_de_roles(cur, [rol_clave])[0]
+    cur.execute("SELECT COUNT(*) FROM usuario_rol WHERE usuario_id=? AND rol_id=?", usuario_id, rid)
+    if cur.fetchone()[0]:
         return False
-    db.ejecutar("INSERT INTO usuario_rol (usuario_id, rol_id) VALUES (?,?)", usuario_id, rid)
+    cur.execute("INSERT INTO usuario_rol (usuario_id, rol_id) VALUES (?,?)", usuario_id, rid)
     return True
 
 

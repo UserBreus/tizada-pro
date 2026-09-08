@@ -1339,9 +1339,14 @@ def _guardar_catalogo(cat):
     ahí): si algún día se apaga la base, el archivo sigue teniendo el último estado bueno."""
     try:
         try:
-            db.set_doc("catalogo", cat)
-            db.proyectar_catalogo(cat)   # identidad + piezas/variables/talles/diseños NORMALIZADOS (por id)
+            # El documento Y su proyección a las tablas, en UNA transacción: separados, un fallo
+            # al proyectar dejaba el catálogo nuevo guardado con las tablas viejas — la base
+            # contando dos historias distintas, sin que nada avisara.
+            db.guardar_catalogo(cat)
         except Exception as e:
+            LOG.error("catalogo", "No se pudo guardar el catálogo en la base",
+                      f"{type(e).__name__}: {e}. No se guardó NADA (la transacción se deshizo): "
+                      "el cambio que se estaba haciendo se perdió.", error=str(e)[:300])
             print(f"[catalogo] no se pudo guardar en la base: {e}")
             raise
         _guardar_catalogo_json_espejo(cat)
@@ -2070,7 +2075,14 @@ def subir_plantilla():
     try:
         db.borrar_piezas_molde(_pid_reset)   # la base también arranca de cero
     except Exception as e:
-        print(f"[subir_plantilla] no se pudo resetear la base: {e}")
+        # 🔴 ACÁ NO SE SIGUE. La subida de un molde es ATÓMICA (§8): si la base no se pudo poner a
+        # cero, guardar el registro nuevo encima del viejo deja las piezas apuntando a la
+        # geometría de OTRO archivo, y eso sale impreso sin que nadie lo note. Antes era un
+        # `print` que en el servidor publicado no lee nadie, y el alta seguía como si nada.
+        LOG.error("molde", "No se pudo poner la base a cero al re-subir el molde",
+                  f"{type(e).__name__}: {e}. El molde NO se dio de alta: el archivo anterior y su "
+                  "registro quedan como estaban.", molde=_pid_reset, error=str(e)[:300])
+        return jsonify({"error": f"no se pudo preparar la base para el molde nuevo: {e}"}), 500
     _guardar_registro(_pid_reset, alta["registro"], reset=True)
     resumen = {"archivo": f.filename, "mesas": alta["mesas"], "piezas": alta["piezas"],
                "talles": alta["talles"],
@@ -7992,6 +8004,11 @@ def eliminar_producto():
     try:
         db.borrar_piezas_molde(pid)
     except Exception as e:
+        # Los archivos ya se borraron; si la base no acompañó, queda constancia con el motivo
+        # (antes era un `print` que en el servidor publicado no leía nadie).
+        LOG.error("molde", "El molde se borró del disco pero no de la base",
+                  f"{type(e).__name__}: {e}. Pueden quedar piezas y talles huérfanos en la base.",
+                  molde=pid, error=str(e)[:300])
         print(f"[eliminar_producto] no se pudo borrar en la base: {e}")
     _REG_DB_CACHE.pop(pid, None)
         

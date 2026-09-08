@@ -146,23 +146,35 @@ def editar_usuario(uid):
     if "roles" in d and _seria_el_ultimo_admin(uid, d.get("roles") or []):
         return jsonify({"error": "no podés dejar el sistema sin ningún administrador activo"}), 400
 
-    if "nombre" in d or "email" in d or "activo" in d:
-        db.ejecutar("UPDATE usuario SET nombre=COALESCE(?,nombre), email=COALESCE(?,email), "
-                    "activo=COALESCE(?,activo), modificado_en=SYSUTCDATETIME(), modificado_por=? WHERE id=?",
-                    (d.get("nombre") or "").strip() or None, (d.get("email") or "").strip() or None,
-                    None if d.get("activo") is None else (1 if d["activo"] else 0), yo_["id"], uid)
-    if d.get("password"):
-        if len(d["password"]) < 8:
-            return jsonify({"error": "la contraseña tiene que tener al menos 8 caracteres"}), 400
-        h, salt = auth.hashear(d["password"])
-        db.ejecutar("UPDATE usuario SET password_hash=?, password_salt=? WHERE id=?", h, salt, uid)
-    if "roles" in d:
-        db.ejecutar("DELETE FROM usuario_rol WHERE usuario_id=?", uid)
-        for r in d["roles"]:
-            try:
-                auth.asignar_rol(uid, r)
-            except ValueError as e:
-                return jsonify({"error": str(e)}), 400
+    if d.get("password") and len(d["password"]) < 8:
+        return jsonify({"error": "la contraseña tiene que tener al menos 8 caracteres"}), 400
+    # El hasheo (260k iteraciones) va FUERA de la transacción: no se tienen tomados locks de la
+    # base durante ~200 ms de CPU.
+    _pw = auth.hashear(d["password"]) if d.get("password") else None
+    # 🔴 TODO EL CAMBIO EN UNA TRANSACCIÓN. Antes eran varias sueltas: el `DELETE` de los roles se
+    # confirmaba y recién después se asignaban de a uno, así que una clave de rol inexistente
+    # devolvía 400 **con el usuario ya sin ningún rol** (y si era el último admin, nadie podía
+    # volver a entrar a arreglarlo).
+    try:
+        with db.cursor() as cur:
+            rids = auth.ids_de_roles(cur, d["roles"]) if "roles" in d else None   # valida primero
+            if "nombre" in d or "email" in d or "activo" in d:
+                cur.execute("UPDATE usuario SET nombre=COALESCE(?,nombre), email=COALESCE(?,email), "
+                            "activo=COALESCE(?,activo), modificado_en=SYSUTCDATETIME(), modificado_por=? "
+                            "WHERE id=?",
+                            (d.get("nombre") or "").strip() or None,
+                            (d.get("email") or "").strip() or None,
+                            None if d.get("activo") is None else (1 if d["activo"] else 0),
+                            yo_["id"], uid)
+            if _pw:
+                cur.execute("UPDATE usuario SET password_hash=?, password_salt=? WHERE id=?",
+                            _pw[0], _pw[1], uid)
+            if rids is not None:
+                cur.execute("DELETE FROM usuario_rol WHERE usuario_id=?", uid)
+                for rid in rids:
+                    cur.execute("INSERT INTO usuario_rol (usuario_id, rol_id) VALUES (?,?)", uid, rid)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400          # nada se escribió: la transacción se deshizo
     return jsonify({"ok": True})
 
 
@@ -174,8 +186,19 @@ def borrar_usuario(uid):
         return jsonify({"error": "no podés borrarte a vos mismo"}), 400
     if _seria_el_ultimo_admin(uid, []):
         return jsonify({"error": "no podés dejar el sistema sin ningún administrador activo"}), 400
-    db.ejecutar("DELETE FROM usuario WHERE id=?", uid)
-    return jsonify({"ok": True})
+    # 🔴 SE DESACTIVA, NO SE BORRA LA FILA. Dos razones, y las dos importan:
+    #   · `DELETE FROM usuario` **REVENTABA** con error 547 para cualquiera que hubiera subido un
+    #     molde: `producto.creado_por` (y `diseno`/`pedido`/`trabajo`) apuntan al usuario y no
+    #     tienen ON DELETE. Salía como un 500 con el mensaje crudo de SQL Server.
+    #   · `creado_por` es AUTORÍA (ver §8): borrar la fila la destruye, y con ella el rastro de
+    #     quién dio de alta cada molde.
+    # Desactivado NO puede entrar (`usuario_actual` mira `activo` en CADA request) y pierde todos
+    # sus roles, que es lo que el administrador quería lograr.
+    with db.cursor() as cur:
+        cur.execute("DELETE FROM usuario_rol WHERE usuario_id=?", uid)
+        cur.execute("UPDATE usuario SET activo=0, modificado_en=SYSUTCDATETIME(), modificado_por=? "
+                    "WHERE id=?", yo_["id"], uid)
+    return jsonify({"ok": True, "desactivado": True})
 
 
 def _seria_el_ultimo_admin(uid, roles_nuevos):
@@ -216,11 +239,17 @@ def crear_rol():
     clave = (d.get("clave") or "").strip().lower().replace(" ", "_")
     if not clave:
         return jsonify({"error": "falta la clave del rol"}), 400
-    if db.valor("SELECT id FROM rol WHERE clave=?", clave) is not None:
-        return jsonify({"error": f"ya existe un rol '{clave}'"}), 400
-    rid = db.insertar("INSERT INTO rol (clave, nombre, descripcion) VALUES (?,?,?)",
-                      clave, (d.get("nombre") or clave).strip(), (d.get("descripcion") or "").strip() or None)
-    _set_permisos(rid, d.get("permisos") or [])
+    # El rol y sus permisos, en UNA transacción: un rol creado sin permisos no le sirve a nadie
+    # y encima parece configurado.
+    with db.cursor() as cur:
+        cur.execute("SELECT id FROM rol WHERE clave=?", clave)
+        if cur.fetchone() is not None:
+            return jsonify({"error": f"ya existe un rol '{clave}'"}), 400
+        cur.execute("INSERT INTO rol (clave, nombre, descripcion) OUTPUT INSERTED.id VALUES (?,?,?)",
+                    clave, (d.get("nombre") or clave).strip(),
+                    (d.get("descripcion") or "").strip() or None)
+        rid = int(cur.fetchone()[0])
+        _set_permisos(rid, d.get("permisos") or [], cur)
     return jsonify({"ok": True, "id": rid})
 
 
@@ -235,11 +264,13 @@ def editar_rol(rid):
     # sacan, nadie puede volver a dárselos y el sistema queda trabado.
     if r["es_sistema"] and "permisos" in d:
         return jsonify({"error": "el rol de sistema no puede cambiar sus permisos"}), 400
-    if "nombre" in d or "descripcion" in d:
-        db.ejecutar("UPDATE rol SET nombre=COALESCE(?,nombre), descripcion=? WHERE id=?",
-                    (d.get("nombre") or "").strip() or None, (d.get("descripcion") or "").strip() or None, rid)
-    if "permisos" in d:
-        _set_permisos(rid, d["permisos"])
+    with db.cursor() as cur:          # el texto y los permisos, juntos
+        if "nombre" in d or "descripcion" in d:
+            cur.execute("UPDATE rol SET nombre=COALESCE(?,nombre), descripcion=? WHERE id=?",
+                        (d.get("nombre") or "").strip() or None,
+                        (d.get("descripcion") or "").strip() or None, rid)
+        if "permisos" in d:
+            _set_permisos(rid, d["permisos"], cur)
     return jsonify({"ok": True})
 
 
@@ -258,9 +289,18 @@ def borrar_rol(rid):
     return jsonify({"ok": True})
 
 
-def _set_permisos(rid, claves):
-    db.ejecutar("DELETE FROM rol_permiso WHERE rol_id=?", rid)
+def _set_permisos(rid, claves, cur=None):
+    """Deja el rol con EXACTAMENTE esos permisos, en UNA transacción.
+
+    🔴 Antes el `DELETE` se confirmaba solo y después se insertaban de a uno: si algo fallaba en el
+    medio (o el proceso se moría), el rol quedaba **sin ningún permiso**, guardado y sin aviso —
+    o sea, todos los que lo tenían perdían el acceso de golpe."""
+    if cur is None:
+        with db.cursor() as c2:
+            return _set_permisos(rid, claves, c2)
+    cur.execute("DELETE FROM rol_permiso WHERE rol_id=?", rid)
     for c in claves or []:
-        pid = db.valor("SELECT id FROM permiso WHERE clave=?", c)
-        if pid:
-            db.ejecutar("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, pid)
+        cur.execute("SELECT id FROM permiso WHERE clave=?", c)
+        r = cur.fetchone()
+        if r:
+            cur.execute("INSERT INTO rol_permiso (rol_id, permiso_id) VALUES (?,?)", rid, int(r[0]))
