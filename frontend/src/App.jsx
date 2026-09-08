@@ -10165,7 +10165,10 @@ export default function App() {
   // `efimero`. Borrar de más no es un riesgo: el servidor sólo toca los que llevan la marca.
   const efimerosDelPedido = () => {
     const _ids = new Set(Object.keys(moldesEfimeros || {}));
-    (moldesSeleccionados || []).forEach(id => {
+    // 🔴 TAMBIÉN LOS QUE ENTRARON POR EL DISEÑO. Un molde con el diseño adentro se elige dentro de
+    // su espacio (`toggleMoldeEnDiseno` → `disenoMoldes`) y puede no estar en `moldesSeleccionados`:
+    // así quedaban sin borrar y el pedido siguiente los seguía mostrando (reporte 2026-09-08).
+    [...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()].forEach(id => {
       if ((productosCat.productos || []).find(p => p.id === id && p.efimero)) _ids.add(id);
     });
     return [...(_ids)];
@@ -10206,10 +10209,14 @@ export default function App() {
     // reconocerlas en el próximo (regla del usuario). Las del catálogo no se tocan.
     (async () => {
       const _pids = [...new Set([...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()])].filter(Boolean);
-      if (!_pids.length) return;
-      try {
-        await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
-      } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+      // ⚠️ El `return` por «no hay moldes» era de las TIPOGRAFÍAS y se llevaba puesto el borrado de
+      // los moldes efímeros de abajo: si el pedido no tenía ningún molde ELEGIDO (se subió y no se
+      // alcanzó a elegir, o la pantalla se recargó), el molde de 100 MB se quedaba para siempre.
+      if (_pids.length) {
+        try {
+          await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
+        } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+      }
       // ── LOS MOLDES CON EL DISEÑO ADENTRO SE VAN CON EL PEDIDO ──────────────────────────────
       // Se subieron «sólo para este pedido»: acá se borran de verdad (archivo, datos y base). Si
       // no, cada pedido dejaría más de 100 MB en el servidor para siempre. El servidor sólo
@@ -10217,11 +10224,18 @@ export default function App() {
       try {
         const _ef = efimerosDelPedido();
         if (_ef.length) {
-          await fetch('/api/pedido/limpiar_efimeros', {
+          const _r = await fetch('/api/pedido/limpiar_efimeros', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pids: _ef })
           });
-          setMoldesEfimeros({});
+          // SÓLO SE OLVIDAN LOS QUE EL SERVIDOR BORRÓ DE VERDAD. Si ignoró alguno (por ejemplo,
+          // una tizada de ese molde todavía generando), antes se limpiaba igual el estado y no
+          // quedaba nadie que volviera a intentarlo: el molde se quedaba para siempre. Ahora el
+          // que sobrevive sigue anotado y el próximo «Nuevo pedido» lo vuelve a pedir.
+          let _borrados = _ef;
+          try { _borrados = (await _r.json())?.borrados || _ef; } catch { /* respuesta rara: se olvidan todos, como antes */ }
+          setMoldesEfimeros(prev => Object.fromEntries(
+            Object.entries(prev || {}).filter(([id]) => !_borrados.includes(id))));
           fetchProductos();
         }
       } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }

@@ -189,6 +189,32 @@ ok('_choque = None' in _src and "if efimero:" in _src,
    "el alta le exige nombre único a un efímero (no puede: se sube uno por pedido)")
 print("    OK    el alta no reusa efímeros ni les pide nombre único")
 
+# ══ 5. MIRAR LA LISTA NO ES USAR EL MOLDE ════════════════════════════════════════════════════
+print("\n5 · 🔴 VER EL MOLDE EN LA LISTA NO LO MANTIENE VIVO")
+# Reporte del usuario (2026-09-08): «si pongo nuevo pedido siguen ahí los moldes temporales del
+# pedido pasado». La grilla pide la MINIATURA de cada molde (`/api/productos/<pid>/preview`), y esa
+# request pasaba por la guardia y marcaba el efímero como «visto»: con la lista en pantalla, la
+# limpieza de abandonados no se lo llevaba nunca. Trabajar con el molde sí tiene que refrescarlo.
+_tocados = []
+_real_tocar = S._tocar_efimero
+S._tocar_efimero = lambda pid: _tocados.append((pid, S.request.path))
+try:
+    _cli = S.app.test_client()
+    _cli.get("/api/productos/prod_efim_hoy/preview")
+    ok(not _tocados, f"la miniatura de la lista NO marca el molde como usado ({_tocados})")
+    _cli.get("/api/config?pid=prod_efim_hoy")
+    ok(any(t[0] == "prod_efim_hoy" for t in _tocados),
+       "…pero trabajar con el molde sí lo marca (un pedido abierto no se borra por debajo)")
+finally:
+    S._tocar_efimero = _real_tocar
+print(f"    OK    miniatura: no · trabajar con el molde: sí ({[t[1] for t in _tocados]})")
+
+# La limpieza no puede depender de que alguien reinicie el servidor.
+_src_arr = inspect.getsource(S)
+ok("_arrancar_barrido_efimeros()" in _src_arr and "time.sleep(3600)" in _src_arr,
+   "la limpieza de abandonados corre CADA HORA, no sólo al arrancar el servidor")
+print("    OK    el barrido de abandonados también corre solo, cada hora")
+
 print()
 if FALLOS:
     print(f"❌ {len(FALLOS)} FALLO(S):")

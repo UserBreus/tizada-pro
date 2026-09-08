@@ -1354,6 +1354,28 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-08 (398) — «NUEVO PEDIDO» Y LOS MOLDES TEMPORALES QUE NO SE IBAN.** Reporte del
+  usuario: «¿por qué si pongo nuevo pedido siguen ahí los moldes temporales del pedido pasado?».
+  Tenían que fallar CUATRO cosas juntas, y fallaban:
+  **(a) 🔴 MIRAR LA LISTA CONTABA COMO USAR EL MOLDE.** `_tocar_efimero` corre en `_guardia_moldes`,
+  por donde pasan todas las requests con pid — y la grilla pide la MINIATURA de cada molde
+  (`/api/productos/<pid>/preview`). O sea que **tener la lista en pantalla refrescaba
+  `efimero_visto`** y el barrido de abandonados (24 h sin usarse) no se los llevaba nunca. Medido en
+  el log del usuario: los dos efímeros se marcaban vistos en cada pintada de la grilla. Ahora los
+  endpoints de vidriera (`_API_NO_USA_EL_MOLDE`: `/preview`, `/descargar_plantilla`) no cuentan.
+  **(b) El barrido sólo corría al ARRANCAR el servidor.** Con el servidor prendido días, nadie los
+  juntaba. Ahora corre además **cada hora** (`_arrancar_barrido_efimeros`).
+  **(c) «Nuevo pedido» podía saltearse el borrado**: estaba dentro de un `if (!_pids.length) return`
+  que era para las TIPOGRAFÍAS del pedido — sin moldes elegidos, el molde de 100 MB se quedaba.
+  **(d) `efimerosDelPedido()` sólo miraba `moldesSeleccionados`**, y un molde con el diseño adentro
+  entra al pedido **por el DISEÑO** (`toggleMoldeEnDiseno` → `disenoMoldes`): justo los del camino B
+  quedaban afuera de la limpieza.
+  Y de yapa: el front hacía `setMoldesEfimeros({})` pase lo que pase, así que si el servidor
+  ignoraba alguno (por ejemplo, una tizada de ese molde todavía generando) **no quedaba nadie que
+  volviera a intentarlo**. Ahora sólo se olvidan los que el servidor confirma en `borrados`.
+  Contrato: `verificar_efimero.py` §5 (la miniatura no marca el molde como usado; trabajar con él
+  sí; y el barrido corre solo cada hora).
+
 - **2026-09-08 (397) — EL MISMO MOLDE EN DOS PEDIDOS NO SE PISA, y consultar una ruta ya no
   resucita moldes borrados.** Pregunta del usuario: «si subo 2 veces el mismo molde en 2 pedidos
   diferentes, ¿no pueden colapsarse entre ellos?». Los archivos no: cada molde tiene su `pid` al

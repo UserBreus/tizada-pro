@@ -1569,6 +1569,10 @@ _API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/")
 # preview del catálogo. Todo lo demás que llegue por POST/PUT/PATCH/DELETE con `pid` SÍ escribe.
 _API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_multi")
 
+# Endpoints que MUESTRAN el molde en una lista, sin trabajar con él: la miniatura de la grilla y la
+# descarga del archivo. No cuentan como «este molde está en uso» para los efímeros (ver la guardia).
+_API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla")
+
 # PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
 # al servidor SIN pasar por nginx (localhost:8050 o la IP, típico al abrirlo en la propia máquina),
 # el frontend —compilado con base `/Tizadapro/`— pide `/Tizadapro/api/…` y nadie saca el prefijo:
@@ -1625,7 +1629,12 @@ def _guardia_moldes():
         # el que pasan TODAS las requests que trabajan sobre un molde, así que un pedido abierto
         # lo refresca solo y la limpieza de abandonados no se lo lleva por debajo. Barato: se
         # reescribe como mucho cada 15 minutos.
-        _tocar_efimero(pid)
+        # 🔴 MIRAR LA LISTA NO ES USARLO (reporte del usuario 2026-09-08: «si pongo nuevo pedido
+        # siguen ahí los moldes temporales del pedido pasado»). La grilla de moldes pide la
+        # miniatura de CADA molde, y eso marcaba el efímero como visto: la limpieza de abandonados
+        # no se lo llevaba nunca, porque bastaba con tener la lista en pantalla.
+        if not any(request.path.endswith(x) for x in _API_NO_USA_EL_MOLDE):
+            _tocar_efimero(pid)
         # 3) ESCRIBIR EL CATÁLOGO PIDE PERMISO. Una moldería del catálogo la VE todo el mundo (un
         #    Operario la necesita para trabajar), pero tocarla es otra cosa. Antes lo que hacía de
         #    candado era el DUEÑO, y al arreglar «lo que subo desde Configuración es de todos» ese
@@ -8204,6 +8213,20 @@ def _barrer_efimeros(horas=None):
         return 0
 
 
+def _arrancar_barrido_efimeros():
+    """Corre `_barrer_efimeros` cada hora, además del barrido del arranque. Es la red que junta los
+    moldes de un pedido que nadie cerró: el front borra los suyos al empezar otro pedido, pero si la
+    pestaña se cerró (o el servidor no se reinicia nunca) hacía falta alguien que pasara."""
+    def _cada_hora():
+        while True:
+            time.sleep(3600)
+            try:
+                _barrer_efimeros()
+            except Exception as e:
+                print("[efimeros] barrido periódico:", e)
+    threading.Thread(target=_cada_hora, daemon=True).start()
+
+
 def _tocar_efimero(pid):
     """Refresca `efimero_visto` para que el barrido no se lleve un molde que se está usando."""
     try:
@@ -10042,7 +10065,10 @@ if __name__ == "__main__":
         except Exception:
             pass
     _en_hilo(_precalentar_nido)
+    # LA LIMPIEZA DE ABANDONADOS, CADA HORA (antes: sólo al arrancar). Con el servidor prendido
+    # días, un efímero de un pedido que nadie terminó no lo juntaba nadie.
     _en_hilo(_barrer_efimeros)
+    _arrancar_barrido_efimeros()
     # ⚡ DUAL-STACK IPv4 + IPv6 — CRÍTICO para la velocidad. En Windows "localhost" resuelve a
     # ::1 (IPv6) ANTES que a 127.0.0.1: si el server solo escucha IPv4, CADA request a
     # http://localhost paga ~2s de retry (con ~40 requests al asignar variantes = >1 minuto de

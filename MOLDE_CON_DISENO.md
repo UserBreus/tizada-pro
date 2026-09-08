@@ -1126,3 +1126,29 @@ Contrato: `verificar_mismo_molde_dos_pedidos.py`.
 ⚠️ **Consultar la ruta de un molde no lo crea.** `_ruta_datos`/`_ruta_entrada` hacían `makedirs`
 siempre —hasta para preguntar si un archivo existía— y una consulta sobre un molde borrado le
 resucitaba la carpeta vacía. Ahora sólo crean carpetas de un molde que ya está en disco.
+
+## CUÁNDO SE VA UN MOLDE EFÍMERO
+
+Un molde del camino B se sube **para un pedido** y no queda guardado. Se va por tres caminos, y los
+tres tienen que existir porque cada uno cubre lo que el otro no:
+
+1. **«Nuevo pedido» / «Terminar pedido»** manda sus pids a `/api/pedido/limpiar_efimeros`. La lista
+   sale de `efimerosDelPedido()`: lo que subió esta pantalla (`moldesEfimeros`, guardado en el
+   navegador) **más** los moldes del pedido que el catálogo marca `efimero` — tanto los de
+   `moldesSeleccionados` como **los que entraron por el diseño** (`disenoMoldes`), que es como entra
+   un molde del camino B.
+2. **El barrido de abandonados**, para el que cerró la pestaña: se lleva los `efimero: true` que
+   nadie tocó en `TIZADA_EFIMERO_TTL_H` horas (24 por defecto). Corre al arrancar el servidor **y
+   cada hora**.
+3. Nunca por nombre, nunca «los que sobran»: se borra por el flag y por la fecha (ya se perdieron 3
+   moldes del usuario por confundir eso).
+
+⚠️ **Ver un molde en la lista NO es usarlo.** `_tocar_efimero` refresca `efimero_visto` en la
+guardia de requests, pero los endpoints de vidriera (la miniatura de la grilla, la descarga del
+archivo) están excluidos (`_API_NO_USA_EL_MOLDE`). Sin esa exclusión, tener la pantalla de moldes
+abierta mantenía vivos para siempre los efímeros de pedidos ya terminados — que es exactamente lo
+que reportó el usuario el 2026-09-08.
+
+⚠️ Si el servidor **ignora** un pid (no es efímero, es de otro usuario, o hay una tizada suya
+generando), el front **no lo borra de su lista**: queda anotado y el próximo «Nuevo pedido» lo
+vuelve a pedir. Olvidarlo era dejarlo en el servidor para siempre.
