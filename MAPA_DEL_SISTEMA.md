@@ -1396,6 +1396,16 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   `asignandoGrupoPz` o `asignandoConjunto`: entrar o salir de «elegir piezas» deja el visor sin
   restos de la tanda anterior. Verificado leyendo el `fill` de cada pieza en el DOM (las capturas
   reducidas engañan con estos colores: verde tenue sobre fondo negro se lee como cyan).
+  **(d) «¿Por qué me sale que la moldería no se puede pedir si tengo la variable?»** El aviso del
+  paso «Moldes» sale de `productosCat`, que se pide UNA vez por sesión (`sesionLista`): configurar
+  las variables en Configuración y volver al pedido —sin recargar la página— mostraba el estado
+  VIEJO, con el cartel puesto aunque la variable ya tuviera sus piezas. Ahora el catálogo se
+  vuelve a pedir **al entrar al paso** (efecto sobre `activoTab`+`pedidoPaso`) y el cartel trae un
+  «↻ Ya las configuré, actualizá». De paso el texto: distingue «no tiene ninguna variable» de «la
+  variable está creada pero SIN PIEZAS» (era el mismo cartel para los dos casos, y con la variable
+  ya armada no se entendía qué pedía), y manda al lugar que existe hoy — Variables → abrir el
+  grupo → «+ Elegir piezas» de la variable — en vez de a unos pasos «1. Nombrar / 2. Grupos» que
+  ya no están en la pantalla.
 - **2026-09-07 (394) — SEGUNDOS, NO MINUTOS: la carga del molde con diseño 56 → ~8 s y la tizada de
   5 prendas 51 → ~15 s.** Pedido del usuario: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá
   todos los caminos para que sean segundos y milisegundos; y la tizada de 5 tardó 45 s». Estudio

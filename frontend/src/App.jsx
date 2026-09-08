@@ -11352,6 +11352,15 @@ export default function App() {
     const idx = lista.findIndex(x => x.moldeId === (it && it.moldeId) && (x.clave || null) === ((it && it.clave) || null));
     setArteIdx(idx >= 0 ? idx : Math.max(0, lista.findIndex(x => x.moldeId === (it && it.moldeId))));
   };
+  // AL ENTRAR AL PASO «MOLDES», el catálogo se vuelve a pedir. `productosCat` se carga una vez
+  // por sesión y de él sale el aviso «esta moldería todavía no se puede pedir»: configurar las
+  // variables en Configuración y volver al pedido mostraba el estado VIEJO, con el cartel puesto
+  // aunque la variable ya tuviera sus piezas (lo reportó el usuario: «¿por qué me sale eso si
+  // tengo variable?»).
+  useEffect(() => {
+    if (activoTab === 'pedidos' && pedidoPaso === 'moldes') fetchProductos();
+  }, [activoTab, pedidoPaso]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const pasoItems = React.useMemo(() => {
     const it = [];
     if (pedidoPaso === 'diseno') {
@@ -12557,17 +12566,34 @@ export default function App() {
                     const faltan = (productosCat.productos || []).filter(p => !p.personal && p.plantilla
                       && !(p.variantes || []).some(v => (v.valores || []).some(x => x.pieza_idx != null)));
                     if (!faltan.length) return null;
+                    // QUÉ le falta a cada uno: no es lo mismo «no creaste ninguna variable» que
+                    // «la variable está creada pero vacía» — el usuario veía el mismo cartel en los
+                    // dos casos y, con su variable ya armada, no entendía qué le pedían (2026-09-08).
+                    const _vacias = faltan.filter(p => (p.variantes || []).length > 0);
+                    const _sinNada = faltan.filter(p => !(p.variantes || []).length);
                     return (
                       <div style={{ fontSize: 12, lineHeight: 1.5, padding: '10px 12px', marginBottom: 12, borderRadius: 10,
                         background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: 'var(--text-secondary)' }}>
                         <b style={{ color: '#fbbf24' }}>{faltan.length === 1 ? 'Esta moldería todavía no se puede pedir' : `${faltan.length} molderías todavía no se pueden pedir`}</b>
-                        <div style={{ marginTop: 4 }}>
-                          {faltan.map(p => p.nombre).join(', ')} — {faltan.length === 1 ? 'no tiene' : 'no tienen'} ninguna <b>variable</b> con piezas.
-                          {' '}Acá se elige una variable («manga corta», «musculosa»), no el molde entero.
-                        </div>
+                        {_sinNada.length > 0 && (
+                          <div style={{ marginTop: 4 }}>
+                            {_sinNada.map(p => p.nombre).join(', ')} — {_sinNada.length === 1 ? 'no tiene' : 'no tienen'} ninguna <b>variable</b>.
+                            {' '}Acá se elige una variable («manga corta», «musculosa»), no el molde entero.
+                          </div>
+                        )}
+                        {_vacias.length > 0 && (
+                          <div style={{ marginTop: 4 }}>
+                            {_vacias.map(p => `${p.nombre} («${((p.variantes || [])[0] || {}).label || 'sin nombre'}»)`).join(', ')} —
+                            {' '}{_vacias.length === 1 ? 'su variable está creada pero SIN PIEZAS' : 'sus variables están creadas pero SIN PIEZAS'}.
+                            {' '}Hay que decirle qué piezas lleva.
+                          </div>
+                        )}
                         <div style={{ marginTop: 5, color: 'var(--text-muted)' }}>
-                          Se arma en <b>Configuración › Molderías › {faltan[0].nombre} › Variables</b>: primero <b>1. Nombrar</b> las piezas, después <b>2. Grupos</b> para crear la variable.
+                          Se arma en <b>Configuración › Molderías › {faltan[0].nombre} › Variables</b>: se abre el <b>grupo</b>,
+                          se toca <b>«+ Elegir piezas»</b> de la variable y se marcan sus piezas en el visor.
                         </div>
+                        <button type="button" className="btn ghost" style={{ marginTop: 8, fontSize: 11.5, padding: '5px 10px' }}
+                          onClick={() => fetchProductos()}>↻ Ya las configuré, actualizá</button>
                       </div>
                     );
                   })()}
