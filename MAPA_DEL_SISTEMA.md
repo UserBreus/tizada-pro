@@ -60,6 +60,29 @@
 
 ---
 
+## 0.b 🧵 CAMINO B — MOLDE CON EL DISEÑO ADENTRO (en curso, rama `pruebas-tizada-con-diseno`)
+
+Se está construyendo un **segundo camino de alta**: el cliente sube **UN archivo que ya trae el
+diseño estampado adentro de cada pieza** (sin arte aparte ni mapeo). Convive con el de hoy; el
+camino A **no se toca**.
+
+🧠 **Todo lo de ese camino —plan, decisiones, preguntas abiertas y bitácora— vive en
+`MOLDE_CON_DISENO.md` (raíz del repo).** Leerlo antes de tocar nada de esa feature y actualizarlo
+en la misma tanda. Acá sólo queda el puntero, para que no se dupliquen dos verdades.
+
+Lo mínimo que hay que saber si se toca CUALQUIER otra cosa del sistema (2026-09-02):
+
+| Qué | Dónde se decide | Por qué importa afuera de la feature |
+|---|---|---|
+| «¿este molde es del camino B?» | **la marca `molde.origen` en disco**, al lado de `plantilla.ai` (`piezas_con_diseno.es_camino_b`) | el nesting paraleliza con **procesos**: una global de módulo no cruzaría. Y entra en la clave de **todos** los cachés que dependen del archivo (`_DET_CACHE`, `_PZS_CACHE`, el caché de detección en disco): el alta detecta y marca DESPUÉS, así que misma ruta + mismo mtime da resultados distintos |
+| el flag para las pantallas | `prod["origen"] == "con_diseno"` (lo devuelve `/api/productos`) | la marca de disco manda para el motor; ésta es para la UI |
+| **`idx_mesa`** | `registro[pieza][talle]`, columna nueva en `dbo.pieza_talle` | `pieza_idx` = posición dentro del **TALLE** (identidad, §8.9) · `idx_mesa` = posición dentro de la **MESA** (lo que indexa `extraer_piezas_mesa`). En el camino A coinciden; con 9 mesas, no. Al leer de la base la clave se pone **sólo si no es NULL** |
+| moldes **efímeros** | `prod["efimero"]` | se borran solos («Nuevo pedido», «Terminar pedido» y el barrido al arrancar). 🔴 Sólo por el flag y la fecha — ver §8 |
+| **el molde desplegado** | `entrada/<pid>/desplegado/` (`m{mesa}.pdf` + `m{mesa}.json` + `personalizacion.json`), lo escribe el alta (`piezas_con_diseno.desplegar_molde`) | el archivo se lee **una vez**: el motor toma de ahí la página de cada (mesa, talle) ya aislada y podada, y los contornos. Validado por **sello** (tamaño + fecha del `plantilla.ai`): si no coincide se rehace solo. Se borra con la carpeta del molde y al re-subir uno del camino A. Changelog 384 |
+| nombrar sus piezas | `POST /api/plantilla/pieza_renombrar` | las herramientas del camino A (`etiquetas`, `grupo_pieza`, `emparejado`) devuelven **409** sobre un molde B: re-armarían el registro asumiendo una sola mesa |
+
+---
+
 ## 1. Qué es el sistema (en una frase)
 
 App **local** que toma un **MOLDE** (Illustrator `.ai` / PDF / DXF) + un **ARTE** (el diseño) y produce **TIZADAS**: hojas PDF vectoriales con las piezas acomodadas para cortar e imprimir (sublimación). Todo en **medidas reales (cm)**.
@@ -279,6 +302,13 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 
 ## 9. 🐛 TRAMPAS CONOCIDAS (gotchas que ya me mordieron)
 
+- 🔴 **SQL SERVER ANIDA LOS COMENTARIOS `/* */`, Y UN `/*` DE ADORNO TE ROMPE EL LOTE ENTERO.** Un
+  comentario de `db/schema.sql` terminaba en «`/api/molde/config/*`»: ese `/*` abre un comentario
+  INTERNO, el `*/` de la línea cierra sólo ése, y el de afuera queda abierto → *«Missing end comment
+  mark»* y el lote no se aplica. Como el esquema se aplica **al arrancar el servidor**, el síntoma
+  fue una tabla que faltaba y `/api/salud` avisando «va a dar error 500 en casi todo» — nada que se
+  vea leyendo el archivo. Al escribir rutas o comodines dentro de un comentario SQL, **nunca dejes
+  `/*` ni `*/` sueltos**. Lo cuida `verificar_schema_indices.py` (chequeo 2b). Entrada 400.
 - 🔴 **EL JOB OBJECT DE WINDOWS SE LLEVA PUESTO AL AYUDANTE DE ACTUALIZACIÓN.** El servidor se mete
   a sí mismo en un Job con `KILL_ON_JOB_CLOSE` (para no dejar procesos de dibujo sueltos, entrada
   170) y **los hijos heredan el Job aunque nazcan con `DETACHED_PROCESS`** — «detached» no es
@@ -409,6 +439,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 - `GET /api/productos` · `GET /api/plantilla/deteccion[?talle_ref][&candidatas=1]` (→ `detectar_piezas`, piezas del molde; `candidatas=1` = molde ORIGINAL + capas que aún no son talle, para la herramienta de variantes por piezas) · `GET /api/plantilla/nido` (geometría nesteada).
 - `GET /api/plantilla/deteccion_todas` (→ `detectar_piezas_todas`: TODAS las piezas de TODOS los talles en un lienzo + `formato`; es la vista del agrupado por selección — ver §10.c).
 - `GET/POST /api/plantilla/variantes` (variantes POR CAPA) · `POST /api/plantilla/variantes_piezas` (variantes POR PIEZAS) — ver §10.c.
+- `POST /api/plantilla/pieza_renombrar` (**CAMINO B**: le pone nombre a UNA pieza por `(mesa, t_idx)`; no re-arma el registro) · `POST /api/pedido/limpiar_efimeros` (borra los moldes efímeros del pedido) — ver §0.b.
 - `POST /api/plantilla/grupo_pieza` (**agrupar piezas homólogas**: nombre + correspondencia entre talles en UN gesto) · `GET/POST /api/plantilla/emparejado` (el ajuste avanzado: acomodo virtual + corrección por índice) — ver §10.c.
 - `GET /api/arte/deteccion?diseno=` (→ `detectar_arte`, mesas + mapeo) · `POST /api/arte/mapeo` (guarda `mapeo_arte.json` + `prod["mapeo_arte"]` fijo; corre `validar_arte_separado`; **pre-warm** de `_piezas_base` en background).
 - `POST /api/arte/preview_piezas` (→ `_piezas_base`, render real cacheado por pieza).
@@ -1431,6 +1462,1051 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   motor con casos de juguete; lo que rompe son los datos del taller.
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+> ⚠️ **LAS ENTRADAS 372 A 399 SE NUMERARON EN PARALELO EN DOS RAMAS Y HAY NÚMEROS REPETIDOS.**
+> Mientras en `main` iba la auditoría de tutoriales y de base (372-393, fechas 2026-08-31 a
+> 2026-09-07), en `pruebas-tizada-con-diseno` iba el CAMINO B (372-399, fechas 2026-08-31 a
+> 2026-09-08). Al unir las dos ramas (2026-09-08) **no se renumeró nada**: renumerar habría dejado
+> mintiendo todas las referencias internas («ver changelog 387») de la rama que se tocara, y esas
+> referencias también viven en los contratos. Para citar una entrada de este tramo, **decí el número
+> Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
+> adentro. **La numeración sigue en 400.**
+
+- **2026-09-08 (400) — SE UNIÓ LA RAMA DEL CAMINO B CON LA AUDITORÍA DE BASE Y PROCESOS.** Pedido
+  del usuario: «traé las actualizaciones tal cual; lo único que tenés que cuidar son los bugs que ya
+  tenemos solucionados». Las dos ramas salieron del MISMO punto (`e6a505a`) y siguieron en paralelo:
+  **40 commits** del camino B (molde con el diseño adentro) y **9** de la auditoría (entregas 386-393).
+  Se fusionó a `main`: **7 archivos en conflicto, 10 choques**.
+
+  **LOS CHOQUES Y CÓMO SE RESOLVIERON** (en todos, la regla fue: la funcionalidad del camino B entra
+  entera, pero pasando por el arreglo de la auditoría, no por encima de él):
+  - `servidor.py` · **la precarga tras subir el molde**: el camino B agregaba un `Thread` pelado más
+    (el desplegado por talles). Los DOS van ahora por `_en_hilo` — un hilo de fondo no tiene
+    `teardown_request` y deja el molde recién subido trabado justo cuando el usuario puede re-subirlo.
+  - `servidor.py` · **borrar un molde**: el camino B lo había refactorizado a `_borrar_molde_entero`,
+    que hacía catálogo + `rmtree` + base todo junto y quedaba **bajo el candado de configuración**
+    (era el caso peor de la entrega 392). Se partió en dos: `_borrar_molde_entero` (catálogo, en
+    sección de edición) y **`_borrar_archivos_y_base`** (lo que tarda, SIN candado). Los tres caminos
+    de borrado —el botón, el barrido automático y «Nuevo pedido»— usan el mismo reparto.
+  - `motor_pedido.py` · **`extraer_personalizacion`**: el camino B agregó la exclusión de los talles
+    como campos y el nombre canónico del campo («00» → `numero`). Entró tal cual, pero dentro de los
+    `with` de la entrega 387: es el camino caliente y corre dentro de los workers del pool.
+  - `aplanar_rip.py` · el aplanado de un nivel, `_unificar_icc` y **conservar el OutputIntent** (fix
+    del camino B) entraron enteros, dentro del `with` que garantiza el cierre si el aplanado falla.
+  - `db/schema.sql` · quedaron **los dos** bloques: la columna `idx_mesa` y la tabla `config_molde`
+    del camino B, y los 12 índices de la entrega 391.
+  - `frontend/src/App.jsx` · los dos lados agregaban en el mismo lugar cosas distintas (cancelar la
+    tizada · el estado del molde abierto desde el pedido y la limpieza del pedido con moldes que ya
+    no existen): entraron las dos.
+  - `MAPA` y `API_RUTAS` · ver la nota de numeración de arriba; el total de endpoints se recontó.
+
+  🔴 **EL BUG QUE APARECIÓ AL UNIR, Y QUE NINGUNA DE LAS DOS RAMAS TENÍA SOLA.** El comentario de la
+  tabla nueva terminaba en «`/api/molde/config/*`». **SQL Server ANIDA los comentarios `/* */`**: ese
+  `/*` abría uno interno que nunca se cerraba, y el lote entero moría con *«Missing end comment
+  mark»*. En la rama del camino B no se notaba porque **nadie aplicaba el esquema solo**; la entrega
+  391 puso al servidor a aplicarlo AL ARRANCAR, así que al unir, el arranque no pudo crear
+  `config_molde` y `/api/salud` avisaba «faltan 1 tablas · el sistema va a dar error 500 en casi
+  todo». Arreglado, y **el contrato `verificar_schema_indices.py` ahora comprueba que ningún lote deje
+  un comentario abierto** (chequeo 2b). Es el ejemplo de manual de por qué el esquema se mira al
+  aplicarlo y no leyéndolo.
+
+  **LO QUE ADEMÁS SE CORRIGIÓ DEL CÓDIGO NUEVO, POR LA MISMA REGLA** (no eran regresiones, eran el
+  mismo error que la auditoría ya había pagado, en código recién llegado):
+  - `_barrer_efimeros` corre en un hilo que vive **toda la vida del servidor** y tomaba el candado de
+    configuración a mano. Si algo levantaba antes de soltarlo, quedaba tomado **para siempre** y nadie
+    podía volver a tocar la configuración: pasó a `_seccion_edicion` (con `finally`).
+  - `_desplegar_en_fondo` abría el molde en un `Thread` pelado → por `_en_hilo`.
+  - `db.borrar_producto` partía una operación en **tres** transacciones (buscar el id · borrar las
+    piezas · borrar la fila): ahora es UNA, con `_producto_id(cur, …)` y `UPDLOCK` como el resto
+    (entregas 390 y 391). `borrar_piezas_molde` acepta un cursor de afuera para poder participar.
+
+  **VERIFICADO.** Los 9 contratos de la auditoría y los 15 del camino B, en verde; los 22 contratos
+  viejos del repo también (el único que falla, `verificar_arte_liviano.py`, pide un molde que ya no
+  está en `datos/` — falla igual antes de la fusión). Build del frontend OK, `verificar_tdz.mjs` sin
+  casos nuevos. Servidor reiniciado y comprobado **por hora de arranque**: salud verde, 27 tablas y 13
+  índices, y la base sin una sola transacción fantasma ni bloqueo.
+
+  ⏳ **PENDIENTE ANOTADO**: `API_RUTAS.md` se generaba con un script que no está en el repo y quedó
+  atrasado en las DOS ramas — hoy lista 122 endpoints y en el código hay 16 rutas que no figuran
+  (`/api/molde/config/*` del camino B, `/api/registro`, `/api/tutoriales`… de main). Hay que recuperar
+  o rehacer el generador; no bloquea nada, pero el documento miente por omisión.
+
+- **2026-09-08 (399) — LA CONFIGURACIÓN DEL MOLDE SE GUARDA Y SE VUELVE A APLICAR.** Pedido del
+  usuario: «que en la base podamos guardar las configuraciones de los moldes con diseño y después
+  poder seleccionar cuál usar, para no hacer todos los mismos pasos de nuevo». Un molde del camino
+  B se sube para UN pedido y se borra con él: el nombrado de las piezas, los grupos, las variables,
+  las telas y el talle de guía se iban con él.
+  · **Dónde vive:** tabla nueva `dbo.config_molde` (`db.guardar_config_molde` /
+  `listar_configs_molde` / `leer_config_molde` / `borrar_config_molde`). Está en `schema.sql` y
+  además **se crea sola la primera vez** (`_asegurar_config_molde`): las bases ya instaladas no
+  vuelven a pasar por el instalador.
+  · **Atada al ARCHIVO (sha1), no al molde** — el molde se borra con el pedido, la configuración
+  queda. `_sha1_molde` memoriza por (tamaño, fecha): son 123 MB, leerlos en cada listado no.
+  · 🔴 **QUÉ ENTRA AL APLICARLA** (regla del usuario, 2026-09-08: «los ajustes que quiero que se
+  guarden son los de la ETIQUETA; los nombres de las piezas es obligatorio siempre»): **siempre** el
+  nombrado de las piezas y la **etiqueta** —`posiciones`, `piezas_off`, `zonas`, que se marcan pieza
+  por pieza y cuelgan del NOMBRE—; **sólo si se tilda**, lo que es decisión DEL PEDIDO: grupos y
+  variables, telas, planilla, talle de guía, borde y producción (`_PARTES_CONFIG`). Aplicar todo
+  junto le metía al pedido nuevo las decisiones del viejo sin que nadie las pidiera.
+  · **La elige el usuario, nunca se aplica sola** (fue explícito). La lista dice qué tan bien calza:
+  `igual` (mismo archivo), `parecida` (otro archivo con las mismas piezas y mesas) o `distinta` —
+  y se puede aplicar igual: después se mira en el visor si acomodó bien.
+  · 🔴 **Las piezas se guardan por `(mesa, idx_mesa)` y por NOMBRE.** El par es la identidad que no
+  depende del talle (`PD.renombrar`), y el nombre es lo que permite **reubicar los `pieza_idx` de
+  grupos y variables** en el molde nuevo: aplicar los índices guardados tal cual apuntaría a otra
+  pieza si el orden cambió — y una tizada mal sale igual de bien impresa.
+  · **Lo que no entra se dice** (`sin_lugar`, `piezas_perdidas`), no se esconde.
+  · Endpoints: `POST /api/molde/config/guardar`, `GET /api/molde/config/lista?pid=`,
+  `POST /api/molde/config/aplicar`, `DELETE /api/molde/config/<id>`. Pantalla: tarjeta
+  «Configuración» en Moldería → modal para guardar con un nombre, ver las guardadas con su estado,
+  aplicar (con informe) y borrar.
+  · Contrato: `verificar_config_guardada.py` (incluye el caso 🔴 de las piezas en otro orden).
+
+- **2026-09-08 (398) — «NUEVO PEDIDO» Y LOS MOLDES TEMPORALES QUE NO SE IBAN.** Reporte del
+  usuario: «¿por qué si pongo nuevo pedido siguen ahí los moldes temporales del pedido pasado?».
+  Tenían que fallar CUATRO cosas juntas, y fallaban:
+  **(a) 🔴 MIRAR LA LISTA CONTABA COMO USAR EL MOLDE.** `_tocar_efimero` corre en `_guardia_moldes`,
+  por donde pasan todas las requests con pid — y la grilla pide la MINIATURA de cada molde
+  (`/api/productos/<pid>/preview`). O sea que **tener la lista en pantalla refrescaba
+  `efimero_visto`** y el barrido de abandonados (24 h sin usarse) no se los llevaba nunca. Medido en
+  el log del usuario: los dos efímeros se marcaban vistos en cada pintada de la grilla. Ahora los
+  endpoints de vidriera (`_API_NO_USA_EL_MOLDE`: `/preview`, `/descargar_plantilla`) no cuentan.
+  **(b) El barrido sólo corría al ARRANCAR el servidor.** Con el servidor prendido días, nadie los
+  juntaba. Ahora corre además **cada hora** (`_arrancar_barrido_efimeros`).
+  **(c) «Nuevo pedido» podía saltearse el borrado**: estaba dentro de un `if (!_pids.length) return`
+  que era para las TIPOGRAFÍAS del pedido — sin moldes elegidos, el molde de 100 MB se quedaba.
+  **(d) `efimerosDelPedido()` sólo miraba `moldesSeleccionados`**, y un molde con el diseño adentro
+  entra al pedido **por el DISEÑO** (`toggleMoldeEnDiseno` → `disenoMoldes`): justo los del camino B
+  quedaban afuera de la limpieza.
+  Y de yapa: el front hacía `setMoldesEfimeros({})` pase lo que pase, así que si el servidor
+  ignoraba alguno (por ejemplo, una tizada de ese molde todavía generando) **no quedaba nadie que
+  volviera a intentarlo**. Ahora sólo se olvidan los que el servidor confirma en `borrados`.
+  Contrato: `verificar_efimero.py` §5 (la miniatura no marca el molde como usado; trabajar con él
+  sí; y el barrido corre solo cada hora).
+
+- **2026-09-08 (397) — EL MISMO MOLDE EN DOS PEDIDOS NO SE PISA, y consultar una ruta ya no
+  resucita moldes borrados.** Pregunta del usuario: «si subo 2 veces el mismo molde en 2 pedidos
+  diferentes, ¿no pueden colapsarse entre ellos?». Los archivos no: cada molde tiene su `pid` al
+  azar y su carpeta. Pero **sí compartían la caché del desplegado**, que se guarda por **sha1 del
+  archivo** (es lo que hace que la segunda subida tarde 1 s en vez de 25) — y ahí había tres
+  agujeros reales:
+  **(a) El temporal de escritura era `<clave>.tmp`, uno solo para todos.** Dos subidas del mismo
+  archivo a la vez: la segunda hacía `rmtree` de ese temporal mientras la primera copiaba adentro →
+  árbol a medias. Ahora el temporal lleva un sufijo único y se limpia siempre (`finally`).
+  **(b) `os.replace` de una CARPETA falla en Windows si el destino existe.** La excepción se
+  tragaba y quedaban ~128 MB de `.tmp` tirados para siempre. Ahora, si otro pedido ganó la carrera
+  (su copia vale igual: mismo sha1), se descarta la nuestra y se avisa por consola.
+  **(c) El barrido de entradas viejas podía borrar la carpeta que otra subida estaba copiando.**
+  Ahora hay **un candado para toda la caché** (`_CACHE_DESPL_LOCK`): leer, reemplazar y barrer no
+  pasan a la vez. Copiar ~128 MB tarda ~1 s; esperar ese segundo es mejor que llevarse media caché.
+  **(d) La caché guarda su INVENTARIO** (`contenido.json`: qué archivos tiene y cuánto pesa cada
+  uno) y al usarla se compara la copia contra él: una caché mutilada (borrado a medias, disco
+  lleno) **se descarta y el desplegado se rehace**, en vez de dar por bueno un molde al que le
+  faltan mesas — el peor error posible acá, porque sale bien impreso. El barrido también se lleva
+  ahora los `.tmp-…` huérfanos y las entradas del MISMO archivo con una versión vieja del
+  desplegado (había 256 MB de `v394`/`v394b` que ya no lee nadie).
+  **(e) 🔴 `_ruta_datos` / `_ruta_entrada` hacían `makedirs` SIEMPRE, aun para sólo CONSULTAR una
+  ruta.** Cualquier pregunta sobre un molde ya borrado (una pantalla abierta de ayer, un pedido
+  viejo, un script) le recreaba la carpeta vacía: de ahí las carpetas huérfanas de `entrada/` y
+  `datos/productos/` que hubo que limpiar a mano hoy (11, todas vacías). Ahora sólo se crean las
+  carpetas de un molde que YA existe en disco (`_molde_en_disco`); la del molde la crea el alta.
+  **Contrato nuevo: `verificar_mismo_molde_dos_pedidos.py`** (diez hilos guardando y leyendo la
+  caché del mismo archivo, caché mutilada, dos moldes con el mismo archivo, y la ruta de un molde
+  muerto). Y `verificar_alta_con_diseno.py` §5 ahora recorre **el catálogo** y no `entrada/*`: se
+  ponía rojo por una carpeta de un molde borrado (`prod_20260903_112000_55ad`, 123 MB de un alta
+  cortada el 3/9 que sigue ahí porque el `rmtree` no pudo con el archivo abierto).
+
+- **2026-09-08 (396) — CADA MOLDE EN SU DISEÑO: se acabaron las tizadas dobles y el molde repetido
+  en la ficha (y la ficha dice con qué tipografía se estampa).** Reporte del usuario: un pedido con
+  dos espacios («Camiseta» y «Campera»), uno por molde, salió con **cuatro hojas** —«Principal»,
+  «Deportivo Pro» y «Delta», con la misma tizada dos veces— y la ficha con **el mismo molde dos
+  veces**.
+  **(a) 🔴 LA CAUSA: `/api/generar_multi` recorría, para CADA molde, TODOS los diseños de la
+  planilla.** Las filas de la campera también se generaban con el molde de la camiseta. En el camino
+  A eso lo tapaba a medias el arte (sin `arte.ai` para ese diseño, `continue`); en el camino B el
+  diseño viene DENTRO del molde, `val` se arma a mano (`{"aprobado": True, "modo": "con_diseno"}`) y
+  nada frenaba nada → 2 moldes × 2 diseños = 4 tizadas, 4 molde-guía y 230 piezas en vez de 115. La
+  hoja «Principal» fantasma era el mismo efecto: la copia de más caía en el diseño que no tenía
+  asignación de tela, y `TELA()` la manda a la tela por defecto.
+  **El front sabía el reparto y no lo mandaba** (`disenoMoldes`, elegido en el paso 1). Ahora viaja
+  como `moldes_por_diseno = {slug: [pid, …]}` (`App.jsx`, dentro del mismo recorrido que arma
+  `vars_por_diseno` — para no sumar otra lectura de `_slugDiseno` y romper el tope congelado de
+  `verificar_tdz.mjs`), y el server lo aplica ANTES del fallback de arte. Si no viene (pantalla
+  vieja), se deduce de `vars_por_diseno`, que dice lo mismo y viaja desde antes. **Sin ningún mapa
+  no se filtra nada, a propósito**: generar de más es feo, dejar prendas sin tizar es peor.
+  **(b) La ficha repetía el molde por OTRO camino, aunque el reparto ya estuviera bien.** El
+  completado «los moldes del pedido van siempre» (entrada 2026-08-31) buscaba una guía del molde
+  para el diseño PEDIDO; si esas filas se habían generado con el arte de otro diseño (`_fallback`),
+  la guía existía anotada con el diseño ESTAMPADO y no la encontraba → agregaba una segunda del
+  mismo molde. Ahora se anota `(pid, diseño pedido)` en `_guias_pedidas` y el completado también
+  respeta `moldes_por_diseno`. Y como último candado, `ficha_tecnica.generar_ficha` descarta una
+  guía que sea **copia exacta** de otra (mismo molde, misma variable, mismas piezas y los mismos
+  bytes de dibujo): si el arte cambia entre diseños los bytes cambian y las dos siguen saliendo.
+  **(c) LA FICHA DICE CON QUÉ TIPOGRAFÍA SALE cada campo** (pedido del usuario: «sea cual sea el
+  formato, mostrá la fuente que se eligió»). `_fuentes_guia(pers, talle, carpeta)` resuelve la
+  fuente REAL —la del archivo, o el reemplazo del pedido, o Anton Regular si no está en el
+  catálogo— y la guía la trae en `fuentes`; la ficha la escribe en su propia línea gris, partida en
+  varias si no entra: «Tipografía · Nombre: Anton Regular (falta «MoreFont1-CL», se sustituyó)».
+  **Bug encontrado de paso:** `_molde_guia_ficha` corre en el HILO que genera, donde no hay
+  `request` → `_reempl_de_request()` devolvía `{}` y **el molde guía se dibujaba con otra
+  tipografía que la tizada**. Ahora `correr()` le pasa los reemplazos que leyó al llegar el pedido.
+  **Contrato nuevo: `verificar_pedido_por_diseno.py`** (con el mapa, con el respaldo y sin nada;
+  caja de arena con dos copias de un molde real, motor y guía espiados). Verificado también con los
+  dos moldes reales del pedido del usuario: la ficha sale con una sola guía por molde y con la
+  línea de tipografía.
+
+- **2026-09-07 (395) — CONFIGURACIÓN DEL MOLDE: las piezas de una variable ya no se pierden, y el
+  talle de guía se puede cambiar siempre.** Dos bugs que reportó el usuario en un molde que había
+  re-subido.
+  **(a) 🔴 «Cuando voy a crear variable queda bugiado con las piezas seleccionadas».** Las piezas
+  que se eligen para una VARIABLE vivían SÓLO en el estado del navegador hasta tocar «Listo»:
+  salir con «⬅ Volver a los grupos», cambiar de pestaña o cualquier `fetchProductos()` las
+  borraba sin avisar, y la variable quedaba creada y VACÍA (así estaba su «cUELLO REDONDO»:
+  `valores: []` después de seis guardados). Reproducido y arreglado: `aplicarVariantes(fn)` —
+  hermano de `aplicarGruposPz`— cambia `variantesEdit` **y guarda solo** a los 300 ms; lo usan
+  `togglePiezaEnTipo`, `agregarPiezasATipo` (recuadro), `quitarPieza`, `quitarPiezaDeGrupo` y
+  `renombrarPieza`. Para que el autoguardado no se pise con el usuario, `guardarGruposCon` aplica
+  la respuesta del server (que enriquece cada valor con su `pieza_id`) sólo si NADIE editó
+  mientras viajaba (`_varEdit`, además del `_seqVar` que ya descartaba respuestas viejas).
+  **(b) 🔴 «No me deja elegir el talle guía».** Dos causas, las dos arregladas:
+  · el botón estaba `disabled={varPzModo}` — y ese modo («elegir piezas», variantes por piezas) se
+    **prende solo** (`NombrarVariantes` lo activa cuando el molde ya se definió por piezas) y no se
+    apagaba al cambiar de pestaña: el talle de guía quedaba imposible de tocar sin recargar. Ahora
+    el botón nunca se bloquea: si el modo está activo, SALE de él (`activarVarPz(false)`, que
+    recarga la detección normal) y abre el selector. Y un efecto lo apaga al salir de Moldería,
+    igual que ya se hacía con el emparejado.
+  · un molde subido o RE-subido quedaba **sin `variante_guia` en el catálogo** (`subir_plantilla`
+    nunca la ponía): la pantalla mostraba como guía la que eligiera la detección, que no estaba
+    guardada — elegir esa misma en el selector no cambiaba nada y parecía que el molde no dejaba
+    tocarla. Ahora `subir_plantilla` llama a `_ajustar_variante_guia` (que sólo escribe si falta o
+    si la que había ya no existe en el molde nuevo). Verificado por HTTP con un molde propio
+    (`prueba_guia_resubida.py`): subida y re-subida dejan la guía puesta, la pantalla la muestra y
+    elegir otra a mano anda.
+  ⚠️ **Lo que costó encontrarlo**: los dos síntomas se reproducen sólo con el gesto exacto del
+  usuario. La evidencia útil no fue el log del servidor (todos 200) sino **el estado que quedó en
+  el catálogo** (grupo con `piezas: []` y variable con `valores: []` después de seis POST): cuando
+  algo «se bugea» en una pantalla de configuración, mirar primero qué quedó guardado.
+  **(c) 2026-09-08 — «Las piezas del grupo quedan seleccionadas para siempre».** Faltaba esto, que
+  es lo que el usuario estaba viendo: al terminar de elegir las piezas de un GRUPO, sus piezas
+  quedaban pintadas con `rgba(16,185,129,0.12)` — el mismo verde que el sistema usa para «pieza ya
+  asignada a una variable». Con el grupo abierto el visor muestra SÓLO sus piezas, así que se veían
+  TODAS verdes: marcadas, sin forma de distinguir después lo elegido para la variable. Ahora, con
+  un grupo abierto y sin ningún modo de asignación activo, sólo van en verde las piezas que ya
+  están en alguna variable DE ESE grupo; el resto queda neutro (`rgba(255,255,255,0.04)`), listo
+  para elegir. Y un efecto limpia `selNombrar` cada vez que cambia `asignandoTipo`,
+  `asignandoGrupoPz` o `asignandoConjunto`: entrar o salir de «elegir piezas» deja el visor sin
+  restos de la tanda anterior. Verificado leyendo el `fill` de cada pieza en el DOM (las capturas
+  reducidas engañan con estos colores: verde tenue sobre fondo negro se lee como cyan).
+  **(d) «¿Por qué me sale que la moldería no se puede pedir si tengo la variable?»** El aviso del
+  paso «Moldes» sale de `productosCat`, que se pide UNA vez por sesión (`sesionLista`): configurar
+  las variables en Configuración y volver al pedido —sin recargar la página— mostraba el estado
+  VIEJO, con el cartel puesto aunque la variable ya tuviera sus piezas. Ahora el catálogo se
+  vuelve a pedir **al entrar al paso** (efecto sobre `activoTab`+`pedidoPaso`) y el cartel trae un
+  «↻ Ya las configuré, actualizá». De paso el texto: distingue «no tiene ninguna variable» de «la
+  variable está creada pero SIN PIEZAS» (era el mismo cartel para los dos casos, y con la variable
+  ya armada no se entendía qué pedía), y manda al lugar que existe hoy — Variables → abrir el
+  grupo → «+ Elegir piezas» de la variable — en vez de a unos pasos «1. Nombrar / 2. Grupos» que
+  ya no están en la pantalla.
+  **(e) 🔴 UN CAMBIO GUARDADO EN UN MOLDE LLEGA A TODAS LAS PANTALLAS** («cuando hago un cambio en
+  moldes y lo guardo debe de enviarle a todos», usuario 2026-09-08). Es una app web multiusuario y
+  el catálogo se pedía UNA vez por sesión: lo que guardaba una persona no existía para las
+  pantallas ya abiertas —de otro usuario, o suyas en otra pestaña— hasta un F5. Ahora:
+  · `_guardar_catalogo` sube una REVISIÓN (`catalogo_rev`, un doc en la BASE, no en memoria: el
+    sistema puede correr con más de un proceso). Es best-effort: si falla, el catálogo igual quedó
+    guardado y lo único que se pierde es el aviso.
+  · Esa revisión viaja en `/api/actualizacion/estado`, el latido que la pantalla YA hace cada 30 s
+    (10 s o 2 s si hay una actualización en curso): no se agregó ningún polling nuevo.
+  · El front compara: si cambió, dispara `tizada:catalogo` y `App` vuelve a pedir `/api/productos`.
+    **No recarga la página** — eso perdería lo que el usuario esté escribiendo. Y como el navegador
+    frena los temporizadores de las pestañas que no se miran, también se refresca al volver a la
+    pestaña (`visibilitychange`).
+  Verificado de punta a punta contra el 8051: un guardado desde otra sesión (`prueba_rev_catalogo.py`)
+  subió la revisión y la pantalla abierta pidió el catálogo sola diez segundos después, sin tocar
+  nada. La revisión también se ve en el latido sin sesión (es sólo un número).
+- **2026-09-07 (394) — SEGUNDOS, NO MINUTOS: la carga del molde con diseño 56 → ~8 s y la tizada de
+  5 prendas 51 → ~15 s.** Pedido del usuario: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá
+  todos los caminos para que sean segundos y milisegundos; y la tizada de 5 tardó 45 s». Estudio
+  completo (caminos, pros/contras, medidas) en `MOLDE_CON_DISENO.md` «SEGUNDOS, NO MINUTOS».
+  **Medido antes** (servidor 8051, 2026-09-07 9:16): subida `POST /api/plantilla` 25 s (contornos
+  de 9 mesas con 6 procesos: 16 s de pared, todo atado a la mesa 2) + páginas por talle 31 s en
+  segundo plano; pedido de 5 prendas 51 s = motor 21 (hoja 6, previews 8, validar 6) + aplanado
+  RIP 15 + perfil/verificación/ficha 15.
+  **La carga** (`piezas_con_diseno.py`, `servidor.py`):
+  · 🔴 **`get_cdrawings` en vez de `get_drawings`** (`_dibujos`): mismo resultado, crudo (tuplas).
+    Medido: mesa 2 de 9,0 s a 2,2 s — **7 de los 9 s eran PyMuPDF envolviendo en `Point`/`Rect`
+    los miles de puntos del DISEÑO**, que el alta no mira (sólo quiere los recortes del talle).
+    `_rect_de` devuelve `fitz.Rect`; `_items_objetos` convierte SÓLO el trazado elegido de cada
+    pieza (lo que espera `molde_real._contorno_de_drawing`). Verificado: 180/180 contornos
+    (9 mesas × 20 talles) byte a byte iguales a los de `get_drawings`. `TIZADA_DIBUJOS_LEGACY=1`
+    vuelve. Contornos de las 9 mesas: 39 → 12 s en serie; **16 → 5 s en paralelo**.
+  · **Contornos por sello** (`desplegar_mesa`, `_json_vigente`): con `contornos=True` se rehacían
+    SIEMPRE aunque `m{mesa}.json` fuera de ese archivo (el alta repetida costaba 16 s por nada).
+  · **Caché por hash del archivo** (`servidor._cache_desplegado_tomar/_guardar`,
+    `datos/desplegado_cache/<sha1>_v394/`): el mismo archivo subido otra vez (re-subir, otro
+    molde con el mismo .ai) copia el desplegado COMPLETO (contornos + páginas) y el `alta`
+    guardado; el sha1 de 123 MB cuesta 0,2 s. Se guarda cuando `_prewarm_desplegado` termina las
+    páginas; quedan los últimos 6 archivos distintos (~120 MB cada uno). El sello sigue valiendo
+    porque al temporal se le pone la fecha con la que se armó la caché (`os.utime`). ⚠️ Cambiar
+    el formato del desplegado exige subir `_CACHE_DESPL_VERSION`.
+  · **Procesos del alta = mesas** (`_procesos_alta`: núcleos − 1, tope 12; antes `procesos_render`
+    = 6 → 9 mesas en dos tandas). `TIZADA_PROCESOS` manda.
+  **La tizada** (`hoja_pike.py`, `aplanar_rip.py`, `motor_pedido.py`, `verificar_rip_compatible.py`,
+  `servidor.py`):
+  · **Bases marcadas `/TizadaBase`** (`xobject_base`): nacen de una página desplegada sin capas
+    y con sus fuentes declaradas → el aplanado (`_aplanar_un_nivel`) no las re-parsea (sólo les
+    saca `/OC`/`/Group`) y `validar_salida.caminar` no las chequea. Aplanado 15 → 4 s; validar
+    6 → 0 s.
+  · **Hoja intermedia sin comprimir** (`componer_hoja_pike`: `compress_streams=False`): el
+    aplanado la vuelve a escribir igual. Escribir el PDF 6 → 0 s. ⚠️ Por eso
+    `verificar_hoja_compartida.py` mide el peso DESPUÉS de aplanar.
+  · **SVG de cada base cacheado en disco** (`svg_base_cacheado`, `desplegado/svg/<clave>.svg`).
+    🔴 La clave NO puede llevar el nombre del XObject: `page.add_resource` lo genera AL AZAR y la
+    caché no acertaba nunca (27 SVG nuevos por corrida). Previews 8 → 3 s.
+  · **Flate nivel 1** (`pikepdf.settings.set_flate_compression_level`, en `aplanar_rip` y
+    `piezas_con_diseno`; `TIZADA_FLATE=6` vuelve): guardar la hoja aplanada 6,9 → 1,7 s
+    (18,0 → 20,4 MB). Sin pérdida: cambia cuánto se empaqueta, no un byte del contenido.
+  · Servidor: sin arte no hay RGB que rastrear (`_pdf_tiene_rgb` se salta con moldes con diseño);
+    `verificar_rip_compatible.verificar(path, balance=False)` no re-corre `validar_salida`
+    (el CLI sí); cronómetro del pedido ENTERO en `correr()` (`[tiempos] pedido <tid>: motor · rip ·
+    perfil · verificar · ficha · total`).
+  **Medido después** (`medir_tizada_b.py 5`, mismo molde, en frío): 35 → **10 s** (motor 6:
+  nesting 2, previews 3; aplanado 4) · hoja aplanada 20,4 MB. Carga (`medir_alta2.py`, 9
+  procesos): alta completa 15,5 → **5,2 s**; con contornos ya hechos 18 → 3,1 s; páginas por talle
+  en segundo plano 32,6 → 28,8 s. **Por HTTP contra el 8051** (`prueba_cache.py`, molde efímero
+  propio): `POST /api/plantilla` 25 → **11,4 s** la primera vez (páginas listas a los 34 s, caché
+  guardada 4 s después) y **1,0 s** la segunda vez con el mismo archivo, con el desplegado
+  COMPLETO (páginas y placeholders incluidos). Cronómetro: `[tiempos] subida de <archivo>`.
+  ⚠️ **Lo que salió mal**: un medidor sin `if __name__ == "__main__"` en Windows (spawn) se
+  re-ejecuta entero en cada worker: la medición «con 6/9/12 procesos» corrió en SERIE, en loop
+  y dejó 11 procesos huérfanos que inflaron TODAS las cifras (mesa 2: 15 s en vez de 8). Regla:
+  todo script que llame a `desplegar_molde(procesos=n)` lleva el guardián, y antes de medir se
+  listan los `python.exe` vivos con su línea de comando (`Get-CimInstance Win32_Process`).
+  Contratos: `verificar_desplegado`, `verificar_hoja_compartida` (peso tras aplanar),
+  `verificar_tizada_con_diseno`, `verificar_placeholders_con_diseno`, `verificar_molde_con_diseno`,
+  `verificar_poda_camino_b`, `verificar_registro_idx_mesa`; comparación de contornos 180/180.
+  · **Bug encontrado por el usuario al tizar (10:20): `'NoneType' object has no attribute 'get'`**
+    en `texto_curvas._glifo`. La fuente que subió al catálogo («MoreggiTFont4-Camiseta.ttf») no
+    trae tabla cmap unicode —sólo Mac Roman (1,0) y símbolo (3,0)— y `TTFont.getBestCmap()`
+    devuelve None. `FuenteCurvas._cmap_de_respaldo` arma el mapa con lo que hay (símbolo =
+    0xF000 + código; Mac Roman decodificado a unicode; nunca None: el servidor recorre
+    `fc.cmap.keys()`). Y un ESPACIO sin glifo (fuentes decorativas con letras y números nada
+    más) ya no tumba «MESSI 10»: avanza el glifo `space` si existe por nombre o un tercio del em.
+  · 🔴 **Reporte del usuario (10:30): «hay piezas que se ven por fuera de lo que debería ser, el
+    borde parece de más de 3 mm, y a la ficha le faltan las piezas».** Tres causas:
+    (1) **El contorno era el recorte equivocado.** `_piezas_de_mesa_cruda` tomaba el recorte de
+    MAYOR ÁREA del grupo, y en el archivo real ése es la LÍNEA DE CORTE dibujada: un clip con
+    sólo trazos adentro, 0,5-1 mm más alto (camiseta, cuello recto, costadillo) y hasta 4 mm más
+    ancho (cuello curvo, mesa 7) que la máscara del diseño. La pieza salía con una franja blanca
+    entre el estampado y el borde de corte. Ahora el contorno es el recorte de mayor área ENTRE
+    LOS QUE TIENEN RELLENOS adentro (`_rellenos_por_clip`, por el `level` de
+    `get_drawings(extended=True)`); sin rellenos en ninguno, el mayor como antes. Cambian
+    179/180 contornos del archivo real (misma cantidad de piezas). El desplegado lleva
+    `v = _V_CONTORNOS` (2): un JSON con otra versión rehace los contornos y CONSERVA las páginas
+    por talle (`_json_mismo_archivo` vs `_json_vigente`); `_CACHE_DESPL_VERSION` → `v394b`.
+    (2) **La ficha sin molde guía**: `_molde_guia_ficha` devolvía None por no encontrar
+    `arte.ai`; en el camino B el diseño está en el molde (`arte=None`, `mapeo=None`, `pers` del
+    molde, mismo criterio que `_piezas_base`).
+    (3) **`_desplegar_en_fondo`**: un molde ya cargado con desplegado no listo (regla vieja,
+    carpeta borrada) lo rehace un hilo de fondo UNA vez por molde; antes los endpoints decían
+    `preparando` y nadie lo armaba. Y la clave de la caché de SVG lleva la mesa (dos piezas de
+    mesas distintas con el mismo contorno compartían el SVG).
+  · 🔴🔴 **Segundo reporte (10:55): «sigue pasando, sólo en algunas piezas».** Las que seguían mal
+    eran las RECTANGULARES (cuello recto, mesas 5/6): su contorno es un solo segmento `("re", x,
+    y, ancho, alto)` y `generar_pedido.ops_cont` le sumaba el desplazamiento (`dx`, `dy`) a LOS
+    CUATRO valores, ancho y alto incluidos. El clip del borde de corte salía 104 pt (3,7 cm) más
+    angosto y 3 pt más alto que el diseño: la raya negra vertical DENTRO de la pieza, la franja
+    blanca arriba y el estampado que «se pasaba» del borde por la derecha (leído en la hoja real:
+    `9.921 9.921 600.112 141.981 re` con 600,112 = 704,976 − 104,864). El diseño en sí estaba
+    bien porque su clip va sin desplazamiento (`cm` aparte). En el camino A nunca se vio: sus
+    contornos son polilíneas/curvas. Los otros ocho manejos de `re` del motor y del nesting
+    estaban bien (revisados uno por uno). Ahora `re` desplaza x e y y escala ancho y alto.
+  · 🔴 **LA LÍNEA DE CORTE DEL ARCHIVO ES EL BORDE DE LA PIEZA (pedido del usuario, 11:20: «en vez
+    de dibujar el borde por arriba, que los cambios los haga en el borde que viene»).** El
+    archivo real trae, por pieza, la máscara del diseño Y una línea de corte dibujada (trazo de
+    2 mm centrado en su propio trazado, 0,5-4 mm más grande que la máscara). Dibujar el borde
+    nuestro encima daba dos bordes (1 mm negro de ellos + 3,5 mm nuestros). Ahora:
+    (1) `_piezas_de_mesa_cruda`: si en el grupo hay un recorte SIN rellenos que envuelve al del
+    diseño y tiene un trazo (adentro, o el dibujo siguiente con su misma caja —cuello curvo—),
+    ESA es la pieza: su trazado es el contorno (`cont["linea_corte"] = True`). Sin línea, la
+    máscara del diseño como antes. (2) Etapa de páginas, `quitar_linea_de_corte`: sigue la CTM
+    del content-stream, arma la caja de cada trazado pintado sólo con trazo y, si coincide con
+    `bbox_raw` del contorno (±1 pt), cambia el `S` por `n` (queda sin pintar) y guarda ancho y
+    color EXACTOS (`m{mesa}.json["linea_corte"][talle][idx] = {w, color}`; `_leer_desplegado`
+    lo mete en `cont["linea_corte"]`). (3) `_armar_base`: borde ACTIVO → el borde configurado
+    (ancho, color, alineación) sobre ese trazado, único; borde APAGADO y la pieza trae línea →
+    se traza tal cual venía (mismo ancho, color, centrada). Versiones: `_V_CONTORNOS = 3`,
+    `_V_PAGINAS = 3` (las páginas viejas se rehacen: la línea hay que sacarla), caché `v394c`,
+    `_piezas_base_clave` v16 lleva las versiones del desplegado. Contrato: `verificar_desplegado`
+    §7 (y §1/§2: la página de control también pasa por `quitar_linea_de_corte`, como ya pasaba
+    por `quitar_placeholders`; el conteo de píxeles distintos va con numpy — en Python puro
+    tardaba 10 minutos y parecía colgado). Verificado en el archivo real: las 9 mesas × 20
+    talles detectan su línea (w 5,669 pt, color k [0 0 0 1]) y la página desplegada queda sin
+    ese trazo; con el borde apagado la base la traza tal cual (un solo `S` de 5,669 pt).
+    **Segunda vuelta (12:10, «queda ese desfasaje» + subida de 30 s + nombrar lento):** (a) entre
+    la máscara del diseño y la línea de corte hay 0,5-2 mm que en el archivo tapaba la mitad
+    interior del trazo; con el borde «fuera» quedaba una franja blanca → `_armar_base` traza
+    además esa mitad interior (ancho original, color del borde) DESPUÉS del diseño (`borde_post`);
+    apagado, la línea original también va después del diseño (antes iba antes, y el diseño la
+    tapaba a medias). (b) La subida de 30 s y el nombrar lento fueron CPU ajena: los contratos
+    corriendo en la misma máquina (4 procesos + renders) justo cuando el usuario subía, más el
+    `_desplegar_en_fondo` del molde viejo, más un SEGUNDO hilo de páginas para el molde nuevo
+    (`_desplegar_en_fondo` no sabía del hilo de la subida): ahora `_prewarm_desplegado` se
+    anota en `_DESPL_FONDO`, y `desplegar_mesa(contornos=False)` devuelve enseguida si las
+    páginas ya están con su versión (antes reescribía las 20 páginas otra vez: 44 s). Regla
+    para mí: no correr contratos pesados mientras el usuario prueba en el 8051. (c) Un pedido
+    sobre un molde que ya no existe (re-subido como producto nuevo) cae en `pagina_arte(None)`
+    con `TypeError` en vez de un aviso claro — pendiente.
+  · 🔴 **«ARMAR CON BASE» (camino A) A LA MISMA VELOCIDAD (pedido del usuario, 14:00).** Medido
+    con `prod_default` + diseño «jugador» (`medir_camino_a.py`, scratchpad): el paso Arte
+    (`_piezas_base`) tardaba **5,3 s por talle y SIEMPRE regeneraba**: (a) 🔴 bug mío de la
+    mañana — la clave v16 llevaba una TUPLA `(3, 3)` que vuelve del `manifest.json` como lista y
+    nunca coincidía → cada preview se rehacía (el usuario lo vio como «nombrar/arte lento»);
+    ahora es el string `despl3.3`; (b) 12 conversiones a SVG para 6 piezas (la misma pieza por
+    cada combinación de toggles, misma base) → una por nombre; (c) las conversiones (0,4 s cada
+    una: MuPDF recorre el arte entero recortado) van al pool de render en paralelo
+    (`_svgs_de_piezas`, `_svg_worker`) cuando lo pide el usuario (`fg`); el prewarm y los
+    workers siguen en serie. Resultado: talle nuevo 5,3 → 1,3 s; talle en caché 0,1 s.
+    **La tizada del camino A**: 15 s de los cuales 13 eran `get_svg_image()` de la hoja entera.
+    Ahora la preview por símbolos también en la hoja de siempre: `generar_pieza` devuelve
+    `{pdf, base, estampado}` (el documento por prenda sigue igual; `base` sin `despl` → hoja de
+    siempre, nesting con máscara por contorno), y `_nestear_y_componer` arma los `<symbol>` con
+    `hoja_pike.svgs_de_bases`: caché de disco (camino A: `<arte>/svg_cache/<sha1>.svg`, clave =
+    `base_stream` con los nombres al azar `/A…`/`/E…` normalizados + firma de arte y plantilla;
+    camino B: junto al desplegado) y las que faltan al pool en paralelo (`procesos` = ejecutor
+    del servidor o un número; None = serie). Tope 400 SVG por caché. `generar_pedido`,
+    `generar_pedido_grupos` y `_nestear_y_componer` reciben `procesos`; el servidor pasa
+    `_get_render_pool()`. Medido: 5 prendas de 5 talles 15 s → **10 s** la primera vez (pool
+    propio del script incluido) → **2,3 s** con la caché caliente; aplanado 0,6 s.
+  **Pendientes con plan** (ver el doc): responder la subida al instante y desplegar en segundo
+  plano con avance en pantalla (front: estado «preparando el molde» en `subirPlantilla`);
+  contornos desde el content-stream parseado (sin MuPDF; 1,2 s por mesa) con contrato contra
+  `get_cdrawings`; páginas por talle sólo de los talles del pedido cuando la tizada llega antes
+  que el segundo plano; previews después de marcar el trabajo listo; E6/E7 del changelog 393.
+- **2026-09-04 (393) — LA HOJA COMPARTIDA: la tizada del camino B deja de ser lineal en prendas.**
+  Pedido del usuario: «5 camisetas tardan 2:30; 100 tienen que tardar 2 minutos; buscá el mejor
+  método». Plan aprobado en `~/.claude/plans/dapper-cuddling-dahl.md`; diseño en
+  `MOLDE_CON_DISENO.md` «LA HOJA COMPARTIDA». Medido antes (5 prendas, en frío): motor 29 s +
+  aplanado 26 s = **70 s** (en el servidor, con ICC y máquina cargada, 180 s). Cada prenda
+  repetía TODO: serializar la pieza, copiar la mesa entera a la hoja (45 copias, 29 MB) y
+  des-anidarla inline para el RIP (900.000 operadores).
+  **Lo que cambia** (`hoja_pike.py` nuevo; `motor_pedido.py`, `nesting_contorno.py`,
+  `aplanar_rip.py`, `servidor.py`):
+  · **Base compartida**: `_armar_base` (camino B) deja en la base de dónde salió la mesa
+    (`despl` = pdf desplegado + página) y el nombre del XObject; `generar_pieza` ya no serializa:
+    devuelve `{base, estampado}` (el estampado = clip + nombre/número en curvas + etiqueta, lo
+    que cambia por prenda). El documento por pieza sólo existe si alguien lo pide
+    (`_DocPerezoso`: el Arte, el nesting de siempre, los contratos).
+  · **`hoja_pike.componer_hoja_pike`**: la hoja se compone con pikepdf. Por base, UN Form XObject
+    plano: la mesa desplegada metida INLINE (bytes tal cual, la receta de `_flatten`: `q [Matrix
+    cm] [BBox re W n] <contenido> Q`) + clip + borde, con los recursos de la página (fuentes
+    incluidas). Por colocación: `q <cm> /B_k Do Q` + `q <cm> <estampado> Q`. La `cm` reproduce a
+    `show_pdf_page` (signo de giro +1, calibrado: con −1 las piezas libres giraban al revés).
+  · **Máscaras por contorno** (`nesting_contorno._mascara_contorno`): el nesting ya no rasteriza
+    el arte de cada pieza; pinta el polígono del contorno (+ borde) a 4× y reduce a celdas con el
+    mismo criterio. `TIZADA_MASCARA_LEGACY=1` vuelve al raster.
+  · **Aplanado de UN nivel** (`aplanar_rip._aplanar_un_nivel`, default): la página conserva sus
+    `Do`; el interior de cada base se des-anida y sanea UNA vez (memo por objgen); ICC unificado
+    por hash en todo el archivo (`_unificar_icc`); el **OutputIntent ya no se borra** y el
+    servidor lo incrusta DESPUÉS del aplanado (antes lo ponía antes y el aplanado lo borraba: el
+    archivo salía sin perfil). `TIZADA_APLANADO_TOTAL=1` = inline como siempre.
+  · **Validar una vez**: `generar_pedido_grupos` reusa las validaciones de `_nestear_y_componer`
+    (la segunda pasada costaba 26 s y reportaba un espaciado inventado).
+  · **Preview liviano** (`hoja_pike.preview_svg`): `<symbol>` por base + `<use>` por colocación +
+    el estampado convertido por PyMuPDF. Los ids de PyMuPDF (`cp0`…) se prefijan por símbolo: sin
+    eso el recorte de una pieza se aplicaba a otra. ⚠️ MuPDF NO dibuja `<use>`/`<symbol>`: para
+    verificar el SVG hay que mirarlo en un navegador (Chromium lo dibuja igual que la hoja).
+  · **Compatibilidad RIP** (`verificar_rip_compatible.py`): PDF ≤ 1.6, sin capas, sin
+    transparencia, profundidad 1, fuentes embebidas, colores CMYK/Gray/ICC-4/Separation, un ICC
+    por perfil, OutputIntent GTS_PDFX N=4, streams balanceados, segundo lector (PyMuPDF). Corre al
+    terminar cada tizada; si falla, aviso en `avisos_pedido`.
+  · Bug adyacente: `servidor.py` `_cb = _combo_toggles(...)` pisaba el flag camino B → `_cbt`.
+  · Las fuentes del diseño se CONSERVAN en las bases (antes `_barrer_fuentes` las borraba y el
+    aplanado eliminaba los textos vivos: un rótulo del diseño se veía en el Arte y no salía en la
+    hoja — 1836 píxeles de diferencia medidos en la hoja de siempre; la nueva da 0).
+  · **Nesting a escala (E7)** (`nesting_contorno._anidar_estrategia`): a 100 prendas (900 piezas,
+    72 geometrías) el nesting viejo no terminó en 25 min (una FFT por ángulo candidato y por
+    hoja, 24 ángulos con rotación libre). Ahora: (1) **bloques de idénticas** — una geometría ya
+    colocada busca primero, SIN FFT, el primer lugar libre de su fila, de la siguiente y de una
+    más (barrido vectorizado con `sliding_window_view`, prueba local de solapamiento); (2) una
+    repetida que no entra usa la FFT sólo con el ángulo de su anterior y sólo desde su hoja en
+    adelante; (3) la primera de una geometría con rotación libre va de grueso a fino (múltiplos
+    de 90° y después ±2 pasos alrededor del mejor: 8 FFT en vez de 24). Medido: 30 prendas 69 →
+    14 s (FFT 2997 → 681, mismas 5 hojas); 100 prendas: más de 25 min → 38 s (1497 FFT).
+    `TIZADA_NESTING_SIN_BLOQUES=1` vuelve al barrido completo. Contadores en `_DEBUG`.
+  · 🔴 Trampa de `_DocPerezoso`: `if p["doc"]:` llamaba `__len__` → `real()` → serializaba la
+    pieza (1,6 MB) para las 900 piezas sólo para cerrarlas: 170 de los 269 s a 100 prendas. Ahora
+    `__bool__` es True sin armar nada. Un objeto perezoso que se usa como booleano tiene que
+    decirlo explícitamente.
+  · Preview: los estampados de TODA la hoja se convierten a SVG en UNA pasada (un documento con
+    los 900, en coordenadas de página) en vez de una por prenda.
+  **Medido (5 prendas, 3 talles, en frío)**: 70 s → **40 s** (motor 28: nesting 6, hoja 5,
+  previews 13, validar 4; aplanado 11) · hoja 46 MB → 21 MB (18 aplanada) · previews 64 → 39 MB
+  · con las MISMAS colocaciones la hoja nueva y la de siempre difieren en 0,1 % de píxeles (bordes
+  de las piezas giradas, redondeo) · aplanar no cambia un píxel. Contratos nuevos:
+  `verificar_hoja_compartida.py`, `verificar_rip_compatible.py`; medidor `medir_tizada_b.py`.
+  **Medido (100 prendas, 8 talles, en frío)**: de **más de 40 min** (extrapolado; el nesting solo
+  no terminó en 25) a **138 s = 1,4 s/prenda** (motor 91: nesting 37, hoja 14, previews 21,
+  validar 16; aplanado 47) · hoja 51 MB (48 aplanada) · 15 hojas de 5 m · previews 264 MB en
+  total (una por hoja).
+  Lo que sigue (plan E6): bases y sus SVG pre-armados en el alta (por procesos; hoy 72 bases =
+  ~14 s de armar documentos para el preview), la tizada entera en un proceso, memoria de tizada;
+  y el aplanado/validación por hoja en paralelo (47 + 16 s a 100 prendas).
+- **2026-09-04 (392) — EL SERVIDOR SE CONGELABA UN MINUTO: NADA CONSTRUYE EL DESPLEGADO EN UN
+  HILO DEL REQUEST.** Reporte del usuario: «entro al molde con diseño y no me muestra las piezas,
+  y ponerle nombre a una tarda más de un minuto». Medido en su sesión: `/api/productos` (3 KB)
+  **9,4 s**, `emparejado` 3,1 s, `etiqueta` 3,7 s, `deteccion_todas` 2,9 s — y la pantalla pide
+  varios por acción. La radiografía con **py-spy** del proceso del servidor mostró el hilo
+  activo en `fuentes_estado → extraer_personalizacion → personalizacion_con_diseno →
+  desplegar_mesa → pikepdf.save` **con el GIL**: el chequeo de tipografía del camino B (389),
+  llamado apenas se entra al Arte —antes de que el hilo de fondo termine las páginas por
+  talle— armaba las 9 mesas EN EL HILO DEL REQUEST y en serie, en paralelo con el hilo de fondo
+  que hacía lo mismo por procesos. `pikepdf.save` no suelta el GIL, así que TODO el servidor
+  esperaba: por eso el visor tardaba en mostrar las piezas y nombrar costaba un minuto.
+  Arreglo, en tres capas:
+  1. `fuentes_estado` (camino B) **nunca construye**: si `PD.desplegado_listo()` es falso responde
+     `preparando: true` (sin fuentes) y el front re-pregunta cada 6 s hasta 2 min
+     (`_reintentoFuentes`). Lee los placeholders con `personalizacion_con_diseno(armar=False)`.
+  2. `personalizacion_con_diseno(armar=True)` y `ruta_desplegada(armar=True)` (lo que usa el
+     motor) construyen **por procesos** (`desplegar_molde`, una sola pasada por todas las mesas),
+     nunca en el hilo que llama.
+  3. **Un candado por molde** (`_candado(path)` en `desplegar_molde`): el segundo que necesita
+     las páginas ESPERA al que las está armando (el hilo de fondo de la subida) y al re-mirar las
+     encuentra hechas. Se acabó el doble trabajo.
+  4. La vista previa de piezas del Arte (`_piezas_base`) tampoco construye: si el molde no está
+     listo responde `preparando` y el front vuelve a pedir (sin cachear el vacío).
+  5. `_leer_desplegado` **no cachea una entrada sin páginas**: se guardaba en `_CONT_CACHE`
+     mientras el hilo de fondo las armaba y, como el sello del archivo no cambia, el servidor
+     decía «preparando» para siempre (el chequeo de tipografía re-preguntaba cada 7 s sin fin).
+  Después del arreglo, en frío: `/api/productos` 0,09-0,2 s, `deteccion_todas` 0,08 s,
+  `emparejado`/`etiqueta` 0,08 s; entrar a nombrar y ponerle nombre a una pieza: ~3-4 s de
+  servidor en total (antes, más de un minuto). Regla nueva para el mapa (§6 gotchas): **pikepdf y PyMuPDF
+  retienen el GIL — cualquier trabajo pesado con ellos va en un proceso, y nunca dentro de un
+  request**.
+- **2026-09-04 (391) — BUGS DEL PEDIDO CON MOLDE CON DISEÑO (la parte que toca configuración).**
+  Pedido del usuario: «repará los bugs que se generan en el pedido de moldes cargados con diseño;
+  hay varios que se bugean con la configuración». Se recorrió el flujo entero en el navegador
+  (subir → nombrar → volver → etiqueta → color del cliente → volver → requisitos) y esto es lo
+  que estaba roto y cómo quedó:
+  1. **Pantalla EN BLANCO al salir de la herramienta por la barra.** Desde nombrar/etiqueta
+     (`desdePedidoB` puesto), tocar «Pedidos» o «Configuración» en la barra dejaba todo vacío: el
+     pedido se oculta con `!desdePedidoB` y el panel de Configuración también, y nadie limpiaba
+     `desdePedidoB` salvo «← Volver al pedido». Ahora los dos botones llaman
+     `cerrarHerramientaB()` (cierra el modo nombrar, limpia `desdePedidoB`/`pendienteNombrarB`/
+     `empTodasData`, cierra la moldería y vacía `_talleDetCache`).
+  2. **El conteo de etiquetas era del molde anterior.** `etiquetaConfig` es UN solo estado y la
+     tarjeta del paso Arte sólo recargaba la detección: con dos moldes con diseño, «Etiqueta: N
+     de 9 ubicadas» y el botón «Ubicar la etiqueta» mostraban lo del molde que se miró antes. El
+     efecto de la tarjeta ahora trae `/api/productos/etiqueta` del molde elegido (fetch inline: la
+     const `cargarEtiqueta` se define más abajo y sumaría un use-before-define al tope de
+     `verificar_tdz.mjs`).
+  3. **La tipografía faltante NO contaba en el requisito «Cargar fuente».** Dos causas:
+     `cargarFuentesTodas` y `fuentesFaltantesItems` filtraban por `arteCargado[…]` (un molde con
+     diseño no tiene arte cargado → nunca se consultaba), y el efecto que dispara el chequeo
+     corría **antes de que llegara el catálogo** al recargar la página parado en el Arte (los
+     moldes no se reconocían como camino B y el activo era `prod_default`). Ahora los moldes con
+     diseño entran en las dos listas y el efecto depende también de `_idsCat`. Verificado:
+     «Tipografía (1)», 0/3, y el detalle por molde con «se va a sublimar con Anton — podés
+     avanzar igual».
+  4. **«Falta el arte de «X»» para un molde con diseño.** El requisito «Asignar arte» ya sabía que
+     en el camino B lo que falta es NOMBRAR (`_itemListo`), pero el texto decía «falta el arte».
+     Ahora: «Faltan nombrar las piezas de «X» · diseño «Y» (N sin nombre)».
+  5. **«Nombrar las piezas» abría la GRILLA de molderías del taller** («Molde 1», «Nueva
+     Moldería», «Volver al Panel de Configuración» — captura del usuario). `abrirNombrarB` /
+     `abrirEtiquetaB` ponían `adminSubView='productos'` y recién DESPUÉS de `await
+     handleActivarProducto()` (activar + recargar catálogo + estado) abrían la moldería: mientras
+     tanto se renderizaba la grilla, y si esa espera tardaba o fallaba el cliente quedaba ahí,
+     dentro del taller. Ahora la moldería y la pestaña se abren ANTES del await (`pidCfg` toma
+     `molderiaAbierta` explícito, no depende del activo del servidor), y además la rama de render
+     tiene guardia: con `desdePedidoB` puesto **nunca** se muestra la grilla — si el molde todavía
+     no está en el catálogo del navegador sale «Abriendo el molde…» con «← Volver al pedido».
+     Verificado en la ruta del cliente sondeando el DOM cada 100 ms durante la apertura: la
+     grilla no aparece ni un instante, ni para nombrar ni para la etiqueta.
+  6. **El pedido listaba los efímeros de OTROS usuarios** (un admin ve los de todos por
+     `molde.ver_todos`), y `irANombrarB` abría el primero sin nombrar aunque fuera ajeno.
+     `_mios` filtra `!p.de_otro` (los dos sitios).
+  7. **`limpiar_efimeros` («Nuevo pedido») borraba efímeros ajenos** — el pendiente del changelog
+     387. Ahora ignora todo molde con `creado_por` distinto del usuario actual.
+  8. **Carpetas huérfanas de 118 MB en `entrada/`** (la `prod_20260903_112000_55ad` —borrada a
+     mano el 2026-09-08, con el usuario, después de comprobar que no estaba ni en el catálogo ni
+     en la base y que su archivo seguía intacto en «CAMISETA JUGADOR»— y una de
+     prueba de ese día): `_borrar_molde_entero` hacía `rmtree(ignore_errors=True)`, que en Windows
+     falla EN SILENCIO si `plantilla.ai` está abierto un instante por el propio servidor (caché
+     de documentos, una detección en curso, el hilo de páginas). Medido: minutos después el
+     archivo se borraba sin problema — el bloqueo es transitorio. Ahora cierra los documentos
+     abiertos (`MP.cerrar_abiertos()`), reintenta 5 veces, y si sigue trabado reintenta en un
+     hilo hasta dos minutos; si aun así no puede, lo dice en el log con la carpeta.
+  Verificado que NO eran bugs: el molde activo es POR SESIÓN (`session["pid_activo"]`, no se
+  cruza entre usuarios); «Re-subir Plantilla» sigue en el DOM tras «Salir» pero con
+  `display:none` (no se ve); «Cambiar» talle guía en la herramienta anda (guarda `variante_guia`,
+  el lienzo sigue con las 180 piezas); ubicar + guardar la etiqueta y el color del cliente
+  funcionan de punta a punta (el molde queda cian, el admin sigue con el suyo).
+  ⚠️ Latente y preexistente (está en HEAD): `zdef` no está definido en el overlay de zonas
+  (`editZonas` es `false` constante → código muerto). Cuenta en el tope de `verificar_tdz.mjs`:
+  si alguien suma OTRO use-before-define, el build lo muestra a él aunque no tenga nada que ver.
+- **2026-09-04 (390) — LA PANTALLA DEL TALLER, REHECHA; Y TRES COSAS DE LA ETIQUETA PASAN AL
+  CLIENTE.** Pedido del usuario sobre la 389: «este campo hacerlo moderno, 100 % moderno, menos
+  palabras y más iconos» + «el color del texto y del contorno que lo pueda modificar el cliente,
+  igual que la alineación, en la etiqueta nomás».
+  **La pantalla** (`Configuración → Molde con diseño`): era una lista de labels y campos; ahora
+  son **tarjetas con icono** — Borde de corte · Etiqueta · Así sale · Planilla · Acomodo — con
+  interruptor en la cabecera de cada una, números con la unidad **adentro** (sin label aparte),
+  **segmented** para «fuera/centro/dentro» y para la alineación (◧ ◫ ◨), **chips** para qué
+  muestra la etiqueta, y la **muestra de color como control** (el CMYK va en el `title`).
+  «Guardar» y el aviso de «vale para N» suben a la cabecera. Y una tarjeta **«Así sale»**: la
+  pieza dibujada en vivo con su borde, su etiqueta, su halo y su alineación — reemplaza tres
+  párrafos por algo que se mira.
+  🔴 Los controles son **componentes de módulo** (`CfgCard`, `CfgNum`, `CfgSeg`, `CfgColor`,
+  `CfgChip`, `CfgSw`, `CfgPreview`), no helpers dentro del render: (1) definidos adentro, React
+  los remonta en cada tecleo y el input **pierde el foco**; (2) `verificar_diccionario.mjs` sólo
+  ve el ancla en el JSX (`data-tour="x"` / `ancla="x"`) — pasarla como argumento a un helper la
+  dejaba invisible para el tutorial, que es justamente quien la necesita. 8 entradas nuevas en el
+  diccionario; las tarjetas (contenedores) van sin ancla.
+  **Los tres campos del cliente** (`_ETQ_CLIENTE = ("color", "borde_color", "align")`): el admin
+  sigue fijando el punto de partida, y el molde manda **sólo si el cliente los tocó** —
+  `_etiqueta_de` mira `prod["etiqueta"]` **crudo** (no el ya mezclado con los defaults: si no, el
+  default del sistema ganaría siempre y lo del admin no se vería nunca). `set_etiqueta` los
+  acepta en camino B junto con `posiciones`/`piezas_off`/`zonas`. En la pantalla del pedido se
+  apaga **bloque por bloque** lo que decide el taller, no con un envolvente: la opacidad de un
+  padre no se puede revertir en el hijo y `pointer-events: none` se hereda. Verificado por API:
+  el cliente cambia color/halo/alineación y quedan; el `size_mm`, el `mostrar` y el `activo` que
+  mande se **ignoran** y siguen los del taller.
+- **2026-09-04 (389) — LA PANTALLA DEL TALLER, COMPLETA; Y LA TIPOGRAFÍA DEL «00»/«NOMBRE»
+  AVISA.** Dos pedidos del usuario: (a) «no me agregaste un espacio para configurar desde admin
+  ese tipo de cosas: qué plantilla le asignaremos, el color de etiqueta, color de borde, etc.,
+  **sin tener el molde cargado**»; (b) «si la fuente del nombre y el 00 no la detecta, que
+  funcione como la otra parte: que dé un aviso y puedas cargarla o cambiarla por una nuestra, y
+  si no, que use la predeterminada».
+  **(a)** La pantalla ya existía (`Configuración → Molde con diseño`, `adminSubView ===
+  'con_diseno'`, es global: no necesita ningún molde cargado) pero estaba a medias: sólo grosor y
+  alineación del borde, tamaño/separador/qué muestra de la etiqueta, y el nesting. Le faltaba
+  **todo lo que el usuario nombró**. Ahora tiene: **color del borde de corte**; de la etiqueta,
+  **alineación, color del texto, color del halo, grosor del halo** y el interruptor del halo; y
+  la **planilla del pedido** — `config_con_diseno.planilla_template_id`, que `subir_plantilla`
+  le aplica a TODO molde con diseño al confirmarse el camino (no en `crear_producto`: ahí
+  todavía no se sabe si el archivo trae el diseño adentro). Los colores usan el mismo
+  `ColorPickerModal` CMYK del resto. `_ETQ_FORMA` ya incluía `align`/`color`/`borde_*`, así que
+  el motor los toma sin tocar nada más. Verificado: guardar y releer devuelve los valores, y un
+  molde subido después queda con la planilla configurada.
+  **(b)** `GET /api/pedido/fuentes_estado` miraba **el arte**, que en el camino B no existe → el
+  paso Arte decía «Cargar fuente ✓» aunque la tipografía del archivo no estuviera en el catálogo,
+  y la prenda salía con la de reemplazo **sin avisar**. Ahora, para un molde del camino B, las
+  fuentes requeridas salen de los **placeholders del desplegado** (`extraer_personalizacion`,
+  incluido el `por_talle`). Todo lo demás ya servía tal cual: el modal lista el catálogo para
+  cambiarla, `POST /api/pedido/fuente_resolver` sube la del diseño o guarda el reemplazo **del
+  pedido**, y el motor cae a Anton si no hay nada. Verificado en la pantalla con el archivo real:
+  «Tipografía (1)» en amarillo, «No se encontraron las fuentes: MoreFont1-CL», elegir una del
+  catálogo la saca de faltantes. Contrato: `verificar_placeholders_con_diseno.py` §5 (el
+  reemplazo cambia lo estampado).
+- **2026-09-04 (388) — LA HERRAMIENTA, SIN ENTRAR A CONFIGURACIÓN; Y LAS PIEZAS EN EL ORDEN DEL
+  ARCHIVO.** Dos correcciones del usuario sobre la 387, con captura: (a) «¿te parece a vos que
+  están así ordenadas las piezas? mirá el PDF»; (b) «que use la misma herramienta, pero **no debe
+  entrar a ajustes reales: a ese espacio no puede tener acceso el cliente**».
+  **(a) El acomodo del visor: NO SE ACOMODA NADA.** Aclaración del usuario en la misma tanda, con
+  las dos capturas al lado: «que respete cómo viene en el archivo… **no hablo de las mesas sino de
+  los objetos: que no separe los que están uno arriba del otro. Todos los frentes están juntos,
+  que los deje así — ya están en diferente capa**». Los talles vienen dibujados **uno encima del
+  otro** (la gradación anidada) y así tienen que verse; se distinguen por su CAPA (el ojito de la
+  columna de talles), no por su posición. Lo ÚNICO que se acomoda son las **mesas**, y sólo porque
+  el PDF las guarda todas en el mismo lugar (medido: las 9 páginas arrancan en (0,0)).
+  Implementación: **`acomodo_mesas(por_mesa)`** calcula, con la unión de TODOS los talles, la caja
+  de cada mesa y su lugar en filas tipo estante, en el orden del archivo, con el ancho de fila que
+  deja el lienzo más parecido a 16:9. Se calcula **una sola vez** y se le pasa a todos los talles
+  (`layout_visor(..., acomodo=)`): si se calculara por talle, el molde se movería al cambiar de
+  talle. Dentro de la mesa, cada pieza queda donde el archivo la puso — el recorte que se le pasa a
+  `_item_visor` es el de la MESA, no el de la pieza. `visor_junto` ya no acomoda nada: los talles
+  comparten lienzo, sólo los concatena. Los dos devuelven **`formato: "anidado"`** y el front no
+  dibuja el rótulo por talle (caerían los 20 en el mismo lugar); `canvasLayout.filas` se fue.
+  Verificado en pantalla: se ve la gradación (espalda con sus 20 talles anidados, frente igual,
+  mangas, tiras), 0 piezas que se pisen **dentro de un talle**, y tocar la pila nombra la pieza en
+  los **20 talles** de una.
+  ⚠️ Un molde subido ANTES de esto conserva su `visor_contornos.json` con el acomodo viejo (se ve
+  chico y separado): se corrige al volver a subirlo. Los efímeros duran un pedido, así que se
+  arregla solo.
+  **(b) La herramienta sin Configuración.** `abrirNombrarB`/`abrirEtiquetaB` ya **no hacen
+  `setActivoTab('config')`**: el espacio de trabajo del molde se renderiza desde la pestaña
+  **Pedidos** (`{(activoTab === 'config' || desdePedidoB) && …}`, y el pedido se tapa con
+  `activoTab === 'pedidos' && !desdePedidoB`). Con `_soloHerramienta` (= `!!desdePedidoB`) quedan
+  fuera **todos** los accesos al espacio del taller: el menú de ajustes, «⬅ Volver a ajustes»,
+  «Re-subir Plantilla», «Nombrar talles» (`NombrarVariantes`, que reescribe las capas del
+  archivo), «Agregar una pieza» y la ayuda de exportación. Queda el visor, la herramienta, el
+  talle de guía y «← Volver al pedido», con un subtítulo que dice qué se está haciendo. 🔴 No es
+  sólo estética: el deep-link a `activoTab='config'` **renderizaba la pantalla de configuración a
+  alguien sin `config.ver`** (el permiso gatea el botón del menú, no el render).
+  **Y el orden en las listas de la etiqueta**: `et["piezas"]` y `_etq_piezas_del_molde` van sin
+  ordenar para el camino B → «Espalda, Frente, Manga, Cuello, Costadillo, Tira» (archivo), no
+  alfabético. Verificado en el navegador de punta a punta: nombrar 9 piezas, la lista de la
+  etiqueta en orden, y ningún botón que lleve a los ajustes.
+- **2026-09-04 (387) — CAMINO B: NOMBRAR Y ETIQUETA CON LAS PANTALLAS DE CONFIGURACIÓN, «00» /
+  «NOMBRE» POR TEXTO, Y EL CUELGUE DEL SERVIDOR.** Tres pedidos del usuario: (1) «el nombrar
+  piezas del molde con diseño tiene que ser exactamente la misma herramienta que usa Moldería»,
+  (2) «lo mismo la etiqueta», (3) «el archivo trae el número como 00 y el nombre como NOMBRE: se
+  detectan y se les pone el valor de la columna número y nombre; y las piezas en el orden del
+  archivo». La versión propia del pedido de la 386 (lienzo junto, recuadro, homólogas) queda
+  sin uso en el pedido; el lienzo junto (`visor_junto`) pasó a servir a Moldería.
+  **(1) Nombrar = Moldería.** Desde el pedido, «Nombrar las piezas» (`abrirNombrarB`) activa el
+  molde y abre Configuración → Moldería con el modo «nombrar» prendido (efecto
+  `pendienteNombrarB`: `activarEmparejar` lee el molde ACTIVO, así que se prende recién cuando
+  la pantalla está sobre ese molde), con **«← Volver al pedido»** (`desdePedidoB`,
+  `volverAlPedidoB`: cierra, vuelve al paso Arte y recarga nombres y etiqueta). Para que esa
+  herramienta funcione con el camino B: `GET /api/plantilla/emparejado` devuelve
+  `_emparejado_camino_b` (guía, talles, `nombres_guia` por `pieza_idx` del guía —sin los
+  provisorios «Pieza N», que para la pantalla son «sin nombre»—, `asignacion` completa y todo en
+  `manual`: no hay pendientes), `POST grupo_pieza` en camino B es **renombrar** la pieza
+  (`PD.renombrar` por mesa + idx_mesa; `eliminar` = volver a un provisorio libre), `POST
+  emparejado` es no-op, y `deteccion_todas` devuelve `visor_junto` con **`t_idx` = pieza_idx**
+  (el contrato del lienzo junto: «su índice dentro del talle»; el índice dentro de la mesa va en
+  `idx_mesa`). En el front, `crearGrupoTodas` con `empData.origen === 'con_diseno'` nombra cada
+  pieza seleccionada por su `t_idx` sin exigir la del guía (`sinGuia` no aplica), y `_postGrupo`
+  vuelve a pedir el lienzo junto (trae los nombres del registro). Moldería esconde «Agregar una
+  pieza» y «Acomodar piezas» para el camino B (no aplican).
+  **(2) Etiqueta = la pestaña Etiqueta.** `abrirEtiquetaB` abre `tabAjustesMolde='etiqueta'`
+  (+ `cargarEtiqueta(pid)`/`cargarBorde()`, lo que hace el menú). Para el camino B la sección de
+  FORMA (mostrar, qué muestra, tamaño, color, borde) se ve pero no se edita —es la config viva
+  del taller, `set_etiqueta` sólo toma posiciones— con una nota que lo dice. Las listas de piezas
+  (`et["piezas"]`, `_etq_piezas_del_molde(ordenar=False)`) van en el **orden del archivo** para
+  el camino B. 🔴 `abrirEtiquetaB`/`abrirNombrarB`/`volverAlPedidoB` limpian `empTodasData`: la
+  pestaña filtra el lienzo junto POR NOMBRE y con el lienzo de antes de nombrar (nombres en
+  blanco) el visor salía vacío — pasó. El panel del pedido quedó en dos botones + estado
+  (`panelNombrarJSX`), sin el nombrado propio.
+  **(3) «00» y «NOMBRE» por texto.** `piezas_con_diseno.quitar_placeholders` corre en la etapa de
+  páginas del desplegado, sobre las instrucciones de cada talle: decodifica cada `Tj`/`TJ` con la
+  codificación de la fuente (`_decodificador`: WinAnsi + `/Differences`; ToUnicode para Type0)
+  —⚠️ el «00» de este archivo viene como `\x1f\x1f` con `/Differences [31 /0]` y PyMuPDF lo
+  descarta como control—, y si dice «00»/«NOMBRE» guarda `cx`/`baseline_y` (dispositivo, como
+  `bbox_mu`, con `marco`+`U` que ahora deja la etapa de contornos en el JSON), `size`, `fuente`,
+  `ancho` (por `/Widths`), `colorn` y `pasadas` (relleno/trazo nativos en orden) y **saca el
+  operador del dibujo**. Queda en `m{mesa}.json["placeholders"][talle][campo]`;
+  `personalizacion_con_diseno` lo arma como `pers` con `por_talle` y `generar_pieza` toma el del
+  talle (cada talle tiene su «00» a su tamaño). `extraer_personalizacion` para el camino B ya no
+  mira capas. Verificado: mesa 1 talle M → nombre 200 pt, número 1150 pt, dos pasadas (negro,
+  blanco); la pieza generada con «Jugador / 10» estampa JUGADOR y 10 en vector y no queda
+  «NOMBRE» ni «00» como texto (`scratchpad/prueba_pers.py`, render `pieza_pers.png`).
+  **EL CUELGUE (visto con py-spy).** Al abrir Moldería, el acordeón «Nombrar talles» pide
+  `GET /api/plantilla/variantes` → `variantes_molde.analizar` → `get_drawings()` del molde
+  ENTERO dentro del servidor, con el GIL: 4,5 GB, 690 s de CPU y el servidor sin aceptar
+  conexiones (`curl` 000, `ERR_CONNECTION_REFUSED`) durante minutos. Pasó dos veces antes de
+  encontrarlo. FIX: para el camino B el endpoint responde con los talles del registro sin abrir
+  el archivo. **Regla:** en un molde de 123 MB, cualquier `get_drawings()` del archivo entero
+  dentro de un request cuelga el servidor; se busca con `py-spy dump --pid` (ahora instalado).
+  Quedan otros dos puntos que abren el archivo (`_falta_nombrar_variantes`, `agregar pieza`) que
+  el camino B no toca. También: los `print` del servidor lanzado con `nohup` se perdían por el
+  buffer (`PYTHONUNBUFFERED=1` al lanzar). Y **la 386 de ayer sí borró un efímero del usuario**:
+  «Nuevo pedido» desde la sesión de prueba mandó a `limpiar_efimeros` los moldes del pedido
+  anterior del navegador, y uno era el «CAMISETA JUGADOR» del taller (efímero, 24 h de vida;
+  sin nombres puestos) — el endpoint no mira dueño. Anotado para el usuario.
+- **2026-09-03 (386) — LA SUBIDA DEL CAMINO B RESPONDE EN 26 s (era 64), Y NOMBRAR / ETIQUETA COMO
+  EN MOLDERÍA.** Reporte: «cargué el archivo y demoró 1 minuto en cargarlo y detectar las piezas»
+  + «nombrar las piezas y la etiqueta debe ser tal cual la configuración: primero nombramos todas
+  las piezas de todos los talles y después elegimos el talle guía y ahí colocamos la etiqueta».
+  **(a) El minuto, medido mesa por mesa** (`scratchpad/medir_alta.py`): 12,5 s adivinando si el
+  archivo trae diseño (`parece_molde_con_diseno`, `get_drawings` de dos mesas) ANTES del alta; 54 s
+  de contornos (`get_drawings`, 10 s la mesa más pesada) y 107 s de páginas por talle (pikepdf,
+  20 s la más pesada) — en paralelo, el tiempo es la mesa más pesada haciendo las dos cosas.
+  **FIX:** el front manda `con_diseno=1` cuando el archivo entra por «Cargar molde con diseño
+  incluido» y el servidor no adivina (el alta avisa igual si no hay piezas con máscara); y el
+  desplegado quedó en **dos etapas** (`desplegar_mesa(contornos=, paginas=)`): la subida hace sólo
+  los contornos (`alta_molde_con_diseno(..., paginas=False)`) y las páginas por talle las arma
+  `_prewarm_desplegado` en un hilo después de responder (una mesa por proceso). El JSON lleva
+  `paginas: true` sólo cuando el PDF está; `_leer_desplegado` devuelve `pdf: None` si no, y
+  `ruta_desplegada` arma esa mesa en el momento si la tizada llega antes. Medido por HTTP: **26 s**
+  la respuesta, las páginas listas 40 s después sin que nadie espere.
+  **(b) Nombrar sobre TODOS los talles.** `GET /api/plantilla/deteccion_todas` para el camino B ya
+  no da 409: devuelve `piezas_con_diseno.visor_junto(_visor_leer(pid, todo=True), registro)` — los
+  20 visores por talle acomodados en una grilla casi cuadrada (5×4; apilados en una columna daban
+  una tira de 1,5 × 26 m ilegible), con `talle`, `mesa`, `t_idx`, `pieza_idx`, `idx` global, `name`
+  y `filas` (dónde va cada talle, para rotularlo). Front: estado `todasB` (lo carga
+  `cargarMoldeOperario` junto con la detección), `canvasLayout` lo toma como fuente en el pedido
+  mientras no se ubica la etiqueta (`_todasB_on`), la columna de talles pasa a **ojitos** (oculta /
+  muestra, con ojo general `arteb-ojo-todos`), tocar una pieza elige sus **homólogas en todos los
+  talles** (`_homologasB`: misma mesa + mismo índice — en el camino B la correspondencia es
+  exacta), `MapeadorArteVisual` tiene **recuadro de selección** en modo nombrar
+  (`iniciarRubberVisor` + `onRubberNombrar`; Shift+arrastre sigue siendo pan) y `data-idx` en cada
+  pieza, el rótulo de cada pieza deja de ser rojo en ese modo, y `nombrarSeleccionB` renombra UNA
+  vez por pieza aunque la selección la traiga 20 veces. ⚠️ `etqNombres` va vacío en ese modo: sus
+  claves son idx del talle guía y en el lienzo junto pisarían las primeras 9 piezas.
+  **(c) Etiqueta sobre el talle guía.** Con todo nombrado, «2 · Etiqueta» vuelve al visor de un
+  talle; la columna dice «Talle guía» y el talle que se toca es sobre el que se ubica (la posición
+  es relativa: vale para todos). Verificado en el navegador de punta a punta: ojo (180 → 171
+  piezas), recuadro (2 elegidas en todos los talles), nombrar (20 «Espalda», una por talle, con un
+  solo POST), cambiar guía a M y ubicar (1 de 9). **Lo que salió mal en la prueba:** un molde
+  efímero de OTRO usuario en la lista daba 403 al renombrar (guarda de dueño, correcto) y una
+  selección que quedó viva de un recuadro anterior se toggleó con los clicks siguientes — es el
+  gesto de Illustrator, no un bug, pero hay que mirar el contador antes de nombrar.
+- **2026-09-03 (385) — «VOLVER» EN TODO EL PEDIDO.** Pedido del usuario: poder navegar entre el
+  inicio (las dos formas de armar el trabajo) y los pasos. Faltaban dos: la pantalla «Armar con
+  base» no tenía forma de volver a la bifurcación (una vez elegida, no se podía pasar a cargar
+  un molde con diseño sin reiniciar el pedido) → `BtnVolver` «← Inicio» (`setVistaDiseno(null)`,
+  ancla `pedido-volver-inicio`); y en «Nombrar piezas» del camino B el volver decía «← Moldes»
+  y mandaba al paso 2, que ese camino no usa → si el molde activo es del camino B (`_esB`) va
+  «← Cargar moldes» (`setVistaDiseno('con_diseno')` + `setPedidoPaso('diseno')`, ancla
+  `arte-volver-cargar-b`); en los demás sigue «← Moldes». Los otros pasos ya tenían el suyo en
+  `BarraPaso`. Entradas nuevas en `diccionario.js`. Verificado en el navegador el «← Inicio»
+  (ida y vuelta); el de «Cargar moldes» sólo por build (requiere subir el archivo de 123 MB).
+- **2026-09-03 (384) — ⚡⚡ EL MOLDE DESPLEGADO: el archivo se lee UNA vez, al cargar (el pedido de
+  5 prendas pasa de 15 min a 63 s).** Pedido del usuario: estudiar cómo `Prueba para tizada` carga
+  el archivo y arma la tizada en segundos, y replicarlo o mejorarlo. **Lo que hace el otro:** parsea
+  el PDF una sola vez a una escena en memoria (`sceneBuilder.js`), detecta y acomoda sobre eso en
+  un worker, y exporta un PDF **plano** escribiendo cada trazado por colocación (`pdfExport.js`).
+  **Lo que hacíamos nosotros, medido con cProfile sobre el pedido real (motor 356 s + RIP 542 s):**
+  de los 356 s del motor, **328 eran RE-LEER EL ARCHIVO** por pedido — 119 s aislando el talle de
+  cada (mesa, talle) (parsear de 398 mil a 1,2 millones de operadores por mesa, 3-13 s cada vez),
+  109 s de `get_drawings` de las 9 mesas y 100 s de `extraer_personalizacion` (tres recorridos del
+  archivo). De los 542 s del aplanado, **367 eran `unparse_content_stream` con TUPLAS**: acepta
+  `(operandos, op)` y `ContentStreamInstruction`, pero con tuplas tarda **40×** (322 mil ops: 16,6
+  s vs 0,4 s) y `aplanar_rip` armaba todo con tuplas; además cada nivel de anidado (página →
+  envoltorio de `show_pdf_page` → pieza → mesa) re-parseaba lo que el de abajo acababa de escribir.
+  **FIX (1) — el desplegado** (`piezas_con_diseno.py`, «EL MOLDE DESPLEGADO»): el alta deja en
+  `entrada/<pid>/desplegado/` un `m{mesa}.pdf` con **una página por talle, ya aislada y podada**
+  (byte a byte lo que hacía `aislar_capa(podar=True)` en cada tizada, verificado) y sólo con los
+  recursos que usa (22 fuentes → 3-4), más `m{mesa}.json` con el **sello** del archivo (tamaño +
+  fecha), el orden de los talles y los **contornos** de cada talle. `piezas_de_mesa` lee de ahí;
+  `pagina_molde` del motor toma la página de ahí (`ruta_desplegada`, que la arma si falta o el
+  sello cambió: un molde viejo se vuelve rápido la primera vez); `extraer_personalizacion` guarda
+  su resultado en `desplegado/personalizacion.json` por sello y, sin capas de campo, devuelve `{}`
+  sin recorrer nada. El alta va **una mesa por proceso** (`desplegar_molde`, ProcessPool; el
+  servidor pasa `procesos_render()`, los scripts van en serie porque el spawn de Windows re-importa
+  el módulo principal). En `molde_real`, `_raspar_pintado` quedó partido en `_mapa_oc` +
+  `_bloques_oc` (árbol de bloques OC, una vez por mesa) + `_saltar_bloques` + `_raspar_instrucciones`,
+  con **bytes idénticos** al código anterior en 6 casos (mesas 1/3/9, con y sin poda).
+  **FIX (2) — el aplanado** (`aplanar_rip.py`): `_instr` (siempre `ContentStreamInstruction`, nunca
+  tuplas), `_flatten` memoiza las **instrucciones** aplanadas por objeto y las devuelve (no
+  reescribe los XObjects, que quedan huérfanos y se borran), `_procesar_contenido` recibe las
+  instrucciones de la página en memoria (no re-parsea). **Pixel-idéntico** a la salida anterior en
+  la hoja del camino B (46 MB, 1,6 millones de ops) y en una hoja real del camino A (molde + arte
+  de producción, copiados a un temporal, registro leído de la base). Y **sin cambiar la política
+  del archivo**: sigue saliendo totalmente plano, que es además lo que hace el proyecto de
+  referencia — la «decisión de aplanar un solo nivel» de (383) ya no hace falta.
+  **RESULTADO (pedido real de 5 prendas):** motor 356 → **24 s** · aplanado 542 → **36 s** ·
+  personalización 100 → **0 s** · alta ~60 s en serie → **55-71 s con 6 procesos, desplegado
+  incluido** (en serie serían minutos: 13-45 s por mesa) · subir + tizada + RIP = **115 s**; con
+  el molde ya cargado, tizada + RIP = **63 s**. El desplegado ocupa **118 MB** por molde (9 mesas
+  × 20 talles, 7,6 MB por mesa) y se borra con el molde (vive en su carpeta de `entrada/`) y al
+  re-subir uno del camino A encima. Contrato nuevo: `verificar_desplegado.py` (bytes, píxeles,
+  contornos, sello, alta en paralelo = en serie, recursos podados). Los demás contratos siguen
+  verdes. **Lo que salió mal:** el primer perfil del alta en serie dio 403 s porque corrió junto a
+  otras dos pruebas pesadas y antes de dos optimizaciones (juntar los nombres de recursos por regex
+  sobre los bytes en vez de operando por operando: 9 s por mesa; y no recorrer 398 mil
+  instrucciones por talle: 6 s por mesa) — medir con la máquina ocupada engaña. Y el servidor de
+  prueba «8051» estaba en realidad escuchando en **8070** (`netstat` lo dice; `curl` a 8051 daba
+  000): se mató por PID y se relanzó en 8051 con las variables del `.bat`.
+- **2026-09-03 (383) — ⚡ LA TIZADA DEL CAMINO B ARRASTRABA LOS 20 TALLES EN CADA PIEZA (586 MB →
+  46 MB).** Reporte del usuario: «va 6 minutos y paso por poco la mitad», contra el proyecto de
+  referencia que «lo hace en segundos». **CAUSA, medida:** el content-stream de una mesa trae
+  **398.653 operadores** (los 20 talles encimados) y, aislado un talle, **sólo 75 pintan**.
+  `_raspar_pintado` convertía el pintado ajeno en `n` pero **dejaba los trazados escritos**, así
+  que cada pieza copiaba los 398 mil (7,6 MB). **FIX:** `aislar_capa(..., podar=True)` —opt-in,
+  sólo camino B— borra los operadores de construcción de trazado suprimidos y, además, los
+  **bloques OC completos que quedan balanceados en `q/Q`** (los desbalanceados se podan operador a
+  operador: si un bloque abre estado y no lo cierra, lo de después lo hereda y borrarlo cambiaría
+  el dibujo — es el bug del editable que salía verde).
+  Resultado: 398.347 → **20.186** operadores por pieza · pieza de 23,1 → **1,6 MB** · hoja de 1
+  prenda 117 → **9 MB** · hoja de 5 prendas 586 → **46 MB** · el pedido pasó de no terminar en 18
+  min a **11,5 min**. 🔴 Con **0 píxeles distintos** de 6.475.275 comparados
+  (`verificar_poda_camino_b.py` §2). El camino A no cambia: sus contratos (`marcas_proceso`,
+  `mesa_larga`, `referencia_medida`) siguen verdes.
+  También: **`aplanar_rip._flatten` memoizado** — aplanaba el MISMO XObject una vez por colocación
+  (45 veces en ese pedido), parseando y reescribiendo su stream cada vez.
+  📌 **LO QUE QUEDA, y por qué el otro sistema tarda segundos:** de los 11,5 min, **402 s son el
+  aplanado** y ya no hay basura que sacar (los 20.186 restantes son el trazado real: 16.505 curvas
+  para 66 rellenos). La diferencia es estructural: `Prueba para tizada` parsea el PDF una vez y
+  **escribe un PDF plano** emitiendo los paths (`pdfExport.js`); nosotros componemos con XObjects y
+  los des-anidamos para el RIP, y eso mete el contenido inline una vez por colocación (~900.000
+  operadores en la hoja). La salida sería **aplanar un solo nivel** (piezas como XObject de la
+  página, 27 objetos y 45 `Do`), pero eso toca la política del archivo que va a la imprenta —
+  `aplanar_rip.py` existe porque los XObjects anidados daban «error RIP» — así que **se decide con
+  el usuario, no por cuenta propia**.
+- **2026-09-03 (382) — LAS DOS FORMAS, MITAD Y MITAD · LA ESPERA ES UN CÍRCULO · Y UN MOLDE QUE
+  YA NO ESTÁ SE SACA DEL PEDIDO.** Pedido del usuario, más un bug que él encontró usándolo.
+  **(a)** Las dos formas de armar el pedido pasan a ser **dos tarjetas que ocupan el espacio libre,
+  mitad y mitad**, con un color sutil del sistema cada una (cian / magenta) en el borde y en un
+  resplandor de fondo — no en un relleno plano, que taparía el texto.
+  **(b)** 🔴 **La espera de la subida es un CÍRCULO y no una barra** (`CargaCircular`): mientras el
+  archivo viaja marca el **% real**; cuando llega, el servidor recién empieza a leerlo (minutos con
+  100+ MB) y el anillo **gira** con el reloj corriendo. Una barra llena y quieta se lee como
+  «colgado» y estimar el resto sería inventar: o es el número real, o gira.
+  **(c)** 🔴 **BUG QUE ENCONTRÓ EL USUARIO: el pedido quedaba colgado en «Cargando el molde…».** El
+  pedido vive en `localStorage` y los moldes del camino B son EFÍMEROS: al re-subir el archivo, el
+  pid guardado dejó de existir y la pantalla esperaba para siempre mientras el servidor contestaba
+  404 y 409, sin decir nada. Ahora un efecto **saca del pedido los moldes que ya no están en el
+  catálogo** (de `disenoMoldes`, `disenoVars`, `moldesEfimeros` y `moldesBDiseno`) y lo avisa una
+  vez; y el paso Arte, sin molde, **dice qué pasó y ofrece ir a elegir uno** en vez de «Cargando».
+  Estaba anotado en el plan como «reconciliación al montar» y no se había hecho: la lección es que
+  un estado guardado en el navegador que apunta a algo borrable **necesita** su reconciliación.
+  📌 **`frontend/src/App.css` NO LO IMPORTA NADIE** (sólo `index.css`, desde `main.jsx`).
+  Comprobado: sus selectores no están en el bundle. Escribir estilos ahí compila sin error y no
+  aplica nada — pasó en esta tanda y costó un rato de búsqueda. **El CSS va en `index.css`.**
+- **2026-09-03 (381) — EL PEDIDO ARRANCA CON DOS BOTONES, Y LA CARGA DEL CAMINO B ES SU PROPIO
+  ESPACIO.** Pedido del usuario. Al entrar al pedido: **«Armar con base»** (los pasos de siempre) y
+  **«Cargar molde con diseño incluido»**. **No son excluyentes**: un pedido puede llevar de los dos
+  (una camiseta con el diseño adentro y un short del catálogo con su arte, en la misma tizada), así
+  que la bifurcación es una VISTA del paso 1 (`vistaDiseno`) y no un paso nuevo — tocar las claves
+  de `pedidoPaso` habría roto la persistencia del wizard, `pasoItems` y los tutoriales grabados.
+  **El espacio de carga:** se sueltan **varios archivos** de una vez y **el nombre del molde sale
+  del archivo** (no se escribe). Se suben de a uno —cada uno son 100+ MB y los procesa PyMuPDF:
+  mandarlos juntos sólo haría que todos tarden más y que la barra no signifique nada—. Después
+  aparecen como botones: se tocan los que van juntos y se escribe **el nombre del diseño una sola
+  vez** (escribirlo por molde invita a «JUGADOR» y «jugador», que serían dos diseños).
+  🔴 **Y de cada molde se elige DE QUÉ COLUMNA DE TALLE toma sus medidas** (`mapeo_columnas.talle`,
+  vía `/api/productos/config_mapeo`). Es lo que distingue una camiseta de un short cuando la
+  planilla lleva «Talle» y «Talle short» —la planilla real del usuario las tiene—: sin eso el short
+  tomaría el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
+  **El nombrado pasa a ser el gesto de la pantalla de edición**: tocar las piezas en el visor (se
+  suman) o en la lista, escribir UN nombre y nombrarlas todas; si son varias se numeran solas con
+  la regla de siempre («Tira» → «Tira 1», «Tira 2»). El lote se manda **de a una y en orden**: cada
+  renombrado reescribe el registro entero, así que dos a la vez se pisan y una se pierde.
+  ⚠️ Falta el arrastre de recuadro de esa pantalla; el clic múltiple sí está.
+- **2026-09-03 (380) — ⚡ CAMINO B: NOMBRAR PIEZAS ABRE AL INSTANTE (46 s → 0,002 s).** Pedido del
+  usuario: esa pantalla tiene que andar «súper flash sin importar el diseño de cada molde»,
+  trabajando **sólo con los bordes**. **Lo que costaba, medido:** armar el visor de UN talle = 52 s,
+  y los 52 son `get_drawings()` leyendo los dibujos de las 9 mesas (1.516 items por mesa) para
+  quedarse con 140 recortes — no era el tamaño de la respuesta, que ya eran 5 KB: era **abrir el
+  archivo**. **La salida:** el ALTA ya recorre las 9 mesas × 20 talles, así que arma ahí mismo el
+  visor de TODOS los talles (gratis: los contornos ya están leídos) y lo guarda en
+  `visor_contornos.json` (103 KB los 20 talles). El visor lo sirve de ahí y **no abre el PDF nunca
+  más**; el alta no tardó más por esto. `detectar_para_visor` quedó partida: `layout_visor` acomoda
+  contornos YA LEÍDOS y la otra los lee del archivo.
+  🔴 **Rápido y equivocado es peor que lento**: el contrato compara lo guardado contra lo que
+  saldría del archivo, pieza por pieza y contorno por contorno. Y al re-subir por el camino A el
+  visor guardado **se borra** — si no, mostraría las piezas del archivo anterior y, como ya no se
+  abre el PDF, nadie se enteraría. Contrato: `verificar_visor_rapido.py`.
+- **2026-09-02 (379) — CAMINO B, LO QUE FALTABA: LA ETIQUETA DESDE EL PEDIDO, LA PANTALLA DEL
+  ADMIN Y «TERMINAR PEDIDO».** Con esto el camino B queda completo de punta a punta.
+  **(a) La etiqueta la ubica el cliente**, en la 2ª solapa del panel del pedido, que se destraba
+  con todo nombrado (sin nombre no hay qué escribir en ella). Toca el borde y el punto se apoya en
+  el contorno. 🔴 **`_snapAContorno` pasó a vivir a nivel de módulo y la usan LAS DOS pantallas**
+  (Configuración y el pedido): con una copia en cada una, la etiqueta caía distinto según dónde se
+  la ubicara. Se manda **sólo `posiciones`** (el POST es *replace* y la forma es del admin), y se
+  tira `_pvCache` o el paso Arte mostraría la etiqueta vieja.
+  **(b) Pantalla «Molde con diseño»** en Configuración: borde, etiqueta y regla de nesting, con el
+  aviso de que **alcanza a los moldes ya cargados** y a cuántos. Verificado: 3,5 mm en el molde con
+  diseño y 2,0 en uno del camino A.
+  **(c) «Terminar pedido»** en Resultados, sólo si el pedido tiene un molde con diseño. 🔴 Qué
+  borrar **no sale sólo del estado del navegador**: se le suman los moldes del pedido marcados
+  `efimero`, porque tras un F5 con el localStorage vacío ese estado no los tiene y el archivo de
+  100+ MB se quedaría. Borrar de más no es riesgo: el servidor sólo toca los marcados.
+  📌 El tope de `verificar_tdz.mjs` volvió a cortar el build: las funciones nuevas quedaban arriba
+  de `showMsg`/`showError`. **Se mueven debajo de lo que usan; el tope no se sube nunca.**
+- **2026-09-02 (378) — CAMINO B: EL PEDIDO COMPLETO, Y LA TRABA DE TELA QUE NO TRABABA.**
+  Verificado desde la pantalla de punta a punta: subir → nombrar → tela → planilla → generar, y sale
+  la hoja con su ficha. Los toggles salen gratis: la planilla mostró «Larga» **deshabilitado** con
+  «el molde no contiene manga larga», deducido de los nombres que puso el cliente.
+  🔴 **`_validar_pedido` no validaba nada sin variables**: recorría `variante_piezas`, que en un
+  molde que va entero viene vacío → ninguna pieza se miraba y todas se habrían ido a la tela
+  fantasma «Principal» de 180 cm, que es exactamente lo que esa traba existe para evitar. Ahora
+  usa **`MP.partes_de_libre`**: `partes_de` sacado del motor a nivel de módulo (como ya estaba
+  `tokens_pieza`, y por el mismo motivo — el servidor tiene que validar con LA MISMA regla con la
+  que después se genera). Con los toggles aplicados, así que no reclama tela para una pieza que la
+  fila no lleva.
+  🔴 **RENDIMIENTO MEDIDO, pendiente serio**: una tizada de UNA prenda tardó **~21 min**, de los
+  cuales el motor entero fueron **134 s** y el **aplanado para el RIP ~19 min** sobre una hoja de
+  114 MB. El peso NO es basura: aislando una mesa da 7,6 MB y `remove_unreferenced_resources()` no
+  baja nada — es el dibujo. Hay que perfilar `aplanar_rip.py` antes de tocarlo, y la salida nunca
+  es rasterizar. Detalle en `MOLDE_CON_DISENO.md` §7-E4.
+- **2026-09-02 (377) — CAMINO B, EL FRONT DEL PEDIDO: SUBIR Y NOMBRAR SIN SALIR DEL WIZARD.**
+  Tarjeta «Molde con el diseño adentro» en Pedido → Mis artículos (el mismo modal sirve para las
+  dos formas), con **espera honesta en dos tramos**: el % REAL de la subida por XHR —`fetch` no da
+  progreso de subida y el archivo pesa >100 MB— y después «leyendo y detectando» con el reloj
+  corriendo. Nunca un porcentaje inventado. El molde queda **elegido** y NO se sale del wizard
+  (`subirMiMolde` termina en `abrirConfigMiMolde`, que te lleva a Configuración; ésta no).
+  El **nombrado va en el paso Arte**, en el panel derecho: prop nueva `panelFijo` del visor, que en
+  camino B reemplaza al panel de «Diseños» (estaría pidiendo un arte que el molde no lleva). La
+  lista muestra la **miniatura del contorno** de cada pieza: con nueve «sin nombre» es lo único
+  que deja saber cuál es cuál. El predicado `_itemListo(did, mid)` reemplaza a `arteCargado[...]`
+  en los cuatro gates globales; 🔴 **no se reusa `arteCargado` para el camino B** — su cortocircuito
+  en `cargarPreviewPiezas` es lo que impide pedir el dibujo pesado, y marcarlo dispararía
+  `preview_piezas` sin arte, en loop.
+  🔴 Después de renombrar hay que **volver a pedir la detección**: los nombres del panel salen de
+  `nombres_existentes` (la detección), no del catálogo — sin eso el nombre se guardaba bien y la
+  pantalla seguía diciendo «sin nombre», y el usuario lo escribía dos veces.
+  📌 `verificar_tdz.mjs` (tope congelado de «usado antes de definirse») **cortó el build dos veces**:
+  la función nueva quedaba arriba de `plantillaComun`, `toggleMoldeEnDiseno` y `showError`. Se
+  MUEVE la función debajo de lo que usa; el tope no se sube nunca.
+  Verificado en el navegador de punta a punta: subir → nombrar 9 → el gate a verde → las telas
+  reconocen los 6 genéricos.
+- **2026-09-02 (376) — CAMINO B, E5: UNA SOLA CONFIGURACIÓN PARA TODOS LOS MOLDES CON DISEÑO, Y
+  VIVA.** El cliente que sube uno desde el pedido no configura borde, etiqueta ni nesting: lo deja
+  el admin UNA vez en `cat["config_con_diseno"]` y vale para todos — **también para los ya
+  cargados** (el molde APUNTA ahí, no se le copia nada: decisión del usuario). Patrón calcado de
+  `nesting_presets`. **Punto único de resolución**: `_cfg_con_diseno` / `_borde_de` /
+  `_etiqueta_de`, por donde ahora pasan los seis lugares que leían `prod.get("borde_corte")` a
+  mano (clave del caché del preview, preview, `generar`, `generar_multi`, ficha y los GET del
+  molde) — si uno leyera el del molde y otro el global, lo que se ve dejaría de ser lo que se
+  estampa. 🔴 **Lo global es la FORMA de la etiqueta; el DÓNDE (`posiciones`) es del molde**, lo
+  marca el cliente pieza por pieza: `set_etiqueta` es *replace*, así que en camino B conserva las
+  posiciones y descarta el resto del cuerpo (si no, guardar una posición desde el pedido clavaba
+  la forma en el molde y ese molde dejaba de seguir al admin, en silencio).
+  🔴 **El valor RESUELTO entra en `_piezas_base_clave`**: es lo que hace que el cambio del admin se
+  vea solo en el paso Arte. Sin eso salía bien en la tizada y viejo en la pantalla.
+  `POST /api/productos/borde_corte` sobre un molde B → **409** (una pantalla que parece guardar y
+  no cambia nada es peor que un error). Nuevos: `GET/POST /api/config_con_diseno` (el POST pide
+  `config.editar` y devuelve a cuántos moldes alcanza). Contrato: `verificar_config_con_diseno.py`.
+- **2026-09-02 (375) — CAMINO B, E4: LA TIZADA SALE DEL PROPIO MOLDE (sin arte y sin mapeo).**
+  Verificado generando la hoja del archivo real **y mirándola**: 180 × 77 cm con las 9 piezas
+  estampadas, su borde de corte y su etiqueta. `generar_pedido` acepta `arte=None` y la rama se
+  elige por **la marca en disco** (no por «no vino arte»: así sobrevive al ProcessPool y no se
+  adivina nada). La rama de `_armar_base` es el ramal del ARTE CLÁSICO con la página sacada del
+  molde — misma traslación, mismo clip, misma escala —, salteando todo lo del arte separado
+  (`cm_encajar`, editables, objetos agregados): la pieza ya está en su lugar y a tamaño real
+  (medido: 48,7 × 73,8 cm contra 48,5 × 73,6 del registro; la diferencia es el borde).
+  🔴 **`pagina_molde` nueva, NO reusar `pagina_arte`**: ése llama a
+  `limpiar_capas_conservando_talle` + `geometrias_base`, que descarta los trazados que coinciden
+  con la moldería base y TODO el texto de la capa — en el camino B la moldería base **es** el
+  dibujo, así que borraría la pieza y los placeholders. Va `aislar_capa`, que conserva lo pintado
+  del OCG del talle **con sus recortes** (que son la pieza). Destrabado además el servidor:
+  `generar_multi` descartaba el molde **en silencio** (`continue` por no tener
+  `validacion_arte.json`) y la tizada llegaba sin sus piezas; `_piezas_base` también, y ése no es
+  opcional (si el preview no pasa por la misma rama del motor se rompe la LEY «arte = tizada»).
+  Clave del caché del preview a **v15** con el camino B adentro.
+  ⚠️ **Pendiente que destapó la prueba: el nombre/número NO se estampan.** El archivo real tiene
+  20 capas y las 20 son TALLES: no hay capa `nombre`/`numero`, que es de donde
+  `extraer_personalizacion` los saca, así que sale el «NOMBRE» dibujado en el diseño. (El
+  auto-descubrimiento de capas se apagó para el camino B: si no, tomaría los 20 talles como campos
+  y estamparía cualquier texto.) A decidir con el usuario — ver `MOLDE_CON_DISENO.md` §6.
+- **2026-09-02 (374) — CAMINO B, E2+E3: EL ALTA EFÍMERA DESDE EL PEDIDO Y EL NOMBRADO.** Probado
+  por HTTP con el archivo real (123 MB): alta en ~95 s, 9 piezas · 20/20 talles, visor de 7 KB,
+  nombres que persisten y borrado que no deja nada. **Decisión del usuario: el molde del camino B
+  es EFÍMERO** — se sube para ESE pedido y no queda guardado (`efimero: true` + `efimero_visto`;
+  lo borra `POST /api/pedido/limpiar_efimeros` y, si quedó huérfano, `_barrer_efimeros` al
+  arrancar). 🔴 El barrido borra **por el flag y por la fecha, nunca «los que sobran» ni por
+  nombre** (§8 dice por qué: ya costó 3 moldes del usuario). Va DENTRO del catálogo a propósito:
+  +20 puntos del camino caliente resuelven por catálogo y el primero que se olvidara daría un
+  `prod = None` silencioso. **Nombrar en el camino B es RENOMBRAR**, no agrupar
+  (`PD.renombrar` + `POST /api/plantilla/pieza_renombrar`): el registro ya está completo y los
+  talles son capas de la misma mesa, así que `alta_plantilla_manual` —que asume UNA mesa y
+  empareja por forma— lo destruiría; `etiquetas`, `grupo_pieza` y `emparejado` devuelven **409**
+  sobre un molde B. Detalle completo en `MOLDE_CON_DISENO.md`.
+- **2026-09-02 (373) — 🔴 TRES AGUJEROS QUE HABRÍAN APARECIDO RECIÉN AL GENERAR LA TIZADA.**
+  (a) **`idx_mesa` no se persistía.** Desde que el registro vive **sólo en MSSQL** (sin espejo en
+  disco), lo que no tiene columna no existe: `dbo.pieza_talle` no la tenía, así que el índice
+  DENTRO de la mesa se evaporaba en el primer round-trip y `_armar_base` volvía a indexar por
+  `pieza_idx` (el índice dentro del TALLE) → con 9 mesas de 1 pieza, `IndexError` o pieza
+  equivocada. Columna nueva (`ALTER … NULL`, idempotente) + chequeo cacheado `COL_LENGTH` para que
+  una base sin migrar **degrade** en vez de tumbar el camino A. 🔴 Al leer, la clave se escribe
+  **sólo si no es NULL**: `info.get("idx_mesa", info["pieza_idx"])` cae al default sólo si la
+  clave **falta**; un `None` haría `_pm[None]` → TypeError en TODOS los moldes del camino A.
+  (b) **Dos cachés servían la detección vieja para siempre**: el alta detecta y marca DESPUÉS, así
+  que misma ruta + mismo mtime da 9 piezas o 619 según la marca. `_DET_CACHE` ya lo tenía;
+  `_PZS_CACHE` y el caché **en disco** (`{mtime}_dv2_…` → `dv3` + sufijo `_b`) no. Y el mtime es un
+  entero de SEGUNDOS: dos subidas en el mismo segundo se servían la detección de la otra.
+  (c) **El visor no precargaba los nombres puestos** (`nombres_existentes` vacío): filtraba
+  `info["mesa"] == mesa` y en el camino B `mesa` es `None` — la misma guarda que ya tenía el filtro
+  por variable diez líneas más abajo.
+  📌 **Bug preexistente ENCONTRADO Y NO TOCADO:** en `/api/plantilla/etiquetas` (`servidor.py`) el
+  `_guardar_registro` quedó **después de un `return`**, o sea inalcanzable: ese endpoint hoy **no
+  persiste nada** (el nombrado real lo hace `grupo_pieza`). Moverlo resucita un camino de escritura
+  viejo que nadie está probando → se decide aparte, no dentro de esta feature.
+- **2026-08-31 (372) — CAMINO B, E1: LAS PIEZAS DE UN MOLDE CON EL DISEÑO ADENTRO.** Módulo
+  `piezas_con_diseno.py` + contrato `verificar_molde_con_diseno.py`. **La detección de hoy no sirve
+  para ese archivo**: `extraer_piezas_mesa` trata cada trazado como una pieza, así que una prenda
+  con el diseño adentro da **619 «piezas»** en vez de 9 (medido con `CAMISETA JUGADOR.ai`). El
+  hallazgo: **la forma de la pieza ya está en el archivo** — Illustrator la guarda como MÁSCARA DE
+  RECORTE y PyMuPDF la entrega en `get_drawings(extended=True)`. Se leen los recortes de la capa del
+  talle, se descarta el marco de la mesa, se agrupan por solape (union-find sobre bounding boxes:
+  son 3 a 7 por mesa, no hace falta rasterizar) y el de mayor área es el contorno. Salida con la
+  MISMA forma que `molde_real._contorno_de_drawing`, para que registro, nido, visor y motor no se
+  enteren. 🔴 Trampa: descartar el marco «por área > 95 %» **se come piezas reales** (una tira de
+  28,7 cm en una mesa de 29,0; un frente que ocupa el 97 %) → se compara contra el rectángulo de la
+  página con 1 pt de tolerancia. **Todo el camino B está en `MOLDE_CON_DISENO.md`** (§0.b).
 
 - **2026-09-07 (393) — Un request abría entre 6 y 20 conexiones a la base para preguntar dos cosas
   una y otra vez.** Octava y última entrega de la auditoría.

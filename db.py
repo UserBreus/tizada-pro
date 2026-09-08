@@ -476,6 +476,25 @@ def _proyectar_un_producto(pid, p, cur=None):
         cur.execute("UPDATE pedido_fila SET diseno_id=NULL WHERE diseno_id=?", did)
         cur.execute("DELETE FROM diseno WHERE id=?", did)     # mapeo_arte/editable: CASCADE
 
+_PT_IDX_MESA = None
+
+
+def _pt_tiene_idx_mesa():
+    """¿La base ya tiene la columna `idx_mesa` (camino B)? Cacheado: es una pregunta por proceso.
+
+    Se pregunta en vez de asumir porque un servidor publicado puede estar corriendo con el
+    esquema viejo (el arranque AVISA que faltan tablas, no las aplica — ver `_faltan_tablas`).
+    Sin la columna, escribir el INSERT nuevo tiraría «Invalid column name» en CADA guardado y
+    rompería el camino A entero; así, degrada a lo que hacía antes."""
+    global _PT_IDX_MESA
+    if _PT_IDX_MESA is None:
+        try:
+            _PT_IDX_MESA = valor("SELECT COL_LENGTH('dbo.pieza_talle','idx_mesa')") is not None
+        except Exception:
+            _PT_IDX_MESA = False
+    return _PT_IDX_MESA
+
+
 def guardar_registro(legacy_pid, piezas, reg):
     """Reconstruye las piezas del molde en la base. `piezas` = piezas.json['piezas'] (ids 1..N
     numéricos), `reg` = el registro {clave: {talle: {...}}}. Idempotente: upsert por
@@ -527,6 +546,7 @@ def guardar_registro(legacy_pid, piezas, reg):
         cur.execute("UPDATE producto SET registro_rev = registro_rev + 1 WHERE id=?", pid)
         # EN LOTE: con 30 talles son ~1000 filas; de a una eran ~1000 idas y vueltas al
         # server por cada guardado de un nombre. `fast_executemany` las manda juntas.
+        _con_im = _pt_tiene_idx_mesa()
         _filas_pt = []
         for clave, por_t in (reg or {}).items():
             fid = fila_id.get(clave)
@@ -536,17 +556,20 @@ def guardar_registro(legacy_pid, piezas, reg):
                 tid = t_id.get(t)
                 if tid is None or not isinstance(inf, dict):
                     continue
-                _filas_pt.append((fid, tid, inf.get("mesa"), inf.get("pieza_idx"),
-                                  _j.dumps(inf.get("ancla"), ensure_ascii=False) if inf.get("ancla") is not None else None,
-                                  _j.dumps(inf.get("bbox_mu")) if inf.get("bbox_mu") is not None else None,
-                                  inf.get("w_cm"), inf.get("h_cm")))
+                _f = (fid, tid, inf.get("mesa"), inf.get("pieza_idx"),
+                      _j.dumps(inf.get("ancla"), ensure_ascii=False) if inf.get("ancla") is not None else None,
+                      _j.dumps(inf.get("bbox_mu")) if inf.get("bbox_mu") is not None else None,
+                      inf.get("w_cm"), inf.get("h_cm"))
+                _filas_pt.append((_f + (inf.get("idx_mesa"),)) if _con_im else _f)
         if _filas_pt:
             try:
                 cur.fast_executemany = True
             except Exception:
                 pass
-            cur.executemany("INSERT INTO pieza_talle (pieza_id, talle_id, mesa, pieza_idx, ancla, bbox_mu, ancho_cm, alto_cm) "
-                            "VALUES (?,?,?,?,?,?,?,?)", _filas_pt)
+            cur.executemany(
+                "INSERT INTO pieza_talle (pieza_id, talle_id, mesa, pieza_idx, ancla, bbox_mu, ancho_cm, alto_cm"
+                + (", idx_mesa) VALUES (?,?,?,?,?,?,?,?,?)" if _con_im else ") VALUES (?,?,?,?,?,?,?,?)"),
+                _filas_pt)
             try:
                 cur.fast_executemany = False
             except Exception:
@@ -561,9 +584,11 @@ def leer_registro(legacy_pid):
     pid = valor("SELECT id FROM producto WHERE legacy_id=?", legacy_pid)
     if pid is None:
         return None
+    _con_im = _pt_tiene_idx_mesa()
     rows = filas(
         "SELECT p.nombre AS clave, t.nombre AS talle, pt.mesa, pt.pieza_idx, pt.ancla, "
-        "pt.bbox_mu, pt.ancho_cm, pt.alto_cm "
+        "pt.bbox_mu, pt.ancho_cm, pt.alto_cm"
+        + (", pt.idx_mesa " if _con_im else " ") +
         "FROM pieza p JOIN pieza_talle pt ON pt.pieza_id=p.id JOIN talle t ON t.id=pt.talle_id "
         "WHERE p.producto_id=? ORDER BY p.id_en_molde", pid)
     if not rows:
@@ -573,6 +598,11 @@ def leer_registro(legacy_pid):
         inf = {"mesa": r["mesa"], "pieza_idx": r["pieza_idx"],
                "w_cm": float(r["ancho_cm"]) if r["ancho_cm"] is not None else None,
                "h_cm": float(r["alto_cm"]) if r["alto_cm"] is not None else None}
+        # 🔴 La clave va SÓLO si tiene valor. El motor hace `info.get("idx_mesa", info["pieza_idx"])`
+        # y `.get` cae al default sólo si la clave NO ESTÁ: escribir None acá haría `_pm[None]`
+        # (TypeError) en TODOS los moldes del camino A.
+        if _con_im and r["idx_mesa"] is not None:
+            inf["idx_mesa"] = int(r["idx_mesa"])
         for k in ("bbox_mu", "ancla"):
             if r[k]:
                 try:
@@ -583,35 +613,142 @@ def leer_registro(legacy_pid):
     return reg
 
 
-def borrar_piezas_molde(legacy_pid):
+def borrar_piezas_molde(legacy_pid, cur=None):
     """Borra TODO lo del molde en la base (piezas, geometría, relaciones, talles).
-    Para «borrar molde = borrar todo» y para el reset al re-subir."""
+    Para «borrar molde = borrar todo» y para el reset al re-subir.
+
+    Con `cur` participa de la transacción de quien llama (lo usa `borrar_producto`, que borra
+    esto Y la fila del molde: son UNA operación y no pueden quedar a medias una de otra)."""
+    if cur is None:
+        with cursor() as c2:
+            return borrar_piezas_molde(legacy_pid, c2)
+    pid = _producto_id(cur, legacy_pid)
+    if pid is None:
+        return 0
+    # ⚠️ PRIMERO lo que APUNTA a estas filas sin cascade, si no salta el error 547 y no se
+    # borra nada (`_proyectar_un_producto` ya hacía esta limpieza; acá faltaba).
+    _pz = "IN (SELECT id FROM pieza WHERE producto_id=?)"
+    _va = "IN (SELECT id FROM variable WHERE producto_id=?)"
+    _ta = "IN (SELECT id FROM talle WHERE producto_id=?)"
+    cur.execute(f"DELETE FROM mapeo_arte WHERE variable_id {_va}", pid)
+    cur.execute(f"DELETE FROM mapeo_arte WHERE pieza_id {_pz}", pid)
+    cur.execute(f"DELETE FROM editable WHERE variable_id {_va}", pid)
+    cur.execute(f"DELETE FROM editable WHERE talle_id {_ta}", pid)
+    # Las filas de pedidos históricos NO se borran: quedan sin la variable/el talle (el pedido
+    # es del usuario; el molde es lo que se está borrando).
+    cur.execute(f"UPDATE pedido_fila SET variable_id=NULL WHERE variable_id {_va}", pid)
+    cur.execute(f"UPDATE pedido_fila SET talle_id=NULL WHERE talle_id {_ta}", pid)
+    cur.execute(f"DELETE FROM junta_pieza WHERE pieza_id {_pz}", pid)
+    cur.execute(f"DELETE FROM variable_pieza WHERE pieza_id {_pz}", pid)
+    cur.execute(f"DELETE FROM pieza_talle WHERE pieza_id {_pz}", pid)
+    cur.execute("DELETE FROM variable WHERE producto_id=?", pid)   # junta: CASCADE
+    cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)      # pieza_tela: CASCADE
+    cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
+    return 1
+
+
+def borrar_producto(legacy_pid):
+    """Borra el molde ENTERO de la base, incluida su fila en `producto`. Devuelve 1 si la borró.
+
+    `sync_productos` hace borrado LÓGICO (`activo=0`) porque un molde sacado del catálogo puede
+    tener historia. Un molde EFÍMERO del camino B no: se sube para un pedido y no existe después,
+    así que dejar su fila acumularía una por cada subida para siempre.
+    🔴 La fila NO se borra si algún pedido la referencia (`dbo.pedido` no tiene cascade): ahí se
+    cae al borrado lógico de siempre. Hoy nadie escribe pedidos, pero el día que se escriban,
+    borrar un efímero no puede llevarse un pedido histórico por delante."""
+    # UNA sola transacción para toda la operación: antes eran tres (buscar el id · borrar las
+    # piezas · borrar la fila), y si se cortaba en el medio el molde quedaba a mitad de borrar.
     with cursor() as cur:
         pid = _producto_id(cur, legacy_pid)
         if pid is None:
             return 0
-        # ⚠️ PRIMERO lo que APUNTA a estas filas sin cascade, si no salta el error 547 y no se
-        # borra nada (`_proyectar_un_producto` ya hacía esta limpieza; acá faltaba).
-        _pz = "IN (SELECT id FROM pieza WHERE producto_id=?)"
-        _va = "IN (SELECT id FROM variable WHERE producto_id=?)"
-        _ta = "IN (SELECT id FROM talle WHERE producto_id=?)"
-        cur.execute(f"DELETE FROM mapeo_arte WHERE variable_id {_va}", pid)
-        cur.execute(f"DELETE FROM mapeo_arte WHERE pieza_id {_pz}", pid)
-        cur.execute(f"DELETE FROM editable WHERE variable_id {_va}", pid)
-        cur.execute(f"DELETE FROM editable WHERE talle_id {_ta}", pid)
-        # Las filas de pedidos históricos NO se borran: quedan sin la variable/el talle (el pedido
-        # es del usuario; el molde es lo que se está borrando).
-        cur.execute(f"UPDATE pedido_fila SET variable_id=NULL WHERE variable_id {_va}", pid)
-        cur.execute(f"UPDATE pedido_fila SET talle_id=NULL WHERE talle_id {_ta}", pid)
-        cur.execute(f"DELETE FROM junta_pieza WHERE pieza_id {_pz}", pid)
-        cur.execute(f"DELETE FROM variable_pieza WHERE pieza_id {_pz}", pid)
-        cur.execute(f"DELETE FROM pieza_talle WHERE pieza_id {_pz}", pid)
-        cur.execute("DELETE FROM variable WHERE producto_id=?", pid)   # junta: CASCADE
-        cur.execute("DELETE FROM pieza WHERE producto_id=?", pid)      # pieza_tela: CASCADE
-        cur.execute("DELETE FROM talle WHERE producto_id=?", pid)
-        return 1
+        borrar_piezas_molde(legacy_pid, cur)
+        for t in ("diseno", "producto_tela", "config"):
+            try:
+                cur.execute(f"DELETE FROM {t} WHERE producto_id=?", pid)
+            except Exception:
+                pass                     # tabla ausente en una base a medio migrar: no es fatal
+        cur.execute("DELETE FROM producto WHERE id=? AND NOT EXISTS "
+                    "(SELECT 1 FROM pedido WHERE producto_id=?)", pid, pid)
+        if cur.rowcount == 0:
+            cur.execute("UPDATE producto SET activo=0 WHERE id=?", pid)
+            return 0
+    return 1
 
 
 def registro_rev(legacy_pid):
     """Revisión actual del registro del molde (para claves de caché). None si el molde no está."""
     return valor("SELECT registro_rev FROM producto WHERE legacy_id=?", legacy_pid)
+
+
+# ── CONFIGURACIONES GUARDADAS DE UN MOLDE (camino B) ──────────────────────────────────────────
+# Un molde que trae el diseño adentro se sube PARA UN PEDIDO y se borra con él: el nombrado de las
+# piezas, los grupos, las variables y las telas se perdían, y al volver a usar el MISMO archivo en
+# otro pedido había que hacer todo de nuevo (pedido del usuario 2026-09-08). Acá se guarda esa
+# configuración, atada al ARCHIVO (sha1) y no al molde, para poder ofrecerla la próxima vez.
+_CONFIG_MOLDE_LISTA = False
+
+
+def _asegurar_config_molde():
+    """Crea la tabla si falta. Va acá y no sólo en `schema.sql` porque las bases que ya están
+    instaladas no vuelven a pasar por el instalador: la primera vez que alguien guarda una
+    configuración, la tabla tiene que aparecer sola."""
+    global _CONFIG_MOLDE_LISTA
+    if _CONFIG_MOLDE_LISTA:
+        return
+    with cursor() as cur:
+        cur.execute("""
+IF OBJECT_ID('dbo.config_molde') IS NULL
+CREATE TABLE dbo.config_molde (
+    id          INT IDENTITY(1,1) PRIMARY KEY,
+    nombre      NVARCHAR(160) NOT NULL,
+    sha1        NVARCHAR(40)  NULL,     -- del archivo del molde: identifica el MISMO archivo
+    molde       NVARCHAR(240) NULL,     -- de qué molde salió (para reconocerla en la lista)
+    piezas_n    INT NULL,               -- cuántas piezas tenía (compatibilidad a ojo)
+    mesas_n     INT NULL,
+    creado_en   DATETIME2 NOT NULL CONSTRAINT DF_config_molde_creado DEFAULT SYSUTCDATETIME(),
+    creado_por  INT NULL,
+    datos       NVARCHAR(MAX) NOT NULL  -- el JSON con todo lo guardado
+)""")
+    _CONFIG_MOLDE_LISTA = True
+
+
+def guardar_config_molde(nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por=None, id_=None):
+    """Guarda (o pisa, si viene `id_`) una configuración. Devuelve su id."""
+    _asegurar_config_molde()
+    txt = _json.dumps(datos, ensure_ascii=False)
+    with cursor() as cur:
+        if id_:
+            cur.execute("UPDATE config_molde SET nombre=?, sha1=?, molde=?, piezas_n=?, mesas_n=?, "
+                        "datos=? WHERE id=?", nombre, sha1, molde, piezas_n, mesas_n, txt, int(id_))
+            if cur.rowcount:
+                return int(id_)
+        cur.execute("INSERT INTO config_molde (nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por) "
+                    "OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    nombre, sha1, molde, piezas_n, mesas_n, txt, creado_por)
+        return int(cur.fetchone()[0])
+
+
+def listar_configs_molde():
+    """Todas las configuraciones guardadas, sin el JSON (la lista no lo necesita)."""
+    _asegurar_config_molde()
+    return filas("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por "
+                 "FROM config_molde ORDER BY creado_en DESC")
+
+
+def leer_config_molde(id_):
+    _asegurar_config_molde()
+    f = fila("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por, datos "
+             "FROM config_molde WHERE id=?", int(id_))
+    if not f:
+        return None
+    try:
+        f["datos"] = _json.loads(f["datos"] or "{}")
+    except Exception:
+        f["datos"] = {}
+    return f
+
+
+def borrar_config_molde(id_):
+    _asegurar_config_molde()
+    return ejecutar("DELETE FROM config_molde WHERE id=?", int(id_))

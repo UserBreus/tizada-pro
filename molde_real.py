@@ -112,6 +112,23 @@ def extraer_piezas_mesa(doc_molde, mesa, talle, area_min_cm2=0.25, lado_min_cm=0
     no solo la mayor — para moldería con varias piezas en la misma mesa.
     Orden DETERMINISTA por bounding box (x0, y0): el índice de cada pieza es
     estable para un mismo archivo+talle, así se puede referenciar por índice."""
+    # ── CAMINO B: el molde ya trae el diseño adentro ────────────────────────────────────────────
+    # Acá abajo cada TRAZADO es una pieza, que es lo correcto para un molde pelado. Pero si el
+    # molde trae el diseño estampado, esa cuenta explota: una prenda da 619 "piezas" (cada franja,
+    # cada logo, cada letra) en vez de 9. En ese caso la pieza se lee de su MÁSCARA DE RECORTE.
+    #
+    # El enrutado está ACÁ y no en cada llamador a propósito: por esta función pasan el visor de
+    # nombrado, el registro, el nido y el motor. Ponerlo acá es lo que hace que el camino B
+    # funcione en todo el sistema en vez de en la pantalla donde se lo probó.
+    #
+    # La decisión NO se adivina en cada lectura: la dejó escrita el alta al lado del archivo
+    # (`piezas_con_diseno.marcar`). Ver `MOLDE_CON_DISENO.md`.
+    try:
+        import piezas_con_diseno as _PD          # import diferido: `piezas_con_diseno` importa de acá
+        if _PD.es_camino_b(getattr(doc_molde, "name", None)):
+            return _PD.piezas_de_mesa(doc_molde, mesa, talle, area_min_cm2, lado_min_cm)
+    except ImportError:
+        pass
     CM = 28.3465
     page = doc_molde[mesa - 1]
     cb = page.cropbox
@@ -203,6 +220,9 @@ _PAINT_PATH = {"S", "s", "f", "F", "f*", "B", "B*", "b", "b*"}   # -> se reempla
 _PAINT_TEXT = {"Tj", "TJ", "'", '"'}                            # -> se eliminan (glifos)
 _PAINT_DROP = {"Do", "sh"}                                      # XObject / sombreado
 _CLIP_OPS = {"W", "W*"}                                          # recorte
+# CONSTRUCCIÓN del trazado (dónde va la línea). No pintan nada por sí solos: sin su operador de
+# pintura, lo único que hacen es ocupar lugar en el archivo.
+_PATH_BUILD = {"m", "l", "c", "v", "y", "re", "h"}
 
 
 def _norm_capa(s):
@@ -215,23 +235,111 @@ def _norm_capa(s):
     return " ".join(s.lower().replace("-", " ").split())
 
 
-def _raspar_pintado(pdf, page, suprimir_fn):
+def _raspar_pintado(pdf, page, suprimir_fn, podar=False):
     """Núcleo: reescribe el content-stream conservando TODO el estado gráfico (color, CTM,
     q/Q, estado de texto) en su orden ORIGINAL, y suprimiendo SOLO el PINTADO del contenido
     para el cual `suprimir_fn(pila_de_capas)` da True (`pila` = lista de sets de nombres OC
     abiertos). Conservar las órdenes de color/estado es CLAVE: borrar bloques enteros
     desbalancea el estado y le cambia el color HEREDADO a otras capas (ej. el editable sin
     color propio que terminaba verde/negro). Los trazos suprimidos se descartan con `n`, los
-    glifos/imágenes/sombreados se omiten, los recortes ajenos se quitan."""
+    glifos/imágenes/sombreados se omiten, los recortes ajenos se quitan.
+
+    `podar=True` **además borra los trazados suprimidos**, en vez de dejarlos escritos con un `n`.
+    🔴 Medido sobre el molde con el diseño adentro: la mesa trae **398.653 operadores** (los 20
+    talles encimados) y, aislado un talle, **sólo 75 pintan**. Sin podar, cada pieza de la tizada
+    arrastra los 398 mil —7,6 MB— y una hoja de 5 prendas terminó en **586 MB**, con el aplanado
+    para el RIP sin terminar a los 20 minutos.
+    ⚠️ Por qué NO es el modo por defecto: el camino A depende de que el estado gráfico quede
+    intacto, y su salida está verificada pixel a pixel. Acá se borran SÓLO los operadores de
+    construcción de trazado (`m l c v y re h`) y su pintura — nunca `q/Q`, `cm`, `gs` ni los
+    colores, que son estado y sí se heredan."""
     instrucciones = parse_content_stream(page)
+    ops, oc = _mapa_oc(instrucciones, page)
+    saltar = _saltar_bloques(ops, oc, suprimir_fn) if podar else set()
+    salida = _raspar_instrucciones(instrucciones, ops, oc, suprimir_fn, podar, saltar)
+    page.Contents = pdf.make_stream(unparse_content_stream(salida))
+
+
+def _mapa_oc(instrucciones, page):
+    """Una pasada barata sobre las instrucciones ya parseadas: el operador de cada una como `str`
+    y, para cada `BDC /OC`, el set de nombres de capa normalizados.
+
+    Está separado de `_raspar_pintado` porque es lo que se consulta **talle por talle** al
+    desplegar un molde del camino B (`piezas_con_diseno.desplegar_mesa`): parsear la mesa cuesta
+    1,3 s y resolver el nombre de cada BDC toca los recursos de la página. Hacerlo una vez y
+    filtrar veinte veces sobre listas de Python es lo que deja el molde entero desplegado en
+    segundos, en vez de re-parsear 398 mil operadores por cada talle."""
+    ops = [str(i.operator) for i in instrucciones]
+    oc = {}
+    for i, o in enumerate(ops):
+        if o == "BDC":
+            inst = instrucciones[i]
+            if len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
+                oc[i] = {_norm_capa(x) for x in _nombres_oc(inst.operands[1], page)}
+    return ops, oc
+
+
+def _bloques_oc(ops, oc):
+    """El ÁRBOL de bloques de contenido marcado (BDC/BMC … EMC): por bloque, `(inicio, fin,
+    nombres de capa o None, balanceado en q/Q, hijos)`. Se arma UNA vez por mesa y
+    `_saltar_bloques` lo recorre por talle: veinte recorridos de 20 bloques en vez de veinte de
+    398 mil operadores (medido: 2,3 s por mesa que pasan a nada)."""
+    raiz, abiertos = [], []              # abiertos: [inicio, nombres, balance q/Q, hijos]
+    for i, o in enumerate(ops):
+        if o in ("BDC", "BMC"):
+            abiertos.append([i, oc.get(i) if o == "BDC" else None, 0, []])
+        elif o == "EMC":
+            if abiertos:
+                ini, nombres, bal, hijos = abiertos.pop()
+                (abiertos[-1][3] if abiertos else raiz).append((ini, i, nombres, bal == 0, hijos))
+        elif o == "q":
+            for b in abiertos:
+                b[2] += 1
+        elif o == "Q":
+            for b in abiertos:
+                b[2] -= 1
+    return raiz
+
+
+def _saltar_bloques(ops, oc, suprimir_fn, bloques=None):
+    """PODA FUERTE: los índices de los BLOQUES OC que no se usan, para borrarlos ENTEROS.
+
+    Podar sólo los trazados deja igual todo el estado gráfico de los otros 19 talles: medido, de
+    398.653 operadores quedaban 25.070 para dibujar 75 cosas. Ese resto son `q/Q/cm` y colores
+    que ya no pintan nada, pero que el RIP igual tiene que leer y des-anidar — y ahí se iban
+    minutos por hoja.
+    🔴 Un bloque sólo se borra si queda BALANCEADO en `q`/`Q`: si abre un estado y no lo cierra,
+    lo que viene después lo hereda y borrarlo cambiaría el dibujo (es el bug del editable que
+    salía verde). Los desbalanceados se podan como antes, operador por operador.
+    Un bloque suprimido no se mira por dentro (sus hijos van con él, se borre o no)."""
+    if bloques is None:
+        bloques = _bloques_oc(ops, oc)
+    saltar = set()
+
+    def caminar(lista):
+        for ini, fin, nombres, balanceado, hijos in lista:
+            if nombres and suprimir_fn([nombres]):      # bloque de una capa que NO se usa
+                if balanceado:                           # abrió y cerró todo lo que tocó
+                    saltar.update(range(ini, fin + 1))
+                continue
+            caminar(hijos)
+    caminar(bloques)
+    return saltar
+
+
+def _raspar_instrucciones(instrucciones, ops, oc, suprimir_fn, podar, saltar):
+    """La pasada que decide instrucción por instrucción (ver `_raspar_pintado`). Devuelve la lista
+    de instrucciones que quedan; no toca la página."""
     salida, pila = [], []
-    for inst in instrucciones:
-        op = str(inst.operator)
+    n = len(instrucciones)
+    # Sólo se recorren las instrucciones que quedan: con la poda fuerte se saltea el 95 % y
+    # pasar igual por las 398 mil costaba 0,2 s por talle.
+    indices = range(n) if not saltar else [i for i in range(n) if i not in saltar]
+    for _idx in indices:
+        inst = instrucciones[_idx]
+        op = ops[_idx]
         if op in ("BDC", "BMC"):
-            nombres = set()
-            if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
-                nombres = {_norm_capa(x) for x in _nombres_oc(inst.operands[1], page)}
-            pila.append(nombres)
+            pila.append(oc.get(_idx) or set())
             continue
         if op == "EMC":
             if pila:
@@ -240,8 +348,12 @@ def _raspar_pintado(pdf, page, suprimir_fn):
         if op in ("MP", "DP"):
             continue
         if suprimir_fn(pila):
+            if podar and op in _PATH_BUILD:
+                continue          # el trazado ni se escribe: no lo pinta nadie
             if op in _PAINT_PATH:
-                salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
+                # Con poda no hace falta ni el `n`: no quedó ningún trazado abierto que cerrar.
+                if not podar:
+                    salida.append(pikepdf.ContentStreamInstruction([], pikepdf.Operator("n")))
                 continue
             if op in _PAINT_TEXT:
                 if op == "'":                                   # avanzar línea sin pintar
@@ -256,15 +368,16 @@ def _raspar_pintado(pdf, page, suprimir_fn):
             if op in _CLIP_OPS:
                 continue                                        # no dejar recortes ajenos
         salida.append(inst)
-    page.Contents = pdf.make_stream(unparse_content_stream(salida))
+    return salida
 
 
-def aislar_capa(pdf, page, objetivo):
+def aislar_capa(pdf, page, objetivo, podar=False):
     """AÍSLA una capa OCG dejando SOLO su contenido pintado (suprime el pintado de TODO lo
     demás), conservando el estado gráfico → el objeto se pinta con su color EXACTO (CMYK/spot).
     `objetivo` = nombre(s) de la capa a conservar (str o set)."""
     obj = {_norm_capa(objetivo)} if isinstance(objetivo, str) else {_norm_capa(o) for o in objetivo}
-    _raspar_pintado(pdf, page, lambda pila: not any(frame and (obj & frame) for frame in pila))
+    _raspar_pintado(pdf, page, lambda pila: not any(frame and (obj & frame) for frame in pila),
+                    podar=podar)
 
 
 _FILL_PATH = {"f", "F", "f*", "b", "b*", "B", "B*"}   # ops que RELLENAN (llevan color de fill)

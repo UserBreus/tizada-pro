@@ -293,6 +293,40 @@ function Icon({ name, className = "", style }) {
 // (`FuenteCurvas.size_para_alto`). Sin esto el visor mostraría la etiqueta un 28 % más chica que
 // la tizada, y la ley del sistema es que se vean IGUAL.
 const CAP_RATIO_ETQ = 0.716;
+// Una pieza que TODAVÍA NO TIENE NOMBRE: así las deja el alta de un molde con el diseño adentro
+// («Pieza 3»). 🔴 Es la MISMA regla que usa el servidor para contar `piezas_nombradas`: si la
+// pantalla y el servidor contaran distinto, el botón de seguir quedaría apagado sin que se
+// entienda por qué (o al revés, dejaría pasar un molde a medio nombrar).
+const _ES_PIEZA_SIN_NOMBRE = /^Pieza( extra)? \d+'*$/;
+
+// APOYAR LA ETIQUETA EN EL CONTORNO: del punto que se tocó al punto del borde más cercano, con el
+// ángulo de la tangente y la normal hacia ADENTRO (para que el texto entre en la pieza y no salga).
+// Vive a nivel de módulo porque la usan DOS pantallas —Configuración y el pedido (camino B)— y si
+// cada una tuviera su copia, la etiqueta caería distinto según dónde la hayas puesto.
+// Devuelve `{rx, ry, ang, t, …}` o null. 🔴 `t` es la posición RELATIVA en el contorno (0..1) y NO
+// el largo de arco: es lo que hace que la etiqueta caiga en el mismo lugar en todos los talles,
+// que están gradados y no miden lo mismo.
+function _snapAContorno(d, cx, cy, pc) {
+  try {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'path'); el.setAttribute('d', d);
+    const len = el.getTotalLength(); if (!len) return null;
+    let best = null; const N = 160;
+    for (let i = 0; i <= N; i++) {
+      const l = len * i / N; const pt = el.getPointAtLength(l);
+      const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2;
+      if (!best || dd < best.dd) best = { dd, l, x: pt.x, y: pt.y };
+    }
+    const p2 = el.getPointAtLength(Math.min(len, best.l + 1.5));
+    let tx = p2.x - best.x, ty = p2.y - best.y; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    let nx = -ty, ny = tx;
+    const ccx = pc.px + pc.pw / 2, ccy = pc.py + pc.ph / 2;
+    if ((ccx - best.x) * nx + (ccy - best.y) * ny < 0) { nx = -nx; ny = -ny; }   // normal hacia el centro
+    const ang = Math.atan2(nx, -ny) * 180 / Math.PI;   // «arriba» del texto = normal hacia adentro
+    return { rx: Math.max(0, Math.min(1, (best.x - pc.px) / pc.pw)),
+             ry: Math.max(0, Math.min(1, (best.y - pc.py) / pc.ph)),
+             ang: Math.round(ang * 10) / 10, x: best.x, y: best.y, l: best.l, len, t: best.l / len };
+  } catch { return null; }
+}
 
 // El DIBUJO de una mesa del arte se pide por URL (`m.img`), no viene dentro del JSON. Un arte de
 // vector pesado son 1098 KB por mesa (11,6 MB en total) que el navegador tenía que parsear y
@@ -1056,6 +1090,39 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
   );
 }
 
+/** El círculo de carga de la subida del camino B.
+ *
+ * 🔴 POR QUÉ NO ES UNA BARRA: cuando el archivo termina de viajar, el servidor RECIÉN empieza a
+ * leerlo, y con 100+ MB eso son minutos. Una barra llena y quieta se lee como «colgado», y llenarla
+ * de a poco con un tiempo estimado sería inventar. Así que hay dos estados y se pasa de uno a otro:
+ * mientras sube, el anillo marca el **porcentaje real**; cuando llegó, **gira** y muestra el reloj.
+ *
+ * `fase`: 'subiendo' → determinado con `pct` · cualquier otra cosa → girando con `seg`.
+ */
+function CargaCircular({ fase, pct = 0, seg = 0 }) {
+  const R = 40, C = 2 * Math.PI * R;
+  const subiendo = fase === 'subiendo';
+  const _p = Math.max(0, Math.min(100, pct));
+  const mm = Math.floor((seg || 0) / 60), ss = (seg || 0) % 60;
+  return (
+    <div className={`carga-circular ${subiendo ? 'determinado' : 'girando'}`}
+         role="progressbar" aria-valuemin={0} aria-valuemax={100}
+         aria-valuenow={subiendo ? Math.round(_p) : undefined}>
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle className="pista" cx="50" cy="50" r={R} strokeWidth="7" />
+        <circle className="arco" cx="50" cy="50" r={R} strokeWidth="7"
+          strokeDasharray={subiendo ? C : undefined}
+          strokeDashoffset={subiendo ? C * (1 - _p / 100) : undefined} />
+      </svg>
+      <div className="centro">
+        {subiendo
+          ? <><span className="valor">{Math.round(_p)}</span><span className="unidad">%</span></>
+          : <><span className="valor">{mm}:{String(ss).padStart(2, '0')}</span><span className="unidad">leyendo</span></>}
+      </div>
+    </div>
+  );
+}
+
 function AyudaExportMolde({ term }) {
   const V = (term?.variante || 'talle').toLowerCase();
   const secc = {
@@ -1357,6 +1424,109 @@ function ProgresoPaso({ items, onClick }) {
 }
 
 /** El botón de VOLVER: siempre el primero de la izquierda, siempre igual. */
+// ── CONTROLES DE «MOLDE CON DISEÑO» (Configuración) ─────────────────────────────────────────
+// Compactos y con icono: la pantalla se lee de un vistazo en vez de leerse línea por línea
+// (pedido del usuario 2026-09-04: «menos palabras y más iconos»). Van a nivel de MÓDULO —
+// definidos dentro del render, React los remontaría en cada tecleo y el input perdería el foco.
+function CfgCard({ icono, titulo, extra, ancla, children }) {
+  return (
+    <div data-tour={ancla || undefined} style={{ borderRadius: 16, padding: '15px 16px', display: 'flex', flexDirection: 'column', gap: 13,
+      background: 'rgba(255,255,255,0.028)', border: '1px solid var(--border-light)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <span style={{ width: 30, height: 30, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,216,245,0.12)', color: 'var(--accent)', flexShrink: 0 }}>
+          <Icon name={icono} style={{ width: 15, height: 15 }} />
+        </span>
+        <span style={{ fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>{titulo}</span>
+        <span style={{ marginLeft: 'auto' }}>{extra}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+/** Número con su unidad ADENTRO: no hace falta un label aparte. */
+function CfgNum({ valor, onChange, unidad, ancla, titulo, ...props }) {
+  return (
+    <div style={{ position: 'relative', flex: 1, minWidth: 92 }}>
+      <input data-tour={ancla} title={titulo} type="number" value={valor} onChange={(e) => onChange(e.target.value)} {...props}
+        style={{ height: 38, width: '100%', fontSize: 14, fontWeight: 700, padding: '0 34px 0 11px', borderRadius: 10,
+          background: 'rgba(0,0,0,0.28)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+      <span style={{ position: 'absolute', right: 11, top: 10, fontSize: 11, color: 'var(--text-muted)', pointerEvents: 'none' }}>{unidad}</span>
+    </div>
+  );
+}
+/** Grupo de botones: el valor elegido SE VE, no se lee. */
+function CfgSeg({ valor, opciones, onPick, ancla }) {
+  return (
+    <div data-tour={ancla} style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 11, background: 'rgba(0,0,0,0.28)', border: '1px solid var(--border-light)' }}>
+      {opciones.map(o => (
+        <button key={o.v} type="button" title={o.t} onClick={() => onPick(o.v)}
+          style={{ flex: 1, height: 32, borderRadius: 8, cursor: 'pointer', border: 'none', fontSize: 13, fontWeight: 700,
+            background: valor === o.v ? 'var(--accent)' : 'transparent',
+            color: valor === o.v ? '#001016' : 'var(--text-secondary)' }}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+/** La muestra de color ES el control (y dice su CMYK en el title). */
+function CfgColor({ valor, titulo, onPick, ancla }) {
+  const v = valor || [0, 0, 0, 0];
+  const cmyk = `C${Math.round((v[0] || 0) * 100)} M${Math.round((v[1] || 0) * 100)} Y${Math.round((v[2] || 0) * 100)} K${Math.round((v[3] || 0) * 100)}`;
+  return (
+    <button type="button" data-tour={ancla} title={`${titulo} · ${cmyk}`} onClick={() => onPick(valor)}
+      style={{ display: 'flex', alignItems: 'center', gap: 9, padding: 6, paddingRight: 11, borderRadius: 11, flex: 1, minWidth: 112,
+        border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.28)', cursor: 'pointer', color: 'var(--text-primary)' }}>
+      <span style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(255,255,255,0.18)', background: cmykHex(valor), flexShrink: 0 }} />
+      <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', textAlign: 'left', lineHeight: 1.25 }}>{titulo}</span>
+    </button>
+  );
+}
+function CfgChip({ on, onClick, texto, ancla }) {
+  return (
+    <button type="button" data-tour={ancla} onClick={onClick}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+        border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+        background: on ? 'rgba(0,216,245,0.13)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)' }}>
+      {on ? <Icon name="check" style={{ width: 12, height: 12, strokeWidth: 3 }} /> : <span style={{ width: 12 }} />}{texto}
+    </button>
+  );
+}
+function CfgSw({ on, onClick, ancla, titulo }) {
+  return (
+    <span data-tour={ancla} title={titulo} onClick={onClick} style={{ width: 40, height: 23, borderRadius: 999, cursor: 'pointer', flexShrink: 0, display: 'inline-block',
+      background: on ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'background .2s' }}>
+      <span style={{ position: 'absolute', top: 2.5, left: on ? 19 : 2.5, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+    </span>
+  );
+}
+/** Lo que se está configurando, DIBUJADO: la pieza con su borde y su etiqueta. */
+function CfgPreview({ borde, etq }) {
+  const _b = borde || {}, _e = etq || {};
+  const txt = [(_e.mostrar || {}).talle !== false && 'M', (_e.mostrar || {}).pieza !== false && 'Espalda',
+               (_e.mostrar || {}).numero !== false && '#01'].filter(Boolean).join(_e.separador || '-') || 'Espalda';
+  const d = 'M 30 8 L 70 8 L 78 22 L 70 30 L 70 92 L 30 92 L 30 30 L 22 22 Z';
+  const al = _e.align || 'centro';
+  const x = al === 'izquierda' ? 32 : al === 'derecha' ? 68 : 50;
+  const anchor = al === 'izquierda' ? 'start' : al === 'derecha' ? 'end' : 'middle';
+  const fs = Math.max(3, (parseFloat(_e.size_mm) || 3) * 1.7);
+  return (
+    <div style={{ borderRadius: 12, background: '#fff', padding: 10, display: 'flex', justifyContent: 'center' }}>
+      <svg viewBox="0 0 100 104" width="176" height="183">
+        {_b.activo !== false && <path d={d} fill="none" stroke={cmykHex(_b.color || [0, 0, 0, 0.85])} strokeWidth={Math.max(0.6, (parseFloat(_b.ancho_mm) || 2) * 0.6) * 2} />}
+        <path d={d} fill="#eef1f3" stroke="rgba(0,0,0,0.35)" strokeWidth="0.5" />
+        {_e.activo !== false && (<>
+          {_e.borde_activo !== false && (
+            <text x={x} y={84} textAnchor={anchor} fontSize={fs} fontWeight="800" fill="none"
+              stroke={cmykHex(_e.borde_color || [0.01, 0.01, 0.01, 0.05])}
+              strokeWidth={Math.max(0.4, (parseFloat(_e.borde_mm) || 0) * 1.1)} strokeLinejoin="round">{txt}</text>
+          )}
+          <text x={x} y={84} textAnchor={anchor} fontSize={fs} fontWeight="800" fill={cmykHex(_e.color || [0.15, 0.15, 0.15, 0.30])}>{txt}</text>
+        </>)}
+      </svg>
+    </div>
+  );
+}
+
 function BtnVolver({ texto, onClick, ancla }) {
   return (
     <button className="btn ghost" data-tour={ancla} style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={onClick}>← {texto}</button>
@@ -2660,7 +2830,13 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, aviso, cargando }) {
+function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
+                                  nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando }) {
+  // RECUADRO DE SELECCIÓN (modo nombrar, camino B): arrastrar sobre el fondo elige todas las
+  // piezas que abarca — el mismo gesto que Moldería. En coords de pantalla; se traduce a piezas
+  // por el `data-idx` de cada <g> al soltar. Con Shift, el arrastre sigue siendo pan.
+  const [rubber, setRubber] = React.useState(null);
+  const rubberRecien = React.useRef(false);   // el click que cierra un recuadro NO toggle-a la pieza de abajo
   // Desplegables de la barra de Diseños, agrupados por RANGO (#… en el nombre de la mesa)
   const [rangosCerrados, setRangosCerrados] = React.useState(new Set());
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
@@ -2690,6 +2866,28 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
     const base = artVB || _domVB(); const sx = e.clientX, sy = e.clientY;
     const mv = (ev) => setArtVB({ ...base, x: base.x - (ev.clientX - sx) / box.width * base.w, y: base.y - (ev.clientY - sy) / box.height * base.h });
     const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
+  };
+  const iniciarRubberVisor = (e) => {
+    if (e.button !== 0 || !artWrapRef.current) return;
+    if (e.shiftKey) return artPanStart(e);
+    const x0 = e.clientX, y0 = e.clientY;
+    setRubber({ x0, y0, x1: x0, y1: y0 });
+    const mv = (ev) => setRubber({ x0, y0, x1: ev.clientX, y1: ev.clientY });
+    const up = (ev) => {
+      window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up);
+      setRubber(null);
+      const rx0 = Math.min(x0, ev.clientX), ry0 = Math.min(y0, ev.clientY);
+      const rx1 = Math.max(x0, ev.clientX), ry1 = Math.max(y0, ev.clientY);
+      if (rx1 - rx0 <= 3 && ry1 - ry0 <= 3) return;          // fue un click: lo resuelve la pieza
+      const idxs = [];
+      artWrapRef.current.querySelectorAll('[data-idx]').forEach(g => {
+        const b = g.getBoundingClientRect();
+        if (b.right >= rx0 && b.left <= rx1 && b.bottom >= ry0 && b.top <= ry1) idxs.push(parseInt(g.getAttribute('data-idx'), 10));
+      });
+      rubberRecien.current = true; setTimeout(() => { rubberRecien.current = false; }, 0);
+      if (idxs.length && onRubberNombrar) onRubberNombrar(idxs);
+    };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   };
   React.useEffect(() => {   // rueda = zoom (listener no-pasivo para poder preventDefault)
@@ -2737,7 +2935,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
       </div>
       <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
         {panelIzquierdo}
-        <div ref={artWrapRef} onMouseDown={artPanStart} style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', cursor: 'grab' }}>
+        <div ref={artWrapRef} onMouseDown={nombrarModo ? iniciarRubberVisor : artPanStart} style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10, padding: 12, overflow: 'hidden', display: 'flex', alignItems: 'stretch', justifyContent: 'stretch', cursor: 'grab' }}>
           {/* AVISO sobre el molde (ej. el tope de telas): donde el operario está mirando, no en un
               cartel al costado de la pantalla. */}
           {aviso && (
@@ -2748,6 +2946,14 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
               <span style={{ fontSize: 13, fontWeight: 700, color: '#ffd9d9', lineHeight: 1.35 }}>{aviso}</span>
             </div>
           )}
+          {rubber && (() => {
+            const b = artWrapRef.current && artWrapRef.current.getBoundingClientRect();
+            if (!b) return null;
+            return <div style={{ position: 'absolute', zIndex: 5, pointerEvents: 'none',
+              left: Math.min(rubber.x0, rubber.x1) - b.left, top: Math.min(rubber.y0, rubber.y1) - b.top,
+              width: Math.abs(rubber.x1 - rubber.x0), height: Math.abs(rubber.y1 - rubber.y0),
+              border: '1px dashed var(--accent)', background: 'rgba(0,216,245,0.10)' }} />;
+          })()}
           {canvasLayout?.layout?.length ? (() => {
             // VER VARIANTE: si viene `vf`, se muestran SOLO sus piezas y se ACOMODAN (translate por `vf.pos`,
             // el mismo orden guardado en Variables). `px/py` quedan en coords YA acomodadas (para labels y encuadre);
@@ -2830,7 +3036,10 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                 )}
                 {piezasZ.map((p) => {
                   const pzName = p.nombre;
-                  const isSelected = selectedPiezaMapeo === pzName;
+                  // En modo NOMBRAR, «seleccionada» es la del gesto de nombrar (varias a la vez);
+                  // en el resto, la única del mapeo. Es el mismo resaltado, no uno nuevo.
+                  const isSelected = nombrarModo ? !!(selNombrarB && selNombrarB.has(p.idx))
+                                                 : selectedPiezaMapeo === pzName;
                   // ARTE POR RANGO (#talle/#rango): el diseño mostrado es el del TALLE que se ve
                   // (mapeo_talles), no el default del 1er rango (bug "primero aparece el 6XL").
                   const _mtz = mapeoData?.mapeo_talles?.[pzName];
@@ -2860,7 +3069,32 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       /* `data-pieza`: sin esto, un paso grabado tocando una pieza no se podía volver
                          a encontrar (el SVG no tiene texto ni controles). Ver `pieza:` en localizar.js */
                       data-pieza={pzName || _genN || ('pieza ' + p.idx)}
-                      style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
+                      data-idx={p.idx}
+                      style={{ cursor: 'pointer' }} onClick={(e) => {
+                        // UBICAR LA ETIQUETA (camino B, desde el pedido): el punto que se tocó se
+                        // «apoya» en el contorno más cercano. Se calcula en coordenadas del SVG y
+                        // restando el traslado de la pieza (en «ver variante» están reacomodadas).
+                        if (etqPickModo) {
+                          e.stopPropagation();
+                          try {
+                            const svg = e.currentTarget.ownerSVGElement || e.currentTarget.closest('svg');
+                            const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+                            const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+                            const snap = _snapAContorno(p.path_svg, q.x - (p._dx || 0), q.y - (p._dy || 0), p);
+                            if (snap && onPickEtiqueta) onPickEtiqueta(pzName, snap);
+                          } catch { /* sin geometría no se ubica nada: mejor no hacer nada que poner mal */ }
+                          return;
+                        }
+                        // NOMBRAR (camino B): tocar suma o saca la pieza de la selección, como en
+                        // la pantalla de edición. Así se eligen varias y se nombran de una: se
+                        // numeran solas (Frente 1, Frente 2…) en vez de escribir nueve veces.
+                        if (nombrarModo) {
+                          e.stopPropagation();
+                          if (rubberRecien.current) return;       // ese click cerró un recuadro
+                          onPiezaNombrarClick && onPiezaNombrarClick(p);
+                          return;
+                        }
+                        if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_genN); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
                       <title>{pzName} {mappedMesaIdx ? `(Mesa ${mappedMesaIdx})` : '(sin diseño)'}</title>
                       <defs><clipPath id={`clipmapv-${p.idx}`}><path d={p.path_svg} /></clipPath></defs>
                       {/* RENDER REAL del motor (la pieza tal cual sale en la tizada). Si está, NO se re-dibuja nada. */}
@@ -2971,10 +3205,12 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                 })}
                 {labels.map((l) => {
                   const pzName = l.nombre;
-                  const isSelected = selectedPiezaMapeo === pzName;
+                  // En modo NOMBRAR (camino B) el cartel sigue a la selección de nombrar y no
+                  // habla de diseño (no hay mapeo): rojo «sin diseño» sobre 180 piezas era ruido.
+                  const isSelected = nombrarModo ? !!(selNombrarB && selNombrarB.has(l.p.idx)) : selectedPiezaMapeo === pzName;
                   const mesa = mapeoValores[pzName];
                   const lcx = l.r.x + l.r.w / 2, lcy = l.r.y + l.r.h / 2;
-                  const col = isSelected ? 'var(--accent)' : mesa ? 'var(--success)' : '#ff4d4d';
+                  const col = isSelected ? 'var(--accent)' : nombrarModo ? 'rgba(255,255,255,0.45)' : mesa ? 'var(--success)' : '#ff4d4d';
                   return (
                     <g key={'lbl' + l.p.idx} style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_gen(pzName)); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
                       <line x1={l.ax} y1={l.ay} x2={lcx} y2={lcy} stroke={col} strokeWidth={1} strokeDasharray="3 2" />
@@ -2989,7 +3225,10 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
             <div style={{ color: 'var(--text-muted)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Cargando el molde…</div>
           )}
         </div>
-        {telaModo ? panelTela : (
+        {/* `panelFijo` (camino B: nombrar las piezas) MANDA sobre todo: en un molde que trae
+            el diseno adentro no hay diseno que cargar, y el panel de «Diseños · Sin diseño»
+            estaría pidiendo un arte que no existe. */}
+        {telaModo ? panelTela : panelFijo ? panelFijo : (
         <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Diseños</div>
@@ -3293,6 +3532,9 @@ function AvisoActualizacion() {
   const [est, setEst] = useState(null);       // {version, pendiente:{version,segundos}, en_curso}
   const [seg, setSeg] = useState(null);       // segundos que faltan (los baja el reloj de acá)
   const verRef = useRef(null);
+  const catRevRef = useRef(null);   // última revisión del catálogo vista (ver el ciclo de abajo)
+  // Los moldes efímeros que el PEDIDO tiene abiertos viajan en el latido: es como el servidor sabe
+  // que no son huérfanos y no se los lleva la limpieza (los mantiene la pantalla, no el catálogo).
 
   useEffect(() => {
     let vivo = true, timer = null;
@@ -3303,13 +3545,23 @@ function AvisoActualizacion() {
     const ciclo = async () => {
       let delay = 30000;
       try {
-        const r = await fetch('/api/actualizacion/estado');
+        const _ef = (window.__tizadaEfimerosAbiertos || []).filter(Boolean);
+        const r = await fetch('/api/actualizacion/estado'
+          + (_ef.length ? '?efimeros=' + encodeURIComponent(_ef.join(',')) : ''));
         if (!r.ok) throw new Error('http ' + r.status);
         const d = await r.json();
         if (!vivo) return;
         // Si el servidor contesta con OTRA versión, esta pantalla quedó vieja → recargar YA.
         if (verRef.current && d.version && d.version !== verRef.current) { window.location.reload(); return; }
         verRef.current = d.version || verRef.current;
+        // EL CATÁLOGO CAMBIÓ (otra persona, u otra pestaña): se vuelve a pedir SOLO. No se recarga
+        // la página —eso perdería lo que el usuario esté escribiendo—, sólo el catálogo, que es de
+        // donde salen los moldes y sus variables (pedido del usuario 2026-09-08: «cuando hago un
+        // cambio en moldes y lo guardo debe de enviarle a todos»).
+        if (d.catalogo_rev != null) {
+          if (catRevRef.current != null && d.catalogo_rev !== catRevRef.current) window.dispatchEvent(new Event('tizada:catalogo'));
+          catRevRef.current = d.catalogo_rev;
+        }
         setEst(d);
         setSeg(d.pendiente ? d.pendiente.segundos : null);
         if (d.en_curso) delay = 2000;
@@ -4176,12 +4428,25 @@ export default function App() {
   const fuenteDestinoRef = useRef('pedido');
   // `reemplOverride`: el mapa que ACABA de elegirse (el estado de React aún no lo tiene). Sin esto
   // el cartel de «tipografía no encontrada» seguía puesto después de resolverla.
+  // Reintento del chequeo de tipografías mientras el molde con diseño se prepara: cada 6 s,
+  // hasta 20 veces por clave (dos minutos — más que lo que tardan las páginas por talle).
+  const _reintentosFuentes = useRef({});
+  const _reintentoFuentes = (clave, fn) => {
+    const k = String(clave);
+    const n = (_reintentosFuentes.current[k] || 0) + 1;
+    if (n > 20) return;
+    _reintentosFuentes.current[k] = n;
+    setTimeout(fn, 6000);
+  };
   const cargarFuentesEstado = async (reemplOverride) => {
     const pid = pidCfg || productosCat.activo; if (!pid) return;
     try {
       const r = await fetch(`/api/pedido/fuentes_estado?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(disenoActivo || 'principal')}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(reemplOverride ?? fuentesReempl ?? {}))}`);
       if (!r.ok) return;
       const d = await r.json();
+      // CAMINO B recién subido: el servidor todavía está preparando el molde en segundo plano y
+      // NO construye nada por nosotros (congelaba todo). Se vuelve a preguntar en unos segundos.
+      if (d.preparando) { _reintentoFuentes(pid, () => cargarFuentesEstado(reemplOverride)); return; }
       setFuentesEstado(d);
       // …y se anota de QUÉ arte era, para que el aviso pueda nombrarlo (ver abajo)
       setFuentesPorArte(prev => ({ ...prev, [(disenoActivo || 'principal') + '|' + pid]: d.faltantes || [] }));
@@ -4200,13 +4465,19 @@ export default function App() {
       const r = await fetch(`/api/pedido/fuentes_estado?${q}`);
       if (!r.ok) return;
       const d = await r.json();
+      if (d.preparando) { _reintentoFuentes(did + '|' + mid, () => cargarFuentesDeArte(did, mid, reemplOverride)); return; }
       setFuentesPorArte(prev => ({ ...prev, [did + '|' + mid]: d.faltantes || [] }));
     } catch { /* sin red: no bloquear por esto */ }
   };
   // Todos los artes YA cargados, en paralelo (son GET; el paso no espera por esto).
   const cargarFuentesTodas = async (reemplOverride) => {
+    // CAMINO B: no hay arte cargado, pero el molde pide la tipografía de su «NOMBRE»/«00»
+    // (`fuentes_estado` la saca de los placeholders). Sin esto la barra decía «Cargar fuente ✓»
+    // con la fuente faltando, y al pasar a la planilla no salía el «Seguir de todos modos».
+    // (Inline y no `_esConDiseno`: esa const se define más abajo — ver `verificar_tdz.mjs`.)
+    const _esB = (mid) => ((productosCat.productos || []).find(x => x.id === mid) || {}).origen === 'con_diseno';
     const tareas = (disenosPedido || []).flatMap(d => (disenoMoldes[d.id] || []).map(mid => ({ did: d.id, mid })))
-      .filter(t => arteCargado[t.did + '|' + t.mid]);
+      .filter(t => arteCargado[t.did + '|' + t.mid] || _esB(t.mid));
     await Promise.all(tareas.map(t => cargarFuentesDeArte(t.did, t.mid, reemplOverride)));
   };
   const [selectedPiezaMapeo, setSelectedPiezaMapeo] = useState('');
@@ -4215,6 +4486,17 @@ export default function App() {
   const [modalConfirmOpen, setModalConfirmOpen] = useState(false);
   const [confirmProductoId, setConfirmProductoId] = useState('');
   const [modalTalleGuiaOpen, setModalTalleGuiaOpen] = useState(false);
+  // CONFIGURACIONES GUARDADAS DEL MOLDE (camino B). Un molde con el diseño adentro se borra con el
+  // pedido y con él todo lo configurado; esto permite volver a aplicarlo cuando se sube el mismo
+  // archivo en otro pedido. Se elige A MANO: nada se aplica solo (pedido del usuario 2026-09-08).
+  const [cfgGuardadas, setCfgGuardadas] = useState([]);
+  const [cfgModalOpen, setCfgModalOpen] = useState(false);
+  const [cfgBusy, setCfgBusy] = useState(false);
+  const [cfgNombre, setCfgNombre] = useState('');
+  const [cfgInforme, setCfgInforme] = useState(null);   // qué entró y qué no, después de aplicar
+  // QUÉ SE APLICA ADEMÁS DE LA ETIQUETA Y LOS NOMBRES (que van siempre, regla del usuario
+  // 2026-09-08). Lo de acá es decisión DEL PEDIDO: se aplica sólo si la persona lo tilda.
+  const [cfgPartes, setCfgPartes] = useState([]);
   const [catalogoGrupos, setCatalogoGrupos] = useState([]);
   const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
   // Panel inline de selección de pieza en la barra lateral:
@@ -4230,6 +4512,8 @@ export default function App() {
   // Biblioteca de reglas (campos reutilizables) + columna seleccionada en el editor
   const [reglasPlanilla, setReglasPlanilla] = useState([]);
   const [nestingPresets, setNestingPresets] = useState([]); // presets de nesting (reglas de acomodo)
+  // La config de los moldes que traen el DISEÑO ADENTRO: una sola, para todos ellos.
+  const [cfgConDiseno, setCfgConDiseno] = useState(null);
   const [colSeleccionada, setColSeleccionada] = useState(null); // índice de columna en edición (panel izq)
   const [reglaEditando, setReglaEditando] = useState(null); // regla en edición en el espacio de Reglas
   const [nestingEditando, setNestingEditando] = useState(null); // preset de nesting en edición
@@ -4258,6 +4542,11 @@ export default function App() {
   // otra pantalla: es la misma config de Moldería en modo RECORTADO (sin el paso Variables, que
   // es de setup del catálogo) + salida directa de vuelta al pedido.
   const [modoMiMolde, setModoMiMolde] = useState(null);
+  // CAMINO B desde el pedido: «Nombrar piezas» y «Etiqueta» abren LAS MISMAS pantallas de
+  // Configuración (Moldería y la pestaña Etiqueta) para ese molde, con «← Volver al pedido».
+  // Regla del usuario 2026-09-04: exactamente la misma herramienta, no una parecida.
+  const [desdePedidoB, setDesdePedidoB] = useState(null);          // pid del molde abierto desde el pedido
+  const [pendienteNombrarB, setPendienteNombrarB] = useState(null); // pid: activar «nombrar» cuando Moldería esté lista
 
   const irPantallaAyuda = React.useCallback((d) => {
     if (!d) return;
@@ -4279,6 +4568,34 @@ export default function App() {
   const [subirMoldeNombre, setSubirMoldeNombre] = useState('');
   const [subirMoldeFile, setSubirMoldeFile] = useState(null);
   const [subirMoldeBusy, setSubirMoldeBusy] = useState(false);
+  // ── CAMINO B: el molde que YA TRAE EL DISEÑO adentro de cada pieza ──────────────────────────
+  // El mismo modal sirve para las dos subidas; este flag cambia el texto, el `accept` y qué se
+  // manda al servidor. `subirBFase` es el avance HONESTO de la espera: el archivo pesa >100 MB y
+  // procesarlo lleva su tiempo, así que se dice en qué anda y hace cuánto — nunca un porcentaje
+  // inventado (regla del proyecto: tardar con un cartel honesto sí, aproximar no).
+  const [subirMoldeConDiseno, setSubirMoldeConDiseno] = useState(false);
+  const [subirBFase, setSubirBFase] = useState(null);   // {fase, pct, seg}
+  // Moldes efímeros de ESTE pedido: {pid: {nombre, creado}}. Se borran al terminar o reiniciar.
+  const [moldesEfimeros, setMoldesEfimeros] = useState(_wizRef.current?.moldesEfimeros || {});
+  // Nombrado de las piezas de un molde del camino B, dentro del pedido. La selección es MÚLTIPLE
+  // —el gesto de la pantalla de edición— porque nombrar de a una son nueve idas y vueltas:
+  // eligiendo las dos mangas juntas y escribiendo «Manga Corta» quedan numeradas solas.
+  const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} (compat: la última tocada)
+  const [selNombrarB, setSelNombrarB] = useState(new Set());   // idx de las piezas elegidas
+  // El lienzo de TODOS los talles del molde con diseño (`/api/plantilla/deteccion_todas`), para
+  // nombrar como en Moldería: una fila por talle. Lleva `pid` para no mostrar el de otro molde.
+  const [todasB, setTodasB] = useState(null);
+  const [nombreBInput, setNombreBInput] = useState('');
+  // ¿El visor está en modo «tocá dónde va la etiqueta»? (2ª tarea del cliente en el camino B)
+  const [etqPickB, setEtqPickB] = useState(false);
+  // ── POR DÓNDE SE EMPIEZA EL PEDIDO ──────────────────────────────────────────────────────────
+  // null = todavía no eligió · 'base' = los pasos de siempre · 'con_diseno' = subir los archivos
+  // que ya traen el diseño. NO es excluyente: un pedido puede llevar de los dos.
+  const [vistaDiseno, setVistaDiseno] = useState(_wiz.vistaDiseno || null);
+  const [moldesBSel, setMoldesBSel] = useState([]);            // moldes tildados para ponerles diseño
+  const [moldesBDiseno, setMoldesBDiseno] = useState(_wiz.moldesBDiseno || {});   // {pid: nombre del diseño}
+  const [disenoBInput, setDisenoBInput] = useState('');
+  const fileInputMoldeBRef = useRef(null);
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
   const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0, 0, 0, 0.85], alineacion: 'fuera' });  // borde de corte del molde
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
@@ -4686,6 +5003,7 @@ export default function App() {
     fetchGruposTizada();
   }, [sesionLista, yo?.id]);
 
+
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
   // se produce un ReferenceError de "Temporal Dead Zone" al iniciar la app.
@@ -4697,6 +5015,12 @@ export default function App() {
   // y que además se resetea cuando la sesión se cae. Con varios artículos con el MISMO nombre,
   // eso terminaba guardando el nombrado de piezas en el molde equivocado.
   const pidCfg = molderiaAbierta || modoMiMolde || productosCat.activo || '';
+  // 🔴 «SÓLO LA HERRAMIENTA»: el molde con diseño se nombra y se etiqueta con LAS MISMAS
+  // pantallas de Configuración, pero abiertas desde el pedido — y ahí el cliente NO tiene que
+  // ver ni tocar los ajustes del taller (regla del usuario 2026-09-04). Con esto quedan fuera:
+  // el menú de ajustes, «volver a ajustes», re-subir el molde, nombrar talles y la ayuda de
+  // exportación. Queda el visor, la herramienta y «← Volver al pedido».
+  const _soloHerramienta = !!desdePedidoB;
   // Sufijo `?pid=`/`&pid=` listo para pegar en una URL de GET.
   const qPid = (sep = '?') => (pidCfg ? `${sep}pid=${encodeURIComponent(pidCfg)}` : '');
   // EL PRODUCTO QUE SE ESTÁ CONFIGURANDO. Las pantallas de configuración leían
@@ -4776,7 +5100,12 @@ export default function App() {
     // creyendo ver la guía y estaba tocando otro talle. Con `asignandoTipo` se vuelve a `etqData`
     // (el talle guía o el que eligió con los chips), que es de donde salen esos índices.
     const _varAbierta = tabAjustesMolde === 'variables' && varStep === 'grupos' && !!grupoAislado && !asignandoTipo;
-    const src = (((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData;
+    // CAMINO B en el pedido, mientras se NOMBRA: el lienzo de TODOS los talles (una fila por
+    // talle), el mismo gesto que Moldería. Para la etiqueta (`etqPickB`) se vuelve al talle guía.
+    const _todasB_on = activoTab === 'pedidos' && pedidoPaso === 'arte' && !etqPickB
+      && !!todasB?.piezas?.length && todasB.pid === etqPid;
+    const src = _todasB_on ? todasB
+      : ((((empModo && empTodas) || _etqPorPieza || _varAbierta) && empTodasData?.piezas?.length) ? empTodasData : etqData);
     if (!src?.piezas) return { layout: [], dibujo: [], zTalle: new Map(), width: 850, height: 400, vb: '0 0 850 400' };
 
     // Siempre usar las posiciones originales del PDF
@@ -4831,8 +5160,11 @@ export default function App() {
 
     // Vista de TODAS las variantes juntas: cada variante es un bloque de piezas. El nombre de la
     // variante va UNA vez por bloque (antes iba en cada pieza: 36 rótulos encimados).
+    // ⚠️ `anidado` = los talles vienen dibujados UNO ENCIMA DEL OTRO (así los trae el archivo, y
+    // así se muestran: regla del usuario 2026-09-04). Rotular un bloque por talle pondría los 20
+    // rótulos en el mismo lugar; el talle se lee en la columna de capas, no en el lienzo.
     let clusters = null;
-    if (layout.length && layout[0].talle != null) {
+    if (src.formato !== 'anidado' && layout.length && layout[0].talle != null) {
       const cajas = new Map();
       layout.forEach(p => {
         const c = cajas.get(p.talle) || { talle: p.talle, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, n: 0 };
@@ -4860,7 +5192,8 @@ export default function App() {
     const dibujo = layout.slice().sort((a, b) => _z(b) - _z(a));
 
     return { layout, dibujo, zTalle, width: W, height: H, vb, vbW, vbH, cmPerUnit, sep, clusters };
-  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo]);
+  }, [etqData, empModo, empTodas, empTodasData, tabAjustesMolde, etqPiezaSel, varStep, grupoAislado, asignandoTipo,
+      activoTab, pedidoPaso, etqPickB, todasB, etqPid]);
 
   // Las variantes del MOLDE. `etqData.talles` es de la DETECCIÓN que se está mostrando: en la
   // vista «asignar variantes por piezas» son las capas del archivo original (una sola, «Capa 1»).
@@ -5098,6 +5431,23 @@ export default function App() {
     }
   };
 
+  // EL CATÁLOGO CAMBIÓ EN EL SERVIDOR (lo avisa el latido de `AvisoActualizacion`, que compara la
+  // revisión): se vuelve a pedir. Es lo que hace que un cambio de moldes/variables guardado por
+  // otra persona —o por vos en otra pestaña— llegue a esta pantalla sin recargar (2026-09-08).
+  useEffect(() => {
+    const onCat = () => { if (sesionLista) fetchProductos(); };
+    // …y al VOLVER a la pestaña. El navegador frena los temporizadores de las pestañas que no se
+    // están mirando (hasta una vez por minuto), así que el latido puede llegar tarde: apenas la
+    // pantalla vuelve al frente se pide el catálogo, y lo que se ve es lo último guardado.
+    const onVer = () => { if (document.visibilityState === 'visible' && sesionLista) fetchProductos(); };
+    window.addEventListener('tizada:catalogo', onCat);
+    document.addEventListener('visibilitychange', onVer);
+    return () => {
+      window.removeEventListener('tizada:catalogo', onCat);
+      document.removeEventListener('visibilitychange', onVer);
+    };
+  }, [sesionLista]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const fetchConfig = async () => {
     try {
       const res = await fetch(`/api/config${qPid()}`);
@@ -5215,6 +5565,7 @@ export default function App() {
       console.error("Error al obtener presets de nesting", e);
     }
   };
+
 
   const fetchPerfiles = async () => {
     try {
@@ -6787,12 +7138,22 @@ export default function App() {
   const _nidoGen = useRef(0);
   const invalidarNido = () => { _nidoGen.current++; setNidoData(null); setNidoError(null); };
 
+  // Nº de ediciones locales de las variables. `guardarGruposCon` aplica la respuesta del server
+  // (que enriquece cada valor con su `pieza_id`) SÓLO si nadie tocó nada mientras viajaba: si no,
+  // la respuesta de un guardado automático pisaba la pieza que el usuario acababa de elegir.
+  const _varEdit = useRef(0);
+  const _varSaveT = useRef(null);
+  // ENTRAR O SALIR DE «ELEGIR PIEZAS» (de un grupo, de una variable o de un conjunto) deja el
+  // visor LIMPIO. Sin esto quedaban piezas marcadas de la tanda anterior y, al pasar del grupo a
+  // la variable, no se distinguía lo recién elegido (reporte del usuario 2026-09-08).
+  useEffect(() => { setSelNombrar(new Set()); }, [asignandoTipo, asignandoGrupoPz, asignandoConjunto]);
   const guardarGruposCon = async (arr, silencioso) => {
     if (!pidCfg) return;
     // Dos gestos seguidos = dos POST en vuelo. Si la respuesta del PRIMERO llega después de que
     // el segundo ya actualizó el estado, aplicarla devuelve el array viejo y la pieza que
     // acabás de tocar se "des-toca" sola. Sólo se aplica la respuesta del guardado MÁS NUEVO.
     const _mi = ++_seqVar.current;
+    const _ed = _varEdit.current;      // foto de las ediciones locales al salir
     try {
       const r = await fetch('/api/productos/variantes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6801,7 +7162,8 @@ export default function App() {
       const d = await leerJson(r); if (!r.ok) throw new Error(d.error || 'No se pudo guardar');
       // El server DEVUELVE las variantes enriquecidas (les resuelve el `pieza_id` estable). Antes
       // se tiraba la respuesta y el front seguía con valores a medias hasta recargar.
-      if (_mi === _seqVar.current && Array.isArray(d.variantes)) setVariantesEdit(d.variantes);
+      // …y sólo si el usuario no siguió editando mientras la respuesta viajaba (autoguardado).
+      if (_mi === _seqVar.current && _ed === _varEdit.current && Array.isArray(d.variantes)) setVariantesEdit(d.variantes);
       // ⛔ ACÁ NO SE INVALIDA EL NIDO. El nido es la GEOMETRÍA de las piezas del registro (todos los
       // talles): tocar qué piezas tiene una variable NO lo cambia — sólo cambia cuáles se muestran,
       // y eso `nidoVarPiezas` lo recalcula solo con `variantesEdit`. Invalidarlo acá lo dejaba en
@@ -6810,6 +7172,20 @@ export default function App() {
       if (!silencioso) showMsg('Variable guardada ✓');
     } catch (err) { showError(err.message || 'No se pudo guardar'); }
   };
+
+  // Cambiar las variables Y GUARDARLAS SOLO (300 ms de respiro), igual que `aplicarGruposPz`.
+  // 🔴 Antes las piezas de una variable vivían únicamente en el estado del navegador hasta que se
+  // tocaba «Listo»: salir con «⬅ Volver a los grupos», cambiar de pestaña o que algo llamara a
+  // `fetchProductos()` las borraba SIN AVISAR — y la variable quedaba creada y vacía (reporte del
+  // usuario 2026-09-07: «cuando voy a crear variable queda bugiado con las piezas seleccionadas»).
+  const aplicarVariantes = (fn) => setVariantesEdit(prev => {
+    const nueva = fn(prev || []);
+    _varEdit.current++;
+    clearTimeout(_varSaveT.current);
+    _varSaveT.current = setTimeout(() => guardarGruposCon(nueva, true), 300);
+    return nueva;
+  });
+
 
   // Guardar los modelos (grupos de variables). Acepta el array a persistir (estado quizá no actualizado aún).
 
@@ -7455,7 +7831,7 @@ export default function App() {
     const afectadas = b ? (b.piezas || []) : [idx];    // "van juntas": la unidad entera entra/sale junta
     const yaEsta = (t0?.valores || []).some(v => v.pieza_idx === idx);
     // MULTIGRUPO: togglea la pieza SOLO en este grupo; no la saca de los demas.
-    setVariantesEdit(prev => prev.map(t => {
+    aplicarVariantes(prev => prev.map(t => {
       if (t.clave !== clave) return t;
       let vals;
       if (yaEsta) { const quitar = new Set(afectadas); vals = (t.valores || []).filter(v => !quitar.has(v.pieza_idx)); }
@@ -7471,9 +7847,9 @@ export default function App() {
       return { ...t, valores: vals };
     }));
   };
-  const quitarPieza = (idx) => setVariantesEdit(prev => prev.map(t => ({ ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) })));
-  const quitarPiezaDeGrupo = (clave, idx) => setVariantesEdit(prev => prev.map(t => t.clave === clave ? { ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) } : t));
-  const renombrarPieza = (idx, label) => setVariantesEdit(prev => prev.map(t => ({ ...t, valores: (t.valores || []).map(v => v.pieza_idx === idx ? { ...v, label } : v) })));
+  const quitarPieza = (idx) => aplicarVariantes(prev => prev.map(t => ({ ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) })));
+  const quitarPiezaDeGrupo = (clave, idx) => aplicarVariantes(prev => prev.map(t => t.clave === clave ? { ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) } : t));
+  const renombrarPieza = (idx, label) => aplicarVariantes(prev => prev.map(t => ({ ...t, valores: (t.valores || []).map(v => v.pieza_idx === idx ? { ...v, label } : v) })));
   // Agregar VARIAS piezas de una al grupo destino (selección por recuadro). MULTIGRUPO:
   // solo agrega al grupo destino (no las saca de los otros grupos). Expande los vínculos.
   const agregarPiezasATipo = (clave, idxs) => {
@@ -7499,7 +7875,7 @@ export default function App() {
       if (gen) ocupados.add(gen);
     });
     if (!entran.length) return;
-    setVariantesEdit(prev => prev.map(t => {
+    aplicarVariantes(prev => prev.map(t => {
       if (t.clave !== clave) return t;
       const ya = new Set((t.valores || []).map(v => v.pieza_idx));
       const nuevos = entran.filter(idx => !ya.has(idx)).map(idx => _valorDeIdx(idx, juntas));
@@ -7672,6 +8048,14 @@ export default function App() {
       varPzUltimo.current = null; setVarPzEstado('');
     }
   }, [pidCfg]);
+
+  // Salir de Moldería con «elegir piezas» (variantes por piezas) prendido tiene que CERRARLO:
+  // si queda activo, el visor sigue mostrando el archivo ORIGINAL y el botón del talle de guía
+  // no responde — el usuario se quedaba sin poder cambiarlo (reporte 2026-09-07). Mismo criterio
+  // que el emparejado, unas líneas más arriba.
+  useEffect(() => {
+    if (varPzModo && tabAjustesMolde !== 'molderia') activarVarPz(false);
+  }, [tabAjustesMolde]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // AUTOGUARDADO: cada cambio de la asignación se persiste solo (con un respiro de 500 ms para no
   // pegarle al server en cada clic). Sólo guarda el BORRADOR: partir el PDF sigue siendo manual.
@@ -8003,7 +8387,10 @@ export default function App() {
       // fila entra UNA sola `__variante`, así que si el espacio usa dos moldes, para el segundo la
       // fila llegaba sin variable y el motor generaba TODAS sus piezas. Con esto el server le
       // devuelve a cada molde la variable que ese espacio eligió en el paso 1.
-      const vars_por_diseno = {};
+      // …y QUÉ MOLDE VA EN QUÉ DISEÑO: `{slug: [pid]}`. El servidor no lo puede adivinar y sin
+      // esto generaba cada molde para las filas de TODOS los diseños (el pedido salía con el doble
+      // de tizadas y el mismo molde repetido en la ficha — reporte del usuario 2026-09-08).
+      const vars_por_diseno = {}, moldes_por_diseno = {};
       (disenosPedido || []).forEach(d => {
         const slug = _slugDiseno(d.nombre), m = {};
         (disenoVars[d.id] || []).forEach(cl => {
@@ -8011,11 +8398,13 @@ export default function App() {
           if (v?.moldeId && !m[v.moldeId]) m[v.moldeId] = cl;   // la 1ª elegida para ese molde
         });
         if (Object.keys(m).length) vars_por_diseno[slug] = m;
+        const lst = (disenoMoldes[d.id] || []).filter(pid => ids.includes(pid));
+        if (lst.length) moldes_por_diseno[slug] = lst;
       });
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
       const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -8055,9 +8444,12 @@ export default function App() {
       localStorage.setItem('tizada_wizard', JSON.stringify({
         pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
         telaBaseMolde, telaPorPieza, cantidadOn,
+        // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
+        // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
+        moldesEfimeros,
       }));
     } catch (e) { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, moldesEfimeros]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
@@ -8099,6 +8491,7 @@ export default function App() {
   // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
   const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
 
+
   // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
   // molde por detrás, MÁS cada molde elegido ENTERO. Los moldes propios que sube el usuario no
   // tienen Variables (ese paso se les recorta) → sin esto no tendrían pantalla de arte.
@@ -8138,8 +8531,19 @@ export default function App() {
     if (id !== productosCat.activo) handleActivarProducto(id);
     if (clave && verVariante !== clave) setVerVariante(clave);   // el visor de arte muestra SOLO las piezas de la variable
     if (!clave && verVariante) setVerVariante(null);             // molde entero → sin filtro de variable
+    // CAMINO B: no hay arte que detectar ni mesas que mapear — el diseño ya está adentro de las
+    // piezas, y el trabajo acá es NOMBRARLAS. Pedir el mapeador dispararía `/api/arte/deteccion`
+    // sobre un molde sin arte. (Se resuelve inline y no con `_esConDiseno`, que se define más
+    // abajo: leer una `const` antes de su definición corta el build — ver `verificar_tdz.mjs`.)
+    const _idEsB = (productosCat.productos.find(x => x.id === id) || {}).origen === 'con_diseno';
     // Siempre se ve el MOLDE (vacío). El DISEÑO solo si en ESTE pedido ya se subió (para ESTE diseño).
-    if (arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(id); else { setMapeoData(null); cargarMoldeOperario(id); }
+    if (!_idEsB && arteCargado[disenoActivo + '|' + id]) cargarMapeadorOperario(id); else { setMapeoData(null); cargarMoldeOperario(id); }
+    // CAMINO B: el panel «Piezas y etiqueta» cuenta las etiquetas UBICADAS con `etiquetaConfig`,
+    // que es UN solo estado. Sin recargarlo acá, al pasar de un molde a otro el conteo (y el
+    // botón «Ubicar la etiqueta») eran los del molde ANTERIOR. Bug reportado 2026-09-04.
+    // (fetch inline y no `cargarEtiqueta`: esa const se define más abajo y sumaría un
+    // «use before define» al tope de `verificar_tdz.mjs`.)
+    if (_idEsB) fetch(`/api/productos/etiqueta?pid=${encodeURIComponent(id)}`).then(r => r.ok ? r.json() : null).then(d => { if (d) setEtiquetaConfig(d); }).catch(() => { });
   }, [activoTab, pedidoPaso, arteIdx, productosCat.activo, _idsCat, arteCargado, disenoActivo, disenoVars, disenoMoldes, verVariante]);
 
   // CADA DISEÑO ES UN ESPACIO PROPIO. Al cambiar de diseño —o de prenda dentro del diseño— se
@@ -8436,6 +8840,8 @@ export default function App() {
       if (req !== _pvReq.current) return;                 // llegó una respuesta vieja → descartar
       if (res.ok) {
         const d = await res.json();
+        // molde con diseño que todavía se está preparando: no se cachea el vacío y se vuelve a pedir
+        if (d.preparando) { _reintentoFuentes('pv|' + k, () => cargarPreviewPiezas()); return; }
         if (req === _pvReq.current) { setPreviewPiezas(d.piezas || {}); if (d.piezas) _pvGuardar(k, d.piezas); _prefetchTalles(mapeo, talle, _reempl); }
       } else {
         // El server dice POR QUÉ no puede (falta arte/registro/producto): avisar UNA vez y
@@ -8480,7 +8886,10 @@ export default function App() {
     cargarFuentesEstado();
     cargarFuentesTodas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pedidoPaso, disenoActivo, arteCargado]);
+    // `_idsCat`/`arteCargado` en las deps: al RECARGAR la página parado en el Arte, el efecto
+    // corría antes de que llegara el catálogo → los moldes con diseño no se reconocían como
+    // tales (y el activo era `prod_default`): la tipografía faltante no se avisaba nunca.
+  }, [_idsCat, pedidoPaso, disenoActivo, arteCargado]);
   // Refrescar el render real al entrar al Arte / cambiar variante / mover el mapeo o el override
   // (debounce largo: espera a que dejes de arrastrar; el caché hace instantáneos los repetidos).
   React.useEffect(() => {
@@ -8703,6 +9112,9 @@ export default function App() {
       setNidoData(null); setNidoError(null);    // el nido se arma con el emparejado: hay que rearmarlo
       if (empTalle) await verVarianteOperario(empTalle);
       await fetchProductos();
+      // CAMINO B: el lienzo junto trae el nombre de cada pieza desde el registro (no hay
+      // `empTodasInfo` que lo reconstruya): se vuelve a pedir para que el rótulo cambie ya.
+      if (d?.origen === 'con_diseno' && empTodas) await cargarTodasVariantes(null);
       if (msg) showMsg(msg);
       return true;
     } catch (e) { showError('No se pudo guardar: ' + e.message); return false; }
@@ -8761,6 +9173,21 @@ export default function App() {
     // se parte en CADENAS — una por pieza del talle guía — y las demás se reparten a la cadena
     // con la que MÁS SOLAPAN. Cada cadena se guarda con el MISMO nombre y el server renumera.
     const guia = empData?.guia;
+    // CAMINO B (el molde trae el diseño adentro): la pieza *i* del talle T ES la pieza *i* de
+    // cualquier otro talle, así que no hace falta tocar la del guía — cada pieza seleccionada
+    // (por su índice dentro del talle) se nombra, y el server renumera si hay varias.
+    if (empData?.origen === 'con_diseno') {
+      const idxs = [...new Set(sel.map(p => p.t_idx))];
+      let ok = true;
+      for (let k = 0; k < idxs.length; k++) {
+        const gi = idxs[k];
+        const viejo = (empData?.nombres_guia || {})[String(gi)] || '';
+        const msg = k === idxs.length - 1 ? (idxs.length === 1 ? `«${nom}» ✓` : `${idxs.length} piezas nombradas «${nom}» ✓`) : null;
+        ok = (await _postGrupo({ nombre: nom, guia_idx: gi, renombrar_de: viejo && viejo !== nom ? viejo : '' }, msg)) && ok;
+      }
+      if (ok) { setEmpNombreInput(''); setSelNombrar(new Set()); }
+      return;
+    }
     const delGuia = sel.filter(p => p.talle === guia);
     if (!delGuia.length) {
       showError(`Falta la pieza de ${guia}: el nombre se guarda en ese ${term.variante.toLowerCase()} y de ahí se propaga`);
@@ -9256,6 +9683,21 @@ export default function App() {
     const p = productosCat.productos.find(x => x.id === mid);
     return !!p && !!p.plantilla && (p.piezas_nombradas || 0) > 0;
   };
+  // ── CAMINO B: el molde trae el DISEÑO ADENTRO de cada pieza ────────────────────────────────
+  // No lleva arte aparte, así que todo lo que hoy pregunta «¿ya cargó el arte?» tiene que
+  // preguntar otra cosa: si sus piezas ya tienen nombre. Es un predicado y no un `arteCargado`
+  // trucho a propósito — marcar el ítem como «arte cargado» dispararía `preview_piezas` sin arte
+  // (el cortocircuito de `cargarPreviewPiezas` es lo que hoy impide pedir el dibujo pesado).
+  const _esConDiseno = (mid) => (productosCat.productos.find(x => x.id === mid) || {}).origen === 'con_diseno';
+  const _piezasSinNombre = (mid) => {
+    const p = productosCat.productos.find(x => x.id === mid) || {};
+    return Math.max(0, (p.piezas_registradas || 0) - (p.piezas_nombradas || 0));
+  };
+  // ¿Este ítem del paso Arte ya está listo para seguir? Camino A: tiene su arte. Camino B: ya
+  // sabemos qué es cada pieza (sin eso no hay etiqueta, ni telas, ni toggles que funcionen).
+  const _itemListo = (did, mid) => _esConDiseno(mid)
+    ? (_moldeUsable(mid) && _piezasSinNombre(mid) === 0)
+    : !!arteCargado[did + '|' + mid];
   // 🔴 ACÁ VAN **TODAS** LAS VARIABLES QUE SE PUEDEN USAR, incluidas las de los moldes propios.
   // Antes se excluían los propios («tienen su pestaña»), pero `propio` lo calcula el server
   // **según QUIÉN MIRA** (`propio and creado_por == vos`): para el DUEÑO daba true y para
@@ -9338,7 +9780,7 @@ export default function App() {
   const puedeIrAArte = disenosPedido.length > 0 && disenosSinMolde.length === 0;
   // Tareas de arte: un (diseño, molde) por cada asignación.
   const tareasArte = disenosPedido.flatMap(d => (disenoMoldes[d.id] || []).map(mid => ({ did: d.id, mid })));
-  const todasArteCargadas = tareasArte.length > 0 && tareasArte.every(t => arteCargado[t.did + '|' + t.mid]);
+  const todasArteCargadas = tareasArte.length > 0 && tareasArte.every(t => _itemListo(t.did, t.mid));
   // ── TELAS OBLIGATORIAS: no se avanza a la planilla si alguna pieza quedó sin tela ──
   const _genTelaP = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
   // Piezas (genéricas) que el operario VE Y PUEDE TOCAR en el visor del Arte: las del canvas, con el
@@ -9413,7 +9855,7 @@ export default function App() {
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
-  const arteEnPedido = (mid) => disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
+  const arteEnPedido = (mid) => _esConDiseno(mid) || disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
 
   const moldesDeDiseno = (did) => disenoMoldes[did] || [];
 
@@ -9680,8 +10122,10 @@ export default function App() {
     } catch { showError('No se pudo guardar el borde'); }
   };
   // Etiqueta de identificación del molde: cargar / guardar.
-  const cargarEtiqueta = async () => {
-    const pid = pidCfg; if (!pid) return;
+  // `pidEx` = molde EXPLÍCITO. Desde el PEDIDO el molde no es `pidCfg` (ése es el que está abierto
+  // en Configuración): sin esto, ubicar la etiqueta de un molde con diseño leería la de otro.
+  const cargarEtiqueta = async (pidEx = null) => {
+    const pid = pidEx || pidCfg; if (!pid) return;
     try { const r = await fetch(`/api/productos/etiqueta?pid=${pid}`); if (r.ok) setEtiquetaConfig(await r.json()); } catch { }
   };
   const cargarTalleEtq = async (talle) => {
@@ -10109,10 +10553,42 @@ export default function App() {
   };
 
   // Empezar un pedido nuevo desde 0: limpia toda la selección y vuelve al paso 1.
-  const reiniciarPedido = () => abrirConfirmar({
-    titulo: 'Empezar un pedido nuevo', ok: 'Empezar de 0',
-    texto: 'Se borra TODO lo de este pedido: diseños, prendas, telas asignadas, filas de la planilla y lo que quedó en memoria. Las tizadas ya generadas y la configuración de los moldes no se tocan.',
-    onOk: _reiniciarPedido });
+  // Los moldes EFÍMEROS de este pedido. No alcanza con `moldesEfimeros` (lo que subió ESTA
+  // pantalla): si se recargó la página con el localStorage vacío, o el molde se subió desde otro
+  // lado, ese estado no los tiene y el archivo —más de 100 MB— se quedaría en el servidor hasta
+  // que lo junte el barrido. Así que se suman los moldes DEL PEDIDO que el catálogo marca
+  // `efimero`. Borrar de más no es un riesgo: el servidor sólo toca los que llevan la marca.
+  const efimerosDelPedido = () => {
+    const _ids = new Set(Object.keys(moldesEfimeros || {}));
+    // 🔴 TAMBIÉN LOS QUE ENTRARON POR EL DISEÑO. Un molde con el diseño adentro se elige dentro de
+    // su espacio (`toggleMoldeEnDiseno` → `disenoMoldes`) y puede no estar en `moldesSeleccionados`:
+    // así quedaban sin borrar y el pedido siguiente los seguía mostrando (reporte 2026-09-08).
+    [...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()].forEach(id => {
+      if ((productosCat.productos || []).find(p => p.id === id && p.efimero)) _ids.add(id);
+    });
+    return [...(_ids)];
+  };
+  // LO QUE ESTA PANTALLA TIENE ABIERTO, para que el latido lo diga y el servidor no lo dé por
+  // huérfano. Es una variable global a propósito: el latido vive en otro componente y no puede
+  // recibirlo por props sin arrastrar todo el estado del pedido.
+  useEffect(() => {
+    window.__tizadaEfimerosAbiertos = efimerosDelPedido();
+  }, [moldesEfimeros, moldesSeleccionados, disenoMoldes, productosCat]);
+
+  const reiniciarPedido = () => {
+    // Si hay moldes con el diseño adentro, se van con el pedido y con ellos el nombrado de las
+    // piezas: eso se dice ANTES, no después. Es el único trabajo de este paso que no se recupera.
+    const _ef = efimerosDelPedido().map(id => (moldesEfimeros || {})[id]
+      || { nombre: ((productosCat.productos || []).find(p => p.id === id) || {}).nombre || 'sin nombre' });
+    const _extra = _ef.length
+      ? ` También se borra ${_ef.length === 1 ? 'el molde que subiste con el diseño adentro' : `los ${_ef.length} moldes que subiste con el diseño adentro`} (${_ef.map(m => `«${m.nombre}»`).join(', ')}) y los nombres que les pusiste a sus piezas: se subieron sólo para este pedido.`
+      : '';
+    abrirConfirmar({
+      titulo: 'Empezar un pedido nuevo', ok: 'Empezar de 0',
+      texto: 'Se borra TODO lo de este pedido: diseños, prendas, telas asignadas, filas de la planilla y lo que quedó en memoria.'
+        + _extra + ' Las tizadas ya generadas y la configuración de los moldes no se tocan.',
+      onOk: _reiniciarPedido });
+  };
   // «NUEVO PEDIDO» = ARRANCAR DE CERO, DE VERDAD. Si sobrevive algo del pedido anterior —una tela
   // asignada, un diseño, el arte marcado como cargado, una caché de piezas— el pedido nuevo sale
   // con datos del viejo y eso se descubre recién con la tela CORTADA. Por eso se limpia TODO lo
@@ -10135,10 +10611,38 @@ export default function App() {
     // reconocerlas en el próximo (regla del usuario). Las del catálogo no se tocan.
     (async () => {
       const _pids = [...new Set([...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()])].filter(Boolean);
-      if (!_pids.length) return;
+      // ⚠️ El `return` por «no hay moldes» era de las TIPOGRAFÍAS y se llevaba puesto el borrado de
+      // los moldes efímeros de abajo: si el pedido no tenía ningún molde ELEGIDO (se subió y no se
+      // alcanzó a elegir, o la pantalla se recargó), el molde de 100 MB se quedaba para siempre.
+      if (_pids.length) {
+        try {
+          await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
+        } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+      }
+      // ── LOS MOLDES CON EL DISEÑO ADENTRO SE VAN CON EL PEDIDO ──────────────────────────────
+      // Se subieron «sólo para este pedido»: acá se borran de verdad (archivo, datos y base). Si
+      // no, cada pedido dejaría más de 100 MB en el servidor para siempre. El servidor sólo
+      // borra los que están marcados `efimero`, así que mandar un pid de más no hace daño.
       try {
-        await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
-      } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+        const _ef = efimerosDelPedido();
+        {
+          const _r = await fetch('/api/pedido/limpiar_efimeros', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            // …y los HUÉRFANOS: los efímeros del pedido anterior, que ya no están anotados en
+            // ninguna pantalla. El servidor sólo se lleva los míos que nadie tenga abiertos.
+            body: JSON.stringify({ pids: _ef, incluir_huerfanos: true })
+          });
+          // SÓLO SE OLVIDAN LOS QUE EL SERVIDOR BORRÓ DE VERDAD. Si ignoró alguno (por ejemplo,
+          // una tizada de ese molde todavía generando), antes se limpiaba igual el estado y no
+          // quedaba nadie que volviera a intentarlo: el molde se quedaba para siempre. Ahora el
+          // que sobrevive sigue anotado y el próximo «Nuevo pedido» lo vuelve a pedir.
+          let _borrados = _ef;
+          try { _borrados = (await _r.json())?.borrados || _ef; } catch { /* respuesta rara: se olvidan todos, como antes */ }
+          setMoldesEfimeros(prev => Object.fromEntries(
+            Object.entries(prev || {}).filter(([id]) => !_borrados.includes(id))));
+          fetchProductos();
+        }
+      } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }
     })();
     setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
     setEtqData(null); setEtqNombres({}); setVerVariante(null);
@@ -10173,6 +10677,65 @@ export default function App() {
     setTimeout(() => setErrorInformativo(prev => prev === txt ? '' : prev), 7000);
   };
 
+  // ── CONFIGURACIONES GUARDADAS DEL MOLDE ──────────────────────────────────────────────────
+  const cargarCfgGuardadas = async () => {
+    try {
+      const r = await fetch(`/api/molde/config/lista${qPid('?')}`);
+      const d = await r.json();
+      setCfgGuardadas(d.configs || []);
+    } catch { setCfgGuardadas([]); }
+  };
+  const guardarCfgMolde = async () => {
+    const nombre = (cfgNombre || '').trim();
+    if (!nombre) { showError('Ponele un nombre para reconocerla después.'); return; }
+    setCfgBusy(true);
+    try {
+      const r = await fetch('/api/molde/config/guardar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: pidCfg, nombre })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
+      setCfgNombre('');
+      await cargarCfgGuardadas();
+      showMsg(`Configuración «${nombre}» guardada (${d.piezas} piezas) ✓`);
+    } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
+  };
+  const aplicarCfgMolde = async (c) => {
+    setCfgBusy(true); setCfgInforme(null);
+    try {
+      const r = await fetch('/api/molde/config/aplicar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: pidCfg, id: c.id, partes: cfgPartes })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
+      setCfgInforme(d);
+      // Que se VEA aplicada: el catálogo (grupos, variables, telas) y la detección (los nombres
+      // de las piezas en el visor) se vuelven a pedir. Es lo que el usuario mira para decidir si
+      // esa configuración le sirve para este molde.
+      await fetchProductos();
+      try {
+        const rd = await fetch(`/api/plantilla/deteccion${qPid('?')}`);
+        const dd = await rd.json();
+        if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
+      } catch { /* el visor se refresca al entrar de nuevo */ }
+      setMoldeReload(v => v + 1);
+    } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
+  };
+  const borrarCfgMolde = async (c) => {
+    abrirConfirmar({
+      titulo: 'Borrar la configuración guardada', ok: 'Borrar',
+      texto: `Se borra «${c.nombre}». No toca ningún molde: es sólo la receta guardada.`,
+      onOk: async () => {
+        try {
+          await fetch(`/api/molde/config/${c.id}`, { method: 'DELETE' });
+          await cargarCfgGuardadas();
+        } catch { /* si falla, sigue en la lista */ }
+      }
+    });
+  };
+
   const showWarn = (txt) => {
     setAdvertenciaInformativa(txt);
     setTimeout(() => setAdvertenciaInformativa(prev => prev === txt ? '' : prev), 10000);
@@ -10194,6 +10757,437 @@ export default function App() {
       showError('No se pudo cancelar: ' + e.message);
     }
   };
+
+  // ── UN MOLDE DEL PEDIDO QUE YA NO EXISTE SE SACA, NO SE ESPERA ──────────────────────────────
+  // 🔴 El pedido vive en el navegador (`localStorage`) y los moldes con el diseño adentro son
+  // EFÍMEROS: si se subió el archivo de nuevo, o se cerró el pedido en otra pestaña, o pasó el
+  // barrido del servidor, el pid guardado ya no está. Pasó de verdad: la pantalla se quedaba en
+  // «Cargando el molde…» para siempre mientras el servidor contestaba 404 y 409, sin decir nada.
+  // Se limpia y se avisa, que es lo único que la persona puede accionar.
+  const _limpiezaAviso = useRef(false);
+  useEffect(() => {
+    if (!productosCat.productos.length) return;          // el catálogo todavía no llegó
+    const vivos = new Set(productosCat.productos.map(p => p.id));
+    const _faltan = [...new Set(Object.values(disenoMoldes).flat())].filter(id => !vivos.has(id));
+    if (!_faltan.length) { _limpiezaAviso.current = false; return; }
+    const _nom = _faltan.map(id => (moldesEfimeros || {})[id]?.nombre).filter(Boolean);
+    setDisenoMoldes(prev => {
+      const n = {};
+      Object.entries(prev).forEach(([did, ids]) => { n[did] = (ids || []).filter(id => vivos.has(id)); });
+      return n;
+    });
+    setDisenoVars(prev => {
+      const n = {};
+      Object.entries(prev).forEach(([did, m]) => {
+        n[did] = Object.fromEntries(Object.entries(m || {}).filter(([mid]) => vivos.has(mid)));
+      });
+      return n;
+    });
+    setMoldesEfimeros(prev => Object.fromEntries(Object.entries(prev || {}).filter(([id]) => vivos.has(id))));
+    setMoldesBDiseno(prev => Object.fromEntries(Object.entries(prev || {}).filter(([id]) => vivos.has(id))));
+    if (!_limpiezaAviso.current) {
+      _limpiezaAviso.current = true;
+      showWarn(_nom.length
+        ? `${_nom.length === 1 ? 'El molde' : 'Los moldes'} ${_nom.map(n => `«${n}»`).join(', ')} ya no ${_nom.length === 1 ? 'está' : 'están'} en el servidor (se sube para un pedido y no queda guardado). Volvé a cargarlo si lo necesitás.`
+        : 'Un molde de este pedido ya no está en el servidor y se sacó del pedido.');
+    }
+  }, [_idsCat, disenoMoldes]);
+
+  // ── CAMINO B: elegir piezas y nombrarlas, como en la pantalla de edición ────────────────────
+  // En el lienzo de TODOS los talles, una pieza es la MISMA en cada talle (misma mesa, mismo
+  // índice: en el camino B la correspondencia es exacta). Tocar una elige sus homólogas de una:
+  // es lo que en Moldería se hace a mano seleccionando «las que son la misma pieza».
+  const _todasBActivo = () => !etqPickB && !!todasB?.piezas?.length && todasB.pid === etqPid;
+  const _homologasB = (pz) => (todasB?.piezas || []).filter(p => p.mesa === pz.mesa && p.t_idx === pz.t_idx).map(p => p.idx);
+  const _toggleGrupoB = (n, ids) => { const on = ids.some(i => n.has(i)); ids.forEach(i => (on ? n.delete(i) : n.add(i))); };
+  const togglePiezaNombrarB = (pz) => {
+    const ids = _todasBActivo() ? _homologasB(pz) : [pz.idx];
+    setSelNombrarB(prev => { const n = new Set(prev); _toggleGrupoB(n, ids.length ? ids : [pz.idx]); return n; });
+    setPiezaBSel({ mesa: pz.mesa, t_idx: pz.t_idx });
+  };
+  // El RECUADRO del visor devuelve idx del lienzo junto: se agrupan por pieza y cada grupo se
+  // invierte entero (mismo gesto que el click, muchas veces).
+  const rubberNombrarB = (idxs) => {
+    if (!_todasBActivo()) return;
+    const pares = new Map();
+    (todasB.piezas || []).filter(p => idxs.includes(p.idx)).forEach(p => pares.set(`${p.mesa}|${p.t_idx}`, p));
+    if (!pares.size) return;
+    setSelNombrarB(prev => { const n = new Set(prev); pares.forEach(p => _toggleGrupoB(n, _homologasB(p))); return n; });
+    const _ult = [...pares.values()].pop();
+    setPiezaBSel({ mesa: _ult.mesa, t_idx: _ult.t_idx });
+  };
+
+
+  // ── La config de los moldes con el diseño adentro (la deja el taller, una vez) ───────────────
+  const cargarCfgConDiseno = async () => {
+    fetchNestingPresets();          // el desplegable de «cómo se acomodan» sale de ahí
+    try {
+      const r = await fetch('/api/config_con_diseno');
+      if (r.ok) setCfgConDiseno(await r.json());
+    } catch { /* sin config no se puede editar: la pantalla muestra «Cargando…» */ }
+  };
+  const guardarCfgConDiseno = async () => {
+    if (!cfgConDiseno) return;
+    try {
+      const r = await fetch('/api/config_con_diseno', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfgConDiseno)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo guardar');
+      setCfgConDiseno(d);
+      // El preview de las piezas incluye el borde y la etiqueta: sin tirar el caché del navegador,
+      // el paso Arte seguiría mostrando la medida vieja (la tizada ya saldría con la nueva).
+      _pvCache.current = {};
+      showMsg(d.moldes
+        ? `Guardado. Vale para ${d.moldes} molde${d.moldes === 1 ? '' : 's'} con diseño, también los ya cargados.`
+        : 'Guardado.');
+    } catch (err) { showError(err.message); }
+  };
+
+  // ── CAMINO B: ubicar la ETIQUETA DE CORTE desde el pedido ────────────────────────────────────
+  // El cliente sólo dice DÓNDE va en cada pieza. El tamaño, la tipografía y qué dice los deja el
+  // admin una sola vez para todos estos moldes (`/api/config_con_diseno`), así que acá se manda
+  // SÓLO `posiciones`: el servidor conserva la forma y no deja que el pedido se la pise.
+  const ubicarEtiquetaB = (nombrePieza, snap) => {
+    if (!nombrePieza || !snap) return;
+    setEtiquetaConfig(prev => ({
+      ...(prev || {}),
+      posiciones: { ...((prev || {}).posiciones || {}),
+                    [nombrePieza]: { rx: snap.rx, ry: snap.ry, ang: snap.ang, t: snap.t } },
+    }));
+  };
+  const quitarEtiquetaB = (nombrePieza) => {
+    setEtiquetaConfig(prev => {
+      const _p = { ...((prev || {}).posiciones || {}) };
+      delete _p[nombrePieza];
+      return { ...(prev || {}), posiciones: _p };
+    });
+  };
+  const guardarEtiquetaPosicionesB = async (pid) => {
+    try {
+      const r = await fetch('/api/productos/etiqueta', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, posiciones: (etiquetaConfig || {}).posiciones || {} })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo guardar dónde va la etiqueta');
+      setEtiquetaConfig(d);
+      // El render de la pieza incluye la etiqueta: si el preview no se rehace, el paso Arte
+      // mostraría la etiqueta en el lugar viejo aunque la tizada ya la ponga en el nuevo.
+      _pvCache.current = {};
+      showMsg('Listo: la etiqueta va donde la marcaste.');
+    } catch (err) { showError(err.message); }
+  };
+
+  // ── CAMINO B: cargar VARIOS archivos, uno tras otro ─────────────────────────────────────────
+  // Se suben de a uno (no en paralelo): cada uno son 100+ MB y el servidor los procesa con
+  // PyMuPDF, así que mandarlos todos juntos sólo haría que todos tarden más y que la barra no
+  // signifique nada. El nombre del molde sale del ARCHIVO: el usuario no lo escribe.
+  const subirMoldesConDiseno = async (fileList) => {
+    const files = [...(fileList || [])].filter(f => /\.(ai|pdf)$/i.test(f.name || ''));
+    if (!files.length) { showError('Elegí archivos .ai o .pdf.'); return; }
+    setSubirMoldeBusy(true);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const nombre = (f.name || 'Molde').replace(/\.(ai|pdf)$/i, '').trim() || 'Molde';
+      const t0 = Date.now();
+      setSubirBFase({ fase: 'subiendo', pct: 0, seg: 0, nombre, i: i + 1, total: files.length });
+      const reloj = setInterval(() => setSubirBFase(x => x ? { ...x, seg: Math.round((Date.now() - t0) / 1000) } : x), 1000);
+      try {
+        const r = await fetch('/api/productos/crear', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'No se pudo crear el molde');
+        const fd = new FormData();
+        fd.append('archivo', f);
+        fd.append('pid', d.id);
+        fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
+        const d2 = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', rutaApi('/api/plantilla'));   // el XHR no pasa por el envoltorio de fetch
+          xhr.upload.onprogress = (e) => {
+            if (!e.lengthComputable) return;
+            const pct = Math.round(e.loaded * 100 / e.total);
+            setSubirBFase(x => ({ ...(x || {}), fase: pct >= 100 ? 'procesando' : 'subiendo', pct }));
+          };
+          xhr.onload = () => {
+            try {
+              const j = JSON.parse(xhr.responseText || '{}');
+              xhr.status >= 200 && xhr.status < 300 ? resolve(j) : reject(new Error(j.error || 'No se pudo procesar el molde'));
+            } catch { reject(new Error('El servidor respondió algo que no se entiende')); }
+          };
+          xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor'));
+          xhr.send(fd);
+        });
+        if (d2.origen !== 'con_diseno') {
+          showError(`«${nombre}» no parece traer el diseño adentro de las piezas`
+            + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '') + '. Quedó cargado igual, pero necesita el arte aparte.');
+        }
+        setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
+      } catch (err) {
+        showError(`«${nombre}»: ${err.message}`);
+      } finally {
+        clearInterval(reloj);
+      }
+    }
+    setSubirBFase(null);
+    setSubirMoldeBusy(false);
+    await fetchProductos();
+    setMoldeReload(v => v + 1);
+    invalidarNido(); setSembrarGen(v => v + 1);
+  };
+  // A qué DISEÑO va cada molde. Se elige tildando varios y escribiendo el nombre una sola vez:
+  // con una camiseta y un short del mismo diseño, escribirlo dos veces invita a que queden
+  // distintos («JUGADOR» / «jugador») y entonces son dos diseños.
+  const ponerDisenoB = () => {
+    const nom = disenoBInput.trim();
+    if (!nom || !moldesBSel.length) return;
+    setMoldesBDiseno(m => { const n = { ...m }; moldesBSel.forEach(id => { n[id] = nom; }); return n; });
+    setDisenoBInput(''); setMoldesBSel([]);
+  };
+  // DE QUÉ COLUMNA DE TALLE toma sus medidas este molde. Es lo que distingue una camiseta de un
+  // short cuando la planilla lleva las dos («Talle» y «Talle short»): sin esto el short tomaría
+  // el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
+  const ponerColumnaTalleB = async (colId) => {
+    const ids = [...moldesBSel];
+    if (!ids.length) return;
+    try {
+      for (const id of ids) {
+        const p = (productosCat.productos || []).find(x => x.id === id) || {};
+        await fetch('/api/productos/config_mapeo', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, planilla_template_id: p.planilla_template_id,
+                                 mapeo_columnas: { ...(p.mapeo_columnas || {}), talle: colId } })
+        });
+      }
+      await fetchProductos();
+    } catch (err) { showError(err.message); }
+  };
+  // Del espacio de carga al de nombrar: los moldes entran al pedido con su diseño y se sigue en
+  // el paso de siempre, que es donde vive el visor.
+  // ── CAMINO B: nombrar y etiqueta con LAS PANTALLAS DE CONFIGURACIÓN ─────────────────────────
+  // Misma maquinaria que «Mi propio molde» (`abrirConfigMiMolde`): se activa el molde, se abre
+  // su Moldería (o su pestaña Etiqueta) y queda un «← Volver al pedido». El modo «nombrar» de
+  // Moldería se prende cuando la pantalla ya está sobre ESE molde (efecto `pendienteNombrarB`):
+  // `activarEmparejar` lee el molde activo y llamarlo antes de que se active leería el anterior.
+  const abrirNombrarB = async (pid) => {
+    if (!pid) return;
+    setEmpTodasData(null);          // el lienzo junto se vuelve a pedir: trae los nombres de HOY
+    setDesdePedidoB(pid);           // ⚠️ NO se cambia de pestaña: el cliente no entra a Configuración
+    // 🔴 La moldería se abre ANTES de esperar al servidor. Antes iba después del `await` y,
+    // mientras se activaba el molde y se recargaba el catálogo, la pantalla mostraba la GRILLA
+    // de molderías del taller («Molde 1», «Nueva Moldería»); si esa espera tardaba o fallaba, el
+    // cliente quedaba ahí (captura del usuario 2026-09-04). `pidCfg` toma `molderiaAbierta`
+    // explícito, así que no depende del activo del servidor.
+    setAdminSubView('productos');
+    setMolderiaAbierta(pid);
+    setTabAjustesMolde('molderia');
+    setPendienteNombrarB(pid);
+    await handleActivarProducto(pid);
+  };
+  const abrirEtiquetaB = async (pid) => {
+    if (!pid) return;
+    // La pestaña Etiqueta filtra el lienzo junto POR NOMBRE: si quedó el de antes de nombrar
+    // (nombres en blanco), no encuentra la pieza y el visor sale vacío. Se pide de nuevo.
+    setEmpTodasData(null);
+    setDesdePedidoB(pid);           // ⚠️ NO se cambia de pestaña (ver `abrirNombrarB`)
+    setAdminSubView('productos');   // la moldería se abre ANTES del await (ver `abrirNombrarB`)
+    setMolderiaAbierta(pid);
+    setTabAjustesMolde('etiqueta');
+    await handleActivarProducto(pid);
+    // lo mismo que hace el menú de ajustes al entrar a la pestaña: sin esto el panel queda vacío
+    cargarEtiqueta(pid); cargarBorde();
+  };
+  const volverAlPedidoB = async () => {
+    const pid = desdePedidoB;
+    if (empModo) await activarEmparejar(false);
+    setDesdePedidoB(null); setPendienteNombrarB(null); setEmpTodasData(null);
+    setMolderiaAbierta(null); setTabAjustesMolde('menu'); setAdminSubView('dashboard');
+    setPedidoPaso('arte');
+    _talleDetCache.current = {};                       // los nombres cambiaron en Moldería
+    await fetchProductos();
+    if (pid) { await cargarMoldeOperario(pid); cargarEtiqueta(pid); }
+  };
+  // 🔴 SALIR DE LA HERRAMIENTA POR LA BARRA («Pedidos» / «Configuración»). Sin esto, la pantalla
+  // quedaba EN BLANCO: `desdePedidoB` seguía puesto, así que el pedido se ocultaba
+  // (`activoTab === 'pedidos' && !desdePedidoB`) y el panel de Configuración también
+  // (`adminSubView === 'dashboard' && !desdePedidoB`). Bug reportado 2026-09-04.
+  const cerrarHerramientaB = () => {
+    if (!desdePedidoB) return;
+    if (empModo) activarEmparejar(false);
+    setDesdePedidoB(null); setPendienteNombrarB(null); setEmpTodasData(null);
+    setMolderiaAbierta(null); setTabAjustesMolde('menu');
+    _talleDetCache.current = {};
+  };
+  React.useEffect(() => {
+    if (!pendienteNombrarB || pidCfg !== pendienteNombrarB || tabAjustesMolde !== 'molderia' || molderiaAbierta !== pendienteNombrarB) return;
+    setPendienteNombrarB(null);
+    activarEmparejar(true, 'simple');
+  }, [pendienteNombrarB, pidCfg, tabAjustesMolde, molderiaAbierta]);
+
+  const irANombrarB = () => {
+    const _mios = (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno' && !p.de_otro);   // los MÍOS: un admin ve los de todos, pero su pedido no abre ni nombra los ajenos
+    if (!_mios.length) return;
+    const _dis = [...new Set(_mios.map(p => moldesBDiseno[p.id]).filter(Boolean))];
+    setDisenosPedido(prev => {
+      const n = [...prev];
+      _dis.forEach(nom => { const id = _slugDiseno(nom); if (!n.some(d => d.id === id)) n.push({ id, nombre: nom }); });
+      return n;
+    });
+    setDisenoMoldes(prev => {
+      const n = { ...prev };
+      _mios.forEach(p => {
+        const nom = moldesBDiseno[p.id]; if (!nom) return;
+        const id = _slugDiseno(nom);
+        n[id] = [...new Set([...(n[id] || []), p.id])];
+      });
+      return n;
+    });
+    const _prim = _dis[0] ? _slugDiseno(_dis[0]) : '';
+    if (_prim) setDisenoActivo(_prim);
+    setArteIdx(0);
+    setPedidoPaso('arte');
+    // …y directo a NOMBRAR el primer molde, con la herramienta de Moldería. Los demás se abren
+    // desde el paso Arte, molde por molde. Si ya tiene todo nombrado, se queda en el pedido.
+    const _sinNombre = _mios.find(p => (_piezasSinNombre(p.id) || []).length) || _mios[0];
+    if (_sinNombre) abrirNombrarB(_sinNombre.id);
+  };
+
+  // ── CAMINO B: subir un molde que YA TRAE EL DISEÑO adentro ───────────────────────────────────
+  // Hermana de `subirMiMolde`, con tres diferencias que importan:
+  //   · el molde se crea `efimero` (es de ESTE pedido y no queda guardado) y hereda la planilla
+  //     del pedido, para que se pueda combinar con los moldes que ya estén elegidos;
+  //   · la subida va por XHR para poder mostrar el avance REAL (con `fetch` no hay progreso de
+  //     subida, y son >100 MB: sin eso la pantalla parece colgada);
+  //   · NO se sale del wizard. `subirMiMolde` termina en `abrirConfigMiMolde`, que te manda a
+  //     Configuración; acá el nombrado de las piezas se hace en el mismo paso Arte.
+  // ── CAMINO B: nombrar UNA pieza ─────────────────────────────────────────────────────────────
+  // 🔴 Va por un endpoint propio, NO por el nombrado de siempre. `/api/plantilla/etiquetas` y
+  // `grupo_pieza` RE-ARMAN el registro para emparejar los talles por forma; acá los talles son
+  // capas de la misma mesa y ya están pareados desde el alta, así que re-armarlo sólo puede
+  // romperlo. `mesa` y `t_idx` son los que el visor ya trae en cada pieza.
+  // `recargar: false` cuando se nombra un LOTE: recargar el catálogo y la detección entre pieza y
+  // pieza son N idas y vueltas para tirar N-1; el llamador lo hace UNA vez al final.
+  const renombrarPiezaB = async (pid, mesa, t_idx, nombre, { recargar = true } = {}) => {
+    const n = (nombre || '').trim();
+    if (!n) return false;
+    try {
+      const r = await fetch('/api/plantilla/pieza_renombrar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid, mesa, t_idx, nombre: n })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo poner el nombre');
+      if (recargar) {
+        await fetchProductos();        // el conteo de piezas nombradas es lo que destraba el paso
+        // 🔴 Y se vuelve a pedir la DETECCIÓN: los nombres que muestra el panel salen de ahí
+        // (`nombres_existentes`), no del catálogo. Sin esto el nombre se guardaba bien y la
+        // pantalla seguía diciendo «sin nombre» — el usuario lo escribiría dos veces.
+        await cargarMoldeOperario(pid);
+      }
+      return true;
+    } catch (err) {
+      showError(err.message);
+      return false;
+    }
+  };
+
+  // Nombra TODAS las elegidas con el mismo nombre. Si son varias, el servidor las desambigua con
+  // la regla de siempre (`nombres_normalizados`): «Manga Corta» → «Manga Corta 1» y «Manga Corta 2».
+  // Se mandan de a una y EN ORDEN, no en paralelo: cada renombrado reescribe el registro entero,
+  // así que dos a la vez se pisarían y una de las dos se perdería.
+  const nombrarSeleccionB = async (pid) => {
+    const nom = nombreBInput.trim();
+    if (!nom || !selNombrarB.size) return;
+    // En el lienzo de todos los talles la selección trae la misma pieza 20 veces (una por
+    // talle): se renombra UNA vez por pieza —el registro es por pieza, para todos sus talles.
+    const _src = (!etqPickB && todasB?.piezas?.length && todasB.pid === pid) ? todasB.piezas : (etqData?.piezas || []);
+    const _vistos = new Set();
+    const _pzs = [];
+    _src.filter(p => selNombrarB.has(p.idx)).forEach(p => {
+      const k = `${p.mesa}|${p.t_idx}`;
+      if (!_vistos.has(k)) { _vistos.add(k); _pzs.push(p); }
+    });
+    let _ok = 0;
+    for (const pz of _pzs) {
+      if (await renombrarPiezaB(pid, pz.mesa, pz.t_idx, nom, { recargar: false })) _ok++;
+    }
+    setNombreBInput('');
+    setSelNombrarB(new Set());
+    setPiezaBSel(null);
+    await fetchProductos();
+    await cargarMoldeOperario(pid);       // los nombres del panel salen de la detección
+    if (_ok) showMsg(_ok === 1 ? `Listo: «${nom}».` : `Listo: ${_ok} piezas nombradas.`);
+  };
+
+  const subirMoldeConDisenoPedido = async () => {
+    const nombre = subirMoldeNombre.trim();
+    if (!nombre || !subirMoldeFile) return;
+    setSubirMoldeBusy(true);
+    setSubirBFase({ fase: 'subiendo', pct: 0, seg: 0 });
+    const t0 = Date.now();
+    const reloj = setInterval(() => setSubirBFase(f => f ? { ...f, seg: Math.round((Date.now() - t0) / 1000) } : f), 1000);
+    let pid = null;
+    try {
+      const r = await fetch('/api/productos/crear', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'No se pudo crear el molde');
+      pid = d.id;
+      const fd = new FormData();
+      fd.append('archivo', subirMoldeFile);
+      fd.append('pid', pid);
+      fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
+      const d2 = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        // `rutaApi` y no '/api/plantilla' pelado: el XHR NO pasa por el envoltorio de `fetch`,
+        // así que publicado en una sub-ruta iría a la raíz del dominio (ver `base.js`).
+        xhr.open('POST', rutaApi('/api/plantilla'));
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const pct = Math.round(e.loaded * 100 / e.total);
+          // Al llegar al 100 % de la subida el servidor recién EMPIEZA a leer el archivo: se
+          // cambia de fase para no dejar una barra llena y quieta, que parece colgada.
+          setSubirBFase(f => ({ ...(f || {}), fase: pct >= 100 ? 'procesando' : 'subiendo', pct }));
+        };
+        xhr.onload = () => {
+          try {
+            const j = JSON.parse(xhr.responseText || '{}');
+            xhr.status >= 200 && xhr.status < 300 ? resolve(j) : reject(new Error(j.error || 'No se pudo procesar el molde'));
+          } catch { reject(new Error('El servidor respondió algo que no se entiende')); }
+        };
+        xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor'));
+        xhr.send(fd);
+      });
+      if (d2.origen !== 'con_diseno') {
+        // El archivo no trae el diseño adentro: se dice por qué y se deja el molde igual (el
+        // servidor ya lo dio de alta por el camino de siempre), para no perder la subida.
+        showError('Este archivo no parece traer el diseño adentro de las piezas'
+          + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '')
+          + '. Quedó cargado como molde común: necesita que le cargues el arte aparte.');
+      }
+      setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now() } }));
+      avisarAltaMolde(d2);
+      toggleMoldeEnDiseno(pid);          // queda ELEGIDO en el diseño activo: ya es parte del pedido
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      clearInterval(reloj);
+      setSubirBFase(null);
+      setSubirMoldeBusy(false);
+      await fetchProductos();
+      setMoldeReload(v => v + 1);
+      invalidarNido(); setSembrarGen(v => v + 1);
+      setSubirMoldeOpen(false); setSubirMoldeNombre(''); setSubirMoldeFile(null);
+      setSubirMoldeConDiseno(false);
+    }
+  };
+
 
   // Aviso (no bloqueante) al subir el diseño: si la planilla cargó un dato que se
   // estampa (nombre/número) pero el diseño NO trae su capa, avisar que no se va a
@@ -10841,11 +11835,11 @@ export default function App() {
     return `«${mol}»${va} · diseño «${_nomDiseno(did)}»`;
   };
   // Variables cuyo arte todavía no se cargó (el arte es del MOLDE, pero se avisa por variable).
-  const itemsSinArte = itemsPedido.filter(x => !arteCargado[x.did + '|' + x.moldeId]);
+  const itemsSinArte = itemsPedido.filter(x => !_itemListo(x.did, x.moldeId));
   // Variables cuya tipografía no está: el estado es por (diseño, molde) — se expande a sus
   // variables para poder nombrar la que estás usando.
   const fuentesFaltantesItems = itemsPedido
-    .filter(x => arteCargado[x.did + '|' + x.moldeId])
+    .filter(x => arteCargado[x.did + '|' + x.moldeId] || _esConDiseno(x.moldeId))   // camino B: sin arte, pero con tipografía propia
     .map(x => ({ ...x, mid: x.moldeId, fuentes: fuentesPorArte[x.did + '|' + x.moldeId] || [] }))
     .filter(x => x.fuentes.length);
 
@@ -10884,6 +11878,15 @@ export default function App() {
     const idx = lista.findIndex(x => x.moldeId === (it && it.moldeId) && (x.clave || null) === ((it && it.clave) || null));
     setArteIdx(idx >= 0 ? idx : Math.max(0, lista.findIndex(x => x.moldeId === (it && it.moldeId))));
   };
+  // AL ENTRAR AL PASO «MOLDES», el catálogo se vuelve a pedir. `productosCat` se carga una vez
+  // por sesión y de él sale el aviso «esta moldería todavía no se puede pedir»: configurar las
+  // variables en Configuración y volver al pedido mostraba el estado VIEJO, con el cartel puesto
+  // aunque la variable ya tuviera sus piezas (lo reportó el usuario: «¿por qué me sale eso si
+  // tengo variable?»).
+  useEffect(() => {
+    if (activoTab === 'pedidos' && pedidoPaso === 'moldes') fetchProductos();
+  }, [activoTab, pedidoPaso]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const pasoItems = React.useMemo(() => {
     const it = [];
     if (pedidoPaso === 'diseno') {
@@ -10899,7 +11902,10 @@ export default function App() {
                 ok: disenosPedido.filter(d => !disenosSinMolde.includes(d)).map(d => `«${d.nombre}»: ${(disenoMoldes[d.id] || []).length} prenda(s)`) });
     } else if (pedidoPaso === 'arte') {
       it.push({ id: 'arte', label: 'cargar el arte', corto: 'Asignar arte', hecho: tareasArte.length > 0 && itemsSinArte.length === 0,
-                faltan: itemsSinArte.map(x => `Falta el arte de ${_arteLbl(x.did, x)}.`),
+                // camino B: lo que falta no es el arte (viene adentro) sino NOMBRAR las piezas
+                faltan: itemsSinArte.map(x => _esConDiseno(x.moldeId)
+                  ? `Faltan nombrar las piezas de ${_arteLbl(x.did, x)} (${_piezasSinNombre(x.moldeId)} sin nombre).`
+                  : `Falta el arte de ${_arteLbl(x.did, x)}.`),
                 ok: itemsPedido.filter(x => arteCargado[x.did + '|' + x.moldeId]).map(x => `Arte cargado en ${_arteLbl(x.did, x)}`) });
       it.push({ id: 'telas', label: 'la tela de cada pieza', corto: 'Asignar tela', hecho: !telasIncompletas,
                 // POR VARIABLE: «faltan 3 piezas» sin decir dónde obligaba a buscarlas a mano
@@ -11055,6 +12061,7 @@ export default function App() {
               data-tour="nav-pedidos"
               className={`nav-item ${activoTab === 'pedidos' ? 'active' : ''}`}
               onClick={() => {
+                cerrarHerramientaB();   // si estaba nombrando/etiquetando un molde con diseño
                 setActivoTab('pedidos');
                 setAdminSubView('dashboard');
                 setModoMiMolde(null);   // salir por el menú también sale del modo «mi molde»
@@ -11071,6 +12078,7 @@ export default function App() {
               data-tour="nav-config"
               className={`nav-item ${activoTab === 'config' ? 'active' : ''}`}
               onClick={() => {
+                cerrarHerramientaB();   // si estaba nombrando/etiquetando un molde con diseño
                 setActivoTab('config');
                 setAdminSubView('dashboard');
                 setModoMiMolde(null);   // salir por el menú también sale del modo «mi molde»
@@ -11736,8 +12744,12 @@ export default function App() {
           </div>
         </Modal>
 
-        {/* Tab 1: Pedidos */}
-        {activoTab === 'pedidos' && (
+        {/* Tab 1: Pedidos.
+            `desdePedidoB` lo tapa: el molde con diseño usa LA MISMA herramienta de nombrar y de
+            etiqueta que Configuración, pero SIN entrar a Configuración (el cliente no tiene por
+            qué ver ni tocar los ajustes del taller — regla del usuario 2026-09-04). La pantalla
+            de la herramienta se renderiza abajo, dentro de esta misma pestaña. */}
+        {activoTab === 'pedidos' && !desdePedidoB && (
           <div className="panel animate-fade pedido-unido" style={['diseno', 'moldes', 'arte', 'planilla'].includes(pedidoPaso) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}}>
             {/* Título + pasos en UNA fila */}
             {(() => {
@@ -11775,7 +12787,45 @@ export default function App() {
                 (2026-08-21): el campo para escribir arriba y CENTRADO, y debajo los botones,
                 también centrados y de a TRES por línea. Los botones de acción, todos en la barra
                 de abajo — la misma de los otros 4 pasos. */}
-            {pedidoPaso === 'diseno' && !mapeandoOperario && (
+            {/* ── POR DÓNDE SE EMPIEZA ──────────────────────────────────────────────────────
+                Dos formas de armar el trabajo. No son excluyentes: se elige por dónde empezar y
+                un mismo pedido puede llevar de las dos (una camiseta con el diseño adentro y un
+                short del catálogo con su arte van a la misma tizada). */}
+            {pedidoPaso === 'diseno' && !mapeandoOperario && !vistaDiseno && (
+              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 14, paddingBottom: 6 }}>
+                <span style={{ fontSize: 16, fontWeight: 800, textAlign: 'center', flexShrink: 0 }}>¿Cómo vas a armar este trabajo?</span>
+                {/* LAS DOS FORMAS, MITAD Y MITAD. Ocupan todo el espacio libre: es LA decisión de
+                    esta pantalla, y con dos tarjetas chicas en el medio no se leía así. Un color
+                    sutil para cada una (los del sistema: cian y magenta) para distinguirlas de un
+                    vistazo sin que compitan con el resto de la interfaz. */}
+                <div className="dos-caminos" style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <button type="button" data-tour="pedido-armar-base" className="camino-card camino-cyan"
+                    onClick={() => setVistaDiseno('base')}>
+                    <Icon name="nestingPiezas" className="camino-icon" />
+                    <div className="camino-titulo">Armar con base</div>
+                    <div className="camino-texto">
+                      Elegís el diseño y la prenda de la moldería, y le cargás el arte.<br />Los pasos de siempre.
+                    </div>
+                  </button>
+                  <button type="button" data-tour="pedido-armar-con-diseno" className="camino-card camino-magenta"
+                    onClick={() => setVistaDiseno('con_diseno')}>
+                    <Icon name="upload" className="camino-icon" />
+                    <div className="camino-titulo">Cargar molde con diseño incluido</div>
+                    <div className="camino-texto">
+                      Subís los archivos que ya traen el diseño estampado en cada pieza.<br />
+                      Sin arte aparte ni mapeo: sólo decís qué es cada pieza.
+                    </div>
+                  </button>
+                </div>
+                {(disenosPedido.length > 0 || Object.keys(moldesEfimeros || {}).length > 0) && (
+                  <button className="btn ghost" style={{ fontSize: 12.5, alignSelf: 'center', flexShrink: 0 }} onClick={() => setVistaDiseno('base')}>
+                    ← Seguir con lo que ya venías armando
+                  </button>
+                )}
+              </div>
+            )}
+
+            {pedidoPaso === 'diseno' && !mapeandoOperario && vistaDiseno === 'base' && (
               <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, paddingTop: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -11828,7 +12878,11 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                {/* «← Inicio» vuelve a la pantalla de las dos formas de armar el trabajo. Sin esto,
+                    una vez elegido «Armar con base» no había forma de volver a cargar un molde con
+                    diseño (pedido del usuario 2026-09-03: poder navegar entre el inicio y los pasos). */}
                 <BarraPaso
+                  volver={<BtnVolver texto="Inicio" ancla="pedido-volver-inicio" onClick={() => setVistaDiseno(null)} />}
                   acciones={disenosPedido.length > 0 ? (
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>
                   ) : null}
@@ -11839,6 +12893,138 @@ export default function App() {
                     title={disenosPedido.length ? '' : detalleFaltaPaso(pasoItems)} />} />
               </div>
             )}
+
+            {/* ── CARGAR MOLDES QUE YA TRAEN EL DISEÑO ADENTRO ────────────────────────────────
+                Se suben VARIOS archivos (camiseta, short…). El nombre del molde sale del propio
+                archivo. Después, de cada uno se dice a qué diseño va y de qué columna de talle
+                toma sus medidas (camiseta / short), que es lo que la tizada necesita saber. */}
+            {pedidoPaso === 'diseno' && !mapeandoOperario && vistaDiseno === 'con_diseno' && (() => {
+              const _mios = (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno' && !p.de_otro);   // los MÍOS: un admin ve los de todos, pero su pedido no abre ni nombra los ajenos
+              // Las columnas de TALLE de la planilla del pedido. Cuando hay más de una («Talle» y
+              // «Talle short»), cada molde tiene que decir de cuál toma sus medidas.
+              const _tplPed = (plantillasPlanillas || []).find(t => t.id === plantillaComun) || {};
+              const _colsTalle = (_tplPed.columnas || []).filter(c => c.role === 'talle');
+              const _selN = moldesBSel.length;
+              return (
+              <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, paddingTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>Cargá los moldes con el diseño adentro</span>
+                    <Ayuda ancho={340}>Cada archivo tiene que traer <b>una capa por talle</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva nombre y número— una capa <b>«nombre»</b> y otra <b>«00»</b>. Podés cargar varios (camiseta, short…).</Ayuda>
+                  </div>
+
+                  {/* ZONA DE CARGA — acepta varios archivos de una */}
+                  <div className="upload-zone" data-tour="cargar-b-zona"
+                    onClick={() => !subirMoldeBusy && fileInputMoldeBRef.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); if (!subirMoldeBusy) subirMoldesConDiseno(e.dataTransfer.files); }}
+                    style={{ width: '100%', maxWidth: 620, padding: '26px 18px', cursor: subirMoldeBusy ? 'default' : 'pointer' }}>
+                    <Icon name="upload" className="upload-icon" />
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>Elegí los archivos (.ai · .pdf)</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4 }}>
+                      Podés soltar varios de una vez. El nombre del molde sale del archivo.
+                    </div>
+                  </div>
+                  <input type="file" ref={fileInputMoldeBRef} accept=".ai,.pdf" hidden multiple
+                    onChange={(e) => { subirMoldesConDiseno(e.target.files); e.target.value = ''; }} />
+
+                  {/* AVANCE HONESTO: el % real de la subida y después el reloj mientras el
+                      servidor lee el archivo (que con 100+ MB son un par de minutos). */}
+                  {subirBFase && (
+                    <div style={{ width: '100%', maxWidth: 620, display: 'flex', alignItems: 'center', gap: 18,
+                                  background: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: '18px 20px' }}>
+                      <CargaCircular fase={subirBFase.fase} pct={subirBFase.pct} seg={subirBFase.seg} />
+                      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 800 }}>
+                          {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}
+                        </span>
+                        {subirBFase.nombre && (
+                          <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            «{subirBFase.nombre}»{subirBFase.total > 1 ? ` · archivo ${subirBFase.i} de ${subirBFase.total}` : ''}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                          {subirBFase.fase === 'subiendo'
+                            ? 'No cierres la ventana.'
+                            : 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* LO YA CARGADO: se seleccionan uno o varios y se les pone el diseño */}
+                  {_mios.length > 0 && (
+                    <div style={{ width: '100%', maxWidth: 620, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-secondary)' }}>
+                        Cargados ({_mios.length}) · tocá los que van juntos en un diseño
+                      </div>
+                      <div data-tour="cargar-b-moldes" data-opciones="1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 9 }}>
+                        {_mios.map(p => {
+                          const on = moldesBSel.includes(p.id);
+                          const _dis = (moldesBDiseno || {})[p.id];
+                          const _col = (p.mapeo_columnas || {}).talle || 'talle';
+                          return (
+                            <button key={p.id} type="button"
+                              onClick={() => setMoldesBSel(s => s.includes(p.id) ? s.filter(x => x !== p.id) : [...s, p.id])}
+                              style={{ padding: '11px 12px', borderRadius: 11, cursor: 'pointer', textAlign: 'left',
+                                background: on ? 'rgba(0,216,245,0.12)' : 'rgba(255,255,255,0.03)',
+                                border: '1.5px solid ' + (on ? 'var(--accent)' : 'var(--border-light)') }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 3 }}>
+                                {p.piezas_registradas || 0} piezas
+                                {_dis ? <> · <span style={{ color: 'var(--accent)' }}>{_dis}</span></> : ' · sin diseño'}
+                              </div>
+                              {_colsTalle.length > 1 && (
+                                <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>
+                                  talle: <b>{(_colsTalle.find(c => c.id === _col) || {}).label || _col}</b>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {_selN > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, padding: '12px 13px', borderRadius: 12,
+                          background: 'rgba(0,216,245,0.06)', border: '1px solid var(--accent)' }}>
+                          <div style={{ fontSize: 12, fontWeight: 800 }}>{_selN} molde{_selN === 1 ? '' : 's'} seleccionado{_selN === 1 ? '' : 's'}</div>
+                          <div style={{ display: 'flex', gap: 7 }}>
+                            <input data-tour="cargar-b-diseno" value={disenoBInput} onChange={(e) => setDisenoBInput(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' && disenoBInput.trim()) ponerDisenoB(); }}
+                              placeholder="Nombre del diseño (ej. JUGADOR)"
+                              style={{ flex: 1, minWidth: 0, height: 36, padding: '0 11px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 13 }} />
+                            <button className="btn success" disabled={!disenoBInput.trim()} onClick={ponerDisenoB}
+                              style={{ padding: '8px 13px', fontSize: 12.5, borderRadius: 9 }}>Poner diseño</button>
+                          </div>
+                          {/* DE QUÉ COLUMNA SALE EL TALLE. Es lo que distingue una camiseta de un
+                              short cuando la planilla lleva las dos: sin esto, el short tomaría
+                              el talle de la camiseta y saldría del tamaño equivocado. */}
+                          {_colsTalle.length > 1 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>El talle lo toman de:</span>
+                              {_colsTalle.map(c => (
+                                <button key={c.id} type="button" className="btn ghost" data-tour="cargar-b-columna"
+                                  style={{ padding: '4px 10px', fontSize: 11.5, borderRadius: 8 }}
+                                  onClick={() => ponerColumnaTalleB(c.id)}>{c.label || c.id}</button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <BarraPaso
+                  volver={<BtnVolver texto="Atrás" ancla="cargar-b-volver" onClick={() => { setVistaDiseno(null); setMoldesBSel([]); }} />}
+                  acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
+                  centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
+                  aviso={_mios.length && _mios.some(p => !(moldesBDiseno || {})[p.id]) ? 'Falta decir a qué diseño va cada molde' : ''}
+                  siguiente={<BtnSiguiente texto="Nombrar las piezas" ancla="cargar-b-siguiente"
+                    disabled={!_mios.length || _mios.some(p => !(moldesBDiseno || {})[p.id])}
+                    onClick={irANombrarB} />} />
+              </div>
+              );
+            })()}
 
             {/* Paso 1 · Escribir diseños + asignar moldes (columna de alto fijo, sin scroll de página) */}
             {pedidoPaso === 'moldes' && !mapeandoOperario && (
@@ -11882,7 +13068,7 @@ export default function App() {
 
                 {/* Pestañas: el catálogo compartido vs. lo que subió este usuario */}
                 {(() => {
-                  const nMios = productosCat.productos.filter(p => p.propio && _moldeUsable(p.id)).length;
+                  const nMios = productosCat.productos.filter(p => p.propio && (_moldeUsable(p.id) || p.efimero)).length;
                   const tabs = [{ k: 'catalogo', n: 'Catálogo', c: varsCatalogo.length }, { k: 'mios', n: 'Mis artículos', c: nMios }];
                   return (
                     <div data-tour="pedido-tabs" style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
@@ -11913,17 +13099,34 @@ export default function App() {
                     const faltan = (productosCat.productos || []).filter(p => !p.personal && p.plantilla
                       && !(p.variantes || []).some(v => (v.valores || []).some(x => x.pieza_idx != null)));
                     if (!faltan.length) return null;
+                    // QUÉ le falta a cada uno: no es lo mismo «no creaste ninguna variable» que
+                    // «la variable está creada pero vacía» — el usuario veía el mismo cartel en los
+                    // dos casos y, con su variable ya armada, no entendía qué le pedían (2026-09-08).
+                    const _vacias = faltan.filter(p => (p.variantes || []).length > 0);
+                    const _sinNada = faltan.filter(p => !(p.variantes || []).length);
                     return (
                       <div style={{ fontSize: 12, lineHeight: 1.5, padding: '10px 12px', marginBottom: 12, borderRadius: 10,
                         background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: 'var(--text-secondary)' }}>
                         <b style={{ color: '#fbbf24' }}>{faltan.length === 1 ? 'Esta moldería todavía no se puede pedir' : `${faltan.length} molderías todavía no se pueden pedir`}</b>
-                        <div style={{ marginTop: 4 }}>
-                          {faltan.map(p => p.nombre).join(', ')} — {faltan.length === 1 ? 'no tiene' : 'no tienen'} ninguna <b>variable</b> con piezas.
-                          {' '}Acá se elige una variable («manga corta», «musculosa»), no el molde entero.
-                        </div>
+                        {_sinNada.length > 0 && (
+                          <div style={{ marginTop: 4 }}>
+                            {_sinNada.map(p => p.nombre).join(', ')} — {_sinNada.length === 1 ? 'no tiene' : 'no tienen'} ninguna <b>variable</b>.
+                            {' '}Acá se elige una variable («manga corta», «musculosa»), no el molde entero.
+                          </div>
+                        )}
+                        {_vacias.length > 0 && (
+                          <div style={{ marginTop: 4 }}>
+                            {_vacias.map(p => `${p.nombre} («${((p.variantes || [])[0] || {}).label || 'sin nombre'}»)`).join(', ')} —
+                            {' '}{_vacias.length === 1 ? 'su variable está creada pero SIN PIEZAS' : 'sus variables están creadas pero SIN PIEZAS'}.
+                            {' '}Hay que decirle qué piezas lleva.
+                          </div>
+                        )}
                         <div style={{ marginTop: 5, color: 'var(--text-muted)' }}>
-                          Se arma en <b>Configuración › Molderías › {faltan[0].nombre} › Variables</b>: primero <b>1. Nombrar</b> las piezas, después <b>2. Grupos</b> para crear la variable.
+                          Se arma en <b>Configuración › Molderías › {faltan[0].nombre} › Variables</b>: se abre el <b>grupo</b>,
+                          se toca <b>«+ Elegir piezas»</b> de la variable y se marcan sus piezas en el visor.
                         </div>
+                        <button type="button" className="btn ghost" style={{ marginTop: 8, fontSize: 11.5, padding: '5px 10px' }}
+                          onClick={() => fetchProductos()}>↻ Ya las configuré, actualizá</button>
                       </div>
                     );
                   })()}
@@ -11943,7 +13146,10 @@ export default function App() {
                       (ese paso se les recorta), así que se eligen ENTEROS: el motor genera
                       todas sus piezas. ── */}
                   {pedidoTabMoldes === 'mios' && (() => {
-                    const mios = productosCat.productos.filter(p => p.propio && _moldeUsable(p.id));
+                    // `|| p.efimero`: el molde con el diseño adentro entra con sus piezas todavía sin
+                    // nombrar («Pieza 1»…) y es JUSTAMENTE lo que el cliente va a hacer ahora. Con el
+                    // filtro de siempre desaparecía de su propia pestaña apenas se subía.
+                    const mios = productosCat.productos.filter(p => p.propio && (_moldeUsable(p.id) || p.efimero));
                     return (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                         {mios.map(p => {
@@ -12017,10 +13223,22 @@ export default function App() {
                           );
                         })}
                         {/* Tarjeta "+" para sumar otro artículo propio */}
-                        <button type="button" onClick={() => { setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                        <button type="button" onClick={() => { setSubirMoldeConDiseno(false); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
                           style={{ minHeight: 150, borderRadius: 12, border: '1.5px dashed var(--border-light)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 12.5, fontWeight: 700 }}>
                           <Icon name="plus" style={{ width: 18, height: 18 }} />
                           Subir mi propio molde
+                        </button>
+                        {/* LA OTRA FORMA DE CARGAR: un solo archivo que YA TRAE EL DISEÑO adentro
+                            de cada pieza. No hay arte aparte ni mapeo, y el molde vale sólo para
+                            este pedido (no queda guardado). */}
+                        <button type="button" data-tour="pedido-subir-con-diseno"
+                          onClick={() => { setSubirMoldeConDiseno(true); setSubirMoldeNombre(''); setSubirMoldeFile(null); setSubirMoldeOpen(true); }}
+                          style={{ minHeight: 150, borderRadius: 12, border: '1.5px dashed var(--accent, #6c8cff)', background: 'rgba(108,140,255,0.06)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 12.5, fontWeight: 700, padding: '10px 12px', textAlign: 'center' }}>
+                          <Icon name="plus" style={{ width: 18, height: 18 }} />
+                          Molde con el diseño adentro
+                          <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                            Un solo archivo, sin arte aparte.<br />Vale para este pedido.
+                          </span>
                         </button>
                       </div>
                     );
@@ -12754,6 +13972,113 @@ export default function App() {
                   aplicar: (id) => { if (telaPicker?.destino === 'seleccion') { setTelaSelPiezas(telaPicker.piezas); } aplicarTela(id); setTelaAsignMode(false); },
                 };
                 const _abrirPicker = (destino) => { setTelaPickerQ(''); setTelaPicker({ destino, piezas: destino === 'seleccion' ? [...telaSelPiezas] : [] }); };
+                // ── CAMINO B: PANEL DE NOMBRAR LAS PIEZAS ─────────────────────────────────────
+                // El molde trae el diseño adentro, así que acá no se carga ningún arte: lo que
+                // falta es decir QUÉ ES cada pieza. Sin eso no hay etiqueta que diga «Espalda», no
+                // hay telas (se asignan por nombre) y —lo que menos se ve— no funcionan los
+                // toggles: el motor arma la prenda mirando los TOKENS DEL NOMBRE, así que con una
+                // pieza llamada «Manga 1» elegir corta o larga da exactamente la misma tizada.
+                const _esB = _esConDiseno(_id);
+                const _piezasB = (etqData?.piezas || []);
+                const _selNomB = selNombrarB || new Set();
+                // NOMBRAR sobre el lienzo de TODOS los talles (como Moldería). La selección vive en
+                // idx de ese lienzo; el panel lista las piezas del talle guía, así que se comparan
+                // por (mesa, índice en la mesa), que es la identidad de la pieza en el camino B.
+                const _todasBOn = _esB && !etqPickB && !!todasB?.piezas?.length && todasB.pid === _id;
+                const _clavePz = (pz) => `${pz.mesa}|${pz.t_idx}`;
+                const _selPares = new Set((_todasBOn ? todasB.piezas : _piezasB).filter(p => _selNomB.has(p.idx)).map(_clavePz));
+                // Los talles con el ojo cerrado no se dibujan (columna de la izquierda).
+                const _vfTodasB = _todasBOn
+                  ? { show: new Set(todasB.piezas.filter(p => !tallesOcultos.has(p.talle)).map(p => p.idx)), pos: new Map(), vb: null }
+                  : null;
+                const _nomB = (pz) => etqNombres[pz.idx] || '';
+                const _sinNombreB = _piezasB.filter(pz => _ES_PIEZA_SIN_NOMBRE.test(_nomB(pz)));
+                // Nombres sugeridos: los del catálogo del sistema. Ahorran teclado y, sobre todo,
+                // hacen que los toggles de la planilla encuentren su palabra («Manga Corta»).
+                const _sugeridos = [...new Set((catalogoGrupos || []).flatMap(g => g.piezas || []))].slice(0, 12);
+                // Cuántas piezas ya tienen ubicada su etiqueta (la del molde, no la global).
+                const _etqPos = (etiquetaConfig?.posiciones) || {};
+                const _etqPuestas = _piezasB.filter(pz => _etqPos[_nomB(pz)]).length;
+                const panelNombrarJSX = !_esB ? null : (
+                  <div data-tour="pieza-b-lista" style={{ width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 11 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Piezas y etiqueta</span>
+                    </div>
+                    {/* LAS DOS TAREAS DEL CLIENTE, en orden, y CON LAS PANTALLAS DE CONFIGURACIÓN
+                        (regla del usuario 2026-09-04: exactamente la misma herramienta que
+                        Moldería y que la pestaña Etiqueta). Primero se nombran todas las piezas de
+                        todos los talles; después se elige el talle guía y se ubica la etiqueta. */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
+                      background: _sinNombreB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)',
+                      border: '1px solid ' + (_sinNombreB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)') }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: _sinNombreB.length ? 'var(--warning)' : 'var(--success)' }}>
+                        1 · {_sinNombreB.length ? `Faltan nombrar ${_sinNombreB.length} de ${_piezasB.length}` : `Las ${_piezasB.length} piezas tienen nombre`}
+                      </span>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        Se nombran en Moldería, con todos los talles a la vista: tocá las que son la misma pieza y escribí qué es.
+                      </span>
+                      <button type="button" className={`btn ${_sinNombreB.length ? 'primary' : 'ghost'}`} data-tour="pieza-b-nombrar"
+                        style={{ padding: '7px 10px', fontSize: 12, borderRadius: 9, marginTop: 3 }}
+                        onClick={() => abrirNombrarB(_id)}>
+                        {_sinNombreB.length ? 'Nombrar las piezas' : 'Ver o corregir nombres'}
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
+                      background: _sinNombreB.length ? 'rgba(255,255,255,0.03)' : (_etqPuestas < _piezasB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)'),
+                      border: '1px solid ' + (_sinNombreB.length ? 'var(--border-light)' : (_etqPuestas < _piezasB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)')),
+                      opacity: _sinNombreB.length ? 0.55 : 1 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: _sinNombreB.length ? 'var(--text-muted)' : (_etqPuestas < _piezasB.length ? 'var(--warning)' : 'var(--success)') }}>
+                        2 · Etiqueta: {_etqPuestas} de {_piezasB.length} ubicadas
+                      </span>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        Con todo nombrado, elegís el talle guía y tocás el borde de cada pieza donde va. Las que no toques salen abajo, centradas.
+                      </span>
+                      <button type="button" className="btn ghost" data-tour="etqb-piezas"
+                        style={{ padding: '7px 10px', fontSize: 12, borderRadius: 9, marginTop: 3 }}
+                        disabled={!!_sinNombreB.length}
+                        title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : 'Marcá dónde va la etiqueta de corte'}
+                        onClick={() => abrirEtiquetaB(_id)}>Ubicar la etiqueta</button>
+                    </div>
+                    <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 5, minHeight: 0 }}>
+                      {_piezasB.map(pz => {
+                        const _nom = _nomB(pz);
+                        const _sin = _ES_PIEZA_SIN_NOMBRE.test(_nom);
+                        const _puesta = !!_etqPos[_nom];
+                        return (
+                          <div key={`${pz.mesa}-${pz.t_idx}`}
+                            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 9px', borderRadius: 9,
+                              border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.2)' }}>
+                            <svg viewBox={`${pz.px || 0} ${pz.py || 0} ${Math.max(pz.pw || 1, 1)} ${Math.max(pz.ph || 1, 1)}`}
+                              width="24" height="28" style={{ flexShrink: 0 }} preserveAspectRatio="xMidYMid meet">
+                              <path d={pz.path_svg} fill={_sin ? 'rgba(255,255,255,0.12)' : 'rgba(0,216,245,0.18)'}
+                                stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                              {_puesta && (
+                                <circle cx={(pz.px || 0) + (_etqPos[_nom].rx ?? 0.5) * (pz.pw || 1)}
+                                  cy={(pz.py || 0) + (_etqPos[_nom].ry ?? 0.92) * (pz.ph || 1)}
+                                  r={Math.max(2, (pz.pw || 20) * 0.07)} fill="var(--success)" />
+                              )}
+                            </svg>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: 12, fontWeight: _sin ? 500 : 800, fontStyle: _sin ? 'italic' : 'normal',
+                                color: _sin ? 'var(--text-muted)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {_sin ? 'sin nombre' : _nom}
+                              </div>
+                              <div style={{ fontSize: 9.5, color: _puesta ? 'var(--success)' : 'var(--text-muted)' }}>
+                                {Math.round(pz.w_cm || 0)} × {Math.round(pz.h_cm || 0)} cm{_sin ? '' : (_puesta ? ' · etiqueta ubicada' : ' · etiqueta abajo')}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+
+                // CAMINO B: mientras falte nombrar alguna pieza, el panel lateral es el de
+                // nombrar. Las telas se asignan POR NOMBRE, así que ofrecerlas antes sería peor
+                // que inútil: las nueve «Pieza N» comparten el mismo genérico («Pieza») y una
+                // sola tela se las llevaría a todas de una.
                 const panelTelaJSX = (
                   <div data-tour="telas-panel" style={{ width: 244, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 12 }}>
                     {/* CABECERA */}
@@ -12856,6 +14181,14 @@ export default function App() {
                     )}
                   </div>
                 );
+                // Qué se muestra al costado del visor. En el camino B, mientras falte nombrar
+                // alguna pieza el panel es el de nombrar y NO se puede pasar a otra cosa: el
+                // panel de «Diseños» pediría un arte que este molde no lleva, y el de telas
+                // asigna POR NOMBRE (las nueve «Pieza N» comparten genérico: una sola tela se las
+                // llevaría a todas). Con todo nombrado, sigue el flujo de siempre.
+                // En el camino B el panel de nombrar QUEDA, aunque ya estén todas nombradas: es
+                // por donde se corrige un nombre. Lo único que lo tapa es el modo telas.
+                const _panelFijoB = _esB ? panelNombrarJSX : null;
                 return (
                 <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                   {/* Navegación por DISEÑO (chips con progreso) */}
@@ -12961,14 +14294,14 @@ export default function App() {
                         setSelectedPiezaMapeo={setSelectedPiezaMapeo}
                         objetosEditables={editablesOverlay}
                         editablesRaw={editableData?.objetos || []}
-                        etqNombres={etqNombres}
+                        etqNombres={_todasBOn ? {} : etqNombres}
                         bordeConfig={bordeConfig}
                         etiquetaConfig={etiquetaConfig}
                         talleRef={etqData?.talle_ref}
                         previewPiezas={previewPiezas}
                         onGuardar={guardarMapeo}
                         onCerrar={null}
-                        vf={vfArte}
+                        vf={_todasBOn ? _vfTodasB : vfArte}
                         onCargarDiseno={() => fileInputArteRef.current.click()}
                         titulo={(
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -12993,9 +14326,14 @@ export default function App() {
                             onClick={() => { setFuenteArchivo(null); setFuenteFaltanteSel((fuentesEstado?.faltantes || [])[0] || ''); setFuenteModal(true); cargarFuentesEstado(); }}>
                             Tipografía{fuentesEstado?.faltantes?.length ? ` (${fuentesEstado.faltantes.length})` : ''}
                           </button>
+                          {/* CAMINO B: este molde NO lleva arte aparte (ya lo trae adentro). El
+                              botón se esconde porque cargarle un arte acá no haría nada: el motor
+                              dibuja la pieza con el diseño del propio archivo. */}
+                          {!_esB && (
                           <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
                           </button>
+                          )}
                           {/* El botón depende SÓLO de que haya telas en el sistema. Antes miraba la
                               lista ya filtrada por la selección: con telas asignadas sólo por pieza
                               (o al seleccionar piezas sin telas en común) desaparecía en pleno uso. */}
@@ -13011,15 +14349,37 @@ export default function App() {
                         onTelaClick={(gen) => setTelaSelPiezas(s => s.includes(gen) ? s.filter(x => x !== gen) : [...s, gen])}
                         onTelaVacio={() => setTelaSelPiezas([])}
                         panelTela={panelTelaJSX}
+                        panelFijo={_panelFijoB}
+                        etqPickModo={false}
+                        onPickEtiqueta={ubicarEtiquetaB}
+                        nombrarModo={false}
+                        selNombrarB={_selNomB}
+                        onPiezaNombrarClick={togglePiezaNombrarB}
+                        onRubberNombrar={rubberNombrarB}
                         aviso={telaAviso}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)' }}>{term.variante === 'Talle' ? 'Talles' : term.variante}</div>
+                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ flex: 1 }}>{_esB && etqPickB ? 'Talle guía' : (term.variante === 'Talle' ? 'Talles' : term.variante)}</span>
+                              {_todasBOn && (() => {
+                                // OJO GENERAL: el mismo gesto de un talle, aplicado a todos (como en Moldería).
+                                const _todosOn = !(estado.talles || []).some(t => tallesOcultos.has(t));
+                                return (
+                                  <span title={_todosOn ? 'Ocultar todos los talles' : 'Mostrar todos los talles'} data-tour="arteb-ojo-todos"
+                                    onClick={() => setTallesOcultos(_todosOn ? new Set(estado.talles) : new Set())}
+                                    style={{ cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>{_todosOn ? '👁' : '◡'}</span>
+                                );
+                              })()}
+                            </div>
                             <div style={{ overflowY: 'auto', flex: 1 }}>
                               {estado.talles.map(t => {
-                                const on = (etqData?.talle_ref || '') === t;
+                                // NOMBRAR (camino B, todos los talles juntos): el ojo muestra u oculta ese
+                                // talle. ETIQUETA y camino A: se elige UN talle (el guía) y se ve solo ése.
+                                const on = _todasBOn ? !tallesOcultos.has(t) : (etqData?.talle_ref || '') === t;
                                 return (
-                                  <button key={t} type="button" onClick={() => verVarianteOperario(t)}
+                                  <button key={t} type="button" onClick={() => _todasBOn
+                                      ? setTallesOcultos(prev => { const n = new Set(prev); if (n.has(t)) n.delete(t); else n.add(t); return n; })
+                                      : verVarianteOperario(t)}
                                     style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', border: 'none', borderLeft: on ? '3px solid var(--accent)' : '3px solid transparent', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer', background: on ? 'rgba(0,216,245,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: on ? 700 : 500, fontSize: 13 }}>
                                     <Icon name="eye" style={{ width: 13, height: 13, opacity: on ? 1 : 0.35, flexShrink: 0 }} />
                                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t}</span>
@@ -13028,20 +14388,43 @@ export default function App() {
                                 );
                               })}
                             </div>
-                            <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '9px 12px', borderTop: '1px solid var(--border-light)', lineHeight: 1.4 }}>Tocá un talle para verlo en esa variante.</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', padding: '9px 12px', borderTop: '1px solid var(--border-light)', lineHeight: 1.4 }}>
+                              {_todasBOn ? 'El ojo muestra u oculta ese talle. Se nombran todos a la vez.'
+                                : (_esB && etqPickB ? 'El talle que elijas es el guía: la etiqueta se ubica sobre él.' : 'Tocá un talle para verlo en esa variante.')}
+                            </div>
                           </div>
                         ) : null}
                       />
                     </div>
                   ) : (
+                    /* 🔴 SIN MOLDE NO SE «CARGA» NADA: se dice y se ofrece la salida. Si el molde
+                       del pedido dejó de existir (los del camino B son de un solo pedido), acá
+                       quedaba un «Cargando el molde…» eterno — pasó de verdad. */
+                    !_id ? (
+                      <div className="card" style={{ padding: 22, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 700 }}>Este diseño se quedó sin molde</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', maxWidth: 380, lineHeight: 1.5 }}>
+                          El molde que tenía ya no está en el servidor. Los moldes con el diseño adentro
+                          se cargan para un pedido y no quedan guardados.
+                        </span>
+                        <button className="btn primary" style={{ padding: '8px 16px', fontSize: 12.5 }}
+                          onClick={() => setPedidoPaso('moldes')}>Elegir el molde</button>
+                      </div>
+                    ) : (
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Cargando el molde…</div>
+                    )
                   )}
 
                   {/* (La asignación de tela por pieza ahora vive dentro del panel lateral, en 2 vistas.) */}
 
                   {/* Barra inferior fija */}
+                  {/* Volver: en un molde con el diseño adentro, atrás está la pantalla donde se
+                      cargaron los archivos (el paso «Moldes» no tuvo parte en ese camino); en los
+                      demás, el paso de los moldes, como siempre. */}
                   <BarraPaso
-                    volver={<BtnVolver texto="Moldes" ancla="pedido-volver-moldes" onClick={() => setPedidoPaso('moldes')} />}
+                    volver={_esB
+                      ? <BtnVolver texto="Cargar moldes" ancla="arte-volver-cargar-b" onClick={() => { setVistaDiseno('con_diseno'); setPedidoPaso('diseno'); }} />
+                      : <BtnVolver texto="Moldes" ancla="pedido-volver-moldes" onClick={() => setPedidoPaso('moldes')} />}
                     acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
                     centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
@@ -13963,6 +15346,16 @@ export default function App() {
                         </button>
                       );
                     })()}
+                    {/* TERMINAR: lo mismo que «Nuevo pedido», pero dicho desde el final. Existe
+                        porque el molde con el diseño adentro se subió SÓLO para este pedido y hay
+                        que darle a la persona un lugar claro donde cerrarlo — si no, ese archivo
+                        (>100 MB) se queda en el servidor hasta que lo junte el barrido. */}
+                    {efimerosDelPedido().length > 0 && (
+                      <button className="btn" data-tour="pedido-terminar"
+                        style={{ padding: '8px 14px', fontSize: 12.5, fontWeight: 700 }}
+                        title="Cerrar el pedido y borrar el molde que subiste para él"
+                        onClick={reiniciarPedido}>✓ Terminar pedido</button>
+                    )}
                     <button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5 }} onClick={reiniciarPedido} title="Empezar un pedido nuevo desde 0">↺ Nuevo pedido</button>
                   </div>
                 </div>
@@ -14148,10 +15541,15 @@ export default function App() {
         )}
 
         {/* Tab 2: Configuración Avanzada (CRM Dashboard & Subviews) */}
-        {activoTab === 'config' && (
+        {/* Configuración. `desdePedidoB` la abre SIN cambiar de pestaña y con `adminSubView` en
+            «productos» + `molderiaAbierta`: se renderiza SÓLO el espacio de trabajo del molde
+            (visor + la herramienta), y todo lo que es configuración —el menú de ajustes, re-subir
+            plantilla, nombrar talles, el volver a ajustes— queda oculto (ver `_soloHerramienta`).
+            Así el cliente usa la misma herramienta sin entrar nunca al espacio del taller. */}
+        {(activoTab === 'config' || desdePedidoB) && (
           <>
             {/* 1. CRM Dashboard */}
-            {adminSubView === 'dashboard' && (
+            {adminSubView === 'dashboard' && !desdePedidoB && (
               <div className="panel animate-fade">
                 <div className="panel-header">
                   <h2>Panel de Configuración</h2>
@@ -14216,6 +15614,25 @@ export default function App() {
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Telas</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
                         Registrá tus telas (nombre + ancho) y armá grupos de telas que se pueden combinar entre sí.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Card: la configuración de los moldes que traen el DISEÑO ADENTRO. La deja el
+                      taller UNA vez y la usan todos: el cliente que sube uno desde el pedido no
+                      configura el borde ni la etiqueta, sólo ubica dónde va. */}
+                  <div className="crm-config-card cyan" data-tour="cfg-con-diseno" onClick={() => {
+                    setAdminSubView('con_diseno');
+                    cargarCfgConDiseno();
+                  }}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="edit" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Molde con diseño</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        El borde de corte, la etiqueta y el nesting de los moldes que ya traen el diseño
+                        adentro. Se configura una vez y vale para todos.
                       </p>
                     </div>
                   </div>
@@ -14316,7 +15733,15 @@ export default function App() {
                   </div>
                 )}
 
-                {!molderiaAbierta ? (
+                {desdePedidoB && (!molderiaAbierta || !prodCfg) ? (
+                  /* CAMINO B desde el pedido: la grilla de molderías es del taller y el cliente no
+                     la ve nunca. Si el molde todavía no está en el catálogo del navegador (recién
+                     subido, o el catálogo se está recargando), se espera acá y no en blanco. */
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '40px 0', color: 'var(--text-secondary)', fontSize: 13 }}>
+                    Abriendo el molde…
+                    <button className="btn ghost" onClick={volverAlPedidoB} style={{ marginLeft: 'auto', fontSize: 12.5 }}>← Volver al pedido</button>
+                  </div>
+                ) : !molderiaAbierta ? (
                   <>
                     <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
                       <div>
@@ -14423,7 +15848,13 @@ export default function App() {
                   <>
                     <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        {modoMiMolde ? (
+                        {desdePedidoB ? (
+                          /* CAMINO B desde el pedido: nombrar / etiqueta se hacen con estas mismas
+                             pantallas; la salida es el paso Arte del pedido, con los nombres frescos. */
+                          <button className="btn primary" data-tour="volver-pedido-b" onClick={volverAlPedidoB} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 14px' }}>
+                            ← Volver al pedido
+                          </button>
+                        ) : modoMiMolde ? (
                           /* Vino desde el PEDIDO: la salida natural es volver al pedido, no a la
                              grilla de molderías (que es pantalla de configuración/catálogo). */
                           <button className="btn primary" onClick={() => { setModoMiMolde(null); setMolderiaAbierta(null); setTabAjustesMolde('menu'); setAdminSubView('dashboard'); setActivoTab('pedidos'); setPedidoPaso('moldes'); setPedidoTabMoldes('mios'); }} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '8px 14px' }}>
@@ -14436,7 +15867,13 @@ export default function App() {
                         )}
                         <div>
                           <h2 style={{ margin: 0 }}>{prodCfg.nombre}{modoMiMolde ? <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 10, padding: '2px 8px', borderRadius: 999, background: 'rgba(0,216,245,0.14)', color: 'var(--accent)', verticalAlign: 'middle' }}>MI ARTÍCULO</span> : null}</h2>
-                          <p style={{ margin: 0 }}>{modoMiMolde ? 'Cargá los talles del molde e indicá qué es cada pieza. Después volvé al pedido.' : 'Configurá el molde, el diseño y la planilla de esta moldería.'}</p>
+                          {/* El cliente (camino B desde el pedido) no está «configurando la
+                              moldería»: está haciendo UNA cosa, y el subtítulo lo dice. */}
+                          <p style={{ margin: 0 }}>{_soloHerramienta
+                            ? (tabAjustesMolde === 'etiqueta'
+                                ? 'Elegí el talle guía y tocá el borde de cada pieza donde va su etiqueta. Después volvé al pedido.'
+                                : 'Tocá las piezas que son la misma —están todos los talles— y escribí qué es. Después volvé al pedido.')
+                            : (modoMiMolde ? 'Cargá los talles del molde e indicá qué es cada pieza. Después volvé al pedido.' : 'Configurá el molde, el diseño y la planilla de esta moldería.')}</p>
                         </div>
                       </div>
                     </div>
@@ -14634,9 +16071,11 @@ export default function App() {
                           </div>
                         ) : (
                           <div key={tabAjustesMolde} className="settings-slide" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                            {!_soloHerramienta && (
                             <button className="btn ghost" data-tour="ajuste-volver" onClick={() => setTabAjustesMolde('menu')} style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 10px' }}>
                               ⬅ Volver a ajustes
                             </button>
+                            )}
 
                       {/* Contenido según pestaña activa */}
                       {tabAjustesMolde === 'telas' && (() => {
@@ -15048,6 +16487,9 @@ export default function App() {
                           </button>
                         );
                         const offSet = new Set((ec.piezas_off || []).map(nombreGenerico));   // por NOMBRE GENÉRICO (tolera datos viejos con número)
+                        // CAMINO B: se apaga SOLO lo que decide el taller. Va bloque por bloque y no
+                        // como envolvente: la opacidad de un padre no se puede revertir en el hijo.
+                        const _soloTaller = _esConDiseno(pidCfg) ? { opacity: 0.45, pointerEvents: 'none' } : undefined;
                         const pos = ec.posicion || { rx: 0.5, ry: 0.92 };
                         const align = ec.align || 'centro';
                         const anchorSvg = align === 'izquierda' ? 'start' : align === 'derecha' ? 'end' : 'middle';
@@ -15114,12 +16556,24 @@ export default function App() {
                                 </div>
                               );
                             })()}
-                            <div data-tour="etq-activo" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            {/* CAMINO B: la FORMA de la etiqueta (si va, qué muestra, tamaño, color, borde)
+                                la deja el taller UNA vez para todos los moldes con diseño (config viva,
+                                Configuración → Moldes con diseño). Acá se muestra tal cual, pero no se
+                                edita: el servidor la ignoraría (`set_etiqueta` sólo toma las posiciones). */}
+                            {_esConDiseno(pidCfg) && (
+                              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45, padding: '8px 11px', borderRadius: 9, background: 'rgba(0,216,245,0.07)', border: '1px solid rgba(0,216,245,0.25)' }}>
+                                Este molde trae el diseño adentro: <b>qué muestra</b> la etiqueta y su <b>tamaño</b> los define el
+                                taller, igual para todos. Acá marcás <b>dónde va</b> en cada pieza, y podés cambiarle el
+                                <b>color del texto</b>, el <b>color del contorno</b> y la <b>alineación</b>.
+                              </div>
+                            )}
+                            <div style={{ display: 'contents' }}>
+                            <div data-tour="etq-activo" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', ..._soloTaller }}>
                               <span style={{ fontSize: 13, fontWeight: 600 }}>Mostrar etiqueta</span>
                               <Sw on={ec.activo} onClick={() => setEC({ activo: !ec.activo })} />
                             </div>
                             {ec.activo && (<>
-                              <div data-tour="etq-mostrar">
+                              <div data-tour="etq-mostrar" style={_soloTaller}>
                                 <label style={lbl}>Qué muestra</label>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                   {chip(term.variante || 'Talle', ec.mostrar.talle, () => setEC({ mostrar: { ...ec.mostrar, talle: !ec.mostrar.talle } }))}
@@ -15168,7 +16622,7 @@ export default function App() {
                                   </>);
                                 })()}
                               </div>
-                              <div>
+                              <div style={_soloTaller}>
                                 <label style={lbl}>Tamaño del texto (mm)</label>
                                 <input type="number" min="1" max="40" step="0.5" value={ec.size_mm}
                                   onChange={(e) => setEC({ size_mm: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 110 }} />
@@ -15178,20 +16632,23 @@ export default function App() {
                                 {swatchBtn(ec.color, 'Color del texto', (c) => setEC({ color: c }))}
                               </div>
                               <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: 12 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, ..._soloTaller }}>
                                   <span style={{ fontSize: 13, fontWeight: 600 }}>Borde del texto (halo)</span>
                                   <Sw on={ec.borde_activo} onClick={() => setEC({ borde_activo: !ec.borde_activo })} />
                                 </div>
                                 {ec.borde_activo && (<>
                                   <label style={lbl}>Color del borde</label>
                                   {swatchBtn(ec.borde_color, 'Color del borde', (c) => setEC({ borde_color: c }))}
+                                  <div style={_soloTaller}>
                                   <label style={{ ...lbl, marginTop: 12 }}>Tamaño del borde (mm)</label>
                                   <input type="number" min="0" max="10" step="0.1" value={ec.borde_mm}
                                     onChange={(e) => setEC({ borde_mm: parseFloat(e.target.value) || 0 })} style={{ ...inp, width: 110 }} />
+                                  </div>
                                 </>)}
                               </div>
                               {/* el sí/no por pieza vive en la LISTA DE PIEZAS de arriba */}
                             </>)}
+                            </div>
                             <button className="btn primary" data-tour="etq-guardar" onClick={guardarEtiqueta} style={{ alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar etiqueta</button>
                             {/* el ColorPickerModal ahora es GLOBAL (una sola instancia arriba de todo) */}
                           </div>
@@ -15289,8 +16746,10 @@ export default function App() {
 
                       {tabAjustesMolde === 'molderia' && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                          {/* Botones de Carga (la explicación de qué hace este panel vive en el «?») */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {/* Botones de Carga (la explicación de qué hace este panel vive en el «?»).
+                              `_soloHerramienta` (camino B desde el pedido): re-subir el molde es del
+                              taller — el cliente sube su archivo en el pedido, no acá. */}
+                          <div style={{ display: _soloHerramienta ? 'none' : 'flex', alignItems: 'center', gap: 8 }}>
                             <button className="btn ghost" onClick={() => fileInputPlantillaRef.current.click()} style={{ fontSize: 11.5, flex: 1 }}>
                               <Icon name="upload" style={{ width: 12, height: 12, marginRight: 6 }} /> Re-subir Plantilla
                             </button>
@@ -15310,7 +16769,9 @@ export default function App() {
                               consecuencias); y lo GUARDADO ya no se puede borrar — para sacar una
                               pieza se borra el molde entero y se sube de nuevo. Por eso acá no hay
                               ningún «deshacer». */}
-                          {etqData && (
+                          {/* En un molde con el diseño adentro no se agregan piezas: cada pieza
+                              es su máscara con su diseño, y el alta las lee del archivo. */}
+                          {etqData && !_esConDiseno(pidCfg) && (
                           <div data-tour="pieza-agregar" style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 9 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', flex: 1 }}>Agregar una pieza</span>
@@ -15420,6 +16881,9 @@ export default function App() {
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                   <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>{term.variante} de Guía</span>
+                                  {/* Acomodar piezas es del emparejado por forma: en el camino B la
+                                      correspondencia entre talles es exacta y no hay nada que acomodar. */}
+                                  {!_esConDiseno(pidCfg) && (
                                   <button
                                     type="button"
                                     className={`btn ${modoAcomodar ? 'success' : 'ghost'}`}
@@ -15429,6 +16893,7 @@ export default function App() {
                                     <Icon name={modoAcomodar ? 'check' : 'edit'} style={{ width: 11, height: 11 }} />
                                     {modoAcomodar ? 'Guardando pos.' : 'Acomodar piezas'}
                                   </button>
+                                  )}
                                 </div>
                                 {/* La guía es del MOLDE, no de la vista: en el modo «asignar variantes
                                     por piezas» el visor muestra el archivo ORIGINAL (una sola capa) y acá
@@ -15439,16 +16904,24 @@ export default function App() {
                                   type="button"
                                   className="btn"
                                   data-tour="molde-guia"
-                                  disabled={varPzModo}
-                                  title={varPzModo ? 'Terminá de asignar las piezas para cambiar la guía' : ''}
-                                  style={{ width: '100%', justifyContent: 'space-between', padding: '10px 14px', fontSize: 13, opacity: varPzModo ? 0.65 : 1, cursor: varPzModo ? 'not-allowed' : 'pointer' }}
-                                  onClick={() => { if (!varPzModo) setModalTalleGuiaOpen(true); }}
+                                  title={varPzModo ? 'Sale de «elegir piezas» y abre el selector' : ''}
+                                  style={{ width: '100%', justifyContent: 'space-between', padding: '10px 14px', fontSize: 13 }}
+                                  onClick={async () => {
+                                    // 🔴 Antes esto quedaba DESHABILITADO mientras durara el modo «por
+                                    // piezas» — y ese modo se prende solo (ver `NombrarVariantes`) y no
+                                    // se apagaba al cambiar de pestaña: el talle de guía quedaba
+                                    // imposible de cambiar sin recargar (reporte del usuario
+                                    // 2026-09-07). Ahora el botón SALE del modo (que recarga la
+                                    // detección normal, con los talles de verdad) y abre el selector.
+                                    if (varPzModo) await activarVarPz(false);
+                                    setModalTalleGuiaOpen(true);
+                                  }}
                                 >
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <span style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600 }}>Actual:</span>
                                     <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 14 }}>{etqData.guia || etqData.talle_ref}</span>
                                   </span>
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{varPzModo ? '' : 'Cambiar ▾'}</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cambiar ▾</span>
                                 </button>
                               </div>
 
@@ -15467,7 +16940,10 @@ export default function App() {
                               )}
 
                               {/* Nombrar variantes: sólo hace falta si el molde vino con las capas
-                                  sin nombre, pero se deja siempre disponible para corregirlas. */}
+                                  sin nombre, pero se deja siempre disponible para corregirlas.
+                                  Oculto para el cliente (`_soloHerramienta`): reescribe las capas
+                                  del archivo, y en el camino B los talles ya son las capas. */}
+                              {!_soloHerramienta && (
                               <NombrarVariantes
                                 pid={pidCfg}
                                 term={term}
@@ -15566,11 +17042,33 @@ export default function App() {
                                   );
                                 })()}
                               </NombrarVariantes>
+                              )}
 
                               {/* EMPAREJAR TALLES (§10.c). El nombre de una pieza se propaga al resto de
                                   los talles comparando cómo están dispuestas. Si el molde NO viene
                                   acomodado de forma parecida en cada talle, esa comparación no tiene
                                   señal → acá el usuario reacomoda a mano y/o corrige la pieza homóloga. */}
+                              {/* CONFIGURACIÓN GUARDADA: el molde con el diseño adentro se borra con el
+                                  pedido y se lleva TODO lo configurado. Acá se guarda con un nombre y se
+                                  vuelve a aplicar la próxima vez que se suba el mismo archivo, en vez de
+                                  rehacer los pasos (pedido del usuario 2026-09-08). */}
+                              <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>Configuración</span>
+                                    <Ayuda ancho={300}>Guardá <b>dónde va la etiqueta en cada pieza</b> y el
+                                      nombre de las piezas, y volvé a aplicarlo cuando subas <b>el mismo archivo</b>
+                                      en otro pedido, en vez de marcarlo todo de nuevo. Lo que es del pedido
+                                      (grupos, variables, telas, planilla) va sólo si lo tildás. <b>No se aplica
+                                      sola</b>: la elegís vos y después mirás en el visor si acomodó bien.</Ayuda>
+                                  </span>
+                                  <button type="button" className="btn ghost" data-tour="molde-cfg-abrir"
+                                    style={{ padding: '4px 10px', fontSize: 11 }}
+                                    onClick={() => { setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(); }}>
+                                    Guardar / usar
+                                  </button>
+                                </div>
+                              </div>
                               {(tallesMolde.length > 1) && (
                                 <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: 'transparent' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -15653,7 +17151,8 @@ export default function App() {
                                         const porIdx = new Map((empTodasData?.piezas || []).map(p => [p.idx, p]));
                                         const sel = Array.from(selNombrar).map(g => porIdx.get(g)).filter(Boolean);
                                         const guia = empData?.guia;
-                                        const sinGuia = sel.length > 0 && !sel.some(p => p.talle === guia);
+                                        // Camino B: la pieza es la misma en todos los talles, no hace falta la del guía.
+                                        const sinGuia = empData?.origen !== 'con_diseno' && sel.length > 0 && !sel.some(p => p.talle === guia);
                                         const s = empStats;
                                         return (
                                           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -15865,10 +17364,12 @@ export default function App() {
                               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Illustrator, Corel/PDF o DXF (Optitex, Gerber…)</div>
                             </div>
                           )}
+                          {!_soloHerramienta && (<>
                           <button type="button" className="btn ghost" data-tour="molde-como-exportar" style={{ width: '100%', fontSize: 11.5, marginTop: 8 }} onClick={() => setVerAyudaExport(v => !v)}>
                             {verAyudaExport ? '▲ Ocultar' : '❓ ¿Cómo exportar el molde desde tu programa?'}
                           </button>
                           {verAyudaExport && <AyudaExportMolde term={term} />}
+                          </>)}
                         </div>
                       )}
 
@@ -16984,25 +18485,9 @@ export default function App() {
                             const nombrePc = (p) => p.name || etqNombres[p.idx] || ('Pieza ' + (p.idx + 1));
                             const muestraDe = (p) => [ec.mostrar?.talle && (etqData.talle_ref || '2XL'), ec.mostrar?.pieza && nombreGenerico(nombrePc(p)), ec.mostrar?.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
                             // Apoyar el texto en el CONTORNO: punto más cercano del path + ángulo de la tangente.
-                            const snapContorno = (d, cx, cy, pc) => {
-                              try {
-                                const el = document.createElementNS('http://www.w3.org/2000/svg', 'path'); el.setAttribute('d', d);
-                                const len = el.getTotalLength(); if (!len) return null;
-                                let best = null; const N = 160;
-                                for (let i = 0; i <= N; i++) { const l = len * i / N; const pt = el.getPointAtLength(l); const dd = (pt.x - cx) ** 2 + (pt.y - cy) ** 2; if (!best || dd < best.dd) best = { dd, l, x: pt.x, y: pt.y }; }
-                                const p2 = el.getPointAtLength(Math.min(len, best.l + 1.5));
-                                // tangente del borde + normal hacia ADENTRO de la pieza, para que el
-                                // texto se APOYE en el borde y entre hacia la pieza (no hacia afuera).
-                                let tx = p2.x - best.x, ty = p2.y - best.y; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
-                                let nx = -ty, ny = tx;
-                                const ccx = pc.px + pc.pw / 2, ccy = pc.py + pc.ph / 2;
-                                if ((ccx - best.x) * nx + (ccy - best.y) * ny < 0) { nx = -nx; ny = -ny; }   // normal hacia el centro
-                                const ang = Math.atan2(nx, -ny) * 180 / Math.PI;   // "arriba" del texto = normal hacia adentro
-                                // `t` = posición RELATIVA en el contorno (0..1). Se guarda esta (no el largo de
-                                // arco absoluto) para que la etiqueta caiga en el MISMO lugar en todos los talles.
-                                return { rx: Math.max(0, Math.min(1, (best.x - pc.px) / pc.pw)), ry: Math.max(0, Math.min(1, (best.y - pc.py) / pc.ph)), ang: Math.round(ang * 10) / 10, x: best.x, y: best.y, l: best.l, len, t: best.l / len };
-                              } catch { return null; }
-                            };
+                            // La misma que usa el pedido (camino B): vive a nivel de módulo para que
+                            // la etiqueta caiga igual, se ubique desde acá o desde el pedido.
+                            const snapContorno = _snapAContorno;
                             const piezaBajoMouse = (e) => {
                               const svg = e.currentTarget; let p;
                               try { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; p = pt.matrixTransform(svg.getScreenCTM().inverse()); } catch { return null; }
@@ -17644,6 +19129,16 @@ export default function App() {
                                   else if (grupoPzActivoSet) { // eligiendo piezas de un GRUPO: las suyas en cyan, el resto neutro
                                     if (grupoPzActivoSet.has(p.idx)) { fillCol = 'rgba(0,243,255,0.22)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
                                     else { fillCol = 'rgba(255,255,255,0.03)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
+                                  }
+                                  else if (grupoPzAbierto && !asignandoTipo) {
+                                    // GRUPO ABIERTO, sin estar eligiendo nada: las piezas del grupo NO se
+                                    // pintan por ser del grupo — quedaban todas en verde y el usuario las
+                                    // leía como «seleccionadas para siempre» (reporte 2026-09-08). Verde
+                                    // sólo lo que YA está en alguna variable DE ESTE grupo (que es
+                                    // información: ya tiene lugar); el resto, neutro y listo para elegir.
+                                    const _vGrupo = claveP && (variantesEdit || []).some(v => v.clave === claveP && v.grupoId === grupoPzAbierto);
+                                    if (_vGrupo) { fillCol = 'rgba(16,185,129,0.26)'; badgeFill = '#10b981'; textFill = '#18181b'; }
+                                    else { fillCol = 'rgba(255,255,255,0.04)'; badgeFill = '#3f3f46'; textFill = '#ffffff'; }
                                   }
                                   else if (comboVisor && comboVisor.length) { fillCol = 'rgba(16,185,129,0.30)'; badgeFill = '#10b981'; textFill = '#18181b'; } // pieza de la combinación mostrada
                                   else if (enActivo) { fillCol = 'rgba(0,243,255,0.22)'; badgeFill = '#00d8f5'; textFill = '#18181b'; }
@@ -18442,6 +19937,131 @@ export default function App() {
               );
             })()}
 
+            {/* Configuración de los moldes que traen el DISEÑO ADENTRO (camino B) ─────────────
+                🔴 Es VIVA: al guardarla, los moldes YA CARGADOS también salen con la medida nueva
+                (apuntan a esto, no tienen copia). La pantalla lo dice, porque no es lo que uno
+                espera de una pantalla de configuración. */}
+            {adminSubView === 'con_diseno' && (() => {
+              const c = cfgConDiseno;
+              const setB = (k, v) => setCfgConDiseno(p => ({ ...p, borde_corte: { ...(p.borde_corte || {}), [k]: v } }));
+              const setE = (k, v) => setCfgConDiseno(p => ({ ...p, etiqueta: { ...(p.etiqueta || {}), [k]: v } }));
+              const _b = (c && c.borde_corte) || {}, _e = (c && c.etiqueta) || {};
+              const pick = (titulo, onApply) => (val) => setPicker({ titulo, color: val, onApply });
+              const selectStyle = { height: 38, width: '100%', fontSize: 13.5, padding: '0 11px', borderRadius: 10,
+                background: 'rgba(0,0,0,0.28)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
+              return (
+                <div className="panel animate-fade">
+                  {/* CABECERA: título y «Guardar» arriba — no al final de la página */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginBottom: 6 }}>
+                    <button className="btn ghost" onClick={() => setAdminSubView('dashboard')}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '7px 12px' }}>⬅ Configuración</button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <span style={{ width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'linear-gradient(135deg, rgba(0,216,245,0.20), rgba(255,0,193,0.16))', color: 'var(--accent)' }}>
+                        <Icon name="molderia" style={{ width: 17, height: 17 }} />
+                      </span>
+                      <h2 style={{ margin: 0, fontSize: 20 }}>Molde con diseño</h2>
+                    </div>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {c && !!c.moldes && (
+                        <span title={`Vale para ${c.moldes} molde(s) con diseño, también los ya cargados: una tizada hecha antes del cambio y otra después salen distintas`}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--warning)',
+                            padding: '5px 11px', borderRadius: 999, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.32)' }}>
+                          <Icon name="alert" style={{ width: 13, height: 13 }} /> vale para {c.moldes}
+                        </span>
+                      )}
+                      <button className="btn success" data-tour="cfgb-guardar" style={{ padding: '9px 18px', fontWeight: 800, borderRadius: 10 }}
+                        onClick={guardarCfgConDiseno} disabled={!c}>Guardar</button>
+                    </div>
+                  </div>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 12.5, margin: '0 0 16px' }}>
+                    Cómo salen los moldes que ya traen el diseño adentro. El cliente sólo nombra las piezas y ubica la etiqueta.
+                  </p>
+
+                  {!c ? <p style={{ color: 'var(--text-muted)' }}>Cargando…</p> : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(292px, 1fr))', gap: 14, alignItems: 'start' }}>
+
+                      <CfgCard icono="bordeCorte" titulo="Borde de corte"
+                        extra={<CfgSw on={_b.activo !== false} onClick={() => setB('activo', _b.activo === false)} ancla="cfgb-borde-on" titulo="Dibujar el borde de corte" />}>
+                        <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                          <CfgNum valor={_b.ancho_mm ?? 2} onChange={(v) => setB('ancho_mm', v)} unidad="mm" ancla="cfgb-borde-mm"
+                            titulo="Grosor del borde" step="0.1" min="0.2" max="20" />
+                          <CfgColor valor={_b.color || [0, 0, 0, 0.85]} titulo="Color del borde" ancla="cfgb-borde-color"
+                            onPick={pick('Color del borde de corte', (col) => setB('color', col))} />
+                        </div>
+                        <CfgSeg valor={_b.alineacion || 'fuera'} onPick={(v) => setB('alineacion', v)} ancla="cfgb-borde-alin"
+                          opciones={[{ v: 'fuera', t: 'Por fuera del contorno', label: 'Fuera' },
+                                     { v: 'centro', t: 'Centrado en el contorno', label: 'Centro' },
+                                     { v: 'dentro', t: 'Por dentro del contorno', label: 'Dentro' }]} />
+                      </CfgCard>
+
+                      <CfgCard icono="etiqueta" titulo="Etiqueta"
+                        extra={<CfgSw on={_e.activo !== false} onClick={() => setE('activo', _e.activo === false)} ancla="cfgb-etq-on" titulo="Poner etiqueta" />}>
+                        <div data-tour="cfgb-etq-mostrar" style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                          {[['talle', 'Talle'], ['pieza', 'Pieza'], ['numero', 'N° prenda']].map(([k, t]) => (
+                            <CfgChip key={k} texto={t} on={(_e.mostrar || {})[k] !== false}
+                              onClick={() => setE('mostrar', { ...(_e.mostrar || {}), [k]: (_e.mostrar || {})[k] === false })} />
+                          ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                          <CfgNum valor={_e.size_mm ?? 3} onChange={(v) => setE('size_mm', v)} unidad="mm" ancla="cfgb-etq-mm"
+                            titulo="Tamaño de la letra" step="0.5" min="1" max="40" />
+                          <input data-tour="cfgb-etq-sep" title="Separador entre talle, pieza y número" maxLength={3} value={_e.separador ?? '-'}
+                            onChange={(e) => setE('separador', e.target.value)}
+                            style={{ height: 38, width: 78, fontSize: 14, fontWeight: 700, textAlign: 'center', borderRadius: 10,
+                              background: 'rgba(0,0,0,0.28)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' }} />
+                        </div>
+                        <CfgSeg valor={_e.align || 'centro'} onPick={(v) => setE('align', v)} ancla="cfgb-etq-align"
+                          opciones={[{ v: 'izquierda', t: 'Alineado a la izquierda', label: '◧' },
+                                     { v: 'centro', t: 'Centrado', label: '◫' },
+                                     { v: 'derecha', t: 'Alineado a la derecha', label: '◨' }]} />
+                        <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+                          <CfgColor valor={_e.color || [0.15, 0.15, 0.15, 0.30]} titulo="Color del texto" ancla="cfgb-etq-color"
+                            onPick={pick('Color del texto de la etiqueta', (col) => setE('color', col))} />
+                          <CfgColor valor={_e.borde_color || [0.01, 0.01, 0.01, 0.05]} titulo="Color del halo" ancla="cfgb-etq-halo-color"
+                            onPick={pick('Color del halo de la etiqueta', (col) => setE('borde_color', col))} />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <CfgSw on={_e.borde_activo !== false} onClick={() => setE('borde_activo', _e.borde_activo === false)}
+                            ancla="cfgb-etq-halo-on" titulo="Dibujar el halo del texto" />
+                          <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', flex: 1 }}>Halo</span>
+                          <CfgNum valor={_e.borde_mm ?? 1} onChange={(v) => setE('borde_mm', v)} unidad="mm" ancla="cfgb-etq-halo-mm"
+                            titulo="Grosor del halo" step="0.1" min="0" max="10" />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                          El <b>color del texto</b>, el <b>del halo</b> y la <b>alineación</b> los puede cambiar el cliente en su molde.
+                        </span>
+                      </CfgCard>
+
+                      <CfgCard icono="plantilla" titulo="Así sale">
+                        <CfgPreview borde={_b} etq={_e} />
+                      </CfgCard>
+
+                      <CfgCard icono="planilla" titulo="Planilla">
+                        <select data-tour="cfgb-planilla" style={selectStyle} value={c.planilla_template_id || 'plan_default'}
+                          onChange={(e) => setCfgConDiseno(p => ({ ...p, planilla_template_id: e.target.value }))}>
+                          {(plantillasPlanillas || []).map(t => (<option key={t.id} value={t.id}>{t.nombre || t.id}</option>))}
+                        </select>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                          Las columnas del Excel de estos moldes. Se arman en «Columnas de la planilla».
+                        </span>
+                      </CfgCard>
+
+                      <CfgCard icono="nestingPiezas" titulo="Acomodo en la tela">
+                        <select data-tour="cfgb-nesting" style={selectStyle} value={c.nesting_preset_id || 'nesting_default'}
+                          onChange={(e) => setCfgConDiseno(p => ({ ...p, nesting_preset_id: e.target.value }))}>
+                          {(nestingPresets || []).map(n => (<option key={n.id} value={n.id}>{n.nombre}</option>))}
+                        </select>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                          Separación, margen y giro. Se editan en «Reglas de Nesting».
+                        </span>
+                      </CfgCard>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* 5. Reglas de Nesting Subview */}
             {adminSubView === 'nesting' && (() => {
               const inputStyle = { height: 40, width: '100%', fontSize: 14, padding: '0 11px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
@@ -19019,8 +20639,10 @@ export default function App() {
       </Modal>
 
       <Modal open={subirMoldeOpen} onClose={() => { if (!subirMoldeBusy) setSubirMoldeOpen(false); }} centrado maxWidth={520}
-        titulo="Subir mi propio molde"
-        subtitulo="Queda en «Mis artículos», sólo para vos. Después indicás qué es cada pieza.">
+        titulo={subirMoldeConDiseno ? 'Subir el molde con el diseño adentro' : 'Subir mi propio molde'}
+        subtitulo={subirMoldeConDiseno
+          ? 'Un solo archivo, con el diseño ya estampado en cada pieza. Vale para ESTE pedido: no queda guardado.'
+          : 'Queda en «Mis artículos», sólo para vos. Después indicás qué es cada pieza.'}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
             <label style={{ display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' }}>Nombre del artículo</label>
@@ -19040,16 +20662,42 @@ export default function App() {
                 ? <div style={{ fontSize: 22, lineHeight: 1, color: 'var(--success, #2ecc71)' }}>✓</div>
                 : <Icon name="upload" className="upload-icon" />}
               <div style={{ fontSize: 12.5, fontWeight: 700, color: subirMoldeFile ? 'var(--success, #2ecc71)' : undefined }}>
-                {subirMoldeFile ? subirMoldeFile.name : 'Elegí el molde (.ai · .pdf · .dxf)'}
+                {subirMoldeFile ? subirMoldeFile.name : (subirMoldeConDiseno ? 'Elegí el archivo (.ai · .pdf)' : 'Elegí el molde (.ai · .pdf · .dxf)')}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                {subirMoldeFile ? 'Archivo cargado · tocá para cambiarlo' : 'Illustrator, Corel/PDF o DXF (Optitex, Gerber…)'}
+                {subirMoldeFile ? 'Archivo cargado · tocá para cambiarlo'
+                  : (subirMoldeConDiseno ? 'Illustrator o PDF, con una capa por talle y el diseño adentro de cada pieza'
+                                         : 'Illustrator, Corel/PDF o DXF (Optitex, Gerber…)')}
               </div>
             </div>
-            <input type="file" ref={fileInputMiMoldeRef} accept=".ai,.pdf,.dxf" hidden
+            <input type="file" ref={fileInputMiMoldeRef} accept={subirMoldeConDiseno ? '.ai,.pdf' : '.ai,.pdf,.dxf'} hidden
               onChange={(e) => { const f = e.target.files[0]; setSubirMoldeFile(f || null); if (f && !subirMoldeNombre.trim()) setSubirMoldeNombre((f.name || '').replace(/\.(ai|pdf|dxf)$/i, '')); e.target.value = ''; }} />
           </div>
-          <Ayuda ancho={330}>Al subirlo se abre su configuración: ahí les ponés nombre a los {term.variante.toLowerCase()}s (si vinieron sin nombre) e indicás qué es cada pieza. Con eso ya se puede usar en el pedido.</Ayuda>
+          {subirMoldeConDiseno
+            ? <Ayuda ancho={340}>El archivo tiene que traer <b>una capa por {term.variante.toLowerCase()}</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva nombre y número— una capa <b>«nombre»</b> y otra <b>«00»</b> con los textos de muestra. Al subirlo te vamos a pedir que digas qué es cada pieza.</Ayuda>
+            : <Ayuda ancho={330}>Al subirlo se abre su configuración: ahí les ponés nombre a los {term.variante.toLowerCase()}s (si vinieron sin nombre) e indicás qué es cada pieza. Con eso ya se puede usar en el pedido.</Ayuda>}
+          {/* ESPERA HONESTA: el archivo puede pesar >100 MB y procesarlo lleva su tiempo. Se dice
+              en qué anda y hace cuánto; el porcentaje es el REAL de la subida, y cuando termina
+              se cambia de fase para no dejar una barra llena y quieta (parece colgada). */}
+          {/* ESPERA HONESTA: mientras el archivo viaja, el anillo marca el % REAL; cuando llega,
+              el servidor recién empieza a leerlo (con 100+ MB son minutos) y el anillo pasa a
+              GIRAR. Una barra llena y quieta se lee como «colgado», y estimar el resto sería
+              inventar. Ver `CargaCircular`. */}
+          {subirBFase && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: '16px 18px' }}>
+              <CargaCircular fase={subirBFase.fase} pct={subirBFase.pct} seg={subirBFase.seg} />
+              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 800 }}>
+                  {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  {subirBFase.fase === 'subiendo'
+                    ? 'No cierres la ventana.'
+                    : 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.'}
+                </span>
+              </div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button type="button" className="btn ghost" disabled={subirMoldeBusy} onClick={() => setSubirMoldeOpen(false)}>Cancelar</button>
             {/* El botón se PINTA cuando ya está todo listo (archivo elegido + nombre): es la
@@ -19059,8 +20707,11 @@ export default function App() {
               disabled={subirMoldeBusy || !subirMoldeNombre.trim() || !subirMoldeFile}
               style={subirMoldeFile && subirMoldeNombre.trim() && !subirMoldeBusy
                 ? { fontWeight: 700, boxShadow: '0 0 0 3px rgba(46,204,113,0.18)' } : { opacity: 0.55 }}
-              onClick={subirMiMolde}>
-              {subirMoldeBusy ? 'Subiendo…' : (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir y configurar' : 'Subir y configurar')}
+              onClick={subirMoldeConDiseno ? subirMoldeConDisenoPedido : subirMiMolde}>
+              {subirMoldeBusy ? 'Subiendo…'
+                : (subirMoldeConDiseno
+                    ? (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir el molde' : 'Subir el molde')
+                    : (subirMoldeFile && subirMoldeNombre.trim() ? '✓ Subir y configurar' : 'Subir y configurar'))}
             </button>
           </div>
         </div>
@@ -19381,6 +21032,99 @@ export default function App() {
           document.body
         );
       })()}
+
+      {/* --- MODAL: configuraciones guardadas del molde --- */}
+      {cfgModalOpen && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setCfgModalOpen(false); }}>
+          <div className="modal-content" style={{ maxWidth: 640 }}>
+            <div className="modal-header">
+              <h3>Configuración del molde</h3>
+              <button type="button" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-secondary)' }} onClick={() => setCfgModalOpen(false)}>×</button>
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
+              Guardá <b>dónde va la etiqueta en cada pieza</b> y el nombre de las piezas, y volvé a
+              aplicarlo cuando subas el mismo archivo. Al aplicar, <b>la etiqueta y los nombres van
+              siempre</b>; lo que es del pedido (grupos, telas, planilla) sólo si lo tildás.
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input type="text" value={cfgNombre} data-tour="molde-cfg-nombre"
+                onChange={e => setCfgNombre(e.target.value)}
+                placeholder="Nombre (ej.: «Camiseta jugador · cuello redondo»)"
+                style={{ flex: 1 }} />
+              <button type="button" className="btn primary" data-tour="molde-cfg-guardar"
+                disabled={cfgBusy || !cfgNombre.trim()} onClick={guardarCfgMolde}>Guardar esta</button>
+            </div>
+            {cfgGuardadas.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 12,
+                fontSize: 12, color: 'var(--text-secondary)' }} data-tour="molde-cfg-partes">
+                <span>Aplicar además:</span>
+                {[['grupos_variables', 'grupos y variables'], ['telas', 'telas'],
+                  ['planilla', 'planilla'], ['guia', `${term.variante.toLowerCase()} de guía`],
+                  ['produccion', 'borde y producción']].map(([k, txt]) => (
+                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={cfgPartes.includes(k)}
+                      onChange={e => setCfgPartes(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))} />
+                    {txt}
+                  </label>
+                ))}
+              </div>
+            )}
+            {cfgInforme && (
+              <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, marginBottom: 14, fontSize: 12.5 }}>
+                <b>«{cfgInforme.nombre}» aplicada.</b>{' '}
+                Etiqueta: {cfgInforme.etiqueta_posiciones} pieza(s) con su lugar marcado
+                {cfgInforme.etiqueta_apagadas ? `, ${cfgInforme.etiqueta_apagadas} sin etiqueta` : ''} ·
+                {' '}{cfgInforme.piezas_nombradas} de {cfgInforme.piezas_totales} piezas con nombre
+                {cfgInforme.grupos ? ` · ${cfgInforme.grupos} grupo(s)` : ''}
+                {cfgInforme.variables ? ` · ${cfgInforme.variables} variable(s)` : ''}
+                {cfgInforme.talle_guia ? ` · guía ${cfgInforme.talle_guia}` : ''}.
+                {(cfgInforme.sin_lugar || []).length > 0 && (
+                  <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
+                    No entraron: {cfgInforme.sin_lugar.join(' · ')}
+                  </div>
+                )}
+                {(cfgInforme.piezas_perdidas || []).length > 0 && (
+                  <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
+                    Piezas que la configuración esperaba y este molde no tiene: {cfgInforme.piezas_perdidas.join(', ')}
+                  </div>
+                )}
+                <div style={{ color: 'var(--text-secondary)', marginTop: 6 }}>
+                  Cerrá y mirá el visor: si no acomodó bien, probá con otra.
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+              {cfgGuardadas.length === 0 && (
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                  Todavía no hay ninguna guardada.
+                </div>
+              )}
+              {cfgGuardadas.map(c => (
+                <div key={c.id} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{c.nombre}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                      {c.molde ? `de «${c.molde}» · ` : ''}
+                      <b>etiqueta en {c.etiqueta_posiciones} pieza(s)</b>
+                      {c.etiqueta_apagadas ? ` (${c.etiqueta_apagadas} sin etiqueta)` : ''} ·
+                      {' '}{c.piezas} piezas · {c.detalle}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                    color: c.estado === 'igual' ? 'var(--success, #2a7)' : c.estado === 'parecida' ? 'var(--warning, #b58900)' : 'var(--text-secondary)',
+                    border: '1px solid currentColor' }}>
+                    {c.estado === 'igual' ? 'mismo archivo' : c.estado === 'parecida' ? 'parecida' : 'distinta'}
+                  </span>
+                  <button type="button" className="btn" data-tour="molde-cfg-aplicar" disabled={cfgBusy}
+                    onClick={() => aplicarCfgMolde(c)}>Aplicar</button>
+                  <button type="button" className="btn ghost" data-tour="molde-cfg-borrar" disabled={cfgBusy}
+                    onClick={() => borrarCfgMolde(c)}>Borrar</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- MODAL: Selector de variante (Talle de Guía) en botones cuadrados --- */}
       {modalTalleGuiaOpen && etqData && (

@@ -238,6 +238,176 @@ export const DICCIONARIO = {
     que: 'Sube un molde sin pasar por la configuración del catálogo. Sólo hay que decirle qué es cada pieza.',
     como: 'Tocá para subir tu propio molde.',
   },
+  'pedido-subir-con-diseno': {
+    nombre: 'Molde con el diseño adentro',
+    que: 'La otra forma de cargar: un solo archivo que ya trae el diseño estampado en cada pieza, sin arte aparte ni mapeo. Vale para este pedido y no queda guardado.',
+    como: 'Tocá para subir el archivo que ya trae el diseño adentro.',
+  },
+  'pieza-b-lista': {
+    nombre: 'Las piezas del molde',
+    que: 'Las piezas que trae el archivo, con su miniatura y su medida. Las que todavía dicen «sin nombre» son las que falta identificar: el nombre es lo que hace que después funcionen la etiqueta, las telas y la manga corta o larga.',
+    como: 'Tocá la pieza que querés nombrar.',
+  },
+  'etqb-piezas': {
+    nombre: 'Ubicar la etiqueta',
+    que: 'La segunda tarea, cuando ya están todas las piezas nombradas: marcar en qué parte del borde de cada pieza sale impresa la etiqueta de corte (el talle, el nombre y el número). El tamaño y la tipografía los deja configurados el taller.',
+    como: 'Tocá para pasar a ubicar la etiqueta.',
+  },
+  'pedido-armar-base': {
+    nombre: 'Armar con base',
+    que: 'La forma de siempre: elegís el diseño, la prenda de la moldería y le cargás el arte aparte.',
+    como: 'Tocá para armar el trabajo con la moldería del sistema.',
+  },
+  'pedido-armar-con-diseno': {
+    nombre: 'Cargar molde con diseño incluido',
+    que: 'La otra forma: subís los archivos que ya traen el diseño estampado en cada pieza. No hay arte aparte ni mapeo; sólo decís qué es cada pieza y dónde va la etiqueta.',
+    como: 'Tocá para subir los moldes que ya traen el diseño.',
+  },
+  'cargar-b-zona': {
+    nombre: 'Los archivos',
+    que: 'Acá van los moldes que ya traen el diseño adentro. Podés soltar varios de una vez (la camiseta, el short…); el nombre de cada molde sale del propio archivo.',
+    como: 'Tocá o soltá acá los archivos .ai o .pdf.',
+  },
+  'cargar-b-moldes': {
+    nombre: 'Los moldes cargados',
+    que: 'Los archivos que ya subiste. Se tocan los que van juntos en un mismo diseño para nombrarlos de una sola vez.',
+    como: 'Tocá los moldes que llevan el mismo diseño.',
+  },
+  'cargar-b-diseno': {
+    nombre: 'Nombre del diseño',
+    que: 'Cómo se llama el diseño que llevan los moldes que elegiste (ej. JUGADOR). Es el mismo nombre que usa el resto del pedido para agrupar.',
+    como: 'Escribí el nombre del diseño y apretá Enter.',
+  },
+  'cargar-b-columna': {
+    nombre: 'De qué talle toma las medidas',
+    que: 'Cuando la planilla lleva más de una columna de talle (por ejemplo «Talle» y «Talle short»), acá se dice de cuál toma sus medidas este molde. Sin esto, un short tomaría el talle de la camiseta y saldría del tamaño equivocado.',
+    como: 'Elegí la columna de talle que le corresponde.',
+  },
+  'cargar-b-siguiente': {
+    nombre: 'Nombrar las piezas',
+    que: 'Pasa al visor para decir qué es cada pieza de los moldes que cargaste. Se habilita cuando todos tienen su diseño.',
+    como: 'Tocá para pasar a nombrar las piezas.',
+  },
+  'cargar-b-volver': {
+    nombre: 'Volver',
+    que: 'Vuelve a elegir cómo armar el trabajo. Los moldes que ya subiste quedan cargados.',
+    como: 'Tocá para volver.',
+  },
+  'pieza-b-nombrar': {
+    nombre: 'Nombrar las piezas',
+    que: 'Abre la Moldería de este molde con la herramienta de nombrar de Configuración: todos los talles a la vista, tocás las que son la misma pieza y escribís qué es. Con «← Volver al pedido» seguís acá.',
+    como: 'Tocá el botón. En Moldería, tocá o encerrá con un recuadro las piezas y escribí el nombre.',
+  },
+  'volver-pedido-b': {
+    nombre: 'Volver al pedido',
+    que: 'Cierra la pantalla de configuración y vuelve al paso Arte del pedido con los nombres y la etiqueta ya guardados.',
+    como: 'Tocá «← Volver al pedido».',
+  },
+  'pedido-volver-inicio': {
+    nombre: 'Volver al inicio',
+    que: 'Vuelve a la pantalla de las dos formas de armar el trabajo (con base, o cargando un molde con diseño). Lo que ya elegiste queda.',
+    como: 'Tocá «← Inicio».',
+  },
+  'arteb-ojo-todos': {
+    nombre: 'Mostrar u ocultar todos los talles',
+    que: 'En «Nombrar piezas» del molde con diseño se ven todos los talles juntos, uno debajo del otro. Este ojo los muestra u oculta todos de una; el de cada talle, uno solo.',
+    como: 'Tocá el ojo. Ocultar un talle no lo saca del molde: sólo deja de dibujarse mientras nombrás.',
+  },
+  'arte-volver-cargar-b': {
+    nombre: 'Volver a cargar moldes',
+    que: 'Vuelve a la pantalla donde se cargan los moldes con diseño, para agregar otro archivo o cambiar a qué diseño va cada uno. Los nombres de las piezas quedan.',
+    como: 'Tocá «← Cargar moldes».',
+  },
+  'pedido-terminar': {
+    nombre: 'Terminar el pedido',
+    que: 'Cierra el pedido y borra el molde que subiste con el diseño adentro: se cargó sólo para este trabajo. Las tizadas que ya bajaste no se tocan.',
+    como: 'Tocá para cerrar el pedido.',
+  },
+  'cfg-con-diseno': {
+    nombre: 'Molde con diseño',
+    que: 'La configuración de los moldes que ya traen el diseño adentro de cada pieza: el borde de corte, la etiqueta y cómo se acomodan en la tela. Se deja una vez y vale para todos, también para los que ya están cargados.',
+    como: 'Tocá para configurar cómo salen esos moldes.',
+  },
+  'cfgb-borde-mm': {
+    nombre: 'Grosor del borde de corte',
+    que: 'El ancho, en milímetros, de la línea de corte que rodea cada pieza de estos moldes.',
+    como: 'Escribí el grosor en milímetros.',
+  },
+  'cfgb-borde-alin': {
+    nombre: 'Dónde va el borde',
+    que: 'Si la línea de corte se dibuja por fuera del contorno de la pieza, centrada sobre él, o por dentro. Cambia cuánta tela queda alrededor.',
+    como: 'Elegí dónde se dibuja el borde.',
+  },
+  'cfgb-etq-mm': {
+    nombre: 'Tamaño de la etiqueta',
+    que: 'La altura de la letra, en milímetros, del texto que se imprime al borde de cada pieza (talle, nombre y número).',
+    como: 'Escribí el tamaño de letra en milímetros.',
+  },
+  'cfgb-borde-on': {
+    nombre: 'Dibujar el borde de corte',
+    que: 'Si las piezas de estos moldes salen con la línea de corte alrededor o sin ella.',
+    como: 'Tocá el interruptor.',
+  },
+  'cfgb-borde-color': {
+    nombre: 'Color del borde de corte',
+    que: 'El color CMYK de la línea de corte que rodea cada pieza.',
+    como: 'Tocá la muestra y elegí el color.',
+  },
+  'cfgb-etq-on': {
+    nombre: 'Poner etiqueta',
+    que: 'Si las piezas llevan impreso el rótulo con el talle, el nombre de la pieza y el número de prenda.',
+    como: 'Tocá el interruptor. Apagado, ninguna pieza de estos moldes lleva etiqueta.',
+  },
+  'cfgb-etq-mostrar': {
+    nombre: 'Qué dice la etiqueta',
+    que: 'Las tres partes del rótulo: el talle, el nombre de la pieza y el número de prenda. Se prenden y apagan por separado.',
+    como: 'Tocá cada chip para incluirlo o sacarlo.',
+  },
+  'cfgb-etq-sep': {
+    nombre: 'Separador de la etiqueta',
+    que: 'El carácter que va entre el talle, el nombre de la pieza y el número de prenda del rótulo.',
+    como: 'Escribí el separador (hasta 3 caracteres).',
+  },
+  'cfgb-etq-color': {
+    nombre: 'Color del texto de la etiqueta',
+    que: 'El color CMYK con el que se imprime el rótulo. El cliente lo puede cambiar en su molde.',
+    como: 'Tocá la muestra y elegí el color.',
+  },
+  'cfgb-etq-halo-color': {
+    nombre: 'Color del halo',
+    que: 'El color del contorno que rodea al texto de la etiqueta y lo hace legible sobre un diseño con mucho dibujo. El cliente lo puede cambiar en su molde.',
+    como: 'Tocá la muestra y elegí el color.',
+  },
+  'cfgb-etq-halo-on': {
+    nombre: 'Dibujar el halo',
+    que: 'Si el texto de la etiqueta lleva contorno alrededor o va limpio.',
+    como: 'Tocá el interruptor.',
+  },
+  'cfgb-etq-align': {
+    nombre: 'Alineación de la etiqueta',
+    que: 'De qué lado del punto que marca el cliente se escribe el texto de la etiqueta: a la izquierda, centrado o a la derecha.',
+    como: 'Elegí una de las tres. Vale para todos los moldes con diseño.',
+  },
+  'cfgb-etq-halo-mm': {
+    nombre: 'Grosor del halo',
+    que: 'El ancho, en milímetros, del contorno que rodea al texto de la etiqueta. El halo es lo que hace que se lea sobre un diseño oscuro o con mucho dibujo.',
+    como: 'Escribí el grosor en milímetros. Con 0 (o apagando «Dibujar el halo») el texto va sin contorno.',
+  },
+  'cfgb-planilla': {
+    nombre: 'Planilla de estos moldes',
+    que: 'Las columnas del Excel (talle, nombre, número…) que se le ponen a todo molde con diseño al subirlo. El cliente no la elige: la deja el taller acá.',
+    como: 'Elegí una de las planillas armadas en «Columnas de la planilla». Vale para los moldes que se suban de ahora en más.',
+  },
+  'cfgb-nesting': {
+    nombre: 'Cómo se acomodan en la tela',
+    que: 'Qué regla de nesting —separación entre piezas, margen y giros— se usa para acomodar estos moldes. Las reglas se crean en «Reglas de Nesting».',
+    como: 'Elegí la regla de acomodo.',
+  },
+  'cfgb-guardar': {
+    nombre: 'Guardar la configuración',
+    que: 'Guarda estos valores para TODOS los moldes con diseño, incluidos los que ya están cargados: una tizada hecha antes del cambio y otra después salen distintas.',
+    como: 'Tocá para guardar.',
+  },
 
   'pedido-ir-arte': {
     nombre: 'Cargar el arte',
@@ -639,6 +809,36 @@ export const DICCIONARIO = {
     nombre: 'Cómo exportar el molde',
     que: 'La guía para el diseñador: cómo tiene que salir el archivo desde Illustrator, Corel u Optitex.',
     como: 'Abrí la ayuda de cómo exportar.',
+  },
+  'molde-cfg-abrir': {
+    nombre: 'Guardar / usar configuración',
+    que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
+    como: 'Abrí las configuraciones guardadas.',
+  },
+  'molde-cfg-nombre': {
+    nombre: 'Nombre de la configuración',
+    que: 'Con este nombre se va a reconocer después, en la lista. Conviene decir de qué molde es y qué variante («Camiseta jugador · cuello redondo»).',
+    como: 'Escribí un nombre para reconocerla después.',
+  },
+  'molde-cfg-guardar': {
+    nombre: 'Guardar esta',
+    que: 'Guarda la configuración de este molde con ese nombre. Queda en la base, atada al archivo: el molde se puede borrar con el pedido y la configuración sigue.',
+    como: 'Guardá la configuración de este molde.',
+  },
+  'molde-cfg-partes': {
+    nombre: 'Aplicar además',
+    que: 'La etiqueta y los nombres de las piezas se aplican siempre. Lo demás —grupos y variables, telas, planilla, talle de guía, borde y producción— es del pedido y entra sólo si lo tildás.',
+    como: 'Tildá lo que además querés traer de esa configuración.',
+  },
+  'molde-cfg-aplicar': {
+    nombre: 'Aplicar',
+    que: 'Le pone a este molde el nombrado, los grupos, las variables y las telas de esa configuración. No se aplica sola: la elegís vos y después mirás en el visor si acomodó bien.',
+    como: 'Aplicá esa configuración y fijate en el visor si acomodó bien.',
+  },
+  'molde-cfg-borrar': {
+    nombre: 'Borrar configuración',
+    que: 'Borra la configuración guardada. No toca ningún molde: es sólo la receta.',
+    como: 'Borrá la configuración guardada.',
   },
   'molde-guia': {
     nombre: 'Talle de guía',

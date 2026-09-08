@@ -12,6 +12,7 @@ envuelve en try/except).
 import os
 import re
 import base64
+import hashlib
 import fitz
 
 
@@ -164,6 +165,12 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
     return fila_y, restantes
 
 
+# Los campos salen del nombre de la CAPA del archivo («numero», «numero 2»), que casi nunca trae
+# acentos: la ficha los muestra bien escritos.
+_LABEL_CAMPO = {"nombre": "Nombre", "numero": "Número", "numero 2": "Número 2",
+                "numero2": "Número 2", "palabra": "Palabra", "apellido": "Apellido"}
+
+
 def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archivo="FICHA_TECNICA.pdf"):
     """Arma el PDF. `planilla` = {columnas:[{id,label}], filas:[{colId: valor}]}.
     `moldes_guia` = [{nombre, diseno, variante, piezas:[{nombre, tela, pdf}]}] — UNO POR DISEÑO del
@@ -191,6 +198,21 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
     # 2) MOLDE GUÍA — UNO POR CADA DISEÑO del pedido (abajo; sigue en la misma página si entra, si
     #    no, página nueva). El encabezado dice el DISEÑO, NO el talle: es sólo una guía.
     guias = list(moldes_guia or [])
+    # NUNCA EL MISMO MOLDE DOS VECES (reporte del usuario 2026-09-08: la ficha mostraba dos veces
+    # el mismo molde, uno por cada diseño del pedido). Se descarta una guía sólo si es COPIA EXACTA
+    # de otra —mismo molde, misma variable, mismas piezas y los mismos bytes de dibujo—: si el arte
+    # cambia entre diseños, los bytes cambian y las dos siguen saliendo, que es lo correcto.
+    _vistas, _unicas = set(), []
+    for mg in guias:
+        _k = (str(mg.get("nombre") or ""), str(mg.get("variante") or ""), str(mg.get("opciones") or ""),
+              hashlib.sha1(b"".join(
+                  str(p.get("nombre") or "").encode("utf-8") + (p.get("pdf") or b"")
+                  for p in (mg.get("piezas") or []))).hexdigest())
+        if _k in _vistas:
+            continue
+        _vistas.add(_k)
+        _unicas.append(mg)
+    guias = _unicas
     # La VARIABLE sólo se nombra cuando el MISMO molde+diseño sale en más de una: ahí las piezas
     # cambian y hace falta distinguirlas. Si es la única, nombrarla sería ruido.
     _rep = {}
@@ -225,6 +247,30 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
         y += 11
         _texto(pg, MARGEN, y, detalle, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
         y += 9
+        # CON QUÉ TIPOGRAFÍA SALE ESTAMPADO cada campo. Va en su propia línea (junto al detalle se
+        # cortaba) y avisa si el sistema tuvo que sustituirla: el taller no puede adivinarlo
+        # mirando el dibujo.
+        _fts = mg.get("fuentes") or []
+        if _fts:
+            _partes = [_LABEL_CAMPO.get(str(f.get("campo") or "").strip().lower(),
+                                        str(f.get("campo") or "").capitalize())
+                       + ": " + str(f.get("fuente") or "")
+                       + (f" (falta «{f.get('pedida')}», se sustituyó)" if f.get("sustituida") else "")
+                       for f in _fts]
+            # Se PARTE en varias líneas si no entra: `_texto` recorta con «…» y con tres campos se
+            # perdía justo el dato que hace falta.
+            _anchoT = A4_W - 2 * MARGEN
+            _lin, _acum = "Tipografía  ·  ", []
+            for _pt in _partes:
+                _try = (_lin + "   " + _pt) if _lin.strip() != "Tipografía  ·" and _acum else (_lin + _pt)
+                if fitz.get_text_length(_try, fontname=FONT, fontsize=8) > _anchoT and _acum:
+                    _texto(pg, MARGEN, y, _lin, size=8, color=GRIS, max_w=_anchoT)
+                    y += 9
+                    _lin, _acum = "        " + _pt, [_pt]
+                else:
+                    _lin, _acum = _try, _acum + [_pt]
+            _texto(pg, MARGEN, y, _lin, size=8, color=GRIS, max_w=_anchoT)
+            y += 9
         y, rest = _dibujar_piezas(doc, pg, y, piezas, A4_H - MARGEN)
         while rest:
             pg = nueva_pagina(); y = 78

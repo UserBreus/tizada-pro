@@ -166,8 +166,12 @@ ok("LOS MOLDES DEL PEDIDO VAN SIEMPRE" in _src,
    "🔴 la ficha completa sus guías con los moldes del pedido, no sólo con los de las prendas")
 ok("_specs = list(_guias_ficha)" in _src,
    "y arranca de las guías reales (las de las prendas, con su variable y sus toggles)")
-ok('_porDis = {_slugify_diseno(default_diseno): None}' in _src,
-   "un pedido sin variables por diseño igual trae su molde")
+ok('or {_slugify_diseno(default_diseno): None}' in _src,
+   "un pedido sin variables por diseño igual trae su molde (con el diseño que se editó en el Arte)")
+# …pero SÓLO en los diseños que son suyos: completar un molde en un diseño ajeno era lo que
+# duplicaba la ficha (entrada 396).
+ok('if _dl2 and str(_p) not in _dl2:' in _src,
+   "y el completado respeta el mapa molde→diseño (no agrega el molde en un diseño que no es suyo)")
 
 print()
 if FALLOS:

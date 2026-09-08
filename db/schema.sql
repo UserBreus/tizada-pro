@@ -313,6 +313,36 @@ IF COL_LENGTH('dbo.producto','registro_rev') IS NULL
 GO
 
 GO
+/* 2026-09-02 (camino B): un molde que trae el diseno adentro tiene VARIAS mesas, asi que la
+   posicion dentro del TALLE (pieza_idx, invariante §8.9 del MAPA: es la identidad que resuelve
+   las variables) deja de coincidir con la posicion dentro de la MESA, que es la unica que sirve
+   para indexar `extraer_piezas_mesa`. Con 9 mesas, guardar la de la mesa daria pieza_idx=0 para
+   las 9 piezas y el mapa pieza_idx->nombre se quedaria con UNA: ocho invisibles, en silencio.
+   NULL = camino A (una sola mesa): el motor cae a pieza_idx como siempre. */
+IF COL_LENGTH('dbo.pieza_talle','idx_mesa') IS NULL
+    ALTER TABLE dbo.pieza_talle ADD idx_mesa INT NULL;
+GO
+
+GO
+/* 2026-09-08: CONFIGURACIONES GUARDADAS DE UN MOLDE (camino B). El molde que trae el diseno
+   adentro se sube PARA UN PEDIDO y se borra con el: el nombrado de las piezas, los grupos, las
+   variables y las telas se perdian, y al volver a usar el MISMO archivo en otro pedido habia que
+   rehacer todo. La configuracion se guarda atada al ARCHIVO (sha1), no al molde, y el usuario la
+   elige a mano la proxima vez (ver `db.guardar_config_molde` y los endpoints /api/molde/config/). */
+IF OBJECT_ID('dbo.config_molde') IS NULL
+CREATE TABLE dbo.config_molde (
+    id          INT IDENTITY(1,1) PRIMARY KEY,
+    nombre      NVARCHAR(160) NOT NULL,
+    sha1        NVARCHAR(40)  NULL,
+    molde       NVARCHAR(240) NULL,
+    piezas_n    INT NULL,
+    mesas_n     INT NULL,
+    creado_en   DATETIME2 NOT NULL CONSTRAINT DF_config_molde_creado DEFAULT SYSUTCDATETIME(),
+    creado_por  INT NULL,
+    datos       NVARCHAR(MAX) NOT NULL
+);
+GO
+
 /* ════════════════════════════════════════════════════════════════════════════════════════════
    2026-09-07 — ÍNDICES DE LAS CLAVES FORÁNEAS QUE SE RECORREN DENTRO DE UNA ESCRITURA.
 

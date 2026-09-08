@@ -36,7 +36,16 @@ def extraer_piezas_mesa(doc, mesa, talle, **kw):
         _path, _mt = "", None
     if not _path or _mt is None or kw:
         return _extraer_piezas_mesa_cruda(doc, mesa, talle, **kw)
-    _fk = (_path, _mt)
+    # La MARCA del camino B entra en la clave por el mismo motivo que en `_DET_CACHE`: el alta
+    # DETECTA el camino y recién después marca el molde, así que la misma ruta con el mismo mtime
+    # da contornos distintos antes y después de marcar. Sin esto, el proceso que ya leyó el molde
+    # sin marca sigue sirviendo la detección vieja (cada trazado = una pieza) para siempre.
+    try:
+        import piezas_con_diseno as _PD
+        _cb = _PD.es_camino_b(_path)
+    except ImportError:
+        _cb = False
+    _fk = (_path, _mt, _cb)
     if _fk not in _PZS_CACHE:
         while len(_PZS_CACHE) >= 3:                      # FIFO: fuera el archivo más viejo
             _PZS_CACHE.pop(next(iter(_PZS_CACHE)))
@@ -107,6 +116,69 @@ def opciones_soportadas(piezas_nombres, clave, opciones):
         for o in _ops:
             if all(t in tset for t in _toks[o]):
                 out[o] += 1
+    return out
+
+
+def partes_de_libre(prenda, piezas_nombres):
+    """Piezas que entran en una prenda según sus TOGGLES DE PIEZA (generalización de la
+    manga). Cada toggle = {clave, opcion, opciones}. Para una pieza que menciona la CLAVE
+    (ej. 'manga', 'sisa'):
+      • si menciona la OPCIÓN elegida (ej. 'corta') → entra;
+      • si menciona OTRA opción del toggle (ej. 'larga') → NO entra (es de esa otra);
+      • si NO menciona ninguna opción → entra igual (es una pieza normal, no se adivina
+        nada: 'manga derecha' sin opción sale siempre, como cualquier pieza).
+    Las piezas que no mencionan ninguna clave entran siempre. Acepta varios toggles.
+
+    Vive a nivel de módulo (y no sólo adentro de `generar_pedido`) por el mismo motivo que
+    `tokens_pieza`: el SERVIDOR necesita saber qué piezas entran DE VERDAD en una fila para poder
+    avisar antes de generar — por ejemplo, cuáles quedaron sin tela. Si usara una regla propia,
+    diría una cosa y el motor haría otra."""
+    toggles = prenda.get("toggles") if isinstance(prenda, dict) else None
+    if not toggles:   # compat: prenda con 'manga' corta/larga, o string suelto
+        mval = prenda.get("manga") if isinstance(prenda, dict) else prenda
+        if mval:
+            toggles = [{"clave": "manga", "opcion": mval, "opciones": ["corta", "larga"]}]
+        else:
+            return list(piezas_nombres)
+    norm = []   # (clave, [tokens opción elegida], [[tokens] de las OTRAS opciones])
+    for tg in toggles:
+        clave = str(tg.get("clave", "")).strip().lower()
+        opcion = str(tg.get("opcion", "")).strip().lower()
+        opciones = [str(o).strip().lower() for o in (tg.get("opciones") or []) if str(o).strip()]
+        if opcion and opcion not in opciones:
+            opciones = opciones + [opcion]
+        if not clave or not opcion:
+            continue
+        sel = opcion.split()
+        otras = [o.split() for o in opciones if o != opcion]
+        norm.append((clave, sel, otras))
+    if not norm:
+        return list(piezas_nombres)
+    out = []
+    for p in piezas_nombres:
+        tset = set(tokens_pieza(p))
+        incluir = True
+        for clave, sel, otras in norm:
+            if clave not in tset:
+                continue                                   # esta clave no la afecta
+            if all(t in tset for t in sel):
+                continue                                   # tiene la opción elegida → entra
+            if any(all(t in tset for t in o) for o in otras):
+                incluir = False; break                     # tiene OTRA opción → afuera
+            # else: no menciona ninguna opción → pieza normal → entra
+        if incluir:
+            out.append(p)
+    # VÍNCULOS "van juntas" (ej. manga corta + su vivo): el vínculo es ATÓMICO frente al toggle.
+    # Si algún miembro quedó AFUERA (ej. la manga larga cuando se eligió corta), se saca TODO el
+    # vínculo — así el vivo NO aparece en las líneas que no llevan esa manga (antes salía en todas).
+    juntas = prenda.get("juntas_piezas") if isinstance(prenda, dict) else None
+    if juntas:
+        _names = set(piezas_nombres); _outset = set(out)
+        for _grp in juntas:
+            _miembros = [m for m in _grp if m in _names]
+            if len(_miembros) >= 2 and not all(m in _outset for m in _miembros):
+                out = [p for p in out if p not in _miembros]
+                _outset = set(out)
     return out
 
 
@@ -577,7 +649,12 @@ def detectar_piezas(path, talle_ref=None, ancho_preview=1100, capas_candidatas=F
         _mt = int(os.path.getmtime(path))
     except OSError:
         _mt = None
-    _k = (path, _mt, talle_ref, ancho_preview, capas_candidatas)
+    # 🔴 LA MARCA DEL CAMINO B VA EN LA CLAVE. El alta DETECTA y recién después MARCA el molde, así
+    # que la misma ruta con el mismo mtime da resultados distintos antes y después de marcarlo: sin
+    # esto, el visor servía la detección vieja (245 «piezas» en vez de 9) y no había forma de
+    # refrescarla salvo tocar el archivo. Ya pasó en la propia prueba de este cambio.
+    import piezas_con_diseno as _PD
+    _k = (path, _mt, talle_ref, ancho_preview, capas_candidatas, _PD.es_camino_b(path))
     if _mt is not None and _k in _DET_CACHE:
         return _copy.deepcopy(_DET_CACHE[_k])
     _res = _detectar_piezas_impl(path, talle_ref, ancho_preview, capas_candidatas)
@@ -596,6 +673,15 @@ def _detectar_piezas_impl(path, talle_ref=None, ancho_preview=1100, capas_candid
     piezas:[{idx, px,py,pw,ph (en MILÍMETROS reales), w_cm, h_cm, path_svg(en mm)}]}.
     La escala es REAL y fija (1 unidad = 1 mm), no depende de la cantidad de piezas."""
     doc = _abrir(path)
+    # ── CAMINO B ────────────────────────────────────────────────────────────────────────────────
+    # Un molde con el diseño adentro tiene UNA pieza por mesa, así que el camino de abajo —que
+    # elige la mesa con más trazos y muestra sólo esa— mostraría una sola pieza y no habría nada
+    # que nombrar. Su visor muestra todas las mesas juntas. Además así se lee el archivo UNA vez:
+    # el camino de abajo recorre los dibujos de todas las mesas tres veces (censo de capas, ranking
+    # y extracción), que en un archivo de 123 MB son minutos.
+    import piezas_con_diseno as _PD
+    if _PD.es_camino_b(path):
+        return _PD.detectar_para_visor(doc, talle_ref)
     talles_mesas = _talles_con_molde(doc)
     sin_variantes = False
     if capas_candidatas and not talles_mesas:
@@ -2179,6 +2265,18 @@ def _color_op(pl):
 
 _PERS_CACHE = {}   # memoización por (arte, mtime): extraer_personalizacion es talle/variable-INDEP
                    # y CARA (parsea el content-stream de todo el arte); se llamaba 1× POR TALLE (×19)
+# Cómo se puede llamar la CAPA de un campo, y con qué campo se corresponde. La prenda trae
+# «nombre» y «numero» (o las columnas de la planilla): si la capa se rotula de otra forma, el
+# texto no se estampa y no falla nada — por eso los rótulos habituales se aceptan por nombre.
+# «00» es como se rotula el placeholder del número en los moldes que traen el diseño adentro.
+# (las claves van YA normalizadas: `_norm_nombre` baja a minúsculas y saca los acentos, así que
+#  «Número» entra como «numero» y no hace falta listarlo)
+# ⚠️ «0» NO es alias de nada: en un molde con el diseño adentro «0» es un TALLE (y `CAPAS_NO_PERS`
+# ya lo descarta). Sólo «00», que es el rótulo del placeholder del número.
+_CAMPO_ALIAS = {"00": "numero", "nro": "numero", "num": "numero",
+                "jugador": "nombre", "apellido": "nombre"}
+
+
 def extraer_personalizacion(path_arte, campos=None):
     """Lee los placeholders de personalización SOLO por CAPA: si hay una capa llamada
     como un campo (`nombre`, `numero`, `palabra`, `numero 2`, …) TODO el texto de esa
@@ -2192,6 +2290,22 @@ def extraer_personalizacion(path_arte, campos=None):
     _hit = _PERS_CACHE.get(_ck)
     if _hit is not None:
         return _hit
+    # ── CAMINO B: lo que depende sólo del archivo se guarda EN DISCO, con el molde desplegado ──
+    # Medido: esta función tardaba 100 s sobre el molde real (tres recorridos completos del
+    # archivo con PyMuPDF), y la memoria de arriba sólo vale mientras viva el proceso — un molde
+    # efímero se sube por pedido, así que cada pedido la pagaba entera. Se guarda por sello del
+    # archivo en `desplegado/personalizacion.json`, al lado de las páginas por talle.
+    _cb_pers = None
+    _auto = campos is None            # sólo el resultado auto-descubierto se guarda/lee del disco
+    try:
+        import piezas_con_diseno as _PD
+        if _auto and _PD.es_camino_b(path_arte):
+            _cb_pers = _PD.personalizacion_guardada(path_arte)
+            if _cb_pers is not None:
+                _PERS_CACHE[_ck] = _cb_pers
+                return _cb_pers
+    except Exception:
+        pass
     if campos is None:
         # AUTO-DESCUBRIR: cualquier capa que NO sea del sistema es un campo de
         # personalización (nombre, numero, palabra, numero 2, …). El nombre del
@@ -2201,10 +2315,31 @@ def extraer_personalizacion(path_arte, campos=None):
         # armado de pieza, también dentro de los workers del pool) y un arte que quede abierto
         # por una excepción no se puede reemplazar después (Windows, WinError 5).
         with fitz.open(path_arte) as _d:
+            # 🔴 CAMINO B: en un molde que trae el diseño adentro, las capas son LOS TALLES (20 en el
+            # archivo real). Auto-descubriéndolas, cada talle se tomaría como un campo y el motor
+            # estamparía cualquier texto que encontrara adentro. Los talles nunca son campos.
+            _talles = set()
+            try:
+                import piezas_con_diseno as _PD
+                if _PD.es_camino_b(path_arte):
+                    _talles = {_norm_nombre(t) for t in _PD.talles_del_molde(_d)}
+            except Exception:
+                pass
             # Las capas "Editable …" son OBJETOS editables (mover/rotar/escalar), NO campos de
             # personalización: se excluyen para que no se estampen como texto.
             campos = [c["text"] for c in _d.layer_ui_configs()
-                      if _norm_nombre(c["text"]) not in _sys and not _es_capa_editable(c["text"])]
+                      if _norm_nombre(c["text"]) not in _sys and _norm_nombre(c["text"]) not in _talles
+                      and not _es_capa_editable(c["text"])]
+        if _talles and not campos:
+            # Camino B sin capa de nombre/número: no hay nada que estampar. Los tres recorridos
+            # de abajo sólo sirven para los campos, y sin campos daban {} después de 100 s.
+            pers = {}
+            _PERS_CACHE[_ck] = pers
+            try:
+                _PD.personalizacion_guardar(path_arte, pers)
+            except Exception:
+                pass
+            return pers
     nativos = _colores_personalizable(path_arte)   # color exacto por mesa y por texto
     trazos = _trazo_personalizable(path_arte)       # borde/trazo por mesa y por texto (compat)
     pasadas = _pasadas_personalizable(path_arte)    # PILA de apariencias ORDENADA (manda ésta)
@@ -2253,6 +2388,11 @@ def extraer_personalizacion(path_arte, campos=None):
         cn = _norm_nombre(campo)
         if not any(_norm_nombre(name) == cn for name, _ in capas):
             continue                                   # el diseño no trae esa capa
+        # El campo se guarda con su nombre CANÓNICO: el estampado busca `persona[campo]`, y la
+        # prenda trae «nombre» y «numero». Una capa llamada «00» (así se rotula el placeholder
+        # del número en los moldes que traen el diseño adentro) apuntaría a un campo «00» que la
+        # prenda no tiene, y el número no se estamparía — sin error, que es lo peor.
+        _campo = _CAMPO_ALIAS.get(cn, campo)
         with fitz.open(path_arte) as d:
             for c in d.layer_ui_configs():
                 d.set_layer_ui_config(c["number"], action=0 if _norm_nombre(c["text"]) == cn else 1)
@@ -2262,7 +2402,7 @@ def extraer_personalizacion(path_arte, campos=None):
                         continue
                     for l in b["lines"]:
                         if "".join(s["text"] for s in l["spans"]).strip():
-                            _registrar(mesa, campo, l)
+                            _registrar(mesa, _campo, l)
 
     # El modo viejo "por texto en la capa Personalizable" (adivinar NOMBRE/00 por
     # contenido) FUE QUITADO a pedido del usuario: la personalización se toma SOLO por
@@ -2290,6 +2430,13 @@ def extraer_personalizacion(path_arte, campos=None):
     if len(_PERS_CACHE) > 24:
         _PERS_CACHE.clear()
     _PERS_CACHE[_ck] = pers
+    if _cb_pers is None and _auto:
+        try:
+            import piezas_con_diseno as _PD
+            if _PD.es_camino_b(path_arte):
+                _PD.personalizacion_guardar(path_arte, pers)
+        except Exception:
+            pass
     return pers
 
 
@@ -3548,12 +3695,59 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
 
 
 # ════════════════ GENERACIÓN DEL PEDIDO ════════════════
+class _DocPerezoso:
+    """El documento de UNA pieza de la hoja compartida, armado recién cuando alguien lo pide.
+
+    En la hoja compartida la pieza no se serializa por prenda (ahí estaban 18 de los 180 s del
+    pedido de 5 prendas). Pero el Arte (`_piezas_base` → `pz["doc"][0].get_svg_image()`), el
+    nesting de siempre (`_mascara(doc)`) y los contratos siguen pidiendo un `fitz.Document`: se
+    arma acá, una vez, con la MISMA base y el MISMO estampado que van a la hoja (ley «lo que se ve
+    es lo que sale»)."""
+    def __init__(self, base, estampado):
+        self._b, self._est, self._doc = base, estampado, None
+
+    def real(self):
+        if self._doc is None:
+            b = self._b
+            b["cstream"].write((b["base_stream"] + self._est).encode())
+            buf = io.BytesIO()
+            b["out"].save(buf)
+            self._doc = fitz.open("pdf", buf.getvalue())
+        return self._doc
+
+    def __getitem__(self, i):
+        return self.real()[i]
+
+    def __len__(self):
+        return len(self.real())
+
+    def __bool__(self):
+        # `if p["doc"]:` NO tiene que armar el documento: sin esto, cerrar los docs después de
+        # componer materializaba las 900 piezas (170 s a 100 prendas) para tirarlas.
+        return True
+
+    def __iter__(self):
+        return iter(self.real())
+
+    def close(self):
+        if self._doc is not None:
+            try:
+                self._doc.close()
+            except Exception:
+                pass
+            self._doc = None
+
+    def __getattr__(self, nombre):
+        # cualquier otra cosa de `fitz.Document` (tobytes, page_count, save…): el documento real
+        return getattr(self.real(), nombre)
+
+
 def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, salida,
                    config_nesting=None, progreso=None, mapeo_arte=None, rotaciones=None,
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
                    etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None,
                    editables_color=None, editables_marca=None, editables_sin_marca=None,
-                   marcas_como_cruz=True, referencia="alto"):
+                   marcas_como_cruz=True, referencia="alto", modo_hoja=None, procesos=None):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -3579,7 +3773,23 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     B = (_bc_mm if _bc_activo else 2.0) * MM
     base_doc = _abrir(plantilla)
     TODAS = set(i["name"] for i in base_doc.get_ocgs().values())
-    CAPAS_ARTE = set(i["name"] for i in _abrir(arte).get_ocgs().values())
+    # ── CAMINO B: el molde YA TRAE EL DISEÑO ADENTRO de cada pieza ────────────────────────────
+    # No hay arte aparte ni mapeo: el dibujo de la pieza es el del propio archivo, ya en su lugar
+    # y en su escala. Se decide por la MARCA en disco y no por «no vino arte»: la marca sobrevive
+    # al ProcessPool del nesting (son procesos, no hilos) y no se adivina nada por la forma del
+    # archivo, que es regla del proyecto. Ver `MOLDE_CON_DISENO.md`.
+    try:
+        import piezas_con_diseno as _PD
+        _camino_b = _PD.es_camino_b(plantilla)
+    except ImportError:
+        _camino_b = False
+    CAPAS_ARTE = set() if (_camino_b or not arte) else set(
+        i["name"] for i in _abrir(arte).get_ocgs().values())
+    # LA HOJA COMPARTIDA (2026-09-04, `hoja_pike.py`): en el camino B cada pieza se arma UNA vez y
+    # en la hoja va como un objeto referenciado por prenda; lo que cambia por prenda (nombre,
+    # número, etiqueta) va aparte, como trazos chicos. `TIZADA_HOJA_LEGACY=1` vuelve al armado de
+    # siempre (una copia entera de la pieza por prenda).
+    _modo_hoja = modo_hoja or ("legacy" if os.environ.get("TIZADA_HOJA_LEGACY") else "pike")
 
     fuentes_cache = {}
     def fuente(nombre_ps):
@@ -3609,61 +3819,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _toks_pieza = tokens_pieza      # (vive a nivel de módulo: lo comparte la validación del pedido)
 
     def partes_de(prenda):
-        """Piezas que entran en una prenda según sus TOGGLES DE PIEZA (generalización de la
-        manga). Cada toggle = {clave, opcion, opciones}. Para una pieza que menciona la CLAVE
-        (ej. 'manga', 'sisa'):
-          • si menciona la OPCIÓN elegida (ej. 'corta') → entra;
-          • si menciona OTRA opción del toggle (ej. 'larga') → NO entra (es de esa otra);
-          • si NO menciona ninguna opción → entra igual (es una pieza normal, no se adivina
-            nada: 'manga derecha' sin opción sale siempre, como cualquier pieza).
-        Las piezas que no mencionan ninguna clave entran siempre. Acepta varios toggles."""
-        toggles = prenda.get("toggles") if isinstance(prenda, dict) else None
-        if not toggles:   # compat: prenda con 'manga' corta/larga, o string suelto
-            mval = prenda.get("manga") if isinstance(prenda, dict) else prenda
-            if mval:
-                toggles = [{"clave": "manga", "opcion": mval, "opciones": ["corta", "larga"]}]
-            else:
-                return list(piezas_nombres)
-        norm = []   # (clave, [tokens opción elegida], [[tokens] de las OTRAS opciones])
-        for tg in toggles:
-            clave = str(tg.get("clave", "")).strip().lower()
-            opcion = str(tg.get("opcion", "")).strip().lower()
-            opciones = [str(o).strip().lower() for o in (tg.get("opciones") or []) if str(o).strip()]
-            if opcion and opcion not in opciones:
-                opciones = opciones + [opcion]
-            if not clave or not opcion:
-                continue
-            sel = opcion.split()
-            otras = [o.split() for o in opciones if o != opcion]
-            norm.append((clave, sel, otras))
-        if not norm:
-            return list(piezas_nombres)
-        out = []
-        for p in piezas_nombres:
-            tset = set(_toks_pieza(p))
-            incluir = True
-            for clave, sel, otras in norm:
-                if clave not in tset:
-                    continue                                   # esta clave no la afecta
-                if all(t in tset for t in sel):
-                    continue                                   # tiene la opción elegida → entra
-                if any(all(t in tset for t in o) for o in otras):
-                    incluir = False; break                     # tiene OTRA opción → afuera
-                # else: no menciona ninguna opción → pieza normal → entra
-            if incluir:
-                out.append(p)
-        # VÍNCULOS "van juntas" (ej. manga corta + su vivo): el vínculo es ATÓMICO frente al toggle.
-        # Si algún miembro quedó AFUERA (ej. la manga larga cuando se eligió corta), se saca TODO el
-        # vínculo — así el vivo NO aparece en las líneas que no llevan esa manga (antes salía en todas).
-        juntas = prenda.get("juntas_piezas") if isinstance(prenda, dict) else None
-        if juntas:
-            _names = set(piezas_nombres); _outset = set(out)
-            for _grp in juntas:
-                _miembros = [m for m in _grp if m in _names]
-                if len(_miembros) >= 2 and not all(m in _outset for m in _miembros):
-                    out = [p for p in out if p not in _miembros]
-                    _outset = set(out)
-        return out
+        """Los toggles de la prenda, contra las piezas de ESTE molde. La regla vive suelta
+        (`partes_de` a nivel de módulo) para que el servidor valide con la MISMA."""
+        return partes_de_libre(prenda, piezas_nombres)
     def piezas_de(prenda):
         """Piezas a generar para una prenda: `partes_de` (toggles) INTERSECTADO con la
         VARIABLE de configuración elegida. La variable llega como `variante_piezas` = lista de
@@ -3693,6 +3851,54 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         if rotaciones and p in rotaciones and rotaciones[p]:
             return rotaciones[p]                      # ninguna / 90 / 180 / libre — para TODAS
         return "ninguna"
+
+    # ── CAMINO B: la mesa DEL MOLDE con sólo la capa de este talle ────────────────────────────
+    _molde_por_talle, _molde_limpias, _despl_abiertos, _despl_src = {}, set(), {}, {}
+    def pagina_molde(mesa, talle):
+        """La mesa del MOLDE con SÓLO la capa de este talle, y su dibujo INTACTO.
+
+        🔴 NO se puede reusar `pagina_arte` para esto. Ése llama a
+        `limpiar_capas_conservando_talle(..., geometrias_base(...))`, que dentro de la capa
+        conservada descarta (a) todo trazado cuyo bbox coincide con uno de la moldería base y
+        (b) TODO el texto. En el camino A eso está bien: saca el contorno del molde que viene
+        repetido en el arte. Acá la moldería base **es** el dibujo de la pieza → borraría la
+        pieza entera y, de paso, los placeholders de nombre/número.
+
+        `aislar_capa` conserva lo pintado dentro del OCG del talle con el estado gráfico intacto
+        (CMYK exacto) y **deja sus recortes**, que en el camino B SON la pieza. Medido sobre la
+        mesa 1 del archivo real: de 140 recortes / 1320 rellenos (las 20 capas encimadas) quedan
+        7 / 66 y los 3 textos del talle — el 95 % que se va es el de los otros 19 talles.
+
+        🔴 Y NO SE AÍSLA ACÁ: se toma del MOLDE DESPLEGADO que dejó el alta (`piezas_con_diseno`,
+        «EL MOLDE DESPLEGADO»): una página por talle, ya aislada y podada con este mismo código.
+        Aislar en cada tizada costaba de 3 a 13 s por (mesa, talle) —119 s en un pedido de 5
+        prendas— por parsear entre 398 mil y 1,2 millones de operadores cada vez. Si el molde no
+        está desplegado (uno viejo, o el archivo cambió), `ruta_desplegada` lo despliega en el
+        momento; y si eso tampoco se pudiera, queda el camino de siempre, más abajo."""
+        try:
+            _rd = _PD.ruta_desplegada(plantilla, mesa, talle)
+        except Exception as e:
+            print(f"  [camino B] no se pudo usar el molde desplegado (mesa {mesa}, talle {talle}): {e}")
+            _rd = None
+        if _rd is not None:
+            _fp, _idx = _rd
+            if _fp not in _despl_abiertos:
+                _despl_abiertos[_fp] = _abrir_pike(_fp)
+            _despl_src[(mesa, talle)] = (_despl_abiertos[_fp], _idx, _fp)
+            return _despl_abiertos[_fp].pages[_idx]
+        if talle not in _molde_por_talle:
+            _molde_por_talle[talle] = _abrir_pike(plantilla)
+        pdf = _molde_por_talle[talle]
+        if (talle, mesa) not in _molde_limpias:
+            pag = pdf.pages[mesa - 1]
+            # 🔴 `podar=True`: además de no pintarlos, BORRA los trazados de los otros talles.
+            # Medido: la mesa trae 398.653 operadores (los 20 talles encimados) y de un talle
+            # aislado sólo 75 pintan. Sin podar, cada pieza arrastra los 398 mil (7,6 MB) y una
+            # hoja de 5 prendas dio 586 MB, con el aplanado para el RIP sin terminar a los 20 min.
+            aislar_capa(pdf, pag, talle, podar=True)
+            sanear_oc(pdf, pag)
+            _molde_limpias.add((talle, mesa))
+        return pdf.pages[mesa - 1]
 
     _arte_por_talle, _limpias = {}, set()
     def pagina_arte(mesa, talle):
@@ -4044,6 +4250,14 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
 
     def ops_cont(cont, S, dx=0.0, dy=0.0):
         def fseg(s):
+            if s[0] == "re":
+                # 🔴 (2026-09-07) `re` es (x, y, ANCHO, ALTO): el desplazamiento va SÓLO a x e y.
+                # Se le sumaba a todo, y una pieza rectangular (cuello recto del molde con
+                # diseño, `("re", …)` de `_contorno_de_drawing`) salía con el clip del borde
+                # 3-4 cm más angosto y 1 mm más alto que el diseño: raya negra dentro de la
+                # pieza, franja blanca arriba, «piezas por fuera de lo que deberían ser».
+                x, y, w, h = s[1:5]
+                return f"{x*S + dx:.3f} {y*S + dy:.3f} {w*S:.3f} {h*S:.3f} re"
             return (" ".join(f"{v*S + (dx if i % 2 == 0 else dy):.3f}"
                              for i, v in enumerate(s[1:])) + f" {s[0]}").strip()
         return "\n".join(fseg(s) for s in cont["segmentos"])
@@ -4099,6 +4313,17 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # PIEZA generada (9+) con los MISMOS args → extraía las 135 N veces. Cacheado = 1 sola extracción
     # por (mesa, talle), las piezas toman su índice. Gran ahorro en el preview/tizada (todos los talles).
     _piezas_mesa_cache = {}
+    # Dónde cachear el SVG de cada base de la PREVIEW en el camino A (con arte aparte): al lado
+    # del arte, firmado con la fecha y el tamaño del arte y de la plantilla (ver
+    # `hoja_pike._ruta_cache_svg`). En el camino B la caché vive junto al desplegado.
+    _svg_cache_info = None
+    try:
+        if arte and os.path.exists(arte):
+            _sa, _sp = os.stat(arte), os.stat(plantilla)
+            _svg_cache_info = (os.path.join(os.path.dirname(arte), "svg_cache"),
+                               f"{int(_sa.st_mtime)}:{_sa.st_size}:{int(_sp.st_mtime)}:{_sp.st_size}")
+    except OSError:
+        _svg_cache_info = None
     def _armar_base(pieza, talle, variante):
         info = registro[pieza][talle]
         mesa = info["mesa"]
@@ -4108,7 +4333,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _pm = _piezas_mesa_cache.get(_pmk)
             if _pm is None:
                 _pm = extraer_piezas_mesa(base_doc, mesa, talle); _piezas_mesa_cache[_pmk] = _pm
-            cont = _pm[info["pieza_idx"]]
+            # 🔴 ACÁ SE INDEXA DENTRO DE LA MESA, y `pieza_idx` es la posición dentro del TALLE
+            # (invariante §8.9). En un molde de UNA mesa son el mismo número y por eso convivieron
+            # siempre; en uno de varias mesas (camino B) no: por eso el registro guarda además
+            # `idx_mesa`, que es el que corresponde acá. Sin `idx_mesa` (todo el camino A) se usa
+            # `pieza_idx` como siempre.
+            cont = _pm[info.get("idx_mesa", info["pieza_idx"])]
         else:                                   # etiquetas de texto: el contorno mayor
             cont = extraer_contorno_mesa(base_doc, mesa=mesa, talle=talle)
         x0, y0, _, _ = cont["bbox_raw"]
@@ -4118,8 +4348,29 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         out = pikepdf.Pdf.new()
         page = out.add_blank_page(page_size=(W + 2*B, H + 2*B))
 
+        _despl, _nom_xo = None, None          # camino B: de dónde salió la mesa y cómo se llama
         # ── Arte: contorno (clip) y dibujo, en coordenadas finales de la pieza ──
-        if mapeo_arte and not _mesa_a:          # esta variante quedó SIN diseño en esta pieza
+        if _camino_b:
+            # CAMINO B: el diseño ya está adentro de la pieza, en su lugar y en su escala. Se
+            # trae la mesa del propio molde (con sólo la capa del talle) como Form XObject y se
+            # la recorta al contorno. NO se escala (`cm_encajar` no va: no hay nada que encajar,
+            # la pieza ya está a tamaño real) y NO hay editables ni objetos agregados, que son
+            # cosas del arte separado.
+            # Es, paso por paso, el ramal del ARTE CLÁSICO de más abajo (el diseño ya viene sobre
+            # la misma mesa que el molde) con una sola diferencia: la página sale del MOLDE, no
+            # del arte. Misma escala para todo (`S` del XObject), misma traslación, mismo clip.
+            pag = pagina_molde(mesa, talle)
+            xo = out.copy_foreign(pag.as_form_xobject())
+            if "/OC" in xo:
+                del xo["/OC"]
+            S = float(xo.Matrix[0]) if "/Matrix" in xo else 1.0
+            ops = ops_cont(cont, S)
+            clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)
+            nom = page.add_resource(xo, Name.XObject, prefix="A")
+            arte_draw = (f"q\n1 0 0 1 {B-x0*S:.3f} {B-y0*S:.3f} cm\n"
+                         f"q\n{ops}\nW n\n{nom} Do\nQ\nQ\n")
+            _despl, _nom_xo = _despl_src.get((mesa, talle)), str(nom)
+        elif mapeo_arte and not _mesa_a:        # esta variante quedó SIN diseño en esta pieza
             arte_draw = ""                      # pieza sin arte (el aviso de cobertura lo da el servidor)
             S = cont["user_unit"]
             clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)   # igual necesita clip para el borde/etiqueta
@@ -4238,15 +4489,41 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                          f"{2*B:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
         else:
             borde = ""
+        # ── LA LÍNEA DE CORTE DEL ARCHIVO (camino B, 2026-09-07) ─────────────────────────────
+        # El desplegado la sacó del dibujo y dejó su estilo en `cont["linea_corte"]` ({w, color}).
+        # Su trazo iba CENTRADO en el contorno: la mitad interior tapaba la franja que el diseñador
+        # dejó entre la máscara del diseño y la línea de corte (0,5-2 mm, medido). Por eso:
+        #   · borde APAGADO → la línea se traza tal cual venía (ancho, color, centrada), DESPUÉS
+        #     del diseño, que es donde estaba en el archivo;
+        #   · borde «fuera» → además del trazo exterior se traza la mitad interior de la línea
+        #     original con el color del borde: el borde arranca donde arrancaba la del archivo y
+        #     sigue hacia afuera con el ancho configurado. Sin esto quedaba una franja blanca
+        #     entre el estampado y el borde («desfasaje», reporte del usuario 12:10).
+        #   · «centro» y «dentro» ya cubren el interior: no hace falta nada.
+        _lc = cont.get("linea_corte") if isinstance(cont.get("linea_corte"), dict) else None
+        borde_post = ""
+        if _lc and _lc.get("w"):
+            _wl = float(_lc["w"]) * S
+            if not _bc_activo:
+                _lop, _lv = (_lc.get("color") or ["k", [0, 0, 0, 1]])
+                _lcol = " ".join(f"{float(v):g}" for v in _lv) + " " + {"k": "K", "rg": "RG", "g": "G"}.get(str(_lop), "K")
+                borde_post = f"q\n{clip}\n{_wl:.3f} w 0 j 0 J 10 M {_lcol}\nS\nQ\n"
+            elif _bc_alin == "fuera":
+                borde_post = (f"q\n{clip}\nW n\n{clip}\n"
+                              f"{_wl:.3f} w 0 j 0 J 10 M {_bcol}\nS\nQ\n")
 
         # Stream de contenido REUSABLE: la base va fija y el estampado (texto/etiqueta) se reescribe
         # por prenda con `cstream.write()` → no se acumulan objetos aunque se comparta la base.
         cstream = out.make_stream(b"")
         page.Contents = cstream
-        _base_stream = (f"{borde}{arte_draw}" if _bc_alin == "fuera" else f"{arte_draw}{borde}")
+        _base_stream = (f"{borde}{arte_draw}{borde_post}" if _bc_alin == "fuera" else f"{arte_draw}{borde}{borde_post}")
         return {"out": out, "page": page, "cstream": cstream, "base_stream": _base_stream,
                 "clip": clip, "cont": cont, "W": W, "H": H, "x0": x0, "y0": y0, "x0m": x0m,
-                "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info}
+                "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info,
+                # para la HOJA COMPARTIDA (`hoja_pike`): la mesa desplegada de la que salió el
+                # dibujo, el nombre con el que la referencia `base_stream`, y el margen
+                "despl": _despl, "nom": _nom_xo, "B": B, "pieza": pieza, "talle": talle,
+                "svg_cache": _svg_cache_info}
 
     def generar_pieza(pieza, talle, persona, nro, grupo=None, variante=None):
         _bk = (pieza, talle, variante)
@@ -4281,6 +4558,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 sp = H / ha                        # escala uniforme (alto manda)
                 aw_arte = wa * sp                  # ancho del arte ya escalado
             for campo, pl in ph.items():           # N campos: nombre, numero, palabra, numero 2, …
+                # CAMINO B: cada talle trae su propio «00»/«NOMBRE», a su tamaño y en su lugar
+                # (`por_talle`, ver `piezas_con_diseno.personalizacion_con_diseno`).
+                pl = (pl.get("por_talle") or {}).get(str(talle)) or pl
                 texto = str(persona_n.get(_norm_nombre(campo), "")).strip().upper()
                 if texto == "":
                     continue
@@ -4489,12 +4769,21 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 _tcol = " ".join(f"{v:g}" for v in (_et.get("color") or [0.15, 0.15, 0.15, 0.30])[:4]) + " k"
                 bloques.append(f"q {_tcol}\n{eops}\nf\nQ\n")
 
-        stream = (b["base_stream"] +
-                  f"q\n{clip}\nW n\n" + "".join(bloques) + "Q\n")
+        estampado = f"q\n{clip}\nW n\n" + "".join(bloques) + "Q\n"
+        if _modo_hoja == "pike" and b.get("despl"):
+            # HOJA COMPARTIDA: la base no se vuelve a serializar por prenda. Lo que cambia por
+            # prenda viaja como texto de operadores; el documento de la pieza (si alguien lo
+            # necesita: el Arte, el nesting de siempre) se arma recién al pedirlo.
+            return {"base": b, "estampado": estampado}
+        stream = b["base_stream"] + estampado
         b["cstream"].write(stream.encode())
         buf = io.BytesIO()
         out.save(buf)
-        return buf.getvalue()
+        # El documento de la pieza (lo que se coloca en la hoja de siempre) Y, aparte, la base y
+        # el estampado: con ellos la vista previa de la hoja se arma con símbolos (`preview_svg`)
+        # también en el camino A — convertir la hoja entera costaba 13 de los 15 s de una
+        # tizada de 5 prendas (2026-09-07). `base` sin `despl` → la hoja sigue siendo la de siempre.
+        return {"pdf": buf.getvalue(), "base": b, "estampado": estampado}
 
     piezas_por_tela = {}                              # tela -> lista de piezas (claves dinámicas)
     total = sum(len(piezas_de(p)) for p in prendas)
@@ -4504,12 +4793,23 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             persona = pr.get("personalizacion") or {"nombre": pr.get("nombre", ""), "numero": pr.get("numero", "")}
             datos = generar_pieza(pieza, pr["talle"], persona, nro, grupo=(pr.get("_grupo") if isinstance(pr, dict) else None),
                                   variante=(pr.get("variante_clave") if isinstance(pr, dict) else None))
-            doc = _abrir("pdf", datos)
-            r = doc[0].rect
-            piezas_por_tela.setdefault(TELA(pieza), []).append(
-                {"doc": doc, "w": r.width, "h": r.height, "pieza": pieza, "talle": pr["talle"],
-                 "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
-                 "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
+            if isinstance(datos, dict) and "pdf" not in datos:
+                # hoja compartida: sin documento por prenda (se arma sólo si alguien lo pide)
+                _b = datos["base"]
+                ent = {"doc": _DocPerezoso(_b, datos["estampado"]), "w": float(_b["W"]) + 2 * float(_b["B"]),
+                       "h": float(_b["Hp"]), "base": _b, "estampado": datos["estampado"]}
+            else:
+                # modo de siempre: el documento por prenda + la base y el estampado para la preview
+                _pdf = datos["pdf"] if isinstance(datos, dict) else datos
+                doc = _abrir("pdf", _pdf)
+                r = doc[0].rect
+                ent = {"doc": doc, "w": r.width, "h": r.height}
+                if isinstance(datos, dict):
+                    ent["base"] = datos["base"]; ent["estampado"] = datos["estampado"]
+            ent.update({"pieza": pieza, "talle": pr["talle"],
+                        "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
+                        "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
+            piezas_por_tela.setdefault(TELA(pieza), []).append(ent)
             hechas += 1
             if progreso:
                 progreso("piezas", f"{hechas}/{total} - {pieza} (Prenda {nro}, Talle {pr['talle']})", None)
@@ -4522,10 +4822,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # que un pedido MULTI-MOLDE junte las piezas de varios moldes y las anide juntas.
     if solo_piezas:
         return piezas_por_tela
-    return _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso)
+    return _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso, procesos=procesos)
 
 
-def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso=None, prefijo=""):
+def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso=None, prefijo="", procesos=None):
     """Anida y compone las piezas (ya generadas) por TELA → una hoja por tela.
     Todas las piezas de una misma tela van JUNTAS (sin importar de qué molde son)."""
     cfg = {"ancho_cm": 180, "altura_max_cm": 500, "espaciado_cm": 0.5,
@@ -4537,7 +4837,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
     # CRONÓMETRO por etapa: sin esto, cuando un pedido tarda de más hay que adivinar en qué paso
     # se fue el tiempo. Se imprime al final, en la ventana del servidor.
     _crono = {"armar piezas": time.time() - t0, "acomodar en la tela": 0.0,
-              "escribir el PDF": 0.0, "vistas previas": 0.0}
+              "escribir el PDF": 0.0, "vistas previas": 0.0, "validar": 0.0}
     for tela, piezas in piezas_por_tela.items():
         if not piezas:
             continue
@@ -4551,7 +4851,17 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         coloc, area = anidar_contorno(piezas, cfg_t)
         _crono["acomodar en la tela"] += time.time() - _t_et; _t_et = time.time()
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
-        consumo, alturas_cm = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
+        # HOJA COMPARTIDA si TODAS las piezas de esta tela traen su base (camino B); si no —camino
+        # A, o una tela que mezcla moldes de los dos caminos— el compositor de siempre.
+        _pike = all(("base" in p and (p["base"] or {}).get("despl")) for p in piezas)
+        if _pike:
+            from hoja_pike import componer_hoja_pike
+            consumo, alturas_cm = componer_hoja_pike(coloc, cfg_t, path)
+        else:
+            for p in piezas:
+                if hasattr(p.get("doc"), "real"):
+                    p["doc"] = p["doc"].real()
+            consumo, alturas_cm = componer_pdf_contorno(coloc, cfg_t, path, etiquetas=False)
         _crono["escribir el PDF"] += time.time() - _t_et; _t_et = time.time()
         for p in piezas:
             if "doc" in p and p["doc"]:
@@ -4559,9 +4869,51 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                     p["doc"].close()
                 except Exception:
                     pass
-        _barrer_fuentes(path)
-        d = fitz.open(path)
-        try:
+        if not _pike:
+            _barrer_fuentes(path)     # la hoja compartida no tiene fuentes fuera de las bases
+        # La preview por símbolos también para la hoja de siempre (camino A): cada pieza trae
+        # su base y su estampado desde 2026-09-07. Convertir la hoja entera eran 13 s de 15.
+        _simb = _pike or all((p.get("base") and p.get("estampado") is not None) for p in piezas)
+        if _simb:
+            # PREVIEW LIVIANO (hoja compartida): un `<symbol>` por base y un `<use>` por colocación.
+            # `get_svg_image()` de la hoja entera expandía cada colocación (64 MB por hoja de 5
+            # prendas; 1,3 GB a 100). Los símbolos salen de un documento de la base SOLA.
+            from hoja_pike import preview_svg, altos_de_hojas, svgs_de_bases
+            _docs_base_cache = {}
+            def _doc_base(b):
+                d = _docs_base_cache.get(id(b))
+                if d is None:
+                    b["cstream"].write(b["base_stream"].encode())
+                    _buf = io.BytesIO(); b["out"].save(_buf)
+                    d = fitz.open("pdf", _buf.getvalue()); _docs_base_cache[id(b)] = d
+                return d
+            prevs, _simbolos = [], {}
+            _altos = altos_de_hojas(coloc, cfg_t)
+            _hojas_no_vacias = [h for h in coloc if h]
+            paginas = len(_hojas_no_vacias)
+            # todas las bases de la tela a SVG de una vez: caché de disco + procesos en paralelo
+            if progreso:
+                progreso("previews", f"bases - {tela}", None)
+            _bases = {}
+            for _h in _hojas_no_vacias:
+                for _c in _h:
+                    _bb = _c["pieza"]["base"]; _bases.setdefault(id(_bb), _bb)
+            _crudos = svgs_de_bases(list(_bases.values()), _doc_base, procesos)
+            for i, (hoja_c, alto_pt) in enumerate(zip(_hojas_no_vacias, _altos)):
+                if progreso:
+                    progreso("previews", f"{i + 1}/{paginas} - {tela}", None)
+                pv = f"prev_{slug}_h{i+1}.svg"
+                with open(os.path.join(salida, pv), "w", encoding="utf-8") as f:
+                    f.write(preview_svg(hoja_c, cfg_t, alto_pt, _simbolos, _doc_base, crudos=_crudos))
+                prevs.append(pv)
+            for d in _docs_base_cache.values():
+                try:
+                    d.close()
+                except Exception:
+                    pass
+        else:
+          d = fitz.open(path)
+          try:
             prevs = []
             paginas = len(d)
             for i, pg in enumerate(d):
@@ -4578,7 +4930,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                 with open(os.path.join(salida, pv), "w", encoding="utf-8") as f:
                     f.write(svg)
                 prevs.append(pv)
-        finally:
+          finally:
             d.close()
         _crono["vistas previas"] += time.time() - _t_et
         # El aprovechamiento puede no calcularse si la hoja salió vacía (consumo 0):
@@ -4598,7 +4950,9 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         if telas_cfg and tela in telas_cfg:
             cfg_t.update(telas_cfg[tela])
         telas_spacing[tela] = float(cfg_t.get("espaciado_cm", 0.5)) * 10.0
+    _t_v = time.time()
     validaciones = validar_salida(salida, hojas, telas_spacing)
+    _crono["validar"] += time.time() - _t_v
     # Queda escrito en la ventana del servidor: cuando un pedido tarda de más, se ve en QUÉ paso
     # se fue el tiempo, en vez de tener que adivinar. (El contador de piezas se imprime en
     # `generar_pedido`, que es donde vive: acá esa variable NO existe.)
@@ -4634,14 +4988,14 @@ def generar_pedido_multi(molds, carpeta_fuentes, salida, config_nesting=None,
 
 
 def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
-                          telas_cfg=None, progreso=None):
+                          telas_cfg=None, progreso=None, procesos=None):
     """Genera por GRUPOS de tizada. `grupos` = lista de {nombre, moldes}, donde
     `moldes` es una lista de dicts de molde (como en generar_pedido_multi). Los
     moldes de un MISMO grupo se combinan (por tela); grupos distintos NO se mezclan
     (cada grupo arma sus propias hojas). Cada hoja queda etiquetada con su grupo."""
     t0 = time.time()
     os.makedirs(salida, exist_ok=True)
-    todas, total = [], 0
+    todas, total, validaciones = [], 0, []
     for gi, grupo in enumerate(grupos):
         acc = {}
         for md in grupo["moldes"]:
@@ -4663,14 +5017,16 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)
         res_g = _nestear_y_componer(acc, config_nesting, telas_cfg, salida, t0, total,
-                                    progreso, prefijo=f"g{gi}_")
+                                    progreso, prefijo=f"g{gi}_", procesos=procesos)
         for h in res_g["hojas"]:
             h["grupo"] = grupo.get("nombre", f"Grupo {gi + 1}")
             h["moldes"] = grupo.get("nombres", [])
             todas.append(h)
-    telas_spacing = {}
-    return {"hojas": todas,
-            "validaciones": validar_salida(salida, todas, telas_spacing),
+        # `_nestear_y_componer` YA validó estas hojas, con el espaciado real de cada tela. Volver
+        # a validar acá costaba ~26 s por pedido (parsea toda la hoja tres veces) y encima lo
+        # hacía con `telas_spacing = {}`, reportando un espaciado inventado (2026-09-04).
+        validaciones.extend(res_g.get("validaciones") or [])
+    return {"hojas": todas, "validaciones": validaciones,
             "duracion_s": round(time.time() - t0, 1), "piezas": total}
 
 
@@ -4755,7 +5111,10 @@ def validar_salida(carpeta, hojas, telas_spacing):
                     return
                 vis.add(og)
                 if isinstance(o, pikepdf.Stream) and str(o.get("/Subtype", "")) == "/Form":
-                    chequear(o)
+                    # una base de la hoja compartida (`/TizadaBase`) nace de una página desplegada
+                    # balanceada por contrato: parsear sus 20.000 operadores no aporta nada
+                    if o.get("/TizadaBase") is None:
+                        chequear(o)
                 r2 = o.get("/Resources") if isinstance(o, (pikepdf.Stream, pikepdf.Dictionary)) else None
                 if r2 is not None and "/XObject" in r2:
                     for k in r2.XObject.keys():

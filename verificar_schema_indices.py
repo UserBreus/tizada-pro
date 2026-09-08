@@ -92,6 +92,16 @@ for lote in LOTES:
         ok(bool(guarda) and guarda.group(1).lower() == nombre.lower(),
            f"{nombre} va guardado por su propio IF NOT EXISTS")
 
+print("\n2b) 🔴 Ningun lote deja un comentario abierto (SQL Server ANIDA los /* */)")
+# Ya paso (2026-09-08, al unir la rama del camino B): un comentario terminaba en
+# «/api/molde/config/*» y ese «/*» abria un comentario ANIDADO que nunca se cerraba. SQL Server
+# cortaba el lote con «Missing end comment mark», el arranque no podia aplicar el esquema y
+# faltaba una tabla — con el sistema dando error 500 en casi todo. Se ve solo al APLICARLO.
+_desb = [i for i, b in enumerate(LOTES) if b.count("/*") != b.count("*/")]
+ok(not _desb,
+   f"🔴 hay lote(s) con un comentario sin cerrar (nº {_desb}): SQL Server no los va a poder aplicar")
+print(f"    OK    los {len(LOTES)} lotes abren y cierran todos sus comentarios")
+
 print("\n3) El esquema se aplica AL ARRANCAR (no sólo al instalar)")
 _srv = open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
 ok("db.aplicar_schema()" in _srv, "el servidor aplica `db/schema.sql` al arrancar")
