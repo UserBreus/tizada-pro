@@ -5,7 +5,8 @@ Correr:  python servidor.py   y abrir  http://localhost:8000
 import copy
 import os, re, sys, json, time, threading, uuid, traceback, contextlib
 from collections import OrderedDict
-from flask import Flask, request, jsonify, send_from_directory, send_file, session, has_request_context
+from flask import (Flask, request, jsonify, send_from_directory, send_file, session,
+                   has_request_context, g)
 from werkzeug.exceptions import HTTPException
 
 import motor_pedido as MP
@@ -1217,6 +1218,15 @@ def _catalogo_desde_json():
     return cat
 
 
+def _olvidar_catalogo_memo():
+    """Tira la copia del catálogo que este request tenía en la mano."""
+    if has_request_context():
+        try:
+            g.pop("_cat_memo", None)
+        except Exception:
+            pass
+
+
 def _leer_catalogo_crudo():
     """El catálogo TAL CUAL está, sin tocar nada. Devuelve `(cat, hay_que_sembrarlo)`.
 
@@ -1385,22 +1395,33 @@ def _normalizar_catalogo(cat):
 _CATALOGO_SOLO_LECTURA = not _es_proceso_principal()
 
 
-def _cargar_catalogo(solo_lectura=None):
+def _cargar_catalogo(solo_lectura=None, fresco=False):
     """El catálogo listo para usar. Si al normalizarlo hubo que completar algo, se guarda —pero
     SIEMPRE bajo el candado de edición y releyendo lo fresco, para no pisar a quien esté
-    guardando en ese mismo momento."""
+    guardando en ese mismo momento.
+
+    🔴 **LO QUE DEVUELVE ES DE SÓLO LECTURA.** Dentro de un request se responde SIEMPRE el mismo
+    objeto: un endpoint cualquiera lo pide entre 3 y 6 veces (`_ruta_datos`, `_ruta_entrada`,
+    `_get_active_producto_id`…) y cada una era un viaje a la base más el parseo del documento
+    entero. Para modificarlo y guardarlo va `_cargar_catalogo_para_editar()` (o
+    `_seccion_edicion()`), que además lo relee fresco con el candado ya tomado."""
+    if not fresco and has_request_context() and getattr(_edicion_cat, "n", 0) == 0:
+        _memo = getattr(g, "_cat_memo", None)
+        if _memo is not None:
+            return _memo
     cat, sembrar = _leer_catalogo_crudo()
     tocado = _normalizar_catalogo(cat) or sembrar
     solo = _CATALOGO_SOLO_LECTURA if solo_lectura is None else solo_lectura
-    if not tocado or solo:
-        return cat
-    if getattr(_edicion_cat, "n", 0) > 0:
-        _guardar_catalogo(cat)         # ya estamos adentro de una sección de edición
-        return cat
-    with _seccion_edicion():           # sección CORTA: se toma y se suelta acá mismo
-        cat, sembrar = _leer_catalogo_crudo()      # fresco: entre medio pudo guardar otro
-        if _normalizar_catalogo(cat) or sembrar:
-            _guardar_catalogo(cat)
+    if tocado and not solo:
+        if getattr(_edicion_cat, "n", 0) > 0:
+            _guardar_catalogo(cat)     # ya estamos adentro de una sección de edición
+        else:
+            with _seccion_edicion():   # sección CORTA: se toma y se suelta acá mismo
+                cat, sembrar = _leer_catalogo_crudo()   # fresco: entre medio pudo guardar otro
+                if _normalizar_catalogo(cat) or sembrar:
+                    _guardar_catalogo(cat)
+    if has_request_context() and getattr(_edicion_cat, "n", 0) == 0:
+        g._cat_memo = cat
     return cat
 
 
@@ -1423,6 +1444,9 @@ def _guardar_catalogo(cat):
                       "el cambio que se estaba haciendo se perdió.", error=str(e)[:300])
             print(f"[catalogo] no se pudo guardar en la base: {e}")
             raise
+        # Lo que se acaba de guardar es lo que el resto del request tiene que ver.
+        if has_request_context():
+            g._cat_memo = cat
         _guardar_catalogo_json_espejo(cat)
     finally:
         # ⚠️ Acá NO se suelta el candado de edición, por más tentador que sea: `_cargar_catalogo`
@@ -1525,6 +1549,9 @@ def _seccion_edicion():
     request (un hilo de fondo, un backfill) también tiene cómo hacerlo bien."""
     _LOCK_CAT_EDICION.acquire()
     _edicion_cat.n = getattr(_edicion_cat, "n", 0) + 1
+    # Lo que se haya leído ANTES de tener el candado puede estar viejo: se tira la memoria del
+    # request para que adentro de la sección se relea lo último bueno.
+    _olvidar_catalogo_memo()
     try:
         yield
     finally:
@@ -1539,9 +1566,12 @@ def _cargar_catalogo_para_editar():
     ningún endpoint tiene que acordarse, aunque corte antes por una validación."""
     _LOCK_CAT_EDICION.acquire()
     _edicion_cat.n = getattr(_edicion_cat, "n", 0) + 1
+    _olvidar_catalogo_memo()
     try:
-        # `fresco`: ya tenemos el candado, así que lo que se lea ahora es lo último bueno.
-        return _cargar_catalogo()
+        # `fresco=True`: con el candado ya tomado, lo que se lea ahora es lo último bueno. Sin
+        # esto se devolvería lo que el request leyó ANTES de tener el candado, que es justo lo
+        # que otro pudo haber cambiado mientras tanto.
+        return _cargar_catalogo(fresco=True)
     except Exception:
         _soltar_edicion_catalogo()   # si ni leerlo se pudo, no dejamos el candado tomado
         raise

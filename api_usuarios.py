@@ -7,7 +7,7 @@ pero quien decide es el backend. Ocultar no es proteger.
 """
 import functools
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, g, has_request_context, jsonify, request, session
 
 import auth
 import db
@@ -17,14 +17,39 @@ bp = Blueprint("usuarios", __name__)
 
 # ── Sesión / guardas ─────────────────────────────────────────────────────────
 def usuario_actual():
+    """Quién está logueado, con sus roles y permisos. **Una vez por request.**
+
+    Son TRES consultas (el usuario, sus roles, sus permisos) y cada una abre su propia conexión.
+    Se lo pregunta el guardia de `servidor.py` para toda la API, y después casi cada endpoint lo
+    vuelve a pedir para saber de quién es el molde: eran 6 a 9 conexiones por request sólo para
+    saber quién sos. La memoria va con la CLAVE del usuario de la sesión, así un login o un
+    logout en el medio no devuelve al de antes.
+
+    Sigue leyendo `activo` de la base en cada request: desactivar a alguien lo saca al toque."""
     uid = session.get("uid")
     if not uid:
         return None
+    if has_request_context():
+        _memo = getattr(g, "_usuario_memo", None)
+        if _memo is not None and _memo[0] == uid:
+            return _memo[1]
     u = db.fila("SELECT id, usuario, nombre, activo FROM usuario WHERE id=?", uid)
     if not u or not u["activo"]:
         return None
-    return {"id": u["id"], "usuario": u["usuario"], "nombre": u["nombre"],
-            "roles": auth.roles_de(uid), "permisos": auth.permisos_de(uid)}
+    yo = {"id": u["id"], "usuario": u["usuario"], "nombre": u["nombre"],
+          "roles": auth.roles_de(uid), "permisos": auth.permisos_de(uid)}
+    if has_request_context():
+        g._usuario_memo = (uid, yo)
+    return yo
+
+
+def _olvidar_usuario_memo():
+    """Después de tocar los roles/permisos de alguien, lo de la mano ya no sirve."""
+    if has_request_context():
+        try:
+            g.pop("_usuario_memo", None)
+        except Exception:
+            pass
 
 
 def requiere(*permisos):
@@ -175,6 +200,7 @@ def editar_usuario(uid):
                     cur.execute("INSERT INTO usuario_rol (usuario_id, rol_id) VALUES (?,?)", uid, rid)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400          # nada se escribió: la transacción se deshizo
+    _olvidar_usuario_memo()      # si me edité a mí mismo, lo que tengo en la mano ya no vale
     return jsonify({"ok": True})
 
 
@@ -271,6 +297,7 @@ def editar_rol(rid):
                         (d.get("descripcion") or "").strip() or None, rid)
         if "permisos" in d:
             _set_permisos(rid, d["permisos"], cur)
+    _olvidar_usuario_memo()      # los permisos que tengo en la mano pueden ser los de este rol
     return jsonify({"ok": True})
 
 

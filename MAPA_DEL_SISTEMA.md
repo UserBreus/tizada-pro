@@ -1432,6 +1432,46 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (393) — Un request abría entre 6 y 20 conexiones a la base para preguntar dos cosas
+  una y otra vez.** Octava y última entrega de la auditoría.
+
+  **LO QUE PASABA.** Cada llamada a la base abre **su propia conexión** (del lado de Python no hay
+  pool). Y dos preguntas se repetían dentro del MISMO request:
+  - **Quién sos** (`usuario_actual`): son TRES consultas —el usuario, sus roles, sus permisos—.
+    La hace el guardia (`_guardia_moldes`) para toda la API, la vuelve a hacer `_guard_molde` en
+    el mismo request, y después casi cada endpoint la repite para saber de quién es el molde. Son
+    **19 lugares** que la llaman: entre 6 y 9 conexiones por request sólo para saber quién sos.
+  - **El catálogo** (`_cargar_catalogo`): una consulta más el parseo del documento entero. Hay
+    45 llamadas directas, 61 a `_get_active_producto_id()` y 42 a `_ruta_datos`/`_ruta_entrada`
+    sin `pid` — que terminan todas en lo mismo. Un endpoint que toque el molde y el arte pagaba 5.
+
+  **LO QUE SE HIZO.** Los dos se recuerdan en **`flask.g`**, o sea que la memoria **muere con el
+  request**: no es un caché entre pantallas ni entre usuarios, y no puede servir datos viejos a
+  otro. La del usuario va con la CLAVE de la sesión, así un login o un logout en el medio no
+  devuelve al de antes; y sigue leyendo `activo` de la base en cada request, así desactivar a
+  alguien lo saca al toque.
+
+  🔴 **La regla que lo hace seguro: lo que devuelve `_cargar_catalogo()` es de SÓLO LECTURA.** Para
+  modificar y guardar va `_cargar_catalogo_para_editar()`, que ahora pide el catálogo **fresco**
+  (`fresco=True`) con el candado ya tomado — si devolviera lo memorizado, guardaría encima de lo
+  que otro cambió mientras este request leía. La memoria se tira al entrar a una sección de
+  edición y se actualiza al guardar (lo que se guardó es lo que el resto del request tiene que
+  ver). Fuera de un request no hay memoria: cada hilo lee lo suyo.
+
+  **VERIFICADO** con `verificar_memo_request.py` (nuevo): tres pedidos del catálogo dentro de un
+  request = **una** lectura; `_cargar_catalogo_para_editar` **vuelve a la base** y trae lo último
+  aunque el request ya lo hubiera leído; tres `usuario_actual()` = **una** consulta; cambiar el
+  usuario de la sesión obliga a preguntar de nuevo; y un barrido estático comprueba que **ninguna
+  función guarda el catálogo sin haber tomado el candado**. Más los 32 contratos del repo en
+  verde, el servidor reiniciado y la app abierta de verdad en el sandbox (lista los moldes con sus
+  previews, todas las llamadas 200).
+
+  ⚠️ **PENDIENTE que quedó de toda la auditoría:** `verificar_arte_liviano.py` no corre (usa un
+  molde borrado, ver 390); y 13 de las 26 tablas del esquema **no las escribe nadie** (`pedido`,
+  `pedido_fila`, `trabajo`, `tela`, `fuente`, `editable`, `mapeo_arte`, `junta`…): los pedidos y
+  los trabajos **no están persistidos en MSSQL**, viven en el documento del catálogo y en disco.
+  No es un error de esta tanda, pero conviene no suponer que la base tiene el historial.
+
 - **2026-09-07 (392) — 🔴 EL CANDADO DE LA CONFIGURACIÓN SE TENÍA TOMADO DURANTE EL TRABAJO PESADO
   (y los procesos de dibujo escribían el catálogo sin él).** Séptima entrega de la auditoría.
 
