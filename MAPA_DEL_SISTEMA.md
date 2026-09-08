@@ -1354,6 +1354,31 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-08 (399) — LA CONFIGURACIÓN DEL MOLDE SE GUARDA Y SE VUELVE A APLICAR.** Pedido del
+  usuario: «que en la base podamos guardar las configuraciones de los moldes con diseño y después
+  poder seleccionar cuál usar, para no hacer todos los mismos pasos de nuevo». Un molde del camino
+  B se sube para UN pedido y se borra con él: el nombrado de las piezas, los grupos, las variables,
+  las telas y el talle de guía se iban con él.
+  · **Dónde vive:** tabla nueva `dbo.config_molde` (`db.guardar_config_molde` /
+  `listar_configs_molde` / `leer_config_molde` / `borrar_config_molde`). Está en `schema.sql` y
+  además **se crea sola la primera vez** (`_asegurar_config_molde`): las bases ya instaladas no
+  vuelven a pasar por el instalador.
+  · **Atada al ARCHIVO (sha1), no al molde** — el molde se borra con el pedido, la configuración
+  queda. `_sha1_molde` memoriza por (tamaño, fecha): son 123 MB, leerlos en cada listado no.
+  · **La elige el usuario, nunca se aplica sola** (fue explícito). La lista dice qué tan bien calza:
+  `igual` (mismo archivo), `parecida` (otro archivo con las mismas piezas y mesas) o `distinta` —
+  y se puede aplicar igual: después se mira en el visor si acomodó bien.
+  · 🔴 **Las piezas se guardan por `(mesa, idx_mesa)` y por NOMBRE.** El par es la identidad que no
+  depende del talle (`PD.renombrar`), y el nombre es lo que permite **reubicar los `pieza_idx` de
+  grupos y variables** en el molde nuevo: aplicar los índices guardados tal cual apuntaría a otra
+  pieza si el orden cambió — y una tizada mal sale igual de bien impresa.
+  · **Lo que no entra se dice** (`sin_lugar`, `piezas_perdidas`), no se esconde.
+  · Endpoints: `POST /api/molde/config/guardar`, `GET /api/molde/config/lista?pid=`,
+  `POST /api/molde/config/aplicar`, `DELETE /api/molde/config/<id>`. Pantalla: tarjeta
+  «Configuración» en Moldería → modal para guardar con un nombre, ver las guardadas con su estado,
+  aplicar (con informe) y borrar.
+  · Contrato: `verificar_config_guardada.py` (incluye el caso 🔴 de las piezas en otro orden).
+
 - **2026-09-08 (398) — «NUEVO PEDIDO» Y LOS MOLDES TEMPORALES QUE NO SE IBAN.** Reporte del
   usuario: «¿por qué si pongo nuevo pedido siguen ahí los moldes temporales del pedido pasado?».
   Tenían que fallar CUATRO cosas juntas, y fallaban:

@@ -601,3 +601,76 @@ def borrar_producto(legacy_pid):
 def registro_rev(legacy_pid):
     """Revisión actual del registro del molde (para claves de caché). None si el molde no está."""
     return valor("SELECT registro_rev FROM producto WHERE legacy_id=?", legacy_pid)
+
+
+# ── CONFIGURACIONES GUARDADAS DE UN MOLDE (camino B) ──────────────────────────────────────────
+# Un molde que trae el diseño adentro se sube PARA UN PEDIDO y se borra con él: el nombrado de las
+# piezas, los grupos, las variables y las telas se perdían, y al volver a usar el MISMO archivo en
+# otro pedido había que hacer todo de nuevo (pedido del usuario 2026-09-08). Acá se guarda esa
+# configuración, atada al ARCHIVO (sha1) y no al molde, para poder ofrecerla la próxima vez.
+_CONFIG_MOLDE_LISTA = False
+
+
+def _asegurar_config_molde():
+    """Crea la tabla si falta. Va acá y no sólo en `schema.sql` porque las bases que ya están
+    instaladas no vuelven a pasar por el instalador: la primera vez que alguien guarda una
+    configuración, la tabla tiene que aparecer sola."""
+    global _CONFIG_MOLDE_LISTA
+    if _CONFIG_MOLDE_LISTA:
+        return
+    with cursor() as cur:
+        cur.execute("""
+IF OBJECT_ID('dbo.config_molde') IS NULL
+CREATE TABLE dbo.config_molde (
+    id          INT IDENTITY(1,1) PRIMARY KEY,
+    nombre      NVARCHAR(160) NOT NULL,
+    sha1        NVARCHAR(40)  NULL,     -- del archivo del molde: identifica el MISMO archivo
+    molde       NVARCHAR(240) NULL,     -- de qué molde salió (para reconocerla en la lista)
+    piezas_n    INT NULL,               -- cuántas piezas tenía (compatibilidad a ojo)
+    mesas_n     INT NULL,
+    creado_en   DATETIME2 NOT NULL CONSTRAINT DF_config_molde_creado DEFAULT SYSUTCDATETIME(),
+    creado_por  INT NULL,
+    datos       NVARCHAR(MAX) NOT NULL  -- el JSON con todo lo guardado
+)""")
+    _CONFIG_MOLDE_LISTA = True
+
+
+def guardar_config_molde(nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por=None, id_=None):
+    """Guarda (o pisa, si viene `id_`) una configuración. Devuelve su id."""
+    _asegurar_config_molde()
+    txt = _json.dumps(datos, ensure_ascii=False)
+    with cursor() as cur:
+        if id_:
+            cur.execute("UPDATE config_molde SET nombre=?, sha1=?, molde=?, piezas_n=?, mesas_n=?, "
+                        "datos=? WHERE id=?", nombre, sha1, molde, piezas_n, mesas_n, txt, int(id_))
+            if cur.rowcount:
+                return int(id_)
+        cur.execute("INSERT INTO config_molde (nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por) "
+                    "OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    nombre, sha1, molde, piezas_n, mesas_n, txt, creado_por)
+        return int(cur.fetchone()[0])
+
+
+def listar_configs_molde():
+    """Todas las configuraciones guardadas, sin el JSON (la lista no lo necesita)."""
+    _asegurar_config_molde()
+    return filas("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por "
+                 "FROM config_molde ORDER BY creado_en DESC")
+
+
+def leer_config_molde(id_):
+    _asegurar_config_molde()
+    f = fila("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por, datos "
+             "FROM config_molde WHERE id=?", int(id_))
+    if not f:
+        return None
+    try:
+        f["datos"] = _json.loads(f["datos"] or "{}")
+    except Exception:
+        f["datos"] = {}
+    return f
+
+
+def borrar_config_molde(id_):
+    _asegurar_config_molde()
+    return ejecutar("DELETE FROM config_molde WHERE id=?", int(id_))

@@ -8332,6 +8332,236 @@ def limpiar_efimeros():
     return jsonify({"ok": True, "borrados": borrados, "ignorados": ignorados})
 
 
+# ══ CONFIGURACIONES GUARDADAS DE UN MOLDE ════════════════════════════════════════════════════
+# Un molde del camino B se sube para UN pedido y se borra con él (ver `MOLDE_CON_DISENO.md`): todo
+# el trabajo de configurarlo —nombrar las piezas, armar grupos y variables, elegir telas y talle
+# guía— se perdía, y al volver a usar el MISMO archivo había que hacerlo de nuevo (pedido del
+# usuario 2026-09-08). La configuración se guarda en la BASE, atada al ARCHIVO (sha1) y no al
+# molde, y se aplica SÓLO cuando el usuario la elige.
+#
+# 🔴 LAS PIEZAS SE GUARDAN POR (mesa, idx_mesa) Y POR NOMBRE, no por `pieza_idx`. El par
+# (mesa, idx_mesa) es el único identificador que no depende del talle (ver `PD.renombrar`), y el
+# nombre es lo que permite volver a resolver los `pieza_idx` de grupos y variables en el molde
+# nuevo: si el archivo cambió y las piezas se movieron, los índices viejos apuntarían a otra pieza.
+_CAMPOS_CONFIG_MOLDE = ("grupos", "variantes", "conjuntos", "variante_guia", "etiqueta",
+                        "borde_corte", "telas_cfg", "telas_asignadas", "referencia_medida",
+                        "editables_config", "mapeo_columnas", "planilla_template_id",
+                        "terminologia", "nesting_preset_id", "grupo_tizada", "modelos")
+_SHA1_CACHE = {}
+
+
+def _sha1_molde(path):
+    """sha1 del archivo, memorizado por (tamaño, fecha): identifica al ARCHIVO, que es lo que
+    comparten dos subidas del mismo molde en pedidos distintos. Son 123 MB: sin memoria, cada
+    listado los volvería a leer."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    k = (os.path.normcase(os.path.abspath(path)), st.st_size, int(st.st_mtime))
+    if k not in _SHA1_CACHE:
+        if len(_SHA1_CACHE) > 40:
+            _SHA1_CACHE.clear()
+        _SHA1_CACHE[k] = _sha1_archivo(path)
+    return _SHA1_CACHE[k]
+
+
+def _piezas_del_registro(reg):
+    """[{mesa, idx_mesa, pieza_idx, nombre}] — la identidad de cada pieza con su nombre."""
+    salida, vistos = [], set()
+    for nom, por_t in (reg or {}).items():
+        for inf in (por_t or {}).values():
+            if not isinstance(inf, dict) or inf.get("mesa") is None:
+                continue
+            k = (inf.get("mesa"), inf.get("idx_mesa"))
+            if k in vistos:
+                continue
+            vistos.add(k)
+            salida.append({"mesa": inf.get("mesa"), "idx_mesa": inf.get("idx_mesa"),
+                           "pieza_idx": inf.get("pieza_idx"), "nombre": nom})
+            break
+    salida.sort(key=lambda p: (p["mesa"] if p["mesa"] is not None else -1,
+                               p["idx_mesa"] if p["idx_mesa"] is not None else -1))
+    return salida
+
+
+def _idx_por_nombre(reg):
+    """{nombre: pieza_idx} — con qué índice quedó cada pieza EN ESTE molde (para reubicar los
+    grupos y las variables de una configuración guardada, que vienen con los índices de otro)."""
+    out = {}
+    for nom, por_t in (reg or {}).items():
+        for inf in (por_t or {}).values():
+            if isinstance(inf, dict) and inf.get("pieza_idx") is not None:
+                out[nom] = int(inf["pieza_idx"])
+                break
+    return out
+
+
+@app.post("/api/molde/config/guardar")
+def molde_config_guardar():
+    """Guarda la configuración del molde con un nombre: `{pid, nombre, id?}` (con `id` la pisa)."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    nombre = str(cuerpo.get("nombre") or "").strip()
+    if not nombre:
+        return jsonify({"error": "Ponele un nombre a la configuración para poder reconocerla."}), 400
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "no está ese molde"}), 404
+    reg = _cargar("registro_producto.json", pid) or {}
+    piezas = _piezas_del_registro(reg)
+    if not piezas:
+        return jsonify({"error": "Este molde todavía no tiene piezas: no hay nada que guardar."}), 409
+    datos = {"campos": {k: prod.get(k) for k in _CAMPOS_CONFIG_MOLDE if prod.get(k) not in (None, [], {})},
+             "piezas": piezas,
+             # El nombrado es lo que más cuesta y lo que más se repite: se guarda aparte para poder
+             # decir en la lista cuántas piezas trae.
+             "produccion": _cargar("config_produccion.json", pid) or {},
+             "origen": prod.get("origen"), "molde": prod.get("nombre")}
+    try:
+        _id = db.guardar_config_molde(
+            nombre, _sha1_molde(_ruta_entrada("plantilla.ai", pid)), prod.get("nombre"),
+            len(piezas), len({p["mesa"] for p in piezas}), datos, _uid_actual(),
+            id_=cuerpo.get("id"))
+    except Exception as e:
+        return jsonify({"error": f"no se pudo guardar en la base: {e}"}), 500
+    return jsonify({"ok": True, "id": _id, "piezas": len(piezas)})
+
+
+@app.get("/api/molde/config/lista")
+def molde_config_lista():
+    """Las configuraciones guardadas, con QUÉ TAN BIEN le calzan a este molde (`pid`).
+
+    No se aplica ninguna sola: la pantalla las muestra y el usuario elige (pedido del usuario). El
+    estado es una AYUDA para elegir, no un permiso: una configuración «parecida» se puede aplicar
+    igual, y después se ve en el molde si acomodó bien."""
+    pid = request.args.get("pid") or _get_active_producto_id()
+    try:
+        _sha = _sha1_molde(_ruta_entrada("plantilla.ai", pid))
+    except Exception:
+        _sha = None
+    reg = _cargar("registro_producto.json", pid) or {}
+    _mis = _piezas_del_registro(reg)
+    _n, _m = len(_mis), len({p["mesa"] for p in _mis})
+    salida = []
+    try:
+        _lista = db.listar_configs_molde()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "configs": []})
+    for c in _lista:
+        if _sha and c.get("sha1") == _sha:
+            estado, detalle = "igual", "es de este mismo archivo"
+        elif c.get("mesas_n") == _m and c.get("piezas_n") == _n:
+            estado, detalle = "parecida", f"otro archivo, pero con las mismas {_n} piezas en {_m} mesas"
+        else:
+            estado, detalle = "distinta", (f"tiene {c.get('piezas_n')} pieza(s) en {c.get('mesas_n')} "
+                                           f"mesa(s); este molde tiene {_n} en {_m}")
+        salida.append({"id": c["id"], "nombre": c["nombre"], "molde": c.get("molde"),
+                       "piezas": c.get("piezas_n"), "mesas": c.get("mesas_n"),
+                       "cuando": (c["creado_en"].isoformat() if hasattr(c.get("creado_en"), "isoformat")
+                                  else str(c.get("creado_en") or "")),
+                       "estado": estado, "detalle": detalle})
+    return jsonify({"ok": True, "configs": salida})
+
+
+@app.post("/api/molde/config/aplicar")
+def molde_config_aplicar():
+    """Aplica una configuración guardada a este molde: `{pid, id}`. Devuelve el INFORME de lo que
+    entró y lo que no — el usuario tiene que poder ver si acomodó bien."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    cfg = None
+    try:
+        cfg = db.leer_config_molde(cuerpo.get("id"))
+    except Exception as e:
+        return jsonify({"error": f"no se pudo leer de la base: {e}"}), 500
+    if not cfg:
+        return jsonify({"error": "esa configuración ya no está"}), 404
+    datos = cfg.get("datos") or {}
+    reg = _cargar("registro_producto.json", pid) or {}
+    if not reg:
+        return jsonify({"error": "Este molde todavía no tiene piezas: subilo y esperá a que "
+                                 "termine de leerse antes de aplicar una configuración."}), 409
+    import piezas_con_diseno as PD
+    # 1) EL NOMBRADO. Pieza por pieza, por (mesa, idx_mesa): es la identidad que no depende del
+    #    talle. Lo que no está en este molde se informa y no se toca.
+    puestos, sin_lugar, ren_total = 0, [], {}
+    for p in (datos.get("piezas") or []):
+        try:
+            reg, ren = PD.renombrar(reg, p.get("mesa"), p.get("idx_mesa"), p.get("nombre"))
+            ren_total.update(ren or {})
+            puestos += 1
+        except ValueError as e:
+            sin_lugar.append(f"{p.get('nombre')}: {e}")
+    if ren_total:
+        _migrar_nombres_pieza(pid, ren_total)
+    _guardar_registro(pid, reg)
+    # 2) GRUPOS Y VARIABLES, reubicados POR NOMBRE. Los `pieza_idx` guardados son los del molde de
+    #    donde salió la configuración: aplicarlos tal cual apuntaría a otra pieza si algo se movió.
+    _idx = _idx_por_nombre(reg)
+    _nom_de_idx = {v: k for k, v in ((p["nombre"], p.get("pieza_idx")) for p in (datos.get("piezas") or []))
+                   if v is not None}
+    campos = dict(datos.get("campos") or {})
+    _perdidas = set()
+
+    def _reubicar(idx_viejo):
+        _n2 = _nom_de_idx.get(idx_viejo)
+        _r = _idx.get(_n2) if _n2 else None
+        if _r is None:
+            _perdidas.add(_n2 or f"#{idx_viejo}")
+        return _r
+
+    if campos.get("grupos"):
+        for g in campos["grupos"]:
+            g["piezas"] = [i for i in (_reubicar(int(x)) for x in (g.get("piezas") or [])) if i is not None]
+        campos["grupos"] = [g for g in campos["grupos"] if g.get("piezas")]
+    if campos.get("variantes"):
+        for v in campos["variantes"]:
+            vals = []
+            for val in (v.get("valores") or []):
+                if val.get("pieza_idx") is None:
+                    vals.append(val); continue
+                _i = _reubicar(int(val["pieza_idx"]))
+                if _i is not None:
+                    vals.append({**val, "pieza_idx": _i})
+            v["valores"] = vals
+        campos["variantes"] = [v for v in campos["variantes"] if v.get("valores")]
+    # 3) EL RESTO DE LA CONFIGURACIÓN, tal cual (telas, etiqueta, borde, planilla, talle guía…)
+    cat = _cargar_catalogo_para_editar()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        _soltar_edicion_catalogo()
+        return jsonify({"error": "no está ese molde"}), 404
+    for k, v in campos.items():
+        if k in _CAMPOS_CONFIG_MOLDE:
+            prod[k] = v
+    _guardar_catalogo(cat)
+    if datos.get("produccion"):
+        json.dump(datos["produccion"], open(_ruta_datos("config_produccion.json", pid), "w",
+                                            encoding="utf-8"), ensure_ascii=False)
+    return jsonify({"ok": True,
+                    "nombre": cfg.get("nombre"),
+                    "piezas_nombradas": puestos,
+                    "piezas_totales": len(_piezas_del_registro(reg)),
+                    "grupos": len(campos.get("grupos") or []),
+                    "variables": len(campos.get("variantes") or []),
+                    "talle_guia": campos.get("variante_guia"),
+                    # Lo que NO entró: se dice, no se esconde. Es lo que el usuario tiene que
+                    # revisar en pantalla antes de seguir.
+                    "sin_lugar": sin_lugar[:10],
+                    "piezas_perdidas": sorted(_perdidas)[:10]})
+
+
+@app.delete("/api/molde/config/<int:cid>")
+def molde_config_borrar(cid):
+    """Borra una configuración guardada. No toca ningún molde: es sólo la receta."""
+    try:
+        n = db.borrar_config_molde(cid)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "borradas": n})
+
+
 @app.get("/api/pedido/fuente_chars")
 def fuente_chars():
     """Caracteres que SOPORTA la tipografía de personalización del diseño (la que estampa

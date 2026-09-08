@@ -765,6 +765,31 @@ export const DICCIONARIO = {
     que: 'La guía para el diseñador: cómo tiene que salir el archivo desde Illustrator, Corel u Optitex.',
     como: 'Abrí la ayuda de cómo exportar.',
   },
+  'molde-cfg-abrir': {
+    nombre: 'Guardar / usar configuración',
+    que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
+    como: 'Abrí las configuraciones guardadas.',
+  },
+  'molde-cfg-nombre': {
+    nombre: 'Nombre de la configuración',
+    que: 'Con este nombre se va a reconocer después, en la lista. Conviene decir de qué molde es y qué variante («Camiseta jugador · cuello redondo»).',
+    como: 'Escribí un nombre para reconocerla después.',
+  },
+  'molde-cfg-guardar': {
+    nombre: 'Guardar esta',
+    que: 'Guarda la configuración de este molde con ese nombre. Queda en la base, atada al archivo: el molde se puede borrar con el pedido y la configuración sigue.',
+    como: 'Guardá la configuración de este molde.',
+  },
+  'molde-cfg-aplicar': {
+    nombre: 'Aplicar',
+    que: 'Le pone a este molde el nombrado, los grupos, las variables y las telas de esa configuración. No se aplica sola: la elegís vos y después mirás en el visor si acomodó bien.',
+    como: 'Aplicá esa configuración y fijate en el visor si acomodó bien.',
+  },
+  'molde-cfg-borrar': {
+    nombre: 'Borrar configuración',
+    que: 'Borra la configuración guardada. No toca ningún molde: es sólo la receta.',
+    como: 'Borrá la configuración guardada.',
+  },
   'molde-guia': {
     nombre: 'Talle de guía',
     que: 'El talle de referencia: sobre él se nombran las piezas y desde él se copian a los demás. Conviene uno del medio de la curva (M, 38…).',

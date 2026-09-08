@@ -4162,6 +4162,14 @@ export default function App() {
   const [modalConfirmOpen, setModalConfirmOpen] = useState(false);
   const [confirmProductoId, setConfirmProductoId] = useState('');
   const [modalTalleGuiaOpen, setModalTalleGuiaOpen] = useState(false);
+  // CONFIGURACIONES GUARDADAS DEL MOLDE (camino B). Un molde con el diseño adentro se borra con el
+  // pedido y con él todo lo configurado; esto permite volver a aplicarlo cuando se sube el mismo
+  // archivo en otro pedido. Se elige A MANO: nada se aplica solo (pedido del usuario 2026-09-08).
+  const [cfgGuardadas, setCfgGuardadas] = useState([]);
+  const [cfgModalOpen, setCfgModalOpen] = useState(false);
+  const [cfgBusy, setCfgBusy] = useState(false);
+  const [cfgNombre, setCfgNombre] = useState('');
+  const [cfgInforme, setCfgInforme] = useState(null);   // qué entró y qué no, después de aplicar
   const [catalogoGrupos, setCatalogoGrupos] = useState([]);
   const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
   // Panel inline de selección de pieza en la barra lateral:
@@ -10284,6 +10292,65 @@ export default function App() {
     setErrorInformativo(txt);
     setMensajeInformativo('');
     setTimeout(() => setErrorInformativo(prev => prev === txt ? '' : prev), 7000);
+  };
+
+  // ── CONFIGURACIONES GUARDADAS DEL MOLDE ──────────────────────────────────────────────────
+  const cargarCfgGuardadas = async () => {
+    try {
+      const r = await fetch(`/api/molde/config/lista${qPid('?')}`);
+      const d = await r.json();
+      setCfgGuardadas(d.configs || []);
+    } catch { setCfgGuardadas([]); }
+  };
+  const guardarCfgMolde = async () => {
+    const nombre = (cfgNombre || '').trim();
+    if (!nombre) { showError('Ponele un nombre para reconocerla después.'); return; }
+    setCfgBusy(true);
+    try {
+      const r = await fetch('/api/molde/config/guardar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: pidCfg, nombre })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
+      setCfgNombre('');
+      await cargarCfgGuardadas();
+      showMsg(`Configuración «${nombre}» guardada (${d.piezas} piezas) ✓`);
+    } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
+  };
+  const aplicarCfgMolde = async (c) => {
+    setCfgBusy(true); setCfgInforme(null);
+    try {
+      const r = await fetch('/api/molde/config/aplicar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: pidCfg, id: c.id })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
+      setCfgInforme(d);
+      // Que se VEA aplicada: el catálogo (grupos, variables, telas) y la detección (los nombres
+      // de las piezas en el visor) se vuelven a pedir. Es lo que el usuario mira para decidir si
+      // esa configuración le sirve para este molde.
+      await fetchProductos();
+      try {
+        const rd = await fetch(`/api/plantilla/deteccion${qPid('?')}`);
+        const dd = await rd.json();
+        if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
+      } catch { /* el visor se refresca al entrar de nuevo */ }
+      setMoldeReload(v => v + 1);
+    } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
+  };
+  const borrarCfgMolde = async (c) => {
+    abrirConfirmar({
+      titulo: 'Borrar la configuración guardada', ok: 'Borrar',
+      texto: `Se borra «${c.nombre}». No toca ningún molde: es sólo la receta guardada.`,
+      onOk: async () => {
+        try {
+          await fetch(`/api/molde/config/${c.id}`, { method: 'DELETE' });
+          await cargarCfgGuardadas();
+        } catch { /* si falla, sigue en la lista */ }
+      }
+    });
   };
 
   const showWarn = (txt) => {
@@ -16546,6 +16613,27 @@ export default function App() {
                                   los talles comparando cómo están dispuestas. Si el molde NO viene
                                   acomodado de forma parecida en cada talle, esa comparación no tiene
                                   señal → acá el usuario reacomoda a mano y/o corrige la pieza homóloga. */}
+                              {/* CONFIGURACIÓN GUARDADA: el molde con el diseño adentro se borra con el
+                                  pedido y se lleva TODO lo configurado. Acá se guarda con un nombre y se
+                                  vuelve a aplicar la próxima vez que se suba el mismo archivo, en vez de
+                                  rehacer los pasos (pedido del usuario 2026-09-08). */}
+                              <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>Configuración</span>
+                                    <Ayuda ancho={300}>Guardá cómo quedó configurado este molde —nombres de las
+                                      piezas, grupos, variables, telas y {term.variante.toLowerCase()} de guía— y
+                                      volvé a aplicarla cuando subas <b>el mismo archivo</b> en otro pedido, en vez
+                                      de rehacer todos los pasos. <b>No se aplica sola</b>: la elegís vos y después
+                                      mirás en el visor si acomodó bien.</Ayuda>
+                                  </span>
+                                  <button type="button" className="btn ghost" data-tour="molde-cfg-abrir"
+                                    style={{ padding: '4px 10px', fontSize: 11 }}
+                                    onClick={() => { setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(); }}>
+                                    Guardar / usar
+                                  </button>
+                                </div>
+                              </div>
                               {(tallesMolde.length > 1) && (
                                 <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: 'transparent' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -20497,6 +20585,77 @@ export default function App() {
           document.body
         );
       })()}
+
+      {/* --- MODAL: configuraciones guardadas del molde --- */}
+      {cfgModalOpen && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setCfgModalOpen(false); }}>
+          <div className="modal-content" style={{ maxWidth: 640 }}>
+            <div className="modal-header">
+              <h3>Configuración del molde</h3>
+              <button type="button" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-secondary)' }} onClick={() => setCfgModalOpen(false)}>×</button>
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
+              Guardá cómo quedó este molde (nombres de las piezas, grupos, variables, telas y
+              {' '}{term.variante.toLowerCase()} de guía) y volvé a aplicarla cuando subas el mismo archivo.
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input type="text" value={cfgNombre} data-tour="molde-cfg-nombre"
+                onChange={e => setCfgNombre(e.target.value)}
+                placeholder="Nombre (ej.: «Camiseta jugador · cuello redondo»)"
+                style={{ flex: 1 }} />
+              <button type="button" className="btn primary" data-tour="molde-cfg-guardar"
+                disabled={cfgBusy || !cfgNombre.trim()} onClick={guardarCfgMolde}>Guardar esta</button>
+            </div>
+            {cfgInforme && (
+              <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, marginBottom: 14, fontSize: 12.5 }}>
+                <b>«{cfgInforme.nombre}» aplicada.</b>{' '}
+                {cfgInforme.piezas_nombradas} de {cfgInforme.piezas_totales} piezas con nombre ·
+                {' '}{cfgInforme.grupos} grupo(s) · {cfgInforme.variables} variable(s)
+                {cfgInforme.talle_guia ? ` · guía ${cfgInforme.talle_guia}` : ''}.
+                {(cfgInforme.sin_lugar || []).length > 0 && (
+                  <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
+                    No entraron: {cfgInforme.sin_lugar.join(' · ')}
+                  </div>
+                )}
+                {(cfgInforme.piezas_perdidas || []).length > 0 && (
+                  <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
+                    Piezas que la configuración esperaba y este molde no tiene: {cfgInforme.piezas_perdidas.join(', ')}
+                  </div>
+                )}
+                <div style={{ color: 'var(--text-secondary)', marginTop: 6 }}>
+                  Cerrá y mirá el visor: si no acomodó bien, probá con otra.
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+              {cfgGuardadas.length === 0 && (
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                  Todavía no hay ninguna guardada.
+                </div>
+              )}
+              {cfgGuardadas.map(c => (
+                <div key={c.id} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{c.nombre}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                      {c.molde ? `de «${c.molde}» · ` : ''}{c.piezas} piezas · {c.detalle}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                    color: c.estado === 'igual' ? 'var(--success, #2a7)' : c.estado === 'parecida' ? 'var(--warning, #b58900)' : 'var(--text-secondary)',
+                    border: '1px solid currentColor' }}>
+                    {c.estado === 'igual' ? 'mismo archivo' : c.estado === 'parecida' ? 'parecida' : 'distinta'}
+                  </span>
+                  <button type="button" className="btn" data-tour="molde-cfg-aplicar" disabled={cfgBusy}
+                    onClick={() => aplicarCfgMolde(c)}>Aplicar</button>
+                  <button type="button" className="btn ghost" data-tour="molde-cfg-borrar" disabled={cfgBusy}
+                    onClick={() => borrarCfgMolde(c)}>Borrar</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- MODAL: Selector de variante (Talle de Guía) en botones cuadrados --- */}
       {modalTalleGuiaOpen && etqData && (

@@ -1152,3 +1152,22 @@ que reportó el usuario el 2026-09-08.
 ⚠️ Si el servidor **ignora** un pid (no es efímero, es de otro usuario, o hay una tizada suya
 generando), el front **no lo borra de su lista**: queda anotado y el próximo «Nuevo pedido» lo
 vuelve a pedir. Olvidarlo era dejarlo en el servidor para siempre.
+
+## GUARDAR LA CONFIGURACIÓN DE UN MOLDE Y VOLVER A USARLA
+
+El molde con el diseño adentro se sube **para un pedido** y se borra con él — y con él se iría todo
+el trabajo de configurarlo. Por eso esa configuración se puede **guardar con un nombre** y volver a
+aplicarla cuando se sube el mismo archivo en otro pedido (Moldería → tarjeta «Configuración»).
+
+- Vive en la base (`dbo.config_molde`), **atada al sha1 del ARCHIVO**, no al molde: el molde
+  desaparece con el pedido, la configuración no.
+- Guarda el **nombrado de las piezas** —por `(mesa, idx_mesa)`, la identidad que no depende del
+  talle— más grupos, variables, conjuntos, telas, etiqueta, borde, planilla, talle de guía,
+  referencia de medida, editables y la config de producción.
+- **No se aplica sola.** La lista muestra el estado de cada una (`mismo archivo` / `parecida` /
+  `distinta`) y el usuario elige; al aplicarla se informa qué entró y qué no, y se ve en el visor.
+- 🔴 **Los grupos y las variables se reubican por NOMBRE de pieza.** Sus `pieza_idx` son la posición
+  dentro del talle EN EL MOLDE DE ORIGEN: si en el nuevo las piezas quedaron en otro orden,
+  aplicarlos tal cual armaría los grupos con las piezas equivocadas — y eso sale bien impreso.
+
+Contrato: `verificar_config_guardada.py`.
