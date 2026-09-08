@@ -1432,6 +1432,33 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-07 (388) — La precarga del visor esperaba SONDEANDO 20 veces por segundo, y su
+  contador podía quedar trabado para siempre.** Tercera entrega de la auditoría.
+
+  **LO QUE PASABA.** Al armar piezas del visor hay un candado (`_PIEZAS_BASE_LOCK`) y una regla:
+  lo que pide el USUARIO pasa antes que la precarga. Estaba implementado con un contador global y
+  un `while True: … time.sleep(0.05)`. Dos problemas:
+  1. **Sondeo**: con varias precargas vivas el servidor se despertaba 20 veces por segundo **por
+     hilo** sin hacer nada, y la precarga tardaba hasta 50 ms de más en arrancar cuando ya podía.
+  2. 🔴 **El contador subía y bajaba sin `try/finally`**, y en el medio había un `acquire`
+     bloqueante. Si ese hilo moría ahí, el contador quedaba en >0 **para siempre** y **toda**
+     precarga posterior se quedaba esperando a un usuario que ya no existía.
+
+  **LO QUE SE HIZO.** `_PrioridadVisor`: una `threading.Condition`. El usuario entra con
+  `with _PRIO_VISOR.fg():` (baja el contador SIEMPRE, también si revienta) y la precarga llama
+  `ceder_bg()`, que espera sin sondear y **con un tope de 30 s** — si el contador igual se
+  desincronizara, la precarga pierde prioridad pero no se cuelga. El candado ahora se toma a mano
+  (`acquire`) y se suelta en un `finally`: sin ese `finally`, un solo error al dibujar dejaría el
+  visor congelado para todo el mundo hasta reiniciar.
+
+  ⚠️ **Esto NO toca la generación de la tizada** (changelog 169: la tizada nunca detrás de un
+  candado). Este candado es sólo del armado de piezas del visor.
+
+  **VERIFICADO** con `verificar_prioridad_visor.py`: la precarga espera mientras hay un usuario y
+  arranca **al instante** (0 ms medidos, no 50); un usuario cuyo pedido revienta deja el contador
+  en cero; con el contador desincronizado a mano, `ceder_bg` vuelve al vencer el tope y no se
+  cuelga; y un dibujo que falla **ya con el candado tomado** lo suelta igual.
+
 - **2026-09-07 (387) — 🔴 LOS PROCESOS DE DIBUJO NUNCA SOLTABAN EL MOLDE NI EL ARTE (memoria que
   sólo sube + archivos trabados con el servidor ocioso).** Segunda entrega de la auditoría.
 

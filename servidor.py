@@ -3,7 +3,7 @@ USER · Motor de Sublimación — servidor web local.
 Correr:  python servidor.py   y abrir  http://localhost:8000
 """
 import copy
-import os, re, sys, json, time, threading, uuid, traceback
+import os, re, sys, json, time, threading, uuid, traceback, contextlib
 from collections import OrderedDict
 from flask import Flask, request, jsonify, send_from_directory, send_file, session, has_request_context
 from werkzeug.exceptions import HTTPException
@@ -3847,8 +3847,47 @@ _PREWARM_LOCK = threading.Lock()
 _PREWARM_EN_CURSO = set()   # claves (pid,diseno,variante,mapeo) con pre-warm de talles en curso
 # PRIORIDAD: lo que pide el USUARIO (primer plano) NUNCA espera detrás de la precarga.
 # Los pedidos "bg" (pre-warm/prefetch) ceden el paso mientras haya un "fg" esperando el lock.
-_PB_FG_LOCK = threading.Lock()
-_PB_FG_ESPERANDO = 0
+class _PrioridadVisor:
+    """Quién pasa primero al armar piezas del visor: el usuario (fg) antes que la precarga (bg).
+
+    Dos cosas que antes estaban mal y no se veían:
+      · Era un **sondeo** cada 50 ms. Con varias precargas vivas, el servidor gastaba CPU
+        despertándose 20 veces por segundo por hilo **sin hacer nada**, y el bg tardaba hasta
+        50 ms de más en arrancar cuando ya podía. Ahora espera en una `Condition`: se lo
+        despierta en el momento exacto.
+      · El contador del fg subía y bajaba **sin `try/finally`**, con un `acquire` bloqueante en
+        el medio. Si ese hilo se moría ahí (apagado, interrupción), el contador quedaba en
+        >0 PARA SIEMPRE y **toda** precarga se quedaba esperando un fg que ya no existía.
+
+    El tope de `ceder_bg` es la red de seguridad: si el contador igual se desincronizara, el bg
+    pierde prioridad pero **no se cuelga**."""
+
+    def __init__(self):
+        self._cv = threading.Condition()
+        self._fg = 0
+
+    @contextlib.contextmanager
+    def fg(self):
+        with self._cv:
+            self._fg += 1
+        try:
+            yield
+        finally:
+            with self._cv:
+                self._fg -= 1
+                self._cv.notify_all()
+
+    def ceder_bg(self, timeout=30.0):
+        """Espera a que no quede nadie en primer plano. False si venció el tope."""
+        with self._cv:
+            return self._cv.wait_for(lambda: self._fg == 0, timeout=timeout)
+
+    def esperando(self):
+        with self._cv:
+            return self._fg
+
+
+_PRIO_VISOR = _PrioridadVisor()
 
 def _sha1_corto(obj):
     import hashlib
@@ -3963,22 +4002,18 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
             return r
     except Exception:
         pass
-    global _PB_FG_ESPERANDO
     if prioridad == "bg":
         # La precarga CEDE EL PASO: si el usuario está esperando una generación, el bg no
         # compite por el lock (antes el click del usuario quedaba en cola detrás del warm).
-        while True:
-            with _PB_FG_LOCK:
-                if _PB_FG_ESPERANDO == 0:
-                    break
-            time.sleep(0.05)
+        _PRIO_VISOR.ceder_bg()
+        _PIEZAS_BASE_LOCK.acquire()
     else:
-        with _PB_FG_LOCK:
-            _PB_FG_ESPERANDO += 1
-    with _PIEZAS_BASE_LOCK:                          # miss: generar (otro hilo pudo ganarnos)
-        if prioridad != "bg":
-            with _PB_FG_LOCK:
-                _PB_FG_ESPERANDO -= 1
+        # El fg cuenta como «esperando» sólo hasta que CONSIGUE el lock (igual que antes): a
+        # partir de ahí ya no compite con nadie, y hacer esperar al bg todo el dibujo sería
+        # dejarlo parado varios segundos al pedo.
+        with _PRIO_VISOR.fg():
+            _PIEZAS_BASE_LOCK.acquire()
+    try:                                             # miss: generar (otro hilo pudo ganarnos)
         try:
             r = _leer_cache()
             if r is not None:
@@ -4064,6 +4099,8 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
             return {"piezas": out, "talle": talle, "cache": False}
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _PIEZAS_BASE_LOCK.release()      # tomado arriba a mano (el fg lo pide contando como fg)
 
 
 @app.post("/api/arte/preview_piezas")
