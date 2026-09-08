@@ -112,8 +112,11 @@ Librerías clave del motor: **pymupdf (fitz)** (render/SVG/pixmap), **pikepdf** 
 ### `molde_real.py` (parsing del molde + capas)
 - `extraer_contorno_mesa(doc, mesa, talle)` / `extraer_piezas_mesa(doc, mesa, talle, ...)` → **contornos** de las piezas (segmentos, bbox_raw/bbox_mu, w/h, user_unit). Es de acá que sale la geometría real de cada pieza.
 - Manipulación OCG (capas): `limpiar_capas`, `suprimir_capas`, `aislar_capa`, `sanear_oc`, `limpiar_capas_conservando_talle`, `geometrias_base`.
-- `generar_pieza_real`, `extraer_ancla_etiqueta`, `estampar_etiqueta` (legacy/util).
-- Fuentes: `fuentes_requeridas`, `validar_fuente_subida`, `chequear_catalogo`.
+- `estampar_etiqueta` (legacy/util) y `validar_fuente_subida` (comprueba que el .ttf subido sea la
+  fuente pedida). ⚠️ 2026-09-07: se **borraron** `generar_pieza_real`, `extraer_ancla_etiqueta`,
+  `fuentes_requeridas` y `chequear_catalogo` — no las llamaba nadie y dejaban el archivo ABIERTO
+  (en Windows eso lo traba). Lo vivo es `motor_pedido.generar_pieza` / `_armar_base` para la pieza
+  y `motor_pedido.fuentes_requeridas_arte` para las fuentes.
 
 ### `nesting_contorno.py` (acomodo)
 - `anidar_contorno(piezas, cfg)` → coloca las piezas (rasteriza a máscara con `_mascara`, prueba estrategias `bl`/`bandas`, rota según `_angulos`). Devuelve colocaciones + área.
@@ -1428,6 +1431,58 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   motor con casos de juguete; lo que rompe son los datos del taller.
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
+
+- **2026-09-07 (387) — 🔴 LOS PROCESOS DE DIBUJO NUNCA SOLTABAN EL MOLDE NI EL ARTE (memoria que
+  sólo sube + archivos trabados con el servidor ocioso).** Segunda entrega de la auditoría.
+
+  **LO QUE PASABA.** `motor_pedido` anota lo que abre (`_abrir`/`_abrir_pike`) y el servidor lo
+  cierra en el `teardown_request` de cada request. **Un worker del ProcessPool no tiene
+  teardown**: es un proceso que vive lo que vive el servidor, con UN solo hilo, y el registro es
+  **por hilo** — así que nunca se vaciaba. Cada talle dibujado dejaba su `plantilla.ai` y su
+  `arte.ai` abiertos **para siempre**, en los hasta 6 workers. En Windows eso significa que el
+  usuario no puede reemplazar su propio molde (WinError 5) **sin que haya nada corriendo**, y que
+  la memoria de cada worker sólo sube (la referencia era ~200 MB por worker EN VACÍO).
+
+  **LO QUE SE HIZO.**
+  1. `_render_talle_worker` y `_deteccion_talle_worker`: `finally: MP.cerrar_abiertos()`.
+  2. La precarga del lienzo al subir el molde salía con un `threading.Thread` **pelado**, sin
+     `_en_hilo` — el único envoltorio que cierra los PDFs de un hilo de fondo. Ahora va por
+     `_en_hilo` y además **no se solapa consigo misma** (`_PW_TODAS_EN_CURSO`, clave `(pid, mtime)`):
+     subir el molde dos veces seguidas largaba dos extracciones completas del MISMO archivo, ~12 s
+     cada una, peleándose por la CPU y por el archivo.
+  3. **Handles que sólo se cerraban si todo salía bien** (una excepción los dejaba abiertos):
+     el dibujo de una mesa del arte, la vista previa de una página, la descarga de una mesa
+     (`servidor.py`), `extraer_personalizacion` ×3 y `validar_salida` (`motor_pedido.py`) — este
+     último no cerraba NUNCA, y corre justo antes de entregar la tizada.
+  4. `aplanar_rip.aplanar_para_rip`: los handles y los temporales `<hoja>.__pN.pdf` van en un
+     `finally`. Importaba porque **cuando el paralelo falla, el mismo archivo se reintenta en
+     serie**: el reintento se topaba con la hoja tomada por el intento anterior, y los temporales
+     quedaban en la carpeta del trabajo para siempre. (El `finally` corre DESPUÉS del `save`, así
+     que se respeta la regla de mantener las fuentes abiertas hasta después de guardar.)
+  5. **Código muerto que fugaba, borrado** de `molde_real.py`: `generar_pieza_real`,
+     `extraer_ancla_etiqueta`, `fuentes_requeridas` y `chequear_catalogo`. No las llamaba nadie —
+     las vivas son `motor_pedido.generar_pieza` y `motor_pedido.fuentes_requeridas_arte`— y las
+     cuatro dejaban el archivo abierto. `generar_pieza_real` encima **no tenía arreglo posible sin
+     cambiarle la firma**: devuelve un PDF que sigue apuntando al arte abierto (pikepdf copia
+     perezoso), así que cerrarlo rompería el resultado.
+
+  **VERIFICADO.** Contrato nuevo **`verificar_cierre_pdfs.py`**: los dos workers no dejan nada
+  abierto ni cuando el talle FALLA, y el molde se puede reemplazar después; la precarga cierra al
+  terminar y dos disparos seguidos ejecutan UNO; el aplanado de un PDF ilegible no deja
+  temporales ni traba la hoja; el aplanado bueno conserva sus 3 páginas. Más
+  `verificar_marcas_proceso`, `verificar_fuentes_pedido`, `verificar_traba_pedido`,
+  `verificar_medidas_diseno`, `verificar_referencia_medida`, `verificar_juntas_grupo` y
+  `verificar_cantidad` en verde.
+
+  **LEY ARTE = TIZADA, comprobada, no supuesta:** se comparó la salida de la versión ANTERIOR
+  contra la de ahora. `extraer_personalizacion` da **exactamente lo mismo** sobre los tres artes
+  reales del usuario, y `aplanar_para_rip` produce el **mismo PDF byte a byte** en serie y en
+  paralelo.
+
+  ⚠️ **Trampa que apareció midiendo esto:** dos PDFs con el MISMO contenido difieren igual en el
+  `/ID` del trailer, porque QPDF lo arma con la hora. El código VIEJO comparado consigo mismo, en
+  dos momentos distintos, ya da «distinto». **Para comparar PDFs byte a byte hay que normalizar el
+  `/ID` primero** (`re.sub(rb"/ID \[<[0-9a-f]+><[0-9a-f]+>\]", ...)`).
 
 - **2026-09-07 (386) — 🔴 EL ARRANQUE SE MULTIPLICABA POR 6: los workers del pool re-importaban
   `servidor.py` ENTERO y repetían la sincronización de permisos contra la base.** Primera entrega

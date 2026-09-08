@@ -2025,7 +2025,11 @@ def subir_plantilla():
     json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
     # El lienzo de «Nombrar piezas» se arma YA, en segundo plano: cuando el usuario entre
     # está listo (el alta recién calentó el caché de extracción, así que cuesta poco).
-    threading.Thread(target=_prewarm_deteccion_todas, args=(_pid_reset,), daemon=True).start()
+    # 🔴 Va por `_en_hilo` y no por un `Thread` pelado: un hilo de fondo NO tiene
+    # `teardown_request`, así que sin ese envoltorio los PDFs que abre esta precarga quedaban
+    # abiertos y trababan el molde recién subido (en Windows no se puede reemplazar ni borrar un
+    # archivo abierto) — y es justo el momento en que el usuario puede volver a subirlo.
+    _en_hilo(lambda: _prewarm_deteccion_todas(_pid_reset))
     return jsonify(resumen)
 
 
@@ -2169,10 +2173,20 @@ def plantilla_deteccion():
         return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
 
 
+_PW_TODAS_LOCK = threading.Lock()
+_PW_TODAS_EN_CURSO = set()   # (pid, mtime del molde) con la extracción de TODAS ya en marcha
+
+
 def _prewarm_deteccion_todas(pid):
     """Arma el caché del lienzo TODAS en segundo plano, apenas se sube el molde: para
     cuando el usuario entra a «Nombrar piezas» ya está listo (antes la primera entrada
-    pagaba ~12 s de extracción en frío). Best-effort: si falla, el endpoint lo arma."""
+    pagaba ~12 s de extracción en frío). Best-effort: si falla, el endpoint lo arma.
+
+    NO SE SOLAPA CONSIGO MISMA: son ~12 s leyendo el molde entero, y subir el molde dos veces
+    seguidas (o entrar a la pantalla mientras corre) largaba dos extracciones completas del MISMO
+    archivo peleándose por la misma CPU y el mismo archivo. La clave lleva el mtime: un molde
+    nuevo SÍ vuelve a calcular."""
+    _clave = None
     try:
         pl = _ruta_entrada("plantilla.ai", pid)
         mt = int(os.path.getmtime(pl))
@@ -2180,6 +2194,11 @@ def _prewarm_deteccion_todas(pid):
         fp = os.path.join(cdir, f"{mt}_dv2_TODAS.json")
         if os.path.exists(fp):
             return
+        _clave = (pid, mt)
+        with _PW_TODAS_LOCK:
+            if _clave in _PW_TODAS_EN_CURSO:
+                return                       # ya lo está armando otro hilo
+            _PW_TODAS_EN_CURSO.add(_clave)
         import variantes_molde as VM
         try:
             formato = VM.analizar(pl).get("formato") or "extendido"
@@ -2193,6 +2212,10 @@ def _prewarm_deteccion_todas(pid):
         os.replace(_tmp, fp)
     except Exception:
         pass
+    finally:
+        if _clave is not None:
+            with _PW_TODAS_LOCK:
+                _PW_TODAS_EN_CURSO.discard(_clave)
 
 
 @app.get("/api/plantilla/deteccion_todas")
@@ -3681,24 +3704,24 @@ def arte_mesa_img():
                     except OSError:
                         pass
             import pymupdf as fitz
-            doc = fitz.open(arte)
-            if mesa > len(doc):
-                doc.close()
-                return jsonify({"error": "esa mesa no existe"}), 404
-            try:                                    # las guías y los editables no se imprimen
-                for c in doc.layer_ui_configs():
-                    if MP._es_capa_guia(c.get("text")) or MP._es_capa_editable(c.get("text")):
-                        doc.set_layer_ui_config(c["number"], action=2)
-            except Exception:
-                pass
-            pg = doc[mesa - 1]
-            tmp = dest + ".tmp"                     # atómico: dos pestañas pueden pedir lo mismo
-            # newline="": en Windows el modo texto convierte cada \n en \r\n y el archivo dejaría
-            # de ser byte por byte el vector que produce el motor (además de pesar más).
-            with open(tmp, "w", encoding="utf-8", newline="") as f:
-                f.write(pg.get_svg_image())
-            os.replace(tmp, dest)
-            doc.close()
+            # `with`: si el dibujo falla a mitad (una mesa rota, disco lleno), el arte NO puede
+            # quedar abierto — en Windows queda trabado y el usuario no lo puede reemplazar.
+            with fitz.open(arte) as doc:
+                if mesa > len(doc):
+                    return jsonify({"error": "esa mesa no existe"}), 404
+                try:                                # las guías y los editables no se imprimen
+                    for c in doc.layer_ui_configs():
+                        if MP._es_capa_guia(c.get("text")) or MP._es_capa_editable(c.get("text")):
+                            doc.set_layer_ui_config(c["number"], action=2)
+                except Exception:
+                    pass
+                pg = doc[mesa - 1]
+                tmp = dest + ".tmp"                 # atómico: dos pestañas pueden pedir lo mismo
+                # newline="": en Windows el modo texto convierte cada \n en \r\n y el archivo
+                # dejaría de ser byte por byte el vector que produce el motor (y pesaría más).
+                with open(tmp, "w", encoding="utf-8", newline="") as f:
+                    f.write(pg.get_svg_image())
+                os.replace(tmp, dest)
         except Exception as e:
             return jsonify({"error": f"no se pudo dibujar la mesa: {e}"}), 500
     r = send_file(dest, mimetype="image/svg+xml", conditional=True)
@@ -4158,7 +4181,13 @@ def _get_render_pool():
 def _render_talle_worker(args):
     """WORKER de proceso: genera UN talle → caché en disco. Recibe SOLO tipos simples
     (spawn-safe), no cruza objetos fitz/pikepdf entre procesos. El env TIZADA_* lo hereda
-    del proceso padre (spawn hereda el entorno). Devuelve el talle (o None si falló)."""
+    del proceso padre (spawn hereda el entorno). Devuelve el talle (o None si falló).
+
+    🔴 EL `finally` NO ES DECORACIÓN. Un worker **no tiene `teardown_request`**: es un proceso
+    que vive todo lo que vive el servidor y con UN solo hilo, así que el registro de PDFs abiertos
+    (`MP._LOCAL`, que es por hilo) nunca se vaciaba. Cada talle dejaba su `plantilla.ai` y su
+    `arte.ai` abiertos PARA SIEMPRE: memoria que sólo sube y, en Windows, el molde y el arte
+    trabados (WinError 5 al re-subirlos) **con el servidor sin hacer nada**."""
     pid, diseno, variante, talle, mapeo_arg = args
     try:
         cat = _cargar_catalogo()
@@ -4169,16 +4198,27 @@ def _render_talle_worker(args):
         return talle
     except Exception:
         return None
+    finally:
+        try:
+            MP.cerrar_abiertos()
+        except Exception:
+            pass
 
 def _deteccion_talle_worker(args):
     """WORKER de proceso: pre-genera la DETECCIÓN de piezas de UN talle → caché en disco.
-    Es lo caro del visor (get_drawings de todo el molde); en paralelo, no 19× secuencial."""
+    Es lo caro del visor (get_drawings de todo el molde); en paralelo, no 19× secuencial.
+    El `finally` que cierra los PDFs va por lo mismo que en `_render_talle_worker`."""
     pid, talle = args
     try:
         _deteccion_base_cached(pid, talle)
         return talle
     except Exception:
         return None
+    finally:
+        try:
+            MP.cerrar_abiertos()
+        except Exception:
+            pass
 
 @app.post("/api/arte/asignar_todo")
 def arte_asignar_todo():
@@ -7328,12 +7368,13 @@ def pagina_img(tid, archivo):
     if not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
     try:
-        d = fitz.open(ruta)
-        if pi < 0 or pi >= d.page_count:
-            pi = 0
-        pix = d[pi].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
-        png = pix.tobytes("png")
-        d.close()
+        # `with`: si el dibujo de la vista previa falla, la hoja del trabajo no puede quedar
+        # abierta (después no se la puede reemplazar ni borrar).
+        with fitz.open(ruta) as d:
+            if pi < 0 or pi >= d.page_count:
+                pi = 0
+            pix = d[pi].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
+            png = pix.tobytes("png")
         return send_file(_io.BytesIO(png), mimetype="image/png")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -7356,23 +7397,27 @@ def descargar_mesa(tid, archivo):
     if not os.path.exists(ruta):
         return jsonify({"error": "la mesa no existe"}), 404
     try:
-        src = pikepdf.open(ruta)
-        n = len(src.pages)
-        if pi < 0 or pi >= n:
-            pi = 0
-        if n == 1:                    # hoja de 1 sola página → el archivo TAL CUAL (RIP-safe garantizado)
-            src.close()
-            return send_file(ruta, mimetype="application/pdf", as_attachment=True, download_name=fn + ".pdf")
-        dst = pikepdf.new()
-        dst.pages.append(src.pages[pi])   # copia la página (ya aplanada) a su propio PDF
-        try:
-            dst.docinfo["/Creator"] = "TIZADA PRO"
-            dst.docinfo["/Producer"] = "TIZADA PRO"
-        except Exception:
-            pass
-        buf = _io.BytesIO()
-        dst.save(buf, force_version="1.6")
-        dst.close(); src.close()
+        # Los dos `with`: si la copia falla, ni la hoja del trabajo ni el PDF nuevo pueden quedar
+        # abiertos. El `send_file` del caso de 1 página va AFUERA, con el archivo ya cerrado.
+        with pikepdf.open(ruta) as src:
+            n = len(src.pages)
+            if pi < 0 or pi >= n:
+                pi = 0
+            if n == 1:                # hoja de 1 sola página → el archivo TAL CUAL (RIP-safe)
+                buf = None
+            else:
+                with pikepdf.new() as dst:
+                    dst.pages.append(src.pages[pi])   # la página (ya aplanada) a su propio PDF
+                    try:
+                        dst.docinfo["/Creator"] = "TIZADA PRO"
+                        dst.docinfo["/Producer"] = "TIZADA PRO"
+                    except Exception:
+                        pass
+                    buf = _io.BytesIO()
+                    dst.save(buf, force_version="1.6")
+        if buf is None:
+            return send_file(ruta, mimetype="application/pdf", as_attachment=True,
+                             download_name=fn + ".pdf")
         buf.seek(0)
         return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=fn + ".pdf")
     except Exception as e:

@@ -321,25 +321,26 @@ def _procesar_contenido(pdf, page):
 def _aplanar_archivo(path):
     """Núcleo SERIAL: aplana TODAS las páginas del PDF in-place (des-anida + 1 pasada de saneo +
     estado gráfico + Creator/Producer + PDF 1.6, colores CMYK EXACTOS). Lanza si algo falla."""
-    pdf = pikepdf.open(path, allow_overwriting_input=True)
-    for page in pdf.pages:
-        _flatten(pdf, page, es_pagina=True)      # des-anida los Form XObjects (inline byte a byte)
-        _procesar_contenido(pdf, page)           # 1 pasada: sanea texto + saca OCG + consolida ICC + huérfanos
-        _declarar_estado_grafico(pdf, page)      # ExtGState opaco + /GSflat
-    if "/OutputIntents" in pdf.Root:
-        del pdf.Root["/OutputIntents"]           # Illustrator no lo tiene; el ICCBased de la página alcanza
-    try:
-        with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
-            meta["dc:creator"] = ["TIZADA PRO"]
-            meta["xmp:CreatorTool"] = "TIZADA PRO"
-            meta["pdf:Producer"] = "TIZADA PRO"
-    except Exception:
-        pass
-    pdf.docinfo["/Creator"] = "TIZADA PRO"
-    pdf.docinfo["/Producer"] = "TIZADA PRO"
-    pdf.remove_unreferenced_resources()
-    pdf.save(path, force_version="1.6")          # PDF 1.6 como Illustrator (máx. compat. RIP)
-    pdf.close()
+    # `with`: si el aplanado falla a mitad, el que llama REINTENTA sobre el MISMO archivo — y con
+    # el handle anterior todavía abierto ese reintento se topaba con el archivo tomado.
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        for page in pdf.pages:
+            _flatten(pdf, page, es_pagina=True)  # des-anida los Form XObjects (inline byte a byte)
+            _procesar_contenido(pdf, page)       # 1 pasada: sanea texto + saca OCG + ICC + huérfanos
+            _declarar_estado_grafico(pdf, page)  # ExtGState opaco + /GSflat
+        if "/OutputIntents" in pdf.Root:
+            del pdf.Root["/OutputIntents"]       # Illustrator no lo tiene; el ICCBased alcanza
+        try:
+            with pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+                meta["dc:creator"] = ["TIZADA PRO"]
+                meta["xmp:CreatorTool"] = "TIZADA PRO"
+                meta["pdf:Producer"] = "TIZADA PRO"
+        except Exception:
+            pass
+        pdf.docinfo["/Creator"] = "TIZADA PRO"
+        pdf.docinfo["/Producer"] = "TIZADA PRO"
+        pdf.remove_unreferenced_resources()
+        pdf.save(path, force_version="1.6")      # PDF 1.6 como Illustrator (máx. compat. RIP)
 
 
 def _aplanar_una_pagina(path):
@@ -363,56 +364,66 @@ def aplanar_para_rip(path):
         if not os.environ.get("TIZADA_APLANADO_PARALELO"):
             _aplanar_archivo(path)
             return True
-        src = pikepdf.open(path)
-        npag = len(src.pages)
-        if npag <= 1:
-            src.close()
-            _aplanar_archivo(path)
-            return True
-        # 1) partir en 1 PDF por página (aún SIN aplanar)
-        tmps = []
-        for i, pg in enumerate(src.pages):
-            d = pikepdf.new(); d.pages.append(pg)
-            tmp = f"{path}.__p{i}.pdf"
-            d.save(tmp); d.close(); tmps.append(tmp)
-        src.close()
-        # 2) aplanar cada página en PARALELO
-        from concurrent.futures import ProcessPoolExecutor
+        # 🔴 TODO lo de abajo va con `finally`: si el paralelo falla, el que llama REINTENTA en
+        # serie sobre el MISMO archivo. Sin cerrar los handles y sin borrar los temporales, ese
+        # reintento se topaba con la hoja tomada y la carpeta del trabajo quedaba sembrada de
+        # `<hoja>.__pN.pdf` para siempre.
+        tmps, abiertos, out = [], [], None
         try:
-            # `TIZADA_PROCESOS` acota el paralelismo en servidores con poca RAM (cada worker
-            # pesa ~200 MB). Sin la variable: como siempre (núcleos - 1).
+            with pikepdf.open(path) as src:
+                una_sola = len(src.pages) <= 1
+                if not una_sola:
+                    # 1) partir en 1 PDF por página (aún SIN aplanar)
+                    for i, pg in enumerate(src.pages):
+                        tmp = f"{path}.__p{i}.pdf"
+                        tmps.append(tmp)      # se anota ANTES de escribir: si falla, se borra igual
+                        with pikepdf.new() as d:
+                            d.pages.append(pg)
+                            d.save(tmp)
+            if una_sola:                      # una sola página: el camino serial de siempre
+                _aplanar_archivo(path)
+                return True
+            # 2) aplanar cada página en PARALELO
+            from concurrent.futures import ProcessPoolExecutor
             try:
-                _tope = int(os.environ.get("TIZADA_PROCESOS") or 0)
-            except ValueError:
-                _tope = 0
-            _w = max(1, _tope) if _tope else max(2, (os.cpu_count() or 4) - 1)
-            with ProcessPoolExecutor(max_workers=min(len(tmps), _w)) as ex:
-                oks = list(ex.map(_aplanar_una_pagina, tmps))
-        except Exception:
-            oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial
-        if not all(oks):
-            raise RuntimeError("una página no se aplanó en paralelo")
-        # 3) reensamblar las páginas ya aplanadas. IMPORTANTE: mantener CADA PDF fuente ABIERTO
-        # hasta después de out.save() — pikepdf copia perezoso y cerrar antes deja referencias
-        # colgadas → se pierde contenido en algunas páginas.
-        out = pikepdf.new()
-        abiertos = []
-        for tmp in tmps:
-            s = pikepdf.open(tmp)
-            out.pages.extend(s.pages)
-            abiertos.append(s)
-        out.docinfo["/Creator"] = "TIZADA PRO"
-        out.docinfo["/Producer"] = "TIZADA PRO"
-        out.remove_unreferenced_resources()
-        out.save(path, force_version="1.6")
-        out.close()
-        for s in abiertos:
-            try: s.close()
-            except Exception: pass
-        for tmp in tmps:
-            try: os.remove(tmp)
-            except Exception: pass
-        return True
+                # `TIZADA_PROCESOS` acota el paralelismo en servidores con poca RAM (cada worker
+                # pesa ~200 MB). Sin la variable: como siempre (núcleos - 1).
+                try:
+                    _tope = int(os.environ.get("TIZADA_PROCESOS") or 0)
+                except ValueError:
+                    _tope = 0
+                _w = max(1, _tope) if _tope else max(2, (os.cpu_count() or 4) - 1)
+                with ProcessPoolExecutor(max_workers=min(len(tmps), _w)) as ex:
+                    oks = list(ex.map(_aplanar_una_pagina, tmps))
+            except Exception:
+                oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial
+            if not all(oks):
+                raise RuntimeError("una página no se aplanó en paralelo")
+            # 3) reensamblar las páginas ya aplanadas. IMPORTANTE: mantener CADA PDF fuente ABIERTO
+            # hasta después de out.save() — pikepdf copia perezoso y cerrar antes deja referencias
+            # colgadas → se pierde contenido en algunas páginas. Por eso se cierran en el `finally`
+            # (que corre DESPUÉS del save), y no de a uno acá.
+            out = pikepdf.new()
+            for tmp in tmps:
+                s = pikepdf.open(tmp)
+                out.pages.extend(s.pages)
+                abiertos.append(s)
+            out.docinfo["/Creator"] = "TIZADA PRO"
+            out.docinfo["/Producer"] = "TIZADA PRO"
+            out.remove_unreferenced_resources()
+            out.save(path, force_version="1.6")
+            return True
+        finally:
+            for _d in ([out] if out is not None else []) + abiertos:
+                try:
+                    _d.close()
+                except Exception:
+                    pass
+            for tmp in tmps:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
     except Exception as e:
         try:
             print(f"  [aplanar_rip] paralelo falló ({e}); aplano serial")

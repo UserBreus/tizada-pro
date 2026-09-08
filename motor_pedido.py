@@ -2197,12 +2197,14 @@ def extraer_personalizacion(path_arte, campos=None):
         # personalización (nombre, numero, palabra, numero 2, …). El nombre del
         # campo = el nombre de la capa.
         _sys = CAPAS_NO_PERS
-        _d = fitz.open(path_arte)
-        # Las capas "Editable …" son OBJETOS editables (mover/rotar/escalar), NO campos de
-        # personalización: se excluyen para que no se estampen como texto.
-        campos = [c["text"] for c in _d.layer_ui_configs()
-                  if _norm_nombre(c["text"]) not in _sys and not _es_capa_editable(c["text"])]
-        _d.close()
+        # `with` en los tres `fitz.open` de esta función: es el camino CALIENTE (corre en cada
+        # armado de pieza, también dentro de los workers del pool) y un arte que quede abierto
+        # por una excepción no se puede reemplazar después (Windows, WinError 5).
+        with fitz.open(path_arte) as _d:
+            # Las capas "Editable …" son OBJETOS editables (mover/rotar/escalar), NO campos de
+            # personalización: se excluyen para que no se estampen como texto.
+            campos = [c["text"] for c in _d.layer_ui_configs()
+                      if _norm_nombre(c["text"]) not in _sys and not _es_capa_editable(c["text"])]
     nativos = _colores_personalizable(path_arte)   # color exacto por mesa y por texto
     trazos = _trazo_personalizable(path_arte)       # borde/trazo por mesa y por texto (compat)
     pasadas = _pasadas_personalizable(path_arte)    # PILA de apariencias ORDENADA (manda ésta)
@@ -2245,24 +2247,22 @@ def extraer_personalizacion(path_arte, campos=None):
         d["_txt"] += txt   # texto completo (un nombre en curva llega glifo a glifo)
 
     # ── 1) Por CAPA: aislar cada capa-campo (mostrarla sola) y leer su texto ──
-    d0 = fitz.open(path_arte)
-    capas = [(c["text"], c["number"]) for c in d0.layer_ui_configs()]
-    d0.close()
+    with fitz.open(path_arte) as d0:
+        capas = [(c["text"], c["number"]) for c in d0.layer_ui_configs()]
     for campo in campos:
         cn = _norm_nombre(campo)
         if not any(_norm_nombre(name) == cn for name, _ in capas):
             continue                                   # el diseño no trae esa capa
-        d = fitz.open(path_arte)
-        for c in d.layer_ui_configs():
-            d.set_layer_ui_config(c["number"], action=0 if _norm_nombre(c["text"]) == cn else 1)
-        for mesa in range(1, len(d) + 1):
-            for b in d[mesa - 1].get_text("dict")["blocks"]:
-                if b.get("type") != 0:
-                    continue
-                for l in b["lines"]:
-                    if "".join(s["text"] for s in l["spans"]).strip():
-                        _registrar(mesa, campo, l)
-        d.close()
+        with fitz.open(path_arte) as d:
+            for c in d.layer_ui_configs():
+                d.set_layer_ui_config(c["number"], action=0 if _norm_nombre(c["text"]) == cn else 1)
+            for mesa in range(1, len(d) + 1):
+                for b in d[mesa - 1].get_text("dict")["blocks"]:
+                    if b.get("type") != 0:
+                        continue
+                    for l in b["lines"]:
+                        if "".join(s["text"] for s in l["spans"]).strip():
+                            _registrar(mesa, campo, l)
 
     # El modo viejo "por texto en la capa Personalizable" (adivinar NOMBRE/00 por
     # contenido) FUE QUITADO a pedido del usuario: la personalización se toma SOLO por
@@ -4725,6 +4725,7 @@ def validar_salida(carpeta, hojas, telas_spacing):
                         "ok": False,
                         "detalle": f"Error al validar: {e}"})
 
+        p = None            # se cierra en el `finally`: era el único abierto que nunca cerraba
         try:
             p = pikepdf.open(path)
             malos = total = 0
@@ -4780,6 +4781,14 @@ def validar_salida(carpeta, hojas, telas_spacing):
                         "detalle": f"Error al validar: {e}"})
             res.append({"nombre": f"{h['tela']}: tintas planas", "ok": False,
                         "detalle": f"Error al validar: {e}"})
+        finally:
+            # La validación es lo ÚLTIMO que pasa antes de entregar la tizada: si la hoja queda
+            # abierta acá, el usuario no puede borrar ni volver a generar ese trabajo.
+            if p is not None:
+                try:
+                    p.close()
+                except Exception:
+                    pass
 
         # Spacing check (instant, using the guaranteed nesting spacing constraint)
         peor = telas_spacing.get(h["tela"], 5.0)

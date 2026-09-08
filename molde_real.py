@@ -15,9 +15,14 @@ Pipeline por pieza/talle:
         -> ELIMINA físicamente del content stream los bloques de contenido
            opcional (BDC /OC ... EMC) de las capas de moldería. No es un
            "ocultar": el contenido borrado no llega al RIP de imprenta.
-  3. generar_pieza_real(...)
-        -> PDF de la pieza = clip(contorno del talle) sobre el arte limpio,
-           100 % vectorial, alineado en coordenadas de la mesa.
+  3. El armado de la pieza (clip del contorno sobre el arte limpio) vive en
+     `motor_pedido.generar_pieza` / `_armar_base`, NO acá.
+
+⚠️ 2026-09-07: se borraron `generar_pieza_real`, `extraer_ancla_etiqueta`, `fuentes_requeridas` y
+`chequear_catalogo`. No las llamaba NADIE (las vivas son `motor_pedido.generar_pieza` y
+`motor_pedido.fuentes_requeridas_arte`) y las cuatro dejaban el arte/el molde ABIERTOS: en Windows
+eso traba el archivo y el usuario no lo puede reemplazar. `generar_pieza_real` encima no tenía
+arreglo posible sin cambiarle la firma — devolvía un PDF que sigue apuntando al arte abierto.
 """
 
 import pymupdf as fitz
@@ -664,88 +669,12 @@ def capa_admite_color_objeto(page, objetivo, obj_id):
 
 
 # ─────────────────────────────────────────────────────────────────
-# 3. GENERACIÓN DE LA PIEZA
-# ─────────────────────────────────────────────────────────────────
-def generar_pieza_real(contorno, path_arte, capas_molde, path_salida=None,
-                       borde_mm=2.0, color_borde_cmyk=(0, 0, 0, 0.85)):
-    """Pieza = clip(contorno del talle) sobre el arte de la misma mesa,
-    con las capas indicadas borradas, más un BORDE DE CORTE impreso:
-    `borde_mm` EXTERNO al contorno (no invade el diseño), en `color_borde_cmyk`.
-    Técnica: se traza el contorno con grosor 2×borde DEBAJO del arte recortado;
-    el arte cubre la mitad interna y queda visible solo la mitad externa."""
-    x0, y0, x1, y1 = contorno["bbox_raw"]
-    W, H = contorno["w"], contorno["h"]  # tamaño real en puntos (sin UserUnit)
-    b = borde_mm / 10 * 28.3465          # mm -> puntos
-
-    arte = pikepdf.open(path_arte)
-    pag = arte.pages[contorno["mesa"] - 1]
-    limpiar_capas(arte, pag, set(capas_molde))
-    xobj_src = pag.as_form_xobject()
-
-    out = pikepdf.Pdf.new()
-    page = out.add_blank_page(page_size=(W + 2 * b, H + 2 * b))
-    xobj = out.copy_foreign(xobj_src)
-    # la Matrix del XObject ya incorpora /UserUnit (pikepdf la genera): leerla y componer en su espacio
-    S = float(xobj.Matrix[0]) if "/Matrix" in xobj else 1.0
-    nombre = page.add_resource(xobj, Name.XObject, prefix="Arte")
-
-    def fseg(s):
-        coords = " ".join(f"{v * S:.3f}" for v in s[1:])
-        return f"{coords} {s[0]}".strip()
-
-    ops = "\n".join(fseg(s) for s in contorno["segmentos"])
-    c, m, y, k = color_borde_cmyk
-    borde = ""
-    if borde_mm > 0:
-        # clip par-impar (rectángulo grande + contorno) = SOLO el exterior de la pieza;
-        # el trazo de grosor 2×b queda recortado a su mitad externa: borde de `b` exacto
-        # que no puede invadir el diseño, sea cual sea la opacidad del arte.
-        rx, ry = x0 * S - 4 * b, y0 * S - 4 * b
-        borde = (f"q\n"
-                 f"{rx:.3f} {ry:.3f} {W + 8 * b:.3f} {H + 8 * b:.3f} re\n"
-                 f"{ops}\nW* n\n"
-                 f"{ops}\n"
-                 f"{2 * b:.3f} w 1 j 1 J {c} {m} {y} {k} K\n"
-                 f"S\nQ\n")
-    stream = (f"q\n1 0 0 1 {b - x0 * S:.3f} {b - y0 * S:.3f} cm\n"
-              f"{borde}"
-              f"q\n{ops}\nW n\n"
-              f"{nombre} Do\nQ\nQ\n")
-    page.Contents = out.make_stream(stream.encode())
-    if path_salida:
-        out.save(path_salida)
-    return out
-
-
-# ─────────────────────────────────────────────────────────────────
 # 4. ETIQUETA DE PIEZA (Talle-Pieza-#) desde el ancla de la plantilla
 # ─────────────────────────────────────────────────────────────────
 import math
 
 MM = 2.83465  # puntos por mm
 
-
-def extraer_ancla_etiqueta(path_molde, mesa, talle, patron="Talle-Pieza"):
-    """Busca el placeholder de etiqueta en la capa del talle y devuelve su
-    ancla: origen, ángulo (grados) y tamaño de fuente. El diseñador define
-    DÓNDE y CÓMO va la etiqueta posicionando el placeholder en la plantilla."""
-    doc = fitz.open(path_molde)
-    for c in doc.layer_ui_configs():
-        if c["text"] != talle:
-            doc.set_layer_ui_config(c["number"], action=2)
-    page = doc[mesa - 1]
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type") != 0:
-            continue
-        for line in block["lines"]:
-            texto = "".join(s["text"] for s in line["spans"])
-            if patron in texto:
-                s0 = line["spans"][0]
-                dx, dy = line["dir"]
-                return {"origen": tuple(s0["origin"]),
-                        "angulo": math.degrees(math.atan2(-dy, dx)),
-                        "size": s0["size"]}
-    return None
 
 
 def estampar_etiqueta(pieza_fitz, contorno, ancla, texto, borde_mm=2.0,
@@ -825,26 +754,6 @@ def sanear_oc(pdf, page, _vistos=None):
 # ─────────────────────────────────────────────────────────────────
 # 6. CATÁLOGO DE TIPOGRAFÍAS — validación en el alta del arte (Fase B)
 # ─────────────────────────────────────────────────────────────────
-def fuentes_requeridas(path_arte, capa_personalizable="Personalizable"):
-    """Fuentes que el MOTOR va a necesitar como ARCHIVO para estampar texto
-    dinámico: las que usan los placeholders de personalización y de etiqueta.
-    Devuelve nombres PostScript sin prefijo de subset (ABCDEF+)."""
-    requeridas = {}
-    for capa in (capa_personalizable, None):  # None = capas de talles (etiquetas)
-        doc = fitz.open(path_arte)
-        for c in doc.layer_ui_configs():
-            on = (c["text"] == capa) if capa else (c["text"] not in ("Fondo", "Capa 1", capa_personalizable))
-            doc.set_layer_ui_config(c["number"], action=0 if on else 2)
-        for i in range(len(doc)):
-            for b in doc[i].get_text("dict")["blocks"]:
-                if b.get("type") != 0:
-                    continue
-                for l in b["lines"]:
-                    for s in l["spans"]:
-                        nombre = s["font"].split("+")[-1]
-                        uso = "personalización" if capa else "etiquetas"
-                        requeridas.setdefault(nombre, set()).add(uso)
-    return {n: sorted(usos) for n, usos in requeridas.items()}
 
 
 def validar_fuente_subida(path_ttf, nombre_postscript_pedido):
@@ -859,14 +768,6 @@ def validar_fuente_subida(path_ttf, nombre_postscript_pedido):
     except Exception as e:
         return False, str(e)
 
-
-def chequear_catalogo(path_arte, catalogo):
-    """Chequeo de intake: ¿están en el catálogo todas las fuentes que el motor
-    necesita? `catalogo` = {nombre_postscript: ruta_ttf}. Devuelve (faltantes,
-    requeridas) — si hay faltantes, el pedido NO entra hasta que se suban."""
-    req = fuentes_requeridas(path_arte)
-    faltantes = {n: usos for n, usos in req.items() if n not in catalogo}
-    return faltantes, req
 
 
 # ─────────────────────────────────────────────────────────────────
