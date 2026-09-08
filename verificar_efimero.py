@@ -189,6 +189,32 @@ ok('_choque = None' in _src and "if efimero:" in _src,
    "el alta le exige nombre único a un efímero (no puede: se sube uno por pedido)")
 print("    OK    el alta no reusa efímeros ni les pide nombre único")
 
+# ══ 4b. LOS HUÉRFANOS DEL PEDIDO ANTERIOR ════════════════════════════════════════════════════
+print("\n4b · 🔴 «NUEVO PEDIDO» SE LLEVA TAMBIÉN LOS DEL PEDIDO ANTERIOR")
+# Reporte del usuario (2026-09-08): terminado un pedido, sus moldes temporales ya no están anotados
+# en ninguna pantalla, así que «Nuevo pedido» no mandaba ningún pid y quedaban para siempre. Ahora
+# el front pide `incluir_huerfanos` y el servidor se lleva LOS MÍOS que nadie tenga abiertos.
+_instalar_dobles()
+S._EFIMEROS_VIVOS.clear()
+_r = S.app.test_client().post("/api/pedido/limpiar_efimeros", json={"pids": [], "incluir_huerfanos": True})
+_d = _r.get_json() or {}
+ok(sorted(_d.get("borrados") or []) == ["prod_efim_hoy", "prod_efim_viejo"],
+   f"sin mandar ningún pid, se lleva mis dos efímeros huérfanos — borró {_d.get('borrados')}")
+ok("prod_catalogo" not in (_d.get("borrados") or []) and "prod_mio" not in (_d.get("borrados") or []),
+   "🔴 se llevó un molde del catálogo o un «Mi artículo» de verdad")
+print(f"    OK    huérfanos borrados: {_d.get('borrados')}")
+
+# …pero NO el de una pantalla que lo tiene abierto (su latido lo declara cada 30 s)
+_instalar_dobles()
+S._EFIMEROS_VIVOS.clear()
+S.app.test_client().get("/api/actualizacion/estado?efimeros=prod_efim_viejo")
+_d = (S.app.test_client().post("/api/pedido/limpiar_efimeros",
+                               json={"pids": [], "incluir_huerfanos": True}).get_json() or {})
+ok("prod_efim_viejo" not in (_d.get("borrados") or []),
+   f"🔴 borró el molde de un pedido ABIERTO en otra pantalla ({_d.get('borrados')})")
+ok("prod_efim_hoy" in (_d.get("borrados") or []), "y el que nadie tiene abierto sí se va")
+print(f"    OK    el abierto en otra pantalla queda; el huérfano se va ({_d.get('borrados')})")
+
 # ══ 5. MIRAR LA LISTA NO ES USAR EL MOLDE ════════════════════════════════════════════════════
 print("\n5 · 🔴 VER EL MOLDE EN LA LISTA NO LO MANTIENE VIVO")
 # Reporte del usuario (2026-09-08): «si pongo nuevo pedido siguen ahí los moldes temporales del

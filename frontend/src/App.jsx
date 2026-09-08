@@ -3494,6 +3494,8 @@ function AvisoActualizacion() {
   const [seg, setSeg] = useState(null);       // segundos que faltan (los baja el reloj de acá)
   const verRef = useRef(null);
   const catRevRef = useRef(null);   // última revisión del catálogo vista (ver el ciclo de abajo)
+  // Los moldes efímeros que el PEDIDO tiene abiertos viajan en el latido: es como el servidor sabe
+  // que no son huérfanos y no se los lleva la limpieza (los mantiene la pantalla, no el catálogo).
 
   useEffect(() => {
     let vivo = true, timer = null;
@@ -3504,7 +3506,9 @@ function AvisoActualizacion() {
     const ciclo = async () => {
       let delay = 30000;
       try {
-        const r = await fetch('/api/actualizacion/estado');
+        const _ef = (window.__tizadaEfimerosAbiertos || []).filter(Boolean);
+        const r = await fetch('/api/actualizacion/estado'
+          + (_ef.length ? '?efimeros=' + encodeURIComponent(_ef.join(',')) : ''));
         if (!r.ok) throw new Error('http ' + r.status);
         const d = await r.json();
         if (!vivo) return;
@@ -10173,6 +10177,13 @@ export default function App() {
     });
     return [...(_ids)];
   };
+  // LO QUE ESTA PANTALLA TIENE ABIERTO, para que el latido lo diga y el servidor no lo dé por
+  // huérfano. Es una variable global a propósito: el latido vive en otro componente y no puede
+  // recibirlo por props sin arrastrar todo el estado del pedido.
+  useEffect(() => {
+    window.__tizadaEfimerosAbiertos = efimerosDelPedido();
+  }, [moldesEfimeros, moldesSeleccionados, disenoMoldes, productosCat]);
+
   const reiniciarPedido = () => {
     // Si hay moldes con el diseño adentro, se van con el pedido y con ellos el nombrado de las
     // piezas: eso se dice ANTES, no después. Es el único trabajo de este paso que no se recupera.
@@ -10223,10 +10234,12 @@ export default function App() {
       // borra los que están marcados `efimero`, así que mandar un pid de más no hace daño.
       try {
         const _ef = efimerosDelPedido();
-        if (_ef.length) {
+        {
           const _r = await fetch('/api/pedido/limpiar_efimeros', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pids: _ef })
+            // …y los HUÉRFANOS: los efímeros del pedido anterior, que ya no están anotados en
+            // ninguna pantalla. El servidor sólo se lleva los míos que nadie tenga abiertos.
+            body: JSON.stringify({ pids: _ef, incluir_huerfanos: true })
           });
           // SÓLO SE OLVIDAN LOS QUE EL SERVIDOR BORRÓ DE VERDAD. Si ignoró alguno (por ejemplo,
           // una tizada de ese molde todavía generando), antes se limpiaba igual el estado y no

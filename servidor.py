@@ -536,6 +536,16 @@ def actualizacion_estado():
         _e["catalogo_rev"] = _catalogo_rev()
     except Exception:
         pass
+    # QUÉ MOLDES EFÍMEROS TIENE ABIERTOS ESTA PANTALLA. Se anota en memoria: es la señal de «hay
+    # alguien trabajando con esto» que usa la limpieza de huérfanos. No se escribe en el catálogo a
+    # propósito — subiría la revisión cada pocos minutos y todas las pantallas recargarían.
+    try:
+        for _pe in (request.args.get("efimeros") or "").split(","):
+            _pe = _pe.strip()
+            if _pe:
+                _EFIMEROS_VIVOS[_pe] = time.time()
+    except Exception:
+        pass
     return jsonify(_e)
 
 
@@ -8195,7 +8205,8 @@ def _barrer_efimeros(horas=None):
         limite = time.time() - horas * 3600
         viejos = [p["id"] for p in cat.get("productos", [])
                   if p.get("efimero") is True
-                  and float(p.get("efimero_visto") or p.get("creado") or 0) < limite]
+                  and float(p.get("efimero_visto") or p.get("creado") or 0) < limite
+                  and not _efimero_abierto(p["id"])]   # ninguna pantalla lo tiene abierto ahora
         if not viejos:
             return 0
         print(f"[efimeros] limpiando {len(viejos)} molde(s) de pedidos abandonados "
@@ -8227,6 +8238,19 @@ def _arrancar_barrido_efimeros():
     threading.Thread(target=_cada_hora, daemon=True).start()
 
 
+# Efímeros que alguna pantalla declaró ABIERTOS en su latido: {pid: cuándo}. Vive en memoria (se
+# pierde al reiniciar, y está bien: el catálogo sigue teniendo `efimero_visto` para el plazo largo).
+_EFIMEROS_VIVOS = {}
+_EFIMERO_GRACIA_MIN = float(os.environ.get("TIZADA_EFIMERO_GRACIA_MIN") or 3)
+
+
+def _efimero_abierto(pid):
+    """¿Alguna pantalla dijo, hace menos de `_EFIMERO_GRACIA_MIN` minutos, que lo tiene abierto?
+    El latido va cada 30 s, así que 3 minutos aguanta un par de latidos perdidos sin dar por
+    abandonado un pedido que alguien está usando."""
+    return (time.time() - _EFIMEROS_VIVOS.get(str(pid), 0)) < _EFIMERO_GRACIA_MIN * 60
+
+
 def _tocar_efimero(pid):
     """Refresca `efimero_visto` para que el barrido no se lleve un molde que se está usando."""
     try:
@@ -8255,10 +8279,28 @@ def limpiar_efimeros():
     catálogo. Nunca «los que sobran», nunca por nombre — así se perdieron 3 moldes del usuario
     con su nombrado adentro, y no se pudieron recuperar.
     Las tizadas ya generadas NO se tocan: viven en `trabajos/` y son archivos independientes."""
-    pids = [str(p) for p in ((request.get_json(silent=True) or {}).get("pids") or [])]
-    if not pids:
+    _cuerpo = request.get_json(silent=True) or {}
+    pids = [str(p) for p in (_cuerpo.get("pids") or [])]
+    _huerfanos = bool(_cuerpo.get("incluir_huerfanos"))
+    if not pids and not _huerfanos:
         return jsonify({"ok": True, "borrados": []})
     cat = _cargar_catalogo_para_editar()
+    if _huerfanos:
+        # 🔴 LOS DEL PEDIDO ANTERIOR. El front sólo conoce los moldes que TIENE anotados; terminado
+        # el pedido (o recargada la pantalla con el pedido ya reiniciado) esa lista queda vacía y
+        # esos moldes no son de nadie — quedaban para siempre (reporte del usuario 2026-09-08).
+        # Se suman MIS efímeros que ninguna pantalla declaró abiertos en su latido. Sigue sin
+        # tocarse nada que no sea `efimero: true` ni nada de otra persona.
+        _uid_l = (_usuario_actual() or {}).get("id")
+        for _p in cat["productos"]:
+            _pid_h = str(_p.get("id") or "")
+            if _p.get("efimero") is not True or _pid_h in pids:
+                continue
+            if _p.get("creado_por") and _uid_l and _p.get("creado_por") != _uid_l:
+                continue
+            if _efimero_abierto(_pid_h):
+                continue                 # hay otra pantalla trabajando con ese pedido
+            pids.append(_pid_h)
     borrados, ignorados = [], []
     for pid in pids:
         prod = next((p for p in cat["productos"] if p.get("id") == pid), None)
