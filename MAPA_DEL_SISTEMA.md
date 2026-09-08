@@ -1406,6 +1406,22 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   ya armada no se entendía qué pedía), y manda al lugar que existe hoy — Variables → abrir el
   grupo → «+ Elegir piezas» de la variable — en vez de a unos pasos «1. Nombrar / 2. Grupos» que
   ya no están en la pantalla.
+  **(e) 🔴 UN CAMBIO GUARDADO EN UN MOLDE LLEGA A TODAS LAS PANTALLAS** («cuando hago un cambio en
+  moldes y lo guardo debe de enviarle a todos», usuario 2026-09-08). Es una app web multiusuario y
+  el catálogo se pedía UNA vez por sesión: lo que guardaba una persona no existía para las
+  pantallas ya abiertas —de otro usuario, o suyas en otra pestaña— hasta un F5. Ahora:
+  · `_guardar_catalogo` sube una REVISIÓN (`catalogo_rev`, un doc en la BASE, no en memoria: el
+    sistema puede correr con más de un proceso). Es best-effort: si falla, el catálogo igual quedó
+    guardado y lo único que se pierde es el aviso.
+  · Esa revisión viaja en `/api/actualizacion/estado`, el latido que la pantalla YA hace cada 30 s
+    (10 s o 2 s si hay una actualización en curso): no se agregó ningún polling nuevo.
+  · El front compara: si cambió, dispara `tizada:catalogo` y `App` vuelve a pedir `/api/productos`.
+    **No recarga la página** — eso perdería lo que el usuario esté escribiendo. Y como el navegador
+    frena los temporizadores de las pestañas que no se miran, también se refresca al volver a la
+    pestaña (`visibilitychange`).
+  Verificado de punta a punta contra el 8051: un guardado desde otra sesión (`prueba_rev_catalogo.py`)
+  subió la revisión y la pantalla abierta pidió el catálogo sola diez segundos después, sin tocar
+  nada. La revisión también se ve en el latido sin sesión (es sólo un número).
 - **2026-09-07 (394) — SEGUNDOS, NO MINUTOS: la carga del molde con diseño 56 → ~8 s y la tizada de
   5 prendas 51 → ~15 s.** Pedido del usuario: «cargar `CAMISETA JUGADOR.ai` demora 1 minuto; buscá
   todos los caminos para que sean segundos y milisegundos; y la tizada de 5 tardó 45 s». Estudio

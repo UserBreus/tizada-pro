@@ -3493,6 +3493,7 @@ function AvisoActualizacion() {
   const [est, setEst] = useState(null);       // {version, pendiente:{version,segundos}, en_curso}
   const [seg, setSeg] = useState(null);       // segundos que faltan (los baja el reloj de acá)
   const verRef = useRef(null);
+  const catRevRef = useRef(null);   // última revisión del catálogo vista (ver el ciclo de abajo)
 
   useEffect(() => {
     let vivo = true, timer = null;
@@ -3510,6 +3511,14 @@ function AvisoActualizacion() {
         // Si el servidor contesta con OTRA versión, esta pantalla quedó vieja → recargar YA.
         if (verRef.current && d.version && d.version !== verRef.current) { window.location.reload(); return; }
         verRef.current = d.version || verRef.current;
+        // EL CATÁLOGO CAMBIÓ (otra persona, u otra pestaña): se vuelve a pedir SOLO. No se recarga
+        // la página —eso perdería lo que el usuario esté escribiendo—, sólo el catálogo, que es de
+        // donde salen los moldes y sus variables (pedido del usuario 2026-09-08: «cuando hago un
+        // cambio en moldes y lo guardo debe de enviarle a todos»).
+        if (d.catalogo_rev != null) {
+          if (catRevRef.current != null && d.catalogo_rev !== catRevRef.current) window.dispatchEvent(new Event('tizada:catalogo'));
+          catRevRef.current = d.catalogo_rev;
+        }
         setEst(d);
         setSeg(d.pendiente ? d.pendiente.segundos : null);
         if (d.en_curso) delay = 2000;
@@ -4649,6 +4658,7 @@ export default function App() {
     fetchGruposTizada();
   }, [sesionLista, yo?.id]);
 
+
   // Valores derivados del estado. DEBEN declararse antes que los useEffect/useMemo
   // que los referencian (p. ej. en sus arrays de dependencias), de lo contrario
   // se produce un ReferenceError de "Temporal Dead Zone" al iniciar la app.
@@ -5075,6 +5085,23 @@ export default function App() {
       console.error("Error al obtener catálogo", e);
     }
   };
+
+  // EL CATÁLOGO CAMBIÓ EN EL SERVIDOR (lo avisa el latido de `AvisoActualizacion`, que compara la
+  // revisión): se vuelve a pedir. Es lo que hace que un cambio de moldes/variables guardado por
+  // otra persona —o por vos en otra pestaña— llegue a esta pantalla sin recargar (2026-09-08).
+  useEffect(() => {
+    const onCat = () => { if (sesionLista) fetchProductos(); };
+    // …y al VOLVER a la pestaña. El navegador frena los temporizadores de las pestañas que no se
+    // están mirando (hasta una vez por minuto), así que el latido puede llegar tarde: apenas la
+    // pantalla vuelve al frente se pide el catálogo, y lo que se ve es lo último guardado.
+    const onVer = () => { if (document.visibilityState === 'visible' && sesionLista) fetchProductos(); };
+    window.addEventListener('tizada:catalogo', onCat);
+    document.addEventListener('visibilitychange', onVer);
+    return () => {
+      window.removeEventListener('tizada:catalogo', onCat);
+      document.removeEventListener('visibilitychange', onVer);
+    };
+  }, [sesionLista]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchConfig = async () => {
     try {

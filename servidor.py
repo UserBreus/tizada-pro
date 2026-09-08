@@ -528,7 +528,15 @@ def actualizacion_estado():
     """Lo consulta la PANTALLA para mostrar la cuenta regresiva. Sin clave a propósito: no revela
     nada sensible (qué versión corre y cuánto falta para el corte) y lo necesita cualquiera que
     esté trabajando para enterarse de que el sistema se va a reiniciar."""
-    return jsonify(ACT.estado(_version()["version"]))
+    _e = ACT.estado(_version()["version"])
+    # La REVISIÓN DEL CATÁLOGO viaja acá (este latido ya lo hace la pantalla cada 30 s): si cambió,
+    # el front vuelve a pedir `/api/productos` solo. Así un cambio de moldes/variables llega a
+    # todos los que están trabajando, sin F5 (pedido del usuario 2026-09-08).
+    try:
+        _e["catalogo_rev"] = _catalogo_rev()
+    except Exception:
+        pass
+    return jsonify(_e)
 
 
 @app.post("/api/actualizacion/subir")
@@ -1140,6 +1148,36 @@ def _cargar_catalogo():
 _lock_catalogo = threading.Lock()
 
 
+# ── REVISIÓN DEL CATÁLOGO ────────────────────────────────────────────────────────────────────
+# Un número que sube con CADA escritura del catálogo. Sirve para que las pantallas abiertas se
+# enteren de un cambio hecho por otra persona (o por vos en otra pestaña) sin recargar: viaja en
+# el latido de `/api/actualizacion/estado` y el front, si cambió, vuelve a pedir `/api/productos`.
+# Vive en la BASE (no en memoria) porque el sistema puede correr con más de un proceso.
+_CAT_REV_CACHE = {"n": None}
+
+
+def _catalogo_rev():
+    """La revisión actual del catálogo (int). 0 si la base no contesta: nunca rompe el latido."""
+    try:
+        d = db.get_doc("catalogo_rev") or {}
+        n = int(d.get("n") or 0)
+        _CAT_REV_CACHE["n"] = n
+        return n
+    except Exception:
+        return _CAT_REV_CACHE["n"] or 0
+
+
+def _subir_catalogo_rev():
+    """Sube la revisión. Best-effort: si falla, el catálogo igual quedó guardado — lo único que se
+    pierde es el aviso automático a las otras pantallas."""
+    try:
+        n = _catalogo_rev() + 1
+        db.set_doc("catalogo_rev", {"n": n, "t": time.time()})
+        _CAT_REV_CACHE["n"] = n
+    except Exception as e:
+        print(f"[catalogo] no se pudo subir la revisión: {e}")
+
+
 def _guardar_catalogo(cat):
     """Guarda el catálogo en la BASE (fuente de verdad) + sincroniza la identidad de los
     productos a la tabla `producto`. Además deja un espejo en JSON como respaldo (no se lee de
@@ -1152,6 +1190,7 @@ def _guardar_catalogo(cat):
             print(f"[catalogo] no se pudo guardar en la base: {e}")
             raise
         _guardar_catalogo_json_espejo(cat)
+        _subir_catalogo_rev()      # …y las pantallas abiertas se enteran en el próximo latido
     finally:
         # ⚠️ Acá NO se suelta el candado de edición, por más tentador que sea: `_cargar_catalogo`
         # puede guardar POR SU CUENTA (siembra el doc si no está, backfill de plantillas) y eso
