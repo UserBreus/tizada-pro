@@ -1354,6 +1354,45 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
 ## 11. CHANGELOG (lo que voy tocando — mantener al día)
 
+- **2026-09-08 (396) — CADA MOLDE EN SU DISEÑO: se acabaron las tizadas dobles y el molde repetido
+  en la ficha (y la ficha dice con qué tipografía se estampa).** Reporte del usuario: un pedido con
+  dos espacios («Camiseta» y «Campera»), uno por molde, salió con **cuatro hojas** —«Principal»,
+  «Deportivo Pro» y «Delta», con la misma tizada dos veces— y la ficha con **el mismo molde dos
+  veces**.
+  **(a) 🔴 LA CAUSA: `/api/generar_multi` recorría, para CADA molde, TODOS los diseños de la
+  planilla.** Las filas de la campera también se generaban con el molde de la camiseta. En el camino
+  A eso lo tapaba a medias el arte (sin `arte.ai` para ese diseño, `continue`); en el camino B el
+  diseño viene DENTRO del molde, `val` se arma a mano (`{"aprobado": True, "modo": "con_diseno"}`) y
+  nada frenaba nada → 2 moldes × 2 diseños = 4 tizadas, 4 molde-guía y 230 piezas en vez de 115. La
+  hoja «Principal» fantasma era el mismo efecto: la copia de más caía en el diseño que no tenía
+  asignación de tela, y `TELA()` la manda a la tela por defecto.
+  **El front sabía el reparto y no lo mandaba** (`disenoMoldes`, elegido en el paso 1). Ahora viaja
+  como `moldes_por_diseno = {slug: [pid, …]}` (`App.jsx`, dentro del mismo recorrido que arma
+  `vars_por_diseno` — para no sumar otra lectura de `_slugDiseno` y romper el tope congelado de
+  `verificar_tdz.mjs`), y el server lo aplica ANTES del fallback de arte. Si no viene (pantalla
+  vieja), se deduce de `vars_por_diseno`, que dice lo mismo y viaja desde antes. **Sin ningún mapa
+  no se filtra nada, a propósito**: generar de más es feo, dejar prendas sin tizar es peor.
+  **(b) La ficha repetía el molde por OTRO camino, aunque el reparto ya estuviera bien.** El
+  completado «los moldes del pedido van siempre» (entrada 2026-08-31) buscaba una guía del molde
+  para el diseño PEDIDO; si esas filas se habían generado con el arte de otro diseño (`_fallback`),
+  la guía existía anotada con el diseño ESTAMPADO y no la encontraba → agregaba una segunda del
+  mismo molde. Ahora se anota `(pid, diseño pedido)` en `_guias_pedidas` y el completado también
+  respeta `moldes_por_diseno`. Y como último candado, `ficha_tecnica.generar_ficha` descarta una
+  guía que sea **copia exacta** de otra (mismo molde, misma variable, mismas piezas y los mismos
+  bytes de dibujo): si el arte cambia entre diseños los bytes cambian y las dos siguen saliendo.
+  **(c) LA FICHA DICE CON QUÉ TIPOGRAFÍA SALE cada campo** (pedido del usuario: «sea cual sea el
+  formato, mostrá la fuente que se eligió»). `_fuentes_guia(pers, talle, carpeta)` resuelve la
+  fuente REAL —la del archivo, o el reemplazo del pedido, o Anton Regular si no está en el
+  catálogo— y la guía la trae en `fuentes`; la ficha la escribe en su propia línea gris, partida en
+  varias si no entra: «Tipografía · Nombre: Anton Regular (falta «MoreFont1-CL», se sustituyó)».
+  **Bug encontrado de paso:** `_molde_guia_ficha` corre en el HILO que genera, donde no hay
+  `request` → `_reempl_de_request()` devolvía `{}` y **el molde guía se dibujaba con otra
+  tipografía que la tizada**. Ahora `correr()` le pasa los reemplazos que leyó al llegar el pedido.
+  **Contrato nuevo: `verificar_pedido_por_diseno.py`** (con el mapa, con el respaldo y sin nada;
+  caja de arena con dos copias de un molde real, motor y guía espiados). Verificado también con los
+  dos moldes reales del pedido del usuario: la ficha sale con una sola guía por molde y con la
+  línea de tipografía.
+
 - **2026-09-07 (395) — CONFIGURACIÓN DEL MOLDE: las piezas de una variable ya no se pierden, y el
   talle de guía se puede cambiar siempre.** Dos bugs que reportó el usuario en un molde que había
   re-subido.

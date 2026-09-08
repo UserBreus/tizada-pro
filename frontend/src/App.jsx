@@ -8034,7 +8034,10 @@ export default function App() {
       // fila entra UNA sola `__variante`, así que si el espacio usa dos moldes, para el segundo la
       // fila llegaba sin variable y el motor generaba TODAS sus piezas. Con esto el server le
       // devuelve a cada molde la variable que ese espacio eligió en el paso 1.
-      const vars_por_diseno = {};
+      // …y QUÉ MOLDE VA EN QUÉ DISEÑO: `{slug: [pid]}`. El servidor no lo puede adivinar y sin
+      // esto generaba cada molde para las filas de TODOS los diseños (el pedido salía con el doble
+      // de tizadas y el mismo molde repetido en la ficha — reporte del usuario 2026-09-08).
+      const vars_por_diseno = {}, moldes_por_diseno = {};
       (disenosPedido || []).forEach(d => {
         const slug = _slugDiseno(d.nombre), m = {};
         (disenoVars[d.id] || []).forEach(cl => {
@@ -8042,11 +8045,13 @@ export default function App() {
           if (v?.moldeId && !m[v.moldeId]) m[v.moldeId] = cl;   // la 1ª elegida para ese molde
         });
         if (Object.keys(m).length) vars_por_diseno[slug] = m;
+        const lst = (disenoMoldes[d.id] || []).filter(pid => ids.includes(pid));
+        if (lst.length) moldes_por_diseno[slug] = lst;
       });
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
       const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));

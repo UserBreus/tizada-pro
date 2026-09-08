@@ -7126,7 +7126,48 @@ def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None
     return out
 
 
-def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
+def _fuentes_guia(pers, talle, carpeta):
+    """Con qué tipografía sale estampado CADA campo (nombre, número, palabra…), ya con los
+    reemplazos del pedido aplicados. Devuelve [{campo, fuente, pedida, sustituida}].
+
+    El archivo pide la fuente por su nombre PostScript, pero lo que termina saliendo puede ser otra:
+    el pedido pudo reemplazarla, y si no está en el catálogo el motor estampa con Anton Regular
+    (regla del usuario 2026-08-20). La ficha tiene que decir la que SALIÓ —con la sustitución a la
+    vista—, no la que el archivo pidió: si no, promete una tipografía que nunca se imprimió."""
+    campos = {}
+    for _mapa in (pers or {}).values():
+        for _campo, _pl in (_mapa or {}).items():
+            if not isinstance(_pl, dict):
+                continue
+            # CAMINO B: cada talle trae su propio placeholder (`por_talle`), y con él su fuente.
+            _p = (_pl.get("por_talle") or {}).get(str(talle)) or _pl
+            _f = str(_p.get("fuente") or "").strip()
+            if _f:
+                campos.setdefault(str(_campo), _f)
+    if not campos:
+        return []
+    try:
+        _cat = MP.catalogo_fuentes(carpeta)
+    except Exception:
+        _cat = {}
+    salida = []
+    for _campo, _f in sorted(campos.items()):
+        try:
+            _ruta = MP.resolver_fuente(_f, carpeta)
+        except Exception:
+            _ruta = None
+        _sust = not _ruta
+        if _sust:
+            try:
+                _ruta = MP.resolver_fuente("Anton Regular", carpeta)
+            except Exception:
+                _ruta = None
+        _nom = (_cat.get(_ruta) or {}).get("interno") or (_f if not _sust else "Anton Regular")
+        salida.append({"campo": _campo, "fuente": _nom, "pedida": _f, "sustituida": bool(_sust)})
+    return salida
+
+
+def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None):
     # ⚠️ El molde guía de la FICHA se genera con `marcas_como_cruz=False`: ahí el objeto se tiene que
     # seguir viendo en su lugar (pedido del usuario 2026-08-26). La cruz es para la TELA.
     """Molde guía para la ficha: las piezas de la VARIABLE del pedido, al talle guía, con el diseño
@@ -7177,6 +7218,11 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     # personalización (tipografía, curva y borde del diseño). Se toma la PRIMERA fila del pedido
     # que traiga alguno y se estampa igual que en la tizada: lo que el taller ve en la ficha es
     # exactamente lo que va a salir impreso.
+    # 🔴 LOS REEMPLAZOS SON DEL PEDIDO y esta función corre en el HILO que genera: ahí no hay
+    # `request`, así que `_reempl_de_request()` devolvía {} y el molde guía se estampaba con otra
+    # tipografía que la tizada. `correr()` los pasa (los leyó cuando llegó el pedido).
+    _rp = reempl if reempl is not None else _reempl_de_request()
+    _cf = _fuentes_para(pid, _rp)
     _mu = (var or {}).get("muestra") or {}
     if _mu.get("nombre") or _mu.get("numero"):
         prendas = [{**_p, "nombre": _mu.get("nombre") or "", "numero": _mu.get("numero") or "",
@@ -7199,7 +7245,7 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     tmp = _tmp.mkdtemp()
     piezas = []
     try:
-        ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, _fuentes_para(pid, _reempl_de_request()), tmp,
+        ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, _cf, tmp,
                                 mapeo_arte=mapeo, solo_piezas=True,
                                 asignacion_tela=(var or {}).get("asig"),
                                 telas_cfg=(var or {}).get("telas"),
@@ -7263,6 +7309,9 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None):
     _ej = " ".join(x for x in (_mu.get("nombre"), _mu.get("numero")) if x).strip() or None
     return {"nombre": (prod or {}).get("nombre", pid), "diseno": dnom, "variante": vnom,
             "opciones": opciones, "ejemplo": _ej, "piezas": piezas,
+            # CON QUÉ TIPOGRAFÍA SALE: el taller lo tiene que ver en la ficha, sea cual sea el
+            # formato del pedido (pedido del usuario 2026-09-08).
+            "fuentes": _fuentes_guia(pers, talle, _cf),
             # LO QUE NO SE SUBLIMA (TPU/Bordado/DTF): va debajo de las piezas, para que el taller
             # sepa qué hay que aplicar aparte y sobre qué pieza.
             "procesos": _procesos_ficha(pid, prod, diseno, variante, arte, talle, reg)}
@@ -7282,6 +7331,19 @@ def generar_multi():
     # Los reemplazos de fuente son DEL PEDIDO y viajan en el cuerpo: se leen ACÁ (el hilo que
     # genera no tiene `request`, igual que las fuentes de la entrada 246).
     _reempl = _reempl_de_request()
+    # QUÉ MOLDE VA EN QUÉ DISEÑO: `{slug_del_diseño: [pid, …]}`, tal como el usuario los eligió en
+    # el paso 1. Sin esto, cada molde se generaba para TODAS las filas de la planilla, sin importar
+    # de qué diseño fueran: un pedido con dos diseños y dos moldes salía con CUATRO tizadas y
+    # cuatro molde-guía en la ficha (reporte del usuario 2026-09-08). Un diseño que no venga en el
+    # mapa no se filtra: mejor de más que dejar una prenda sin generar.
+    _moldes_por_dis = {_slugify_diseno(k): [str(x) for x in (v or [])]
+                       for k, v in (cuerpo.get("moldes_por_diseno") or {}).items() if v}
+    # RESPALDO: `vars_por_diseno` ({slug: {pid: variable}}) dice lo mismo y viaja desde antes. Sirve
+    # para una pantalla que quedó abierta con el front viejo: sin esto seguiría pidiendo cada molde
+    # para todos los diseños y la tizada volvería a salir doble.
+    for _sl, _pm in (cuerpo.get("vars_por_diseno") or {}).items():
+        if isinstance(_pm, dict) and _pm:
+            _moldes_por_dis.setdefault(_slugify_diseno(_sl), [str(x) for x in _pm.keys()])
     if not prendas:
         return jsonify({"error": "el pedido no tiene prendas"}), 400
     if not pids:
@@ -7310,7 +7372,9 @@ def generar_multi():
     # FICHA TÉCNICA: un molde guía POR CADA DISEÑO del pedido (y por cada variable dentro del
     # diseño), en el orden en que aparecen. Antes era uno solo por molde — el de la 1ª fila — así
     # que un pedido con «Jugador» + «Golero» mostraba un solo diseño y escondía el otro.
-    _guias_ficha, _guias_vistas = [], set()
+    # `_guias_pedidas` = (pid, diseño TAL COMO LO PIDIÓ LA FILA), antes del fallback de arte: es lo
+    # que hay que mirar para saber si un molde ya cubrió ese diseño (ver el completado de más abajo).
+    _guias_ficha, _guias_vistas, _guias_pedidas = [], set(), set()
     for pid in pids:
         reg = _cargar("registro_producto.json", pid)
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -7430,7 +7494,14 @@ def generar_multi():
         # tizada usa lo que preparaste, no un diseño cualquiera. Si ese no tiene arte, el 1º que sí.
         _dd = _slugify_diseno(default_diseno)
         _fallback = _dd if _dd in _con_arte else (_con_arte[0] if _con_arte else None)
-        for dslug, subset in por_diseno.items():
+        for _dslug_pedido, subset in por_diseno.items():
+            dslug = _dslug_pedido
+            # ESTE MOLDE, ¿ES DE ESTE DISEÑO? (ver `_moldes_por_dis`). Se pregunta ANTES del
+            # fallback de arte: si el diseño dice qué moldes lleva y este no está, sus filas son
+            # de OTRA prenda del pedido y no hay que generarlas con este molde.
+            _dl = _moldes_por_dis.get(dslug)
+            if _dl and str(pid) not in _dl:
+                continue
             sub = _diseno_sub(dslug)
             val = _cargar("validacion_arte.json", pid, sub=sub)
             if not val and _fallback and _fallback != dslug:
@@ -7532,6 +7603,7 @@ def generar_multi():
                             _g0["muestra"] = _muestra_de(_prg)
                     continue
                 _guias_vistas.add(_kg)
+                _guias_pedidas.add((pid, _dslug_pedido))
                 _guias_ficha.append({"pid": pid, "molde": nombre, "diseno": dslug, "diseno_nombre": dnom,
                                      "clave": _vc or None, "piezas": _prg.get("variante_piezas"),
                                      "asig": _asig_d, "telas": _telas,
@@ -7700,13 +7772,27 @@ def generar_multi():
                         if _cl:
                             _porDis[_slugify_diseno(_dslug)] = _cl
                     if not _porDis:
-                        _porDis = {_slugify_diseno(default_diseno): None}
+                        # Sin variables por diseño, los diseños de ESTE molde salen del mapa del
+                        # pedido; recién si tampoco está, el diseño que se editó en el Arte.
+                        _porDis = {_ds2: None for _ds2, _lst in _moldes_por_dis.items()
+                                   if str(_p) in (_lst or [])} or {_slugify_diseno(default_diseno): None}
                     for _ds, _cl in _porDis.items():
+                        # El mapa manda también acá: completar «por las dudas» un molde en un
+                        # diseño que no es suyo es exactamente lo que duplicaba la ficha.
+                        _dl2 = _moldes_por_dis.get(_ds)
+                        if _dl2 and str(_p) not in _dl2:
+                            continue
                         if (_p, _ds, _cl or "") in _vistos:
                             continue
                         # ¿ya hay una guía de ESE molde y diseño con otra variable? entonces no
                         # hace falta otra: la ficha no repite el mismo molde sin motivo
                         if any(g.get("pid") == _p and (g.get("diseno") or "") == _ds for g in _specs):
+                            continue
+                        # …ni cuando las filas de ese diseño YA se generaron con el arte de otro
+                        # (`_fallback`): la guía existe, sólo que anotada con el diseño que de
+                        # verdad se estampó. Sin esto la ficha mostraba DOS VECES el mismo molde
+                        # (reporte del usuario 2026-09-08).
+                        if (_p, _ds) in _guias_pedidas:
                             continue
                         _vistos.add((_p, _ds, _cl or ""))
                         _specs.append({"pid": _p, "diseno": _ds, "clave": _cl})
@@ -7729,7 +7815,8 @@ def generar_multi():
                     if _prodf and _regf:
                         prog("ficha", (_sp.get("molde") or (_prodf or {}).get("nombre", _pf))
                              + (f" · {_sp['diseno_nombre']}" if _sp.get("diseno_nombre") else ""), None)
-                        g = _molde_guia_ficha(_pf, _prodf, _regf, _sp.get("diseno") or default_diseno, _sp)
+                        g = _molde_guia_ficha(_pf, _prodf, _regf, _sp.get("diseno") or default_diseno, _sp,
+                                              reempl=_reempl)
                         if g:
                             _guias.append(g)
                 _pl = planilla_ficha or {"columnas": [], "filas": prendas}

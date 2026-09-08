@@ -1058,3 +1058,45 @@ node scripts/analyze-layers.mjs "ruta/al/archivo.ai"
   y este archivo.
   ⚠️ Trampa de herramienta: escribir este archivo con un heredoc de bash falló
   (`unexpected EOF`); va con la herramienta de escritura, como manda [[escrituras-atomicas]].
+
+## UN PEDIDO CON VARIOS MOLDES: cada uno va SÓLO en su diseño
+
+En el paso 1 del pedido cada **espacio de diseño** («Camiseta», «Campera») elige SU molde. El
+servidor no lo puede adivinar mirando la planilla: la columna «Diseño» dice de qué espacio es cada
+FILA, no qué molde le toca. Por eso el front manda el reparto:
+
+```
+moldes_por_diseno = { "camiseta": ["prod_…d413"], "campera": ["prod_…14c3"] }
+```
+
+`/api/generar_multi` lo aplica **antes** del fallback de arte: si un diseño declara sus moldes y
+este no está, sus filas son de otra prenda del pedido y no se generan con este molde.
+
+🔴 **Por qué importa más acá que en el camino A.** En el camino A, un molde sin `arte.ai` para ese
+diseño se salteaba solo (no había nada que estampar). Acá el diseño viene DENTRO del molde: no hay
+arte que falte, así que **nada frenaba la copia de más**. Un pedido de 2 moldes × 2 diseños salía
+con 4 hojas (dos de ellas la misma tizada, una con la tela de verdad y otra con la tela por defecto,
+porque el diseño de más no tenía asignación) y con la ficha mostrando dos veces el mismo molde.
+
+Respaldo: si el `moldes_por_diseno` no viene (una pantalla que quedó abierta con el front viejo), se
+deduce de `vars_por_diseno`. Si no viene ninguno de los dos **no se filtra**: es preferible generar
+de más —se ve— a dejar prendas sin tizada —no se ve—.
+
+Contrato: `verificar_pedido_por_diseno.py`.
+
+## LA FICHA DICE CON QUÉ TIPOGRAFÍA SALE
+
+El molde guía de la ficha muestra, en una línea gris, la fuente REAL de cada campo:
+
+```
+Tipografía  ·  Nombre: Anton Regular (falta «MoreFont1-CL», se sustituyó)   Número: …
+```
+
+Se resuelve igual que en la tizada (`_fuentes_guia` → `MP.resolver_fuente`): el nombre PostScript
+que pide el archivo, con el **reemplazo del pedido** aplicado, y si no está en el catálogo,
+`Anton Regular` (regla del 2026-08-20) **dicho a la vista** — el taller no puede adivinar mirando el
+dibujo que esa no es la tipografía que se pidió.
+
+⚠️ `_molde_guia_ficha` corre en el hilo que genera el pedido: ahí NO hay `request`, así que los
+reemplazos hay que **pasárselos** (`reempl=`). Cuando no se hacía, el molde guía se dibujaba con una
+tipografía y la tela salía con otra.
