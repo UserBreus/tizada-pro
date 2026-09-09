@@ -87,6 +87,39 @@ try:
 except Exception:
     pass
 
+# ── 5. UNA CONSULTA QUE NO VUELVE TIENE TECHO (y al cortar no deja nada abierto) ────────────
+# 🔴 Lo que faltaba (2026-09-09): `timeout=10` en `pyodbc.connect` es sólo para CONECTAR. Una vez
+# conectado, la consulta esperaba PARA SIEMPRE y el motor tampoco corta la espera por un candado
+# (`LOCK_TIMEOUT = -1`). Dos operaciones que se pisan no daban error: dejaban la petición colgada
+# con su transacción y su conexión abiertas, tomando candados. No falla, no avisa: se nota porque
+# el sistema deja de responder.
+import time as _t                                                              # noqa: E402
+ok(getattr(db, "TIMEOUT_CONSULTA", 0) > 0,
+   "no hay techo de espera para las consultas (`db.TIMEOUT_CONSULTA`)")
+_cn = db.conectar()
+try:
+    ok(getattr(_cn, "timeout", 0) == db.TIMEOUT_CONSULTA,
+       f"la conexión no trae el techo puesto (timeout={getattr(_cn, 'timeout', None)})")
+finally:
+    _cn.close()
+# Y que de verdad corte: se baja el techo a 2 s y se pide una espera de 10.
+_previo = db.TIMEOUT_CONSULTA
+db.TIMEOUT_CONSULTA = 2
+_t0, _corto = _t.time(), False
+try:
+    with db.cursor() as cur:
+        cur.execute("WAITFOR DELAY '00:00:10'")     # sólo esperar: no toca ningún dato
+except Exception:
+    _corto = True
+_tardo = _t.time() - _t0
+db.TIMEOUT_CONSULTA = _previo
+ok(_corto and _tardo < 6, f"una consulta trabada NO se cortó (esperó {_tardo:.1f} s)")
+print(f"  una consulta que no vuelve se corta sola a los {_tardo:.1f} s ✓")
+_fin = _sesiones()
+if _fin:
+    ok(_fin[1] == 0, f"tras cortar por techo quedaron {_fin[1]} transacción/es abierta/s")
+    print(f"  y al cortar no queda nada abierto: {_fin[1]} fantasma/s")
+
 print()
 if FALLOS:
     print("✗ FALLA:")

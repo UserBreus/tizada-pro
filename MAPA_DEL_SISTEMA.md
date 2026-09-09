@@ -1482,6 +1482,42 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (414) — 🔴 UNA CONSULTA A LA BASE PODÍA ESPERAR PARA SIEMPRE.** Pregunta del
+  usuario: *«fijate si hay transacciones que… alguna que termine después no se cierre y quede ahí
+  jodiendo»*.
+
+  **REVISADO TODO EL CAMINO A LA BASE, y lo que se buscaba NO estaba:** las 26 transacciones del
+  sistema (`db.py` 16, `auth.py` 4, `api_usuarios.py` 5, `instalar_servidor.py` 1) pasan **todas**
+  por `db.cursor()` o por `contextlib.closing` — ninguna conexión suelta. Ninguna está **anidada**
+  (los dos `with db.cursor() as c2` de `asignar_rol` y `_set_permisos` son el patrón «si no me
+  pasan cursor, abro uno», no un segundo dentro del primero). Ninguna tiene trabajo pesado adentro:
+  ni disco, ni PDFs, ni red, ni el motor — el `rmtree` de 123 MB al borrar un molde corre **antes**
+  de tocar la base. La más grande reescribe **1.020 filas** en un `executemany` con
+  `fast_executemany`: milisegundos. Medido en vivo: **0 sesiones dormidas con transacción abierta,
+  0 peticiones bloqueadas**.
+
+  **PERO SÍ HABÍA UN AGUJERO, y es exactamente el que describe la pregunta.** `timeout=10` en
+  `pyodbc.connect` es sólo para **conectar**. Una vez conectado, `cn.timeout` era **0** y el
+  `LOCK_TIMEOUT` de la sesión **-1**: los dos quieren decir *esperar para siempre*. Comprobado en la
+  base real — un `WAITFOR DELAY '00:00:04'` esperó los 4 s enteros sin que nada lo cortara. O sea:
+  el día que dos operaciones se pisen, la segunda **no da error**: deja la petición colgada con su
+  transacción y su conexión abiertas, tomando candados que hacen esperar al resto. No falla y no
+  avisa; se nota porque el sistema deja de responder.
+
+  **AHORA**: `db.TIMEOUT_CONSULTA` (30 s, `TIZADA_DB_TIMEOUT` lo cambia) se pone en `cn.timeout` al
+  conectar. Va del lado del **cliente** y no con `SET LOCK_TIMEOUT` por dos razones: no cuesta una
+  ida y vuelta más por conexión —que es justo lo que la auditoría 386-393 vino a bajar— y cubre
+  **toda** espera, no sólo la de un candado (una consulta lenta, la base que dejó de contestar).
+  `aplicar_schema` lleva su propio techo, más ancho (180 s): es DDL de arranque sin concurrencia,
+  pero con dos servidores arrancando a la vez el segundo también podría quedarse esperando.
+  🔴 **El techo es generoso a propósito**: lo más pesado del sistema son milisegundos, así que a los
+  30 s no hay nada legítimo — hay algo trabado, y es mejor que falle y se vea.
+
+  **VERIFICADO contra la base real**: con el techo en 2 s, tres consultas trabadas seguidas se
+  cortan solas y quedan **0 transacciones fantasma** (el `rollback` + `close` del contexto aguanta
+  el corte). El trabajo normal no se entera: 1.720 filas en 5 ms. Contrato: sección 5 nueva en
+  `verificar_db_conexiones.py`, que además del techo comprueba que al cortar no quede nada abierto.
+
 - **2026-09-09 (413) — 🔴 DOS MOLDES DE UN MISMO DISEÑO, CADA UNO CON SU COLUMNA DE TALLE.**
   Pedido del usuario: *«cómo trataría 2 moldes con un mismo diseño pero con dos columnas
   diferentes; que el cliente pueda decirle al sistema qué va con qué columna sin tener que hacer

@@ -57,8 +57,27 @@ def _cadena(base=None):
     return ";".join(p) + ";"
 
 
-def conectar(base=DB_NAME, autocommit=False):
-    return pyodbc.connect(_cadena(base), autocommit=autocommit, timeout=10)
+# 🔴 TECHO DE ESPERA DE UNA CONSULTA. `timeout=10` en `pyodbc.connect` es sólo el tiempo para
+# CONECTAR: una vez conectado, la consulta esperaba PARA SIEMPRE (`cn.timeout = 0`), y el motor
+# tampoco corta la espera por un candado (`LOCK_TIMEOUT = -1`, medido). O sea: dos operaciones que
+# se pisan no dan error — dejan la petición colgada, con su transacción y su conexión abiertas,
+# tomando candados que hacen esperar al resto. Eso es lo que «queda ahí jodiendo»: no falla, no
+# avisa, y sólo se nota porque el sistema se pone lento o no responde.
+# El techo es generoso a propósito: lo más pesado que hace el sistema —reescribir las piezas de un
+# molde— son ~1.000 filas en un solo `executemany` (milisegundos). Si algo tarda 30 s es que está
+# trabado, y entonces es mejor que falle y se vea.
+TIMEOUT_CONSULTA = int(os.environ.get("TIZADA_DB_TIMEOUT", "30"))
+
+
+def conectar(base=DB_NAME, autocommit=False, timeout_consulta=None):
+    cn = pyodbc.connect(_cadena(base), autocommit=autocommit, timeout=10)
+    # Se pone del lado del CLIENTE (`cn.timeout`) y no con `SET LOCK_TIMEOUT`: así no cuesta una
+    # ida y vuelta más por cada conexión —que es justo lo que la auditoría 386-393 vino a bajar— y
+    # cubre toda espera, no sólo la de un candado (una consulta lenta, la base que dejó de contestar).
+    _t = TIMEOUT_CONSULTA if timeout_consulta is None else timeout_consulta
+    if _t:
+        cn.timeout = int(_t)
+    return cn
 
 
 @contextlib.contextmanager
@@ -155,7 +174,10 @@ def aplicar_schema(path=None):
     with open(path, "r", encoding="utf-8") as f:
         sql = f.read()
     lotes = [b.strip() for b in __import__("re").split(r"(?im)^\s*GO\s*$", sql) if b.strip()]
-    with contextlib.closing(conectar(autocommit=True)) as cn:
+    # Techo aparte: esto es DDL de arranque (crear 26 tablas y sus índices en una base fría puede
+    # tardar), y no compite con nadie. Igual lleva uno: si DOS servidores arrancan a la vez, el
+    # segundo se quedaría esperando el candado del esquema para siempre.
+    with contextlib.closing(conectar(autocommit=True, timeout_consulta=180)) as cn:
         cur = cn.cursor()
         for b in lotes:
             cur.execute(b)
