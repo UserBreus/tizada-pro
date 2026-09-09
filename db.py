@@ -258,6 +258,76 @@ def set_doc(clave, obj, version_esperada=None):
         return _escribir_doc(cur, clave, obj, version_esperada)
 
 
+# ════════════════ RESERVAS («esto lo está editando fulano») ════════════════
+# El candado de edición del servidor dura lo que dura un guardado. Esto es otra cosa: dura lo que
+# dura una PERSONA con el editor abierto, cruza procesos y máquinas, y sobre todo **se puede
+# mostrar**. Sin esto, dos operarios editan la misma regla de nesting sin enterarse y el segundo
+# pisa al primero (ya no lo pierde —la versión del documento lo evita— pero igual le cambia el
+# valor y nadie se entera).
+# Se suelta SOLA: la pantalla renueva con el latido que ya hace, y si se cierra o se cuelga, el
+# `latido` deja de avanzar. Nunca queda algo trabado porque alguien se fue a almorzar.
+RESERVA_SEGUNDOS = int(os.environ.get("TIZADA_RESERVA_SEG", "90"))
+
+
+def tomar_reserva(recurso, usuario_id, usuario=None, segundos=None):
+    """Toma (o renueva) la reserva. Devuelve `(la_tengo, dueño)`.
+
+    Es UNA sentencia condicionada: `WHERE` acepta sólo si la reserva es MÍA o si está vencida. Dos
+    personas tocando el mismo botón en el mismo instante no pueden quedársela las dos — decide la
+    base, no el orden en que llegaron a la memoria de un proceso."""
+    # `or` no sirve acá: 0 segundos es un valor válido («todo vencido») y `0 or 90` da 90.
+    seg = RESERVA_SEGUNDOS if segundos is None else int(segundos)
+    with cursor() as cur:
+        cur.execute(
+            "UPDATE reserva SET usuario_id=?, usuario=?, latido=SYSUTCDATETIME(), "
+            "       tomada=CASE WHEN usuario_id=? THEN tomada ELSE SYSUTCDATETIME() END "
+            " WHERE recurso=? AND (usuario_id=? OR usuario_id IS NULL "
+            "                      OR DATEDIFF(second, latido, SYSUTCDATETIME()) >= ?)",
+            usuario_id, usuario, usuario_id, recurso, usuario_id, seg)
+        if cur.rowcount == 0:
+            cur.execute("SELECT usuario_id, usuario, latido FROM reserva WHERE recurso=?", recurso)
+            r = cur.fetchone()
+            if r is not None:
+                return False, {"usuario_id": r[0], "usuario": r[1]}
+            try:
+                cur.execute("INSERT INTO reserva (recurso, usuario_id, usuario) VALUES (?,?,?)",
+                            recurso, usuario_id, usuario)
+            except Exception:
+                # Otro la insertó en el mismo instante (choque contra la PK): gana ése.
+                cur.execute("SELECT usuario_id, usuario FROM reserva WHERE recurso=?", recurso)
+                r = cur.fetchone()
+                if r is not None and r[0] != usuario_id:
+                    return False, {"usuario_id": r[0], "usuario": r[1]}
+        return True, {"usuario_id": usuario_id, "usuario": usuario}
+
+
+def soltar_reserva(recurso, usuario_id):
+    """La suelta SÓLO si es tuya (si no, soltar la de otro sería un botón para robarla)."""
+    with cursor() as cur:
+        cur.execute("DELETE FROM reserva WHERE recurso=? AND usuario_id=?", recurso, usuario_id)
+        return cur.rowcount > 0
+
+
+def soltar_reservas_de(usuario_id):
+    """Todas las de una persona (al cerrar sesión, o cuando su pantalla avisa que se va)."""
+    with cursor() as cur:
+        cur.execute("DELETE FROM reserva WHERE usuario_id=?", usuario_id)
+        return cur.rowcount
+
+
+def reservas_vivas(segundos=None):
+    """Las que siguen latiendo: `{recurso: {usuario_id, usuario, hace_seg}}`. De paso borra las
+    vencidas — la limpieza va acá y no en un hilo aparte, que sería un proceso más que cuidar."""
+    # `or` no sirve acá: 0 segundos es un valor válido («todo vencido») y `0 or 90` da 90.
+    seg = RESERVA_SEGUNDOS if segundos is None else int(segundos)
+    with cursor() as cur:
+        cur.execute("DELETE FROM reserva WHERE DATEDIFF(second, latido, SYSUTCDATETIME()) >= ?", seg)
+        cur.execute("SELECT recurso, usuario_id, usuario, "
+                    "       DATEDIFF(second, tomada, SYSUTCDATETIME()) FROM reserva")
+        return {r[0]: {"usuario_id": r[1], "usuario": r[2], "hace_seg": int(r[3] or 0)}
+                for r in cur.fetchall()}
+
+
 def doc_existe(clave):
     return valor("SELECT COUNT(*) FROM config WHERE producto_id IS NULL AND clave=?", clave) > 0
 

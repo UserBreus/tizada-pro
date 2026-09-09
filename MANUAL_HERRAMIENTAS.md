@@ -340,6 +340,19 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
 - **Trampa:** un molde **sin** `columnas` cae al fallback `nombre/numero/talle` en
   `_traducir_prendas`. Si el código asume columnas, rompe esos moldes.
 
+### 3.5.b **Quién está editando qué** (aparece solo)
+
+- **Qué es:** al abrir un molde en Configuración, una regla de nesting o una planilla, esa cosa
+  queda **tomada a tu nombre**. Si otra persona la tiene abierta, ves un cartel ámbar
+  («Fulano está editando esto ahora mismo», ancla `reserva-aviso`) y el botón de **guardar queda
+  apagado**. Podés mirar todo igual.
+- **Se libera sola** apenas la otra persona cierra la pantalla; y si se le colgó el navegador, a los
+  90 segundos. **No hay que pedirle a nadie que la suelte.**
+- **Nunca te deja sin trabajar:** si el servidor no contesta, o el sistema anda sin usuarios, no
+  bloquea nada. Es una cortesía para no pisarse, no un permiso.
+- **Guarda:** `POST /api/reserva/tomar` · `/soltar` · `GET /api/reservas`; se renueva con el
+  latido que la pantalla ya hace.
+
 ### 3.6 **Nesting** del molde
 
 - **Pasos:** elegir el preset en el desplegable (`nsel-elegir`). Abajo se ve el resumen

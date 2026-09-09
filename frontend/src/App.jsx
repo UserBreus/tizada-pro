@@ -3566,6 +3566,93 @@ function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
   );
 }
 
+// ── RESERVAS: «esto lo está editando fulano» ──────────────────────────────────────────────────
+// Guardar con versión ya evita PERDER el trabajo del otro; esto evita el otro problema, que es
+// pisarle el valor sin enterarse. Quien abre un editor toma esa cosa; los demás la ven en sólo
+// lectura con el nombre de quien la tiene. Nunca traba de verdad: si el servidor no contesta, o no
+// hay usuarios, se sigue trabajando (una reserva es una cortesía, no un permiso).
+// El estado vive a nivel de módulo y no en un contexto de React porque quien lo refresca es el
+// LATIDO, que ya existe y corre en otro componente: pasarlo por props sería atarlos sin necesidad.
+const RESERVAS_ABIERTAS = new Set();          // lo que ESTA pantalla tiene tomado
+let RESERVAS_ESTADO = { reservas: {}, yo: null };
+
+function _avisarReservas(d) {
+  RESERVAS_ESTADO = { reservas: (d && d.reservas) || {}, yo: (d && d.yo) != null ? d.yo : null };
+  window.dispatchEvent(new Event('tizada:reservas'));
+}
+
+async function tomarReserva(recurso) {
+  if (!recurso) return;
+  RESERVAS_ABIERTAS.add(recurso);             // el latido la renueva desde ya
+  try {
+    const r = await fetch('/api/reserva/tomar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recurso })
+    });
+    const d = await r.json();
+    if (d && d.mia === false && d.dueno) {
+      RESERVAS_ESTADO = { ...RESERVAS_ESTADO,
+        reservas: { ...RESERVAS_ESTADO.reservas, [recurso]: d.dueno } };
+      window.dispatchEvent(new Event('tizada:reservas'));
+    }
+  } catch { /* sin servidor no se traba a nadie */ }
+}
+
+async function soltarReserva(recurso) {
+  if (!recurso) return;
+  RESERVAS_ABIERTAS.delete(recurso);
+  try {
+    await fetch('/api/reserva/soltar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recurso })
+    });
+  } catch { /* si no se pudo soltar, vence sola al dejar de latir */ }
+}
+
+/** Toma `recurso` mientras este editor esté abierto. Devuelve `{mia, dueno}`.
+ *  `mia` arranca en true a propósito: hasta que el servidor conteste, no se traba nada. */
+function useReserva(recurso) {
+  const [estado, setEstado] = React.useState({ mia: true, dueno: null });
+  React.useEffect(() => {
+    if (!recurso) { setEstado({ mia: true, dueno: null }); return; }
+    const leer = () => {
+      const d = RESERVAS_ESTADO.reservas[recurso];
+      const yo = RESERVAS_ESTADO.yo;
+      // Sin sesión (taller de un solo usuario) no hay a quién comparar: es de todos.
+      setEstado(!d || yo == null || d.usuario_id === yo
+        ? { mia: true, dueno: null } : { mia: false, dueno: d });
+    };
+    tomarReserva(recurso).then(leer);
+    window.addEventListener('tizada:reservas', leer);
+    // Si se cierra la pestaña de golpe no hay `unmount`: se avisa igual, y si no llega, la reserva
+    // vence sola cuando el latido deja de renovarla.
+    const alSalir = () => { try { navigator.sendBeacon?.('/api/reserva/soltar', new Blob([JSON.stringify({ recurso })], { type: 'application/json' })); } catch { /* nada */ } };
+    window.addEventListener('pagehide', alSalir);
+    return () => {
+      window.removeEventListener('tizada:reservas', leer);
+      window.removeEventListener('pagehide', alSalir);
+      soltarReserva(recurso);
+    };
+  }, [recurso]);
+  return estado;
+}
+
+/** El cartel de «lo está editando otro». Se dibuja sólo cuando corresponde: si es tuyo, nada. */
+function AvisoReserva({ estado, que = 'esto' }) {
+  if (!estado || estado.mia) return null;
+  const quien = (estado.dueno && (estado.dueno.usuario || 'otra persona')) || 'otra persona';
+  return (
+    <div data-tour="reserva-aviso" style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: 10,
+      background: 'rgba(255,215,0,0.10)', border: '1px solid rgba(255,215,0,0.45)',
+      fontSize: 12.5, marginBottom: 10 }}>
+      <span style={{ fontSize: 15 }}>🔒</span>
+      <span><b>{quien}</b> está editando {que} ahora mismo. Lo ves como quedó, pero no se puede
+        guardar hasta que termine.</span>
+    </div>
+  );
+}
+
 /** CINTA DE ACTUALIZACIÓN — la cuenta regresiva que ve quien está trabajando cuando hay una
  *  actualización programada en el servidor. Pregunta cada 30 s (barato); cuando falta menos de
  *  2 minutos pasa a contar segundo a segundo, con el reloj del navegador (no machaca al servidor).
@@ -3589,8 +3676,13 @@ function AvisoActualizacion() {
       let delay = 30000;
       try {
         const _ef = (window.__tizadaEfimerosAbiertos || []).filter(Boolean);
-        const r = await fetch('/api/actualizacion/estado'
-          + (_ef.length ? '?efimeros=' + encodeURIComponent(_ef.join(',')) : ''));
+        // Las reservas viajan en ESTE latido y no en un sondeo aparte: un segundo reloj cada 30 s
+        // por pantalla es tráfico que no hace falta.
+        const _rs = [...RESERVAS_ABIERTAS];
+        const _q = [];
+        if (_ef.length) _q.push('efimeros=' + encodeURIComponent(_ef.join(',')));
+        if (_rs.length) _q.push('reservas=' + encodeURIComponent(_rs.join(',')));
+        const r = await fetch('/api/actualizacion/estado' + (_q.length ? '?' + _q.join('&') : ''));
         if (!r.ok) throw new Error('http ' + r.status);
         const d = await r.json();
         if (!vivo) return;
@@ -3605,6 +3697,7 @@ function AvisoActualizacion() {
           if (catRevRef.current != null && d.catalogo_rev !== catRevRef.current) window.dispatchEvent(new Event('tizada:catalogo'));
           catRevRef.current = d.catalogo_rev;
         }
+        if (d.reservas) _avisarReservas(d);      // quién está editando qué, para toda la app
         setEst(d);
         setSeg(d.pendiente ? d.pendiente.segundos : null);
         if (d.en_curso) delay = 2000;
@@ -5091,6 +5184,16 @@ export default function App() {
   const _soloHerramienta = !!desdePedidoB;
   // Sufijo `?pid=`/`&pid=` listo para pegar en una URL de GET.
   const qPid = (sep = '?') => (pidCfg ? `${sep}pid=${encodeURIComponent(pidCfg)}` : '');
+  // 🔴 QUIÉN ESTÁ EDITANDO QUÉ. Tres cosas se toman mientras alguien las tiene abiertas: el molde
+  // que está en Configuración, la regla de nesting y la planilla. No traba de verdad —si el
+  // servidor no contesta o no hay usuarios, se sigue— pero deja de pasar que dos configuren lo
+  // mismo sin enterarse. Se sueltan solas cuando la pantalla deja de latir.
+  // `molderiaAbierta` y no `pidCfg`: pidCfg cae al molde ACTIVO aunque no haya nada abierto, y
+  // reservar por estar parado en una pantalla sería trabar moldes que nadie está tocando. El molde
+  // propio del pedido (`modoMiMolde`) no se reserva: es de una sola persona.
+  const resMolde = useReserva(molderiaAbierta ? `molde:${molderiaAbierta}` : null);
+  const resNesting = useReserva(nestingEditando?.id ? `nesting:${nestingEditando.id}` : null);
+  const resPlanilla = useReserva(planillaEditando?.id ? `planilla:${planillaEditando.id}` : null);
   // EL PRODUCTO QUE SE ESTÁ CONFIGURANDO. Las pantallas de configuración leían
   // `activoProdDetalle` (el molde ACTIVO del server) pero guardaban contra `pidCfg` (el ABIERTO).
   // Cuando no coinciden —y no coinciden cada vez que se abre un molde, porque `handleActivarProducto`
@@ -16246,6 +16349,8 @@ export default function App() {
                   </>
                 ) : prodCfg && (
                   <>
+                    {/* Otro lo tiene abierto: se ve igual, pero no se guarda encima. */}
+                    <AvisoReserva estado={resMolde} que={`el molde «${prodCfg.nombre}»`} />
                     <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                         {desdePedidoB ? (
@@ -19904,7 +20009,11 @@ export default function App() {
                       <button className="btn ghost" onClick={() => setProbandoPlanilla(true)} style={{ padding: '8px 16px', fontSize: 13, height: 36, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--cmyk-cyan)', borderColor: 'var(--cmyk-cyan)' }}>
                         <Icon name="eye" style={{ width: 14, height: 14 }} /> Visualizar
                       </button>
-                      <button className="btn success" data-tour="col-guardar" onClick={handleSavePlanilla} style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px', fontSize: 13, height: 36 }}>
+                      <button className="btn success" data-tour="col-guardar" onClick={handleSavePlanilla}
+                        disabled={!resPlanilla.mia}
+                        title={resPlanilla.mia ? '' : `La está editando ${(resPlanilla.dueno || {}).usuario || 'otra persona'}`}
+                        style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px', fontSize: 13, height: 36,
+                          opacity: resPlanilla.mia ? 1 : 0.45, cursor: resPlanilla.mia ? 'pointer' : 'not-allowed' }}>
                         Guardar Planilla
                       </button>
                     </div>
@@ -20535,6 +20644,7 @@ export default function App() {
                       const set = (k, v) => setNestingEditando({ ...n, [k]: v });
                       return (
                         <div style={{ display: 'grid', gap: 16 }}>
+                          <AvisoReserva estado={resNesting} que="esta regla de nesting" />
                           <div>
                             <label style={labelStyle}>Nombre</label>
                             <input type="text" value={n.nombre} data-tour="nesting-nombre" placeholder="Ej. Estándar, Apretado, Sin giro…" onChange={(e) => set('nombre', e.target.value)} style={inputStyle} />
@@ -20574,7 +20684,10 @@ export default function App() {
                           </div>
                           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
                             <button className="btn ghost" onClick={() => setNestingEditando(null)} style={{ padding: '8px 16px' }}>Cancelar</button>
-                            <button className="btn success" style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px' }}
+                            <button className="btn success" disabled={!resNesting.mia}
+                              title={resNesting.mia ? '' : `La está editando ${(resNesting.dueno || {}).usuario || 'otra persona'}`}
+                              style={{ backgroundColor: 'var(--success)', color: 'white', padding: '8px 16px',
+                                opacity: resNesting.mia ? 1 : 0.45, cursor: resNesting.mia ? 'pointer' : 'not-allowed' }}
                               data-tour="nesting-guardar" onClick={async () => { const id = await guardarNestingPreset(n); if (id) setNestingEditando(null); }}>Guardar nesting</button>
                           </div>
                         </div>

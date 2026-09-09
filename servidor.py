@@ -152,11 +152,74 @@ class _TrabajoCancelado(Exception):
 
 
 def _nuevo_trabajo(tid, **extra):
-    """Anota un trabajo nuevo (y aprovecha para podar los viejos)."""
+    """Anota un trabajo nuevo (y aprovecha para podar los viejos).
+
+    🔴 CON DUEÑO. Una tizada es de quien la mandó a hacer: sin esto, cualquiera con el id miraba el
+    estado del pedido de otro y —peor— se bajaba sus PDF, porque la ruta de descarga ni siquiera
+    pasa por la guardia de sesión (no empieza con `/api/`). El dueño va TAMBIÉN a disco: los
+    trabajos se podan de memoria a las 6 h y los archivos quedan, así que sin eso una tizada de
+    ayer se volvía imposible de bajar."""
     _podar_trabajos()
+    _u = None
+    try:
+        _u = _uid_actual()
+    except Exception:
+        pass
     trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
-                     "creado": time.time(), "cancelar": threading.Event(), **extra}
+                     "creado": time.time(), "cancelar": threading.Event(), "usuario": _u, **extra}
+    if _u is not None:
+        try:
+            _d = os.path.join(TRABAJOS, tid)
+            os.makedirs(_d, exist_ok=True)
+            _tmp = os.path.join(_d, "duenio.json.tmp")
+            with open(_tmp, "w", encoding="utf-8") as _f:
+                json.dump({"u": _u}, _f)
+            os.replace(_tmp, os.path.join(_d, "duenio.json"))
+        except Exception as _e:
+            print(f"[trabajos] no se pudo anotar el dueño de {tid}: {_e}")
     return trabajos[tid]
+
+
+def _duenio_trabajo(tid):
+    """De quién es este trabajo. Primero la memoria, después el disco (los trabajos viejos ya no
+    están en memoria pero sus archivos sí). None = de nadie / no se sabe."""
+    t = trabajos.get(tid)
+    if t is not None and t.get("usuario") is not None:
+        return t.get("usuario")
+    try:
+        with open(os.path.join(TRABAJOS, tid, "duenio.json"), encoding="utf-8") as f:
+            return json.load(f).get("u")
+    except Exception:
+        return None
+
+
+def _sesion_o_403():
+    """Exige sesión en una ruta que NO pasa por `_guardia_moldes` (la guardia sólo mira `/api/`).
+    Devuelve la respuesta 401 o None. Sin sistema de usuarios (taller) deja pasar, como siempre."""
+    if not _USUARIOS_ON:
+        return None
+    try:
+        _u = _usuario_actual()
+    except Exception:
+        return None                # la base parpadeó: la seguridad no puede tumbar el sistema
+    if not _u:
+        return jsonify({"error": "no hay sesión iniciada"}), 401
+    return None
+
+
+def _trabajo_ajeno(tid):
+    """Devuelve la respuesta 403 si este trabajo NO es de quien está pidiendo, o None si puede.
+
+    Sin sistema de usuarios (taller sin base) no hay a quién preguntarle: pasa, como siempre. Un
+    trabajo SIN dueño (de antes de esto) también pasa: no se le corta el acceso a lo que ya estaba."""
+    if not _USUARIOS_ON:
+        return None
+    _d = _duenio_trabajo(tid)
+    if _d is None:
+        return None
+    if _uid_actual() == _d:
+        return None
+    return jsonify({"error": "esa tizada no es tuya"}), 403
 
 
 def _podar_trabajos():
@@ -767,6 +830,20 @@ def actualizacion_estado():
     # QUÉ MOLDES EFÍMEROS TIENE ABIERTOS ESTA PANTALLA. Se anota en memoria: es la señal de «hay
     # alguien trabajando con esto» que usa la limpieza de huérfanos. No se escribe en el catálogo a
     # propósito — subiría la revisión cada pocos minutos y todas las pantallas recargarían.
+    # RESERVAS: el mismo latido las renueva y trae quién tiene qué. Va acá y no en un sondeo
+    # aparte porque un segundo reloj cada 30 s por pantalla es tráfico que no hace falta.
+    try:
+        _u = _usuario_actual() or {}
+        _uid = _u.get("id")
+        if _uid is not None:
+            for _rc in (request.args.get("reservas") or "").split(","):
+                _rc = _rc.strip()
+                if _recurso_valido(_rc):
+                    db.tomar_reserva(_rc, _uid, _u.get("nombre") or _u.get("usuario"))
+        _e["reservas"] = db.reservas_vivas()
+        _e["yo"] = _uid
+    except Exception:
+        pass
     try:
         for _pe in (request.args.get("efimeros") or "").split(","):
             _pe = _pe.strip()
@@ -8643,6 +8720,69 @@ def generar_multi():
     return jsonify({"id": tid})
 
 
+# ── RESERVAS: «esto lo está editando fulano» ─────────────────────────────────────────────────
+# Dos personas configurando a la vez ya no se pierden el trabajo (el guardado va con versión), pero
+# igual se pisan el VALOR sin enterarse. Esto lo hace visible: quien abre un editor toma la cosa, y
+# los demás la ven en sólo lectura con el nombre de quien la tiene. Se suelta sola cuando esa
+# pantalla deja de latir, así que nadie queda bloqueado porque alguien se fue.
+_RECURSO_OK = re.compile(r"^(molde|nesting|planilla|regla|tela):[A-Za-z0-9_\-\.]{1,120}$")
+
+
+def _recurso_valido(r):
+    return bool(r) and bool(_RECURSO_OK.match(str(r)))
+
+
+@app.post("/api/reserva/tomar")
+def reserva_tomar():
+    """Toma o renueva la reserva de UNA cosa. Devuelve `{mia, dueno}`: si no es tuya, `dueno` dice
+    quién la tiene para poder decirlo en pantalla."""
+    cuerpo = request.get_json(force=True) or {}
+    rec = str(cuerpo.get("recurso") or "").strip()
+    if not _recurso_valido(rec):
+        return jsonify({"error": "recurso inválido"}), 400
+    _u = _usuario_actual() or {}
+    _uid = _u.get("id")
+    if _uid is None:
+        return jsonify({"mia": True, "dueno": None, "sin_usuarios": True})   # taller sin base
+    try:
+        mia, dueno = db.tomar_reserva(rec, _uid, _u.get("nombre") or _u.get("usuario"))
+    except Exception as e:
+        # 🔴 Si la base no contesta, NO se traba a nadie: la reserva es una cortesía para no
+        # pisarse, no un requisito para trabajar. Se avisa y se sigue.
+        print(f"[reserva] no se pudo tomar «{rec}»: {e}")
+        return jsonify({"mia": True, "dueno": None, "sin_base": True})
+    return jsonify({"mia": mia, "dueno": dueno if not mia else None})
+
+
+@app.post("/api/reserva/soltar")
+def reserva_soltar():
+    cuerpo = request.get_json(force=True) or {}
+    rec = str(cuerpo.get("recurso") or "").strip()
+    _u = _usuario_actual() or {}
+    if _u.get("id") is None:
+        return jsonify({"ok": True})
+    try:
+        if rec == "*":
+            return jsonify({"ok": True, "n": db.soltar_reservas_de(_u["id"])})
+        if not _recurso_valido(rec):
+            return jsonify({"error": "recurso inválido"}), 400
+        return jsonify({"ok": db.soltar_reserva(rec, _u["id"])})
+    except Exception as e:
+        print(f"[reserva] no se pudo soltar «{rec}»: {e}")
+        return jsonify({"ok": False})
+
+
+@app.get("/api/reservas")
+def reservas_lista():
+    """Todo lo que está tomado ahora mismo. Lo pide la pantalla de configuración para pintar quién
+    está en qué, sin tener que preguntar cosa por cosa."""
+    try:
+        _u = _usuario_actual() or {}
+        return jsonify({"reservas": db.reservas_vivas(), "yo": _u.get("id")})
+    except Exception as e:
+        return jsonify({"reservas": {}, "yo": None, "error": str(e)[:120]})
+
+
 @app.get("/api/trabajo/<tid>")
 def estado_trabajo(tid):
     t = trabajos.get(tid)
@@ -8652,6 +8792,9 @@ def estado_trabajo(tid):
         # vueltas para siempre (o dejaba la tarjeta muda, sin decir qué pasó).
         return jsonify({"error": "el trabajo ya no existe", "estado": "desconocido",
                         "motivo": "se reinició el servidor o el trabajo es de hace rato"}), 404
+    _no = _trabajo_ajeno(tid)
+    if _no:
+        return _no
     # el aviso de cancelación es un objeto de Python: no viaja
     return jsonify({k: v for k, v in t.items() if k != "cancelar"})
 
@@ -8663,6 +8806,9 @@ def cancelar_trabajo(tid):
     t = trabajos.get(tid)
     if not t:
         return jsonify({"error": "el trabajo ya no existe", "estado": "desconocido"}), 404
+    _no = _trabajo_ajeno(tid)
+    if _no:
+        return _no
     if t.get("estado") in ("listo", "error", "cancelado"):
         return jsonify({"error": f"el trabajo ya está {t.get('estado')}", "estado": t.get("estado")}), 409
     if t.get("cancelar") is not None:
@@ -9473,6 +9619,15 @@ def fuente_chars():
 
 @app.get("/trabajos/<tid>/<archivo>")
 def descargar(tid, archivo):
+    """🔴 ESTA RUTA NO PASA POR `_guardia_moldes`: la guardia sólo mira lo que empieza con `/api/`.
+    Medido el 2026-09-09: pedir los moldes sin sesión daba 401, pero bajar el PDF de una tizada
+    daba 200 — sin login. Por eso la sesión y el dueño se piden ACÁ, a mano."""
+    _no = _sesion_o_403()
+    if _no:
+        return _no
+    _no = _trabajo_ajeno(tid)
+    if _no:
+        return _no
     return send_from_directory(os.path.join(TRABAJOS, tid), archivo)
 
 
@@ -9480,6 +9635,9 @@ def descargar(tid, archivo):
 def pagina_img(tid, archivo):
     """Una página de un PDF del trabajo como PNG (para MOSTRARLO en el visor con el look del sistema:
     así el scroll es el de la app, no el del visor de PDF del navegador). `pi`=página, `z`=zoom."""
+    _no = _trabajo_ajeno(tid)
+    if _no:
+        return _no
     import io as _io
     import fitz
     try:
@@ -9511,6 +9669,9 @@ def descargar_mesa(tid, archivo):
     """Descarga UNA mesa (la página `pi` de la hoja) como PDF PROPIO, con el NOMBRE que se ve en la
     tizada. Así cada mesa baja SEPARADA aunque varias sean páginas del mismo PDF (misma tela). La
     página ya viene aplanada (RIP-safe) desde la generación; se copia tal cual a un PDF de 1 página."""
+    _no = _trabajo_ajeno(tid)
+    if _no:
+        return _no
     import io as _io
     import pikepdf
     try:
@@ -9557,6 +9718,10 @@ def descargar_zip():
     import io
     import zipfile
     ids = [t for t in request.args.get("ids", "").split(",") if t]
+    for _t in ids:                      # el zip junta varias: TODAS tienen que ser tuyas
+        _no = _trabajo_ajeno(_t)
+        if _no:
+            return _no
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for tid in ids:

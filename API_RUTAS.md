@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **151 endpoints**. Generado automáticamente del código.
+Total: **154 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -214,6 +214,9 @@ Total: **151 endpoints**. Generado automáticamente del código.
 | GET | `/api/reglas_planilla` |  | — |
 | POST | `/api/reglas_planilla/eliminar` |  | body: id |
 | POST | `/api/reglas_planilla/guardar` |  | body: clave, comportamiento, id, nombre, opciones, tipo |
+| POST | `/api/reserva/soltar` |  | body: recurso |
+| POST | `/api/reserva/tomar` | Toma o renueva la reserva de UNA cosa. Devuelve `{mia, dueno}`: si no es tuya, `dueno` dice quién la tiene para poder decirlo en pantalla. | body: recurso |
+| GET | `/api/reservas` | Todo lo que está tomado ahora mismo. Lo pide la pantalla de configuración para pintar quién está en qué, sin tener que preguntar cosa por cosa. | — |
 
 
 ## Usuarios / Roles / Permisos

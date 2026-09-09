@@ -300,6 +300,22 @@ CREATE TABLE dbo.config (
 );
 
 GO
+/* 2026-09-09: RESERVAS. «Esto lo esta editando fulano»: quien abre el editor de un molde o de una
+   regla la toma, y los demas lo ven en solo lectura con el nombre de quien lo tiene. Se renueva
+   con el latido que la pantalla ya hace; si esa pantalla se cierra o se cuelga, el `latido` deja
+   de avanzar y a los pocos segundos queda libre sola (no hay que soltarla a mano). El `recurso` es
+   texto: molde:<pid>, nesting:<id>, planilla:<id>, regla:<id>. (reservas) */
+IF OBJECT_ID('dbo.reserva','U') IS NULL
+CREATE TABLE dbo.reserva (
+    recurso     NVARCHAR(160) NOT NULL PRIMARY KEY,
+    usuario_id  INT NULL,
+    usuario     NVARCHAR(120) NULL,   -- el nombre, para poder decirlo sin otra consulta
+    tomada      DATETIME2 NOT NULL CONSTRAINT DF_reserva_tomada DEFAULT SYSUTCDATETIME(),
+    latido      DATETIME2 NOT NULL CONSTRAINT DF_reserva_latido DEFAULT SYSUTCDATETIME()
+);
+GO
+
+GO
 /* 2026-09-09: VERSION del documento de config. Sin esto, guardar es «escribi lo que tengo»: dos
    procesos que leen lo mismo y guardan uno detras del otro dejan el ultimo, y el cambio del primero
    desaparece sin ningun error. El candado que lo evitaba vive en la memoria de UN proceso, asi que

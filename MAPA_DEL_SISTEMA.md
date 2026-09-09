@@ -1482,6 +1482,56 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (417) — 👥 «ESTO LO ESTÁ EDITANDO FULANO» + LAS TIZADAS SON DE QUIEN LAS PIDIÓ.**
+  Pregunta del usuario: *«¿podemos hacer algo estilo tiempo real como Google Sheets, o reglas
+  chicas: si alguien está editando un molde o una regla de nesting, otro no puede? ¿cuál es mejor y
+  más viable?»*.
+
+  **POR QUÉ LAS REGLAS CHICAS Y NO LA CO-EDICIÓN.** Sheets y Figma funcionan porque su dato es un
+  chorro de operaciones chiquitas sobre un documento vivo y su pantalla es un lienzo. Acá cada
+  pantalla de configuración es un **formulario con botón de guardar** y cada guardado reescribe un
+  documento entero: co-editar de verdad exige rehacer la persistencia **y** todas las pantallas.
+  Y no haría falta: la mitad de lo que da Sheets ya está — **no perder** el trabajo del otro lo
+  resolvió la 416, y **enterarse** de que algo cambió ya lo hacía el latido con `catalogo_rev`. Lo
+  único que faltaba era **ver quién está adentro de qué**. Eso es una tabla y tres endpoints.
+
+  **CÓMO FUNCIONA.** Tabla `dbo.reserva` (`recurso` como PK, dueño, `tomada`, `latido`). El recurso
+  es texto con forma fija: `molde:<pid>`, `nesting:<id>`, `planilla:<id>`, `regla:<id>`, `tela:<id>`
+  (validado con regex — no se puede reservar cualquier cosa). `db.tomar_reserva` es **una sentencia
+  condicionada**: el `WHERE` acepta sólo si la reserva es mía o si venció, así que la exclusión la
+  decide **el motor**, no el orden en que dos procesos llegaron a su memoria.
+  🔴 **Se suelta SOLA.** La pantalla renueva con el latido que ya hacía (`?reservas=…` en
+  `/api/actualizacion/estado`, que de paso devuelve `reservas` y `yo` para toda la app): si se
+  cierra o se cuelga, el `latido` deja de avanzar y a los 90 s queda libre. **Nadie queda trabado
+  porque alguien se fue a almorzar con la ventana abierta**, que es el modo clásico en que un
+  sistema de bloqueos se vuelve odioso. Pedir la lista es lo que limpia lo vencido: no hay un hilo
+  más que cuidar.
+  🔴 **Y no traba de verdad.** Si la base no contesta, o no hay sistema de usuarios, `mia: true` y
+  se sigue trabajando. Una reserva es una cortesía para no pisarse, no un permiso: si un problema
+  de infraestructura además dejara a todos sin poder editar, sería peor el remedio.
+  **En pantalla:** `useReserva(recurso)` + `<AvisoReserva>` (cartel ámbar «Fulano está editando
+  esto ahora mismo») en el molde abierto en Configuración, la regla de nesting y la planilla, con
+  el botón de guardar apagado. `RESERVAS_ABIERTAS`/`RESERVAS_ESTADO` viven a nivel de módulo porque
+  quien las refresca es el latido, que corre en OTRO componente.
+
+  **DE PASO, UN AGUJERO DE VERDAD.** Medido antes de tocar nada: pedir los moldes sin sesión daba
+  **401**, pero bajar el **PDF de una tizada** daba **200** — sin login. `/trabajos/<id>/<archivo>`
+  no empieza con `/api/`, y `_guardia_moldes` sólo mira lo que empieza con `/api/`. Encima ningún
+  trabajo tenía dueño: con el id se leía el estado del pedido de otro. Ahora el trabajo **nace con
+  dueño** (y el dueño queda **en disco**, porque los trabajos se podan de memoria a las 6 h y los
+  archivos quedan — si no, una tizada de ayer se volvía imposible de bajar), y las **seis** rutas
+  de trabajos verifican dueño; la descarga además pide sesión a mano. Medido después: **401**.
+
+  ⚠️ **Trampa que costó un rato:** `seg = int(segundos or RESERVA_SEGUNDOS)` — con `segundos=0`
+  («todo vencido», que es como se prueba el vencimiento) `0 or 90` da **90**. Con valores donde el
+  cero es válido va `if segundos is None`, nunca `or`.
+
+  **VERIFICADO**: `verificar_reservas.py` (nuevo) prueba la exclusión **contra la base real** —toma,
+  renovación, vencimiento, que otro no la suelte— y los endpoints contra un doble; batería completa
+  y `npm run build` con los siete contratos; `API_RUTAS.md` regenerado (154). En el servidor real,
+  el PDF sin sesión pasó de 200 a **401**. ⚠️ Lo que **no** se pudo probar en pantalla es el cartel
+  con DOS sesiones de verdad (haría falta crear un usuario): queda a la vista del usuario.
+
 - **2026-09-09 (416) — 🔴 GUARDAR LA CONFIGURACIÓN YA NO PISA LO QUE HIZO OTRO (entrega 1 de la 415).**
   Pedido del usuario: *«esto debe de estar armado lógicamente para que lo usen infinitas personas a
   la vez»*. Es el límite 1 de la 415, el que causa **pérdida silenciosa de trabajo**, y es el que

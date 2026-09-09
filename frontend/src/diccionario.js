@@ -278,6 +278,11 @@ export const DICCIONARIO = {
     que: 'Cómo se llama el diseño que llevan los moldes que elegiste (ej. JUGADOR). Es el mismo nombre que usa el resto del pedido para agrupar.',
     como: 'Escribí el nombre del diseño y apretá Enter.',
   },
+  'reserva-aviso': {
+    nombre: 'Lo está editando otra persona',
+    que: 'Aparece cuando otra persona tiene abierto esto mismo. Podés mirarlo, pero el botón de guardar queda apagado hasta que termine, así no se pisan el trabajo. Se libera solo apenas cierra la pantalla.',
+    como: 'Esperá a que termine, o avisale.',
+  },
   'cargar-b-columna': {
     nombre: 'De qué talle toma las medidas',
     que: 'Cuando la planilla lleva más de una columna de talle (por ejemplo «Talle» y «Talle short»), acá se dice de cuál toma sus medidas este molde. Sin esto, un short tomaría el talle de la camiseta y saldría del tamaño equivocado.',
