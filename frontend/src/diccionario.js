@@ -860,6 +860,11 @@ export const DICCIONARIO = {
     que: 'Le pone a este molde el nombrado, los grupos, las variables y las telas de esa configuración. No se aplica sola: la elegís vos y después mirás en el visor si acomodó bien.',
     como: 'Aplicá esa configuración y fijate en el visor si acomodó bien.',
   },
+  'molde-cfg-actualizar': {
+    nombre: 'Actualizar esta configuración',
+    que: 'Guarda cómo está el molde AHORA —los nombres de las piezas y dónde va la etiqueta en cada una— dentro de una configuración que ya tenías, en vez de crear otra. Es lo que conviene cuando corregís un detalle: si no, quedan tres o cuatro casi iguales y no se sabe cuál es la buena. Lo que tenía guardado antes se pierde, y se pregunta antes.',
+    como: 'Guardá los cambios en la configuración que ya tenías.',
+  },
   'molde-cfg-borrar': {
     nombre: 'Borrar configuración',
     que: 'Borra la configuración guardada. No toca ningún molde: es sólo la receta.',

@@ -628,6 +628,10 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 4. Lo que es decisión **del pedido** —grupos y variables, telas, planilla, talle de guía,
    producción— entra **sólo si lo tildás** en el modal.
 
+**Corregir una que ya tenías:** hacé el cambio en el molde (un nombre, dónde va una etiqueta) y en
+la lista tocá **«Actualizar»** sobre esa configuración: guarda cómo está el molde ahora **dentro de
+la misma**, en vez de dejarte cuatro casi iguales. Pregunta antes, porque lo anterior se pierde.
+
 **Trampas:**
 - ⏳ **Si acabás de subir el molde, esperá.** El molde se lee en segundo plano (más de un
   minuto en uno grande) y hasta que termina no tiene piezas. Podés apretar **Aplicar**

@@ -1473,6 +1473,40 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (407) — El cartel volvía solo después de aplicar, y una receta guardada no se podía
+  EDITAR.** Pedido del usuario: *«si ya apliqué la configuración encontrada, ese cartel debe
+  desaparecer. Y si quiero editar una configuración guardada me debe dejar: le hago cambios y, en
+  vez de guardar una nueva, tengo que poder guardar en la existente»*.
+
+  **1 · 🔴 EL CARTEL REAPARECÍA SOLO.** Aplicar termina con `setMoldeReload(v => v + 1)` —para que
+  el visor muestre los nombres nuevos— y eso es una **dependencia de la búsqueda de la sugerencia**:
+  se volvía a buscar, la encontraba otra vez y la volvía a ofrecer, como si no hubieras hecho nada.
+  Poner el aviso en `null` no alcanzaba: lo pisaba la búsqueda siguiente. Ahora se recuerda **qué
+  receta se aplicó en cada molde** (`cfgAplicada`) y la búsqueda la saltea. Se guarda el **id** y no
+  un simple «ya está»: si mañana guardás OTRA que le calce, esa sí se ofrece.
+
+  **2 · GUARDAR ENCIMA DE UNA QUE YA ESTÁ.** El backend ya sabía hacerlo (`guardar_config_molde`
+  acepta `id_` y pisa), pero la pantalla nunca mandaba el `id`: cada corrección creaba otra receta y
+  quedaban tres o cuatro casi iguales sin saber cuál era la buena. Cada receta de la lista tiene
+  ahora **«Actualizar»**, que guarda cómo está el molde AHORA adentro de ESA — con su confirmación,
+  porque lo de antes se pierde.
+
+  🔴 **Y ESO DESTAPÓ UN AGUJERO**: `guardar` con `id` **no miraba de quién era la receta**. Iba por
+  `id`, así que alcanzaba con escribir el número a mano para reemplazarle la receta a un compañero
+  — el mismo agujero que ya se había cerrado en aplicar y borrar (402). Cerrado con
+  `_config_es_mia`, con el mismo 404 que si no existiera.
+
+  ⚠️ **Y una trampa de React que casi entra**: el botón «Guardar» del pie llamaba
+  `onClick={guardarCfgMolde}`, y ahora la función recibe «la receta a pisar» como primer argumento
+  — React le pasa el **evento del click**, que es truthy: habría intentado pisar una receta
+  inexistente en vez de crear una nueva. Va envuelto (`() => guardarCfgMolde()`) y **lo cuida el
+  contrato**.
+
+  **VERIFICADO**: `verificar_config_guardada.py` §8 (guardar con `id` pisa la misma y no deja copia,
+  guarda el cambio, y otro usuario no puede pisarla) y `frontend/verificar_pasos_pedido.mjs` §6 (se
+  recuerda la aplicada, la búsqueda la saltea, existe «Actualizar» y el botón del pie no manda el
+  evento).
+
 - **2026-09-09 (406) — EL AVISO DE «ESTE MOLDE YA LO CONFIGURASTE» SALE DONDE SE TRABAJA EL
   MOLDE, y desde ahí se elige.** Pedido del usuario, con la captura del paso Arte: *«acá debe salir
   el cartel de que se encontró una configuración, y desde acá se debe elegir esa configuración»*.

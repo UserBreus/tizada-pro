@@ -72,6 +72,22 @@ ok(APP.includes('cfgSugeridas[_id]') && APP.includes('cfgSugeridas[pidCfg]'),
 ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id\)/.test(APP),
    'y aplicar recibe el molde por argumento (no por estado, que React no tiene actualizado)');
 
+console.log('\n6) Aplicada una vez, el cartel NO vuelve; y una receta se puede EDITAR');
+// 🔴 Aplicar recarga el molde (`moldeReload`) y eso vuelve a disparar la búsqueda: sin recordar
+// cuál ya se aplicó, el cartel reaparecía solo como si no hubieras hecho nada.
+ok(APP.includes('const cfgAplicada = useRef({})'), 'se recuerda qué receta ya se aplicó en cada molde');
+ok(/cfgAplicada\.current\[_pidAp\] = c\.id/.test(APP), 'se anota al aplicar bien');
+ok(/_sirve = c => c\.id !== cfgAplicada\.current\[pid\]/.test(APP),
+   'y la búsqueda ya no la ofrece (pero sí ofrecería OTRA que calce)');
+// Editar la que ya está, en vez de juntar copias casi iguales.
+ok(APP.includes('data-tour="molde-cfg-actualizar"'), 'cada receta guardada se puede actualizar');
+ok(APP.includes('const actualizarCfgMolde'), 'con su confirmación (pisa lo que tenía)');
+ok(/id: existente \? existente\.id : undefined/.test(APP), 'y el guardado manda el id de esa receta');
+// ⚠️ El botón del pie pasa el EVENTO como argumento: sin envolverlo, `existente` sería el evento
+// y creería que hay que pisar una receta que no existe.
+ok(APP.includes('onClick={() => guardarCfgMolde()}'),
+   '🔴 el botón de guardar nuevo NO le pasa el evento como si fuera una receta');
+
 console.log();
 if (fallos.length) {
   console.log(`✗ CONTRATO ROTO — ${fallos.length} falla(s):`);

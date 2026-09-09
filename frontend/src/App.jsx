@@ -4511,6 +4511,11 @@ export default function App() {
   // Nombre de la configuración que se apretó mientras el molde todavía se leía: entra sola.
   const [cfgEsperando, setCfgEsperando] = useState('');
   const cfgSugDescartada = useRef({});
+  // 🔴 QUÉ RECETA YA SE APLICÓ EN CADA MOLDE. Sin esto el cartel volvía SOLO: aplicar recarga el
+  // molde (`moldeReload`), eso vuelve a disparar la búsqueda, la encuentra otra vez y la ofrece de
+  // nuevo — como si no hubiera pasado nada. Se guarda el id, no un simple «ya está»: si mañana
+  // guardás OTRA receta que le calce, esa sí se ofrece.
+  const cfgAplicada = useRef({});   // { pid: id de la receta ya aplicada }
   const [catalogoGrupos, setCatalogoGrupos] = useState([]);
   const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
   // Panel inline de selección de pieza en la barra lateral:
@@ -10719,21 +10724,34 @@ export default function App() {
       setCfgGuardadas(d.configs || []);
     } catch { setCfgGuardadas([]); }
   };
-  const guardarCfgMolde = async () => {
-    const nombre = (cfgNombre || '').trim();
+  // `existente` = {id, nombre}: en vez de crear otra, PISA esa. Es lo normal cuando corregís algo
+  // (un nombre, dónde va una etiqueta) sobre una receta que ya tenías: sin esto quedaban tres o
+  // cuatro casi iguales y no se sabía cuál era la buena (pedido del usuario 2026-09-09).
+  const guardarCfgMolde = async (existente) => {
+    const nombre = existente ? existente.nombre : (cfgNombre || '').trim();
     if (!nombre) { showError('Ponele un nombre para reconocerla después.'); return; }
     setCfgBusy(true);
     try {
       const r = await fetch('/api/molde/config/guardar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: cfgPidEfectivo(), nombre })
+        body: JSON.stringify({ pid: cfgPidEfectivo(), nombre, id: existente ? existente.id : undefined })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
-      setCfgNombre('');
+      if (!existente) setCfgNombre('');
       await cargarCfgGuardadas();
-      showMsg(`Configuración «${nombre}» guardada (${d.piezas} piezas) ✓`);
+      showMsg(existente
+        ? `«${nombre}» actualizada con cómo está el molde ahora (${d.piezas} piezas) ✓`
+        : `Configuración «${nombre}» guardada (${d.piezas} piezas) ✓`);
     } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
+  };
+  const actualizarCfgMolde = (c) => {
+    abrirConfirmar({
+      titulo: `Guardar en «${c.nombre}»`, ok: 'Guardar encima',
+      texto: `«${c.nombre}» pasa a guardar cómo está el molde AHORA: los nombres de las piezas y `
+        + `dónde va la etiqueta en cada una. Lo que tenía guardado antes se pierde.`,
+      onOk: () => guardarCfgMolde({ id: c.id, nombre: c.nombre }),
+    });
   };
   // 🔴 APLICAR AGUANTA QUE EL MOLDE TODAVÍA SE ESTÉ LEYENDO. El camino B despliega el molde en
   // segundo plano y tarda más de un minuto en uno grande: apretar «Aplicar» apenas se sube daba un
@@ -10779,6 +10797,7 @@ export default function App() {
         if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
       } catch { /* el visor se refresca al entrar de nuevo */ }
       setMoldeReload(v => v + 1);
+      cfgAplicada.current[_pidAp] = c.id;      // …y no se vuelve a ofrecer la misma
       setCfgSugeridas(prev => ({ ...prev, [_pidAp]: null }));
       showMsg(`«${c.nombre}» aplicada: ${d.piezas_nombradas} nombre(s) y etiqueta en ${d.etiqueta_posiciones} pieza(s) ✓`);
     } catch (e) { setCfgEsperando(''); showError(e.message); } finally { if (!_esperando) setCfgBusy(false); }
@@ -10815,8 +10834,9 @@ export default function App() {
         const d = await r.json();
         if (!vivo) return;
         if (d.preparando && intento < 40) { reloj = setTimeout(() => mirar(intento + 1), 6000); return; }
-        const cand = (d.configs || []).find(c => c.estado === 'igual')
-          || (d.configs || []).find(c => c.estado === 'mismo_molde');
+        const _sirve = c => c.id !== cfgAplicada.current[pid];
+        const cand = (d.configs || []).filter(_sirve).find(c => c.estado === 'igual')
+          || (d.configs || []).filter(_sirve).find(c => c.estado === 'mismo_molde');
         setCfgSugeridas(prev => ({ ...prev, [pid]: (cand && !cfgSugDescartada.current[pid]) ? cand : null }));
       } catch { if (vivo) setCfgSugeridas(prev => ({ ...prev, [pid]: null })); }
     };
@@ -21348,6 +21368,12 @@ export default function App() {
                           <button type="button" className={_calza ? 'btn primary' : 'btn'} data-tour="molde-cfg-aplicar"
                             disabled={cfgBusy} style={{ padding: '8px 16px', fontSize: 12.5 }}
                             onClick={() => aplicarCfgMolde(c)}>Aplicar</button>
+                          {/* GUARDAR ENCIMA de esta receta: corregís algo del molde y lo dejás en
+                              la que ya tenías, en vez de juntar cuatro casi iguales. */}
+                          <button type="button" className="btn" data-tour="molde-cfg-actualizar"
+                            disabled={cfgBusy} title={`Guardar cómo está el molde ahora dentro de «${c.nombre}»`}
+                            style={{ padding: '8px 12px', fontSize: 12.5 }}
+                            onClick={() => actualizarCfgMolde(c)}>Actualizar</button>
                           <button type="button" className="btn danger-ghost" data-tour="molde-cfg-borrar"
                             disabled={cfgBusy} title="Borrar esta configuración"
                             style={{ padding: '8px 10px', fontSize: 12.5 }}
@@ -21407,7 +21433,8 @@ export default function App() {
                   placeholder="Ponele un nombre (ej.: «Camiseta jugador · cuello redondo»)"
                   style={{ flex: 1 }} />
                 <button type="button" className="btn primary" data-tour="molde-cfg-guardar"
-                  disabled={cfgBusy || !cfgNombre.trim()} onClick={guardarCfgMolde}>Guardar</button>
+                  disabled={cfgBusy || !cfgNombre.trim()}
+                  onClick={() => guardarCfgMolde()}>Guardar</button>
               </div>
             </div>
           </div>

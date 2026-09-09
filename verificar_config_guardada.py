@@ -352,8 +352,9 @@ ok("const cfgPidEfectivo" in _app, "el modal resuelve su molde en un solo lugar 
 # Se mira SOLO el bloque de las funciones del modal: `pid: pidCfg` es correcto en el resto de la
 # pantalla de configuracion (ahi el molde abierto ES el que se edita).
 _bloque = _app[_app.index("const cargarCfgGuardadas"):_app.index("const showWarn")]
-ok(_bloque.count("pid: cfgPidEfectivo()") == 2 and "pid: pidCfg" not in _bloque,
-   "guardar y aplicar usan ese molde, no el que esta abierto en Configuracion")
+ok("pid: cfgPidEfectivo()" in _bloque and "const _pidAp = pidExplicito || cfgPidEfectivo()" in _bloque
+   and "pid: _pidAp" in _bloque and "pid: pidCfg" not in _bloque,
+   "guardar y aplicar usan ESE molde (el explicito, o el abierto en Configuracion), nunca `pidCfg`")
 ok("cargarCfgGuardadas(_id)" in _app and "cargarCfgGuardadas(pidCfg)" in _app,
    "los dos lugares que abren el modal le pasan el molde por ARGUMENTO (estado de React)")
 # …y el espacio de las herramientas quedo con los botones y nada mas (pedido del usuario).
@@ -367,6 +368,34 @@ ok("Con todo nombrado, elegís el talle guía" not in _app,
 ok('data-tour="pieza-b-configuracion"' in _app,
    "y «Guardar configuracion» esta en el mismo panel del visor")
 print("    OK    tres botones, sin texto, y cada uno sobre el molde que corresponde")
+
+print("\n8 · GUARDAR ENCIMA DE UNA QUE YA ESTA (editarla, no juntar copias)")
+# Pedido del usuario (2026-09-09): «si quiero editar una configuracion guardada me debe dejar; le
+# hago cambios y en vez de guardar una nueva, guardar en la existente». Sin esto quedaban tres o
+# cuatro casi iguales y no se sabia cual era la buena.
+_id8 = ((CLI.post("/api/molde/config/guardar",
+                  json={"pid": PID_A, "nombre": "la que se edita"}).get_json()) or {}).get("id")
+_antes8 = len(_CFGS)
+# se le cambia el nombre a una pieza y se guarda ENCIMA de la misma receta
+REGISTROS[PID_A]["Espalda"] = REGISTROS[PID_A].pop("Espalda")
+CAT["productos"][0]["etiqueta"]["posiciones"]["Manga izquierda"] = {"rx": 0.9, "ry": 0.9}
+_r8 = CLI.post("/api/molde/config/guardar",
+               json={"pid": PID_A, "nombre": "la que se edita", "id": _id8})
+_d8 = _r8.get_json() or {}
+ok(_r8.status_code == 200 and _d8.get("id") == _id8,
+   f"guardar con `id` PISA la misma receta y devuelve su id ({_r8.status_code}, id={_d8.get('id')})")
+ok(len(_CFGS) == _antes8, f"y NO deja una copia nueva ({len(_CFGS)} guardadas, eran {_antes8})")
+_pos8 = ((_CFGS[_id8]["datos"].get("campos") or {}).get("etiqueta") or {}).get("posiciones") or {}
+ok("Manga izquierda" in _pos8, f"y guarda el cambio (posiciones: {sorted(_pos8)})")
+# …y NUNCA la de otro
+_yo8 = S._uid_actual
+S._uid_actual = lambda *a, **k: 9
+_r8b = CLI.post("/api/molde/config/guardar",
+                json={"pid": PID_A, "nombre": "te la piso", "id": _id8})
+ok(_r8b.status_code == 404, f"otro usuario NO puede pisar la mia escribiendo el id (HTTP {_r8b.status_code})")
+S._uid_actual = _yo8
+ok(_CFGS[_id8]["nombre"] == "la que se edita", "y la receta quedo intacta")
+print("    OK    se edita la que ya esta, y nadie pisa la de otro")
 
 print()
 if FALLOS:

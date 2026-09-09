@@ -8994,6 +8994,15 @@ def molde_config_guardar():
     prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
     if not prod:
         return jsonify({"error": "no está ese molde"}), 404
+    # PISAR UNA QUE YA ESTÁ (`id`): sólo la propia. Va por `id`, así que sin este control alcanzaba
+    # con escribir el número a mano para reemplazarle la receta a un compañero — el mismo agujero
+    # que ya se cerró en aplicar y borrar. Mismo 404 que si no existiera.
+    if cuerpo.get("id"):
+        try:
+            if not _config_es_mia(db.leer_config_molde(cuerpo.get("id"))):
+                return jsonify({"error": "esa configuración ya no está"}), 404
+        except Exception as e:
+            return jsonify({"error": f"no se pudo leer de la base: {e}"}), 500
     reg = _cargar("registro_producto.json", pid) or {}
     piezas = _piezas_del_registro(reg)
     if not piezas:
