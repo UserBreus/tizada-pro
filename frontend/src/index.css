@@ -1460,3 +1460,22 @@ input[type="number"] {
   font-variant-numeric: tabular-nums;
 }
 .carga-circular .centro .unidad { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Datito de la configuración guardada del molde: «etiqueta en 14», «14 piezas»… Son HECHOS, no
+   botones: se leen de un vistazo y no invitan a tocarlos. */
+.cfg-dato {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-light);
+  white-space: nowrap;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

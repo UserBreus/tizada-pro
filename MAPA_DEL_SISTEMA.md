@@ -1473,6 +1473,87 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (403) — LA PANTALLA: el modal de la configuración, rehecho; y el espacio de las
+  herramientas quedó con los botones y nada más.** Pedido del usuario, con la captura del modal
+  viejo: *«mejorá este modal para que sea súper moderno e intuitivo, y el botón de guardar
+  configuración debe estar en la parte donde veo el visor del molde, los talles y las demás
+  herramientas. También quitá todo el texto que está en el espacio de ver y corregir nombre y
+  ubicar etiqueta: ahí estará sólo el botón, más nada. Y son botones: Nombrar piezas, Ubicar
+  etiqueta»*.
+
+  **EL MODAL.** Antes era un párrafo largo, una fila de casillas sueltas y una lista apretada.
+  Ahora se lee de un vistazo y en el orden en que se usa:
+  · **Arriba, TUS CONFIGURACIONES** —lo de todos los días— con una tarjeta por receta: el nombre,
+    una **pastilla de estado** (`mismo archivo` · `mismo molde` · `parecida` · `distinta`), los
+    **datos como fichitas** (`etiqueta en 14`, `14 piezas`, `de «MOLDE VOLLEY CAMPERAS»`) y la
+    explicación de por qué calza. **La que calza va resaltada en verde y su «Aplicar» es el botón
+    lleno**; las otras quedan en segundo plano.
+  · **«APLICAR ADEMÁS»** dejó de ser casillas: son **interruptores en pastilla** que se encienden
+    con un toque. La etiqueta y los nombres entran siempre y por eso NO están acá.
+  · **Abajo, en un pie fijo, «GUARDAR CÓMO QUEDÓ ESTE MOLDE»**: nombre + Guardar (y el Enter
+    guarda). El párrafo explicativo se fue al **«?»** del encabezado, como manda §8.
+  · El **resultado de aplicar** encabeza el modal con su tilde y sus fichitas, y lo que NO entró
+    va en ámbar.
+
+  **EL ESPACIO DE LAS HERRAMIENTAS** (panel del visor, camino B): se fueron los dos carteles con
+  su título y su párrafo. Quedan **tres botones**: «Nombrar piezas», «Ubicar etiqueta» y
+  **«Guardar configuración»** —que antes obligaba a entrar a Moldería—. Lo que falta se lee en el
+  **color** (ámbar / verde) y en un contador chiquito al costado del botón (`12/14`, `✓`); pieza
+  por pieza sigue estando en la lista de abajo.
+
+  🔴 **EL BUG QUE ESTO DESTAPÓ, Y QUE ERA GRAVE.** El modal trabajaba con `pidCfg` —el molde
+  **abierto en Configuración**—, pero desde el PEDIDO ese no es el molde: `pidCfg` cae al **activo
+  del server**. Con el botón nuevo, guardar desde el pedido habría escrito **la configuración de un
+  molde adentro de otro** (la trampa del §7). Ahora el modal recibe el molde **explícito**
+  (`cfgPid` → `cfgPidEfectivo()`), y quien lo abre se lo pasa **por argumento** a
+  `cargarCfgGuardadas(pid)`: hacer `setCfgPid(...)` y pedir la lista en el mismo gesto listaba las
+  del molde ANTERIOR, porque React todavía no había actualizado el estado (el mismo error de tick
+  de la entrada 277). Lo cuida el paso 7 de `verificar_config_guardada.py`, que además comprueba
+  que los textos se hayan ido y que los botones se llamen como los pidió el usuario.
+
+  **VERIFICADO EN LA APP REAL** (sandbox de sólo lectura, `py srv_visor.py` → 8060, ahora con su
+  entrada en `.claude/launch.json`): el modal con y sin configuraciones guardadas, y el aviso
+  «Este molde ya lo configuraste como «Campera comun» (con otro diseño adentro)» con **Aplicar** y
+  **Ahora no**. Build en verde y los 6 contratos del frontend también.
+
+- **2026-09-09 (402) — LA CONFIGURACIÓN DEL MOLDE AHORA SE RECONOCE POR EL MOLDE, NO POR EL
+  ARCHIVO — y es DE CADA USUARIO.** Pedido del usuario: *«que los ajustes de la etiqueta se puedan
+  guardar para ese usuario que está trabajando en el molde con diseño, así puede reutilizarlo
+  cuando sube otro pedido que tal vez es el mismo molde pero con otro diseño adentro; y el nombre
+  de las piezas también. Obvio que podrá elegirlo rápido, pero ver si está correcto y si no lo
+  cambiará a mano»*.
+
+  **LO QUE YA ESTABA** (entrada 399, camino B): guardar con un nombre la etiqueta pieza por pieza y
+  el nombrado, listarlas, aplicarlas con informe de lo que entró y lo que no, y elegir a mano.
+  **LO QUE FALTABA ERA JUSTO LO QUE PEDÍA:**
+
+  1. 🔴 **SE RECONOCÍA EL ARCHIVO, NO EL MOLDE.** La receta se ataba al `sha1` del `.ai`, y el mismo
+     molde con **otro diseño adentro es otro archivo**: nunca daba «mismo archivo», y sólo caía en
+     «parecida» si coincidían por casualidad las cuentas de piezas y mesas. O sea: para el caso más
+     común del camino B —el mismo molde, otro diseño— no servía. Ahora se guarda además una
+     **HUELLA de la geometría** (`_huella_molde`): las medidas de cada pieza, a medio centímetro,
+     del talle que más piezas tiene. El diseño de adentro no cambia cuánto mide una pieza, así que
+     **la huella sobrevive al cambio de diseño**. Estados de la lista: `mismo archivo` (sha1) ·
+     **`mismo molde`** (huella) · `parecida` (comparten ≥60 % de las piezas) · `distinta`. Va como
+     columna `config_molde.huella` para que comparar no obligue a abrir el JSON de cada receta.
+     Las guardadas antes siguen funcionando: caen a la cuenta de piezas y mesas de siempre.
+  2. 🔴 **SON DE CADA USUARIO.** `listar_configs_molde` traía las de TODOS: en un taller con varias
+     personas la lista se llenaba de recetas ajenas. Ahora filtra por `creado_por`, y **aplicar y
+     borrar también** (`_config_es_mia`) — van por `id`, así que sin ese control alcanzaba con
+     escribir el número a mano para tocar la de otro. Contesta el mismo 404 que si no existiera: no
+     hace falta contarle a nadie cuántas tienen los demás.
+  3. **AVISO AL ABRIR UN MOLDE CONOCIDO.** Si hay una receta tuya que le calza, aparece en la
+     tarjeta «Configuración»: *«Este molde ya lo configuraste como «X» (con otro diseño adentro):
+     etiqueta en N piezas y M nombres»* + **Aplicar** / **Ahora no**. **Nunca se aplica sola**
+     (decisión del usuario): entra al tocar el botón, y después se mira el visor y se corrige a
+     mano — el «Ahora no» se recuerda por molde para no insistir.
+
+  **VERIFICADO** con `verificar_config_guardada.py`, ampliado: el mismo molde con otro archivo da
+  «mismo molde»; **otro** molde con la misma cantidad de piezas en la misma cantidad de mesas NO se
+  confunde (0 % de coincidencia → «distinta»); y otro usuario no ve, no aplica y no borra las
+  ajenas, mientras el dueño las sigue viendo. La columna nueva ya está en la base real (el esquema
+  se aplica al arrancar, entrada 391).
+
 - **2026-09-09 (401) — 🔴 UNA MESA LARGA TIRABA ABAJO EL PEDIDO ENTERO, DESPUÉS DE ARMARLO BIEN; y
   el índice de endpoints dejó de mentir.** Reporte del usuario, con la captura del cartel rojo:
   *«Page size must be between 3 and 14400 PDF units»*.

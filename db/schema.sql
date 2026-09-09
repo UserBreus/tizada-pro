@@ -339,8 +339,16 @@ CREATE TABLE dbo.config_molde (
     mesas_n     INT NULL,
     creado_en   DATETIME2 NOT NULL CONSTRAINT DF_config_molde_creado DEFAULT SYSUTCDATETIME(),
     creado_por  INT NULL,
+    huella      NVARCHAR(40)  NULL,     -- de la GEOMETRIA del molde (ver el ALTER de abajo)
     datos       NVARCHAR(MAX) NOT NULL
 );
+GO
+/* 2026-09-09: HUELLA DE LA GEOMETRIA del molde (medidas de sus piezas). `sha1` identifica el
+   ARCHIVO; con el mismo molde y otro diseno adentro el archivo cambia y las piezas no, asi que
+   esta columna es la que permite reconocer la configuracion igual. Va por ALTER ademas de estar
+   en el CREATE: las bases ya instaladas no vuelven a pasar por el CREATE. */
+IF COL_LENGTH('dbo.config_molde','huella') IS NULL
+    ALTER TABLE dbo.config_molde ADD huella NVARCHAR(40) NULL;
 GO
 
 /* ════════════════════════════════════════════════════════════════════════════════════════════

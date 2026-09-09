@@ -1157,10 +1157,19 @@ vuelve a pedir. Olvidarlo era dejarlo en el servidor para siempre.
 
 El molde con el diseño adentro se sube **para un pedido** y se borra con él — y con él se iría todo
 el trabajo de configurarlo. Por eso esa configuración se puede **guardar con un nombre** y volver a
-aplicarla cuando se sube el mismo archivo en otro pedido (Moldería → tarjeta «Configuración»).
+aplicarla en otro pedido (Moldería → tarjeta «Configuración»).
 
-- Vive en la base (`dbo.config_molde`), **atada al sha1 del ARCHIVO**, no al molde: el molde
-  desaparece con el pedido, la configuración no.
+- Vive en la base (`dbo.config_molde`) y **es de cada usuario**: cada uno ve, aplica y borra las
+  suyas (decisión del usuario 2026-09-09). La lista filtra por `creado_por`, y aplicar y borrar
+  —que van por `id`— también, si no alcanzaba con escribir el número a mano.
+- 🔴 **SE RECONOCE EL MOLDE, NO EL ARCHIVO.** Guarda dos cosas: el `sha1` del ARCHIVO y la
+  **HUELLA** (`_huella_molde`), que son las medidas de sus piezas. El mismo molde con **otro diseño
+  adentro** es otro archivo pero las piezas miden lo mismo, así que la huella coincide y la receta
+  se ofrece igual — que es el caso para el que se guarda. Estados de la lista:
+  `mismo archivo` (sha1) · `mismo molde` (huella) · `parecida` (≥60 % de las piezas coinciden) ·
+  `distinta`. Las guardadas antes de que existiera la huella caen a la cuenta de piezas y mesas.
+- **Al abrir un molde ya conocido aparece un aviso** con el nombre de la receta y un botón
+  «Aplicar». Nunca se aplica sola.
 - Guarda el **nombrado de las piezas** —por `(mesa, idx_mesa)`, la identidad que no depende del
   talle— más grupos, variables, conjuntos, telas, etiqueta, borde, planilla, talle de guía,
   referencia de medida, editables y la config de producción.
@@ -1168,8 +1177,8 @@ aplicarla cuando se sube el mismo archivo en otro pedido (Moldería → tarjeta 
   «dónde va la etiqueta» se marca pieza por pieza, es lo que más cuesta y cuelga del nombre de la
   pieza. Lo que es decisión DEL PEDIDO —grupos y variables, telas, planilla, talle de guía, borde y
   producción— entra sólo si se tilda en el modal.
-- **No se aplica sola.** La lista muestra el estado de cada una (`mismo archivo` / `parecida` /
-  `distinta`) y el usuario elige; al aplicarla se informa qué entró y qué no, y se ve en el visor.
+- **No se aplica sola.** El aviso y la lista muestran cuál calza y cuánto trae; el usuario elige,
+  y al aplicarla se informa qué entró y qué no, para revisarlo en el visor y corregir a mano.
 - 🔴 **Los grupos y las variables se reubican por NOMBRE de pieza.** Sus `pieza_idx` son la posición
   dentro del talle EN EL MOLDE DE ORIGEN: si en el nuevo las piezas quedaron en otro orden,
   aplicarlos tal cual armaría los grupos con las piezas equivocadas — y eso sale bien impreso.

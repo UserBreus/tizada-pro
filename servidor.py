@@ -8918,6 +8918,59 @@ def _piezas_del_registro(reg):
     return salida
 
 
+def _huella_molde(reg):
+    """HUELLA DE LA GEOMETRÍA del molde: `(hash, piezas)`. Identifica AL MOLDE, no al archivo.
+
+    🔴 POR QUÉ EXISTE. Una configuración guardada se reconocía por el `sha1` del archivo, y el
+    mismo molde con OTRO DISEÑO adentro es otro archivo: el trabajo de marcar la etiqueta pieza por
+    pieza no se podía reusar, que es justo el caso del camino B (se sube un molde por pedido y el
+    diseño cambia). Las PIEZAS, en cambio, miden lo mismo: esa es la identidad estable.
+
+    Entran TODOS los talles: `(talle, mesa, ancho, alto)` de cada pieza, a medio centímetro (eso
+    absorbe el redondeo sin llegar a confundir dos piezas distintas). ⚠️ Se probó con un solo talle
+    «de referencia» —el que más piezas tuviera— y estaba mal: si en una subida una pieza no se
+    detecta, el talle de referencia puede cambiar, y como **cada talle mide distinto** la
+    comparación daba CERO y el mismo molde se veía como otro. Con todos los talles, una pieza de
+    más o de menos mueve el parecido apenas.
+
+    `piezas` se devuelve además del hash para poder medir el PARECIDO cuando no da exacto: una
+    pieza de más o de menos no puede tirar abajo todo el reconocimiento."""
+    import hashlib
+    piezas = set()
+    for _nom, pt in (reg or {}).items():
+        for t, inf in (pt or {}).items():
+            if not isinstance(inf, dict) or inf.get("mesa") is None:
+                continue
+            w, h = inf.get("w_cm"), inf.get("h_cm")
+            if w is None or h is None:
+                continue
+            piezas.add((str(t), int(inf["mesa"]),
+                        round(float(w) * 2) / 2, round(float(h) * 2) / 2))
+    if not piezas:
+        return None, []
+    piezas = sorted(piezas)
+    canon = json.dumps(piezas, separators=(",", ":"))
+    return hashlib.sha1(canon.encode("utf-8")).hexdigest(), piezas
+
+
+def _config_es_mia(cfg):
+    """¿Esta configuración guardada es del usuario que está trabajando? Las recetas son POR
+    USUARIO: la lista ya sólo muestra las propias, pero aplicar y borrar van por `id` y sin este
+    control cualquiera podía tocar la de otro escribiendo el número a mano."""
+    if not cfg:
+        return False
+    return (cfg.get("creado_por") or None) == (_uid_actual() or None)
+
+
+def _parecido_huella(a, b):
+    """Cuánto se parecen dos moldes por sus piezas: 0..1 (cuántas comparten sobre el total)."""
+    _a = {tuple(x) for x in (a or [])}
+    _b = {tuple(x) for x in (b or [])}
+    if not _a or not _b:
+        return 0.0
+    return len(_a & _b) / float(len(_a | _b))
+
+
 def _idx_por_nombre(reg):
     """{nombre: pieza_idx} — con qué índice quedó cada pieza EN ESTE molde (para reubicar los
     grupos y las variables de una configuración guardada, que vienen con los índices de otro)."""
@@ -8951,11 +9004,15 @@ def molde_config_guardar():
              # decir en la lista cuántas piezas trae.
              "produccion": _cargar("config_produccion.json", pid) or {},
              "origen": prod.get("origen"), "molde": prod.get("nombre")}
+    # La HUELLA del molde (sus piezas y cuánto miden) es lo que permite reconocerlo cuando vuelve
+    # con otro diseño adentro: el archivo es otro, las piezas son las mismas.
+    _huella, _huella_pz = _huella_molde(reg)
+    datos["huella_piezas"] = _huella_pz
     try:
         _id = db.guardar_config_molde(
             nombre, _sha1_molde(_ruta_entrada("plantilla.ai", pid)), prod.get("nombre"),
             len(piezas), len({p["mesa"] for p in piezas}), datos, _uid_actual(),
-            id_=cuerpo.get("id"))
+            id_=cuerpo.get("id"), huella=_huella)
     except Exception as e:
         return jsonify({"error": f"no se pudo guardar en la base: {e}"}), 500
     return jsonify({"ok": True, "id": _id, "piezas": len(piezas)})
@@ -8976,26 +9033,43 @@ def molde_config_lista():
     reg = _cargar("registro_producto.json", pid) or {}
     _mis = _piezas_del_registro(reg)
     _n, _m = len(_mis), len({p["mesa"] for p in _mis})
+    _h_mio, _pz_mio = _huella_molde(reg)
     salida = []
     try:
-        _lista = db.listar_configs_molde()
+        # 🔴 SÓLO LAS DEL USUARIO que está trabajando (decisión del usuario 2026-09-09): la lista
+        # se llenaba con las recetas de todo el taller y nadie encontraba la suya.
+        _lista = db.listar_configs_molde(_uid_actual())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "configs": []})
     for c in _lista:
+        _datos = {}
+        try:
+            _datos = (db.leer_config_molde(c["id"]) or {}).get("datos") or {}
+        except Exception:
+            pass
         if _sha and c.get("sha1") == _sha:
             estado, detalle = "igual", "es de este mismo archivo"
+        elif _h_mio and c.get("huella") == _h_mio:
+            # LO QUE PEDÍA EL USUARIO: el mismo molde con otro diseño adentro. El archivo cambia,
+            # las piezas no, así que el nombrado y la etiqueta sirven tal cual.
+            estado, detalle = "mismo_molde", "el mismo molde, con otro diseño adentro"
+        elif _datos.get("huella_piezas"):
+            _p = _parecido_huella(_datos["huella_piezas"], _pz_mio)
+            if _p >= 0.6:
+                estado = "parecida"
+                detalle = f"otro molde parecido: coinciden {round(_p * 100)} de cada 100 piezas"
+            else:
+                estado = "distinta"
+                detalle = (f"sólo coinciden {round(_p * 100)} de cada 100 piezas con este molde")
         elif c.get("mesas_n") == _m and c.get("piezas_n") == _n:
+            # Guardada ANTES de que existiera la huella: queda la cuenta de siempre.
             estado, detalle = "parecida", f"otro archivo, pero con las mismas {_n} piezas en {_m} mesas"
         else:
             estado, detalle = "distinta", (f"tiene {c.get('piezas_n')} pieza(s) en {c.get('mesas_n')} "
                                            f"mesa(s); este molde tiene {_n} en {_m}")
         # QUÉ TRAE: la cuenta de posiciones de etiqueta es lo que se mira para elegir (es el
         # trabajo que se guarda). Se lee del JSON sólo para eso; la lista no carga nada más.
-        _et = {}
-        try:
-            _et = ((db.leer_config_molde(c["id"]) or {}).get("datos") or {}).get("campos", {}).get("etiqueta") or {}
-        except Exception:
-            pass
+        _et = (_datos.get("campos") or {}).get("etiqueta") or {}
         salida.append({"id": c["id"], "nombre": c["nombre"], "molde": c.get("molde"),
                        "piezas": c.get("piezas_n"), "mesas": c.get("mesas_n"),
                        "etiqueta_posiciones": len(_et.get("posiciones") or {}),
@@ -9017,7 +9091,9 @@ def molde_config_aplicar():
         cfg = db.leer_config_molde(cuerpo.get("id"))
     except Exception as e:
         return jsonify({"error": f"no se pudo leer de la base: {e}"}), 500
-    if not cfg:
+    if not cfg or not _config_es_mia(cfg):
+        # Mismo texto para «no existe» y «es de otro»: no hace falta contarle a nadie cuántas
+        # configuraciones tienen los demás.
         return jsonify({"error": "esa configuración ya no está"}), 404
     datos = cfg.get("datos") or {}
     reg = _cargar("registro_producto.json", pid) or {}
@@ -9109,8 +9185,11 @@ def molde_config_aplicar():
 
 @app.delete("/api/molde/config/<int:cid>")
 def molde_config_borrar(cid):
-    """Borra una configuración guardada. No toca ningún molde: es sólo la receta."""
+    """Borra una configuración guardada. No toca ningún molde: es sólo la receta.
+    Sólo la propia: son por usuario (ver `_config_es_mia`)."""
     try:
+        if not _config_es_mia(db.leer_config_molde(cid)):
+            return jsonify({"error": "esa configuración ya no está"}), 404
         n = db.borrar_config_molde(cid)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

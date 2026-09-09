@@ -4497,6 +4497,15 @@ export default function App() {
   // QUÉ SE APLICA ADEMÁS DE LA ETIQUETA Y LOS NOMBRES (que van siempre, regla del usuario
   // 2026-09-08). Lo de acá es decisión DEL PEDIDO: se aplica sólo si la persona lo tilda.
   const [cfgPartes, setCfgPartes] = useState([]);
+  // ¿ESTE MOLDE YA LO CONFIGURÉ ANTES? Si hay una receta guardada que le calza, se avisa con un
+  // botón. NUNCA se aplica sola: la decisión es del usuario (2026-09-09), que después mira el
+  // visor y corrige a mano lo que haga falta.
+  // 🔴 EL MOLDE DEL MODAL, EXPLÍCITO. `pidCfg` es el molde ABIERTO EN CONFIGURACIÓN y desde el
+  // PEDIDO no es el mismo (cae al ACTIVO del server): guardar o aplicar ahí habría escrito la
+  // configuración de un molde adentro de otro, que es la trampa documentada del §7 del mapa.
+  const [cfgPid, setCfgPid] = useState(null);
+  const [cfgSugerida, setCfgSugerida] = useState(null);
+  const cfgSugDescartada = useRef({});
   const [catalogoGrupos, setCatalogoGrupos] = useState([]);
   const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
   // Panel inline de selección de pieza en la barra lateral:
@@ -10678,9 +10687,16 @@ export default function App() {
   };
 
   // ── CONFIGURACIONES GUARDADAS DEL MOLDE ──────────────────────────────────────────────────
-  const cargarCfgGuardadas = async () => {
+  // El molde sobre el que trabaja el modal: el que le pasaron al abrirlo (pedido) o, si no, el
+  // que está abierto en Configuración.
+  const cfgPidEfectivo = () => cfgPid || pidCfg;
+  // ⚠️ El molde va POR ARGUMENTO y no por el estado: quien abre el modal hace `setCfgPid(...)` y
+  // llama a esto en el mismo gesto, y ahí React todavía no actualizó el estado — se listarían las
+  // configuraciones del molde ANTERIOR (mismo error de tick que la entrada 277 del mapa).
+  const cargarCfgGuardadas = async (pidExplicito) => {
+    const _p = pidExplicito || cfgPidEfectivo();
     try {
-      const r = await fetch(`/api/molde/config/lista${qPid('?')}`);
+      const r = await fetch(`/api/molde/config/lista?pid=${encodeURIComponent(_p)}`);
       const d = await r.json();
       setCfgGuardadas(d.configs || []);
     } catch { setCfgGuardadas([]); }
@@ -10692,7 +10708,7 @@ export default function App() {
     try {
       const r = await fetch('/api/molde/config/guardar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: pidCfg, nombre })
+        body: JSON.stringify({ pid: cfgPidEfectivo(), nombre })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
@@ -10706,7 +10722,7 @@ export default function App() {
     try {
       const r = await fetch('/api/molde/config/aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: pidCfg, id: c.id, partes: cfgPartes })
+        body: JSON.stringify({ pid: cfgPidEfectivo(), id: c.id, partes: cfgPartes })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
@@ -10716,7 +10732,7 @@ export default function App() {
       // esa configuración le sirve para este molde.
       await fetchProductos();
       try {
-        const rd = await fetch(`/api/plantilla/deteccion${qPid('?')}`);
+        const rd = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(cfgPidEfectivo())}`);
         const dd = await rd.json();
         if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
       } catch { /* el visor se refresca al entrar de nuevo */ }
@@ -10735,6 +10751,24 @@ export default function App() {
       }
     });
   };
+
+  // Al abrir un molde (y cada vez que cambia lo que hay adentro) se pregunta si alguna receta
+  // GUARDADA POR MÍ le calza. Se queda con la del mismo archivo y, si no, con la del mismo molde
+  // con otro diseño adentro — que es el caso para el que se guardan.
+  useEffect(() => {
+    if (!pidCfg) { setCfgSugerida(null); return; }
+    let vivo = true;
+    (async () => {
+      try {
+        const r = await fetch(`/api/molde/config/lista${qPid('?')}`);
+        const d = await r.json();
+        const cand = (d.configs || []).find(c => c.estado === 'igual')
+          || (d.configs || []).find(c => c.estado === 'mismo_molde');
+        if (vivo) setCfgSugerida(cand && !cfgSugDescartada.current[pidCfg] ? cand : null);
+      } catch { if (vivo) setCfgSugerida(null); }
+    })();
+    return () => { vivo = false; };
+  }, [pidCfg, moldeReload]);
 
   const showWarn = (txt) => {
     setAdvertenciaInformativa(txt);
@@ -14005,40 +14039,47 @@ export default function App() {
                       <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
                       <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Piezas y etiqueta</span>
                     </div>
-                    {/* LAS DOS TAREAS DEL CLIENTE, en orden, y CON LAS PANTALLAS DE CONFIGURACIÓN
-                        (regla del usuario 2026-09-04: exactamente la misma herramienta que
-                        Moldería y que la pestaña Etiqueta). Primero se nombran todas las piezas de
-                        todos los talles; después se elige el talle guía y se ubica la etiqueta. */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
-                      background: _sinNombreB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)',
-                      border: '1px solid ' + (_sinNombreB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)') }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: _sinNombreB.length ? 'var(--warning)' : 'var(--success)' }}>
-                        1 · {_sinNombreB.length ? `Faltan nombrar ${_sinNombreB.length} de ${_piezasB.length}` : `Las ${_piezasB.length} piezas tienen nombre`}
-                      </span>
-                      <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                        Se nombran en Moldería, con todos los talles a la vista: tocá las que son la misma pieza y escribí qué es.
-                      </span>
-                      <button type="button" className={`btn ${_sinNombreB.length ? 'primary' : 'ghost'}`} data-tour="pieza-b-nombrar"
-                        style={{ padding: '7px 10px', fontSize: 12, borderRadius: 9, marginTop: 3 }}
+                    {/* SÓLO LOS BOTONES (pedido del usuario 2026-09-09: «quitá todo el texto que
+                        está en el espacio de ver y corregir nombre y ubicar etiqueta; ahí estará
+                        sólo el botón, más nada»). Lo que hay que hacer se lee en el COLOR: en
+                        ámbar lo que falta, en verde lo que ya está — y la lista de piezas de abajo
+                        muestra pieza por pieza qué le falta a cada una. La explicación larga vive
+                        en el «?» de al lado, como el resto del sistema. */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      <button type="button" className={`btn ${_sinNombreB.length ? 'primary' : 'ghost'}`}
+                        data-tour="pieza-b-nombrar"
+                        style={{ width: '100%', justifyContent: 'space-between', padding: '10px 12px', fontSize: 12.5, borderRadius: 10,
+                          borderColor: _sinNombreB.length ? undefined : 'rgba(16,185,129,0.35)' }}
+                        title={_sinNombreB.length ? `Faltan ${_sinNombreB.length} de ${_piezasB.length}` : `Las ${_piezasB.length} piezas tienen nombre`}
                         onClick={() => abrirNombrarB(_id)}>
-                        {_sinNombreB.length ? 'Nombrar las piezas' : 'Ver o corregir nombres'}
+                        <span>Nombrar piezas</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.85 }}>
+                          {_sinNombreB.length ? `${_piezasB.length - _sinNombreB.length}/${_piezasB.length}` : '✓'}
+                        </span>
                       </button>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '9px 11px', borderRadius: 12,
-                      background: _sinNombreB.length ? 'rgba(255,255,255,0.03)' : (_etqPuestas < _piezasB.length ? 'rgba(245,158,11,0.10)' : 'rgba(16,185,129,0.10)'),
-                      border: '1px solid ' + (_sinNombreB.length ? 'var(--border-light)' : (_etqPuestas < _piezasB.length ? 'rgba(245,158,11,0.35)' : 'rgba(16,185,129,0.35)')),
-                      opacity: _sinNombreB.length ? 0.55 : 1 }}>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: _sinNombreB.length ? 'var(--text-muted)' : (_etqPuestas < _piezasB.length ? 'var(--warning)' : 'var(--success)') }}>
-                        2 · Etiqueta: {_etqPuestas} de {_piezasB.length} ubicadas
-                      </span>
-                      <span style={{ fontSize: 10.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                        Con todo nombrado, elegís el talle guía y tocás el borde de cada pieza donde va. Las que no toques salen abajo, centradas.
-                      </span>
-                      <button type="button" className="btn ghost" data-tour="etqb-piezas"
-                        style={{ padding: '7px 10px', fontSize: 12, borderRadius: 9, marginTop: 3 }}
+                      <button type="button" className={`btn ${(!_sinNombreB.length && _etqPuestas < _piezasB.length) ? 'primary' : 'ghost'}`}
+                        data-tour="etqb-piezas"
+                        style={{ width: '100%', justifyContent: 'space-between', padding: '10px 12px', fontSize: 12.5, borderRadius: 10,
+                          borderColor: (!_sinNombreB.length && _etqPuestas >= _piezasB.length) ? 'rgba(16,185,129,0.35)' : undefined }}
                         disabled={!!_sinNombreB.length}
-                        title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : 'Marcá dónde va la etiqueta de corte'}
-                        onClick={() => abrirEtiquetaB(_id)}>Ubicar la etiqueta</button>
+                        title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : `${_etqPuestas} de ${_piezasB.length} ubicadas`}
+                        onClick={() => abrirEtiquetaB(_id)}>
+                        <span>Ubicar etiqueta</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.85 }}>
+                          {_etqPuestas >= _piezasB.length && !_sinNombreB.length ? '✓' : `${_etqPuestas}/${_piezasB.length}`}
+                        </span>
+                      </button>
+                      {/* GUARDAR / USAR LA CONFIGURACIÓN, acá mismo: es donde se ve el visor, los
+                          talles y las demás herramientas (pedido del usuario 2026-09-09). Antes
+                          había que entrar a Moldería para llegar. */}
+                      <button type="button" className="btn ghost" data-tour="pieza-b-configuracion"
+                        style={{ width: '100%', justifyContent: 'space-between', padding: '10px 12px', fontSize: 12.5, borderRadius: 10,
+                          borderColor: cfgSugerida ? 'rgba(16,185,129,0.45)' : undefined }}
+                        title="Guardar cómo quedó este molde, o usar una configuración guardada"
+                        onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id); }}>
+                        <span>Guardar configuración</span>
+                        {cfgSugerida && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--success)' }}>hay una</span>}
+                      </button>
                     </div>
                     <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 5, minHeight: 0 }}>
                       {_piezasB.map(pz => {
@@ -17056,18 +17097,42 @@ export default function App() {
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                                     <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>Configuración</span>
-                                    <Ayuda ancho={300}>Guardá <b>dónde va la etiqueta en cada pieza</b> y el
-                                      nombre de las piezas, y volvé a aplicarlo cuando subas <b>el mismo archivo</b>
-                                      en otro pedido, en vez de marcarlo todo de nuevo. Lo que es del pedido
-                                      (grupos, variables, telas, planilla) va sólo si lo tildás. <b>No se aplica
+                                    <Ayuda ancho={320}>Guardá <b>dónde va la etiqueta en cada pieza</b> y el
+                                      nombre de las piezas, y volvé a aplicarlo en otro pedido en vez de marcarlo
+                                      todo de nuevo. Sirve aunque el archivo sea otro: se reconoce <b>el molde por
+                                      sus piezas</b>, así que el mismo molde <b>con otro diseño adentro</b> lo
+                                      encuentra igual. Lo que es del pedido (grupos, variables, telas, planilla) va
+                                      sólo si lo tildás. Son <b>tuyas</b>: cada uno ve las suyas. <b>No se aplica
                                       sola</b>: la elegís vos y después mirás en el visor si acomodó bien.</Ayuda>
                                   </span>
                                   <button type="button" className="btn ghost" data-tour="molde-cfg-abrir"
                                     style={{ padding: '4px 10px', fontSize: 11 }}
-                                    onClick={() => { setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(); }}>
+                                    onClick={() => { setCfgPid(null); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(pidCfg); }}>
                                     Guardar / usar
                                   </button>
                                 </div>
+                                {/* ESTE MOLDE YA LO CONFIGURASTE. Aparece sólo si hay una receta TUYA que
+                                    le calza. No se aplica sola: un clic acá y después se mira el visor. */}
+                                {cfgSugerida && (
+                                  <div data-tour="molde-cfg-sugerida"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                                      border: '1px solid var(--success, #2a7)', borderRadius: 10, padding: '8px 10px' }}>
+                                    <span style={{ fontSize: 12.5, flex: 1, minWidth: 180 }}>
+                                      Este molde ya lo configuraste como <b>«{cfgSugerida.nombre}»</b>
+                                      {cfgSugerida.estado === 'mismo_molde' ? ' (con otro diseño adentro)' : ''}:
+                                      {' '}etiqueta en {cfgSugerida.etiqueta_posiciones} pieza(s) y {cfgSugerida.piezas} nombre(s).
+                                    </span>
+                                    <button type="button" className="btn" disabled={cfgBusy}
+                                      data-tour="molde-cfg-sugerida-aplicar"
+                                      onClick={async () => { await aplicarCfgMolde(cfgSugerida); setCfgModalOpen(true); }}>
+                                      Aplicar
+                                    </button>
+                                    <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11 }}
+                                      onClick={() => { cfgSugDescartada.current[pidCfg] = true; setCfgSugerida(null); }}>
+                                      Ahora no
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                               {(tallesMolde.length > 1) && (
                                 <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: 'transparent' }}>
@@ -21034,93 +21099,163 @@ export default function App() {
       })()}
 
       {/* --- MODAL: configuraciones guardadas del molde --- */}
+      {/* ══ CONFIGURACIÓN DEL MOLDE ══════════════════════════════════════════════════════════
+          Dos trabajos en una pantalla, y en el orden en que se usan: ARRIBA usar una guardada (es
+          lo de todos los días) y ABAJO guardar la de ahora. La explicación larga vive en el «?»
+          del encabezado, no en un párrafo: la pantalla tiene que leerse de un vistazo. */}
       {cfgModalOpen && (
         <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setCfgModalOpen(false); }}>
-          <div className="modal-content" style={{ maxWidth: 640 }}>
-            <div className="modal-header">
-              <h3>Configuración del molde</h3>
-              <button type="button" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-secondary)' }} onClick={() => setCfgModalOpen(false)}>×</button>
+          <div className="modal-content" style={{ maxWidth: 620, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header" style={{ margin: 0, padding: '20px 24px 16px' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                <h3 style={{ margin: 0 }}>Configuración del molde</h3>
+                <Ayuda ancho={330}>Guarda <b>dónde va la etiqueta en cada pieza</b> y el nombre de
+                  las piezas. Sirve aunque el archivo sea otro: el molde se reconoce <b>por sus
+                  piezas</b>, así que el mismo molde <b>con otro diseño adentro</b> lo encuentra
+                  igual. Al aplicar, <b>la etiqueta y los nombres van siempre</b>; lo del pedido va
+                  sólo si lo tildás. Son <b>tuyas</b>: cada uno ve las suyas.</Ayuda>
+              </span>
+              <button type="button" aria-label="Cerrar"
+                style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer', color: 'var(--text-secondary)' }}
+                onClick={() => setCfgModalOpen(false)}>×</button>
             </div>
-            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Guardá <b>dónde va la etiqueta en cada pieza</b> y el nombre de las piezas, y volvé a
-              aplicarlo cuando subas el mismo archivo. Al aplicar, <b>la etiqueta y los nombres van
-              siempre</b>; lo que es del pedido (grupos, telas, planilla) sólo si lo tildás.
-            </p>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <input type="text" value={cfgNombre} data-tour="molde-cfg-nombre"
-                onChange={e => setCfgNombre(e.target.value)}
-                placeholder="Nombre (ej.: «Camiseta jugador · cuello redondo»)"
-                style={{ flex: 1 }} />
-              <button type="button" className="btn primary" data-tour="molde-cfg-guardar"
-                disabled={cfgBusy || !cfgNombre.trim()} onClick={guardarCfgMolde}>Guardar esta</button>
-            </div>
-            {cfgGuardadas.length > 0 && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 12,
-                fontSize: 12, color: 'var(--text-secondary)' }} data-tour="molde-cfg-partes">
-                <span>Aplicar además:</span>
-                {[['grupos_variables', 'grupos y variables'], ['telas', 'telas'],
-                  ['planilla', 'planilla'], ['guia', `${term.variante.toLowerCase()} de guía`],
-                  ['produccion', 'borde y producción']].map(([k, txt]) => (
-                  <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={cfgPartes.includes(k)}
-                      onChange={e => setCfgPartes(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))} />
-                    {txt}
-                  </label>
-                ))}
-              </div>
-            )}
-            {cfgInforme && (
-              <div style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, marginBottom: 14, fontSize: 12.5 }}>
-                <b>«{cfgInforme.nombre}» aplicada.</b>{' '}
-                Etiqueta: {cfgInforme.etiqueta_posiciones} pieza(s) con su lugar marcado
-                {cfgInforme.etiqueta_apagadas ? `, ${cfgInforme.etiqueta_apagadas} sin etiqueta` : ''} ·
-                {' '}{cfgInforme.piezas_nombradas} de {cfgInforme.piezas_totales} piezas con nombre
-                {cfgInforme.grupos ? ` · ${cfgInforme.grupos} grupo(s)` : ''}
-                {cfgInforme.variables ? ` · ${cfgInforme.variables} variable(s)` : ''}
-                {cfgInforme.talle_guia ? ` · guía ${cfgInforme.talle_guia}` : ''}.
-                {(cfgInforme.sin_lugar || []).length > 0 && (
-                  <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
-                    No entraron: {cfgInforme.sin_lugar.join(' · ')}
+
+            <div style={{ padding: '0 24px 4px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {/* RESULTADO de aplicar: lo primero que se ve, y dice qué NO entró. */}
+              {cfgInforme && (
+                <div style={{ borderRadius: 14, padding: '12px 14px', marginBottom: 16, fontSize: 12.5,
+                  background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.32)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+                    <span style={{ color: 'var(--success)', fontSize: 14 }}>✓</span>
+                    <b style={{ fontSize: 13 }}>«{cfgInforme.nombre}» aplicada</b>
                   </div>
-                )}
-                {(cfgInforme.piezas_perdidas || []).length > 0 && (
-                  <div style={{ color: 'var(--warning, #b58900)', marginTop: 6 }}>
-                    Piezas que la configuración esperaba y este molde no tiene: {cfgInforme.piezas_perdidas.join(', ')}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <span className="cfg-dato">Etiqueta en {cfgInforme.etiqueta_posiciones} pieza(s)</span>
+                    {!!cfgInforme.etiqueta_apagadas && <span className="cfg-dato">{cfgInforme.etiqueta_apagadas} sin etiqueta</span>}
+                    <span className="cfg-dato">{cfgInforme.piezas_nombradas} de {cfgInforme.piezas_totales} con nombre</span>
+                    {!!cfgInforme.grupos && <span className="cfg-dato">{cfgInforme.grupos} grupo(s)</span>}
+                    {!!cfgInforme.variables && <span className="cfg-dato">{cfgInforme.variables} variable(s)</span>}
+                    {cfgInforme.talle_guia && <span className="cfg-dato">guía {cfgInforme.talle_guia}</span>}
                   </div>
-                )}
-                <div style={{ color: 'var(--text-secondary)', marginTop: 6 }}>
-                  Cerrá y mirá el visor: si no acomodó bien, probá con otra.
-                </div>
-              </div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
-              {cfgGuardadas.length === 0 && (
-                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                  Todavía no hay ninguna guardada.
+                  {((cfgInforme.sin_lugar || []).length > 0 || (cfgInforme.piezas_perdidas || []).length > 0) && (
+                    <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--warning)', lineHeight: 1.5 }}>
+                      {(cfgInforme.sin_lugar || []).length > 0 && <div>No entraron: {cfgInforme.sin_lugar.join(' · ')}</div>}
+                      {(cfgInforme.piezas_perdidas || []).length > 0 && <div>Este molde no tiene: {cfgInforme.piezas_perdidas.join(', ')}</div>}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                    Cerrá y miralo en el visor. Lo que no haya quedado bien se corrige a mano.
+                  </div>
                 </div>
               )}
-              {cfgGuardadas.map(c => (
-                <div key={c.id} style={{ border: '1px solid var(--border-light)', borderRadius: 10, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{c.nombre}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                      {c.molde ? `de «${c.molde}» · ` : ''}
-                      <b>etiqueta en {c.etiqueta_posiciones} pieza(s)</b>
-                      {c.etiqueta_apagadas ? ` (${c.etiqueta_apagadas} sin etiqueta)` : ''} ·
-                      {' '}{c.piezas} piezas · {c.detalle}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                    color: c.estado === 'igual' ? 'var(--success, #2a7)' : c.estado === 'parecida' ? 'var(--warning, #b58900)' : 'var(--text-secondary)',
-                    border: '1px solid currentColor' }}>
-                    {c.estado === 'igual' ? 'mismo archivo' : c.estado === 'parecida' ? 'parecida' : 'distinta'}
-                  </span>
-                  <button type="button" className="btn" data-tour="molde-cfg-aplicar" disabled={cfgBusy}
-                    onClick={() => aplicarCfgMolde(c)}>Aplicar</button>
-                  <button type="button" className="btn ghost" data-tour="molde-cfg-borrar" disabled={cfgBusy}
-                    onClick={() => borrarCfgMolde(c)}>Borrar</button>
+
+              {/* ── LAS GUARDADAS ─────────────────────────────────────────────────────────── */}
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 9 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                  Tus configuraciones
+                </span>
+                {cfgGuardadas.length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{cfgGuardadas.length} guardada(s)</span>
+                )}
+              </div>
+
+              {cfgGuardadas.length === 0 ? (
+                <div style={{ borderRadius: 14, border: '1px dashed var(--border-light-hover)', padding: '22px 18px',
+                  textAlign: 'center', color: 'var(--text-muted)', fontSize: 12.5, marginBottom: 18 }}>
+                  Todavía no guardaste ninguna.<br />
+                  <span style={{ fontSize: 11.5 }}>Configurá el molde y guardalo acá abajo para reusarlo en el próximo pedido.</span>
                 </div>
-              ))}
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginBottom: 16 }}>
+                  {cfgGuardadas.map(c => {
+                    const _calza = c.estado === 'igual' || c.estado === 'mismo_molde';
+                    const _pill = c.estado === 'igual' ? { t: 'mismo archivo', c: 'var(--success)' }
+                      : c.estado === 'mismo_molde' ? { t: 'mismo molde', c: 'var(--success)' }
+                      : c.estado === 'parecida' ? { t: 'parecida', c: 'var(--warning)' }
+                      : { t: 'distinta', c: 'var(--text-muted)' };
+                    return (
+                      <div key={c.id} style={{ borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12,
+                        background: _calza ? 'rgba(16,185,129,0.06)' : 'rgba(255,255,255,0.02)',
+                        border: '1px solid ' + (_calza ? 'rgba(16,185,129,0.30)' : 'var(--border-light)') }}>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: 13.5 }}>{c.nombre}</span>
+                            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase',
+                              padding: '2px 8px', borderRadius: 20, color: _pill.c, border: '1px solid currentColor' }}>{_pill.t}</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                            <span className="cfg-dato">etiqueta en {c.etiqueta_posiciones}</span>
+                            {!!c.etiqueta_apagadas && <span className="cfg-dato">{c.etiqueta_apagadas} sin etiqueta</span>}
+                            <span className="cfg-dato">{c.piezas} piezas</span>
+                            {c.molde && <span className="cfg-dato" title={c.molde}>de «{c.molde}»</span>}
+                          </div>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.detalle}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <button type="button" className={_calza ? 'btn primary' : 'btn'} data-tour="molde-cfg-aplicar"
+                            disabled={cfgBusy} style={{ padding: '8px 16px', fontSize: 12.5 }}
+                            onClick={() => aplicarCfgMolde(c)}>Aplicar</button>
+                          <button type="button" className="btn danger-ghost" data-tour="molde-cfg-borrar"
+                            disabled={cfgBusy} title="Borrar esta configuración"
+                            style={{ padding: '8px 10px', fontSize: 12.5 }}
+                            onClick={() => borrarCfgMolde(c)}>Borrar</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* ── QUÉ MÁS ENTRA AL APLICAR (opcional, como interruptores) ────────────────── */}
+              {cfgGuardadas.length > 0 && (
+                <div style={{ marginBottom: 18 }} data-tour="molde-cfg-partes">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
+                      Aplicar además
+                    </span>
+                    <Ayuda ancho={300}>La <b>etiqueta</b> y los <b>nombres</b> entran siempre: es el
+                      trabajo que se guarda. Esto otro es <b>decisión del pedido</b> —qué grupos y
+                      variables lleva, con qué telas y con qué planilla—, así que entra sólo si lo
+                      encendés vos.</Ayuda>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                    {[['grupos_variables', 'Grupos y variables'], ['telas', 'Telas'],
+                      ['planilla', 'Planilla'], ['guia', term.variante + ' de guía'],
+                      ['produccion', 'Borde y producción']].map(([k, txt]) => {
+                      const on = cfgPartes.includes(k);
+                      return (
+                        <button key={k} type="button"
+                          onClick={() => setCfgPartes(prev => on ? prev.filter(x => x !== k) : [...prev, k])}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                            fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 20,
+                            transition: 'var(--transition-smooth)',
+                            color: on ? 'var(--accent)' : 'var(--text-secondary)',
+                            background: on ? 'var(--selected-bg)' : 'rgba(255,255,255,0.03)',
+                            border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)') }}>
+                          <span style={{ fontSize: 11 }}>{on ? '✓' : '+'}</span>{txt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── GUARDAR LA DE AHORA (pie fijo: es la otra mitad de la pantalla) ─────────── */}
+            <div style={{ padding: '14px 24px 20px', borderTop: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.015)' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase',
+                color: 'var(--text-secondary)', marginBottom: 8 }}>
+                Guardar cómo quedó este molde
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="text" value={cfgNombre} data-tour="molde-cfg-nombre"
+                  onChange={e => setCfgNombre(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && cfgNombre.trim() && !cfgBusy) guardarCfgMolde(); }}
+                  placeholder="Ponele un nombre (ej.: «Camiseta jugador · cuello redondo»)"
+                  style={{ flex: 1 }} />
+                <button type="button" className="btn primary" data-tour="molde-cfg-guardar"
+                  disabled={cfgBusy || !cfgNombre.trim()} onClick={guardarCfgMolde}>Guardar</button>
+              </div>
             </div>
           </div>
         </div>

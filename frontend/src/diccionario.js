@@ -815,6 +815,21 @@ export const DICCIONARIO = {
     que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
     como: 'Abrí las configuraciones guardadas.',
   },
+  'pieza-b-configuracion': {
+    nombre: 'Guardar configuración',
+    que: 'Abre la configuración guardada de este molde: acá se guarda con un nombre cómo quedó (dónde va la etiqueta en cada pieza y el nombre de las piezas) y se vuelve a aplicar en otro pedido. El molde se reconoce por sus piezas, así que el mismo molde con otro diseño adentro también la encuentra. Son tuyas: cada uno ve las suyas.',
+    como: 'Abrí la configuración del molde.',
+  },
+  'molde-cfg-sugerida': {
+    nombre: 'Este molde ya lo configuraste',
+    que: 'Aviso de que hay una configuración TUYA guardada que le calza a este molde: dice cuál es y cuánto trae (en cuántas piezas está marcada la etiqueta y cuántos nombres). Aparece también cuando el archivo es otro pero el molde es el mismo con otro diseño adentro, porque el molde se reconoce por sus piezas.',
+    como: 'Mirá el aviso de la configuración guardada.',
+  },
+  'molde-cfg-sugerida-aplicar': {
+    nombre: 'Aplicar la configuración que ya tenías',
+    que: 'Pone de una los nombres de las piezas y dónde va la etiqueta en cada una, tal como los habías dejado. No se aplica sola nunca: entra recién cuando tocás este botón, y después conviene mirar el visor y corregir a mano lo que no haya quedado bien.',
+    como: 'Aplicá la configuración guardada.',
+  },
   'molde-cfg-nombre': {
     nombre: 'Nombre de la configuración',
     que: 'Con este nombre se va a reconocer después, en la lista. Conviene decir de qué molde es y qué variante («Camiseta jugador · cuello redondo»).',

@@ -600,6 +600,45 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
   y por ahí pasan el preview del Arte, la ficha y las llamadas al motor. Si se agrega otro lugar
   que lea el borde o la etiqueta, **tiene que pasar por ahí**.
 
+### 4.9c **Guardar / usar la configuración de un molde** (etiqueta + nombres, para reusar)
+
+- **Dónde:** desde el PEDIDO, en el panel del visor (donde están los talles y las herramientas):
+  botón **«Guardar configuración»** (`pieza-b-configuracion`), al lado de «Nombrar piezas» y
+  «Ubicar etiqueta». También desde el molde abierto → ajuste **Moldería** → tarjeta
+  **«Configuración»** → **«Guardar / usar»** (`molde-cfg-abrir`). Es para el molde que trae el
+  diseño adentro, que se sube **para un pedido y se borra con él**: sin esto, el trabajo de
+  configurarlo se perdía.
+- **Para qué:** no volver a marcar a mano **dónde va la etiqueta en cada pieza** ni a **nombrar las
+  piezas** cada vez que se sube el mismo molde.
+
+**Los pasos, la primera vez (guardar):**
+1. Configurá el molde como siempre: nombrá las piezas y marcá la etiqueta pieza por pieza.
+2. Abrí **«Guardar / usar»**, escribí un nombre que lo identifique («Camiseta jugador · cuello
+   redondo») y tocá **Guardar esta**.
+
+**Los pasos, la próxima vez (usar):**
+1. Subí el molde en el pedido nuevo. Si el sistema lo reconoce, en la tarjeta «Configuración»
+   aparece el aviso **«Este molde ya lo configuraste como «X»»** con **Aplicar** y **Ahora no**.
+2. Tocá **Aplicar** (o abrí la configuración y elegí de la lista: cada tarjeta dice si es del
+   **mismo archivo**, del **mismo molde**, **parecida** o **distinta**, y la que calza va
+   resaltada en verde con su «Aplicar» lleno).
+3. 🔴 **Miralo en el visor.** Entra siempre el nombrado y la etiqueta; el informe dice cuántas
+   piezas quedaron con su lugar marcado y **qué no entró**. Lo que no haya quedado bien se corrige
+   a mano, como siempre.
+4. Lo que es decisión **del pedido** —grupos y variables, telas, planilla, talle de guía,
+   producción— entra **sólo si lo tildás** en el modal.
+
+**Trampas:**
+- 🔴 **Son tuyas.** Cada usuario ve, aplica y borra **las suyas**. La de un compañero no aparece.
+- 🔴 **Se reconoce el MOLDE, no el archivo.** El mismo molde con **otro diseño adentro** es otro
+  archivo y se reconoce igual (por las medidas de sus piezas: la «huella»). Si cambiaste el molde
+  de verdad —otra pieza, otra medida— va a decir «parecida» o «distinta»: ahí revisá con más ganas.
+- **Nunca se aplica sola.** Ni el aviso ni la lista tocan nada hasta que apretás **Aplicar**.
+- **Borrar una configuración no toca ningún molde**: es sólo la receta.
+- **Guarda:** `POST /api/molde/config/guardar` · **usa:** `GET /api/molde/config/lista` +
+  `POST /api/molde/config/aplicar` · **borra:** `DELETE /api/molde/config/<id>`.
+  Vive en `dbo.config_molde`. Contrato: `verificar_config_guardada.py`.
+
 ### 4.9 **Publicación**
 - Manda las mejoras de **esta máquina** al servidor publicado en internet. Los moldes, artes y
   pedidos **no viajan**.

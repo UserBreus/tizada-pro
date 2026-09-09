@@ -4,7 +4,9 @@
     {
       "name": "tizada",
       "runtimeExecutable": "py",
-      "runtimeArgs": ["servidor.py"],
+      "runtimeArgs": [
+        "servidor.py"
+      ],
       "port": 8050,
       "autoPort": true,
       "env": {
@@ -17,8 +19,18 @@
     {
       "name": "tizada-real",
       "runtimeExecutable": "py",
-      "runtimeArgs": ["servidor.py"],
+      "runtimeArgs": [
+        "servidor.py"
+      ],
       "port": 8050
+    },
+    {
+      "name": "tizada-visor",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "srv_visor.py"
+      ],
+      "port": 8060
     }
   ]
 }

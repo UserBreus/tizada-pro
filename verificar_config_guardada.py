@@ -22,6 +22,10 @@ Lo que se verifica:
   5. **Lo que no entra se DICE** (`sin_lugar`, `piezas_perdidas`): el usuario tiene que poder ver
      si acomodó bien.
   6. **Borrar** una configuración no toca ningún molde.
+  7. 🔴 **El MISMO molde con OTRO DISEÑO adentro se reconoce igual**: el archivo cambia (otro
+     `sha1`) pero las piezas miden lo mismo, y esa HUELLA es la identidad. Un molde distinto
+     con la misma cantidad de piezas NO se confunde.
+  8. 🔴 **Son de cada usuario**: nadie ve, aplica ni borra la receta de otro.
 
 ⚠️ No toca nada del usuario: `DATOS`/`ENTRADA` van a un temporal, el catálogo y el registro son
 dobles en memoria y la base es un doble que guarda las configuraciones en un dict (si algo intenta
@@ -53,17 +57,25 @@ _falso_db.__getattr__ = lambda n: (lambda *a, **k: (_ for _ in ()).throw(
 _CFGS, _SEQ = {}, [0]
 
 
-def _guardar_cfg(nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por=None, id_=None):
+def _guardar_cfg(nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por=None, id_=None,
+                 huella=None):
     _SEQ[0] += 1
     i = int(id_ or _SEQ[0])
     _CFGS[i] = {"id": i, "nombre": nombre, "sha1": sha1, "molde": molde, "piezas_n": piezas_n,
                 "mesas_n": mesas_n, "creado_en": "2026-09-08", "creado_por": creado_por,
+                "huella": huella,
                 "datos": json.loads(json.dumps(datos))}     # copia: nadie se lleva la referencia
     return i
 
 
+def _listar_cfg(creado_por=None, todas=False):
+    """Como la de verdad: SÓLO las del usuario que pregunta (ver `db.listar_configs_molde`)."""
+    return [dict(c, datos=None) for c in _CFGS.values()
+            if todas or (c.get("creado_por") or None) == (creado_por or None)]
+
+
 _falso_db.guardar_config_molde = _guardar_cfg
-_falso_db.listar_configs_molde = lambda: [dict(c, datos=None) for c in _CFGS.values()]
+_falso_db.listar_configs_molde = _listar_cfg
 _falso_db.leer_config_molde = lambda i: (dict(_CFGS[int(i)]) if int(i) in _CFGS else None)
 _falso_db.borrar_config_molde = lambda i: (1 if _CFGS.pop(int(i), None) else 0)
 _falso_db.guardar_registro = lambda pid, piezas, reg: 1
@@ -90,13 +102,17 @@ def _registro(nombres, idx_desde=0):
     """{nombre: {talle: {mesa, idx_mesa, pieza_idx}}} — una pieza por mesa, dos talles."""
     reg = {}
     for i, n in enumerate(nombres):
+        # Las MEDIDAS son la huella del molde: es lo que no cambia cuando cambia el diseño de
+        # adentro. Cada pieza mide distinto a propósito, para que la huella tenga señal.
         reg[n] = {t: {"mesa": i + 1, "idx_mesa": 0, "pieza_idx": idx_desde + i,
+                      "w_cm": 30.0 + i, "h_cm": 40.0 + 2 * i,
                       "bbox_mu": [0, 0, 10, 10]} for t in ("S", "M")}
     return reg
 
 
 NOMBRES = ["Espalda", "Frente", "Manga derecha", "Manga izquierda"]
-PID_A, PID_B = "prod_config_a", "prod_config_b"
+PID_A, PID_B, PID_C, PID_D = ("prod_config_a", "prod_config_b", "prod_config_c",
+                              "prod_config_d")
 CAT = {"activo": PID_A, "productos": [
     {"id": PID_A, "nombre": "CAMISETA (pedido de ayer)", "origen": "con_diseno", "efimero": True,
      "variante_guia": "M",
@@ -117,12 +133,28 @@ CAT = {"activo": PID_A, "productos": [
     # 🔴 quedaron en OTRO ORDEN dentro del talle: si la configuración se aplicara por `pieza_idx`,
     # los grupos y las variables señalarían la pieza equivocada.
     {"id": PID_B, "nombre": "CAMISETA (pedido de hoy)", "origen": "con_diseno", "efimero": True},
+    {"id": PID_C, "nombre": "PANTALON (otro molde)", "origen": "con_diseno", "efimero": True},
+    {"id": PID_D, "nombre": "CAMISETA (una pieza sin detectar)", "origen": "con_diseno", "efimero": True},
 ]}
 REGISTROS = {
     PID_A: _registro(NOMBRES),
     PID_B: {f"Pieza {i + 1}": {t: {"mesa": i + 1, "idx_mesa": 0, "pieza_idx": (i + 2) % 4,
+                                   "w_cm": 30.0 + i, "h_cm": 40.0 + 2 * i,
                                    "bbox_mu": [0, 0, 10, 10]} for t in ("S", "M")}
             for i in range(4)},
+    # OTRO MOLDE: mismas 4 piezas en 4 mesas, pero MIDEN DISTINTO. Sirve para comprobar que la
+    # huella no confunde dos moldes sólo porque tengan la misma cantidad de piezas.
+    PID_C: {f"Pieza {i + 1}": {t: {"mesa": i + 1, "idx_mesa": 0, "pieza_idx": i,
+                                   "w_cm": 12.0 + i, "h_cm": 90.0 + i,
+                                   "bbox_mu": [0, 0, 10, 10]} for t in ("S", "M")}
+            for i in range(4)},
+    # EL MISMO molde, pero una pieza no se detecto en esta subida (pasa). Tiene que seguir
+    # reconociendose: es lo que justifica que la huella sea de TODOS los talles y que haya un
+    # parecido por porcentaje en vez de un si/no.
+    PID_D: {f"Pieza {i + 1}": {t: {"mesa": i + 1, "idx_mesa": 0, "pieza_idx": i,
+                                   "w_cm": 30.0 + i, "h_cm": 40.0 + 2 * i,
+                                   "bbox_mu": [0, 0, 10, 10]} for t in ("S", "M")}
+            for i in range(3)},
 }
 PRODUCCION = {PID_A: {"espaciado_mm": 7, "margen_mm": 12, "rotacion": "auto"}}
 GUARDADOS = {}
@@ -143,11 +175,16 @@ def _instalar_dobles():
     S._usuario_actual = lambda *a, **k: {"id": 7, "permisos": ["molde.editar", "pedido.crear"]}
     S._USUARIOS_ON = False
     # Los dos moldes son el MISMO archivo: mismo contenido, mismo sha1.
-    for pid in (PID_A, PID_B):
+    for pid in (PID_A, PID_B, PID_C, PID_D):
         d = os.path.join(os.environ["TIZADA_ENTRADA"], pid)
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "plantilla.ai"), "wb") as f:
-            f.write(b"%PDF-1.6 el mismo archivo en dos pedidos\n")
+            # A y B son el MISMO archivo (el mismo molde subido dos veces); C es otro molde,
+            # asi que tambien es otro archivo: si no, se reconoceria por el sha1 y esta parte
+            # de la prueba no probaria nada.
+            f.write(b"%PDF-1.6 otro molde distinto\n" if pid == PID_C
+                    else b"%PDF-1.6 el mismo, con una pieza menos\n" if pid == PID_D
+                    else b"%PDF-1.6 el mismo archivo en dos pedidos\n")
 
 
 _instalar_dobles()
@@ -176,8 +213,24 @@ with open(os.path.join(os.environ["TIZADA_ENTRADA"], PID_B, "plantilla.ai"), "ab
     f.write(b"otro archivo, mismas piezas\n")
 S._SHA1_CACHE.clear()
 _c = ((CLI.get(f"/api/molde/config/lista?pid={PID_B}").get_json() or {}).get("configs") or [{}])[0]
-ok(_c.get("estado") == "parecida", f"otro archivo con las mismas piezas → «parecida» ({_c.get('estado')})")
+# 🔴 LO QUE PEDÍA EL USUARIO (2026-09-09): el MISMO molde con OTRO DISEÑO adentro es otro archivo
+# —otro sha1— y antes caía en «parecida» sólo si coincidían las cuentas de piezas y mesas. Ahora se
+# reconoce por la HUELLA: las piezas miden lo mismo, así que el nombrado y la etiqueta sirven tal cual.
+ok(_c.get("estado") == "mismo_molde",
+   f"otro archivo, mismo molde → «mismo_molde» ({_c.get('estado')}: {_c.get('detalle')})")
 print(f"    OK    {_c.get('detalle')}")
+
+print("\n2b · 🔴 Y NO CONFUNDE DOS MOLDES DISTINTOS (misma cantidad de piezas, otras medidas)")
+_c2 = ((CLI.get(f"/api/molde/config/lista?pid={PID_C}").get_json() or {}).get("configs") or [{}])[0]
+ok(_c2.get("estado") == "distinta",
+   f"otro molde con 4 piezas en 4 mesas NO se toma por el mismo ({_c2.get('estado')}: {_c2.get('detalle')})")
+print(f"    OK    {_c2.get('detalle')}")
+
+print("\n2c · UNA PIEZA QUE NO SE DETECTO NO PUEDE TIRAR ABAJO EL RECONOCIMIENTO")
+_c3 = ((CLI.get(f"/api/molde/config/lista?pid={PID_D}").get_json() or {}).get("configs") or [{}])[0]
+ok(_c3.get("estado") == "parecida",
+   f"el mismo molde con una pieza menos sigue saliendo como parecida ({_c3.get('estado')})")
+print(f"    OK    {_c3.get('detalle')}")
 
 print("\n3 · 🔴 APLICARLA AL MOLDE NUEVO (las piezas están en OTRO ORDEN a propósito)")
 _id = list(_CFGS)[0]
@@ -234,11 +287,55 @@ ok(any("Capucha" in x for x in (d.get("sin_lugar") or [])),
    f"una pieza que este molde no tiene se informa, no se esconde ({d.get('sin_lugar')})")
 print(f"    OK    aviso: {(d.get('sin_lugar') or ['-'])[0]}")
 
+print("\n5b · 🔴 LAS CONFIGURACIONES SON DE CADA USUARIO")
+# Decision del usuario (2026-09-09): «que se puedan guardar PARA ESE USUARIO que esta trabajando».
+# La lista ya solo trae las propias; aplicar y borrar van por `id`, asi que tambien se controlan
+# ahi — si no, alcanzaba con escribir el numero a mano para tocar la receta de otro.
+_yo = S._uid_actual
+S._uid_actual = lambda *a, **k: 9            # entra OTRA persona
+_l = ((CLI.get(f"/api/molde/config/lista?pid={PID_B}").get_json() or {}).get("configs") or [])
+ok(_l == [], f"otro usuario NO ve las mias (ve {len(_l)})")
+_r = CLI.post("/api/molde/config/aplicar", json={"pid": PID_B, "id": _id})
+ok(_r.status_code == 404, f"ni puede aplicarlas escribiendo el id a mano (HTTP {_r.status_code})")
+_r = CLI.delete(f"/api/molde/config/{_id}")
+ok(_r.status_code == 404 and _id in _CFGS, f"ni borrarlas (HTTP {_r.status_code})")
+S._uid_actual = _yo
+_l = ((CLI.get(f"/api/molde/config/lista?pid={PID_B}").get_json() or {}).get("configs") or [])
+ok(len(_l) == 1, f"y el dueno las sigue viendo ({len(_l)})")
+print("    OK    cada uno ve, aplica y borra las suyas")
+
 print("\n6 · BORRAR la configuración no toca ningún molde")
 _antes = dict(REGISTROS[PID_B])
 r = CLI.delete(f"/api/molde/config/{_id}")
 ok((r.get_json() or {}).get("ok") and _id not in _CFGS, "se borra de la lista")
 ok(REGISTROS[PID_B] == _antes, "y el molde queda igual (era sólo la receta)")
+
+print("\n7 · 🔴 LA PANTALLA TRABAJA SOBRE EL MOLDE EXPLICITO, Y SIN TEXTO DE MAS")
+# El modal se abre desde DOS lugares: Molderia (molde abierto en Configuracion) y el PEDIDO (el
+# molde con diseno). `pidCfg` sirve para el primero y NO para el segundo —cae al ACTIVO del
+# server—, asi que guardar desde el pedido habria escrito la configuracion de un molde adentro de
+# otro (la trampa del §7 del mapa). Y el pid va POR ARGUMENTO: quien abre hace `setCfgPid` y pide
+# la lista en el mismo gesto, cuando React todavia no actualizo el estado.
+_app = open(os.path.join(RAIZ, "frontend", "src", "App.jsx"), encoding="utf-8").read()
+ok("const cfgPidEfectivo" in _app, "el modal resuelve su molde en un solo lugar (`cfgPidEfectivo`)")
+# Se mira SOLO el bloque de las funciones del modal: `pid: pidCfg` es correcto en el resto de la
+# pantalla de configuracion (ahi el molde abierto ES el que se edita).
+_bloque = _app[_app.index("const cargarCfgGuardadas"):_app.index("const showWarn")]
+ok(_bloque.count("pid: cfgPidEfectivo()") == 2 and "pid: pidCfg" not in _bloque,
+   "guardar y aplicar usan ese molde, no el que esta abierto en Configuracion")
+ok("cargarCfgGuardadas(_id)" in _app and "cargarCfgGuardadas(pidCfg)" in _app,
+   "los dos lugares que abren el modal le pasan el molde por ARGUMENTO (estado de React)")
+# …y el espacio de las herramientas quedo con los botones y nada mas (pedido del usuario).
+ok("<span>Nombrar piezas</span>" in _app and "<span>Ubicar etiqueta</span>" in _app,
+   "los botones se llaman «Nombrar piezas» y «Ubicar etiqueta»")
+ok("Se nombran en Molderia, con todos los talles a la vista" not in _app
+   and "Se nombran en Moldería, con todos los talles a la vista" not in _app,
+   "se fue el parrafo que explicaba como nombrar")
+ok("Con todo nombrado, elegís el talle guía" not in _app,
+   "y el que explicaba como ubicar la etiqueta")
+ok('data-tour="pieza-b-configuracion"' in _app,
+   "y «Guardar configuracion» esta en el mismo panel del visor")
+print("    OK    tres botones, sin texto, y cada uno sobre el molde que corresponde")
 
 print()
 if FALLOS:

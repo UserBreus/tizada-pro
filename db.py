@@ -710,36 +710,57 @@ CREATE TABLE dbo.config_molde (
     creado_por  INT NULL,
     datos       NVARCHAR(MAX) NOT NULL  -- el JSON con todo lo guardado
 )""")
+        # HUELLA DE LA GEOMETRÍA: identifica al MOLDE, no al archivo. El mismo molde con otro
+        # diseño adentro es otro archivo (otro sha1) pero las piezas miden lo mismo, así que la
+        # huella coincide y la configuración se reconoce igual. Va aparte y como columna porque
+        # es lo que se compara al listar: leer el JSON de cada una para eso era un viaje por fila.
+        cur.execute("IF COL_LENGTH('dbo.config_molde','huella') IS NULL "
+                    "ALTER TABLE dbo.config_molde ADD huella NVARCHAR(40) NULL")
     _CONFIG_MOLDE_LISTA = True
 
 
-def guardar_config_molde(nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por=None, id_=None):
-    """Guarda (o pisa, si viene `id_`) una configuración. Devuelve su id."""
+def guardar_config_molde(nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por=None, id_=None,
+                         huella=None):
+    """Guarda (o pisa, si viene `id_`) una configuración. Devuelve su id.
+
+    `sha1` es del ARCHIVO y `huella` del MOLDE (las medidas de sus piezas): con el mismo molde y
+    otro diseño adentro cambia el primero y NO el segundo, que es lo que permite reconocerlo."""
     _asegurar_config_molde()
     txt = _json.dumps(datos, ensure_ascii=False)
     with cursor() as cur:
         if id_:
             cur.execute("UPDATE config_molde SET nombre=?, sha1=?, molde=?, piezas_n=?, mesas_n=?, "
-                        "datos=? WHERE id=?", nombre, sha1, molde, piezas_n, mesas_n, txt, int(id_))
+                        "datos=?, huella=? WHERE id=?",
+                        nombre, sha1, molde, piezas_n, mesas_n, txt, huella, int(id_))
             if cur.rowcount:
                 return int(id_)
-        cur.execute("INSERT INTO config_molde (nombre, sha1, molde, piezas_n, mesas_n, datos, creado_por) "
-                    "OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    nombre, sha1, molde, piezas_n, mesas_n, txt, creado_por)
+        cur.execute("INSERT INTO config_molde (nombre, sha1, molde, piezas_n, mesas_n, datos, "
+                    "creado_por, huella) OUTPUT INSERTED.id VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    nombre, sha1, molde, piezas_n, mesas_n, txt, creado_por, huella)
         return int(cur.fetchone()[0])
 
 
-def listar_configs_molde():
-    """Todas las configuraciones guardadas, sin el JSON (la lista no lo necesita)."""
+def listar_configs_molde(creado_por=None, todas=False):
+    """Las configuraciones guardadas, sin el JSON (la lista no lo necesita).
+
+    🔴 POR USUARIO (decisión del usuario 2026-09-09): cada uno ve LAS SUYAS. Antes se listaban
+    todas y en un taller con varias personas la lista se llenaba de recetas ajenas. Sin sesión
+    (taller sin usuarios) las de nadie son `creado_por IS NULL`, que es justo lo que se guardó.
+    `todas=True` es para el mantenimiento, no para la pantalla."""
     _asegurar_config_molde()
-    return filas("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por "
-                 "FROM config_molde ORDER BY creado_en DESC")
+    cols = ("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por, huella "
+            "FROM config_molde ")
+    if todas:
+        return filas(cols + "ORDER BY creado_en DESC")
+    if creado_por is None:
+        return filas(cols + "WHERE creado_por IS NULL ORDER BY creado_en DESC")
+    return filas(cols + "WHERE creado_por=? ORDER BY creado_en DESC", int(creado_por))
 
 
 def leer_config_molde(id_):
     _asegurar_config_molde()
-    f = fila("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por, datos "
-             "FROM config_molde WHERE id=?", int(id_))
+    f = fila("SELECT id, nombre, sha1, molde, piezas_n, mesas_n, creado_en, creado_por, huella, "
+             "datos FROM config_molde WHERE id=?", int(id_))
     if not f:
         return None
     try:
