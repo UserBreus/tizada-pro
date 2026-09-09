@@ -1473,6 +1473,44 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (404) — 🔴 «ESTE MOLDE TODAVÍA NO TIENE PIEZAS»: apretar Aplicar apenas subido el
+  molde daba un cartel rojo, y había que volver a nombrar todo a mano.** Reporte del usuario con la
+  captura: *«me sale esto; la configuración de nombrar las piezas también debe poder guardarse para
+  no estar escribiendo cada vez: las nombra automático en base a lo que eligió, pero podrá ver
+  entrando a Nombrar piezas si está correcto o no»*.
+
+  **NO ERA QUE NO SE GUARDARAN LOS NOMBRES: ERA EL TIEMPO.** En el registro del sistema quedó
+  clarísimo: el molde se subió a las **10:58:06**; el usuario apretó «Aplicar» a los **30 s**
+  (10:58:36) y otras dos veces (:44 y :56) → **409** las tres. A las **11:00:22** —dos minutos
+  después de subir— la misma configuración entró **200**. El camino B despliega el molde en un hilo
+  de fondo y **el registro de las piezas aparece recién al final**; hasta entonces `aplicar`
+  contestaba «este molde todavía no tiene piezas», que suena a que la receta no sirve. Como el
+  cartel no invitaba a esperar, se volvía a nombrar a mano: exactamente lo que la función existe
+  para evitar.
+
+  **LO QUE SE HIZO — SE APRIETA UNA VEZ Y ENTRA SOLA CUANDO EL MOLDE ESTÁ:**
+  1. El servidor **distingue** «se está leyendo» de «no hay molde»: si la plantilla está pero el
+     registro todavía no, contesta `preparando: true` y *«Todavía se está leyendo el molde. La
+     configuración se aplica sola apenas termine»*. Sin plantilla sigue siendo el error de siempre.
+  2. La pantalla **espera y reintenta sola** (cada 5 s, hasta ~4 min) en vez de mostrar el error.
+     Mientras tanto, un aviso en celeste dice cuál quedó esperando, con **«No esperar»** para
+     cortar. ⚠️ Esto **no** contradice el «nunca se aplica sola» de la 402: el usuario **ya apretó
+     el botón**; lo que se hace es cumplir lo que pidió cuando se puede.
+  3. **El aviso de «este molde ya lo configuraste» también volvía a preguntar.** La huella sale de
+     las piezas, así que con el molde a medio leer no reconocía nada — y nada volvía a disparar la
+     búsqueda cuando terminaba, así que el aviso **no aparecía nunca** en el caso más común (recién
+     subido). Ahora `/api/molde/config/lista` devuelve `preparando` y la pantalla re-pregunta cada
+     6 s hasta que el molde está.
+  4. Al aplicar bien, además del informe sale un aviso corto con lo que entró.
+
+  **SOBRE «QUE LOS NOMBRES SE GUARDEN»**: ya se guardaban y ya entraban solos con la receta (402);
+  lo que fallaba era llegar a aplicarla. Con esto, el usuario aprieta una vez, el molde termina de
+  leerse, **las piezas quedan nombradas** y entra a «Nombrar piezas» sólo a mirar si está bien.
+
+  **VERIFICADO** con el paso 6b nuevo de `verificar_config_guardada.py`: con el molde subido y sin
+  piezas todavía contesta 409 **con** `preparando`; sin molde, 409 **sin** `preparando`; y la
+  pantalla reintenta en vez de mostrar el error.
+
 - **2026-09-09 (403) — LA PANTALLA: el modal de la configuración, rehecho; y el espacio de las
   herramientas quedó con los botones y nada más.** Pedido del usuario, con la captura del modal
   viejo: *«mejorá este modal para que sea súper moderno e intuitivo, y el botón de guardar

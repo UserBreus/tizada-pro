@@ -9077,7 +9077,11 @@ def molde_config_lista():
                        "cuando": (c["creado_en"].isoformat() if hasattr(c.get("creado_en"), "isoformat")
                                   else str(c.get("creado_en") or "")),
                        "estado": estado, "detalle": detalle})
-    return jsonify({"ok": True, "configs": salida})
+    # `preparando`: el molde está subido pero todavía sin piezas (se lee en segundo plano). La
+    # HUELLA sale de las piezas, así que hasta que estén NO se puede reconocer el molde y el aviso
+    # de «esto ya lo configuraste» no aparecería nunca — la pantalla vuelve a preguntar.
+    return jsonify({"ok": True, "configs": salida,
+                    "preparando": (not reg) and os.path.exists(_ruta_entrada("plantilla.ai", pid))})
 
 
 @app.post("/api/molde/config/aplicar")
@@ -9098,8 +9102,19 @@ def molde_config_aplicar():
     datos = cfg.get("datos") or {}
     reg = _cargar("registro_producto.json", pid) or {}
     if not reg:
-        return jsonify({"error": "Este molde todavía no tiene piezas: subilo y esperá a que "
-                                 "termine de leerse antes de aplicar una configuración."}), 409
+        # 🔴 EL MOLDE RECIÉN SUBIDO TODAVÍA SE ESTÁ LEYENDO. El camino B despliega las páginas por
+        # talle en un hilo de fondo —más de un minuto en un molde grande— y el registro de las
+        # piezas aparece recién al final. Quien apretaba «Aplicar» apenas subía el molde se comía
+        # un cartel rojo y volvía a nombrar las piezas a mano (reporte del usuario 2026-09-09:
+        # tres intentos a los 30, 38 y 50 segundos; a los 2 minutos anduvo).
+        # Se DISTINGUE de «no hay molde» para que la pantalla pueda esperar y aplicarla sola en
+        # cuanto esté: el usuario ya la eligió, así que completar lo que pidió no es aplicar por
+        # nuestra cuenta.
+        if os.path.exists(_ruta_entrada("plantilla.ai", pid)):
+            return jsonify({"preparando": True,
+                            "error": "Todavía se está leyendo el molde. La configuración se aplica "
+                                     "sola apenas termine."}), 409
+        return jsonify({"error": "Todavía no hay molde cargado: subilo y volvé a probar."}), 409
     import piezas_con_diseno as PD
     # 1) EL NOMBRADO. Pieza por pieza, por (mesa, idx_mesa): es la identidad que no depende del
     #    talle. Lo que no está en este molde se informa y no se toca.

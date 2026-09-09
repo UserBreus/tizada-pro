@@ -310,6 +310,37 @@ r = CLI.delete(f"/api/molde/config/{_id}")
 ok((r.get_json() or {}).get("ok") and _id not in _CFGS, "se borra de la lista")
 ok(REGISTROS[PID_B] == _antes, "y el molde queda igual (era sólo la receta)")
 
+print("\n6b · 🔴 APLICAR MIENTRAS EL MOLDE TODAVIA SE ESTA LEYENDO")
+# Reporte del usuario (2026-09-09): subio el molde y apreto «Aplicar» a los 30 s. El camino B
+# despliega el molde en un hilo de fondo y el registro de piezas aparece recien al final (en el
+# caso real, 2 minutos), asi que se comio un cartel rojo TRES veces y volvio a nombrar a mano.
+# El servidor tiene que DISTINGUIR «se esta leyendo» de «no hay molde», para que la pantalla
+# pueda esperar y aplicarla sola en cuanto este: el usuario ya la eligio.
+# (la de arriba ya se borro en el paso 6: se guarda una propia para esta prueba)
+_nid = ((CLI.post("/api/molde/config/guardar",
+                  json={"pid": PID_A, "nombre": "para probar la espera"}).get_json()) or {}).get("id")
+_reg_d = REGISTROS[PID_D]
+REGISTROS[PID_D] = {}                      # el molde esta subido pero todavia sin piezas
+_r = CLI.post("/api/molde/config/aplicar", json={"pid": PID_D, "id": _nid})
+_d = _r.get_json() or {}
+ok(_r.status_code == 409 and _d.get("preparando") is True,
+   f"con el molde subido y sin piezas todavia, avisa que se esta LEYENDO "
+   f"(HTTP {_r.status_code}, preparando={_d.get('preparando')})")
+ok("sola apenas termine" in (_d.get("error") or ""),
+   f"y lo dice sin asustar: «{_d.get('error')}»")
+_r2 = CLI.post("/api/molde/config/aplicar", json={"pid": "prod_que_no_existe", "id": _nid})
+_d2 = _r2.get_json() or {}
+ok(_r2.status_code == 409 and not _d2.get("preparando"),
+   f"y si NO hay molde, eso NO es «preparando» (preparando={_d2.get('preparando')})")
+REGISTROS[PID_D] = _reg_d
+# …y la pantalla ESPERA en vez de tirar el cartel rojo
+_app0 = open(os.path.join(RAIZ, "frontend", "src", "App.jsx"), encoding="utf-8").read()
+_apl = _app0[_app0.index("const aplicarCfgMolde"):_app0.index("const cancelarEsperaCfg")]
+ok("d.preparando" in _apl and "setTimeout(" in _apl,
+   "la pantalla REINTENTA sola mientras el molde se lee, no muestra un error")
+ok("setCfgEsperando(c.nombre)" in _apl, "y mientras tanto dice cual quedo esperando")
+print("    OK    se apreta una vez y entra sola cuando el molde esta listo")
+
 print("\n7 · 🔴 LA PANTALLA TRABAJA SOBRE EL MOLDE EXPLICITO, Y SIN TEXTO DE MAS")
 # El modal se abre desde DOS lugares: Molderia (molde abierto en Configuracion) y el PEDIDO (el
 # molde con diseno). `pidCfg` sirve para el primero y NO para el segundo —cae al ACTIVO del

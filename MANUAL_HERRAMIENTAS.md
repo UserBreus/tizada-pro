@@ -629,6 +629,10 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
    producción— entra **sólo si lo tildás** en el modal.
 
 **Trampas:**
+- ⏳ **Si acabás de subir el molde, esperá.** El molde se lee en segundo plano (más de un
+  minuto en uno grande) y hasta que termina no tiene piezas. Podés apretar **Aplicar**
+  igual: queda anotado y **entra solo** en cuanto el molde está. El aviso celeste te dice
+  cuál quedó esperando.
 - 🔴 **Son tuyas.** Cada usuario ve, aplica y borra **las suyas**. La de un compañero no aparece.
 - 🔴 **Se reconoce el MOLDE, no el archivo.** El mismo molde con **otro diseño adentro** es otro
   archivo y se reconoce igual (por las medidas de sus piezas: la «huella»). Si cambiaste el molde

@@ -4505,6 +4505,8 @@ export default function App() {
   // configuración de un molde adentro de otro, que es la trampa documentada del §7 del mapa.
   const [cfgPid, setCfgPid] = useState(null);
   const [cfgSugerida, setCfgSugerida] = useState(null);
+  // Nombre de la configuración que se apretó mientras el molde todavía se leía: entra sola.
+  const [cfgEsperando, setCfgEsperando] = useState('');
   const cfgSugDescartada = useRef({});
   const [catalogoGrupos, setCatalogoGrupos] = useState([]);
   const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
@@ -10717,15 +10719,35 @@ export default function App() {
       showMsg(`Configuración «${nombre}» guardada (${d.piezas} piezas) ✓`);
     } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
   };
-  const aplicarCfgMolde = async (c) => {
-    setCfgBusy(true); setCfgInforme(null);
+  // 🔴 APLICAR AGUANTA QUE EL MOLDE TODAVÍA SE ESTÉ LEYENDO. El camino B despliega el molde en
+  // segundo plano y tarda más de un minuto en uno grande: apretar «Aplicar» apenas se sube daba un
+  // cartel rojo («este molde todavía no tiene piezas») y había que volver a nombrar todo a mano
+  // (reporte del usuario 2026-09-09). Ahora la elección queda ANOTADA y entra sola en cuanto el
+  // molde está — no es aplicar por nuestra cuenta: el usuario ya apretó el botón.
+  const cfgEspera = useRef(null);        // { cancelado } de la espera en curso
+  const aplicarCfgMolde = async (c, _intento = 0) => {
+    if (_intento === 0) { cfgEspera.current = { cancelado: false }; setCfgInforme(null); }
+    const _mia = cfgEspera.current || { cancelado: false };
+    if (_mia.cancelado) return;
+    setCfgBusy(true);
+    let _esperando = false;
     try {
       const r = await fetch('/api/molde/config/aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pid: cfgPidEfectivo(), id: c.id, partes: cfgPartes })
       });
       const d = await r.json();
+      if (!r.ok && d.preparando) {
+        if (_mia.cancelado) return;
+        // ~4 minutos de paciencia: más que eso ya no es «está tardando», es que algo falló.
+        if (_intento >= 48) throw new Error('El molde tardó demasiado en leerse. Probá de nuevo en un momento.');
+        _esperando = true;
+        setCfgEsperando(c.nombre);
+        setTimeout(() => { if (!_mia.cancelado) aplicarCfgMolde(c, _intento + 1); }, 5000);
+        return;
+      }
       if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
+      setCfgEsperando('');
       setCfgInforme(d);
       // Que se VEA aplicada: el catálogo (grupos, variables, telas) y la detección (los nombres
       // de las piezas en el visor) se vuelven a pedir. Es lo que el usuario mira para decidir si
@@ -10737,7 +10759,12 @@ export default function App() {
         if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
       } catch { /* el visor se refresca al entrar de nuevo */ }
       setMoldeReload(v => v + 1);
-    } catch (e) { showError(e.message); } finally { setCfgBusy(false); }
+      showMsg(`«${c.nombre}» aplicada: ${d.piezas_nombradas} nombre(s) y etiqueta en ${d.etiqueta_posiciones} pieza(s) ✓`);
+    } catch (e) { setCfgEsperando(''); showError(e.message); } finally { if (!_esperando) setCfgBusy(false); }
+  };
+  const cancelarEsperaCfg = () => {
+    if (cfgEspera.current) cfgEspera.current.cancelado = true;
+    setCfgEsperando(''); setCfgBusy(false);
   };
   const borrarCfgMolde = async (c) => {
     abrirConfirmar({
@@ -10758,16 +10785,24 @@ export default function App() {
   useEffect(() => {
     if (!pidCfg) { setCfgSugerida(null); return; }
     let vivo = true;
-    (async () => {
+    let reloj = null;
+    // El molde se RECONOCE por sus piezas, y un molde recién subido todavía no las tiene (se lee
+    // en segundo plano, más de un minuto en uno grande). Sin volver a preguntar, el aviso de
+    // «esto ya lo configuraste» no aparecía nunca: nada vuelve a disparar este efecto cuando el
+    // molde termina. Se re-pregunta cada 6 s, hasta 4 minutos.
+    const mirar = async (intento) => {
       try {
         const r = await fetch(`/api/molde/config/lista${qPid('?')}`);
         const d = await r.json();
+        if (!vivo) return;
+        if (d.preparando && intento < 40) { reloj = setTimeout(() => mirar(intento + 1), 6000); return; }
         const cand = (d.configs || []).find(c => c.estado === 'igual')
           || (d.configs || []).find(c => c.estado === 'mismo_molde');
-        if (vivo) setCfgSugerida(cand && !cfgSugDescartada.current[pidCfg] ? cand : null);
+        setCfgSugerida(cand && !cfgSugDescartada.current[pidCfg] ? cand : null);
       } catch { if (vivo) setCfgSugerida(null); }
-    })();
-    return () => { vivo = false; };
+    };
+    mirar(0);
+    return () => { vivo = false; if (reloj) clearTimeout(reloj); };
   }, [pidCfg, moldeReload]);
 
   const showWarn = (txt) => {
@@ -21121,6 +21156,20 @@ export default function App() {
             </div>
 
             <div style={{ padding: '0 24px 4px', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {/* ESPERANDO A QUE EL MOLDE TERMINE DE LEERSE. No es un error: el usuario ya eligió
+                  y la configuración entra sola en cuanto el molde esté (ver `aplicarCfgMolde`). */}
+              {cfgEsperando && (
+                <div style={{ borderRadius: 14, padding: '12px 14px', marginBottom: 16, fontSize: 12.5,
+                  display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                  background: 'rgba(0,243,255,0.06)', border: '1px solid rgba(0,243,255,0.3)' }}>
+                  <span style={{ flex: 1, minWidth: 180 }}>
+                    Todavía se está leyendo el molde. <b>«{cfgEsperando}»</b> se aplica sola apenas termine
+                    — podés seguir trabajando.
+                  </span>
+                  <button type="button" className="btn ghost" style={{ padding: '5px 12px', fontSize: 11.5 }}
+                    onClick={cancelarEsperaCfg}>No esperar</button>
+                </div>
+              )}
               {/* RESULTADO de aplicar: lo primero que se ve, y dice qué NO entró. */}
               {cfgInforme && (
                 <div style={{ borderRadius: 14, padding: '12px 14px', marginBottom: 16, fontSize: 12.5,
