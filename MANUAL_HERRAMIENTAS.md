@@ -626,7 +626,10 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
    piezas quedaron con su lugar marcado y **qué no entró**. Lo que no haya quedado bien se corrige
    a mano, como siempre.
 4. Lo que es decisión **del pedido** —grupos y variables, telas, planilla, talle de guía,
-   producción— entra **sólo si lo tildás** en el modal.
+   producción— entra **sólo si lo tildás** en el modal. Y **queda guardado con la configuración**:
+   lo que dejes encendido al guardarla (o al tocar «Actualizar») vuelve así la próxima vez, y cada
+   receta muestra en su tarjeta lo que se lleva. Desde el aviso se aplica **lo que la receta
+   tiene**, sin depender de lo que haya tildado en pantalla.
 
 **Corregir una que ya tenías:** hacé el cambio en el molde (un nombre, dónde va una etiqueta) y en
 la lista tocá **«Actualizar»** sobre esa configuración: guarda cómo está el molde ahora **dentro de

@@ -9012,7 +9012,11 @@ def molde_config_guardar():
              # El nombrado es lo que más cuesta y lo que más se repite: se guarda aparte para poder
              # decir en la lista cuántas piezas trae.
              "produccion": _cargar("config_produccion.json", pid) or {},
-             "origen": prod.get("origen"), "molde": prod.get("nombre")}
+             "origen": prod.get("origen"), "molde": prod.get("nombre"),
+             # QUÉ MÁS ENTRA CUANDO SE APLIQUE ESTA RECETA. Antes había que tildarlo cada vez: las
+             # opciones vivían sólo en la pantalla y la receta no se acordaba de nada (pedido del
+             # usuario 2026-09-09). La etiqueta y los nombres no están acá: esos van siempre.
+             "partes": [str(x) for x in (cuerpo.get("partes") or []) if str(x) in _PARTES_CONFIG]}
     # La HUELLA del molde (sus piezas y cuánto miden) es lo que permite reconocerlo cuando vuelve
     # con otro diseño adentro: el archivo es otro, las piezas son las mismas.
     _huella, _huella_pz = _huella_molde(reg)
@@ -9083,6 +9087,8 @@ def molde_config_lista():
                        "piezas": c.get("piezas_n"), "mesas": c.get("mesas_n"),
                        "etiqueta_posiciones": len(_et.get("posiciones") or {}),
                        "etiqueta_apagadas": len(_et.get("piezas_off") or []),
+                       # lo que además entra al aplicarla (lo eligió quien la guardó)
+                       "partes": [x for x in (_datos.get("partes") or []) if x in _PARTES_CONFIG],
                        "cuando": (c["creado_en"].isoformat() if hasattr(c.get("creado_en"), "isoformat")
                                   else str(c.get("creado_en") or "")),
                        "estado": estado, "detalle": detalle})
@@ -9172,7 +9178,13 @@ def molde_config_aplicar():
             v["valores"] = vals
         campos["variantes"] = [v for v in campos["variantes"] if v.get("valores")]
     # 3) LA ETIQUETA SIEMPRE; el resto, sólo lo que el usuario haya tildado (ver `_PARTES_CONFIG`).
-    _partes = [str(x) for x in (cuerpo.get("partes") or []) if str(x) in _PARTES_CONFIG]
+    # Las que manda la pantalla; y si NO manda ninguna (el aviso de «ya configuraste este molde»
+    # aplica sin abrir el modal), las que la receta tiene guardadas. Así la receta se aplica
+    # entera, como la dejaste, sin que nadie tenga que acordarse de tildar lo mismo otra vez.
+    _pedidas = cuerpo.get("partes")
+    if _pedidas is None:
+        _pedidas = datos.get("partes") or []
+    _partes = [str(x) for x in (_pedidas or []) if str(x) in _PARTES_CONFIG]
     _permitidos = set(_CAMPOS_SIEMPRE)
     for _pt in _partes:
         _permitidos.update(_PARTES_CONFIG[_pt])

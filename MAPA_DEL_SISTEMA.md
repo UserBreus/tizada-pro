@@ -1473,6 +1473,82 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (410) — EL TALLE DE GUÍA SE ASIGNA EN EL ACTO.** Pedido del usuario: *«arreglá lo
+  del talle guía: que cuando presione en el talle guía se asigne rápido, en tiempo real»*.
+
+  **QUÉ PASABA.** `cambiarTalleGuia` **esperaba el dibujo** (`/api/plantilla/deteccion?talle_ref=`)
+  y recién después cambiaba algo en pantalla. Medido en el molde «Camiseta de futbol»: **947 ms** la
+  primera vez para un talle (28 ms si ya estaba cacheado), y en un molde grande son varios segundos.
+  Durante toda esa espera el botón seguía diciendo el talle anterior: el clic parecía no hacer nada.
+
+  **AHORA** (medido: el rótulo cambia a los **27 ms**, y a los 50 ms ya se ve el talle nuevo):
+  · El talle elegido **manda enseguida** (`guiaPend`), antes de pedir nada.
+  · **El guardado sale en paralelo** con el dibujo, no en fila detrás de él.
+  · Mientras llega el molde dibujado se muestra **«dibujando…»** al lado del talle: cambió el
+    talle, falta el dibujo, y decirlo evita que parezca colgado.
+  · Si se toca **otro** talle antes de que llegue el anterior, la respuesta vieja **se descarta**
+    (`guiaSeq`): manda el último clic.
+
+  🔴 **Y NO MIENTE SI EL GUARDADO FALLA.** La detección devuelve como guía **la GUARDADA**, así que
+  con el guardado caído la pantalla habría vuelto sola al talle anterior sin decir por qué — o,
+  peor, se habría quedado mostrando uno que no se guardó. Ahora: si falla, se avisa con el motivo y
+  se vuelve al anterior; y el dibujo, que llega después, **no puede volver a poner** el talle que no
+  se guardó (`guiaFallo`). Probado a propósito contra el sandbox de sólo lectura, que rechaza toda
+  escritura: sale *«No se pudo guardar el talle de guía: sandbox de SÓLO LECTURA…»* y la guía queda
+  en la de antes.
+
+  **VERIFICADO EN LA APP REAL** (sandbox, con el guardado simulado lento para ver que no se espera)
+  y por contrato: `frontend/verificar_pasos_pedido.mjs` §8.
+
+- **2026-09-09 (409) — 🔴 «¿POR QUÉ NO LE PUSO LO QUE SELECCIONÉ?» — DOS COSAS, y la primera fue
+  mía.** El usuario tildó «Talle de guía» y las tarjetas no mostraban nada.
+
+  **1 · EL SERVIDOR CORRÍA CÓDIGO VIEJO. Error mío, y el que la memoria avisa.** La entrada 408
+  (guardar los «además» con la receta) tocó `servidor.py` a las **12:00:18**, y el servidor estaba
+  levantado desde las **11:55:35**: el cambio **nunca corrió**. El front mandaba `partes` y el
+  servidor —el de antes, en memoria— lo ignoraba, así que no se guardaba nada y la lista no
+  devolvía nada. Se ve en un renglón: comparar la **hora de arranque del proceso** con el `mtime`
+  de `servidor.py`. `/api/salud` contestando 200 **no** prueba nada de esto.
+  ⛔ **Tras tocar un `.py`, reiniciar Y comprobar por hora de arranque. Siempre.**
+
+  **2 · Y LA PANTALLA NO DECÍA QUE HABÍA QUE GUARDARLO.** Aun con el servidor al día, tildar una
+  opción **no la pega a ninguna receta**: entra al aplicar, y queda guardada recién con **«Guardar»**
+  (una nueva) o **«Actualizar»** (la que ya tenías). Eso no estaba dicho en ningún lado. Ahora,
+  debajo de las opciones, hay una línea que cambia sola: en ámbar *«esto todavía no está guardado en
+  ninguna: … tocá «Actualizar» en la configuración que quieras»* cuando lo tildado no coincide con
+  ninguna receta, y en gris *«se guarda con la configuración…»* cuando sí.
+
+  **VERIFICADO DE PUNTA A PUNTA** contra el servidor real (base y datos aislados): guardo una receta
+  sin opciones → la tarjeta muestra vacío; tildo «Talle de guía» + «Telas» y toco «Actualizar» → la
+  tarjeta las muestra y **sigue habiendo una sola receta**; la aplico en otro molde **sin tildar
+  nada** → entran las dos y además el nombrado. Contrato: `frontend/verificar_pasos_pedido.mjs` §7.
+
+- **2026-09-09 (408) — LOS «APLICAR ADEMÁS» AHORA VIAJAN CON LA RECETA.** Pregunta del usuario,
+  señalando la fila de opciones: *«¿si quiero agregar a una configuración ya guardada estas
+  opciones? Agregá»*.
+
+  **QUÉ PASABA.** Esas opciones —grupos y variables, telas, planilla, talle de guía, borde y
+  producción— vivían **sólo en la pantalla**: eran un tilde del momento. La receta guardaba TODOS
+  los campos, pero no se acordaba de **cuáles querías que entraran**, así que en cada pedido había
+  que volver a tildar lo mismo. Y desde el aviso de «este molde ya lo configuraste» —que aplica sin
+  abrir el modal— entraba lo que hubiera quedado tildado en una pantalla que ni estaba abierta.
+
+  **AHORA:**
+  · **Se guardan con la configuración** (`datos["partes"]`), tanto al crearla como al tocar
+    **«Actualizar»** en una que ya tenías: así se le AGREGAN a una receta vieja.
+  · **La lista las devuelve**, y cada tarjeta muestra abajo lo que se lleva («además: Telas ·
+    Talle de guía») — se ve sin tener que aplicarla.
+  · **Al abrir el modal vienen tildadas** las de la receta que le calza a ese molde.
+  · **Aplicar sin mandar la lista usa las de la receta.** Es lo que hace el aviso: entra la receta
+    entera, como la dejaste. Si la pantalla manda una lista (aunque sea vacía), manda ella.
+
+  ⚠️ Las claves son las de `_PARTES_CONFIG` (servidor) y `CFG_PARTES` (front): si se agrega una
+  parte hay que tocar las dos. La **etiqueta** y los **nombres** no están ahí: entran siempre.
+
+  **VERIFICADO** con `verificar_config_guardada.py` §9: se guardan (y se descarta una clave
+  inventada), la lista las devuelve, aplicar sin mandarlas usa las de la receta y de verdad entran,
+  y si la pantalla manda la lista vacía no entra nada de eso.
+
 - **2026-09-09 (407) — El cartel volvía solo después de aplicar, y una receta guardada no se podía
   EDITAR.** Pedido del usuario: *«si ya apliqué la configuración encontrada, ese cartel debe
   desaparecer. Y si quiero editar una configuración guardada me debe dejar: le hago cambios y, en

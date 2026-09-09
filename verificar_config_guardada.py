@@ -355,7 +355,7 @@ _bloque = _app[_app.index("const cargarCfgGuardadas"):_app.index("const showWarn
 ok("pid: cfgPidEfectivo()" in _bloque and "const _pidAp = pidExplicito || cfgPidEfectivo()" in _bloque
    and "pid: _pidAp" in _bloque and "pid: pidCfg" not in _bloque,
    "guardar y aplicar usan ESE molde (el explicito, o el abierto en Configuracion), nunca `pidCfg`")
-ok("cargarCfgGuardadas(_id)" in _app and "cargarCfgGuardadas(pidCfg)" in _app,
+ok("cargarCfgGuardadas(_id, true)" in _app and "cargarCfgGuardadas(pidCfg, true)" in _app,
    "los dos lugares que abren el modal le pasan el molde por ARGUMENTO (estado de React)")
 # …y el espacio de las herramientas quedo con los botones y nada mas (pedido del usuario).
 ok("<span>Nombrar piezas</span>" in _app and "<span>Ubicar etiqueta</span>" in _app,
@@ -396,6 +396,37 @@ ok(_r8b.status_code == 404, f"otro usuario NO puede pisar la mia escribiendo el 
 S._uid_actual = _yo8
 ok(_CFGS[_id8]["nombre"] == "la que se edita", "y la receta quedo intacta")
 print("    OK    se edita la que ya esta, y nadie pisa la de otro")
+
+print("\n9 · LOS «ADEMAS» VIAJAN CON LA RECETA (no hay que tildarlos cada vez)")
+# Pedido del usuario (2026-09-09): «si quiero agregar a una configuracion ya guardada estas
+# opciones». Antes vivian solo en la pantalla: la receta no se acordaba de nada y habia que volver
+# a tildar lo mismo en cada pedido.
+_id9 = ((CLI.post("/api/molde/config/guardar",
+                  json={"pid": PID_A, "nombre": "con extras",
+                        "partes": ["guia", "telas", "inventada"]}).get_json()) or {}).get("id")
+_g9 = _CFGS[_id9]["datos"].get("partes")
+ok(sorted(_g9 or []) == ["guia", "telas"],
+   f"se guardan las que eligio, y se descarta la que no existe ({_g9})")
+_l9 = ((CLI.get(f"/api/molde/config/lista?pid={PID_A}").get_json() or {}).get("configs") or [])
+_c9 = next((c for c in _l9 if c["id"] == _id9), {})
+ok(sorted(_c9.get("partes") or []) == ["guia", "telas"],
+   f"y la lista las devuelve, para poder verlas sin aplicar ({_c9.get('partes')})")
+
+# APLICAR SIN MANDAR NADA usa las de la receta (es lo que hace el aviso, sin abrir el modal)
+_prod9 = next(p for p in CAT["productos"] if p["id"] == PID_B)
+_prod9.pop("variante_guia", None); _prod9.pop("telas_cfg", None)
+_d9 = (CLI.post("/api/molde/config/aplicar", json={"pid": PID_B, "id": _id9}).get_json() or {})
+ok(sorted(_d9.get("partes") or []) == ["guia", "telas"],
+   f"aplicar SIN mandar partes usa las de la receta ({_d9.get('partes')})")
+ok(_prod9.get("variante_guia") == "M" and (_prod9.get("telas_cfg") or {}).get("todas") == ["Delta"],
+   "y de verdad entraron el talle de guia y las telas")
+# …y si la pantalla manda una lista, manda ella (aunque sea vacia)
+_prod9.pop("variante_guia", None)
+_d9b = (CLI.post("/api/molde/config/aplicar",
+                 json={"pid": PID_B, "id": _id9, "partes": []}).get_json() or {})
+ok(not _d9b.get("partes") and _prod9.get("variante_guia") is None,
+   f"si la pantalla manda la lista vacia, NO entra nada de eso ({_d9b.get('partes')})")
+print("    OK    la receta se lleva sus «ademas» y se aplican solos")
 
 print()
 if FALLOS:

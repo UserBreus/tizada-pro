@@ -298,6 +298,11 @@ const CAP_RATIO_ETQ = 0.716;
 // pantalla y el servidor contaran distinto, el botón de seguir quedaría apagado sin que se
 // entienda por qué (o al revés, dejaría pasar un molde a medio nombrar).
 const _ES_PIEZA_SIN_NOMBRE = /^Pieza( extra)? \d+'*$/;
+// LO QUE ADEMÁS PUEDE LLEVAR UNA CONFIGURACIÓN GUARDADA del molde. La etiqueta y los nombres
+// NO están acá: esos entran siempre. Las claves son las de `_PARTES_CONFIG` en `servidor.py`.
+const CFG_PARTES = [['grupos_variables', 'Grupos y variables'], ['telas', 'Telas'],
+                    ['planilla', 'Planilla'], ['guia', 'Talle de guía'],
+                    ['produccion', 'Borde y producción']];
 
 // APOYAR LA ETIQUETA EN EL CONTORNO: del punto que se tocó al punto del borde más cercano, con el
 // ángulo de la tangente y la normal hacia ADENTRO (para que el texto entre en la pieza y no salga).
@@ -4486,6 +4491,12 @@ export default function App() {
   const [modalConfirmOpen, setModalConfirmOpen] = useState(false);
   const [confirmProductoId, setConfirmProductoId] = useState('');
   const [modalTalleGuiaOpen, setModalTalleGuiaOpen] = useState(false);
+  // EL TALLE DE GUÍA QUE SE ACABA DE TOCAR. Vale MÁS que el que dice el dibujo: el dibujo tarda
+  // (hay que leer el molde en ese talle) y hasta que llegaba, la pantalla seguía mostrando el
+  // anterior — parecía que el clic no había hecho nada.
+  const [guiaPend, setGuiaPend] = useState(null);
+  const guiaSeq = useRef(0);          // para descartar respuestas viejas si se toca varias veces
+  const guiaFallo = useRef(0);        // el nº de cambio cuyo GUARDADO falló (ver `cambiarTalleGuia`)
   // CONFIGURACIONES GUARDADAS DEL MOLDE (camino B). Un molde con el diseño adentro se borra con el
   // pedido y con él todo lo configurado; esto permite volver a aplicarlo cuando se sube el mismo
   // archivo en otro pedido. Se elige A MANO: nada se aplica solo (pedido del usuario 2026-09-08).
@@ -7033,32 +7044,55 @@ export default function App() {
     // ellas, el efecto no se volvía a disparar cuando el molde pasaba a tener plantilla.
   }, [adminSubView, pidCfg, moldeReload, prodCfg?.plantilla, prodCfg?.arte]);
 
+  // 🔴 SE ASIGNA EN EL ACTO. Antes se esperaba a que el servidor devolviera el molde DIBUJADO en
+  // ese talle —lo lento: ~1 s en un molde común y varios segundos en uno grande la primera vez—
+  // y recién ahí cambiaba algo en pantalla: el clic parecía no hacer nada (reporte del usuario
+  // 2026-09-09). Ahora el talle elegido manda ENSEGUIDA (`guiaPend`, medido: 27 ms), el guardado
+  // sale en paralelo y el dibujo entra cuando llega, sin trabar nada.
   const cambiarTalleGuia = async (talleRef) => {
-    showMsg("Actualizando talle de guía...");
+    const _n = ++guiaSeq.current;
+    const _antes = (etqData || {}).guia || (etqData || {}).talle_ref || null;
+    setGuiaPend(talleRef);                       // la pantalla ya muestra el nuevo
+    if (pidCfg) {
+      // Caché del navegador: al RECARGAR no se pierde, ande o no el servidor.
+      try { localStorage.setItem('tizada_talleguia_' + pidCfg, talleRef); } catch (e) { /* sin storage */ }
+      // Guardar es rápido y NO depende del dibujo: va en paralelo.
+      fetch('/api/productos/variante_guia', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pidCfg, variante: talleRef })
+      }).then(async r => {
+        if (_n !== guiaSeq.current) return;      // se tocó otro después: manda ése
+        if (!r.ok) throw new Error(((await leerJson(r)) || {}).error || `HTTP ${r.status}`);
+        fetchProductos();
+        setGuiaPend(null);                       // guardado: ya lo dice el molde
+      }).catch(e => {
+        if (_n !== guiaSeq.current) return;
+        // 🔴 NO se revierte en silencio. La detección devuelve como guía la GUARDADA, así que si
+        // el guardado falló y no dijéramos nada, la pantalla volvería sola al talle anterior y
+        // parecería que el clic no funcionó (otra vez, pero peor: ahora mintiendo).
+        guiaFallo.current = _n;          // …y que el dibujo, que llega después, no lo vuelva a poner
+        setGuiaPend(null);
+        setEtqData(prev => (prev ? { ...prev, guia: _antes } : prev));
+        showError(`No se pudo guardar el ${term.variante.toLowerCase()} de guía: ${e.message}`);
+      });
+    }
     try {
       const url = `/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talleRef)}${qPid('&')}`;
       const res = await fetch(url);
       const data = await res.json();
+      // Si mientras tanto se tocó OTRO talle, esta respuesta llegó tarde: manda el último clic.
+      if (_n !== guiaSeq.current) return;
       if (!res.ok) throw new Error(data.error);
-
-      setEtqData(data);
+      // `guia: talleRef` a propósito: el dibujo se pidió ANTES de que el guardado terminara, así
+      // que su `guia` puede ser todavía la vieja. Lo que eligió la persona es lo que vale; si el
+      // guardado falla, el `catch` de arriba lo vuelve atrás Y lo dice.
+      // …salvo que el guardado haya fallado: en ese caso vale el anterior, y el aviso ya se dio.
+      setEtqData({ ...data, guia: guiaFallo.current === _n ? _antes : talleRef });
       setEtqNombres(data.nombres_existentes || {});
-      if (pidCfg) {
-        // 1) Caché del navegador: hace que al RECARGAR no se pierda (anda con
-        //    cualquier versión del servidor).
-        localStorage.setItem('tizada_talleguia_' + pidCfg, talleRef);
-        // 2) Base de datos: compartido entre todos los usuarios (server al día).
-        try {
-          await fetch('/api/productos/variante_guia', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: pidCfg, variante: talleRef })
-          });
-          fetchProductos();
-        } catch (e) { /* el cambio visual y el caché ya se aplicaron */ }
-      }
-      showMsg("");
+      if (!pidCfg) setGuiaPend(null);            // sin molde abierto no hay nada que guardar
     } catch (err) {
+      if (_n !== guiaSeq.current) return;
+      setGuiaPend(null);
       showError(err.message);
     }
   };
@@ -10713,15 +10747,31 @@ export default function App() {
   // El molde sobre el que trabaja el modal: el que le pasaron al abrirlo (pedido) o, si no, el
   // que está abierto en Configuración.
   const cfgPidEfectivo = () => cfgPid || pidCfg;
+  // ¿Lo que está tildado en «Aplicar además» ya está guardado en alguna receta? Si no, es un
+  // cambio que todavía no quedó en ninguna: hay que decirlo, si no el usuario tilda y no entiende
+  // por qué la tarjeta no lo muestra (reporte del usuario 2026-09-09).
+  const _partesSinGuardar = React.useMemo(() => {
+    if (!cfgGuardadas.length) return false;
+    const mio = [...cfgPartes].sort().join('|');
+    return !cfgGuardadas.some(c => [...(c.partes || [])].sort().join('|') === mio);
+  }, [cfgPartes, cfgGuardadas]);
   // ⚠️ El molde va POR ARGUMENTO y no por el estado: quien abre el modal hace `setCfgPid(...)` y
   // llama a esto en el mismo gesto, y ahí React todavía no actualizó el estado — se listarían las
   // configuraciones del molde ANTERIOR (mismo error de tick que la entrada 277 del mapa).
-  const cargarCfgGuardadas = async (pidExplicito) => {
+  const cargarCfgGuardadas = async (pidExplicito, preTildar) => {
     const _p = pidExplicito || cfgPidEfectivo();
     try {
       const r = await fetch(`/api/molde/config/lista?pid=${encodeURIComponent(_p)}`);
       const d = await r.json();
       setCfgGuardadas(d.configs || []);
+      // AL ABRIR: los «además» que se ven tildados son los que trae la receta que le calza a este
+      // molde. Antes había que volver a tildar lo mismo cada vez, porque vivían sólo en la
+      // pantalla y la receta no se acordaba de nada.
+      if (preTildar) {
+        const _mejor = (d.configs || []).find(c => c.estado === 'igual')
+          || (d.configs || []).find(c => c.estado === 'mismo_molde');
+        setCfgPartes((_mejor && _mejor.partes) || []);
+      }
     } catch { setCfgGuardadas([]); }
   };
   // `existente` = {id, nombre}: en vez de crear otra, PISA esa. Es lo normal cuando corregís algo
@@ -10734,7 +10784,8 @@ export default function App() {
     try {
       const r = await fetch('/api/molde/config/guardar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: cfgPidEfectivo(), nombre, id: existente ? existente.id : undefined })
+        body: JSON.stringify({ pid: cfgPidEfectivo(), nombre, partes: cfgPartes,
+                               id: existente ? existente.id : undefined })
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
@@ -10762,7 +10813,9 @@ export default function App() {
   // `pidExplicito`: el aviso del panel del pedido aplica sobre SU molde, que no es el que está
   // abierto en Configuración. Va por argumento y no por estado por lo mismo de siempre: React no
   // lo tendría actualizado en el mismo gesto.
-  const aplicarCfgMolde = async (c, pidExplicito, _intento = 0) => {
+  // `partesExplicitas`: `undefined` = lo tildado en la pantalla · `null` = lo que trae la receta
+  // guardada (es lo que corresponde cuando se aplica desde el aviso, sin abrir el modal).
+  const aplicarCfgMolde = async (c, pidExplicito, _intento = 0, partesExplicitas) => {
     const _pidAp = pidExplicito || cfgPidEfectivo();
     if (_intento === 0) { cfgEspera.current = { cancelado: false }; setCfgInforme(null); }
     const _mia = cfgEspera.current || { cancelado: false };
@@ -10772,7 +10825,9 @@ export default function App() {
     try {
       const r = await fetch('/api/molde/config/aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: _pidAp, id: c.id, partes: cfgPartes })
+        body: JSON.stringify({ pid: _pidAp, id: c.id,
+                               partes: partesExplicitas === undefined ? cfgPartes
+                                 : (partesExplicitas === null ? undefined : partesExplicitas) })
       });
       const d = await r.json();
       if (!r.ok && d.preparando) {
@@ -10781,7 +10836,7 @@ export default function App() {
         if (_intento >= 48) throw new Error('El molde tardó demasiado en leerse. Probá de nuevo en un momento.');
         _esperando = true;
         setCfgEsperando(c.nombre);
-        setTimeout(() => { if (!_mia.cancelado) aplicarCfgMolde(c, _pidAp, _intento + 1); }, 5000);
+        setTimeout(() => { if (!_mia.cancelado) aplicarCfgMolde(c, _pidAp, _intento + 1, partesExplicitas); }, 5000);
         return;
       }
       if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
@@ -14180,12 +14235,12 @@ export default function App() {
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                           <button type="button" className="btn primary" data-tour="pieza-b-sugerida-aplicar"
                             disabled={cfgBusy} style={{ flex: 1, minWidth: 96, padding: '7px 10px', fontSize: 12, borderRadius: 9 }}
-                            onClick={() => { setCfgPid(_id); aplicarCfgMolde(cfgSugeridas[_id], _id); }}>
+                            onClick={() => { setCfgPid(_id); aplicarCfgMolde(cfgSugeridas[_id], _id, 0, null); }}>
                             Aplicar
                           </button>
                           <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
                             title="Ver todas las configuraciones guardadas y elegir otra"
-                            onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id); }}>
+                            onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id, true); }}>
                             Elegir otra
                           </button>
                           <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
@@ -14235,7 +14290,7 @@ export default function App() {
                         style={{ width: '100%', justifyContent: 'space-between', padding: '10px 12px', fontSize: 12.5, borderRadius: 10,
                           borderColor: cfgSugeridas[_id] ? 'rgba(16,185,129,0.45)' : undefined }}
                         title="Guardar cómo quedó este molde, o usar una configuración guardada"
-                        onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id); }}>
+                        onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id, true); }}>
                         <span>Guardar configuración</span>
                         {cfgSugeridas[_id] && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--success)' }}>hay una</span>}
                       </button>
@@ -17119,7 +17174,10 @@ export default function App() {
                                 >
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <span style={{ color: 'var(--text-secondary)', fontSize: 11.5, fontWeight: 600 }}>Actual:</span>
-                                    <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 14 }}>{etqData.guia || etqData.talle_ref}</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--accent)', fontSize: 14 }}>{guiaPend || etqData.guia || etqData.talle_ref}</span>
+                                    {/* El talle ya cambió; lo que falta es el DIBUJO, que tarda.
+                                        Decirlo evita que parezca que se colgó. */}
+                                    {guiaPend && <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>dibujando…</span>}
                                   </span>
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Cambiar ▾</span>
                                 </button>
@@ -17266,7 +17324,7 @@ export default function App() {
                                   </span>
                                   <button type="button" className="btn ghost" data-tour="molde-cfg-abrir"
                                     style={{ padding: '4px 10px', fontSize: 11 }}
-                                    onClick={() => { setCfgPid(null); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(pidCfg); }}>
+                                    onClick={() => { setCfgPid(null); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(pidCfg, true); }}>
                                     Guardar / usar
                                   </button>
                                 </div>
@@ -17283,7 +17341,7 @@ export default function App() {
                                     </span>
                                     <button type="button" className="btn" disabled={cfgBusy}
                                       data-tour="molde-cfg-sugerida-aplicar"
-                                      onClick={async () => { setCfgPid(null); await aplicarCfgMolde(cfgSugeridas[pidCfg], pidCfg); setCfgModalOpen(true); }}>
+                                      onClick={async () => { setCfgPid(null); await aplicarCfgMolde(cfgSugeridas[pidCfg], pidCfg, 0, null); setCfgModalOpen(true); }}>
                                       Aplicar
                                     </button>
                                     <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11 }}
@@ -21362,6 +21420,19 @@ export default function App() {
                             <span className="cfg-dato">{c.piezas} piezas</span>
                             {c.molde && <span className="cfg-dato" title={c.molde}>de «{c.molde}»</span>}
                           </div>
+                          {/* Lo que ADEMÁS se lleva esta receta: se ve sin tener que aplicarla. */}
+                          {(c.partes || []).length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>además:</span>
+                              {(c.partes || []).map(k => (
+                                <span key={k} style={{ fontSize: 10.5, fontWeight: 600, padding: '2px 7px',
+                                  borderRadius: 20, color: 'var(--accent)', background: 'var(--selected-bg)',
+                                  border: '1px solid rgba(0,243,255,0.35)' }}>
+                                  {(CFG_PARTES.find(x => x[0] === k) || [k, k])[1]}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.detalle}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -21392,15 +21463,16 @@ export default function App() {
                     <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-secondary)' }}>
                       Aplicar además
                     </span>
-                    <Ayuda ancho={300}>La <b>etiqueta</b> y los <b>nombres</b> entran siempre: es el
+                    <Ayuda ancho={320}>La <b>etiqueta</b> y los <b>nombres</b> entran siempre: es el
                       trabajo que se guarda. Esto otro es <b>decisión del pedido</b> —qué grupos y
                       variables lleva, con qué telas y con qué planilla—, así que entra sólo si lo
-                      encendés vos.</Ayuda>
+                      encendés vos. <b>Queda guardado con la configuración</b>: al guardarla (o al
+                      tocar «Actualizar» en una que ya tenías) se lleva lo que dejaste encendido, y
+                      la próxima vez vuelve así. Cada una muestra abajo lo que se lleva.</Ayuda>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                    {[['grupos_variables', 'Grupos y variables'], ['telas', 'Telas'],
-                      ['planilla', 'Planilla'], ['guia', term.variante + ' de guía'],
-                      ['produccion', 'Borde y producción']].map(([k, txt]) => {
+                    {CFG_PARTES.map(([k, _t]) => {
+                      const txt = k === 'guia' ? term.variante + ' de guía' : _t;
                       const on = cfgPartes.includes(k);
                       return (
                         <button key={k} type="button"
@@ -21415,6 +21487,17 @@ export default function App() {
                         </button>
                       );
                     })}
+                  </div>
+                  {/* 🔴 QUE SE VEA QUE HAY QUE GUARDARLO. Tildar acá NO lo deja pegado a ninguna
+                      receta: entra al aplicar, y queda guardado recién con «Guardar» (una nueva) o
+                      «Actualizar» (la que ya tenías). Sin decirlo, el usuario tildaba y no entendía
+                      por qué la tarjeta no lo mostraba (reporte 2026-09-09). */}
+                  <div style={{ fontSize: 11, color: _partesSinGuardar ? 'var(--warning)' : 'var(--text-muted)',
+                    marginTop: 8, lineHeight: 1.45 }}>
+                    {_partesSinGuardar
+                      ? <>Esto todavía <b>no está guardado</b> en ninguna: entra al aplicar, y para que
+                          quede tocá <b>«Actualizar»</b> en la configuración que quieras (o guardá una nueva).</>
+                      : <>Se guarda con la configuración: queda al tocar <b>«Guardar»</b> o <b>«Actualizar»</b>.</>}
                   </div>
                 </div>
               )}
@@ -21461,8 +21544,8 @@ export default function App() {
                 <button
                   key={t}
                   type="button"
-                  className={`talle-square ${(etqData.guia || etqData.talle_ref) === t ? 'active' : ''}`}
-                  data-elegida={(etqData.guia || etqData.talle_ref) === t ? '1' : '0'}
+                  className={`talle-square ${(guiaPend || etqData.guia || etqData.talle_ref) === t ? 'active' : ''}`}
+                  data-elegida={(guiaPend || etqData.guia || etqData.talle_ref) === t ? '1' : '0'}
                   onClick={() => { cambiarTalleGuia(t); setModalTalleGuiaOpen(false); }}
                 >
                   {t}

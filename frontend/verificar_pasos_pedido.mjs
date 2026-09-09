@@ -69,8 +69,12 @@ ok(/pieza-b-sugerida[\s\S]{0,1800}Elegir otra/.test(APP), 'y se puede elegir OTR
 ok(APP.includes('const [cfgSugeridas, setCfgSugeridas]'), 'la sugerencia se guarda POR MOLDE');
 ok(APP.includes('cfgSugeridas[_id]') && APP.includes('cfgSugeridas[pidCfg]'),
    'cada pantalla mira la de SU molde');
-ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id\)/.test(APP),
+ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id/.test(APP),
    'y aplicar recibe el molde por argumento (no por estado, que React no tiene actualizado)');
+// El aviso aplica con lo que trae LA RECETA (`null`), no con lo que haya quedado tildado en
+// una pantalla que ni siquiera está abierta.
+ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id, 0, null\)/.test(APP),
+   'y desde el aviso entra lo que la receta tiene guardado');
 
 console.log('\n6) Aplicada una vez, el cartel NO vuelve; y una receta se puede EDITAR');
 // 🔴 Aplicar recarga el molde (`moldeReload`) y eso vuelve a disparar la búsqueda: sin recordar
@@ -87,6 +91,34 @@ ok(/id: existente \? existente\.id : undefined/.test(APP), 'y el guardado manda 
 // y creería que hay que pisar una receta que no existe.
 ok(APP.includes('onClick={() => guardarCfgMolde()}'),
    '🔴 el botón de guardar nuevo NO le pasa el evento como si fuera una receta');
+
+console.log('\n7) Los «aplicar ademas» quedan guardados con la receta, y se dice cuando falta guardar');
+// Reporte del usuario 2026-09-09: tildo «Talle de guia» y las tarjetas no lo mostraban. Eran dos
+// cosas: el servidor corria codigo viejo (no se habia reiniciado) y, ademas, la pantalla no decia
+// que tildar no alcanza — queda guardado recien con «Guardar» o «Actualizar».
+ok(/partes: cfgPartes/.test(APP), 'guardar manda lo que esta tildado');
+ok(APP.includes('const _partesSinGuardar'), 'la pantalla sabe si eso todavia no esta en ninguna receta');
+ok(APP.includes('no está guardado'), 'y lo dice con todas las letras');
+ok(/c\.partes \|\| \[\]/.test(APP), 'y cada tarjeta muestra lo que se lleva');
+
+console.log('\n8) El TALLE DE GUIA se asigna en el acto (y no miente si el guardado falla)');
+// Reporte del usuario 2026-09-09: se esperaba a que el servidor devolviera el molde DIBUJADO en
+// ese talle (medido: ~1 s en un molde comun, varios segundos en uno grande la primera vez) y hasta
+// entonces la pantalla no cambiaba: el clic parecia no hacer nada.
+const cg = APP.slice(APP.indexOf('const cambiarTalleGuia'), APP.indexOf('const guardarReferencia'));
+ok(/setGuiaPend\(talleRef\)/.test(cg), 'el talle elegido manda enseguida, antes de cualquier respuesta');
+ok(cg.indexOf('setGuiaPend(talleRef)') < cg.indexOf('/api/plantilla/deteccion'),
+   'se marca ANTES de pedir el dibujo, no despues');
+ok(!/await fetch\('\/api\/productos\/variante_guia'/.test(cg),
+   'el guardado sale en paralelo: no se espera para mostrar el cambio');
+ok(/_n !== guiaSeq\.current/.test(cg),
+   'y si se toca otro talle, la respuesta vieja se descarta (manda el ultimo clic)');
+// 🔴 La deteccion devuelve como guia la GUARDADA: si el guardado fallo y no dijeramos nada, la
+// pantalla volveria sola al talle anterior y pareceria que el clic no funciono.
+ok(/No se pudo guardar el/.test(cg), 'si el guardado falla, se DICE');
+ok(/guiaFallo\.current === _n \? _antes : talleRef/.test(cg),
+   'y el dibujo, que llega despues, no vuelve a poner un talle que no se guardo');
+ok(APP.includes('dibujando'), 'mientras llega el dibujo se avisa, para que no parezca colgado');
 
 console.log();
 if (fallos.length) {
