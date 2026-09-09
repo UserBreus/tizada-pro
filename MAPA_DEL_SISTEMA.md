@@ -1473,6 +1473,60 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (412) — 🔴 LA PLANILLA MOSTRABA LOS TALLES DE UN SOLO MOLDE.** Pedido del usuario:
+  *«me muestra el talle de un solo molde; si cargo 2 moldes me debe mostrar todos los talles de los
+  2. Y la columna del diseño, al elegir, que deje elegir en la fila el diseño que tenga ese talle en
+  al menos 1 de los moldes que tenga»*.
+
+  **POR QUÉ.** La columna Talle ofrecía `estado.talles`, que sale de `/api/estado_general` y son los
+  del molde **ACTIVO del servidor** — uno solo. Con dos moldes en el pedido faltaba la mitad de los
+  talles y esas prendas no se podían cargar. Medido en la máquina: «Camiseta de futbol» tiene 30
+  talles (incluye los `…fem`) y «MOLDE VOLLEY CAMPERAS» 10; se veían 10 o 30 según cuál estuviera
+  activo, nunca los 30 del pedido.
+
+  **AHORA:**
+  · `/api/productos` manda los **talles de CADA molde** (`talles`), en el orden del archivo. El
+    orden sale de `resumen_plantilla.json`, **no** de abrir el `.ai`: esto corre por cada molde en
+    cada llamada.
+  · La planilla arma `tallesDelPedido` = la **unión** de los talles de los moldes del pedido, sin
+    repetir y respetando el orden de cada uno. `estado.talles` queda de red por si el servidor
+    todavía no los manda.
+  · La columna **Diseño** de una fila ofrece **sólo los diseños que tienen ESE talle** en alguno de
+    sus moldes (`_disenosParaTalle`), y la validación mira **la fila**, no la columna sola. Si
+    ningún diseño lo tiene, se ofrecen todos igual (una lista vacía es un callejón sin salida).
+
+  **VERIFICADO EN LA APP REAL** (sandbox, pedido de dos moldes armado desde el navegador): la
+  columna Talle ofrece **30** opciones —con `XSfem`, que sólo tiene un molde, y `XS`, que tienen los
+  dos—; en la fila con `XSfem` el Diseño ofrece **sólo «jugador»**, y en la fila con `M` ofrece
+  **«jugador» y «campera»**. Contrato: `frontend/verificar_pasos_pedido.mjs` §10.
+
+- **2026-09-09 (411) — APLICADA LA CONFIGURACIÓN, EL VISOR MUESTRA LO QUE ENTRÓ.** Pedido del
+  usuario: *«después que aplicás la configuración ya guardada, el visor en tiempo real te debe
+  mostrar todo ya como está en la configuración»*.
+
+  **POR QUÉ NO SE VEÍA.** La configuración le cambia al molde dos cosas —los **nombres** de las
+  piezas y **dónde va la etiqueta**— y el visor **no las lee de un solo lado**:
+  · los nombres salen de `/api/plantilla/deteccion`, que está **cacheada en el navegador** por
+    `(molde, talle)` en `_talleDetCache`;
+  · la etiqueta sale de `/api/productos/etiqueta`, que es **otro estado** (`etiquetaConfig`);
+  · el lienzo con **todos los talles** (`empTodasData`) filtra **por NOMBRE**, así que con los
+    nombres viejos no encuentra nada.
+  Aplicar refrescaba **sólo la detección**, y encima sin tocar el caché: la pantalla seguía
+  mostrando lo de antes, como si no hubiera pasado nada.
+
+  **AHORA hay UN solo lugar que deja el visor al día** (`refrescarVisorMolde(pid)`): tira el caché
+  de la detección **de ese molde** (todos sus talles), pide de nuevo el lienzo junto, y relee
+  nombres y etiqueta **en paralelo** (son dos lecturas cortas). Aplicar lo llama con el molde que
+  tocó, no con el que esté abierto en otro lado.
+
+  ⚠️ Si mañana el visor pasa a leer algo más, **va acá**: es el único punto donde se junta todo lo
+  que una configuración aplicada puede cambiar.
+
+  **VERIFICADO**: `verificar_config_guardada.py` comprueba que lo que el visor **vuelve a pedir**
+  ya sea lo aplicado (`/api/productos/etiqueta` devuelve las posiciones de la receta), y
+  `frontend/verificar_pasos_pedido.mjs` §9 que el refresco cubra las tres fuentes y que aplicar lo
+  llame.
+
 - **2026-09-09 (410) — EL TALLE DE GUÍA SE ASIGNA EN EL ACTO.** Pedido del usuario: *«arreglá lo
   del talle guía: que cuando presione en el talle guía se asigne rápido, en tiempo real»*.
 

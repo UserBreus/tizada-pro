@@ -120,6 +120,34 @@ ok(/guiaFallo\.current === _n \? _antes : talleRef/.test(cg),
    'y el dibujo, que llega despues, no vuelve a poner un talle que no se guardo');
 ok(APP.includes('dibujando'), 'mientras llega el dibujo se avisa, para que no parezca colgado');
 
+console.log('\n9) Aplicada la configuracion, el VISOR muestra lo que entro');
+// Pedido del usuario 2026-09-09. Los nombres y la etiqueta no salen de un solo lado: la deteccion
+// (CACHEADA por molde y talle), `/api/productos/etiqueta`, y el lienzo con todos los talles.
+// Refrescar solo uno dejaba la pantalla como estaba, como si no hubiera pasado nada.
+const rv = APP.slice(APP.indexOf('const refrescarVisorMolde'), APP.indexOf('const aplicarCfgMolde'));
+ok(rv.length > 100, 'hay un solo lugar que deja el visor al dia (`refrescarVisorMolde`)');
+ok(/delete _talleDetCache\.current\[k\]/.test(rv), 'tira el cache de la deteccion de ESE molde');
+ok(/setEmpTodasData\(null\)/.test(rv), 'y el lienzo con todos los talles se vuelve a pedir');
+ok(/cargarMoldeOperario\(pid\)/.test(rv), 'relee los nombres');
+ok(/api\/productos\/etiqueta/.test(rv) && /setEtiquetaConfig/.test(rv), 'y la etiqueta');
+const ap = APP.slice(APP.indexOf('const aplicarCfgMolde'), APP.indexOf('const cancelarEsperaCfg'));
+ok(/refrescarVisorMolde\(_pidAp\)/.test(ap), 'y aplicar lo llama con el molde que toco');
+
+console.log('\n10) La planilla ofrece los talles de TODOS los moldes del pedido');
+// Reporte del usuario 2026-09-09: con dos moldes cargados la columna Talle mostraba los de UNO
+// solo (`estado.talles`, que son los del molde ACTIVO del servidor) y faltaba la mitad.
+ok(APP.includes('const tallesDelPedido'), 'hay una lista con los talles de todos los moldes');
+ok(/moldesUnion\.forEach\(mid => _tallesDeMolde\(mid\)/.test(APP),
+   'se juntan molde por molde, sin repetir y respetando el orden de cada uno');
+ok(!/c\.role === 'talle' \? \(estado\?\.talles \|\| \[\]\)/.test(APP),
+   'y la columna Talle ya NO usa los del molde activo');
+ok(/c\.role === 'talle'.{0,60}tallesDelPedido/s.test(APP), 'sino los del pedido');
+// …y el DISENO de una fila solo puede ser uno que tenga ESE talle en alguno de sus moldes.
+ok(APP.includes('const _disenosParaTalle'), 'los diseños se filtran por el talle de la fila');
+ok(/_disenosParaTalle\(_cTalle \? fila\[_cTalle\.id\] : ''\)/.test(APP),
+   'el desplegable de Diseño usa el talle DE ESA FILA');
+ok(/_opcionesDeCol\(c, f\)/.test(APP), 'y la validación mira la fila, no la columna sola');
+
 console.log();
 if (fallos.length) {
   console.log(`✗ CONTRATO ROTO — ${fallos.length} falla(s):`);

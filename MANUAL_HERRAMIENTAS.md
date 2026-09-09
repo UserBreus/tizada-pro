@@ -868,8 +868,15 @@ Funciona **como una planilla de Excel** (`planilla-tabla`).
   4. **Variable por fila**: la celda de variable abre un picker con **preview de las piezas** de
      cada variable → define **qué piezas se generan** en esa fila.
   5. **Diseño por fila**: la columna «Diseño» elige cuál de los diseños del pedido lleva la fila.
+     Sólo ofrece los diseños que **existen en el talle de esa fila**: si un diseño no tiene ese
+     talle en ninguno de los moldes del pedido, no aparece en la lista de esa fila (las demás filas
+     lo siguen ofreciendo). Si la fila todavía no tiene talle, se ofrecen todos.
   6. **Agregar** N filas (`planilla-agregar`) o **⬆ Importar CSV** (`planilla-csv`).
   7. **Enviar →** (`planilla-enviar`).
+- **Con VARIOS moldes en el pedido:** la columna «Talle» ofrece la **unión** de los talles de
+  todos los moldes cargados, sin repetidos y respetando el orden de cada molde (antes mostraba los
+  de uno solo y no se podía cargar una prenda del otro). Cada molde publica sus talles en
+  `GET /api/productos` (campo `talles`); el front los une en `tallesDelPedido`.
 - **Importar CSV:** los valores que **no existan** en el molde quedan **vacíos** — no inventa nada.
   Hay un panel para omitir/corregir filas antes de importar.
 - **Bloqueos del botón Enviar** (el cartel de al lado dice cuál):

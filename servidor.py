@@ -9468,6 +9468,23 @@ def get_productos():
         # contar EXACTAMENTE como el motor, que resuelve por NOMBRE GENÉRICO (§10 del mapa: la
         # posición es de «Frente», no de «Frente 8»). Contarlo en la pantalla con el nombre crudo
         # daría otro número y el paso diría que falta algo que ya está.
+        # LOS TALLES DE ESTE MOLDE, en el orden del archivo. La planilla del pedido los necesita
+        # POR MOLDE: con dos moldes cargados tiene que ofrecer los de los dos, y hasta ahora sólo
+        # veía los del molde ACTIVO (`/api/estado_general`), así que faltaban la mitad.
+        # El orden sale de `resumen_plantilla.json` (lo escribe el alta) y NO de abrir el .ai:
+        # esto corre por cada molde en cada `/api/productos`.
+        _talles_p, _vis_t = [], set()
+        for _pt in (_reg_conteo or {}).values():
+            for _t in (_pt or {}):
+                if _t not in _vis_t:
+                    _vis_t.add(_t); _talles_p.append(_t)
+        try:
+            _orden_t = (_cargar("resumen_plantilla.json", pid) or {}).get("talles") or []
+        except Exception:
+            _orden_t = []
+        if _orden_t:
+            _en_orden = [t for t in _orden_t if t in _vis_t]
+            _talles_p = _en_orden + [t for t in _talles_p if t not in set(_en_orden)]
         _etqp = p.get("etiqueta") or {}
         _gen = {MP._norm_generico(str(_k)) for _k in _reg_conteo}
         _gen.discard("")
@@ -9523,6 +9540,8 @@ def get_productos():
             # pasos del pedido para el paso «Ubicar etiqueta» del molde con diseño.
             "etiquetas_ubicadas": n_etq_puestas,
             "etiquetas_total": n_etq_total,
+            # Los talles que tiene ESTE molde (la planilla junta los de todos los del pedido).
+            "talles": _talles_p,
             # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla
             # puede ofrecer «Deshacer»: sin el dato, agregar una pieza parecía un camino de ida.
             # Qué opciones de cada toggle (manga/sisa/…) tiene REALMENTE este molde, y por variable:

@@ -9646,6 +9646,34 @@ export default function App() {
   const colorDeDiseno = (did) => DISENO_COLORS[Math.max(0, disenosPedido.findIndex(d => d.id === did)) % DISENO_COLORS.length];
   // Unión de moldes de las variables elegidas (el molde queda por detrás de la variable).
   const moldesUnion = [...new Set(Object.values(disenoMoldes).flat())];
+  // ── LOS TALLES DEL PEDIDO (de TODOS los moldes, no de uno) ────────────────────────────────
+  // 🔴 La planilla ofrecía `estado.talles`, que son los del molde ACTIVO del servidor: con dos
+  // moldes cargados faltaba la mitad de los talles y no se podía cargar la prenda (reporte del
+  // usuario 2026-09-09). Cada molde dice los suyos en `/api/productos`, en el orden del archivo;
+  // acá se juntan sin repetir, respetando ese orden. El `estado.talles` queda de red por si el
+  // servidor todavía no los manda.
+  const _tallesDeMolde = (mid) => ((productosCat.productos.find(p => p.id === mid) || {}).talles) || [];
+  const tallesDelPedido = React.useMemo(() => {
+    const out = [], vistos = new Set();
+    moldesUnion.forEach(mid => _tallesDeMolde(mid).forEach(t => {
+      const k = String(t);
+      if (!vistos.has(k)) { vistos.add(k); out.push(k); }
+    }));
+    return out.length ? out : (estado?.talles || []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productosCat.productos, moldesUnion.join(','), estado?.talles]);
+  // Los diseños que SIRVEN para ese talle: los que tienen al menos un molde que lo trae. Sin esto
+  // se podía elegir en la fila un diseño cuyo molde no tiene ese talle, y eso recién se descubría
+  // con la tizada armada.
+  const _disenosParaTalle = (talle) => {
+    const t = String(talle || '').trim().toLowerCase();
+    if (!t) return disenosPedido.map(d => d.nombre);
+    const sirven = disenosPedido.filter(d => (disenoMoldes[d.id] || [])
+      .some(mid => _tallesDeMolde(mid).some(x => String(x).trim().toLowerCase() === t)));
+    // Si NINGUNO lo trae, se ofrecen todos igual (una lista vacía es un callejón sin salida) y lo
+    // marca la validación de abajo, que es la que frena antes de fabricar.
+    return (sirven.length ? sirven : disenosPedido).map(d => d.nombre);
+  };
   // COLUMNAS ACTIVAS de la planilla según los moldes del pedido: una columna se usa si está en el
   // `mapeo_columnas` de algún molde elegido (ej. «Talle short» sólo la usa el short). Las que no
   // usa ningún molde del pedido quedan APAGADAS. `null` = todas activas (sin info → no apagar nada).
@@ -10813,6 +10841,31 @@ export default function App() {
   // `pidExplicito`: el aviso del panel del pedido aplica sobre SU molde, que no es el que está
   // abierto en Configuración. Va por argumento y no por estado por lo mismo de siempre: React no
   // lo tendría actualizado en el mismo gesto.
+  // 🔴 EL VISOR TIENE QUE MOSTRAR LO QUE ACABA DE ENTRAR. Aplicar una configuración le cambia al
+  // molde los NOMBRES de las piezas y DÓNDE va la etiqueta, y eso el visor no lo lee de un solo
+  // lado: los nombres salen de la detección (que está CACHEADA por molde y talle), la etiqueta de
+  // `/api/productos/etiqueta`, y el lienzo con todos los talles de `empTodasData`. Refrescar sólo
+  // uno dejaba la pantalla mostrando lo de antes, como si no hubiera pasado nada (pedido del
+  // usuario 2026-09-09: «después de aplicar, el visor tiene que mostrar todo ya como está en la
+  // configuración»).
+  const refrescarVisorMolde = async (pid) => {
+    if (!pid) return;
+    // 1) fuera el caché de la detección de ESE molde (todos sus talles): tiene los nombres viejos
+    Object.keys(_talleDetCache.current).forEach(k => {
+      if (String(k).startsWith(pid + '|')) delete _talleDetCache.current[k];
+    });
+    // 2) el lienzo con todos los talles se vuelve a pedir (filtra POR NOMBRE)
+    setEmpTodasData(null);
+    // 3) los nombres y la etiqueta, en paralelo: son dos lecturas cortas
+    await Promise.all([
+      cargarMoldeOperario(pid),
+      fetch(`/api/productos/etiqueta?pid=${encodeURIComponent(pid)}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => { if (d) setEtiquetaConfig(d); })
+        .catch(() => { /* la etiqueta se relee al entrar a su pestaña */ }),
+    ]);
+  };
+
   // `partesExplicitas`: `undefined` = lo tildado en la pantalla · `null` = lo que trae la receta
   // guardada (es lo que corresponde cuando se aplica desde el aviso, sin abrir el modal).
   const aplicarCfgMolde = async (c, pidExplicito, _intento = 0, partesExplicitas) => {
@@ -10846,11 +10899,7 @@ export default function App() {
       // de las piezas en el visor) se vuelven a pedir. Es lo que el usuario mira para decidir si
       // esa configuración le sirve para este molde.
       await fetchProductos();
-      try {
-        const rd = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(_pidAp)}`);
-        const dd = await rd.json();
-        if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
-      } catch { /* el visor se refresca al entrar de nuevo */ }
+      await refrescarVisorMolde(_pidAp);      // nombres + etiqueta + lienzo, sin nada cacheado viejo
       setMoldeReload(v => v + 1);
       cfgAplicada.current[_pidAp] = c.id;      // …y no se vuelve a ofrecer la misma
       setCfgSugeridas(prev => ({ ...prev, [_pidAp]: null }));
@@ -11504,9 +11553,14 @@ export default function App() {
     || (c?.role === 'manga' ? 'toggle' : c?.role === 'talle' ? 'desplegable' : 'texto');
   const _opcionesCol = (c) => ((c?.opciones || _reglaDeCol(c)?.opciones || '')
     .split(',').map(s => s.trim()).filter(Boolean));
-  const _opcionesDeCol = (c) => {   // devuelve la lista de valores válidos, o null si la columna es libre
-    if (c.role === 'talle') { const t = estado?.talles || []; return t.length ? t : null; }
-    if (c.role === 'diseno') { const d = disenosPedido.map(x => x.nombre); return d.length ? d : null; }
+  const _opcionesDeCol = (c, fila) => {   // devuelve la lista de valores válidos, o null si la columna es libre
+    if (c.role === 'talle') { const t = tallesDelPedido; return t.length ? t : null; }
+    if (c.role === 'diseno') {
+      // Con la fila a la vista, sólo los diseños que tienen ESE talle (ver `_disenosParaTalle`).
+      const _tc = fila ? cols.find(x => x.role === 'talle') : null;
+      const d = _disenosParaTalle(_tc ? fila[_tc.id] : '');
+      return d.length ? d : null;
+    }
     const tipo = _tipoCol(c);
     const opts = _opcionesCol(c);
     if (tipo === 'desplegable') return opts.length ? opts : null;
@@ -11970,7 +12024,7 @@ export default function App() {
     const bad = [];
     filas.forEach((f, i) => {
       cols.forEach(c => {
-        const opts = _opcionesDeCol(c);
+        const opts = _opcionesDeCol(c, f);
         if (!opts || !opts.length) return;   // columna libre → no valida
         const v = String(f[c.id] ?? '').trim();
         if (v !== '' && !opts.some(o => _normV(o) === _normV(v))) bad.push({ i, label: c.label || c.id, v });
@@ -13748,7 +13802,11 @@ export default function App() {
                               const plc = `${i}-${ci}`;
                               const editando = !!plEdit && plEdit.r === i && plEdit.c === ci;
                               const esDropdown = c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable';
-                              const dropdownOpts = c.role === 'talle' ? (estado?.talles || []) : c.role === 'diseno' ? disenosPedido.map(d => d.nombre) : opts;
+                              // El desplegable del DISEÑO se arma con el talle DE ESTA FILA: sólo
+                              // los diseños que tienen ese talle en alguno de sus moldes.
+                              const _cTalle = c.role === 'diseno' ? cols.find(x => x.role === 'talle') : null;
+                              const dropdownOpts = c.role === 'talle' ? tallesDelPedido
+                                : c.role === 'diseno' ? _disenosParaTalle(_cTalle ? fila[_cTalle.id] : '') : opts;
                               const _esNum = c.role === 'numero' || c.role === 'cantidad';
                               const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
                                 fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };

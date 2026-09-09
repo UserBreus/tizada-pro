@@ -257,6 +257,15 @@ ok(not _prod_b.get("grupos") and not _prod_b.get("variantes"),
    f"ni los grupos y variables ({_prod_b.get('grupos')} · {_prod_b.get('variantes')})")
 print("    OK    entraron la etiqueta y los nombres; el resto quedó afuera")
 
+# 🔴 Y LO QUE EL VISOR RELEE YA ES LO NUEVO. La pantalla no lee la etiqueta del informe:
+# la vuelve a pedir a `/api/productos/etiqueta`. Si ahi todavia estuviera la de antes, el visor
+# seguiria mostrando lo viejo por mas que la configuracion se haya aplicado bien.
+_etq_ap = (CLI.get(f"/api/productos/etiqueta?pid={PID_B}").get_json() or {})
+_pos_ap = sorted((_etq_ap.get("posiciones") or {}).keys())
+ok(_pos_ap == ["Espalda", "Frente", "Manga derecha"],
+   f"la etiqueta que relee el visor ya es la aplicada ({_pos_ap})")
+print(f"    OK    el visor relee: {_pos_ap}")
+
 print("\n3b · …Y LO DEL PEDIDO ENTRA SI SE TILDA")
 d = (CLI.post("/api/molde/config/aplicar",
               json={"pid": PID_B, "id": _id,
