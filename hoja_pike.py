@@ -412,7 +412,23 @@ def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1, crud
             cm_pdf = matriz_colocacion(c, m, 1.0, alto_pag, W, H, signo_rotacion)
             ops_est.append(("q\n" + cm_pdf + "\n").encode("ascii") + est.encode("latin-1") + b"Q\n")
     if ops_est:
-        cuerpo.append('<g>' + _svg_de_ops(ancho_pag, alto_pag, b"".join(ops_est), fitz, "est_") + '</g>')
+        # ── MESAS DE MÁS DE 5,08 m EN LA VISTA PREVIA ────────────────────────────────────────
+        # 🔴 El estampado se traduce a SVG dibujándolo en una página temporal del tamaño de la
+        # hoja, y NINGUNA página PDF puede pasar de 14400 unidades (508 cm). La hoja de verdad ya
+        # lo resolvía con /UserUnit (ver `componer_hoja_pike`); esto no, así que una mesa larga
+        # tiraba «Page size must be between 3 and 14400 PDF units» — y como el preview NO estaba
+        # protegido, se caía el pedido ENTERO después de haber armado bien la tizada
+        # (reporte del usuario 2026-09-09, con el tope de mesa en 50 m).
+        # Se dibuja todo dividido por `uu` en una página que sí entra, y el grupo se devuelve
+        # multiplicado por `uu`: mismas coordenadas, mismo vector, sin perder un solo trazo.
+        uu = max(1, ceil(max(ancho_pag, alto_pag) / 14400.0))
+        s_uu = 1.0 / uu
+        ops = b"".join(ops_est)
+        if uu > 1:
+            ops = f"q\n{s_uu:.8f} 0 0 {s_uu:.8f} 0 0 cm\n".encode("ascii") + ops + b"Q\n"
+        _svg_est = _svg_de_ops(ancho_pag * s_uu, alto_pag * s_uu, ops, fitz, "est_")
+        cuerpo.append(f'<g transform="scale({uu:g})">{_svg_est}</g>' if uu > 1
+                      else '<g>' + _svg_est + '</g>')
     return (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
             f'viewBox="0 0 {ancho_pag:.3f} {alto_pag:.3f}" width="{ancho_pag:.3f}pt" height="{alto_pag:.3f}pt">'
             f'<rect width="100%" height="100%" fill="#ffffff"/><defs>{"".join(defs)}</defs>{"".join(cuerpo)}</svg>')

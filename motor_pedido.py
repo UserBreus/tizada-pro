@@ -4903,8 +4903,23 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                 if progreso:
                     progreso("previews", f"{i + 1}/{paginas} - {tela}", None)
                 pv = f"prev_{slug}_h{i+1}.svg"
-                with open(os.path.join(salida, pv), "w", encoding="utf-8") as f:
-                    f.write(preview_svg(hoja_c, cfg_t, alto_pt, _simbolos, _doc_base, crudos=_crudos))
+                # 🔴 BEST-EFFORT, COMO LA FICHA. El preview es una ayuda para MIRAR; la tizada es
+                # el producto y a esta altura ya está armada. Que un problema al dibujarlo se
+                # llevara puesto el pedido entero es exactamente al revés de lo que corresponde:
+                # pasó el 2026-09-09 con una mesa de más de 5,08 m («Page size must be between 3
+                # and 14400 PDF units»). Si falla, se dice cuál y se sigue.
+                try:
+                    _svg = preview_svg(hoja_c, cfg_t, alto_pt, _simbolos, _doc_base, crudos=_crudos)
+                except Exception as _e_pv:
+                    print(f"  [!] sin vista previa de la hoja {i + 1} de {tela} "
+                          f"(la tizada NO se toca): {type(_e_pv).__name__}: {_e_pv}", flush=True)
+                    continue
+                # Se arma entero en memoria y recién ahí se escribe: `open(w)` TRUNCA antes de
+                # fallar, y un .svg a medias se ve como una hoja rota en vez de como una que falta.
+                _tmp_pv = os.path.join(salida, pv + ".tmp")
+                with open(_tmp_pv, "w", encoding="utf-8") as f:
+                    f.write(_svg)
+                os.replace(_tmp_pv, os.path.join(salida, pv))
                 prevs.append(pv)
             for d in _docs_base_cache.values():
                 try:

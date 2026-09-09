@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **122 endpoints**. Generado automáticamente del código.
+Total: **151 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -34,6 +34,9 @@ Total: **122 endpoints**. Generado automáticamente del código.
 | DELETE | `/api/fuente/archivo/<path:nombre>` | Saca una tipografía del catálogo. Ojo: si algún arte la usa, ese arte va a quedar sin fuente (se avisa al validar) — por eso el front pide confirmación antes. | — |
 | GET | `/api/fuente/glifos/<path:nombre>` | Qué caracteres TIENE y cuáles le FALTAN a una fuente del catálogo. 'Tiene' = el contorno se puede dibujar de verdad (estar en el cmap no alcanza: puede estar ma | — |
 | GET | `/api/pedido/fuente_chars` | Caracteres que SOPORTA la tipografía de personalización del diseño (la que estampa nombre/número). La planilla los usa para pintar en ROJO lo que la fuente no t | q: producto_id |
+| POST | `/api/pedido/fuente_resolver` | Resuelve una fuente NO reconocida del arte. · **Subiéndola** (multipart): `destino=sistema` la deja en el catálogo global —el sistema la va a reconoce | body: faltante, usar · form: destino, pid · file: archivo |
+| GET | `/api/pedido/fuentes_estado` | Fuentes que pide el arte del diseño vs las que el sistema puede resolver (catálogo + las de este pedido + reemplazos). ⚠️ Los faltantes AVISAN, no tra | q: diseno, pid |
+| POST | `/api/pedido/fuentes_pedido_limpiar` | Borra las tipografías subidas «sólo para este pedido» (`datos/<pid>/fuentes`). Regla del usuario (2026-08-21): «si carga una tipografía tiene la opció | — |
 
 ## Nesting / Grupos de tizada
 
@@ -82,6 +85,8 @@ Total: **122 endpoints**. Generado automáticamente del código.
 | POST | `/api/publicacion/cancelar` |  | — |
 | GET | `/api/publicacion/estado` | Para la pantalla de Publicación: qué versión hay acá, qué versión hay publicada y si hay algo pendiente allá. Si el servidor publicado no contesta, se dice y li | — |
 | POST | `/api/publicacion/publicar` | Arma el paquete y lo SUBE. `cuando` = 0 (ya) o marca de tiempo. Es lo que hace el botón. | body: cuando, url, version |
+| GET | `/api/actualizacion/log` | El log del AYUDANTE (`_actualizacion/actualizador_log.txt`): la letra chica de la última instalación — dónde se cortó, con horas. Es lo que hasta ahor | — |
+| GET | `/api/publicacion/registro` | El registro y el log del ayudante DEL SERVIDOR PUBLICADO, para verlos desde el taller. 🔴 Esto es lo que faltaba el 2026-09-01: la actualización falló  | — |
 
 ## Productos / Moldería
 
@@ -102,6 +107,10 @@ Total: **122 endpoints**. Generado automáticamente del código.
 | POST | `/api/productos/renombrar` |  | body: id, nombre |
 | POST | `/api/productos/telas_asignadas` | Telas (ids del registro global) disponibles para ESTE molde. Cuerpo nuevo: {id, todas:[…], por_pieza:{pieza:[…]}}. Cuerpo viejo: {id, telas:[…]} (= `todas`). | body: id, max_var, por_pieza, telas, todas |
 | POST | `/api/productos/terminologia` | Guarda los nombres configurables (variante/molde) de un producto. Solo afecta las etiquetas que ve el usuario; el funcionamiento es el mismo. | body: id, terminologia |
+| DELETE | `/api/molde/config/<int:cid>` | Borra una configuración guardada. No toca ningún molde: es sólo la receta. | — |
+| POST | `/api/molde/config/aplicar` | Aplica una configuración guardada a este molde: `{pid, id}`. Devuelve el INFORME de lo que entró y lo que no — el usuario tiene que poder ver si acomo | body: id, partes, pid |
+| POST | `/api/molde/config/guardar` | Guarda la configuración del molde con un nombre: `{pid, nombre, id?}` (con `id` la pisa). | body: id, nombre, pid |
+| GET | `/api/molde/config/lista` | Las configuraciones guardadas, con QUÉ TAN BIEN le calzan a este molde (`pid`). No se aplica ninguna sola: la pantalla las muestra y el usuario elige  | q: pid |
 
 ## Plantilla (molde)
 
@@ -120,7 +129,6 @@ Total: **122 endpoints**. Generado automáticamente del código.
 | GET | `/api/plantilla/pdf_guia` | PDF imprimible con el molde de guía + el recuadro de medida y el nombre de cada pieza, según el modo elegido en el visor (default / rango / talle). | q: capas, config, formato, guia, limpio, piezas, rango, talle |
 | POST | `/api/plantilla/pieza_agregar` | Agrega una PIEZA NUEVA al molde, en el lugar del lienzo que se indique. Cuerpo: `{pid?, origen: "duplicar"|"archivo", pieza_idx?, dx, dy, nombre?}` · `duplicar` | body: dx, dy, origen, pieza_idx |
 | POST | `/api/plantilla/pieza_archivo` | Guarda el archivo de la pieza que se va a agregar (paso previo a `pieza_agregar`). Va a un nombre fijo (`pieza_nueva.ai`) y NO toca el molde: recién `pieza_agre | file: archivo |
-| POST | `/api/plantilla/pieza_deshacer` | Saca la ÚLTIMA pieza agregada: vuelve el molde a su versión anterior y el registro con él. El archivo se revierte moviendo el puntero de versión (el original nu | — |
 | GET | `/api/plantilla/variantes` | Radiografía del molde para la herramienta de NOMBRAR VARIANTES: qué capas hay, cuáles son talles, y la curva propuesta (de menor a mayor por área). Acepta `?pid | — |
 | POST | `/api/plantilla/variantes` | Aplica los nombres de variante (talle) a las capas del molde. Body: `{pid?, nombres: {capa_actual: nombre_nuevo}}`. Escribe una VERSIÓN nueva del molde (el arch | body: nombres |
 | POST | `/api/plantilla/variantes_piezas` | Asigna las variantes SELECCIONANDO PIEZAS (molde con todo en una sola capa). Body: `{pid?, asignaciones: {pieza_idx: "nombre_variante"}}` con los índices de `/a | body: asignaciones |
@@ -177,6 +185,8 @@ Total: **122 endpoints**. Generado automáticamente del código.
 | POST | `/api/productos/objeto_agregado/<oid>/pieza` | Asigna el objeto a una pieza, o lo DESASIGNA (`pieza` vacía): sigue en la barra, listo para colocarlo en otra. Un objeto vive en UNA sola pieza — para tenerlo e | body: diseno, pid, pieza |
 | POST | `/api/productos/objeto_agregado/<oid>/transform` | Guarda el transform (mover/rotar/escalar/espejar) del objeto agregado, POR VARIABLE y talle. Estructura en el manifiesto: obj['transforms'][variante][talle] = { | body: diseno, pid, pieza, talles, transform, variante |
 | POST | `/api/productos/objeto_agregar` |  | form: diseno, nombre, pid · file: archivo |
+| POST | `/api/productos/editable_marca` | Asigna (o QUITA) la marca de proceso de un editable — TPU · Bordado · DTF — POR VARIABLE y a nivel OBJETO. Body: {pid?, diseno, nombre, variante, marc | body: diseno, marca, nombre, obj_id, pid, sin_marca, variante |
+| GET | `/api/productos/editables_marcas` | Las marcas de proceso de un molde+diseño, tal como las guarda el catálogo: `{variable: {IDENT: marca}}`. Lo usa el editor para pintar los botones ence | q: diseno, pid |
 
 ## Diseños
 
@@ -204,3 +214,38 @@ Total: **122 endpoints**. Generado automáticamente del código.
 | GET | `/api/reglas_planilla` |  | — |
 | POST | `/api/reglas_planilla/eliminar` |  | body: id |
 | POST | `/api/reglas_planilla/guardar` |  | body: clave, comportamiento, id, nombre, opciones, tipo |
+
+
+## Usuarios / Roles / Permisos
+
+| Método | Ruta | Descripción | Params |
+|---|---|---|---|
+| POST | `/api/auth/login` |  | body: password, usuario |
+| POST | `/api/auth/logout` |  | — |
+| POST | `/api/auth/password` |  | body: actual, nueva |
+| GET | `/api/auth/yo` | Quién soy y qué puedo. El front lo usa para pintar la UI (ocultar ≠ proteger). ⚠️ Si la BASE no responde hay que decirlo con todas las letras (**503 + | — |
+| GET | `/api/permisos` |  | — |
+| GET | `/api/roles` |  | — |
+| POST | `/api/roles` |  | body: clave, descripcion, nombre, permisos |
+| DELETE | `/api/roles/<int:rid>` |  | — |
+| PUT | `/api/roles/<int:rid>` |  | body: descripcion, nombre |
+| GET | `/api/usuarios` |  | — |
+| POST | `/api/usuarios` |  | body: email, nombre, password, roles, usuario |
+| DELETE | `/api/usuarios/<int:uid>` |  | — |
+| PUT | `/api/usuarios/<int:uid>` |  | body: activo, email, nombre, password, roles |
+
+## Registro del sistema
+
+| Método | Ruta | Descripción | Params |
+|---|---|---|---|
+| GET | `/api/consola` | LA CONSOLA DEL SERVIDOR: exactamente lo que se vería en la ventana de PowerShell, con la fecha y la hora de cada línea. Sale de un ARCHIVO de texto (` | q: buscar, limite |
+| GET | `/api/registro` | Los últimos eventos. `tipo` (error/aviso/info), `area` y `limite` filtran. Pide sesión (o el token del taller, para leer el publicado desde acá): lo q | q: area, limite, tipo |
+| POST | `/api/registro/limpiar` |  | — |
+
+## Ayuda guiada (tutoriales grabados)
+
+| Método | Ruta | Descripción | Params |
+|---|---|---|---|
+| GET | `/api/tutoriales` | Los tutoriales grabados, para el menú de Ayuda. SIN permiso: la ayuda es para todos. | — |
+| POST | `/api/tutoriales` | Guarda una grabación. Body: {nombre, desc?, pasos:[{ancla, accion, etiqueta, donde}]}. Con `id` reemplaza uno existente (renombrar / regrabar). Sólo a | body: desc, id, nombre, pasos |
+| POST | `/api/tutoriales/borrar` | Saca un tutorial de la lista. Body: {id}. Sólo administradores. | — |

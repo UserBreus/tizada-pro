@@ -12,6 +12,8 @@ Verifica, componiendo hojas de verdad con el motor:
   3. Las PIEZAS quedan en la posición y el tamaño correctos (en centímetros reales), no corridas
      ni a escala.
   4. El aplanado para el RIP (`aplanar_rip`) NO se come el /UserUnit.
+  5. 🔴 LA VISTA PREVIA de la hoja compartida tambien aguanta una mesa larga, y si
+     igual fallara NO puede llevarse puesta la tizada (es una ayuda para mirar, no el producto).
 
 No toca datos del usuario: dibuja piezas sintéticas en un temporal.
 """
@@ -133,6 +135,41 @@ if __name__ == "__main__":
         print(f"    UserUnit={m3['uu']:g} · {m3['alto_cm']/100:.2f} m")
         ok(m3["uu"] == m2["uu"] and abs(m3["alto_cm"] - m2["alto_cm"]) < 2,
            "el aplanado conserva /UserUnit y el largo (si no, saldría a 1/N de escala)")
+        # -- 5) LA VISTA PREVIA DE LA HOJA COMPARTIDA (camino B) ------------------------------
+        # 🔴 Aca se caia el pedido ENTERO (2026-09-09). El preview traduce el estampado a SVG
+        # dibujandolo en una pagina temporal del tamano de la hoja: con una mesa de mas de 5,08 m
+        # esa pagina no existe («Page size must be between 3 and 14400 PDF units») y la excepcion
+        # subia hasta `generar_pedido_grupos`, con la tizada YA ARMADA. Dos cosas se cuidan aca:
+        # que el preview sepa dibujarla, y que si algun dia falla igual, no arrastre a la tizada.
+        print("\n[5] la vista previa de una mesa larga (hoja compartida)")
+        import hoja_pike as HP
+        _b = {"W": 40 * CM, "Hp": 30 * CM, "B": 0.0}
+        _cfg_p = {"ancho_cm": 180.0, "margenes_cm": {"izq": 1, "der": 1, "sup": 1, "inf": 1}}
+        _alto_p = 900 * CM                      # 9 m: mas del doble del tope del formato
+        _hoja_p = [{"cx": 30 * CM, "cy": 880 * CM, "bw": 40 * CM, "bh": 30 * CM, "ang": 0,
+                    "pieza": {"base": _b, "estampado": "0 0 1 rg 10 10 50 50 re f\n"}}]
+        _svg = _err = None
+        try:
+            _svg = HP.preview_svg(_hoja_p, _cfg_p, _alto_p, {}, None, crudos={id(_b): "<g/>"})
+        except Exception as e:
+            _err = f"{type(e).__name__}: {e}"
+        ok(_err is None, f"la vista previa de una mesa de 9 m no puede fallar ({_err})")
+        if _svg:
+            _uu = int(-(-_alto_p // 14400))     # el mismo `ceil` que usa el compositor
+            # el ancho lo calcula `hoja_pike` con SU constante de cm (diferente en el 6º decimal)
+            ok(f'viewBox="0 0 {180 * HP.CM:.3f} {_alto_p:.3f}"' in _svg,
+               "el SVG sigue midiendo la hoja entera (no quedo a escala de 1/UserUnit)")
+            ok(f'transform="scale({_uu:g})"' in _svg,
+               f"el estampado se dibuja dividido por {_uu} y se devuelve multiplicado por {_uu}")
+        # ...y que un preview roto NO se lleve puesta la tizada
+        _src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "motor_pedido.py"),
+                    encoding="utf-8").read()
+        _i = _src.index("preview_svg(hoja_c, cfg_t")
+        ok("try:" in _src[max(0, _i - 700):_i],
+           "escribir el preview va dentro de un `try`: si falla, la tizada sigue")
+        ok("os.replace" in _src[_i:_i + 900],
+           "y se escribe con .tmp + os.replace (open(w) trunca antes de fallar)")
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print("\n" + ("TODO OK" if not FALLOS else f"{len(FALLOS)} FALLA(S):\n  - " + "\n  - ".join(FALLOS)))

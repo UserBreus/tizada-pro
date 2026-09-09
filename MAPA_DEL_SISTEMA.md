@@ -254,6 +254,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 | **Un endpoint que recibe el molde en el campo `id`** | `_pid_de_request` **ignora `id` a propósito** (en varios endpoints es un preset/regla/grupo) → esos endpoints **no pasan por `_guardia_moldes`**. Hay que llamar **`_guard_id(cuerpo)`** (o `_guard_molde(pid)`) a mano. Lo mismo con los que reciben una LISTA de moldes (`generar_multi` → `molds`). |
 | **`fetchProductos()` (se llama en ~28 lugares)** | Cada llamada crea un `productosCat` nuevo. Los efectos que **siembran buffers de edición** (variables, modelos, grupos, telas) tienen que estar clavados por **`pidCfg` + una GENERACIÓN**, no por el objeto ni por una firma del contenido: si no, re-siembran y **pisan lo que el usuario está editando sin guardar**. |
 | **Puertos/servers** | El front nuevo contra un backend viejo (o al revés) = incoherencia. Reiniciá 8050 tras editar `.py`. Recompilá `dist` tras editar `src`. |
+| **Un endpoint nuevo (`@app.get/post…`)** | `API_RUTAS.md` se genera del código: corré **`py generar_api_rutas.py --escribir`** y listo. Lo cuida `verificar_api_rutas.py` — sin eso el índice miente por omisión y terminás escribiendo dos rutas para lo mismo (pasó: 30 rutas sin documentar). |
 
 ---
 
@@ -1471,6 +1472,53 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > referencias también viven en los contratos. Para citar una entrada de este tramo, **decí el número
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
+
+- **2026-09-09 (401) — 🔴 UNA MESA LARGA TIRABA ABAJO EL PEDIDO ENTERO, DESPUÉS DE ARMARLO BIEN; y
+  el índice de endpoints dejó de mentir.** Reporte del usuario, con la captura del cartel rojo:
+  *«Page size must be between 3 and 14400 PDF units»*.
+
+  **QUÉ PASABA.** El tope de mesa es **50 m** (`ALTO_MESA_MAX_CM`) y la hoja de verdad ya sabía
+  hacerlas: pasadas las **14400 unidades** (200 pulgadas = 5,08 m, el techo del formato PDF) usa
+  **/UserUnit** y dibuja todo dividido, como en `componer_hoja_pike` y `componer_pdf_contorno`.
+  Lo que NO lo sabía era la **vista previa**: `hoja_pike.preview_svg` traduce el estampado a SVG
+  dibujándolo en una página temporal **del tamaño de la hoja**, y esa página no existe. Con una
+  mesa de más de 5,08 m, `pikepdf` se plantaba… y la excepción subía hasta `generar_pedido_grupos`
+  con **la tizada ya armada**: el pedido se perdía por el dibujito de al lado.
+
+  **DOS ARREGLOS, PORQUE SON DOS ERRORES DISTINTOS:**
+  1. **El preview aprende a hacer mesas largas.** Mismo truco que la hoja: se calcula `uu`, se
+     dibuja el estampado en una página de `1/uu` y el grupo se devuelve con `transform="scale(uu)"`.
+     Mismas coordenadas, **sigue siendo vector**, no se pierde un trazo (ley «el arte se ve igual
+     que la tizada»).
+  2. 🔴 **El preview pasa a ser BEST-EFFORT, como la ficha técnica.** Es una ayuda para MIRAR; el
+     producto es la tizada, y a esa altura ya está hecha. Si falla, se dice cuál hoja quedó sin
+     preview y se sigue. Que un adorno pudiera matar un pedido estaba exactamente al revés.
+     De paso, el `.svg` se arma entero en memoria y se escribe con `.tmp` + `os.replace`:
+     `open(w)` **trunca antes de fallar** y dejaba una hoja rota en vez de una que falta.
+
+  **VERIFICADO** con `verificar_mesa_larga.py`, que ahora tiene el paso 5: una hoja de **9 m** se
+  previsualiza sin fallar, el SVG sigue midiendo la hoja entera (no quedó a 1/uu de escala) y el
+  estampado lleva su `scale`. Además se comprueba **en el código** que escribir el preview esté
+  dentro de un `try` y que use `.tmp` + `os.replace`. `verificar_hoja_compartida.py` sigue verde:
+  la hoja normal es **pixel-idéntica** (0 píxeles distintos).
+
+  **Y EL PENDIENTE QUE DEJÓ LA 400: `API_RUTAS.md`.** Decía «Generado automáticamente del código»
+  pero **el generador no estaba en el repo**, así que se fue atrasando en las DOS ramas: le
+  faltaban **30 rutas** (todo el sistema de usuarios y roles, el registro, los tutoriales, la
+  configuración guardada del molde…) y le sobraba una borrada. Ahora hay **`generar_api_rutas.py`**
+  (lee las rutas con `ast`, no con expresiones regulares; **conserva las secciones**, que las
+  escribió una persona; ubica lo nuevo por reglas y por parecido; saca lo que ya no existe; sin
+  `--escribir` no toca nada) y **`verificar_api_rutas.py`**, que rompe el día que el documento y el
+  código no coincidan. Quedó en **151 endpoints**, con tres secciones nuevas: Usuarios / Roles /
+  Permisos, Registro del sistema y Ayuda guiada.
+
+  **Y EL CONTRATO QUE NO PODÍA CORRER.** `verificar_arte_liviano.py` tenía el id del molde
+  **escrito a mano** (`prod_20260729_163651_4d0d`): re-subido el molde, el id cambió y la prueba
+  moría con un `FileNotFoundError` que parecía una falla del sistema. Ahora **elige solo** el molde
+  que tenga plantilla y registro (o se declara SALTEADA, que es honesto, en vez de roja). Y su tope
+  de «abrir el Arte» dejó de ser un número fijo —medido con un molde que ya no existe— para ser un
+  **presupuesto por mesa**: lo que se cuida es que abrir el Arte no vuelva a ser lineal en el peso
+  del archivo. Medido con 8 mesas: 3,3 s en frío y **0,01 s** la segunda vez.
 
 - **2026-09-08 (400) — SE UNIÓ LA RAMA DEL CAMINO B CON LA AUDITORÍA DE BASE Y PROCESOS.** Pedido
   del usuario: «traé las actualizaciones tal cual; lo único que tenés que cuidar son los bugs que ya
