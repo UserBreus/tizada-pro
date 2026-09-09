@@ -281,7 +281,12 @@ export const DICCIONARIO = {
   'cargar-b-columna': {
     nombre: 'De qué talle toma las medidas',
     que: 'Cuando la planilla lleva más de una columna de talle (por ejemplo «Talle» y «Talle short»), acá se dice de cuál toma sus medidas este molde. Sin esto, un short tomaría el talle de la camiseta y saldría del tamaño equivocado.',
-    como: 'Elegí la columna de talle que le corresponde.',
+    como: 'Tocá la columna de talle que le corresponde a este molde.',
+  },
+  'molde-columna-talle': {
+    nombre: 'De qué talle toma las medidas',
+    que: 'Con más de una columna de talle en la planilla, cada molde toma el suyo de una: la camiseta de «Talle» y el short de «Talle short». Mientras no lo digas, la tarjeta lo marca en amarillo.',
+    como: 'Tocá la columna de talle que le corresponde a este molde.',
   },
   'cargar-b-siguiente': {
     nombre: 'Nombrar las piezas',

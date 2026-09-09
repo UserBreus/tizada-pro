@@ -729,8 +729,15 @@ ni mapeo.
      archivo**: no hay que escribirlo.
   2. Tocá los moldes **que van juntos** y escribí **el nombre del diseño** una sola vez
      (`cargar-b-diseno`).
-  3. Si la planilla tiene más de una columna de talle («Talle», «Talle short»), elegí de cuál toma
-     cada molde (`cargar-b-columna`). 🔴 Sin esto un short tomaría el talle de la camiseta.
+  3. Si la planilla tiene más de una columna de talle («Talle», «Talle short»), **en la tarjeta de
+     cada molde** hay dos pastillas: tocá la columna de la que toma su talle (`cargar-b-columna`).
+     Es un toque, no hay que tildar el molde ni abrir nada. Mientras no lo digas, la tarjeta lo
+     marca en ámbar («¿QUÉ TALLE?»), la barra de abajo lo avisa y **«Al arte» queda apagado**.
+     🔴 Sin esto un short tomaría el talle de la camiseta y saldría del tamaño equivocado.
+     · Para poner varios de una: tildalos y usá la tira «El talle lo toman de».
+     · El mismo control está en la tarjeta de **Mis artículos** (`molde-columna-talle`), para los
+       moldes que ya están en un diseño del pedido.
+     · Con **una sola** columna de talle no aparece nada de esto.
   4. **Al arte** (`cargar-b-siguiente`) lleva al paso Arte: el visor, los talles y las
      herramientas. 🔴 **NO entra solo a nombrar** (cambió 2026-09-09): a cada herramienta se
      entra con su botón, así no perdés de vista el resto.
@@ -877,6 +884,13 @@ Funciona **como una planilla de Excel** (`planilla-tabla`).
   todos los moldes cargados, sin repetidos y respetando el orden de cada molde (antes mostraba los
   de uno solo y no se podía cargar una prenda del otro). Cada molde publica sus talles en
   `GET /api/productos` (campo `talles`); el front los une en `tallesDelPedido`.
+- **Con DOS columnas de talle** («Talle» y «Talle short»): cada columna ofrece **sólo los talles de
+  los moldes que la leen** — la del short no ofrece los de la camiseta. De qué columna toma el
+  talle cada molde se dice **en su tarjeta**, en el espacio de carga o en Mis artículos (§5.2.b).
+  🔴 Si una columna trae un talle que **ningún** molde del pedido tiene ahí, el pedido **no se
+  fabrica**: el botón Enviar se apaga con el motivo, y si se pega a la API directo el servidor
+  responde 409 diciendo qué columna mirar. (Que a UN molde le falte un talle que otro sí tiene no
+  frena nada: es la regla de siempre.)
 - **Importar CSV:** los valores que **no existan** en el molde quedan **vacíos** — no inventa nada.
   Hay un panel para omitir/corregir filas antes de importar.
 - **Bloqueos del botón Enviar** (el cartel de al lado dice cuál):

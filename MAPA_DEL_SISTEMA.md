@@ -248,6 +248,7 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 | **`etiqueta` (config o `_eops_*`)** | El text-on-path. **NO ROMPER la baseline** ([[etiqueta-baseline-no-romper]]). Posiciones en cascada: `variante§nombre completo` > `variante§genérico` > `grupo§nombre` > `nombre` global > **otra variable** (último recurso, entrada 146). El motor y el preview del front tienen que resolver IGUAL: cuando el preview tenía más fallbacks, la etiqueta se veía bien en pantalla y salía en el lugar por defecto en la tizada. Contrato: `verificar_etiqueta_posicion.py`. |
 | **`editables` (mover/persistir)** | `set_editable` guarda por `(pid, diseno_slug, IDENT, talle)` — IDENT = nombre de capa (1 objeto) o `"nombre<SEP>obj_id"` (capa multi-objeto, anida en `…[capa]["objetos"][obj_id]`, §10.b/§5). El front resuelve `pid` con `moldesDeDiseno(disenoActivo)[arteIdx] || productosCat.activo` (¡ojo con `_mid` undefined → guarda en el molde activo equivocado!). El motor: los objetos editados/recoloreados se sacan de la base **por objeto** (`suprimir_objetos`) + se redibujan (`pagina_arte_solo(obj_id=)`); el resto de la capa queda en el diseño. **Color override** (`set_editable_color`/`_editables_color`/`editables_color`) usa el MISMO camino "redibujar": un color-override suma el objeto a `_redibujar_nombres`. Recolorar SIEMPRE **antes** de aislar (§10.b). El color NO está en `_pvKeyCon` (memoria del front) → `guardarColorEditable` invalida `_pvCache` a mano; sí está en `_piezas_base_clave` v7 (disco). |
 | **La FICHA TÉCNICA (`_guias_ficha` / `_molde_guia_ficha` / `ficha_tecnica.py`)** | Lo que ve el TALLER. Una guía por **(molde · diseño · variable)**: si tocás cómo se recolectan, revisá que sigan saliendo **después del `_fallback`** (el arte real) y con **la tela de SU diseño** (`_asig_de(dslug)` resuelta dentro del bucle, no en el hilo). Contrato: `verificar_ficha_disenos.py`. |
+| **`mapeo_columnas` (de qué columna sale el talle)** | Con DOS columnas de talle («Talle» y «Talle short») cada molde lee la SUYA: equivocarse **no falla**, saca la prenda del tamaño equivocado. Si tocás el mapeo revisá los cuatro lugares que lo leen: `_traducir_prendas` (el talle real + `_hay_fallback`), `_talles_cruzados` (la traba antes de fabricar), `_aplica_al_molde` (qué columnas obligatorias se le exigen) y, en la pantalla, `colDeMolde`/`tallesDeColumna`/`colActiva`. ⚠️ El dict mezcla **ids de columna** con la marca `talle_elegido`: quien recorra `values()` tiene que **filtrar por texto**. Contratos: `verificar_talle_por_molde.py` y `frontend/verificar_columna_talle.mjs`. |
 | **`columnas` del producto** | La Camiseta NO tiene columnas → `_traducir_prendas` cae al fallback `pr.get("nombre"/"numero"/"talle")`. Si asumís columnas, rompés esos moldes. |
 | **El catálogo (`_guardar_catalogo`)** | Es global. Escribir desde un estado stale del front puede pisar `editables`/`mapeo_arte`/`variantes`. Los endpoints leen el catálogo FRESCO antes de modificar. |
 | **Cualquier pantalla de CONFIGURACIÓN del molde** | ⛔ **TODO va por `pidCfg`/`prodCfg` (el molde ABIERTO), nunca por `activoProdDetalle` (el ACTIVO del server).** Leer de uno y escribir en el otro **copia la configuración de un molde adentro de otro** (pasó: entrada 122). `activoProdDetalle` sólo puede aparecer en el PEDIDO y en la grilla de molderías. Un grep de `activoProdDetalle` dentro del bloque de config tiene que dar **cero**. |
@@ -303,6 +304,14 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
 
 ## 9. 🐛 TRAMPAS CONOCIDAS (gotchas que ya me mordieron)
 
+- 🔴 **UN `or` DE CORTESÍA RELLENABA EL TALLE CON EL DE LA COLUMNA DE AL LADO.** `_traducir_prendas`
+  resolvía el talle así: `pr.get(talle_col) or pr.get("talle")`. Con UNA columna de talle es el
+  atajo que hace andar las planillas viejas y las filas sintéticas (ficha, preview). Con DOS
+  («Talle» y «Talle short»), en cambio, una celda vacía del short se rellenaba con la de la
+  camiseta: **no falla, sale una prenda del tamaño equivocado, ya impresa y cortada**. Ahora el
+  atajo está acotado por `_hay_fallback` (una sola columna de talle, o un mapeo que apunta a una
+  columna que ya no existe). Regla general: **un `or` sobre datos del usuario es una suposición**;
+  con dos campos parecidos al lado, la suposición es siempre la equivocada. Entrada 413.
 - 🔴 **SQL SERVER ANIDA LOS COMENTARIOS `/* */`, Y UN `/*` DE ADORNO TE ROMPE EL LOTE ENTERO.** Un
   comentario de `db/schema.sql` terminaba en «`/api/molde/config/*`»: ese `/*` abre un comentario
   INTERNO, el `*/` de la línea cierra sólo ése, y el de afuera queda abierto → *«Missing end comment
@@ -1472,6 +1481,65 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > referencias también viven en los contratos. Para citar una entrada de este tramo, **decí el número
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
+
+- **2026-09-09 (413) — 🔴 DOS MOLDES DE UN MISMO DISEÑO, CADA UNO CON SU COLUMNA DE TALLE.**
+  Pedido del usuario: *«cómo trataría 2 moldes con un mismo diseño pero con dos columnas
+  diferentes; que el cliente pueda decirle al sistema qué va con qué columna sin tener que hacer
+  muchos pasos de configuración»*. Y, preguntado, fue tajante en las tres decisiones: **lo pone el
+  cliente** (nada de adivinar por el nombre del archivo ni por los talles), **donde carga los
+  moldes** (sin ir a ningún espacio extra) y **queda guardado en el molde, siempre**.
+
+  **POR QUÉ ERA UN AGUJERO.** Todo molde nace con `mapeo_columnas.talle = "talle"`
+  (`_crear_producto`), así que un short recién subido apuntaba a la columna de la camiseta **sin
+  que nadie lo dijera**. Y `_traducir_prendas` remataba: `pr.get(talle_col) or pr.get("talle")` —
+  con «Talle short» vacía, el short **heredaba** el talle de la camiseta. No falla: sale una
+  prenda del tamaño equivocado, ya impresa y cortada.
+
+  **EL GESTO (una sola decisión, un toque).** La línea muerta «talle: Talle» de la tarjeta del
+  molde pasó a ser el control: `SelectorColumnaTalle` (componente de módulo en `App.jsx`), montado
+  en la tarjeta del **espacio de carga** (camino B, ancla `cargar-b-columna`) y en la de **Mis
+  artículos** (ancla `molde-columna-talle`). **No se dibuja si la planilla tiene una sola columna
+  de talle**: el pedido normal no ve nada nuevo. Un toque guarda con
+  `POST /api/productos/config_mapeo` — que ahora hace **merge** en vez de pisar el dict, para que
+  mandar sólo la columna de talle no le borre al molde el mapeo de nombre/número/manga.
+  La botonera vieja «El talle lo toman de» queda como **atajo en lote** (varios tildados de una).
+
+  **QUE NO SE PUEDA DEJAR SIN ELEGIR.** El default del alta no es una decisión, y no había cómo
+  distinguirlo de una: ahora al elegir se escribe `mapeo_columnas.talle_elegido = true`. Con más de
+  una columna de talle, un molde sin esa marca sale en ámbar («¿QUÉ TALLE?»), la barra de abajo del
+  espacio de carga dice *«Falta decir de qué columna toma el talle cada molde»* y **«Al arte» queda
+  apagado**, igual que ya hacía con el diseño. ⚠️ `talle_elegido` convive con ids de columna dentro
+  de `mapeo_columnas`: los dos lugares que leen `values()` (`_aplica_al_molde` en el servidor,
+  `columnasActivasPlanilla` en la pantalla) **filtran por texto** para que una marca no cuente como
+  columna usada.
+
+  **LA RED DE SEGURIDAD** (eran fallas de hoy que este caso destapa):
+  · **Cada columna de talle ofrece sólo los talles de SUS moldes** — `tallesDeColumna(colId)` junto
+    a `tallesDelPedido`; antes las dos ofrecían la unión y se podía cargar un short en un talle que
+    no existe. Un solo punto de paso: `_opcionesDeCol` (de ahí salen el desplegable, la validación
+    y el import de CSV).
+  · **La columna Diseño se juzga con la fila entera** — `_disenosParaTalle` (miraba la PRIMERA
+    columna de talle) pasó a `_disenosParaFila(fila)`: cada molde se mide con SU columna.
+  · **Traba antes de fabricar**: como las opciones de la columna ya son las correctas, la
+    validación que apaga «Enviar» la agarra sola, sin UI nueva.
+  · **Servidor** — el relleno por nombre de campo se ACOTÓ (`_hay_fallback`): sigue valiendo con
+    UNA sola columna de talle o con un mapeo que apunta a una columna que ya no existe, así que
+    **ninguna planilla vieja cambia**; con dos, vacío es vacío. Y `_talles_cruzados(pids, prendas,
+    cat)` corre **antes de armar nada** en `generar_multi`: si una fila pide en una columna de
+    talle algo que **ningún** molde del pedido tiene ahí, corta con **409** y dice qué columna.
+
+  🔴 **Por qué la traba pregunta por COLUMNA y no por molde:** la regla del usuario es que un
+  diseño vale si el talle lo tiene **al menos uno** de sus moldes (entrada 412), y sigue en pie
+  «cada talle carga lo que tiene, un hueco no frena nada». Exigírselo molde por molde frenaría
+  pedidos buenos. Por eso también **la traba sólo existe con dos o más columnas de talle**: con una
+  sola, un molde al que le falta un talle no frena nada, como siempre.
+
+  **Contratos**: `verificar_talle_por_molde.py` (nuevo: cada molde su columna · la celda vacía no
+  hereda · el chequeo cruzado · compat de una columna · el merge de `config_mapeo`) y
+  `frontend/verificar_columna_talle.mjs` (nuevo, en el `build`: talles por columna, diseños por
+  fila, el control montado en las dos tarjetas, la traba de «Al arte», y —candado del pedido— que
+  **la pantalla no adivine** la columna). `verificar_pasos_pedido.mjs` §10 actualizado a los nombres
+  nuevos. **VERIFICADO**: batería py completa, `npm run build` con los siete contratos.
 
 - **2026-09-09 (412) — 🔴 LA PLANILLA MOSTRABA LOS TALLES DE UN SOLO MOLDE.** Pedido del usuario:
   *«me muestra el talle de un solo molde; si cargo 2 moldes me debe mostrar todos los talles de los

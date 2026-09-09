@@ -7242,6 +7242,74 @@ def _cantidad_de_fila(pr, col):
     return max(1, n)
 
 
+def _talles_de_registro(reg, pid=None):
+    """Los talles que tiene un molde, en el orden del archivo. Salen del REGISTRO de piezas
+    (`{pieza: {talle: …}}`); el orden lo pone `resumen_plantilla.json`, que lo escribe el alta —
+    abrir el .ai para esto costaria segundos por molde en cada llamada."""
+    out, vistos = [], set()
+    for _pt in (reg or {}).values():
+        for _t in (_pt or {}):
+            if _t not in vistos:
+                vistos.add(_t); out.append(_t)
+    if pid:
+        try:
+            orden = (_cargar("resumen_plantilla.json", pid) or {}).get("talles") or []
+        except Exception:
+            orden = []
+        if orden:
+            _en = [t for t in orden if t in vistos]
+            out = _en + [t for t in out if t not in set(_en)]
+    return out
+
+
+def _talles_cruzados(pids, prendas, cat, reg_de=None):
+    """¿Alguna fila pide, en una columna de talle, un talle que NINGUN molde del pedido tiene en
+    esa columna? Devuelve el cuerpo del error (para un 409) o None.
+
+    🔴 Sólo corre cuando la planilla tiene MAS DE UNA columna de talle. Con una sola vale la regla
+    de siempre —cada talle carga lo que tiene, un hueco no frena nada ([[talles-piezas-desiguales]]).
+    Con dos («Talle» y «Talle short»), en cambio, un valor que no existe en esa columna significa
+    casi siempre que el molde esta leyendo la columna equivocada: y eso NO falla, sale una prenda
+    del tamano que no es, ya impresa y cortada.
+
+    Se pregunta por COLUMNA y no por molde a proposito: un diseno vale si el talle lo tiene al
+    menos UNO de sus moldes (regla del usuario), asi que exigirselo a cada molde frenaria pedidos
+    buenos."""
+    reg_de = reg_de or (lambda _p: _cargar("registro_producto.json", str(_p)) or {})
+    prods = {str(p.get("id")): p for p in (cat.get("productos") or [])}
+    _tid = (prods.get(str(pids[0])) or {}).get("planilla_template_id") if pids else None
+    _tpl = next((t for t in (cat.get("plantillas_planillas") or []) if t.get("id") == _tid), {}) or {}
+    cols_t = [c for c in (_tpl.get("columnas") or []) if c.get("role") == "talle"]
+    if len(cols_t) <= 1:
+        return None
+    _ids = {c.get("id") for c in cols_t}
+    por_col = {}
+    for pid in pids:
+        _pr = prods.get(str(pid)) or {}
+        _col = (_pr.get("mapeo_columnas") or {}).get("talle") or ""
+        if _col not in _ids:
+            _col = cols_t[0].get("id")
+        por_col.setdefault(_col, set()).update(
+            str(t).strip().lower() for t in _talles_de_registro(reg_de(pid)))
+    for c in cols_t:
+        _cid = c.get("id")
+        _disp = por_col.get(_cid)
+        if not _disp:
+            continue          # columna que no lee ningun molde del pedido: no hay nada que validar
+        _malos = {}
+        for pr in (prendas or []):
+            _v = str(pr.get(_cid, "") or "").strip()
+            if _v and _v.lower() not in _disp:
+                _malos[_v] = _malos.get(_v, 0) + 1
+        if _malos:
+            _l = ", ".join(f"«{k}» ({v} fila/s)" for k, v in sorted(_malos.items(), key=lambda x: -x[1]))
+            return {"error": "un talle no es de ese molde",
+                    "detalle": f"La columna «{c.get('label') or _cid}» pide talles que ningún molde "
+                               f"del pedido tiene en esa columna: {_l}. Revisá de qué columna toma "
+                               f"el talle cada molde, o corregí esas filas."}
+    return None
+
+
 def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None,
                       exigir_obligatorias=True):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
@@ -7267,6 +7335,24 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     numero_col = mapeo_columnas.get("numero", "numero")
     manga_col = mapeo_columnas.get("manga", "manga")
     larga_val = str(mapeo_columnas.get("manga_larga_val", "larga")).strip().lower()
+    # 🔴 DOS COLUMNAS DE TALLE («Talle» y «Talle short»): cada molde lee la SUYA. Es lo que
+    # distingue una camiseta de un short, y equivocarse no da error: da una prenda del tamaño que
+    # no es, ya impresa y cortada.
+    _cols_talle_tpl = [c for c in cols_template if c.get("role") == "talle"]
+    # El relleno por NOMBRE de campo sólo vale cuando no hay ambigüedad posible: una sola columna de
+    # talle, o un mapeo que apunta a una columna que ya no existe. Con dos, una celda vacía es una
+    # celda VACÍA — rellenarla con la de al lado hacía salir el short con el talle de la camiseta.
+    _hay_fallback = (len(_cols_talle_tpl) <= 1
+                     or talle_col not in {c.get("id") for c in _cols_talle_tpl})
+    _lbl_talle = next((c.get("label") or c.get("id") for c in _cols_talle_tpl
+                       if c.get("id") == talle_col), None) or "Talle"
+    # Los talles que ESTE molde tiene de verdad. Sólo se mira con DOS columnas de talle: con una
+    # sola vale la regla de siempre —cada talle carga lo que tiene y un hueco no frena nada
+    # ([[talles-piezas-desiguales]])—; con dos, un valor que el molde no tiene huele a columna
+    # equivocada. Lo decide `_talles_cruzados`, que ve todos los moldes del pedido.
+    _talles_molde = ({str(t).strip().lower() for t in _talles_de_registro(reg)}
+                     if (reg and len(_cols_talle_tpl) > 1) else set())
+    _talle_ajeno = {}
     # TOGGLES DE PIEZA (generaliza la manga): TODAS las columnas con comportamiento
     # "manga" (role="manga"). Cada una aporta una palabra CLAVE (ej. 'manga', 'sisa') y
     # sus OPCIONES; el valor de la fila dice qué opción se eligió. Puede haber varias.
@@ -7350,7 +7436,10 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     # rol mapeable valen si este molde las mapea POR ID; las demás (Diseño, dato libre) van
     # siempre.
     _ROLES_MAPEABLES = {"talle", "nombre", "numero", "manga"}
-    _usa = set((prod or {}).get("mapeo_columnas", {}).values()) if (prod or {}).get("mapeo_columnas") else None
+    # Sólo los valores de texto: en `mapeo_columnas` conviven ids de columna con marcas
+    # (`talle_elegido`, que dice si la decisión la tomó alguien o quedó el default del alta).
+    _usa = ({v for v in (prod or {}).get("mapeo_columnas", {}).values() if isinstance(v, str) and v}
+            if (prod or {}).get("mapeo_columnas") else None)
 
     def _aplica_al_molde(c):
         if c.get("role") not in _ROLES_MAPEABLES:
@@ -7361,7 +7450,7 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
 
     _oblig = [c for c in cols_template if c.get("obligatoria") and _aplica_al_molde(c)]
     if not _oblig:
-        _oblig = [{"id": talle_col, "label": "Talle"}]
+        _oblig = [{"id": talle_col, "label": _lbl_talle}]
     # 🔴 …y NO se exige nada cuando la fila es una MUESTRA INTERNA (el molde guía de la ficha, el
     # preview del arte, el visor): esas filas traen lo mínimo para dibujar y no tienen por qué
     # cargar las columnas que el pedido pide. Con el filtro puesto se descartaban y la ficha se
@@ -7390,8 +7479,14 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             opcion = val or (ti["opciones"][0] if ti["opciones"] else "")   # vacío → primera opción
             if opcion:
                 toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
+        _tv = pr.get(talle_col, "")
+        if not str(_tv or "").strip() and _hay_fallback:
+            _tv = pr.get("talle", "") or pr.get("Talle", "")
+        if _talles_molde and str(_tv or "").strip() and str(_tv).strip().lower() not in _talles_molde:
+            _ka = str(_tv).strip()
+            _talle_ajeno[_ka] = _talle_ajeno.get(_ka, 0) + 1
         translated_pr = {
-            "talle": pr.get(talle_col, "") or pr.get("talle", "") or pr.get("Talle", ""),
+            "talle": _tv,
             "nombre": pr.get(nombre_col, "") or pr.get("nombre", "") or pr.get("Nombre", "") or "",
             "numero": pr.get(numero_col, "") or pr.get("numero", "") or pr.get("Número", "") or pr.get("Numero", "") or "",
             "manga": manga_final,
@@ -7437,6 +7532,8 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     _traducir_prendas.sin_talle = _descartadas
     _traducir_prendas.faltantes = _faltantes
     _traducir_prendas.obligatorias = [c.get("label") or c.get("id") for c in _oblig]
+    _traducir_prendas.talle_ajeno = _talle_ajeno       # talle que este molde NO tiene -> cuántas filas
+    _traducir_prendas.col_talle = _lbl_talle           # de qué columna lo leyó
     return out
 
 
@@ -7944,6 +8041,12 @@ def generar_multi():
         if _no:
             return _no
     cat = _cargar_catalogo()
+    # 🔴 ANTES DE ARMAR NADA: que ninguna fila pida en una columna de talle algo que ningún molde
+    # del pedido tiene ahí (la columna equivocada no falla: sale impresa). La pantalla ya lo frena;
+    # esto es el cinturón para quien pegue a la API directo.
+    _cruz = _talles_cruzados([str(x) for x in pids], prendas, cat)
+    if _cruz:
+        return jsonify(_cruz), 409
     grupos_cfg = cat.get("grupos_tizada", [])
     def _grupo_de(_pid):
         for g in grupos_cfg:
@@ -9473,18 +9576,7 @@ def get_productos():
         # veía los del molde ACTIVO (`/api/estado_general`), así que faltaban la mitad.
         # El orden sale de `resumen_plantilla.json` (lo escribe el alta) y NO de abrir el .ai:
         # esto corre por cada molde en cada `/api/productos`.
-        _talles_p, _vis_t = [], set()
-        for _pt in (_reg_conteo or {}).values():
-            for _t in (_pt or {}):
-                if _t not in _vis_t:
-                    _vis_t.add(_t); _talles_p.append(_t)
-        try:
-            _orden_t = (_cargar("resumen_plantilla.json", pid) or {}).get("talles") or []
-        except Exception:
-            _orden_t = []
-        if _orden_t:
-            _en_orden = [t for t in _orden_t if t in _vis_t]
-            _talles_p = _en_orden + [t for t in _talles_p if t not in set(_en_orden)]
+        _talles_p = _talles_de_registro(_reg_conteo, pid)
         _etqp = p.get("etiqueta") or {}
         _gen = {MP._norm_generico(str(_k)) for _k in _reg_conteo}
         _gen.discard("")
@@ -10410,7 +10502,11 @@ def config_mapeo():
     if tid:
         prod["planilla_template_id"] = tid
     if mapeo is not None:
-        prod["mapeo_columnas"] = mapeo
+        # MERGE, no pisar: una pantalla que sólo cambia la COLUMNA DE TALLE no tiene por qué
+        # conocer el resto del dict, y pisándolo entero le borraba nombre/numero/manga.
+        _prev = dict(prod.get("mapeo_columnas") or {})
+        _prev.update(mapeo)
+        prod["mapeo_columnas"] = _prev
         
     _guardar_catalogo(cat)
     return jsonify({"ok": True})

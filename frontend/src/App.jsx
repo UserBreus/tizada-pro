@@ -304,6 +304,44 @@ const CFG_PARTES = [['grupos_variables', 'Grupos y variables'], ['telas', 'Telas
                     ['planilla', 'Planilla'], ['guia', 'Talle de guía'],
                     ['produccion', 'Borde y producción']];
 
+// ── DE QUÉ COLUMNA DE TALLE TOMA SUS MEDIDAS UN MOLDE ────────────────────────────────────────
+// 🔴 Cuando la planilla lleva más de una columna de talle («Talle» y «Talle short»), cada molde
+// tiene que decir de cuál toma el suyo: es lo que distingue una camiseta de un short. Va ACÁ, en
+// la tarjeta del molde y a UN SOLO TOQUE (pedido del usuario 2026-09-09: «que lo ponga el cliente
+// pero de una forma fácil, sin ir a un espacio extra»), porque mandarlo a una pantalla de
+// configuración aparte era el paso que nadie hacía — y no hacerlo no falla: saca la prenda del
+// tamaño equivocado, ya impresa y cortada.
+// Mientras nadie eligió NO se muestra ninguna encendida: el default del catálogo apunta a la
+// primera columna, y mostrarlo como si fuera una decisión era la trampa.
+function SelectorColumnaTalle({ colsTalle, valor, elegido, onElegir, ancla }) {
+  if (!colsTalle || colsTalle.length <= 1) return null;   // una sola columna: no hay nada que decidir
+  return (
+    <div onClick={(e) => e.stopPropagation()} data-tour={ancla} data-opciones="1"
+      style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>
+      {/* El rótulo va en su propia línea: la tarjeta del molde mide 150 px y con las dos
+          pastillas al lado se partía en tres renglones distintos. */}
+      <span style={{ width: '100%', fontSize: 9, fontWeight: 800, letterSpacing: .3,
+        color: elegido ? 'var(--text-muted)' : 'var(--warning)' }}>
+        {elegido ? 'TALLE DE' : '¿QUÉ TALLE?'}
+      </span>
+      {colsTalle.map(c => {
+        const on = !!elegido && c.id === valor;
+        return (
+          <button key={c.id} type="button"
+            title={`Este molde toma el talle de la columna «${c.label || c.id}»`}
+            onClick={(e) => { e.stopPropagation(); onElegir(c.id); }}
+            style={{ padding: '2px 7px', borderRadius: 7, fontSize: 10, fontWeight: 800, cursor: 'pointer',
+              background: on ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+              color: on ? '#04222a' : 'var(--text-secondary)',
+              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)') }}>
+            {c.label || c.id}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // APOYAR LA ETIQUETA EN EL CONTORNO: del punto que se tocó al punto del borde más cercano, con el
 // ángulo de la tangente y la normal hacia ADENTRO (para que el texto entre en la pieza y no salga).
 // Vive a nivel de módulo porque la usan DOS pantallas —Configuración y el pedido (camino B)— y si
@@ -9662,14 +9700,44 @@ export default function App() {
     return out.length ? out : (estado?.talles || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productosCat.productos, moldesUnion.join(','), estado?.talles]);
-  // Los diseños que SIRVEN para ese talle: los que tienen al menos un molde que lo trae. Sin esto
-  // se podía elegir en la fila un diseño cuyo molde no tiene ese talle, y eso recién se descubría
-  // con la tizada armada.
-  const _disenosParaTalle = (talle) => {
-    const t = String(talle || '').trim().toLowerCase();
-    if (!t) return disenosPedido.map(d => d.nombre);
-    const sirven = disenosPedido.filter(d => (disenoMoldes[d.id] || [])
-      .some(mid => _tallesDeMolde(mid).some(x => String(x).trim().toLowerCase() === t)));
+  // ── DE QUÉ COLUMNA TOMA EL TALLE CADA MOLDE ──────────────────────────────────────────────
+  // 🔴 Una planilla puede llevar DOS columnas de talle («Talle» y «Talle short») y cada molde lee
+  // la SUYA: es lo que distingue una camiseta de un short. Equivocarse no da error — da una prenda
+  // del tamaño que no es, ya impresa y cortada. Con UNA sola columna nada de esto se ve ni cambia.
+  // Las columnas de talle salen de la planilla DEL PEDIDO (`plantillaComun`): en el espacio de
+  // carga todavía no hay molde activo, así que mirar `cols` —que son las del molde activo del
+  // servidor— dejaría la pantalla sin saber que hay dos columnas justo cuando hay que elegirlas.
+  const colsTalle = React.useMemo(() => {
+    const _t = (plantillasPlanillas || []).find(x => x.id === plantillaComun);
+    return ((_t && _t.columnas) || cols || []).filter(c => c.role === 'talle');
+  }, [plantillasPlanillas, plantillaComun, cols]);
+  const colDeMolde = (mid) => {
+    const c = ((productosCat.productos.find(p => p.id === mid) || {}).mapeo_columnas || {}).talle;
+    return (colsTalle.some(x => x.id === c) ? c : (colsTalle[0] || {}).id) || 'talle';
+  };
+  // Los talles que ofrece UNA columna son los de los moldes que la leen. Sin esto «Talle short»
+  // ofrecía también los de la camiseta y se podía cargar un short en un talle que no existe.
+  const tallesDeColumna = (colId) => {
+    if (colsTalle.length <= 1) return tallesDelPedido;
+    const out = [], vistos = new Set();
+    moldesUnion.forEach(mid => {
+      if (colDeMolde(mid) !== colId) return;
+      _tallesDeMolde(mid).forEach(t => {
+        const k = String(t);
+        if (!vistos.has(k)) { vistos.add(k); out.push(k); }
+      });
+    });
+    return out.length ? out : tallesDelPedido;
+  };
+  // Los diseños que SIRVEN para una fila: los que tienen al menos un molde que trae el talle que
+  // la fila pide EN LA COLUMNA DE ESE MOLDE. Sin esto se podía elegir en la fila un diseño cuyo
+  // molde no tiene ese talle, y recién se descubría con la tizada armada.
+  const _disenosParaFila = (fila) => {
+    const sirven = disenosPedido.filter(d => (disenoMoldes[d.id] || []).some(mid => {
+      const v = String((fila || {})[colDeMolde(mid)] || '').trim().toLowerCase();
+      if (!v) return true;                   // sin talle cargado no se descarta a nadie
+      return _tallesDeMolde(mid).some(x => String(x).trim().toLowerCase() === v);
+    }));
     // Si NINGUNO lo trae, se ofrecen todos igual (una lista vacía es un callejón sin salida) y lo
     // marca la validación de abajo, que es la que frena antes de fabricar.
     return (sirven.length ? sirven : disenosPedido).map(d => d.nombre);
@@ -9681,7 +9749,8 @@ export default function App() {
     const molds = moldesUnion.map(id => (productosCat.productos || []).find(p => p.id === id)).filter(Boolean);
     if (!molds.length || !molds.some(m => m.mapeo_columnas)) return null;
     const usados = new Set();
-    molds.forEach(m => Object.values(m.mapeo_columnas || {}).forEach(v => usados.add(v)));
+    // Sólo valores de texto: en `mapeo_columnas` conviven ids de columna con marcas (`talle_elegido`).
+    molds.forEach(m => Object.values(m.mapeo_columnas || {}).forEach(v => { if (typeof v === 'string' && v) usados.add(v); }));
     return usados;
   }, [moldesUnion, productosCat]);
   // Roles que se activan/desactivan por molde (los toggles «usar en este molde»). El resto —Diseño
@@ -11174,20 +11243,29 @@ export default function App() {
   // DE QUÉ COLUMNA DE TALLE toma sus medidas este molde. Es lo que distingue una camiseta de un
   // short cuando la planilla lleva las dos («Talle» y «Talle short»): sin esto el short tomaría
   // el talle de la camiseta y saldría del tamaño equivocado, impreso y cortado.
+  // `talle_elegido` marca que la decisión LA TOMÓ ALGUIEN. Sin esa marca no se puede distinguir
+  // «eligió Talle» de «nadie tocó nada y quedó el default del alta», que es justo lo que hacía que
+  // un short saliera con el talle de la camiseta sin que nadie se enterara. El servidor hace merge,
+  // así que mandar sólo estas dos claves no le borra al molde el resto del mapeo.
+  const _guardarColumnaTalle = (ids, colId) => Promise.all(ids.map(id => {
+    const p = (productosCat.productos || []).find(x => x.id === id) || {};
+    return fetch('/api/productos/config_mapeo', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, planilla_template_id: p.planilla_template_id,
+                             mapeo_columnas: { talle: colId, talle_elegido: true } })
+    });
+  }));
+  // UN molde, un toque, desde su propia tarjeta.
+  const ponerColumnaTalle = async (pid, colId) => {
+    try { await _guardarColumnaTalle([pid], colId); await fetchProductos(); }
+    catch (err) { showError(err.message); }
+  };
+  // …y el atajo en lote, para poner varios de una (los que están tildados).
   const ponerColumnaTalleB = async (colId) => {
     const ids = [...moldesBSel];
     if (!ids.length) return;
-    try {
-      for (const id of ids) {
-        const p = (productosCat.productos || []).find(x => x.id === id) || {};
-        await fetch('/api/productos/config_mapeo', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, planilla_template_id: p.planilla_template_id,
-                                 mapeo_columnas: { ...(p.mapeo_columnas || {}), talle: colId } })
-        });
-      }
-      await fetchProductos();
-    } catch (err) { showError(err.message); }
+    try { await _guardarColumnaTalle(ids, colId); await fetchProductos(); }
+    catch (err) { showError(err.message); }
   };
   // Del espacio de carga al de nombrar: los moldes entran al pedido con su diseño y se sigue en
   // el paso de siempre, que es donde vive el visor.
@@ -11554,11 +11632,10 @@ export default function App() {
   const _opcionesCol = (c) => ((c?.opciones || _reglaDeCol(c)?.opciones || '')
     .split(',').map(s => s.trim()).filter(Boolean));
   const _opcionesDeCol = (c, fila) => {   // devuelve la lista de valores válidos, o null si la columna es libre
-    if (c.role === 'talle') { const t = tallesDelPedido; return t.length ? t : null; }
+    if (c.role === 'talle') { const t = tallesDeColumna(c.id); return t.length ? t : null; }
     if (c.role === 'diseno') {
-      // Con la fila a la vista, sólo los diseños que tienen ESE talle (ver `_disenosParaTalle`).
-      const _tc = fila ? cols.find(x => x.role === 'talle') : null;
-      const d = _disenosParaTalle(_tc ? fila[_tc.id] : '');
+      // Con la fila a la vista, sólo los diseños que sirven para ESA fila (ver `_disenosParaFila`).
+      const d = _disenosParaFila(fila || null);
       return d.length ? d : null;
     }
     const tipo = _tipoCol(c);
@@ -13164,9 +13241,13 @@ export default function App() {
               const _mios = (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno' && !p.de_otro);   // los MÍOS: un admin ve los de todos, pero su pedido no abre ni nombra los ajenos
               // Las columnas de TALLE de la planilla del pedido. Cuando hay más de una («Talle» y
               // «Talle short»), cada molde tiene que decir de cuál toma sus medidas.
-              const _tplPed = (plantillasPlanillas || []).find(t => t.id === plantillaComun) || {};
-              const _colsTalle = (_tplPed.columnas || []).filter(c => c.role === 'talle');
+              const _colsTalle = colsTalle;
               const _selN = moldesBSel.length;
+              const _faltaDis = !!_mios.length && _mios.some(p => !(moldesBDiseno || {})[p.id]);
+              // 🔴 Con más de una columna de talle, seguir sin decir de cuál toma cada molde es
+              // salir con el short del tamaño de la camiseta. Es un toque por tarjeta.
+              const _faltaCol = _colsTalle.length > 1
+                && _mios.some(p => !(p.mapeo_columnas || {}).talle_elegido);
               return (
               <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, paddingTop: 4 }}>
@@ -13236,11 +13317,9 @@ export default function App() {
                                 {p.piezas_registradas || 0} piezas
                                 {_dis ? <> · <span style={{ color: 'var(--accent)' }}>{_dis}</span></> : ' · sin diseño'}
                               </div>
-                              {_colsTalle.length > 1 && (
-                                <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>
-                                  talle: <b>{(_colsTalle.find(c => c.id === _col) || {}).label || _col}</b>
-                                </div>
-                              )}
+                              <SelectorColumnaTalle colsTalle={_colsTalle} valor={_col}
+                                elegido={!!(p.mapeo_columnas || {}).talle_elegido} ancla="cargar-b-columna"
+                                onElegir={(cid) => ponerColumnaTalle(p.id, cid)} />
                             </button>
                           );
                         })}
@@ -13280,9 +13359,10 @@ export default function App() {
                   volver={<BtnVolver texto="Atrás" ancla="cargar-b-volver" onClick={() => { setVistaDiseno(null); setMoldesBSel([]); }} />}
                   acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
                   centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
-                  aviso={_mios.length && _mios.some(p => !(moldesBDiseno || {})[p.id]) ? 'Falta decir a qué diseño va cada molde' : ''}
+                  aviso={_faltaDis ? 'Falta decir a qué diseño va cada molde'
+                    : _faltaCol ? 'Falta decir de qué columna toma el talle cada molde' : ''}
                   siguiente={<BtnSiguiente texto="Al arte" ancla="cargar-b-siguiente"
-                    disabled={!_mios.length || _mios.some(p => !(moldesBDiseno || {})[p.id])}
+                    disabled={!_mios.length || _faltaDis || _faltaCol}
                     onClick={irANombrarB} />} />
               </div>
               );
@@ -13468,6 +13548,13 @@ export default function App() {
                                   ))}
                                 </div>
                               </button>
+                              {/* De qué columna toma el talle. Sólo si el molde YA está en un
+                                  diseño del pedido: en una tarjeta que no se usa sería ruido. */}
+                              {!!susDisenos.length && (
+                                <SelectorColumnaTalle colsTalle={colsTalle} valor={colDeMolde(p.id)}
+                                  elegido={!!(p.mapeo_columnas || {}).talle_elegido} ancla="molde-columna-talle"
+                                  onElegir={(cid) => ponerColumnaTalle(p.id, cid)} />
+                              )}
                               <div style={{ display: 'flex', gap: 5, marginTop: 8 }}>
                                 <button type="button" className="btn ghost" data-tour="mimolde-configurar" style={{ flex: 1, fontSize: 11, padding: '5px 8px' }}
                                   onClick={() => abrirConfigMiMolde(p.id)}>
@@ -13802,11 +13889,11 @@ export default function App() {
                               const plc = `${i}-${ci}`;
                               const editando = !!plEdit && plEdit.r === i && plEdit.c === ci;
                               const esDropdown = c.role === 'talle' || c.role === 'diseno' || tipo === 'desplegable';
-                              // El desplegable del DISEÑO se arma con el talle DE ESTA FILA: sólo
-                              // los diseños que tienen ese talle en alguno de sus moldes.
-                              const _cTalle = c.role === 'diseno' ? cols.find(x => x.role === 'talle') : null;
-                              const dropdownOpts = c.role === 'talle' ? tallesDelPedido
-                                : c.role === 'diseno' ? _disenosParaTalle(_cTalle ? fila[_cTalle.id] : '') : opts;
+                              // El desplegable del DISEÑO se arma con los talles DE ESTA FILA: sólo
+                              // los diseños que traen ese talle en alguno de sus moldes (cada uno
+                              // juzgado por SU columna de talle, que puede no ser la misma).
+                              const dropdownOpts = c.role === 'talle' ? tallesDeColumna(c.id)
+                                : c.role === 'diseno' ? _disenosParaFila(fila) : opts;
                               const _esNum = c.role === 'numero' || c.role === 'cantidad';
                               const _fBase = { padding: '6px 8px', fontSize: 13, lineHeight: '20px', height: 32, boxSizing: 'border-box',
                                 fontFamily: _esNum ? 'monospace' : 'inherit', fontWeight: c.role === 'nombre' ? 600 : 'normal' };

@@ -141,11 +141,11 @@ ok(/moldesUnion\.forEach\(mid => _tallesDeMolde\(mid\)/.test(APP),
    'se juntan molde por molde, sin repetir y respetando el orden de cada uno');
 ok(!/c\.role === 'talle' \? \(estado\?\.talles \|\| \[\]\)/.test(APP),
    'y la columna Talle ya NO usa los del molde activo');
-ok(/c\.role === 'talle'.{0,60}tallesDelPedido/s.test(APP), 'sino los del pedido');
+ok(/c\.role === 'talle'.{0,80}tallesDeColumna\(c\.id\)/s.test(APP),
+   'sino los de los moldes que leen ESA columna de talle');
 // …y el DISENO de una fila solo puede ser uno que tenga ESE talle en alguno de sus moldes.
-ok(APP.includes('const _disenosParaTalle'), 'los diseños se filtran por el talle de la fila');
-ok(/_disenosParaTalle\(_cTalle \? fila\[_cTalle\.id\] : ''\)/.test(APP),
-   'el desplegable de Diseño usa el talle DE ESA FILA');
+ok(APP.includes('const _disenosParaFila'), 'los diseños se filtran por la fila entera');
+ok(/_disenosParaFila\(fila\)/.test(APP), 'el desplegable de Diseño usa ESA FILA');
 ok(/_opcionesDeCol\(c, f\)/.test(APP), 'y la validación mira la fila, no la columna sola');
 
 console.log();
