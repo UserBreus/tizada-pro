@@ -1254,7 +1254,15 @@ def _leer_catalogo_crudo():
     Quién escribe y cuándo lo decide `_cargar_catalogo`."""
     cat, sembrar = None, False
     try:
-        cat = db.get_doc("catalogo")
+        # Se pide TAMBIÉN la versión: es lo que después permite guardar condicionalmente («guardá
+        # sólo si nadie lo tocó desde que lo leí»), que es lo único que sirve cuando hay más de un
+        # proceso. Y si esto es una lectura PARA EDITAR, se guarda además una copia de cómo estaba:
+        # si el guardado choca, con esa copia se puede saber qué cambié YO y re-aplicarlo sobre lo
+        # que dejó el otro, en vez de pisarlo.
+        cat, _ver = db.get_doc_ver("catalogo")
+        if getattr(_edicion_cat, "n", 0) > 0:
+            _edicion_cat.ver = _ver
+            _edicion_cat.base = copy.deepcopy(cat) if cat is not None else None
         if cat is None:
             # Primera vez: sembrar la base con el JSON histórico (o el default) y no volver a
             # depender del archivo. Esto NO es "migrar los datos de piezas": es traer la config
@@ -1455,10 +1463,12 @@ _CAT_REV_CACHE = {"n": None}
 
 
 def _catalogo_rev():
-    """La revisión actual del catálogo (int). 0 si la base no contesta: nunca rompe el latido."""
+    """La revisión actual del catálogo (int). 0 si la base no contesta: nunca rompe el latido.
+
+    El número es la VERSION de la fila, que el propio UPDATE incrementa (ver `db._escribir_doc`).
+    La pantalla sólo compara «¿cambió?», así que cualquier número que avance sirve."""
     try:
-        d = db.get_doc("catalogo_rev") or {}
-        n = int(d.get("n") or 0)
+        n = db.get_doc_ver("catalogo_rev")[1]
         _CAT_REV_CACHE["n"] = n
         return n
     except Exception:
@@ -1467,13 +1477,101 @@ def _catalogo_rev():
 
 def _subir_catalogo_rev():
     """Sube la revisión. Best-effort: si falla, el catálogo igual quedó guardado — lo único que se
-    pierde es el aviso automático a las otras pantallas."""
+    pierde es el aviso automático a las otras pantallas.
+
+    🔴 El +1 lo hace la BASE, en la misma sentencia. Leer el número y escribir n+1 desde el código
+    era una carrera: con dos procesos guardando a la vez, los dos leían lo mismo y escribían el
+    mismo n+1, así que una de las dos pantallas nunca se enteraba de que algo había cambiado."""
     try:
-        n = _catalogo_rev() + 1
-        db.set_doc("catalogo_rev", {"n": n, "t": time.time()})
-        _CAT_REV_CACHE["n"] = n
+        _CAT_REV_CACHE["n"] = db.set_doc("catalogo_rev", {"t": time.time()})
     except Exception as e:
         print(f"[catalogo] no se pudo subir la revisión: {e}")
+
+
+_AUSENTE = object()          # «esta clave no estaba», que no es lo mismo que «estaba en None»
+
+
+def _es_lista_de_ids(x):
+    return isinstance(x, list) and x and all(isinstance(i, dict) and i.get("id") for i in x)
+
+
+def _fusionar_listas_id(vieja, mia, fresca):
+    """Listas de objetos con `id` (productos, plantillas, reglas…): se casan POR ID, no por
+    posición. El orden lo pone la mía, que es la que la pantalla acaba de ver."""
+    vv = {i["id"]: i for i in vieja} if _es_lista_de_ids(vieja) else {}
+    ff = {i["id"]: i for i in fresca}
+    out, vistos = [], set()
+    for x in mia:
+        _i = x["id"]
+        vistos.add(_i)
+        if _i in ff:
+            out.append(_fusionar_cambios(vv.get(_i, _AUSENTE), x, ff[_i]))
+        elif _i in vv and vv[_i] == x:
+            continue                       # el otro lo borró y yo no lo toqué: respeto el borrado
+        else:
+            out.append(x)                  # es mío nuevo, o lo cambié: va
+    for x in fresca:                       # lo que el otro AGREGÓ mientras tanto
+        if x["id"] not in vistos and x["id"] not in vv:
+            out.append(x)
+    return out
+
+
+def _fusionar_cambios(vieja, mia, fresca):
+    """Re-aplica MIS cambios sobre la versión FRESCA, sabiendo de qué versión partí.
+
+    Es lo que convierte «gana el último que guarda» (que borra el trabajo del otro, sin avisar) en
+    «cada uno conserva lo suyo». La regla es simple y se lee en el orden en que está escrita:
+    lo que yo no toqué queda como lo dejó el otro; lo que el otro no tocó queda como lo dejé yo;
+    y si los dos tocaron el MISMO lugar se baja un nivel (clave por clave, id por id) hasta llegar
+    a un valor suelto — ahí sí gana el mío, que es el conflicto de verdad y no se puede partir más.
+    """
+    if mia == vieja:
+        return fresca                      # no toqué nada acá: manda lo del otro
+    if fresca == vieja:
+        return mia                         # el otro no tocó nada acá: manda lo mío
+    if isinstance(mia, dict) and isinstance(fresca, dict) and isinstance(vieja, dict):
+        out = dict(fresca)
+        for k in mia:
+            out[k] = _fusionar_cambios(vieja.get(k, _AUSENTE), mia[k], fresca.get(k, _AUSENTE))
+        for k in vieja:                    # lo que borré yo, si el otro no lo tocó, queda borrado
+            if k not in mia and k in out and vieja.get(k) == fresca.get(k):
+                del out[k]
+        return out
+    if _es_lista_de_ids(mia) and _es_lista_de_ids(fresca):
+        return _fusionar_listas_id(vieja if isinstance(vieja, list) else [], mia, fresca)
+    return mia
+
+
+_REINTENTOS_CAT = 4
+
+
+def _guardar_catalogo_con_version(cat):
+    """Guarda el catálogo SIN pisar lo que hizo otro. Devuelve el catálogo tal como quedó.
+
+    🔴 El candado `_LOCK_CAT_EDICION` vive en la memoria de UN proceso: alcanza mientras haya un
+    solo servidor, pero con dos (o dos máquinas) deja de proteger y vuelve el *lost update* — el
+    último que guarda borra el cambio del otro sin un solo error. La escritura condicional por
+    versión sí cruza procesos: si la versión cambió, no se guarda nada, se relee lo fresco, se
+    re-aplican MIS cambios encima y se reintenta. Sólo si ni así se puede, se avisa y no se pisa.
+    """
+    _ver = getattr(_edicion_cat, "ver", None)
+    _base = getattr(_edicion_cat, "base", None)
+    for _i in range(_REINTENTOS_CAT):
+        try:
+            _nueva = db.guardar_catalogo(cat, version_esperada=_ver)
+            _edicion_cat.ver = _nueva
+            _edicion_cat.base = copy.deepcopy(cat)
+            return cat
+        except db.ConflictoVersion:
+            if _base is None:
+                raise                      # sin la copia de partida no hay con qué fusionar
+            _fresco, _ver = db.get_doc_ver("catalogo")
+            if _fresco is None:
+                raise
+            cat = _fusionar_cambios(_base, cat, _fresco)
+            _base = copy.deepcopy(_fresco)
+            print(f"[catalogo] otro proceso guardó primero: re-aplico mis cambios (intento {_i + 2})")
+    raise RuntimeError("el catálogo cambió muchas veces mientras se guardaba: no se pisó nada")
 
 
 def _guardar_catalogo(cat):
@@ -1485,7 +1583,7 @@ def _guardar_catalogo(cat):
             # El documento Y su proyección a las tablas, en UNA transacción: separados, un fallo
             # al proyectar dejaba el catálogo nuevo guardado con las tablas viejas — la base
             # contando dos historias distintas, sin que nada avisara.
-            db.guardar_catalogo(cat)
+            cat = _guardar_catalogo_con_version(cat)
         except Exception as e:
             LOG.error("catalogo", "No se pudo guardar el catálogo en la base",
                       f"{type(e).__name__}: {e}. No se guardó NADA (la transacción se deshizo): "
@@ -1631,6 +1729,9 @@ def _soltar_edicion_catalogo():
     siempre (en el teardown de cualquier request, aunque no haya tocado el catálogo)."""
     n = getattr(_edicion_cat, "n", 0)
     _edicion_cat.n = 0
+    # Fuera de la sección, la versión leída ya no vale: la próxima edición relee la suya.
+    _edicion_cat.ver = None
+    _edicion_cat.base = None
     for _ in range(n):
         try:
             _LOCK_CAT_EDICION.release()

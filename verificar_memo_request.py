@@ -59,7 +59,32 @@ def _filas(sql, *a):
 _falso.get_doc = _get_doc
 _falso.fila = _fila
 _falso.filas = _filas
-_falso.guardar_catalogo = lambda cat: _DOCS.__setitem__("catalogo", copy.deepcopy(cat))
+# El catálogo se guarda CONDICIONALMENTE (2026-09-09): el doble lleva su versión, como la base.
+_VERS = {}
+
+
+class _ConflictoVersion(Exception):
+    pass
+
+
+def _get_doc_ver(c, default=None):
+    # Cuenta como lectura del documento: desde 2026-09-09 el catálogo se lee por acá (con su
+    # versión), y si no se contara, este contrato diría «cero viajes» siempre.
+    _CUENTA["get_doc"] += 1
+    return copy.deepcopy(_DOCS.get(c, default)), _VERS.get(c, 0)
+
+
+def _guardar_cat_ver(cat, version_esperada=None):
+    if version_esperada is not None and version_esperada != _VERS.get("catalogo", 0):
+        raise _ConflictoVersion("el catálogo cambió mientras tanto")
+    _DOCS["catalogo"] = copy.deepcopy(cat)
+    _VERS["catalogo"] = _VERS.get("catalogo", 0) + 1
+    return _VERS["catalogo"]
+
+
+_falso.ConflictoVersion = _ConflictoVersion
+_falso.get_doc_ver = _get_doc_ver
+_falso.guardar_catalogo = _guardar_cat_ver
 _falso.set_doc = lambda c, o: _DOCS.__setitem__(c, copy.deepcopy(o))
 _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 sys.modules["db"] = _falso

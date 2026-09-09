@@ -1482,12 +1482,58 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (416) — 🔴 GUARDAR LA CONFIGURACIÓN YA NO PISA LO QUE HIZO OTRO (entrega 1 de la 415).**
+  Pedido del usuario: *«esto debe de estar armado lógicamente para que lo usen infinitas personas a
+  la vez»*. Es el límite 1 de la 415, el que causa **pérdida silenciosa de trabajo**, y es el que
+  hay que resolver antes que ninguno: mientras esté, agregar un segundo proceso EMPEORA el sistema.
+
+  **EL PROBLEMA.** ~48 endpoints hacen `leer el catálogo entero → cambiar lo mío → guardarlo
+  entero`. Lo que evitaba que dos se pisaran era `_LOCK_CAT_EDICION`, un `threading.RLock`: vive en
+  la **memoria de un proceso**. Con dos procesos (o dos máquinas) no protege nada — los dos leen lo
+  mismo, los dos escriben el documento completo, y el cambio del primero desaparece **sin un solo
+  error en pantalla**. Y como el catálogo es global, ni siquiera hace falta que sea el mismo molde.
+
+  **LA SOLUCIÓN: versión en el documento, y fusión en vez de pisada.**
+  · `dbo.config` tiene ahora `version INT` (ALTER idempotente, marca `config_version`).
+  · `db.get_doc_ver(clave)` devuelve `(documento, versión)`; `db._escribir_doc` hace el UPDATE
+    **condicionado a esa versión** y levanta `db.ConflictoVersion` si no coincide — dentro de la
+    transacción de quien llama, así que **no se guarda nada** (ni el documento ni la proyección a
+    las tablas). `db.guardar_catalogo(cat, version_esperada=…)` devuelve la versión nueva.
+  · `_leer_catalogo_crudo` anota la versión y, **si la lectura es para editar**, una copia de cómo
+    estaba el catálogo en ese momento.
+  · `_guardar_catalogo_con_version` guarda condicionado. Si chocó: relee lo fresco, **re-aplica MIS
+    cambios encima** (`_fusionar_cambios`) y reintenta, hasta 4 veces. Si ni así, avisa y **no
+    pisa**. El candado local se queda: hace que dentro de un proceso el choque ni ocurra.
+
+  🔴 **LA REGLA DE FUSIÓN, que es el corazón:** *lo que yo no toqué queda como lo dejó el otro; lo
+  que el otro no tocó queda como lo dejé yo; si los dos tocaron el mismo lugar se baja un nivel
+  (clave por clave, y las listas de objetos con `id` **casadas por id, nunca por posición**) hasta
+  llegar a un valor suelto — ahí gana el mío, que es el conflicto de verdad y no se puede partir
+  más.* Los borrados también se respetan: si yo saqué algo y el otro no lo tocó, queda sacado.
+  Esto convierte «gana el último y borra el trabajo del otro» en «cada uno conserva lo suyo».
+
+  **VERIFICADO** en `verificar_config_concurrente.py` §3, simulando dos PROCESOS (el segundo escribe
+  saltándose el candado, que es exactamente lo que pasa con dos servidores): el cambio de A y el de
+  B sobreviven los dos, el molde que B agregó no se borra, lo que A borró queda borrado, y en el
+  choque real —el mismo campo— gana el último pero **no se pierde nada más**. Los dobles de `db` de
+  los otros cuatro contratos se hicieron conscientes de la versión.
+
+  **De paso, la misma carrera en chico:** `_subir_catalogo_rev` leía el número y escribía n+1 desde
+  el código. Con dos procesos guardando a la vez los dos leían lo mismo y escribían el mismo n+1, así
+  que **una de las dos pantallas nunca se enteraba** de que algo había cambiado. Ahora el número es
+  la `version` de esa fila, que incrementa la BASE en la misma sentencia. (El aviso ya vivía en la
+  base, no en memoria: eso estaba bien de antes.)
+
+  ⚠️ **Esto NO alcanza solo**: siguen abiertos los límites 2, 3 y 4 de la 415 (partir el catálogo
+  por molde, el pool de render, y persistir pedidos y trabajos). Pero es el que había que hacer
+  primero, porque es el único que pierde datos.
+
 - **2026-09-09 (415) — 📌 PENDIENTE MEDIDO: HOY EL SISTEMA NO AGUANTA 100 PERSONAS A LA VEZ.**
   Pregunta del usuario: *«¿el sistema está armado para que 100 personas puedan usar al mismo tiempo,
   usar los mismos moldes y hacer todos los procesos al mismo tiempo?»*. **No, todavía no**, y
   conviene tener escrito por qué, porque no es una intuición: son cuatro límites concretos.
 
-  1. 🔴 **EL CANDADO DE CONFIGURACIÓN VIVE EN LA MEMORIA DE UN PROCESO.** `_LOCK_CAT_EDICION` es un
+  1. ✅ **RESUELTO en la 416** — **EL CANDADO DE CONFIGURACIÓN VIVE EN LA MEMORIA DE UN PROCESO.** `_LOCK_CAT_EDICION` es un
      `threading.RLock`. Hoy alcanza porque hay **un solo** proceso Flask (`make_server(...,
      threaded=True)`), pero 100 personas piden más de un proceso o más de una máquina — y con dos,
      ese candado deja de proteger: vuelve el *lost update* (dos guardan, gana el último y el cambio

@@ -39,7 +39,29 @@ _falso.set_doc = lambda c, o: _DOCS.__setitem__(c, copy.deepcopy(o))
 _falso.get_doc = lambda c: copy.deepcopy(_DOCS.get(c))
 # Desde 2026-09-07 el catálogo se guarda con `guardar_catalogo` (documento + proyección a las
 # tablas, en UNA transacción). El doble imita sólo el documento, que es lo que la app vuelve a leer.
-_falso.guardar_catalogo = lambda cat: _DOCS.__setitem__("catalogo", copy.deepcopy(cat))
+# El catálogo se guarda CONDICIONALMENTE (2026-09-09): el doble lleva su versión, como la base.
+_VERS = {}
+
+
+class _ConflictoVersion(Exception):
+    pass
+
+
+def _get_doc_ver(c, default=None):
+    return copy.deepcopy(_DOCS.get(c, default)), _VERS.get(c, 0)
+
+
+def _guardar_cat_ver(cat, version_esperada=None):
+    if version_esperada is not None and version_esperada != _VERS.get("catalogo", 0):
+        raise _ConflictoVersion("el catálogo cambió mientras tanto")
+    _DOCS["catalogo"] = copy.deepcopy(cat)
+    _VERS["catalogo"] = _VERS.get("catalogo", 0) + 1
+    return _VERS["catalogo"]
+
+
+_falso.ConflictoVersion = _ConflictoVersion
+_falso.get_doc_ver = _get_doc_ver
+_falso.guardar_catalogo = _guardar_cat_ver
 _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 
 # ── LA "BASE" DEL REGISTRO, SIMULADA (2026-08-19: el server lee el registro SOLO de la base;
@@ -198,6 +220,81 @@ ok(clave(p_otra) == k0, "tocar OTRA variable NO regenera ésta (no invalida de m
 p_borde = copy.deepcopy(base)
 p_borde["borde_corte"] = {"activo": True, "ancho_mm": 9}
 ok(clave(p_borde) != k0, "CONTROL: el borde de corte sigue invalidando")
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# 3 · DOS **PROCESOS** GUARDANDO A LA VEZ (el candado de memoria no llega hasta acá)
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# 🔴 `_LOCK_CAT_EDICION` vive en la memoria de UN proceso. Alcanza mientras haya un solo servidor,
+# pero el sistema tiene que aguantar muchas personas a la vez, y eso son varios procesos (y varias
+# máquinas). Con dos, ese candado no protege nada: los dos leen lo mismo, los dos guardan el
+# catálogo ENTERO, y el cambio del primero desaparece sin un solo error. Lo que sí cruza procesos
+# es la VERSION del documento: si cambió, no se pisa — se relee, se re-aplica lo mío encima y se
+# reintenta.
+print("\n3 · DOS PROCESOS A LA VEZ")
+
+_CAT0 = {"activo": "pA",
+         "productos": [{"id": "pA", "nombre": "Camiseta", "borde_corte": {"activo": False}},
+                       {"id": "pB", "nombre": "Short"}],
+         "plantillas_planillas": [{"id": "tpl1", "nombre": "Estándar",
+                                   "columnas": [{"id": "talle", "label": "Talle", "role": "talle"}]}]}
+_DOCS["catalogo"] = copy.deepcopy(_CAT0)
+_VERS["catalogo"] = 7                     # una versión cualquiera, para no probar con el 0
+
+# «Proceso A» abre el catálogo para editar y cambia LO SUYO (el molde pA).
+_a = S._cargar_catalogo_para_editar()
+next(p for p in _a["productos"] if p["id"] == "pA")["borde_corte"] = {"activo": True, "ancho_mm": 5}
+
+# «Proceso B» —otro servidor— guarda ANTES, tocando otro molde. El candado de A no lo frena.
+_b = copy.deepcopy(_DOCS["catalogo"])
+next(p for p in _b["productos"] if p["id"] == "pB")["nombre"] = "Short largo"
+_b["productos"].append({"id": "pC", "nombre": "Medias"})
+S.db.guardar_catalogo(_b)                 # sin versión: es otro proceso, escribe lo suyo
+
+# …y recién ahora guarda A.
+S._guardar_catalogo(_a)
+S._soltar_edicion_catalogo()
+_fin = _DOCS["catalogo"]
+_por_id = {p["id"]: p for p in _fin["productos"]}
+ok((_por_id.get("pA") or {}).get("borde_corte", {}).get("activo") is True,
+   "el cambio de A sobrevive (era el que se perdía sin avisar)")
+ok((_por_id.get("pB") or {}).get("nombre") == "Short largo",
+   "y el de B también: guardar el molde pA no pisa el molde pB")
+ok("pC" in _por_id, "el molde que B agregó mientras tanto no se borra")
+ok(_VERS["catalogo"] > 8, f"la versión avanzó como corresponde ({_VERS['catalogo']})")
+
+# Un BORRADO mío también se respeta, y no se lleva puesto lo que hizo el otro.
+_DOCS["catalogo"] = copy.deepcopy(_CAT0); _VERS["catalogo"] = 20
+_a2 = S._cargar_catalogo_para_editar()
+_a2["productos"] = [p for p in _a2["productos"] if p["id"] != "pB"]      # A borra el Short
+_b2 = copy.deepcopy(_DOCS["catalogo"])
+next(p for p in _b2["productos"] if p["id"] == "pA")["nombre"] = "Camiseta v2"
+S.db.guardar_catalogo(_b2)
+S._guardar_catalogo(_a2)
+S._soltar_edicion_catalogo()
+_ids = {p["id"] for p in _DOCS["catalogo"]["productos"]}
+_nom = {p["id"]: p["nombre"] for p in _DOCS["catalogo"]["productos"]}
+ok("pB" not in _ids, f"lo que A borró queda borrado ({sorted(_ids)})")
+ok(_nom.get("pA") == "Camiseta v2", "y el renombre de B sigue ahí")
+
+# Si los dos tocan EXACTAMENTE lo mismo, no hay magia: gana el último, pero NADA MÁS se pierde.
+_DOCS["catalogo"] = copy.deepcopy(_CAT0); _VERS["catalogo"] = 30
+_a3 = S._cargar_catalogo_para_editar()
+next(p for p in _a3["productos"] if p["id"] == "pA")["nombre"] = "de A"
+_b3 = copy.deepcopy(_DOCS["catalogo"])
+next(p for p in _b3["productos"] if p["id"] == "pA")["nombre"] = "de B"
+next(p for p in _b3["productos"] if p["id"] == "pB")["nombre"] = "Short de B"
+S.db.guardar_catalogo(_b3)
+S._guardar_catalogo(_a3)
+S._soltar_edicion_catalogo()
+_nom3 = {p["id"]: p["nombre"] for p in _DOCS["catalogo"]["productos"]}
+ok(_nom3.get("pA") == "de A", "en el choque real (el MISMO campo) gana el último que guarda")
+ok(_nom3.get("pB") == "Short de B", "pero lo demás que hizo el otro NO se pierde")
+
+# Y la fusión, sola, sin servidor de por medio.
+_f = S._fusionar_cambios({"a": 1, "b": {"x": 1}}, {"a": 2, "b": {"x": 1}}, {"a": 1, "b": {"x": 9}})
+ok(_f == {"a": 2, "b": {"x": 9}}, f"cada uno conserva lo suyo, clave por clave ({_f})")
+_f2 = S._fusionar_cambios({"a": 1}, {"a": 1}, {"a": 5})
+ok(_f2 == {"a": 5}, "lo que no toqué queda como lo dejó el otro")
 
 print()
 if FALLOS:

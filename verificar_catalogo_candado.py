@@ -38,8 +38,30 @@ _GUARDADOS = []          # cada vez que se guarda el catálogo, se anota acá
 _falso = types.ModuleType("db")
 _falso.get_doc = lambda c, default=None: copy.deepcopy(_DOCS.get(c, default))
 _falso.set_doc = lambda c, o: _DOCS.__setitem__(c, copy.deepcopy(o))
-_falso.guardar_catalogo = lambda cat: (_GUARDADOS.append(time.time()),
-                                       _DOCS.__setitem__("catalogo", copy.deepcopy(cat)))[-1]
+# El catálogo se guarda CONDICIONALMENTE (2026-09-09): el doble lleva su versión, como la base.
+_VERS = {}
+
+
+class _ConflictoVersion(Exception):
+    pass
+
+
+def _get_doc_ver(c, default=None):
+    return copy.deepcopy(_DOCS.get(c, default)), _VERS.get(c, 0)
+
+
+def _guardar_cat_ver(cat, version_esperada=None):
+    if version_esperada is not None and version_esperada != _VERS.get("catalogo", 0):
+        raise _ConflictoVersion("el catálogo cambió mientras tanto")
+    _GUARDADOS.append(time.time())
+    _DOCS["catalogo"] = copy.deepcopy(cat)
+    _VERS["catalogo"] = _VERS.get("catalogo", 0) + 1
+    return _VERS["catalogo"]
+
+
+_falso.ConflictoVersion = _ConflictoVersion
+_falso.get_doc_ver = _get_doc_ver
+_falso.guardar_catalogo = _guardar_cat_ver
 _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 sys.modules["db"] = _falso
 

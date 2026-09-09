@@ -207,13 +207,55 @@ def get_doc(clave, default=None):
         return default
 
 
-def set_doc(clave, obj):
+class ConflictoVersion(Exception):
+    """Otro proceso guardó ese documento entre que lo leíste y lo escribiste."""
+
+
+def get_doc_ver(clave, default=None):
+    """El documento Y su versión: `(obj, version)`. La versión es lo que después permite escribir
+    CONDICIONALMENTE — «guardá esto sólo si nadie lo tocó desde que lo leí»."""
+    r = filas("SELECT valor, [version] FROM config WHERE producto_id IS NULL AND clave=?", clave)
+    if not r:
+        return default, 0
+    try:
+        return _json.loads(r[0]["valor"]), int(r[0]["version"] or 0)
+    except Exception:
+        return default, int(r[0]["version"] or 0)
+
+
+def _escribir_doc(cur, clave, obj, version_esperada=None):
+    """UPSERT del documento dentro de una transacción que ya está abierta. Devuelve la versión
+    nueva. Con `version_esperada`, si otro lo cambió antes, levanta `ConflictoVersion` — y como
+    estamos dentro de la transacción de quien llama, ahí no se guarda NADA."""
     txt = _json.dumps(obj, ensure_ascii=False)
+    # `OUTPUT INSERTED.[version]` devuelve la versión nueva EN LA MISMA sentencia: sin eso hacía
+    # falta un SELECT más por cada guardado, y bajar los viajes a la base es justo lo que buscaba
+    # la auditoría 386-393.
+    _sql = ("UPDATE config SET valor=?, [version]=[version]+1 OUTPUT INSERTED.[version] "
+            "WHERE producto_id IS NULL AND clave=?")
+    if version_esperada is None:
+        cur.execute(_sql, txt, clave)
+    else:
+        cur.execute(_sql + " AND [version]=?", txt, clave, int(version_esperada))
+    _r = cur.fetchone()
+    if _r is not None:
+        return int(_r[0])
+    if version_esperada is not None:
+        # No actualizó: o la versión cambió, o el documento no existe todavía. Distinguirlo importa:
+        # lo primero es un choque de verdad y lo segundo es la primera escritura de todas.
+        cur.execute("SELECT [version] FROM config WHERE producto_id IS NULL AND clave=?", clave)
+        _v = cur.fetchone()
+        if _v is not None:
+            raise ConflictoVersion(
+                f"«{clave}» cambió mientras lo editabas (versión {int(_v[0])}, esperaba {version_esperada})")
+    cur.execute("INSERT INTO config (producto_id, clave, valor, [version]) VALUES (NULL, ?, ?, 1)",
+                clave, txt)
+    return 1
+
+
+def set_doc(clave, obj, version_esperada=None):
     with cursor() as cur:
-        # UPSERT: un solo documento por clave (producto_id NULL).
-        cur.execute("UPDATE config SET valor=? WHERE producto_id IS NULL AND clave=?", txt, clave)
-        if cur.rowcount == 0:
-            cur.execute("INSERT INTO config (producto_id, clave, valor) VALUES (NULL, ?, ?)", clave, txt)
+        return _escribir_doc(cur, clave, obj, version_esperada)
 
 
 def doc_existe(clave):
@@ -379,22 +421,24 @@ def proyectar_catalogo(cat):
             _proyectar_un_producto(pid, p, cur)
 
 
-def guardar_catalogo(cat):
+def guardar_catalogo(cat, version_esperada=None):
     """El documento del catálogo Y su proyección a las tablas, en UNA sola transacción.
+    Devuelve la versión nueva.
 
-    Separados, un fallo al proyectar dejaba el documento nuevo guardado con las tablas viejas."""
-    txt = _json.dumps(cat, ensure_ascii=False)
+    Separados, un fallo al proyectar dejaba el documento nuevo guardado con las tablas viejas.
+
+    🔴 Con `version_esperada` la escritura es CONDICIONAL: si otro proceso guardó entre medio,
+    levanta `ConflictoVersion` y no se guarda nada. Es lo único que evita el *lost update* cuando
+    hay MÁS DE UN PROCESO — el candado de `servidor.py` vive en la memoria de uno solo."""
     with cursor() as cur:
-        cur.execute("UPDATE config SET valor=? WHERE producto_id IS NULL AND clave=?", txt, "catalogo")
-        if cur.rowcount == 0:
-            cur.execute("INSERT INTO config (producto_id, clave, valor) VALUES (NULL, ?, ?)",
-                        "catalogo", txt)
+        _ver = _escribir_doc(cur, "catalogo", cat, version_esperada)
         prod_ids = sync_productos(cat, cur)
         for p in (cat.get("productos") or []):
             pid = prod_ids.get(p.get("id"))
             if pid is None:
                 continue
             _proyectar_un_producto(pid, p, cur)
+    return _ver
 
 
 def _proyectar_un_producto(pid, p, cur=None):

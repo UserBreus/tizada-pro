@@ -40,7 +40,29 @@ _falso_db.set_doc = lambda c, o: _DOCS.__setitem__(c, _cp.deepcopy(o))
 _falso_db.get_doc = lambda c, default=None: _cp.deepcopy(_DOCS.get(c, default))
 # Desde 2026-09-07 el catálogo se guarda con `guardar_catalogo` (documento + proyección a las
 # tablas, en UNA transacción). El doble imita el documento, que es lo que la app vuelve a leer.
-_falso_db.guardar_catalogo = lambda cat: _DOCS.__setitem__("catalogo", _cp.deepcopy(cat))
+# El catálogo se guarda CONDICIONALMENTE (2026-09-09): el doble lleva su versión, como la base.
+_VERS = {}
+
+
+class _ConflictoVersion(Exception):
+    pass
+
+
+def _get_doc_ver(c, default=None):
+    return _cp.deepcopy(_DOCS.get(c, default)), _VERS.get(c, 0)
+
+
+def _guardar_cat_ver(cat, version_esperada=None):
+    if version_esperada is not None and version_esperada != _VERS.get("catalogo", 0):
+        raise _ConflictoVersion("el catálogo cambió mientras tanto")
+    _DOCS["catalogo"] = _cp.deepcopy(cat)
+    _VERS["catalogo"] = _VERS.get("catalogo", 0) + 1
+    return _VERS["catalogo"]
+
+
+_falso_db.ConflictoVersion = _ConflictoVersion
+_falso_db.get_doc_ver = _get_doc_ver
+_falso_db.guardar_catalogo = _guardar_cat_ver
 _falso_db.proyectar_catalogo = lambda cat: None   # la proyeccion a tablas no aplica en memoria
 sys.modules["db"] = _falso_db
 

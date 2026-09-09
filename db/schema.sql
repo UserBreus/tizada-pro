@@ -300,6 +300,15 @@ CREATE TABLE dbo.config (
 );
 
 GO
+/* 2026-09-09: VERSION del documento de config. Sin esto, guardar es «escribi lo que tengo»: dos
+   procesos que leen lo mismo y guardan uno detras del otro dejan el ultimo, y el cambio del primero
+   desaparece sin ningun error. El candado que lo evitaba vive en la memoria de UN proceso, asi que
+   deja de servir apenas hay dos. Con la version, la escritura es CONDICIONAL. (config_version) */
+IF COL_LENGTH('dbo.config','version') IS NULL
+    ALTER TABLE dbo.config ADD [version] INT NOT NULL CONSTRAINT DF_config_version DEFAULT 0;
+GO
+
+GO
 /* 2026-08-19: el `ancla` real es un dict JSON (~120 chars) — NVARCHAR(32) lo truncaba. (ancla_ancha) */
 IF COL_LENGTH('dbo.pieza_talle','ancla') IS NOT NULL AND COL_LENGTH('dbo.pieza_talle','ancla') <= 64
     ALTER TABLE dbo.pieza_talle ALTER COLUMN ancla NVARCHAR(MAX) NULL;
