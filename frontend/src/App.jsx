@@ -4504,7 +4504,10 @@ export default function App() {
   // PEDIDO no es el mismo (cae al ACTIVO del server): guardar o aplicar ahí habría escrito la
   // configuración de un molde adentro de otro, que es la trampa documentada del §7 del mapa.
   const [cfgPid, setCfgPid] = useState(null);
-  const [cfgSugerida, setCfgSugerida] = useState(null);
+  // 🔴 POR MOLDE, no una sola. El aviso tiene que salir en las DOS pantallas donde se ve un molde
+  // —el panel del pedido y Moldería— y ahí el molde NO es el mismo: con una sola sugerencia, la
+  // del pedido mostraba la del molde abierto en Configuración (o ninguna).
+  const [cfgSugeridas, setCfgSugeridas] = useState({});   // { pid: config | null }
   // Nombre de la configuración que se apretó mientras el molde todavía se leía: entra sola.
   const [cfgEsperando, setCfgEsperando] = useState('');
   const cfgSugDescartada = useRef({});
@@ -8501,6 +8504,12 @@ export default function App() {
   // recargas al pedo; pero sin ninguna dep del catálogo, un efecto que corrió ANTES de que
   // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
   const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
+  // 🔴 FIRMA DE LO QUE MIRA LA BARRA DE PASOS. `_idsCat` son sólo los IDs, y los pasos «Nombrar
+  // piezas» y «Ubicar etiqueta» miran CONTADORES que cambian sin que cambie ningún id: con la
+  // firma vieja, nombrabas todas las piezas y el paso seguía en rojo hasta cambiar de pantalla.
+  const _avanceCat = React.useMemo(
+    () => productosCat.productos.map(p => `${p.id}:${p.plantilla ? 1 : 0}:${p.piezas_nombradas || 0}/${p.piezas_registradas || 0}:${p.etiquetas_ubicadas || 0}/${p.etiquetas_total || 0}`).join(','),
+    [productosCat.productos]);
 
 
   // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
@@ -9700,6 +9709,13 @@ export default function App() {
   // trucho a propósito — marcar el ítem como «arte cargado» dispararía `preview_piezas` sin arte
   // (el cortocircuito de `cargarPreviewPiezas` es lo que hoy impide pedir el dibujo pesado).
   const _esConDiseno = (mid) => (productosCat.productos.find(x => x.id === mid) || {}).origen === 'con_diseno';
+  // Piezas (por nombre) a las que todavía no se les dijo dónde va la etiqueta — o que no lleva.
+  // El conteo lo hace el SERVIDOR, que resuelve por nombre genérico igual que el motor: hacerlo
+  // acá con el nombre crudo daba otro número y el paso decía que faltaba algo que ya estaba.
+  const _etiquetasSinUbicar = (mid) => {
+    const p = productosCat.productos.find(x => x.id === mid) || {};
+    return Math.max(0, (p.etiquetas_total || 0) - (p.etiquetas_ubicadas || 0));
+  };
   const _piezasSinNombre = (mid) => {
     const p = productosCat.productos.find(x => x.id === mid) || {};
     return Math.max(0, (p.piezas_registradas || 0) - (p.piezas_nombradas || 0));
@@ -10725,7 +10741,11 @@ export default function App() {
   // (reporte del usuario 2026-09-09). Ahora la elección queda ANOTADA y entra sola en cuanto el
   // molde está — no es aplicar por nuestra cuenta: el usuario ya apretó el botón.
   const cfgEspera = useRef(null);        // { cancelado } de la espera en curso
-  const aplicarCfgMolde = async (c, _intento = 0) => {
+  // `pidExplicito`: el aviso del panel del pedido aplica sobre SU molde, que no es el que está
+  // abierto en Configuración. Va por argumento y no por estado por lo mismo de siempre: React no
+  // lo tendría actualizado en el mismo gesto.
+  const aplicarCfgMolde = async (c, pidExplicito, _intento = 0) => {
+    const _pidAp = pidExplicito || cfgPidEfectivo();
     if (_intento === 0) { cfgEspera.current = { cancelado: false }; setCfgInforme(null); }
     const _mia = cfgEspera.current || { cancelado: false };
     if (_mia.cancelado) return;
@@ -10734,7 +10754,7 @@ export default function App() {
     try {
       const r = await fetch('/api/molde/config/aplicar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: cfgPidEfectivo(), id: c.id, partes: cfgPartes })
+        body: JSON.stringify({ pid: _pidAp, id: c.id, partes: cfgPartes })
       });
       const d = await r.json();
       if (!r.ok && d.preparando) {
@@ -10743,7 +10763,7 @@ export default function App() {
         if (_intento >= 48) throw new Error('El molde tardó demasiado en leerse. Probá de nuevo en un momento.');
         _esperando = true;
         setCfgEsperando(c.nombre);
-        setTimeout(() => { if (!_mia.cancelado) aplicarCfgMolde(c, _intento + 1); }, 5000);
+        setTimeout(() => { if (!_mia.cancelado) aplicarCfgMolde(c, _pidAp, _intento + 1); }, 5000);
         return;
       }
       if (!r.ok) throw new Error(d.error || 'no se pudo aplicar');
@@ -10754,11 +10774,12 @@ export default function App() {
       // esa configuración le sirve para este molde.
       await fetchProductos();
       try {
-        const rd = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(cfgPidEfectivo())}`);
+        const rd = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(_pidAp)}`);
         const dd = await rd.json();
         if (rd.ok) { setEtqData(dd); setEtqNombres(dd.nombres_existentes || {}); }
       } catch { /* el visor se refresca al entrar de nuevo */ }
       setMoldeReload(v => v + 1);
+      setCfgSugeridas(prev => ({ ...prev, [_pidAp]: null }));
       showMsg(`«${c.nombre}» aplicada: ${d.piezas_nombradas} nombre(s) y etiqueta en ${d.etiqueta_posiciones} pieza(s) ✓`);
     } catch (e) { setCfgEsperando(''); showError(e.message); } finally { if (!_esperando) setCfgBusy(false); }
   };
@@ -10779,31 +10800,40 @@ export default function App() {
     });
   };
 
-  // Al abrir un molde (y cada vez que cambia lo que hay adentro) se pregunta si alguna receta
-  // GUARDADA POR MÍ le calza. Se queda con la del mismo archivo y, si no, con la del mismo molde
-  // con otro diseño adentro — que es el caso para el que se guardan.
-  useEffect(() => {
-    if (!pidCfg) { setCfgSugerida(null); return; }
+  // Busca si hay una receta MÍA que le calce a ESE molde y la deja en `cfgSugeridas[pid]`.
+  // El molde se RECONOCE por sus piezas, y uno recién subido todavía no las tiene (se lee en
+  // segundo plano, más de un minuto en uno grande): sin volver a preguntar, el aviso de «esto ya
+  // lo configuraste» no aparecía nunca — nada dispara de nuevo la búsqueda cuando el molde
+  // termina. Se re-pregunta cada 6 s, hasta 4 minutos.
+  const buscarCfgSugerida = React.useCallback((pid) => {
+    if (!pid) return () => {};
     let vivo = true;
     let reloj = null;
-    // El molde se RECONOCE por sus piezas, y un molde recién subido todavía no las tiene (se lee
-    // en segundo plano, más de un minuto en uno grande). Sin volver a preguntar, el aviso de
-    // «esto ya lo configuraste» no aparecía nunca: nada vuelve a disparar este efecto cuando el
-    // molde termina. Se re-pregunta cada 6 s, hasta 4 minutos.
     const mirar = async (intento) => {
       try {
-        const r = await fetch(`/api/molde/config/lista${qPid('?')}`);
+        const r = await fetch(`/api/molde/config/lista?pid=${encodeURIComponent(pid)}`);
         const d = await r.json();
         if (!vivo) return;
         if (d.preparando && intento < 40) { reloj = setTimeout(() => mirar(intento + 1), 6000); return; }
         const cand = (d.configs || []).find(c => c.estado === 'igual')
           || (d.configs || []).find(c => c.estado === 'mismo_molde');
-        setCfgSugerida(cand && !cfgSugDescartada.current[pidCfg] ? cand : null);
-      } catch { if (vivo) setCfgSugerida(null); }
+        setCfgSugeridas(prev => ({ ...prev, [pid]: (cand && !cfgSugDescartada.current[pid]) ? cand : null }));
+      } catch { if (vivo) setCfgSugeridas(prev => ({ ...prev, [pid]: null })); }
     };
     mirar(0);
     return () => { vivo = false; if (reloj) clearTimeout(reloj); };
-  }, [pidCfg, moldeReload]);
+  }, []);
+
+  // El molde ABIERTO EN CONFIGURACIÓN…
+  useEffect(() => buscarCfgSugerida(pidCfg), [pidCfg, moldeReload, buscarCfgSugerida]);
+  // …y los moldes CON DISEÑO que estén en el pedido: su aviso va en el panel del visor, que es
+  // donde el usuario los está trabajando (pedido del usuario 2026-09-09).
+  useEffect(() => {
+    const cortes = (productosCat.productos || [])
+      .filter(p => p.origen === 'con_diseno' && !p.de_otro)
+      .map(p => buscarCfgSugerida(p.id));
+    return () => cortes.forEach(f => f && f());
+  }, [_idsCat, moldeReload, buscarCfgSugerida]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const showWarn = (txt) => {
     setAdvertenciaInformativa(txt);
@@ -11119,10 +11149,10 @@ export default function App() {
     if (_prim) setDisenoActivo(_prim);
     setArteIdx(0);
     setPedidoPaso('arte');
-    // …y directo a NOMBRAR el primer molde, con la herramienta de Moldería. Los demás se abren
-    // desde el paso Arte, molde por molde. Si ya tiene todo nombrado, se queda en el pedido.
-    const _sinNombre = _mios.find(p => (_piezasSinNombre(p.id) || []).length) || _mios[0];
-    if (_sinNombre) abrirNombrarB(_sinNombre.id);
+    // 🔴 Y SE QUEDA EN EL PASO ARTE. Antes entraba SOLO a nombrar el primer molde: te sacaba del
+    // pedido sin pedirte permiso y perdías de vista el visor, los talles y el resto (pedido del
+    // usuario 2026-09-09: «que no vaya más directo a nombrar»). Nombrar y ubicar la etiqueta son
+    // ahora dos PASOS de la barra de abajo, y se entra a cada uno con su botón.
   };
 
   // ── CAMINO B: subir un molde que YA TRAE EL DISEÑO adentro ───────────────────────────────────
@@ -11970,12 +12000,46 @@ export default function App() {
                 faltan: disenosSinMolde.map(d => `«${d.nombre}» no tiene ninguna prenda elegida.`),
                 ok: disenosPedido.filter(d => !disenosSinMolde.includes(d)).map(d => `«${d.nombre}»: ${(disenoMoldes[d.id] || []).length} prenda(s)`) });
     } else if (pedidoPaso === 'arte') {
-      it.push({ id: 'arte', label: 'cargar el arte', corto: 'Asignar arte', hecho: tareasArte.length > 0 && itemsSinArte.length === 0,
-                // camino B: lo que falta no es el arte (viene adentro) sino NOMBRAR las piezas
-                faltan: itemsSinArte.map(x => _esConDiseno(x.moldeId)
-                  ? `Faltan nombrar las piezas de ${_arteLbl(x.did, x)} (${_piezasSinNombre(x.moldeId)} sin nombre).`
-                  : `Falta el arte de ${_arteLbl(x.did, x)}.`),
-                ok: itemsPedido.filter(x => arteCargado[x.did + '|' + x.moldeId]).map(x => `Arte cargado en ${_arteLbl(x.did, x)}`) });
+      // 🔴 EL MOLDE CON EL DISEÑO ADENTRO NO LLEVA ARTE: sus dos tareas son NOMBRAR las piezas y
+      // UBICAR la etiqueta, y son PASOS PROPIOS de esta barra (pedido del usuario 2026-09-09).
+      // Antes iban escondidas adentro de «Asignar arte», que para el camino B decía «faltan
+      // nombrar las piezas»: el nombre del paso no era el de la tarea y la etiqueta no figuraba
+      // en ningún lado.
+      const _itB = itemsPedido.filter(x => _esConDiseno(x.moldeId));
+      const _itA = itemsPedido.filter(x => !_esConDiseno(x.moldeId));
+      if (_itA.length || !_itB.length) {
+        const _sinArteA = _itA.filter(x => !arteCargado[x.did + '|' + x.moldeId]);
+        it.push({ id: 'arte', label: 'cargar el arte', corto: 'Asignar arte',
+                  hecho: _itA.length > 0 && _sinArteA.length === 0,
+                  faltan: _itA.length ? _sinArteA.map(x => `Falta el arte de ${_arteLbl(x.did, x)}.`)
+                                      : ['Todavía no hay ningún molde en el pedido.'],
+                  ok: _itA.filter(x => arteCargado[x.did + '|' + x.moldeId]).map(x => `Arte cargado en ${_arteLbl(x.did, x)}`) });
+      }
+      if (_itB.length) {
+        const _sinNomB = _itB.filter(x => !_moldeUsable(x.moldeId) || _piezasSinNombre(x.moldeId) > 0);
+        it.push({ id: 'nombresB', label: 'nombrar las piezas', corto: 'Nombrar piezas',
+                  hecho: _sinNomB.length === 0,
+                  faltan: _sinNomB.map(x => (productosCat.productos.find(p => p.id === x.moldeId) || {}).plantilla
+                    ? `${_arteLbl(x.did, x)}: faltan ${_piezasSinNombre(x.moldeId) || 'las'} pieza(s) por nombrar — tocá «Nombrar piezas».`
+                    : `${_arteLbl(x.did, x)}: todavía se está leyendo el molde, esperá unos segundos.`),
+                  ok: _itB.filter(x => _moldeUsable(x.moldeId) && _piezasSinNombre(x.moldeId) === 0)
+                          .map(x => `${_arteLbl(x.did, x)}: sus piezas ya tienen nombre`) });
+        // ⚠️ `aviso: true` — NO TRABA, a propósito: una pieza a la que no se le marcó la etiqueta
+        // NO sale sin etiqueta, sale con la etiqueta CENTRADA ABAJO. Exigir el 100 % frenaría
+        // pedidos que están perfectos. Queda en amarillo para que se vea lo que falta.
+        // Sólo se cuenta sobre los moldes YA NOMBRADOS: la etiqueta va por NOMBRE de pieza, así
+        // que en uno sin nombrar el total no significa nada (todas las «Pieza N» son el mismo
+        // nombre genérico y daría «1»).
+        const _sinEtqB = _itB.filter(x => _moldeUsable(x.moldeId) && _piezasSinNombre(x.moldeId) === 0
+                                          && _etiquetasSinUbicar(x.moldeId) > 0);
+        it.push({ id: 'etiquetaB', label: 'ubicar la etiqueta', corto: 'Ubicar etiqueta',
+                  hecho: _sinNomB.length === 0 && _sinEtqB.length === 0, aviso: true,
+                  faltan: _sinNomB.length
+                    ? ['Primero nombrá las piezas: la etiqueta se marca sobre el nombre de cada una.']
+                    : _sinEtqB.map(x => `${_arteLbl(x.did, x)}: ${_etiquetasSinUbicar(x.moldeId)} pieza(s) sin marcar — salen con la etiqueta centrada abajo. Podés avanzar igual.`),
+                  ok: _itB.filter(x => _moldeUsable(x.moldeId) && _etiquetasSinUbicar(x.moldeId) === 0)
+                          .map(x => `${_arteLbl(x.did, x)}: todas las piezas tienen su etiqueta ubicada`) });
+      }
       it.push({ id: 'telas', label: 'la tela de cada pieza', corto: 'Asignar tela', hecho: !telasIncompletas,
                 // POR VARIABLE: «faltan 3 piezas» sin decir dónde obligaba a buscarlas a mano
                 faltan: telasFaltantesDet.map(x => `${_arteLbl(x.did, x.it)}: ${x.n} pieza(s) sin tela — asignalas en «Asignar telas».`),
@@ -12011,7 +12075,7 @@ export default function App() {
     }
     return it;
   }, [pedidoPaso, disenosPedido, disenoMoldes, disenosSinMolde, tareasArte, arteCargado, disenoVars, _idsCat,
-      telasIncompletas, telasFaltantesTotal, fuentesPorArte, filas, cols, moldesSeleccionados, trabajosMulti]);   // eslint-disable-line react-hooks/exhaustive-deps
+      _avanceCat, telasIncompletas, telasFaltantesTotal, fuentesPorArte, filas, cols, moldesSeleccionados, trabajosMulti]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const removeFila = (i) => {
     const next = filas.filter((_, idx) => idx !== i);
@@ -13088,7 +13152,7 @@ export default function App() {
                   acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
                   centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={_mios.length && _mios.some(p => !(moldesBDiseno || {})[p.id]) ? 'Falta decir a qué diseño va cada molde' : ''}
-                  siguiente={<BtnSiguiente texto="Nombrar las piezas" ancla="cargar-b-siguiente"
+                  siguiente={<BtnSiguiente texto="Al arte" ancla="cargar-b-siguiente"
                     disabled={!_mios.length || _mios.some(p => !(moldesBDiseno || {})[p.id])}
                     onClick={irANombrarB} />} />
               </div>
@@ -14067,13 +14131,50 @@ export default function App() {
                 const _sugeridos = [...new Set((catalogoGrupos || []).flatMap(g => g.piezas || []))].slice(0, 12);
                 // Cuántas piezas ya tienen ubicada su etiqueta (la del molde, no la global).
                 const _etqPos = (etiquetaConfig?.posiciones) || {};
-                const _etqPuestas = _piezasB.filter(pz => _etqPos[_nomB(pz)]).length;
+                // El CONTADOR del botón sale del servidor (que cuenta por nombre genérico, igual
+                // que el motor y que la barra de pasos): contarlo acá con el nombre crudo daba un
+                // número distinto al del paso de abajo, y uno de los dos mentía.
+                const _prodB = productosCat.productos.find(x => x.id === _id) || {};
+                const _etqTotal = _prodB.etiquetas_total || _piezasB.length;
+                const _etqPuestas = _prodB.etiquetas_total != null ? (_prodB.etiquetas_ubicadas || 0)
+                  : _piezasB.filter(pz => _etqPos[_nomB(pz)]).length;
                 const panelNombrarJSX = !_esB ? null : (
                   <div data-tour="pieza-b-lista" style={{ width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 11 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
                       <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Piezas y etiqueta</span>
                     </div>
+                    {/* ESTE MOLDE YA LO CONFIGURASTE. El aviso va ACÁ —donde se está trabajando el
+                        molde— y no sólo en Moldería (pedido del usuario 2026-09-09). Desde acá se
+                        aplica de una, o se abre la lista para elegir otra. Nunca se aplica sola. */}
+                    {cfgSugeridas[_id] && (
+                      <div data-tour="pieza-b-sugerida"
+                        style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 11px', borderRadius: 12,
+                          background: 'rgba(16,185,129,0.10)', border: '1px solid rgba(16,185,129,0.40)' }}>
+                        <span style={{ fontSize: 12, lineHeight: 1.45 }}>
+                          <b style={{ color: 'var(--success)' }}>Ya configuraste este molde</b> como
+                          {' '}<b>«{cfgSugeridas[_id].nombre}»</b>
+                          {cfgSugeridas[_id].estado === 'mismo_molde' ? ' (con otro diseño adentro)' : ''}:
+                          {' '}{cfgSugeridas[_id].piezas} nombre(s) y etiqueta en {cfgSugeridas[_id].etiqueta_posiciones} pieza(s).
+                        </span>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button type="button" className="btn primary" data-tour="pieza-b-sugerida-aplicar"
+                            disabled={cfgBusy} style={{ flex: 1, minWidth: 96, padding: '7px 10px', fontSize: 12, borderRadius: 9 }}
+                            onClick={() => { setCfgPid(_id); aplicarCfgMolde(cfgSugeridas[_id], _id); }}>
+                            Aplicar
+                          </button>
+                          <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
+                            title="Ver todas las configuraciones guardadas y elegir otra"
+                            onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id); }}>
+                            Elegir otra
+                          </button>
+                          <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
+                            onClick={() => { cfgSugDescartada.current[_id] = true; setCfgSugeridas(prev => ({ ...prev, [_id]: null })); }}>
+                            Ahora no
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     {/* SÓLO LOS BOTONES (pedido del usuario 2026-09-09: «quitá todo el texto que
                         está en el espacio de ver y corregir nombre y ubicar etiqueta; ahí estará
                         sólo el botón, más nada»). Lo que hay que hacer se lee en el COLOR: en
@@ -14092,16 +14193,19 @@ export default function App() {
                           {_sinNombreB.length ? `${_piezasB.length - _sinNombreB.length}/${_piezasB.length}` : '✓'}
                         </span>
                       </button>
-                      <button type="button" className={`btn ${(!_sinNombreB.length && _etqPuestas < _piezasB.length) ? 'primary' : 'ghost'}`}
+                      <button type="button" className={`btn ${(!_sinNombreB.length && _etqPuestas < _etqTotal) ? 'primary' : 'ghost'}`}
                         data-tour="etqb-piezas"
                         style={{ width: '100%', justifyContent: 'space-between', padding: '10px 12px', fontSize: 12.5, borderRadius: 10,
-                          borderColor: (!_sinNombreB.length && _etqPuestas >= _piezasB.length) ? 'rgba(16,185,129,0.35)' : undefined }}
+                          borderColor: (!_sinNombreB.length && _etqPuestas >= _etqTotal) ? 'rgba(16,185,129,0.35)' : undefined }}
                         disabled={!!_sinNombreB.length}
-                        title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : `${_etqPuestas} de ${_piezasB.length} ubicadas`}
+                        title={_sinNombreB.length ? 'Primero decinos qué es cada pieza' : `${_etqPuestas} de ${_etqTotal} ubicadas`}
                         onClick={() => abrirEtiquetaB(_id)}>
                         <span>Ubicar etiqueta</span>
                         <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.85 }}>
-                          {_etqPuestas >= _piezasB.length && !_sinNombreB.length ? '✓' : `${_etqPuestas}/${_piezasB.length}`}
+                          {/* Con piezas sin nombre no se muestra cuenta: la etiqueta va por NOMBRE
+                              de pieza, así que hasta que estén nombradas el total no significa nada
+                              (todas las «Pieza N» son el mismo nombre genérico y daría «0/1»). */}
+                          {_sinNombreB.length ? '' : (_etqPuestas >= _etqTotal ? '✓' : `${_etqPuestas}/${_etqTotal}`)}
                         </span>
                       </button>
                       {/* GUARDAR / USAR LA CONFIGURACIÓN, acá mismo: es donde se ve el visor, los
@@ -14109,11 +14213,11 @@ export default function App() {
                           había que entrar a Moldería para llegar. */}
                       <button type="button" className="btn ghost" data-tour="pieza-b-configuracion"
                         style={{ width: '100%', justifyContent: 'space-between', padding: '10px 12px', fontSize: 12.5, borderRadius: 10,
-                          borderColor: cfgSugerida ? 'rgba(16,185,129,0.45)' : undefined }}
+                          borderColor: cfgSugeridas[_id] ? 'rgba(16,185,129,0.45)' : undefined }}
                         title="Guardar cómo quedó este molde, o usar una configuración guardada"
                         onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id); }}>
                         <span>Guardar configuración</span>
-                        {cfgSugerida && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--success)' }}>hay una</span>}
+                        {cfgSugeridas[_id] && <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--success)' }}>hay una</span>}
                       </button>
                     </div>
                     <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 5, minHeight: 0 }}>
@@ -17148,22 +17252,22 @@ export default function App() {
                                 </div>
                                 {/* ESTE MOLDE YA LO CONFIGURASTE. Aparece sólo si hay una receta TUYA que
                                     le calza. No se aplica sola: un clic acá y después se mira el visor. */}
-                                {cfgSugerida && (
+                                {cfgSugeridas[pidCfg] && (
                                   <div data-tour="molde-cfg-sugerida"
                                     style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                                       border: '1px solid var(--success, #2a7)', borderRadius: 10, padding: '8px 10px' }}>
                                     <span style={{ fontSize: 12.5, flex: 1, minWidth: 180 }}>
-                                      Este molde ya lo configuraste como <b>«{cfgSugerida.nombre}»</b>
-                                      {cfgSugerida.estado === 'mismo_molde' ? ' (con otro diseño adentro)' : ''}:
-                                      {' '}etiqueta en {cfgSugerida.etiqueta_posiciones} pieza(s) y {cfgSugerida.piezas} nombre(s).
+                                      Este molde ya lo configuraste como <b>«{cfgSugeridas[pidCfg].nombre}»</b>
+                                      {cfgSugeridas[pidCfg].estado === 'mismo_molde' ? ' (con otro diseño adentro)' : ''}:
+                                      {' '}etiqueta en {cfgSugeridas[pidCfg].etiqueta_posiciones} pieza(s) y {cfgSugeridas[pidCfg].piezas} nombre(s).
                                     </span>
                                     <button type="button" className="btn" disabled={cfgBusy}
                                       data-tour="molde-cfg-sugerida-aplicar"
-                                      onClick={async () => { await aplicarCfgMolde(cfgSugerida); setCfgModalOpen(true); }}>
+                                      onClick={async () => { setCfgPid(null); await aplicarCfgMolde(cfgSugeridas[pidCfg], pidCfg); setCfgModalOpen(true); }}>
                                       Aplicar
                                     </button>
                                     <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11 }}
-                                      onClick={() => { cfgSugDescartada.current[pidCfg] = true; setCfgSugerida(null); }}>
+                                      onClick={() => { cfgSugDescartada.current[pidCfg] = true; setCfgSugeridas(prev => ({ ...prev, [pidCfg]: null })); }}>
                                       Ahora no
                                     </button>
                                   </div>

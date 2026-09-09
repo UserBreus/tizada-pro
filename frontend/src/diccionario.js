@@ -815,6 +815,16 @@ export const DICCIONARIO = {
     que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
     como: 'Abrí las configuraciones guardadas.',
   },
+  'pieza-b-sugerida': {
+    nombre: 'Ya configuraste este molde',
+    que: 'Aviso de que hay una configuración tuya guardada que le calza a este molde: dice cuál es, cuántos nombres trae y en cuántas piezas está marcada la etiqueta. Aparece también cuando el archivo es otro pero el molde es el mismo con otro diseño adentro, porque el molde se reconoce por sus piezas.',
+    como: 'Mirá el aviso de la configuración guardada.',
+  },
+  'pieza-b-sugerida-aplicar': {
+    nombre: 'Aplicar la configuración guardada',
+    que: 'Pone de una los nombres de las piezas y dónde va la etiqueta en cada una, tal como los habías dejado. No se aplica sola nunca: entra recién cuando tocás este botón. Si el molde todavía se está leyendo, queda esperando y entra sola en cuanto termina. Después conviene abrir «Nombrar piezas» y mirar si quedó bien.',
+    como: 'Aplicá la configuración guardada.',
+  },
   'pieza-b-configuracion': {
     nombre: 'Guardar configuración',
     que: 'Abre la configuración guardada de este molde: acá se guarda con un nombre cómo quedó (dónde va la etiqueta en cada pieza y el nombre de las piezas) y se vuelve a aplicar en otro pedido. El molde se reconoce por sus piezas, así que el mismo molde con otro diseño adentro también la encuentra. Son tuyas: cada uno ve las suyas.',

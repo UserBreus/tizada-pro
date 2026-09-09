@@ -1473,6 +1473,79 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (406) — EL AVISO DE «ESTE MOLDE YA LO CONFIGURASTE» SALE DONDE SE TRABAJA EL
+  MOLDE, y desde ahí se elige.** Pedido del usuario, con la captura del paso Arte: *«acá debe salir
+  el cartel de que se encontró una configuración, y desde acá se debe elegir esa configuración»*.
+
+  **QUÉ PASABA.** El aviso existía sólo en **Moldería** (Configuración). En el panel del pedido
+  —que es donde el cliente está mirando el molde— lo único que había era un «hay una» chiquito al
+  costado del botón: había que adivinar que ahí adentro estaba la receta.
+
+  **1 · LA SUGERENCIA PASÓ A SER POR MOLDE.** Era UNA sola (`cfgSugerida`) y se buscaba para
+  `pidCfg`, el molde **abierto en Configuración**. Desde el pedido ese no es el molde: el panel
+  habría mostrado la receta de otro, o ninguna. Ahora es un mapa `cfgSugeridas[pid]`, con un
+  `buscarCfgSugerida(pid)` que corre para el molde abierto **y** para cada molde con diseño del
+  pedido. Cada pantalla mira la de SU molde.
+
+  **2 · EL CARTEL, ARRIBA DE LOS BOTONES**: *«Ya configuraste este molde como «X» (con otro diseño
+  adentro): 14 nombre(s) y etiqueta en 14 pieza(s)»* con **Aplicar** · **Elegir otra** (abre la
+  lista) · **Ahora no**. `aplicarCfgMolde` recibe el molde **por argumento** — por estado no
+  serviría, React no lo tiene actualizado en el mismo gesto (la trampa de siempre).
+
+  🔴 **Y APARECIÓ UN NÚMERO QUE MENTÍA.** El contador de la etiqueta (405) daba **«0/1»** en un
+  molde recién subido: la posición de la etiqueta va por **NOMBRE GENÉRICO**, y con todas las
+  piezas llamadas «Pieza 1», «Pieza 2»… el genérico de todas es «pieza» → un solo nombre. No es un
+  error del conteo (es el modelo), pero mostrarlo antes de nombrar no significa nada: ahora el
+  contador **no se muestra hasta que estén nombradas** (el botón ya estaba deshabilitado igual), y
+  el paso de la barra sólo cuenta los moldes ya nombrados.
+
+  **VERIFICADO EN LA APP REAL** (sandbox de sólo lectura, con el pedido armado desde el navegador y
+  la respuesta de la lista simulada): el cartel sale en el panel del pedido con sus tres botones,
+  los dos pasos nuevos están en la barra de abajo y el botón del paso anterior dice «Al arte».
+  Contrato ampliado: `frontend/verificar_pasos_pedido.mjs` §5.
+
+- **2026-09-09 (405) — NOMBRAR Y UBICAR LA ETIQUETA SON DOS PASOS DE LA BARRA, y del diseño ya no
+  se entra solo a nombrar.** Pedido del usuario: *«cuando pasás de elegir el diseño al siguiente
+  paso va directo acá (la captura del paso Arte): que no vaya más directo a nombrar. Y nombrar las
+  piezas y ubicar etiqueta, en el modo molde con diseño, deben ser parte de los pasos que se
+  muestran en la parte inferior»*.
+
+  **1 · SE FUE EL SALTO AUTOMÁTICO.** `irANombrarB` terminaba con `abrirNombrarB(...)`: te metía
+  DENTRO de la herramienta de nombrar del primer molde apenas pasabas de paso. Te sacaba del pedido
+  sin pedirte permiso —adiós visor, talles y el resto de las herramientas— y encima el molde recién
+  subido todavía se estaba leyendo. Ahora se queda en el paso **Arte** y a cada herramienta se
+  entra con su botón. El botón de «siguiente» decía «Nombrar las piezas» y ahora dice **«Al arte»**,
+  que es a dónde lleva de verdad.
+  ⚠️ De paso: la condición para elegir a cuál molde saltar era `(_piezasSinNombre(p.id) || []).length`
+  y `_piezasSinNombre` devuelve un **número** — `(3 || []).length` es `undefined`, así que el
+  `find` no acertaba nunca y siempre saltaba al primero. Murió con la función.
+
+  **2 · LOS DOS PASOS, EN LA BARRA DE ABAJO.** El molde con el diseño adentro no lleva arte, así
+  que sus tareas viajaban escondidas dentro de «Asignar arte» (que para el camino B decía «faltan
+  nombrar las piezas»: el nombre del paso no era el de la tarea) y **la etiqueta no figuraba en
+  ningún lado**. Ahora, en el paso Arte, los ítems se arman por separado:
+  · **«Asignar arte»** sólo mira los moldes que llevan arte (camino A). Si el pedido es todo
+    camino B, ni aparece.
+  · **«Nombrar piezas»** — TRABA. Dice de qué molde y cuántas piezas faltan, y si el molde
+    todavía se está leyendo lo dice con esas palabras en vez de «faltan las piezas».
+  · **«Ubicar etiqueta»** — 🔴 **AVISA PERO NO TRABA**, a propósito: una pieza sin marcar **no sale
+    sin etiqueta**, sale con la etiqueta **centrada abajo**. Exigir el 100 % frenaría pedidos que
+    están perfectos. Queda en amarillo con el detalle por molde.
+
+  **3 · EL CONTEO DE LA ETIQUETA LO HACE EL SERVIDOR** (`etiquetas_ubicadas` / `etiquetas_total` en
+  `/api/productos`), y cuenta por **NOMBRE GENÉRICO**, igual que el motor (§10: la posición es de
+  «Frente», no de «Frente 8»). El panel del visor pasó a usar ESE número: contándolo en la pantalla
+  con el nombre crudo, el botón y el paso de abajo daban distinto y uno de los dos mentía.
+
+  **4 · Y LA BARRA SE ENTERA.** `pasoItems` dependía de `_idsCat` —sólo los IDs—, y estos pasos
+  miran CONTADORES que cambian sin que cambie ningún id: nombrabas todo y el paso seguía en rojo
+  hasta cambiar de pantalla. Se agregó `_avanceCat`, una firma con plantilla + nombradas + etiquetas
+  de cada molde.
+
+  **VERIFICADO** con `frontend/verificar_pasos_pedido.mjs` (nuevo, **corre en el build**): los dos
+  pasos existen, nombrar traba y etiqueta no, el arte ya no habla de nombrar, del diseño no se abre
+  la herramienta sola, y la barra depende del avance.
+
 - **2026-09-09 (404) — 🔴 «ESTE MOLDE TODAVÍA NO TIENE PIEZAS»: apretar Aplicar apenas subido el
   molde daba un cartel rojo, y había que volver a nombrar todo a mano.** Reporte del usuario con la
   captura: *«me sale esto; la configuración de nombrar las piezas también debe poder guardarse para

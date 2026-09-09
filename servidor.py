@@ -9442,6 +9442,18 @@ def get_productos():
         # front — hasta que no haya al menos una, los demás ajustes del molde quedan DESACTIVADOS
         # (regla del usuario 2026-08-19: sin nombrar no se avanza a nada).
         n_nombradas = sum(1 for _k in _reg_conteo if not _ES_PROVISORIO.match(_k))
+        # ETIQUETA: cuántas piezas tienen resuelto DÓNDE va (o que NO lleva). Va acá, con el resto
+        # de los contadores del molde, porque lo mira la barra de pasos del pedido — y tiene que
+        # contar EXACTAMENTE como el motor, que resuelve por NOMBRE GENÉRICO (§10 del mapa: la
+        # posición es de «Frente», no de «Frente 8»). Contarlo en la pantalla con el nombre crudo
+        # daría otro número y el paso diría que falta algo que ya está.
+        _etqp = p.get("etiqueta") or {}
+        _gen = {MP._norm_generico(str(_k)) for _k in _reg_conteo}
+        _gen.discard("")
+        _res = {MP._norm_generico(str(_k).split("§")[-1]) for _k in (_etqp.get("posiciones") or {})}
+        _res |= {MP._norm_generico(str(_k).split("§")[-1]) for _k in (_etqp.get("piezas_off") or [])}
+        n_etq_total = len(_gen)
+        n_etq_puestas = len(_gen & _res)
         val_path = os.path.join(DATOS, "productos", pid, "validacion_arte.json")
         has_arte = False
         if os.path.exists(val_path):
@@ -9486,6 +9498,10 @@ def get_productos():
             "plantilla": has_plantilla,
             "piezas_nombradas": n_nombradas,
             "piezas_registradas": n_piezas,
+            # Piezas (por nombre) con la etiqueta resuelta, sobre el total. Lo usa la barra de
+            # pasos del pedido para el paso «Ubicar etiqueta» del molde con diseño.
+            "etiquetas_ubicadas": n_etq_puestas,
+            "etiquetas_total": n_etq_total,
             # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla
             # puede ofrecer «Deshacer»: sin el dato, agregar una pieza parecía un camino de ida.
             # Qué opciones de cada toggle (manga/sisa/…) tiene REALMENTE este molde, y por variable:

@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "diccionario": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs",
-    "build": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs && vite build",
+    "diccionario": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs && node verificar_pasos_pedido.mjs",
+    "build": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs && node verificar_pasos_pedido.mjs && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "build:publicado": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs && vite build --base=/Tizadapro/"
+    "build:publicado": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs && node verificar_pasos_pedido.mjs && vite build --base=/Tizadapro/"
   },
   "dependencies": {
     "react": "^19.2.6",

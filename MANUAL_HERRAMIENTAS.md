@@ -724,7 +724,9 @@ ni mapeo.
      (`cargar-b-diseno`).
   3. Si la planilla tiene más de una columna de talle («Talle», «Talle short»), elegí de cuál toma
      cada molde (`cargar-b-columna`). 🔴 Sin esto un short tomaría el talle de la camiseta.
-  4. **Nombrar las piezas** (`cargar-b-siguiente`) lleva al visor.
+  4. **Al arte** (`cargar-b-siguiente`) lleva al paso Arte: el visor, los talles y las
+     herramientas. 🔴 **NO entra solo a nombrar** (cambió 2026-09-09): a cada herramienta se
+     entra con su botón, así no perdés de vista el resto.
 - **También** se puede subir de a uno desde la pestaña **Mis artículos** → tarjeta **«Molde con el
   diseño adentro»** (`pedido-subir-con-diseno`).
 - **Qué tiene que traer el archivo** (`.ai`/`.pdf`, sin DXF): una **capa por talle**, cada pieza
@@ -734,7 +736,12 @@ ni mapeo.
 - **Pasos:** nombre + archivo → se sube (con el % real y después el reloj mientras el servidor lo
   lee: un archivo de 100+ MB tarda un par de minutos) → el molde **queda elegido** en el diseño
   activo, **sin salir del pedido**.
-- **Después, en el paso Arte**, el panel de la derecha tiene las dos tareas del cliente:
+- **Después, en el paso Arte**, el panel de la derecha tiene **tres botones y nada más**
+  («Nombrar piezas», «Ubicar etiqueta», «Guardar configuración» — §4.9c) y, abajo, la lista de
+  piezas con lo que le falta a cada una. Las dos tareas **también son pasos de la barra de abajo**:
+  **«Nombrar piezas»** traba hasta que estén todas, y **«Ubicar etiqueta»** avisa en amarillo pero
+  **no traba** (una pieza sin marcar sale con la etiqueta centrada abajo, no sin etiqueta).
+  Qué hace cada una:
   1. **Piezas** — **el mismo gesto que en la moldería** (§3.1): tocá las piezas **en el visor** (se
      van sumando) o en la lista, escribí **un** nombre y tocá «Nombrar N». Si elegiste varias se
      numeran solas («Tira» → «Tira 1», «Tira 2»). El visor abre al instante y muestra **sólo
