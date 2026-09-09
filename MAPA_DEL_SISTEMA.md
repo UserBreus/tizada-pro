@@ -1482,6 +1482,38 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-09 (415) — 📌 PENDIENTE MEDIDO: HOY EL SISTEMA NO AGUANTA 100 PERSONAS A LA VEZ.**
+  Pregunta del usuario: *«¿el sistema está armado para que 100 personas puedan usar al mismo tiempo,
+  usar los mismos moldes y hacer todos los procesos al mismo tiempo?»*. **No, todavía no**, y
+  conviene tener escrito por qué, porque no es una intuición: son cuatro límites concretos.
+
+  1. 🔴 **EL CANDADO DE CONFIGURACIÓN VIVE EN LA MEMORIA DE UN PROCESO.** `_LOCK_CAT_EDICION` es un
+     `threading.RLock`. Hoy alcanza porque hay **un solo** proceso Flask (`make_server(...,
+     threaded=True)`), pero 100 personas piden más de un proceso o más de una máquina — y con dos,
+     ese candado deja de proteger: vuelve el *lost update* (dos guardan, gana el último y el cambio
+     del otro **desaparece sin ningún error**, y como el catálogo es global no es sólo el mismo
+     molde). **Plan:** mover la exclusión a la base (`sp_getapplock` en la conexión, o una fila de
+     candado con su dueño y su vencimiento) y que `_cargar_catalogo_para_editar` la tome; el
+     `teardown_request` que ya suelta el candado local sirve igual. Contrato a extender:
+     `verificar_config_concurrente.py` (hoy prueba dos hilos; tendría que probar dos PROCESOS).
+  2. **EL CATÁLOGO ES UN SOLO DOCUMENTO Y SE REESCRIBE ENTERO.** Medido: 55 KB con 4 moldes, y lo
+     guardan **59 endpoints** (48 lo piden «para editar»). Con cientos de moldes son megabytes por
+     cada guardado, todos haciendo cola detrás del mismo candado. **Plan:** partirlo por molde
+     (`config` ya tiene `producto_id`; la tabla `producto` ya normaliza la identidad) para que
+     guardar el molde X no toque el documento del molde Y.
+  3. **EL RENDER ES UN POOL DE 6 PROCESOS DE ~200 MB.** `procesos_render()` = `min(cpu, 6)`. 100
+     tizadas a la vez es cola y RAM: no se rompe, pero tampoco escala. Y **la tizada no puede ir
+     detrás de un lock** (entrada 169), así que la salida es más máquinas, no más candados.
+  4. **LOS TRABAJOS VIVEN EN MEMORIA** (`trabajos = {}`) y **13 de las 26 tablas no las escribe
+     nadie** (pedidos, filas, trabajos, telas…): un reinicio pierde el avance de lo que está
+     corriendo y un segundo servidor no vería nada. **Plan:** persistir `pedido`/`pedido_fila`/
+     `trabajo`, que ya están en el esquema.
+
+  Lo que **sí** está listo para varios a la vez: las escrituras son atómicas (`.tmp` + `os.replace`),
+  la autoría y los permisos por usuario están (`creado_por`, `_guard_molde`), las operaciones que
+  van juntas van en UNA transacción (386-393) y ninguna consulta puede esperar para siempre (414).
+  Orden sugerido para encarar lo de arriba: **1 → 2 → 4 → 3**.
+
 - **2026-09-09 (414) — 🔴 UNA CONSULTA A LA BASE PODÍA ESPERAR PARA SIEMPRE.** Pregunta del
   usuario: *«fijate si hay transacciones que… alguna que termine después no se cierre y quede ahí
   jodiendo»*.
