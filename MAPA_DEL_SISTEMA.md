@@ -1482,6 +1482,52 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (425) — 🎨 «¿POR QUÉ ME CAMBIÓ LOS COLORES?»: tres respuestas, y dos eran nuestras.**
+  Reporte del usuario con una mesa descargada en la mano: *«el original es 0/100/100/0 y el
+  archivo exportado fue 0/99,6/100/0,2; ¿declara los colores y el perfil ICC y todo lo que debe
+  tener un archivo para sublimación?»*. Se miró el ARCHIVO (los bytes), no lo que muestra un visor.
+
+  **A) El 0/99,6/100/0,2 viene del arte del usuario, no del sistema.** Su `arte.ai` trae escrito
+  `0 0.996 1 0.002 k` (JUGADOR ×8, GOLERO ×2). Illustrator **muestra** 0/100/100/0 porque redondea
+  el panel a enteros; lo que **guardó** es 99,6 y 0,2 (254/255: el valor pasó por 8 bits en algún
+  paso de Illustrator). El sistema copió los bytes tal cual (`copy_foreign`, ley del vector
+  original). 📌 **Regla para la próxima:** ante «me cambió el color», comparar **los operadores `k`
+  del arte contra los de la hoja** con pikepdf; el panel de Illustrator no es la fuente de verdad.
+
+  **B) 🔴 El nombre/número del GOLERO salía 0/87,3/84,8/7,1 — un color CALCULADO, no el del arte.**
+  En la hoja había `0.0000 0.8734 0.8481 0.0706 k` ×6 (3 goleros × nombre + número): formato de 4
+  decimales = `_color_op` cayendo al fallback sRGB→CMYK porque `colorn` venía `None`. CAUSA: los
+  tres lectores de personalización (`_colores_personalizable`, `_trazo_personalizable`,
+  `_pasadas_personalizable`) guardaban el color nativo SÓLO con clave por **texto del `Tj`**. El
+  GOLERO usa una **fuente CID** (2 bytes por glifo): ese "texto" son ids de glifo (`\x00(\x00+…`)
+  que jamás coinciden con «nombre»/«00». En la mesa 1 zafaba por el atajo «un solo texto en la
+  mesa»; en la 2 (nombre + número) no había atajo → None → color calculado. **Silencioso: no
+  falla, imprime otro rojo.** FIX: los tres lectores guardan TAMBIÉN con clave por **CAPA**
+  (`_CLAVE_CAPA + nombre normalizado`: Nombre, Número…), que no depende de la fuente; `_match_texto`
+  prueba la capa primero, y las claves por capa **no cuentan** para el atajo de «un solo texto» (si
+  contaran, una mesa de un texto tendría dos entradas y el atajo moriría). `_registrar` recibe la
+  capa y el re-matcheo final también. El camino B **no** tenía el bug: `quitar_placeholders`
+  decodifica el `Tj` con la fuente y lee el color directo.
+
+  **C) 🔴 La mesa suelta bajaba SIN perfil de color.** La hoja completa lleva `OutputIntents`
+  (`GTS_PDFX`, «U.S. Web Coated (SWOP) v2», ICC N=4 de 557 KB, puesto por `_embeber_perfil_pdf` y
+  conservado por `aplanar_rip`). `descargar_mesa` copiaba la página a un `pikepdf.new()` — y el
+  OutputIntent vive en la **raíz** del documento, no en la página. El archivo que el usuario le
+  lleva a la imprenta era justo el que no lo declaraba. FIX: `_pdf_de_una_pagina(src, pi)` copia el
+  OutputIntent (`copy_foreign`); el ZIP no tenía el problema (escribe las hojas enteras).
+  Verificado contra la hoja real: la mesa suelta sale con el mismo perfil, byte a byte, y los
+  valores `k` de la página idénticos.
+
+  **Lo que SÍ estaba bien y conviene decir:** todo el color es `DeviceCMYK` directo (operador
+  `k`), sin `rg`, sin ICCBased, sin Separations: el RIP recibe los números exactos. Lo único que
+  faltaba era la **declaración** del perfil en la mesa suelta.
+
+  **CONTRATO** `verificar_color_nativo_cid.py`: arte sintético con fuente Type0/Identity-H (el
+  color se encuentra por capa aunque el texto sean ids de glifo), el atajo de «un solo texto» sigue
+  vivo, el arte REAL del GOLERO da el rojo exacto en la mesa 2 y JUGADOR no cambia, y la mesa
+  suelta conserva OutputIntent y colores. Regresión verde: `verificar_placeholders_con_diseno.py`,
+  `verificar_etiqueta_nombre.py`, `verificar_ficha_piezas_pedido.py`.
+
 - **2026-09-10 (424) — 🔴 LA VISTA PREVIA RECORTABA UNA PIEZA CON LA SILUETA DE OTRA (ids de
   recorte repetidos).** Reporte del usuario, con dos capturas y ya harto: *«hay piezas que quedan
   cortadas y el diseño del arte en piezas que no van»*, *«sigue pasando el mismo error de mierda»*.

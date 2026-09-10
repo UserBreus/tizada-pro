@@ -9861,6 +9861,32 @@ def pagina_img(tid, archivo):
         return jsonify({"error": str(e)}), 500
 
 
+def _pdf_de_una_pagina(src, pi):
+    """UNA página de la hoja como PDF propio, CON el perfil de color de la hoja.
+
+    🔴 `OutputIntents` (el perfil ICC que le dice al RIP con qué destino de color se armó el
+    archivo) vive en la RAÍZ del documento, no en la página: copiar la página sola lo dejaba
+    afuera. La hoja entera bajaba con perfil y la mesa suelta sin él — el archivo que el usuario
+    le lleva a la imprenta era justo el que no lo declaraba (reporte 2026-09-10: «¿declara el
+    perfil ICC y todo lo que debe tener un archivo para sublimación?» — no lo declaraba).
+    Los valores de color no se tocan: sólo viaja la declaración, como en la hoja."""
+    import pikepdf
+    dst = pikepdf.new()
+    dst.pages.append(src.pages[pi])
+    ois = src.Root.get("/OutputIntents")
+    if ois:
+        try:
+            dst.Root.OutputIntents = dst.copy_foreign(src.make_indirect(ois))
+        except Exception as e:
+            print(f"[descargar_mesa] no se pudo copiar el perfil de color: {e}")
+    try:
+        dst.docinfo["/Creator"] = "TIZADA PRO"
+        dst.docinfo["/Producer"] = "TIZADA PRO"
+    except Exception:
+        pass
+    return dst
+
+
 @app.get("/api/trabajos/<tid>/mesa/<archivo>")
 def descargar_mesa(tid, archivo):
     """Descarga UNA mesa (la página `pi` de la hoja) como PDF PROPIO, con el NOMBRE que se ve en la
@@ -9890,13 +9916,8 @@ def descargar_mesa(tid, archivo):
             if n == 1:                # hoja de 1 sola página → el archivo TAL CUAL (RIP-safe)
                 buf = None
             else:
-                with pikepdf.new() as dst:
-                    dst.pages.append(src.pages[pi])   # la página (ya aplanada) a su propio PDF
-                    try:
-                        dst.docinfo["/Creator"] = "TIZADA PRO"
-                        dst.docinfo["/Producer"] = "TIZADA PRO"
-                    except Exception:
-                        pass
+                # la página (ya aplanada) a su propio PDF, CON el perfil de color de la hoja
+                with _pdf_de_una_pagina(src, pi) as dst:
                     buf = _io.BytesIO()
                     dst.save(buf, force_version="1.6")
         if buf is None:

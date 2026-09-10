@@ -1942,7 +1942,7 @@ def _colores_personalizable(path_arte):
                 return None
 
         _op_n = {4: "k", 3: "rg", 1: "g"}
-        dentro, cur, cur_cs_n, per = 0, None, None, {}
+        dentro, cur, cur_cs_n, per, _capa = 0, None, None, {}, ""
         _gstack = []   # el color de relleno es ESTADO GRÁFICO: q lo guarda y Q lo restaura.
         for inst in insts:
             op = str(inst.operator)
@@ -1975,7 +1975,10 @@ def _colores_personalizable(path_arte):
             # Entramos a una capa de PERSONALIZACIÓN (Personalizable o capa de campo:
             # Nombre, Número…), NO a la gráfica/guías.
             if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
-                if any(_norm_nombre(n) not in CAPAS_GRAFICAS for n in _nombres_oc(inst.operands[1], pg)):
+                _nombres = [_norm_nombre(n) for n in _nombres_oc(inst.operands[1], pg)]
+                if any(n not in CAPAS_GRAFICAS for n in _nombres):
+                    if dentro == 0:      # la capa-campo que se está entrando (Nombre, Número…)
+                        _capa = next((n for n in _nombres if n not in CAPAS_GRAFICAS), "")
                     dentro += 1; continue
                 elif dentro:
                     dentro += 1
@@ -1985,10 +1988,13 @@ def _colores_personalizable(path_arte):
                 dentro -= 1; continue
             # color de relleno de CADA texto, por contenido (no el de la estrella/escudo,
             # que es un path). Se guarda el del primer Tj de cada texto = su relleno.
+            # Y TAMBIÉN por CAPA (ver `_CLAVE_CAPA`): con fuente CID el texto no sirve de clave.
             if dentro and op in ("Tj", "TJ", "'", '"') and cur is not None:
                 k = _norm_nombre(_texto_de_tj(inst))
                 if k and k not in per:
                     per[k] = (cur[0], list(cur[1]))
+                if _capa:
+                    per.setdefault(_CLAVE_CAPA + _capa, (cur[0], list(cur[1])))
         if per:
             res[str(i + 1)] = per
     return res
@@ -2050,7 +2056,7 @@ def _trazo_personalizable(path_arte):
                 return None
 
         _op_n = {4: "k", 3: "rg", 1: "g"}
-        dentro, scol, scs_n, sw, per, _ult_txt = 0, None, None, None, {}, ""
+        dentro, scol, scs_n, sw, per, _ult_txt, _capa = 0, None, None, None, {}, "", ""
         _gstack = []   # trazo (color+ancho) también es ESTADO GRÁFICO: q guarda / Q restaura
         for inst in insts:
             op = str(inst.operator)
@@ -2080,9 +2086,11 @@ def _trazo_personalizable(path_arte):
                 except Exception:
                     pass
             if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
-                if any(_norm_nombre(n) not in CAPAS_GRAFICAS for n in _nombres_oc(inst.operands[1], pg)):
+                _nombres = [_norm_nombre(n) for n in _nombres_oc(inst.operands[1], pg)]
+                if any(n not in CAPAS_GRAFICAS for n in _nombres):
                     if dentro == 0:
                         scol, sw = None, None   # reset al entrar (sin arrastrar estado de afuera)
+                        _capa = next((n for n in _nombres if n not in CAPAS_GRAFICAS), "")
                     dentro += 1; continue
                 elif dentro:
                     dentro += 1
@@ -2100,6 +2108,8 @@ def _trazo_personalizable(path_arte):
             if dentro and op in ("S", "s", "B", "B*", "b", "b*") and scol is not None and sw and sw > 0:
                 if _ult_txt and _ult_txt not in per:
                     per[_ult_txt] = (scol[0], list(scol[1]), round(sw, 3))
+                if _capa:                # también por capa (fuente CID: el texto no es clave)
+                    per.setdefault(_CLAVE_CAPA + _capa, (scol[0], list(scol[1]), round(sw, 3)))
         if per:
             res[str(i + 1)] = per
     return res
@@ -2151,7 +2161,7 @@ def _pasadas_personalizable(path_arte):
         _op_n = {4: "k", 3: "rg", 1: "g"}
         # relleno y trazo son ESTADO GRÁFICO: `q` guarda y `Q` restaura (gotcha ya documentado).
         fcol, fcs_n, scol, scs_n, sw = None, None, None, None, None
-        dentro, per, _ult_txt, _hay_texto, _acum = 0, {}, "", False, ""
+        dentro, per, _ult_txt, _hay_texto, _acum, _capa = 0, {}, "", False, "", ""
         _gstack = []
 
         _acum, _pl = "", []      # texto y pasadas de la capa que se está recorriendo
@@ -2201,10 +2211,12 @@ def _pasadas_personalizable(path_arte):
                 except Exception: pass
 
             if op == "BDC" and len(inst.operands) == 2 and str(inst.operands[0]) == "/OC":
-                if any(_norm_nombre(n) not in CAPAS_GRAFICAS for n in _nombres_oc(inst.operands[1], pg)):
+                _nombres = [_norm_nombre(n) for n in _nombres_oc(inst.operands[1], pg)]
+                if any(n not in CAPAS_GRAFICAS for n in _nombres):
                     if dentro == 0:
                         scol, sw = None, None    # sin arrastrar el estado de trazo de afuera
                         _acum, _pl = "", []      # arranca la capa
+                        _capa = next((n for n in _nombres if n not in CAPAS_GRAFICAS), "")
                     dentro += 1; continue
                 elif dentro:
                     dentro += 1
@@ -2221,6 +2233,8 @@ def _pasadas_personalizable(path_arte):
                     t = _norm_nombre(_acum)
                     if t and _pl:
                         per.setdefault(t, list(_pl))
+                    if _capa and _pl:    # también por capa (fuente CID: el texto no es clave)
+                        per.setdefault(_CLAVE_CAPA + _capa, list(_pl))
                     _acum, _pl = "", []
                 continue
             if not dentro:
@@ -2273,6 +2287,12 @@ _PERS_CACHE = {}   # memoización por (arte, mtime): extraer_personalizacion es 
 #  «Número» entra como «numero» y no hace falta listarlo)
 # ⚠️ «0» NO es alias de nada: en un molde con el diseño adentro «0» es un TALLE (y `CAPAS_NO_PERS`
 # ya lo descarta). Sólo «00», que es el rótulo del placeholder del número.
+# 🔴 CLAVE POR CAPA para el color/trazo/pasadas nativos de la personalización. Los lectores
+# guardaban SÓLO por texto del `Tj`; con una fuente CID (2 bytes por glifo, p. ej. la del
+# GOLERO) ese "texto" son ids de glifo y nunca coincide con «nombre»/«00» → `colorn=None` →
+# el estampado caía a sRGB→CMYK y el rojo 0/99,6/100/0,2 salía 0/87/85/7 (2026-09-10).
+# La capa (Nombre, Número…) no depende de la fuente, así que es la clave que manda.
+_CLAVE_CAPA = "\x00capa:"
 _CAMPO_ALIAS = {"00": "numero", "nro": "numero", "num": "numero",
                 "jugador": "nombre", "apellido": "nombre"}
 
@@ -2345,33 +2365,40 @@ def extraer_personalizacion(path_arte, campos=None):
     pasadas = _pasadas_personalizable(path_arte)    # PILA de apariencias ORDENADA (manda ésta)
     pers = {}
 
-    def _match_texto(dmesa, tn):
-        # busca por contenido. El relleno puede venir duplicado (fitz lee "0000"
-        # cuando el "00" se dibuja dos veces) → match flexible por contención. Si no
-        # matchea y la mesa tiene un solo valor, se usa ese.
+    def _match_texto(dmesa, tn, capa=None):
+        # 🔴 PRIMERO POR CAPA: es la clave que no depende de la fuente (ver `_CLAVE_CAPA`).
+        # Después por contenido. El relleno puede venir duplicado (fitz lee "0000" cuando el
+        # "00" se dibuja dos veces) → match flexible por contención. Si no matchea y la mesa
+        # tiene un solo texto, se usa ese. Las claves por capa NO cuentan para el «un solo
+        # valor»: si contaran, una mesa de un texto tendría dos entradas y el atajo moriría.
         if not dmesa:
             return None
-        v = dmesa.get(tn)
+        if capa:
+            v = dmesa.get(_CLAVE_CAPA + capa)
+            if v is not None:
+                return v
+        _txt = {k: x for k, x in dmesa.items() if not str(k).startswith(_CLAVE_CAPA)}
+        v = _txt.get(tn)
         if v is None:
-            v = next((x for k, x in dmesa.items() if k and (k in tn or tn in k)), None)
-        if v is None and len(dmesa) == 1:
-            v = next(iter(dmesa.values()))
+            v = next((x for k, x in _txt.items() if k and (k in tn or tn in k)), None)
+        if v is None and len(_txt) == 1:
+            v = next(iter(_txt.values()))
         return v
 
-    def _registrar(mesa, campo, l):
+    def _registrar(mesa, campo, l, capa=""):
         s0 = l["spans"][0]
         bb = fitz.Rect(l["bbox"])
         txt = "".join(s["text"] for s in l["spans"]).strip()
         tn = _norm_nombre(txt)
-        colorn = _match_texto(nativos.get(str(mesa)) or {}, tn)
-        tz = _match_texto(trazos.get(str(mesa)) or {}, tn)
+        colorn = _match_texto(nativos.get(str(mesa)) or {}, tn, capa)
+        tz = _match_texto(trazos.get(str(mesa)) or {}, tn, capa)
         d = pers.setdefault(str(mesa), {}).setdefault(campo, {
             "cx": round((bb.x0 + bb.x1) / 2, 1), "baseline_y": round(s0["origin"][1], 1),
             "size": round(s0["size"], 1), "fuente": s0["font"].split("+")[-1],
             "ancho": round(bb.width, 1), "color": s0.get("color", 0),
             "colorn": colorn, "trazo": tz,
-            "pasadas": _match_texto(pasadas.get(str(mesa)) or {}, tn),   # pila de apariencias
-            "baseline_pts": [], "_txt": ""})
+            "pasadas": _match_texto(pasadas.get(str(mesa)) or {}, tn, capa),   # pila de apariencias
+            "baseline_pts": [], "_txt": "", "_capa": capa})
         # Acumular la LÍNEA BASE de cada glifo/renglón (origin x,y + bordes x0,x1 del bbox del
         # renglón). Si el placeholder viene sobre una CURVA/ARCO, sus glifos trazan la curva; si
         # es un PÁRRAFO de varias líneas, cada renglón trae su ancho → sirve para la ALINEACIÓN.
@@ -2402,7 +2429,7 @@ def extraer_personalizacion(path_arte, campos=None):
                         continue
                     for l in b["lines"]:
                         if "".join(s["text"] for s in l["spans"]).strip():
-                            _registrar(mesa, _campo, l)
+                            _registrar(mesa, _campo, l, cn)     # `cn` = la capa, normalizada
 
     # El modo viejo "por texto en la capa Personalizable" (adivinar NOMBRE/00 por
     # contenido) FUE QUITADO a pedido del usuario: la personalización se toma SOLO por
@@ -2423,10 +2450,12 @@ def extraer_personalizacion(path_arte, campos=None):
                     _seen.add(_k); _uniq.append(_p)   # (x, y, x0, x1)
             _pl["baseline_pts"] = _uniq
             _tn = _norm_nombre(_pl.get("_txt", ""))
-            if _tn:
-                _pl["trazo"] = _match_texto(trazos.get(_mk) or {}, _tn) or _pl.get("trazo")
-                _pl["colorn"] = _match_texto(nativos.get(_mk) or {}, _tn) or _pl.get("colorn")
+            _cp = _pl.get("_capa") or None
+            if _tn or _cp:
+                _pl["trazo"] = _match_texto(trazos.get(_mk) or {}, _tn, _cp) or _pl.get("trazo")
+                _pl["colorn"] = _match_texto(nativos.get(_mk) or {}, _tn, _cp) or _pl.get("colorn")
             _pl.pop("_txt", None)
+            _pl.pop("_capa", None)
     if len(_PERS_CACHE) > 24:
         _PERS_CACHE.clear()
     _PERS_CACHE[_ck] = pers
