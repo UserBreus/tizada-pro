@@ -4900,16 +4900,34 @@ export default function App() {
   // `{variable: {IDENT: 'tpu'|'bordado'|'dtf'}}`, tal cual lo guarda el catálogo.
   const [editMarcas, setEditMarcas] = useState({});
   const [editSinMarca, setEditSinMarca] = useState({});   // objetos con proceso que NO dejan cruz
+  // 🔴 LO QUE NO SE SUBLIMA ES DEL **PEDIDO**, NO DEL MOLDE (decisión del usuario 2026-09-10, sobre
+  // un caso real: la ficha salió con «escudo en TPU» sin que nadie lo eligiera — estaba guardado en
+  // el catálogo desde un pedido anterior). Sus palabras: «eso no puede pasar ni quedar bugiado una
+  // elección de un pedido anterior; por cada pedido y por cada molde elegimos». Así que vive acá,
+  // con el pedido: `{pid: {diseño: {variable: {IDENT: valor}}}}`, y «Nuevo pedido» lo deja en cero.
+  const [marcasPedido, setMarcasPedido] = useState(_wiz.marcasPedido || {});
+  const [sinMarcaPedido, setSinMarcaPedido] = useState(_wiz.sinMarcaPedido || {});
+  const _mpGuardar = (setter, pid, diseno, clave, ident, valor) => setter(prev => {
+    const _d = diseno || 'principal';
+    const _p = { ...(prev[pid] || {}) };
+    const _dd = { ...(_p[_d] || {}) };
+    const _cc = { ..._dd[clave] };
+    if (valor) _cc[ident] = valor; else delete _cc[ident];
+    if (Object.keys(_cc).length) _dd[clave] = _cc; else delete _dd[clave];
+    _p[_d] = _dd;
+    return { ...prev, [pid]: _p };
+  });
   const MARCAS_PROC = [
     { k: 'tpu', t: 'TPU', icon: 'tpu' },
     { k: 'bordado', t: 'Bordado', icon: 'bordado' },
     { k: 'dtf', t: 'DTF', icon: 'dtf' },
   ];
-  const cargarMarcasEditables = async (pid, diseno) => {
-    try {
-      const r = await fetch(`/api/productos/editables_marcas?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}`);
-      if (r.ok) { const d = await r.json(); setEditMarcas(d.marcas || {}); setEditSinMarca(d.sin_marca || {}); }
-    } catch { /* sin red: el editor igual abre */ }
+  // Ya no se le preguntan al servidor: son de ESTE pedido. Un pedido nuevo arranca sin ninguna,
+  // o sea que todo se sublima hasta que alguien diga otra cosa acá, en el paso Arte.
+  const cargarMarcasEditables = (pid, diseno) => {
+    const _d = diseno || 'principal';
+    setEditMarcas(((marcasPedido[pid] || {})[_d]) || {});
+    setEditSinMarca(((sinMarcaPedido[pid] || {})[_d]) || {});
   };
   /** Qué marca tiene un objeto en la variable en curso (o en la base «*»). */
   const marcaDe = (nombre) => (editMarcas[verVariante] || {})[nombre]
@@ -4930,13 +4948,9 @@ export default function App() {
     const nueva = !conProceso.every(n => sinMarcaDe(n));
     const clave = verVariante || '*';
     try {
-      for (const nombre of conProceso) {
-        const r = await fetch('/api/productos/editable_marca', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pid, diseno: diseno || 'principal', nombre, variante: clave, sin_marca: nueva }),
-        });
-        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'no se pudo guardar'); }
-      }
+      // 🔴 NO va al catálogo: queda en el pedido. Guardarlo en el molde era lo que hacía que la
+      // elección de un pedido se aplicara sola en el siguiente.
+      conProceso.forEach(nombre => _mpGuardar(setSinMarcaPedido, pid, diseno, clave, nombre, nueva || null));
       setEditSinMarca(prev => {
         const m = { ...prev, [clave]: { ...(prev[clave] || {}) } };
         conProceso.forEach(n => { if (nueva) m[clave][n] = true; else delete m[clave][n]; });
@@ -4959,13 +4973,7 @@ export default function App() {
     const nueva = todos ? '' : marca;
     const clave = verVariante || '*';
     try {
-      for (const nombre of nombres) {
-        const r = await fetch('/api/productos/editable_marca', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pid, diseno: diseno || 'principal', nombre, variante: clave, marca: nueva }),
-        });
-        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'no se pudo guardar'); }
-      }
+      nombres.forEach(nombre => _mpGuardar(setMarcasPedido, pid, diseno, clave, nombre, nueva || null));
       setEditMarcas(prev => {
         const m = { ...prev, [clave]: { ...(prev[clave] || {}) } };
         nombres.forEach(n => { if (nueva) m[clave][n] = nueva; else delete m[clave][n]; });
@@ -8629,7 +8637,7 @@ export default function App() {
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
       const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -8671,7 +8679,7 @@ export default function App() {
         telaBaseMolde, telaPorPieza, cantidadOn,
         // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
         // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
-        moldesEfimeros,
+        moldesEfimeros, marcasPedido, sinMarcaPedido,
       }));
     } catch (e) { /* localStorage lleno o no disponible */ }
   }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, moldesEfimeros]);
@@ -10905,6 +10913,9 @@ export default function App() {
     // 3) arte y visor
     setArteCargado({}); setArteIdx(0); setCantidadOn(false);
     setFuentesReempl({}); setFuentesPorArte({});   // la fuente elegida era de ESE pedido: uno nuevo arranca sin ella
+    // …y LO QUE NO SE SUBLIMA también era de ESE pedido: el nuevo arranca con todo sublimándose
+    // (es la regla que pidió el usuario; ver `marcasPedido`).
+    setMarcasPedido({}); setSinMarcaPedido({}); setEditMarcas({}); setEditSinMarca({});
     // …y las tipografías subidas «sólo para este pedido» se borran: el sistema no tiene que
     // reconocerlas en el próximo (regla del usuario). Las del catálogo no se tocan.
     (async () => {

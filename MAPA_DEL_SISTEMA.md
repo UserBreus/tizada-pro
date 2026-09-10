@@ -1482,6 +1482,46 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (423) — 🔴 «ESCUDO EN TPU» SE APLICÓ SOLO: LA MARCA ERA DEL MOLDE Y AHORA ES DEL PEDIDO.**
+  Reporte del usuario con la ficha en la mano: *«me puso solo automático escudo en TPU; eso no puede
+  pasar ni quedar bugiado una elección de un pedido anterior; por cada pedido y por cada molde
+  elegimos si el escudo va»*.
+
+  **QUÉ PASABA.** La marca de proceso vivía en el CATÁLOGO:
+  `producto.editables[diseño][variable][objeto] = {marca, sin_marca}`, escrita por
+  `POST /api/productos/editable_marca` desde el propio paso Arte del pedido. O sea: **la elección de
+  un pedido quedaba pegada al molde para siempre** y se aplicaba sola en todos los siguientes. En el
+  molde del usuario había quedado `jugador/escudo: tpu + sin_marca`, `jugador/Escudo…v2: bordado` y
+  `golero/escudo: tpu`; la ficha del pedido nuevo salió con «NO SE SUBLIMA» en los dos diseños sin
+  que nadie lo tocara.
+  🔴 **La consecuencia es de la peor familia**: un objeto que **no se imprime** cuando tenía que
+  imprimirse (o al revés). No falla, no avisa — se descubre con la tela cortada.
+
+  **CÓMO QUEDÓ** (el usuario eligió entre tres salidas): **cada pedido arranca EN CERO — todo se
+  sublima — y la marca se pone en el paso Arte, sobre el objeto**, que es donde ya estaban los
+  botones TPU · Bordado · DTF.
+  · Servidor: `_marcas_del_pedido(cuerpo, pid, dslug, clave)` lee del CUERPO del pedido
+    (`marcas_pedido` / `sin_marca_pedido`, con forma `{pid: {diseño: {variable: {IDENT: valor}}}}`).
+    La usan el motor **y la ficha técnica** — si leyeran distinto, el taller aplicaría un proceso
+    que la tela no pidió. `_editables_marca`/`_editables_sin_marca` (los del catálogo) ya **no se
+    usan al generar**.
+  · Pantalla: `marcasPedido`/`sinMarcaPedido` son estado del PEDIDO (viajan en el wizard, así que
+    sobreviven a recargar la página), y **elegir ya no llama a `/api/productos/editable_marca`**.
+    **«Nuevo pedido» las deja en cero**, como el resto ([[pedido-sin-arrastre]]).
+
+  ⚠️ Lo que quedó guardado en los moldes de antes **no se borra** (es del usuario) pero queda
+  **inerte**: nadie lo lee al generar.
+
+  **Y lo que NO era un bug**, aunque vino en el mismo reporte: las prendas **negras** de esa tizada
+  son el diseño **GOLERO**. La tabla de talles de la ficha lo dice: filas 1, 12 y 23 son GOLERO y
+  son exactamente las tres que salieron negras; el resto, JUGADOR en rojo. La «montaña» negra entre
+  las tiras es la manga del golero acomodada al lado. Revisadas las 3 hojas: sin superposiciones.
+
+  **VERIFICADO**: `verificar_marca_por_pedido.py` (nuevo) — sin nada en el pedido no hay marcas
+  aunque el molde las tenga guardadas; lo que manda el pedido vale sólo para SU molde y SU diseño
+  (el caso del usuario era justamente que salía en los dos); motor y ficha leen lo mismo; y la
+  pantalla ya no escribe en el catálogo.
+
 - **2026-09-10 (422) — 🚫 LAS PIEZAS SIN ETIQUETA SE ELIGEN **EN EL VISOR**, con su botón de modo.**
   Sobre la 421 el usuario pidió el gesto concreto: *«debe estar en donde se va a mostrar un botón de
   deshabilitar etiqueta en algunas piezas, presionás ahí y después presionás en qué piezas no va la

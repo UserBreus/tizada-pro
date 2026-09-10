@@ -218,7 +218,12 @@ MP.extraer_editables = lambda *a, **k: [
      "w_cm": 7.5, "h_cm": 7.5, "svg": None, "thumb": None}
     for _n in ("escudo", "estrella", "numero", "logo")]
 try:
-    _por = {i["nombre"]: i for i in S._procesos_ficha("pid", _pf, "principal", "v_1", "a.ai", talle_guia="M")}
+    # 🔴 Desde 2026-09-10 (changelog 423) la marca es DEL PEDIDO, no del molde: la ficha la recibe
+    # por parámetro. Los casos son los mismos; lo que cambia es de dónde salen.
+    _mk = S._editables_marca(_pf, "principal")
+    _sm = S._editables_sin_marca(_pf, "principal")
+    _por = {i["nombre"]: i for i in S._procesos_ficha("pid", _pf, "principal", "v_1", "a.ai",
+                                                      talle_guia="M", marcas=_mk, sin_marca=_sm)}
     ok("escudo" in _por and _por["escudo"]["sin_marca"] and _por["escudo"]["proceso"] == "TPU",
        "ficha: proceso + sin marca aparece, con su material")
     ok("estrella" in _por and _por["estrella"]["sin_marca"] and not _por["estrella"]["proceso"],
@@ -272,7 +277,9 @@ try:
          "w_cm": w, "h_cm": w, "mesa": m, "svg": None, "thumb": None}
         for m, w in ((1, 6.5), (2, 7.5), (3, 8.5))]
     _prodm = {"editables": {"principal": {"v_1": {"escudo": {"transforms": {}, "marca": "tpu"}}}}}
-    _r = S._procesos_ficha("pid", _prodm, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG)
+    _r = S._procesos_ficha("pid", _prodm, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG,
+                          marcas=S._editables_marca(_prodm, "principal"),
+                          sin_marca=S._editables_sin_marca(_prodm, "principal"))
     ok(len(_r) == 1, f"el objeto se lista UNA sola vez, aunque esté en 3 mesas (salieron {len(_r)})")
     _md = _r[0]["medidas"] if _r else []
     ok(len(_md) == 3, f"una línea por RANGO del arte (salieron {len(_md)})")
@@ -285,7 +292,9 @@ try:
     MP.extraer_editables = lambda arte: [
         {"nombre": "escudo", "ident": "escudo", "capa": "Editable escudo", "pieza": "Frente",
          "w_cm": 7.5, "h_cm": 7.5, "mesa": 1, "svg": None, "thumb": None}]
-    _r2 = S._procesos_ficha("pid", _prodm, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG)
+    _r2 = S._procesos_ficha("pid", _prodm, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG,
+                          marcas=S._editables_marca(_prodm, "principal"),
+                          sin_marca=S._editables_sin_marca(_prodm, "principal"))
     _md2 = _r2[0]["medidas"] if _r2 else []
     ok(len(_md2) == 1 and _md2[0]["talles"] == "talle M" and _md2[0]["texto"] == "7.5 × 7.5 cm",
        f"sin rangos, la medida es la del TALLE GUÍA: {_md2}")
@@ -294,7 +303,9 @@ try:
     _prodc = dict(_prodm, editables_config={"Editable escudo": {"capa": "Editable escudo", "rangos": [
         {"variantes": ["XS", "S", "M"], "apaisado": {"ancho": "8", "alto": "8"}, "vertical": {"ancho": "", "alto": ""}},
         {"variantes": ["L", "XL", "2XL"], "apaisado": {"ancho": "10", "alto": "10"}, "vertical": {"ancho": "", "alto": ""}}]}})
-    _r3 = S._procesos_ficha("pid", _prodc, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG)
+    _r3 = S._procesos_ficha("pid", _prodc, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG,
+                          marcas=S._editables_marca(_prodc, "principal"),
+                          sin_marca=S._editables_sin_marca(_prodc, "principal"))
     _t3 = [f"{m['talles']} → {m['texto']}" for m in (_r3[0]["medidas"] if _r3 else [])]
     ok(_t3 == ["XS a M → 8.0 × 8.0 cm", "L a 2XL → 10.0 × 10.0 cm"],
        f"el tamaño CONFIGURADO manda sobre el del arte: {_t3}")

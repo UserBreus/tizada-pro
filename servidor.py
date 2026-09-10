@@ -6194,6 +6194,25 @@ def _clamp_color(color):
     return {"fill": f, "stroke": s}
 
 
+def _marcas_del_pedido(cuerpo, pid, dslug, clave="marcas_pedido"):
+    """Las marcas de proceso (TPU/Bordado/DTF) que eligió ESTE pedido para ESTE molde y diseño.
+
+    🔴 SON DEL PEDIDO, NO DEL MOLDE (decisión del usuario 2026-09-10, sobre un caso real: la ficha
+    salió con «escudo en TPU» sin que nadie lo eligiera — estaba guardado en el catálogo desde un
+    pedido anterior y se aplicó solo). Sus palabras: *«eso no puede pasar ni quedar bugiado una
+    elección de un pedido anterior; por cada pedido y por cada molde elegimos»*. Así que **cada
+    pedido arranca en cero: todo se sublima** hasta que alguien diga otra cosa en el paso Arte.
+
+    Forma: `{pid: {diseno_slug: {variable: {IDENT: valor}}}}` → devuelve `{variable: {IDENT: valor}}`.
+    """
+    _t = (cuerpo or {}).get(clave) or {}
+    if not isinstance(_t, dict):
+        return {}
+    _m = (_t.get(str(pid)) or {}) if isinstance(_t.get(str(pid)), dict) else {}
+    _d = _m.get(str(dslug))
+    return _d if isinstance(_d, dict) else {}
+
+
 def _editables_marca(prod, dslug):
     """MARCAS DE PROCESO (TPU/Bordado/DTF) para el motor: `{variable: {IDENT: "tpu"|…}}`.
     Espejo de `_editables_color`: la marca es del OBJETO y de la VARIABLE (no por talle) — lo que
@@ -8010,7 +8029,8 @@ def _combo_toggles(prenda):
                         for t in (prenda.get("toggles") or [])))
 
 
-def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None):
+def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None,
+                    marcas=None, sin_marca=None):
     """Los objetos que NO se subliman (TPU/Bordado/DTF) de este molde+diseño, para la ficha.
 
     🔴 UNO POR OBJETO. El arte puede traer el mismo objeto en varias mesas (una por rango de
@@ -8021,9 +8041,11 @@ def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None
         abarca — es la medida que va a salir de verdad;
       · si no, la medida que el objeto tiene en el **TALLE GUÍA** (la del arte).
     Best-effort: si el arte no se puede leer, la ficha sale igual sin esta sección."""
-    marcas = _editables_marca(prod, _slugify_diseno(diseno))
+    # 🔴 DEL PEDIDO (ver `_marcas_del_pedido`): el molde ya no decide qué no se sublima. Si el
+    # llamador no las pasa, no hay ninguna — que es como arranca todo pedido nuevo.
+    marcas = marcas or {}
     _m = {**(marcas.get("*") or {}), **(marcas.get(variante) or {})}
-    _sm_all = _editables_sin_marca(prod, _slugify_diseno(diseno))
+    _sm_all = sin_marca or {}
     _sm = {**(_sm_all.get("*") or {}), **(_sm_all.get(variante) or {})}
     # 🔴 LOS «SIN MARCA» TAMBIÉN VAN A LA FICHA, tengan proceso o no. Es la definición del usuario:
     # en la tizada no sale nada, pero acá tiene que estar el dibujo, el material y el tamaño — si
@@ -8193,7 +8215,8 @@ def _fuentes_guia(pers, talle, carpeta):
     return salida
 
 
-def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None):
+def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
+                      marcas_ped=None, sin_marca_ped=None):
     # ⚠️ El molde guía de la FICHA se genera con `marcas_como_cruz=False`: ahí el objeto se tiene que
     # seguir viendo en su lugar (pedido del usuario 2026-08-26). La cruz es para la TELA.
     """Molde guía para la ficha: las piezas de la VARIABLE del pedido, al talle guía, con el diseño
@@ -8280,8 +8303,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None):
                                 editables_cfg=_editables_cfg(prod, diseno or "principal"),
                                 editables_tamano=_editables_tamano(prod),
                                 editables_color=_editables_color(prod, diseno or "principal"),
-                                editables_marca=_editables_marca(prod, diseno or "principal"),
-                                editables_sin_marca=_editables_sin_marca(prod, diseno or "principal"),
+                                editables_marca=(marcas_ped or {}),        # del PEDIDO, no del molde
+                                editables_sin_marca=(sin_marca_ped or {}),
                                 referencia=(prod or {}).get("referencia_medida") or "alto",
                                 # …pero DIBUJADO: en la ficha el objeto se tiene que seguir viendo en
                                 # su lugar (la cruz es para la TELA). Ver el comentario de arriba.
@@ -8340,7 +8363,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None):
             "fuentes": _fuentes_guia(pers, talle, _cf),
             # LO QUE NO SE SUBLIMA (TPU/Bordado/DTF): va debajo de las piezas, para que el taller
             # sepa qué hay que aplicar aparte y sobre qué pieza.
-            "procesos": _procesos_ficha(pid, prod, diseno, variante, arte, talle, reg)}
+            "procesos": _procesos_ficha(pid, prod, diseno, variante, arte, talle, reg,
+                                        marcas=marcas_ped, sin_marca=sin_marca_ped)}
 
 
 @app.post("/api/generar_multi")
@@ -8659,9 +8683,11 @@ def generar_multi():
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
                 "editables_tamano": _editables_tamano(prod),
                 "editables_color": _editables_color(prod, dslug),
-                "editables_marca": _editables_marca(prod, dslug),   # TPU/Bordado/DTF → cruz en la tizada
+                # TPU/Bordado/DTF → cruz en la tizada. 🔴 DEL PEDIDO: el molde ya no decide (ver
+                # `_marcas_del_pedido`). Sin nada elegido, todo se sublima.
+                "editables_marca": _marcas_del_pedido(cuerpo, pid, dslug),
                 # …y cuáles de esos NO dejan la cruz (el objeto igual no se sublima)
-                "editables_sin_marca": _editables_sin_marca(prod, dslug),
+                "editables_sin_marca": _marcas_del_pedido(cuerpo, pid, dslug, "sin_marca_pedido"),
                 # qué dimensión manda en ESTE molde (cada molde puede tener la suya)
                 "referencia": (prod or {}).get("referencia_medida") or "alto",
                 "objetos_agregados": _objetos_agregados_motor(pid, sub),   # objetos que sumó el usuario (PNG/SVG/PDF/AI)
@@ -8847,8 +8873,10 @@ def generar_multi():
                     if _prodf and _regf:
                         prog("ficha", (_sp.get("molde") or (_prodf or {}).get("nombre", _pf))
                              + (f" · {_sp['diseno_nombre']}" if _sp.get("diseno_nombre") else ""), None)
-                        g = _molde_guia_ficha(_pf, _prodf, _regf, _sp.get("diseno") or default_diseno, _sp,
-                                              reempl=_reempl)
+                        _dsf = _sp.get("diseno") or default_diseno
+                        g = _molde_guia_ficha(_pf, _prodf, _regf, _dsf, _sp, reempl=_reempl,
+                                              marcas_ped=_marcas_del_pedido(cuerpo, _pf, _dsf),
+                                              sin_marca_ped=_marcas_del_pedido(cuerpo, _pf, _dsf, "sin_marca_pedido"))
                         if g:
                             _guias.append(g)
                 _pl = planilla_ficha or {"columnas": [], "filas": prendas}
