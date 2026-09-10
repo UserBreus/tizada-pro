@@ -1482,6 +1482,33 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (421) — 👁️ «QUÉ PIEZA NO LLEVA ETIQUETA» EXISTÍA, PERO NO SE VEÍA.** El usuario lo
+  pidió como si no estuviera: *«en la configuración en etiqueta y en la etiqueta de molde con diseño
+  agregale una opción de poder decidir qué pieza no le pondrás etiqueta»*. **Ya estaba de punta a
+  punta** — `etiqueta.piezas_off` (por NOMBRE GENÉRICO), lo respeta el motor (`_et_off` en
+  `motor_pedido`), lo cuenta `/api/productos` (`etiqueta_apagadas`) y el visor no la dibuja. Lo que
+  fallaba era **encontrarlo**: el control era un botón de **10,5 px que decía «sí»**, sin encabezado
+  de columna, y la Ayuda del rótulo «Piezas» no lo mencionaba.
+
+  **AHORA** la lista tiene encabezado (`PIEZA` · `¿LLEVA ETIQUETA?`), el control es una pastilla que
+  se lee —**LLEVA** / **SIN ETIQUETA**—, el rótulo muestra «N sin etiqueta» en ámbar cuando hay
+  alguna apagada, y la Ayuda explica la regla: **todas llevan; si alguna no tiene que llevar (un
+  vivo, una tira) se apaga acá y no se le imprime ninguna, en ningún talle**. Es la MISMA pantalla
+  que usa el cliente desde el pedido en «Ubicar etiqueta» (camino B), así que los dos lugares que
+  pidió quedaron cubiertos con un solo cambio.
+
+  Y en **Configuración → Molde con diseño** (que es global y no conoce las piezas de ningún molde)
+  se agregó la línea que dice **dónde** se elige, porque es ahí donde el usuario fue a buscarlo.
+
+  🔴 **LA LECCIÓN, que vale más que el cambio:** una función que no se encuentra es una función que
+  no existe. Antes de construir lo que piden, **buscar si ya está**; y si está, el trabajo no es
+  agregarla, es hacerla visible. Acá el costo de no mirar habría sido duplicar `piezas_off` con otro
+  nombre y dejar dos verdades peleándose.
+
+  **VERIFICADO en la app real** (sandbox de sólo lectura): la lista muestra el encabezado y las
+  pastillas; al apagar «Dorso» la fila se atenúa, la pastilla pasa a «SIN ETIQUETA» y arriba aparece
+  «1 sin etiqueta». Contratos de etiqueta y de camino B en verde; `npm run build` con los siete.
+
 - **2026-09-10 (420) — ⚠️ CORRECCIÓN DE LA 419: NO ERAN 297 SEGUNDOS, SON 4,4.** Medí la función
   equivocada y armé el argumento de la 419 sobre ese número. Queda anotado porque el error de
   método es tan útil como el resultado.

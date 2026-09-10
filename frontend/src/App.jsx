@@ -17051,7 +17051,23 @@ export default function App() {
                               if (!listaPz.length) return <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Registrá la plantilla del molde para ver sus piezas.</div>;
                               return (
                                 <div data-tour="etq-piezas">
-                                  <label style={lbl}>Piezas <Ayuda ancho={330}>elegí una y marcá en el visor dónde va su etiqueta — si el nombre tiene varias (Frente 1, Frente 2), <b>cada una lleva la suya</b></Ayuda></label>
+                                  <label style={lbl}>Piezas
+                                    {/* 🔴 El apagado por pieza EXISTÍA desde siempre, pero era un
+                                        botoncito de 10 px que decía «sí»: nadie lo encontraba
+                                        (reporte del usuario 2026-09-10, que lo pidió como si no
+                                        estuviera). Ahora la columna tiene nombre, el control se lee
+                                        y acá se dice cuántas quedaron apagadas. */}
+                                    {offSet.size > 0 && (
+                                      <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 800, color: 'var(--warning)' }}>
+                                        {offSet.size} sin etiqueta
+                                      </span>
+                                    )}
+                                    <Ayuda ancho={350}>Elegí una y marcá en el visor dónde va su etiqueta — si el nombre tiene varias (Frente 1, Frente 2), <b>cada una lleva la suya</b>.<br /><br /><b>Todas las piezas llevan etiqueta.</b> Si alguna no tiene que llevarla (un vivo, una tira), tocá <b>LLEVA</b> en su fila: queda en <b>SIN ETIQUETA</b> y no se le imprime ninguna, en ningún {(term.variante || 'talle').toLowerCase()}.</Ayuda>
+                                  </label>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px 4px', fontSize: 9.5, fontWeight: 800, letterSpacing: .4, color: 'var(--text-muted)' }}>
+                                    <span style={{ flex: 1 }}>PIEZA</span>
+                                    <span>¿LLEVA ETIQUETA?</span>
+                                  </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: 10, padding: 5 }}>
                                     {listaPz.map(p => {
                                       const sel = etqPiezaSel === p.nombre;
@@ -17066,9 +17082,17 @@ export default function App() {
                                           {pzs.length > 1 && <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{pzs.length} piezas</span>}
                                           <span title={pzs.length > 1 ? `${nPuestas} de ${pzs.length} piezas ubicadas` : (puesta ? 'Ya tiene su etiqueta ubicada' : 'Todavía sin ubicar')}
                                             style={{ fontSize: 11, fontWeight: 800, color: puesta ? 'var(--accent)' : (nPuestas ? 'var(--warning, #f5a623)' : 'var(--text-muted)'), minWidth: 14, textAlign: 'center' }}>{pzs.length > 1 ? `${nPuestas}/${pzs.length}` : (puesta ? '✓' : '·')}</span>
-                                          <button type="button" title={apagada ? 'Esta pieza NO lleva etiqueta' : 'Esta pieza lleva etiqueta'}
+                                          <button type="button"
+                                            title={apagada ? 'Esta pieza NO lleva etiqueta. Tocá para que sí lleve.'
+                                              : 'Esta pieza lleva etiqueta. Tocá para que NO lleve ninguna.'}
                                             onClick={(e) => { e.stopPropagation(); const g = nombreGenerico(p.nombre); const off = new Set(offSet); off.has(g) ? off.delete(g) : off.add(g); setEC({ piezas_off: [...off] }); }}
-                                            style={{ border: '1px solid var(--border-light)', background: 'transparent', borderRadius: 6, padding: '2px 7px', fontSize: 10.5, cursor: 'pointer', color: apagada ? 'var(--text-muted)' : 'var(--accent)' }}>{apagada ? 'no' : 'sí'}</button>
+                                            style={{ borderRadius: 999, padding: '2px 9px', fontSize: 9.5, fontWeight: 800, letterSpacing: .3,
+                                              cursor: 'pointer', whiteSpace: 'nowrap',
+                                              border: '1px solid ' + (apagada ? 'var(--border-light)' : 'var(--accent)'),
+                                              background: apagada ? 'transparent' : 'rgba(0,243,255,0.10)',
+                                              color: apagada ? 'var(--text-muted)' : 'var(--accent)' }}>
+                                            {apagada ? 'SIN ETIQUETA' : 'LLEVA'}
+                                          </button>
                                         </div>
                                       );
                                     })}
@@ -20596,6 +20620,11 @@ export default function App() {
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
                           El <b>color del texto</b>, el <b>del halo</b> y la <b>alineación</b> los puede cambiar el cliente en su molde.
+                          {/* Acá no se puede elegir POR PIEZA: esta pantalla vale para todos los moldes con
+                              diseño y no sabe qué piezas tiene cada uno. Se dice dónde se elige, que es
+                              justo lo que el usuario vino a buscar acá (2026-09-10). */}
+                          {' '}Todas las piezas llevan etiqueta; <b>cuáles no</b> se elige en cada molde, en
+                          «Ubicar etiqueta» (columna <b>¿LLEVA ETIQUETA?</b>).
                         </span>
                       </CfgCard>
 

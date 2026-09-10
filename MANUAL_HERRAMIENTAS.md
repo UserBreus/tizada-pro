@@ -340,6 +340,20 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
 - **Trampa:** un molde **sin** `columnas` cae al fallback `nombre/numero/talle` en
   `_traducir_prendas`. Si el código asume columnas, rompe esos moldes.
 
+### 3.4.b **Que una pieza NO lleve etiqueta**
+
+- **Dónde:** Moldería → un molde → **Etiqueta**, en la lista **Piezas** (columna
+  **¿LLEVA ETIQUETA?**). Es la misma pantalla a la que entra el cliente desde el pedido con
+  **«Ubicar etiqueta»**, así que sirve igual para los moldes con el diseño adentro.
+- **Regla:** **todas las piezas llevan etiqueta.** Si alguna no tiene que llevarla (un vivo, una
+  tira), tocá **LLEVA** en su fila y queda en **SIN ETIQUETA**.
+- **Efecto:** esa pieza no lleva etiqueta en **ningún talle**, ni en el visor ni en la tizada. Se
+  guarda por **nombre genérico**: apagar «Cuello» apaga todos los cuellos.
+- **Se ve de un vistazo:** al lado del rótulo «Piezas» aparece «N sin etiqueta» en ámbar.
+- **Guarda:** `etiqueta.piezas_off` del molde (`POST /api/productos/etiqueta`).
+- ⚠️ En **Configuración → Molde con diseño** NO se elige: esa pantalla vale para todos los moldes
+  con diseño y no sabe qué piezas tiene cada uno. Se elige molde por molde, acá.
+
 ### 3.5.b **Quién está editando qué** (aparece solo)
 
 - **Qué es:** al abrir un molde en Configuración, una regla de nesting o una planilla, esa cosa
