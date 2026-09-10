@@ -1482,6 +1482,35 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (422) — 🚫 LAS PIEZAS SIN ETIQUETA SE ELIGEN **EN EL VISOR**, con su botón de modo.**
+  Sobre la 421 el usuario pidió el gesto concreto: *«debe estar en donde se va a mostrar un botón de
+  deshabilitar etiqueta en algunas piezas, presionás ahí y después presionás en qué piezas no va la
+  etiqueta; y obvio debés poder guardar y también habilitar de nuevo»*.
+
+  Tenía razón en el fondo: apagarla desde la LISTA obliga a **saber cómo se llama** la pieza. En el
+  visor **se la ve**, que es justo lo que uno mira cuando decide que un vivo o una tira no lleva.
+
+  **CÓMO QUEDÓ.** Botón **«🚫 Elegir piezas SIN etiqueta»** arriba de la lista (`etq-apagar-modo`).
+  Prendido, se pone ámbar, dice **«✓ Listo — volver a ubicar la etiqueta»** y aparece la instrucción.
+  En ese modo, **tocar una pieza en el visor la apaga**; tocarla de nuevo la vuelve a prender —el
+  mismo gesto para las dos cosas— y las apagadas se marcan **a rayas rojas** para verlas de un
+  vistazo. Se guarda con el **«Guardar etiqueta»** de siempre (es `piezas_off`, el mismo campo de
+  la 421: no se duplicó nada). La lista de la derecha sigue funcionando igual, para quien prefiera
+  buscar por nombre.
+
+  Detalles que importan: el modo **desvía el clic del visor** (`onPickApagar` en vez de `onPick`),
+  así que mientras está prendido **no se coloca ninguna etiqueta por error**, y el hover deja de
+  previsualizar. Se **apaga solo al salir de la pestaña**: un modo que sobrevive al cambio de
+  pantalla sorprende al volver. Y guarda por **NOMBRE GENÉRICO**, igual que el motor (`_et_off`):
+  apagar «Cuello» apaga los once cuellos del molde.
+
+  Vale para los dos lugares con un solo cambio, porque es la misma pantalla a la que entra el
+  cliente desde el pedido con **«Ubicar etiqueta»** (camino B).
+
+  **VERIFICADO en la app real** (sandbox de sólo lectura, molde «Camiseta de futbol»): al tocar el
+  cuello en el visor, la lista pasó a «SIN ETIQUETA», el rótulo mostró «1 sin etiqueta» y las piezas
+  quedaron marcadas; al tocarlo de nuevo volvió a «LLEVA» y el contador desapareció.
+
 - **2026-09-10 (421) — 👁️ «QUÉ PIEZA NO LLEVA ETIQUETA» EXISTÍA, PERO NO SE VEÍA.** El usuario lo
   pidió como si no estuviera: *«en la configuración en etiqueta y en la etiqueta de molde con diseño
   agregale una opción de poder decidir qué pieza no le pondrás etiqueta»*. **Ya estaba de punta a

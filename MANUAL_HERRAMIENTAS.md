@@ -342,11 +342,17 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
 
 ### 3.4.b **Que una pieza NO lleve etiqueta**
 
-- **Dónde:** Moldería → un molde → **Etiqueta**, en la lista **Piezas** (columna
-  **¿LLEVA ETIQUETA?**). Es la misma pantalla a la que entra el cliente desde el pedido con
-  **«Ubicar etiqueta»**, así que sirve igual para los moldes con el diseño adentro.
+- **Dónde:** Moldería → un molde → **Etiqueta**. Es la misma pantalla a la que entra el cliente
+  desde el pedido con **«Ubicar etiqueta»**, así que sirve igual para los moldes con el diseño
+  adentro.
 - **Regla:** **todas las piezas llevan etiqueta.** Si alguna no tiene que llevarla (un vivo, una
-  tira), tocá **LLEVA** en su fila y queda en **SIN ETIQUETA**.
+  tira), se apaga. Dos formas, la que te quede cómoda:
+  1. **En el visor** (`etq-apagar-modo`): tocá **«🚫 Elegir piezas SIN etiqueta»** y después tocá
+     las piezas en el dibujo. Quedan **marcadas a rayas**. Tocalas de nuevo para que vuelvan a
+     llevar. Al terminar, **«✓ Listo»** para volver a ubicar la etiqueta.
+  2. **En la lista**, columna **¿LLEVA ETIQUETA?**: tocá **LLEVA** en su fila y queda en
+     **SIN ETIQUETA**.
+- **Guardar:** con el botón **«Guardar etiqueta»** de siempre.
 - **Efecto:** esa pieza no lleva etiqueta en **ningún talle**, ni en el visor ni en la tizada. Se
   guarda por **nombre genérico**: apagar «Cuello» apaga todos los cuellos.
 - **Se ve de un vistazo:** al lado del rótulo «Piezas» aparece «N sin etiqueta» en ámbar.

@@ -4514,6 +4514,10 @@ export default function App() {
   const [etqPiezaSel, setEtqPiezaSel] = useState(null);
   const [etqPzTocada, setEtqPzTocada] = useState(null);
   const [etqIgualar, setEtqIgualar] = useState(false);   // MODO: lo que se marque se aplica a TODAS las del mismo nombre
+  // MODO «elegir las piezas SIN etiqueta»: se prende con su botón y se tocan las piezas EN EL
+  // VISOR, que es donde se las ve (pedido del usuario 2026-09-10). Antes sólo se podía desde la
+  // lista de la derecha, y ahí hay que saber el nombre de la pieza para encontrarla.
+  const [etqApagarModo, setEtqApagarModo] = useState(false);
   // Ventana «a estos talles les faltan estas piezas» tras nombrar (changelog 179).
   const [avisoTalles, setAvisoTalles] = useState(null);
   const [zonasModo, setZonasModo] = useState(false);     // ETIQUETA: modo "zonas de texto" (elegir esquinas → dividir la pieza en zonas)
@@ -10767,6 +10771,7 @@ export default function App() {
   // lista — el visor arranca mostrando algo con lo que trabajar, y evita dibujar el text-on-path
   // de las ~135 piezas (antes ese piso lo daba auto-elegir una VARIABLE, concepto que esta
   // pantalla ya no usa).
+  useEffect(() => { if (tabAjustesMolde !== 'etiqueta') setEtqApagarModo(false); }, [tabAjustesMolde]);
   useEffect(() => {
     if (tabAjustesMolde !== 'etiqueta' || etqPiezaSel) return;
     const lista = etiquetaConfig?.piezas_gen || [];
@@ -17064,6 +17069,26 @@ export default function App() {
                                     )}
                                     <Ayuda ancho={350}>Elegí una y marcá en el visor dónde va su etiqueta — si el nombre tiene varias (Frente 1, Frente 2), <b>cada una lleva la suya</b>.<br /><br /><b>Todas las piezas llevan etiqueta.</b> Si alguna no tiene que llevarla (un vivo, una tira), tocá <b>LLEVA</b> en su fila: queda en <b>SIN ETIQUETA</b> y no se le imprime ninguna, en ningún {(term.variante || 'talle').toLowerCase()}.</Ayuda>
                                   </label>
+                                  {/* 🔴 ELEGIRLAS EN EL VISOR. Pedido del usuario (2026-09-10): un botón para
+                                      entrar al modo y después tocar EN EL DIBUJO las piezas que no llevan.
+                                      Desde la lista también se puede, pero ahí hay que saber cómo se llama
+                                      la pieza; en el visor se la ve. El mismo toque la vuelve a prender. */}
+                                  <button type="button" data-tour="etq-apagar-modo"
+                                    onClick={() => setEtqApagarModo(v2 => !v2)}
+                                    style={{ width: '100%', marginBottom: 7, padding: '8px 11px', borderRadius: 9, cursor: 'pointer',
+                                      fontSize: 11.5, fontWeight: 800, textAlign: 'left',
+                                      border: '1px solid ' + (etqApagarModo ? 'var(--warning)' : 'var(--border-light)'),
+                                      background: etqApagarModo ? 'rgba(255,215,0,0.12)' : 'rgba(255,255,255,0.03)',
+                                      color: etqApagarModo ? 'var(--warning)' : 'var(--text-secondary)' }}>
+                                    {etqApagarModo ? '✓ Listo — volver a ubicar la etiqueta' : '🚫 Elegir piezas SIN etiqueta'}
+                                  </button>
+                                  {etqApagarModo && (
+                                    <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--text-secondary)', marginBottom: 8,
+                                      padding: '8px 10px', borderRadius: 9, background: 'rgba(255,215,0,0.07)', border: '1px solid rgba(255,215,0,0.35)' }}>
+                                      Tocá <b>en el visor</b> las piezas que <b>no</b> llevan etiqueta: quedan marcadas a
+                                      rayas. Tocalas de nuevo para que sí lleven. Al terminar, <b>Guardar etiqueta</b>.
+                                    </div>
+                                  )}
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px 4px', fontSize: 9.5, fontWeight: 800, letterSpacing: .4, color: 'var(--text-muted)' }}>
                                     <span style={{ flex: 1 }}>PIEZA</span>
                                     <span>¿LLEVA ETIQUETA?</span>
@@ -19110,6 +19135,18 @@ export default function App() {
                                 return { ...prev, posiciones: _np };
                               });   // clave = variante§nombre-completo (POR PIEZA POR VARIABLE); t/rx/ry = posición relativa (estable entre talles)
                             };
+                            // APAGAR/PRENDER LA ETIQUETA DE UNA PIEZA, tocándola en el visor. Se guarda por
+                            // NOMBRE GENÉRICO: apagar «Cuello» apaga todos los cuellos, que es como lo lee el
+                            // motor (`_et_off`). Volver a tocarla la prende: el mismo gesto para las dos cosas.
+                            const onPickApagar = (e) => {
+                              const r2 = piezaBajoMouse(e); if (!r2) return;
+                              const g = nombreGenerico(nombrePc(r2.hit));
+                              setEtiquetaConfig(prev => {
+                                const s2 = new Set((prev.piezas_off || []).map(nombreGenerico));
+                                s2.has(g) ? s2.delete(g) : s2.add(g);
+                                return { ...prev, piezas_off: [...s2] };
+                              });
+                            };
                             // ZONAS: tocar una pieza solo la SELECCIONA (no coloca etiqueta) → aparecen sus esquinas.
                             const onPickZona = (e) => {
                               const r = piezaBajoMouse(e); if (!r) return;
@@ -19175,8 +19212,9 @@ export default function App() {
                             return (
                               <svg ref={visorSvgRef} viewBox={vf && vf.vb ? vf.vb : `0 0 ${canvasLayout.width} ${canvasLayout.height}`}
                                 width={(vf && vf.vb ? Number(vf.vb.split(' ')[2]) : canvasLayout.width) * visorView.k} height={(vf && vf.vb ? Number(vf.vb.split(' ')[3]) : canvasLayout.height) * visorView.k}
-                                onClick={zonasModo ? onPickZona : (ec.activo ? onPick : undefined)} onMouseMove={(ec.activo && !zonasModo) ? onHover : undefined} onMouseLeave={() => setEtqHover(null)}
-                                style={{ display: 'block', userSelect: 'none', overflow: 'visible', cursor: zonasModo ? 'copy' : (ec.activo ? 'crosshair' : 'default') }}>
+                                onClick={etqApagarModo ? onPickApagar : (zonasModo ? onPickZona : (ec.activo ? onPick : undefined))}
+                                onMouseMove={(ec.activo && !zonasModo && !etqApagarModo) ? onHover : undefined} onMouseLeave={() => setEtqHover(null)}
+                                style={{ display: 'block', userSelect: 'none', overflow: 'visible', cursor: etqApagarModo ? 'pointer' : (zonasModo ? 'copy' : (ec.activo ? 'crosshair' : 'default')) }}>
                                 {/* sin imagen de fondo: las piezas van sobre el espacio del visor */}
                                 {canvasLayout.dibujo.map((p) => {
                                   if (p.talle && tallesOcultos.has(p.talle)) return null;   // capa oculta por su ojito
@@ -19210,6 +19248,12 @@ export default function App() {
                                       </defs>
                                       {/* relleno de la pieza (resaltada si está seleccionada para editar su alineación) */}
                                       <path d={p.path_svg} style={{ fill: omit ? 'rgba(255,255,255,0.015)' : (name === etqPiezaSel ? 'rgba(0,243,255,0.13)' : 'rgba(0,243,255,0.04)'), stroke: 'none' }} />
+                                      {/* Eligiendo las que no llevan: las apagadas se marcan a rayas para verlas de
+                                          un vistazo (fuera del modo alcanza con que salgan pálidas y sin texto). */}
+                                      {etqApagarModo && omit && (
+                                        <path d={p.path_svg} style={{ fill: 'rgba(255,90,110,0.15)', stroke: 'rgba(255,90,110,0.85)',
+                                          strokeWidth: Math.max(0.05, 1.2 * pxmm), strokeDasharray: `${2.5 * pxmm} ${2 * pxmm}` }} />
+                                      )}
                                       {/* borde de corte por FUERA del contorno (como el motor): trazo 2× recortado al
                                           exterior → solo la mitad externa se ve. Así el TEXTO (recortado al contorno,
                                           adentro) queda DETRÁS del borde y respeta su grosor; la base/los descendentes

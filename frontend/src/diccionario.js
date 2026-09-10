@@ -278,6 +278,11 @@ export const DICCIONARIO = {
     que: 'Cómo se llama el diseño que llevan los moldes que elegiste (ej. JUGADOR). Es el mismo nombre que usa el resto del pedido para agrupar.',
     como: 'Escribí el nombre del diseño y apretá Enter.',
   },
+  'etq-apagar-modo': {
+    nombre: 'Elegir piezas sin etiqueta',
+    que: 'Todas las piezas llevan etiqueta. Con este botón entrás a elegir cuáles NO: tocás las piezas en el visor y quedan marcadas a rayas. Tocándolas de nuevo vuelven a llevar. Se guarda con «Guardar etiqueta».',
+    como: 'Tocá el botón y después las piezas que no llevan etiqueta.',
+  },
   'reserva-aviso': {
     nombre: 'Lo está editando otra persona',
     que: 'Aparece cuando otra persona tiene abierto esto mismo. Podés mirarlo, pero el botón de guardar queda apagado hasta que termine, así no se pisan el trabajo. Se libera solo apenas cierra la pantalla.',
