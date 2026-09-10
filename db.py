@@ -258,6 +258,92 @@ def set_doc(clave, obj, version_esperada=None):
         return _escribir_doc(cur, clave, obj, version_esperada)
 
 
+# ════════════════ TRABAJOS DE TIZADA (el ESTADO; los PDF siguen en trabajos/<id>/) ════════════
+# Vivían en un `dict` en memoria. Eso significaba dos cosas malas: un reinicio dejaba a todos los
+# pedidos en curso sondeando un id que ya no existía, y un SEGUNDO servidor no veía nada de lo que
+# hacía el primero — o sea, no se podía crecer de una máquina. Acá vive el estado; el proceso que
+# genera igual guarda su copia en memoria (lee más rápido y ahí está el aviso de cancelación), pero
+# la verdad que puede ver cualquiera está en la base.
+
+
+def trabajo_crear(legacy_id, usuario_id=None, molde_nombre=None, moldes=None):
+    with cursor() as cur:
+        cur.execute("DELETE FROM trabajo WHERE legacy_id=?", legacy_id)   # reintento con el mismo id
+        cur.execute(
+            "INSERT INTO trabajo (legacy_id, estado, creado_por, molde_nombre, moldes, progreso) "
+            "VALUES (?,?,?,?,?,?)",
+            legacy_id, "en cola", usuario_id, (molde_nombre or "")[:400], (moldes or "")[:400], "")
+
+
+def trabajo_actualizar(legacy_id, **campos):
+    """Escribe sólo lo que se le pasa. `resultado` va como JSON (es lo que la pantalla ya lee)."""
+    _permitidos = ("estado", "progreso", "error", "resultado", "cancelar")
+    sets, args = [], []
+    for k in _permitidos:
+        if k not in campos:
+            continue
+        v = campos[k]
+        if k == "resultado" and v is not None and not isinstance(v, str):
+            v = _json.dumps(v, ensure_ascii=False)
+        if k == "progreso" and v is not None:
+            v = str(v)[:300]
+        sets.append(f"{k}=?")
+        args.append(v)
+    if not sets:
+        return 0
+    sets.append("actualizado=SYSUTCDATETIME()")
+    with cursor() as cur:
+        cur.execute(f"UPDATE trabajo SET {', '.join(sets)} WHERE legacy_id=?", *args, legacy_id)
+        return cur.rowcount
+
+
+def trabajo_leer(legacy_id):
+    """El trabajo como lo espera la pantalla, o None. `resultado` vuelve ya parseado."""
+    r = filas("SELECT legacy_id, estado, progreso, error, resultado, cancelar, creado_por, "
+              "       molde_nombre, moldes, "
+              "       DATEDIFF(second, '1970-01-01', creado_en) AS creado "
+              "  FROM trabajo WHERE legacy_id=?", legacy_id)
+    if not r:
+        return None
+    d = r[0]
+    try:
+        d["resultado"] = _json.loads(d["resultado"]) if d.get("resultado") else None
+    except Exception:
+        d["resultado"] = None
+    return {"estado": d.get("estado") or "en cola", "progreso": d.get("progreso") or "",
+            "resultado": d.get("resultado"), "error": d.get("error"),
+            "cancelar_pedido": bool(d.get("cancelar")), "usuario": d.get("creado_por"),
+            "producto_nombre": d.get("molde_nombre") or "", "producto_id": d.get("moldes") or "",
+            "creado": float(d.get("creado") or 0)}
+
+
+def trabajo_cancelar(legacy_id):
+    """Pide la cancelación. La ATIENDE el proceso que está generando (mira este campo entre fases),
+    que puede no ser este: por eso es una marca en la base y no un aviso en memoria."""
+    with cursor() as cur:
+        cur.execute("UPDATE trabajo SET cancelar=1, actualizado=SYSUTCDATETIME() "
+                    " WHERE legacy_id=? AND estado NOT IN ('listo','error','cancelado')", legacy_id)
+        return cur.rowcount > 0
+
+
+def trabajo_cancelado(legacy_id):
+    v = valor("SELECT cancelar FROM trabajo WHERE legacy_id=?", legacy_id)
+    return bool(v)
+
+
+def trabajos_podar(horas=6, vivos=200):
+    """Saca los TERMINADOS viejos. Nunca toca uno que esté corriendo (perderlo dejaría a la pantalla
+    sondeando un id que desapareció) ni los archivos del disco."""
+    with cursor() as cur:
+        cur.execute("DELETE FROM trabajo WHERE estado IN ('listo','error','cancelado') "
+                    "   AND DATEDIFF(hour, actualizado, SYSUTCDATETIME()) > ?", int(horas))
+        n = cur.rowcount
+        cur.execute("DELETE FROM trabajo WHERE id IN ("
+                    "  SELECT id FROM trabajo WHERE estado IN ('listo','error','cancelado') "
+                    "   ORDER BY actualizado DESC OFFSET ? ROWS)", int(vivos))
+        return n + cur.rowcount
+
+
 # ════════════════ RESERVAS («esto lo está editando fulano») ════════════════
 # El candado de edición del servidor dura lo que dura un guardado. Esto es otra cosa: dura lo que
 # dura una PERSONA con el editor abierto, cruza procesos y máquinas, y sobre todo **se puede

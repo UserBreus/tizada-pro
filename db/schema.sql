@@ -300,6 +300,27 @@ CREATE TABLE dbo.config (
 );
 
 GO
+/* 2026-09-10: EL TRABAJO DE TIZADA VIVE EN LA BASE, no en la memoria de un proceso. Sin esto un
+   reinicio dejaba a todos los pedidos en curso sondeando un id que ya no existia, y un SEGUNDO
+   servidor no veia nada de lo que estaba haciendo el primero — o sea, no se podia crecer de una
+   maquina. La carpeta trabajos/<legacy_id> sigue teniendo los PDF; esto es el ESTADO.
+   (trabajo_estado) */
+IF COL_LENGTH('dbo.trabajo','progreso') IS NULL
+    ALTER TABLE dbo.trabajo ADD
+        progreso    NVARCHAR(300)  NULL,
+        error       NVARCHAR(MAX)  NULL,
+        resultado   NVARCHAR(MAX)  NULL,   -- el JSON que la pantalla ya sabe leer
+        cancelar    BIT NOT NULL CONSTRAINT DF_trabajo_cancelar DEFAULT 0,
+        moldes      NVARCHAR(400)  NULL,
+        molde_nombre NVARCHAR(400) NULL,
+        actualizado DATETIME2 NOT NULL CONSTRAINT DF_trabajo_actualizado DEFAULT SYSUTCDATETIME();
+GO
+/* Se consulta por el id de carpeta y se poda por fecha: los dos con indice. */
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_trabajo_actualizado' AND object_id=OBJECT_ID('dbo.trabajo'))
+    CREATE INDEX IX_trabajo_actualizado ON dbo.trabajo(actualizado);
+GO
+
+GO
 /* 2026-09-09: RESERVAS. «Esto lo esta editando fulano»: quien abre el editor de un molde o de una
    regla la toma, y los demas lo ven en solo lectura con el nombre de quien lo tiene. Se renueva
    con el latido que la pantalla ya hace; si esa pantalla se cierra o se cuelga, el `latido` deja

@@ -32,9 +32,37 @@ os.environ["TIZADA_ENTRADA"] = os.path.join(_TMP, "entrada")
 os.environ["TIZADA_TRABAJOS"] = os.path.join(_TMP, "trabajos")
 os.environ["TIZADA_DB_SERVER"] = "localhost\\NO_EXISTE_ES_UNA_PRUEBA"
 
+# La "base" de los trabajos: un dict que hace de OTRO PROCESO. Es lo que permite probar que el
+# estado no vive sólo en la memoria del que genera (2026-09-10).
+_TRAB = {}
 _falso = types.ModuleType("db")
 _falso.__getattr__ = lambda n: (lambda *a, **k: None)
 _falso.get_doc = lambda c, default=None: default
+
+
+def _t_crear(legacy_id, usuario_id=None, molde_nombre=None, moldes=None):
+    _TRAB[legacy_id] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
+                        "cancelar_pedido": False, "usuario": usuario_id,
+                        "producto_nombre": molde_nombre or "", "producto_id": moldes or "",
+                        "creado": __import__("time").time()}
+
+
+def _t_act(legacy_id, **campos):
+    d = _TRAB.get(legacy_id)
+    if d is None:
+        return 0
+    if "cancelar" in campos:
+        d["cancelar_pedido"] = bool(campos.pop("cancelar"))
+    d.update(campos)
+    return 1
+
+
+_falso.trabajo_crear = _t_crear
+_falso.trabajo_actualizar = _t_act
+_falso.trabajo_leer = lambda tid: (dict(_TRAB[tid]) if tid in _TRAB else None)
+_falso.trabajo_cancelar = lambda tid: bool(_TRAB.get(tid) and not _t_act(tid, cancelar=True) is None)
+_falso.trabajo_cancelado = lambda tid: bool((_TRAB.get(tid) or {}).get("cancelar_pedido"))
+_falso.trabajos_podar = lambda horas=6, vivos=200: 0
 sys.modules["db"] = _falso
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -145,6 +173,45 @@ ok(_app.count("if (!res.ok)") >= 1 and "El trabajo ya no existe." in _app,
 ok("/cancelar`" in _app or "/cancelar'" in _app, "hay un botón que llama a cancelar")
 ok("rutaApi(`/api/trabajo/" in _app,
    "🔴 y los sondeos pasan por `rutaApi` (sin eso fallan en el servidor publicado, que va bajo un prefijo)")
+
+print("\n7) EL TRABAJO NO VIVE SOLO EN LA MEMORIA DE ESTE PROCESO")
+# 🔴 Es lo que hace falta para que el sistema crezca de una máquina (2026-09-10). Con el estado
+# sólo en memoria: un reinicio dejaba a todos los pedidos en curso sondeando un id que ya no
+# existía, y un SEGUNDO servidor no veía nada de lo que estaba haciendo el primero.
+_tid = "zz_multi_proceso"
+S._nuevo_trabajo(_tid, producto_nombre="Camiseta", producto_id="p1")
+ok(_tid in _TRAB, "al crear el trabajo queda anotado fuera de la memoria")
+S._tocar_trabajo(_tid, estado="generando")
+ok(_TRAB[_tid]["estado"] == "generando", "y los cambios de estado se guardan")
+S._tocar_trabajo(_tid, resultado={"hojas": [{"archivo": "a.pdf"}]}, estado="listo")
+ok(_TRAB[_tid]["estado"] == "listo" and _TRAB[_tid]["resultado"],
+   "el resultado también (es lo que la pantalla necesita para mostrar las hojas)")
+
+# EL REINICIO: se borra TODA la memoria del proceso, como cuando el servidor arranca de nuevo.
+S.trabajos.clear()
+_r = C.get(f"/api/trabajo/{_tid}")
+ok(_r.status_code == 200 and (_r.get_json() or {}).get("estado") == "listo",
+   f"🔴 tras un reinicio la pantalla SIGUE viendo su tizada (HTTP {_r.status_code})")
+ok(((_r.get_json() or {}).get("resultado") or {}).get("hojas"),
+   "y con sus hojas, para poder bajarlas")
+
+# CANCELAR DESDE OTRO SERVIDOR: el que aprieta el botón puede no ser el que está generando.
+_tid2 = "zz_cancel_remoto"
+S._nuevo_trabajo(_tid2, producto_nombre="Short", producto_id="p2")
+S._tocar_trabajo(_tid2, estado="generando")
+S.trabajos.clear()                      # este proceso ya no lo tiene: lo genera "el otro"
+_r = C.post(f"/api/trabajo/{_tid2}/cancelar")
+ok(_r.status_code == 200, f"se puede pedir la cancelación de un trabajo de otro proceso (HTTP {_r.status_code})")
+ok(_TRAB[_tid2]["cancelar_pedido"] is True, "la marca queda donde el que genera la va a ver")
+# …y el que genera la atiende en su aviso de progreso
+S.trabajos[_tid2] = {"estado": "generando", "cancelar": threading.Event(), "creado": time.time()}
+S._ULTIMO_CANCEL_MIRADO.pop(_tid2, None)
+_paro = False
+try:
+    S._cancelado(_tid2)
+except S._TrabajoCancelado:
+    _paro = True
+ok(_paro, "🔴 y el proceso que está generando se entera y para")
 
 print()
 if FALLOS:

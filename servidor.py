@@ -167,6 +167,14 @@ def _nuevo_trabajo(tid, **extra):
         pass
     trabajos[tid] = {"estado": "en cola", "progreso": "", "resultado": None, "error": None,
                      "creado": time.time(), "cancelar": threading.Event(), "usuario": _u, **extra}
+    # …Y EN LA BASE. La memoria es de ESTE proceso: sin esto, un reinicio dejaba a todos los
+    # pedidos en curso sondeando un id que ya no existía, y un segundo servidor no vería nada.
+    try:
+        db.trabajo_crear(tid, usuario_id=_u,
+                         molde_nombre=str(extra.get("producto_nombre") or ""),
+                         moldes=str(extra.get("producto_id") or ""))
+    except Exception as _e:
+        print(f"[trabajos] no se pudo anotar {tid} en la base: {_e}")
     if _u is not None:
         try:
             _d = os.path.join(TRABAJOS, tid)
@@ -180,6 +188,45 @@ def _nuevo_trabajo(tid, **extra):
     return trabajos[tid]
 
 
+_ULTIMO_PERSISTIDO = {}          # tid -> cuándo se escribió por última vez el progreso
+_CADA_SEG_PROGRESO = 1.0
+
+
+def _tocar_trabajo(tid, **campos):
+    """Deja el estado del trabajo en memoria Y en la base.
+
+    🔴 El PROGRESO se escribe como mucho una vez por segundo: llega uno por pieza dibujada y
+    escribir cada uno sería cientos de idas a la base por tizada, para un texto que nadie mira más
+    de una vez por segundo. Los cambios de ESTADO (listo, error, cancelado) van SIEMPRE, sin
+    esperar: son los que la otra pantalla necesita ver ya."""
+    t = trabajos.get(tid)
+    if t is not None:
+        t.update({k: v for k, v in campos.items() if k != "cancelar"})
+    _final = str(campos.get("estado") or "") in ("listo", "error", "cancelado")
+    _solo_progreso = set(campos) <= {"progreso"}
+    if _solo_progreso and not _final:
+        _ahora = time.time()
+        if _ahora - _ULTIMO_PERSISTIDO.get(tid, 0) < _CADA_SEG_PROGRESO:
+            return
+        _ULTIMO_PERSISTIDO[tid] = _ahora
+    try:
+        db.trabajo_actualizar(tid, **campos)
+    except Exception as e:
+        print(f"[trabajos] no se pudo guardar el estado de {tid}: {e}")
+
+
+def _trabajo_estado(tid):
+    """El trabajo para la pantalla: el de memoria si lo generó ESTE proceso, si no el de la base
+    (otro servidor, o este mismo después de un reinicio). None si ya no está en ningún lado."""
+    t = trabajos.get(tid)
+    if t is not None:
+        return {k: v for k, v in t.items() if k != "cancelar"}
+    try:
+        return db.trabajo_leer(tid)
+    except Exception:
+        return None
+
+
 def _duenio_trabajo(tid):
     """De quién es este trabajo. Primero la memoria, después el disco (los trabajos viejos ya no
     están en memoria pero sus archivos sí). None = de nadie / no se sabe."""
@@ -187,6 +234,13 @@ def _duenio_trabajo(tid):
     if t is not None and t.get("usuario") is not None:
         return t.get("usuario")
     try:
+        d = db.trabajo_leer(tid)
+        if d and d.get("usuario") is not None:
+            return d.get("usuario")
+    except Exception:
+        pass
+    try:
+        # Red: los archivos de un trabajo viejo sobreviven a la poda de la base.
         with open(os.path.join(TRABAJOS, tid, "duenio.json"), encoding="utf-8") as f:
             return json.load(f).get("u")
     except Exception:
@@ -235,6 +289,17 @@ def _podar_trabajos():
                         if v.get("estado") in ("listo", "error", "cancelado"))
     for _, t in terminados[:max(0, len(terminados) - _TRABAJOS_VIVOS)]:
         trabajos.pop(t, None)
+        _ULTIMO_PERSISTIDO.pop(t, None)
+        _ULTIMO_CANCEL_MIRADO.pop(t, None)
+    # …y lo mismo en la base, que es la que ahora tiene la lista de verdad. Best-effort: si falla,
+    # lo peor que pasa es que queden filas viejas; nunca se toca uno que esté corriendo.
+    try:
+        db.trabajos_podar(_TRABAJOS_HORAS, _TRABAJOS_VIVOS)
+    except Exception as e:
+        print(f"[trabajos] no se pudo podar en la base: {e}")
+
+
+_ULTIMO_CANCEL_MIRADO = {}       # tid -> cuándo se le preguntó a la base por la cancelación
 
 
 def _cancelado(tid):
@@ -244,16 +309,26 @@ def _cancelado(tid):
     t = trabajos.get(tid)
     if t is not None and t.get("cancelar") is not None and t["cancelar"].is_set():
         raise _TrabajoCancelado()
+    # 🔴 …y también se mira la BASE: quien aprieta «cancelar» puede estar hablando con OTRO
+    # servidor, y ése no tiene este aviso en su memoria. Se pregunta como mucho una vez por
+    # segundo: llega un aviso de progreso por pieza dibujada.
+    _ahora = time.time()
+    if _ahora - _ULTIMO_CANCEL_MIRADO.get(tid, 0) >= 1.0:
+        _ULTIMO_CANCEL_MIRADO[tid] = _ahora
+        try:
+            if db.trabajo_cancelado(tid):
+                raise _TrabajoCancelado()
+        except _TrabajoCancelado:
+            raise
+        except Exception:
+            pass                 # sin base, manda el aviso en memoria (el de siempre)
 
 
 def _marcar_cancelado(tid, salida):
     """Deja el trabajo como cancelado y limpia lo que alcanzó a escribir (es salida del sistema,
     no datos del usuario: la carpeta `trabajos/<id>` la hace la propia generación)."""
     import shutil
-    t = trabajos.get(tid)
-    if t is not None:
-        t["estado"] = "cancelado"
-        t["progreso"] = "cancelado"
+    _tocar_trabajo(tid, estado="cancelado", progreso="cancelado")
     shutil.rmtree(salida, ignore_errors=True)
 
 # ── Perfiles ICC (color management real) ─────────────────────────────────────
@@ -5342,7 +5417,37 @@ def procesos_render():
         n = int(os.environ.get("TIZADA_PROCESOS") or 0)
     except ValueError:
         n = 0
-    return max(1, n) if n else min((os.cpu_count() or 4), 6)
+    if n:
+        return max(1, n)
+    _cpu = os.cpu_count() or 4
+    if not PUBLICADO:
+        # TALLER: la máquina es la del usuario y está haciendo otras cosas. Se queda en el tope de
+        # siempre — acá el sistema no puede quedarse con todo (ya pasó: [[procesos-huerfanos]]).
+        return min(_cpu, 6)
+    # 🔴 PUBLICADO: acá la máquina ES para esto, y el tope fijo de 6 dejaba capacidad sin usar —
+    # es lo que hacía que muchas personas generando a la vez fueran una cola de 6 en 6, aunque el
+    # servidor tuviera 32 núcleos. Se mide: un proceso pesa ~200 MB, así que manda la RAM LIBRE
+    # (con 250 MB de margen por proceso) y nunca más de un proceso por núcleo. Si no se puede
+    # medir la memoria, queda el tope de siempre.
+    try:
+        import ctypes
+
+        class _MEM(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        _m = _MEM(); _m.dwLength = ctypes.sizeof(_MEM)
+        # ⚠️ `restype` explícito: sin él, ctypes asume int y el fallo pasa en silencio.
+        ctypes.windll.kernel32.GlobalMemoryStatusEx.restype = ctypes.c_int
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(_m)):
+            raise OSError("GlobalMemoryStatusEx")
+        # Se reserva 1 GB para el propio servidor y el sistema.
+        _libre_mb = max(0, (_m.ullAvailPhys / (1024 * 1024)) - 1024)
+        return max(1, min(_cpu, int(_libre_mb // 250)))
+    except Exception:
+        return min(_cpu, 6)
 
 
 def _get_render_pool():
@@ -7760,10 +7865,10 @@ def generar():
 
     def correr():
         try:
-            trabajos[tid]["estado"] = "generando"
+            _tocar_trabajo(tid, estado="generando")
             def prog(fase, a, b):
                 _cancelado(tid)          # el único punto donde se puede parar sin dejar nada a medias
-                trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
+                _tocar_trabajo(tid, progreso=f"{fase}: {a}" + (f"/{b}" if b else ""))
             res = MP.generar_pedido(_ruta_entrada("plantilla.ai", pid),
                                     (None if _cb1 else _ruta_entrada("arte.ai", pid)),
                                     reg, pers, translated_prendas, _fuentes_para(pid, _reempl_de_request()), salida, progreso=prog,
@@ -7813,13 +7918,11 @@ def generar():
             json.dump({"prendas": prendas, "resultado": {k: v for k, v in res.items() if k != "hojas"} |
                        {"hojas": res["hojas"]}}, open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"),
                        ensure_ascii=False)
-            trabajos[tid]["resultado"] = res
-            trabajos[tid]["estado"] = "listo"
+            _tocar_trabajo(tid, resultado=res, estado="listo")
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
         except Exception as e:
-            trabajos[tid]["estado"] = "error"
-            trabajos[tid]["error"] = f"{e}"
+            _tocar_trabajo(tid, estado="error", error=f"{e}")
             traceback.print_exc()
 
     _en_hilo(correr)
@@ -8528,10 +8631,10 @@ def generar_multi():
 
     def correr():
         try:
-            trabajos[tid]["estado"] = "generando"
+            _tocar_trabajo(tid, estado="generando")
             def prog(fase, a, b):
                 _cancelado(tid)          # el único punto donde se puede parar sin dejar nada a medias
-                trabajos[tid]["progreso"] = f"{fase}: {a}" + (f"/{b}" if b else "")
+                _tocar_trabajo(tid, progreso=f"{fase}: {a}" + (f"/{b}" if b else ""))
             # Cronómetro del PEDIDO entero (el motor imprime el suyo): lo que pasa después del
             # motor —aplanado, perfil, verificación, ficha— era la mitad del tiempo y no se veía.
             _crono, _tc = {}, time.time()
@@ -8707,13 +8810,11 @@ def generar_multi():
             json.dump({"prendas": prendas, "moldes": nombres,
                        "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res["hojas"]}},
                       open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)
-            trabajos[tid]["resultado"] = res
-            trabajos[tid]["estado"] = "listo"
+            _tocar_trabajo(tid, resultado=res, estado="listo")
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
         except Exception as e:
-            trabajos[tid]["estado"] = "error"
-            trabajos[tid]["error"] = f"{e}"
+            _tocar_trabajo(tid, estado="error", error=f"{e}")
             traceback.print_exc()
 
     _en_hilo(correr)
@@ -8785,25 +8886,25 @@ def reservas_lista():
 
 @app.get("/api/trabajo/<tid>")
 def estado_trabajo(tid):
-    t = trabajos.get(tid)
+    # De la memoria de ESTE proceso, o de la base: así el sondeo sigue andando después de un
+    # reinicio y también cuando la tizada la está armando OTRO servidor.
+    t = _trabajo_estado(tid)
     if not t:
-        # 🔴 Con `estado` adentro. La pantalla guarda el pedido en curso y lo retoma al recargar:
-        # si el servidor se reinició en el medio, ese id ya no existe y el sondeo se quedaba dando
-        # vueltas para siempre (o dejaba la tarjeta muda, sin decir qué pasó).
+        # 🔴 Con `estado` adentro: si el trabajo ya no está en ningún lado, la pantalla tiene que
+        # dejar de sondear y decir por qué, no quedarse muda dando vueltas para siempre.
         return jsonify({"error": "el trabajo ya no existe", "estado": "desconocido",
-                        "motivo": "se reinició el servidor o el trabajo es de hace rato"}), 404
+                        "motivo": "el trabajo es de hace rato y ya se limpió"}), 404
     _no = _trabajo_ajeno(tid)
     if _no:
         return _no
-    # el aviso de cancelación es un objeto de Python: no viaja
-    return jsonify({k: v for k, v in t.items() if k != "cancelar"})
+    return jsonify(t)
 
 
 @app.post("/api/trabajo/<tid>/cancelar")
 def cancelar_trabajo(tid):
     """Para una tizada que se está armando. No corta a mitad de escribir: la generación se entera
     en el próximo aviso de progreso, entre dos fases, y ahí larga."""
-    t = trabajos.get(tid)
+    t = _trabajo_estado(tid)
     if not t:
         return jsonify({"error": "el trabajo ya no existe", "estado": "desconocido"}), 404
     _no = _trabajo_ajeno(tid)
@@ -8811,9 +8912,16 @@ def cancelar_trabajo(tid):
         return _no
     if t.get("estado") in ("listo", "error", "cancelado"):
         return jsonify({"error": f"el trabajo ya está {t.get('estado')}", "estado": t.get("estado")}), 409
-    if t.get("cancelar") is not None:
-        t["cancelar"].set()
-    t["progreso"] = "cancelando…"
+    # La marca va a la BASE porque quien la atiende es el proceso que está generando, y puede no
+    # ser éste. Si además lo está generando este mismo, el aviso en memoria lo corta al instante.
+    try:
+        db.trabajo_cancelar(tid)
+    except Exception as e:
+        print(f"[trabajos] no se pudo pedir la cancelación de {tid}: {e}")
+    _local = trabajos.get(tid)
+    if _local is not None and _local.get("cancelar") is not None:
+        _local["cancelar"].set()
+        _local["progreso"] = "cancelando…"
     return jsonify({"ok": True, "estado": t.get("estado")})
 
 
@@ -11473,7 +11581,12 @@ if __name__ == "__main__":
         # conexión, sin límite de cola y sin protección ante clientes lentos. Si el de producción
         # no está instalado NO se cae a los de desarrollo en silencio: se avisa y se corta (mejor
         # no arrancar que arrancar mal).
-        _hilos = int(os.environ.get("TIZADA_HILOS", "8"))
+        # HILOS QUE ATIENDEN PEDIDOS HTTP. 8 fijos era poco para mucha gente: una sola llamada
+        # lenta (un preview grande) se queda con un hilo, y con 8 alcanzan ocho de esas para que
+        # el resto vea el sistema colgado. Se sube con la máquina: dos por núcleo, entre 8 y 32.
+        # (Son hilos que casi siempre están ESPERANDO a la base o al disco, no calculando: por eso
+        # pueden ser más que los núcleos sin pelearse por el procesador.)
+        _hilos = int(os.environ.get("TIZADA_HILOS") or 0) or min(32, max(8, (os.cpu_count() or 4) * 2))
         _cert, _key = os.environ.get("TIZADA_TLS_CERT"), os.environ.get("TIZADA_TLS_KEY")
         if _cert and _key:
             # ── HTTPS PROPIO (sin proxy delante) ──────────────────────────────────────────────

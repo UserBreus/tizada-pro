@@ -1482,6 +1482,52 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (418) — 🔴 LA TIZADA DEJA DE VIVIR EN LA MEMORIA DE UN PROCESO (límite 4 de la 415).**
+  Pedido del usuario: *«te pedí que sean 100 personas que lo puedan usar»*. Es el límite que
+  **impedía crecer de una máquina**: con el estado sólo en un `dict`, un reinicio dejaba a todos
+  los pedidos en curso sondeando un id que ya no existía, y un SEGUNDO servidor no veía nada de lo
+  que hacía el primero.
+
+  **AHORA** `dbo.trabajo` guarda el estado (`estado`, `progreso`, `error`, `resultado` JSON,
+  `cancelar`, `molde_nombre`, `moldes`, `actualizado` + índice). La memoria del proceso sigue como
+  **caché de lectura** —es más rápida y ahí vive el aviso de cancelación—, pero la verdad que puede
+  ver cualquiera está en la base:
+  · `_tocar_trabajo(tid, **campos)` escribe en los dos lados. 🔴 El **progreso** se persiste como
+    mucho **una vez por segundo** (llega uno por pieza dibujada: escribirlos todos serían cientos
+    de idas a la base por tizada, para un texto que nadie mira más rápido que eso). Los cambios de
+    **estado** van siempre, sin esperar.
+  · `_trabajo_estado(tid)` lee de memoria si el trabajo es de este proceso, y si no de la base →
+    el sondeo sigue andando **después de un reinicio** y también cuando genera **otro servidor**.
+  · **Cancelar cruza procesos**: el botón marca `cancelar` en la base; el proceso que genera la
+    mira en su aviso de progreso (preguntando como mucho 1 vez/s), que es el único punto donde se
+    puede parar sin dejar un PDF a medias. Si además genera este mismo, el aviso en memoria lo
+    corta al instante.
+  · El dueño del trabajo también sale de la base (el `duenio.json` queda de red para los viejos).
+
+  **Y CAPACIDAD DE VERDAD, medida.** El pool de dibujo estaba clavado en **6 procesos** aunque la
+  máquina tuviera 32 núcleos: eso convertía «100 personas» en «6 a la vez». Ahora, **sólo en modo
+  PUBLICADO** (donde la máquina es para esto), `procesos_render()` se mide sola: manda la **RAM
+  libre** (cada proceso pesa ~200 MB, se reservan 1 GB para el sistema y 250 MB por proceso) y
+  nunca más de uno por núcleo. En **TALLER queda en 6 como siempre**: ahí la máquina es la del
+  usuario y el sistema no puede quedarse con todo ([[procesos-huerfanos]]). Medido en esta máquina
+  (12 núcleos): taller **6**, publicado **12**. Y los hilos que atienden HTTP pasan de 8 fijos a
+  **dos por núcleo, entre 8 y 32**: con 8, ocho llamadas lentas dejaban el sistema colgado para
+  todos.
+
+  **LO QUE SE MIDIÓ ANTES DE TOCAR** (para no adivinar): 100 pantallas abiertas necesitan **3,3
+  latidos por segundo** y el servidor despacha **174/s**, con 0 fallidos — mirar y configurar
+  nunca fue el problema. Y el catálogo escala mejor de lo que decía la 415: con **200 moldes** son
+  **250 KB** y guardarlo lleva **112 ms** (no «megabytes»; queda corregido).
+
+  **VERIFICADO**: §7 nueva en `verificar_trabajos_ciclo.py` — borra TODA la memoria del proceso
+  (que es lo que pasa en un reinicio) y comprueba que la pantalla sigue viendo su tizada **con sus
+  hojas**, que se puede pedir la cancelación de un trabajo que genera otro proceso, y que el que
+  genera se entera y para. Las funciones de `db` se probaron contra la base real.
+
+  ⚠️ **Lo que todavía falta para varias MÁQUINAS**: los PDF viven en `trabajos/<id>/` en disco
+  local; con dos servidores hace falta que esa carpeta sea compartida. Y siguen sin persistirse
+  `pedido`/`pedido_fila` (no hay historial de pedidos en la base).
+
 - **2026-09-09 (417) — 👥 «ESTO LO ESTÁ EDITANDO FULANO» + LAS TIZADAS SON DE QUIEN LAS PIDIÓ.**
   Pregunta del usuario: *«¿podemos hacer algo estilo tiempo real como Google Sheets, o reglas
   chicas: si alguien está editando un molde o una regla de nesting, otro no puede? ¿cuál es mejor y
