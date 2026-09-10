@@ -392,9 +392,21 @@ def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1, crud
         W = float(b["W"]) + 2 * float(b["B"])
         H = float(b["Hp"])
         k = id(b)
-        sid = ids.get(k)
+        # 🔴 EL PREFIJO ES DE LA BASE, NO DE SU POSICIÓN EN LA PÁGINA.
+        # El contenido de cada símbolo se cachea en `simbolos` ENTRE PÁGINAS y lleva el prefijo
+        # escrito adentro (`B7_clip_1`, …). Si el número se sacara de `len(ids)`, que arranca de
+        # cero en cada página, en la hoja 2 una base distinta recibiría un prefijo que otra ya
+        # usó: dos `clipPath` con el MISMO id. En un navegador gana el primero, así que la pieza
+        # se recorta con la silueta de OTRA — una tira sale con la loma de una manga adentro y
+        # media blanca. Reportado por el usuario (2026-09-10) como «piezas cortadas y el diseño
+        # del arte en piezas que no van». No falla nada: sólo se ve mal, y es lo que él mira para
+        # aprobar el trabajo. Contrato: `verificar_previa_recortes.py`.
+        _sids = simbolos.setdefault("__sid__", {})   # id(base) → prefijo, estable en toda la hoja
+        sid = _sids.get(k)
         if sid is None:
-            sid = f"B{len(ids) + 1}"
+            sid = f"B{len(_sids) + 1}"
+            _sids[k] = sid
+        if k not in ids:                              # primera vez EN ESTA PÁGINA: va su <symbol>
             ids[k] = sid
             sym = simbolos.get(k)
             if sym is None:

@@ -1482,6 +1482,41 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (424) — 🔴 LA VISTA PREVIA RECORTABA UNA PIEZA CON LA SILUETA DE OTRA (ids de
+  recorte repetidos).** Reporte del usuario, con dos capturas y ya harto: *«hay piezas que quedan
+  cortadas y el diseño del arte en piezas que no van»*, *«sigue pasando el mismo error de mierda»*.
+
+  **QUÉ PASABA.** La previa mete el dibujo de cada base en un `<symbol>` y lo repite con `<use>`.
+  PyMuPDF numera sus recortes desde cero en cada documento (`id="cp0"`), así que a cada símbolo se
+  le pone un prefijo — eso ya estaba (2026-09-04). El problema era **de dónde salía el número**:
+  `sid = f"B{len(ids) + 1}"`, e **`ids` arranca de cero en CADA PÁGINA de la hoja**, mientras que el
+  contenido de los símbolos se cachea ENTRE PÁGINAS (`simbolos`) **con el prefijo ya escrito
+  adentro**. Entonces en la hoja 2 una base nueva recibía un prefijo que otra ya había usado → dos
+  `clipPath` con el mismo id → **en un navegador gana el primero** y la pieza se recorta con la
+  silueta de otra. Medido en las previas del usuario: **hasta 15 ids repetidos** en una hoja; se
+  veía como tiras huecas o con la loma de una manga adentro, y prendas «cortadas».
+  🔴 **No falla nada.** El PDF de la tizada sale BIEN —ahí el recorte es de verdad—; lo que miente
+  es **lo único que el usuario mira para aprobar el trabajo**.
+
+  **FIX** (`hoja_pike.preview_svg`): el prefijo es **de la base**, no de su lugar en la página. Se
+  guarda `simbolos["__sid__"][id(base)] → prefijo` (el mismo dict que ya viaja entre páginas), y el
+  `<symbol>` se re-emite en cada página con ese nombre estable.
+  **CONTRATO** `verificar_previa_recortes.py`: la misma base en dos páginas, sin ids repetidos, cada
+  recorte el de su pieza, y todo `use` apuntando a un símbolo presente en esa página.
+
+  ⚠️ **CÓMO NO VERIFICAR ESTO, que me costó una hora y un diagnóstico equivocado entero:
+  PyMuPDF NO respeta los `clipPath` al dibujar un SVG** (probado: un recorte a la mitad pinta el
+  100 %). Rasterizar una previa con PyMuPDF muestra **rectángulos siempre**, tenga o no el bug —
+  y de ahí salió una primera teoría (que PyMuPDF fusionaba el marco de la página con la silueta en
+  un solo `path`, uniéndolos en vez de cruzarlos) que era **falsa**: abierto en un navegador, el
+  SVG de la pieza sola siempre estuvo bien. Se llegó al bug real mirando la ESTRUCTURA del archivo
+  (ids repetidos) y confirmándolo **en un navegador**, que es el que dibuja esto de verdad. Es el
+  mismo error de método que ya está anotado para las `<image>` (§9): **antes de creerle a un
+  render, verificar que el que dibuja respeta lo que estás midiendo.**
+
+  ⚠️ Las previas ya generadas siguen rotas (el archivo está escrito): se arreglan volviendo a
+  generar el pedido. El contrato las lista como informativo, sin fallar por ellas.
+
 - **2026-09-10 (423) — 🔴 «ESCUDO EN TPU» SE APLICÓ SOLO: LA MARCA ERA DEL MOLDE Y AHORA ES DEL PEDIDO.**
   Reporte del usuario con la ficha en la mano: *«me puso solo automático escudo en TPU; eso no puede
   pasar ni quedar bugiado una elección de un pedido anterior; por cada pedido y por cada molde
