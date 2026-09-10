@@ -1482,6 +1482,45 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (419) — 🔴 SUBIR UN MOLDE SE QUEDABA CON EL SERVIDOR CINCO MINUTOS.**
+  El usuario puso la meta en criollo: *«en la parte del pedido tiene que haber infinitas personas,
+  eso lo puede usar cualquiera al mismo tiempo; la configuración sí es limitada para que dos no
+  editen la misma, pero pueden ser varios editando configuraciones distintas»*. Lo segundo ya estaba
+  (417). Lo primero tenía un techo que no estaba en ninguna de mis listas anteriores, y era **el
+  más grande de todos**.
+
+  **MEDIDO, no estimado**, con el molde real del usuario: `alta_plantilla` sobre un `.ai` de
+  **118 MB tarda 297 segundos**. Y corría **dentro del hilo que atiende la llamada web**. O sea:
+  cada persona que sube un molde se quedaba con un hilo del servidor **cinco minutos**, y con los
+  hilos ocupados el sitio **deja de contestarle a todos los demás**, aunque sólo estén mirando.
+  En el pedido, subir el molde es **lo primero que hace cualquiera**. Con 24 hilos alcanzaban 24
+  personas subiendo a la vez para dejar la web muerta para las otras 76.
+
+  **AHORA** la ruta recibe el archivo, lo deja en el temporal y **contesta enseguida** con un
+  trabajo (`{job, procesando}`); la lectura corre por `_procesar_molde_subido(...)` fuera del hilo
+  web y la pantalla pregunta cómo va con la maquinaria de trabajos de la 418. En la pantalla no
+  cambia nada: el cartel «Leyendo el archivo…» con su reloj ya existía; ahora además dice si está
+  **esperando lugar** y cuántos tiene adelante. `esperarMoldeLeido()` en el front cubre los TRES
+  lugares que suben un molde, y si el servidor contesta el resumen directo (versión vieja) lo usa
+  tal cual.
+
+  🔴 **LO DELICADO FUE EL `request`.** Ese código llamaba a `_ruta_datos`/`_ruta_entrada`/`_cargar`
+  **sin pid**, y esos helpers caen al **molde ACTIVO GLOBAL** cuando no hay request. Fuera del hilo
+  web eso significa **escribir el molde de una persona encima del de otra**, sin que nadie se
+  entere. Se ataron los **10** puntos al `_PID` capturado al entrar (más `_ARCH` y el flag de camino
+  B), y el contrato **canda que la función pesada no mencione `request` ni el molde activo**.
+
+  **CUPO.** Varias lecturas a la vez se pelean por la CPU y terminan todas más tarde: se atienden de
+  a `_ALTAS_A_LA_VEZ` (`TIZADA_ALTAS`, por defecto un cuarto de los núcleos, mínimo 2) y al que
+  espera se le dice cuántos tiene adelante. El sitio nunca se traba: el cupo es de la LECTURA, no
+  de las llamadas web.
+
+  **VERIFICADO** con `verificar_subida_no_traba.py` (nuevo), que sube una **copia** de un molde real
+  por la ruta de verdad: el hilo web queda libre en **0,12 s** (antes 297) y el servidor contesta
+  **402 llamadas en 2 s** mientras la lectura corre. El resumen que recibe la pantalla es el mismo
+  de siempre (`archivo`, `mesas`, `piezas`, `talles`, `completitud`, `origen`) y el molde queda
+  guardado en su lugar.
+
 - **2026-09-10 (418) — 🔴 LA TIZADA DEJA DE VIVIR EN LA MEMORIA DE UN PROCESO (límite 4 de la 415).**
   Pedido del usuario: *«te pedí que sean 100 personas que lo puedan usar»*. Es el límite que
   **impedía crecer de una máquina**: con el estado sólo en un `dict`, un reinicio dejaba a todos

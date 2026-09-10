@@ -2522,61 +2522,24 @@ def _descartar_tmp(ruta):
         pass
 
 
-@app.post("/api/plantilla")
-def subir_plantilla():
-    f = request.files.get("archivo")
-    if not f:
-        return jsonify({"error": "falta el archivo"}), 400
-    destino = _ruta_entrada("plantilla.ai", original=True)
-    _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
-    # ── SUBIDA ATÓMICA ───────────────────────────────────────────────────────────────────────
-    # El archivo entra a un TEMPORAL y sólo reemplaza al molde bueno si se pudo procesar.
-    # Antes se guardaba encima y recién después se procesaba: si el alta fallaba (422), el molde
-    # quedaba con el ARCHIVO NUEVO y el REGISTRO VIEJO — o sea, las piezas registradas apuntando
-    # a la geometría de otro archivo. Un molde así se ve bien y genera cualquier cosa.
-    # ⚠️ El temporal CONSERVA la extensión `.ai`: PyMuPDF deduce el tipo de documento por la
-    # extensión, y con un `.tmp` no lo abriría (y el alta fallaría por una razón inventada).
-    tmp = os.path.join(os.path.dirname(destino), "plantilla.subiendo.ai")
-    nombre = (f.filename or "").lower()
-    # LOS NOMBRES DEL MOLDE ANTERIOR **NO** SE TRANSFIEREN: re-subir un molde es un RESET
-    # TOTAL (registro, variables, emparejado; los ids arrancan de nuevo) — decisión del
-    # 2026-08-18. Acá se sacaba una «foto» del talle guía (`snapshot_nombres_guia`) para
-    # remapear los nombres al archivo nuevo; el remapeo se fue con esa decisión y la foto
-    # quedó huérfana: se leía el molde VIEJO entero en cada re-subida para tirar el
-    # resultado. Lo destapó comparar contra la copia del servidor, que todavía tiene el
-    # camino completo. `nombres_conservados` sigue en la respuesta —siempre null— porque la
-    # pantalla ya lo contempla y es el enganche si algún día se decide volver a transferirlos.
-    dxf_resumen = None
-    _corresp_nueva = None          # correspondencia pieza↔talle del DXF (se escribe con el commit)
-    _con_diseno, _motivo_b = False, ""   # ¿camino B? se decide más abajo, sobre el temporal
-    if nombre.endswith(".dxf"):
-        # Molde en DXF (AAMA/ASTM de Optitex, Gerber, Lectra…): se CONVIERTE a un PDF
-        # con una capa por talle + los contornos de cada pieza, igual que un .ai.
-        # Las curvas del archivo (bulge/spline/elipse) se conservan EXACTAS (Bézier).
-        import importar_dxf, traceback as _tb
-        # Guardar el DXF original SIEMPRE (antes de convertir): así, aunque la conversión
-        # falle, queda el archivo para diagnosticar/reimportar y no se pierde.
-        fuente = _ruta_entrada("plantilla_fuente.dxf")
-        f.save(fuente)
-        try:
-            pdf_bytes, dxf_resumen = importar_dxf.dxf_a_pdf(fuente)
-            with open(tmp, "wb") as g:
-                g.write(pdf_bytes)
-        except Exception as e:
-            _tb.print_exc()
-            _descartar_tmp(tmp)
-            return jsonify({"error": f"no se pudo importar el DXF: {e}"}), 422
-        # Correspondencia EXACTA pieza↔talle del DXF (Piece Name + Size): la usan el
-        # nido y el registro para NO adivinar el emparejado entre talles.
-        # Se GUARDA EN MEMORIA y se escribe recién con el `os.replace` de más abajo: forma parte
-        # de la misma transacción que el archivo del molde (ver «EL REEMPLAZO, AL FINAL Y ATÓMICO»).
-        try:
-            _corresp_nueva = dxf_resumen.pop("indices", None)
-        except Exception:
-            _corresp_nueva = None
-    else:
-        # .ai / .pdf (Illustrator, Corel, InDesign…): PyMuPDF los lee directo.
-        f.save(tmp)
+_ALTAS_A_LA_VEZ = int(os.environ.get("TIZADA_ALTAS") or 0) or max(2, (os.cpu_count() or 4) // 4)
+_SEM_ALTA = threading.BoundedSemaphore(_ALTAS_A_LA_VEZ)
+_EN_COLA_ALTA = [0]          # cuántos están esperando lugar (para poder decirlo en pantalla)
+
+
+def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
+                           _corresp_nueva, _con_diseno, _motivo_b, _t_subida):
+    """LO CARO de subir un molde: leerlo, detectar las piezas y dejarlo en su lugar.
+
+    🔴 Corre FUERA del hilo que atiende la llamada web. Medido el 2026-09-10 con el molde real del
+    usuario: **118 MB = 297 segundos**. Con esto adentro del hilo, cada persona que sube un molde
+    se quedaba con un hilo del servidor CINCO MINUTOS — y con los hilos ocupados el sitio deja de
+    contestarle a TODOS los demás, aunque sólo estén mirando. En el pedido, subir el molde es lo
+    primero que hace cualquiera: era el techo real de cuánta gente entra a la vez.
+
+    Devuelve `(resumen, None)` o `(None, (mensaje, código))`. No toca `request`: todo por parámetro.
+    """
+    nombre = (_ARCH or "").lower()      # el nombre del archivo, que acá sólo sirve para ver si es DXF
     if dxf_resumen:
         # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
         # pone → solo genera ruido y tarda). Los talles ya vienen del DXF; las piezas se
@@ -2592,7 +2555,7 @@ def subir_plantilla():
         try:
             import pymupdf as fitz
             import piezas_con_diseno as PD
-            if str(request.form.get("con_diseno") or "") == "1":
+            if _PIDE_B:
                 # El usuario ya lo dijo: vino por «Cargar molde con diseño incluido». Adivinarlo
                 # costaba 12,5 s (leer los dibujos de dos mesas) antes de empezar el alta, y el alta
                 # misma avisa si el archivo no trae piezas con máscara. Ver changelog 386.
@@ -2630,7 +2593,7 @@ def subir_plantilla():
                 alta = MP.alta_plantilla(tmp)      # se valida ANTES de pisar el molde bueno
         except Exception as e:
             _descartar_tmp(tmp)
-            return jsonify({"error": f"no se pudo procesar la plantilla: {e}"}), 422
+            return None, (f"no se pudo procesar la plantilla: {e}", 422)
     # Si el DXF trajo NOMBRES de pieza, se aplican SOLOS (arma el registro con esos
     # nombres, emparejando por posición). SOLO para moldes chicos: con muchas piezas el
     # emparejado es carísimo (O(n²)×talles, +30s) → se saltea y se nombran en el visor/modelos.
@@ -2641,7 +2604,7 @@ def subir_plantilla():
             nombres = dxf_resumen["nombres"]
             asign = [{"idx": i, "nombre": nombres[i]}
                      for i in range(min(len(det["piezas"]), len(nombres))) if str(nombres[i]).strip()]
-            manual = MP.alta_plantilla_manual(tmp, asign, det["mesa"], det["talle_ref"], indices=_corresp_nueva or _cargar("correspondencia_piezas.json") or None, emparejado=_emparejado_cfg()) if asign else None
+            manual = MP.alta_plantilla_manual(tmp, asign, det["mesa"], det["talle_ref"], indices=_corresp_nueva or _cargar("correspondencia_piezas.json", _PID) or None, emparejado=_emparejado_cfg()) if asign else None
             if manual and manual.get("registro"):
                 alta = manual
                 dxf_resumen["nombres_aplicados"] = sorted(manual["registro"].keys())
@@ -2667,7 +2630,7 @@ def subir_plantilla():
         os.replace(tmp, destino)
     except Exception as e:
         _descartar_tmp(tmp)
-        return jsonify({"error": f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}"}), 422
+        return None, (f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}", 422)
     # ── LA MARCA DEL CAMINO, CON EL ARCHIVO YA EN SU LUGAR ──────────────────────────────────────
     # Va DESPUÉS del `os.replace` a propósito: si se marcara el temporal y la subida fallara,
     # quedaría marcado el molde VIEJO, que es de otro camino. Y se BORRA cuando el archivo nuevo
@@ -2683,7 +2646,7 @@ def subir_plantilla():
                 # es de OTRO archivo. Dejarlo haría que «nombrar piezas» mostrara las piezas del
                 # molde anterior — y como no se abre el PDF, nadie se enteraría.
                 try:
-                    os.remove(_ruta_datos(_VISOR_JSON, _pid_de_request() or _get_active_producto_id()))
+                    os.remove(_ruta_datos(_VISOR_JSON, _PID))
                 except OSError:
                     pass
                 # Lo mismo con el molde DESPLEGADO (páginas por talle + contornos): es del archivo
@@ -2700,12 +2663,12 @@ def subir_plantilla():
     # para NO adivinar el emparejado entre talles. Va acá, con el molde ya reemplazado.
     if _corresp_nueva:
         try:
-            json.dump(_corresp_nueva, open(_ruta_datos("correspondencia_piezas.json"), "w", encoding="utf-8"), ensure_ascii=False)
+            json.dump(_corresp_nueva, open(_ruta_datos("correspondencia_piezas.json", _PID), "w", encoding="utf-8"), ensure_ascii=False)
         except Exception:
             pass
     # RESET del molde re-subido: piezas (ids desde 1), emparejado manual y las VARIABLES/grupos
     # que apuntaban a las piezas del archivo anterior (quedarían colgadas de ids muertos).
-    _pid_reset = _get_active_producto_id()
+    _pid_reset = _PID
     try:
         os.remove(_ruta_datos("emparejado_talles.json", _pid_reset))
     except OSError:
@@ -2746,7 +2709,7 @@ def subir_plantilla():
         LOG.error("molde", "No se pudo poner la base a cero al re-subir el molde",
                   f"{type(e).__name__}: {e}. El molde NO se dio de alta: el archivo anterior y su "
                   "registro quedan como estaban.", molde=_pid_reset, error=str(e)[:300])
-        return jsonify({"error": f"no se pudo preparar la base para el molde nuevo: {e}"}), 500
+        return None, (f"no se pudo preparar la base para el molde nuevo: {e}", 500)
     _guardar_registro(_pid_reset, alta["registro"], reset=True)
     # EL TALLE DE GUÍA, PUESTO (2026-09-07). Un molde subido (o RE-subido) quedaba sin
     # `variante_guia` en el catálogo: la pantalla mostraba como guía la que eligió la detección,
@@ -2761,7 +2724,7 @@ def subir_plantilla():
     # estaban en la mano). Se guarda para que nombrar piezas y ubicar la etiqueta abran al
     # instante en vez de releer el archivo, que es lo que cuesta 52 s por talle.
     _visor_guardar(_pid_reset, alta.get("visor"))
-    resumen = {"archivo": f.filename, "mesas": alta["mesas"], "piezas": alta["piezas"],
+    resumen = {"archivo": _ARCH, "mesas": alta["mesas"], "piezas": alta["piezas"],
                "talles": alta["talles"],
                "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
                "problemas": alta["problemas"],
@@ -2771,7 +2734,7 @@ def subir_plantilla():
                "origen": "con_diseno" if _con_diseno else "molde",
                "motivo_origen": _motivo_b,
                "dxf": dxf_resumen}
-    json.dump(resumen, open(_ruta_datos("resumen_plantilla.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    json.dump(resumen, open(_ruta_datos("resumen_plantilla.json", _PID), "w", encoding="utf-8"), ensure_ascii=False)
     # El lienzo de «Nombrar piezas» se arma YA, en segundo plano: cuando el usuario entre
     # está listo (el alta recién calentó el caché de extracción, así que cuesta poco).
     # 🔴 Va por `_en_hilo` y no por un `Thread` pelado: un hilo de fondo NO tiene
@@ -2786,9 +2749,107 @@ def subir_plantilla():
         # También va por `_en_hilo`, por lo mismo que la precarga de arriba: el desplegado abre
         # el molde y, sin cerrarlo, lo deja trabado justo cuando el usuario puede re-subirlo.
         _en_hilo(lambda: _prewarm_desplegado(destino, list(alta.get("talles") or []), alta))
-    print(f"  [tiempos] subida de {f.filename}: {time.time() - _t_subida:.1f}s"
+    print(f"  [tiempos] subida de {_ARCH}: {time.time() - _t_subida:.1f}s"
           + (f" ({_motivo_b})" if _con_diseno else ""), flush=True)
-    return jsonify(resumen)
+    return resumen, None
+
+
+
+
+@app.post("/api/plantilla")
+def subir_plantilla():
+    f = request.files.get("archivo")
+    if not f:
+        return jsonify({"error": "falta el archivo"}), 400
+    # 🔴 TODO LO QUE SALE DEL REQUEST SE CAPTURA ACÁ. De acá para abajo el trabajo pesado corre
+    # FUERA del hilo web (ver el final de esta función), y ahí no hay `request`: `_ruta_datos` y
+    # compañía caerían al molde ACTIVO GLOBAL, que puede ser el de otra persona.
+    _PID = _pid_de_request() or _get_active_producto_id()
+    _ARCH = f.filename or ""
+    _PIDE_B = str(request.form.get("con_diseno") or "") == "1"
+    destino = _ruta_entrada("plantilla.ai", pid=_PID, original=True)
+    _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
+    # ── SUBIDA ATÓMICA ───────────────────────────────────────────────────────────────────────
+    # El archivo entra a un TEMPORAL y sólo reemplaza al molde bueno si se pudo procesar.
+    # Antes se guardaba encima y recién después se procesaba: si el alta fallaba (422), el molde
+    # quedaba con el ARCHIVO NUEVO y el REGISTRO VIEJO — o sea, las piezas registradas apuntando
+    # a la geometría de otro archivo. Un molde así se ve bien y genera cualquier cosa.
+    # ⚠️ El temporal CONSERVA la extensión `.ai`: PyMuPDF deduce el tipo de documento por la
+    # extensión, y con un `.tmp` no lo abriría (y el alta fallaría por una razón inventada).
+    tmp = os.path.join(os.path.dirname(destino), "plantilla.subiendo.ai")
+    nombre = (f.filename or "").lower()
+    # LOS NOMBRES DEL MOLDE ANTERIOR **NO** SE TRANSFIEREN: re-subir un molde es un RESET
+    # TOTAL (registro, variables, emparejado; los ids arrancan de nuevo) — decisión del
+    # 2026-08-18. Acá se sacaba una «foto» del talle guía (`snapshot_nombres_guia`) para
+    # remapear los nombres al archivo nuevo; el remapeo se fue con esa decisión y la foto
+    # quedó huérfana: se leía el molde VIEJO entero en cada re-subida para tirar el
+    # resultado. Lo destapó comparar contra la copia del servidor, que todavía tiene el
+    # camino completo. `nombres_conservados` sigue en la respuesta —siempre null— porque la
+    # pantalla ya lo contempla y es el enganche si algún día se decide volver a transferirlos.
+    dxf_resumen = None
+    _corresp_nueva = None          # correspondencia pieza↔talle del DXF (se escribe con el commit)
+    _con_diseno, _motivo_b = False, ""   # ¿camino B? se decide más abajo, sobre el temporal
+    if nombre.endswith(".dxf"):
+        # Molde en DXF (AAMA/ASTM de Optitex, Gerber, Lectra…): se CONVIERTE a un PDF
+        # con una capa por talle + los contornos de cada pieza, igual que un .ai.
+        # Las curvas del archivo (bulge/spline/elipse) se conservan EXACTAS (Bézier).
+        import importar_dxf, traceback as _tb
+        # Guardar el DXF original SIEMPRE (antes de convertir): así, aunque la conversión
+        # falle, queda el archivo para diagnosticar/reimportar y no se pierde.
+        fuente = _ruta_entrada("plantilla_fuente.dxf", pid=_PID)
+        f.save(fuente)
+        try:
+            pdf_bytes, dxf_resumen = importar_dxf.dxf_a_pdf(fuente)
+            with open(tmp, "wb") as g:
+                g.write(pdf_bytes)
+        except Exception as e:
+            _tb.print_exc()
+            _descartar_tmp(tmp)
+            return jsonify({"error": f"no se pudo importar el DXF: {e}"}), 422
+        # Correspondencia EXACTA pieza↔talle del DXF (Piece Name + Size): la usan el
+        # nido y el registro para NO adivinar el emparejado entre talles.
+        # Se GUARDA EN MEMORIA y se escribe recién con el `os.replace` de más abajo: forma parte
+        # de la misma transacción que el archivo del molde (ver «EL REEMPLAZO, AL FINAL Y ATÓMICO»).
+        try:
+            _corresp_nueva = dxf_resumen.pop("indices", None)
+        except Exception:
+            _corresp_nueva = None
+    else:
+        # .ai / .pdf (Illustrator, Corel, InDesign…): PyMuPDF los lee directo.
+        f.save(tmp)
+    # 🔴 DE ACÁ EN MÁS, EN SEGUNDO PLANO. Lo que sigue son minutos de CPU (118 MB = 297 s medidos)
+    # y no puede quedarse con un hilo del servidor: la pantalla ya muestra «Leyendo el archivo…»
+    # con su reloj, así que ahora pregunta cómo va, igual que con la tizada.
+    tid = uuid.uuid4().hex[:12]
+    _nuevo_trabajo(tid, producto_id=_PID, producto_nombre=_ARCH, tipo="molde")
+    _tocar_trabajo(tid, progreso="leyendo el archivo")
+
+    def _correr_alta():
+        _EN_COLA_ALTA[0] += 1
+        try:
+            # Cupo: varias altas a la vez se pelean por la CPU y terminan TODAS más tarde. Se
+            # atienden de a `_ALTAS_A_LA_VEZ` y al resto se le dice que está esperando lugar.
+            if not _SEM_ALTA.acquire(blocking=False):
+                _tocar_trabajo(tid, progreso=f"esperando lugar ({_EN_COLA_ALTA[0] - 1} adelante)")
+                _SEM_ALTA.acquire()
+            try:
+                _tocar_trabajo(tid, estado="generando", progreso="leyendo el archivo")
+                res, err = _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
+                                                  _corresp_nueva, _con_diseno, _motivo_b, _t_subida)
+            finally:
+                _SEM_ALTA.release()
+            if err:
+                _tocar_trabajo(tid, estado="error", error=err[0])
+            else:
+                _tocar_trabajo(tid, estado="listo", resultado=res, progreso="")
+        except Exception as e:
+            traceback.print_exc()
+            _tocar_trabajo(tid, estado="error", error=f"{e}")
+        finally:
+            _EN_COLA_ALTA[0] -= 1
+
+    _en_hilo(_correr_alta)
+    return jsonify({"job": tid, "procesando": True, "en_cola": max(0, _EN_COLA_ALTA[0])})
 
 
 def _procesos_alta():

@@ -3566,6 +3566,32 @@ function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
   );
 }
 
+// ── ESPERAR A QUE EL SERVIDOR TERMINE DE LEER EL MOLDE ───────────────────────────────────────
+// 🔴 Subir un molde ya no contesta con el molde leído: contesta con un TRABAJO. Medido el
+// 2026-09-10, leer el archivo real del usuario (118 MB) lleva 297 s, y eso NO puede quedarse con
+// un hilo del servidor: con los hilos ocupados el sitio deja de contestarle a todos los demás,
+// aunque sólo estén mirando. En el pedido, subir el molde es lo primero que hace cualquiera.
+// Acá se espera igual que antes —la pantalla ya mostraba «Leyendo el archivo…» con su reloj—,
+// pero preguntando cómo va. Si el servidor es viejo y contesta el resumen directo, se usa tal cual.
+async function esperarMoldeLeido(resp, onProgreso) {
+  if (!resp || !resp.job) return resp;
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1200));
+    let d;
+    try {
+      const r = await fetch(rutaApi(`/api/trabajo/${resp.job}`));
+      d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'el trabajo ya no está');
+    } catch (e) {
+      throw new Error(`Se perdió el hilo mientras se leía el molde: ${e.message}`);
+    }
+    if (onProgreso && d.progreso) onProgreso(d.progreso);
+    if (d.estado === 'listo') return d.resultado || {};
+    if (d.estado === 'error') throw new Error(d.error || 'No se pudo procesar el molde');
+    if (d.estado === 'cancelado') throw new Error('La lectura del molde se canceló');
+  }
+}
+
 // ── RESERVAS: «esto lo está editando fulano» ──────────────────────────────────────────────────
 // Guardar con versión ya evita PERDER el trabajo del otro; esto evita el otro problema, que es
 // pisarle el valor sin enterarse. Quien abre un editor toma esa cosa; los demás la ven en sólo
@@ -6564,8 +6590,9 @@ export default function App() {
       fd.append('archivo', subirMoldeFile);
       fd.append('pid', pid);
       const r2 = await fetch('/api/plantilla', { method: 'POST', body: fd });
-      const d2 = await r2.json();
-      if (!r2.ok) throw new Error(d2.error || 'No se pudo procesar el molde');
+      const _j2 = await r2.json();
+      if (!r2.ok) throw new Error(_j2.error || 'No se pudo procesar el molde');
+      const d2 = await esperarMoldeLeido(_j2, (p) => setProcesando(p));
       // MISMO aviso que en Configuración: es la ruta por la que entran los moldes de cliente
       // (DXF de cualquier lado), o sea la que MÁS necesita que se diga qué salió mal.
       avisarAltaMolde(d2);
@@ -11316,7 +11343,7 @@ export default function App() {
           };
           xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor'));
           xhr.send(fd);
-        });
+        }).then(j => esperarMoldeLeido(j, (p) => setSubirBFase(x => ({ ...(x || {}), fase: 'procesando', nota: p }))));
         if (d2.origen !== 'con_diseno') {
           showError(`«${nombre}» no parece traer el diseño adentro de las piezas`
             + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '') + '. Quedó cargado igual, pero necesita el arte aparte.');
@@ -11567,7 +11594,7 @@ export default function App() {
         };
         xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor'));
         xhr.send(fd);
-      });
+      }).then(j => esperarMoldeLeido(j, (p) => setSubirBFase(f => ({ ...(f || {}), fase: 'procesando', nota: p }))));
       if (d2.origen !== 'con_diseno') {
         // El archivo no trae el diseño adentro: se dice por qué y se deja el molde igual (el
         // servidor ya lo dio de alta por el camino de siempre), para no perder la subida.
@@ -13392,7 +13419,10 @@ export default function App() {
                         <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
                           {subirBFase.fase === 'subiendo'
                             ? 'No cierres la ventana.'
-                            : 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.'}
+                            /* `nota` la manda el servidor: dice si está leyendo o esperando lugar
+                               (se atienden de a varias para que el sitio no se le trabe a nadie). */
+                            : (subirBFase.nota
+                              || 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.')}
                         </span>
                       </div>
                     </div>
