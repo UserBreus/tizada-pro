@@ -1482,6 +1482,40 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-10 (420) — ⚠️ CORRECCIÓN DE LA 419: NO ERAN 297 SEGUNDOS, SON 4,4.** Medí la función
+  equivocada y armé el argumento de la 419 sobre ese número. Queda anotado porque el error de
+  método es tan útil como el resultado.
+
+  **QUÉ PASÓ.** Timeé `MP.alta_plantilla()` sobre el `.ai` de 118 MB del usuario: 297 s. Pero ese
+  archivo es del **camino B** (trae el diseño adentro), y para esos la subida NO llama a
+  `alta_plantilla`: llama a `PD.alta_molde_con_diseno()`, que aprovecha que los talles son CAPAS de
+  la misma mesa y no empareja nada. Medido bien, el mismo archivo:
+
+  | qué | 118 MB |
+  |---|---|
+  | `alta_molde_con_diseno`, 6 mesas a la vez (lo que corre de verdad) | **4,4 s** |
+  | `alta_molde_con_diseno`, de a una mesa | 12,5 s |
+  | `alta_plantilla` (camino A — NO se usa para este archivo) | 297 s |
+
+  Y los moldes del camino A del usuario pesan ~1 MB: **2 s**.
+
+  🔴 **LA TRAMPA DE MÉTODO, para no repetirla:** medir «la función que parece» en vez de **seguir la
+  llamada desde el endpoint**. La bifurcación estaba a la vista en `subir_plantilla` (`if <camino B>:
+  PD.alta_molde_con_diseno(...) else: MP.alta_plantilla(...)`) y no la miré. Antes de cronometrar
+  algo, hay que confirmar **quién lo llama y con qué archivo**.
+
+  ⚠️ **SEGUNDA TRAMPA, en el mismo rato:** el primer script de medición no tenía
+  `if __name__ == "__main__"`, así que el ProcessPool **re-importó el script y lo corrió entero de
+  nuevo** — los tiempos salieron mezclados y el paralelo «falló». Está avisado en el docstring de
+  `alta_molde_con_diseno` y tampoco lo miré. Todo script de medición que use procesos lleva el
+  guardia.
+
+  **¿LA 419 SIGUE VALIENDO? Sí, con menos urgencia de la que le puse.** Sacar la lectura del hilo
+  web está bien igual: (a) un molde grande subido por el camino A **sí** cuesta minutos, y ese caso
+  existe; (b) recibir 118 MB por la red ya ocupa el hilo un rato largo por sí solo; (c) el cupo
+  evita que varias lecturas se peleen por la CPU. Pero **el sitio no se caía con 24 personas
+  subiendo**, como dije: eran 4,4 s cada una, no 5 minutos.
+
 - **2026-09-10 (419) — 🔴 SUBIR UN MOLDE SE QUEDABA CON EL SERVIDOR CINCO MINUTOS.**
   El usuario puso la meta en criollo: *«en la parte del pedido tiene que haber infinitas personas,
   eso lo puede usar cualquiera al mismo tiempo; la configuración sí es limitada para que dos no

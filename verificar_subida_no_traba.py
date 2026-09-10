@@ -2,10 +2,14 @@
 """
 CONTRATO: SUBIR UN MOLDE NO TRABA EL SITIO — `py verificar_subida_no_traba.py`.
 
-Medido el 2026-09-10 con el molde real del usuario: **118 MB tardan 297 segundos en leerse**, y
-todo eso corría DENTRO del hilo que atiende la llamada web. O sea: cada persona que sube un molde
-se quedaba con un hilo del servidor durante cinco minutos, y con los hilos ocupados el sitio deja
-de contestarle a TODOS los demás, aunque sólo estén mirando.
+Leer un molde subido corría DENTRO del hilo que atiende la llamada web, así que quien sube se
+quedaba con un atendedor del servidor todo ese rato y los demás hacían fila.
+
+⚠️ Cuánto es «ese rato», medido bien el 2026-09-10 (ver changelog 420, que corrige al 419): un
+molde del camino B de 118 MB son **4,4 s** (`alta_molde_con_diseno`, 6 mesas a la vez) y uno del
+camino A de 1 MB son **2 s**. El número de 297 s que motivó este contrato era `alta_plantilla`
+sobre un archivo que NO pasa por ahí: mal medido. Igual conviene que no bloquee — un molde grande
+por el camino A sí cuesta minutos, y recibir 118 MB por la red ya ocupa el hilo un buen rato.
 
 En el sistema de PEDIDO eso es lo primero que hace cualquiera: era el techo real de cuánta gente
 puede entrar a la vez. El pedido tiene que aguantar a todo el mundo al mismo tiempo (pedido del
