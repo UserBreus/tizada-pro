@@ -1482,6 +1482,40 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (430) — 🏷️ EL BORDE DE LA ETIQUETA TAMBIÉN SE VA + infraestructura del
+  auto-apagado de la etiqueta del sistema (regla PENDIENTE del usuario).**
+  **1. «Me ocultó la etiqueta pero me dejó su contorno».** Illustrator exporta la apariencia
+  «borde detrás» de un texto **no como texto** sino como los CONTORNOS DEL GLIFO trazados: un
+  bloque `q cm m/l/c… h S Q` (sólo trazado + `S`) entre dos `Tj`. La 429 sacaba el `Tj` y el
+  borde blanco quedaba flotando. Fix en `quitar_placeholders`: cada texto sacado (placeholder o
+  etiqueta) deja su **caja** en `cajas_sacadas` (x, línea base, ancho, alto en dispositivo — el
+  ancho se calcula ANTES de la bifurcación porque lo usan las dos ramas), y una **segunda pasada**
+  (`_bloques_de_contorno`) recorre los `q…Q` de primer nivel siguiendo el `cm`, se queda con los
+  que son **sólo trazado pintado con S** (nada de `f`, `W`, texto, XObjects ni `q` anidado) y cuya
+  caja cae **entera** dentro de la caja del texto sacado (−1,1/+0,3 altos, 2 mm de margen). Es
+  GEOMETRÍA, no fuente: vale para cualquier diseñador. Un dibujo del diseño que pase por ahí
+  sobresale y no se toca. `_V_PAGINAS` 5 → 6 (las páginas cambian de contenido). La etiqueta
+  informada lleva `contornos` = cuántos bordes se sacaron. Contrato §4 de
+  `verificar_etiqueta_del_archivo.py`: `contornos ≥ 1`, se van `S` y `Tj`, y los `f`/`f*` de la
+  página quedan **iguales** (no se llevó relleno del diseño).
+  **2. Donde el talle QUEDA como diseño, la etiqueta del sistema sobra.** El usuario: *«en la
+  solapa no quiero la etiqueta del borde, ya viene con una etiqueta diseñada»*. Lo que hay:
+  `piezas_con_talle_en_diseno(decision)` (qué (mesa, idx) traen una familia que se DEJA),
+  `_sincronizar_etiqueta_auto(pid, path)` en `servidor.py` (traduce a nombres por el registro y
+  guarda `etiqueta.piezas_off / auto_off / auto_rechazadas` bajo `_seccion_edicion`; corre después
+  de las páginas en `_prewarm_desplegado` y al fijar una familia), `_migrar_nombres_pieza` migra
+  las tres listas, `/api/productos` → `etiquetas_auto_off` y la pantalla lo cuenta. **⏳ LA REGLA
+  DE FUSIÓN NO ESTÁ ESCRITA**: `_fusionar_apagadas(piezas_off, auto_prev, rechazadas_prev,
+  auto_nuevo)` tiene un `TODO(human)` y mientras tanto **devuelve las listas tal cual** (no se
+  apaga nada solo; el cliente apaga tocando la pieza, como siempre). La regla tiene que sostener:
+  lo que el sistema apagó antes y ya no corresponde se vuelve a prender (sólo eso, no lo que apagó
+  el cliente) y lo que el cliente PRENDIÓ después de un apagado automático no se vuelve a apagar
+  nunca. Plan: escribirla ahí, correr `verificar_etiqueta_del_archivo.py`, y agregarle un caso
+  puro a ese contrato (auto → rechazo → decisión nueva).
+  ⚠️ **TRAMPA DE HERRAMIENTA (2 horas):** `verificar_placeholders_con_diseno.py` «moría con exit
+  127 y sin stderr» — no era el código: da de alta el molde entero **en serie** (9 mesas, > 10
+  min) y la herramienta Bash lo cortaba en silencio. Corrido desde PowerShell en segundo plano:
+  **verde, código 0**. Los contratos largos van con la salida a archivo y sin la Bash tool.
 - **2026-09-11 (429) — 🏷️ LA ETIQUETA QUE TRAE EL DISEÑO SE DECIDE POR FAMILIA, NO POR UMBRALES
   (reemplaza la regla de la 428).** El usuario objetó la 428 de raíz: *«no todos los diseñadores
   traen la etiqueta como debería; entonces debe ser ajuste nuestro. Buscá un verdadero método»*.

@@ -901,8 +901,9 @@ _V_CONTORNOS = 3          # 3 = la línea de corte del archivo es el contorno (2
 # Versión de la etapa de PÁGINAS. 3 = la línea de corte se saca del dibujo (`quitar_linea_de_corte`).
 # 4 = también se saca la ETIQUETA DE CORTE que ya trae el diseño. 5 = se decide POR FAMILIA a nivel
 # molde (`decidir_familias`), no por umbrales; el hash de la decisión (`etq`) también entra en la
-# vigencia. Sin subir el número, un molde ya desplegado seguiría con su etiqueta vieja adentro.
-_V_PAGINAS = 5
+# vigencia. 6 = se saca también el BORDE de la etiqueta (contornos de glifo trazados). Sin subir
+# el número, un molde ya desplegado seguiría con su etiqueta vieja adentro.
+_V_PAGINAS = 6
 # Lo que se copia de la página original a la desplegada. Lista CERRADA a propósito: `/PieceInfo`
 # (los datos privados de Illustrator), `/Metadata`, `/Annots` o `/Thumb` no dibujan nada y pesan.
 _CLAVES_PAGINA = ("/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate",
@@ -1276,6 +1277,7 @@ def decidir_familias(candidatos, total_piezas, manual=None):
         else:
             motivo = f"está en {n} de {total_piezas} piezas, menos de dos tercios: se deja"
         salida.append({"clave": f["clave"], "claves": sorted(f.get("claves") or [f["clave"]]),
+                       "piezas_lista": sorted([list(x) for x in f["piezas"]]),   # (mesa, idx): para apagar la etiqueta del sistema ahí
                        "fuente": f["fuente"], "alto_mm": f["alto_mm"],
                        **({"alto_hasta_mm": f["alto_hasta_mm"]} if f.get("alto_hasta_mm") else {}),
                        "piezas": n, "de": total_piezas, "talles": len(f["talles"]),
@@ -1283,6 +1285,18 @@ def decidir_familias(candidatos, total_piezas, manual=None):
                        "ocultar": ocultar, "automatico": auto, "motivo": motivo})
     salida.sort(key=lambda x: (-x["piezas"], x["clave"]))
     return salida
+
+
+def piezas_con_talle_en_diseno(decision):
+    """Las piezas `[mesa, idx]` donde quedó una familia de talle SIN ocultar: el talle es parte
+    del diseño (la talla tejida de la solapa). Ahí la etiqueta de corte del sistema sobra —el
+    usuario lo pidió (2026-09-11): «la solapa ya viene con una etiqueta diseñada para la visual».
+    Sale de la decisión guardada; el servidor lo traduce a nombres y apaga la etiqueta ahí."""
+    out = set()
+    for f in ((decision or {}).get("familias") or []):
+        if not f.get("ocultar"):
+            out |= {tuple(x) for x in (f.get("piezas_lista") or [])}
+    return sorted([list(x) for x in out])
 
 
 def _ruta_etq(path_molde):
@@ -1501,6 +1515,7 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
     encontrados = {}                      # campo → placeholder
     etiquetas = {}                        # idx_pieza → la etiqueta de corte que traía el archivo
     quitar = set()
+    cajas_sacadas = []                    # (idx_pieza|None, x, baseline, ancho, alto) de cada texto sacado
     for i, inst in enumerate(salida):
         op = str(inst.operator)
         ops = inst.operands
@@ -1573,6 +1588,16 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
                 m = _mul(_mul([tfs, 0, 0, tfs, 0, 0], tm), ctm)
                 esc = (m[0] ** 2 + m[1] ** 2) ** 0.5           # tamaño del texto en puntos (crudos)
                 ox, oy = m[4], m[5]
+                if op in ("Tj", "'"):
+                    b = bytes(ops[-1])
+                elif op == '"':
+                    b = bytes(ops[2])
+                else:
+                    b = b"".join(bytes(x) for x in ops[0] if isinstance(x, pikepdf.String))
+                an = _ancho_texto(f, b, dec) if f is not None else None
+                if an is None:
+                    an = 0.6 * len(txt.strip())
+                ancho = an * esc * th                          # en puntos crudos, como `esc`
                 if campo is None:
                     # ¿nombra el talle? Entonces es candidato a ETIQUETA DE CORTE del diseño. Se
                     # mide con la MISMA posición que los placeholders (una sola matemática) y se
@@ -1595,17 +1620,8 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
                                                            "copias": 0})
                                 etiquetas[_ip]["copias"] += 1
                                 quitar.add(i)
+                                cajas_sacadas.append((_ip, _dx, _dy, ancho * U, esc * U))
                     continue
-                if op in ("Tj", "'"):
-                    b = bytes(ops[-1])
-                elif op == '"':
-                    b = bytes(ops[2])
-                else:
-                    b = b"".join(bytes(x) for x in ops[0] if isinstance(x, pikepdf.String))
-                an = _ancho_texto(f, b, dec) if f is not None else None
-                if an is None:
-                    an = 0.6 * len(txt.strip())
-                ancho = an * esc * th
                 dx, dy = _dev(ox, oy)
                 ph = encontrados.get(campo)
                 if ph is None:
@@ -1628,11 +1644,117 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
                     if ph["trazo"] is None:
                         ph["trazo"] = [scol[0], list(scol[1]), round(_w, 4)]
                 quitar.add(i)
+                cajas_sacadas.append((None, dx, dy, ancho * U, esc * U))
         except Exception:
             continue
     if not quitar:
         return salida, {}, {}
+    # 🔴 EL BORDE TAMBIÉN SE VA. Illustrator exporta la apariencia «borde detrás» de un texto como
+    # los CONTORNOS DEL GLIFO trazados (`q cm m/l… h S Q`), no como texto: sacando sólo el `Tj`
+    # quedaba el borde blanco de la etiqueta flotando (reporte del usuario 2026-09-11: «me ocultó
+    # la etiqueta pero me dejó su contorno»). Se reconocen por GEOMETRÍA —un bloque solo-trazo
+    # cuya caja cae dentro de la caja del texto sacado—, que vale para cualquier fuente.
+    for i_q, i_Q, ip in _bloques_de_contorno(salida, cajas_sacadas, marco, U):
+        quitar.update(range(i_q, i_Q + 1))
+        if ip is not None and ip in etiquetas:
+            etiquetas[ip]["contornos"] = etiquetas[ip].get("contornos", 0) + 1
     return [inst for i, inst in enumerate(salida) if i not in quitar], encontrados, etiquetas
+
+
+_OPS_TRAZADO = {"m", "l", "c", "v", "y", "re", "h"}
+_OPS_ESTADO = {"w", "M", "J", "j", "d", "CS", "SCN", "SC", "K", "RG", "G", "gs", "ri", "i"}
+
+
+def _bloques_de_contorno(salida, cajas, marco, U):
+    """Los bloques `q … Q` que son SÓLO un trazado pintado con `S`/`s` (contornos de glifo) y caen
+    dentro de la caja de un texto sacado. Devuelve `[(i_q, i_Q, idx_pieza)]`.
+
+    La caja del texto es (x, baseline, ancho, alto) en dispositivo; se toma desde 0,3 alturas
+    debajo de la línea base hasta 1,1 arriba (descendentes y ascendentes), con 2 mm de margen. El
+    bloque tiene que caer ENTERO adentro: un dibujo del diseño que pase por ahí sobresale y no se
+    toca."""
+    if not cajas:
+        return []
+    x0c, y0c, x1c, y1c = marco
+    mm2 = 2.0 * (CM / 10.0) * U
+
+    def _dev(x, y):
+        return ((x - x0c) * U, (y1c - y) * U)
+
+    def _adentro(bx0, by0, bx1, by1):
+        for ip, dx, dy, ancho, alto in cajas:
+            X0, X1 = dx - mm2, dx + ancho + mm2
+            Y0, Y1 = dy - 1.1 * alto - mm2, dy + 0.3 * alto + mm2
+            if bx0 >= X0 and bx1 <= X1 and by0 >= Y0 and by1 <= Y1:
+                return ip
+        return "sin"
+
+    ctm, pila = [1, 0, 0, 1, 0, 0], []
+    hallados = []
+    i = 0
+    n = len(salida)
+    while i < n:
+        op = str(salida[i].operator)
+        ops = salida[i].operands
+        if op == "cm":
+            try:
+                ctm = _mul([float(v) for v in ops], ctm)
+            except Exception:
+                pass
+        elif op == "Q":
+            if pila:
+                ctm = pila.pop()
+        elif op == "q":
+            pila.append(list(ctm))
+            # ¿es un bloque solo-trazo? se mira hasta su Q (sin anidar)
+            j, prof, pts, pintado, otro, ctm_b = i + 1, 1, [], None, False, list(ctm)
+            while j < n and prof:
+                o2, a2 = str(salida[j].operator), salida[j].operands
+                if o2 == "q":
+                    prof += 1; otro = True
+                elif o2 == "Q":
+                    prof -= 1
+                    if prof == 0:
+                        break
+                elif o2 == "cm":
+                    try:
+                        ctm_b = _mul([float(v) for v in a2], ctm_b)
+                    except Exception:
+                        otro = True
+                elif o2 in _OPS_TRAZADO:
+                    try:
+                        nums = [float(v) for v in a2]
+                        if o2 == "re":
+                            x, y, w, h = nums
+                            cand = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
+                        else:
+                            cand = [(nums[k], nums[k + 1]) for k in range(0, len(nums) - 1, 2)]
+                        for x, y in cand:
+                            X = ctm_b[0] * x + ctm_b[2] * y + ctm_b[4]
+                            Y = ctm_b[1] * x + ctm_b[3] * y + ctm_b[5]
+                            pts.append(_dev(X, Y))
+                    except Exception:
+                        otro = True
+                elif o2 in ("S", "s"):
+                    pintado = "S" if pintado is None else "varios"
+                elif o2 in ("f", "F", "f*", "B", "B*", "b", "b*", "n", "W", "W*"):
+                    otro = True                      # relleno o recorte: no es un borde de glifo
+                elif o2 in _OPS_ESTADO:
+                    pass
+                else:
+                    otro = True                      # texto, imágenes, XObjects…: no es esto
+                j += 1
+            if prof == 0 and pintado == "S" and not otro and pts:
+                bx0 = min(p[0] for p in pts); bx1 = max(p[0] for p in pts)
+                by0 = min(p[1] for p in pts); by1 = max(p[1] for p in pts)
+                ip = _adentro(bx0, by0, bx1, by1)
+                if ip != "sin":
+                    hallados.append((i, j, ip))
+                    ctm = pila.pop()             # el Q del bloque cierra este q
+                    i = j + 1
+                    continue
+        i += 1
+    return hallados
 
 
 def quitar_linea_de_corte(salida, page, contornos, marco, U):

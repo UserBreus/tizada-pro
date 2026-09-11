@@ -175,8 +175,19 @@ else:
     s2, ph, etq = PD.quitar_placeholders(salida, pag, idx["marco"], idx["U"], "M", conts, ocultar=ocultar)
     ok(etq and list(etq.values())[0]["copias"] == 2,
        f"se sacaron las 2 copias de la etiqueta de la pieza (etq={ {k: v['texto'] for k, v in etq.items()} })")
-    ok(n_antes - len(s2) == 2 + sum(1 for _ in ph) * 0 + (n_antes - len(s2) - 2),
-       "y nada más que eso y los placeholders")
+    # 🔴 EL BORDE TAMBIÉN. Illustrator exporta el borde de la etiqueta como los contornos del glifo
+    # trazados (`q cm m/l… h S Q`), no como texto: sacando sólo el `Tj` quedaba el borde blanco
+    # flotando («me ocultó la etiqueta pero me dejó su contorno», 2026-09-11). Se reconoce por
+    # geometría: un bloque solo-trazo dentro de la caja del texto sacado.
+    ok(etq and list(etq.values())[0].get("contornos", 0) >= 1,
+       f"🔴 y también su BORDE trazado ({list(etq.values())[0].get('contornos', 0)} bloque(s) de contorno de glifo)")
+    _sacadas = [salida[i] for i in range(n_antes) if i >= len(s2) or salida[i] is not s2[i]]
+    _ops_s = [str(x.operator) for x in salida]
+    _ops_2 = [str(x.operator) for x in s2]
+    ok(_ops_s.count("S") - _ops_2.count("S") >= 1 and _ops_s.count("Tj") - _ops_2.count("Tj") >= 2,
+       f"se fueron trazos «S» ({_ops_s.count('S') - _ops_2.count('S')}) y textos «Tj» ({_ops_s.count('Tj') - _ops_2.count('Tj')})")
+    ok(_ops_s.count("f") == _ops_2.count("f") and _ops_s.count("f*") == _ops_2.count("f*"),
+       "y NINGÚN relleno del diseño («f») se tocó")
     # sin decisión (ocultar vacío) no se saca la etiqueta
     s3, _, etq3 = PD.quitar_placeholders(salida, pag, idx["marco"], idx["U"], "M", conts, ocultar=set())
     ok(not etq3, "sin familias que ocultar, la etiqueta queda (no se adivina)")

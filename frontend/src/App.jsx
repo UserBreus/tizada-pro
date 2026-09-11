@@ -14551,6 +14551,15 @@ export default function App() {
                             </span>
                           </label>
                         ))}
+                        {/* Donde el talle quedó como parte del diseño (la talla tejida de la solapa),
+                            la etiqueta del SISTEMA sobra: se apaga sola en esas piezas, sin pisar lo que
+                            el cliente eligió. Se cambia como siempre: tocando la pieza en el visor. */}
+                        {!!_prodB.etiquetas_auto_off && (
+                          <span style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-muted)' }}>
+                            En <b>{_prodB.etiquetas_auto_off} pieza(s)</b> el talle es parte del diseño: ahí la
+                            etiqueta del sistema queda <b>apagada</b>. Si la querés igual, tocá la pieza en el visor.
+                          </span>
+                        )}
                       </div>
                     )}
                     {/* ESTE MOLDE YA LO CONFIGURASTE. El aviso va ACÁ —donde se está trabajando el

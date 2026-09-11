@@ -3049,6 +3049,79 @@ def _desplegar_en_fondo(path):
     _en_hilo(_run)
 
 
+def _pid_de_ruta_molde(path):
+    """`entrada/<pid>/plantilla.ai` → pid (o None si la ruta no tiene esa forma)."""
+    try:
+        d = os.path.dirname(os.path.abspath(path))
+        return os.path.basename(d) if os.path.basename(os.path.dirname(d)) == os.path.basename(ENTRADA) else os.path.basename(d)
+    except Exception:
+        return None
+
+
+def _fusionar_apagadas(piezas_off, auto_prev, rechazadas_prev, auto_nuevo):
+    """Qué piezas quedan SIN etiqueta del sistema después de una decisión nueva.
+
+    Tres listas de nombres de pieza entran:
+      · `piezas_off`     — lo que hoy está apagado (lo que lee el motor): mezcla de lo que apagó
+                           el cliente tocando en el visor y lo que apagó el sistema la vez anterior;
+      · `auto_prev`      — lo que el sistema apagó la vez anterior;
+      · `rechazadas_prev`— lo que el sistema apagó alguna vez y el cliente volvió a PRENDER;
+      · `auto_nuevo`     — lo que el sistema quiere apagar ahora (piezas donde el talle es diseño).
+    Devuelve `(piezas_off_final, auto_final, rechazadas_final)`, listas de nombres sin repetir.
+
+    La regla tiene que sostener dos cosas a la vez: (1) lo que el sistema apagó ANTES y ya no
+    corresponde (cambió la decisión) tiene que volver a prenderse — pero sólo eso, no lo que el
+    cliente apagó por su cuenta; (2) lo que el cliente PRENDIÓ a mano después de que el sistema
+    lo apagara no se vuelve a apagar nunca (rechazado), aunque la decisión lo siga proponiendo.
+    """
+    piezas_off = [str(x) for x in (piezas_off or [])]
+    auto_prev = {str(x) for x in (auto_prev or [])}
+    rechazadas_prev = {str(x) for x in (rechazadas_prev or [])}
+    auto_nuevo = {str(x) for x in (auto_nuevo or [])}
+    # TODO(human): devolver (piezas_off_final, auto_final, rechazadas_final) según la regla de arriba.
+    # Mientras la regla no esté escrita, NO se apaga nada solo: se devuelven las listas tal cual
+    # (el cliente sigue apagando piezas a mano en el visor, como siempre).
+    return sorted(set(piezas_off)), sorted(auto_prev & set(piezas_off)), sorted(rechazadas_prev)
+
+
+def _sincronizar_etiqueta_auto(pid, path):
+    """Después de decidir la etiqueta del diseño: en las piezas donde el talle QUEDÓ como diseño
+    (la talla tejida de la solapa) se apaga la etiqueta del sistema, sin pisar lo del cliente.
+    Traduce (mesa, índice) → nombre de pieza por el registro y guarda bajo el candado."""
+    try:
+        import piezas_con_diseno as PD
+        dec = PD.leer_decision(path)
+        if dec is None:
+            return
+        quiere = {tuple(x) for x in PD.piezas_con_talle_en_diseno(dec)}
+        reg = db.leer_registro(pid) or {}
+        nombres = set()
+        for nom, por_talle in reg.items():
+            for info in (por_talle or {}).values():
+                if isinstance(info, dict) and (info.get("mesa"), info.get("idx_mesa")) in quiere:
+                    nombres.add(str(nom))
+                    break
+        with _seccion_edicion():
+            cat = _cargar_catalogo()
+            prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+            if not prod:
+                return
+            et = dict(prod.get("etiqueta") or {})
+            off, auto, rech = _fusionar_apagadas(et.get("piezas_off"), et.get("auto_off"),
+                                                 et.get("auto_rechazadas"), nombres)
+            if (off, auto, rech) == (list(et.get("piezas_off") or []), list(et.get("auto_off") or []),
+                                     list(et.get("auto_rechazadas") or [])):
+                return
+            et["piezas_off"], et["auto_off"], et["auto_rechazadas"] = off, auto, rech
+            prod["etiqueta"] = et
+            _guardar_catalogo(cat)
+        _TOGGLES_CACHE.pop(pid, None)
+    except NotImplementedError:
+        raise
+    except Exception as e:
+        print(f"[camino B] no se pudo apagar la etiqueta en las piezas con talle de diseño ({pid}): {e}")
+
+
 def _prewarm_desplegado(path, talles, alta=None):
     """Segunda etapa del desplegado del camino B (ver `piezas_con_diseno.desplegar_mesa`): las
     páginas por talle, una mesa por proceso, después de responder la subida. Best-effort.
@@ -3063,6 +3136,9 @@ def _prewarm_desplegado(path, talles, alta=None):
         _t0 = time.time()
         PD.desplegar_molde(path, talles, procesos=_procesos_alta(), contornos=False, paginas=True)
         print(f"[camino B] páginas por talle listas ({time.time()-_t0:.0f}s): {path}")
+        _pid_s = _pid_de_ruta_molde(path)
+        if _pid_s:
+            _sincronizar_etiqueta_auto(_pid_s, path)
         if alta is not None:
             _cache_desplegado_guardar(path, alta)
     except Exception as e:
@@ -4258,6 +4334,13 @@ def _migrar_nombres_pieza(pid, ren):
             et = prod.get("etiqueta") or {}
             if isinstance(et.get("posiciones"), dict):
                 et["posiciones"], _t = _mueve(et["posiciones"]); cambio = cambio or _t
+            # las LISTAS de nombres también (antes se perdía el «sin etiqueta» al renombrar la
+            # pieza: se marcaba con el nombre provisorio y el nombre nuevo no lo heredaba)
+            for _lk in ("piezas_off", "auto_off", "auto_rechazadas"):
+                if isinstance(et.get(_lk), list):
+                    _nl = [ren.get(str(x), str(x)) for x in et[_lk]]
+                    if _nl != et[_lk]:
+                        et[_lk] = sorted(set(_nl)); cambio = True
             tc = prod.get("telas_cfg") or {}
             if isinstance(tc.get("por_pieza"), dict):
                 tc["por_pieza"], _t = _mueve(tc["por_pieza"]); cambio = cambio or _t
@@ -6072,6 +6155,15 @@ def set_etiqueta():
         # de partida (ver `_ETQ_CLIENTE` en `_etiqueta_de`).
         for _k in ("posiciones", "piezas_off", "zonas") + _ETQ_CLIENTE:
             _guardado[_k] = et.get(_k)
+        # Lo que el sistema apagó solo (`auto_off`) y el cliente acaba de PRENDER tocando la pieza
+        # queda RECHAZADO: la próxima decisión no lo vuelve a apagar. Y lo que vuelve a apagar,
+        # deja de estar rechazado.
+        _nuevo_off = {str(x) for x in (_guardado.get("piezas_off") or [])}
+        _auto = {str(x) for x in (_guardado.get("auto_off") or [])}
+        _rech = {str(x) for x in (_guardado.get("auto_rechazadas") or [])}
+        _rech = (_rech | (_auto - _nuevo_off)) - _nuevo_off
+        _guardado["auto_rechazadas"] = sorted(_rech)
+        _guardado["auto_off"] = sorted(_auto & _nuevo_off)
         et = _guardado
     prod["etiqueta"] = et
     _guardar_catalogo(cat)
@@ -10146,6 +10238,8 @@ def get_productos():
             # una y su motivo: la pantalla las lista con un interruptor. Vacío = no trae ninguna,
             # o el desplegado todavía no decidió.
             "etiquetas_familias": _etq_fams,
+            # piezas donde el sistema apagó SU etiqueta porque el talle es parte del diseño
+            "etiquetas_auto_off": len(_etqp.get("auto_off") or []),
             # Los talles que tiene ESTE molde (la planilla junta los de todos los del pedido).
             "talles": _talles_p,
             # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla
@@ -10638,6 +10732,7 @@ def set_etiqueta_archivo():
     dec = PD.fijar_familia(path, clave, ocultar)
     if dec is None:
         return jsonify({"error": "el molde todavía se está preparando: probá en un momento"}), 409
+    _sincronizar_etiqueta_auto(pid, path)
     _invalidar_cache_molde(pid)
     # las páginas se rehacen en segundo plano; la pantalla verá «preparando» mientras tanto
     try:
