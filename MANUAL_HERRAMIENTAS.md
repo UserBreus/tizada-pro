@@ -306,7 +306,8 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
      mesa se llama `#XS-L Pieza`.
    - **Talle por talle** — un diseño por talle: mesa `#XS Pieza`.
 3. **Descargar guía .ai** — el PDF/AI con las cajas de medida (sólo la variable en curso si hay una
-   elegida). `GET /api/plantilla/pdf_guia`.
+   elegida). `GET /api/plantilla/pdf_guia`. Abre el **«Guardar como»** para elegir dónde dejarlo
+   (como toda descarga de la app, ver `src/descargar.js`); cancelar no descarga.
 - **Guarda:** `POST /api/productos/referencia_medida` y la config de medida por variante.
   Precedencia en el motor: **exacto > rango > default**; si algo no queda cubierto, avisa.
 
@@ -954,8 +955,15 @@ Funciona **como una planilla de Excel** (`planilla-tabla`).
     dice su diseño, y ese diseño tiene su molde guía más abajo.
   - **Espacio infinito de mesas** (`MesasInfinito`): zoom con la rueda, **pan con clic derecho**,
     cada mesa se puede **renombrar** y se descarga con ese nombre.
-  - **Descargar todo (N)**: baja **cada mesa por separado** (una página = un archivo), con su
-    nombre. También hay ZIP (`GET /api/trabajos/zip`).
+  - **Descargar una mesa** (el botón de la mesa): abre el **«Guardar como»** del sistema con el
+    nombre de la mesa ya puesto, y guarda donde elijas. **Cancelar no descarga nada.** Mismo
+    comportamiento en la ficha técnica (completa o una hoja), la guía .ai y el CSV de la planilla.
+    Vive en `src/descargar.js` (File System Access API; en Firefox/Safari/celular cae a la descarga
+    de siempre). Contrato: `frontend/verificar_descarga_elegir_carpeta.mjs` (corre en el build).
+  - **Descargar todo (N)**: pide **una carpeta** y guarda ahí **cada mesa por separado** (una
+    página = un archivo), con su nombre. Sin la API del navegador, baja de a una como antes.
+    También hay ZIP (`GET /api/trabajos/zip`). Cada archivo lleva el perfil ICC declarado
+    (`OutputIntent`) y los valores CMYK intactos, se baje una, varias o todas.
   - **Aviso naranja**: «Algunas piezas salieron en blanco» — la tizada **sí** se generó; esas piezas
     no tienen diseño (van con su borde y etiqueta). Lista cuáles y por qué.
 - **Aplanado para el RIP:** la hoja se aplana como Illustrator (0 XObjects anidados, 1 perfil ICC,

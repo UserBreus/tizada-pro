@@ -5,6 +5,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
          esArrastre } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
+import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 
 // --- Inline SVG Icons Component for clean, dependency-free icons ---
 // Acepta `style` además de `className`. Si no se pasa ni estilo ni clase,
@@ -2607,7 +2608,7 @@ function DetalleFuente({ f, onVolver }) {
 /** VISOR de la FICHA TÉCNICA, integrado al diseño del sistema: las páginas se muestran como
  *  imágenes en un contenedor con el SCROLL del sistema (no el del visor de PDF del navegador), y
  *  los botones usan los estilos de la app (sin recuadros). Descargar todo / una hoja / imprimir. */
-function VisorFicha({ id, archivo, paginas }) {
+function VisorFicha({ id, archivo, paginas, avisar }) {
   const urlPdf = rutaApi(`/trabajos/${id}/${archivo}`);
   const imgPag = (pi, z = 2) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=${z}`);
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
@@ -2661,6 +2662,7 @@ function VisorFicha({ id, archivo, paginas }) {
     <div className="animate-fade">
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
         <a href={urlPdf} download="Ficha_tecnica.pdf" title="Descargar la ficha técnica completa"
+          onClick={(e) => { e.preventDefault(); descargarArchivo(urlPdf, 'Ficha_tecnica.pdf', { avisar }); }}
           style={{ ...btnMod, background: 'var(--accent)', color: 'var(--bg-primary)' }}>
           <IcoDescarga /> Descargar ficha
         </a>
@@ -2708,6 +2710,7 @@ function VisorFicha({ id, archivo, paginas }) {
                   boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
               {/* botón de descarga de ESA hoja, en el borde superior */}
               <a href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} title={`Descargar sólo la hoja ${i + 1}`}
+                onClick={(e) => { e.preventDefault(); descargarArchivo(urlHoja(i), `Ficha_hoja_${i + 1}.pdf`, { avisar }); }}
                 style={{ position: 'absolute', top: 10, right: 10, width: 34, height: 34, borderRadius: 999,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
                   background: 'rgba(15,20,26,0.72)', backdropFilter: 'blur(3px)', border: '1px solid rgba(255,255,255,0.18)' }}>
@@ -2722,7 +2725,7 @@ function VisorFicha({ id, archivo, paginas }) {
   );
 }
 
-function MesasInfinito({ mesas, job }) {
+function MesasInfinito({ mesas, job, avisar }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   // Nombres editados: PERSISTEN ligados a ESTE pedido (clave = id del trabajo). Un pedido NUEVO
   // tiene otro id → arranca con los nombres por defecto ("Mesa N"). Se guardan en localStorage.
@@ -2806,6 +2809,7 @@ function MesasInfinito({ mesas, job }) {
                       : <span onDoubleClick={() => setEditando(key)} title="Doble-click para renombrar"
                           style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text', userSelect: 'none' }}>{nombre}</span>}
                     <a href={rutaApi(`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`)} download={sanit(nombre) + '.pdf'} title="Descargar esta mesa"
+                      onClick={(e) => { e.preventDefault(); descargarArchivo(rutaApi(`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`), sanit(nombre) + '.pdf', { avisar }); }}
                       onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
                       style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
                       <Icon name="download" style={{ width: 14, height: 14 }} />
@@ -9719,9 +9723,7 @@ export default function App() {
       const blob = await res.blob();
       const cd = res.headers.get('Content-Disposition') || '';
       const m = cd.match(/filename="?([^"]+)"?/);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : 'guia.ai';
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      await descargarBlob(blob, m ? m[1] : 'guia.ai', { avisar: showError });
     } catch { showError('No se pudo generar la guía .ai'); }
   };
   // Descargar la BASE (contornos del molde, sin recuadro/nombre/medidas). Si hay una VARIABLE
@@ -11758,11 +11760,9 @@ export default function App() {
     const nombre = (moldeById(moldesSeleccionados[0])?.nombre || 'planilla')
       .replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, '').trim().replace(/\s+/g, '_') || 'planilla';
     const blob = new Blob(['\ufeff' + lineas.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `planilla_${nombre}.csv`;
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    showMsg(`Planilla exportada: ${filas.length} fila(s) · ${visibles.length} columna(s).`);
+    descargarBlob(blob, `planilla_${nombre}.csv`, { avisar: showError }).then((ok) => {
+      if (ok) showMsg(`Planilla exportada: ${filas.length} fila(s) · ${visibles.length} columna(s).`);
+    });
   };
   // ── CÓMO ESTÁ CONFIGURADA UNA COLUMNA ─────────────────────────────────────────────────────────
   // El tipo y las opciones pueden venir de la columna MISMA o de su REGLA (el preset de
@@ -15875,6 +15875,9 @@ export default function App() {
                             // Descarga CADA MESA por separado (una página = un archivo), con su NOMBRE,
                             // aunque varias sean del mismo PDF/tela. Usa los nombres editados (localStorage).
                             const nombres = (() => { try { return JSON.parse(localStorage.getItem('tizada_mesas_nombres_' + j.resultado.id) || '{}'); } catch (_e) { return {}; } })();
+                            // Se arma la lista y se elige UNA carpeta: todas las mesas van ahí (ver descargar.js).
+                            // Sin la API del navegador, cae a la descarga de a una, como siempre.
+                            const items = [];
                             for (const tl of [...new Set(hojas.map(h => h.tela))]) {
                               let gi = 0;
                               for (const h of hojas.filter(x => x.tela === tl)) {
@@ -15882,14 +15885,12 @@ export default function App() {
                                 for (let pi = 0; pi < pvs.length; pi++) {
                                   const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : ('Mesa ' + (gi + 1) + (tl ? ' - ' + tl : ''));
                                   gi++;
-                                  const a = document.createElement('a');
-                                  a.href = rutaApi(`/api/trabajos/${j.resultado.id}/mesa/${h.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`);
-                                  a.download = sanit(nombre) + '.pdf';
-                                  document.body.appendChild(a); a.click(); a.remove();
-                                  await new Promise(r => setTimeout(r, 500));
+                                  items.push({ url: rutaApi(`/api/trabajos/${j.resultado.id}/mesa/${h.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`), nombre: sanit(nombre) + '.pdf' });
                                 }
                               }
                             }
+                            const n = await descargarVarios(items, { avisar: showError });
+                            if (n > 0) showMsg(`Guardadas ${n} mesa(s) en la carpeta elegida.`);
                           }}>
                           <Icon name="download" style={{ width: 13, height: 13 }} /> Descargar todo ({totalMesas})
                         </button>
@@ -15970,11 +15971,11 @@ export default function App() {
                         </div>
                       )}
                       {vistaFicha && job.resultado?.ficha ? (
-                        <VisorFicha id={job.resultado.id} archivo={job.resultado.ficha} paginas={job.resultado.ficha_paginas || 1} />
+                        <VisorFicha id={job.resultado.id} archivo={job.resultado.ficha} paginas={job.resultado.ficha_paginas || 1} avisar={showError} />
                       ) : (
                         /* ESPACIO INFINITO de las mesas (zoom con rueda, pan con click DERECHO,
                            nombre renombrable, descarga con ese nombre). */
-                        <MesasInfinito mesas={mesas} job={job} />
+                        <MesasInfinito mesas={mesas} job={job} avisar={showError} />
                       )}
                     </div>
                   );

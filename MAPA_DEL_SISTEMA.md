@@ -1482,6 +1482,39 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (427) — 💾 TODA DESCARGA ABRE EL «GUARDAR COMO»; «Descargar todo» pide UNA carpeta.**
+  Pedido del usuario: *«cuando descargás el PDF, que te abra la carpeta de elegir dónde guardarlo»*.
+  Un `<a download>` deja al navegador guardar solo en "Descargas". Chrome y Edge traen la **File
+  System Access API**: la página abre el «Guardar como» nativo (`showSaveFilePicker`) y escribe el
+  archivo donde el usuario eligió; para «Descargar todo» es mejor que 30 diálogos: `showDirectoryPicker`
+  → **una** carpeta y todas las mesas ahí. Verificado que el navegador del pane la expone en
+  `http://127.0.0.1:8050` (`isSecureContext` = true; localhost cuenta como seguro, y el publicado
+  es https).
+  **Módulo nuevo `frontend/src/descargar.js`** — `descargarArchivo(url, nombre, {avisar})`,
+  `descargarBlob(blob, nombre, …)` y `descargarVarios(items, {avisar, progreso})`. Reglas: (1) sin la
+  API (Firefox, Safari, celular) cae al `<a download>` de siempre: la descarga nunca deja de
+  funcionar; (2) **cancelar NO descarga nada** — ni «te lo dejo en Descargas» (AbortError → return
+  sin respaldo); (3) el archivo se pide con `fetch` de la misma origen (viaja la sesión) y se escribe
+  tal cual llega; (4) el diálogo se abre **dentro del gesto del usuario**, antes del `fetch` — si se
+  pidiera el archivo primero, el navegador podría rechazar el diálogo por «no viene de un click»;
+  (5) errores por `avisar` (el aviso de la app), nunca `alert`.
+  **Por dónde pasa TODO:** la mesa suelta y «Descargar todo» del resultado, la ficha técnica
+  (completa y por hoja), la guía .ai y el CSV de la planilla. Las anclas conservan su `href` (clic
+  del medio, «guardar enlace como») y frenan la descarga clásica con `preventDefault`, si no se
+  guardaría dos veces.
+  🔴 **Trampa que cazó el candado de pantalla negra:** el ancla de la mesa vive en `MesasInfinito`,
+  un componente FUERA de `App`, y `showError` no existe ahí → `no-undef` = pantalla en blanco al
+  abrir el resultado. Se le pasa `avisar={showError}` como prop (igual que a `VisorFicha`). Sin el
+  candado (`verificar_tdz.mjs`) esto se habría descubierto con la app rota.
+  **CONTRATO** `frontend/verificar_descarga_elegir_carpeta.mjs` (en el build): cada `download=`
+  lleva `onClick` a `descargarArchivo` + `preventDefault`; ningún `a.download = …` suelto; «todo» va
+  por `descargarVarios`; el módulo reconoce la cancelación y no descarga, tiene respaldo, usa
+  fetch, no usa `alert`. ⚠️ El lector de anclas del contrato cuenta llaves: una regex hasta el primer
+  `>` se corta en el `=>` de los `onClick` (primer intento, falló).
+  **Lo que NO se pudo verificar en vivo:** el diálogo es nativo y está detrás del login del
+  resultado; se verificó que el bundle nuevo carga sin errores y contiene el módulo. Queda para que
+  el usuario lo pruebe con un pedido real.
+
 - **2026-09-11 (426) — 🎨 EL PERFIL VA INCRUSTADO Y DECLARADO POR TODOS LOS CAMINOS DE DESCARGA, y los
   valores no se tocan (1, 2 o todas las mesas).** El usuario precisó el pedido de la 425: *«el perfil
   ICC incrustado y declarado y todo lo del color para que se respete en el RIP, pero los valores
