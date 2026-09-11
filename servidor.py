@@ -8786,6 +8786,18 @@ def generar_multi():
                         except Exception as _eh:
                             print("[!] perfil/color en hoja:", repr(_eh))
                     res["perfil_icc"] = _icc_nom
+                else:
+                    # 🔴 SIN PERFIL DISPONIBLE la hoja sale SIN OutputIntent, y el RIP la ripea con lo
+                    # que tenga a mano. Antes esto pasaba en silencio (sólo el chequeo genérico de
+                    # compatibilidad lo mencionaba entre otras cosas). El usuario pidió (2026-09-11)
+                    # que el perfil vaya incrustado y declarado SIEMPRE: si no se puede, se dice
+                    # con todas las letras. Pasa cuando la máquina no tiene ningún .icc/.icm (ni
+                    # Adobe, ni `perfiles_icc/`, ni `TIZADA_PERFILES`).
+                    res["perfil_icc"] = None
+                    avisos_pedido.append(
+                        "La tizada salió SIN perfil de color declarado (no hay ningún .icc/.icm en esta "
+                        "máquina): el RIP la va a ripear con su perfil por defecto. Instalá los perfiles "
+                        "(carpeta perfiles_icc/ o TIZADA_PERFILES) y volvé a generar.")
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
             _marca("perfil")

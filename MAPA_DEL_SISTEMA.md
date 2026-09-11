@@ -1482,6 +1482,38 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (426) — 🎨 EL PERFIL VA INCRUSTADO Y DECLARADO POR TODOS LOS CAMINOS DE DESCARGA, y los
+  valores no se tocan (1, 2 o todas las mesas).** El usuario precisó el pedido de la 425: *«el perfil
+  ICC incrustado y declarado y todo lo del color para que se respete en el RIP, pero los valores
+  debe mantenerlos aunque se descargue 1 o 2 o todos los PDF»*. Se enumeraron TODOS los caminos y
+  se verificó cada uno contra la hoja real (`20260910-162232-0a15`, 3 mesas):
+  · **Una mesa** (`/api/trabajos/<tid>/mesa/<archivo>?pi=N`) → `_pdf_de_una_pagina`: las 3 mesas
+    sueltas salen con el **mismo ICC byte a byte** (SWOP, 557 168 bytes, `GTS_PDFX`) y con el
+    **mismo multiconjunto de operadores `k`** que su página (304/428/396 usos), sin ningún `rg`,
+    `scn` ni `cs` — DeviceCMYK puro.
+  · **«Descargar todo»** de la pantalla NO es otro camino: recorre las mesas y llama al **mismo
+    endpoint** página por página. El **ZIP** (`/api/trabajos/zip`) escribe las hojas enteras tal
+    cual (nunca perdió el perfil) y la pantalla hoy no lo usa. **El archivo entero**
+    (`/trabajos/<tid>/<archivo>`) es `send_from_directory` del PDF en disco: as-is.
+  · **La ficha técnica (A4) va sin perfil a propósito**: es la hoja del taller, no va al RIP.
+  **De dónde sale el perfil, y la única forma de que falte.** `_icc_para_salida`: el forzado →
+  el que trae el arte (`_detectar_perfil_incrustado`; los artes JUGADOR/GOLERO **no** traen) → el
+  predeterminado del sistema (`USWebCoatedSWOP.icc`) buscado en `PERFILES_DIRS` (`TIZADA_PERFILES`,
+  las carpetas de Adobe, `spool\drivers\color`). En esta máquina lo resuelve **de la carpeta de
+  Adobe (x86)**; `perfiles_icc/` está vacía acá. El paquete **COMPLETO** (`empaquetar.py`) copia los
+  `.icc/.icm` del taller a `perfiles_icc/` y el instalador apunta `TIZADA_PERFILES` (DESPLIEGUE.md
+  §perfiles); el paquete de **actualización no los lleva** — si en el servidor faltan, es de
+  instalación, no de código. 🔴 Si no hay NINGÚN perfil, `_icc_para_salida` devuelve `None` y la
+  hoja salía **sin OutputIntent en silencio** (sólo el chequeo RIP lo nombraba entre otras cosas).
+  Ahora esa rama deja `res["perfil_icc"] = None` y un aviso del pedido que dice «**SIN perfil de
+  color declarado**» con qué hacer. `verificar_rip_compatible` sigue exigiendo `GTS_PDFX` + ICC N=4.
+  **Lo que NO se hace, y por qué:** no se pasa el contenido a `ICCBased`. Para un RIP con su propio
+  perfil de impresión, lo correcto es **DeviceCMYK + OutputIntent** (PDF/X): los números llegan
+  exactos y el perfil sólo declara el destino. Un `ICCBased` invitaría a convertir.
+  **CONTRATO** `verificar_color_nativo_cid.py` §4–5: hoja sintética de 3 páginas con un rojo
+  DISTINTO por página → cada mesa suelta trae su valor y ninguno de otra, el ICC byte a byte y
+  `GTS_PDFX`; sin carpetas de perfiles `_icc_para_salida` da `None` y la generación avisa.
+
 - **2026-09-10 (425) — 🎨 «¿POR QUÉ ME CAMBIÓ LOS COLORES?»: tres respuestas, y dos eran nuestras.**
   Reporte del usuario con una mesa descargada en la mano: *«el original es 0/100/100/0 y el
   archivo exportado fue 0/99,6/100/0,2; ¿declara los colores y el perfil ICC y todo lo que debe

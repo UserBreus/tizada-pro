@@ -167,13 +167,20 @@ else:
     print("    (no está el arte real: se saltea)")
 MP.cerrar_abiertos()
 
-print("\n4 · 🔴 LA MESA SUELTA LLEVA EL PERFIL DE COLOR DE LA HOJA (y los colores no se tocan)")
+print("\n4 · 🔴 CADA MESA SUELTA LLEVA EL PERFIL DE LA HOJA, con SUS valores (1, 2 o todas)")
+# Pedido explícito del usuario (2026-09-11): «los valores debe mantenerlos aunque se descargue 1 o 2
+# o todos los pdf». La pantalla baja TODO por `descargar_mesa` (una mesa, o «Descargar todo» que
+# llama al mismo endpoint página por página), así que este helper es el único camino. Cada página
+# lleva un rojo DISTINTO a propósito: si el helper sacara la página equivocada o perdiera un valor,
+# acá se ve.
 import servidor as S                              # noqa: E402
+ROJOS = [b"0 0.996 1 0.002 k", b"0 1 1 0.314 k", b"0.75 0 0 0 k"]
 hoja = pikepdf.new()
-for _ in range(3):
+for i in range(3):
     hoja.add_blank_page(page_size=(300, 300))
-hoja.pages[1].Contents = hoja.make_stream(b"q 0 0.996 1 0.002 k 10 10 100 100 re f Q")
-icc = hoja.make_stream(b"\x00" * 128)
+    hoja.pages[i].Contents = hoja.make_stream(b"q " + ROJOS[i] + b" 10 10 100 100 re f Q")
+PERFIL = bytes(range(256)) * 4                     # 1 KB con contenido, no ceros: se compara byte a byte
+icc = hoja.make_stream(PERFIL)
 icc.N = 4
 hoja.Root.OutputIntents = pikepdf.Array([hoja.make_indirect(pikepdf.Dictionary({
     "/Type": pikepdf.Name("/OutputIntent"), "/S": pikepdf.Name("/GTS_PDFX"),
@@ -183,18 +190,42 @@ b = io.BytesIO()
 hoja.save(b)
 b.seek(0)
 src = pikepdf.open(b)
-dst = S._pdf_de_una_pagina(src, 1)
-o = io.BytesIO()
-dst.save(o, force_version="1.6")
-o.seek(0)
-out = pikepdf.open(o)
-oi = out.Root.get("/OutputIntents")
-ok(bool(oi), "🔴 la mesa suelta trae OutputIntents (antes: ninguno)")
-ok(oi and str(oi[0].get("/OutputConditionIdentifier")) == "Perfil de prueba", "con el MISMO perfil que la hoja")
-ok(oi and oi[0].DestOutputProfile.read_bytes() == b"\x00" * 128 and int(oi[0].DestOutputProfile.N) == 4,
-   "y los bytes del perfil idénticos, N=4")
-ok(b"0 0.996 1 0.002 k" in out.pages[0].Contents.read_bytes(), "los valores de color de la página no se tocan")
-ok(len(out.pages) == 1 and out.pdf_version == "1.6", "una sola página, PDF 1.6")
+for pi in range(3):
+    dst = S._pdf_de_una_pagina(src, pi)
+    o = io.BytesIO()
+    dst.save(o, force_version="1.6")
+    o.seek(0)
+    out = pikepdf.open(o)
+    oi = out.Root.get("/OutputIntents")
+    ok(bool(oi) and str(oi[0].get("/S")) == "/GTS_PDFX"
+       and str(oi[0].get("/OutputConditionIdentifier")) == "Perfil de prueba",
+       f"🔴 mesa {pi + 1} suelta: OutputIntent GTS_PDFX declarado, el mismo de la hoja")
+    ok(oi and oi[0].DestOutputProfile.read_bytes() == PERFIL and int(oi[0].DestOutputProfile.N) == 4,
+       f"    mesa {pi + 1}: el ICC incrustado es byte a byte el de la hoja (N=4)")
+    cont = out.pages[0].Contents.read_bytes()
+    ok(ROJOS[pi] in cont and all(r not in cont for r in ROJOS if r != ROJOS[pi]),
+       f"    mesa {pi + 1}: trae SU valor de color ({ROJOS[pi].decode()}) y ninguno de otra página")
+    ok(len(out.pages) == 1 and out.pdf_version == "1.6", f"    mesa {pi + 1}: una sola página, PDF 1.6")
+
+print("\n5 · 🔴 SI NO HAY NINGÚN PERFIL EN LA MÁQUINA, SE DICE — nunca sale una hoja sin declarar en silencio")
+# `_icc_para_salida` decide el perfil: forzado → el del arte → el predeterminado del sistema. Los
+# tres salen de archivos .icc/.icm de la máquina (Adobe, Windows, `perfiles_icc/`, TIZADA_PERFILES).
+# Si no hay ninguno, devuelve (None, None, None) y la hoja saldría sin OutputIntent: eso ahora deja
+# `perfil_icc = None` y un aviso que lo dice con todas las letras.
+_dirs, _cache = S.PERFILES_DIRS, S._perfiles_cache
+try:
+    S.PERFILES_DIRS, S._perfiles_cache = [], None
+    ok(S._icc_para_salida([], cat={}) == (None, None, None),
+       "sin carpetas de perfiles, `_icc_para_salida` devuelve (None, None, None) — no inventa uno")
+finally:
+    S.PERFILES_DIRS, S._perfiles_cache = _dirs, _cache
+_src = open(os.path.join(RAIZ, "servidor.py"), encoding="utf-8").read()
+_i = _src.find('res["perfil_icc"] = None')
+ok(_i > 0, "🔴 la generación deja `perfil_icc = None` cuando no hubo perfil")
+ok(_i > 0 and "SIN perfil de color" in _src[_i:_i + 900] and "avisos_pedido.append" in _src[_i:_i + 900],
+   "y agrega un aviso al pedido que dice «SIN perfil de color» (antes: silencio)")
+ok(S._icc_para_salida([], cat={})[0] is not None or not S.PERFILES_DIRS,
+   f"en ESTA máquina hay perfil por defecto: {S._icc_para_salida([], cat={})[1]}")
 
 for f in (ARTE,):
     try:
