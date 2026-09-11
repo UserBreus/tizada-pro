@@ -2733,7 +2733,8 @@ function MesasInfinito({ mesas, job, avisar }) {
   const [nombres, setNombres] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_e) { return {}; }
   });
-  const [editando, setEditando] = useState(null);  // key de la mesa en edición
+  const [editando, setEditando] = useState(null);
+  const [cargadas, setCargadas] = useState({});   // previa de cada mesa: true = dibujada · 'error'  // key de la mesa en edición
   useEffect(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify(nombres)); } catch (_e) { /* storage lleno/bloqueado */ }
   }, [LS_KEY, nombres]);
@@ -2817,8 +2818,24 @@ function MesasInfinito({ mesas, job, avisar }) {
                   </div>
                   {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
                   {pv
-                    ? <img src={rutaApi(`/trabajos/${job.resultado.id}/${pv}`)} alt={nombre} draggable={false}
-                        style={{ width: w, height: h, display: 'block' }} />
+                    ? <div style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
+                        {/* La previa es VECTOR y puede pesar decenas de MB (molde con el diseño adentro):
+                            mientras el navegador la trae y la dibuja, se dice — un blanco parecía «no se ve». */}
+                        <img src={rutaApi(`/trabajos/${job.resultado.id}/${pv}`)} alt={nombre} draggable={false} decoding="async"
+                          onLoad={() => setCargadas(c => (c[key] ? c : { ...c, [key]: true }))}
+                          onError={() => setCargadas(c => ({ ...c, [key]: 'error' }))}
+                          style={{ width: w, height: h, display: 'block' }} />
+                        {!cargadas[key] && (
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.85)' }}>
+                            Dibujando la mesa…
+                          </div>
+                        )}
+                        {cargadas[key] === 'error' && (
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#b00', fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.9)' }}>
+                            No se pudo traer la vista previa (la mesa está bien: descargala)
+                          </div>
+                        )}
+                      </div>
                     : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
                   {/* ABAJO: tamaño ancho × alto */}
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
@@ -14631,43 +14648,49 @@ export default function App() {
                         archivo. Nunca en silencio. Ver changelog 429 del MAPA. */}
                     {!!(_prodB.etiquetas_familias || []).length && (
                       <div data-tour="pieza-b-etiqueta-archivo"
-                        style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '10px 11px', borderRadius: 12,
+                        style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 10px', borderRadius: 10, flexShrink: 0,
                           background: 'rgba(56,139,253,0.10)', border: '1px solid rgba(56,139,253,0.40)' }}>
-                        <span style={{ fontSize: 12, lineHeight: 1.45 }}>
-                          <b>El diseño trae textos con el talle.</b> Los que se repiten en casi todas las
-                          piezas son la etiqueta de corte del diseñador: <b>se ocultan</b> y se usa la del
-                          sistema, así no salen dos. Los demás se dejan.
-                        </span>
-                        {(_prodB.etiquetas_familias || []).map((fam) => (
-                          <label key={fam.clave} title={fam.motivo}
-                            style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11.5, lineHeight: 1.4, cursor: 'pointer' }}>
-                            <input type="checkbox" checked={!!fam.ocultar} style={{ marginTop: 2 }}
-                              onChange={async (e) => {
-                                const ocultar = e.target.checked;
-                                try {
-                                  const r = await fetch('/api/productos/etiqueta_archivo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ id: _id, clave: fam.clave, ocultar }) });
-                                  const d = await r.json().catch(() => ({}));
-                                  if (!r.ok) { showError(d.error || 'No se pudo cambiar la etiqueta del diseño'); return; }
-                                  showMsg(ocultar ? 'Se oculta esa etiqueta del diseño. Rehaciendo las piezas…' : 'Esa etiqueta del diseño se deja. Rehaciendo las piezas…');
-                                  fetchProductos();
-                                } catch (_e) { showError('No se pudo cambiar la etiqueta del diseño'); }
-                              }} />
-                            <span>
-                              <b>{fam.ocultar ? 'Se oculta' : 'Se deja'}</b> «{fam.ejemplo}» · {fam.fuente} · {fam.alto_mm} mm ·
-                              en <b>{fam.piezas} de {fam.de}</b> pieza(s)
-                              {fam.borde_mm != null ? ` · a ${fam.borde_mm} mm del borde` : ''}
-                              <span style={{ display: 'block', color: 'var(--text-muted)' }}>{fam.motivo}</span>
-                            </span>
-                          </label>
-                        ))}
-                        {/* Donde el talle quedó como parte del diseño (la talla tejida de la solapa),
-                            la etiqueta del SISTEMA sobra: se apaga sola en esas piezas, sin pisar lo que
-                            el cliente eligió. Se cambia como siempre: tocando la pieza en el visor. */}
+                        {/* Texto corto + «?» (regla UI): la explicación larga tapaba media barra y
+                            achicaba los campos de abajo (reporte del usuario 2026-09-11). */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>Etiqueta que trae el diseño</span>
+                          <Ayuda ancho={310}>
+                            El diseño trae textos con el talle. Los que se repiten igual en casi todas las piezas son la
+                            etiqueta de corte del diseñador: <b>se ocultan</b> y se usa la del sistema, así la prenda no
+                            sale con dos. Los que están en una sola pieza (la talla tejida) son diseño y se dejan.
+                            Cada renglón es una familia (misma fuente y tamaño): <b>marcado = se oculta</b>. Si el
+                            sistema se equivocó, cambiá el casillero y las piezas se rehacen.
+                            {!!_prodB.etiquetas_auto_off && (<><br /><br />En <b>{_prodB.etiquetas_auto_off} pieza(s)</b> el
+                              talle es parte del diseño: ahí la etiqueta del sistema queda apagada. Si la querés igual,
+                              tocá la pieza en el visor.</>)}
+                          </Ayuda>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 96, overflowY: 'auto' }}>
+                          {(_prodB.etiquetas_familias || []).map((fam) => (
+                            <label key={fam.clave}
+                              title={`${fam.motivo}${fam.borde_mm != null ? ` · a ${fam.borde_mm} mm del borde` : ''}`}
+                              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5, lineHeight: 1.3, cursor: 'pointer', minWidth: 0 }}>
+                              <input type="checkbox" checked={!!fam.ocultar} style={{ margin: 0, flexShrink: 0 }}
+                                onChange={async (e) => {
+                                  const ocultar = e.target.checked;
+                                  try {
+                                    const r = await fetch('/api/productos/etiqueta_archivo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ id: _id, clave: fam.clave, ocultar }) });
+                                    const d = await r.json().catch(() => ({}));
+                                    if (!r.ok) { showError(d.error || 'No se pudo cambiar la etiqueta del diseño'); return; }
+                                    showMsg(ocultar ? 'Se oculta esa etiqueta del diseño. Rehaciendo las piezas…' : 'Esa etiqueta del diseño se deja. Rehaciendo las piezas…');
+                                    fetchProductos();
+                                  } catch (_e) { showError('No se pudo cambiar la etiqueta del diseño'); }
+                                }} />
+                              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <b>{fam.ocultar ? 'Oculta' : 'Se deja'}</b> · {String(fam.fuente || '').replace(/-?(Regular|MT)$/, '')} {fam.alto_mm} mm · {fam.piezas}/{fam.de}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
                         {!!_prodB.etiquetas_auto_off && (
-                          <span style={{ fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-muted)' }}>
-                            En <b>{_prodB.etiquetas_auto_off} pieza(s)</b> el talle es parte del diseño: ahí la
-                            etiqueta del sistema queda <b>apagada</b>. Si la querés igual, tocá la pieza en el visor.
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            Sin etiqueta del sistema en {_prodB.etiquetas_auto_off} pieza(s): el talle ya es diseño.
                           </span>
                         )}
                       </div>

@@ -1482,6 +1482,49 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (433) — 🐢 «LAS MESAS TARDAN O NO SE VEN» NO ERA LA PC NI EL DIBUJO: era el pool del
+  desplegado, que se abandonaba por UNA mesa y dejaba al servidor 3 minutos en serie con el GIL.
+  + el panel «Piezas y etiqueta» compacto.** Reporte del usuario: *«el paso tizada le cuesta
+  mostrar las mesas, algunas se ven y otras no, o demora mucho; chequeá si es esta PC o el
+  sistema»*.
+  **MEDIDO, no supuesto.** (a) La máquina: i7-9750H 6 núcleos, 32 GB (17 libres), SSD, carga
+  14 % — sobra. (b) El dibujo: la previa de la mesa 1 de Dry Polo es un SVG de **40 MB** (27
+  símbolos con 3 313 paths cuya `d=` suma 39,9 MB; es el diseño vectorial adentro del molde,
+  camino B) contra 2,4 MB la de Deportivo Pro. Servido desde un estático de prueba, **Chrome lo
+  carga en 0,9 s y lo rasteriza en 0,26–0,39 s** (medido con `Image.onload` + `drawImage` a 440 y
+  880 px; el de 2,4 MB: 0,12 s / 0,07 s). ⚠️ `requestAnimationFrame` en una pestaña de fondo NO
+  mide pintado: dio 26 s para el chico y 47 ms para el grande — era el tiempo hasta que la
+  pestaña pasó al frente. (c) **El registro** del pedido de las 13:06: `[camino B] el desplegado
+  en paralelo falló (PermissionError: Acceso denegado: m3.pdf.tmp -> m3.pdf)` a las 13:06:38 —
+  el motor tenía abierta `m3.pdf` del molde efímero (armaba las piezas, 15 s, y la ficha) mientras
+  el hilo de fondo rehacía las páginas (`_V_PAGINAS` 6 obliga a rehacerlas una vez); el worker
+  esperaba **7 s** (8 intentos) y se rendía; el `except` envolvía al **pool entero** → las mesas
+  que faltaban se armaron **en serie dentro del servidor** (`páginas por talle listas (376s)`),
+  con el GIL tomado por `pikepdf.save` → las previas pedidas a las 13:06:44 salieron a
+  cuentagotas (g0 a los 0 s, g1 **9 s después**) y la pantalla parecía rota. Es la misma falla
+  de la 2026-09-07 (`_reemplazar`) con el lector equivocado: no un JSON de décimas, sino un
+  render de segundos.
+  **FIX (`piezas_con_diseno.py`).** (1) `_reemplazar`: 8 → **40 intentos** (0,25 → 1 s; ~38 s),
+  lo que dura un render. (2) `_desplegar_molde_sin_candado`: **una mesa que falla no tira el
+  pool** — cada futuro se recoge por separado, la que falla se **reintenta una vez en el pool**
+  y, si insiste, **sólo ésa** va en serie al final; el `except` de afuera queda para «el pool no
+  arrancó». Ganchos `_POOL_FACTORY` / `_MESA_EN_SERIE` para probarlo sin procesos. **CONTRATO**
+  nuevo `verificar_desplegado_pool.py` (pool de mentira): falla una vez → 9/9 del pool y nada
+  en serie; falla dos veces → 8 del pool + la 3 sola en serie; sin pool → todo en serie; la
+  espera de `_reemplazar` ≥ 30 s. Verde; `verificar_desplegado.py` (pool real) y
+  `verificar_etiqueta_del_archivo.py` siguen verdes. Server reiniciado 13:28:22.
+  **FRONT.** (3) La previa de cada mesa muestra **«Dibujando la mesa…»** hasta el `onLoad` del
+  `<img>` (y un aviso si no se pudo traer): un blanco de 40 MB en camino se leía como «no se
+  ve». Sigue siendo el MISMO vector, sin miniaturas ni PNG. (4) **Panel «Piezas y etiqueta»
+  compacto** (reporte: *«que este texto no contamine toda la barra ni achique campos»*): título
+  «Etiqueta que trae el diseño» + **«?»** con la explicación larga (regla texto corto + «?»);
+  cada familia en UN renglón («Oculta · Arial-Bold 5.3 mm · 8/9», el motivo en el `title`),
+  lista con tope de alto y `flexShrink: 0` para no comerse los campos de abajo. Lo que decía
+  «Se oculta «0»» no era un bug: los talles de ese molde son números y «0» es el texto del
+  primer talle; igual se sacó, no aportaba.
+  📌 LECCIÓN: «tarda» se mide en tres lugares antes de opinar — la máquina, el archivo y el
+  registro del server. Acá los dos primeros estaban bien y el tercero tenía la línea exacta.
+  ⚠️ No visto en pantalla (sesión); medido en un estático de prueba con los SVG reales.
 - **2026-09-11 (432) — 📏 LA MESA DE TRABAJO ES LA TELA MENOS UN MARGEN (3 cm, configurable); el
   valor a mano de una tela manda.** Pedido del usuario: *«que la mesa de trabajo tenga siempre 3 cm
   menos que el ancho que tiene la tela, a no ser que le cambien a mano el valor a alguna o algunas

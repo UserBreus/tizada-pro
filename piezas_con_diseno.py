@@ -2009,11 +2009,16 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     return conts
 
 
-def _reemplazar(origen, destino, intentos=8):
+def _reemplazar(origen, destino, intentos=40):
     """`os.replace` con reintento. En Windows falla con «Acceso denegado» si OTRO proceso tiene
     el destino abierto en ese instante (el servidor leyendo `m{mesa}.json` mientras un worker lo
     reescribe): visto 2026-09-07 — el pool «fallaba» por eso y las 9 mesas seguían EN SERIE, tres
-    veces más lento, sin que nadie se enterara. Esperar unas décimas y volver a probar alcanza."""
+    veces más lento, sin que nadie se enterara.
+    🔴 Y el que lee puede tardar lo que dura un RENDER, no unas décimas (2026-09-11): el motor
+    tiene abierta `m3.pdf` mientras arma las piezas (15 s) y la ficha; con 8 intentos (7 s) el
+    worker se rendía, el pool se abandonaba y las mesas restantes se armaban en serie DENTRO del
+    servidor, 3 minutos con el GIL tomado — justo cuando el paso Tizada pedía las previas.
+    Ahora espera hasta ~40 s (0,25 s → 1 s por intento)."""
     import time
     for i in range(intentos):
         try:
@@ -2022,7 +2027,7 @@ def _reemplazar(origen, destino, intentos=8):
         except PermissionError:
             if i == intentos - 1:
                 raise
-            time.sleep(0.25 * (i + 1))
+            time.sleep(min(1.0, 0.25 * (i + 1)))
 
 
 def _json_mismo_archivo(fj, sello, talles):
@@ -2107,6 +2112,17 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
         _cand.release()
 
 
+def _pool_por_defecto(max_workers):
+    from concurrent.futures import ProcessPoolExecutor
+    return ProcessPoolExecutor(max_workers=max_workers)
+
+
+# Ganchos para el contrato (`verificar_desplegado_pool.py`): un pool de mentira que hace fallar una
+# mesa, y contar qué se armó en serie. En producción son el ProcessPool y `desplegar_mesa`.
+_POOL_FACTORY = _pool_por_defecto
+_MESA_EN_SERIE = None          # se fija abajo, después de definir `desplegar_mesa`
+
+
 def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos, paginas, n, mesas, por_mesa):
     hecho = 0
 
@@ -2120,19 +2136,38 @@ def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos
 
     pendientes = list(mesas)
     if procesos and procesos > 1 and n > 1:
+        # 🔴 UNA MESA QUE FALLA NO TIRA EL POOL. Antes el `except` envolvía al pool entero: la
+        # primera mesa que reventaba (un «Acceso denegado» porque el motor tenía abierta su
+        # página) abandonaba el pool y TODAS las que faltaban se armaban en serie dentro del
+        # servidor, con el GIL tomado — medido 2026-09-11: 3 minutos de servidor a los tumbos
+        # justo en el paso Tizada. Ahora cada mesa se recoge por separado: la que falla se
+        # reintenta UNA vez en el pool y, si vuelve a fallar, sólo ESA va en serie al final.
         try:
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            with ProcessPoolExecutor(max_workers=min(n, procesos)) as ex:
+            from concurrent.futures import as_completed
+            with _POOL_FACTORY(max_workers=min(n, procesos)) as ex:
                 futs = {ex.submit(_desplegar_mesa_worker, (path_molde, m, list(talles), contornos, paginas)): m for m in mesas}
-                for f in as_completed(futs):
-                    mesa, conts = f.result()
-                    _listo(mesa, conts)
-                    pendientes.remove(mesa)
+                reintentadas = set()
+                while futs:
+                    for f in as_completed(list(futs)):
+                        mesa = futs.pop(f)
+                        try:
+                            mesa, conts = f.result()
+                        except Exception as e:
+                            if mesa not in reintentadas:
+                                reintentadas.add(mesa)
+                                print(f"[camino B] la mesa {mesa} falló en el pool ({type(e).__name__}: {e}); la reintento")
+                                futs[ex.submit(_desplegar_mesa_worker, (path_molde, mesa, list(talles), contornos, paginas))] = mesa
+                            else:
+                                print(f"[camino B] la mesa {mesa} falló dos veces en el pool ({type(e).__name__}: {e}); "
+                                      f"va en serie al final")
+                            continue
+                        _listo(mesa, conts)
+                        pendientes.remove(mesa)
         except Exception as e:
-            print(f"[camino B] el desplegado en paralelo falló ({type(e).__name__}: {e}); "
+            print(f"[camino B] el pool del desplegado no arrancó ({type(e).__name__}: {e}); "
                   f"sigo en serie con {len(pendientes)} mesa(s)")
     for mesa in pendientes:
-        _listo(mesa, desplegar_mesa(path_molde, mesa, list(talles), contornos=contornos, paginas=paginas))
+        _listo(mesa, _MESA_EN_SERIE(path_molde, mesa, list(talles), contornos=contornos, paginas=paginas))
     return por_mesa
 
 
@@ -2256,3 +2291,6 @@ def ruta_desplegada(path_molde, mesa, talle, armar=True):
     if d is None or d["pdf"] is None or talle not in d["orden"]:
         return None
     return d["pdf"], d["orden"].index(talle)
+
+
+_MESA_EN_SERIE = desplegar_mesa   # el armado en serie de verdad (el contrato lo reemplaza para contar)
