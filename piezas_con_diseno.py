@@ -2112,6 +2112,18 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
         _cand.release()
 
 
+def _procesos_por_defecto():
+    """Cuántos procesos para armar páginas cuando el que llama no lo dice (el motor, una página
+    que falta). 🔴 `TIZADA_PROCESOS` MANDA: es la variable que acota la memoria del servidor
+    publicado (cada worker abre el molde entero: con un .ai de 123 MB pesa ~1 GB). Sin ella,
+    los núcleos de la máquina menos uno, como siempre."""
+    try:
+        n = int(os.environ.get("TIZADA_PROCESOS") or 0)
+    except ValueError:
+        n = 0
+    return max(1, n) if n else max(2, (os.cpu_count() or 2) - 1)
+
+
 def _pool_por_defecto(max_workers):
     from concurrent.futures import ProcessPoolExecutor
     return ProcessPoolExecutor(max_workers=max_workers)
@@ -2216,7 +2228,7 @@ def personalizacion_con_diseno(path_molde, armar=True, procesos=None):
     if armar and talles and not desplegado_listo(path_molde):
         # una sola pasada por todas las mesas, una mesa por proceso (las que ya están se saltan
         # por sello adentro de `desplegar_mesa`)
-        desplegar_molde(path_molde, talles, procesos=procesos or max(2, (os.cpu_count() or 2) - 1),
+        desplegar_molde(path_molde, talles, procesos=procesos or _procesos_por_defecto(),
                         contornos=False, paginas=True)
     pers = {}
     for mesa in range(1, n + 1):
@@ -2285,7 +2297,7 @@ def ruta_desplegada(path_molde, mesa, talle, armar=True):
             doc.close()
         if not talles:
             return None
-        desplegar_molde(path_molde, talles, procesos=max(2, (os.cpu_count() or 2) - 1),
+        desplegar_molde(path_molde, talles, procesos=_procesos_por_defecto(),
                         contornos=(d is None), paginas=True)
         d = _leer_desplegado(path_molde, mesa)
     if d is None or d["pdf"] is None or talle not in d["orden"]:

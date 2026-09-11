@@ -1482,6 +1482,19 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (434) — 🚀 PREPARANDO LA PUBLICACIÓN: los pools del camino B respetan `TIZADA_PROCESOS`.**
+  Al revisar qué haría falta a mano en el servidor (78 commits desde el último paquete, que era de
+  `e6a505a`, ANTERIOR a la fusión del camino B), apareció esto: `personalizacion_con_diseno` y
+  `ruta_desplegada` armaban su pool con `max(2, núcleos − 1)` e ignoraban `TIZADA_PROCESOS`, la
+  variable que acota la memoria del publicado (changelog 26: cada proceso de render ~200 MB; un
+  worker del desplegado con un .ai de 123 MB llega a ~1 GB). Ahora `_procesos_por_defecto()` lee
+  la variable primero. Lo que el servidor hace SOLO al arrancar: `db/schema.sql` idempotente
+  (`_poner_base_al_dia_al_arrancar`: `trabajo.*`, `reserva`, `config.version`,
+  `pieza_talle.idx_mesa`, `config_molde`, índices de FK) y la sincronización de permisos. Lo que
+  NO viaja y hay que mirar a mano: la variable `TIZADA_PROCESOS` (memoria), la key de telas
+  (`config_externo.json` sí va en el zip), los perfiles ICC (`TIZADA_PERFILES`), y la primera
+  vez cada molde con diseño rehace sus páginas (`_V_PAGINAS` 6). Sin dependencias nuevas
+  (`requirements.txt` no cambió). El VERSION lo escribe el usuario.
 - **2026-09-11 (433) — 🐢 «LAS MESAS TARDAN O NO SE VEN» NO ERA LA PC NI EL DIBUJO: era el pool del
   desplegado, que se abandonaba por UNA mesa y dejaba al servidor 3 minutos en serie con el GIL.
   + el panel «Piezas y etiqueta» compacto.** Reporte del usuario: *«el paso tizada le cuesta
