@@ -14513,6 +14513,21 @@ export default function App() {
                       <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
                       <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Piezas y etiqueta</span>
                     </div>
+                    {/* EL MOLDE YA TRAÍA LA ETIQUETA DIBUJADA. El sistema la oculta (si no, la
+                        prenda sale con dos: la del archivo y la que estampa la tizada), pero NUNCA
+                        en silencio: se avisa acá, que es donde se ubica la etiqueta. Ver
+                        `piezas_con_diseno.etiqueta_del_archivo` y el changelog 428 del MAPA. */}
+                    {!!_prodB.etiquetas_en_archivo && (
+                      <div style={{ display: 'flex', gap: 8, padding: '10px 11px', borderRadius: 12,
+                        background: 'rgba(56,139,253,0.10)', border: '1px solid rgba(56,139,253,0.40)' }}>
+                        <Icon name="info" style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: 'var(--accent)' }} />
+                        <span style={{ fontSize: 12, lineHeight: 1.45 }}>
+                          Este molde ya traía <b>la etiqueta del talle dibujada</b> en
+                          {' '}<b>{_prodB.etiquetas_en_archivo} pieza(s)</b>. Se oculta y se usa la del
+                          sistema, así no salen dos. El resto del diseño no se toca.
+                        </span>
+                      </div>
+                    )}
                     {/* ESTE MOLDE YA LO CONFIGURASTE. El aviso va ACÁ —donde se está trabajando el
                         molde— y no sólo en Moldería (pedido del usuario 2026-09-09). Desde acá se
                         aplica de una, o se abre la lista para elegir otra. Nunca se aplica sola. */}

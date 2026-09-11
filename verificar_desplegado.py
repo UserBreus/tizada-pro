@@ -92,7 +92,8 @@ def main():
             pg = src.pages[MESA - 1]
             MR.aislar_capa(src, pg, tl, podar=True)
             _ins = list(pikepdf.parse_content_stream(pg))
-            _ins, _ph = PD.quitar_placeholders(_ins, pg, _j["marco"], _j["U"])
+            _ins, _ph, _ = PD.quitar_placeholders(_ins, pg, _j["marco"], _j["U"],
+                                                 tl, [PD._cont_de_json(c) for c in _j["talles"].get(tl) or []])
             # y sin la línea de corte del archivo (changelog 394)
             _ins, _ = PD.quitar_linea_de_corte(_ins, pg, [PD._cont_de_json(c) for c in _j["talles"].get(tl) or []], _j["marco"], _j["U"])
             a = pikepdf.unparse_content_stream(_ins)
@@ -124,7 +125,8 @@ def main():
         MR.sanear_oc(src, pg)
         # la página de control también sin «00»/«NOMBRE» (changelog 387: el desplegado los saca)
         _ins2 = list(pikepdf.parse_content_stream(pg))
-        _ins2, _ = PD.quitar_placeholders(_ins2, pg, _j["marco"], _j["U"])
+        _ins2, _, _ = PD.quitar_placeholders(_ins2, pg, _j["marco"], _j["U"],
+                                            TALLE, [PD._cont_de_json(c) for c in _j["talles"][TALLE]])
         # …y sin la LÍNEA DE CORTE del archivo (changelog 394: el desplegado la saca y la base la
         # vuelve a trazar con la configuración del borde)
         _ins2, _ = PD.quitar_linea_de_corte(_ins2, pg, [PD._cont_de_json(c) for c in _j["talles"][TALLE]], _j["marco"], _j["U"])

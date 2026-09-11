@@ -10080,6 +10080,16 @@ def get_productos():
         _res |= {MP._norm_generico(str(_k).split("§")[-1]) for _k in (_etqp.get("piezas_off") or [])}
         n_etq_total = len(_gen)
         n_etq_puestas = len(_gen & _res)
+        # ¿el molde traía la etiqueta de corte ya dibujada? (sólo camino B; barato: lee los JSON
+        # del desplegado, no abre el .ai)
+        n_etq_archivo = 0
+        try:
+            import piezas_con_diseno as _PD
+            _plb = _ruta_entrada("plantilla.ai", pid)
+            if _PD.es_camino_b(_plb):
+                n_etq_archivo = _PD.piezas_con_etiqueta_propia(_plb)[0]
+        except Exception:
+            pass
         val_path = os.path.join(DATOS, "productos", pid, "validacion_arte.json")
         has_arte = False
         if os.path.exists(val_path):
@@ -10128,6 +10138,10 @@ def get_productos():
             # pasos del pedido para el paso «Ubicar etiqueta» del molde con diseño.
             "etiquetas_ubicadas": n_etq_puestas,
             "etiquetas_total": n_etq_total,
+            # Piezas que traían SU PROPIA etiqueta de corte dibujada en el archivo. El sistema la
+            # oculta (si no, la prenda sale con dos), pero nunca en silencio: la pantalla lo dice
+            # en el paso de la etiqueta. 0 = el molde no traía ninguna, o todavía no se desplegó.
+            "etiquetas_en_archivo": n_etq_archivo,
             # Los talles que tiene ESTE molde (la planilla junta los de todos los del pedido).
             "talles": _talles_p,
             # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla

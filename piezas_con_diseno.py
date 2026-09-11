@@ -899,7 +899,9 @@ _CONT_CACHE = {}          # {(carpeta, mesa): índice ya leído}  — no releer 
 # la regla). 2 = el recorte con el diseño adentro, no el mayor del grupo (2026-09-07).
 _V_CONTORNOS = 3          # 3 = la línea de corte del archivo es el contorno (2026-09-07)
 # Versión de la etapa de PÁGINAS. 3 = la línea de corte se saca del dibujo (`quitar_linea_de_corte`).
-_V_PAGINAS = 3
+# 4 = también se saca la ETIQUETA DE CORTE que ya trae el diseño (`etiqueta_del_archivo`). Sin
+# subir el número, un molde ya desplegado seguiría con su etiqueta vieja adentro del PDF por talle.
+_V_PAGINAS = 4
 # Lo que se copia de la página original a la desplegada. Lista CERRADA a propósito: `/PieceInfo`
 # (los datos privados de Illustrator), `/Metadata`, `/Annots` o `/Thumb` no dibujan nada y pesan.
 _CLAVES_PAGINA = ("/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate",
@@ -1132,9 +1134,77 @@ def _ancho_texto(fuente, b, dec):
         return None
 
 
-def quitar_placeholders(salida, page, marco, U):
-    """Saca de `salida` (instrucciones de UN talle) los textos «00»/«NOMBRE» y devuelve
-    `(salida_sin_ellos, {campo: placeholder})`.
+# ─────────────────────────────────────────────────────────────────
+# LA ETIQUETA QUE YA TRAE EL DISEÑO
+# ─────────────────────────────────────────────────────────────────
+# Un molde con el diseño adentro puede venir con la ETIQUETA DE CORTE ya puesta: un texto chico con
+# el TALLE, pegado al borde de cada pieza. Si se deja, la prenda sale con DOS —la del archivo y la
+# que estampa el sistema— una encima de la otra o en distinto lugar.
+#
+# 🔴 EL TEXTO SOLO NO ALCANZA PARA RECONOCERLA, y esto es lo que hace difícil el problema. En el
+# molde del usuario (`CAMISETA JUGADOR.ai`, 2026-09-11) hay DOS textos que dicen «M» en el mismo
+# talle:
+#   · la etiqueta de corte  → 5,3 mm, Arial-Bold, a 1,2 mm del borde inferior de la pieza;
+#   · la TALLA TEJIDA       → 12 mm, Gunplay, en el CENTRO de la piecita «TALLE» (52 %, 52 %).
+# La segunda es DISEÑO: es la etiqueta que se cose en la prenda. Borrarla dejaría la prenda sin su
+# talla, y no fallaría nada — se descubre con la tela cortada.
+#
+# Por eso se piden las TRES condiciones juntas. La que separa de verdad los dos casos es la
+# distancia al borde: 1,2 mm contra 26 mm.
+_ETQ_ALTO_MAX_MM = 10.0     # la de corte mide 5,3; la talla tejida, 12
+_ETQ_BORDE_MAX_MM = 10.0    # la de corte está a 1,2-2,0; la talla tejida, a 26
+
+
+def _norm_talle(s):
+    return " ".join(str(s or "").strip().upper().replace("-", " ").split())
+
+
+def etiqueta_del_archivo(txt, talle, dx, dy, alto_mm, contornos):
+    """¿Este texto es la ETIQUETA DE CORTE que ya trae el diseño? Devuelve `(idx_pieza, borde_mm)`
+    o `None`.
+
+    Las tres condiciones, y por qué cada una:
+      1. **dice exactamente el talle de SU capa** — no «contiene», no «se parece»: una pieza que
+         dijera «TALLE M» o «M-Frente» es otra cosa y no se toca;
+      2. **es chica** (≤ 10 mm) — una marca de corte no es un titular;
+      3. **está pegada al borde de su pieza** (≤ 10 mm) — es lo que la distingue de un texto del
+         diseño, que va donde el diseño lo puso.
+    Pura y sin estado: se puede probar sola (`verificar_etiqueta_del_archivo.py`).
+    """
+    if not talle or _norm_talle(txt) != _norm_talle(talle):
+        return None
+    if alto_mm > _ETQ_ALTO_MAX_MM:
+        return None
+    CM10 = CM / 10.0                      # puntos por milímetro
+    # ⚠️ Se mide la distancia al BORDE de la pieza, esté el texto adentro o apenas afuera. Exigir
+    # que cayera DENTRO dejaba escapar la etiqueta de las MANGAS, que en este molde queda 1 mm por
+    # DEBAJO del contorno: el diseñador alinea la base del texto con el ruedo, así que los glifos
+    # quedan medio adentro y medio afuera. Medido en el archivo real (2026-09-11).
+    mejor = None
+    for i, c in enumerate(contornos or []):
+        try:
+            x0, y0, x1, y1 = c["bbox_mu"]
+        except Exception:
+            continue
+        fx = max(x0 - dx, 0.0, dx - x1)    # 0 si está dentro en X
+        fy = max(y0 - dy, 0.0, dy - y1)
+        if fx or fy:
+            borde = (fx * fx + fy * fy) ** 0.5          # afuera: distancia a la caja
+        else:
+            borde = min(dx - x0, x1 - dx, dy - y0, y1 - dy)   # adentro: al borde más cercano
+        borde /= CM10
+        if borde <= _ETQ_BORDE_MAX_MM and (mejor is None or borde < mejor[1]):
+            mejor = (i, borde)
+    return (mejor[0], round(mejor[1], 2)) if mejor else None
+
+
+def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None):
+    """Saca de `salida` (instrucciones de UN talle) los textos «00»/«NOMBRE» y —si el diseño la
+    trae— la ETIQUETA DE CORTE del talle. Devuelve
+    `(salida_sin_ellos, {campo: placeholder}, {idx_pieza: etiqueta})`.
+
+    `talle` y `contornos` son los de ESTE talle; sin ellos no se busca la etiqueta (queda todo
+    como antes). Ver `etiqueta_del_archivo` para la regla y por qué hacen falta tres condiciones.
 
     El placeholder tiene la forma que espera `motor_pedido.generar_pieza` (la misma de
     `extraer_personalizacion`): `cx`/`baseline_y` en coordenadas de dispositivo de la mesa (las
@@ -1183,6 +1253,7 @@ def quitar_placeholders(salida, page, marco, U):
     tm = tlm = None
     tl, tc, tw, th = 0.0, 0.0, 0.0, 1.0
     encontrados = {}                      # campo → placeholder
+    etiquetas = {}                        # idx_pieza → la etiqueta de corte que traía el archivo
     quitar = set()
     for i, inst in enumerate(salida):
         op = str(inst.operator)
@@ -1250,12 +1321,26 @@ def quitar_placeholders(salida, page, marco, U):
                 dec = _decodificador(f) if f is not None else None
                 txt = _texto_mostrado(op, ops, dec)
                 campo = _PLACEHOLDERS.get(txt.strip().upper().replace(" ", ""))
-                if campo is None or tm is None:
+                if tm is None:
                     continue
                 # posición y tamaño en el espacio de usuario → dispositivo
                 m = _mul(_mul([tfs, 0, 0, tfs, 0, 0], tm), ctm)
                 esc = (m[0] ** 2 + m[1] ** 2) ** 0.5           # tamaño del texto en puntos (crudos)
                 ox, oy = m[4], m[5]
+                if campo is None:
+                    # ¿es la ETIQUETA DE CORTE que ya trae el diseño? Se mide con la MISMA
+                    # posición que los placeholders —una sola matemática— para que no puedan
+                    # discrepar. Ver `etiqueta_del_archivo`.
+                    _dx, _dy = _dev(ox, oy)
+                    _hit = etiqueta_del_archivo(txt, talle, _dx, _dy, esc * U / (CM / 10.0), contornos)
+                    if _hit is not None:
+                        _ip, _borde = _hit
+                        etiquetas.setdefault(_ip, {"texto": txt.strip(), "x": round(_dx, 2),
+                                                   "y": round(_dy, 2), "alto_mm": round(esc * U / (CM / 10.0), 2),
+                                                   "borde_mm": _borde, "copias": 0})
+                        etiquetas[_ip]["copias"] += 1
+                        quitar.add(i)
+                    continue
                 if op in ("Tj", "'"):
                     b = bytes(ops[-1])
                 elif op == '"':
@@ -1291,8 +1376,8 @@ def quitar_placeholders(salida, page, marco, U):
         except Exception:
             continue
     if not quitar:
-        return salida, {}
-    return [inst for i, inst in enumerate(salida) if i not in quitar], encontrados
+        return salida, {}, {}
+    return [inst for i, inst in enumerate(salida) if i not in quitar], encontrados, etiquetas
 
 
 def quitar_linea_de_corte(salida, page, contornos, marco, U):
@@ -1501,15 +1586,20 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         out = pikepdf.Pdf.new()
         placeholders = {}
         lineas = {}
+        etq_archivo = {}      # talle → {idx_pieza: la etiqueta de corte que traía el diseño}
         for talle in talles:
             obj = {MR._norm_capa(talle)}
             fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
             saltar = MR._saltar_bloques(ops, oc, fn, bloques)
             salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
-            # «00» y «NOMBRE»: se leen y se SACAN del dibujo de este talle (ver arriba)
-            salida, ph = quitar_placeholders(salida, pag, marco, U)
+            # «00» y «NOMBRE» se leen y se SACAN del dibujo de este talle (ver arriba); y si el
+            # diseño ya trae la ETIQUETA DE CORTE del talle, también se saca — si no, la prenda
+            # sale con dos (la del archivo y la del sistema).
+            salida, ph, etq = quitar_placeholders(salida, pag, marco, U, talle, conts.get(talle) or [])
             if ph:
                 placeholders[talle] = ph
+            if etq:
+                etq_archivo[talle] = {str(k): v for k, v in etq.items()}
             # la línea de corte del archivo se saca del dibujo: la base la vuelve a trazar con
             # la configuración del borde (o tal cual, si el borde está apagado)
             salida, lc = quitar_linea_de_corte(salida, pag, conts.get(talle) or [], marco, U)
@@ -1525,7 +1615,8 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
 
     _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
                     "v": _V_CONTORNOS, "vp": _V_PAGINAS, "marco": marco, "U": U,
-                    "placeholders": placeholders, "linea_corte": lineas})
+                    "placeholders": placeholders, "linea_corte": lineas,
+                    "etiqueta_archivo": etq_archivo})
     return conts
 
 
@@ -1716,6 +1807,35 @@ def personalizacion_con_diseno(path_molde, armar=True, procesos=None):
             base = c["por_talle"][_ts[len(_ts) // 2]]
             pers.setdefault(str(mesa), {})[campo] = {**base, "por_talle": c["por_talle"]}
     return pers
+
+
+def piezas_con_etiqueta_propia(path_molde):
+    """Cuántas PIEZAS del molde traían su propia etiqueta de corte (y en qué mesas).
+
+    Lo que dejó escrito el desplegado (`m{mesa}.json → etiqueta_archivo`). NO abre el molde ni
+    despliega nada: si la etapa de páginas todavía no corrió, devuelve `(0, {})` — el aviso
+    aparece cuando el dato existe, no antes. Se cuenta por PIEZA (mesa + índice), no por talle:
+    la misma pieza trae su etiqueta en los 20 talles y eso es UNA pieza etiquetada, no veinte.
+    """
+    import json
+    carpeta = _carpeta_desplegado(path_molde)
+    if not os.path.isdir(carpeta):
+        return 0, {}
+    por_mesa, total = {}, set()
+    for fn in os.listdir(carpeta):
+        if not (fn.startswith("m") and fn.endswith(".json")):
+            continue
+        try:
+            mesa = int(fn[1:-5])
+            with open(os.path.join(carpeta, fn), encoding="utf-8") as fh:
+                d = json.load(fh)
+        except Exception:
+            continue
+        idxs = {str(i) for t in (d.get("etiqueta_archivo") or {}).values() for i in t}
+        if idxs:
+            por_mesa[mesa] = len(idxs)
+            total |= {(mesa, i) for i in idxs}
+    return len(total), por_mesa
 
 
 def personalizacion_guardada(path_molde, armar=True):

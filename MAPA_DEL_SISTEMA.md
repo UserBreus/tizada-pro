@@ -1482,6 +1482,50 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (428) — 🏷️ EL MOLDE PUEDE TRAER LA ETIQUETA YA PUESTA: SE DETECTA Y SE OCULTA.**
+  Pedido del usuario: *«que el sistema lo detecte y tenga una manera de que oculte automáticamente
+  la etiqueta que viene en el diseño sin que nos afecte a otros textos que vengan»*.
+
+  **LO QUE TRAE EL ARCHIVO** (medido en `CAMISETA JUGADOR.ai`, 9 mesas × 20 talles). Tres familias
+  de texto, y sólo UNA es la etiqueta:
+  · **etiqueta de corte** — Arial-Bold **5,3 mm**, dice **exactamente su talle** (20/20), pegada al
+    borde de la pieza (**1,2 mm** adentro; en las mangas **1 mm AFUERA**), centrada a lo ancho.
+    Está en 8 de las 9 mesas y **se imprime** (cae dentro del recorte);
+  · **rótulo de la mesa** — Tahoma-Bold ~30 mm con el NOMBRE de la pieza (ESPALDA, FRENTE, MANGA
+    DEREHA *(sic)*, CUELLO DER/IZQ, TALLE), **fuera** del contorno → el recorte se lo lleva;
+  · **la TALLA TEJIDA** — en la piecita «TALLE», **12 mm** en el CENTRO (a 26 mm del borde). Es la
+    que se cose en la prenda.
+
+  🔴 **POR QUÉ EL TEXTO SOLO NO ALCANZA:** la talla tejida **también dice «M»**. Una regla «si dice
+  el talle, sacalo» dejaría la prenda **sin su talla**, sin fallar nada — se descubre con la tela
+  cortada. Por eso van **tres condiciones juntas**, y la que separa de verdad es la distancia al
+  borde (1,2 mm contra 26): (1) dice **exactamente** el talle de SU capa; (2) mide **≤ 10 mm**;
+  (3) está a **≤ 10 mm del borde** de su pieza.
+
+  **DÓNDE VIVE.** `piezas_con_diseno.etiqueta_del_archivo(...)` — pura y testeable sola — llamada
+  desde `quitar_placeholders`, que es **el mismo recorrido** que ya saca «00»/«NOMBRE»: una sola
+  matemática de posición, imposible que discrepen. Lo sacado se guarda en `m{mesa}.json →
+  etiqueta_archivo` y `piezas_con_etiqueta_propia()` lo cuenta para la pantalla.
+  ⚠️ **`_V_PAGINAS` 3 → 4**: un molde ya desplegado tiene su PDF por talle escrito CON la etiqueta
+  adentro; sin subir la versión, el arreglo no llegaba nunca.
+  **NUNCA EN SILENCIO:** `/api/productos` devuelve `etiquetas_en_archivo` y el paso «Piezas y
+  etiqueta» lo avisa («este molde ya traía la etiqueta del talle en N piezas: se oculta y se usa la
+  del sistema»).
+
+  🔴 **Error que cometí y corrigió la medición:** la primera regla exigía que el texto cayera
+  **DENTRO** del contorno. Contra el archivo real se comió 2 de las 9 mesas: en las MANGAS la
+  etiqueta queda **1 mm por debajo** del contorno (el diseñador alinea la base del texto con el
+  ruedo, así que los glifos quedan medio adentro). Ahora se mide **distancia al borde**, adentro o
+  afuera. 📌 Una regla geométrica no se da por buena hasta correrla contra el archivo del usuario.
+
+  **CONTRATO** `verificar_etiqueta_del_archivo.py`: la regla caso por caso; la talla tejida NO se
+  toca ni diciendo el talle; contra el archivo real se encuentra en **las 8 mesas que la traen** y
+  quedan el rótulo, la talla tejida y los placeholders; y la versión del caché subió.
+  ⏳ **Pendiente anotado:** los NOMBRES de las piezas están en el archivo (el rótulo Tahoma). Se
+  podrían proponer al nombrar. **No se hizo**: choca con [[archivo-molde-solo-talle]] («del archivo,
+  sólo el talle») y el usuario tiene que decidir si esa regla se matiza — un rótulo que el diseñador
+  escribió a la vista no es lo mismo que un nombre de capa interno.
+
 - **2026-09-11 (427) — 💾 TODA DESCARGA ABRE EL «GUARDAR COMO»; «Descargar todo» pide UNA carpeta.**
   Pedido del usuario: *«cuando descargás el PDF, que te abra la carpeta de elegir dónde guardarlo»*.
   Un `<a download>` deja al navegador guardar solo en "Descargas". Chrome y Edge traen la **File
