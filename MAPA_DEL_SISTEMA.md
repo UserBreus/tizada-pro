@@ -1482,6 +1482,34 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (432) — 📏 LA MESA DE TRABAJO ES LA TELA MENOS UN MARGEN (3 cm, configurable); el
+  valor a mano de una tela manda.** Pedido del usuario: *«que la mesa de trabajo tenga siempre 3 cm
+  menos que el ancho que tiene la tela, a no ser que le cambien a mano el valor a alguna o algunas
+  telas en específico; esos 3 cm deben ser configurables»*. Hasta ahora (74, 2026-07-24) la mesa
+  (`ancho_cm`, lo que nestea la tizada) arrancaba **igual a la medida** del sistema de stock y el
+  usuario restaba los orillos **tela por tela** (157 para 160, 147 para 150…: así está su catálogo).
+  **MODELO.** `cat['telas_margen_cm']` (global, 3 sin configurar; `_telas_margen`) y
+  `cat['telas_ancho']` pasa a ser **la mesa puesta A MANO** de esa tela. `_telas_merge` calcula
+  `ancho_cm = medida − margen` (mínimo 1; sin medida del sistema, 180 − margen) salvo que la tela
+  tenga valor a mano, que va **tal cual** y marca `manual: True`. Helpers puros sobre el `cat`:
+  `_telas_aplicar_ancho(cat, id, cm|None)` (None = volver al automático) y
+  `_telas_aplicar_margen(cat, cm)` (recalcula todas las automáticas en el acto — la tizada lee
+  `cat['telas']`, `_config_produccion` no cambió). Endpoints: `POST /api/telas/ancho` acepta
+  `ancho_cm: null` y devuelve `{ancho_cm, manual}`; **nuevo `POST /api/telas/margen`**; `GET
+  /api/telas` y `/refrescar` devuelven `margen_cm`. Los valores a mano que el usuario ya tenía
+  **siguen mandando** (es la regla: «a no ser que le cambien a mano»); si quiere que sigan al
+  margen, los quita con la ×.
+  **PANTALLA** Config › Telas: recuadro **«Margen de la mesa»** (`telas-margen`) arriba de la lista;
+  la columna «Ancho de impresión» pasa a **«Mesa de trabajo»** y cada fila dice **auto** o
+  **«a mano ×»** (la × devuelve al automático; el campo a mano se marca con el borde). Diccionario
+  (`telas-margen` nuevo, `telas-lista` reescrito) y manual §4.4 al día; `API_RUTAS.md`
+  regenerado (también entró `POST /api/productos/etiqueta_archivo` de la 429).
+  **CONTRATO** nuevo `verificar_telas_margen.py` (sobre un catálogo de mentira): 160 → 157 sin
+  configurar; margen 2/0/negativo; el valor a mano no se mueve al cambiar el margen y las
+  automáticas sí; quitarlo vuelve al automático; sin medida 180 − margen; y que
+  `_config_produccion` siga nesteando con `ancho_cm` y nunca con `medida_cm`. Verde; build verde
+  (`guardarTelasMargen` vive debajo de `showMsg` por el candado TDZ); server reiniciado 12:57:42.
+  ⚠️ **No visto en pantalla** (Config › Telas pide sesión; el sandbox es de sólo lectura).
 - **2026-09-11 (431) — 🔤 LA TIPOGRAFÍA ES DE CADA MOLDE EN CADA DISEÑO, y «la misma para todos»
   es opcional (como las telas).** Observación del usuario: *«la fuente que elijo no es por diseño
   ni por molde; la tipografía es por diseño y por molde, cada uno tiene lo suyo, pero podríamos

@@ -7293,13 +7293,51 @@ def set_config():
 # ═════════════════ TELAS (registro GLOBAL + grupos combinables) ═════════════════
 # TELAS — YA NO se crean acá: vienen de la API EXTERNA del WMS (stock). De nuestro lado sólo se pone
 # el ANCHO (cm) por tela (la API lo trae dentro del texto, inconsistente). El catálogo local guarda:
-#   cat["telas_ancho"] = {str(id_api): ancho_cm}   ← lo ÚNICO que edita el usuario
-#   cat["telas"]        = último fetch mergeado {id,nombre,ancho_cm,codigo,moneda,precio}  ← cache/offline
+#   cat["telas_ancho"]     = {str(id_api): ancho_cm}   ← la MESA puesta A MANO para esa tela (manda)
+#   cat["telas_margen_cm"] = 3.0                        ← cuántos cm menos que la tela tiene la mesa
+#   cat["telas"]        = último fetch mergeado {id,nombre,medida_cm,ancho_cm,manual,…}  ← cache/offline
+# 🔴 LA MESA ES LA TELA MENOS UN MARGEN (regla del usuario 2026-09-11): «que la mesa de trabajo
+# tenga siempre 3 cm menos que el ancho de la tela, a no ser que le cambien a mano el valor a
+# alguna tela; esos 3 cm deben ser configurables». `ancho_cm` (lo que usa la tizada) sale de
+# `medida_cm − margen`, salvo que esa tela tenga un valor a mano en `telas_ancho`.
 # `_config_produccion` lee cat["telas"] → la generación anda aun sin red. La api-key vive en
 # config_externo.json (NO versionado) o en la env EXTERNAL_API_KEY. Los GRUPOS combinables siguen.
 _TELAS_MEM = {"ts": 0.0, "data": None}     # cache en memoria del fetch (evita pegarle a la API en cada request)
 _TELAS_TTL = 300                            # segundos
 _UA_TELAS = "TIZADAPRO/1.0"                 # Cloudflare bloquea el UA por defecto de Python (ver _UA_PUB)
+_TELAS_MARGEN_CM = 3.0                      # margen por defecto de la mesa (el usuario lo cambia en Config › Telas)
+_TELAS_MEDIDA_DEFAULT = 180.0               # ancho de tela cuando el sistema de stock no lo informa
+
+
+def _telas_margen(cat):
+    """Cuántos cm menos que la TELA tiene la MESA de trabajo (global; se resta en cada tela sin
+    valor a mano). Nunca negativo; sin configurar, 3 cm."""
+    try:
+        v = (cat or {}).get("telas_margen_cm")
+        return max(0.0, float(v)) if v is not None else _TELAS_MARGEN_CM
+    except Exception:
+        return _TELAS_MARGEN_CM
+
+
+def _telas_aplicar_ancho(cat, tid, ancho_cm):
+    """Pone (o quita, con `None`) la mesa A MANO de una tela y refleja el resultado en la tela
+    cacheada. Devuelve `{id, ancho_cm, manual}` o None si la tela no está. Puro sobre `cat`."""
+    tid = str(tid)
+    anchos = dict(cat.get("telas_ancho") or {})
+    if ancho_cm is None:
+        anchos.pop(tid, None)
+    else:
+        anchos[tid] = max(1.0, float(ancho_cm))
+    cat["telas_ancho"] = anchos
+    cat["telas"] = _telas_merge(cat, cat.get("telas") or [])
+    return next((dict(t) for t in cat["telas"] if str(t.get("id")) == tid), None)
+
+
+def _telas_aplicar_margen(cat, margen_cm):
+    """Guarda el margen global y recalcula la mesa de todas las telas sin valor a mano."""
+    cat["telas_margen_cm"] = max(0.0, float(margen_cm))
+    cat["telas"] = _telas_merge(cat, cat.get("telas") or [])
+    return cat["telas_margen_cm"]
 
 
 def _config_externo():
@@ -7388,19 +7426,27 @@ def _fetch_telas_externas():
 
 def _telas_merge(cat, telas_api):
     """Dos anchos por tela:
-      `medida_cm` = ancho de la TELA que informa el sistema (parseado de la descripción; informativo).
-      `ancho_cm`  = ANCHO DE IMPRESIÓN que usa la TIZADA (editable local en cat['telas_ancho']).
-    Default del ancho de impresión = la medida del sistema (o 180 si no se pudo leer), y el usuario lo
-    ajusta a lo que realmente imprime (suele ser menor que el rollo por orillos/márgenes)."""
+      `medida_cm` = ancho de la TELA que informa el sistema (parseado de la descripción; dato).
+      `ancho_cm`  = la MESA DE TRABAJO que usa la TIZADA = `medida_cm − margen` (global,
+                    `cat['telas_margen_cm']`, 3 cm sin configurar) — salvo que esa tela tenga un
+                    valor A MANO en `cat['telas_ancho']`, que manda tal cual (`manual: True`).
+    Antes (2026-07-24 → 2026-09-11) el default era la medida pelada y el usuario restaba los
+    orillos tela por tela (157 para 160, 147 para 150…). Regla del usuario: «siempre 3 cm menos,
+    a no ser que le cambien a mano el valor a alguna tela en específico». Sin medida del sistema
+    se parte de 180 y también se resta el margen (representa a la tela)."""
     anchos = cat.get("telas_ancho") or {}
+    margen = _telas_margen(cat)
     out = []
     for t in telas_api:
         med = t.get("medida_cm")
         if med is None:
             med = _ancho_de_descripcion(t.get("nombre"))
         ov = anchos.get(str(t["id"]))
-        ancho = float(ov) if ov is not None else float(med if med is not None else 180.0)
-        out.append({**t, "medida_cm": med, "ancho_cm": ancho})
+        if ov is not None:
+            ancho, manual = float(ov), True
+        else:
+            ancho, manual = max(1.0, float(med if med is not None else _TELAS_MEDIDA_DEFAULT) - margen), False
+        out.append({**t, "medida_cm": med, "ancho_cm": ancho, "manual": manual})
     return out
 
 
@@ -7440,7 +7486,8 @@ def get_telas():
     if _g:
         return _g
     cat = _cargar_catalogo()
-    return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
+    return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", []),
+                    "margen_cm": _telas_margen(cat)})
 
 
 @app.post("/api/telas/refrescar")
@@ -7455,12 +7502,15 @@ def refrescar_telas():
         return jsonify({"error": f"No se pudo consultar la API de telas: {err}"}), 502
     _TELAS_MEM["data"] = telas_api
     _TELAS_MEM["ts"] = time.time()
-    return jsonify({"telas": _telas_efectivas(cat, forzar=False), "grupos": cat.get("grupos_telas", []), "count": len(telas_api)})
+    return jsonify({"telas": _telas_efectivas(cat, forzar=False), "grupos": cat.get("grupos_telas", []),
+                    "count": len(telas_api), "margen_cm": _telas_margen(cat)})
 
 
 @app.post("/api/telas/ancho")
 def set_tela_ancho():
-    """Guarda el ANCHO (cm) local de una tela de la API. Es lo único editable de nuestro lado."""
+    """La MESA de trabajo de una tela puesta A MANO (`ancho_cm`), que manda sobre el margen
+    global. Con `ancho_cm: null` se QUITA el valor a mano y la tela vuelve al automático
+    (medida − margen). Devuelve la tela como queda (`ancho_cm`, `manual`)."""
     _g = _guard_sesion_telas()
     if _g:
         return _g
@@ -7468,16 +7518,37 @@ def set_tela_ancho():
     tid = str(cuerpo.get("id") or "").strip()
     if not tid:
         return jsonify({"error": "falta id"}), 400
-    ancho = max(1.0, float(cuerpo.get("ancho_cm", 180) or 180))
+    _v = cuerpo.get("ancho_cm")
+    try:
+        ancho = None if _v in (None, "") else float(_v)
+    except (TypeError, ValueError):
+        return jsonify({"error": "ancho inválido"}), 400
     cat = _cargar_catalogo_para_editar()
-    anchos = cat.get("telas_ancho") or {}
-    anchos[tid] = ancho
-    cat["telas_ancho"] = anchos
-    for t in (cat.get("telas") or []):          # reflejar en la tela cacheada
-        if str(t.get("id")) == tid:
-            t["ancho_cm"] = ancho
+    tela = _telas_aplicar_ancho(cat, tid, ancho)
     _guardar_catalogo(cat)
-    return jsonify({"ok": True, "id": tid, "ancho_cm": ancho})
+    if not tela:
+        return jsonify({"ok": True, "id": tid, "ancho_cm": ancho, "manual": ancho is not None})
+    return jsonify({"ok": True, "id": tid, "ancho_cm": tela.get("ancho_cm"), "manual": bool(tela.get("manual"))})
+
+
+@app.post("/api/telas/margen")
+def set_telas_margen():
+    """El MARGEN global de la mesa (cm): cuántos cm menos que la tela. Se recalcula la mesa de
+    todas las telas sin valor a mano en el acto (la tizada lee `cat['telas']`)."""
+    _g = _guard_sesion_telas()
+    if _g:
+        return _g
+    cuerpo = request.get_json(force=True) or {}
+    try:
+        margen = float(cuerpo.get("margen_cm"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "falta el margen (cm)"}), 400
+    if margen < 0:
+        return jsonify({"error": "el margen no puede ser negativo"}), 400
+    cat = _cargar_catalogo_para_editar()
+    margen = _telas_aplicar_margen(cat, margen)
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "margen_cm": margen, "telas": cat.get("telas") or []})
 
 
 @app.get("/api/telas/conexion")

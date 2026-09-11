@@ -511,10 +511,13 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 ### 4.4 **Telas**
 - Las telas **vienen del sistema de stock** (API externa) — acá **no se crean ni se borran**.
 - **Pasos:** ver el chip de **conexión** (`telas-conexion`) → **↻ Actualizar telas del sistema**
-  (`telas-actualizar`) → para cada tela, escribir el **ANCHO DE IMPRESIÓN (cm)**, que es el que usa
-  la tizada (suele ser **menor** que la medida del rollo, por los orillos) → armar **grupos
-  combinables** (tocar las telas que se pueden intercambiar) → **Guardar grupos**.
-- **Guarda:** `GET /api/telas` · `POST /api/telas/refrescar` · `POST /api/telas/ancho` ·
+  (`telas-actualizar`) → **Margen de la mesa** (`telas-margen`, 3 cm si no se toca): la **MESA DE
+  TRABAJO** de cada tela —la que usa la tizada— sale sola como *medida − margen* → si una tela
+  necesita otra mesa, escribirla en su fila (queda **«a mano»** y manda; la **×** la devuelve al
+  automático) → armar **grupos combinables** (tocar las telas que se pueden intercambiar) →
+  **Guardar grupos**.
+- **Guarda:** `GET /api/telas` · `POST /api/telas/refrescar` · `POST /api/telas/ancho`
+  (`ancho_cm: null` = volver al automático) · `POST /api/telas/margen` ·
   `POST /api/telas` (grupos) · `GET /api/telas/conexion`. La key vive en `config_externo.json`
   (gitignoreado) y **viaja con el paquete de publicación**, no se carga a mano.
 - **Nota:** el **alto** de la hoja se configura en **Reglas de Nesting**, no acá.

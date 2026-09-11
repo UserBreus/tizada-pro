@@ -5723,7 +5723,7 @@ export default function App() {
       const r = await fetch('/api/telas/refrescar', { method: 'POST' });
       const d = await _jsonTelas(r);
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setTelasReg({ telas: d.telas || [], grupos: d.grupos || [] });
+      setTelasReg({ telas: d.telas || [], grupos: d.grupos || [], margen_cm: d.margen_cm });
       showMsg(`Telas actualizadas ✓ (${d.count ?? (d.telas || []).length})`);
     } catch (e) { showError('No se pudo actualizar las telas del sistema: ' + (e.message || e)); }
     finally { setTelasRefrescando(false); }
@@ -5736,13 +5736,17 @@ export default function App() {
       if (r.ok) setTelaConexion(await r.json());
     } catch (e) { /* sin conexión al server: se deja el estado como está */ }
   };
-  // Guarda el ANCHO (cm) local de una tela de la API (lo único editable de nuestro lado).
+  // La MESA de trabajo de una tela puesta A MANO (manda sobre el margen global). Vacío = volver al
+  // automático (medida − margen). El server devuelve cómo queda la tela (`ancho_cm`, `manual`).
   const guardarTelaAncho = async (id, ancho) => {
-    const a = Math.max(1, parseFloat(String(ancho).replace(',', '.')) || 180);
+    const txt = String(ancho ?? '').trim().replace(',', '.');
+    const a = txt === '' ? null : Math.max(1, parseFloat(txt) || 1);
     try {
       const r = await fetch('/api/telas/ancho', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ancho_cm: a }) });
-      if (r.ok) setTelasReg(prev => ({ ...prev, telas: (prev.telas || []).map(t => String(t.id) === String(id) ? { ...t, ancho_cm: a } : t) }));
-    } catch (e) { showError('No se pudo guardar el ancho'); }
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      setTelasReg(prev => ({ ...prev, telas: (prev.telas || []).map(t => String(t.id) === String(id) ? { ...t, ancho_cm: d.ancho_cm, manual: !!d.manual } : t) }));
+    } catch (e) { showError('No se pudo guardar la mesa de esta tela: ' + (e.message || e)); }
   };
   // Guarda la disponibilidad de telas del molde: `todas` (para todas las piezas) + `por_pieza`
   // (telas EXTRA de esas piezas). Devuelve la config normalizada por el server.
@@ -11006,6 +11010,20 @@ export default function App() {
     setErrorInformativo(txt);
     setMensajeInformativo('');
     setTimeout(() => setErrorInformativo(prev => prev === txt ? '' : prev), 7000);
+  };
+
+  // (Vive acá abajo y no junto a `guardarTelaAncho` por el contrato TDZ: usa `showMsg`.)
+  // El MARGEN global (cm): la mesa = tela − margen en todas las telas sin valor a mano. El server
+  // recalcula y devuelve la lista entera, así la pantalla muestra las mesas nuevas al instante.
+  const guardarTelasMargen = async (margen) => {
+    const m = Math.max(0, parseFloat(String(margen ?? '').replace(',', '.')) || 0);
+    try {
+      const r = await fetch('/api/telas/margen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ margen_cm: m }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      setTelasReg(prev => ({ ...prev, telas: d.telas || prev.telas, margen_cm: d.margen_cm }));
+      showMsg(`Margen de la mesa: ${d.margen_cm} cm ✓ (las telas sin valor a mano ya lo usan)`);
+    } catch (e) { showError('No se pudo guardar el margen: ' + (e.message || e)); }
   };
 
   // ── CONFIGURACIONES GUARDADAS DEL MOLDE ──────────────────────────────────────────────────
@@ -21100,13 +21118,28 @@ export default function App() {
                           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T.length} tela{T.length === 1 ? '' : 's'}</span>
                           <input placeholder="Buscar tela…" value={telaFiltroCfg} onChange={e => setTelaFiltroCfg(e.target.value)} style={{ ...inS, flex: 1, minWidth: 180, maxWidth: 300 }} />
                         </div>
+                        {/* LA MESA ES LA TELA MENOS UN MARGEN (2026-09-11, regla del usuario): «que la
+                            mesa tenga siempre 3 cm menos que el ancho de la tela, a no ser que le cambien
+                            a mano el valor a alguna tela; esos 3 cm deben ser configurables». */}
+                        <div data-tour="telas-margen" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, padding: '10px 12px', border: '1px solid var(--border-light)', borderRadius: 10 }}>
+                          <span style={{ fontSize: 12.5, flex: 1, minWidth: 220, lineHeight: 1.4, color: 'var(--text-secondary)' }}>
+                            <b style={{ color: '#fff' }}>Margen de la mesa:</b> la mesa de trabajo usa el ancho de la tela <b>menos</b> este margen. Una tela con un valor puesto a mano no lo usa.
+                          </span>
+                          <input type="number" min="0" step="0.5" value={telasReg.margen_cm ?? 3}
+                            onChange={e => setTelasReg(prev => ({ ...prev, margen_cm: e.target.value }))}
+                            onBlur={e => guardarTelasMargen(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                            title="Cuántos cm menos que la tela tiene la mesa"
+                            style={{ ...inS, width: 84, textAlign: 'right' }} />
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>cm</span>
+                        </div>
                         <div data-tour="telas-lista" style={{ border: '1px solid var(--border-light)', borderRadius: 10, overflow: 'hidden' }}>
                           {/* Cabecera de columnas */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-light)', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                             <span style={{ width: 14, flexShrink: 0 }} />
                             <span style={{ flex: 1 }}>Tela</span>
                             <span style={{ width: 96, textAlign: 'right', flexShrink: 0 }} title="El ancho que informa el sistema de stock (dato)">Medida</span>
-                            <span style={{ width: 150, textAlign: 'right', flexShrink: 0 }} title="El ancho que usa la tizada para nestear en esta tela">Ancho de impresión</span>
+                            <span style={{ width: 214, textAlign: 'right', flexShrink: 0 }} title="El ancho que usa la tizada: la medida menos el margen, o el valor puesto a mano">Mesa de trabajo</span>
                           </div>
                           <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                             {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>{T.length ? 'Ninguna tela coincide con la búsqueda.' : 'No hay telas. Tocá «Actualizar telas del sistema».'}</div>}
@@ -21119,15 +21152,22 @@ export default function App() {
                                 </span>
                                 {/* Medida del sistema (dato, no editable) */}
                                 <span style={{ width: 96, textAlign: 'right', flexShrink: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>{t.medida_cm != null ? `${t.medida_cm} cm` : '—'}</span>
-                                {/* Ancho de IMPRESIÓN (editable, el que usa la tizada) */}
-                                <span style={{ width: 150, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                                  <input type="number" min="1" value={t.ancho_cm ?? ''} placeholder="ancho"
+                                {/* MESA DE TRABAJO (la que usa la tizada): automática = medida − margen; a mano manda */}
+                                <span style={{ width: 214, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                  <input type="number" min="1" value={t.ancho_cm ?? ''} placeholder="mesa"
                                     onChange={e => setAnchoLocal(t.id, e.target.value)}
                                     onBlur={e => guardarTelaAncho(t.id, e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                                    title="Ancho que usa la tizada en esta tela"
-                                    style={{ ...inS, width: 84, textAlign: 'right' }} />
+                                    title={t.manual ? 'Valor puesto a mano: manda sobre el margen' : 'Automático: la medida menos el margen. Escribí un valor para fijarlo a mano.'}
+                                    style={{ ...inS, width: 84, textAlign: 'right', borderColor: t.manual ? 'var(--accent)' : undefined }} />
                                   <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 20 }}>cm</span>
+                                  {t.manual ? (
+                                    <button type="button" className="btn ghost" onClick={() => guardarTelaAncho(t.id, '')}
+                                      title="Volver al automático (medida menos margen)"
+                                      style={{ fontSize: 10.5, padding: '3px 7px', width: 64, color: 'var(--accent)' }}>a mano ×</button>
+                                  ) : (
+                                    <span style={{ fontSize: 10.5, color: 'var(--text-muted)', width: 64, textAlign: 'center' }}>auto</span>
+                                  )}
                                 </span>
                               </div>
                             ))}

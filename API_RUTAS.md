@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **154 endpoints**. Generado automáticamente del código.
+Total: **156 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -155,6 +155,7 @@ Total: **154 endpoints**. Generado automáticamente del código.
 | POST | `/api/productos/borde_corte` |  | body: activo, ancho_mm, color, pid |
 | GET | `/api/productos/etiqueta` |  | q: pid |
 | POST | `/api/productos/etiqueta` |  | body: activo, align, borde_activo, borde_color, borde_mm, color, mostrar, pid, piezas_off, posicion, posiciones, separador, size_mm, texto, zonas |
+| POST | `/api/productos/etiqueta_archivo` | El interruptor de la etiqueta que trae el diseño: fija a mano si una FAMILIA de texto (fuente + tamaño) se oculta o se deja. Cuerpo: `{id, clave, ocul | body: clave, id, ocultar |
 
 ## Arte
 
@@ -202,9 +203,10 @@ Total: **154 endpoints**. Generado automáticamente del código.
 |---|---|---|---|
 | GET | `/api/telas` |  | — |
 | POST | `/api/telas` | Ya NO crea telas (vienen de la API). Sólo administra los GRUPOS combinables. | body: grupos |
-| POST | `/api/telas/ancho` | Guarda el ANCHO (cm) local de una tela de la API. Es lo único editable de nuestro lado. | body: ancho_cm, id |
+| POST | `/api/telas/ancho` | La MESA de trabajo de una tela puesta A MANO (manda sobre el margen global). `ancho_cm: null` = volver al automático (medida − margen). Devuelve `ancho_cm` y `manual`. | body: ancho_cm, id |
 | GET | `/api/telas/conexion` | Estado de la conexión con la API del sistema. NO devuelve la key (sólo si está o no). | — |
 | POST | `/api/telas/refrescar` | Fuerza re-consulta a la API externa (botón «Actualizar telas del sistema»). | — |
+| POST | `/api/telas/margen` | El MARGEN global de la mesa (cm): cuántos cm menos que la tela. Se recalcula la mesa de todas las telas sin valor a mano en el acto (la tizada lee `ca | body: margen_cm |
 
 ## Planillas / Reglas
 

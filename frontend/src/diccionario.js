@@ -1266,10 +1266,15 @@ export const DICCIONARIO = {
     que: 'Vuelve a traer la lista de telas desde el sistema de stock.',
     como: 'Tocá «Actualizar».',
   },
+  'telas-margen': {
+    nombre: 'Margen de la mesa',
+    que: 'La mesa de trabajo de cada tela es su medida menos este margen (3 cm si no lo cambiás). Vale para todas las telas que no tengan un valor puesto a mano: cambiarlo acá les cambia la mesa a todas ellas en el acto.',
+    como: 'Escribí cuántos cm menos que la tela tiene la mesa.',
+  },
   'telas-lista': {
     nombre: 'Lista de telas',
-    que: 'Lo único que se carga a mano es el ANCHO DE IMPRESIÓN, que es el que usa la tizada para acomodar. Suele ser menor que la medida del rollo, por los orillos. Si está mal, la tizada sale mal.',
-    como: 'Revisá el ancho de cada tela.',
+    que: 'Cada tela muestra su medida (dato del sistema de stock) y la MESA DE TRABAJO, que es la que usa la tizada para acomodar. La mesa sale sola: la medida menos el margen. Si una tela necesita otra, escribila a mano y esa manda («a mano»); con la × vuelve al automático. Si está mal, la tizada sale mal.',
+    como: 'Revisá la mesa de cada tela.',
   },
   'telas-tope': {
     nombre: 'Tope de telas por prenda',
