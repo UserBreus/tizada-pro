@@ -14513,19 +14513,44 @@ export default function App() {
                       <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
                       <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Piezas y etiqueta</span>
                     </div>
-                    {/* EL MOLDE YA TRAÍA LA ETIQUETA DIBUJADA. El sistema la oculta (si no, la
-                        prenda sale con dos: la del archivo y la que estampa la tizada), pero NUNCA
-                        en silencio: se avisa acá, que es donde se ubica la etiqueta. Ver
-                        `piezas_con_diseno.etiqueta_del_archivo` y el changelog 428 del MAPA. */}
-                    {!!_prodB.etiquetas_en_archivo && (
-                      <div style={{ display: 'flex', gap: 8, padding: '10px 11px', borderRadius: 12,
-                        background: 'rgba(56,139,253,0.10)', border: '1px solid rgba(56,139,253,0.40)' }}>
-                        <Icon name="info" style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: 'var(--accent)' }} />
+                    {/* TEXTOS DEL DISEÑO QUE NOMBRAN EL TALLE, por FAMILIA (fuente + tamaño). La que se
+                        repite en casi todas las piezas es la etiqueta de corte que trajo el diseñador:
+                        se oculta (si no, la prenda sale con dos). La que está en una sola pieza es
+                        diseño (la talla tejida) y se deja. Cada familia tiene su interruptor, porque
+                        no todos los diseñadores la traen como debería: la decisión es nuestra, no del
+                        archivo. Nunca en silencio. Ver changelog 429 del MAPA. */}
+                    {!!(_prodB.etiquetas_familias || []).length && (
+                      <div data-tour="pieza-b-etiqueta-archivo"
+                        style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: '10px 11px', borderRadius: 12,
+                          background: 'rgba(56,139,253,0.10)', border: '1px solid rgba(56,139,253,0.40)' }}>
                         <span style={{ fontSize: 12, lineHeight: 1.45 }}>
-                          Este molde ya traía <b>la etiqueta del talle dibujada</b> en
-                          {' '}<b>{_prodB.etiquetas_en_archivo} pieza(s)</b>. Se oculta y se usa la del
-                          sistema, así no salen dos. El resto del diseño no se toca.
+                          <b>El diseño trae textos con el talle.</b> Los que se repiten en casi todas las
+                          piezas son la etiqueta de corte del diseñador: <b>se ocultan</b> y se usa la del
+                          sistema, así no salen dos. Los demás se dejan.
                         </span>
+                        {(_prodB.etiquetas_familias || []).map((fam) => (
+                          <label key={fam.clave} title={fam.motivo}
+                            style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 11.5, lineHeight: 1.4, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={!!fam.ocultar} style={{ marginTop: 2 }}
+                              onChange={async (e) => {
+                                const ocultar = e.target.checked;
+                                try {
+                                  const r = await fetch('/api/productos/etiqueta_archivo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ id: _id, clave: fam.clave, ocultar }) });
+                                  const d = await r.json().catch(() => ({}));
+                                  if (!r.ok) { showError(d.error || 'No se pudo cambiar la etiqueta del diseño'); return; }
+                                  showMsg(ocultar ? 'Se oculta esa etiqueta del diseño. Rehaciendo las piezas…' : 'Esa etiqueta del diseño se deja. Rehaciendo las piezas…');
+                                  fetchProductos();
+                                } catch (_e) { showError('No se pudo cambiar la etiqueta del diseño'); }
+                              }} />
+                            <span>
+                              <b>{fam.ocultar ? 'Se oculta' : 'Se deja'}</b> «{fam.ejemplo}» · {fam.fuente} · {fam.alto_mm} mm ·
+                              en <b>{fam.piezas} de {fam.de}</b> pieza(s)
+                              {fam.borde_mm != null ? ` · a ${fam.borde_mm} mm del borde` : ''}
+                              <span style={{ display: 'block', color: 'var(--text-muted)' }}>{fam.motivo}</span>
+                            </span>
+                          </label>
+                        ))}
                       </div>
                     )}
                     {/* ESTE MOLDE YA LO CONFIGURASTE. El aviso va ACÁ —donde se está trabajando el

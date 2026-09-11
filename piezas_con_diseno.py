@@ -899,9 +899,10 @@ _CONT_CACHE = {}          # {(carpeta, mesa): índice ya leído}  — no releer 
 # la regla). 2 = el recorte con el diseño adentro, no el mayor del grupo (2026-09-07).
 _V_CONTORNOS = 3          # 3 = la línea de corte del archivo es el contorno (2026-09-07)
 # Versión de la etapa de PÁGINAS. 3 = la línea de corte se saca del dibujo (`quitar_linea_de_corte`).
-# 4 = también se saca la ETIQUETA DE CORTE que ya trae el diseño (`etiqueta_del_archivo`). Sin
-# subir el número, un molde ya desplegado seguiría con su etiqueta vieja adentro del PDF por talle.
-_V_PAGINAS = 4
+# 4 = también se saca la ETIQUETA DE CORTE que ya trae el diseño. 5 = se decide POR FAMILIA a nivel
+# molde (`decidir_familias`), no por umbrales; el hash de la decisión (`etq`) también entra en la
+# vigencia. Sin subir el número, un molde ya desplegado seguiría con su etiqueta vieja adentro.
+_V_PAGINAS = 5
 # Lo que se copia de la página original a la desplegada. Lista CERRADA a propósito: `/PieceInfo`
 # (los datos privados de Illustrator), `/Metadata`, `/Annots` o `/Thumb` no dibujan nada y pesan.
 _CLAVES_PAGINA = ("/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate",
@@ -1135,76 +1136,321 @@ def _ancho_texto(fuente, b, dec):
 
 
 # ─────────────────────────────────────────────────────────────────
-# LA ETIQUETA QUE YA TRAE EL DISEÑO
+# LA ETIQUETA QUE YA TRAE EL DISEÑO — decidida POR FAMILIA, no por umbrales
 # ─────────────────────────────────────────────────────────────────
-# Un molde con el diseño adentro puede venir con la ETIQUETA DE CORTE ya puesta: un texto chico con
-# el TALLE, pegado al borde de cada pieza. Si se deja, la prenda sale con DOS —la del archivo y la
-# que estampa el sistema— una encima de la otra o en distinto lugar.
+# Un molde con el diseño adentro puede venir con la ETIQUETA DE CORTE ya puesta: un texto con el
+# TALLE en cada pieza. Si se deja, la prenda sale con DOS (la del archivo y la del sistema).
 #
-# 🔴 EL TEXTO SOLO NO ALCANZA PARA RECONOCERLA, y esto es lo que hace difícil el problema. En el
-# molde del usuario (`CAMISETA JUGADOR.ai`, 2026-09-11) hay DOS textos que dicen «M» en el mismo
-# talle:
-#   · la etiqueta de corte  → 5,3 mm, Arial-Bold, a 1,2 mm del borde inferior de la pieza;
-#   · la TALLA TEJIDA       → 12 mm, Gunplay, en el CENTRO de la piecita «TALLE» (52 %, 52 %).
-# La segunda es DISEÑO: es la etiqueta que se cose en la prenda. Borrarla dejaría la prenda sin su
-# talla, y no fallaría nada — se descubre con la tela cortada.
+# 🔴 LO QUE NO SIRVE: reconocerla por tamaño y posición («≤ 10 mm, pegada al borde»). Eso estaba
+# calibrado con UN diseñador; otro la pone más grande, más adentro o con texto de más («TALLE M»),
+# y la regla falla EN SILENCIO. El usuario lo dijo con todas las letras (2026-09-11): «no todos
+# los diseñadores traen la etiqueta como debería; debe ser ajuste nuestro».
 #
-# Por eso se piden las TRES condiciones juntas. La que separa de verdad los dos casos es la
-# distancia al borde: 1,2 mm contra 26 mm.
-_ETQ_ALTO_MAX_MM = 10.0     # la de corte mide 5,3; la talla tejida, 12
-_ETQ_BORDE_MAX_MM = 10.0    # la de corte está a 1,2-2,0; la talla tejida, a 26
+# LO QUE SÍ ES INDEPENDIENTE DEL DISEÑADOR: la etiqueta de corte **se repite igual en casi todas
+# las piezas** del molde (la copian y pegan: misma fuente, mismo tamaño), mientras que un texto
+# del diseño que también dice el talle —la TALLA TEJIDA de la piecita «TALLE», que dice «M» igual
+# que la etiqueta— vive en UNA sola pieza. La firma es la CONSISTENCIA entre piezas.
+#
+# Entonces:
+#   1. CANDIDATO = todo texto de la capa de un talle que nombre ESE talle como palabra entera
+#      («M», «TALLE M», «M-FRENTE» sí; «2XL» no es «XL»; «00» no es «0»). Sin umbral de tamaño ni
+#      de posición. Los placeholders «00»/«NOMBRE» van por su propio camino.
+#   2. FAMILIA = (fuente, alto redondeado a 0,5 mm). Es lo que un copiar-pegar conserva.
+#   3. DECISIÓN por molde: se oculta la familia que aparece en ≥ 2/3 de las piezas del molde
+#      (y en al menos 2). El resto se deja y se INFORMA. El usuario puede dar vuelta cada familia
+#      desde la pantalla (interruptor), y eso rehace las páginas.
+# Vive en `etiqueta_archivo.json`, al lado del desplegado. Su hash entra en la vigencia de las
+# páginas por talle: cambiar la decisión rehace SÓLO las páginas, no los contornos.
+import re as _re
+
+_ETQ_JSON = "etiqueta_archivo.json"
+_V_ETQ = 1                  # versión de la REGLA de decisión (subir si cambia el criterio)
+_ETQ_FRACCION = 2.0 / 3.0   # una familia es etiqueta de corte si está en ≥ 2/3 de las piezas
+_ETQ_RADIO_MM = 40.0        # a qué pieza pertenece un texto: la más cercana, hasta 40 mm
+
+
+def _tokens(txt):
+    return [t for t in _re.split(r"[^0-9A-Za-zÁÉÍÓÚÑÜáéíóúñü]+", str(txt or "").upper()) if t]
 
 
 def _norm_talle(s):
     return " ".join(str(s or "").strip().upper().replace("-", " ").split())
 
 
-def etiqueta_del_archivo(txt, talle, dx, dy, alto_mm, contornos):
-    """¿Este texto es la ETIQUETA DE CORTE que ya trae el diseño? Devuelve `(idx_pieza, borde_mm)`
-    o `None`.
+def menciona_talle(txt, talle):
+    """¿El texto nombra ESE talle como palabra entera? «TALLE M» y «M-FRENTE» sí; «2XL» no es «XL»."""
+    t = _norm_talle(talle)
+    if not t:
+        return False
+    if _norm_talle(txt) == t:
+        return True
+    return t in _tokens(txt)
 
-    Las tres condiciones, y por qué cada una:
-      1. **dice exactamente el talle de SU capa** — no «contiene», no «se parece»: una pieza que
-         dijera «TALLE M» o «M-Frente» es otra cosa y no se toca;
-      2. **es chica** (≤ 10 mm) — una marca de corte no es un titular;
-      3. **está pegada al borde de su pieza** (≤ 10 mm) — es lo que la distingue de un texto del
-         diseño, que va donde el diseño lo puso.
-    Pura y sin estado: se puede probar sola (`verificar_etiqueta_del_archivo.py`).
-    """
-    if not talle or _norm_talle(txt) != _norm_talle(talle):
-        return None
-    if alto_mm > _ETQ_ALTO_MAX_MM:
-        return None
-    CM10 = CM / 10.0                      # puntos por milímetro
-    # ⚠️ Se mide la distancia al BORDE de la pieza, esté el texto adentro o apenas afuera. Exigir
-    # que cayera DENTRO dejaba escapar la etiqueta de las MANGAS, que en este molde queda 1 mm por
-    # DEBAJO del contorno: el diseñador alinea la base del texto con el ruedo, así que los glifos
-    # quedan medio adentro y medio afuera. Medido en el archivo real (2026-09-11).
+
+def familia_de(fuente, alto_mm):
+    """La clave de familia: fuente (sin subset) + alto a 0,5 mm. Lo que conserva un copiar-pegar."""
+    f = str(fuente or "?").lstrip("/").split("+")[-1]
+    return f"{f}|{round(float(alto_mm) * 2) / 2:g}"
+
+
+def pieza_de_texto(dx, dy, contornos):
+    """`(idx_pieza, borde_mm)` de la pieza a la que pertenece un texto: la que lo contiene o, si
+    quedó apenas afuera (la base del texto alineada con el ruedo), la más cercana hasta
+    `_ETQ_RADIO_MM`. `borde_mm` = distancia al borde de esa pieza (informativo)."""
+    CM10 = CM / 10.0
     mejor = None
     for i, c in enumerate(contornos or []):
         try:
             x0, y0, x1, y1 = c["bbox_mu"]
         except Exception:
             continue
-        fx = max(x0 - dx, 0.0, dx - x1)    # 0 si está dentro en X
+        fx = max(x0 - dx, 0.0, dx - x1)
         fy = max(y0 - dy, 0.0, dy - y1)
         if fx or fy:
-            borde = (fx * fx + fy * fy) ** 0.5          # afuera: distancia a la caja
+            d = (fx * fx + fy * fy) ** 0.5
         else:
-            borde = min(dx - x0, x1 - dx, dy - y0, y1 - dy)   # adentro: al borde más cercano
-        borde /= CM10
-        if borde <= _ETQ_BORDE_MAX_MM and (mejor is None or borde < mejor[1]):
-            mejor = (i, borde)
-    return (mejor[0], round(mejor[1], 2)) if mejor else None
+            d = min(dx - x0, x1 - dx, dy - y0, y1 - dy)
+        d /= CM10
+        if (fx or fy) and d > _ETQ_RADIO_MM:
+            continue
+        if mejor is None or d < mejor[1]:
+            mejor = (i, round(d, 2))
+    return mejor
 
 
-def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None):
+def decidir_familias(candidatos, total_piezas, manual=None):
+    """La decisión por molde, PURA (se prueba sola).
+
+    `candidatos` = [{mesa, talle, idx, fuente, alto_mm, texto, borde_mm}, …] de TODAS las mesas.
+    `total_piezas` = cuántas piezas tiene el molde (mesa+índice). `manual` = {clave: bool} que
+    el usuario fijó desde la pantalla (gana siempre). Devuelve la lista de familias, cada una con
+    `ocultar` y su `motivo`, ordenadas de la más presente a la menos.
+    """
+    fams = {}
+    for c in candidatos:
+        k = familia_de(c.get("fuente"), c.get("alto_mm", 0))
+        f = fams.setdefault(k, {"clave": k, "fuente": str(c.get("fuente") or "?").lstrip("/").split("+")[-1],
+                                "alto_mm": round(float(c.get("alto_mm", 0)), 1), "piezas": set(),
+                                "talles": set(), "ejemplo": c.get("texto", ""), "borde_mm": None})
+        f["piezas"].add((c.get("mesa"), c.get("idx")))
+        f["talles"].add(c.get("talle"))
+        if c.get("borde_mm") is not None and (f["borde_mm"] is None or c["borde_mm"] < f["borde_mm"]):
+            f["borde_mm"] = c["borde_mm"]
+    # 🔴 UN TEXTO QUE ESCALA CON EL TALLE ES UN SOLO TEXTO. La talla tejida mide 10 mm en el talle 0
+    # y 13,5 en el 6XL: por clave (fuente + alto) salían SIETE familias de una pieza cada una. Es
+    # el mismo elemento en la misma pieza, así que se fusionan las familias de la misma fuente que
+    # caen exactamente en las mismas piezas; el alto queda como rango. Una etiqueta de corte no
+    # escala (5,3 mm en los 20 talles) y no la toca.
+    por_huella = {}
+    for f in list(fams.values()):
+        h = (f["fuente"], tuple(sorted(f["piezas"])))
+        g = por_huella.get(h)
+        if g is None:
+            por_huella[h] = f
+            f["altos"] = {f["alto_mm"]}
+            f["claves"] = [f["clave"]]
+            continue
+        del fams[f["clave"]]
+        g["altos"].add(f["alto_mm"])
+        g["claves"].append(f["clave"])       # la etapa de páginas oculta por clave: van TODAS
+        g["talles"] |= f["talles"]
+        if f["borde_mm"] is not None and (g["borde_mm"] is None or f["borde_mm"] < g["borde_mm"]):
+            g["borde_mm"] = f["borde_mm"]
+    for f in fams.values():
+        altos = sorted(f.pop("altos", {f["alto_mm"]}))
+        if len(altos) > 1:
+            f["alto_mm"] = altos[0]
+            f["alto_hasta_mm"] = altos[-1]
+    salida = []
+    for f in fams.values():
+        n = len(f["piezas"])
+        auto = n >= 2 and total_piezas > 0 and n >= _ETQ_FRACCION * total_piezas
+        fijado = (manual or {}).get(f["clave"])
+        ocultar = bool(fijado) if fijado is not None else auto
+        if fijado is not None:
+            motivo = "lo fijaste vos"
+        elif auto:
+            motivo = f"se repite en {n} de {total_piezas} piezas: es la etiqueta de corte"
+        elif n == 1:
+            motivo = "está en una sola pieza: parece parte del diseño (la talla tejida, por ejemplo)"
+        else:
+            motivo = f"está en {n} de {total_piezas} piezas, menos de dos tercios: se deja"
+        salida.append({"clave": f["clave"], "claves": sorted(f.get("claves") or [f["clave"]]),
+                       "fuente": f["fuente"], "alto_mm": f["alto_mm"],
+                       **({"alto_hasta_mm": f["alto_hasta_mm"]} if f.get("alto_hasta_mm") else {}),
+                       "piezas": n, "de": total_piezas, "talles": len(f["talles"]),
+                       "ejemplo": f["ejemplo"], "borde_mm": f["borde_mm"],
+                       "ocultar": ocultar, "automatico": auto, "motivo": motivo})
+    salida.sort(key=lambda x: (-x["piezas"], x["clave"]))
+    return salida
+
+
+def _ruta_etq(path_molde):
+    return os.path.join(_carpeta_desplegado(path_molde), _ETQ_JSON)
+
+
+def leer_decision(path_molde):
+    """La decisión guardada, si es de ESTE archivo y de esta regla; si no, None."""
+    import json
+    try:
+        with open(_ruta_etq(path_molde), encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:
+        return None
+    if d.get("sello") != _sello(path_molde) or d.get("v") != _V_ETQ:
+        return None
+    return d
+
+
+def familias_ocultas(decision):
+    """Las claves (fuente + alto) que hay que sacar del dibujo, según la decisión. Una familia
+    fusionada (el mismo texto escalando con el talle) aporta TODAS sus claves."""
+    out = set()
+    for f in ((decision or {}).get("familias") or []):
+        if f.get("ocultar"):
+            out |= set(f.get("claves") or [f["clave"]])
+    return sorted(out)
+
+
+def hash_ocultas(claves):
+    """El hash que entra en la vigencia de las páginas: cambia la decisión → se rehacen."""
+    import hashlib
+    return hashlib.sha1("|".join(sorted(claves or [])).encode("utf-8")).hexdigest()[:12]
+
+
+def buscar_candidatos_mesa(path_molde, mesa, talles):
+    """Los candidatos a etiqueta de UNA mesa, en todos sus talles (worker de proceso).
+
+    Parsea la mesa una vez y filtra por talle como la etapa de páginas, pero SIN escribir nada:
+    sólo lee los textos. Medido: 1-5 s por mesa, en paralelo con las demás."""
+    import molde_real as MR
+    fj = os.path.join(_carpeta_desplegado(path_molde), f"m{mesa}.json")
+    idx = _json_mismo_archivo(fj, _sello(path_molde), list(talles))
+    if idx is None:
+        return mesa, []                      # sin contornos no hay a qué pieza asignar: se saltea
+    conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (idx.get("talles") or {}).items()}
+    marco, U = idx.get("marco"), idx.get("U")
+    out = []
+    pdf = pikepdf.open(path_molde)
+    try:
+        pag = pdf.pages[mesa - 1]
+        ins = list(pikepdf.parse_content_stream(pag))
+        ops, oc = MR._mapa_oc(ins, pag)
+        bloques = MR._bloques_oc(ops, oc)
+        for talle in talles:
+            if not conts.get(talle):
+                continue
+            obj = {MR._norm_capa(talle)}
+            fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
+            saltar = MR._saltar_bloques(ops, oc, fn, bloques)
+            salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
+            cands = []
+            quitar_placeholders(salida, pag, marco, U, talle, conts[talle], candidatos=cands)
+            for c in cands:
+                c["mesa"] = mesa
+                out.append(c)
+    finally:
+        pdf.close()
+    return mesa, out
+
+
+def decidir_etiqueta_archivo(path_molde, talles, procesos=None, avisar=None):
+    """Junta los candidatos de TODAS las mesas, decide por familia y escribe
+    `etiqueta_archivo.json`. Conserva lo que el usuario fijó a mano (`manual`). Devuelve la
+    decisión. Se llama antes de la etapa de páginas; si ya está y es vigente, no se recalcula."""
+    import json
+    previa = leer_decision(path_molde)
+    if previa is not None:
+        return previa
+    manual = {}
+    try:                                     # lo fijado a mano sobrevive a una decisión rehecha
+        with open(_ruta_etq(path_molde), encoding="utf-8") as fh:
+            manual = (json.load(fh).get("manual") or {})
+    except Exception:
+        pass
+    d = fitz.open(path_molde)
+    try:
+        n = d.page_count
+    finally:
+        d.close()
+    mesas = list(range(1, n + 1))
+    cands = []
+    pendientes = list(mesas)
+    if procesos and procesos > 1 and n > 1:
+        try:
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            with ProcessPoolExecutor(max_workers=min(n, procesos)) as ex:
+                futs = {ex.submit(buscar_candidatos_mesa, path_molde, m, list(talles)): m for m in mesas}
+                for f in as_completed(futs):
+                    m, cs = f.result()
+                    cands.extend(cs)
+                    pendientes.remove(m)
+                    if avisar:
+                        avisar(n - len(pendientes), n, f"etiquetas · mesa {m}")
+        except Exception as e:
+            print(f"[camino B] la búsqueda de etiquetas en paralelo falló ({type(e).__name__}: {e}); sigo en serie")
+    for m in pendientes:
+        _m, cs = buscar_candidatos_mesa(path_molde, m, list(talles))
+        cands.extend(cs)
+    # cuántas piezas tiene el molde (mesa + índice), de los contornos ya desplegados
+    total = set()
+    sello = _sello(path_molde)
+    for m in mesas:
+        idx = _json_mismo_archivo(os.path.join(_carpeta_desplegado(path_molde), f"m{m}.json"), sello, list(talles))
+        for lst in ((idx or {}).get("talles") or {}).values():
+            for i in range(len(lst)):
+                total.add((m, i))
+    familias = decidir_familias(cands, len(total), manual)
+    dec = {"sello": sello, "v": _V_ETQ, "piezas": len(total), "familias": familias,
+           "manual": manual}
+    escribir_decision(path_molde, dec)
+    return dec
+
+
+def escribir_decision(path_molde, dec):
+    import json
+    ruta = _ruta_etq(path_molde)
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    with open(ruta + ".tmp", "w", encoding="utf-8") as fh:
+        json.dump(dec, fh, ensure_ascii=False, indent=1)
+    _reemplazar(ruta + ".tmp", ruta)
+
+
+def fijar_familia(path_molde, clave, ocultar):
+    """El interruptor de la pantalla: fija una familia a mano y re-decide. Devuelve la decisión
+    nueva; las páginas se rehacen por el hash (ver `desplegar_mesa`)."""
+    dec = leer_decision(path_molde)
+    if dec is None:
+        return None
+    manual = dict(dec.get("manual") or {})
+    if ocultar is None:
+        manual.pop(clave, None)
+    else:
+        manual[clave] = bool(ocultar)
+    # re-decidir con los mismos conteos: cada familia guarda sus números
+    for f in dec.get("familias") or []:
+        fijado = manual.get(f["clave"])
+        f["ocultar"] = bool(fijado) if fijado is not None else bool(f.get("automatico"))
+        f["motivo"] = ("lo fijaste vos" if fijado is not None else
+                       (f"se repite en {f['piezas']} de {f['de']} piezas: es la etiqueta de corte" if f.get("automatico")
+                        else ("está en una sola pieza: parece parte del diseño (la talla tejida, por ejemplo)" if f["piezas"] == 1
+                              else f"está en {f['piezas']} de {f['de']} piezas, menos de dos tercios: se deja")))
+    dec["manual"] = manual
+    escribir_decision(path_molde, dec)
+    return dec
+
+
+def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocultar=None, candidatos=None):
     """Saca de `salida` (instrucciones de UN talle) los textos «00»/«NOMBRE» y —si el diseño la
     trae— la ETIQUETA DE CORTE del talle. Devuelve
     `(salida_sin_ellos, {campo: placeholder}, {idx_pieza: etiqueta})`.
 
-    `talle` y `contornos` son los de ESTE talle; sin ellos no se busca la etiqueta (queda todo
-    como antes). Ver `etiqueta_del_archivo` para la regla y por qué hacen falta tres condiciones.
+    `talle` y `contornos` son los de ESTE talle. Dos modos para la etiqueta que trae el diseño:
+      · `candidatos=[]` → MODO BÚSQUEDA: no saca ningún texto del talle; agrega a esa lista cada
+        texto que nombre el talle (con fuente, alto, pieza, distancia al borde). Es lo que usa
+        `decidir_etiqueta_archivo` para armar las familias de TODO el molde.
+      · `ocultar={claves}` → MODO PÁGINAS: saca los textos que nombren el talle y sean de una de
+        esas familias (las que la decisión marcó). Sin `ocultar`, no se saca ninguna.
 
     El placeholder tiene la forma que espera `motor_pedido.generar_pieza` (la misma de
     `extraer_personalizacion`): `cx`/`baseline_y` en coordenadas de dispositivo de la mesa (las
@@ -1328,18 +1574,27 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None):
                 esc = (m[0] ** 2 + m[1] ** 2) ** 0.5           # tamaño del texto en puntos (crudos)
                 ox, oy = m[4], m[5]
                 if campo is None:
-                    # ¿es la ETIQUETA DE CORTE que ya trae el diseño? Se mide con la MISMA
-                    # posición que los placeholders —una sola matemática— para que no puedan
-                    # discrepar. Ver `etiqueta_del_archivo`.
-                    _dx, _dy = _dev(ox, oy)
-                    _hit = etiqueta_del_archivo(txt, talle, _dx, _dy, esc * U / (CM / 10.0), contornos)
-                    if _hit is not None:
-                        _ip, _borde = _hit
-                        etiquetas.setdefault(_ip, {"texto": txt.strip(), "x": round(_dx, 2),
-                                                   "y": round(_dy, 2), "alto_mm": round(esc * U / (CM / 10.0), 2),
-                                                   "borde_mm": _borde, "copias": 0})
-                        etiquetas[_ip]["copias"] += 1
-                        quitar.add(i)
+                    # ¿nombra el talle? Entonces es candidato a ETIQUETA DE CORTE del diseño. Se
+                    # mide con la MISMA posición que los placeholders (una sola matemática) y se
+                    # decide POR FAMILIA a nivel molde (ver arriba): acá sólo se junta o se aplica.
+                    if talle and (candidatos is not None or ocultar) and menciona_talle(txt, talle):
+                        _dx, _dy = _dev(ox, oy)
+                        _alto = esc * U / (CM / 10.0)
+                        _fn = str(f.get("/BaseFont", "")).lstrip("/").split("+")[-1] if f is not None else "?"
+                        _pz = pieza_de_texto(_dx, _dy, contornos)
+                        if _pz is not None:
+                            _ip, _borde = _pz
+                            if candidatos is not None:
+                                candidatos.append({"talle": talle, "idx": _ip, "texto": txt.strip(),
+                                                   "fuente": _fn, "alto_mm": round(_alto, 2),
+                                                   "borde_mm": _borde, "x": round(_dx, 2), "y": round(_dy, 2)})
+                            elif familia_de(_fn, _alto) in ocultar:
+                                etiquetas.setdefault(_ip, {"texto": txt.strip(), "x": round(_dx, 2),
+                                                           "y": round(_dy, 2), "alto_mm": round(_alto, 2),
+                                                           "borde_mm": _borde, "familia": familia_de(_fn, _alto),
+                                                           "copias": 0})
+                                etiquetas[_ip]["copias"] += 1
+                                quitar.add(i)
                     continue
                 if op in ("Tj", "'"):
                     b = bytes(ops[-1])
@@ -1558,7 +1813,9 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
         _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "v": _V_CONTORNOS,
                         "paginas": bool(_viejo), "marco": marco, "U": U,
                         **({"placeholders": _viejo.get("placeholders") or {}, "vp": _V_PAGINAS,
-                            "linea_corte": _viejo.get("linea_corte") or {}} if _viejo else {})})
+                            "linea_corte": _viejo.get("linea_corte") or {},
+                            "etiqueta_archivo": _viejo.get("etiqueta_archivo") or {},
+                            "etq": _viejo.get("etq")} if _viejo else {})})
         if not paginas or _viejo:
             return conts
     elif conts is None:
@@ -1568,7 +1825,10 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             return desplegar_mesa(path_molde, mesa, talles, carpeta, contornos=True, paginas=True)
         conts = _prev.get("talles") or {}
         marco, U = _prev.get("marco"), _prev.get("U")
-        if _prev.get("paginas") and _prev.get("vp") == _V_PAGINAS and os.path.exists(fp):
+        _etq_dec = leer_decision(path_molde)
+        _etq_hash = hash_ocultas(familias_ocultas(_etq_dec))
+        if (_prev.get("paginas") and _prev.get("vp") == _V_PAGINAS and os.path.exists(fp)
+                and _prev.get("etq") == _etq_hash):
             # las páginas de ESTE archivo ya están (y con la regla actual): no se rehacen. Sin
             # esto, un segundo `desplegar_molde(paginas=True)` sobre un molde listo (el hilo de
             # fondo que arrancó un endpoint mientras corría el de la subida) las reescribía
@@ -1577,6 +1837,12 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
 
     # 2) la página de cada talle. Se parsea la mesa UNA vez y se filtra veinte; el filtrado es,
     #    instrucción por instrucción, el mismo de `aislar_capa(..., podar=True)`.
+    # la decisión sobre la etiqueta del diseño (por familia, a nivel molde) — puede no existir
+    # todavía (contornos recién hechos): entonces no se oculta nada, y `desplegar_molde` la arma
+    # antes de pedir las páginas
+    _etq_dec = leer_decision(path_molde)
+    _ocultar = set(familias_ocultas(_etq_dec))
+    _etq_hash = hash_ocultas(_ocultar)
     pdf = pikepdf.open(path_molde)
     try:
         pag = pdf.pages[mesa - 1]
@@ -1595,7 +1861,8 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
             # «00» y «NOMBRE» se leen y se SACAN del dibujo de este talle (ver arriba); y si el
             # diseño ya trae la ETIQUETA DE CORTE del talle, también se saca — si no, la prenda
             # sale con dos (la del archivo y la del sistema).
-            salida, ph, etq = quitar_placeholders(salida, pag, marco, U, talle, conts.get(talle) or [])
+            salida, ph, etq = quitar_placeholders(salida, pag, marco, U, talle, conts.get(talle) or [],
+                                                  ocultar=_ocultar)
             if ph:
                 placeholders[talle] = ph
             if etq:
@@ -1616,7 +1883,7 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
                     "v": _V_CONTORNOS, "vp": _V_PAGINAS, "marco": marco, "U": U,
                     "placeholders": placeholders, "linea_corte": lineas,
-                    "etiqueta_archivo": etq_archivo})
+                    "etiqueta_archivo": etq_archivo, "etq": _etq_hash})
     return conts
 
 
@@ -1702,6 +1969,17 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
     _cand = _candado(path_molde)
     _cand.acquire()
     try:
+        if paginas:
+            # 🔴 LA DECISIÓN VA ANTES QUE LAS PÁGINAS: necesita los candidatos de TODAS las mesas
+            # (la familia se decide por cuántas piezas la traen), y las páginas la aplican. Si los
+            # contornos no están todavía, se hacen primero.
+            if contornos:
+                _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, True, False, n, mesas, por_mesa)
+                contornos = False
+            try:
+                decidir_etiqueta_archivo(path_molde, talles, procesos=procesos, avisar=avisar)
+            except Exception as e:
+                print(f"[camino B] no se pudo decidir la etiqueta del diseño de {path_molde}: {e}")
         return _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos, paginas, n, mesas, por_mesa)
     finally:
         _cand.release()
@@ -1810,32 +2088,13 @@ def personalizacion_con_diseno(path_molde, armar=True, procesos=None):
 
 
 def piezas_con_etiqueta_propia(path_molde):
-    """Cuántas PIEZAS del molde traían su propia etiqueta de corte (y en qué mesas).
-
-    Lo que dejó escrito el desplegado (`m{mesa}.json → etiqueta_archivo`). NO abre el molde ni
-    despliega nada: si la etapa de páginas todavía no corrió, devuelve `(0, {})` — el aviso
-    aparece cuando el dato existe, no antes. Se cuenta por PIEZA (mesa + índice), no por talle:
-    la misma pieza trae su etiqueta en los 20 talles y eso es UNA pieza etiquetada, no veinte.
-    """
-    import json
-    carpeta = _carpeta_desplegado(path_molde)
-    if not os.path.isdir(carpeta):
-        return 0, {}
-    por_mesa, total = {}, set()
-    for fn in os.listdir(carpeta):
-        if not (fn.startswith("m") and fn.endswith(".json")):
-            continue
-        try:
-            mesa = int(fn[1:-5])
-            with open(os.path.join(carpeta, fn), encoding="utf-8") as fh:
-                d = json.load(fh)
-        except Exception:
-            continue
-        idxs = {str(i) for t in (d.get("etiqueta_archivo") or {}).values() for i in t}
-        if idxs:
-            por_mesa[mesa] = len(idxs)
-            total |= {(mesa, i) for i in idxs}
-    return len(total), por_mesa
+    """`(piezas_ocultadas, familias)` según la decisión guardada. NO abre el molde ni despliega:
+    si la decisión no está todavía, `(0, [])` — el aviso aparece cuando el dato existe."""
+    dec = leer_decision(path_molde)
+    if not dec:
+        return 0, []
+    fams = dec.get("familias") or []
+    return sum(f.get("piezas", 0) for f in fams if f.get("ocultar")), fams
 
 
 def personalizacion_guardada(path_molde, armar=True):

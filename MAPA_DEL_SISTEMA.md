@@ -1482,7 +1482,55 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (429) — 🏷️ LA ETIQUETA QUE TRAE EL DISEÑO SE DECIDE POR FAMILIA, NO POR UMBRALES
+  (reemplaza la regla de la 428).** El usuario objetó la 428 de raíz: *«no todos los diseñadores
+  traen la etiqueta como debería; entonces debe ser ajuste nuestro. Buscá un verdadero método»*.
+  Tenía razón: «≤ 10 mm y a ≤ 10 mm del borde» estaba **calibrado con UN archivo**; otro diseñador la
+  pone más grande, más adentro o con texto de más («TALLE M»), y esa regla falla **en silencio**.
+
+  **EL MÉTODO, independiente del diseñador.** Lo que no cambia entre diseñadores: la etiqueta de
+  corte **se repite igual en casi todas las piezas** del molde (copiar-pegar: misma fuente, mismo
+  tamaño), mientras que un texto del diseño que también dice el talle —la talla tejida de la
+  piecita «TALLE», que dice «M» igual que la etiqueta— vive en **una sola pieza**. La firma es la
+  **consistencia entre piezas**, no el tamaño ni la posición.
+  1. **CANDIDATO** = todo texto de la capa de un talle que nombre ESE talle **como palabra entera**
+     (`menciona_talle`: «M», «TALLE M», «M-FRENTE» sí; «2XL» no es «XL»; «00» no es «0»). Sin umbral.
+  2. **FAMILIA** = fuente (sin subset) + alto a 0,5 mm (`familia_de`). Lo que un copiar-pegar conserva.
+     🔴 Un texto que **escala con el talle** (la talla tejida: 10 → 13,7 mm) daba SIETE familias de
+     una pieza: se fusionan las de la misma fuente que caen en **las mismas piezas** (es el mismo
+     elemento), el alto queda como rango y la familia lleva **todas sus claves** — la etapa de
+     páginas oculta por clave, y con una sola se sacaría en un talle nada más.
+  3. **DECISIÓN por molde** (`decidir_familias`, pura): se oculta la familia presente en **≥ 2/3 de
+     las piezas** (y ≥ 2). Lo demás se deja y se **informa** con su motivo. Lo que el usuario fija
+     a mano (`manual`) gana siempre.
+  **DÓNDE VIVE.** `etiqueta_archivo.json` al lado del desplegado (`sello` + `_V_ETQ`). El flujo:
+  contornos → `decidir_etiqueta_archivo` (una pasada por mesa, en paralelo: parsea y filtra por
+  talle como la etapa de páginas pero **sin escribir**; medido 1-5 s por mesa) → páginas, que
+  reciben las claves a ocultar. `quitar_placeholders` tiene dos modos (`candidatos=[]` junta,
+  `ocultar={claves}` saca) sobre **el mismo recorrido** que «00»/«NOMBRE». El **hash de la decisión
+  (`etq`) entra en la vigencia de las páginas**: cambiar la decisión rehace SÓLO las páginas.
+  `_V_PAGINAS` 4 → 5. La caché del desplegado por archivo copia la carpeta entera (decisión
+  incluida), así que no repone páginas inconsistentes.
+  **INTERRUPTOR.** `/api/productos` devuelve `etiquetas_familias` (con `ocultar`, `motivo`,
+  `piezas de N`, alto, distancia al borde) y `POST /api/productos/etiqueta_archivo {id, clave,
+  ocultar|null}` → `fijar_familia` + rehacer páginas en fondo (`_prewarm_desplegado`, guardado por
+  `_DESPL_FONDO`) + `_invalidar_cache_molde`. La pantalla («Piezas y etiqueta») lista cada familia
+  con su casillero y su motivo; ancla `pieza-b-etiqueta-archivo` en el diccionario de la ayuda.
+  **Medido en `CAMISETA JUGADOR.ai`:** 2 familias — Arial 5,3 mm en **8 de 9** piezas (20 talles) →
+  se oculta; Gunplay 10,1–13,7 mm en **1** pieza → se deja. El rótulo (Tahoma) ni es candidato.
+  **CONTRATO** `verificar_etiqueta_del_archivo.py` (reescrito): tokens, decisión pura (2/3 justo,
+  una pieza, molde de una pieza, manual gana), una etiqueta de **18 mm en el medio** en 9 de 9
+  TAMBIÉN se oculta (no hay umbral), el archivo real, aplicar la decisión saca sólo esa familia en
+  una mesa real, el hash cambia al fijar, y los umbrales viejos **ya no existen** en el código.
+  `verificar_desplegado.py` §6 ahora cuenta los archivos por mesa (la decisión es uno más).
+  ⚠️ `verificar_placeholders_con_diseno.py` falló UNA vez en la corrida en lote y salió verde dos
+  veces solo (trabaja en un temporal): transitorio del pool, no del cambio. Queda anotado.
+  📌 LECCIÓN: una regla calibrada contra un archivo no es un método; el método sale de lo que es
+  **invariante** del problema (acá, que la etiqueta se copia en todas las piezas), y lo que no se
+  puede decidir con certeza se muestra con interruptor.
+
 - **2026-09-11 (428) — 🏷️ EL MOLDE PUEDE TRAER LA ETIQUETA YA PUESTA: SE DETECTA Y SE OCULTA.**
+  *(regla de umbrales — REEMPLAZADA por la 429; queda como registro de la primera vuelta)*
   Pedido del usuario: *«que el sistema lo detecte y tenga una manera de que oculte automáticamente
   la etiqueta que viene en el diseño sin que nos afecte a otros textos que vengan»*.
 

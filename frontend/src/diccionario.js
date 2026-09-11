@@ -830,6 +830,11 @@ export const DICCIONARIO = {
     que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
     como: 'Abrí las configuraciones guardadas.',
   },
+  'pieza-b-etiqueta-archivo': {
+    nombre: 'La etiqueta que trae el diseño',
+    que: 'El diseño trae textos con el talle. Los que se repiten igual en casi todas las piezas son la etiqueta de corte que puso el diseñador: se ocultan, y la tizada pone la del sistema, así la prenda no sale con dos. Los que están en una sola pieza (la talla tejida, por ejemplo) son parte del diseño y se dejan. Cada renglón es una familia de textos (misma fuente y tamaño) con un casillero: si el sistema se equivocó, lo cambiás vos y las piezas se rehacen.',
+    como: 'Mirá cada renglón: marcado = se oculta, sin marcar = se deja. Cambiá el casillero si hace falta.',
+  },
   'pieza-b-sugerida': {
     nombre: 'Ya configuraste este molde',
     que: 'Aviso de que hay una configuración tuya guardada que le calza a este molde: dice cuál es, cuántos nombres trae y en cuántas piezas está marcada la etiqueta. Aparece también cuando el archivo es otro pero el molde es el mismo con otro diseño adentro, porque el molde se reconoce por sus piezas.',

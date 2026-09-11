@@ -10082,12 +10082,12 @@ def get_productos():
         n_etq_puestas = len(_gen & _res)
         # ¿el molde traía la etiqueta de corte ya dibujada? (sólo camino B; barato: lee los JSON
         # del desplegado, no abre el .ai)
-        n_etq_archivo = 0
+        n_etq_archivo, _etq_fams = 0, []
         try:
             import piezas_con_diseno as _PD
             _plb = _ruta_entrada("plantilla.ai", pid)
             if _PD.es_camino_b(_plb):
-                n_etq_archivo = _PD.piezas_con_etiqueta_propia(_plb)[0]
+                n_etq_archivo, _etq_fams = _PD.piezas_con_etiqueta_propia(_plb)
         except Exception:
             pass
         val_path = os.path.join(DATOS, "productos", pid, "validacion_arte.json")
@@ -10142,6 +10142,10 @@ def get_productos():
             # oculta (si no, la prenda sale con dos), pero nunca en silencio: la pantalla lo dice
             # en el paso de la etiqueta. 0 = el molde no traía ninguna, o todavía no se desplegó.
             "etiquetas_en_archivo": n_etq_archivo,
+            # Las FAMILIAS de texto que nombran el talle (fuente + tamaño), con la decisión de cada
+            # una y su motivo: la pantalla las lista con un interruptor. Vacío = no trae ninguna,
+            # o el desplegado todavía no decidió.
+            "etiquetas_familias": _etq_fams,
             # Los talles que tiene ESTE molde (la planilla junta los de todos los del pedido).
             "talles": _talles_p,
             # Cuántas piezas se le agregaron al molde (= versiones del archivo). Con esto la pantalla
@@ -10605,6 +10609,54 @@ def config_terminologia():
     prod["terminologia"] = actual
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "terminologia": actual})
+
+
+@app.post("/api/productos/etiqueta_archivo")
+def set_etiqueta_archivo():
+    """El interruptor de la etiqueta que trae el diseño: fija a mano si una FAMILIA de texto
+    (fuente + tamaño) se oculta o se deja. Cuerpo: `{id, clave, ocultar: true|false|null}`
+    (null = volver a lo automático).
+
+    Después de fijarla se rehacen las PÁGINAS por talle en segundo plano —el hash de la decisión
+    está en su vigencia, así que `desplegar_molde` rehace sólo lo que cambió— y se tiran las
+    cachés derivadas del molde (preview, nido): el dibujo de la pieza cambió."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no:
+        return _no
+    clave = str(cuerpo.get("clave") or "").strip()
+    if not clave:
+        return jsonify({"error": "falta la familia (clave)"}), 400
+    ocultar = cuerpo.get("ocultar", None)
+    if ocultar is not None:
+        ocultar = bool(ocultar)
+    import piezas_con_diseno as PD
+    path = _ruta_entrada("plantilla.ai", pid)
+    if not (os.path.exists(path) and PD.es_camino_b(path)):
+        return jsonify({"error": "este molde no trae el diseño adentro"}), 409
+    dec = PD.fijar_familia(path, clave, ocultar)
+    if dec is None:
+        return jsonify({"error": "el molde todavía se está preparando: probá en un momento"}), 409
+    _invalidar_cache_molde(pid)
+    # las páginas se rehacen en segundo plano; la pantalla verá «preparando» mientras tanto
+    try:
+        import pymupdf as _fz
+        _d = _fz.open(path)
+        try:
+            _talles = PD.talles_del_molde(_d)
+        finally:
+            _d.close()
+        _k = os.path.normcase(os.path.abspath(path))
+        with _DESPL_FONDO_LOCK:
+            _ya = _k in _DESPL_FONDO
+        if not _ya:
+            _en_hilo(lambda: _prewarm_desplegado(path, _talles, None))
+    except Exception as e:
+        print(f"[camino B] no se pudieron rehacer las páginas tras fijar la etiqueta: {e}")
+    fams = dec.get("familias") or []
+    return jsonify({"ok": True, "familias": fams,
+                    "etiquetas_en_archivo": sum(f.get("piezas", 0) for f in fams if f.get("ocultar"))})
 
 
 @app.post("/api/productos/variante_guia")

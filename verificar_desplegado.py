@@ -184,8 +184,12 @@ def main():
         print("\n6 · EL ALTA EN PARALELO DA LO MISMO QUE EN SERIE")
         shutil.rmtree(os.path.join(tmp, PD.DESPLEGADO), ignore_errors=True)
         t0 = time.time(); alta_p = PD.alta_molde_con_diseno(COPIA, procesos=4); t_p = time.time() - t0
-        n_arch = len(os.listdir(os.path.join(tmp, PD.DESPLEGADO)))
-        ok(n_arch == 2 * n_mesas, f"alta con 4 procesos: {t_p:.0f}s · {n_arch} archivos en desplegado/")
+        _arch = os.listdir(os.path.join(tmp, PD.DESPLEGADO))
+        # por mesa: su índice y su PDF por talle. Aparte, UN archivo del molde entero: la decisión
+        # sobre la etiqueta que trae el diseño (`etiqueta_archivo.json`, changelog 429).
+        n_arch = sum(1 for f in _arch if f.startswith("m") and f[1:].split(".")[0].isdigit())
+        ok(n_arch == 2 * n_mesas, f"alta con 4 procesos: {t_p:.0f}s · {n_arch} archivos por mesa en desplegado/")
+        ok(PD._ETQ_JSON in _arch, "y la decisión sobre la etiqueta del diseño quedó escrita al lado")
         ok(alta_p["registro"] and alta_p["visor"] and not alta_p["problemas"],
            f"{len(alta_p['registro'])} piezas · visor de {len(alta_p['visor'])} talles · sin problemas")
         # en serie, sólo la mesa 1 (el molde entero en serie son minutos): los contornos que dejó el
