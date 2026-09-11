@@ -10935,7 +10935,7 @@ export default function App() {
     abrirConfirmar({
       titulo: 'Empezar un pedido nuevo', ok: 'Empezar de 0',
       texto: 'Se borra TODO lo de este pedido: diseños, prendas, telas asignadas, filas de la planilla y lo que quedó en memoria.'
-        + _extra + ' Las tizadas ya generadas y la configuración de los moldes no se tocan.',
+        + _extra + ' Las tizadas generadas en este pedido se borran del servidor (descargalas antes si las necesitás). La configuración de los moldes no se toca.',
       onOk: _reiniciarPedido });
   };
   // «NUEVO PEDIDO» = ARRANCAR DE CERO, DE VERDAD. Si sobrevive algo del pedido anterior —una tela
@@ -10962,6 +10962,16 @@ export default function App() {
     // …y las tipografías subidas «sólo para este pedido» se borran: el sistema no tiene que
     // reconocerlas en el próximo (regla del usuario). Las del catálogo no se tocan.
     (async () => {
+      // ── LAS TIZADAS DEL PEDIDO SE VAN CON ÉL (regla del usuario 2026-09-11) ──────────────────
+      // Los PDF ya se descargaron desde el paso Tizada; en el servidor no quedan (antes se
+      // acumulaban para siempre). Se mandan las anotadas y `incluir_anteriores` se lleva también
+      // las mías que esta pantalla ya no tiene. El servidor no borra una que esté generando ni
+      // una de otro usuario.
+      try {
+        const _tids = [...new Set([...(trabajosMulti || []).map(t => t && t.jobId), trabajoId].filter(Boolean))];
+        await fetch('/api/pedido/limpiar_trabajos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: _tids, incluir_anteriores: true }) });
+      } catch { /* quedan archivos de más; el próximo «Nuevo pedido» los vuelve a pedir */ }
       const _pids = [...new Set([...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()])].filter(Boolean);
       // ⚠️ El `return` por «no hay moldes» era de las TIPOGRAFÍAS y se llevaba puesto el borrado de
       // los moldes efímeros de abajo: si el pedido no tenía ningún molde ELEGIDO (se subió y no se

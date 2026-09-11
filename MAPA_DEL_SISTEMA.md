@@ -1482,6 +1482,26 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (435) — 🗑️ «NUEVO PEDIDO» BORRA LAS TIZADAS DEL PEDIDO DEL SERVIDOR.** Al revisar
+  qué haría falta en el publicado apareció que los pedidos se acumulan en `trabajos/` para siempre
+  (3,3 GB / 317 pedidos en el taller; cada mesa de un molde con diseño deja además una previa de
+  hasta 40 MB). Regla del usuario: *«después que pusieron nuevo pedido eso se borra y listo»*.
+  **SERVER.** `POST /api/pedido/limpiar_trabajos {ids, incluir_anteriores}`: borra carpeta
+  (`shutil.rmtree`), fila (`db.trabajo_borrar`) y memoria de cada tizada. Guardas: id con forma
+  `[A-Za-z0-9_-]{6,80}` (nada de rutas), **nunca una en cola o generando** (`_trabajo_corriendo`:
+  memoria y base), **nunca una ajena** (`_trabajo_ajeno`). `incluir_anteriores` suma **las mías
+  terminadas** que la pantalla ya no tiene (`db.trabajos_terminados_de(uid)`: recarga, otra
+  pestaña); sin usuarios (taller) todo lo terminado del disco es de la misma persona. Con
+  usuarios, una carpeta sin fila y sin dueño **no se toca** desde acá (la fila se poda a las 6 h y
+  podría ser de otro) — ⏳ pendiente: una poda por edad para esas huérfanas, si el disco del
+  servidor lo pide. **FRONT.** `_reiniciarPedido` (lo usan «Nuevo pedido» y «Terminar pedido»)
+  llama al endpoint con las anotadas + `incluir_anteriores: true`; el confirmar ahora dice
+  «las tizadas generadas en este pedido se borran del servidor (descargalas antes)» en vez de
+  «no se tocan». **CONTRATO** `verificar_trabajos_se_borran.py` (carpeta temporal + base de
+  mentira): anotada se borra, generando queda, `../datos` se ignora, `incluir_anteriores` se
+  lleva la terminada, la de OTRO usuario queda, y el confirmar avisa. Verde. `API_RUTAS.md`
+  regenerado (157). Server reiniciado 14:55:25. ⚠️ En el taller, el próximo «Nuevo pedido» se
+  lleva los 317 pedidos de prueba acumulados: es lo pedido («son pruebas acá»).
 - **2026-09-11 (434) — 🚀 PREPARANDO LA PUBLICACIÓN: los pools del camino B respetan `TIZADA_PROCESOS`.**
   Al revisar qué haría falta a mano en el servidor (78 commits desde el último paquete, que era de
   `e6a505a`, ANTERIOR a la fusión del camino B), apareció esto: `personalizacion_con_diseno` y

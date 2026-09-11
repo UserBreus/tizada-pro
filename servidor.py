@@ -9518,6 +9518,82 @@ def _tocar_efimero(pid):
         pass
 
 
+_TID_OK = re.compile(r"[A-Za-z0-9_-]{6,80}")     # forma de un id de trabajo: nada de rutas
+
+
+def _trabajo_corriendo(tid):
+    """¿Está en cola o generando? Primero la memoria, después la base."""
+    t = trabajos.get(tid)
+    if isinstance(t, dict) and t.get("estado") in ("en cola", "generando"):
+        return True
+    try:
+        d = db.trabajo_leer(tid)
+        return bool(d and d.get("estado") in ("en cola", "generando"))
+    except Exception:
+        return False
+
+
+def _borrar_trabajo(tid):
+    """Archivos de `trabajos/<id>` + fila de la base + memoria. True si había algo."""
+    import shutil
+    habia = False
+    ruta = os.path.join(TRABAJOS, tid)
+    if os.path.isdir(ruta):
+        shutil.rmtree(ruta, ignore_errors=True)
+        habia = True
+    if trabajos.pop(tid, None) is not None:
+        habia = True
+    try:
+        if db.trabajo_borrar(tid):
+            habia = True
+    except Exception:
+        pass
+    return habia
+
+
+@app.post("/api/pedido/limpiar_trabajos")
+def limpiar_trabajos():
+    """Borra las TIZADAS del pedido que se cierra: los PDF de `trabajos/<id>`, la fila y la
+    memoria. Lo llaman «Nuevo pedido» y «Terminar pedido».
+
+    🔴 REGLA DEL USUARIO (2026-09-11): «después que pusieron nuevo pedido eso se borra y listo».
+    Hasta hoy los pedidos se acumulaban en el disco para siempre (3,3 GB en el taller), y cada
+    mesa de un molde con diseño deja además una vista previa de hasta 40 MB.
+
+    Body: `ids` = las tizadas que la pantalla tenía anotadas; `incluir_anteriores` = también
+    las MÍAS terminadas que la pantalla ya no tiene (recarga, otra pestaña). Con usuarios, «mías»
+    es por `creado_por` en la base: una carpeta sin fila y sin dueño no se toca desde acá (podría
+    ser de otro). Sin usuarios (taller) todo lo terminado del disco es de la misma persona.
+    Nunca se borra una que esté en cola o generando, ni una de otro usuario."""
+    _cuerpo = request.get_json(silent=True) or {}
+    ids = [str(x) for x in (_cuerpo.get("ids") or []) if x]
+    if _cuerpo.get("incluir_anteriores"):
+        try:
+            for x in db.trabajos_terminados_de(_uid_actual() if _USUARIOS_ON else None):
+                if x not in ids:
+                    ids.append(str(x))
+        except Exception:
+            pass
+        if not _USUARIOS_ON:
+            try:
+                for nombre in sorted(os.listdir(TRABAJOS)):
+                    if nombre not in ids and os.path.isdir(os.path.join(TRABAJOS, nombre)):
+                        ids.append(nombre)
+            except Exception:
+                pass
+    borrados, ignorados = [], []
+    for tid in ids:
+        if not _TID_OK.fullmatch(tid):
+            ignorados.append(tid)
+            continue
+        if _trabajo_ajeno(tid) is not None or _trabajo_corriendo(tid):
+            ignorados.append(tid)
+            continue
+        if _borrar_trabajo(tid):
+            borrados.append(tid)
+    return jsonify({"ok": True, "borrados": borrados, "ignorados": ignorados})
+
+
 @app.post("/api/pedido/limpiar_efimeros")
 def limpiar_efimeros():
     """Borra los moldes EFÍMEROS del camino B que mandó el pedido (los que trajeron el diseño

@@ -738,7 +738,9 @@ para cualquier diseño.
   5. **Cargar el arte →** (`pedido-ir-arte`).
 - **Bloqueos:** el botón se apaga si algún diseño quedó sin variable — el cartel al lado dice cuál.
   Una variable con **otra planilla** aparece deshabilitada: no se puede combinar.
-- **↺ Nuevo pedido** reinicia todo.
+- **↺ Nuevo pedido** reinicia todo. 🔴 **Y borra del servidor las tizadas de ese pedido**
+  (`POST /api/pedido/limpiar_trabajos`, 2026-09-11): los PDF hay que descargarlos ANTES, desde el
+  paso Tizada. No se borra una que esté generando ni una de otro usuario.
 
 ### 5.2 Subir **mi propio molde** desde el pedido
 

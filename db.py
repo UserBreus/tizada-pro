@@ -344,6 +344,26 @@ def trabajos_podar(horas=6, vivos=200):
         return n + cur.rowcount
 
 
+def trabajo_borrar(legacy_id):
+    """Saca la fila de un trabajo (los archivos los borra el servidor). Cuántas filas se fueron."""
+    with cursor() as cur:
+        cur.execute("DELETE FROM trabajo WHERE legacy_id=?", legacy_id)
+        return cur.rowcount
+
+
+def trabajos_terminados_de(usuario_id):
+    """`legacy_id` de los trabajos TERMINADOS de ese usuario (None = los que no tienen dueño).
+    Lo usa «Nuevo pedido» para llevarse las tizadas del pedido anterior aunque la pantalla ya no
+    las tenga anotadas (recarga, otra pestaña)."""
+    if usuario_id is None:
+        r = filas("SELECT legacy_id FROM trabajo WHERE creado_por IS NULL "
+                  "   AND estado IN ('listo','error','cancelado')")
+    else:
+        r = filas("SELECT legacy_id FROM trabajo WHERE creado_por=? "
+                  "   AND estado IN ('listo','error','cancelado')", usuario_id)
+    return [x["legacy_id"] for x in r]
+
+
 # ════════════════ RESERVAS («esto lo está editando fulano») ════════════════
 # El candado de edición del servidor dura lo que dura un guardado. Esto es otra cosa: dura lo que
 # dura una PERSONA con el editor abierto, cruza procesos y máquinas, y sobre todo **se puede

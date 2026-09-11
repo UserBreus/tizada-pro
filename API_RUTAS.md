@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **156 endpoints**. Generado automáticamente del código.
+Total: **157 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -111,6 +111,7 @@ Total: **156 endpoints**. Generado automáticamente del código.
 | POST | `/api/molde/config/aplicar` | Aplica una configuración guardada a este molde: `{pid, id}`. Devuelve el INFORME de lo que entró y lo que no — el usuario tiene que poder ver si acomo | body: id, partes, pid |
 | POST | `/api/molde/config/guardar` | Guarda la configuración del molde con un nombre: `{pid, nombre, id?}` (con `id` la pisa). | body: id, nombre, pid |
 | GET | `/api/molde/config/lista` | Las configuraciones guardadas, con QUÉ TAN BIEN le calzan a este molde (`pid`). No se aplica ninguna sola: la pantalla las muestra y el usuario elige  | q: pid |
+| POST | `/api/pedido/limpiar_trabajos` | Borra las TIZADAS del pedido que se cierra: los PDF de `trabajos/<id>`, la fila y la memoria. Lo llaman «Nuevo pedido» y «Terminar pedido». 🔴 REGLA DE | body: ids, incluir_anteriores |
 
 ## Plantilla (molde)
 
