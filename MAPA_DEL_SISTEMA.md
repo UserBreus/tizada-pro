@@ -1482,6 +1482,42 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-11 (431) — 🔤 LA TIPOGRAFÍA ES DE CADA MOLDE EN CADA DISEÑO, y «la misma para todos»
+  es opcional (como las telas).** Observación del usuario: *«la fuente que elijo no es por diseño
+  ni por molde; la tipografía es por diseño y por molde, cada uno tiene lo suyo, pero podríamos
+  hacer como la tela de elegirla para todos la misma, pero opcional»*. Tenía razón: desde la 275
+  el reemplazo era **UN mapa** `{fuente → tipografía}` para todo el pedido, indexado por el
+  NOMBRE de la fuente — dos diseños (o dos moldes) que usan la misma fuente recibían el mismo
+  cambio sin que nadie lo pidiera.
+  **FRONT.** `fuentesReempl` pasa a `{ 'diseño|molde': {fuente: tipografía} }` (la clave es el id
+  del diseño, que ya es su slug, + el pid). Helpers `_claveFx`, `_reemplDe(did, mid, mapa)` y
+  `_reemplActivo(pid, mapa)` — `mapa` es el estado recién armado, para el tick en que React aún no
+  lo tiene (la lección de la 276/277). Todos los que mandaban el mapa mandan **el del par**:
+  `cargarFuentesEstado`, `cargarFuentesDeArte`, el preview, la precarga de talles, `asignar_todo`
+  y la clave del caché en memoria `_pvKeyCon`. `resolverFuente` escribe sólo el par activo;
+  cargar el ARCHIVO de una fuente que tenía reemplazo lo suelta en **todos** los pares (el archivo
+  es del sistema o del molde, no de un par). Un pedido guardado con la forma vieja (valores =
+  nombre) se **reparte a cada par** que tenía: nadie pierde lo que eligió. El modal «Fuentes» dice
+  arriba **para quién** es («Para «molde» en «diseño»») y trae **«⧉ Usar en otros moldes…»**
+  (`arte-fuente-copiar`; aparece con más de un molde y una elección hecha) → modal de copia
+  calcado del de telas: *Todos los moldes del pedido* o marcando cuáles, avisa «ya tiene una
+  elegida», **pisa** (es «que quede la misma»). `generar_multi` recibe `fuentes_reemplazo_por`
+  (el mapa entero) + `fuentes_reemplazo` (el activo, para un server viejo).
+  **SERVER.** `_reempl_de_request(dslug=None, pid=None)`: con `fuentes_reemplazo_por` presente y
+  un par pedido devuelve **ese par o `{}`** — un par sin elección NO cae al plano (sería volver a
+  pegarle la elección de un molde a otro); sin el mapa por par, el plano de siempre (front viejo).
+  `generar_multi` arma `molds_data[…]["fuentes"]` con el par `(dslug, pid)` y cada guía de la
+  ficha lleva su `reempl` (`_molde_guia_ficha(..., reempl=_sp["reempl"])`): ficha = tizada. Los
+  endpoints de UN arte (preview, `fuentes_estado`, `fuente_resolver`) siguen leyendo el plano,
+  que ahora es el del par elegido por el front.
+  **CONTRATO** `verificar_fuentes_pedido.py` §6: el par devuelve su tipografía, dos moldes del
+  mismo diseño no la comparten, un par sin elección da `{}`, el plano vale sin mapa por par y por
+  querystring. Verde. Build verde (TDZ en 321: tres casos nuevos míos —`pidCfg`, `_nomMolde`,
+  `_nomDiseno` leídos desde arriba— se resolvieron pasando el pid y quitando los lookups, no
+  subiendo el tope). ⚠️ **No visto en pantalla**: el botón necesita dos moldes con una tipografía
+  elegida y el sandbox de sólo lectura no deja cargar arte.
+  📌 REGLA: toda config de estampado que se elige en el pedido es **por molde en cada diseño**
+  (como la tela, las marcas y los editables); un mapa global «por nombre» es un bug esperando.
 - **2026-09-11 (430) — 🏷️ EL BORDE DE LA ETIQUETA TAMBIÉN SE VA + infraestructura del
   auto-apagado de la etiqueta del sistema (regla PENDIENTE del usuario).**
   **1. «Me ocultó la etiqueta pero me dejó su contorno».** Illustrator exporta la apariencia

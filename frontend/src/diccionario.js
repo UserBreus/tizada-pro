@@ -830,6 +830,11 @@ export const DICCIONARIO = {
     que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
     como: 'Abrí las configuraciones guardadas.',
   },
+  'arte-fuente-copiar': {
+    nombre: 'Usar la tipografía en otros moldes',
+    que: 'La tipografía que elegís es de este molde en este diseño: cada uno tiene la suya. Con este botón la copiás a los otros moldes o diseños del pedido, todos de un toque o marcando cuáles, sin ir de molde en molde. Pisa lo que tuvieran elegido.',
+    como: 'Tocá «Usar en otros moldes…» y marcá a cuáles va.',
+  },
   'pieza-b-etiqueta-archivo': {
     nombre: 'La etiqueta que trae el diseño',
     que: 'El diseño trae textos con el talle. Los que se repiten igual en casi todas las piezas son la etiqueta de corte que puso el diseñador: se ocultan, y la tizada pone la del sistema, así la prenda no sale con dos. Los que están en una sola pieza (la talla tejida, por ejemplo) son parte del diseño y se dejan. Cada renglón es una familia de textos (misma fuente y tamaño) con un casillero: si el sistema se equivocó, lo cambiás vos y las piezas se rehacen.',

@@ -101,6 +101,24 @@ ok(_k1 != _k2, "dos tipografías distintas comparten clave de caché")
 ok(_k0 == S._piezas_base_clave(**_args, reempl={}), "la clave no es estable con los mismos datos")
 print("  · la clave del render cambia con la tipografía elegida (se re-dibuja al instante)")
 
+# ── 6. 🔴 LA TIPOGRAFÍA ES DE CADA MOLDE EN CADA DISEÑO (2026-09-11) ────────────────────────
+# Regla del usuario: «la tipografía es por diseño y por molde, cada uno tiene lo suyo». El front
+# manda `fuentes_reemplazo_por` = {"diseño|molde": {fuente: tipografía}} y el servidor toma el par
+# que le toca a cada molde. Un par que no está NO hereda el de otro (eso era el bug: dos diseños con
+# la misma fuente recibían el mismo cambio). Sin el mapa por par, el plano sigue valiendo.
+_por = {"jugador|m1": {"F": "Impact Regular"}, "jugador|m2": {"F": "Anton Regular"}}
+with S.app.test_request_context("/api/generar_multi", method="POST",
+                                json={"fuentes_reemplazo_por": _por, "fuentes_reemplazo": {"F": "PLANO"}}):
+    ok(S._reempl_de_request("JUGADOR", "m1") == {"F": "Impact Regular"}, "el par diseño|molde no devuelve SU tipografía")
+    ok(S._reempl_de_request("jugador", "m2") == {"F": "Anton Regular"}, "dos moldes del mismo diseño comparten tipografía")
+    ok(S._reempl_de_request("golero", "m1") == {}, "un par sin elección hereda la de otro (eso era el bug)")
+    ok(S._reempl_de_request() == {"F": "PLANO"}, "sin par, el mapa plano ya no se lee")
+with S.app.test_request_context("/api/generar_multi", method="POST", json={"fuentes_reemplazo": {"F": "PLANO"}}):
+    ok(S._reempl_de_request("jugador", "m1") == {"F": "PLANO"}, "sin mapa por par, el plano tiene que valer (front viejo)")
+with S.app.test_request_context("/api/pedido/fuentes_estado?fuentes_reemplazo=%7B%22F%22%3A%22X%22%7D"):
+    ok(S._reempl_de_request() == {"F": "X"}, "el mapa plano por querystring dejó de leerse")
+print("  · la tipografía se lee por par diseño|molde; un par sin elección queda sin reemplazo")
+
 print()
 if FALLOS:
     print("✗ FALLA:")

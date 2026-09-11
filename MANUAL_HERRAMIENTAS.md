@@ -834,6 +834,11 @@ propio); el ✓ verde marca las que ya tienen arte.
      modos»** y *«Cargar la tipografía»* (el modal de siempre: subirla al sistema o sólo a este
      pedido, o elegir un reemplazo del catálogo). El cartel de arriba **desaparece solo** cuando la
      tipografía queda resuelta, y el visor se re-dibuja **al instante** con la elegida.
+     🔸 **Es de ESTE molde en ESTE diseño** (2026-09-11): el modal lo dice arriba («Para «molde»
+     en «diseño»»). Elegirla acá no cambia la de los otros moldes. Para que quede la misma en
+     todos: **«⧉ Usar en otros moldes…»** (`arte-fuente-copiar`, aparece cuando hay más de un
+     molde y ya elegiste una) → *Todos los moldes del pedido* o marcando cuáles; pisa lo que
+     tuvieran. Igual que «Copiar estas telas a…».
   6. **A la planilla →** (`arte-siguiente`).
 - **Guarda:** `POST /api/arte` (multipart `archivo` + `diseno` + `pid`) →
   `entrada/<pid>/disenos/<slug>/arte.ai` + `validacion_arte.json` + `mapeo_arte.json` +

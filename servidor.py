@@ -8761,13 +8761,18 @@ def generar_multi():
                                      "_combos_vistos": {_combo_toggles(_prg)},
                                      # Nombre y número de ejemplo (de una fila real del pedido) para
                                      # que el molde guía los muestre estampados como en la prenda.
-                                     "muestra": _muestra_de(_prg)})
+                                     "muestra": _muestra_de(_prg),
+                                     # La tipografía elegida para ESTE molde en ESTE diseño: la guía
+                                     # de la ficha se estampa con la misma que la tizada.
+                                     "reempl": _reempl_de_request(dslug, pid)})
             molds_data.append({
                 "plantilla": _ruta_entrada("plantilla.ai", pid),
                 # CAMINO B: sin arte. El motor lo detecta por la marca del molde, pero mandarle
                 # la ruta de un `arte.ai` que no existe lo haría abrirlo igual para leer sus capas.
                 "arte": (None if _cb else _ruta_entrada("arte.ai", pid, sub=sub)),
-                "fuentes": _fuentes_para(pid, _reempl),   # carpetas + reemplazos DEL PEDIDO (arte=tizada)
+                # carpetas + reemplazos de ESTE molde en ESTE diseño (arte=tizada). Es por par, no
+                # del pedido entero: dos moldes con la misma fuente pueden reemplazarla distinto.
+                "fuentes": _fuentes_para(pid, _reempl_de_request(dslug, pid)),
                 "registro": reg, "pers": pers, "prendas": subset,
                 "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(dslug),
                 "borde_corte": _borde_de(prod, cat),
@@ -8978,7 +8983,7 @@ def generar_multi():
                         prog("ficha", (_sp.get("molde") or (_prodf or {}).get("nombre", _pf))
                              + (f" · {_sp['diseno_nombre']}" if _sp.get("diseno_nombre") else ""), None)
                         _dsf = _sp.get("diseno") or default_diseno
-                        g = _molde_guia_ficha(_pf, _prodf, _regf, _dsf, _sp, reempl=_reempl,
+                        g = _molde_guia_ficha(_pf, _prodf, _regf, _dsf, _sp, reempl=_sp.get("reempl", _reempl),
                                               marcas_ped=_marcas_del_pedido(cuerpo, _pf, _dsf),
                                               sin_marca_ped=_marcas_del_pedido(cuerpo, _pf, _dsf, "sin_marca_pedido"))
                         if g:
@@ -9145,20 +9150,35 @@ def _fuentes_para(pid, reemplazos=None):
     return {"carpetas": [d, FUENTES], "alias": dict(reemplazos or {})}
 
 
-def _reempl_de_request():
-    """Los reemplazos de fuente que manda el FRONT con el pedido en curso: `{faltante: interno}`."""
+def _reempl_de_request(dslug=None, pid=None):
+    """Los reemplazos de fuente que manda el FRONT con el pedido en curso: `{faltante: interno}`.
+
+    🔴 LA TIPOGRAFÍA ES DE CADA MOLDE EN CADA DISEÑO (regla del usuario 2026-09-11: «la tipografía
+    es por diseño y por molde, cada uno tiene lo suyo»). El front manda `fuentes_reemplazo_por` =
+    `{"<slug del diseño>|<pid>": {faltante: interno}}` y acá se pide el par con `(dslug, pid)`.
+    Si el pedido trae el mapa por par, **un par que no está NO tiene reemplazo** (no cae al mapa
+    plano: sería volver a que la elección de un molde se le pegue a otro). Los endpoints que
+    trabajan sobre UN arte (preview, `fuentes_estado`) reciben `fuentes_reemplazo` plano con el
+    mapa de ese par ya elegido por el front."""
+    def _limpio(r):
+        return {str(k): str(v) for k, v in r.items() if k and v} if isinstance(r, dict) else None
     try:
+        import json as _j
         d = request.get_json(silent=True) if request.method in ("POST", "PUT", "PATCH") else None
-        if isinstance(d, dict):
-            r = d.get("fuentes_reemplazo")
-            if isinstance(r, dict):
-                return {str(k): str(v) for k, v in r.items() if k and v}
+        d = d if isinstance(d, dict) else {}
+        por = d.get("fuentes_reemplazo_por")
+        if por is None:
+            v = request.args.get("fuentes_reemplazo_por")
+            if v:
+                por = _j.loads(v)
+        if isinstance(por, dict) and dslug is not None and pid is not None:
+            return _limpio(por.get(f"{_slugify_diseno(dslug)}|{pid}") or {}) or {}
+        r = _limpio(d.get("fuentes_reemplazo"))
+        if r is not None:
+            return r
         v = request.args.get("fuentes_reemplazo")
         if v:
-            import json as _j
-            r = _j.loads(v)
-            if isinstance(r, dict):
-                return {str(k): str(v2) for k, v2 in r.items() if k and v2}
+            return _limpio(_j.loads(v)) or {}
     except Exception:
         pass
     return {}

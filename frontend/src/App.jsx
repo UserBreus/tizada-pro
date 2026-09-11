@@ -4584,7 +4584,27 @@ export default function App() {
   // Antes se guardaba en el molde (`prod.fuentes_reemplazo`) y una elección vieja pisaba la fuente
   // correcta para siempre — pasó: el arte traía una fuente QUE ESTABA en el catálogo y se estampaba
   // con otra. Viaja en cada request (`fuentes_reemplazo`) y se limpia con «Nuevo pedido».
-  const [fuentesReempl, setFuentesReempl] = useState(_wiz.fuentesReempl || {});
+  // 🔴 …Y ES DE CADA MOLDE EN CADA DISEÑO (regla del usuario 2026-09-11: «la tipografía es por
+  // diseño y por molde, cada uno tiene lo suyo»). Forma: `{ 'diseño|molde': {fuente: tipografía} }`.
+  // Antes era UN mapa para todo el pedido y dos diseños con la misma fuente recibían el mismo
+  // cambio. «La misma para todos» sigue existiendo, pero se pide (modal de copia, como las telas).
+  const [fuentesReempl, setFuentesReempl] = useState(() => {
+    const m = _wiz.fuentesReempl || {};
+    // Un pedido guardado con la forma vieja (valores = nombre de tipografía): valía para todos
+    // los artes → se reparte a cada par que el pedido tenía. Así nadie pierde lo que eligió.
+    if (Object.values(m).some(v => typeof v === 'string')) {
+      const n = {};
+      Object.entries(_wiz.disenoMoldes || {}).forEach(([did, mids]) => (mids || []).forEach(mid => { n[did + '|' + mid] = { ...m }; }));
+      return n;
+    }
+    return m;
+  });
+  const _claveFx = (did, mid) => `${did || 'principal'}|${mid}`;
+  // El mapa de UN par. `mapa` = el estado recién armado, para el tick en que React aún no lo tiene.
+  const _reemplDe = (did, mid, mapa) => ((mapa ?? fuentesReempl) || {})[_claveFx(did, mid)] || {};
+  // (`pid` viene de quien llama: `pidCfg` se declara más abajo y el contrato TDZ no deja leerlo acá.)
+  const _reemplActivo = (pid, mapa) => _reemplDe(disenoActivo, pid, mapa);
+  const [fuenteCopiar, setFuenteCopiar] = useState(null);    // {did, mid, destinos:Set} — «Usar en otros moldes…»
   const [fuenteModal, setFuenteModal] = useState(false);     // modal «Resolver fuente»
   // Cartel de «la tipografía no está» al querer avanzar a la Planilla. NO traba: trae el botón
   // «Seguir de todos modos» (regla del usuario 2026-08-21). Sólo recuerda lo que va a pasar.
@@ -4611,7 +4631,7 @@ export default function App() {
   const cargarFuentesEstado = async (reemplOverride) => {
     const pid = pidCfg || productosCat.activo; if (!pid) return;
     try {
-      const r = await fetch(`/api/pedido/fuentes_estado?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(disenoActivo || 'principal')}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(reemplOverride ?? fuentesReempl ?? {}))}`);
+      const r = await fetch(`/api/pedido/fuentes_estado?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(disenoActivo || 'principal')}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(_reemplDe(disenoActivo, pid, reemplOverride)))}`);
       if (!r.ok) return;
       const d = await r.json();
       // CAMINO B recién subido: el servidor todavía está preparando el molde en segundo plano y
@@ -4631,7 +4651,7 @@ export default function App() {
   const cargarFuentesDeArte = async (did, mid, reemplOverride) => {
     if (!did || !mid) return;
     try {
-      const q = `pid=${encodeURIComponent(mid)}&diseno=${encodeURIComponent(did)}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(reemplOverride ?? fuentesReempl ?? {}))}`;
+      const q = `pid=${encodeURIComponent(mid)}&diseno=${encodeURIComponent(did)}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(_reemplDe(did, mid, reemplOverride)))}`;
       const r = await fetch(`/api/pedido/fuentes_estado?${q}`);
       if (!r.ok) return;
       const d = await r.json();
@@ -5867,25 +5887,25 @@ export default function App() {
       }
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo resolver la fuente'); return; }
-      // El reemplazo NO lo guarda el server: vive en ESTE pedido.
+      // El reemplazo NO lo guarda el server: vive en ESTE pedido, y es de ESTE molde en ESTE
+      // diseño. Se arma el mapa nuevo entero primero (el estado de React no lo tiene en este
+      // tick) y con ese mismo mapa se repiden el cartel y el render: así el visor cambia al instante.
+      const _k = _claveFx(disenoActivo, pid);
+      const _par = { ...(fuentesReempl[_k] || {}) };
+      const _nuevo = { ...fuentesReempl };
       if (accion === 'subir') {
-        // cargar el archivo de una fuente que tenía reemplazo = volver a ella
-        if ((d.alias_quitados || []).length) setFuentesReempl(m => { const n = { ...m }; d.alias_quitados.forEach(k => delete n[k]); return n; });
+        // cargar el archivo de una fuente que tenía reemplazo = volver a ella, en TODOS los
+        // artes del pedido (el archivo es del sistema o del molde, no de un par)
+        (d.alias_quitados || []).forEach(k => Object.keys(_nuevo).forEach(kk => { const n = { ...(_nuevo[kk] || {}) }; delete n[k]; _nuevo[kk] = n; }));
       } else if (d.quitar) {
-        setFuentesReempl(m => { const n = { ...m }; delete n[datos.faltante]; return n; });   // eligió la original
+        delete _par[datos.faltante]; _nuevo[_k] = _par;      // eligió la original
       } else {
-        setFuentesReempl(m => ({ ...m, [datos.faltante]: datos.usar }));
+        _par[datos.faltante] = datos.usar; _nuevo[_k] = _par;
       }
+      setFuentesReempl(_nuevo);
       showMsg(accion === 'subir'
         ? (datos.destino === 'sistema' ? 'Fuente cargada al sistema ✓ — el sistema la va a reconocer siempre' : 'Fuente cargada sólo para este pedido ✓')
-        : 'Listo: esta tizada usa esa tipografía ✓');
-      // EN TIEMPO REAL: se repide el render con el mapa de fuentes YA actualizado (el estado de
-      // React todavía no lo tiene en este tick), así el visor cambia la tipografía al instante.
-      const _nuevo = accion === 'subir'
-        ? (() => { const m = { ...fuentesReempl }; (d.alias_quitados || []).forEach(k => delete m[k]); return m; })()
-        : d.quitar
-          ? (() => { const m = { ...fuentesReempl }; delete m[datos.faltante]; return m; })()
-          : { ...fuentesReempl, [datos.faltante]: datos.usar };
+        : 'Listo: este molde en este diseño usa esa tipografía ✓ (los demás moldes no cambian)');
       await cargarFuentesEstado(_nuevo);        // el cartel se va apenas queda resuelta
       cargarFuentesTodas(_nuevo);               // …y en los demás artes del pedido también
       _pvCache.current = {}; setPreviewPiezas({}); cargarPreviewPiezas(null, _nuevo);
@@ -8641,7 +8661,7 @@ export default function App() {
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
       const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: fuentesReempl }) });
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -8969,7 +8989,7 @@ export default function App() {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true, fuentes_reemplazo: fuentesReempl })
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true, fuentes_reemplazo: _reemplDe(dis, pid) })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
           } catch (e) { /* sigue con el próximo talle */ }
@@ -8999,7 +9019,7 @@ export default function App() {
   const _prefetchTok = React.useRef(0);     // aborta una precarga vieja si cambió el contexto
   // ⚠️ La TIPOGRAFÍA elegida entra en la clave: sin ella, cambiarla devolvía el render cacheado
   // con la anterior y parecía que no pasaba nada (mismo mapeo, mismo talle → mismo hit).
-  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(reempl ?? fuentesReempl ?? {})}`;
+  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(_reemplDe(disenoActivo, pidCfg || productosCat.activo, reempl))}`;
   const _pvKeyDe = (talle) => _pvKeyCon(mapeoValores, talle);
   const _pvGuardar = (k, piezas) => {
     if (Object.keys(_pvCache.current).length > 300) _pvCache.current = {};   // tope de memoria
@@ -9037,7 +9057,7 @@ export default function App() {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true, fuentes_reemplazo: _reempl })
+              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true, fuentes_reemplazo: _reemplDe(dis, pid, _reempl) })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
             else if (res.status === 409) return;   // falta arte/registro: no martillar 30 veces
@@ -9078,7 +9098,7 @@ export default function App() {
     try {
       const res = await fetch('/api/arte/preview_piezas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid, diseno: disenoActivo, variante: clave, mapeo, editables: { [clave || '*']: editorTfs }, talle, fuentes_reemplazo: _reempl })   // + los reemplazos de fuente DEL PEDIDO
+        body: JSON.stringify({ pid, diseno: disenoActivo, variante: clave, mapeo, editables: { [clave || '*']: editorTfs }, talle, fuentes_reemplazo: _reemplDe(disenoActivo, pid, _reempl) })   // + la tipografía de ESTE molde en ESTE diseño
       });
       if (req !== _pvReq.current) return;                 // llegó una respuesta vieja → descartar
       if (res.ok) {
@@ -12961,6 +12981,20 @@ export default function App() {
           {fuenteModal && (
         <Modal open={fuenteModal} onClose={() => setFuenteModal(false)} titulo="Fuentes" maxWidth={560}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+            {/* DE QUIÉN ES LO QUE SE ELIGE ACÁ (2026-09-11): de este molde en este diseño. Si se
+                quiere la misma en los demás, se copia — nunca se pega sola. */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)' }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                Para <b style={{ color: '#fff' }}>«{_nomMolde(pidCfg || productosCat.activo)}»</b> en <b style={{ color: '#fff' }}>«{_nomDiseno(disenoActivo || 'principal')}»</b>. Cada molde de cada diseño tiene su tipografía.
+              </span>
+              {tareasArte.length > 1 && Object.keys(_reemplActivo(pidCfg || productosCat.activo)).length > 0 && (
+                <button type="button" className="btn ghost" data-tour="arte-fuente-copiar" style={{ fontSize: 12, padding: '6px 10px' }}
+                  title="Usar esta misma tipografía en otros moldes o diseños del pedido"
+                  onClick={() => setFuenteCopiar({ did: disenoActivo || 'principal', mid: pidCfg || productosCat.activo, destinos: new Set() })}>
+                  ⧉ Usar en otros moldes…
+                </button>
+              )}
+            </div>
             {(fuentesEstado?.faltantes || []).length > 0 && (
               <div style={{ fontSize: 12.5, color: 'var(--warning, #f5a524)', fontWeight: 700, lineHeight: 1.45 }}>
                 No se encontraron las fuentes: {(fuentesEstado.faltantes).join(' · ')}
@@ -13050,6 +13084,64 @@ export default function App() {
           </div>
         </Modal>
       )}
+
+        {/* LA MISMA TIPOGRAFÍA EN OTROS MOLDES DEL PEDIDO (2026-09-11, pedido del usuario: «podríamos
+            hacer como la tela, de elegirla para todos la misma, pero opcional»). Copia el mapa
+            {fuente → tipografía} del molde+diseño que se está mirando a los pares elegidos. PISA lo
+            que tuvieran: es exactamente «que quede la misma». */}
+        <Modal open={!!fuenteCopiar} onClose={() => setFuenteCopiar(null)} titulo="Usar esta tipografía en…" maxWidth={560}>
+          {fuenteCopiar && (() => {
+            const origen = _reemplDe(fuenteCopiar.did, fuenteCopiar.mid);
+            const destinos = tareasArte.filter(t => !(t.did === fuenteCopiar.did && t.mid === fuenteCopiar.mid));
+            const todos = destinos.length > 0 && destinos.every(t => fuenteCopiar.destinos.has(t.did + '|' + t.mid));
+            const marcar = (k) => setFuenteCopiar(c => { const n = new Set(c.destinos); if (n.has(k)) n.delete(k); else n.add(k); return { ...c, destinos: n }; });
+            const aplicar = () => {
+              const elegidos = destinos.filter(t => fuenteCopiar.destinos.has(t.did + '|' + t.mid));
+              if (!elegidos.length) return;
+              const n = { ...fuentesReempl };
+              elegidos.forEach(t => { n[_claveFx(t.did, t.mid)] = { ...origen }; });
+              setFuentesReempl(n);
+              setFuenteCopiar(null);
+              showMsg(`Tipografía aplicada a ${elegidos.length} ${elegidos.length === 1 ? 'molde' : 'moldes'} ✓`);
+              cargarFuentesTodas(n);            // los avisos de los otros artes, con el mapa nuevo
+            };
+            const _lista = Object.entries(origen).map(([f, u]) => `${f} → ${u}`).join(' · ');
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                  Se copia la tipografía de <b>«{_nomMolde(fuenteCopiar.mid)}»</b> en <b>«{_nomDiseno(fuenteCopiar.did)}»</b> ({_lista}) a los moldes que marques. <b>Pisa</b> lo que tuvieran elegido.
+                </div>
+                {destinos.length === 0 ? (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Este pedido tiene un solo molde: no hay a dónde copiar.</div>
+                ) : (<>
+                  <button type="button" className="btn ghost" style={{ alignSelf: 'flex-start', fontSize: 12 }}
+                    onClick={() => setFuenteCopiar(c => ({ ...c, destinos: todos ? new Set() : new Set(destinos.map(t => t.did + '|' + t.mid)) }))}>
+                    {todos ? 'Ninguno' : 'Todos los moldes del pedido'}
+                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto' }}>
+                    {destinos.map(t => {
+                      const k = t.did + '|' + t.mid;
+                      const tiene = Object.keys(_reemplDe(t.did, t.mid)).length;
+                      return (
+                        <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, border: '1px solid var(--border-light)', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={fuenteCopiar.destinos.has(k)} onChange={() => marcar(k)} />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5 }}>
+                            <b>{_nomMolde(t.mid)}</b> <span style={{ color: 'var(--text-muted)' }}>en {_nomDiseno(t.did)}</span>
+                          </span>
+                          {tiene > 0 && <span style={{ fontSize: 11, color: 'var(--warning, #f5a524)' }}>ya tiene una elegida</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button type="button" className="btn ghost" onClick={() => setFuenteCopiar(null)}>Cancelar</button>
+                    <button type="button" className="btn primary" disabled={!fuenteCopiar.destinos.size} onClick={aplicar}>Aplicar</button>
+                  </div>
+                </>)}
+              </div>
+            );
+          })()}
+        </Modal>
 
         {/* Unificar perfil: si los diseños tienen perfiles distintos, elegir a cuál transformar todo */}
         <Modal open={!!perfilUnificar} onClose={() => setPerfilUnificar(null)} titulo="Tus diseños tienen perfiles distintos" maxWidth={480} centrado>
