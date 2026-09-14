@@ -1332,14 +1332,19 @@ def hash_ocultas(claves):
     return hashlib.sha1("|".join(sorted(claves or [])).encode("utf-8")).hexdigest()[:12]
 
 
-def buscar_candidatos_mesa(path_molde, mesa, talles):
-    """Los candidatos a etiqueta de UNA mesa, en todos sus talles (worker de proceso).
+def buscar_candidatos_mesa(path_molde, mesa, talles, orden=None):
+    """Los candidatos a etiqueta de UNA mesa, en los talles pedidos (worker de proceso).
 
     Parsea la mesa una vez y filtra por talle como la etapa de páginas, pero SIN escribir nada:
-    sólo lee los textos. Medido: 1-5 s por mesa, en paralelo con las demás."""
+    sólo lee los textos. Medido: 1-5 s por mesa, en paralelo con las demás.
+
+    🔴 `orden` = los talles del MOLDE, para reconocer el índice del desplegado; `talles` = los que
+    le tocan a este worker. Son distintos desde que el trabajo se reparte por talle (2026-09-14):
+    pasarle el trozo a `_json_mismo_archivo` lo hacía fallar —el orden no coincidía—, devolvía
+    cero candidatos y el molde entero quedaba SIN etiqueta detectada, en silencio."""
     import molde_real as MR
     fj = os.path.join(_carpeta_desplegado(path_molde), f"m{mesa}.json")
-    idx = _json_mismo_archivo(fj, _sello(path_molde), list(talles))
+    idx = _json_mismo_archivo(fj, _sello(path_molde), list(orden if orden is not None else talles))
     if idx is None:
         return mesa, []                      # sin contornos no hay a qué pieza asignar: se saltea
     conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (idx.get("talles") or {}).items()}
@@ -1389,22 +1394,32 @@ def decidir_etiqueta_archivo(path_molde, talles, procesos=None, avisar=None):
         d.close()
     mesas = list(range(1, n + 1))
     cands = []
-    pendientes = list(mesas)
-    if procesos and procesos > 1 and n > 1:
+    # El trozo de trabajo es (mesa, unos talles). Con varias mesas, una mesa entera por proceso
+    # —parsearla cuesta y así se parsea una sola vez—; con pocas mesas y muchos talles se parte
+    # por TALLE, o un molde de una sola mesa no repartiría nada (2026-09-14, ver `_armar_paginas`).
+    if procesos and procesos > 1 and n < procesos and len(talles) > 1:
+        tareas = [(m, tr) for m in mesas for tr in _trozos_de_talles(talles, max(1, procesos // n))]
+    else:
+        tareas = [(m, list(talles)) for m in mesas]
+    pendientes = list(range(len(tareas)))
+    if procesos and procesos > 1 and len(tareas) > 1:
         try:
             from concurrent.futures import ProcessPoolExecutor, as_completed
-            with ProcessPoolExecutor(max_workers=min(n, procesos)) as ex:
-                futs = {ex.submit(buscar_candidatos_mesa, path_molde, m, list(talles)): m for m in mesas}
+            with ProcessPoolExecutor(max_workers=min(len(tareas), procesos)) as ex:
+                futs = {ex.submit(buscar_candidatos_mesa, path_molde, m, list(tr), list(talles)): i
+                        for i, (m, tr) in enumerate(tareas)}
                 for f in as_completed(futs):
-                    m, cs = f.result()
+                    i = futs[f]
+                    _m, cs = f.result()
                     cands.extend(cs)
-                    pendientes.remove(m)
+                    pendientes.remove(i)
                     if avisar:
-                        avisar(n - len(pendientes), n, f"etiquetas · mesa {m}")
+                        avisar(len(tareas) - len(pendientes), len(tareas), f"etiquetas · mesa {_m}")
         except Exception as e:
             print(f"[camino B] la búsqueda de etiquetas en paralelo falló ({type(e).__name__}: {e}); sigo en serie")
-    for m in pendientes:
-        _m, cs = buscar_candidatos_mesa(path_molde, m, list(talles))
+    for i in pendientes:
+        m, tr = tareas[i]
+        _m, cs = buscar_candidatos_mesa(path_molde, m, list(tr), list(talles))
         cands.extend(cs)
     # cuántas piezas tiene el molde (mesa + índice), de los contornos ya desplegados
     total = set()
@@ -1681,13 +1696,27 @@ def _bloques_de_contorno(salida, cajas, marco, U):
     def _dev(x, y):
         return ((x - x0c) * U, (y1c - y) * U)
 
+    # Cada caja ya resuelta a (x0, x1, y0, y1, idx_pieza): se consultan una vez por punto.
+    _cajas = [(dx - mm2, dx + ancho + mm2, dy - 1.1 * alto - mm2, dy + 0.3 * alto + mm2, ip)
+              for ip, dx, dy, ancho, alto in cajas]
+
     def _adentro(bx0, by0, bx1, by1):
-        for ip, dx, dy, ancho, alto in cajas:
-            X0, X1 = dx - mm2, dx + ancho + mm2
-            Y0, Y1 = dy - 1.1 * alto - mm2, dy + 0.3 * alto + mm2
+        for X0, X1, Y0, Y1, ip in _cajas:
             if bx0 >= X0 and bx1 <= X1 and by0 >= Y0 and by1 <= Y1:
                 return ip
         return "sin"
+
+    # 🔴 EL DESCARTE TEMPRANO. Un bloque que pisa un punto que no cae en NINGUNA caja no puede
+    # estar entero adentro de una, así que se abandona ahí mismo, sin terminar de recorrerlo. Las
+    # etiquetas ocupan milímetros en una mesa de metros: casi todos los bloques del diseño mueren
+    # en su primer punto y cuestan unas comparaciones en vez de cientos de instrucciones.
+    # ⚠️ Contra CADA caja, nunca contra la que las envuelve a todas: con las etiquetas repartidas
+    # por la mesa esa envolvente ES la mesa entera y no descarta nada (medido 2026-09-14).
+    def _toca(px, py):
+        for X0, X1, Y0, Y1, _ip in _cajas:
+            if X0 <= px <= X1 and Y0 <= py <= Y1:
+                return True
+        return False
 
     ctm, pila = [1, 0, 0, 1, 0, 0], []
     hallados = []
@@ -1732,7 +1761,11 @@ def _bloques_de_contorno(salida, cajas, marco, U):
                         for x, y in cand:
                             X = ctm_b[0] * x + ctm_b[2] * y + ctm_b[4]
                             Y = ctm_b[1] * x + ctm_b[3] * y + ctm_b[5]
-                            pts.append(_dev(X, Y))
+                            _p = _dev(X, Y)
+                            if not _toca(_p[0], _p[1]):
+                                otro = True          # pisa fuera de toda etiqueta: no es un borde
+                                break
+                            pts.append(_p)
                     except Exception:
                         otro = True
                 elif o2 in ("S", "s"):
@@ -1743,6 +1776,12 @@ def _bloques_de_contorno(salida, cajas, marco, U):
                     pass
                 else:
                     otro = True                      # texto, imágenes, XObjects…: no es esto
+                if otro:
+                    # 🔴 YA NO PUEDE SER: no hace falta recorrer el resto del bloque. El `i += 1`
+                    # de afuera sigue instrucción por instrucción como siempre, así que el `ctm`
+                    # se mantiene bien y los bloques ANIDADOS se miran igual (cada `q` abre su
+                    # propio intento). Cortar acá no cambia qué se encuentra, sólo cuánto cuesta.
+                    break
                 j += 1
             if prof == 0 and pintado == "S" and not otro and pts:
                 bx0 = min(p[0] for p in pts); bx1 = max(p[0] for p in pts)
@@ -1867,7 +1906,8 @@ def quitar_linea_de_corte(salida, page, contornos, marco, U):
     return [reemplazar.get(i, inst) for i, inst in enumerate(salida)], encontrados
 
 
-def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, paginas=True):
+def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, paginas=True,
+                   procesos=None, avisar=None):
     """Despliega UNA mesa y devuelve `{talle: [contornos]}` (sólo los talles con piezas). Es lo que
     corre en cada proceso del alta.
 
@@ -1965,42 +2005,9 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     _etq_dec = leer_decision(path_molde)
     _ocultar = set(familias_ocultas(_etq_dec))
     _etq_hash = hash_ocultas(_ocultar)
-    pdf = pikepdf.open(path_molde)
-    try:
-        pag = pdf.pages[mesa - 1]
-        ins = list(pikepdf.parse_content_stream(pag))
-        ops, oc = MR._mapa_oc(ins, pag)
-        bloques = MR._bloques_oc(ops, oc)
-        out = pikepdf.Pdf.new()
-        placeholders = {}
-        lineas = {}
-        etq_archivo = {}      # talle → {idx_pieza: la etiqueta de corte que traía el diseño}
-        for talle in talles:
-            obj = {MR._norm_capa(talle)}
-            fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
-            saltar = MR._saltar_bloques(ops, oc, fn, bloques)
-            salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
-            # «00» y «NOMBRE» se leen y se SACAN del dibujo de este talle (ver arriba); y si el
-            # diseño ya trae la ETIQUETA DE CORTE del talle, también se saca — si no, la prenda
-            # sale con dos (la del archivo y la del sistema).
-            salida, ph, etq = quitar_placeholders(salida, pag, marco, U, talle, conts.get(talle) or [],
-                                                  ocultar=_ocultar)
-            if ph:
-                placeholders[talle] = ph
-            if etq:
-                etq_archivo[talle] = {str(k): v for k, v in etq.items()}
-            # la línea de corte del archivo se saca del dibujo: la base la vuelve a trazar con
-            # la configuración del borde (o tal cual, si el borde está apagado)
-            salida, lc = quitar_linea_de_corte(salida, pag, conts.get(talle) or [], marco, U)
-            if lc:
-                lineas[talle] = {str(k): v for k, v in lc.items()}
-            npag = _pagina_desplegada(out, pag, salida)
-            MR.sanear_oc(out, npag)
-        out.save(fp + ".tmp")
-        out.close()
-        _reemplazar(fp + ".tmp", fp)
-    finally:
-        pdf.close()
+    placeholders, lineas, etq_archivo = _armar_paginas(path_molde, mesa, talles, conts, marco, U,
+                                                       _ocultar, fp + ".tmp", procesos, avisar)
+    _reemplazar(fp + ".tmp", fp)
 
     _escribir_json({"sello": sello, "orden": list(talles), "talles": conts, "paginas": True,
                     "v": _V_CONTORNOS, "vp": _V_PAGINAS, "marco": marco, "U": U,
@@ -2059,6 +2066,152 @@ def _desplegar_mesa_worker(args):
     """Worker de proceso (spawn-safe: recibe y devuelve tipos simples)."""
     path, mesa, talles, contornos, paginas = args
     return mesa, desplegar_mesa(path, mesa, list(talles), contornos=contornos, paginas=paginas)
+
+
+_TALLES_POR_PROCESO = 3        # menos que esto no paga el parseo de la mesa (ver `_trozos_de_talles`)
+
+
+def _trozos_de_talles(talles, procesos):
+    """En cuántos trozos conviene partir los talles de UNA mesa.
+
+    🔴 CADA PROCESO VUELVE A PARSEAR LA MESA. En el molde de una sola mesa eso son 5 s antes de
+    empezar, así que darle menos de `_TALLES_POR_PROCESO` talles a un proceso es regalar tiempo.
+    Medido 2026-09-14 con 20 talles: 4 procesos 62 s · 6 procesos 61 s · 11 procesos **73 s** (la
+    máquina tiene 6 núcleos y cada worker se queda con la mesa parseada en memoria). Con el tope,
+    20 talles piden 6 trozos aunque el servidor ofrezca 11 procesos."""
+    tope = max(1, len(talles) // _TALLES_POR_PROCESO)
+    return _trozos(talles, min(int(procesos or 1), tope))
+
+
+def _trozos(lista, k):
+    """`lista` partida en a lo sumo `k` trozos parejos, SIN cambiar el orden."""
+    lista = list(lista)
+    k = max(1, min(int(k), len(lista)))
+    n, sobra = divmod(len(lista), k)
+    out, i = [], 0
+    for j in range(k):
+        largo = n + (1 if j < sobra else 0)
+        out.append(lista[i:i + largo])
+        i += largo
+    return [t for t in out if t]
+
+
+def _paginas_de_talles(path_molde, mesa, talles, conts, marco, U, ocultar, destino):
+    """UNA página por talle (en el orden dado) escrita en `destino`. Devuelve
+    `(placeholders, lineas, etiqueta_archivo)`.
+
+    La mesa se parsea UNA vez y se filtra para cada talle: ése es el reparto natural del trabajo
+    (ver `_armar_paginas`). Antes esto vivía adentro de `desplegar_mesa`."""
+    import molde_real as MR
+    ocultar = set(ocultar or ())
+    pdf = pikepdf.open(path_molde)
+    try:
+        pag = pdf.pages[mesa - 1]
+        ins = list(pikepdf.parse_content_stream(pag))
+        ops, oc = MR._mapa_oc(ins, pag)
+        bloques = MR._bloques_oc(ops, oc)
+        out = pikepdf.Pdf.new()
+        placeholders = {}
+        lineas = {}
+        etq_archivo = {}      # talle → {idx_pieza: la etiqueta de corte que traía el diseño}
+        for talle in talles:
+            obj = {MR._norm_capa(talle)}
+            fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
+            saltar = MR._saltar_bloques(ops, oc, fn, bloques)
+            salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
+            # «00» y «NOMBRE» se leen y se SACAN del dibujo de este talle (ver arriba); y si el
+            # diseño ya trae la ETIQUETA DE CORTE del talle, también se saca — si no, la prenda
+            # sale con dos (la del archivo y la del sistema).
+            salida, ph, etq = quitar_placeholders(salida, pag, marco, U, talle, (conts or {}).get(talle) or [],
+                                                  ocultar=ocultar)
+            if ph:
+                placeholders[talle] = ph
+            if etq:
+                etq_archivo[talle] = {str(k): v for k, v in etq.items()}
+            # la línea de corte del archivo se saca del dibujo: la base la vuelve a trazar con
+            # la configuración del borde (o tal cual, si el borde está apagado)
+            salida, lc = quitar_linea_de_corte(salida, pag, (conts or {}).get(talle) or [], marco, U)
+            if lc:
+                lineas[talle] = {str(k): v for k, v in lc.items()}
+            npag = _pagina_desplegada(out, pag, salida)
+            MR.sanear_oc(out, npag)
+        out.save(destino)
+        out.close()
+    finally:
+        pdf.close()
+    return placeholders, lineas, etq_archivo
+
+
+def _paginas_worker(args):
+    """Worker de proceso para UN trozo de talles. Los contornos y la decisión de la etiqueta se
+    releen del desplegado ya escrito: así por el pipe viajan sólo textos y números."""
+    path_molde, mesa, orden, mis_talles, destino = args
+    idx = _json_mismo_archivo(os.path.join(_carpeta_desplegado(path_molde), f"m{mesa}.json"),
+                              _sello(path_molde), list(orden)) or {}
+    conts = {t: [_cont_de_json(c) for c in lst] for t, lst in (idx.get("talles") or {}).items()}
+    ocultar = familias_ocultas(leer_decision(path_molde))
+    ph, lc, etq = _paginas_de_talles(path_molde, mesa, list(mis_talles), conts,
+                                     idx.get("marco"), idx.get("U"), ocultar, destino)
+    return list(mis_talles), ph, lc, etq
+
+
+def _armar_paginas(path_molde, mesa, talles, conts, marco, U, ocultar, destino, procesos, avisar):
+    """Las páginas de una mesa, repartidas por TALLE si hay procesos de sobra.
+
+    🔴 POR QUÉ POR TALLE. El reparto del camino B es por MESA, y con un molde de UNA sola mesa
+    —todas las piezas juntas en una mesa de metros, como los arma otro diseñador— no repartía
+    nada: 20 talles en fila en un proceso, 197 s (medido 2026-09-14). Cada talle es una página
+    independiente, así que se arman en trozos y se pegan EN ORDEN. Cada proceso vuelve a parsear
+    la mesa (5 s en ese archivo); recién vale la pena con varios talles por trozo, por eso el
+    corte de `_trozos`. Si el pool no arranca o un trozo falla, se hace todo acá: se pierde la
+    velocidad, no el desplegado."""
+    trozos = (_trozos_de_talles(talles, procesos)
+              if (procesos and procesos > 1 and len(talles) > 1) else [list(talles)])
+    if len(trozos) > 1:
+        partes = [destino + f".p{i}" for i in range(len(trozos))]
+        try:
+            from concurrent.futures import as_completed
+            ph_t, lc_t, etq_t, hechos = {}, {}, {}, 0
+            with _POOL_FACTORY(max_workers=len(trozos)) as ex:
+                futs = [ex.submit(_paginas_worker, (path_molde, mesa, list(talles), tr, pa))
+                        for tr, pa in zip(trozos, partes)]
+                for f in as_completed(futs):
+                    mis, ph, lc, etq = f.result()
+                    ph_t.update(ph); lc_t.update(lc); etq_t.update(etq)
+                    hechos += len(mis)
+                    if avisar:
+                        avisar(hechos, len(talles), f"talle {hechos} de {len(talles)}")
+            # pegar los trozos EN ORDEN (el pool los devuelve como terminan, no como van)
+            abiertos = []
+            try:
+                out = pikepdf.Pdf.new()
+                for pa in partes:
+                    p = pikepdf.open(pa)
+                    abiertos.append(p)
+                    out.pages.extend(p.pages)      # los originales quedan abiertos hasta el save
+                out.save(destino)
+                out.close()
+            finally:
+                for p in abiertos:
+                    try:
+                        p.close()
+                    except Exception:
+                        pass
+                for pa in partes:
+                    try:
+                        os.remove(pa)
+                    except Exception:
+                        pass
+            return ph_t, lc_t, etq_t
+        except Exception as e:
+            print(f"[camino B] el reparto por talle falló ({type(e).__name__}: {e}); "
+                  f"armo la mesa {mesa} entera acá")
+            for pa in partes:
+                try:
+                    os.remove(pa)
+                except Exception:
+                    pass
+    return _paginas_de_talles(path_molde, mesa, list(talles), conts, marco, U, ocultar, destino)
 
 
 import threading as _threading
@@ -2147,6 +2300,14 @@ def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos
             avisar(hecho, n, f"mesa {mesa} de {n}")
 
     pendientes = list(mesas)
+    if procesos and procesos > 1 and n == 1 and len(talles) > 1:
+        # 🔴 UNA SOLA MESA: no hay nada que repartir por mesa, así que se reparte por TALLE
+        # (ver `_armar_paginas`). Se llama a `desplegar_mesa` y no a `_MESA_EN_SERIE` porque esto
+        # NO es el camino en serie: adentro abre su propio pool, y el gancho de pruebas cuenta
+        # justamente lo que se hizo sin repartir.
+        _listo(mesas[0], desplegar_mesa(path_molde, mesas[0], list(talles), contornos=contornos,
+                                        paginas=paginas, procesos=procesos, avisar=avisar))
+        return por_mesa
     if procesos and procesos > 1 and n > 1:
         # 🔴 UNA MESA QUE FALLA NO TIRA EL POOL. Antes el `except` envolvía al pool entero: la
         # primera mesa que reventaba (un «Acceso denegado» porque el motor tenía abierta su

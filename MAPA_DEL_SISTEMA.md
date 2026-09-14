@@ -1482,6 +1482,57 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (436) — 🐌 «SUBO ESTE ARCHIVO Y NO LO BANCA»: era un molde de UNA SOLA MESA, y el
+  camino B repartía el trabajo por MESA. 197 s → 50 s.** El usuario trajo otra tanda de moldes
+  (`drive-download…/MOLDES`) y el sistema tardaba una eternidad con ellos. **No es el tamaño**: el
+  archivo nuevo pesa 29 MB contra 118 MB del que ya andaba. Es **cómo está armado**:
+
+  | | el que ya andaba | el nuevo |
+  |---|---|---|
+  | mesas (páginas) | 9, una pieza cada una | **1**, de 4,63 m × 1,18 m con las 14 piezas |
+  | talles (capas) | 20 | 20 (40 OCG: cada nombre repetido) |
+  | instrucciones de la mesa | 20 mil | **2,35 millones** |
+
+  Y el reparto del camino B es **una mesa por proceso**: con 9 mesas, 9 procesos; con UNA, ninguno.
+  Los 20 talles se armaban en fila en un solo proceso — 197 s con el usuario mirando «preparando»
+  en el paso Arte (registro del 14/09 09:39→09:42).
+  **FIX 1 — `_bloques_de_contorno` se rinde apenas sabe que no es (4x).** La pasada que saca el
+  BORDE de la etiqueta (changelog 430) recorría **entero** cada uno de los 13 526 bloques `q…Q` de
+  la mesa, aunque en la primera instrucción ya se supiera que no era un borde de glifo. Ahora corta
+  ahí mismo, y además descarta el bloque en cuanto toca un punto que no cae en **ninguna** caja de
+  texto sacado. ⚠️ Contra CADA caja, **nunca** contra la que las envuelve a todas: con las
+  etiquetas repartidas por una mesa de metros esa envolvente ES la mesa entera y no descarta nada
+  (primer intento, medido: volvía a 1,79 s por talle). `quitar_placeholders`: 4,0 s → 0,9 s por
+  talle, con el resultado **idéntico** (comparado contra el módulo viejo, con y sin etiqueta que
+  ocultar).
+  **FIX 2 — el trozo de trabajo pasa a ser (mesa, unos talles).** Cada talle es una página
+  independiente: `_paginas_de_talles` (lo que vivía adentro de `desplegar_mesa`) + `_paginas_worker`
+  + `_armar_paginas`, que reparte, arma los trozos en paralelo y los **pega en orden**. Lo mismo en
+  `decidir_etiqueta_archivo`, que ya recibía una lista de talles. Con varias mesas **no cambia
+  nada**: sigue siendo una mesa por proceso (parsearla cuesta 5 s y así se parsea una vez), y un
+  worker de mesa nunca abre otro pool adentro (`procesos=None`).
+  🔴 **EL BUG QUE ESTO TRAJO, y por qué es el peligroso:** `buscar_candidatos_mesa` valida el
+  índice del desplegado con `_json_mismo_archivo(fj, sello, talles)`, que compara el ORDEN de los
+  talles. Pasándole el **trozo**, el orden no coincidía → devolvía `None` → **cero candidatos** →
+  el molde entero quedaba **sin etiqueta detectada, en silencio** (la prenda habría salido con
+  dos). Ahora van separados: `talles` es el trozo y `orden` son los del molde.
+  **TOPE DE PROCESOS.** Cada proceso vuelve a parsear la mesa (5 s), así que menos de
+  `_TALLES_POR_PROCESO = 3` talles por proceso es regalar tiempo. Medido con 20 talles: 4 procesos
+  62 s · 6 procesos 61 s · **11 procesos 73 s** (la máquina tiene 6 núcleos y cada worker se queda
+  con la mesa parseada en memoria). Con el tope, el servidor pide 11 y se abren 6.
+  **MEDIDO al final** (los cuatro moldes de la tanda; «alta» = lo que tarda el botón, «páginas» =
+  el segundo plano): CAMISETA JUGADOR 6 s + 48 s · CAMISETA LIBERO 5 s + **53 s (eran 197)** ·
+  SHORT JUGADOR y LIBERO (28 talles, 4 MB) 1 s + 9 s.
+  **CONTRATO** nuevo `verificar_reparto_por_talle.py`: cómo se parte (orden, nada perdido, el
+  tope), el trozo encuentra **las mismas** etiquetas que la corrida entera (y sin el orden devuelve
+  vacío: la falla queda escrita), **repartido == sin repartir** (mismo contenido en cada página,
+  mismos placeholders, líneas, etiqueta y hash) y nada de pools anidados. Verde, junto con
+  `verificar_desplegado`, `_pool`, `etiqueta_del_archivo`, `placeholders_con_diseno`,
+  `molde_con_diseno`, `alta_con_diseno`, `personalizacion_con_diseno` y `tizada_con_diseno`.
+  Server reiniciado 10:42:08.
+  📌 LECCIÓN: el paralelismo se reparte por la unidad que el ARCHIVO tenga, no por la que tenía el
+  primer archivo que probamos. Acá la unidad natural era la mesa hasta que llegó un molde con una
+  sola; la que siempre está es el TALLE.
 - **2026-09-11 (435) — 🗑️ «NUEVO PEDIDO» BORRA LAS TIZADAS DEL PEDIDO DEL SERVIDOR.** Al revisar
   qué haría falta en el publicado apareció que los pedidos se acumulan en `trabajos/` para siempre
   (3,3 GB / 317 pedidos en el taller; cada mesa de un molde con diseño deja además una previa de
