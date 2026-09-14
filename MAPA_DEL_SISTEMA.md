@@ -1482,6 +1482,45 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (445) — 🟢 EL VISOR NO ESPERA DETRÁS DEL PRECALENTADO (y el archivo final
+  queda igual de bueno).** El usuario: *«lo dejaste más roto, mira, demora en mostrar el contenido
+  en el visor; en el visor, si se tiene que bajar la calidad del visor que se haga, mientras no
+  afecte el archivo final: el archivo final debe ser el correcto, con el vectorial, la calidad, el
+  perfil incrustado y declarado y los colores reales — pero debe ser un sistema óptimo y rápido»*.
+  - **CAUSA (medida en `logs/consola.log`, no supuesta):** al abrir el paso Arte,
+    `/api/arte/asignar_todo` mandaba **los 20-30 talles de una sola vez** al pool de render, que
+    tiene 6 procesos. Los 6 quedaban tomados ~45 s seguidos, así que **todo** lo que el usuario
+    pedía mientras tanto —el dibujo de la pieza que está mirando, las medidas, el mapeo— entraba
+    en la cola DETRÁS de esos 30. No era el dibujo: era la **cola**.
+  - **FIX (`servidor.py`, `arte_asignar_todo._run`):** el trabajo de FONDO ya no puede tomar el
+    pool entero. (1) El **talle guía** —el que la pantalla está mirando— se hace primero y con
+    todo el pool, y recién ahí se marca `guia_lista`; (2) el resto se va soltando con
+    `wait(..., FIRST_COMPLETED)` manteniendo como mucho `procesos_render() - _LIBRES_PARA_EL_VISOR`
+    futuros en vuelo. Constante nueva `_LIBRES_PARA_EL_VISOR` (env `TIZADA_LIBRES_VISOR`,
+    **2** por defecto): cuántos procesos quedan SIEMPRE libres para lo que se pide en el momento.
+  - **MEDIDO** (`scratchpad/medir_visor.py`, caché en frío, el arte más pesado del usuario —
+    JUGADOR PESADO, 7 MB, 33 piezas): **el visor queda libre a los 10,0 s** (antes esperaba los
+    ~45 s de la tanda entera) y los 30 talles terminan a los 61 s **de fondo, sin trabar la
+    pantalla**. El precalentado tarda un poco más a propósito: la pantalla responde siempre.
+  - **La barra cuenta TALLES, no tareas.** Por cada talle van dos trabajos (render + detección);
+    `hecho` se incrementa sólo con los renders (`_es_render`), o llegaba al 100 % a mitad de camino.
+  - 🔴 **EL ARCHIVO FINAL NO SE TOCÓ, y se verificó que sigue igual.** Este cambio es de
+    PLANIFICACIÓN (cuántas tareas a la vez), no de contenido: no toca el render ni la hoja. Para
+    probarlo, los contratos del archivo final en verde: `verificar_tizada_con_diseno` (la hoja real:
+    vectorial, **0 imágenes**), `verificar_color_nativo_cid` (color nativo exacto del arte + el
+    OutputIntent de la hoja en cada mesa suelta), `verificar_rip_compatible` (PDF/X-1a-like sobre
+    una HOJA real: ✅ verde), `verificar_medidas_diseno`.
+  - **TRAMPA (anotada para no volver a caer):** `verificar_rip_compatible.py` **no es un contrato
+    automático**, es una herramienta que **pide un PDF por argumento**; sin argumento imprime su
+    docstring y sale con **código 2**. Ese 2 se lee como «falló» y no falló nada. El servidor ya lo
+    corre solo sobre cada hoja generada (`res["rip_compatible"]`, ~`servidor.py:9223`).
+  - **ARREGLADO ADEMÁS — un contrato que se ponía rojo por datos del usuario:**
+    `verificar_color_nativo_cid` clavaba el valor *negro 0/0/0/100* para el arte JUGADOR. El usuario
+    reemplazó ese `arte.ai` (el «PESADO») y su texto pasó a blanco (`0 0 0 0 k`) → rojo sin que
+    hubiera nada roto. **Un contrato no puede clavar un valor que vive en un archivo del usuario:**
+    ahora exige la PROPIEDAD (todos los campos traen `colorn` nativo y `_color_op` lo escribe tal
+    cual) e imprime el valor de hoy como dato.
+
 - **2026-09-14 (444) — 🗑️ «NUEVO PEDIDO» BORRA DE VERDAD, Y NO SE GUARDA NADA 15 DÍAS.** El
   usuario, mirando el changelog anterior: *«después que se pone nuevo pedido eso se debe borrar de
   todos lados; ¿para qué lo queremos guardado por 15 días si no lo vamos a volver a utilizar?»*.

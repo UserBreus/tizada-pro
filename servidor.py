@@ -5703,6 +5703,10 @@ _RENDER_POOL = None
 # es UNA tarea, así que 8 son unos minutos de trabajo: alcanza para amortizar el arranque y no
 # deja que el pico de una tizada pesada se quede pegado en el proceso.
 _TAREAS_POR_WORKER = int(os.environ.get("TIZADA_TAREAS_POR_WORKER") or 8)
+# Cuántos procesos del pool NO puede tomar el trabajo de FONDO (el precalentado de talles). Son los
+# que quedan para atender lo que el usuario pide en el momento: el dibujo de la pieza que está
+# mirando, las medidas, el mapeo. Sin esto el precalentado tomaba los 6 y el visor esperaba detrás.
+_LIBRES_PARA_EL_VISOR = max(1, int(os.environ.get("TIZADA_LIBRES_VISOR") or 2))
 _RENDER_POOL_LOCK = threading.Lock()
 _ASIGNAR_JOBS = {}          # job_id -> {"hecho": n, "total": N, "done": bool}
 
@@ -5899,21 +5903,52 @@ def arte_asignar_todo():
             _ASIGNAR_JOBS.pop(k, None)
     def _run():
         try:
-            from concurrent.futures import as_completed
+            from concurrent.futures import as_completed, wait, FIRST_COMPLETED
             pool = _get_render_pool()
-            # RENDERS (por variable) + DETECCIONES (por molde, para el visor) — ambos en paralelo.
-            futs = {pool.submit(_render_talle_worker, (pid, diseno, variante, str(t), _mapeo_arg)): str(t)
-                    for t in talles}
-            det = [pool.submit(_deteccion_talle_worker, (pid, str(t))) for t in talles]
             _ASIGNAR_JOBS[job]["fase"] = "dibujando"
-            for _f in as_completed(futs):
+
+            # ── 1) EL TALLE QUE SE ESTÁ MIRANDO, YA ─────────────────────────────────────────
+            # Va solo y con todo el pool disponible: es lo único que la pantalla está esperando.
+            _resto = [str(t) for t in talles]
+            if _guia in _resto:
+                _resto.remove(_guia)
+                _f0 = pool.submit(_render_talle_worker, (pid, diseno, variante, _guia, _mapeo_arg))
+                _d0 = pool.submit(_deteccion_talle_worker, (pid, _guia))
+                for _f in as_completed([_f0, _d0]):
+                    pass
                 _ASIGNAR_JOBS[job]["hecho"] += 1
-                # apenas está el talle que el visor tiene en pantalla, se lo libera
-                if futs.get(_f) == _guia or not _guia:
-                    _ASIGNAR_JOBS[job]["guia_lista"] = True
-            _ASIGNAR_JOBS[job]["fase"] = "midiendo"    # ya están los diseños; faltan las medidas
-            for _f in as_completed(det):   # esperar también las detecciones (para que el front no las recalcule)
-                pass
+            _ASIGNAR_JOBS[job]["guia_lista"] = True     # la pantalla ya puede seguir
+
+            # ── 2) LOS DEMÁS, DE A POCO, DEJANDO LUGAR ──────────────────────────────────────
+            # 🔴 NUNCA OCUPAR EL POOL ENTERO CON TRABAJO DE FONDO. Antes se mandaban los 20 talles
+            # juntos: los 6 procesos quedaban tomados ~45 s y cualquier cosa que el usuario pidiera
+            # —el dibujo de la pieza que mira, las medidas— esperaba detrás de todo eso. Eso es lo
+            # que se sentía como «el visor demora en mostrar el contenido» (2026-09-14).
+            # Se dejan `_LIBRES_PARA_EL_VISOR` procesos sin usar, siempre.
+            _a_la_vez = max(1, procesos_render() - _LIBRES_PARA_EL_VISOR)
+            _pend, _cola = set(), [(t, k) for t in _resto for k in ("render", "deteccion")]
+            _es_render = set()          # la barra cuenta TALLES dibujados, no tareas sueltas:
+            while _cola or _pend:       # por cada talle van un render y una detección
+                while _cola and len(_pend) < _a_la_vez:
+                    _t, _k = _cola.pop(0)
+                    _f = (pool.submit(_render_talle_worker, (pid, diseno, variante, _t, _mapeo_arg))
+                          if _k == "render" else
+                          pool.submit(_deteccion_talle_worker, (pid, _t)))
+                    _pend.add(_f)
+                    if _k == "render":
+                        _es_render.add(_f)
+                if not _pend:
+                    break
+                _listos, _pend = wait(_pend, return_when=FIRST_COMPLETED)
+                for _f in _listos:
+                    try:
+                        _f.result()
+                    except Exception:
+                        pass            # un talle que falla no puede frenar a los demás
+                    if _f in _es_render:
+                        _ASIGNAR_JOBS[job]["hecho"] = min(
+                            _ASIGNAR_JOBS[job]["hecho"] + 1, _ASIGNAR_JOBS[job]["total"])
+            _ASIGNAR_JOBS[job]["fase"] = "midiendo"
         except Exception as e:
             _ASIGNAR_JOBS[job]["error"] = str(e)
         finally:

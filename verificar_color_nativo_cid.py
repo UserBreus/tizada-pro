@@ -160,9 +160,19 @@ if os.path.exists(os.path.join(real, "golero", "arte.ai")):
        "🔴 GOLERO mesa 2 · Número: ídem")
     ok(all(MP._color_op(pl) == ROJO for pl in m2.values()),
        "y lo que se escribe en la tizada es «0 0.996 1 0.002 k», el del arte, sin calcular nada")
+    # JUGADOR usa una fuente SIMPLE (no CID): tiene que salir por el camino de siempre, con su
+    # color nativo leído del archivo. 🔴 NO se clava el valor: el arte es del usuario y lo cambia
+    # cuando quiere (2026-09-14 lo reemplazó por el «PESADO» y el texto pasó de negro a blanco, lo
+    # que ponía este contrato en rojo sin que hubiera nada roto). Lo que se exige es la PROPIEDAD:
+    # que haya color nativo y que se escriba tal cual, sin recalcularlo.
     j = MP.extraer_personalizacion(os.path.join(real, "jugador", "arte.ai"))
-    ok(all(pl.get("colorn") == ("k", [0.0, 0.0, 0.0, 1.0]) for c in j.values() for pl in c.values()),
-       "JUGADOR (fuente simple): sigue igual, negro 0/0/0/100")
+    _pl = [pl for c in j.values() for pl in c.values()]
+    ok(_pl and all(pl.get("colorn") for pl in _pl),
+       "JUGADOR (fuente simple): todos los campos traen color NATIVO del arte (ninguno en None)")
+    ok(all(MP._color_op(pl) == " ".join(f"{v:g}" for v in pl["colorn"][1]) + " " + pl["colorn"][0]
+           for pl in _pl),
+       "…y la tizada escribe ESE color tal cual, sin calcularlo "
+       f"(hoy: {sorted({MP._color_op(pl) for pl in _pl})})")
 else:
     print("    (no está el arte real: se saltea)")
 MP.cerrar_abiertos()
