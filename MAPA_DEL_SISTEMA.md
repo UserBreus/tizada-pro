@@ -1482,6 +1482,27 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (444) — 🗑️ «NUEVO PEDIDO» BORRA DE VERDAD, Y NO SE GUARDA NADA 15 DÍAS.** El
+  usuario, mirando el changelog anterior: *«después que se pone nuevo pedido eso se debe borrar de
+  todos lados; ¿para qué lo queremos guardado por 15 días si no lo vamos a volver a utilizar?»*.
+  🔴 **POR QUÉ HABÍA 300 CARPETAS SI «Nuevo pedido» ya las borraba (changelog 435).** Con usuarios
+  activos, las tizadas anteriores salían **sólo de la base** (`db.trabajos_terminados_de`). Con
+  MSSQL apagado —que en el taller pasa seguido, el propio registro lo repite todo el día— esa
+  consulta tiraba excepción, el `except` la tragaba y la lista quedaba **vacía**: «Nuevo pedido»
+  no se llevaba nada y todo seguía en disco, en silencio. Ahora, si la base no contesta, se mira
+  el **`duenio.json`** que cada tizada deja al lado: alcanza para saber cuáles son mías. Una
+  carpeta sin dueño escrito NO se toca (puede ser de otro).
+  **Y EL BARRIDO DEJA DE SER UN ARCHIVO HISTÓRICO:** 15 días → **2** (`TIZADA_TRABAJOS_DIAS`), y
+  corre **a los 20 s de arrancar** y no recién a la hora. No es donde se guardan las tizadas: el
+  que limpia es «Nuevo pedido», y esto es la red para lo que se escapó (se cerró la pestaña, se
+  cortó la luz). Dos días alcanzan para volver a bajar un PDF al otro día.
+  **MEDIDO AL REINICIAR:** `trabajos/` pasó de **300 carpetas y 2,85 GB a 2 carpetas y 0,12 GB**.
+  **CONTRATO** `verificar_trabajos_se_borran.py` §5b: con la base caída igual se borra la mía y la
+  de otro sigue intacta. Verificado que el contrato **falla** si se rompe el arreglo (se rompió a
+  propósito y salió con código 1).
+  📌 LECCIÓN: un `except: pass` alrededor de la consulta que arma una lista de borrado no deja un
+  error — deja una lista vacía, que parece «no había nada que borrar». El caso de la base caída
+  hay que probarlo, no suponerlo.
 - **2026-09-14 (443) — 🛡️ SE ARREGLA LA AUDITORÍA (442), no sólo se anota.** El usuario: *«¿y por
   qué no tocaste todo eso?»*. Tenía razón: «buscá problemas» era «arreglalos». Lo hecho:
 

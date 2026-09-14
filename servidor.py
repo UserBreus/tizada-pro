@@ -285,10 +285,12 @@ def _trabajo_ajeno(tid):
     return jsonify({"error": "esa tizada no es tuya"}), 403
 
 
-# Cuántos DÍAS se guardan en disco las tizadas viejas. Pasado eso, la carpeta entera se borra:
-# son PDF que ya se descargaron. Medido 2026-09-14: `trabajos/` tenía 2,9 GB en 300 carpetas de
-# hasta 80 días, y nada las borraba salvo «Nuevo pedido» o el .bat a mano — ~2 GB por mes.
-_TRABAJOS_DIAS_DISCO = float(os.environ.get("TIZADA_TRABAJOS_DIAS") or 15)
+# Cuántos DÍAS sobrevive en disco una tizada que NADIE cerró. No es un archivo histórico: el que
+# limpia de verdad es «Nuevo pedido», que se lleva las del pedido que se cierra. Esto es sólo la
+# red para lo que se escapó (se cerró la pestaña, se cortó la luz). Decisión del usuario
+# (2026-09-14): *«¿para qué lo queremos guardado 15 días si no lo vamos a volver a utilizar?»* —
+# quedan 2 días, que alcanzan para volver a bajar un PDF al otro día si hizo falta.
+_TRABAJOS_DIAS_DISCO = float(os.environ.get("TIZADA_TRABAJOS_DIAS") or 2)
 
 
 def _podar_trabajos_en_disco():
@@ -9700,8 +9702,12 @@ def _arrancar_barrido_efimeros():
     moldes de un pedido que nadie cerró: el front borra los suyos al empezar otro pedido, pero si la
     pestaña se cerró (o el servidor no se reinicia nunca) hacía falta alguien que pasara."""
     def _cada_hora():
+        # La primera pasada va ENSEGUIDA (no a la hora): si el servidor venía de estar apagado,
+        # lo que quedó tirado se limpia al arrancar y no cuando alguien se acuerde.
+        primera = True
         while True:
-            time.sleep(3600)
+            time.sleep(20 if primera else 3600)
+            primera = False
             try:
                 _barrer_efimeros()
             except Exception as e:
@@ -9796,17 +9802,37 @@ def limpiar_trabajos():
     _cuerpo = request.get_json(silent=True) or {}
     ids = [str(x) for x in (_cuerpo.get("ids") or []) if x]
     if _cuerpo.get("incluir_anteriores"):
+        _de_la_base = False
         try:
             for x in db.trabajos_terminados_de(_uid_actual() if _USUARIOS_ON else None):
                 if x not in ids:
                     ids.append(str(x))
+            _de_la_base = True
         except Exception:
-            pass
+            _de_la_base = False
         if not _USUARIOS_ON:
             try:
                 for nombre in sorted(os.listdir(TRABAJOS)):
                     if nombre not in ids and os.path.isdir(os.path.join(TRABAJOS, nombre)):
                         ids.append(nombre)
+            except Exception:
+                pass
+        elif not _de_la_base:
+            # 🔴 SI LA BASE NO CONTESTA, LA LISTA NO PUEDE VENIR VACÍA. Con usuarios activos, las
+            # tizadas anteriores salían SÓLO de la base; con MSSQL apagado —que en el taller pasa
+            # seguido— «Nuevo pedido» no se llevaba nada y todo quedaba en disco. Cada tizada deja
+            # al lado un `duenio.json`: alcanza para saber cuáles son mías sin la base.
+            _yo = _uid_actual()
+            try:
+                for nombre in sorted(os.listdir(TRABAJOS)):
+                    if nombre in ids or not os.path.isdir(os.path.join(TRABAJOS, nombre)):
+                        continue
+                    try:
+                        with open(os.path.join(TRABAJOS, nombre, "duenio.json"), encoding="utf-8") as fh:
+                            if json.load(fh).get("u") == _yo:
+                                ids.append(nombre)
+                    except Exception:
+                        continue          # sin dueño escrito: no se toca (puede ser de otro)
             except Exception:
                 pass
     borrados, ignorados = [], []

@@ -112,6 +112,30 @@ try:
     ok("20260911-100300-dddd" in r["borrados"] and not existe("20260911-100300-dddd"), "no borró la mía")
     ok("20260911-100400-eeee" in r["ignorados"] and existe("20260911-100400-eeee"), "🔴 borró la tizada de OTRO usuario")
     print("  · con usuarios: la mía se va, la de otro queda")
+
+    # ── 5b. 🔴 CON LA BASE CAÍDA TAMBIÉN SE LLEVA LAS MÍAS ──────────────────────────────────
+    # Con usuarios activos, las anteriores salían SÓLO de la base. Con MSSQL apagado —que en el
+    # taller pasa seguido— la lista venía vacía y NO se borraba nada: por eso había 300 carpetas
+    # acumuladas (2,9 GB). Ahora se mira el `duenio.json` que cada tizada deja al lado.
+    print("\n5b · 🔴 SI LA BASE NO CONTESTA, SE MIRA EL DUEÑO ESCRITO AL LADO DE LA TIZADA")
+
+    def _rota(_uid):
+        raise RuntimeError("MSSQL apagado")
+
+    S.db.trabajos_terminados_de = _rota
+    try:
+        carpeta("20260911-100500-ffff", usuario=7)
+        with io.open(os.path.join(TMP, "20260911-100500-ffff", "duenio.json"), "w") as _f:
+            _f.write('{"u": 7}')
+        carpeta("20260911-100600-gggg", usuario=9)
+        with io.open(os.path.join(TMP, "20260911-100600-gggg", "duenio.json"), "w") as _f:
+            _f.write('{"u": 9}')
+        r = llamar({"ids": [], "incluir_anteriores": True})
+        ok("20260911-100500-ffff" in r["borrados"], "con la base caída igual se borra la mía")
+        ok("20260911-100600-gggg" not in r["borrados"], "…y la de otro sigue sin tocarse")
+        print("  · con la base caída: la mía se va igual (por el `duenio.json`), la de otro no")
+    finally:
+        S.db.trabajos_terminados_de = _terminados_de
 finally:
     S.trabajos.clear()
     shutil.rmtree(TMP, ignore_errors=True)
