@@ -187,6 +187,28 @@ def main():
             ok(os.path.exists(c) and os.path.getsize(c) < 3e6,
                f"…y queda guardado, liviano ({os.path.getsize(c)/1e6:.2f} MB)" if os.path.exists(c) else "…y queda guardado")
 
+    # ── 6. 🔴 MEZCLAR MOLDES NO PUEDE MEZCLAR SILUETAS ──────────────────────────────────────
+    print("\n6 · 🔴 DOS MOLDES EN LA MISMA MESA NO COMPARTEN LA FORMA DE UNA PIEZA")
+    # El nesteo reusa la máscara (la silueta) de una pieza cuando otra tiene la misma clave de
+    # geometría. Desde que los moldes de la misma columna se acomodan JUNTOS, esa clave TIENE que
+    # distinguir el molde: si no, dos piezas que se llaman igual en moldes distintos se colocan con
+    # la misma forma y la hoja sale con las piezas encimadas — impresa y perfecta.
+    import nesting_contorno as NC
+    src_n = inspect.getsource(NC._preparar)
+    ok('p.get("_molde")' in src_n, "el molde entra en la clave de geometría del nesteo")
+    src_m = io.open(os.path.join(_AQUI, "motor_pedido.py"), encoding="utf-8").read()
+    ok('_e["_molde"] = _mk' in src_m, "…y el motor le pone a cada pieza de qué molde es")
+
+    def _clave(p, cell=2.0, esp=0.5, paso=15):
+        return (p.get("_molde"), p.get("pieza"), p.get("talle"), p.get("variante"), p["rotacion"],
+                p.get("borde_cm", 0), cell, esp, paso)
+    _a = {"_molde": "A/plantilla.ai", "pieza": "Frente 1", "talle": "M", "variante": None,
+          "rotacion": 180, "borde_cm": 0}
+    ok(_clave(_a) == _clave(dict(_a)), "la misma pieza del mismo molde sí comparte forma (eso se quiere)")
+    ok(_clave(_a) != _clave(dict(_a, _molde="B/plantilla.ai")),
+       "🔴 la misma pieza de OTRO molde NO comparte forma")
+    ok(_clave(_a) != _clave(dict(_a, talle="L")), "…ni otro talle")
+
     print()
     if FALLOS:
         print(f"❌ CONTRATO ROTO — {len(FALLOS)} falla(s):")

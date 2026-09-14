@@ -1482,6 +1482,61 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (442) — 🔎 AUDITORÍA DE CUATRO FRENTES + una regresión propia cazada a tiempo.**
+  El usuario pidió buscar más problemas «de este tipo y de otros». Cuatro auditorías de solo
+  lectura en paralelo: salidas mal impresas, concurrencia/multiusuario, disco/estabilidad y
+  seguridad. Lo ARREGLADO en esta tanda es uno solo, pero es el peor:
+
+  🔴 **REGRESIÓN DEL MISMO DÍA (changelog 439): dos moldes en la misma mesa compartían la SILUETA
+  de una pieza.** `nesting_contorno._preparar` reusa la máscara cuando dos piezas tienen la misma
+  clave `(pieza, talle, variante, rotación, borde, celda, espaciado, paso)` — y esa clave **no
+  decía de qué molde era**. Hasta hoy no hacía falta: cada molde armaba su propia tizada. Desde
+  que los moldes de la misma columna de talle se acomodan JUNTOS, dos moldes distintos con una
+  pieza que se llama igual («Frente 1», «Cuello 1»), mismo talle, misma rotación y las dos filas
+  **sin variable elegida** (`variante=None`, el caso normal) compartían clave: la segunda se
+  colocaba con la forma de la PRIMERA → piezas encimadas, en una hoja que se imprime perfecta.
+  Fix: el motor le pone `_molde` a cada pieza al juntarlas (`generar_pedido_grupos`) y la clave lo
+  incluye. Contrato `verificar_mesa_por_talle.py` §6. 📌 LECCIÓN: al ampliar QUÉ se mezcla, hay que
+  revisar todas las claves de deduplicación aguas abajo — una clave que era suficiente deja de
+  serlo sin que nada falle.
+
+  **LO ENCONTRADO Y NO ARREGLADO** (queda escrito para atacarlo por orden; nada de esto es nuevo
+  del día salvo donde se indica):
+
+  *Salidas mal impresas.* (a) `motor_pedido.py:4210-4221`: si falla leer los editables, el
+  `except` los apaga TODOS — se pierden posición, tamaño y color, y **un objeto marcado TPU/
+  Bordado/DTF se sublima igual**; sin aviso. (b) `4222-4238`: la garantía «si el aislamiento falla
+  el objeto se DEJA» es correcta para uno movido pero **al revés** para uno marcado. (c)
+  `servidor.py:8052`: una celda de toggle vacía elige la primera opción («Manga corta») en
+  silencio. (d) `4714-4733`: si la etiqueta por zonas falla, `_usa_zonas` no se baja y la pieza
+  sale **sin ninguna etiqueta**. (e) `8773-8777`: una fila cuyo diseño no tiene arte se genera con
+  el arte de OTRO diseño sin decirlo (y la ficha usa un fallback distinto). (f) `4332-4338`: si
+  falla leer los `#talle`/`#rango`, todos los talles caen al mapeo base. (g) `hoja_pike.py:247`:
+  la clave del SVG de la previa (camino A) ignora el color de los editables y la mesa del arte.
+
+  *Concurrencia.* (h) 🔴 La guarda de permisos **se saltea omitiendo el `pid`**: `_guardia_moldes`
+  hace `if not pid: return None`, pero el endpoint igual resuelve el molde por el activo GLOBAL
+  (`cat["activo"]`) — un Operario activa un molde del catálogo y después le escribe sin pid. Ocho
+  POST que reescriben registro/arte/variantes entran por ahí. (i) Dos pestañas comparten el molde
+  activo (la sesión es del navegador). (j) `_EFIMEROS_VIVOS` es por proceso: con dos servidores el
+  barrido borra el molde que el otro está usando. (k) `_ASIGNAR_JOBS` no se persiste ni tiene
+  dueño. (l) ~20 `open(...,"w")` directos sobre JSON del molde, sin `.tmp` + `os.replace`, contra
+  la regla dura del MAPA. (m) `db.py` no tiene pool de conexiones.
+
+  *Disco y estabilidad.* (n) `trabajos/` **2,9 GB, 300 carpetas, nunca se poda en disco** (sólo
+  «Nuevo pedido» y el .bat a mano); ~2 GB/mes al ritmo de julio. (o) `logs/servidor.log` no rota
+  (~85 MB/mes) — `consola.log` sí. (p) `servidor.py:9133`: el `json.dump` final de `pedido.json`
+  **no está protegido** y puede marcar «error» una tizada YA ripeada en disco. (q) El vigilante
+  relanza **para siempre** si el servidor muere después de 20 s (el cortacircuitos sólo cuenta
+  arranques cortos). (r) `svg_cache` crece sin poda, a diferencia de `mesas_cache`.
+
+  *Seguridad (antes de publicar).* (s) 🔴 `POST /api/publicacion/publicar` no pide permiso, acepta
+  la `url` del cuerpo y le manda el paquete **con el token de actualización**: cualquier sesión se
+  hace dar la credencial que permite subir y aplicar código en el publicado. (t) 🔴 Si la base se
+  cae, `_usuario_actual()` lanza y la guarda hace `_u = True`: **la API entera queda abierta sin
+  sesión**. (u) `GET /api/actualizacion/log` no pide sesión ni token. (v) Sin `MAX_CONTENT_LENGTH`
+  y `POST /api/fuente` guarda con el `filename` crudo del cliente. (w) Login sin freno de fuerza
+  bruta y sesión de 31 días.
 - **2026-09-14 (441) — 🧹 SIETE COSAS DE UNA: el arte deja de hacer esperar 40 s, la ficha no se
   re-dibuja, el servidor no se levanta once veces, y dos patas de los 12,5 GB de RAM.**
 

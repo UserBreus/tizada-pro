@@ -65,6 +65,10 @@ _TOL_MARCO = 1.0      # pt de tolerancia para reconocer el marco de la mesa
 # Lectura del archivo (cacheada: `get_drawings` es lo caro)
 # ─────────────────────────────────────────────────────────────────
 _CACHE = {}
+# De qué HILO es cada entrada. Lo necesita `olvidar()` sin documento: un request que termina no
+# puede llevarse el caché del hilo de fondo que está desplegando un molde (ahí el caché es lo que
+# hace que los 20 talles de una mesa cuesten una sola lectura).
+_CACHE_HILO = {}
 
 
 def _dibujos(doc, mesa):
@@ -75,6 +79,7 @@ def _dibujos(doc, mesa):
     de los 20 talles: sin caché serían 20 lecturas de la misma mesa.
     """
     clave = (id(doc), mesa)
+    _CACHE_HILO[clave] = _hilo_actual()
     if clave not in _CACHE:
         if os.environ.get("TIZADA_DIBUJOS_LEGACY") == "1":
             _CACHE[clave] = doc[mesa - 1].get_drawings(extended=True)
@@ -88,14 +93,28 @@ def _dibujos(doc, mesa):
     return _CACHE[clave]
 
 
+def _hilo_actual():
+    import threading
+    return threading.get_ident()
+
+
 def olvidar(doc=None):
     """Suelta la caché. Obligatorio antes de cerrar el documento: la clave es `id(doc)` y Python
-    reusa los ids de los objetos liberados — sin esto, otro documento podría leer estos dibujos."""
+    reusa los ids de los objetos liberados — sin esto, otro documento podría leer estos dibujos.
+
+    🔴 SIN DOCUMENTO se lleva SÓLO lo de ESTE HILO. Lo llama el `teardown_request` al terminar cada
+    request (si no, los dibujos de una mesa entera quedaban residentes para siempre); vaciarlo todo
+    ahí le tiraría el caché al hilo de fondo que está desplegando un molde, y ese hilo pide la
+    misma mesa una vez por talle: sin caché son 2,2 s por talle en vez de una sola lectura."""
     if doc is None:
-        _CACHE.clear()
+        _yo = _hilo_actual()
+        for k in [k for k, h in _CACHE_HILO.items() if h == _yo]:
+            _CACHE.pop(k, None)
+            _CACHE_HILO.pop(k, None)
         return
     for k in [k for k in _CACHE if k[0] == id(doc)]:
         del _CACHE[k]
+        _CACHE_HILO.pop(k, None)
 
 
 def _rect_de(d):

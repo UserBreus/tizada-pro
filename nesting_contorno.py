@@ -189,7 +189,13 @@ def _preparar(piezas, cfg):
         cache_key = (cell_pt, esp_c, paso, p["rotacion"], p.get("borde_cm", 0))
         if p.get("_cache_key") == cache_key:               # ya computada (mismo objeto, otra orden)
             continue
-        geo_key = (p.get("pieza"), p.get("talle"), p.get("variante"), p["rotacion"],
+        # 🔴 EL MOLDE VA EN LA CLAVE. Sin él, dos moldes distintos con una pieza del mismo nombre
+        # («Frente 1», «Cuello 1»), mismo talle y las dos filas sin variable elegida compartían la
+        # SILUETA: la segunda se colocaba con la forma de la primera y la hoja salía con las piezas
+        # encimadas, perfectamente imprimible. Antes no podía pasar porque cada molde armaba su
+        # propia tizada; desde el changelog 439 los moldes de la misma columna de talle se acomodan
+        # JUNTOS, así que la clave tiene que distinguirlos.
+        geo_key = (p.get("_molde"), p.get("pieza"), p.get("talle"), p.get("variante"), p["rotacion"],
                    p.get("borde_cm", 0), cell_pt, esp_c, paso)
         p["_geo_key"] = geo_key
         hit = _geo.get(geo_key)

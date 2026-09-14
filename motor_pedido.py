@@ -5096,7 +5096,14 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                                 editables_marca=md.get("editables_marca"),
                                 editables_sin_marca=md.get("editables_sin_marca"),
                                 referencia=md.get("referencia") or "alto")
+            # De qué MOLDE es cada pieza. Lo necesita el nesteo para no confundir dos piezas que
+            # se llaman igual en moldes distintos (ver `nesting_contorno._preparar`): desde que los
+            # moldes de la misma columna de talle comparten mesa, en `acc` conviven piezas de
+            # varios moldes. La plantilla es única por molde, así que sirve de identidad.
+            _mk = str(md.get("plantilla") or id(md))
             for tela, lst in pt.items():
+                for _e in lst:
+                    _e["_molde"] = _mk
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)
         res_g = _nestear_y_componer(acc, config_nesting, telas_cfg, salida, t0, total,
