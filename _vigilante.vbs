@@ -84,6 +84,17 @@ fallos = 0
 Do
     If ApagadoAProposito() Then Exit Do
 
+    ' UN SOLO VIGILANTE POR SERVIDOR. Si en esta vuelta YA hay alguien atendiendo, es que otro
+    ' vigilante lo levanto: este sobra y se va. Sin esto quedaban dos peleando por el puerto
+    ' 8050 --el perdedor muere enseguida y su vigilante lo relanza-- y el servidor se levantaba
+    ' una y otra vez (reporte del usuario 2026-09-14: se levanto 11 veces sin parar).
+    ' El chequeo de arriba solo corria al ARRANCAR, y entre el kill y el relanzamiento hay una
+    ' ventana en la que nadie contesta: los dos pasaban.
+    If Contesta() Then
+        Anotar "ya hay otro servidor atendiendo: este vigilante se retira"
+        Exit Do
+    End If
+
     ' el registro anterior se conserva: sin él no se puede investigar la caída
     On Error Resume Next
     If fso.FileExists(fso.BuildPath(logs, "servidor.log")) Then

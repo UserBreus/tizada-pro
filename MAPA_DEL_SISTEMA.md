@@ -1482,6 +1482,66 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (441) — 🧹 SIETE COSAS DE UNA: el arte deja de hacer esperar 40 s, la ficha no se
+  re-dibuja, el servidor no se levanta once veces, y dos patas de los 12,5 GB de RAM.**
+
+  **(A) SUBIR UN ARTE: 40 s → se ve enseguida.** Medido: la subida en sí tarda menos de 1 s y
+  analizar el arte 3 s. Los 40 s eran el PRECALENTADO de los VEINTE talles, que se esperaba
+  mirando un cartel. ⚠️ No se volvió a «sólo el talle guía» (eso ya se probó y fue peor: había que
+  esperar en cada cambio de talle). Se siguen preparando todos; lo que cambia es que el talle QUE
+  SE ESTÁ MIRANDO se dibuja **primero** (`talle_guia` va al frente de la cola en
+  `arte_asignar_todo`, y el job avisa con `guia_lista`) y, apenas está, la pantalla se libera: los
+  otros diecinueve se terminan solos, sin cartel. La función además **devuelve** ahí (antes el
+  `await` del que la llamaba esperaba igual a los veinte).
+
+  **(B) LA FICHA TÉCNICA NO SE VUELVE A DIBUJAR CADA VEZ.** Generarla cuesta 3-5 s dentro del
+  pedido (no se nota). Lo que demoraba era MOSTRARLA: `pagina_img` re-rasterizaba el PDF —hasta
+  30 MB de vector, ~1 s por página— en CADA request, sin guardar en disco ni dejar que el
+  navegador guardara (el `after_request` marca todo `no-store`), y la pantalla pedía **dos**
+  imágenes por página (miniatura `z=1` y grande `z=2`, y medido `z=1` cuesta lo mismo) más el PDF
+  entero en un iframe oculto por si tocaban Imprimir. Ahora: `pagina_img` guarda el PNG al lado
+  del trabajo (como `mesa_img`), el nuevo `_png_guardado` manda `immutable` para que el navegador
+  lo guarde, la miniatura usa **la misma** imagen achicada por CSS, y el PDF se carga recién al
+  tocar Imprimir. Medido sobre la ficha más pesada (30,8 MB, 2 páginas): **4,1 s cada apertura →
+  2,3 s la primera y 0,0 s las siguientes.**
+
+  **(C) «SE LEVANTÓ 11 VECES Y ROMPIÓ TODO».** `REINICIAR-SERVIDOR.bat` mataba el servidor **y**
+  hacía `schtasks /run`. Pero el vigilante viejo (`_vigilante.vbs`) estaba ESPERANDO a ese
+  servidor y lo relanzaba solo; el `schtasks /run` levantaba un SEGUNDO vigilante. Dos servidores
+  peleando por el 8050, el perdedor muere en segundos, su vigilante lo relanza, y así. Dos
+  arreglos: el `.bat` **espera 14 s a que el vigilante lo levante** y sólo lanza la tarea si no
+  vuelve; y el vigilante, **en cada vuelta del bucle**, se retira si ya hay alguien atendiendo (el
+  chequeo existía pero sólo al arrancar, y entre el kill y el relanzamiento nadie contesta: los
+  dos pasaban). Verificado: matando el servidor, vuelve **una** vez y con PID nuevo.
+
+  **(D) RAM (12,5 GB) — dos patas, de un diagnóstico más largo.** (1) El pool de render es
+  persistente y **sus workers no morían nunca**: se quedaban con el pico de la tizada más pesada
+  (el asignador de Python no devuelve al sistema) × hasta 6 procesos. Ahora
+  `max_tasks_per_child=_TAREAS_POR_WORKER` (8, `TIZADA_TAREAS_POR_WORKER`): cada worker se renueva
+  y el pico se devuelve. (2) `teardown_request` cerraba los PDFs pero **no** vaciaba
+  `piezas_con_diseno._CACHE`, que guarda el `get_cdrawings` de mesas ENTERAS; ahora llama a
+  `PD.olvidar()`. ⏳ Lo demás del diagnóstico queda anotado abajo.
+
+  **(E) TALLE EN UNA SOLA COLUMNA.** Regla del usuario: *«si subo talle en una columna y en la
+  misma fila no en la otra, no importa, no es problema de avisar, y en la tabla tiene que
+  estar»*. Las columnas de talle pasan a ser un **grupo**: alcanza con que UNA tenga valor
+  (`_faltaEnFila`). Antes se exigían todas las marcadas obligatorias, así que esa fila quedaba
+  afuera de la tizada Y de la ficha, y encima preguntaba. Las obligatorias que no son de talle se
+  siguen exigiendo una por una.
+
+  **(F) ZOOM.** El recorte nítido (changelog 440) esperaba 220 ms a que la mano parara: se sentía
+  como «borroso y después nítido». Ahora 90 ms y hasta 12 recortes vivos.
+
+  **(G) «NUEVO PEDIDO» LIMPIA MÁS.** Se borran también los nombres de mesa guardados en el
+  navegador (`tizada_mesas_nombres_*`), que quedaban uno por pedido para siempre. Ya volvía al
+  paso 1 y ya borraba las tizadas y los moldes efímeros (changelog 435).
+
+  ⏳ **PENDIENTES DEL DIAGNÓSTICO DE RAM** (medidos, no hechos): `_molde_por_talle`
+  (`motor_pedido.py`) abre una copia COMPLETA del molde por talle en el camino de fallback;
+  `_base_cache` guarda un PDF con copia de la mesa entera por (pieza, talle, variante) sin tope;
+  `_CONT_CACHE` y `_NIDO_CACHE` crecen sin límite ni expiración; y en modo taller no existe
+  `TIZADA_PROCESOS`, así que los topes caen en 6 + hasta 12 procesos a la vez.
+  ⏳ **Sin verificar en pantalla** (todo esto pide sesión): lo medido es el servidor y los tiempos.
 - **2026-09-14 (440) — 🔍 LA VISTA DE LA MESA SE PIDE POR PEDAZOS: rápida de lejos, legible de
   cerca.** Seguimiento de la 439. El usuario mandó la captura de una etiqueta borrosa: *«que
   funcione rápido pero al menos los textos así pequeño queden legibles; no te pido la mejor

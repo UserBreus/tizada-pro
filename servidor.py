@@ -2284,6 +2284,16 @@ def _cerrar_pdfs(_exc=None):
         MP.cerrar_abiertos()
     except Exception:
         pass
+    # 🔴 …Y EL CACHÉ DE DIBUJOS DEL MOLDE CON DISEÑO. `piezas_con_diseno._CACHE` guarda el
+    # `get_cdrawings` de una mesa ENTERA (miles de trazos del diseño) por documento abierto, y sólo
+    # se vaciaba si el flujo pasaba por ciertos `finally`. Todo lo que entrara por otro endpoint
+    # dejaba esos dibujos residentes para siempre, en el proceso principal y en cada worker
+    # (diagnóstico 2026-09-14: una de las patas de los 12,5 GB).
+    try:
+        import piezas_con_diseno as _PDt
+        _PDt.olvidar()
+    except Exception:
+        pass
 
 
 @app.errorhandler(Exception)
@@ -5569,6 +5579,10 @@ def arte_preview_piezas():
 # pikepdf + SVG) sin cruzar objetos, y escribe el render al caché en disco. El ProcessPool
 # es PERSISTENTE (el spawn en Windows re-importa el módulo; crearlo una vez amortiza).
 _RENDER_POOL = None
+# Cada cuántas tareas se renueva un worker del pool (ver `_get_render_pool`). Un talle entero
+# es UNA tarea, así que 8 son unos minutos de trabajo: alcanza para amortizar el arranque y no
+# deja que el pico de una tizada pesada se quede pegado en el proceso.
+_TAREAS_POR_WORKER = int(os.environ.get("TIZADA_TAREAS_POR_WORKER") or 8)
 _RENDER_POOL_LOCK = threading.Lock()
 _ASIGNAR_JOBS = {}          # job_id -> {"hecho": n, "total": N, "done": bool}
 
@@ -5739,6 +5753,15 @@ def arte_asignar_todo():
     # el talle guía y los demás recién cuando se los toca: con un arte pesado cada talle son ~8
     # recortes del vector, y hacer los 20 de una eran ~60 s de espera para ver algo.
     talles = [str(t) for t in (cuerpo.get("talles") or []) if str(t).strip()] or _variantes_molde(pid)
+    # 🔴 EL TALLE QUE SE ESTÁ MIRANDO VA PRIMERO. Se siguen preparando TODOS (eso no cambia: sin el
+    # resto hay que esperar en cada cambio de talle), pero el visor no tiene por qué esperar a los
+    # veinte para mostrar el que tiene en pantalla. Apenas ése está, `guia_lista` se prende y la
+    # pantalla se libera; los demás se terminan solos (reporte del usuario 2026-09-14: «subir el
+    # arte demoró más de 40 segundos»).
+    _guia = str(cuerpo.get("talle_guia") or "").strip()
+    if _guia and _guia in talles:
+        talles = [_guia] + [t for t in talles if t != _guia]
+    _guia = _guia if _guia in talles else (talles[0] if talles else "")
     job = uuid.uuid4().hex[:8]
     # PROGRESO DE VERDAD: los talles terminan de a uno y de golpe (el primero tarda lo que tarda
     # levantar los procesos + renderizar entero) → el cartel se quedaba clavado en «0/20» y parecía
@@ -5749,8 +5772,8 @@ def arte_asignar_todo():
     if len(talles) == 1:   # con un solo talle se mira SU carpeta: si no, se cuentan las piezas
         _sub = os.path.join(_sub, re.sub(r"[^A-Za-z0-9_-]+", "_", str(talles[0]))[:24] or "guia")
     _dircache = _ruta_datos(_sub, pid, sub=_diseno_sub(diseno))
-    _ASIGNAR_JOBS[job] = {"hecho": 0, "total": len(talles), "done": False,
-                          "dir": _dircache, "desde": time.time() - 1, "fase": "arrancando"}
+    _ASIGNAR_JOBS[job] = {"hecho": 0, "total": len(talles), "done": False, "guia_lista": False,
+                          "guia": _guia, "dir": _dircache, "desde": time.time() - 1, "fase": "arrancando"}
     if len(_ASIGNAR_JOBS) > 40:   # no acumular jobs viejos
         for k in [k for k, v in list(_ASIGNAR_JOBS.items()) if v.get("done")][:20]:
             _ASIGNAR_JOBS.pop(k, None)
@@ -5759,11 +5782,15 @@ def arte_asignar_todo():
             from concurrent.futures import as_completed
             pool = _get_render_pool()
             # RENDERS (por variable) + DETECCIONES (por molde, para el visor) — ambos en paralelo.
-            futs = [pool.submit(_render_talle_worker, (pid, diseno, variante, str(t), _mapeo_arg)) for t in talles]
+            futs = {pool.submit(_render_talle_worker, (pid, diseno, variante, str(t), _mapeo_arg)): str(t)
+                    for t in talles}
             det = [pool.submit(_deteccion_talle_worker, (pid, str(t))) for t in talles]
             _ASIGNAR_JOBS[job]["fase"] = "dibujando"
             for _f in as_completed(futs):
                 _ASIGNAR_JOBS[job]["hecho"] += 1
+                # apenas está el talle que el visor tiene en pantalla, se lo libera
+                if futs.get(_f) == _guia or not _guia:
+                    _ASIGNAR_JOBS[job]["guia_lista"] = True
             _ASIGNAR_JOBS[job]["fase"] = "midiendo"    # ya están los diseños; faltan las medidas
             for _f in as_completed(det):   # esperar también las detecciones (para que el front no las recalcule)
                 pass
@@ -10168,6 +10195,15 @@ def pagina_img(tid, archivo):
     ruta = os.path.join(TRABAJOS, tid, archivo)
     if not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
+    # 🔴 SE DIBUJA UNA VEZ Y SE GUARDA. La ficha técnica lleva adentro el arte vectorial completo
+    # de cada pieza (`ficha_tecnica.py`: el molde guía es el MISMO PDF que nestea la tizada), así
+    # que rasterizar una página cuesta ~1 s aunque sea A4 — y esto lo rehacía en CADA request, sin
+    # guardar nada ni dejar que el navegador guardara (el `after_request` pone `no-store`). Cada
+    # vez que se tocaba la pestaña «Ficha técnica» eran ~4 s de espera (medido 2026-09-14).
+    # Igual que `mesa_img`: se guarda al lado del trabajo y se sirve desde ahí.
+    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_z{z:g}.png")
+    if os.path.exists(cache):
+        return _png_guardado(cache)
     try:
         # `with`: si el dibujo de la vista previa falla, la hoja del trabajo no puede quedar
         # abierta (después no se la puede reemplazar ni borrar).
@@ -10176,9 +10212,28 @@ def pagina_img(tid, archivo):
                 pi = 0
             pix = d[pi].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
             png = pix.tobytes("png")
+        try:
+            with open(cache + ".tmp", "wb") as fh:
+                fh.write(png)
+            os.replace(cache + ".tmp", cache)
+            return _png_guardado(cache)
+        except Exception:
+            pass
         return send_file(_io.BytesIO(png), mimetype="image/png")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _png_guardado(ruta):
+    """Un PNG ya dibujado, con permiso para que el NAVEGADOR también lo guarde.
+
+    🔴 El `after_request` del sistema marca todo como `no-store` (para que una pantalla nunca
+    muestre datos viejos). Estos dibujos son la excepción: su nombre lleva el trabajo, la página y
+    el zoom, así que el mismo nombre SIEMPRE es la misma imagen. Sin esto, el navegador volvía a
+    pedirlos cada vez y el servidor los volvía a mandar enteros."""
+    r = send_file(ruta, mimetype="image/png")
+    r.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return r
 
 
 _VISTA_MESA_W = 1200          # ancho en px de la vista de la grilla (la mesa se ve a ~440 px)
@@ -10242,7 +10297,7 @@ def mesa_img(tid, archivo):
     _sufijo = "" if entera else f"_c{cx0:.4f}-{cy0:.4f}-{cx1:.4f}-{cy1:.4f}"
     cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}{_sufijo}.png")
     if os.path.exists(cache):
-        return send_file(cache, mimetype="image/png")
+        return _png_guardado(cache)
     try:
         with fitz.open(ruta) as d:
             if pi >= d.page_count:
@@ -10262,6 +10317,7 @@ def mesa_img(tid, archivo):
         with open(cache + ".tmp", "wb") as fh:
             fh.write(png)
         os.replace(cache + ".tmp", cache)
+        return _png_guardado(cache)
     except Exception:
         pass
     return send_file(_io.BytesIO(png), mimetype="image/png")

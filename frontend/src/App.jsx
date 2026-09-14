@@ -2610,7 +2610,11 @@ function DetalleFuente({ f, onVolver }) {
  *  los botones usan los estilos de la app (sin recuadros). Descargar todo / una hoja / imprimir. */
 function VisorFicha({ id, archivo, paginas, avisar }) {
   const urlPdf = rutaApi(`/trabajos/${id}/${archivo}`);
-  const imgPag = (pi, z = 2) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=${z}`);
+  // 🔴 UN SOLO DIBUJO POR PÁGINA. La miniatura pedía `z=1` y la grande `z=2`: DOS rasterizados
+  // por página y, medido, `z=1` cuesta lo mismo que `z=2` (el costo es recorrer el vector, no
+  // pintar píxeles). Ahora las dos usan el mismo `z=2` y la miniatura lo achica con CSS: mitad
+  // de trabajo para el servidor y, como la dirección es idéntica, el navegador la reusa.
+  const imgPag = (pi, z = 2) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
   const printRef = React.useRef(null);
   const scrollRef = React.useRef(null);
@@ -2640,8 +2644,18 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
     window.addEventListener('resize', calc);
     return () => { clearTimeout(t); window.removeEventListener('resize', calc); };
   }, [paginas]);
+  // 🔴 EL PDF SE BAJA RECIÉN AL IMPRIMIR. El iframe oculto tenía el PDF puesto desde el momento
+  // de abrir la pestaña: hasta 30 MB de vector bajados y parseados por el visor de PDF del
+  // navegador cada vez, compitiendo con los dibujos de las páginas (medido 2026-09-14).
+  const [pdfListo, setPdfListo] = useState(false);
   const imprimir = () => {
     // iframe oculto con el PDF real → impresión nítida; si el navegador lo bloquea, se abre aparte.
+    if (!pdfListo) {
+      setPdfListo(true);                       // se carga ahora; cuando termine, imprime
+      const espera = () => { try { printRef.current?.contentWindow?.focus(); printRef.current?.contentWindow?.print(); } catch { window.open(urlPdf, '_blank'); } };
+      setTimeout(espera, 400);                 // darle al iframe un momento para traerlo
+      return;
+    }
     try { printRef.current?.contentWindow?.focus(); printRef.current?.contentWindow?.print(); }
     catch { window.open(urlPdf, '_blank'); }
   };
@@ -2720,7 +2734,7 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
           ))}
         </div>
       </div>
-      <iframe ref={printRef} title="imprimir" src={urlPdf} style={{ display: 'none' }} />
+      {pdfListo && <iframe ref={printRef} title="imprimir" src={urlPdf} style={{ display: 'none' }} />}
     </div>
   );
 }
@@ -2751,13 +2765,15 @@ function MesasInfinito({ mesas, job, avisar }) {
   // pedazo (el servidor lo guarda) en vez de pedir uno nuevo a cada arrastre.
   const TILE_CM = 50;              // cada recorte cubre a lo sumo medio metro de mesa
   const BASE_W = 1200;             // ancho del dibujo general de cada mesa, en px
-  const TOPE_RECORTES = 8;         // cuántos pueden estar vivos a la vez (memoria del navegador)
+  const TOPE_RECORTES = 12;        // cuántos pueden estar vivos a la vez (memoria del navegador)
   const [detalle, setDetalle] = useState({});   // clave de mesa → [{id, a, c, b, d, src}]
   const mesaRefs = useRef({});                  // clave → el div de esa mesa
   const mesaInfo = useRef({});                  // clave → {archivo, pi, anchoCm, altoCm}
 
   useEffect(() => {
-    // Se espera a que la mano pare: pedir recortes en mitad de un arrastre es tirar trabajo.
+    // Se espera un toque a que la mano pare (pedir recortes en mitad de un arrastre es tirar
+    // trabajo), pero poco: el usuario reportó que «al hacer zoom rápido queda borroso y demora en
+    // mostrarse nítido» (2026-09-14). 90 ms no se perciben y el recorte sale enseguida.
     const t = setTimeout(() => {
       const wrap = wrapRef.current;
       if (!wrap || view.zoom < 1) { setDetalle({}); return; }
@@ -2800,7 +2816,7 @@ function MesasInfinito({ mesas, job, avisar }) {
         if (tiles.length) out[key] = tiles;
       }
       setDetalle(out);
-    }, 220);
+    }, 90);
     return () => clearTimeout(t);
   }, [view, mesas, job?.resultado?.id]);
 
@@ -9045,6 +9061,10 @@ export default function App() {
     // UN dibujo por vez para lo mismo: al tocar un talle se dispara desde más de un lado y se
     // lanzaban DOS pasadas iguales, que se peleaban la CPU y tardaban el doble. Si ya hay una en
     // curso para este molde/variable/talle, se espera a esa.
+    // EL TALLE QUE SE ESTÁ MIRANDO: es el primero que hay que tener listo (el resto puede
+    // terminarse de fondo). Si el visor todavía no eligió ninguno, el primero de la lista.
+    const _guia = String((etqData?.talle_ref != null && talles.includes(String(etqData.talle_ref)))
+      ? etqData.talle_ref : talles[0]);
     const _kEnCurso = `${pid}|${clave}|${dis}|${talles.join(',')}`;
     if (_asignEnCurso.current[_kEnCurso]) return _asignEnCurso.current[_kEnCurso];
     let _fin;
@@ -9060,7 +9080,9 @@ export default function App() {
       try {
         const r = await fetch('/api/arte/asignar_todo', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, talles })
+          // `talle_guia` = el que el visor está mostrando: el servidor lo dibuja PRIMERO y avisa
+          // apenas está, así la pantalla se libera sin esperar a los otros diecinueve.
+          body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, talles, talle_guia: _guia })
         });
         if (r.ok) {
           const { job, total } = await r.json();
@@ -9073,15 +9095,16 @@ export default function App() {
             // siempre, y `fase` dice qué está pasando cuando todavía no hay nada terminado.
             setAsignando({ hecho: s.hecho || 0, total: total || talles.length, talle: '',
                            piezas: s.piezas || 0, fase: s.fase || '', seg: Math.round((Date.now() - _tIni) / 1000) });
-            if (s.done) break;
+            // 🔴 CON EL TALLE QUE SE ESTÁ MIRANDO ALCANZA PARA SEGUIR. Los demás se terminan de
+            // preparar solos, sin cartel: antes se esperaban los veinte y eran 40 s de reloj
+            // (reporte del usuario 2026-09-14).
+            if (s.done || s.guia_lista) break;
           }
         }
       } catch (e) { usoParalelo = false; }
       // Cargar los renders (ya en caché de disco) + geometría a la MEMORIA del navegador
       // → el cambio entre variantes queda instantáneo. Salen del caché, es rápido.
-      for (let i = 0; i < talles.length; i++) {
-        const t = talles[i];
-        setAsignando({ hecho: i, total: talles.length, talle: String(t) });
+      const _cargarTalle = async (t) => {
         const k = _pvKeyCon(mapeo, t, fuentesReempl);
         if (!_pvCache.current[k]) {
           try {
@@ -9098,9 +9121,20 @@ export default function App() {
             if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
           } catch (e) { /* sigue */ }
         }
-        setAsignando({ hecho: talles.length, total: talles.length, talle: String(t) });
-      }
-    } finally { setAsignando(null); delete _asignEnCurso.current[_kEnCurso]; if (_fin) _fin(); }
+      };
+      // 🔴 SE ESPERA AL TALLE QUE SE ESTÁ MIRANDO, Y NADA MÁS. Los otros diecinueve se cargan
+      // SOLOS, sin cartel y sin trabar la pantalla: seguían preparándose igual, pero el usuario
+      // ya puede trabajar (antes eran 40 s de reloj — reporte 2026-09-14).
+      const _resto = talles.filter(t => String(t) !== String(_guia));
+      setAsignando({ hecho: 0, total: talles.length, talle: String(_guia) });
+      await _cargarTalle(_guia);
+      setAsignando(null);
+      // De fondo, uno por uno para no pelear la CPU con lo que el usuario esté haciendo.
+      (async () => { for (const t of _resto) await _cargarTalle(t); })()
+        .catch(() => { /* si algo falla, ese talle se dibuja cuando se lo toque */ })
+        .then(() => { delete _asignEnCurso.current[_kEnCurso]; if (_fin) { _fin(); _fin = null; } });
+      return;
+    } finally { setAsignando(null); if (_fin) { delete _asignEnCurso.current[_kEnCurso]; _fin(); _fin = null; } }
   };
   // RENDER REAL del motor por pieza, CACHEADO en disco (/api/arte/preview_piezas): una sola fuente
   // de verdad con la tizada. La 1ª vez por config arma+guarda (unos segundos; mientras tanto se ve
@@ -10054,6 +10088,23 @@ export default function App() {
     return String(f?.[c.id] ?? '').trim() === '';
   });
 
+  /** 🔴 LAS COLUMNAS DE TALLE SON UN GRUPO: ALCANZA CON UNA (regla del usuario 2026-09-14).
+   *  Con «Talle» y «Talle short» en la misma planilla, una fila que sólo trae el talle de la
+   *  camiseta es una fila BUENA: esa prenda se fabrica y va en la tabla de la ficha. Exigir las
+   *  dos la dejaba afuera de la tizada Y de la ficha, y encima preguntaba. Las obligatorias que
+   *  NO son de talle se siguen exigiendo todas, una por una. */
+  const _faltaEnFila = React.useCallback((f) => {
+    const talleCols = columnasObligatorias.filter(c => c.role === 'talle');
+    const otras = columnasObligatorias.filter(c => c.role !== 'talle');
+    const faltan = otras.filter(c => !String(f?.[c.id] ?? '').trim());
+    // del grupo de talle: sólo se reclama si NINGUNA tiene valor
+    if (talleCols.length && !talleCols.some(c => String(f?.[c.id] ?? '').trim())) {
+      faltan.push(talleCols.length === 1 ? talleCols[0]
+        : { id: '__talle__', label: talleCols.map(c => c.label || c.id).join(' o ') });
+    }
+    return faltan;
+  }, [columnasObligatorias]);
+
   /** Las filas EMPEZADAS a las que les falta un dato obligatorio (las vacías no cuentan: se
    *  ignoran solas). Es lo que se pregunta antes de armar la tizada. */
   const filasIncompletas = React.useCallback(() => {
@@ -10061,16 +10112,15 @@ export default function App() {
     const out = [];
     filas.forEach((f, i) => {
       if (filaVacia(f)) return;                     // fila en blanco: sobra, no se pregunta
-      const faltan = columnasObligatorias.filter(c => !String(f[c.id] ?? '').trim());
+      const faltan = _faltaEnFila(f);
       if (faltan.length) out.push({ i, faltan: faltan.map(c => c.label || c.id) });
     });
     return out;
-  }, [filas, columnasObligatorias, cols, columnasActivasPlanilla]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filas, columnasObligatorias, cols, columnasActivasPlanilla, _faltaEnFila]);   // eslint-disable-line react-hooks/exhaustive-deps
   /** LAS FILAS QUE SE VAN A FABRICAR: las completas. Las vacías y las que no tienen todas las
    *  columnas obligatorias quedan afuera —de la tizada Y de la ficha técnica—. */
-  const filasQueSalen = React.useCallback(() => filas.filter(f => !filaVacia(f)
-    && columnasObligatorias.every(c => String(f[c.id] ?? '').trim())),
-  [filas, columnasObligatorias, cols, columnasActivasPlanilla]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const filasQueSalen = React.useCallback(() => filas.filter(f => !filaVacia(f) && !_faltaEnFila(f).length),
+  [filas, columnasObligatorias, cols, columnasActivasPlanilla, _faltaEnFila]);   // eslint-disable-line react-hooks/exhaustive-deps
   /** Cuántas prendas sale una fila. 🔴 Si la columna NO está a la vista vale 1: lo que no se ve no
    *  puede multiplicar la tizada (decisión del usuario 2026-08-26). El valor cargado NO se borra:
    *  vuelve a valer en cuanto la columna se muestre otra vez. */
@@ -11099,6 +11149,15 @@ export default function App() {
     //    indexadas por molde/diseño/variable, pero si el pedido nuevo usa el mismo molde con otro
     //    arte mostrarían el anterior hasta recargar la página.
     _pvCache.current = {}; _talleDetCache.current = {}; _detArteCache.current = {};
+    // …y la BASURA GUARDADA EN EL NAVEGADOR de los pedidos anteriores: los nombres que se le
+    // pusieron a las mesas se guardan por trabajo (`tizada_mesas_nombres_<id>`) y quedaban para
+    // siempre, uno por pedido. Un pedido nuevo empieza sin nada de lo de antes (pedido del
+    // usuario 2026-09-14: «que quede todo lo que se hizo anteriormente limpio de la caché»).
+    try {
+      for (const k of Object.keys(localStorage)) {
+        if (k.startsWith('tizada_mesas_nombres_')) localStorage.removeItem(k);
+      }
+    } catch (_e) { /* storage bloqueado: no es motivo para frenar el pedido nuevo */ }
     // 7) el avance guardado en el navegador (si no, «nuevo pedido» + F5 resucitaba el viejo)
     try { localStorage.removeItem('tizada_wizard'); } catch (e) { /* sin storage: nada que borrar */ }
     setPedidoPaso('diseno');          // el wizard arranca por el DISEÑO (2026-08-21)
@@ -14469,7 +14528,7 @@ export default function App() {
                   const _ningunaCompleta = filas.length > 0 && _salen === 0;
                   const bloq = !filas.length || invalidos.length > 0 || !moldesSeleccionados.length
                     || sinArte.length > 0 || _ningunaCompleta;
-                  const _faltaEnTodas = [...new Set((_incompletas.length ? _incompletas : filas.map((f, i) => ({ i, faltan: columnasObligatorias.filter(c => !String(f[c.id] ?? '').trim()).map(c => c.label || c.id) }))).flatMap(x => x.faltan))].join(', ');
+                  const _faltaEnTodas = [...new Set((_incompletas.length ? _incompletas : filas.map((f, i) => ({ i, faltan: _faltaEnFila(f).map(c => c.label || c.id) }))).flatMap(x => x.faltan))].join(', ');
                   const motivo = invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')})`
                     : sinArte.length ? `Falta cargar el arte de: ${sinArte.map(x => _arteLbl(x.did, x)).join(' · ')} (paso Arte)`
                       : !filas.length ? 'Agregá al menos una fila'
