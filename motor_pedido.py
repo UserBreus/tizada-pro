@@ -4614,6 +4614,24 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     if mapeo_arte:
                         return (B + (W - aw_arte) / 2 + px * sp, B + H - py * sp)
                     return (px - x0m + B, Hp - (py - y0m + B))
+                # 🔴 UN CARÁCTER QUE LA TIPOGRAFÍA NO TIENE NO PUEDE TUMBAR LA TIZADA CON UN
+                # RASTRO DE PYTHON. Pasó el 2026-09-14: el nombre llevaba un punto, la fuente del
+                # diseño (de camiseta: sólo letras y números) no lo trae, y el pedido entero
+                # moría con «ValueError: glifo faltante: '.'» — nadie puede hacer nada con eso.
+                # Se corta ACÁ, antes de dibujar, y se dice qué carácter, en qué texto y con qué
+                # tipografía. No se estampa «lo que se pueda»: el nombre de una persona NO se
+                # imprime cambiado en silencio (ver «el peor error es el que sale bien impreso»).
+                # El aviso llega antes: la planilla pinta en ROJO lo que la fuente no tiene
+                # (`/api/pedido/fuente_chars`).
+                _falta = fnom.faltantes(texto)
+                if _falta:
+                    raise ValueError(
+                        "La tipografía «{f}» no puede estampar {c} de «{t}». "
+                        "Sacá {c2} del texto o elegí otra tipografía en el paso Arte.".format(
+                            f=pl.get("fuente") or "?",
+                            c=" ni ".join(f"«{c}»" for c in _falta),
+                            t=texto,
+                            c2=("ese carácter" if len(_falta) == 1 else "esos caracteres")))
                 if _fiel:
                     # (x, y, x0, x1) del arte → coords de la pieza (posición + bordes del renglón).
                     _glifos = [(*_T(px, py), _T(ex0, py)[0], _T(ex1, py)[0]) for (px, py, ex0, ex1) in _bp]

@@ -1482,6 +1482,34 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (437) — 🔤 «glifo faltante: '.'»: la tizada moría por un PUNTO en el nombre, y el
+  aviso que lo evitaba no llegaba al camino B.** El usuario quiso armar una tizada y le salió ese
+  rastro de Python. Las tipografías de camiseta del diseñador (`MoreggiTFont4-Camiseta`,
+  `-Short`, `…?`) traen **letras y números y nada más**: ni punto ni guion (medidas las 16 del
+  catálogo: sólo esas 3 fallan). Un «J. PEREZ» o un «PEREZ-GOMEZ» tumbaba el pedido ENTERO en
+  `texto_curvas._glifo`, después de armar las piezas.
+  🔴 **LA CAUSA DE FONDO NO ERA LA FUENTE: el aviso ya existía y no llegaba.**
+  `/api/pedido/fuente_chars` devuelve los caracteres que la tipografía SÍ puede estampar y la
+  planilla pinta el resto **en ROJO antes de generar** (`faltaEnFuente`, el aviso de arriba).
+  Pero leía `arte.ai` — y **el molde con el diseño adentro no tiene arte**: devolvía `ok:false`,
+  el front no marcaba nada y el nombre raro se descubría al fallar la tizada. Es el MISMO error
+  que ya se había pagado en `fuentes_estado` (2026-09-04): *un endpoint que mira el arte hay que
+  revisarlo para el camino B*. Ahora `fuente_chars` tiene su ramal: `personalizacion_con_diseno`
+  del molde, juntando la tipografía de CADA TALLE (`por_talle`), con `preparando` + reintento en
+  el front (`fuenteCharsTick`) si el desplegado todavía se está armando.
+  **Y SI IGUAL SE GENERA**, `FuenteCurvas.faltantes(texto)` (nuevo) se consulta ANTES de dibujar y
+  el mensaje dice qué hacer: *«La tipografía «X» no puede estampar «.» de «J. PEREZ». Sacá ese
+  carácter del texto o elegí otra tipografía en el paso Arte.»* **Corta, no estampa de menos:** el
+  nombre de una persona NO se imprime cambiado en silencio (regla «el peor error es el que sale
+  bien impreso»). ⏳ Queda como decisión del usuario si, en vez de cortar, esos caracteres deberían
+  salir con la predeterminada (Anton, que los tiene todos) — el nombre quedaría completo con un
+  punto de otra tipografía.
+  **CONTRATO** `verificar_glifos_del_nombre.py`: `faltantes()` (incluido el espacio, que nunca
+  falta), el ramal del camino B en vivo sobre un molde real (70 caracteres, el punto NO está), que
+  el camino A siga saliendo del arte, y que el mensaje nombre tipografía + carácter + texto.
+  Verde. Build verde, server reiniciado 11:25:59.
+  📌 LECCIÓN: cuando una validación «ya existe», hay que comprobar que **llega al caso nuevo**.
+  Ésta estaba escrita, probada y muerta para la mitad de los moldes.
 - **2026-09-14 (436) — 🐌 «SUBO ESTE ARCHIVO Y NO LO BANCA»: era un molde de UNA SOLA MESA, y el
   camino B repartía el trabajo por MESA. 197 s → 50 s.** El usuario trajo otra tanda de moldes
   (`drive-download…/MOLDES`) y el sistema tardaba una eternidad con ellos. **No es el tamaño**: el

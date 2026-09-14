@@ -10056,11 +10056,31 @@ def fuente_chars():
     nombre/número). La planilla los usa para pintar en ROJO lo que la fuente no tiene.
     Devuelve la INTERSECCIÓN de los cmap de todas las fuentes de personalización del arte."""
     pid = request.args.get("producto_id") or _get_active_producto_id()
-    try:
-        pers = MP.extraer_personalizacion(_ruta_entrada("arte.ai", pid)) or {}
-    except Exception:
-        return jsonify({"ok": False, "chars": "", "fuentes": [], "faltantes": []})
-    fuentes = sorted({c.get("fuente") for m in pers.values() for c in (m or {}).values() if c.get("fuente")})
+    # 🔴 EL MOLDE CON EL DISEÑO ADENTRO NO TIENE ARTE. Esto leía `arte.ai` y para el camino B
+    # devolvía vacío: la planilla no pintaba NADA en rojo y el primer nombre con un carácter raro
+    # (un punto, 2026-09-14) tumbaba la tizada entera. Las fuentes salen de los placeholders del
+    # propio molde, igual que en `fuentes_estado`. Mismo error de fondo que la entrada 2026-09-04.
+    if _es_camino_b(pid):
+        import piezas_con_diseno as _PDc
+        _plb = _ruta_entrada("plantilla.ai", pid)
+        if not _PDc.desplegado_listo(_plb):
+            _desplegar_en_fondo(_plb)        # alguien tiene que armarlo: en segundo plano, una vez
+            return jsonify({"ok": False, "preparando": True, "chars": "", "fuentes": [], "faltantes": []})
+        try:
+            pers = _PDc.personalizacion_con_diseno(_plb, armar=False) or {}
+        except Exception:
+            return jsonify({"ok": False, "chars": "", "fuentes": [], "faltantes": []})
+        # en el camino B cada TALLE trae su propio placeholder (con su tamaño y su fuente)
+        fuentes = sorted({f for m in pers.values() for c in (m or {}).values()
+                          for f in ([c.get("fuente")] + [(pt or {}).get("fuente")
+                                                         for pt in (c.get("por_talle") or {}).values()])
+                          if f})
+    else:
+        try:
+            pers = MP.extraer_personalizacion(_ruta_entrada("arte.ai", pid)) or {}
+        except Exception:
+            return jsonify({"ok": False, "chars": "", "fuentes": [], "faltantes": []})
+        fuentes = sorted({c.get("fuente") for m in pers.values() for c in (m or {}).values() if c.get("fuente")})
     sets, ok_f, falta_f = [], [], []
     for f in fuentes:
         ruta = MP.resolver_fuente(f, _fuentes_para(pid, _reempl_de_request()))

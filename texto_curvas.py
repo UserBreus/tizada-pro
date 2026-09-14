@@ -117,6 +117,23 @@ class FuenteCurvas:
         self._cache[ch] = (pen.value, ancho)
         return self._cache[ch]
 
+    def faltantes(self, texto):
+        """Los caracteres de `texto` que esta tipografía NO puede dibujar, sin repetir y en orden.
+
+        Preguntar es mejor que reventar: el que va a estampar lo consulta y arma un aviso que
+        dice qué carácter y en qué texto, en vez de un `glifo faltante: '.'` a mitad de la tizada
+        (reporte del usuario 2026-09-14: un nombre con punto y una fuente de camiseta que sólo
+        trae letras y números)."""
+        out = []
+        for ch in str(texto or ""):
+            if ch in out:
+                continue
+            try:
+                self._glifo(ch)
+            except Exception:
+                out.append(ch)
+        return out
+
     def ancho_texto(self, texto, size):
         return sum(self._glifo(ch)[1] for ch in texto) * size / self.upem
 

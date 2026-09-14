@@ -4417,6 +4417,8 @@ export default function App() {
   const [csvOmit, setCsvOmit] = useState({});         // i -> true si esa fila no se carga
   const [nFilasAgregar, setNFilasAgregar] = useState(1);   // cuántas filas agrega el botón "Agregar Fila"
   const [fuenteChars, setFuenteChars] = useState(null);    // Set de caracteres que SOPORTA la fuente del diseño (null = sin dato)
+  // Se vuelve a preguntar cuando el molde con diseño todavía se estaba armando (ver el efecto).
+  const [fuenteCharsTick, setFuenteCharsTick] = useState(0);
   const [plSel, setPlSel] = useState(null);       // planilla pedido: ANCLA del rango {r,c}
   const [plSelEnd, setPlSelEnd] = useState(null); // OTRA esquina del rango seleccionado {r,c}
   const [plEdit, setPlEdit] = useState(null);     // {r,c} celda EN EDICIÓN (Sheets: 1 click selecciona, doble-click/Enter edita)
@@ -12275,6 +12277,10 @@ export default function App() {
           const r = await fetch(`/api/pedido/fuente_chars?producto_id=${encodeURIComponent(id)}`);
           if (!r.ok) continue;                 // 401/404: se ignora, no rompe el paso
           const d = await r.json();
+          // El molde con diseño todavía se está armando: sin esto el aviso de caracteres no
+          // aparecía NUNCA para ese molde y el nombre con un carácter raro se descubría recién
+          // al fallar la tizada.
+          if (d && d.preparando) { _reintentoFuentes('chars|' + id, () => setFuenteCharsTick(t => t + 1)); continue; }
           if (d && d.ok && d.chars) sets.push(new Set([...d.chars]));
         }
         if (cancelado) return;
@@ -12285,7 +12291,7 @@ export default function App() {
       } catch (_e) { if (!cancelado) setFuenteChars(null); }
     })();
     return () => { cancelado = true; };
-  }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo, sesionLista]);
+  }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo, sesionLista, fuenteCharsTick]);
 
   // ¿La fuente NO tiene este caracter? (los espacios nunca se marcan)
   const faltaEnFuente = (ch) => !!fuenteChars && fuenteChars.size > 0 && String(ch).trim() !== '' && !fuenteChars.has(ch);
