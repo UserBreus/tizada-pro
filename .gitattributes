@@ -1,0 +1,9 @@
+# Los .bat y .cmd van SÍ O SÍ con CRLF: cmd.exe avanza por offset de bytes dando por sentado el
+# CRLF, y con LF solo empieza a leer las órdenes por la mitad («"M" no se reconoce como un
+# comando…»). Ya pasó el 2026-09-14 con REINICIAR-SERVIDOR.bat, que dejó de reiniciar.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# El .vbs lo lee el Windows Script Host, misma historia.
+*.vbs text eol=crlf
+# Los .sh corren en el servidor Linux: nunca CRLF (un \r al final de la shebang lo rompe).
+*.sh text eol=lf

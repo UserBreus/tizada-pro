@@ -1482,6 +1482,36 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (446) — 🔴 DIEZ `.bat` ESTABAN EN LF Y cmd.exe LOS LEÍA POR LA MITAD (entre ellos
+  el de ACTUALIZAR y el de GENERAR ACTUALIZACIÓN).** Apareció solo: al reiniciar el servidor,
+  `REINICIAR-SERVIDOR.bat` escupió `"M" no se reconoce como un comando`, `"tle"`, `"wershell"`,
+  `"exist"`… **y no reinició nada** (seguía reportando el arranque viejo).
+  - **CAUSA:** `cmd.exe` avanza por **offset de bytes** dando por sentado el CRLF. Con LF solo se
+    corre un byte por línea y termina leyendo las órdenes empezadas por la mitad — de ahí los
+    pedazos de palabra. **No le falta ningún programa a la máquina.**
+  - **QUIÉN LO ROMPIÓ:** mis propios scripts de parche. Escriben con `newline=""` (correcto para
+    los `.py`, que ya traen sus saltos) y aplicado a un `.bat` lo deja en **LF puro**. Git no lo
+    tapa: `core.autocrlf=true` convierte al hacer **checkout**, y a estos archivos los escribí
+    directo en el working copy, sin pasar por uno.
+  - **LOS DIEZ:** `REINICIAR-SERVIDOR`, `_arrancar-oculto` (mezclado: 19 CRLF + 5 LF),
+    `ACTUALIZAR-SISTEMA`, `GENERAR-ACTUALIZACION`, `INSTALAR`, `DIAGNOSTICO`, `LIBERAR-ESPACIO`,
+    `LIMPIAR-CARPETAS-VIEJAS`, `iniciar`, `publicado`. ⚠️ Los dos primeros de esa lista son los que
+    usa el usuario **para publicar al servidor**: estaban rotos y todavía no se habían corrido.
+  - **FIX, las dos mitades:** (1) los diez normalizados a CRLF byte a byte, sin tocar el contenido;
+    (2) **`.gitattributes` nuevo** con `*.bat text eol=crlf` (+ `*.cmd`, `*.vbs`; y `*.sh text
+    eol=lf`, que en el servidor Linux un `\r` en la shebang lo rompe), para que salgan bien de
+    cualquier clon aunque esa máquina no tenga `autocrlf`.
+  - **VERIFICADO:** el `.bat` arreglado reinició limpio y el proceso nuevo arrancó a las 15:13:05,
+    **después** del mtime de `servidor.py` (15:08:11) — el criterio del MAPA para saber que corre el
+    código nuevo. `/api/salud` → 200.
+  - 🔴 **REGLA para no repetirlo:** un script de parche que toque un `.bat`/`.cmd`/`.vbs` escribe
+    con `newline="\r\n"`, nunca con `newline=""`. Para auditarlo:
+    `for f in *.bat; do cr=$(tr -cd '\r' < "$f" | wc -c); lf=$(tr -cd '\n' < "$f" | wc -c); [ "$cr" -ne "$lf" ] && echo "$f"; done`
+  - **TRAMPA (me comí una):** `grep -c $'\r' archivo` dentro de un `for` del Bash tool devolvió el
+    total de líneas de **todos** los archivos (el patrón se perdía y un patrón vacío matchea todo),
+    o sea «todos tienen CRLF». Casi cierro el tema con eso. **Para finales de línea, contar BYTES**
+    (`tr -cd` / `od -c`), nunca líneas que matchean.
+
 - **2026-09-14 (445) — 🟢 EL VISOR NO ESPERA DETRÁS DEL PRECALENTADO (y el archivo final
   queda igual de bueno).** El usuario: *«lo dejaste más roto, mira, demora en mostrar el contenido
   en el visor; en el visor, si se tiene que bajar la calidad del visor que se haga, mientras no
