@@ -19,7 +19,9 @@ Lo que se prueba:
   2. moldes de DISTINTO diseño con la MISMA columna comparten mesa; con columnas distintas, no;
   3. la clave de agrupación del pedido es la columna (no el grupo de tizada ni el molde);
   4. la vista liviana existe, sale de la HOJA (no del SVG), se guarda y pesa órdenes de magnitud
-     menos — y el SVG vectorial sigue ahí para el detalle y el PDF intacto para descargar.
+     menos — y el SVG vectorial sigue ahí para el detalle y el PDF intacto para descargar;
+  5. al acercarse, el RECORTE de lo que se está mirando llega con nitidez suficiente para leer una
+     etiqueta de 3 mm (el dibujo general no alcanza: ahí una letra mide 2 píxeles).
 
 ⚠️ Sólo LEE el catálogo y, si hay una tizada vieja en `trabajos/`, la dibuja. No escribe datos.
 """
@@ -149,6 +151,41 @@ def main():
             ok(png < 15e6, f"…y la grilla entera entra en pocos MB ({png/1e6:.1f} MB): por eso deja de clavarse")
     else:
         print("    ⚠️    no hay ninguna tizada pesada en `trabajos/` para medirlo en vivo")
+
+    # ── 5. EL RECORTE NÍTIDO ────────────────────────────────────────────────────────────────
+    print("\n5 · 🔴 AL ACERCARSE, LO QUE SE MIRA SE LEE")
+    ok("cx0" in src_img and "clip=clip" in src_img, "la vista acepta un rectángulo y lo recorta")
+    ok("entera = (cx0, cy0, cx1, cy1) == (0.0, 0.0, 1.0, 1.0)" in src_img,
+       "…y la mesa entera sigue siendo el caso por defecto")
+    ok("_sufijo" in src_img, "cada recorte se guarda aparte (moverse un poco reusa el anterior)")
+    ok("TILE_CM = 50" in app and "BASE_W = 1200" in app,
+       "la pantalla pide los recortes por una grilla fija de medio metro")
+    ok("r.width <= BASE_W * 1.05) continue" in app,
+       "🔴 …y sólo cuando la PANTALLA supera lo que da el dibujo general (no a un zoom inventado)")
+    ok("TOPE_RECORTES" in app, "con un tope de recortes vivos, para no comerse la memoria")
+
+    # la cuenta que importa: cuántos píxeles por cm da un recorte, y cuánto mide ahí una letra de 3 mm
+    TILE_CM, W_TILE = 50, 1600
+    pxcm = W_TILE / TILE_CM
+    print(f"          un recorte de {TILE_CM} cm a {W_TILE} px = {pxcm:.0f} px/cm · una letra de 3 mm mide {pxcm*0.3:.1f} px")
+    ok(pxcm * 0.3 >= 6, f"una etiqueta de 3 mm entra en {pxcm*0.3:.1f} píxeles: se lee")
+    BASE_W, MESA_CM = 1200, 180
+    print(f"          (en el dibujo general esa misma letra mide {BASE_W/MESA_CM*0.3:.1f} px: por eso no se leía)")
+    ok(BASE_W / MESA_CM * 0.3 < 3, "…y el dibujo general por sí solo NO alcanzaba (ésa era la queja)")
+
+    # y de verdad, sobre una mesa real
+    if tid:
+        import pymupdf as fitz
+        f = sorted(glob.glob(os.path.join(S.TRABAJOS, tid, "HOJA_*.pdf")))
+        if f:
+            a = os.path.basename(f[0])
+            with S.app.test_request_context(
+                    f"/api/trabajos/{tid}/mesa_img/{a}?pi=0&w=1600&cx0=0.25&cy0=0.25&cx1=0.5&cy1=0.5"):
+                r = S.mesa_img(tid, a)
+            ok(r.status_code == 200, f"el servidor entrega el recorte de «{a}» (HTTP {r.status_code})")
+            c = os.path.join(S.TRABAJOS, tid, f"vista_{os.path.splitext(a)[0]}_p0_w1600_c0.2500-0.2500-0.5000-0.5000.png")
+            ok(os.path.exists(c) and os.path.getsize(c) < 3e6,
+               f"…y queda guardado, liviano ({os.path.getsize(c)/1e6:.2f} MB)" if os.path.exists(c) else "…y queda guardado")
 
     print()
     if FALLOS:

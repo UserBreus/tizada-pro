@@ -10185,6 +10185,14 @@ _VISTA_MESA_W = 1200          # ancho en px de la vista de la grilla (la mesa se
 _VISTA_MESA_W_MAX = 2400
 
 
+def _frac(v, por_defecto):
+    """Un 0..1 del querystring, tolerante: cualquier cosa rara vuelve al valor por defecto."""
+    try:
+        return min(1.0, max(0.0, float(v)))
+    except (TypeError, ValueError):
+        return por_defecto
+
+
 @app.get("/api/trabajos/<tid>/mesa_img/<archivo>")
 def mesa_img(tid, archivo):
     """UNA mesa como imagen LIVIANA, para la grilla del paso Tizada.
@@ -10214,10 +10222,25 @@ def mesa_img(tid, archivo):
         w = min(_VISTA_MESA_W_MAX, max(200, int(request.args.get("w", _VISTA_MESA_W))))
     except Exception:
         w = _VISTA_MESA_W
+    # 🔴 UN PEDAZO DE LA MESA, NÍTIDO. Con la mesa entera a 1200 px una letra de 3 mm mide 2
+    # píxeles: no se lee (reporte del usuario 2026-09-14). Y subir la resolución de la mesa entera
+    # no es opción: 8 m a 30 px/cm son 155 millones de píxeles, que ningún navegador aguanta por
+    # mesa. Así que la pantalla pide el RECTÁNGULO que está mirando (`cx0..cy1`, en 0..1 de la
+    # página) y ése se dibuja al tamaño que haga falta. Medido: recortar no ahorra tiempo de
+    # dibujo (el costo está en recorrer el contenido, no en los píxeles), pero sí achica el
+    # archivo y la memoria del navegador, que es lo que se estaba acabando.
+    cx0 = _frac(request.args.get("cx0"), 0.0)
+    cy0 = _frac(request.args.get("cy0"), 0.0)
+    cx1 = _frac(request.args.get("cx1"), 1.0)
+    cy1 = _frac(request.args.get("cy1"), 1.0)
+    if cx1 - cx0 < 0.001 or cy1 - cy0 < 0.001:       # recorte degenerado: la mesa entera
+        cx0, cy0, cx1, cy1 = 0.0, 0.0, 1.0, 1.0
+    entera = (cx0, cy0, cx1, cy1) == (0.0, 0.0, 1.0, 1.0)
     ruta = os.path.join(TRABAJOS, tid, archivo)
     if not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
-    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}.png")
+    _sufijo = "" if entera else f"_c{cx0:.4f}-{cy0:.4f}-{cx1:.4f}-{cy1:.4f}"
+    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}{_sufijo}.png")
     if os.path.exists(cache):
         return send_file(cache, mimetype="image/png")
     try:
@@ -10225,8 +10248,13 @@ def mesa_img(tid, archivo):
             if pi >= d.page_count:
                 pi = 0
             pg = d[pi]
-            z = w / pg.rect.width if pg.rect.width else 1.0
-            png = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False).tobytes("png")
+            r = pg.rect
+            clip = None if entera else fitz.Rect(
+                r.x0 + r.width * cx0, r.y0 + r.height * cy0,
+                r.x0 + r.width * cx1, r.y0 + r.height * cy1)
+            ancho_pt = (clip.width if clip is not None else r.width) or 1.0
+            z = w / ancho_pt
+            png = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=clip, alpha=False).tobytes("png")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     try:

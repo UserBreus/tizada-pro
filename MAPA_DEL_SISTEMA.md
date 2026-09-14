@@ -1482,6 +1482,36 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (440) — 🔍 LA VISTA DE LA MESA SE PIDE POR PEDAZOS: rápida de lejos, legible de
+  cerca.** Seguimiento de la 439. El usuario mandó la captura de una etiqueta borrosa: *«que
+  funcione rápido pero al menos los textos así pequeño queden legibles; no te pido la mejor
+  calidad, sólo que los detalles chicos se distingan bien»*.
+  **LA CUENTA.** El dibujo general de la mesa va a 1200 px de ancho: en una mesa de 1,80 m son
+  6,7 px/cm, así que **una etiqueta de 3 mm mide 2 píxeles**. Y subir la resolución de la mesa
+  ENTERA no es opción: 8 m a 30 px/cm son **155 millones de píxeles** por mesa, que ningún
+  navegador aguanta.
+  **MEDIDO, y cambia el diseño:** recortar **no ahorra tiempo de dibujo** (1200 px: 7,4 s · 3000
+  px: 9,3 s · un cuarto a 1600 px: 6,5 s) — el costo está en recorrer el contenido de la página,
+  no en los píxeles. Lo que el recorte ahorra es **archivo y memoria del navegador**, que es
+  justo lo que se estaba acabando. Conclusión: dibujar poco, pero grande.
+  **CÓMO QUEDÓ.** `mesa_img` acepta un rectángulo (`cx0,cy0,cx1,cy1` en 0..1 de la página) y lo
+  dibuja al ancho pedido; cada recorte se guarda aparte. La grilla mantiene el dibujo general
+  (1200 px, liviano, instantáneo) y **encima** apoya el recorte de lo que entra en pantalla,
+  calzado al milímetro, por una grilla fija de **medio metro** — moverse un poco reusa el mismo
+  pedazo en vez de pedir uno nuevo a cada arrastre. 🔴 **El disparador no es un zoom inventado:
+  es que la PANTALLA esté mostrando la mesa más grande de lo que el dibujo general puede dar**
+  (`r.width > BASE_W * 1.05`); cada mesa llega a ese punto en un zoom distinto según cuánto mida.
+  Resultado: un recorte de 50 cm a 1600 px = **32 px/cm → la letra de 3 mm mide 9,6 px y se lee**
+  (medido y mirado: «L-Vivo manga corta izquierda #11», «XL-Cuello #02»…). Pesa 0,01-0,07 MB y
+  tarda 0,06 s en una mesa liviana y 6,5 s en la más pesada, **una sola vez** (después está
+  guardado). Mientras llega se ve el dibujo de abajo: nunca hay un hueco en blanco.
+  **CONTRATO** `verificar_mesa_por_talle.py` §5: el recorte existe, la mesa entera sigue siendo el
+  caso por defecto, se guarda aparte, el disparador es el ancho en pantalla (no un zoom), y **la
+  cuenta de legibilidad**: 9,6 px con recorte contra 2,0 px sin él. Verde.
+  📌 LECCIÓN: antes de optimizar, medir **dónde** está el costo. Acá el instinto decía «recortar
+  para que sea más rápido» y el recorte no acelera nada — sirve por otra razón (memoria), y eso
+  cambió la solución: en vez de recortar para ahorrar tiempo, se recorta para poder dibujar MÁS
+  GRANDE sin reventar el navegador.
 - **2026-09-14 (439) — 🧵 LA MESA LA SEPARAN LA COLUMNA DE TALLE Y LA TELA · 🖼️ y el paso Tizada
   deja de clavar el navegador.** Dos pedidos del usuario en el mismo mensaje.
 

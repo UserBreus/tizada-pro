@@ -2741,6 +2741,69 @@ function MesasInfinito({ mesas, job, avisar }) {
   const wrapRef = useRef(null);
   const viewRef = useRef(view); viewRef.current = view;
 
+  // ── EL DETALLE: SÓLO LO QUE SE ESTÁ MIRANDO ────────────────────────────────────────────────
+  // 🔴 POR QUÉ. El dibujo de la mesa entera es liviano (2,7 MB las diez, contra 202 MB en vector)
+  // pero grueso: a 1200 px de ancho una etiqueta de 3 mm mide 2 píxeles y no se lee (reporte del
+  // usuario 2026-09-14, con la captura). Subir la resolución de la mesa ENTERA no es opción: 8 m
+  // a 30 px/cm son 155 millones de píxeles por mesa. Así que, al acercarse, se pide un recorte
+  // NÍTIDO de la parte visible y se apoya encima del dibujo general, calzado al milímetro.
+  // Los recortes se piden por una grilla fija de medio metro: moverse un poco reusa el mismo
+  // pedazo (el servidor lo guarda) en vez de pedir uno nuevo a cada arrastre.
+  const TILE_CM = 50;              // cada recorte cubre a lo sumo medio metro de mesa
+  const BASE_W = 1200;             // ancho del dibujo general de cada mesa, en px
+  const TOPE_RECORTES = 8;         // cuántos pueden estar vivos a la vez (memoria del navegador)
+  const [detalle, setDetalle] = useState({});   // clave de mesa → [{id, a, c, b, d, src}]
+  const mesaRefs = useRef({});                  // clave → el div de esa mesa
+  const mesaInfo = useRef({});                  // clave → {archivo, pi, anchoCm, altoCm}
+
+  useEffect(() => {
+    // Se espera a que la mano pare: pedir recortes en mitad de un arrastre es tirar trabajo.
+    const t = setTimeout(() => {
+      const wrap = wrapRef.current;
+      if (!wrap || view.zoom < 1) { setDetalle({}); return; }
+      const wb = wrap.getBoundingClientRect();
+      const out = {};
+      let quedan = TOPE_RECORTES;
+      for (const [key, el] of Object.entries(mesaRefs.current)) {
+        const info = mesaInfo.current[key];
+        if (!el || !info || quedan <= 0) continue;
+        const r = el.getBoundingClientRect();
+        const ix0 = Math.max(wb.left, r.left), ix1 = Math.min(wb.right, r.right);
+        const iy0 = Math.max(wb.top, r.top), iy1 = Math.min(wb.bottom, r.bottom);
+        if (ix1 <= ix0 || iy1 <= iy0 || !r.width || !r.height) continue;   // esta mesa no se ve
+        // 🔴 CUÁNDO HACE FALTA EL DETALLE: cuando la PANTALLA está mostrando esta mesa más
+        // grande de lo que el dibujo general puede dar. No es un zoom fijo — depende de cuánto
+        // mide la mesa: una de 60 cm llega a ese punto mucho antes que una de 8 m.
+        if (r.width <= BASE_W * 1.05) continue;
+        const nx = Math.max(1, Math.ceil(info.anchoCm / TILE_CM));
+        const ny = Math.max(1, Math.ceil(info.altoCm / TILE_CM));
+        const i0 = Math.max(0, Math.floor(((ix0 - r.left) / r.width) * nx));
+        const i1 = Math.min(nx - 1, Math.floor(((ix1 - r.left) / r.width - 1e-6) * nx));
+        const j0 = Math.max(0, Math.floor(((iy0 - r.top) / r.height) * ny));
+        const j1 = Math.min(ny - 1, Math.floor(((iy1 - r.top) / r.height - 1e-6) * ny));
+        // El ancho del recorte, redondeado a unos pocos escalones: así al acercarse de a poco no
+        // se pide una imagen distinta cada vez (el servidor ya tiene guardada la del escalón).
+        const necesario = (r.width / nx) * 1.25;
+        const wpx = [600, 900, 1200, 1600].find(x => x >= necesario) || 1600;
+        const tiles = [];
+        for (let j = j0; j <= j1 && quedan > 0; j++) {
+          for (let i = i0; i <= i1 && quedan > 0; i++) {
+            const a = i / nx, b = (i + 1) / nx, c = j / ny, d = (j + 1) / ny;
+            tiles.push({
+              id: `${i}_${j}_${wpx}`, a, c, b, d,
+              src: rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(info.archivo)}`
+                + `?pi=${info.pi}&w=${wpx}&cx0=${a.toFixed(4)}&cy0=${c.toFixed(4)}&cx1=${b.toFixed(4)}&cy1=${d.toFixed(4)}`),
+            });
+            quedan--;
+          }
+        }
+        if (tiles.length) out[key] = tiles;
+      }
+      setDetalle(out);
+    }, 220);
+    return () => clearTimeout(t);
+  }, [view, mesas, job?.resultado?.id]);
+
   // ZOOM con la rueda: listener nativo NO pasivo → preventDefault corta el scroll de la página
   useEffect(() => {
     const el = wrapRef.current;
@@ -2795,6 +2858,7 @@ function MesasInfinito({ mesas, job, avisar }) {
               const tela = hoja.tela || '';
               const nombreDef = 'Mesa ' + (gidx + 1) + (tela ? ' - ' + tela : '');   // secuencial + guión + tela
               const nombre = nombres[key] != null ? nombres[key] : nombreDef;
+              mesaInfo.current[key] = { archivo: hoja.archivo, pi, anchoCm, altoCm };
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
                   {/* ARRIBA: nombre a la IZQUIERDA (doble-click para renombrar) y el ícono de
@@ -2818,13 +2882,14 @@ function MesasInfinito({ mesas, job, avisar }) {
                   </div>
                   {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
                   {pv
-                    ? <div style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
+                    ? <div ref={(el) => { if (el) mesaRefs.current[key] = el; else delete mesaRefs.current[key]; }}
+                        style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
                         {/* 🔴 ACÁ VA LA VISTA LIVIANA, NO EL VECTOR. Diez mesas en SVG son 202 MB y
                             el navegador se clava («La página no responde», 2026-09-14). Esto es un
                             dibujo de LA HOJA DE VERDAD a 1200 px: 2,7 MB las diez, y se distingue
                             cada pieza. El vector sigue intacto en el PDF que se descarga, y el
                             detalle (tocar la mesa) lo abre. Mientras llega, se avisa. */}
-                        <img src={rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=${view.zoom > 1.6 ? 2400 : 1200}`)} alt={nombre} draggable={false} decoding="async"
+                        <img src={rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=1200`)} alt={nombre} draggable={false} decoding="async"
                           onLoad={() => setCargadas(c => (c[key] ? c : { ...c, [key]: true }))}
                           onError={() => setCargadas(c => ({ ...c, [key]: 'error' }))}
                           style={{ width: w, height: h, display: 'block' }} />
@@ -2838,6 +2903,13 @@ function MesasInfinito({ mesas, job, avisar }) {
                             No se pudo traer la vista previa (la mesa está bien: descargala)
                           </div>
                         )}
+                        {/* EL DETALLE NÍTIDO, calzado sobre su pedazo del dibujo general. Mientras
+                            llega se ve el dibujo de abajo: nunca hay un hueco en blanco. */}
+                        {(detalle[key] || []).map(t => (
+                          <img key={t.id} src={t.src} alt="" draggable={false} decoding="async"
+                            style={{ position: 'absolute', left: `${t.a * 100}%`, top: `${t.c * 100}%`,
+                              width: `${(t.b - t.a) * 100}%`, height: `${(t.d - t.c) * 100}%`, display: 'block' }} />
+                        ))}
                       </div>
                     : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
                   {/* ABAJO: tamaño ancho × alto */}
