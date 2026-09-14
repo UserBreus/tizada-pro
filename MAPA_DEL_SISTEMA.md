@@ -1482,6 +1482,45 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (447) — ✅ SE GENERÓ UNA TIZADA DE VERDAD Y SE MIDIÓ EL ARCHIVO FINAL.** No alcanzaba
+  con «el cambio no debería tocar la salida»: el usuario pidió que *el archivo final sea el
+  correcto — vectorial, la calidad, el perfil incrustado y declarado, y los colores reales*. Se
+  generó con el código de hoy, por el mismo camino del botón (`generar_multi`), con el molde y el
+  arte reales del usuario (`prod_20260820_095558_38bc`, diseño JUGADOR — el `arte.ai` «PESADO» de
+  7 MB que subió hoy). **35 s** de motor a ficha. Herramienta: `scratchpad/medir_hojas.py <trabajo>`.
+
+  | | `HOJA_g0_Principal.pdf` | `HOJA_g0_RIB.pdf` |
+  |---|---|---|
+  | | 14,2 MB · 180×798 cm · 2 pág | 0,4 MB · 100×14 cm · 1 pág |
+  | Vectorial | ✅ **0 imágenes** rasterizadas | ✅ **0 imágenes** |
+  | Contenido | 41.850 trazados (1.456/m²) | 8 trazados (56/m²) |
+  | Perfil DECLARADO | ✅ OutputIntent /GTS_PDFX «U.S. Web Coated (SWOP) v2» | ✅ el mismo |
+  | Perfil INCRUSTADO | ✅ ICC N=4 (CMYK) | ✅ ICC N=4 |
+  | RIP | ✅ `verificar_rip_compatible` verde | ✅ verde |
+  | Color | ✅ 7 valores, entre ellos `0 1 1 0.314 k` y `0.75 0 0 0 K` — **del arte, no calculados** | ✅ 5 valores |
+
+  El servidor lo dice también por su cuenta en el resultado del pedido: `perfil_icc = 'U.S. Web
+  Coated (SWOP) v2'` y `rip_compatible = True`.
+
+  **DOS TRAMPAS DEL INSTRUMENTO** (las dos dieron «FALLA» sin que hubiera nada roto — vale anotarlas,
+  porque la conclusión falsa estaba a un paso):
+  1. 🔴 **El color NO está en el stream de la página.** `aplanar_rip` deja el dibujo en Form
+     XObjects de UN nivel (`/fzFrm0`, `/fzFrm1`…) y la página sólo los invoca
+     (`/GSflat gs q /fzFrm0 Do Q`). Buscar los operadores `k`/`K` en `page.Contents` da **cero** y
+     parece una hoja sin color. **Hay que entrar a los XObjects.** (Además, los operadores no vienen
+     uno por línea: partir el stream por `\n` tampoco encuentra nada. Regex sobre el stream entero.)
+  2. **«¿La hoja salió vacía?» no se mide con un umbral fijo de trazados.** El >50 copiado del
+     contrato del camino B daba rojo en la hoja del RIB, que mide 100×14 cm y lleva 8 piezas — y
+     está bien así. Se mide por **densidad** (trazados/m²) con un piso mínimo.
+
+  **Y una del camino, para la próxima:** `generar_multi` ya **exige sesión** (HTTP 401 por curl), así
+  que la prueba va EN PROCESO con `api_usuarios` stubbeado. La columna de diseño de la planilla se
+  llama **`dise_o`**, no `diseño`: con la clave equivocada todas las filas quedan incompletas y el
+  pedido se frena con 422 («ninguna fila está completa»). Y el `pedido.json` guardado anota los
+  moldes **por NOMBRE**, no por pid: rehacer un pedido viejo tal cual no funciona si el molde ya no
+  está en el catálogo. ⚠️ Si el script sondea sin verificar que vino `trabajo` en la respuesta, gira
+  20 minutos en silencio con `tid=None` — pasó.
+
 - **2026-09-14 (446) — 🔴 DIEZ `.bat` ESTABAN EN LF Y cmd.exe LOS LEÍA POR LA MITAD (entre ellos
   el de ACTUALIZAR y el de GENERAR ACTUALIZACIÓN).** Apareció solo: al reiniciar el servidor,
   `REINICIAR-SERVIDOR.bat` escupió `"M" no se reconoce como un comando`, `"tle"`, `"wershell"`,
