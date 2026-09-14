@@ -90,6 +90,15 @@ if not _secret:
             pass          # sin poder guardarla se sigue con la de esta corrida (como antes)
 app.secret_key = _secret
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+# 🔴 TOPE DE LO QUE SE PUEDE SUBIR. No había ninguno: una sola petición de varios GB llenaba el
+# disco (y con el disco lleno la tizada revienta con `std::bad_alloc`, que no parece un problema
+# de disco — ver `_disco`). El molde más pesado que se vio es de 123 MB y el arte de 30, así que
+# 600 MB deja aire de sobra. `TIZADA_SUBIDA_MAX_MB` lo cambia sin tocar código.
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("TIZADA_SUBIDA_MAX_MB") or 600) * 1024 * 1024
+# La sesión duraba 31 días (el valor por defecto de Flask) y no había forma de cortarla. Una
+# semana es lo que dura el uso normal del taller y acota mucho una cookie robada.
+app.config["PERMANENT_SESSION_LIFETIME"] = __import__("datetime").timedelta(
+    days=int(os.environ.get("TIZADA_SESION_DIAS") or 7))
 # HTTPS: la cookie de sesión sólo viaja por conexión segura. Se prende solo en publicado
 # (en el taller es http://localhost y con SECURE el navegador NO guardaría la sesión).
 # `TIZADA_HTTPS=0` lo apaga para probar el modo publicado sin certificado todavía.
@@ -276,9 +285,53 @@ def _trabajo_ajeno(tid):
     return jsonify({"error": "esa tizada no es tuya"}), 403
 
 
+# Cuántos DÍAS se guardan en disco las tizadas viejas. Pasado eso, la carpeta entera se borra:
+# son PDF que ya se descargaron. Medido 2026-09-14: `trabajos/` tenía 2,9 GB en 300 carpetas de
+# hasta 80 días, y nada las borraba salvo «Nuevo pedido» o el .bat a mano — ~2 GB por mes.
+_TRABAJOS_DIAS_DISCO = float(os.environ.get("TIZADA_TRABAJOS_DIAS") or 15)
+
+
+def _podar_trabajos_en_disco():
+    """Borra las carpetas de `trabajos/` más viejas que `_TRABAJOS_DIAS_DISCO`.
+
+    🔴 NUNCA toca una que esté corriendo ni una de hoy. Es lo único que frena el crecimiento del
+    disco: cada tizada deja entre 5 MB y 148 MB (medido), y los PDF ya se bajaron cuando se
+    generaron. Si alguien necesita una vieja, la vuelve a generar.
+    Es best-effort: un archivo trabado por Windows no puede frenar nada."""
+    import shutil
+    limite = time.time() - _TRABAJOS_DIAS_DISCO * 86400
+    borradas = 0
+    try:
+        nombres = os.listdir(TRABAJOS)
+    except OSError:
+        return 0
+    for nom in nombres:
+        ruta = os.path.join(TRABAJOS, nom)
+        try:
+            if not os.path.isdir(ruta) or os.path.getmtime(ruta) > limite:
+                continue
+            t = trabajos.get(nom)
+            if isinstance(t, dict) and t.get("estado") in ("en cola", "generando"):
+                continue                      # está trabajando: ni mirarla
+            shutil.rmtree(ruta, ignore_errors=True)
+            trabajos.pop(nom, None)
+            try:
+                db.trabajo_borrar(nom)
+            except Exception:
+                pass
+            borradas += 1
+        except Exception:
+            continue
+    if borradas:
+        LOG.info("disco", f"Se borraron {borradas} tizada(s) de más de {_TRABAJOS_DIAS_DISCO:g} días",
+                 "Son PDF que ya se habían descargado. Si hace falta una, se vuelve a generar.")
+    return borradas
+
+
 def _podar_trabajos():
     """Saca los trabajos TERMINADOS que ya nadie va a mirar. **Nunca toca uno que esté corriendo**
-    (perderlo dejaría a la pantalla sondeando un id que desapareció) ni los archivos del disco."""
+    (perderlo dejaría a la pantalla sondeando un id que desapareció). Los archivos del disco los
+    borra `_podar_trabajos_en_disco`, por edad."""
     ahora = time.time()
     viejos = [t for t, v in trabajos.items()
               if v.get("estado") in ("listo", "error", "cancelado")
@@ -736,16 +789,50 @@ def publicacion_estado():
     return jsonify(out)
 
 
+def _destino_publicacion_ok(url):
+    """¿Se le puede mandar el PAQUETE —y con él el token de actualización— a esta dirección?
+
+    🔴 EL TOKEN DE ACTUALIZACIÓN ES LA LLAVE DEL SERVIDOR PUBLICADO: con él se puede subir y
+    aplicar código allá. Este endpoint aceptaba la `url` del cuerpo del request y le mandaba el
+    paquete con el token en la cabecera, así que cualquiera con una sesión podía pedir que se lo
+    mandaran a su propia máquina y quedarse con la llave (auditoría 2026-09-14). Ahora sólo se
+    acepta la dirección YA CONFIGURADA en `datos/publicacion.json`, o una nueva que alguien con
+    `config.editar` haya guardado antes desde la pantalla de configuración.
+    Mismo criterio que la allowlist de la API de telas (changelog 70)."""
+    from urllib.parse import urlparse as _up
+    try:
+        u = _up(str(url or ""))
+    except Exception:
+        return False
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return False
+    return True
+
+
 @app.post("/api/publicacion/publicar")
 def publicacion_publicar():
-    """Arma el paquete y lo SUBE. `cuando` = 0 (ya) o marca de tiempo. Es lo que hace el botón."""
+    """Arma el paquete y lo SUBE. `cuando` = 0 (ya) o marca de tiempo. Es lo que hace el botón.
+
+    🔴 PIDE `config.editar`: publicar reescribe el archivo VERSION, arma un paquete (15 min de
+    CPU) y le manda al destino el TOKEN que permite aplicar código allá. No es una acción de
+    operario (auditoría 2026-09-14)."""
     from urllib.parse import urlparse as _urlparse
+    _u = _usuario_actual()
+    if _u and "config.editar" not in (_u.get("permisos") or []):
+        return jsonify({"error": "No tenés permiso para publicar (config.editar)."}), 403
     cuerpo = request.get_json(force=True) or {}
     cfg = _pub_cfg()
-    if cuerpo.get("url"):
+    if cuerpo.get("url") and str(cuerpo["url"]).strip() != str(cfg.get("url") or "").strip():
+        # 🔴 CAMBIAR EL DESTINO ES CAMBIAR A QUIÉN SE LE ENTREGA LA LLAVE. Se guarda igual que
+        # antes, pero sólo si la dirección tiene forma de dirección y quien la manda puede editar
+        # la configuración (ya se comprobó arriba).
+        if not _destino_publicacion_ok(cuerpo["url"]):
+            return jsonify({"error": "esa dirección de destino no es válida"}), 400
         cfg["url"] = cuerpo["url"]
-        with open(os.path.join(AQUI, "datos", "publicacion.json"), "w", encoding="utf-8") as fh:
+        _tmp_pub = os.path.join(AQUI, "datos", "publicacion.json")
+        with open(_tmp_pub + ".tmp", "w", encoding="utf-8") as fh:
             json.dump(cfg, fh, ensure_ascii=False, indent=1)
+        os.replace(_tmp_pub + ".tmp", _tmp_pub)
     # El NÚMERO DE VERSIÓN lo decide el usuario desde la pantalla (no se toca solo). Se escribe en
     # el archivo VERSION ANTES de empaquetar, así el paquete lo lleva. Se acepta sólo `1.2.3`.
     nueva_v = str(cuerpo.get("version") or "").strip()
@@ -852,6 +939,12 @@ def consola_listar():
 def actualizacion_log():
     """El log del AYUDANTE (`_actualizacion/actualizador_log.txt`): la letra chica de la última
     instalación — dónde se cortó, con horas. Es lo que hasta ahora sólo se podía leer por SSH."""
+    # 🔴 PIDE EL TOKEN, igual que `subir` y `aplicar`. Entra por el prefijo
+    # `/api/actualizacion/` de `_API_SIN_SESION`, así que sin esto se leía SIN SESIÓN desde
+    # internet: dice rutas absolutas del servidor, versiones y en qué paso falló una instalación
+    # (auditoría 2026-09-14). Mismo criterio que `/api/registro`.
+    if not ACT.token_ok(request.headers.get("X-Token-Act")):
+        return jsonify({"error": "token inválido"}), 403
     ruta = os.path.join(AQUI, "_actualizacion", "actualizador_log.txt")
     try:
         with open(ruta, encoding="utf-8", errors="replace") as fh:
@@ -2238,13 +2331,38 @@ def _guardia_moldes():
         try:
             _u = _usuario_actual()
         except Exception:
-            _u = True              # la base parpadeó: la seguridad no puede tumbar el sistema
+            # 🔴 QUÉ HACER CUANDO LA BASE NO CONTESTA. En el TALLER se deja pasar: es una máquina sola,
+            # detrás de la puerta del local, y que una base que parpadea deje sin sistema a quien
+            # está fabricando es peor. En el PUBLICADO es al revés: ahí la base ES el control de
+            # acceso, y dejar pasar significa que cualquiera desde internet entra a toda la API con
+            # sólo esperar (o provocar) una caída de base (auditoría 2026-09-14).
+            if PUBLICADO:
+                return jsonify({"error": "no se puede verificar la sesión ahora mismo; "
+                                         "probá de nuevo en unos segundos"}), 503
+            _u = True
         if not _u:
             return jsonify({"error": "no hay sesión iniciada"}), 401
     try:
         pid = _pid_de_request()
         if not pid:
-            return None            # sin molde explícito no hay nada que proteger acá
+            # 🔴 SIN `pid` EXPLÍCITO TAMBIÉN HAY ALGO QUE PROTEGER. Esto devolvía None y se iba:
+            # pero el endpoint igual resuelve un molde, con `_get_active_producto_id()` — sesión y,
+            # si la sesión no tiene, el ACTIVO GLOBAL del catálogo. O sea que omitir el campo del
+            # JSON saltea la guarda de permiso Y la de dueño: un Operario activaba un molde del
+            # catálogo y después le reescribía el registro, el arte o las variantes sin pid
+            # (auditoría 2026-09-14). Ahora, si la request ESCRIBE, se resuelve el molde igual que
+            # el endpoint y se lo comprueba. Las lecturas siguen pasando como siempre.
+            if request.method in ("POST", "PUT", "PATCH", "DELETE") and not any(
+                    request.path.startswith(x) for x in _API_LEE_CON_PID):
+                try:
+                    _pid_impl = _get_active_producto_id()
+                except Exception:
+                    _pid_impl = None
+                if _pid_impl:
+                    _no = _guard_molde(str(_pid_impl), permiso="molde.editar")
+                    if _no:
+                        return _no
+            return None
         # De paso: si es un molde EFÍMERO del camino B, marcarlo como visto. Es el único punto por
         # el que pasan TODAS las requests que trabajan sobre un molde, así que un pedido abierto
         # lo refresca solo y la limpieza de abandonados no se lo lleva por debajo. Barato: se
@@ -7182,7 +7300,9 @@ def subir_fuente():
     f = request.files.get("archivo")
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
-    tmp = os.path.join(ENTRADA, "subida_" + f.filename)
+    # El nombre lo elige el CLIENTE: se le saca cualquier carpeta antes de pegarlo a la ruta.
+    # Hoy el prefijo «subida_» ya neutralizaba un `../`, pero por accidente, no por decisión.
+    tmp = os.path.join(ENTRADA, "subida_" + os.path.basename(f.filename or "fuente"))
     f.save(tmp)
     res = MP.alta_fuente(tmp, FUENTES)
     if not res["ok"]:
@@ -8049,7 +8169,17 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
         for ti in toggle_cols:
             c = ti["col"]
             val = str(pr.get(c.get("id"), pr.get(c.get("label"), "")) or "").strip()
-            opcion = val or (ti["opciones"][0] if ti["opciones"] else "")   # vacío → primera opción
+            # 🔴 UNA CELDA VACÍA NO ELIGE SOLA EN SILENCIO. Una fila sin nada en «Manga» (o en
+        # cualquier toggle: sisa, capucha) salía con la PRIMERA opción —«Corta»— sin decirlo: la
+        # prenda se imprime, se corta, y nadie pidió esa manga (auditoría 2026-09-14). Se sigue
+        # usando la primera (la fila tiene que salir), pero queda ANOTADO para avisarlo.
+        opcion = val or (ti["opciones"][0] if ti["opciones"] else "")
+        if not val and opcion:
+            _lbl = ti.get("label") or ti.get("clave") or "opción"
+            _tg = getattr(_traducir_prendas, "toggles_por_defecto", None)
+            if _tg is None:
+                _tg = _traducir_prendas.toggles_por_defecto = {}
+            _tg[_lbl] = _tg.get(_lbl, 0) + 1   # vacío → primera opción
             if opcion:
                 toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
         _tv = pr.get(talle_col, "")
@@ -8205,9 +8335,19 @@ def generar():
                           f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
             except Exception as _ea:
                 print("  [!] aplanar RIP:", _ea)
-            json.dump({"prendas": prendas, "resultado": {k: v for k, v in res.items() if k != "hojas"} |
-                       {"hojas": res["hojas"]}}, open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"),
-                       ensure_ascii=False)
+            # 🔴 ESTE GUARDADO ES LO ÚLTIMO Y NO PUEDE TIRAR ABAJO EL PEDIDO. Todas las etapas
+            # de arriba (RIP, perfil, verificación, ficha) están protegidas; ésta no lo estaba, así
+            # que un disco lleno —justo cuando `trabajos/` acaba de llenarlo— o una clave que falte
+            # marcaba «error» una tizada YA COMPLETA Y RIPEADA en disco (auditoría 2026-09-14).
+            # `pedido.json` es el testigo del pedido, no el producto.
+            try:
+                with open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8") as _fp:
+                    json.dump({"prendas": prendas,
+                               "resultado": {k: v for k, v in res.items() if k != "hojas"} |
+                                            {"hojas": res.get("hojas") or []}}, _fp, ensure_ascii=False)
+            except Exception as _e_pj:
+                print(f"  [!] no se pudo guardar pedido.json ({type(_e_pj).__name__}: {_e_pj}); "
+                      f"la tizada está completa igual", flush=True)
             _tocar_trabajo(tid, resultado=res, estado="listo")
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
@@ -8697,6 +8837,15 @@ def generar_multi():
         _st = getattr(_traducir_prendas, "sin_talle", 0)
         _flt = getattr(_traducir_prendas, "faltantes", {}) or {}
         _obl = getattr(_traducir_prendas, "obligatorias", []) or []
+        # 🔴 LOS TOGGLES QUE SE ELIGIERON SOLOS. Una celda vacía toma la primera opción («Manga
+        # corta»): la prenda sale igual, pero hay que DECIRLO — si no, se imprime y se corta algo
+        # que nadie pidió y se descubre con la prenda en la mano (auditoría 2026-09-14).
+        _tgd = getattr(_traducir_prendas, "toggles_por_defecto", {}) or {}
+        if _tgd:
+            avisos_pedido.append(
+                "Hay filas sin elegir " + ", ".join(f"«{k}» ({v})" for k, v in sorted(_tgd.items()))
+                + ": salen con la primera opción. Si no es la que querías, completá esas celdas.")
+        _traducir_prendas.toggles_por_defecto = {}
         _detalle = ", ".join(f"{k} ({v})" for k, v in sorted(_flt.items(), key=lambda x: -x[1]))
         # (Las filas incompletas ya no se avisan ACÁ: la pantalla lo pregunta ANTES de armar la
         #  tizada y la persona elige seguir sin ellas o completarlas — pedido del usuario
@@ -8771,7 +8920,17 @@ def generar_multi():
             sub = _diseno_sub(dslug)
             val = _cargar("validacion_arte.json", pid, sub=sub)
             if not val and _fallback and _fallback != dslug:
-                # ese diseño no tiene arte → usar el arte de un diseño que SÍ (no descartar la prenda)
+                # ese diseño no tiene arte → usar el arte de un diseño que SÍ (no descartar la
+                # prenda). 🔴 PERO SE DICE: la prenda sale PERFECTA con el diseño equivocado, y
+                # así nadie se entera hasta tenerla impresa (auditoría 2026-09-14).
+                _nom_pedido = "Principal" if dslug == "principal" else next(
+                    (d["nombre"] for d in ((prod or {}).get("disenos") or []) if d["id"] == dslug), dslug)
+                _nom_usado = "Principal" if _fallback == "principal" else next(
+                    (d["nombre"] for d in ((prod or {}).get("disenos") or []) if d["id"] == _fallback), _fallback)
+                _av_fb = (f"«{nombre}»: el diseño «{_nom_pedido}» no tiene arte cargado, así que "
+                          f"esas prendas salen con el arte de «{_nom_usado}».")
+                if _av_fb not in avisos_pedido:
+                    avisos_pedido.append(_av_fb)
                 dslug = _fallback
                 sub = _diseno_sub(dslug)
                 val = _cargar("validacion_arte.json", pid, sub=sub)
@@ -9132,9 +9291,16 @@ def generar_multi():
             _marca("ficha")
             print("  [tiempos] pedido " + tid + ": " + " · ".join(f"{k}: {v:.0f}s" for k, v in _crono.items())
                   + f" · total: {sum(_crono.values()):.0f}s", flush=True)
-            json.dump({"prendas": prendas, "moldes": nombres,
-                       "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res["hojas"]}},
-                      open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8"), ensure_ascii=False)
+            # 🔴 LO MISMO ACÁ: el testigo del pedido no puede marcar «error» una tizada que ya
+            # está completa y ripeada en disco (auditoría 2026-09-14).
+            try:
+                with open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8") as _fp:
+                    json.dump({"prendas": prendas, "moldes": nombres,
+                               "resultado": {k: v for k, v in res.items() if k != "hojas"} |
+                                            {"hojas": res.get("hojas") or []}}, _fp, ensure_ascii=False)
+            except Exception as _e_pj:
+                print(f"  [!] no se pudo guardar pedido.json ({type(_e_pj).__name__}: {_e_pj}); "
+                      f"la tizada está completa igual", flush=True)
             _tocar_trabajo(tid, resultado=res, estado="listo")
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
@@ -9540,6 +9706,12 @@ def _arrancar_barrido_efimeros():
                 _barrer_efimeros()
             except Exception as e:
                 print("[efimeros] barrido periódico:", e)
+            # …y en la misma pasada, las TIZADAS viejas del disco: es lo único que frena el
+            # crecimiento de `trabajos/` (2,9 GB medidos el 2026-09-14, ~2 GB por mes).
+            try:
+                _podar_trabajos_en_disco()
+            except Exception as e:
+                print("[disco] poda de tizadas viejas:", e)
     threading.Thread(target=_cada_hora, daemon=True).start()
 
 

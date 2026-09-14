@@ -1482,6 +1482,52 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (443) — 🛡️ SE ARREGLA LA AUDITORÍA (442), no sólo se anota.** El usuario: *«¿y por
+  qué no tocaste todo eso?»*. Tenía razón: «buscá problemas» era «arreglalos». Lo hecho:
+
+  **SEGURIDAD (lo que había que cerrar antes de publicar).**
+  · `POST /api/publicacion/publicar` pide **`config.editar`** y valida la dirección de destino:
+  antes cualquier sesión podía pedir que el paquete —**con el token que aplica código en el
+  publicado**— se mandara a su propia máquina. · Con la base caída, la guarda hacía `_u = True` y
+  abría la API entera; ahora en **PUBLICADO devuelve 503** y en taller se sigue dejando pasar (ahí
+  una base que parpadea no puede dejar sin sistema a quien fabrica). · `GET
+  /api/actualizacion/log` **pide el token** como `subir`/`aplicar` (verificado: pasó de 200 a
+  **403** sin token). · `MAX_CONTENT_LENGTH` de 600 MB (`TIZADA_SUBIDA_MAX_MB`) — no había
+  ninguno. · La sesión dura **7 días** en vez de 31 (`TIZADA_SESION_DIAS`). · El nombre de la
+  fuente subida pasa por `basename`. · **Freno a la fuerza bruta** en `/api/auth/login`: 8
+  intentos por usuario y por origen, 60 s de espera, se limpia al entrar bien
+  (`TIZADA_LOGIN_INTENTOS` / `TIZADA_LOGIN_ESPERA`).
+  🔴 **Y EL AGUJERO GRANDE: la guarda se salteaba omitiendo el `pid`.** `_guardia_moldes` hacía
+  `if not pid: return None`, pero el endpoint igual resolvía el molde por el activo GLOBAL. Un
+  Operario activaba un molde del catálogo y después le reescribía registro, arte o variantes sin
+  mandar `pid`. Ahora, **si la request escribe**, la guarda resuelve el molde igual que el
+  endpoint (`_get_active_producto_id()`) y exige `molde.editar`. Las lecturas no cambian.
+
+  **LO QUE SALÍA MAL IMPRESO.** · Si falla leer los editables se apagaban cuatro cosas **en
+  silencio** (posición, tamaño, color, y un objeto marcado TPU/Bordado se sublimaba igual): ahora
+  queda en el registro con el texto de qué revisar antes de cortar. · Si la etiqueta por zonas
+  falla, `_usa_zonas` **no se bajaba** y la pieza salía sin talle, sin nombre y sin número; ahora
+  cae a la etiqueta de siempre y lo dice. · Una celda de toggle vacía elegía la primera opción
+  («Manga corta») sin avisar: sigue saliendo, pero el pedido **lo avisa**. · Una fila cuyo diseño
+  no tiene arte se genera con el arte de otro: sigue generándose (no se descarta la prenda) pero
+  **se dice con nombre y apellido**.
+
+  **DISCO Y ESTABILIDAD.** · `trabajos/` ahora se **poda por edad** (`_podar_trabajos_en_disco`,
+  15 días, `TIZADA_TRABAJOS_DIAS`), enganchada al barrido horario que ya existía: nunca toca una
+  que esté corriendo. Medido hoy: 300 carpetas, **273 se irían**, 2,9 GB. · `logs/servidor.log`
+  **rota** (se conserva una vuelta anterior), como ya hacía `consola.log`. · Los dos `json.dump`
+  finales de `pedido.json` están **protegidos**: eran lo único sin `try` después de tener la
+  tizada ripeada en disco, y podían marcar «error» un pedido completo.
+
+  **TIPOGRAFÍAS.** `alta_fuente` avisa cuando el nombre interno **choca** con una ya cargada: hoy
+  `subida_MoreggiTFont4.ttf` y `subida_MoreggiTFont4-Camiseta.ttf` normalizan igual y una quedó
+  inalcanzable (por eso `verificar_fuentes_pedido.py` está en rojo — es **dato del usuario**, no
+  código: se arregla borrando una de las dos).
+
+  ⏳ **QUEDA DE LA 442**, por orden: la clave del SVG de la previa (camino A) que ignora el color
+  de los editables; los ~20 `open(...,"w")` sin `.tmp`; `_EFIMEROS_VIVOS` y `_ASIGNAR_JOBS` por
+  proceso; `db.py` sin pool; el vigilante que relanza para siempre si el servidor muere pasados
+  20 s; `svg_cache` sin poda; y que no existe noción de CLIENTE fuera de los moldes.
 - **2026-09-14 (442) — 🔎 AUDITORÍA DE CUATRO FRENTES + una regresión propia cazada a tiempo.**
   El usuario pidió buscar más problemas «de este tipo y de otros». Cuatro auditorías de solo
   lectura en paralelo: salidas mal impresas, concurrencia/multiusuario, disco/estabilidad y

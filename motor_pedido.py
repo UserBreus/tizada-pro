@@ -306,8 +306,30 @@ def alta_fuente(ruta_subida, carpeta):
         prueba = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ0123456789#-"
         sin = [ch for ch in prueba if not _tiene_contorno(fc, ch)]
         destino = os.path.join(carpeta, os.path.basename(ruta_subida))
+        # 🔴 DOS TIPOGRAFÍAS QUE SE LLAMAN IGUAL SE PISAN. El resolver busca por nombre interno
+        # normalizado, así que si la que entra declara el mismo nombre que otra ya cargada, una de
+        # las dos queda INALCANZABLE: un molde que la pida va a recibir la otra, y la prenda sale
+        # estampada con una tipografía que nadie eligió. Pasó con `MoreggiTFont4` (2026-09-14: una
+        # se declara «MoreggiTFont4 Camiseta» y la otra «MoreggiTFont4? Camiseta?», que normalizan
+        # igual). No se rechaza —puede ser a propósito, reemplazar la vieja— pero SE DICE.
+        _choca = None
+        try:
+            _nuevo = _norm(f.name)
+            for _r, _i in catalogo_fuentes(carpeta).items():
+                if os.path.normcase(os.path.abspath(_r)) == os.path.normcase(os.path.abspath(destino)):
+                    continue
+                if _norm(_i.get("interno") or "") == _nuevo:
+                    _choca = {"interno": _i.get("interno"), "archivo": os.path.basename(_r)}
+                    break
+        except Exception:
+            _choca = None
         os.replace(ruta_subida, destino)
-        return {"ok": True, "interno": f.name, "sin_contorno": sin}
+        return {"ok": True, "interno": f.name, "sin_contorno": sin,
+                "choca_con": _choca,
+                **({"aviso": f"Ya había una tipografía con este mismo nombre interno "
+                             f"(«{_choca['interno']}», archivo {_choca['archivo']}). El sistema no "
+                             f"puede distinguirlas: va a usar siempre una sola. Borrá la que no uses."}
+                   if _choca else {})}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -4217,8 +4239,18 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     "w_cm": _o["w_cm"], "h_cm": _o["h_cm"],
                     "objetos": [{"obj_id": _ob["obj_id"], "ident": _ident(_o["nombre"], _ob["obj_id"])}
                                 for _ob in (_o.get("objetos") or [])]})
-        except Exception:
+        except Exception as _e_ed:
+            # 🔴 ESTO APAGA CUATRO COSAS A LA VEZ y no se veía en ningún lado: sin
+            # `_edit_por_mesa` ningún objeto «Editable …» se saca del diseño, así que se pierden
+            # posición, tamaño y color… y un objeto marcado TPU/Bordado/DTF —o marcado «no se
+            # sublima»— SE ESTAMPA IGUAL, que es justo lo que no puede pasar. La prenda sale
+            # completa y plausible, y nadie se entera hasta verla impresa.
+            # No arregla el estampado, pero al menos deja de ser mudo (auditoría 2026-09-14).
             _edit_por_mesa = {}
+            print(f"  [!] no se pudieron leer los objetos editables del arte "
+                  f"({type(_e_ed).__name__}: {_e_ed}). El diseño se estampa TAL CUAL: si algún "
+                  f"objeto estaba marcado para NO sublimar, revisá la prenda antes de cortar.",
+                  flush=True)
         # Validar el aislamiento de cada OBJETO a redibujar (editado/fijo/color): solo se saca del
         # diseño y se redibuja si su aislamiento produce contenido real. Si no, se deja en el
         # diseño base (presente) → garantiza que NUNCA desaparezca.

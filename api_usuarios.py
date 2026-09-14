@@ -6,6 +6,8 @@ Se registra en `servidor.py` como Blueprint. La sesión va en una cookie firmada
 pero quien decide es el backend. Ocultar no es proteger.
 """
 import functools
+import os
+import time
 
 from flask import Blueprint, g, has_request_context, jsonify, request, session
 
@@ -68,16 +70,68 @@ def requiere(*permisos):
 
 
 # ── Login ────────────────────────────────────────────────────────────────────
+# 🔴 FRENO A LA FUERZA BRUTA. No había ninguno: se podían probar contraseñas todo lo rápido que
+# aguantara la red, y este endpoint va a estar expuesto a internet. Se cuenta por usuario Y por
+# dirección de origen; tras `_INTENTOS_MAX` fallidos seguidos hay que esperar `_ESPERA_SEG`. Un
+# login bueno borra la cuenta. Vive en memoria a propósito: con varios servidores cada uno frena
+# lo suyo, que es suficiente para el ataque que importa (uno solo probando en serie).
+_FALLOS = {}                 # clave → [cuántos, cuándo fue el último]
+_INTENTOS_MAX = int(os.environ.get("TIZADA_LOGIN_INTENTOS") or 8)
+_ESPERA_SEG = int(os.environ.get("TIZADA_LOGIN_ESPERA") or 60)
+
+
+def _claves_intento(usuario):
+    return (f"u:{(usuario or '').lower()}", f"ip:{request.remote_addr or '?'}")
+
+
+def _frenado(usuario):
+    """Segundos que faltan para poder volver a probar (0 = se puede)."""
+    ahora = time.time()
+    falta = 0
+    for k in _claves_intento(usuario):
+        n, ult = _FALLOS.get(k, (0, 0))
+        if n >= _INTENTOS_MAX:
+            resto = _ESPERA_SEG - (ahora - ult)
+            if resto > 0:
+                falta = max(falta, int(resto) + 1)
+            else:
+                _FALLOS.pop(k, None)          # cumplió la espera: se le da otra ronda
+    return falta
+
+
+def _anotar_fallo(usuario):
+    ahora = time.time()
+    for k in _claves_intento(usuario):
+        n, ult = _FALLOS.get(k, (0, 0))
+        if ahora - ult > _ESPERA_SEG * 5:     # hace rato que no falla: se empieza de nuevo
+            n = 0
+        _FALLOS[k] = (n + 1, ahora)
+    if len(_FALLOS) > 5000:                   # que no crezca sin fin
+        _FALLOS.clear()
+
+
+def _limpiar_fallos(usuario):
+    for k in _claves_intento(usuario):
+        _FALLOS.pop(k, None)
+
+
 @bp.post("/api/auth/login")
 def login():
     d = request.get_json(silent=True) or {}
+    _usr = (d.get("usuario") or "").strip()
+    _espera = _frenado(_usr)
+    if _espera:
+        return jsonify({"error": f"demasiados intentos. Probá de nuevo en {_espera} segundos.",
+                        "espera": _espera}), 429
     try:
-        u = auth.autenticar((d.get("usuario") or "").strip(), d.get("password") or "")
+        u = auth.autenticar(_usr, d.get("password") or "")
     except Exception as e:   # la base caída no es «usuario o contraseña incorrectos»
         return jsonify({"error": "no hay conexión con la base de datos del sistema",
                         "base": False, "detalle": str(e)[:200]}), 503
     if not u:
+        _anotar_fallo(_usr)
         return jsonify({"error": "usuario o contraseña incorrectos"}), 401
+    _limpiar_fallos(_usr)
     session["uid"] = u["id"]
     session.permanent = True
     return jsonify({"ok": True, "usuario": u})
