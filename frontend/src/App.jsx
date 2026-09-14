@@ -2819,9 +2819,12 @@ function MesasInfinito({ mesas, job, avisar }) {
                   {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
                   {pv
                     ? <div style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
-                        {/* La previa es VECTOR y puede pesar decenas de MB (molde con el diseño adentro):
-                            mientras el navegador la trae y la dibuja, se dice — un blanco parecía «no se ve». */}
-                        <img src={rutaApi(`/trabajos/${job.resultado.id}/${pv}`)} alt={nombre} draggable={false} decoding="async"
+                        {/* 🔴 ACÁ VA LA VISTA LIVIANA, NO EL VECTOR. Diez mesas en SVG son 202 MB y
+                            el navegador se clava («La página no responde», 2026-09-14). Esto es un
+                            dibujo de LA HOJA DE VERDAD a 1200 px: 2,7 MB las diez, y se distingue
+                            cada pieza. El vector sigue intacto en el PDF que se descarga, y el
+                            detalle (tocar la mesa) lo abre. Mientras llega, se avisa. */}
+                        <img src={rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=${view.zoom > 1.6 ? 2400 : 1200}`)} alt={nombre} draggable={false} decoding="async"
                           onLoad={() => setCargadas(c => (c[key] ? c : { ...c, [key]: true }))}
                           onError={() => setCargadas(c => ({ ...c, [key]: 'error' }))}
                           style={{ width: w, height: h, display: 'block' }} />
@@ -16260,8 +16263,10 @@ export default function App() {
                               }}
                               title="Click para ver a detalle (Vectorial)"
                             >
+                              {/* Miniatura LIVIANA (ver `/api/trabajos/…/mesa_img`): en vector,
+                                  diez de éstas clavaban el navegador. Tocarla abre el vector. */}
                               <img 
-                                src={rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${pv}`)} 
+                                src={rutaApi(`/api/trabajos/${trabajoEstado.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pIdx}&w=900`)} 
                                 alt="Preview" 
                                 style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
                               />

@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **157 endpoints**. Generado automáticamente del código.
+Total: **158 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -73,6 +73,7 @@ Total: **157 endpoints**. Generado automáticamente del código.
 | GET | `/api/trabajos/<tid>/pagina_img/<archivo>` | Una página de un PDF del trabajo como PNG (para MOSTRARLO en el visor con el look del sistema: así el scroll es el de la app, no el del visor de PDF del navegad | q: pi, z |
 | GET | `/api/trabajos/zip` | Arma un ZIP con los PDF de todas las mesas de los trabajos pedidos (ids separados por coma), una carpeta por molde. | q: ids |
 | GET | `/trabajos/<tid>/<archivo>` |  | — |
+| GET | `/api/trabajos/<tid>/mesa_img/<archivo>` | UNA mesa como imagen LIVIANA, para la grilla del paso Tizada. 🔴 POR QUÉ EXISTE (2026-09-14). La grilla mostraba el SVG vectorial de cada mesa. Con los | q: pi, w |
 
 ## Actualización / Publicación (VPS)
 

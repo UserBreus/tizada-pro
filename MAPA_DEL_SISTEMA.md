@@ -1482,6 +1482,43 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (439) — 🧵 LA MESA LA SEPARAN LA COLUMNA DE TALLE Y LA TELA · 🖼️ y el paso Tizada
+  deja de clavar el navegador.** Dos pedidos del usuario en el mismo mensaje.
+
+  **(A) QUÉ COMPARTE MESA.** *«Si los moldes toman talles de la misma columna deben de mezclarse
+  en la misma mesa de trabajo aunque sean de diferente diseño. Lo que separa en mesa de trabajo es
+  de dónde toma el talle, y la diferente tela.»* Antes `_gkey` era el **grupo de tizada**
+  configurado a mano y, sin grupo, **el molde solo** (`"__solo_" + pid`): cada molde armaba SU
+  tizada. Con el pedido real del usuario —2 camisetas y 2 shorts, 2 diseños, 2 telas— salían
+  **8 hojas** donde correspondían 4, y la tela se desaprovechaba. Ahora `_gkey =
+  _columna_talle_de(prod)` (`mapeo_columnas.talle`, lo que el cliente elige en la tarjeta del
+  molde — ver [[columna-talle-por-molde]]). El DISEÑO no separa: sólo cambia el arte que se
+  estampa. La TELA ya separa más adentro (`_nestear_y_componer` hace una hoja por tela). ⚠️ Los
+  **grupos de tizada** siguen en la configuración pero ya **no separan**: quedaron sólo para
+  nombrar la hoja. Helpers `_columna_talle_de` / `_label_columna_talle` a nivel de módulo (para
+  poder probarlos).
+
+  **(B) «LA PÁGINA NO RESPONDE» EN EL PASO TIZADA.** Medido sobre el pedido real: las 10 mesas se
+  mostraban como **10 SVG que suman 202 MB** (uno solo de 78 MB, otro de 52) — el navegador se
+  moría. Decisión del usuario: *«si es vector se tranca, poné una previsualización más liviana
+  solamente en ese espacio, pero que todo sea distinguible y que no afecte el archivo que se
+  descarga»*. Nuevo `GET /api/trabajos/<tid>/mesa_img/<archivo>?pi&w`: dibuja **la hoja de
+  verdad** (el mismo PDF que se baja) a 1200 px de ancho y lo guarda al lado del trabajo.
+  🔴 **Sale del PDF, NUNCA del SVG**: el rasterizador de SVG de PyMuPDF ignora los recortes y
+  mostraría piezas cortadas con la silueta de otra ([[render-no-prueba-nada]]). Medido: **202 MB
+  → 2,7 MB (77x)**, entre 0,06 s y 8 s por mesa, una sola vez. La grilla pide `w=2400` al
+  acercarse (dos niveles, dos PNG por mesa como mucho). **El detalle sigue abriendo el vector** y
+  **el PDF que se descarga no se toca**: sigue siendo el vector exacto con su perfil de color.
+  📌 Esto **matiza** [[vector-original-siempre]], que decía «nunca rasterizar»: el usuario lo
+  autorizó **sólo para la grilla del paso Tizada**, donde antes no se veía NADA porque la pestaña
+  moría. La ley «el arte se ve igual que la tizada» sigue intacta en el arte, el visor y el PDF.
+
+  **CONTRATO** nuevo `verificar_mesa_por_talle.py`: de qué columna lee cada molde, que 4 moldes de
+  2 diseños den 2 mesas y no 4, que la clave del pedido sea la columna (y ya no el grupo ni el
+  molde solo), que la vista salga de la hoja y no del SVG, que la use la grilla, que el detalle
+  siga en vector, y la medida en vivo sobre la tizada **más pesada** que haya (en una chiquita no
+  hay nada que probar — primer intento: eligió una de junio y dio 2x). Verde.
+  `API_RUTAS.md` regenerado (158). Server reiniciado 12:20:38.
 - **2026-09-14 (438) — 🔤 EL CARÁCTER QUE LA TIPOGRAFÍA NO TIENE LO PRESTA LA PREDETERMINADA.**
   Decisión del usuario sobre el pendiente que dejó la 437: *«si la fuente no tiene algunos
   caracteres que le ponga unos genéricos solamente en ese carácter»*. El nombre sale **COMPLETO**:

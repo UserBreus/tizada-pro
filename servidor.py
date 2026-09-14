@@ -3049,6 +3049,26 @@ def _desplegar_en_fondo(path):
     _en_hilo(_run)
 
 
+def _columna_talle_de(prod):
+    """De qué COLUMNA de la planilla lee el talle este molde (`mapeo_columnas.talle`).
+
+    🔴 ES LO QUE SEPARA LAS MESAS DE TRABAJO (regla del usuario 2026-09-14): dos moldes que leen
+    la misma columna se acomodan JUNTOS aunque sean de diseños distintos — el diseño sólo cambia
+    el arte que se estampa encima. Lo otro que separa es la TELA, y de eso ya se encarga el motor
+    (una hoja por tela). Ver `_gkey` en `generar_multi`."""
+    return str(((prod or {}).get("mapeo_columnas") or {}).get("talle") or "talle")
+
+
+def _label_columna_talle(prod, cat):
+    """El nombre que esa columna tiene en la planilla («Talle», «Talle short»), para la hoja."""
+    cid = _columna_talle_de(prod)
+    for t in ((cat or {}).get("plantillas_planillas") or []):
+        for c in (t.get("columnas") or []):
+            if str(c.get("id")) == cid:
+                return str(c.get("label") or cid)
+    return cid
+
+
 def _pid_de_ruta_molde(path):
     """`entrada/<pid>/plantilla.ai` → pid (o None si la ruta no tiene esa forma)."""
     try:
@@ -8860,11 +8880,20 @@ def generar_multi():
                 "referencia": (prod or {}).get("referencia_medida") or "alto",
                 "objetos_agregados": _objetos_agregados_motor(pid, sub),   # objetos que sumó el usuario (PNG/SVG/PDF/AI)
                 "_cfg_n": _cfg_n, "_telas": _telas, "_nombre": nombre,
-                # Clave del grupo: el id del grupo configurado, o "solo" el molde si no
-                # está en ningún grupo. Las piezas de distintos diseños del MISMO grupo
-                # se mezclan en la misma mesa (el diseño solo cambia el arte estampado).
-                "_gkey": (gconf or {}).get("id") or ("__solo_" + pid),
-                "_gnombre": (gconf or {}).get("nombre") or nombre})
+                # 🔴 QUÉ SEPARA UNA MESA DE TRABAJO: **la columna de talle y la tela**, nada más
+                # (regla del usuario 2026-09-14: «si los moldes toman talles de la misma columna
+                # deben de mezclarse en la misma mesa aunque sean de diferente diseño»). El
+                # DISEÑO no separa: sólo cambia el arte que se estampa sobre la pieza. La TELA ya
+                # separa más adentro (`_nestear_y_componer` arma una hoja por tela), así que acá
+                # alcanza con la columna.
+                #
+                # Antes la clave era el «grupo de tizada» configurado a mano y, sin grupo, el
+                # molde solo → cada molde armaba SU tizada y la tela quedaba desaprovechada: un
+                # pedido de 2 diseños × 2 moldes salía en 8 hojas donde correspondían 2.
+                # ⚠️ Los grupos de tizada siguen existiendo en la configuración pero ya NO
+                # separan: quedan para nombrar. Ver changelog 439.
+                "_gkey": _columna_talle_de(prod),
+                "_gnombre": (gconf or {}).get("nombre") or _label_columna_talle(prod, cat)})
         if nombre not in nombres:
             nombres.append(nombre)
     if not molds_data:
@@ -10150,6 +10179,64 @@ def pagina_img(tid, archivo):
         return send_file(_io.BytesIO(png), mimetype="image/png")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+_VISTA_MESA_W = 1200          # ancho en px de la vista de la grilla (la mesa se ve a ~440 px)
+_VISTA_MESA_W_MAX = 2400
+
+
+@app.get("/api/trabajos/<tid>/mesa_img/<archivo>")
+def mesa_img(tid, archivo):
+    """UNA mesa como imagen LIVIANA, para la grilla del paso Tizada.
+
+    🔴 POR QUÉ EXISTE (2026-09-14). La grilla mostraba el SVG vectorial de cada mesa. Con los
+    moldes que traen el diseño adentro eso son **202 MB en 10 mesas** (uno solo de 78 MB): el
+    navegador se clavaba y salía «La página no responde». Decisión del usuario: *«si es vector se
+    tranca, poné una previsualización más liviana solamente en ese espacio, pero que todo sea
+    distinguible y que no afecte el archivo que se descarga»*.
+
+    Se dibuja **la hoja de verdad** (el mismo PDF que se descarga), no el SVG: es exacto y no
+    depende del rasterizador de SVG, que ignora los recortes (ver [[render-no-prueba-nada]]).
+    A 1200 px de ancho las 10 mesas pesan 2,7 MB en vez de 202 y se distingue cada pieza con su
+    diseño. Se guarda al lado del trabajo: se dibuja UNA vez (0,1 a 8 s según la mesa).
+    ⚠️ Esto NO toca el PDF: la descarga sigue siendo el vector exacto, y el detalle (tocar la
+    mesa) sigue abriendo el SVG."""
+    _no = _trabajo_ajeno(tid)
+    if _no:
+        return _no
+    import io as _io
+    import fitz
+    try:
+        pi = max(0, int(request.args.get("pi", 0)))
+    except Exception:
+        pi = 0
+    try:
+        w = min(_VISTA_MESA_W_MAX, max(200, int(request.args.get("w", _VISTA_MESA_W))))
+    except Exception:
+        w = _VISTA_MESA_W
+    ruta = os.path.join(TRABAJOS, tid, archivo)
+    if not os.path.exists(ruta):
+        return jsonify({"error": "no existe"}), 404
+    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}.png")
+    if os.path.exists(cache):
+        return send_file(cache, mimetype="image/png")
+    try:
+        with fitz.open(ruta) as d:
+            if pi >= d.page_count:
+                pi = 0
+            pg = d[pi]
+            z = w / pg.rect.width if pg.rect.width else 1.0
+            png = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False).tobytes("png")
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    try:
+        # .tmp + replace: dos pestañas pidiendo la misma mesa no se dejan un PNG a medias
+        with open(cache + ".tmp", "wb") as fh:
+            fh.write(png)
+        os.replace(cache + ".tmp", cache)
+    except Exception:
+        pass
+    return send_file(_io.BytesIO(png), mimetype="image/png")
 
 
 def _pdf_de_una_pagina(src, pi):
