@@ -10636,7 +10636,11 @@ def descargar_zip():
         if _no:
             return _no
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    # 🔴 EL ZIP NO COMPRIME: GUARDA. Los PDF de la tizada ya vienen con sus streams comprimidos
+    # (Flate), así que volver a comprimirlos no ahorra NADA y cuesta tiempo. Medido 2026-09-14 con
+    # una tizada de 14,6 MB: DEFLATED 0,50 s y **0,0 % de ahorro**; STORED 0,05 s y el mismo
+    # tamaño. Es 10× y escala con el pedido — en uno de 200 MB son segundos de espera regalados.
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
         for tid in ids:
             t = trabajos.get(tid) or {}
             hojas = ((t.get("resultado") or {}).get("hojas")) or []

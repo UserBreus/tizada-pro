@@ -1482,6 +1482,57 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (448) — 📏 «LA DESCARGA TARDA Y EL PDF SE VE PIXELADO»: se midió capa por capa.
+  El servidor no era el problema; el ZIP sí (10× tirado a la basura).** Reporte del usuario: *«¿por
+  qué demora tanto en descargar un PDF? y cuando lo abro en el visor de Microsoft se ve pixelado y
+  todavía es pesado porque no carga todo. Si descarga vector debería ser vector, ¿no?»*.
+
+  **LO QUE SE MIDIÓ** (`scratchpad/medir_descarga.py`, `medir_werkzeug.py`, tizada real de 14,2 MB):
+
+  | capa | tiempo |
+  |---|---|
+  | leer la hoja del disco | 0,01 s |
+  | el handler entero (`test_client`) | **0,17 s** |
+  | por HTTP con el Werkzeug de verdad | **0,05–0,09 s** (150–300 MB/s) |
+  | bajar UNA mesa (`descargar_mesa`, arma el PDF en el momento) | **0,05 s** |
+  | «Descargar todo» (2 mesas) | 0,06 s |
+  | el visor de la ficha, en frío / en caliente | 0,63 s / **0,00 s** |
+
+  → **En el servidor no hay nada que arreglar.** Se descartó también que `descargar_mesa` rehiciera
+  trabajo (dos pedidos iguales: 0,04 s los dos) y que el WSGI de desarrollo fuera el cuello.
+
+  **LO QUE SÍ APARECIÓ — EL ZIP COMPRIME AL PEDO.** `descargar_zip` usaba `ZIP_DEFLATED` sobre PDF
+  cuyos streams **ya vienen comprimidos** (Flate): medido, **0,50 s y 0,0 % de ahorro** contra
+  **0,05 s** con `ZIP_STORED` y exactamente el mismo tamaño. **10×, y escala con el pedido.**
+  Cambiado a `ZIP_STORED`. ⚠️ `empaquetar.py` (el paquete de actualización) sigue en DEFLATED **a
+  propósito**: ahí adentro hay código y texto, que sí comprime.
+
+  🔴 **EL PIXELADO NO ESTÁ EN EL ARCHIVO, Y SE VERIFICÓ EN UN NAVEGADOR DE VERDAD.** La hoja es
+  **vector puro** (0 imágenes, 41.850 trazados). Abierta en Chromium —el MISMO motor (PDFium) que
+  usa Edge— y llevada al **400 %**, el texto sale **nítido, con los bordes de curva perfectos**
+  (captura tomada). Lo que se ve pixelado es el dibujo **provisional de baja resolución** que el
+  visor muestra mientras alcanza: la página mide **180 × 798 cm** y para verla a 150 dpi harían
+  falta **501 megapíxeles**. Ningún visor rasteriza eso, así que arranca con una versión grosera y
+  la va afinando — en una página de 8 m con 41.850 trazados, eso lleva su tiempo. **Es latencia de
+  dibujo del visor, no pérdida de calidad, y el archivo que va al RIP está intacto.**
+
+  **DATO PARA DECIDIR — LA FICHA TÉCNICA PESA 7,1 MB PARA DOS A4.** `FICHA_TECNICA.pdf`: 2 páginas
+  A4 con **14.176 trazados en la pág. 1 y 6.813 en la 2**, 0 imágenes. Es que el molde guía es el
+  MISMO PDF vectorial que nestea la tizada (`ficha_tecnica.py`), a resolución completa, para un
+  dibujo que se imprime de ~8 cm. **En la app ya abre rápido** (una imagen por página, cacheada:
+  0,63 s en frío, 0 s después); lo pesado es el PDF cuando se lo abre AFUERA. Bajarlo de peso
+  significaría simplificar ese dibujo → **choca con la LEY del vector original, así que es decisión
+  del usuario y queda anotado, no tocado.**
+
+  **Y NO es un defecto:** la hoja mezcla `/UserUnit` entre páginas (pág. 1 UserUnit 2 sobre un
+  MediaBox de 90×399 cm; pág. 2 UserUnit 1 sobre 180×282 cm). Las dos dan **180 cm de ancho real**:
+  es el mecanismo de las mesas de más de 5,08 m, ya verificado contra el RIP del usuario.
+
+  **TRAMPA:** medir con `app.test_client()` **saltea el servidor WSGI** — mide el handler, no lo que
+  recibe el navegador. Para decir «la descarga tarda X» hay que levantar `make_server` y pedirlo por
+  HTTP. (Acá dio lo mismo, pero pudo no darlo.) Y `/trabajos/<tid>/<archivo>` **exige sesión**: por
+  HTTP contra el 8050 da 401, así que la medición va en proceso o con un server propio.
+
 - **2026-09-14 (447) — ✅ SE GENERÓ UNA TIZADA DE VERDAD Y SE MIDIÓ EL ARCHIVO FINAL.** No alcanzaba
   con «el cambio no debería tocar la salida»: el usuario pidió que *el archivo final sea el
   correcto — vectorial, la calidad, el perfil incrustado y declarado, y los colores reales*. Se
