@@ -1482,6 +1482,52 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (449) — 🔴 PENDIENTE / SIN ARREGLAR: EL DISEÑO DEL CUELLO NO LLEGA A LA TIZADA,
+  Y NADIE AVISA.** Salió de una pregunta del usuario (*«¿por qué en tus pruebas no se ve bien el
+  diseño en los moldes?»*) mirando la tizada `20260914-152934-8e3f` (molde
+  `prod_20260820_095558_38bc`, diseño JUGADOR).
+
+  **LO VERIFICADO (no es una sospecha):**
+  1. El arte **SÍ tiene diseño para el cuello**: la **mesa 7** es un relleno a sangre
+     `0 0.996 1 0.002 k` (el rojo del usuario) y está en la capa **«diseño»**, no en «guias».
+     Stream: `/OC /MC0 BDC · 0 0.996 1 0.002 k · 0 0 1440.002 221.103 re · f · EMC`.
+  2. El mapeo apunta bien: **11 piezas** (`Cuello`, `Cuello 1`…`Cuello 10`) → **mesa 7**.
+  3. Ese rojo **no aparece en NINGUNA de las dos hojas**. Se barrieron todos los streams, entrando
+     a los Form XObjects: los colores de la hoja son `0 0 0 1 k/K`, `0.75 0 0 0 K`,
+     `0.01 0.01 0.01 0.05 K`, `0 1 1 0.314 k`, `0 0 0 0 k`, `0.831 0.379 0.495 0.129 k`. **El
+     `0.996` no está.** Los cuellos salen BLANCOS.
+  4. **El sistema no avisa.** El único aviso fue «1 pieza(s) sin diseño (Tapa costura)», que es la
+     única SIN MAPEO. El cuello SÍ tiene mapeo, así que no entra en ese aviso — y sale en blanco
+     igual. **Es un «sale bien impreso»: el peor tipo.**
+  5. El visor coincide con la tizada (**no es un caché viejo**): el SVG cacheado de `Cuello` pesa
+     **10 KB** contra **779 KB** de una pieza del cuerpo, y tampoco tiene el rojo.
+
+  **LO DESCARTADO:**
+  · `pagina_arte_pieza` **conserva** la capa «diseño» (está en `CAPAS_NO_PERS`). Se corrió
+    `suprimir_capas` + `sanear_oc` sobre la mesa 7 a mano: **el rojo sobrevive**, y encima queda sin
+    los `/OC … BDC`, o sea incondicional.
+  · El encaje tampoco: `cm_encajar` usa `_bbox_arte`, que sale del `BBox` del XObject (la mesa
+    entera) — no hay ningún descarte de «rectángulo de fondo». Con «alto manda» o con «ancho
+    manda», un relleno a sangre tendría que cubrir la pieza o al menos dejar una franja. **No deja
+    ni una franja: no se dibuja nada.**
+
+  **LO QUE QUEDA POR PROBAR (el plan):** todo apunta a que `_armar_base` toma la rama
+  `elif mapeo_arte and not _mesa_a:` → `arte_draw = ""`, o sea que **`mesa_arte(pieza, talle,
+  variante)` devuelve `None` para el cuello** aunque el mapeo guardado sí lo tenga
+  (`motor_pedido.py:4372`). Es *otra* fuente de verdad que la que usa el aviso del servidor, y esa
+  discrepancia explicaría las dos cosas a la vez (no se dibuja **y** no se avisa). Para cerrarlo:
+  instrumentar `mesa_arte` en una generación real y registrar qué devuelve para `Cuello` — mirando
+  `_mapeo_var`, `_mapeo_pv[variante]` y el `mapeo_arte` que el servidor pasa de verdad
+  (`servidor.py:5564` y el de `generar_multi`), que puede no ser el mismo que devuelve
+  `_mapeo_estructura`.
+
+  ⚠️ **FALTA UN DATO DEL USUARIO, y sin él no se toca:** no se sabe si ese rojo pleno es **el
+  diseño real del cuello** o un **rectángulo de la plantilla que quedó sin reemplazar**. Las mesas
+  del cuerpo tienen 1.564–2.127 trazados; la 7 y la 8 tienen **3**. Pase lo que pase con esa
+  respuesta, **el sistema es incoherente**: dice que la pieza tiene diseño, no avisa, y no lo
+  imprime. Si el rojo es el diseño, sale mal impreso; si es basura de la plantilla, el aviso
+  «pieza sin diseño» debería incluirla.
+
 - **2026-09-14 (448) — 📏 «LA DESCARGA TARDA Y EL PDF SE VE PIXELADO»: se midió capa por capa.
   El servidor no era el problema; el ZIP sí (10× tirado a la basura).** Reporte del usuario: *«¿por
   qué demora tanto en descargar un PDF? y cuando lo abro en el visor de Microsoft se ve pixelado y
