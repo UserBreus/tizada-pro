@@ -9,13 +9,20 @@ from fontTools.pens.recordingPen import DecomposingRecordingPen
 
 
 class FuenteCurvas:
-    def __init__(self, fuente_bytes):
+    def __init__(self, fuente_bytes, respaldo=None):
         self.tt = TTFont(io.BytesIO(fuente_bytes))
         self.glyphset = self.tt.getGlyphSet()
         self.cmap = self.tt.getBestCmap() or self._cmap_de_respaldo()
         self.upem = self.tt["head"].unitsPerEm
         self._cache = {}
         self._cap = None
+        # 🔴 EL CARÁCTER QUE ESTA FUENTE NO TIENE LO PRESTA LA DE RESPALDO (regla del usuario
+        # 2026-09-14: «si la fuente no tiene algunos caracteres que le ponga unos genéricos
+        # solamente en ese carácter»). Las tipografías de camiseta traen letras y números y nada
+        # más: un «J. PEREZ» tumbaba la tizada entera. Ahora el nombre sale COMPLETO y sólo ese
+        # carácter viene de otra tipografía, escalado para que se vea del mismo tamaño.
+        self.respaldo = respaldo
+        self.sustituidos = []          # los caracteres que hubo que pedirle al respaldo
 
     def _cmap_de_respaldo(self):
         """Un `cmap` unicode para fuentes que NO traen tabla unicode. `getBestCmap` sólo mira las
@@ -101,6 +108,9 @@ class FuenteCurvas:
                 self._cache[ch] = ([], self.upem // 3)
                 return self._cache[ch]
         if gname is None:
+            prestado = self._del_respaldo(ch)
+            if prestado is not None:
+                return prestado
             raise ValueError(f"glifo faltante: {ch!r}")
         pen = DecomposingRecordingPen(self.glyphset)
         # Un glifo puede estar en el cmap pero tener los datos CORRUPTOS (p. ej. `loca` con un
@@ -109,16 +119,60 @@ class FuenteCurvas:
         # es el mismo (ese carácter no se puede dibujar) y un solo glifo roto no tumba la fuente.
         try:
             self.glyphset[gname].draw(pen)
-        except ValueError:
-            raise
         except Exception as e:
+            prestado = self._del_respaldo(ch)      # está en el cmap pero los datos no sirven
+            if prestado is not None:
+                return prestado
             raise ValueError(f"glifo corrupto: {ch!r} ({gname}): {e}") from e
         ancho = self.glyphset[gname].width
         self._cache[ch] = (pen.value, ancho)
         return self._cache[ch]
 
+    def _del_respaldo(self, ch):
+        """El glifo `ch` de la tipografía de respaldo, traído a las unidades de ÉSTA.
+
+        Se escala por dos cosas a la vez: los `upem` (cada fuente mide en su propia grilla) y la
+        **altura de mayúscula**, que es lo que hace que se vea del mismo tamaño — sin eso, un
+        punto prestado a una fuente de camiseta puede salir notoriamente más chico o más grande.
+        Devuelve None si el respaldo tampoco lo tiene: ahí no hay con qué dibujarlo."""
+        if self.respaldo is None:
+            return None
+        try:
+            registros, ancho = self.respaldo._glifo(ch)
+        except Exception:
+            return None
+        k = self.upem / (self.respaldo.upem or self.upem)
+        _cr = self.respaldo.cap_ratio
+        if _cr:
+            k *= (self.cap_ratio / _cr)
+
+        def _pt(p):
+            return None if p is None else (p[0] * k, p[1] * k)   # `qCurveTo` puede traer None
+
+        escalados = [(verbo, tuple(_pt(p) for p in (args or ()))) for verbo, args in registros]
+        if ch not in self.sustituidos:
+            self.sustituidos.append(ch)
+        self._cache[ch] = (escalados, ancho * k)
+        return self._cache[ch]
+
+    def prestados(self, texto):
+        """Los caracteres de `texto` que esta tipografía no tiene y le va a dibujar el respaldo.
+
+        Es lo que hay que AVISAR: salen, pero con otra tipografía. Lo que no puede dibujar ni el
+        respaldo va en `faltantes`."""
+        out = []
+        for ch in str(texto or ""):
+            if ch in out or ch.isspace() or self.cmap.get(ord(ch)) is not None:
+                continue
+            if self._del_respaldo(ch) is not None:
+                out.append(ch)
+        return out
+
     def faltantes(self, texto):
         """Los caracteres de `texto` que esta tipografía NO puede dibujar, sin repetir y en orden.
+
+        Con tipografía de respaldo, un carácter que ELLA sí puede dibujar NO figura acá: se
+        estampa prestado (ver `prestados`). Queda sólo lo que no puede dibujar nadie.
 
         Preguntar es mejor que reventar: el que va a estampar lo consulta y arma un aviso que
         dice qué carácter y en qué texto, en vez de un `glifo faltante: '.'` a mitad de la tizada

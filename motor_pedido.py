@@ -3821,6 +3821,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _modo_hoja = modo_hoja or ("legacy" if os.environ.get("TIZADA_HOJA_LEGACY") else "pike")
 
     fuentes_cache = {}
+    _avisos_fuente = {}          # fuente → caracteres que ya se avisó que presta el respaldo
     def fuente(nombre_ps):
         if nombre_ps not in fuentes_cache:
             ruta = resolver_fuente(nombre_ps, carpeta_fuentes)
@@ -3832,7 +3833,19 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 ruta = resolver_fuente("Anton Regular", carpeta_fuentes)
             if not ruta:
                 raise RuntimeError(f"tipografía '{nombre_ps}' no está en el catálogo (ni el reemplazo temporal Anton Regular)")
-            fuentes_cache[nombre_ps] = FuenteCurvas(open(ruta, "rb").read())
+            # RESPALDO POR CARÁCTER: lo que esta fuente no tenga (un punto, un guion) lo dibuja la
+            # predeterminada, al mismo tamaño. Así el nombre sale COMPLETO en vez de tumbar la
+            # tizada (regla del usuario 2026-09-14). El respaldo se abre UNA vez por pedido.
+            _resp = None
+            _r_anton = resolver_fuente("Anton Regular", carpeta_fuentes)
+            if _r_anton and os.path.normcase(os.path.abspath(_r_anton)) != os.path.normcase(os.path.abspath(ruta)):
+                if "__respaldo__" not in fuentes_cache:
+                    try:
+                        fuentes_cache["__respaldo__"] = FuenteCurvas(open(_r_anton, "rb").read())
+                    except Exception:
+                        fuentes_cache["__respaldo__"] = None
+                _resp = fuentes_cache["__respaldo__"]
+            fuentes_cache[nombre_ps] = FuenteCurvas(open(ruta, "rb").read(), respaldo=_resp)
         return fuentes_cache[nombre_ps]
 
     piezas_nombres = sorted(registro.keys())
@@ -4616,19 +4629,27 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     return (px - x0m + B, Hp - (py - y0m + B))
                 # 🔴 UN CARÁCTER QUE LA TIPOGRAFÍA NO TIENE NO PUEDE TUMBAR LA TIZADA CON UN
                 # RASTRO DE PYTHON. Pasó el 2026-09-14: el nombre llevaba un punto, la fuente del
-                # diseño (de camiseta: sólo letras y números) no lo trae, y el pedido entero
-                # moría con «ValueError: glifo faltante: '.'» — nadie puede hacer nada con eso.
-                # Se corta ACÁ, antes de dibujar, y se dice qué carácter, en qué texto y con qué
-                # tipografía. No se estampa «lo que se pueda»: el nombre de una persona NO se
-                # imprime cambiado en silencio (ver «el peor error es el que sale bien impreso»).
-                # El aviso llega antes: la planilla pinta en ROJO lo que la fuente no tiene
-                # (`/api/pedido/fuente_chars`).
+                # diseño (de camiseta: sólo letras y números) no lo trae, y el pedido entero moría
+                # con «ValueError: glifo faltante: '.'» — nadie puede hacer nada con eso.
+                # REGLA DEL USUARIO: ese carácter sale con la PREDETERMINADA y el resto del nombre
+                # con la del diseño («que le ponga unos genéricos solamente en ese carácter»), así
+                # el nombre sale COMPLETO. Lo resuelve `FuenteCurvas(respaldo=…)`, glifo por glifo.
+                # Se ANOTA en el registro: que salga no quiere decir que no haya que saberlo.
+                # `faltantes()` queda para lo que no puede dibujar NADIE: ahí sí se corta, con un
+                # mensaje que se entiende. Y el aviso llega antes: la planilla marca los caracteres
+                # que no son de la tipografía del diseño (`/api/pedido/fuente_chars`).
+                _fps = pl.get("fuente") or "?"
+                _prest = [c for c in fnom.prestados(texto) if c not in _avisos_fuente.get(_fps, set())]
+                if _prest:
+                    _avisos_fuente.setdefault(_fps, set()).update(_prest)
+                    print(f"  [tipografía] «{_fps}» no tiene " + " ".join(f"«{c}»" for c in _prest)
+                          + ": ese carácter se estampa con la predeterminada", flush=True)
                 _falta = fnom.faltantes(texto)
                 if _falta:
                     raise ValueError(
-                        "La tipografía «{f}» no puede estampar {c} de «{t}». "
-                        "Sacá {c2} del texto o elegí otra tipografía en el paso Arte.".format(
-                            f=pl.get("fuente") or "?",
+                        "La tipografía «{f}» no puede estampar {c} de «{t}», y la predeterminada "
+                        "tampoco. Sacá {c2} del texto.".format(
+                            f=_fps,
                             c=" ni ".join(f"«{c}»" for c in _falta),
                             t=texto,
                             c2=("ese carácter" if len(_falta) == 1 else "esos caracteres")))

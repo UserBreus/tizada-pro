@@ -1482,6 +1482,35 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-14 (438) — 🔤 EL CARÁCTER QUE LA TIPOGRAFÍA NO TIENE LO PRESTA LA PREDETERMINADA.**
+  Decisión del usuario sobre el pendiente que dejó la 437: *«si la fuente no tiene algunos
+  caracteres que le ponga unos genéricos solamente en ese carácter»*. El nombre sale **COMPLETO**:
+  «J. PEREZ» se estampa con la tipografía del diseño y **sólo el punto** viene de Anton.
+  **CÓMO.** `FuenteCurvas(datos, respaldo=otra)`: en `_glifo`, si el carácter no está en el `cmap`
+  —o está pero sus datos están rotos— lo dibuja el respaldo. 🔴 **El glifo prestado se ESCALA por
+  dos cosas**: los `upem` (cada fuente mide en su propia grilla) y la **altura de mayúscula**
+  (`cap_ratio`); sin lo segundo, un punto prestado a una fuente de camiseta sale notoriamente más
+  chico o más grande que el resto del nombre. Medido: punto sobre M queda en 0,156 contra 0,169 en
+  la original. Métodos nuevos: `prestados(texto)` (lo que sale con otra tipografía: se AVISA) y
+  `faltantes(texto)` pasa a ser *lo que no puede dibujar **nadie*** (ahí sí se corta, con un
+  mensaje que se entiende). `motor_pedido.fuente()` arma cada tipografía con la predeterminada de
+  respaldo (una sola vez por pedido, cacheada en `__respaldo__`) y **anota en el registro** cada
+  préstamo: *«[tipografía] «X» no tiene «.»: ese carácter se estampa con la predeterminada»* —
+  que salga no quiere decir que no haya que saberlo.
+  **PANTALLA.** El cartel de la planilla deja de ser ROJO y de decir «revisá la fuente»: ahora es
+  ámbar y dice **«Los caracteres marcados no están en la tipografía del diseño. Se estampan con la
+  tipografía predeterminada, al mismo tamaño: la prenda sale igual y el nombre completo.»** Las
+  celdas marcan igual, en ámbar. El aviso sigue sirviendo —el operario ve que ese carácter va a
+  salir distinto— pero ya no parece que no se pueda fabricar.
+  **CONTRATO** `verificar_glifos_del_nombre.py` (reescrito): sin respaldo «J. PEREZ» no se podía;
+  con respaldo el punto se presta, **se dibuja de verdad** (más trazos y más ancho que sin él),
+  se ve del mismo tamaño, queda anotado, y el espacio nunca se presta. Verde.
+  ⚠️ **HALLAZGO APARTE, no es de esta tanda:** `verificar_fuentes_pedido.py` quedó en ROJO porque
+  dos tipografías subidas por el usuario **chocan de nombre**: `subida_MoreggiTFont4.ttf` (10/09)
+  se declara «MoreggiTFont4 Camiseta» y `subida_MoreggiTFont4-Camiseta.ttf` (14/09) «MoreggiTFont4?
+  Camiseta?» — normalizan igual, así que la vieja quedó **inalcanzable** (el resolver devuelve la
+  nueva). No lo rompió este cambio (el resolver no se tocó): apareció al subir la segunda.
+  ⏳ Pendiente: que `alta_fuente` avise cuando el nombre interno choca con uno que ya está.
 - **2026-09-14 (437) — 🔤 «glifo faltante: '.'»: la tizada moría por un PUNTO en el nombre, y el
   aviso que lo evitaba no llegaba al camino B.** El usuario quiso armar una tizada y le salió ese
   rastro de Python. Las tipografías de camiseta del diseñador (`MoreggiTFont4-Camiseta`,

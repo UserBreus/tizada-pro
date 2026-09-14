@@ -13982,17 +13982,21 @@ export default function App() {
                     <div>
                       <div className="card-title" style={{ marginBottom: 2 }}>Cargá la planilla</div>
                     </div>
+                    {/* NO ES UN ERROR: la tizada sale igual. Esos caracteres no están en la
+                        tipografía del diseño y se estampan con la predeterminada (regla del
+                        usuario 2026-09-14). Antes esto era rojo y decía «revisá la fuente», que
+                        sonaba a que no se podía fabricar — y de hecho ANTES la tizada moría. */}
                     {faltantesFuente.length > 0 && (
                       <div style={{ flexShrink: 0, maxWidth: 460, display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 13px', borderRadius: 10,
-                        background: 'rgba(255,60,60,0.12)', border: '1.5px solid #ff4d4d', boxShadow: '0 0 14px rgba(255,60,60,0.25)' }}>
+                        background: 'rgba(224,160,32,0.12)', border: '1.5px solid var(--warning, #e0a020)' }}>
                         <span style={{ fontSize: 17, lineHeight: 1.1 }}>⚠</span>
                         <div style={{ fontSize: 12, lineHeight: 1.45 }}>
-                          <b style={{ color: '#ff8a8a' }}>Los caracteres marcados en rojo no los tiene la fuente cargada.</b>
-                          <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>Revisá la fuente, eliminá los caracteres o reemplazá la fuente del diseño.</div>
+                          <b style={{ color: 'var(--warning, #e0a020)' }}>Los caracteres marcados no están en la tipografía del diseño.</b>
+                          <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>Se estampan con la tipografía predeterminada, al mismo tamaño: la prenda sale igual y el nombre completo. Si no los querés así, sacalos del texto o cambiá la tipografía en el paso Arte.</div>
                           <div style={{ marginTop: 5, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Faltan:</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Con la predeterminada:</span>
                             {faltantesFuente.map((ch, k) => (
-                              <span key={k} style={{ fontFamily: 'monospace', fontWeight: 800, color: '#ff4d4d', background: 'rgba(255,60,60,0.2)', border: '1px solid rgba(255,80,80,0.5)', borderRadius: 4, padding: '0 5px' }}>{ch}</span>
+                              <span key={k} style={{ fontFamily: 'monospace', fontWeight: 800, color: 'var(--warning, #e0a020)', background: 'rgba(224,160,32,0.2)', border: '1px solid rgba(224,160,32,0.5)', borderRadius: 4, padding: '0 5px' }}>{ch}</span>
                             ))}
                           </div>
                         </div>
@@ -14248,7 +14252,7 @@ export default function App() {
                                 });
                               } else if (_dispFalta) {
                                 contenido = _dispChars.map((ch, k) => (
-                                  <span key={k} style={faltaEnFuente(ch) ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 } : undefined}>{ch}</span>
+                                  <span key={k} style={faltaEnFuente(ch) ? { color: 'var(--warning, #e0a020)', fontWeight: 800, background: 'rgba(224,160,32,0.22)', borderRadius: 2 } : undefined}>{ch}</span>
                                 ));
                               } else {
                                 contenido = <span>{dispVal}</span>;
@@ -14295,7 +14299,7 @@ export default function App() {
                                         <div aria-hidden style={{ ..._fBase, position: 'absolute', inset: 0, whiteSpace: 'pre', overflow: 'hidden', pointerEvents: 'none' }}>
                                           {_lc.map((ch, k) => (
                                             <span key={k} style={faltaEnFuente(ch)
-                                              ? { color: '#ff4d4d', fontWeight: 800, background: 'rgba(255,60,60,0.22)', borderRadius: 2 }
+                                              ? { color: 'var(--warning, #e0a020)', fontWeight: 800, background: 'rgba(224,160,32,0.22)', borderRadius: 2 }
                                               : { color: 'var(--text-primary)' }}>{ch}</span>
                                           ))}
                                         </div>

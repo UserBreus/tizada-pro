@@ -10,13 +10,17 @@ El aviso YA existía: `/api/pedido/fuente_chars` devuelve los caracteres que la 
 estampar y la planilla pinta el resto en ROJO **antes** de generar. Pero leía el **arte**, y el
 molde con el diseño adentro no tiene arte: devolvía vacío y no marcaba nada.
 
+REGLA DEL USUARIO (2026-09-14): *«si la fuente no tiene algunos caracteres que le ponga unos
+genéricos solamente en ese carácter»*. El nombre sale COMPLETO: ese carácter lo dibuja la
+tipografía predeterminada, al mismo tamaño, y el resto sigue siendo la del diseño.
+
 Lo que se prueba:
-  1. `faltantes()` dice exactamente qué caracteres no se pueden dibujar (y no se cuelga con los
-     que sí);
+  1. el carácter que la tipografía no tiene lo PRESTA la de respaldo, se dibuja y se ve del
+     mismo tamaño;
   2. `fuente_chars` de un molde del camino B sale del MOLDE y marca el punto y el guion;
   3. el molde del camino A (con arte) sigue saliendo del arte;
-  4. el mensaje de la tizada dice qué hacer: nombra la tipografía, el carácter y el texto — y
-     NO estampa el nombre cambiado (un nombre de persona no se imprime distinto en silencio).
+  4. el préstamo se ANOTA (que salga no quiere decir que no haya que saberlo), la planilla lo
+     avisa como ADVERTENCIA y, si no lo puede dibujar NADIE, el mensaje dice qué hacer.
 
 ⚠️ Sólo LEE: catálogo de fuentes y moldes ya cargados. No escribe nada.
 """
@@ -48,17 +52,17 @@ def ok(cond, msg):
         FALLOS.append(msg)
 
 
-def _fuente(nombre):
+def _fuente(nombre, respaldo=None):
     r = MP.resolver_fuente(nombre, os.path.join(_AQUI, "catalogo_fuentes"))
     if not r:
         return None
     with open(r, "rb") as fh:
-        return FuenteCurvas(fh.read())
+        return FuenteCurvas(fh.read(), respaldo=respaldo)
 
 
 def main():
     # ── 1. `faltantes()` ────────────────────────────────────────────────────────────────────
-    print("1 · LA TIPOGRAFÍA DICE QUÉ NO PUEDE DIBUJAR")
+    print("1 · EL CARÁCTER QUE NO ESTÁ LO PRESTA LA PREDETERMINADA")
     cat = MP.catalogo_fuentes(os.path.join(_AQUI, "catalogo_fuentes"))
     sin_punto = []
     for ruta, info in cat.items():
@@ -70,15 +74,42 @@ def main():
         if fc.faltantes("."):
             sin_punto.append(info["interno"])
     ok(bool(sin_punto), f"hay tipografías en el catálogo SIN punto (si no, este contrato no prueba nada): {sin_punto}")
-    fc = _fuente(sin_punto[0]) if sin_punto else None
-    if fc is not None:
-        ok(fc.faltantes("J. PEREZ") == ["."], f"«J. PEREZ» → {fc.faltantes('J. PEREZ')}")
-        ok(fc.faltantes("MESSI") == [], "un nombre que sí se puede estampar no da faltantes")
-        ok(fc.faltantes("N.N.") == ["."], "el mismo carácter no se repite en la lista")
-        ok(fc.faltantes(" ") == [], "el espacio nunca falta (tiene avance aunque no tenga contorno)")
     anton = _fuente("Anton Regular")
     ok(anton is not None and anton.faltantes(".-/ 0123456789ABCÑ") == [],
        "la predeterminada («Anton Regular») los tiene todos")
+    _nom = sin_punto[0] if sin_punto else None
+    sola = _fuente(_nom) if _nom else None
+    if sola is not None:
+        ok(sola.faltantes("J. PEREZ") == ["."], f"SIN respaldo, «{_nom}» no podría estampar «J. PEREZ»")
+    fc = _fuente(_nom, respaldo=anton) if _nom else None
+    if fc is not None:
+        ok(fc.prestados("J. PEREZ") == ["."], f"el punto lo presta la predeterminada → {fc.prestados('J. PEREZ')}")
+        ok(fc.faltantes("J. PEREZ") == [], "🔴 …y por eso «J. PEREZ» YA NO falta: la tizada sale")
+        ok(fc.prestados("PEREZ-GOMEZ") == ["-"] and fc.faltantes("PEREZ-GOMEZ") == [],
+           "lo mismo con el guion")
+        ok(fc.prestados("MESSI") == [], "un nombre que la tipografía del diseño cubre entero no presta nada")
+        ok(fc.prestados("N.N.") == ["."], "el mismo carácter no se repite en la lista")
+        ok(fc.faltantes(" ") == [] and fc.prestados(" ") == [],
+           "el espacio nunca falta ni se presta (tiene avance aunque no tenga contorno)")
+        ok("." in fc.sustituidos and len(fc.sustituidos) == len(set(fc.sustituidos)),
+           f"queda anotado qué se prestó, sin repetir: {fc.sustituidos}")
+        # SE DIBUJA DE VERDAD
+        _con = len(fc.ops_texto("J. PEREZ", 100, 0, 0))
+        _sin = len(fc.ops_texto("J PEREZ", 100, 0, 0))
+        ok(_con > _sin, f"el punto se DIBUJA (con punto {_con} trazos · sin punto {_sin})")
+        ok(fc.ancho_texto("J. PEREZ", 100) > fc.ancho_texto("J PEREZ", 100),
+           "…y ocupa su lugar: el nombre con punto mide más de ancho")
+
+        # …Y DEL TAMAÑO QUE CORRESPONDE. Sin escalar por la altura de mayúscula, un punto prestado
+        # sale notoriamente más chico o más grande que el resto del nombre.
+        def _alto(f, ch):
+            _ops, _ = f._glifo(ch)
+            ys = [p[1] for _v, args in _ops for p in (args or ()) if p]
+            return (max(ys) - min(ys)) / f.upem if ys else 0
+        _prest = _alto(fc, ".") / (_alto(fc, "M") or 1)
+        _orig = _alto(anton, ".") / (_alto(anton, "M") or 1)
+        ok(abs(_prest - _orig) < 0.25 * _orig,
+           f"el carácter prestado se ve del mismo tamaño (punto sobre M: prestado {_prest:.3f} · original {_orig:.3f})")
 
     # ── 2. EL MOLDE CON DISEÑO ADENTRO ──────────────────────────────────────────────────────
     print("\n2 · 🔴 EL AVISO SALE DEL MOLDE CUANDO NO HAY ARTE (camino B)")
@@ -106,7 +137,7 @@ def main():
         ok(d.get("ok") and bool(chars), f"devuelve los caracteres del molde «{pid}» ({len(chars)}) · fuentes {d.get('fuentes')}")
         ok(bool(d.get("fuentes")), "…y de qué tipografía salieron")
         if chars and sin_punto:
-            ok("." not in chars, "🔴 el punto NO figura como soportado: la planilla lo pinta en rojo")
+            ok("." not in chars, "🔴 el punto NO figura como soportado: la planilla lo marca y avisa")
         ok("A" in chars and "5" in chars, "las letras y los números sí figuran")
 
     # ── 3. EL CAMINO A NO CAMBIA ────────────────────────────────────────────────────────────
@@ -115,22 +146,21 @@ def main():
        "el camino A sigue leyendo la personalización del arte")
 
     # ── 4. EL MENSAJE DE LA TIZADA ──────────────────────────────────────────────────────────
-    print("\n4 · 🔴 SI IGUAL SE GENERA, EL MENSAJE DICE QUÉ HACER")
+    print("\n4 · 🔴 EL PRÉSTAMO SE ANOTA, SE AVISA, Y LO IMPOSIBLE SE EXPLICA")
     # `generar_pieza` vive ADENTRO de `generar_pedido`: se lee el archivo, no el objeto.
     src = io.open(os.path.join(_AQUI, "motor_pedido.py"), encoding="utf-8").read()
-    ok("fnom.faltantes(texto)" in src, "el estampado pregunta ANTES de dibujar")
-    ok("no puede estampar" in src and "elegí otra tipografía" in src,
-       "el mensaje nombra la tipografía, el carácter y qué hacer (no «glifo faltante»)")
-    ok("raise ValueError" in src.split("fnom.faltantes(texto)")[1][:900],
-       "…y CORTA: no se estampa el nombre cambiado en silencio")
-    # el mensaje se arma de verdad
-    if fc is not None:
-        _f = fc.faltantes("J. PEREZ")
-        msg = ("La tipografía «{f}» no puede estampar {c} de «{t}». "
-               "Sacá {c2} del texto o elegí otra tipografía en el paso Arte.").format(
-            f=sin_punto[0], c=" ni ".join(f"«{c}»" for c in _f), t="J. PEREZ",
-            c2=("ese carácter" if len(_f) == 1 else "esos caracteres"))
-        ok("«.»" in msg and "J. PEREZ" in msg and sin_punto[0] in msg, f"queda así: {msg}")
+    ok("respaldo=_resp" in src, "el motor arma cada tipografía CON una de respaldo")
+    ok('resolver_fuente("Anton Regular", carpeta_fuentes)' in src, "…y el respaldo es la predeterminada del sistema")
+    ok("fnom.prestados(texto)" in src and "[tipografía]" in src,
+       "lo prestado queda ANOTADO en el registro (que salga no quiere decir que no haya que saberlo)")
+    ok("fnom.faltantes(texto)" in src and "y la predeterminada" in src,
+       "y si no lo puede dibujar NADIE, el mensaje lo dice (no «glifo faltante»)")
+    # la planilla avisa, pero como ADVERTENCIA: la tizada sale igual
+    app = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
+    ok("Se estampan con la tipografía predeterminada" in app,
+       "la planilla dice que esos caracteres salen con la predeterminada")
+    ok("no los tiene la fuente cargada" not in app,
+       "…y ya no dice «revisá la fuente», que sonaba a que no se podía fabricar")
 
     print()
     if FALLOS:
@@ -138,7 +168,7 @@ def main():
         for f in FALLOS:
             print("   ·", f)
         sys.exit(1)
-    print("✅ CONTRATO VERDE — lo que la tipografía no puede estampar se avisa antes y se explica")
+    print("✅ CONTRATO VERDE — el carácter que falta lo presta la predeterminada y el nombre sale entero")
 
 
 if __name__ == "__main__":
