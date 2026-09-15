@@ -7,7 +7,6 @@ cambian todo el tiempo, las acciones no. Atarlos a pantallas rompe los permisos 
 Contraseñas: PBKDF2-HMAC-SHA256 con salt por usuario. NUNCA en texto plano, nunca reversibles.
 """
 import hashlib
-import os
 import secrets
 
 import db

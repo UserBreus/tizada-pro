@@ -24,7 +24,6 @@ vigente y ahí las capas YA se llaman como corresponde. Traducir el nombre "al v
 era la alternativa, y siempre quedaba un punto sin traducir (p. ej. `molde_real._candidatos_mesa`,
 que compara la capa por nombre exacto y dejaría al motor sin piezas al generar la tizada).
 """
-import os
 
 import fitz
 

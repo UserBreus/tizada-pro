@@ -2984,8 +2984,7 @@ function MesasInfinito({ mesas, job, avisar }) {
                       (2026-09-15, nadie los abría) `pv` quedó en null y TODAS las mesas mostraban
                       «Sin vista previa» con la tizada perfecta detrás. El dibujo sale de
                       `mesa_img`, que va por ÍNDICE de página: no hay nada que condicionar. */}
-                  {true
-                    ? <div ref={(el) => { if (el) mesaRefs.current[key] = el; else delete mesaRefs.current[key]; }}
+                  <div ref={(el) => { if (el) mesaRefs.current[key] = el; else delete mesaRefs.current[key]; }}
                         style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
                         {/* 🔴 ACÁ VA LA VISTA LIVIANA, NO EL VECTOR. Diez mesas en SVG son 202 MB y
                             el navegador se clava («La página no responde», 2026-09-14). Esto es un
@@ -3014,7 +3013,6 @@ function MesasInfinito({ mesas, job, avisar }) {
                               width: `${(t.b - t.a) * 100}%`, height: `${(t.d - t.c) * 100}%`, display: 'block' }} />
                         ))}
                       </div>
-                    : <div style={{ width: w, height: h, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 11 }}>Sin vista previa</div>}
                   {/* ABAJO: tamaño ancho × alto */}
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
                     {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
@@ -19979,7 +19977,13 @@ export default function App() {
                                       {editZonas && (() => {
                                         const geo = esquinasXY(p.path_svg);
                                         if (!geo) return null;
-                                        const pts = zonasPc ? (zonasPc.puntos || []) : ((zdef && zdef.puntos) || []);
+                                        // 🔴 SIN `zdef`: no existe. Al eliminar «Zonas de texto» quedó
+                                        // esta referencia a una variable que ya no está, y como
+                                        // `zonasPc` es siempre null el ternario la tomaba SIEMPRE:
+                                        // abrir el editor de zonas reventaba con ReferenceError
+                                        // (lo encontró el linter, 2026-09-15). Sin zonas guardadas,
+                                        // no hay puntos.
+                                        const pts = (zonasPc && zonasPc.puntos) || [];
                                         const dotR = Math.max(0.6, Math.min(p.pw, p.ph) * 0.05);
                                         const ccx = p.px + p.pw / 2, ccy = p.py + p.ph / 2;
                                         const near = (t) => pts.some(pt => Math.min(Math.abs(pt - t), 1 - Math.abs(pt - t)) < 0.02);

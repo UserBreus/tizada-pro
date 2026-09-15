@@ -3,18 +3,16 @@ MOTOR DE PEDIDOS — biblioteca central de la app web.
 Alta de plantilla, validación de arte, catálogo de fuentes, generación
 del pedido (texto en curvas) y validaciones de salida.
 """
-import io, os, json, time, math, glob, hashlib, base64, unicodedata
+import io, os, time, math, glob, hashlib, base64, unicodedata
 import numpy as np
 import pymupdf as fitz
 import pikepdf
 from pikepdf import Name, Array, Dictionary, parse_content_stream
-from scipy import ndimage
 
 from molde_real import (extraer_contorno_mesa, extraer_piezas_mesa,
-                        limpiar_capas, limpiar_capas_conservando_talle, aislar_capa, suprimir_capas,
+                        limpiar_capas_conservando_talle, aislar_capa, suprimir_capas,
                         recolorar_capa, capa_admite_color,
                         objetos_de_capa, aislar_objeto, aislar_capa_objetos,
-                        suprimir_objetos, capa_admite_color_objeto,
                         geometrias_base, sanear_oc, _nombres_oc, MM)
 from nesting_contorno import anidar_contorno, componer_pdf_contorno
 

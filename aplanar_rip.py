@@ -11,7 +11,6 @@ exporta Illustrator (que sí funciona):
 TODO preservando los valores CMYK EXACTOS byte a byte (NO usa Ghostscript, que re-cuantiza los
 colores: 0.9 → 0.90039). Verificado pixel-idéntico a la salida original.
 """
-import io
 import os
 import pikepdf
 from pikepdf import Name, parse_content_stream, unparse_content_stream

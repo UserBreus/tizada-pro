@@ -37,7 +37,6 @@ shutil.copytree(os.path.join(RAIZ, "entrada", PID), os.path.join(_TMP, "entrada"
 sys.path.insert(0, RAIZ)
 import motor_pedido as MP                                        # noqa: E402
 import servidor as S                                             # noqa: E402
-import nesting_contorno as NC                                    # noqa: E402
 from nesting_contorno import _preparar, _anidar_estrategia, CM   # noqa: E402
 
 cat = S._cargar_catalogo()

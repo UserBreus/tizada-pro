@@ -14,7 +14,6 @@ Soporta 2 formas:
 
 Los contornos se guardan como SEGMENTOS: ("m",x,y) ("l",x,y) ("c",c1x,c1y,c2x,c2y,x,y) ("h",).
 """
-import io
 import pymupdf as fitz
 
 CM = 28.3465          # puntos por cm

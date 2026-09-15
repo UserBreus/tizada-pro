@@ -16,12 +16,18 @@ import subprocess
 import sys
 import time
 
+import procesos
+
 AQUI = os.path.dirname(os.path.abspath(__file__))
 TOPE = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 60
 LENTO = TOPE * 0.5          # pasó, pero tardó demasiado para lo que mide
 
 def main():
     os.chdir(AQUI)
+    # 🔴 LOS HIJOS SE MUEREN CON ESTO. Un contrato levanta su propio pool: al cortar una corrida
+    # quedaron 18 procesos sueltos con 8,8 GB en la máquina del usuario (2026-09-15). Con el Job
+    # Object, matar el corredor se lleva todo lo que haya lanzado.
+    procesos.atar_hijos()
     # 🔴 UN CONTRATO NO PUEDE COMERSE LA MÁQUINA. `verificar_desplegado` levanta un pool para el
     # alta y, sin tope, son 6 workers de ~1,4 GB: 8,5 GB sólo para correr una prueba (medido
     # 2026-09-15, con el usuario trabajando al lado). Se acota acá, no en cada contrato.

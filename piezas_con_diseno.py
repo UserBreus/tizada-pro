@@ -1942,7 +1942,6 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
     El JSON lleva `paginas: true` sólo cuando el PDF ya está: con contornos nuevos y un PDF viejo
     del archivo anterior, el motor no lo puede tomar por bueno."""
     import json
-    import molde_real as MR
     carpeta = carpeta or _carpeta_desplegado(path_molde)
     os.makedirs(carpeta, exist_ok=True)
     sello = _sello(path_molde)

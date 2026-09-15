@@ -28,7 +28,6 @@ arreglo posible sin cambiarle la firma — devolvía un PDF que sigue apuntando 
 import pymupdf as fitz
 import pikepdf
 from pikepdf import Name, parse_content_stream, unparse_content_stream
-from pikepdf.models import PdfParsingError
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -784,7 +783,6 @@ def capa_admite_color_objeto(page, objetivo, obj_id):
 # ─────────────────────────────────────────────────────────────────
 # 4. ETIQUETA DE PIEZA (Talle-Pieza-#) desde el ancla de la plantilla
 # ─────────────────────────────────────────────────────────────────
-import math
 
 MM = 2.83465  # puntos por mm
 

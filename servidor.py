@@ -1138,7 +1138,6 @@ def _detectar_perfil_incrustado(pdf_path):
     Busca OutputIntent → ICCBased → XMP → y, si no hay perfil, el modelo de color del
     encabezado AI (CMYK/RGB) para saber qué predeterminado corresponde."""
     nombre, espacio = None, None
-    import tempfile
     def _desc_de_icc(data):
         try:
             from PIL import ImageCms
@@ -7811,10 +7810,10 @@ def set_telas():
         cat = _cargar_catalogo()
         if isinstance(cuerpo.get("grupos"), list):
             grupos = []
-            for g in cuerpo["grupos"]:
-                grupos.append({"id": g.get("id") or ("gt_" + uuid.uuid4().hex[:8]),
-                               "nombre": str(g.get("nombre", "")).strip() or "Grupo",
-                               "telas": [str(x) for x in (g.get("telas") or [])]})
+            for gr in cuerpo["grupos"]:
+                grupos.append({"id": gr.get("id") or ("gt_" + uuid.uuid4().hex[:8]),
+                               "nombre": str(gr.get("nombre", "")).strip() or "Grupo",
+                               "telas": [str(x) for x in (gr.get("telas") or [])]})
             cat["grupos_telas"] = grupos
             _guardar_catalogo(cat)
     return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", [])})
@@ -8833,8 +8832,8 @@ def generar_multi():
         return jsonify(_cruz), 409
     grupos_cfg = cat.get("grupos_tizada", [])
     def _grupo_de(_pid):
-        for g in grupos_cfg:
-            if _pid in (g.get("moldes") or []):
+        for gr in grupos_cfg:
+            if _pid in (gr.get("moldes") or []):
                 return g
         return None
     molds_data, nombres, avisos = [], [], []
@@ -10313,8 +10312,8 @@ def molde_config_aplicar():
         return _r
 
     if campos.get("grupos"):
-        for g in campos["grupos"]:
-            g["piezas"] = [i for i in (_reubicar(int(x)) for x in (g.get("piezas") or [])) if i is not None]
+        for gr in campos["grupos"]:
+            gr["piezas"] = [i for i in (_reubicar(int(x)) for x in (gr.get("piezas") or [])) if i is not None]
         campos["grupos"] = [g for g in campos["grupos"] if g.get("piezas")]
     if campos.get("variantes"):
         for v in campos["variantes"]:
@@ -10634,8 +10633,6 @@ def mesa_img(tid, archivo):
     _no = _trabajo_ajeno(tid)
     if _no:
         return _no
-    import io as _io
-    import fitz
     try:
         pi = max(0, int(request.args.get("pi", 0)))
     except Exception:
@@ -10657,10 +10654,6 @@ def mesa_img(tid, archivo):
     cy1 = _frac(request.args.get("cy1"), 1.0)
     if cx1 - cx0 < 0.001 or cy1 - cy0 < 0.001:       # recorte degenerado: la mesa entera
         cx0, cy0, cx1, cy1 = 0.0, 0.0, 1.0, 1.0
-    entera = (cx0, cy0, cx1, cy1) == (0.0, 0.0, 1.0, 1.0)
-    ruta = os.path.join(TRABAJOS, tid, archivo)
-    if not os.path.exists(ruta):
-        return jsonify({"error": "no existe"}), 404
     try:
         cache = _dibujar_vista_mesa(tid, archivo, pi, w, (cx0, cy0, cx1, cy1))
     except Exception as e:
@@ -11818,9 +11811,9 @@ def eliminar_pieza_catalogo():
     nombre = str(cuerpo.get("nombre", "")).strip()
     grupo = str(cuerpo.get("grupo", "")).strip()
     cat = _cargar_catalogo_para_editar()
-    for g in cat.get("catalogo_grupos", []):
-        if not grupo or g.get("nombre", "").lower() == grupo.lower():
-            g["piezas"] = [p for p in g.get("piezas", []) if p.lower() != nombre.lower()]
+    for gr in cat.get("catalogo_grupos", []):
+        if not grupo or gr.get("nombre", "").lower() == grupo.lower():
+            gr["piezas"] = [p for p in gr.get("piezas", []) if p.lower() != nombre.lower()]
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "catalogo_grupos": cat.get("catalogo_grupos", [])})
 
@@ -12333,15 +12326,15 @@ def guardar_grupo_tizada():
         grupos.append(grupo)
     else:
         enc = False
-        for g in grupos:
-            if g.get("id") == gid:
-                g.update(grupo); enc = True; break
+        for gr in grupos:
+            if gr.get("id") == gid:
+                gr.update(grupo); enc = True; break
         if not enc:
             grupo["id"] = gid; grupos.append(grupo)
     # Un molde solo puede estar en UN grupo: sacarlo de los demás.
-    for g in grupos:
-        if g.get("id") != gid:
-            g["moldes"] = [m for m in (g.get("moldes") or []) if m not in moldes]
+    for gr in grupos:
+        if gr.get("id") != gid:
+            gr["moldes"] = [m for m in (gr.get("moldes") or []) if m not in moldes]
     _guardar_catalogo(cat)
     return jsonify({"ok": True, "id": gid})
 
@@ -12447,76 +12440,18 @@ _JOB_WIN = None      # handle del Job de Windows: mientras viva, los hijos viven
 
 
 def _atar_hijos_a_este_proceso():
-    """Que los procesos de dibujo NO sobrevivan al servidor.
-
-    Windows no mata a los hijos cuando muere el padre: al reiniciar el servidor quedaban 6
-    procesos de dibujo sueltos ocupando ~1 GB, y se iban acumulando con cada reinicio hasta
-    dejar la máquina a medio andar (pasó: 86 procesos, 4,8 GB, y todo tardaba el doble).
-    La forma que da Windows para esto es un JOB OBJECT con `KILL_ON_JOB_CLOSE`: se mete a
-    ESTE proceso adentro y **todos los que cree lo heredan**, así que cuando el servidor se
-    apaga —o lo matan— el sistema se lleva a sus hijos con él.
-
-    Si algo falla (Windows viejo, permisos), se sigue como siempre: no rompe nada."""
+    """Que los procesos de dibujo NO sobrevivan al servidor. La implementación vive en
+    `procesos.atar_hijos()` — se compartió con las herramientas del repo cuando una corrida de
+    contratos cortada dejó 18 procesos huérfanos con 8,8 GB (2026-09-15)."""
     global _JOB_WIN
-    if os.name != "nt":
-        return False
     try:
-        import ctypes
-        from ctypes import wintypes
-
-        class _LIMITES(ctypes.Structure):
-            _fields_ = [("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
-                        ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
-                        ("LimitFlags", wintypes.DWORD),
-                        ("MinimumWorkingSetSize", ctypes.c_size_t),
-                        ("MaximumWorkingSetSize", ctypes.c_size_t),
-                        ("ActiveProcessLimit", wintypes.DWORD),
-                        ("Affinity", ctypes.POINTER(ctypes.c_ulong)),
-                        ("PriorityClass", wintypes.DWORD),
-                        ("SchedulingClass", wintypes.DWORD)]
-
-        class _IO(ctypes.Structure):
-            _fields_ = [(n, ctypes.c_ulonglong) for n in
-                        ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-                         "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
-
-        class _EXT(ctypes.Structure):
-            _fields_ = [("BasicLimitInformation", _LIMITES), ("IoInfo", _IO),
-                        ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
-                        ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
-
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        # Declarar los tipos es OBLIGATORIO: sin esto ctypes asume enteros de 32 bits y en
-        # Windows de 64 el HANDLE se trunca → todo falla en silencio (comprobado: el hijo
-        # sobrevivía igual). Con los tipos puestos, el hijo muere con el padre.
-        k32.CreateJobObjectW.restype = wintypes.HANDLE
-        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
-        k32.SetInformationJobObject.restype = wintypes.BOOL
-        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
-                                                wintypes.LPVOID, wintypes.DWORD]
-        k32.AssignProcessToJobObject.restype = wintypes.BOOL
-        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-        k32.GetCurrentProcess.restype = wintypes.HANDLE
-        job = k32.CreateJobObjectW(None, None)
-        if not job:
-            return False
-        info = _EXT()
-        # KILL_ON_JOB_CLOSE: los hijos se mueren con el servidor (eso es lo que evita los procesos
-        # sueltos). BREAKAWAY_OK: **el AYUDANTE de actualización tiene que poder salirse**. Sin
-        # este segundo flag, `actualizador.py` —que se lanza justo antes del `os._exit(0)` para
-        # reemplazar los archivos— quedaba adentro del Job y Windows se lo llevaba puesto en el
-        # mismo instante: la actualización quedaba a medias y el servidor no volvía ni con la
-        # versión nueva ni con la vieja. Salirse hay que PEDIRLO (CREATE_BREAKAWAY_FROM_JOB): esto
-        # sólo lo habilita, no lo aplica a nadie más.
-        info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0800   # KILL_ON_JOB_CLOSE | BREAKAWAY_OK
-        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
-            return False
-        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
-            return False
-        _JOB_WIN = job       # ¡NO cerrar este handle! Cerrarlo mataría a todo el grupo.
-        return True
+        import procesos
+        ok = procesos.atar_hijos()
+        _JOB_WIN = procesos._JOB
+        return ok
     except Exception:
         return False
+
 
 
 if __name__ == "__main__":

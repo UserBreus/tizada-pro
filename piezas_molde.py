@@ -30,13 +30,11 @@ son opcionales:
 `CAPAS_SISTEMA` se lee como un TALLE (`motor_pedido._talles_de_plantilla`). La pieza va DENTRO de
 la capa del talle al que pertenece.
 """
-import os
 
 import pikepdf
 from pikepdf import Dictionary, Name, Stream
 
 import objetos_agregados as OA
-from molde_real import extraer_piezas_mesa
 
 
 def _ocg_por_nombre(pdf, nombre):
