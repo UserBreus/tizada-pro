@@ -1533,6 +1533,10 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   corrida. `verificar_desplegado` se declaró `CONTRATO_LENTO`: lo que mide ES el despliegue, con
   el resultado ya hecho al lado no comprobaría nada.
 
+  **RESULTADO MEDIDO de la tanda**: de **56 verdes / 10 en rojo / 915 s** a **68 verdes / 0 en
+  rojo** (65 en la tanda rápida, 502 s, + los 3 de integración: 192 s, 245 s y 123 s). El
+  despliegue guardado por sha1 pasó de **107 s a 1 s** en la segunda corrida. Commit `ec33f83`.
+
 - **2026-09-15 (463) — 🔴 NOMBRAR PIEZAS TOCABA PIEZAS QUE NO ESTABAN SELECCIONADAS + limpieza
   de restos de moldes borrados + los huérfanos volvieron (y ahora sí está la causa).**
 
