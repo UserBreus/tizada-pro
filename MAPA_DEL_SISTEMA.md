@@ -1482,6 +1482,52 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-15 (452) — 🏠 EL APLANADO SE MUDA A UN PROCESO APARTE: el servidor pasa de 938 a
+  417 MB de pico, y encima tarda menos.** El usuario: *«¿no es mucho 938 MB? ¿no se puede tener el
+  mismo resultado con menos de 100? el servidor tiene otros proyectos y se va a morir»*.
+
+  **PRIMERO, POR QUÉ NO SE PUEDE ACHICAR** (dos hipótesis mías, las dos medidas y las dos FALSAS):
+  1. «Son las listas del memo» → se probó soltarlas (guardar `True` en vez de la lista): **341 → 339
+     MB**. No era eso. Revertido.
+  2. «Son los streams» → una página tiene 95 XObjects, 3,8 MB comprimidos y **8,8 MB
+     descomprimidos**. Tampoco.
+
+  **LO QUE ES**: `new_ops.extend(sub)` copia **referencias**, así que las piezas que comparten
+  diseño comparten las instrucciones. Lo que pesa son las instrucciones **distintas** de las mesas
+  de diseño ya parseadas, que el memo mantiene vivas **a propósito** — sacarlas fue justo el
+  arreglo que bajó el aplanado de 542 s. **No es desperdicio: es un canje memoria/tiempo ya
+  afinado.** Por eso no se puede achicar… pero sí se puede SACAR DE ACÁ.
+
+  **EL CAMBIO** (`aplanar_rip.aplanar_para_rip`): el camino serial de siempre corre en un
+  **ProcessPoolExecutor(max_workers=1)** de un solo uso. Es **el mismo `_aplanar_archivo`** — no
+  parte la hoja ni la reensambla (eso es el camino `TIZADA_APLANADO_PARALELO`, que sigue opt‑in por
+  su propio riesgo). Al terminar, el hijo muere y el sistema operativo recupera todo.
+  `TIZADA_APLANADO_EN_PROCESO=1` vuelve al de antes.
+
+  | tizada de 4 prendas | pico del servidor | paso `rip` | total |
+  |---|---|---|---|
+  | antes de la 451 | 2.147 MB | +1.829 MB | 56 s |
+  | con el memo por página (451) | 938 MB | +622 MB | 55 s |
+  | **+ aplanado aparte (452)** | **417 MB** | **+28 MB** | **48 s** |
+
+  🔴 **La salida NO cambia, verificado**: mismo SHA-1 del stream de cada página **y de todos sus
+  XObjects**, mismos operadores de color con los mismos conteos, misma geometría y 0 imágenes en
+  las dos hojas, y `verificar_rip_compatible` en verde. (También se comparó el camino
+  `TIZADA_APLANADO_PARALELO=1`: da idéntico y 418 MB — pero se prefiere el proceso único, que no
+  parte nada.)
+
+  **¿Y POR QUÉ NO BAJA DE 100 MB?** Porque lo que queda ya no es el aplanado:
+  · **131 MB** es el PISO del proceso web con todo importado (un python pelado son 15 MB, con
+    pikepdf 22 — medido). Eso lo paga el servidor esté o no generando.
+  · **~286 MB** es el motor en su pico: el molde, el arte y las 112 bases por pieza vivas a la vez
+    (`nesting` 350, `previews` 417). Bajar eso **no es un ajuste, es rehacer cómo el motor sostiene
+    las piezas** — no se hizo.
+
+  ⚠️ **Para una máquina compartida, el que falta sigue siendo el CUPO** (ver 450): 417 MB × diez
+  pedidos a la vez siguen siendo ~4 GB, y no hay nada que lo frene. Bajar el pico ayuda; acotar
+  cuántos corren a la vez es lo que evita la caída. Y en un servidor compartido conviene además
+  `TIZADA_PROCESOS` (acota el pool de render, ~200 MB por proceso).
+
 - **2026-09-15 (451) — 🧠 LOS 2 GB DE UNA TIZADA ERAN UN MEMO QUE VIVÍA DE MÁS. El pico baja de
   2.147 a 938 MB con UNA línea, y el archivo sale idéntico.** Pregunta del usuario tras la 450:
   *«¿y por qué genera 2 GB eso?»*. No se contestó de memoria: se midió paso por paso.

@@ -540,6 +540,31 @@ def aplanar_para_rip(path):
         # contenido al partir/reensamblar según la estructura del arte). El paralelo por página
         # (más rápido en hojas con muchas páginas) es OPT-IN con TIZADA_APLANADO_PARALELO=1.
         if not os.environ.get("TIZADA_APLANADO_PARALELO"):
+            # 🔴 PERO EN UN PROCESO APARTE. El aplanado es, de lejos, lo que más memoria pide de
+            # toda la tizada: medido 2026-09-15, **+622 MB** dentro del servidor, y no es un
+            # desperdicio evitable — son las instrucciones ya parseadas de las mesas de diseño,
+            # que el memo mantiene vivas A PROPÓSITO (sacarlas fue el arreglo que bajó el aplanado
+            # de 542 s). O sea: no se puede achicar, pero SÍ se puede sacar de acá.
+            #
+            # En un hijo de un solo uso corre EL MISMO `_aplanar_archivo` —mismo código, mismo
+            # resultado, sin partir ni reensamblar nada— y al terminar el proceso muere y el
+            # sistema operativo recupera TODO. El servidor pasa de un pico de 938 MB a 418, que
+            # importa de verdad cuando la máquina tiene además otros proyectos encima.
+            # `TIZADA_APLANADO_EN_PROCESO=1` vuelve al de siempre (para depurar).
+            if os.environ.get("TIZADA_APLANADO_EN_PROCESO"):
+                _aplanar_archivo(path)
+                return True
+            try:
+                from concurrent.futures import ProcessPoolExecutor
+                with ProcessPoolExecutor(max_workers=1) as ex:
+                    if ex.submit(_aplanar_una_pagina, path).result():
+                        return True
+                print("  [aplanar_rip] el proceso aparte no pudo; aplano acá mismo")
+            except Exception as e:
+                print(f"  [aplanar_rip] no se pudo aplanar aparte ({e}); aplano acá mismo")
+            # Reintentar acá es seguro: `_aplanar_archivo` guarda al final, así que un fallo a
+            # mitad deja el archivo SIN tocar (es la misma garantía en la que ya se apoyaba el
+            # reintento serial del camino paralelo).
             _aplanar_archivo(path)
             return True
         # 🔴 TODO lo de abajo va con `finally`: si el paralelo falla, el que llama REINTENTA en
