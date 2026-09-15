@@ -1482,6 +1482,78 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-15 (451) — 🧠 LOS 2 GB DE UNA TIZADA ERAN UN MEMO QUE VIVÍA DE MÁS. El pico baja de
+  2.147 a 938 MB con UNA línea, y el archivo sale idéntico.** Pregunta del usuario tras la 450:
+  *«¿y por qué genera 2 GB eso?»*. No se contestó de memoria: se midió paso por paso.
+
+  **DÓNDE ESTABA** (`scratchpad/medir_donde.py`, muestreo cada 0,2 s cruzado con el `progreso` que
+  el propio servidor anota): de los **+2.016 MB**, el paso **`rip` se lleva +1.829**. Todo el resto
+  junto —armar piezas, nesting, previews, ficha— suma ~200 MB.
+
+  **POR QUÉ EL APLANADO CUESTA TANTO**: `aplanar_rip` des-anida los Form XObjects, y des-anidar es
+  **copiar el contenido una vez por cada uso**. Medido sobre una hoja real sin aplanar
+  (`scratchpad/medir_aplanado.py`): la página pasa de **99 operadores a 325.418** (**×3.287**), y
+  sólo tener esa lista viva son **229 MB**. Los 99 son casi todos `Do` — uno por pieza colocada.
+
+  🔴 **LA CAUSA FINA, Y ES UNA LÍNEA.** En `_aplanar_archivo` el memo `_hechos` se creaba **una
+  vez para todo el archivo** y se le pasaba a todas las páginas; en el camino por defecto
+  (`_aplanar_un_nivel`) ahí se guarda, por cada Form XObject, **su lista completa de operadores**
+  (`_hechos[_id] = sub_ops`), que quedaba viva hasta terminar el archivo entero. Ahora se crea
+  **por página**. (El comentario que decía «`_hechos` es por página, así el memo no crece con las
+  páginas» ya estaba escrito — en la OTRA rama, la de `TIZADA_APLANADO_TOTAL`.)
+
+  **MEDIDO** (`scratchpad/medir_hechos.py`, la misma hoja de 5 páginas y 112 piezas, aplanada dos
+  veces):
+
+  | | pico | tiempo | salida |
+  |---|---|---|---|
+  | memo compartido (como estaba) | **+1.253 MB** | 10,4 s | 19,2 MB |
+  | memo por página (ahora) | **+257 MB** | 10,4 s | 19,2 MB |
+
+  🔴 **Y LA SALIDA ES IDÉNTICA, verificado como corresponde para un archivo que va a la imprenta**:
+  mismo SHA-1 del stream de **cada página Y de todos sus XObjects**, y **los mismos operadores de
+  color con las mismas cantidades**. En la hoja cada página es una mesa independiente, así que casi
+  no hay XObjects compartidos entre páginas que reaprovechar: por eso no cuesta tiempo.
+
+  **DE PUNTA A PUNTA**: una tizada de 4 prendas pasa de **pico 2.147 MB → 938 MB** (−56 %), el paso
+  RIP de +1.829 → +622 MB, y el total tarda lo mismo (55 s vs 56 s). Contratos del archivo final en
+  verde: vectorial (0 imágenes), OutputIntent /GTS_PDFX con ICC N=4, `verificar_rip_compatible`,
+  colores CMYK nativos.
+
+  ⚠️ **Sigue faltando el cupo de generaciones simultáneas** (ver 450): con 938 MB por tizada, diez a
+  la vez siguen siendo ~9 GB. Bajó a la mitad, no desapareció.
+
+- **2026-09-15 (451b) — ⚠️ CORRECCIÓN DE LA 449: el diseño del cuello SÍ llega — a veces. Es
+  INTERMITENTE, y eso lo hace peor, no mejor.** En la 449 se afirmó que el rojo del cuello
+  (`0 0.996 1 0.002 k`) **no aparecía en ninguna hoja**. Era cierto para aquella tizada
+  (`20260914-152934-8e3f`, ×0) y **es falso en general**:
+
+  | tizada | prendas | rojo del cuello |
+  |---|---|---|
+  | `20260914-152934-8e3f` (ayer) | 2 (2XL, 4XL) | **×0** |
+  | `20260915-093839-00e2` (hoy) | 4 | ×128 |
+  | `20260915-094145-b067` (hoy) | **las 2 mismas de ayer** | **×64** |
+
+  🔴 **El MISMO pedido, hoy, sí lo trae.** No es el pedido, y **no es el cambio del memo** (la
+  salida se probó byte a byte idéntica). Otro dato que apunta al mismo lado: el color *calculado*
+  (4 decimales) también cambió entre las dos corridas del mismo pedido — `0.831 0.379 0.495 0.129 k`
+  ayer contra `1 0.943 0.179 0.097 k` hoy, con el mismo conteo (×44).
+
+  **HIPÓTESIS (sin confirmar, es lo próximo a probar):** la tizada REUSA las bases por pieza que
+  deja el precalentado (`piezas_cache`, ver [[arte-wysiwyg]]). Justo antes de la tizada de ayer,
+  `medir_visor.py` **borró el `piezas_cache` de jugador** y `arte_asignar_todo` lo rearmó con otros
+  argumentos (`variante=None`, mapeo pasado a mano, `talle_guia="M"`). Si esa tanda dejó bases SIN
+  el diseño y la clave del caché no distingue ese caso, la tizada las reusó tal cual. Sería la
+  misma familia que [[cache-preview-que-piezas]]: **el visor mostraba una prenda y la tizada sacaba
+  otra**.
+
+  **Por qué importa más así que como estaba escrito**: un bug que sale SIEMPRE se ve; uno que
+  depende del estado del caché sale bien impreso casi siempre y mal justo cuando nadie lo mira.
+  **Lo de la 449 que sigue en pie**: el aviso «pieza sin diseño» mira el MAPEO, así que una pieza
+  mapeada que igual sale en blanco **nunca se avisa**.
+  **Plan**: reproducir a propósito — borrar `piezas_cache`, correr `arte_asignar_todo` con esos
+  argumentos, generar, y comparar los colores contra una corrida con el caché caliente.
+
 - **2026-09-15 (450) — 🧪 ¿ESTO VA ÁGIL O TRANCA TODO? Medido: NO hay fugas; el riesgo es el
   PICO de 2,1 GB por tizada, sin ningún cupo que lo frene.** Pregunta del usuario. ⚠️ **No sale de
   la telemetría del servidor publicado**: ese sigue sin contestar (ver 4xx más arriba) — sale de

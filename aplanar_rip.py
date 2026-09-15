@@ -484,8 +484,18 @@ def _aplanar_archivo(path):
     # el handle anterior todavía abierto ese reintento se topaba con el archivo tomado.
     with pikepdf.open(path, allow_overwriting_input=True) as pdf:
         _total = bool(os.environ.get("TIZADA_APLANADO_TOTAL"))
-        _hechos = {}
         for page in pdf.pages:
+            # 🔴 EL MEMO ES **POR PÁGINA**, NO POR ARCHIVO. `_hechos` guarda, por cada Form
+            # XObject, su LISTA COMPLETA DE OPERADORES (una pieza de la tizada son ~2.900), y con
+            # un dict único para todo el archivo esas listas quedaban vivas hasta el final: medido
+            # 2026-09-15 sobre una hoja de 5 páginas y 112 piezas, el pico del aplanado pasa de
+            # **+1.253 MB a +257 MB** (−80 %) creándolo acá adentro. En la hoja cada página es una
+            # mesa independiente, así que casi no hay XObjects compartidos que reaprovechar: el
+            # tiempo quedó igual (10,4 s las dos) y la salida es **idéntica** — mismo hash de la
+            # página y de todos sus XObjects, y los mismos operadores de color con las mismas
+            # cantidades. (El mismo razonamiento que ya estaba escrito en la rama `_total`.)
+            _hechos = {}
+
             if _total:
                 # `_hechos` es por página: en la hoja cada página es independiente y así el memo de las
                 # piezas no crece con las páginas.
