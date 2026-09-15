@@ -1482,6 +1482,57 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-15 (450) — 🧪 ¿ESTO VA ÁGIL O TRANCA TODO? Medido: NO hay fugas; el riesgo es el
+  PICO de 2,1 GB por tizada, sin ningún cupo que lo frene.** Pregunta del usuario. ⚠️ **No sale de
+  la telemetría del servidor publicado**: ese sigue sin contestar (ver 4xx más arriba) — sale de
+  auditar el código y medir en la máquina del taller.
+
+  **1. ✅ NO HAY FUGAS** (`scratchpad/medir_fugas.py`). 6 rondas de trabajo real (bajar mesa con
+  pikepdf, dibujar tramos con PyMuPDF variando el recorte para saltear el caché, página de ficha):
+
+  | | inicio | ronda 6 |
+  |---|---|---|
+  | memoria | 131 MB | **137 MB** (plana desde la ronda 1) |
+  | handles abiertos | 347 | **354** (planos desde la ronda 1) |
+  | hilos | 1 | **1** |
+
+  **2. ✅ TAMPOCO SE ACUMULA ENTRE TIZADAS** (`scratchpad/medir_acumula.py`, 3 tizadas seguidas de 4
+  prendas): pico **2146 / 2152 / 2154 MB** y residuo **385 / 389 / 388 MB**. El salto de 131 a 385
+  pasa ENTERO en la primera tizada y después no crece: es caché que se llena una vez, no una fuga.
+  ⚠️ **Trampa de lectura**: dividir (388−131)/3 da «+86 MB por tizada» y es falso. Con series
+  cortas hay que mirar la CURVA, no el promedio.
+
+  **3. 🔴 EL RIESGO REAL: 2,1 GB DE PICO POR TIZADA Y NINGÚN CUPO.** Una tizada de 4 prendas
+  llega a **+2,0 GB** en el proceso que genera (`scratchpad/medir_pico.py`). Y
+  `generar_multi` termina en `_en_hilo(correr)` (`servidor.py:9348`): **un hilo por pedido, sin cupo
+  ni cola**. El único `BoundedSemaphore` del sistema es `_SEM_ALTA`, y es para SUBIR moldes
+  (`servidor.py:2656`). O sea: **cinco personas apretando «Generar» a la vez son ~10 GB**, más los
+  6 procesos de render (~1,2 GB). Es la explicación de los «12,5 GB» que reportó el usuario.
+  Y el disco lleno rompe de tres formas que no parecen de disco (ver `_disco` en `/api/salud`).
+
+  ⚠️ **NO SE PUSO EL CUPO, a propósito.** Hay una cicatriz: [[un-trabajo-pesado-por-vez]] — una cola
+  general dejó «Armando la tizada» CLAVADA y se revirtió entera. **Pero no es el mismo caso**: lo
+  que falló fue un lock COMPARTIDO CON EL VISOR (`_PIEZAS_BASE_LOCK`, que tomaban también subir el
+  arte y dibujar una mesa). Un semáforo **sólo entre generaciones** —como `_SEM_ALTA`— no toca al
+  visor: con cupo N, las primeras N arrancan siempre y en el taller (una persona) nunca espera
+  nadie. Decisión del usuario, por la cicatriz.
+
+  **4. 🔴 LOS CACHÉS DERIVADOS NO SE PODAN NUNCA.** `datos/` son 926 MB y **856 son
+  `piezas_cache`** (618 MB sólo el diseño «jugador»); más `svg_cache` 106 MB y `mesas_cache` 21 MB.
+  Se borran **sólo** cuando cambia la geometría del molde (`servidor.py:4276`): **no hay poda por
+  edad ni por tamaño**, al revés de `trabajos/`, que sí la tiene desde el changelog 443
+  (`_podar_trabajos_en_disco`). Con varios moldes × varios diseños esto son decenas de GB.
+  ⚠️ **NO SE TOCÓ**: viven bajo `datos/`, y «nunca borrar datos del usuario» es regla dura — aunque
+  sean cachés que se rehacen solas. Plan si se aprueba: colgar una poda por edad del mismo barrido
+  horario que ya corre, con `TIZADA_CACHE_DIAS`.
+
+  **5. ✅ LO QUE SÍ ESTÁ BIEN.** Producción usa **waitress** (servidor real, 8–32 hilos según
+  núcleos), no el Werkzeug de desarrollo — y si waitress no está, **no arranca** en vez de caer al
+  de desarrollo en silencio. Ningún trabajo pesado retiene un hilo HTTP: `generar_multi` contesta
+  `{"id": tid}` al toque y el trabajo va por `_en_hilo`. `_en_hilo` cierra los PDFs abiertos y
+  suelta el candado del catálogo en su `finally`. El pool de render está compartido, así que la CPU
+  está acotada aunque la memoria no.
+
 - **2026-09-14 (449) — 🔴 PENDIENTE / SIN ARREGLAR: EL DISEÑO DEL CUELLO NO LLEGA A LA TIZADA,
   Y NADIE AVISA.** Salió de una pregunta del usuario (*«¿por qué en tus pruebas no se ve bien el
   diseño en los moldes?»*) mirando la tizada `20260914-152934-8e3f` (molde
