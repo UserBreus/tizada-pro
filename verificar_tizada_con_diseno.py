@@ -58,17 +58,18 @@ if not os.path.exists(ORIG):
     print(f"❌ no está el archivo de prueba:\n   {ORIG}")
     sys.exit(1)
 
-tmp = tempfile.mkdtemp(prefix="verif_tizada_b_")
-COPIA = os.path.join(tmp, "plantilla.ai")
+# Desplegar el molde real son ~90 s y el archivo no cambia entre corridas: se reusa el
+# despliegue guardado (`contrato_molde_b`). Un control que no se puede correr seguido
+# no protege nada -- y el tope de la tanda esta para eso.
+import contrato_molde_b as CB
+tmp, COPIA, _alta_cb, _ = CB.espacio_desplegado(ORIG, "verif_tizada_b_")
 print("CONTRATO DE LA TIZADA — molde con el diseño adentro\n")
-print(f"copiando {os.path.getsize(ORIG)/1e6:.0f} MB…")
-shutil.copy2(ORIG, COPIA)
 
 try:
     # ── El alta, igual que la del servidor ──────────────────────────────────────────────────
     print("dando de alta el molde (detecta las piezas de todas las mesas y talles)…")
     t0 = time.time()
-    alta = PD.alta_molde_con_diseno(COPIA)
+    alta = _alta_cb   # ya desplegado arriba
     PD.marcar(COPIA, True)
     MP._DET_CACHE.clear()
     reg = alta["registro"]

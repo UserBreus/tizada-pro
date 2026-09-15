@@ -195,7 +195,22 @@ if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
-        print(__doc__); sys.exit(2)
+        # Sin argumento NO es un error de uso: este archivo tambien corre en la tanda de
+        # contratos, que los llama a todos sin parametros. Antes salia con codigo 2 y la tanda lo
+        # contaba como ROJO para siempre -- un control que siempre esta en rojo deja de mirarse.
+        # Se busca la ultima hoja generada de verdad en `trabajos/`; si no hay ninguna, no hay
+        # nada que verificar y se sale VERDE diciendolo.
+        import glob
+        _hojas = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                               "trabajos", "*", "*.pdf")),
+                        key=os.path.getmtime, reverse=True)
+        _hojas = [h for h in _hojas if not os.path.basename(h).lower().startswith("ficha")]
+        if not _hojas:
+            print("CONTRATO DE COMPATIBILIDAD RIP - no hay ninguna hoja en `trabajos/` "
+                  "para revisar (genera una tizada y volve a correrlo)")
+            sys.exit(0)
+        args = [_hojas[0]]
+        print(f"(sin argumento: se revisa la ultima hoja generada, {os.path.basename(args[0])})")
     path = args[0]
     ok, fallas = verificar(path)
     print(f"CONTRATO DE COMPATIBILIDAD RIP — {os.path.basename(path)} ({os.path.getsize(path)/1e6:.1f} MB)")

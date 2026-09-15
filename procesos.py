@@ -91,6 +91,31 @@ def atar_hijos():
     except Exception:
         return False
 
+
+def matar_arbol(pid):
+    """Mata al proceso `pid` Y A TODOS SUS DESCENDIENTES. Devuelve True si pudo.
+
+    🔴 POR QUÉ HACE FALTA, SI YA ESTÁ EL JOB OBJECT (2026-09-15). El Job mata a los hijos cuando
+    muere EL QUE LOS ATÓ. Pero el corredor de contratos no se muere al cortar UN contrato: le
+    aplica `timeout` y sigue con el siguiente. `subprocess` en ese caso mata sólo al hijo directo
+    —el contrato— y el pool que ese contrato había levantado queda vivo hasta el final de la
+    tanda. Medido: 13 procesos sueltos con 930 MB mientras el corredor seguía corriendo.
+    Cortar un proceso que lanzó otros es cortar el ÁRBOL, no la raíz sola.
+
+    Es un `taskkill` sobre un PID CONCRETO con `/T` (su descendencia). NO es un mass-kill: nunca
+    se mata por nombre de imagen — eso está prohibido en este repo y se llevaría puesto al
+    servidor del usuario."""
+    if os.name != "nt":
+        try:
+            os.kill(pid, 9)
+            return True
+        except Exception:
+            return False
+    import subprocess
+    try:
+        r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(int(pid))],
+                           capture_output=True, timeout=20)
+        return r.returncode == 0
     except Exception:
         return False
 

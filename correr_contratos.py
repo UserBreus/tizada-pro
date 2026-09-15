@@ -11,6 +11,7 @@ rápido, no se corre, y deja de servir.
     marcaba en rojo.)
   · Al final, la lista de los LENTOS aunque hayan pasado: son los próximos a arreglar.
 """
+import io
 import os
 import subprocess
 import sys
@@ -19,10 +20,19 @@ import time
 import procesos
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-TOPE = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 60
+TOPE = next((int(a) for a in sys.argv[1:] if a.isdigit()), 60)
 LENTO = TOPE * 0.5          # pasó, pero tardó demasiado para lo que mide
 
 def main():
+    # El corredor escribe emojis y acentos. Redirigido a un archivo, Windows le pone cp1252 a
+    # stdout y el `print` del RESUMEN reventaba con UnicodeEncodeError: la tanda corria entera
+    # y despues no se podia leer QUE fallo. La herramienta que reporta problemas no puede
+    # romperse justo al reportarlos.
+    for _f in (sys.stdout, sys.stderr):
+        try:
+            _f.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     os.chdir(AQUI)
     # 🔴 LOS HIJOS SE MUEREN CON ESTO. Un contrato levanta su propio pool: al cortar una corrida
     # quedaron 18 procesos sueltos con 8,8 GB en la máquina del usuario (2026-09-15). Con el Job
@@ -34,15 +44,41 @@ def main():
     env = dict(os.environ, PYTHONIOENCODING="utf-8",
                TIZADA_PROCESOS=os.environ.get("TIZADA_PROCESOS", "2"))
     files = sorted(f for f in os.listdir(AQUI) if f.startswith("verificar_") and f.endswith(".py"))
+    # 🔴 LOS PESADOS SE DECLARAN Y SE SACAN DE LA TANDA RÁPIDA. Un contrato de integración sobre
+    # el archivo real de 123 MB tarda minutos y no hay forma honesta de acortarlo (no existe un
+    # molde liviano con varias mesas). Antes que subirle el tope a TODOS —o que la tanda entera
+    # tarde media hora y nadie la corra—, se aparta: `--todos` lo incluye.
+    todos = "--todos" in sys.argv
+    pesados = set()
+    for f in files:
+        try:
+            if "CONTRATO_LENTO" in io.open(os.path.join(AQUI, f), encoding="utf-8").read(2000):
+                pesados.add(f)
+        except Exception:
+            pass
+    if not todos and pesados:
+        print("  (fuera de la tanda rapida, son de integracion: " + ", ".join(sorted(pesados))
+              + " - correlos con --todos)", flush=True)
+        files = [f for f in files if f not in pesados]
     print(f"{len(files)} contratos · tope {TOPE}s cada uno\n")
     rojos, lentos, verdes, t0 = [], [], 0, time.time()
     for f in files:
         t = time.time()
+        # 🔴 AL CORTAR POR TOPE HAY QUE MATAR EL ÁRBOL, NO EL CONTRATO SOLO. `subprocess.run` con
+        # `timeout` mata al hijo directo; el pool que ese contrato levantó queda vivo hasta que
+        # termine la tanda entera (medido 2026-09-15: 13 procesos, 930 MB, con el corredor todavía
+        # corriendo). El Job Object sólo actúa cuando muere el corredor, y acá el corredor sigue.
+        pr = subprocess.Popen([sys.executable, f], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, env=env, errors="replace")
         try:
-            r = subprocess.run([sys.executable, f], capture_output=True, text=True,
-                               timeout=TOPE, env=env, errors="replace")
-            dur, code, out = time.time() - t, r.returncode, (r.stdout or "") + (r.stderr or "")
+            so, se = pr.communicate(timeout=TOPE)
+            dur, code, out = time.time() - t, pr.returncode, (so or "") + (se or "")
         except subprocess.TimeoutExpired:
+            procesos.matar_arbol(pr.pid)
+            try:
+                pr.communicate(timeout=10)
+            except Exception:
+                pr.kill()
             dur, code, out = time.time() - t, 124, ""
         if code == 0:
             verdes += 1

@@ -1482,6 +1482,100 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-15 (464) — 🔴 LA GUARDA LE PEDÍA `molde.editar` A 31 RUTAS QUE NO TOCAN NINGÚN
+  MOLDE (y de paso las «protegía» con el permiso equivocado).**
+
+  Lo encontraron DOS contratos en rojo que parecían no tener nada que ver entre sí
+  (`verificar_reservas` y `verificar_tutorial_ventana`): los dos daban 403 con el mensaje de
+  `molde.editar`. Causa: cuando un POST no trae `pid`, `_guardia_moldes` resuelve el molde ACTIVO
+  y exige `molde.editar`. Bien pensado para las ~30 rutas que escriben un molde sin declararlo —
+  **mal para las 31 que no tocan ninguno**. Auditadas una por una (AST sobre `servidor.py`), un
+  Operario no podía: grabar un tutorial, tomar/soltar una reserva, guardar una plantilla de
+  planilla o una regla, cambiar el ancho o el margen de una tela, tocar un preset de nesting,
+  borrar una configuración guardada suya… **ni cancelar su propia tizada**
+  (`/api/trabajo/<tid>/cancelar`).
+
+  El arreglo anterior (`_API_DEL_PEDIDO_SIN_MOLDE`, 3 rutas) era el mismo parche a escala chica:
+  se eliminó y lo reemplaza `_API_SIN_MOLDE`, una tabla **ruta → lo que de verdad le corresponde**:
+  un permiso del catálogo, `"dueño"` (se controla sola) o `"libre"` (no escribe nada). Se compara
+  contra `request.url_rule.rule`, no contra el path: por el path, `/api/trabajo/<tid>/cancelar`
+  no entraría nunca.
+
+  🔴 **Y EXIMIR SIN PONER EL PERMISO ABRE LA PUERTA.** Varias de esas rutas no tenían NINGÚN
+  control propio: el candado accidental era el permiso ajeno. Ahora `catalogo_piezas`,
+  `catalogo_grupos`, `plantillas_planillas`, `reglas_planilla`, `nesting_presets`, `grupos_tizada`,
+  `telas/ancho`, `telas/margen`, `perfiles/config`, `registro/limpiar` y `publicacion/*` piden
+  `config.editar`; `fuente/archivo` pide `fuente.gestionar`; `tutoriales*`, `ayuda.grabar`;
+  `trabajo/<tid>/cancelar`, `pedido.generar`.
+
+  **AGUJERO REAL que encontró el contrato nuevo**: `/api/pedido/fuentes_pedido_limpiar` borraba
+  las tipografías de CUALQUIER pid que le mandaran en el cuerpo, sin mirar de quién era el molde.
+  Ahora filtra por dueño (misma regla que `limpiar_efimeros`).
+
+  Contrato `verificar_permisos_rutas.py`: recorre las 89 rutas de escritura y falla si aparece una
+  nueva sin clasificar, si una con permiso declarado resuelve un molde, si una marcada «dueño» no
+  mira al dueño, si una «libre» escribe, o si se inventa un permiso que no está en `auth.PERMISOS`.
+
+  ⚠️ **Trampa que me comí**: inserté `_guard_permiso` justo encima de `_guardia_moldes` y la
+  función nueva **se quedó con el `@app.before_request`** — el server empezó a tirar 500 en todo.
+  Insertar una función arriba de otra decorada le roba el decorador; mirar SIEMPRE la línea previa.
+
+  **Otros dos arreglos del mismo barrido:** `correr_contratos` reventaba con `UnicodeEncodeError`
+  al imprimir el resumen redirigido a un archivo (stdout en cp1252): la tanda corría entera y
+  después no se podía leer QUÉ falló — ahora reconfigura stdout a utf-8. Y
+  `verificar_rip_compatible` salía con código 2 cuando lo llamaban sin argumento, o sea que en la
+  tanda figuraba ROJO para siempre: ahora toma la última hoja de `trabajos/` (y si no hay ninguna,
+  sale verde diciéndolo). `verificar_mesa_por_talle` estaba en rojo por una línea textual que yo
+  mismo reescribí al extraer `_dibujar_vista_mesa`: ahora busca la DECISIÓN, no la letra.
+
+  **Y el tope de tiempo:** `verificar_hoja_compartida` pasó a reusar el molde ya desplegado
+  (`contrato_molde_b.py`, guardado por sha1 en el temporal) en vez de desplegarlo de cero cada
+  corrida. `verificar_desplegado` se declaró `CONTRATO_LENTO`: lo que mide ES el despliegue, con
+  el resultado ya hecho al lado no comprobaría nada.
+
+- **2026-09-15 (463) — 🔴 NOMBRAR PIEZAS TOCABA PIEZAS QUE NO ESTABAN SELECCIONADAS + limpieza
+  de restos de moldes borrados + los huérfanos volvieron (y ahora sí está la causa).**
+
+  **1. EL BUG QUE REPORTÓ EL USUARIO.** Textual: *«si hay 2 piezas que se parecen o que son
+  simplemente iguales las nombra iguales aunque no las tenga seleccionada. le pongo un nombre y
+  cuando le pongo otro nombre a las otras que son iguales me renombra la misma»*. Y la regla:
+  *«si yo selecciono una, o 5 o 10 piezas nombrara esas»*.
+
+  Causa: `App.jsx → _renumerar(obj, gen)` **renumeraba TODO el nombre genérico 1..N en cada
+  gesto**. Con dos mangas: nombraba la primera «Manga»; al nombrar la segunda —también «Manga»—
+  la función reescribía las dos y la PRIMERA, que no estaba seleccionada, pasaba sola a
+  «Manga 1». Desde la pantalla se ve como que el sistema renombra la pieza equivocada.
+  Lo mismo hacían `toggleNombreEnPieza`, `agregarPiezasANombre` y `renombrarGrupoNombres`, y
+  quitarle el nombre a una renumeraba a las demás.
+
+  ⚠️ **El servidor ya tenía la regla BIEN** (`motor_pedido.nombres_normalizados`: «lo que ya es
+  único se respeta, sólo se desambiguan los repetidos») **desde que se arregló ahí el mismo
+  error**. El frontend se quedó con la versión vieja: la pantalla y el motor nombraban distinto.
+  Cuando una regla se arregla de un lado hay que buscarla del OTRO.
+
+  Ahora `_numerarTocadas(obj, gen, idxs)`: las piezas que no se tocaron quedan intactas y sólo a
+  las tocadas se les da el primer número LIBRE. Contrato nuevo `verificar_nombrar_seleccionadas.py`
+  — no lee el código buscando palabras: **saca la función real de `App.jsx` y la EJECUTA con node**
+  sobre 6 escenarios (incluido «quitar un nombre no renumera a las demás»).
+
+  **2. LOS PROCESOS HUÉRFANOS VOLVIERON: 13 sueltos, 930 MB, con el corredor todavía vivo.**
+  El Job Object de `procesos.atar_hijos()` mata a los hijos cuando muere EL QUE LOS ATÓ — y al
+  cortar UN contrato por tope el corredor **no se muere**, sigue con el siguiente. `subprocess.run`
+  con `timeout` mata sólo al hijo directo y el pool que ese contrato había levantado quedaba vivo
+  hasta el final de la tanda. Arreglado: `procesos.matar_arbol(pid)` (taskkill `/T` sobre un PID
+  CONCRETO, nunca por nombre de imagen) y `correr_contratos` pasó a `Popen` + matar el árbol al
+  vencer el tope. **La lección: cortar un proceso que lanzó otros es cortar el ÁRBOL, no la raíz.**
+
+  **3. RESTOS DE MOLDES YA BORRADOS (pedido del usuario).** Auditado contra
+  `productos_catalogo.json`: los 2 moldes vivos no se tocaron. 11 carpetas VACÍAS de pids muertos
+  borradas; 4 con contenido (21,1 MB) movidas a `_papelera/<fecha>/` — **no se borran de una: ya
+  pasó que se destruyeron 3 moldes del usuario**, y el catálogo puede perder entradas solo (ver
+  «candado para editar el catálogo»). Se borran del todo cuando el usuario lo confirme.
+  Además 454 MB de `.npy` míos de verificación en `scratchpad/`.
+  **Lo que NO se tocó y hay que saber que está**: `datos/productos/<pid>/disenos/*/piezas_cache`
+  = 744 MB y `entrada/.../svg_cache` = 167 MB, todo de los 11 diseños VIVOS del molde activo. Es
+  caché regenerable, no resto: entra en la poda con pantalla de configuración que queda pendiente.
+
 - **2026-09-15 (462) — 🧯 SE CORRIERON LOS 66 CONTRATOS Y SE ARREGLÓ TODO LO QUE ESTABA EN ROJO —
   incluido un bug de AYER que hacía que un toggle ELEGIDO no llegara a la prenda.** El usuario:
   *«debes trabajar dejando las cosas bien»*. Tenía razón: en la entrega anterior encontré un

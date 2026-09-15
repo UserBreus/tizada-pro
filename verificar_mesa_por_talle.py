@@ -29,6 +29,7 @@ import glob
 import inspect
 import io
 import os
+import re
 import sys
 import tempfile
 import types
@@ -168,7 +169,12 @@ def main():
     # ── 5. EL RECORTE NÍTIDO ────────────────────────────────────────────────────────────────
     print("\n5 · 🔴 AL ACERCARSE, LO QUE SE MIRA SE LEE")
     ok("cx0" in src_img and "clip=clip" in src_img, "la vista acepta un rectángulo y lo recorta")
-    ok("entera = (cx0, cy0, cx1, cy1) == (0.0, 0.0, 1.0, 1.0)" in src_img,
+    # Se busca la DECISIÓN, no una línea textual: el `entera = …` se reescribió al extraer
+    # `_dibujar_vista_mesa` (y de paso pasó a cubrir `recorte=None`), y este contrato se puso en
+    # rojo por la letra, no por el comportamiento. Lo que importa es que el rectángulo completo
+    # siga siendo el caso por defecto.
+    _ent = re.search(r"entera\s*=\s*(.+)", src_img)
+    ok(bool(_ent) and "(0.0, 0.0, 1.0, 1.0)" in _ent.group(1),
        "…y la mesa entera sigue siendo el caso por defecto")
     ok("sufijo" in src_img, "cada recorte se guarda aparte (moverse un poco reusa el anterior)")
     ok("TILE_CM = 50" in app and "BASE_W = 1200" in app,

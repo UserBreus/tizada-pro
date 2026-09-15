@@ -640,7 +640,6 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
       else if (n.includes(_nv)) contiene.push(o);
     });
     return [...exacta, ...empieza, ...contiene];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options, _nv, verTodas]);
   // Valor INVÁLIDO: hay opciones fijas, la celda tiene texto y no coincide con ninguna.
   const invalido = options.length > 0 && _nv !== '' && !options.some(o => _norm(o) === _nv);
@@ -5595,7 +5594,6 @@ export default function App() {
     const pos = cfg ? delTpl.findIndex(c => c.role === 'cantidad') : -1;
     if (pos < 0 || pos >= base.length) return [...base, col];
     const out = [...base]; out.splice(pos, 0, col); return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_colsProd, plantillasPlanillas, activoProdDetalle?.planilla_template_id]);
 
   // Terminología configurable del producto activo (cómo se llaman los conceptos
@@ -5987,7 +5985,7 @@ export default function App() {
       window.removeEventListener('tizada:catalogo', onCat);
       document.removeEventListener('visibilitychange', onVer);
     };
-  }, [sesionLista]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sesionLista]);
 
   const fetchConfig = async () => {
     try {
@@ -8510,7 +8508,8 @@ export default function App() {
     if (!idxs.length) { showError('Seleccioná al menos una pieza (clic o recuadro)'); return; }
     const next = { ...etqNombres };
     idxs.forEach(idx => { next[idx] = base; });
-    _renumerar(next, base);   // renumera TODO el genérico (nuevas + existentes) → nombres únicos, sin colisión
+    // SÓLO las seleccionadas: las que ya tenían ese nombre se quedan como están.
+    _numerarTocadas(next, base, idxs);
     setEtqNombres(next);
     setSelNombrar(new Set());
     setEtqNombreInput('');
@@ -8555,7 +8554,6 @@ export default function App() {
     if (!guia || !talles.length) return;
     _etqCapasInit.current = true;
     setTallesOcultos(new Set(talles.filter(t => t !== guia)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabAjustesMolde, empTodasData, etqData?.talle_ref]);
 
   // ETIQUETA: al entrar, el visor se planta en el talle GUÍA (si estaba en otro). La
@@ -8690,13 +8688,15 @@ export default function App() {
     if (!base || base === gen) return;
     const next = { ...etqNombres };
     // Renombrar el grupo viejo al nombre base (sin número)…
-    let toco = false;
-    Object.entries(next).forEach(([idx, nm]) => { if (nm && nombreGenerico(nm) === gen) { next[idx] = base; toco = true; } });
-    if (!toco) return;
-    // …y RENUMERAR TODO el genérico `base` junto (las recién renombradas + las que YA se
-    // llamaban base) → nombres ÚNICOS. Antes numeraba 1..N ignorando las existentes, creaba
-    // duplicados y al guardar el registro (dict por nombre) colisionaba y PERDÍA la pieza.
-    _renumerar(next, base);
+    const _tocadas = [];
+    Object.entries(next).forEach(([idx, nm]) => {
+      if (nm && nombreGenerico(nm) === gen) { next[idx] = base; _tocadas.push(Number(idx)); }
+    });
+    if (!_tocadas.length) return;
+    // Se numeran SÓLO las que cambiaron de nombre. Las que ya se llamaban `base` de antes no se
+    // tocan: si no, renombrar un grupo le movía el nombre a piezas de otro grupo (y el registro,
+    // que es un dict por nombre, perdía una en silencio al colisionar).
+    _numerarTocadas(next, base, _tocadas);
     setEtqNombres(next);
     if (grupoNombresAbierto === gen) setGrupoNombresAbierto(base);
   };
@@ -8707,14 +8707,28 @@ export default function App() {
     setResaltarNombre(r => r === gen ? null : r);
   };
   const quitarNombrePieza = (idx) => setEtqNombres(prev => ({ ...prev, [idx]: '' }));
-  // Renumera todas las piezas de un nombre genérico 1..N (por número actual / idx). 1 sola → sin número.
-  const _renumerar = (obj, gen) => {
-    const items = Object.entries(obj)
-      .filter(([, nm]) => nm && nombreGenerico(nm) === gen)
-      .map(([idx, nm]) => ({ idx: parseInt(idx, 10), num: parseInt((String(nm).match(/(\d+)\s*$/) || [])[1] || '0', 10) }))
-      .sort((a, b) => (a.num - b.num) || (a.idx - b.idx));
-    if (items.length === 1) obj[items[0].idx] = gen;
-    else items.forEach((it, k) => { obj[it.idx] = `${gen} ${k + 1}`; });
+  // 🔴 SE NOMBRA LO QUE ESTÁ SELECCIONADO Y NADA MÁS (regla del usuario 2026-09-15).
+  // Antes acá se RENUMERABA TODO el genérico 1..N en cada gesto. Con dos piezas parecidas el
+  // efecto era el que reportó el usuario: nombraba una «Manga», y al nombrar la otra —también
+  // «Manga»— la PRIMERA, que ni siquiera estaba seleccionada, se convertía sola en «Manga 1».
+  // Parecía que el sistema «renombraba la pieza equivocada».
+  // Ahora: las piezas que NO se tocaron conservan su nombre tal cual, y sólo a las tocadas se les
+  // da el primer número LIBRE. Es la misma regla que ya aplica el servidor en
+  // `motor_pedido.nombres_normalizados` («lo que ya es único se respeta»), así que el nombre que
+  // se ve en pantalla es el que queda guardado.
+  const _numerarTocadas = (obj, gen, idxs) => {
+    const tocadas = new Set((idxs || []).map(Number));
+    const usados = new Set(Object.entries(obj)
+      .filter(([i, nm]) => nm && !tocadas.has(Number(i)) && nombreGenerico(nm) === gen)
+      .map(([, nm]) => String(nm).trim()));
+    [...tocadas].sort((a, b) => a - b).forEach(idx => {
+      if (!obj[idx] || nombreGenerico(obj[idx]) !== gen) return;   // se le quitó el nombre: no se toca
+      let fin = gen;
+      let n = 1;
+      while (usados.has(fin)) { fin = `${gen} ${n}`; n += 1; }
+      obj[idx] = fin;
+      usados.add(fin);
+    });
     return obj;
   };
   // Editar un nombre EN EL VISOR: tocar una pieza la suma o la quita de ese nombre.
@@ -8722,12 +8736,12 @@ export default function App() {
     const next = { ...prev };
     if (next[idx] && nombreGenerico(next[idx]) === gen) next[idx] = '';   // ya era de este nombre → quitar
     else next[idx] = gen;                                                  // sumar a este nombre
-    return _renumerar(next, gen);
+    return _numerarTocadas(next, gen, [idx]);   // la pieza tocada y nadie más
   });
   const agregarPiezasANombre = (gen, idxs) => setEtqNombres(prev => {
     const next = { ...prev };
     idxs.forEach(idx => { next[idx] = gen; });
-    return _renumerar(next, gen);
+    return _numerarTocadas(next, gen, idxs);   // las agregadas y nadie más
   });
 
   // Recuadro de selección (marquee): clic izq. sostenido sobre un espacio vacío + arrastrar →
@@ -9478,7 +9492,6 @@ export default function App() {
     if (pedidoPaso !== 'arte') return;
     cargarFuentesEstado();
     cargarFuentesTodas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     // `_idsCat`/`arteCargado` en las deps: al RECARGAR la página parado en el Arte, el efecto
     // corría antes de que llegara el catálogo → los moldes con diseño no se reconocían como
     // tales (y el activo era `prod_default`): la tipografía faltante no se avisaba nunca.
@@ -9565,13 +9578,9 @@ export default function App() {
       const r = await fetch(`/api/plantilla/deteccion_todas?pid=${encodeURIComponent(pid)}`);
       const d = await r.json();
       if (!r.ok) { setEmpTodasMotivo(d.error || 'no se pudieron leer todas las variantes'); return null; }
-      // ANIDADO = los talles están dibujados uno ENCIMA del otro: mostrarlos juntos es un amasijo
-      // ilegible (no se puede distinguir el frente del S del frente del M). Ahí se trabaja de a uno.
-      // ⛔ El corte por ANIDADO se sacó (2026-08-18): el molde se muestra como viene.
-      if (false && d.formato === 'anidado') {
-        setEmpTodasMotivo(`Este molde tiene los ${term.variante.toLowerCase()}s dibujados uno ENCIMA del otro: mostrarlos juntos sería ilegible, así que se agrupa de a un ${term.variante.toLowerCase()}.`);
-        return null;
-      }
+      // ⛔ ACÁ VIVÍA EL CORTE POR ANIDADO («los talles están uno encima del otro, se trabaja de a
+      // uno»). Se sacó el 2026-08-18: el molde se muestra como viene. Quedó un `if (false && …)`
+      // que el linter marcaba como condición constante; el bloque se eliminó entero.
       // La correspondencia se guarda por (talle, pieza_idx) y ese índice es RELATIVO a la mesa: si
       // esta vista mirara otra mesa que el emparejado, la selección apuntaría a piezas que no son.
       if (empd?.mesa != null && d.mesa != null && empd.mesa !== d.mesa) {
@@ -12156,6 +12165,7 @@ export default function App() {
   // si el valor no coincide, deja la celda VACÍA. Mapea columnas por encabezado
   // (nombre/rol) o, si no hay encabezado reconocible, por posición.
   const _parseCSV = (text) => {
+    // eslint-disable-next-line no-irregular-whitespace -- el carácter raro ES el BOM que se saca
     text = String(text || '').replace(/^﻿/, '');   // saca el BOM
     const primera = (text.split(/\r?\n/)[0] || '');
     const cnt = { ',': 0, ';': 0, '\t': 0 }; let qq = false;
@@ -12775,7 +12785,7 @@ export default function App() {
   // tengo variable?»).
   useEffect(() => {
     if (activoTab === 'pedidos' && pedidoPaso === 'moldes') fetchProductos();
-  }, [activoTab, pedidoPaso]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activoTab, pedidoPaso]);
 
   const pasoItems = React.useMemo(() => {
     const it = [];
@@ -12866,7 +12876,7 @@ export default function App() {
     }
     return it;
   }, [pedidoPaso, disenosPedido, disenoMoldes, disenosSinMolde, tareasArte, arteCargado, disenoVars, _idsCat,
-      _avanceCat, telasIncompletas, telasFaltantesTotal, fuentesPorArte, filas, cols, moldesSeleccionados, trabajosMulti]);   // eslint-disable-line react-hooks/exhaustive-deps
+      _avanceCat, telasIncompletas, telasFaltantesTotal, fuentesPorArte, filas, cols, moldesSeleccionados, trabajosMulti]);
 
   const removeFila = (i) => {
     const next = filas.filter((_, idx) => idx !== i);

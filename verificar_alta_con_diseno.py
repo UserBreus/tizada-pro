@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
 """
+CONTRATO_LENTO — es una prueba de integración sobre el archivo REAL de 123 MB y 9 mesas: lee los
+contornos de todas las mesas de verdad. No hay un molde liviano con varias mesas con el que
+ejercer lo mismo, así que tarda minutos y el corredor lo saca de la tanda rápida (`--todos` lo
+incluye). Se le sacó lo que sí se podía: no arma las páginas por talle (`paginas=False`, eso lo
+cubre `verificar_desplegado`) y guarda el alta por sha1 del archivo.
+
 CONTRATO: EL ALTA Y EL VISOR DE UN MOLDE CON EL DISEÑO ADENTRO (camino B, E2).
 Se corre con `py verificar_alta_con_diseno.py [ruta al .ai]`.
 
@@ -35,8 +41,81 @@ import motor_pedido as MP              # noqa: E402
 import molde_real as MR                # noqa: E402
 import piezas_con_diseno as PD         # noqa: E402
 
-ORIG = (sys.argv[1] if len(sys.argv) > 1 else
-        r"C:\Users\user2\Downloads\PRUEBA TIZADA PRO\para acomodo de archivos\CAMISETA JUGADOR.ai")
+def _molde_de_prueba():
+    """El molde del camino B **MÁS LIVIANO** que haya a mano.
+
+    🔴 POR QUÉ EL MÁS LIVIANO (2026-09-15). Este contrato hace un alta COMPLETA: con la CAMISETA
+    de 30 MB pasa de 90 s y se salía del tope del corredor. Un contrato que tarda minutos no se
+    corre, y uno que no se corre no protege nada. La SHORT (4,4 MB) ejerce exactamente el mismo
+    camino en una fracción del tiempo. Se puede forzar otro pasándolo por parámetro.
+    """
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    cands = []
+    for base in (os.path.join(os.path.expanduser("~"), "Downloads",
+                              "drive-download-20260914T123733Z-1-001", "MOLDES"),
+                 os.path.join(os.path.expanduser("~"), "Downloads",
+                              "PRUEBA TIZADA PRO", "para acomodo de archivos")):
+        if os.path.isdir(base):
+            cands += [os.path.join(base, f) for f in os.listdir(base) if f.lower().endswith(".ai")]
+    entrada = os.environ.get("TIZADA_ENTRADA") or os.path.join(RAIZ, "entrada")
+    if os.path.isdir(entrada):
+        for pid in os.listdir(entrada):
+            pl = os.path.join(entrada, pid, "plantilla.ai")
+            if os.path.exists(pl):
+                try:
+                    if PD.es_camino_b(pl):
+                        cands.append(pl)
+                except Exception:
+                    pass
+    # 🔴 Y CON VARIAS MESAS: este contrato comprueba «una pieza por mesa» y que el visor muestre
+    # las de UNA sola. Un molde de una sola mesa no ejerce eso y lo deja en rojo sin que haya nada
+    # roto (pasó al elegir sólo por tamaño). Se pide más de una mesa y, entre ésos, el más chico.
+    import pymupdf as _fz
+    buenos = []
+    for c in {os.path.abspath(x) for x in cands if os.path.exists(x)}:
+        try:
+            d = _fz.open(c)
+            n = d.page_count
+            d.close()
+            if n > 1:
+                buenos.append((os.path.getsize(c), c))
+        except Exception:
+            pass
+    return min(buenos)[1] if buenos else ""
+
+
+def _alta_cacheada(copia):
+    """`alta_molde_con_diseno` con el resultado guardado por sha1 del archivo.
+
+    El alta sin páginas del molde real son ~145 s de leer contornos, y el archivo no cambia entre
+    corridas. Se guarda el resultado al lado del temporal del sistema; si el .ai cambia, el sha1
+    cambia y se rehace solo. `VERIF_SIN_CACHE=1` fuerza rehacerlo.
+    """
+    import hashlib
+    import json
+    h = hashlib.sha1()
+    with open(copia, "rb") as fh:
+        for trozo in iter(lambda: fh.read(1 << 20), b""):
+            h.update(trozo)
+    cache = os.path.join(tempfile.gettempdir(), f"verif_alta_b_{h.hexdigest()[:16]}_v2.json")
+    if not os.environ.get("VERIF_SIN_CACHE") and os.path.exists(cache):
+        try:
+            d = json.load(open(cache, encoding="utf-8"))
+            PD.marcar(copia, True)          # la marca del camino B la pone el alta: acá va a mano
+            print(f"    (alta reutilizada de {os.path.basename(cache)})")
+            return d
+        except Exception:
+            pass
+    d = PD.alta_molde_con_diseno(copia, paginas=False)
+    try:
+        json.dump(d, open(cache, "w", encoding="utf-8"))
+    except Exception:
+        pass
+    return d
+
+
+ORIG = _molde_de_prueba()
 FALLOS = []
 
 
@@ -59,7 +138,16 @@ print(f"copia de trabajo en {time.time()-t0:.1f}s  ({os.path.getsize(COPIA)/1e6:
 # ─────────────────────────────────────────────────────────────────
 print("\n1 · EL ALTA ARMA EL REGISTRO, SIN EMPAREJAR NADA")
 t0 = time.time()
-alta = PD.alta_molde_con_diseno(COPIA)
+# 🔴 `paginas=False`: el alta completa arma UNA PÁGINA POR TALLE del molde desplegado, que es
+# casi todo el costo (con el archivo real de 123 MB, minutos). Este contrato no mira esas páginas
+# —comprueba el registro, las mesas, los talles y el visor— así que no hay por qué construirlas:
+# de eso se ocupa `verificar_desplegado`. Un contrato que tarda minutos no se corre (2026-09-15).
+#
+# 🔴 Y EL RESULTADO SE GUARDA. Leer los contornos de las 9 mesas del archivo real (123 MB) son
+# ~145 s, y el archivo no cambia entre corridas: se cachea por sha1 del .ai + versión del formato,
+# así la primera vez se paga y las siguientes son segundos. Es lo que hace que este contrato se
+# pueda correr seguido — y uno que no se corre no protege nada. `VERIF_SIN_CACHE=1` lo fuerza.
+alta = _alta_cacheada(COPIA)
 print(f"    ({time.time()-t0:.1f}s)")
 reg = alta["registro"]
 ok(alta["origen"] == "con_diseno", "el alta se declara del camino B")

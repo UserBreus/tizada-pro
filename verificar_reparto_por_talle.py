@@ -7,6 +7,12 @@ repartía el trabajo **por mesa**, así que ahí no repartía nada: 20 talles en
 proceso, 197 s con el usuario esperando en el paso Arte. Ahora, cuando sobran procesos para las
 mesas que hay, el trozo de trabajo pasa a ser **(mesa, unos talles)**.
 
+CONTRATO_LENTO - fuera de la tanda rapida (`correr_contratos.py --todos` lo incluye). No se
+puede acelerar reusando el despliegue guardado, como hacen los otros contratos del camino B
+con `contrato_molde_b`: lo que ESTE mide es el REPARTO del despliegue -- despliega el mismo
+molde con distinta cantidad de procesos y compara que den lo mismo. Con el resultado ya
+hecho al lado no comprobaria nada.
+
 Lo que se prueba:
   1. cómo se parte: el orden se respeta, no se pierde ni se repite un talle, y ningún proceso se
      lleva menos de `_TALLES_POR_PROCESO` (cada uno vuelve a parsear la mesa: con 11 procesos en

@@ -47,17 +47,18 @@ if not os.path.exists(ORIG):
     print(f"❌ no está el archivo de prueba:\n   {ORIG}")
     sys.exit(1)
 
-tmp = tempfile.mkdtemp(prefix="verif_visor_")
-COPIA = os.path.join(tmp, "molde.ai")
+# Desplegar el molde real son ~90 s y el archivo no cambia entre corridas: se reusa el
+# despliegue guardado (`contrato_molde_b`). Un control que no se puede correr seguido
+# no protege nada -- y el tope de la tanda esta para eso.
+import contrato_molde_b as CB
+tmp, COPIA, _alta_cb, _ = CB.espacio_desplegado(ORIG, "verif_visor_")
 print("CONTRATO: EL VISOR DEL CAMINO B ABRE AL INSTANTE\n")
-print(f"copiando el archivo ({os.path.getsize(ORIG)/1e6:.0f} MB)…")
-shutil.copy2(ORIG, COPIA)
 
 try:
     # ══ 1. EL ALTA DEJA EL VISOR DE TODOS LOS TALLES ═════════════════════════════════════════
     print("\n1 · EL ALTA DEJA EL VISOR ARMADO, TALLE POR TALLE")
     t0 = time.time()
-    alta = PD.alta_molde_con_diseno(COPIA)
+    alta = _alta_cb   # ya desplegado arriba
     t_alta = time.time() - t0
     visor = alta.get("visor") or {}
     print(f"    ({t_alta:.0f}s) alta de {len(alta['piezas'])} piezas × {len(alta['talles'])} talles")

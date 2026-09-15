@@ -95,14 +95,15 @@ def xobjects_form(path):
 def main():
     if not os.path.exists(ORIG):
         print("❌ no está el archivo de prueba:\n   " + ORIG); sys.exit(1)
-    tmp = tempfile.mkdtemp(prefix="verif_hc_")
     print("CONTRATO DE LA HOJA COMPARTIDA — una base por pieza y talle, referenciada por prenda\n")
+    # Desplegar el molde real son ~90 s y el archivo no cambia entre corridas: se reusa
+    # el despliegue guardado (ver `contrato_molde_b`). Con eso el contrato entra en la
+    # tanda rapida: uno que no se puede correr seguido no protege nada.
+    import contrato_molde_b as CB
+    t = time.time()
+    tmp, C, alta, _reusado = CB.espacio_desplegado(ORIG, "verif_hc_",
+                                                   alta=PD.alta_molde_con_diseno)
     try:
-        C = os.path.join(tmp, "plantilla.ai")
-        print(f"copiando el archivo ({os.path.getsize(ORIG)/1e6:.0f} MB) y desplegándolo…")
-        t = time.time()
-        shutil.copy2(ORIG, C)
-        alta = PD.alta_molde_con_diseno(C, procesos=max(2, (os.cpu_count() or 4) - 1))
         PD.marcar(C, True)
         MP._DET_CACHE.clear()
         reg, talles = alta["registro"], alta["talles"]

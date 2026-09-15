@@ -58,3 +58,4 @@ certificados/
 
 # registro del servidor cuando arranca sin ventana (INICIAR-SIN-VENTANA.vbs)
 logs/
+_papelera/

@@ -730,7 +730,7 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0, soloVer = fals
       if (i + n >= guia.pasos.length) { setTimeout(() => setFin({ saltada: !interaccion.current }), 0); return i; }
       return i + n;
     });
-  }, [guia.pasos.length]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guia.pasos.length]);
   const retroceder = useCallback(() => { desde.current = -1; setIdx(i => Math.max(0, i - 1)); }, []);
   // SALTEAR A MANO (pedido del usuario): pasar el paso sin hacer lo que pide. Directo, sin el
   // bucle por diseño — si lo saltea es porque no lo quiere hacer ahora.

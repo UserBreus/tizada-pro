@@ -18,8 +18,15 @@ Lo que este contrato cuida:
   6. El alta en PARALELO (como la corre el servidor) da el mismo registro que en serie, mesa a mesa.
   7. La página desplegada lleva SÓLO los recursos que usa: de 22 fuentes a las 3 o 4 del talle.
 
-⚠️ No toca nada del usuario: trabaja sobre copias en un temporal. Tarda unos minutos (despliega el
-molde real entero dos veces: en serie y en paralelo).
+⚠️ No toca nada del usuario: trabaja sobre copias en un temporal.
+
+CONTRATO_LENTO — fuera de la tanda rapida (`correr_contratos.py --todos` lo incluye). Y NO se
+puede acelerar reusando el despliegue guardado, como hacen `verificar_hoja_compartida` y
+`verificar_alta_con_diseno` con `contrato_molde_b`: lo que ESTE contrato mide es justamente
+el despliegue (punto 1: que la pagina salga byte a byte igual; punto 6: que en paralelo de lo
+mismo que en serie). Con el resultado ya hecho al lado no comprobaria nada. Despliega el
+molde real entero dos veces, en serie y en paralelo: son minutos y no hay forma honesta de
+bajarlo.
 """
 import io
 import json

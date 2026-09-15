@@ -2295,16 +2295,60 @@ _API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_mu
 # descarga del archivo. No cuentan como «este molde está en uso» para los efímeros (ver la guardia).
 _API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla")
 
-# 🔴 ENDPOINTS DEL PEDIDO QUE NO TRABAJAN SOBRE UN MOLDE. La guarda, cuando un POST no trae `pid`,
-# resuelve el molde ACTIVO y le exige `molde.editar` — bien pensado para las ~30 rutas que SÍ
-# escriben un molde sin declararlo. Pero éstas no tocan ningún molde del catálogo: limpian lo del
-# PEDIDO (sus tizadas, sus tipografías, y los moldes EFÍMEROS que son de quien los subió, con su
-# propio control de dueño adentro). Exigirles permiso sobre el molde activo tenía dos efectos
-# malos: un Operario sin `molde.editar` NO podía limpiar su propio pedido —sus moldes de >100 MB
-# se quedaban en el servidor para siempre— y `verificar_efimero.py` quedaba en rojo con un 403
-# (2026-09-15). Cada uno de estos endpoints hace su propia comprobación de dueño y de permiso.
-_API_DEL_PEDIDO_SIN_MOLDE = ("/api/pedido/limpiar_efimeros", "/api/pedido/limpiar_trabajos",
-                             "/api/pedido/fuentes_pedido_limpiar")
+
+# 🔴 RUTAS QUE ESCRIBEN PERO NO TRABAJAN SOBRE NINGUN MOLDE (auditoria 2026-09-15).
+# La guarda, cuando un POST no trae `pid`, resuelve el molde ACTIVO y le exige `molde.editar`.
+# Eso esta bien para las ~30 rutas que SI escriben un molde sin declararlo — y MAL para las 31
+# que no tocan ninguno: un Operario no podia grabar un tutorial, tomar una reserva, guardar una
+# plantilla de planilla, cambiar el ancho de una tela NI CANCELAR SU PROPIA TIZADA. Y de yapa
+# quedaban "protegidas" por accidente: el candado real era un permiso que no tiene nada que ver.
+#
+# Aca cada una declara el permiso que DE VERDAD le corresponde (None = ya controla dueño adentro).
+# 🔴 SE COMPARA CONTRA `request.url_rule.rule`, no contra el path: asi las rutas con parametros
+# (`/api/trabajo/<tid>/cancelar`) entran exactas y no por prefijo.
+# Se aplica SOLO a POST/PUT/PATCH/DELETE: el GET de la misma ruta no pide nada.
+# El contrato `verificar_permisos_rutas.py` falla si aparece una ruta de escritura nueva que no
+# este ni aca ni entre las que trabajan un molde: la lista no se puede quedar vieja en silencio.
+_API_SIN_MOLDE = {
+    # configuracion del sistema (catalogo compartido)
+    "/api/catalogo_piezas/agregar": "config.editar",
+    "/api/catalogo_piezas/eliminar": "config.editar",
+    "/api/catalogo_grupos/agregar": "config.editar",
+    "/api/catalogo_grupos/eliminar": "config.editar",
+    "/api/plantillas_planillas/guardar": "config.editar",
+    "/api/plantillas_planillas/eliminar": "config.editar",
+    "/api/reglas_planilla/guardar": "config.editar",
+    "/api/reglas_planilla/eliminar": "config.editar",
+    "/api/nesting_presets/guardar": "config.editar",
+    "/api/nesting_presets/eliminar": "config.editar",
+    "/api/grupos_tizada/guardar": "config.editar",
+    "/api/grupos_tizada/eliminar": "config.editar",
+    "/api/telas/ancho": "config.editar",
+    "/api/telas/margen": "config.editar",
+    "/api/perfiles/config": "config.editar",
+    "/api/registro/limpiar": "config.editar",
+    "/api/config_con_diseno": "config.editar",
+    "/api/publicacion/publicar": "config.editar",
+    "/api/publicacion/cancelar": "config.editar",
+    # tipografias del catalogo
+    "/api/fuente/archivo/<path:nombre>": "fuente.gestionar",
+    # ayuda guiada
+    "/api/tutoriales": "ayuda.grabar",
+    "/api/tutoriales/borrar": "ayuda.grabar",
+    # el que puede generar una tizada puede cancelarla
+    "/api/trabajo/<tid>/cancelar": "pedido.generar",
+    # "dueño" = no hay permiso que pedir: el endpoint mira POR SU CUENTA de quién es cada cosa
+    # (es lo correcto acá: son los efímeros y las tizadas DEL PEDIDO de quien las subió, y un
+    # Operario tiene que poder limpiar lo suyo sin `molde.editar`).
+    "/api/reserva/tomar": "dueño",
+    "/api/reserva/soltar": "dueño",
+    "/api/molde/config/<int:cid>": "dueño",          # `_config_es_mia`
+    "/api/pedido/limpiar_efimeros": "dueño",
+    "/api/pedido/limpiar_trabajos": "dueño",
+    "/api/pedido/fuentes_pedido_limpiar": "dueño",
+    # "libre" = no hay nada que proteger: no escribe nada, es una cuenta
+    "/api/color/convertir": "libre",
+}
 
 # PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
 # al servidor SIN pasar por nginx (localhost:8050 o la IP, típico al abrirlo en la propia máquina),
@@ -2331,6 +2375,25 @@ class _QuitarPrefijo:
 
 
 app.wsgi_app = _QuitarPrefijo(app.wsgi_app, _PREFIJO_APP)
+
+
+def _guard_permiso(clave):
+    """Exige un permiso SUELTO, sin molde de por medio. Devuelve la respuesta de error o None.
+
+    Mismo criterio que el resto del server: sin sistema de usuarios (taller sin base MSSQL) no se
+    puede exigir nada y se deja pasar; si la base parpadea, la seguridad no tumba el sistema."""
+    if not clave or not _USUARIOS_ON:
+        return None
+    try:
+        u = _usuario_actual()
+    except Exception:
+        return None
+    if not u:
+        return jsonify({"error": "no hay sesión iniciada"}), 401
+    if clave not in (u.get("permisos") or []):
+        return jsonify({"error": f"Tu usuario no tiene el permiso «{clave}». Se da por ROL en "
+                                 f"Configuración › Usuarios y permisos."}), 403
+    return None
 
 
 @app.before_request
@@ -2368,6 +2431,15 @@ def _guardia_moldes():
             _u = True
         if not _u:
             return jsonify({"error": "no hay sesión iniciada"}), 401
+    # Las rutas que NO trabajan sobre un molde salen por su propia puerta: se les pide EL permiso
+    # que les toca (o ninguno, si controlan dueño adentro) y NUNCA `molde.editar` del molde activo.
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        _regla = getattr(request.url_rule, "rule", None)
+        if _regla in _API_SIN_MOLDE:
+            _perm = _API_SIN_MOLDE[_regla]
+            # "dueño" y "libre" no son permisos: el endpoint se controla solo (o no hay qué
+            # controlar). Lo que NO puede pasar es que le pidan `molde.editar` del molde activo.
+            return _guard_permiso(None if _perm in ("dueño", "libre") else _perm)
     try:
         pid = _pid_de_request()
         if not pid:
@@ -2379,7 +2451,7 @@ def _guardia_moldes():
             # (auditoría 2026-09-14). Ahora, si la request ESCRIBE, se resuelve el molde igual que
             # el endpoint y se lo comprueba. Las lecturas siguen pasando como siempre.
             if request.method in ("POST", "PUT", "PATCH", "DELETE") and not any(
-                    request.path.startswith(x) for x in _API_LEE_CON_PID) and                     request.path not in _API_DEL_PEDIDO_SIN_MOLDE:
+                    request.path.startswith(x) for x in _API_LEE_CON_PID):
                 try:
                     _pid_impl = _get_active_producto_id()
                 except Exception:
@@ -9708,6 +9780,26 @@ def fuentes_pedido_limpiar():
     if not pids:
         _p = _pid_de_request() or _get_active_producto_id()
         pids = [_p] if _p else []
+    # 🔴 SÓLO LAS DE MIS MOLDES (agujero encontrado por `verificar_permisos_rutas`, 2026-09-15).
+    # La lista de pids viene del CUERPO: sin este filtro, cualquiera con sesión le borraba las
+    # tipografías del pedido a otro usuario mandando su pid. Misma regla que `limpiar_efimeros`:
+    # un molde con dueño sólo lo toca su dueño (o quien pueda editar la moldería del catálogo).
+    _u = None
+    try:
+        _u = _usuario_actual()
+    except Exception:
+        _u = None
+    if _u:
+        _cat = _cargar_catalogo()
+        _permisos = set(_u.get("permisos") or [])
+        _mios = []
+        for _pid in pids:
+            _pr = next((x for x in _cat.get("productos", []) if x.get("id") == str(_pid)), None)
+            _duenio = (_pr or {}).get("creado_por")
+            if _duenio and _duenio != _u.get("id") and "molde.editar" not in _permisos:
+                continue                 # es de otro: no se toca
+            _mios.append(_pid)
+        pids = _mios
     borradas = 0
     for pid in pids:
         d = os.path.join(DATOS, "productos", str(pid), "fuentes")
