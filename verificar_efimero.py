@@ -241,9 +241,15 @@ finally:
 print(f"    OK    miniatura: no · trabajar con el molde: sí ({[t[1] for t in _tocados]})")
 
 # La limpieza no puede depender de que alguien reinicie el servidor.
-_src_arr = inspect.getsource(S)
-ok("_arrancar_barrido_efimeros()" in _src_arr and "time.sleep(3600)" in _src_arr,
-   "la limpieza de abandonados corre CADA HORA, no sólo al arrancar el servidor")
+# ⚠️ SE MIRA LA FUNCIÓN, NO UN TEXTO SUELTO. Antes esto buscaba el literal `time.sleep(3600)` en
+# TODO el módulo: el día que el barrido pasó a `time.sleep(20 if primera else 3600)` —para dar la
+# primera vuelta enseguida— el contrato se puso en rojo sin que nada estuviera roto (2026-09-15).
+# Un contrato que se rompe cuando el código MEJORA enseña a ignorarlo.
+_fn_arr = getattr(S, "_arrancar_barrido_efimeros", None)
+_src_arr = inspect.getsource(_fn_arr) if _fn_arr else ""
+ok(callable(_fn_arr) and "_arrancar_barrido_efimeros()" in inspect.getsource(S)
+   and "while" in _src_arr and "3600" in _src_arr and "_barrer_efimeros(" in _src_arr,
+   "la limpieza de abandonados corre CADA HORA en un bucle propio, no sólo al arrancar el servidor")
 print("    OK    el barrido de abandonados también corre solo, cada hora")
 
 print()

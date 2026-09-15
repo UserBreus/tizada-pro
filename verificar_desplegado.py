@@ -21,6 +21,7 @@ Lo que este contrato cuida:
 ⚠️ No toca nada del usuario: trabaja sobre copias en un temporal. Tarda unos minutos (despliega el
 molde real entero dos veces: en serie y en paralelo).
 """
+import io
 import json
 import os
 import shutil
@@ -41,6 +42,23 @@ import piezas_con_diseno as PD       # noqa: E402
 ORIG = sys.argv[1] if len(sys.argv) > 1 else \
     r"C:\Users\user2\Downloads\PRUEBA TIZADA PRO\para acomodo de archivos\CAMISETA JUGADOR.ai"
 FALLOS = []
+
+
+def _render_bytes(origen, pagina=0, dpi=24):
+    """Los píxeles (CMYK) de una página. `origen` = ruta o bytes de un PDF."""
+    try:
+        import pymupdf as _fz
+    except ImportError:
+        import fitz as _fz
+    try:
+        d = _fz.open(origen) if isinstance(origen, str) else _fz.open("pdf", origen)
+        try:
+            return bytes(d[pagina].get_pixmap(dpi=dpi, colorspace=_fz.csCMYK).samples)
+        finally:
+            d.close()
+    except Exception as e:
+        print("          [!] no se pudo dibujar para comparar:", e)
+        return None
 
 
 def ok(cond, msg):
@@ -98,11 +116,27 @@ def main():
             _ins, _ = PD.quitar_linea_de_corte(_ins, pg, [PD._cont_de_json(c) for c in _j["talles"].get(tl) or []], _j["marco"], _j["U"])
             a = pikepdf.unparse_content_stream(_ins)
             b = d.pages[talles.index(tl)].Contents.read_bytes()
-            iguales += a == b
-            if a != b:
-                print(f"          {tl}: {len(a)} vs {len(b)} bytes · placeholders vistos: {sorted(_ph)}")
+            # 🔴 SE COMPARA EL DIBUJO, NO LOS BYTES (2026-09-15, `cortar_capas.py`). El desplegado
+            # corta el trozo del talle por BYTES antes de parsear, y de paso se lleva los grupos
+            # `q … Q` de los OTROS talles, que el camino de siempre dejaba como trazados MUERTOS
+            # (dibujo sin pintar que el RIP igual tenía que leer). O sea: la página nueva es más
+            # chica y dibuja exactamente lo mismo — byte a byte no puede dar igual, y exigirlo
+            # dejaba el contrato en rojo por una MEJORA. Se comparan los píxeles.
+            # `a` se escribe en la página que ya está aislada y se dibuja el PDF entero; `b` se
+            # dibuja del desplegado tal cual quedó en disco. Sin armar páginas a mano: menos
+            # lugares donde el instrumento pueda mentir.
+            pg.Contents = src.make_stream(a)
+            _bufa = io.BytesIO(); src.save(_bufa)
+            _pa = _render_bytes(_bufa.getvalue(), MESA - 1)
+            _pb = _render_bytes(fp, talles.index(tl))
+            _dif = -1 if _pa is None or _pb is None or len(_pa) != len(_pb) else                 sum(1 for x, y in zip(_pa, _pb) if x != y)
+            iguales += (_dif == 0)
+            if _dif != 0:
+                print(f"          {tl}: {len(a)} vs {len(b)} bytes · {_dif} píxeles distintos "
+                      f"· placeholders vistos: {sorted(_ph)}")
             src.close()
-        ok(iguales == 3, "contenido idéntico a `aislar_capa(podar=True)` + `quitar_placeholders` en 3 talles")
+        ok(iguales == 3, "el MISMO dibujo (píxel a píxel) que `aislar_capa(podar=True)` + "
+                         "`quitar_placeholders` en 3 talles")
         pg_d = d.pages[talles.index(TALLE)]
         res = pg_d.get("/Resources") or {}
         fuentes = len(res.get("/Font") or {})

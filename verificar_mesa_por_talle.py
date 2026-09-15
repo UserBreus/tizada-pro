@@ -113,16 +113,29 @@ def main():
 
     # ── 4. LA VISTA LIVIANA DEL PASO TIZADA ─────────────────────────────────────────────────
     print("\n4 · 🔴 EL PASO TIZADA NO PUEDE CLAVAR EL NAVEGADOR")
-    src_img = inspect.getsource(S.mesa_img)
+    # El dibujo vive en `_dibujar_vista_mesa` desde 2026-09-15: el endpoint y el PRE-DIBUJADO del
+    # final del pedido usan el mismo código y la misma caché (por eso se miran los dos).
+    src_img = inspect.getsource(S.mesa_img) + inspect.getsource(S._dibujar_vista_mesa)
     ok("fitz.open(ruta)" in src_img and "get_pixmap" in src_img,
        "la vista sale de la HOJA (el PDF que se descarga), no del SVG")
     ok(".svg" not in src_img,
        "🔴 …y NO del SVG: su rasterizador ignora los recortes y mostraría piezas mal cortadas")
     ok("os.replace(cache" in src_img, "se guarda una sola vez, y de forma atómica")
+    ok(callable(getattr(S, "_predibujar_mesas", None)),
+       "las mesas se dibujan ANTES de que la pantalla las pida (si no, la grilla aparece vacía)")
     app = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
     ok("mesa_img/${encodeURIComponent(hoja.archivo)}" in app, "la grilla de mesas la usa")
-    ok("/trabajos/${trabajoEstado.resultado.id}/${pv}" in app,
-       "…y el DETALLE sigue abriendo el vector (tocar la mesa)")
+    # 🔴 EL DETALLE YA NO ABRE EL SVG, Y ES A PROPÓSITO (2026-09-15). Esas previas en SVG no se
+    # escriben más: nadie las pedía —en el registro del servidor no hay un solo pedido de un
+    # `prev_*.svg`— y costaban 25 s y cientos de MB por pedido. El detalle abre la MISMA hoja
+    # rasterizada, a más resolución. Lo que no se toca, y es lo que hay que defender acá, es que
+    # **lo que se DESCARGA sigue siendo el vector exacto**.
+    ok("prev_" not in app.split("MesasInfinito")[-1][:60000],
+       "el visor de mesas no depende de las previas en SVG")
+    ok("mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pIdx}&w=2400" in app,
+       "…y el DETALLE abre la misma hoja, a más resolución")
+    ok("/api/trabajos/${j.resultado.id}/mesa/${h.archivo}" in app,
+       "🔴 y la DESCARGA sigue siendo el PDF vectorial de la mesa, no una imagen")
     ok(f"/trabajos/${{job.resultado.id}}/${{hoja.archivo}}" in app or "download" in app,
        "el PDF se sigue descargando tal cual")
 
@@ -157,7 +170,7 @@ def main():
     ok("cx0" in src_img and "clip=clip" in src_img, "la vista acepta un rectángulo y lo recorta")
     ok("entera = (cx0, cy0, cx1, cy1) == (0.0, 0.0, 1.0, 1.0)" in src_img,
        "…y la mesa entera sigue siendo el caso por defecto")
-    ok("_sufijo" in src_img, "cada recorte se guarda aparte (moverse un poco reusa el anterior)")
+    ok("sufijo" in src_img, "cada recorte se guarda aparte (moverse un poco reusa el anterior)")
     ok("TILE_CM = 50" in app and "BASE_W = 1200" in app,
        "la pantalla pide los recortes por una grilla fija de medio metro")
     ok("r.width <= BASE_W * 1.05) continue" in app,

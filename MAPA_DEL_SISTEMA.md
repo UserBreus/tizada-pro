@@ -1482,6 +1482,533 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-15 (462) — 🧯 SE CORRIERON LOS 66 CONTRATOS Y SE ARREGLÓ TODO LO QUE ESTABA EN ROJO —
+  incluido un bug de AYER que hacía que un toggle ELEGIDO no llegara a la prenda.** El usuario:
+  *«debes trabajar dejando las cosas bien»*. Tenía razón: en la entrega anterior encontré un
+  contrato roto y lo dejé ANOTADO en vez de arreglarlo.
+
+  🔴 **1. EL PEOR: `_traducir_prendas` perdía los toggles (regresión del commit `6fd63a4`, ayer).**
+  Al agregar el aviso de «celda vacía» quedó **un nivel de indentación afuera** del
+  `for ti in toggle_cols:`. Tres consecuencias, todas silenciosas:
+  · sin ninguna columna de toggle, **`UnboundLocalError`** (`val` sin asignar) y el pedido revienta;
+  · con VARIAS columnas de toggle (sisa, capucha…), **sólo se miraba la última**;
+  · y el `append` colgaba del `if not val`, así que **un toggle que el usuario SÍ eligió nunca se
+    agregaba**: la prenda salía con la opción por defecto del motor. Es exactamente «sale bien
+    impreso y nadie se entera». Lo agarró `verificar_cantidad.py`, que estaba en rojo.
+
+  **CUÁNTO DAÑO HIZO, medido** (se reconstruyó la versión rota y se corrieron las dos, y después
+  `partes_de_libre` con las piezas REALES de su CAMISETA):
+
+  | | ayer (roto) | hoy |
+  |---|---|---|
+  | dos toggles elegidos («Larga» + «Ancha») | `[]` — **se pierden los dos** | los dos, con su opción |
+  | ninguna columna de toggle | **revienta** (`UnboundLocalError`) | `[]`, sin drama |
+  | piezas de una camiseta con UN toggle (manga) | 10 | 10 — **igual** |
+  | piezas con DOS toggles (manga + sisa) | 12 | 11 — **de más iba «Sisa normal»** |
+
+  🟢 **Con UN solo toggle no salió nada mal impreso**, y es de suerte: al perderse la lista,
+  `partes_de_libre` cae al camino viejo (`prenda["manga"]`, que `_traducir_prendas` sigue
+  calculando aparte) y filtra igual. 🔴 **Con DOS toggles sí**: el segundo se ignoraba entero y sus
+  piezas entraban TODAS — tela y tinta gastadas en algo que nadie pidió. Y un molde sin ninguna
+  columna de toggle directamente no podía generar.
+
+  **2. `verificar_efimero.py` (rojo desde antes, 8 fallas) — y la causa era un permiso de más.**
+  La guarda `_guardia_moldes`, cuando un POST no trae `pid`, resuelve el molde ACTIVO y exige
+  `molde.editar`. Pero `/api/pedido/limpiar_efimeros`, `limpiar_trabajos` y
+  `fuentes_pedido_limpiar` **no tocan ningún molde del catálogo**: limpian lo del PEDIDO y cada uno
+  hace su propio control de dueño. Además de dejar el contrato en rojo, **un Operario sin
+  `molde.editar` no podía limpiar su propio pedido** y sus moldes de >100 MB quedaban para siempre.
+  Va una lista de excepciones (`_API_DEL_PEDIDO_SIN_MOLDE`).
+
+  **3. Tres contratos que se rompieron con MIS cambios de hoy, y estaban bien en rojo:**
+  · `verificar_desplegado` comparaba el desplegado **byte a byte** contra `aislar_capa(podar=True)`.
+    El corte por bytes (457) se lleva además los trazados MUERTOS de los otros talles: la página
+    es más chica y dibuja lo mismo. Ahora compara **píxeles**.
+  · `verificar_mesa_por_talle` miraba literales dentro de `mesa_img`; el dibujo se mudó a
+    `_dibujar_vista_mesa` (460). Ahora mira las dos funciones, exige que exista el pre-dibujado y
+    —lo que de verdad importa— que **la DESCARGA siga siendo el PDF vectorial**.
+  · el mismo contrato exigía que el detalle abriera el SVG; las previas SVG ya no se escriben (460).
+
+  **4. `verificar_fuentes_pedido` (rojo desde antes): una tipografía del catálogo era
+  INALCANZABLE.** `resolver_fuente` devolvía la PRIMERA que matcheara y el «parecido» (uno
+  contenido en el otro) valía tanto como el nombre exacto. Con dos archivos que normalizan igual
+  —`MoreggiTFont4`: uno dice «MoreggiTFont4 Camiseta» y otro «MoreggiTFont4? Camiseta?»— uno
+  quedaba tapado y **la prenda se estampaba con la tipografía que nadie eligió**. Ahora resuelve en
+  tres vueltas: el nombre TAL CUAL → normalizado exacto → recién ahí el parecido.
+
+  ⚠️ **LA LECCIÓN, que vale más que los arreglos: DOS de estos contratos fallaban por mirar un
+  TEXTO del código en vez de su comportamiento.** `verificar_efimero` buscaba el literal
+  `time.sleep(3600)` y se puso en rojo el día que el barrido pasó a `time.sleep(20 if primera else
+  3600)` — o sea, **el contrato se rompió porque el código MEJORÓ**. Un contrato así enseña a
+  ignorarlo, que es lo peor que le puede pasar a una red de seguridad. Los dos se reescribieron
+  para mirar la función y lo que hace.
+
+  ⚠️ **Y la trampa de MEDIR los contratos**: el primer barrido los clasificó mirando si la salida
+  contenía «falla». Tres pasaban y decían «TODO OK: nada queda abierto, ni cuando **falla**».
+  **El estado de un contrato es su código de salida, no su texto.**
+
+- **2026-09-15 (461) — 🧹 «PUSE NUEVO PEDIDO Y LOS MOLDES SIGUEN AHÍ»: el borrado viajaba ÚLTIMO en
+  una cadena de `await` y la página se fue antes de mandarlo.** Reporte del usuario con la captura
+  de «Cargados (4)» después de reiniciar el pedido (los 4 moldes del camino B que había subido).
+
+  **LA PRUEBA, EN EL REGISTRO DEL SERVIDOR.** En el reinicio de las **13:40:49** salieron los dos
+  pedidos (`limpiar_trabajos` y `limpiar_efimeros`). En el de las **14:10:49** salió
+  `limpiar_trabajos`… y **en el mismo segundo la página se recargó** (`GET /assets/index-*.js`,
+  `/logo.svg`, `/api/auth/yo`). `limpiar_efimeros` **nunca se mandó**, y los 4 moldes quedaron en
+  el catálogo — se ven en `productos_catalogo.json` con `efimero: true`.
+
+  🔴 **LA CAUSA**: `_reiniciarPedido` hacía `await` de las tizadas, después `await` de las
+  tipografías y **recién al final** pedía borrar los moldes. Todo eso vive en un `async` suelto: si
+  la pestaña se recarga o se cierra en el medio, lo que falta no sale nunca. Y justamente los
+  moldes —lo más pesado, >100 MB cada uno— eran lo último.
+
+  **DOS ARREGLOS, porque uno solo no alcanza:**
+  1. **El borrado de los moldes se pide PRIMERO y sin esperar a nadie** (su propia tarea; lo demás
+     espera a esa, no al revés). Es lo que más cuesta dejar tirado.
+  2. **Red de seguridad al entrar**: si la pantalla del pedido no tiene ningún efímero anotado pero
+     el servidor todavía guarda alguno mío, pide el barrido de huérfanos. ⚠️ **Y lo reintenta cada
+     minuto**, no una sola vez: el servidor no se lleva un efímero que alguna pantalla haya
+     declarado abierto en los últimos 3 minutos (gracia del latido), así que el que se acaba de
+     soltar cae justo dentro de esa ventana — con un intento único se quedaba igual. El servidor
+     sigue sin tocar nada que otra pantalla declare abierto, así que un pedido en curso en otra
+     pestaña no corre riesgo.
+
+  **Verificado en el navegador** (sandbox de sólo lectura): al cargar la pantalla con efímeros
+  huérfanos en el catálogo, sale el `POST /api/pedido/limpiar_efimeros` solo (405 en el sandbox,
+  que rechaza todo lo que no sea GET — que es exactamente lo que se quería comprobar: que el pedido
+  SALE).
+
+  ⚠️ **PENDIENTE, Y NO ES DE ESTE CAMBIO: `verificar_efimero.py` está en rojo desde antes.** Su
+  `app.test_client()` pide `/api/pedido/limpiar_efimeros` **sin sesión** y el endpoint contesta
+  **403**; de ahí caen en cascada los 8 fallos. Se comprobó que no lo rompió nada de hoy (el diff
+  de `servidor.py` no toca sesión ni permisos). Hay que darle sesión al cliente del contrato, como
+  hacen los demás.
+
+- **2026-09-15 (460) — ⏱️ EL PEDIDO REAL DEL USUARIO: 105 s → 28 s de motor+RIP, y las mesas ya no
+  se hacen esperar. Pero lo PRIMERO es que estaba corriendo el código viejo.** Reporte: *«demoro 2
+  minutos en armar una tizada con estos moldes y este pedido, y aparte las mesas de trabajo
+  demoran una eternidad en mostrarse después de creada»* (4 moldes camino B: CAMISETA y SHORT ×
+  JUGADOR y LIBERO; planilla `MT-2034` de 20 filas).
+
+  🔴 **PRIMERO, LA CAUSA DE QUE «PAREZCA PEOR QUE ANTES»: EL SERVIDOR NO TENÍA LOS CAMBIOS.**
+  Arrancó 10:01; el corte por bytes y el sello son de 12:10-12:57. `servidor.py` **no tiene
+  auto-reload**: la tizada de las 13:43 se armó con el código de antes. **Antes de medir nada,
+  comparar la hora de arranque del proceso con el mtime de los `.py`** (ya está en
+  [[reiniciar-server-python]] y volvió a pasar).
+
+  **LO QUE SE MIDIÓ DEL PEDIDO REAL** (`logs/servidor.log`, pedido `20260915-134337-bd75`):
+  `motor 27s · rip 35s · perfil 11s · verificar 29s · ficha 3s · **total 105 s**`, y después
+  **26 s más** dibujando las 9 miniaturas cuando la grilla ya estaba en pantalla → los 2 minutos.
+  En disco: **373 MB por pedido** — 231,5 MB de previas SVG, 108,9 MB de hojas, 29,4 de ficha.
+
+  **TRES CAMBIOS, todos medidos sobre el mismo molde (18 prendas de CAMISETA JUGADOR):**
+
+  | | motor | aplanado RIP | total | previas en disco |
+  |---|---|---|---|---|
+  | con el sello (457/458) | 48 s | 28 s | **77 s** | 458 MB |
+  | − las previas SVG | 21 s | 25 s | **46 s** | **0** |
+  | + la mesa marcada `/TizadaBase` | 18 s | **11 s** | **28 s** | 0 |
+
+  1. 🔴 **LAS PREVIAS EN SVG NO SE ESCRIBEN MÁS, PORQUE NADIE LAS ABRÍA.** Desde el 2026-09-14 la
+     grilla y el detalle usan `mesa_img` (la hoja de verdad rasterizada). En el registro del
+     servidor **no hay un solo pedido de un `prev_*.svg`**. Costaban **25 de los 48 s del motor y
+     458 MB**. La cuenta de páginas —lo único que la pantalla necesitaba de esa lista— sale de
+     `alturas_cm`. `TIZADA_PREVIEWS_SVG=1` las vuelve a escribir. En el frontend, los tres lugares
+     que contaban mesas con `previews.length` ahora usan `paginas`, y el zoom del bloque viejo abre
+     `mesa_img` en vez del SVG.
+  2. **La mesa compartida del camino B se marca `/TizadaBase`**: nace de una página desplegada
+     (sin marcadores de capa, con sus fuentes declaradas, balanceada por contrato), así que
+     `aplanar_rip` no la re-parsea. Es la misma marca que ya usaba `xobject_base`. **Aplanado
+     25 → 11 s.**
+  3. **Las mesas se dibujan ANTES de que la pantalla las pida** (`_predibujar_mesas`, después de la
+     ficha, con su propia fase `mesas` en la barra de avance). Eran 26 s de grilla vacía DESPUÉS de
+     que la tizada ya estaba lista; ahora salen del disco. El dibujo es el mismo y la caché es la
+     misma: se extrajo `_dibujar_vista_mesa`, que usan el endpoint y el pre-dibujado.
+
+  **Contratos verdes después de todo esto**: `verificar_sello` (134.772 figuras idénticas),
+  `verificar_tizada_con_diseno`, `verificar_hoja_compartida`, `verificar_previa_recortes`.
+
+  ⏭️ **Lo que queda como siguiente cuello**: `acomodar en la tela` (el nesting) son ahora **16 de
+  los 18 s del motor**.
+
+- **2026-09-15 (459) — 🖥️ LA PANTALLA DE RESULTADOS ENTRA SIEMPRE EN LA VENTANA, y los avisos
+  dejaron de comerse el espacio.** Pedido del usuario con dos capturas: *«este cartel quitalo de
+  ahí, y hacé que no importe si hay carteles; el espacio de la captura 2 debe estar siempre en la
+  pantalla, no habría que scrolear para acceder a los botones de abajo»*.
+
+  **LO QUE PASABA.** El visor de las mesas tenía el alto clavado en **`74vh`**. Sumando el
+  encabezado, la fila de pestañas y los carteles de aviso, el total pasaba de la ventana: los
+  botones de abajo (**← Planilla · Nuevo pedido · Armar la tizada**) quedaban bajo el pliegue y
+  había que scrollear para apretarlos. Un cartel de más y la pantalla se descolocaba entera.
+
+  **LO QUE SE HIZO:**
+  1. **Los dos carteles de aviso salieron de la pantalla** (el de «Revisá esto del pedido» y el de
+     «Algunas piezas salieron en blanco»). En su lugar va **un botón con la cuenta** —«⚠ 2
+     avisos»— arriba, al lado de «Descargar todo»: abre un globo con las dos listas y **no mueve
+     nada**. La regla que queda escrita: *en esta pantalla ningún cartel puede cambiar el alto del
+     visor*.
+  2. **La tarjeta es una columna que llega hasta el borde de la ventana** (`useAltoHastaElFondo`) y
+     el visor toma lo que sobre (`flex: 1; min-height: 0`). Vale igual para la pestaña **Ficha
+     técnica**, que tenía su propio cálculo de alto (ahora innecesario, se borró).
+  3. `Ayuda` acepta un **`disparador`** propio (y `tono="aviso"`): el mismo globo de siempre, pero
+     colgado de un botón en vez del «?». Sin duplicar el manejo de posición ni de cierre.
+
+  🔴 **DOS COSAS QUE SALIERON MAL AL HACERLO, las dos medidas en el navegador:**
+  · **`useRef` no servía.** La pantalla de resultados aparece DESPUÉS de montar el componente: el
+    efecto corría una vez con la referencia vacía, salía por el `if (!ref.current) return` y no
+    volvía nunca — la tarjeta quedaba sin alto y el visor colapsado a 0. Recién aparecía al
+    redimensionar la ventana. Va **referencia por función** (`setNodo`), que avisa exactamente
+    cuando el elemento entra.
+  · **`scrollHeight` miente cuando el contenido NO desborda** (vale lo mismo que `clientHeight`).
+    La cuenta «lo que hay debajo = scrollHeight − alto del nodo» se muerde la cola: el alto se
+    achicaba 4 px en cada medición hasta clavarse en el mínimo de 320 px, con media pantalla
+    vacía. Ahora «lo que hay debajo» se suma a mano —hermanos posteriores y paddings de los
+    ancestros hasta el contenedor que scrollea—, que **no depende** del alto que se le dé al nodo.
+
+  **Verificado en el navegador** (sandbox de sólo lectura en 8060, con un pedido de prueba
+  inyectado en `localStorage`): con las dos pestañas (tela y Ficha técnica), a 694 px y a 560 px de
+  alto de ventana — **`scrollHeight − clientHeight = 0`** (la pantalla no scrollea) y el botón
+  «Armar la tizada» siempre dentro de la ventana. El globo de avisos abre por encima, sin correr
+  nada.
+
+- **2026-09-15 (458) — 🖼️ EL SELLO: el dibujo entra a la hoja UNA sola vez. La tizada de 4 prendas
+  pasa de 29,41 a 2,85 MB y de 46 a 19 s, con el MISMO dibujo figura por figura.** Nuevo
+  `hoja_pike.componer_hoja_sello`, usado por los DOS caminos. Contrato: `verificar_sello.py`.
+  `TIZADA_SIN_SELLO=1` vuelve al compositor anterior.
+
+  **EL PROBLEMA, MEDIDO** (changelog 454/455): el **97 %** de cada pieza colocada era el mismo
+  dibujo de la mesa (768 KB de 791), y en una página de 8 m había 19,8 MB de contenido con sólo
+  3,5 MB distintos. En el camino A cada colocación llevaba su copia entera; en el B, una por base.
+
+  **CÓMO QUEDÓ.** `_armar_base` anota en `fuentes_xo` el objeto de ORIGEN de cada dibujo que su
+  `base_stream` referencia (la mesa del arte, la del molde desplegado, cada editable redibujado y
+  cada objeto agregado), memorizado por clave en `_form_de`: así todas las bases que usan la misma
+  mesa apuntan al MISMO objeto y `copy_foreign` lo copia una sola vez. El compositor escribe cada
+  colocación inline — `q <matriz> <recorte de la pieza> <su base> /S0 Do <su nombre y número> Q` —
+  y la hoja queda con **UN solo nivel de XObject**, la estructura que el RIP del usuario ya
+  procesó bien (changelog 456).
+
+  | tizada de 4 prendas (camino A, JUGADOR) | de siempre | con el sello |
+  |---|---|---|
+  | motor | 17,2 s | **8,8 s** |
+  | hoja antes de aplanar | 29,84 MB | **8,35 MB** |
+  | aplanado para el RIP | 28,2 s | **9,8 s** |
+  | **hoja final** | **29,41 MB** | **2,85 MB** (10,3×) |
+  | niveles de XObject | 2 | **1** |
+
+  **Y NO CRECE CON LA CANTIDAD, que era el punto.** La misma tizada con 20 prendas:
+
+  | tizada de 20 prendas (680 colocaciones) | de siempre | con el sello |
+  |---|---|---|
+  | motor | 91,6 s | **44,3 s** |
+  | aplanado para el RIP | 140,0 s | **35,0 s** |
+  | **hoja final** | **147,04 MB** | **6,20 MB** (23,7×) |
+  | de punta a punta | ~232 s | **~79 s** |
+
+  De 4 a 20 prendas la ventaja pasa de 10× a 24×: lo que se repetía era el dibujo, y ahora está
+  una sola vez. **673.860 figuras idénticas**, desvío máximo 0,0046 pt (0,0016 mm).
+  ⚠️ Lo que SÍ sigue creciendo con la cantidad es lo propio de cada prenda: el recorte de la pieza
+  y el nombre/número en curvas, ~9 KB por colocación. A 500 prendas eso solo son ~155 MB — el
+  próximo escalón son los **glifos compartidos** y la **base compartida por (pieza, talle,
+  variable)**.
+
+  🔴 **LA VERIFICACIÓN CAMBIÓ DE INSTRUMENTO, Y HAY QUE ENTENDER POR QUÉ.** La hoja de siempre mete
+  cada pieza como una PÁGINA (`show_pdf_page`); el sello la pega inline, o sea **una composición
+  de matrices menos**. Resultado medido: las **134.772 figuras** de la hoja salen con el mismo
+  tipo, el mismo color, el mismo ancho de trazo y los puntos a **0,0029 pt = 0,001 mm** — cien
+  veces más fino que un punto de impresión a 1440 dpi. Pero eso mueve el antialias del ~0,05 % de
+  los píxeles de BORDE (hasta 22 niveles sobre 255, y algún píxel que cae justo sobre la grilla
+  llega a 240). **Exigir «0 píxeles» acá sería exigir que dos rasterizaciones distintas den bit a
+  bit igual.** El contrato compara **figura por figura con `get_cdrawings`** (que devuelve los
+  puntos con las matrices ya aplicadas) y deja el píxel como control con tolerancia.
+
+  **CUATRO COSAS QUE SE ROMPIERON EN EL CAMINO, todas anotadas porque ninguna es obvia:**
+  1. **El nombre del XObject.** `page.add_resource` genera nombres al azar tipo
+     `/Ax_-73ZjlLXUbUuqaylXI2g`: el remapeo con un patrón de sólo letras y dígitos no acertaba
+     ninguno y la hoja salía con «cannot find XObject resource». Va el juego de caracteres
+     completo de un nombre PDF.
+  2. **La tabla de recursos no puede ser el mismo objeto para todas las páginas.** `aplanar_rip`
+     limpia los huérfanos página por página: con una tabla compartida, la limpieza de la primera
+     se llevaba los dibujos de las otras (40 millones de píxeles cambiados). Cada página lleva su
+     lista de nombres; los STREAMS —que es donde está el peso— siguen compartidos.
+  3. **Faltaba el recorte a la caja de la pieza.** `show_pdf_page` recorta al MediaBox de la
+     página que muestra; al pegar inline eso hay que ponerlo (`q cm 0 0 W H re W n … Q`, la misma
+     receta de `aplanar_rip._flatten`). Sin él, lo que una pieza dibujara un pelo afuera de su
+     caja aparecía en la hoja.
+  4. **`_barrer_fuentes` ya no corre con el sello.** Ese barrido borra TODAS las fuentes de la
+     hoja: con el compositor viejo, un texto VIVO del diseño desaparecía de la tizada. El camino B
+     ya había decidido conservarlas (`hoja_pike.xobject_base`); el sello lo unifica.
+
+  ⚙️ **De paso, el camino A dejó de serializar la pieza por prenda** (`generar_pieza` devuelve
+  base + estampado, como ya hacía el B): con 100 prendas eran 3.300 documentos de ~800 KB armados
+  para tirarlos.
+
+- **2026-09-15 (457) — 🔪 EL TALLE SE CORTA POR BYTES ANTES DE PARSEAR: el pico de memoria de un
+  worker del desplegado baja de 4.547 a 420 MB (−91 %), y encima tarda menos. Con una CORRECCIÓN
+  importante a la 454.** Nuevo `cortar_capas.py`; lo usa `piezas_con_diseno._paginas_de_talles`.
+  Contrato: `verificar_corte_capas.py`.
+
+  🔴 **PRIMERO, LA CORRECCIÓN. LA PROYECCIÓN DE LA 454 («los 20 talles: 177 s → 2,5 s») ERA
+  FALSA, y el error es de método.** Ahí se midió `molde_real.aislar_capa` **suelto**, que parsea la
+  mesa cada vez que se lo llama. El código real NO hace eso: `_paginas_de_talles` parsea la mesa
+  **una sola vez** y filtra veinte (está escrito en su docstring desde el changelog 393). O sea:
+  se midió una función que el sistema no usa así, y se extrapoló. **Medir una pieza suelta no dice
+  lo que hace el pipeline: hay que perfilar el pipeline.**
+
+  **DÓNDE VA EL TIEMPO DE VERDAD** (`scratchpad/perfilar_desplegado.py`, CAMISETA JUGADOR, mesa 1,
+  20 talles, un proceso): `quitar_placeholders` **17,0 s (43 %)** · `_raspar_instrucciones` 8,9 ·
+  parsear 6,5 · armar la página 4,2 · `_mapa_oc` 1,5 · guardar 1,1. **Total 37,5 s.** El parseo
+  nunca fue el cuello.
+
+  **LO QUE SÍ ERA UN PROBLEMA — Y NADIE LO HABÍA MIRADO: LA MEMORIA.** La lista de 2.350.680
+  instrucciones de pikepdf viva mientras se filtran los 20 talles hace que **un solo worker llegue
+  a 4.547 MB de pico**. Y el alta reparte por talle en hasta 9-12 workers, cada uno re-parseando la
+  misma mesa. En una máquina de 16 GB compartida con otros proyectos, eso es la diferencia entre
+  andar y morir.
+
+  | CAMISETA JUGADOR, mesa 1, 20 talles | tiempo | pico de RAM | página |
+  |---|---|---|---|
+  | como estaba | 37,5 s | **4.547 MB** | 28,5 MB |
+  | con el corte por bytes | **34,0 s** | **420 MB** | **27,2 MB** |
+
+  **CÓMO FUNCIONA.** `cortar_capas.cortar(pag)` ubica **por bytes** dónde empieza y termina cada
+  `/OC /MCn BDC … EMC` de primer nivel; `solo(corte, talle)` devuelve los bytes de ese talle. Recién
+  ahí se parsea — **3 MB en vez de 61**. Quién se queda y quién se va lo sigue decidiendo el MISMO
+  código de `molde_real`: cambia la entrada, no la regla.
+
+  ⚠️ **TRES COSAS QUE HAY QUE SABER SI SE TOCA ESTO:**
+  1. **Un bloque que abre un estado gráfico y no lo cierra no se puede sacar entero.** En la
+     CAMISETA real el PRIMER talle (6XL) deja un `q` con un recorte abierto que abarca a los otros
+     19: sacarlo cambiaría el dibujo. Es la misma regla que `molde_real._saltar_bloques`. Esos
+     bloques viajan siempre; de adentro se descartan sólo sus grupos `q … Q` COMPLETOS (que además
+     no dejen `BDC`/`EMC` ni `BT`/`ET` colgando).
+  2. **La salida NO es byte a byte igual, a propósito**: el corte se lleva los trazados muertos de
+     los otros talles (dibujo sin pintar que el camino viejo dejaba y el RIP igual tenía que leer).
+     Por eso el contrato compara **píxeles en CMYK**, no bytes. Contenido: 65,7 → 61,3 MB.
+  3. **Si el corte no se puede garantizar, `cortar` devuelve `None`** y todo sigue por el camino de
+     siempre. Se verifica que los tramos cubran el stream entero antes de dar el corte por bueno.
+
+  **Contrato verde en los cuatro moldes reales del usuario**: CAMISETA JUGADOR (33,0 vs 42,3 s),
+  CAMISETA LIBERO (33,1 vs 41,0), SHORT JUGADOR (4,3 vs 6,3), SHORT LIBERO (4,3 vs 6,4) —
+  0 píxeles distintos y los mismos placeholders/línea de corte/etiqueta en todos.
+
+  ⚡ **Detalle de implementación que costó tres intentos:** contar `q`/`Q` con dos regex con
+  lookaround sobre 61 MB son 3,8 s; con `findall` de un solo patrón, 1,7. Y verificar el corte
+  pegando los trozos copiaba los 61 MB de nuevo: se comparan los LARGOS (los tramos salen de
+  cortar el mismo buffer en posiciones contiguas).
+
+- **2026-09-15 (456) — ✅ EL RIP DEL USUARIO PROCESÓ BIEN LA HOJA CON EL DIBUJO COMPARTIDO.
+  Queda habilitado el camino del «sello».** El usuario pasó `TIZADA_8m_PROPUESTA.pdf` (180 × 799 cm,
+  2 Form XObjects compartidos por 14 de las 44 colocaciones) por su RIP: **ripeó bien**. Antes lo
+  había pasado por su propio chequeador de PDF, que contó **44 formularios gráficos en la hoja de
+  hoy contra 2 en la nueva** — la confirmación, medida por él, de que la hoja dejó de repetirse.
+
+  🔴 **QUÉ SIGNIFICA Y QUÉ NO.** Significa que **un solo nivel de Form XObject referenciado N veces,
+  con recorte y matriz distintos por colocación, en DeviceCMYK y a 8 m con `/UserUnit 2`, le entra
+  al RIP**. No prueba todavía: el tiempo de proceso contra la hoja de hoy, ni una pieza impresa
+  comparada al lado (pendiente de preguntar). La cicatriz del «error RIP» que originó
+  `aplanar_rip.py` era con TRES niveles anidados + capas OCG, y eso sigue sin tocarse.
+
+  **LO QUE DESTRABA** (ver el menú de la 453 y las medidas de la 454):
+  · la hoja con la mesa compartida (camino A, el de producción);
+  · el mismo criterio en el preview del Arte (hoy **22,3 MB por talle** al navegador y 614 MB de
+    `piezas_cache` por diseño) y en la ficha técnica;
+  · y con eso, que el peso de la tizada deje de crecer con la cantidad de prendas.
+
+  ⚠️ **LAS DOS TRAMPAS YA PAGADAS EN ESTA PRUEBA, que son contrato para la implementación:**
+  (1) el bloque compartido tiene que ser **grupos `q … Q` completos** — un Form XObject aísla el
+  estado gráfico (6,7 % de píxeles mal si se corta por balance a secas); (2) el **`/BBox` ajustado
+  al dibujo**, nunca «generoso» — con ±200000 el render sale perfecto pero Illustrator muestra la
+  miniatura en blanco y se niega a mover objetos («la transformación haría que algunos objetos
+  fueran demasiado grandes»). Ninguna de las dos la ven los contratos automáticos: la primera la
+  agarró el diff de píxeles y la segunda el USUARIO abriendo el archivo en Illustrator. **Validar
+  siempre con las tres: píxeles, `verificar_rip_compatible` y abrirlo en Illustrator.**
+
+- **2026-09-15 (455) — 🧪 ARCHIVO DE PRUEBA PARA EL RIP: la misma hoja de 8 m con el diseño
+  compartido. 9,2 → 4,6 MB y CERO píxeles distintos.** El usuario pidió el archivo antes de tocar
+  nada. Se armó **sin generar una tizada nueva**: se re-escribió la página 1 de la tizada real
+  `20260915-095712-4220` (180 × 799 cm, 44 colocaciones) moviendo bytes de lugar.
+  Herramientas: `scratchpad/armar_prueba_rip.py` + `scratchpad/verificar_prueba.py`.
+  Entregado en `Escritorio\PRUEBA RIP TIZADA PRO\` (`TIZADA_8m_COMO_ESTA_HOY.pdf` y
+  `TIZADA_8m_PROPUESTA.pdf`).
+
+  | | hoy | propuesta |
+  |---|---|---|
+  | peso | 9,2 MB | **4,6 MB** |
+  | XObjects en la página | 44 (uno por colocación, ninguno compartido) | **2** (`/DIS0` ×6, `/DIS1` ×8) |
+  | niveles de anidado | 1 | **1** (igual) |
+  | imágenes rasterizadas | 0 | 0 |
+  | perfil declarado + incrustado | SWOP v2 · ICC N=4 | **el mismo** |
+  | `verificar_rip_compatible` | verde | **verde** |
+  | píxeles distintos (CMYK, 40 dpi) | — | **0 de 142.702.560** |
+  | valores de color | 7 | **los mismos 7** |
+
+  **CUÁNTO SE REPITE, MEDIDO SIN SUPONER NADA** (`scratchpad/cuanto_se_repite.py`, partido por
+  contenido con rolling hash): de la página de 8 m, **19,8 MB de contenido → 3,5 MB distintos:
+  el 82 % es repetición**. Las otras dos páginas dan 84 % y 81 %.
+
+  🔴 **LA TRAMPA QUE COSTÓ LA PRIMERA VERSIÓN (vale para la implementación de verdad):
+  un Form XObject AÍSLA el estado gráfico.** Cortar el bloque compartido con el criterio «que los
+  `q` y los `Q` den la misma cuenta» no alcanza: si el bloque dejaba puesto un color, un `gs` o un
+  ancho de línea que el RESTO de la pieza usaba, al meterlo adentro del objeto ese estado ya no sale
+  y el dibujo cambia. Primera versión: **6,7 % de los píxeles distintos**. Arreglo: el bloque
+  compartido empieza en un `q` de nivel raíz y termina donde la profundidad vuelve a 0 — así no deja
+  nada afuera. Con eso, 0 píxeles. **El pixel-diff fue el único que lo detectó**: el peso, los
+  colores y `verificar_rip_compatible` daban bien en las dos versiones.
+
+  ⚠️ **LO QUE EL ARCHIVO DE PRUEBA NO ES.** Comparte 2 de los 3 dibujos (14 de 44 colocaciones):
+  el tercer grupo tiene órdenes de dibujo a nivel raíz entremedio y no se pudo recortar *desde el
+  archivo ya terminado*. **En la implementación real no pasa**: el motor arma la base, así que el
+  diseño nace dentro de su propio `q … Q`. O sea, la ganancia real es MAYOR que el 2× de esta
+  prueba.
+
+  🔴 **SEGUNDO HALLAZGO, Y LO ENCONTRÓ EL USUARIO ABRIENDO EL ARCHIVO EN ILLUSTRATOR: el `/BBox`
+  del objeto compartido tiene que ser EL DE VERDAD.** La primera versión llevaba
+  `[-200000 -200000 200000 200000]` (≈ 7.000 cm) «por las dudas»: el dibujo salía perfecto —0
+  píxeles, control de RIP verde— pero en Illustrator (a) la **miniatura de la capa se veía en
+  blanco** (el dibujo era un punto en una caja gigante) y (b) al mover un objeto saltaba *«No se
+  pueden mover los objetos. La transformación haría que algunos objetos fueran demasiado
+  grandes»*. Ahora el BBox se calcula del propio bloque siguiendo las matrices `cm`
+  (`scratchpad/bbox_bloque.py`): da **55,1 × 88,9 cm**, el tamaño de la pieza. Verificado de nuevo:
+  0 píxeles distintos y RIP verde.
+  **Regla para la implementación: BBox ajustado al dibujo, nunca uno «generoso».** Un BBox grande
+  no se ve en el render ni en los contratos automáticos — se ve recién cuando alguien abre el
+  archivo en Illustrator.
+
+  **QUÉ HAY QUE MIRAR EN EL RIP** (en este orden): que lo procese sin error · el tiempo contra el
+  archivo de hoy · una pieza impresa comparada contra la de hoy · y la regla: 180 cm de ancho por
+  799 de largo (`/UserUnit 2`, el mecanismo de las mesas de más de 5,08 m).
+
+- **2026-09-15 (454) — 🔪 EL CORTE POR BYTES: sacar un talle pasa de 8,85 s a 1,49 s (los 20
+  juntos) con CERO píxeles distintos y los mismos valores de color. Medido sobre los archivos
+  REALES que pasó el usuario.** Objetivo textual: *«que se carguen flash, se trabajen livianos y la
+  tizada y la descarga sean instantáneas, manteniendo la fidelidad de color y los perfiles como
+  están hoy»*.
+
+  **RADIOGRAFÍA DE LOS 6 ARCHIVOS** (`scratchpad/medir_archivos.py`, `medir2.py`):
+
+  | archivo | disco | pág | operadores | descomprimido | `/PieceInfo` | capas |
+  |---|---|---|---|---|---|---|
+  | SHORT LIBERO / JUGADOR | 4,4 MB | 1 | 336.709 | 8,1 MB | 0,96 MB (22 %) | 28 |
+  | CAMISETA LIBERO / JUGADOR | 28,3 MB | 1 | **2.350.680** | **61,4 MB** | 2,62 MB (9 %) | 40 |
+  | ARTE GOLERO / JUGADOR PESADO | 6,8 MB | 8 | 160.948 | 4,2 MB | **4,94 MB (73 %)** | 6 |
+
+  🔴 **La CAMISETA trae el mismo dibujo 20 veces adentro**: una capa OCG por talle, ~118.000
+  operadores cada una. **Un talle es el 5 % del archivo (3,1 MB de 61,4).** Ningún parser sabe
+  saltearse el resto: MuPDF y pikepdf recorren el stream entero siempre.
+
+  **DESCUBRIMIENTO 1 — HOY SE LEE EL ARCHIVO ENTERO UNA VEZ POR TALLE.** `molde_real.aislar_capa`
+  parsea los 2,35 M de operadores y reescribe el stream. Medido (`medir6_contra_el_sistema.py`,
+  `medir7_color.py`), talle M de CAMISETA JUGADOR:
+
+  | | tiempo | página resultante |
+  |---|---|---|
+  | `aislar_capa` (como hoy) | 12,52 s | 64,3 MB |
+  | `aislar_capa(podar=True)` | 8,85 s | 6,2 MB |
+  | **cortar el bloque de BYTES de la capa** | **1,49 s (y corta los 20 talles de una)** | **3,1 MB** |
+
+  🔴 **Y ES IDÉNTICO, verificado como corresponde:** render CMYK a 36 dpi, **0 píxeles distintos de
+  43.801.680**; los **mismos 7 valores de color** (`0 0.996 1 0.002 k`, `1 0.943 0.179 0.097 k`,
+  `0.1 1 0.9 0 K`…); y la reconstrucción de los 20 bloques + los 42 bytes que quedan afuera devuelve
+  el stream original **byte a byte** (64.403.805 = 64.403.805).
+  **Por qué es el método más seguro para el color que existe: no reescribe ni un número, copia
+  bytes.** (Los archivos NO traen ICC ni OutputIntent propios — son `k`/`K` DeviceCMYK pelados; el
+  perfil lo declara TIZADA PRO en la salida, como hasta ahora.)
+  Proyección: los 20 talles hoy ≈ 177 s de CPU · con el corte ≈ 2,5 s.
+
+  **DESCUBRIMIENTO 2 — EL 97 % DE CADA PIEZA COLOCADA EN LA TIZADA ES EL MISMO DIBUJO.** Una
+  colocación real de la hoja `20260915-095712-4220`, abierta tramo por tramo: **791 KB**, de los
+  cuales **768 KB (97 %) es la mesa del arte** (13.849 `c`, 1.559 `f` — los mismos números que la
+  página 2 del `arte.ai`), **5 KB el recorte del contorno** y **18 KB el nombre/número en curvas**.
+  Compartir la mesa como UN objeto deja cada colocación en ~24 KB. Y de esos 18 KB de texto, la
+  mayoría son glifos repetidos (los mismos dígitos en toda la hoja).
+
+  **DESCUBRIMIENTO 3 — EL 73 % DEL ARTE ES DATO PRIVADO DE ILLUSTRATOR.** `/PieceInfo` (el PGF que
+  Illustrator guarda para poder re-editar; ningún lector PDF lo mira). Sacarlo **de la copia de
+  trabajo** (nunca del archivo del usuario): **6,8 MB → 1,8 MB**, con el content-stream **byte a
+  byte idéntico** (768.524 = 768.524). El molde: 28,3 → 25,7 MB.
+
+  **CONSECUENCIA PARA LA HOJA** (proyección desde lo medido, 100 prendas = ~2.700 colocaciones):
+  hoy ~670 MB · con la mesa compartida ~70 MB · + glifos compartidos ~20 MB · + base por
+  (pieza,talle,variable) compartida ~9 MB. **La mesa compartida NO agrega niveles de anidado**: va
+  como XObject de página, que es exactamente lo que `aplanar_rip` ya deja hoy (`/fzFrm0 Do`) — o
+  sea, **no reabre la cicatriz del RIP**, que era con TRES niveles + capas OCG.
+
+  **DE LA INDUSTRIA** (respaldo de que esto es lo normal, no un invento): los Form XObject existen
+  justamente para contenido repetido y son lo que usan las herramientas de imposición (Preps,
+  KIM PDF) e InDesign; PDF/VT-1 agregó `DPart` para que el RIP **cachee** el fondo repetido de cada
+  registro (el caso exacto de «mismo diseño, distinto nombre y número»); y la regla que hay que
+  respetar para que un RIP pueda reusar un XObject es que **no esté involucrado en transparencia**
+  — la hoja ya sale opaca con `SMask=None` por `_declarar_estado_grafico`.
+
+  ⚠️ **LO QUE FALTA VERIFICAR ANTES DE CODEAR:** (a) que el corte por bytes aguante un molde cuyo
+  stream tenga estado gráfico ANTES del primer `BDC` (acá son 42 bytes, pero no es ley); (b) el
+  mismo corte sobre el ARTE, donde las capas no son talles sino `diseño`/`Editable …`/`guias`;
+  (c) una impresión de prueba de una hoja con la mesa compartida.
+
+- **2026-09-15 (453) — 🔬 INVESTIGACIÓN (NADA DECIDIDO, NADA TOCADO): DÓNDE ESTÁ EL PESO DE
+  VERDAD. La hoja repite el mismo dibujo 14 veces; el arte entero pesa 4,4 MB y la tizada de 4
+  prendas pesa 61,7.** Pedido del usuario: *«una lógica nueva para que el sistema siga profesional
+  pero óptimo… que la tizada se arme completa y después se le ponga el diseño… tiene que servir
+  para muchas personas a la vez en un servidor que no es potente (16 GB, 200 GB, procesador de 5ª,
+  con otros proyectos adentro)»*. Se midió antes de proponer nada.
+
+  **LO MEDIDO (molde `prod_20260820_095558_38bc`, diseño JUGADOR, trabajo `20260915-095712-4220`):**
+
+  | | dato |
+  |---|---|
+  | El arte ENTERO (`arte.ai`, 8 mesas) | 7,1 MB en disco · **4,4 MB descomprimido** |
+  | Mapeo del diseño | **33 piezas → 7 mesas distintas** (4,7× de repetición dentro de UN talle) |
+  | Hoja de 4 prendas (4 talles distintos) | 108 colocaciones · **108 XObjects, 0 compartidos** |
+  | Peso de esa hoja | 26,7 MB comprimido · **61,7 MB descomprimido** = el arte ×14 |
+  | El trabajo entero en disco | **74 MB** (hoja 26,7 + previews SVG 40,4 + ficha 6,8) |
+  | Pico de RAM por tizada (post 452) | 417 MB (131 piso del proceso + ~286 el motor) |
+  | `datos/` | 913 MB, de los cuales **614 MB son el `piezas_cache` de UN solo diseño** |
+  | `trabajos/` | 871 MB en 158 archivos |
+
+  **LA CAUSA, EN UNA LÍNEA:** en el **camino A** (molde + arte separados, el de producción) cada
+  colocación se compone con `componer_pdf_contorno` → `show_pdf_page` sobre el `doc` propio de esa
+  pieza, y cada pieza copió el XObject de su mesa dentro de su propia base. O sea: **el dibujo se
+  duplica por pieza, por talle y por prenda**. Crece lineal: 6,7 MB por prenda → 100 prendas ≈
+  670 MB de hoja. El `piezas_cache` (SVG del visor) y la ficha tienen la MISMA causa.
+
+  **LO QUE YA ESTÁ RESUELTO — PERO SÓLO EN EL CAMINO B:** `hoja_pike.componer_hoja_pike` arma la
+  hoja con **una base por (pieza, talle) referenciada N veces** (`q cm /B_k Do Q` + el estampado
+  chico aparte). Se usa **sólo si TODAS las piezas de la tela traen `base["despl"]`** (motor
+  ~4956), o sea nunca en el camino A. Ahí está el escalón inmediato.
+
+  **EL MENÚ DE CAMINOS (en discusión con el usuario, ninguno elegido):**
+  · **A1 — «un dibujo, muchos recortes»**: la mesa entra UNA vez a la hoja como objeto compartido y
+    cada pieza es matriz + recorte al contorno + `Do` + borde + nombre/número, todo a nivel de
+    página (UN nivel de XObject, que es lo que el RIP pide). Peso ≈ fijo (el arte) + ~30 KB por
+    pieza. Es, textual, «armar la tizada y después ponerle el diseño».
+    ⚠️ El nudo fino: los **editables movidos/recoloreados por variable** rompen «una mesa = un
+    dibujo» → el objeto compartido tiene que ir cacheado por **mesa + configuración efectiva**.
+  · **A2 — extender la hoja compartida (`hoja_pike`) al camino A**: bajo riesgo, ya escrito y
+    verificado; mata la repetición por CANTIDAD (25 camisetas del mismo talle = 1 base), deja la
+    repetición por pieza/talle.
+  · **A3 — dos niveles** (mesa compartida adentro de bases compartidas): lo mejor de los dos, pero
+    depende de que el RIP aguante profundidad 2. Se decide con **una** prueba de impresión.
+  · **A4 — PDF/VT / contenido reusable declarado** (el estándar de dato variable): nombre y número
+    sobre un fondo idéntico es exactamente el caso; si el RIP lo soporta, además imprime más rápido.
+  · **B1 — la tizada como DATOS** (marker: pieza, x, y, ángulo, talle, variable, nombre) y el PDF
+    materializado al pedirlo. Es como trabajan Gerber/Lectra.
+  · **B2 — almacén por hash** de mesas/bases compartido entre pedidos, diseños y usuarios.
+  · **B3 — cachear el RESULTADO del acomodo** por multiconjunto de `geo_key` + cfg (hoy se
+    deduplican las máscaras, no las colocaciones).
+  · **C — previews y ficha por referencia y bajo demanda** (40 de los 74 MB del trabajo).
+  · **D — cupo de generaciones** (semáforo SÓLO entre generaciones, no el lock compartido con el
+    visor de [[un-trabajo-pesado-por-vez]]), **un proceso por trabajo que muere al terminar** (como
+    el aplanado de la 452), presupuesto declarado del que salgan pool y cupo, y techo del SO en el
+    Linux del EC2.
+  · **E — poda por edad/tamaño de los cachés derivados** (son derivados, pero viven en `datos/`:
+    decide el usuario).
+
+  **PENDIENTE ANTES DE CODEAR:** (1) tamaño real del pedido típico y del máximo; (2) cuánta gente a
+  la vez; (3) la prueba de RIP con 1 nivel / 2 niveles / PDF-VT; (4) permiso para podar los cachés
+  derivados. Y el banco de medición con pedidos de 1/10/50/100/200 prendas **antes** de elegir:
+  con series cortas hay que mirar la CURVA, no el promedio (trampa ya anotada en la 450).
+
 - **2026-09-15 (452) — 🏠 EL APLANADO SE MUDA A UN PROCESO APARTE: el servidor pasa de 938 a
   417 MB de pico, y encima tarda menos.** El usuario: *«¿no es mucho 938 MB? ¿no se puede tener el
   mismo resultado con menos de 100? el servidor tiene otros proyectos y se va a morir»*.

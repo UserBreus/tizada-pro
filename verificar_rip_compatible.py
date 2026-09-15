@@ -52,9 +52,15 @@ def _walk_xobjects(res, vistos, nivel=0):
             yield from _walk_xobjects(xo.get("/Resources"), vistos, nivel + 1)
 
 
-def verificar(path, balance=True):
+def verificar(path, balance=True, dibujar=True):
     """`balance=False`: no vuelve a parsear todos los streams para el chequeo de q/Q — el motor ya
-    lo hizo en `validar_salida` (el servidor lo llama así; el CLI lo chequea todo)."""
+    lo hizo en `validar_salida` (el servidor lo llama así; el CLI lo chequea todo).
+
+    `dibujar=False`: no vuelve a DIBUJAR la hoja con el segundo lector (chequeo 10). Era el paso
+    más caro de la verificación —26 s en un pedido real de 7 mesas— porque interpretar el vector de
+    una hoja de 8 m cuesta casi lo mismo a 8 dpi que a 1200. El pedido YA la dibuja una vez para
+    las miniaturas de la pantalla (`servidor._predibujar_mesas`), y si eso falla lo dice igual: el
+    mismo trabajo no se hace dos veces. El CLI y los contratos lo siguen haciendo."""
     fallas = []
     def mal(cond, msg):
         if not cond:
@@ -134,7 +140,9 @@ def verificar(path, balance=True):
                     fallas.append(x.get("nombre"))
         except Exception as e:
             fallas.append(f"no se pudo validar el balance de los streams: {e}")
-    # 10 segundo lector
+    # 10 segundo lector (ver `dibujar` en el docstring)
+    if not dibujar:
+        return (not fallas), fallas
     try:
         import pymupdf as fitz
         d = fitz.open(path)

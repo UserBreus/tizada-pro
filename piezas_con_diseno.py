@@ -2119,16 +2119,30 @@ def _paginas_de_talles(path_molde, mesa, talles, conts, marco, U, ocultar, desti
     """UNA página por talle (en el orden dado) escrita en `destino`. Devuelve
     `(placeholders, lineas, etiqueta_archivo)`.
 
-    La mesa se parsea UNA vez y se filtra para cada talle: ése es el reparto natural del trabajo
-    (ver `_armar_paginas`). Antes esto vivía adentro de `desplegar_mesa`."""
+    🔴 EL TROZO DEL TALLE SE CORTA POR BYTES ANTES DE PARSEAR (2026-09-15, `cortar_capas.py`).
+    La mesa del usuario son 2.350.680 operadores y **un talle es el 5 %**: parsear la mesa entera
+    y recorrerla veinte veces costaba ~197 s. Ahora se ubica por bytes dónde empieza y termina
+    cada capa (1,5 s para las veinte) y se parsea **sólo el trozo de cada talle**. Lo que decide
+    qué se conserva sigue siendo el MISMO código de `molde_real` — cambia la entrada, no la
+    regla —, así que el resultado es operador por operador el de siempre. Si el corte no se
+    puede garantizar (`cortar` devuelve None), se sigue por el camino de siempre."""
     import molde_real as MR
+    import cortar_capas as CC
     ocultar = set(ocultar or ())
     pdf = pikepdf.open(path_molde)
     try:
         pag = pdf.pages[mesa - 1]
-        ins = list(pikepdf.parse_content_stream(pag))
-        ops, oc = MR._mapa_oc(ins, pag)
-        bloques = MR._bloques_oc(ops, oc)
+        try:
+            corte = CC.cortar(pag)
+        except Exception as e:
+            print(f"  [camino B] no se pudo cortar la mesa {mesa} por bytes ({type(e).__name__}: {e});"
+                  f" sigo por el camino de siempre")
+            corte = None
+        ins = ops = oc = bloques = None
+        if corte is None:
+            ins = list(pikepdf.parse_content_stream(pag))
+            ops, oc = MR._mapa_oc(ins, pag)
+            bloques = MR._bloques_oc(ops, oc)
         out = pikepdf.Pdf.new()
         placeholders = {}
         lineas = {}
@@ -2136,8 +2150,14 @@ def _paginas_de_talles(path_molde, mesa, talles, conts, marco, U, ocultar, desti
         for talle in talles:
             obj = {MR._norm_capa(talle)}
             fn = (lambda pila, _o=obj: not any(frame and (_o & frame) for frame in pila))
-            saltar = MR._saltar_bloques(ops, oc, fn, bloques)
-            salida = MR._raspar_instrucciones(ins, ops, oc, fn, True, saltar)
+            if corte is not None:
+                _ins = CC.instrucciones(CC.solo(corte, obj))
+                _ops, _oc = MR._mapa_oc(_ins, pag)
+                _bloques = MR._bloques_oc(_ops, _oc)
+            else:
+                _ins, _ops, _oc, _bloques = ins, ops, oc, bloques
+            saltar = MR._saltar_bloques(_ops, _oc, fn, _bloques)
+            salida = MR._raspar_instrucciones(_ins, _ops, _oc, fn, True, saltar)
             # «00» y «NOMBRE» se leen y se SACAN del dibujo de este talle (ver arriba); y si el
             # diseño ya trae la ETIQUETA DE CORTE del talle, también se saca — si no, la prenda
             # sale con dos (la del archivo y la del sistema).

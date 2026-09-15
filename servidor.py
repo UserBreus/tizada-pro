@@ -307,6 +307,20 @@ def _podar_trabajos_en_disco():
         nombres = os.listdir(TRABAJOS)
     except OSError:
         return 0
+    # 🔴 LAS PREVIAS SVG DE LOS PEDIDOS VIEJOS, AUNQUE EL PEDIDO SIGA VIVO. Desde 2026-09-15 no se
+    # escriben más (nadie las abría: la pantalla usa `mesa_img`), pero las de antes quedaron —
+    # eran **435 MB** en la máquina del usuario. Se van sin tocar la hoja ni la ficha, que son lo
+    # que el pedido entrega de verdad.
+    for nom in nombres:
+        d = os.path.join(TRABAJOS, nom)
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            if f.startswith("prev_") and f.endswith(".svg"):
+                try:
+                    os.remove(os.path.join(d, f))
+                except OSError:
+                    pass
     for nom in nombres:
         ruta = os.path.join(TRABAJOS, nom)
         try:
@@ -2282,6 +2296,17 @@ _API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_mu
 # descarga del archivo. No cuentan como «este molde está en uso» para los efímeros (ver la guardia).
 _API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla")
 
+# 🔴 ENDPOINTS DEL PEDIDO QUE NO TRABAJAN SOBRE UN MOLDE. La guarda, cuando un POST no trae `pid`,
+# resuelve el molde ACTIVO y le exige `molde.editar` — bien pensado para las ~30 rutas que SÍ
+# escriben un molde sin declararlo. Pero éstas no tocan ningún molde del catálogo: limpian lo del
+# PEDIDO (sus tizadas, sus tipografías, y los moldes EFÍMEROS que son de quien los subió, con su
+# propio control de dueño adentro). Exigirles permiso sobre el molde activo tenía dos efectos
+# malos: un Operario sin `molde.editar` NO podía limpiar su propio pedido —sus moldes de >100 MB
+# se quedaban en el servidor para siempre— y `verificar_efimero.py` quedaba en rojo con un 403
+# (2026-09-15). Cada uno de estos endpoints hace su propia comprobación de dueño y de permiso.
+_API_DEL_PEDIDO_SIN_MOLDE = ("/api/pedido/limpiar_efimeros", "/api/pedido/limpiar_trabajos",
+                             "/api/pedido/fuentes_pedido_limpiar")
+
 # PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
 # al servidor SIN pasar por nginx (localhost:8050 o la IP, típico al abrirlo en la propia máquina),
 # el frontend —compilado con base `/Tizadapro/`— pide `/Tizadapro/api/…` y nadie saca el prefijo:
@@ -2355,7 +2380,7 @@ def _guardia_moldes():
             # (auditoría 2026-09-14). Ahora, si la request ESCRIBE, se resuelve el molde igual que
             # el endpoint y se lo comprueba. Las lecturas siguen pasando como siempre.
             if request.method in ("POST", "PUT", "PATCH", "DELETE") and not any(
-                    request.path.startswith(x) for x in _API_LEE_CON_PID):
+                    request.path.startswith(x) for x in _API_LEE_CON_PID) and                     request.path not in _API_DEL_PEDIDO_SIN_MOLDE:
                 try:
                     _pid_impl = _get_active_producto_id()
                 except Exception:
@@ -8207,16 +8232,22 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             c = ti["col"]
             val = str(pr.get(c.get("id"), pr.get(c.get("label"), "")) or "").strip()
             # 🔴 UNA CELDA VACÍA NO ELIGE SOLA EN SILENCIO. Una fila sin nada en «Manga» (o en
-        # cualquier toggle: sisa, capucha) salía con la PRIMERA opción —«Corta»— sin decirlo: la
-        # prenda se imprime, se corta, y nadie pidió esa manga (auditoría 2026-09-14). Se sigue
-        # usando la primera (la fila tiene que salir), pero queda ANOTADO para avisarlo.
-        opcion = val or (ti["opciones"][0] if ti["opciones"] else "")
-        if not val and opcion:
-            _lbl = ti.get("label") or ti.get("clave") or "opción"
-            _tg = getattr(_traducir_prendas, "toggles_por_defecto", None)
-            if _tg is None:
-                _tg = _traducir_prendas.toggles_por_defecto = {}
-            _tg[_lbl] = _tg.get(_lbl, 0) + 1   # vacío → primera opción
+            # cualquier toggle: sisa, capucha) salía con la PRIMERA opción —«Corta»— sin decirlo:
+            # la prenda se imprime, se corta, y nadie pidió esa manga (auditoría 2026-09-14). Se
+            # sigue usando la primera (la fila tiene que salir), pero queda ANOTADO para avisarlo.
+            # ⚠️ 2026-09-15: TODO ESTO VA ADENTRO DEL `for`. Al agregar el aviso (commit 6fd63a4)
+            # quedó un nivel afuera, y eso rompía tres cosas a la vez: sin ninguna columna de
+            # toggle reventaba con `UnboundLocalError` (`val` sin asignar); con VARIAS, sólo se
+            # miraba la última; y el `append` colgaba del `if not val`, así que **un toggle
+            # ELEGIDO por el usuario nunca se agregaba** — la prenda salía con la opción por
+            # defecto del motor. Lo agarró `verificar_cantidad.py`.
+            opcion = val or (ti["opciones"][0] if ti["opciones"] else "")
+            if not val and opcion:
+                _lbl = ti.get("label") or ti.get("clave") or "opción"
+                _tg = getattr(_traducir_prendas, "toggles_por_defecto", None)
+                if _tg is None:
+                    _tg = _traducir_prendas.toggles_por_defecto = {}
+                _tg[_lbl] = _tg.get(_lbl, 0) + 1   # vacío → primera opción
             if opcion:
                 toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
         _tv = pr.get(talle_col, "")
@@ -9224,11 +9255,23 @@ def generar_multi():
             # COMPATIBILIDAD RIP (2026-09-04): la hoja final se verifica como PDF/X-1a-like (sin
             # capas ni transparencia, un nivel de objetos, fuentes embebidas, CMYK, perfil de
             # salida). Si algo falla, se avisa en pantalla — no se frena la tizada.
+            # 🔴 LAS MESAS SE DIBUJAN ACÁ, ANTES DE VERIFICAR, Y POR UN MOTIVO DE FONDO: el
+            # chequeo 10 de `verificar_rip_compatible` («¿un segundo lector puede dibujarla?»)
+            # hacía EXACTAMENTE este mismo trabajo. Eran 26 s dibujando para verificar + 26 s
+            # dibujando para la pantalla: el mismo vector de 8 m interpretado dos veces. Ahora se
+            # dibuja UNA vez, en paralelo, y ese resultado sirve para las dos cosas.
+            _mesas_err = []
+            try:
+                _n_mesas, _mesas_err = _predibujar_mesas(tid, res.get("hojas") or [], prog)
+            except Exception as _em:
+                print("  [!] pre-dibujado de las mesas:", repr(_em))
+            _marca("mesas")
             try:
                 from verificar_rip_compatible import verificar as _verif_rip
-                _rip_fallas = []
+                _rip_fallas = list(_mesas_err)
                 for h in res.get("hojas", []):
-                    _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]), balance=False)
+                    _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]), balance=False,
+                                           dibujar=False)
                     if not _okr:
                         _rip_fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
                 res["rip_compatible"] = not _rip_fallas
@@ -10481,6 +10524,97 @@ def _frac(v, por_defecto):
         return por_defecto
 
 
+def _dibujar_vista_mesa(tid, archivo, pi, w, recorte=None):
+    """Dibuja UNA mesa a PNG y la deja cacheada al lado del trabajo. Devuelve la ruta o None.
+
+    Lo usan el endpoint `mesa_img` (cuando la pantalla la pide) y el PRE-DIBUJADO del final del
+    pedido: son el mismo dibujo y la misma caché, así que la que hace el pedido es exactamente
+    la que después sirve la pantalla — sin rehacer nada.
+    """
+    import fitz
+    entera = not recorte or tuple(recorte) == (0.0, 0.0, 1.0, 1.0)
+    cx0, cy0, cx1, cy1 = (0.0, 0.0, 1.0, 1.0) if entera else recorte
+    sufijo = "" if entera else f"_c{cx0:.4f}-{cy0:.4f}-{cx1:.4f}-{cy1:.4f}"
+    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}{sufijo}.png")
+    if os.path.exists(cache):
+        return cache
+    ruta = os.path.join(TRABAJOS, tid, archivo)
+    if not os.path.exists(ruta):
+        return None
+    with fitz.open(ruta) as d:
+        if pi >= d.page_count:
+            pi = 0
+        pg = d[pi]
+        r = pg.rect
+        clip = None if entera else fitz.Rect(r.x0 + r.width * cx0, r.y0 + r.height * cy0,
+                                             r.x0 + r.width * cx1, r.y0 + r.height * cy1)
+        ancho_pt = (clip.width if clip is not None else r.width) or 1.0
+        z = w / ancho_pt
+        png = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=clip, alpha=False).tobytes("png")
+    # .tmp + replace: dos pedidos de la misma mesa no se dejan un PNG a medias
+    with open(cache + ".tmp", "wb") as fh:
+        fh.write(png)
+    os.replace(cache + ".tmp", cache)
+    return cache
+
+
+def _dibujar_una_mesa(args):
+    """Worker de proceso: una mesa a PNG. Devuelve `(archivo, pi, error|None)`."""
+    tid, archivo, pi, w = args
+    try:
+        _dibujar_vista_mesa(tid, archivo, pi, w)
+        return (archivo, pi, None)
+    except Exception as e:
+        return (archivo, pi, f"{type(e).__name__}: {e}")
+
+
+def _predibujar_mesas(tid, hojas, prog=None):
+    """Deja dibujadas TODAS las mesas del pedido antes de que la pantalla las pida.
+
+    🔴 POR QUÉ (2026-09-15, reporte del usuario: «las mesas demoran una eternidad en mostrarse
+    después de creada»). El dibujo de cada mesa se hacía RECIÉN cuando la grilla la pedía: en su
+    pedido real fueron **26 s de grilla vacía** después de que la tizada ya estaba lista — y esa
+    espera se sumaba entera a la que el usuario percibe.
+
+    🔴 Y VA EN PARALELO, con el pool de render. En serie eran otros 26 s: mover la espera de
+    después de la pantalla a adentro del pedido no la saca, sólo la corre de lugar — y el usuario
+    no vio ninguna mejora. PyMuPDF no es thread-safe: van PROCESOS, nunca hilos.
+
+    Devuelve `(hechas, errores)`. Los errores son, además, **la prueba de que un segundo lector
+    puede dibujar la hoja**: es el chequeo 10 de `verificar_rip_compatible`, que hacía exactamente
+    este mismo trabajo por segunda vez (otros 26 s). Ahora se dibuja UNA vez y sirve para las dos
+    cosas.
+    """
+    tareas = [(tid, h["archivo"], pi, _VISTA_MESA_W)
+              for h in (hojas or []) for pi in range(int(h.get("paginas") or 1))]
+    total = len(tareas)
+    if not total:
+        return 0, []
+    errores, hechas = [], 0
+
+    def _anotar(r):
+        nonlocal hechas
+        hechas += 1
+        if r and r[2]:
+            errores.append(f"{r[0]} pág {r[1] + 1}: {r[2]}")
+            print(f"  [!] no se pudo dibujar la mesa {r[1] + 1} de {r[0]}: {r[2]}")
+        if prog:
+            prog("mesas", f"{hechas}/{total}", None)
+
+    try:
+        from concurrent.futures import as_completed
+        ex = _get_render_pool()
+        futs = [ex.submit(_dibujar_una_mesa, t) for t in tareas]
+        for f in as_completed(futs):
+            _anotar(f.result())
+    except Exception as e:
+        # Si el pool no arranca (o se cae), se hacen acá: se pierde la velocidad, no las mesas.
+        print(f"  [!] el pool no pudo dibujar las mesas ({type(e).__name__}: {e}); las hago en serie")
+        for t in tareas[hechas:]:
+            _anotar(_dibujar_una_mesa(t))
+    return hechas, errores
+
+
 @app.get("/api/trabajos/<tid>/mesa_img/<archivo>")
 def mesa_img(tid, archivo):
     """UNA mesa como imagen LIVIANA, para la grilla del paso Tizada.
@@ -10527,33 +10661,13 @@ def mesa_img(tid, archivo):
     ruta = os.path.join(TRABAJOS, tid, archivo)
     if not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
-    _sufijo = "" if entera else f"_c{cx0:.4f}-{cy0:.4f}-{cx1:.4f}-{cy1:.4f}"
-    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}{_sufijo}.png")
-    if os.path.exists(cache):
-        return _png_guardado(cache)
     try:
-        with fitz.open(ruta) as d:
-            if pi >= d.page_count:
-                pi = 0
-            pg = d[pi]
-            r = pg.rect
-            clip = None if entera else fitz.Rect(
-                r.x0 + r.width * cx0, r.y0 + r.height * cy0,
-                r.x0 + r.width * cx1, r.y0 + r.height * cy1)
-            ancho_pt = (clip.width if clip is not None else r.width) or 1.0
-            z = w / ancho_pt
-            png = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=clip, alpha=False).tobytes("png")
+        cache = _dibujar_vista_mesa(tid, archivo, pi, w, (cx0, cy0, cx1, cy1))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    try:
-        # .tmp + replace: dos pestañas pidiendo la misma mesa no se dejan un PNG a medias
-        with open(cache + ".tmp", "wb") as fh:
-            fh.write(png)
-        os.replace(cache + ".tmp", cache)
-        return _png_guardado(cache)
-    except Exception:
-        pass
-    return send_file(_io.BytesIO(png), mimetype="image/png")
+    if not cache:
+        return jsonify({"error": "no existe"}), 404
+    return _png_guardado(cache)
 
 
 def _pdf_de_una_pagina(src, pi):

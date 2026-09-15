@@ -291,10 +291,24 @@ def resolver_fuente(nombre_ps, carpeta):
         # elección, se respeta la original. «Volver a la original» = elegirla en la lista o
         # cargar su archivo (el server borra el alias en los dos casos) — nunca vuelve sola.
         nombre_ps = _al.get(nombre_ps, nombre_ps)
+    # 🔴 UNA COINCIDENCIA EXACTA LE GANA SIEMPRE A UNA PARECIDA (2026-09-15). Antes se devolvía la
+    # PRIMERA que matcheara, y el «parecido» (uno contenido en el otro) valía tanto como el nombre
+    # exacto: con dos tipografías del catálogo que normalizan igual —le pasó al usuario con
+    # `MoreggiTFont4`: una se declara «MoreggiTFont4 Camiseta» y otra «MoreggiTFont4? Camiseta?»—
+    # una de las dos quedaba INALCANZABLE y la prenda salía estampada con la que nadie eligió.
+    # Tres vueltas, de lo más estricto a lo más flojo. El alta ya avisa del choque (`choca_con`);
+    # esto hace que, aun con el choque, cada nombre caiga en SU archivo.
+    cat = catalogo_fuentes(carpeta)
+    for ruta, info in cat.items():                       # 1) el nombre TAL CUAL
+        if (info.get("interno") or "") == nombre_ps:
+            return ruta
     objetivo = _norm(nombre_ps)
-    for ruta, info in catalogo_fuentes(carpeta).items():
-        if _norm(info["interno"]) == objetivo or objetivo in _norm(info["interno"]) \
-           or _norm(info["interno"]) in objetivo:
+    for ruta, info in cat.items():                       # 2) normalizado, pero exacto
+        if _norm(info["interno"]) == objetivo:
+            return ruta
+    for ruta, info in cat.items():                       # 3) recién ahora, el parecido
+        _n = _norm(info["interno"])
+        if objetivo in _n or _n in objetivo:
             return ruta
     return None
 
@@ -2905,7 +2919,7 @@ def _bbox_de_xo(xo):
 
 
 def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, out, page,
-                               mesa_rect, referencia="alto"):
+                               mesa_rect, referencia="alto", xo_src=None):
     """Content-stream que dibuja los objetos AGREGADOS asignados a `pieza`, con su transform.
     Cada objeto es un PDF suelto (datos/.../objetos_agregados/<oid>.pdf). Base = 30% centrado
     (como el editor); encima, el transform del usuario (mover/rotar/escalar/espejar)."""
@@ -2929,10 +2943,18 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
             src = cache.get(ruta)
             if src is None:
                 src = _pk.open(ruta); cache[ruta] = src
-            xo = out.copy_foreign(src.pages[0].as_form_xobject())
+            _f_oa = cache.get(("form", ruta))
+            if _f_oa is None:
+                _f_oa = src.pages[0].as_form_xobject()
+                if "/OC" in _f_oa:
+                    del _f_oa["/OC"]
+                cache[("form", ruta)] = _f_oa
+            xo = out.copy_foreign(_f_oa)
             if "/OC" in xo:
                 del xo["/OC"]
             nom = page.add_resource(xo, Name.XObject, prefix="OA")
+            if xo_src is not None:
+                xo_src[str(nom)] = _f_oa
             # BASE: la BBox del objeto se escala a su MEDIDA REAL sobre la pieza (fw×fh), centrada
             # → misma proporción que el archivo (no se estira) y mismo tamaño que muestra el editor.
             # DENTRO DEL DISEÑO, con la mesa de ESTE talle (ver `pos_agregado_en_diseno`).
@@ -4398,8 +4420,29 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                                f"{int(_sa.st_mtime)}:{_sa.st_size}:{int(_sp.st_mtime)}:{_sp.st_size}")
     except OSError:
         _svg_cache_info = None
+
+    # ── EL DIBUJO, UNA SOLA VEZ EN LA HOJA (2026-09-15, «el sello») ──────────────────────────
+    # 🔴 Medido sobre una tizada real: el **97 %** de cada pieza colocada es el MISMO dibujo de la
+    # mesa (768 KB de 791). Para que en la hoja entre UNA sola vez hace falta que todas las bases
+    # apunten al MISMO objeto de origen: `copy_foreign` deduplica por objeto, así que un
+    # `as_form_xobject()` nuevo por base daría N copias. Acá se memoriza por clave (mesa/talle,
+    # mesa del arte, editable, objeto agregado) y se guarda en `fuentes_xo` de cada base, que es
+    # lo que lee `hoja_pike.componer_hoja_sello`.
+    _form_memo = {}
+
+    def _form_de(clave, pag):
+        """El Form XObject de una página de origen, SIEMPRE el mismo objeto para la misma clave."""
+        xo = _form_memo.get(clave)
+        if xo is None:
+            xo = pag.as_form_xobject()
+            if "/OC" in xo:
+                del xo["/OC"]
+            _form_memo[clave] = xo
+        return xo
+
     def _armar_base(pieza, talle, variante):
         info = registro[pieza][talle]
+        _xo_src = {}          # nombre en `base_stream` → objeto de ORIGEN (para compartirlo)
         mesa = info["mesa"]
         _mesa_a = mesa_arte(pieza, talle, variante) if mapeo_arte else None
         if "pieza_idx" in info:                 # etiquetado visual: pieza puntual de la mesa
@@ -4434,13 +4477,15 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             # la misma mesa que el molde) con una sola diferencia: la página sale del MOLDE, no
             # del arte. Misma escala para todo (`S` del XObject), misma traslación, mismo clip.
             pag = pagina_molde(mesa, talle)
-            xo = out.copy_foreign(pag.as_form_xobject())
+            _fuente = _form_de(("molde", mesa, talle), pag)
+            xo = out.copy_foreign(_fuente)
             if "/OC" in xo:
                 del xo["/OC"]
             S = float(xo.Matrix[0]) if "/Matrix" in xo else 1.0
             ops = ops_cont(cont, S)
             clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)
             nom = page.add_resource(xo, Name.XObject, prefix="A")
+            _xo_src[str(nom)] = _fuente
             arte_draw = (f"q\n1 0 0 1 {B-x0*S:.3f} {B-y0*S:.3f} cm\n"
                          f"q\n{ops}\nW n\n{nom} Do\nQ\nQ\n")
             _despl, _nom_xo = _despl_src.get((mesa, talle)), str(nom)
@@ -4451,10 +4496,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         elif mapeo_arte:                        # ARTE SEPARADO: diseño en mesa aparte, escalado al contorno
             S = cont["user_unit"]
             pag = pagina_arte_pieza(_mesa_a)
-            xo = out.copy_foreign(pag.as_form_xobject())
+            _fuente = _form_de(("arte", _mesa_a), pag)
+            xo = out.copy_foreign(_fuente)
             if "/OC" in xo:
                 del xo["/OC"]
             nom = page.add_resource(xo, Name.XObject, prefix="A")
+            _xo_src[str(nom)] = _fuente
             clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)
             _td = cm_encajar(xo, W, H, B)        # encaje del diseño (alto manda, centrado)
             arte_draw = f"q\n{clip}\nW n\n{_td}\n{nom} Do\nQ\n"
@@ -4501,10 +4548,13 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     _ps = pagina_arte_solo(_mesa_a, _o["capa"], obj_id=_o["obj_id"],
                                            color=(None if _cols else _color_de(_o["ident"], variante)),
                                            colores=_cols)
-                    _xs = out.copy_foreign(_ps.as_form_xobject())
+                    _fuente_e = _form_de(("editable", _mesa_a, _o["capa"], _o["obj_id"],
+                                          repr(_cols), repr(_color_de(_o["ident"], variante))), _ps)
+                    _xs = out.copy_foreign(_fuente_e)
                     if "/OC" in _xs:
                         del _xs["/OC"]
                     _noms = page.add_resource(_xs, Name.XObject, prefix="E")
+                    _xo_src[str(_noms)] = _fuente_e
                     _w_cm = float(_o.get("w_cm") or 0); _h_cm = float(_o.get("h_cm") or 0)
                     _sf = None
                     if _box and _box.get("mantener"):
@@ -4531,16 +4581,18 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _ar = arte_rect(_mesa_a)      # mesa del arte de ESTA pieza y ESTE talle
             arte_draw += _dibujar_objetos_agregados(
                 objetos_agregados, pieza, variante, talle, cont, W, H, B, clip, out, page,
-                [_ar.x0, _ar.y0, _ar.width, _ar.height], referencia)
+                [_ar.x0, _ar.y0, _ar.width, _ar.height], referencia, xo_src=_xo_src)
         else:                                   # ARTE CLÁSICO: diseño sobre la misma mesa del molde
             pag = pagina_arte(mesa, talle)
-            xo = out.copy_foreign(pag.as_form_xobject())
+            _fuente = _form_de(("arte_clasico", mesa, talle), pag)
+            xo = out.copy_foreign(_fuente)
             if "/OC" in xo:
                 del xo["/OC"]
             S = float(xo.Matrix[0]) if "/Matrix" in xo else 1.0
             ops = ops_cont(cont, S)
             clip = ops_cont(cont, S, dx=B - x0*S, dy=B - y0*S)
             nom = page.add_resource(xo, Name.XObject, prefix="A")
+            _xo_src[str(nom)] = _fuente
             arte_draw = (f"q\n1 0 0 1 {B-x0*S:.3f} {B-y0*S:.3f} cm\n"
                          f"q\n{ops}\nW n\n{nom} Do\nQ\nQ\n")
 
@@ -4597,6 +4649,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # para la HOJA COMPARTIDA (`hoja_pike`): la mesa desplegada de la que salió el
                 # dibujo, el nombre con el que la referencia `base_stream`, y el margen
                 "despl": _despl, "nom": _nom_xo, "B": B, "pieza": pieza, "talle": talle,
+                # EL SELLO: nombre usado en `base_stream` → objeto de ORIGEN del dibujo. Todas las
+                # bases que usan la misma mesa apuntan al MISMO objeto, así que al componer la
+                # hoja entra una sola vez (ver `hoja_pike.componer_hoja_sello`).
+                "fuentes_xo": _xo_src,
                 "svg_cache": _svg_cache_info}
 
     def generar_pieza(pieza, talle, persona, nro, grupo=None, variante=None):
@@ -4870,10 +4926,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 bloques.append(f"q {_tcol}\n{eops}\nf\nQ\n")
 
         estampado = f"q\n{clip}\nW n\n" + "".join(bloques) + "Q\n"
-        if _modo_hoja == "pike" and b.get("despl"):
-            # HOJA COMPARTIDA: la base no se vuelve a serializar por prenda. Lo que cambia por
-            # prenda viaja como texto de operadores; el documento de la pieza (si alguien lo
-            # necesita: el Arte, el nesting de siempre) se arma recién al pedirlo.
+        # 🔴 SIN SERIALIZAR LA PIEZA POR PRENDA. Vale para la hoja compartida del camino B
+        # (`despl`) y, desde el sello (2026-09-15), también para el camino A (`fuentes_xo`): con
+        # 100 prendas eran 3.300 documentos de ~800 KB armados para tirarlos. Lo que cambia por
+        # prenda viaja como texto de operadores; el documento de la pieza (si alguien lo necesita:
+        # el Arte, el nesting de siempre, los contratos) se arma recién al pedirlo.
+        if _modo_hoja == "pike" and (b.get("despl") or b.get("fuentes_xo") is not None):
             return {"base": b, "estampado": estampado}
         stream = b["base_stream"] + estampado
         b["cstream"].write(stream.encode())
@@ -4951,10 +5009,20 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         coloc, area = anidar_contorno(piezas, cfg_t)
         _crono["acomodar en la tela"] += time.time() - _t_et; _t_et = time.time()
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
-        # HOJA COMPARTIDA si TODAS las piezas de esta tela traen su base (camino B); si no —camino
-        # A, o una tela que mezcla moldes de los dos caminos— el compositor de siempre.
+        # 🔴 EL SELLO (2026-09-15): el dibujo de cada mesa entra a la hoja UNA sola vez y cada
+        # pieza lo referencia. Vale para los DOS caminos —lo único que pide es que la pieza traiga
+        # su base con `fuentes_xo` y su estampado aparte— y deja la hoja con UN solo nivel de
+        # XObject, la estructura que el RIP del usuario ya procesó bien (changelog 456).
+        # Medido: el 97 % de cada colocación era el mismo dibujo repetido.
+        # `TIZADA_SIN_SELLO=1` vuelve al compositor anterior.
         _pike = all(("base" in p and (p["base"] or {}).get("despl")) for p in piezas)
-        if _pike:
+        _sello = (not os.environ.get("TIZADA_SIN_SELLO")) and bool(piezas) and all(
+            (p.get("base") or {}).get("fuentes_xo") is not None and p.get("estampado") is not None
+            for p in piezas)
+        if _sello:
+            from hoja_pike import componer_hoja_sello
+            consumo, alturas_cm = componer_hoja_sello(coloc, cfg_t, path, progreso=progreso)
+        elif _pike:
             from hoja_pike import componer_hoja_pike
             consumo, alturas_cm = componer_hoja_pike(coloc, cfg_t, path)
         else:
@@ -4969,12 +5037,21 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                     p["doc"].close()
                 except Exception:
                     pass
-        if not _pike:
+        if not (_pike or _sello):
             _barrer_fuentes(path)     # la hoja compartida no tiene fuentes fuera de las bases
-        # La preview por símbolos también para la hoja de siempre (camino A): cada pieza trae
-        # su base y su estampado desde 2026-09-07. Convertir la hoja entera eran 13 s de 15.
-        _simb = _pike or all((p.get("base") and p.get("estampado") is not None) for p in piezas)
-        if _simb:
+        # 🔴 LAS VISTAS PREVIAS EN SVG NO SE ESCRIBEN (2026-09-15). NADIE LAS ABRE: la grilla de
+        # mesas y el detalle usan `mesa_img` —la hoja de verdad rasterizada, ver ese endpoint—
+        # desde el 2026-09-14, y en el registro del servidor no hay UN solo pedido de un
+        # `prev_*.svg`. Lo que costaban, medido sobre el pedido real del usuario (18 prendas del
+        # molde CAMISETA): **25 de los 48 s del motor y 458 MB de disco**. La cuenta de páginas,
+        # que es lo único que la pantalla necesitaba de esta lista, sale de `alturas_cm` (una por
+        # página). `TIZADA_PREVIEWS_SVG=1` las vuelve a escribir.
+        paginas = len(alturas_cm)
+        prevs = []
+        _simb = _pike or _sello or all((p.get("base") and p.get("estampado") is not None) for p in piezas)
+        if not os.environ.get("TIZADA_PREVIEWS_SVG"):
+            pass
+        elif _simb:
             # PREVIEW LIVIANO (hoja compartida): un `<symbol>` por base y un `<use>` por colocación.
             # `get_svg_image()` de la hoja entera expandía cada colocación (64 MB por hoja de 5
             # prendas; 1,3 GB a 100). Los símbolos salen de un documento de la base SOLA.

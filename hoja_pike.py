@@ -455,3 +455,141 @@ def altos_de_hojas(colocaciones, cfg):
             continue
         out.append(max(c["cy"] + c["bh"] / 2 for c in hoja) + (m["sup"] + m["inf"]) * CM)
     return out
+
+
+# ── LA HOJA CON EL SELLO (2026-09-15) ────────────────────────────────────────────────────────
+# `componer_hoja_pike` (arriba) mete el dibujo de la mesa ADENTRO de cada base: una copia por
+# (pieza, talle), y en el camino A ni siquiera eso — cada colocación llevaba su copia entera.
+# Medido sobre una tizada real: el **97 %** de cada colocación es el mismo dibujo (768 KB de 791),
+# y la página de 8 m tenía **19,8 MB de contenido con sólo 3,5 MB distintos**.
+#
+# Acá el dibujo de cada mesa entra UNA sola vez a la hoja, como Form XObject de página, y cada
+# pieza queda como: `q <matriz> <su recorte + su borde> /MESA Do <su nombre y número> Q`.
+# Estructura final: **UN solo nivel de XObject** — exactamente la que ya deja `aplanar_rip` y la
+# que el RIP del usuario procesó bien (changelog 456).
+_RX_NOM = None
+
+
+def _remapear(stream, ren):
+    """Cambia los nombres de XObject del `base_stream` por los globales de la hoja."""
+    import re
+    global _RX_NOM
+    if not ren:
+        return stream
+    if _RX_NOM is None:
+        # 🔴 EL JUEGO DE CARACTERES COMPLETO DE UN NOMBRE PDF. `page.add_resource` genera nombres
+        # al azar del estilo `/Ax_-73ZjlLXUbUuqaylXI2g`: con un patrón de sólo letras y dígitos
+        # el remapeo no acertaba ninguno y la hoja salía con «cannot find XObject resource».
+        _RX_NOM = re.compile(r"/([^\s/\[\]<>(){}%]+)(?=\s+Do(?![A-Za-z0-9]))")
+    return _RX_NOM.sub(lambda m: ren.get("/" + m.group(1), "/" + m.group(1)), stream)
+
+
+def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progreso=None):
+    """Escribe la hoja con el dibujo de cada mesa UNA sola vez. Devuelve `(consumo_cm, alturas_cm)`,
+    igual que `nesting_contorno.componer_pdf_contorno`.
+
+    Cada `c["pieza"]` trae `base` (con `base_stream` y `fuentes_xo`) y `estampado`.
+    """
+    m = cfg["margenes_cm"]
+    ancho_pag = cfg["ancho_cm"] * CM
+    pdf = pikepdf.new()
+    consumo_cm, alturas_cm = 0.0, []
+    xobjs = pikepdf.Dictionary()
+    ren_por_base = {}          # id(base) → {nombre_local: nombre_global}
+    por_fuente = {}            # objgen del objeto de origen → nombre global
+    abiertos = []
+
+    def _global(fuente, del_molde=False):
+        """El nombre global de un dibujo de origen; lo copia a la hoja la primera vez."""
+        try:
+            k = fuente.objgen
+        except Exception:
+            k = id(fuente)
+        nm = por_fuente.get(k)
+        if nm is None:
+            xo = pdf.copy_foreign(fuente)
+            if "/OC" in xo:
+                del xo["/OC"]
+            if "/Group" in xo:
+                del xo["/Group"]
+            # 🔴 LA MESA DEL MOLDE DESPLEGADO YA VIENE LIMPIA. Nace de una página que el alta dejó
+            # sin marcadores de capa, con sus fuentes declaradas y balanceada (contrato del
+            # desplegado): marcarla le ahorra a `aplanar_rip` volver a parsear y re-serializar sus
+            # ~118.000 operadores. Es la MISMA marca que ya usaba la hoja compartida del camino B
+            # (changelog 393: aplanado 15 → 4 s), y se pone SÓLO si no anida otros dibujos adentro.
+            if del_molde and "/XObject" not in (xo.get("/Resources") or {}):
+                xo["/TizadaBase"] = True
+            nm = f"/S{len(por_fuente)}"
+            por_fuente[k] = nm
+            xobjs[nm] = xo
+        return nm
+
+    def _ren(b):
+        r = ren_por_base.get(id(b))
+        if r is None:
+            _dm = bool(b.get("despl"))
+            r = {nom: _global(src, _dm) for nom, src in (b.get("fuentes_xo") or {}).items()}
+            ren_por_base[id(b)] = r
+        return r
+
+    paginas = []
+    por_pagina = []           # (página, nombres de dibujo que usa)
+    for hoja in colocaciones:
+        if not hoja:
+            continue
+        alto_usado = max(c["cy"] + c["bh"] / 2 for c in hoja)
+        alto_pag = alto_usado + (m["sup"] + m["inf"]) * CM
+        uu = max(1, ceil(max(ancho_pag, alto_pag) / 14400.0))
+        s = 1.0 / uu
+        page = pdf.add_blank_page(page_size=(ancho_pag * s, alto_pag * s))
+        paginas.append(page)
+        if uu > 1:
+            page.obj["/UserUnit"] = int(uu)
+        partes = []
+        usados = set()
+        for c in hoja:
+            pz = c["pieza"]
+            b = pz["base"]
+            W = float(b["W"]) + 2 * float(b["B"])
+            H = float(b["Hp"])
+            mtx = matriz_colocacion(c, m, s, alto_pag, W, H, signo_rotacion)
+            ren = _ren(b)
+            usados.update(ren.values())
+            # 🔴 EL RECORTE A LA CAJA DE LA PIEZA. En el compositor de siempre cada pieza es una
+            # PÁGINA que se muestra con `show_pdf_page`, y eso recorta a su MediaBox; acá el
+            # contenido se pega inline, así que el recorte hay que ponerlo. Sin él, lo que la
+            # pieza dibujara un pelo afuera de su caja salía en la hoja: ~0,05 % de píxeles
+            # distintos, repartidos por todos los bordes. (Es la misma receta que usa
+            # `aplanar_rip._flatten` al des-anidar: `q [Matrix cm] [BBox re W n] … Q`.)
+            partes.append(f"q\n{mtx}\n0 0 {_num(W)} {_num(H)} re\nW\nn\n".encode("ascii"))
+            partes.append(_remapear(b["base_stream"], ren).encode("latin-1"))
+            est = pz.get("estampado") or ""
+            if est:
+                partes.append(est.encode("latin-1"))
+            partes.append(b"Q\n")
+        page.obj["/Contents"] = pdf.make_stream(b"".join(partes))
+        por_pagina.append((page, usados))
+        alturas_cm.append(round(alto_pag / CM, 1))
+        consumo_cm += alto_pag / CM
+        if progreso:
+            progreso("escribir el PDF", f"mesa {len(alturas_cm)}", None)
+    # 🔴 LOS RECURSOS SE ASIGNAN AL FINAL, Y CADA PÁGINA CON SU PROPIA TABLA. Dos motivos:
+    # (a) el diccionario de dibujos sigue creciendo mientras se recorren las mesas — asignarlo
+    #     página por página guardaría una copia con lo que hubiera hasta ese momento y las
+    #     primeras quedarían en blanco;
+    # (b) la tabla NO puede ser el mismo objeto para todas: `aplanar_rip` limpia los huérfanos
+    #     página por página, y con una tabla compartida la limpieza de la primera se lleva los
+    #     dibujos que usan las otras. Los STREAMS sí se comparten (que es donde está el peso):
+    #     lo que se duplica es la lista de nombres, unos bytes.
+    for pg, usados in por_pagina:
+        pg.obj["/Resources"] = pikepdf.Dictionary(
+            {"/XObject": pikepdf.Dictionary({n: xobjs[n] for n in sorted(usados)})})
+    # Sin comprimir: el aplanado para el RIP la vuelve a escribir (y ahí sí comprime).
+    pdf.save(path_salida, compress_streams=False)
+    pdf.close()
+    for d in abiertos:
+        try:
+            d.close()
+        except Exception:
+            pass
+    return consumo_cm, alturas_cm

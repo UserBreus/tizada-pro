@@ -446,7 +446,19 @@ const getProgresoDetalle = (progresoStr, estado) => {
   }
 
   if (fase === 'perfil') {
-    return { pct: 98, texto: 'Unificando color e incrustando el perfil…' };
+    return { pct: 96, texto: 'Unificando color e incrustando el perfil…' };
+  }
+
+  // Las mesas se DIBUJAN acá, antes de que la pantalla las pida: así la grilla no aparece vacía
+  // esperando (eran 26 s de espera después de que la tizada ya estaba lista).
+  if (fase === 'mesas') {
+    const nums = String(valor).split('/');
+    const hechas = parseInt(nums[0], 10) || 0;
+    const total = parseInt(nums[1], 10) || 1;
+    return {
+      pct: 97 + Math.round((hechas / total) * 3),
+      texto: `Dibujando las mesas para verlas: ${hechas} de ${total}`
+    };
   }
 
   return { pct: 50, texto: progresoStr };
@@ -893,7 +905,10 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
 // aparece en un globo SÓLO cuando el usuario lo pide. Posición FIJA por portal
 // (getBoundingClientRect) para que ningún contenedor con overflow lo recorte —
 // mismo criterio que el desplegable de ComboCell.
-function Ayuda({ children, ancho = 260 }) {
+// `disparador` / `tono`: por defecto es el «?» de siempre. Con `disparador` el globo cuelga de
+// otro control (por ejemplo el botón «N avisos» de los resultados), sin duplicar el popover ni su
+// manejo de posición y cierre. `tono='aviso'` lo pinta en ámbar.
+function Ayuda({ children, ancho = 260, disparador = null, tono = null, titulo = null }) {
   const btnRef = useRef(null);
   const [pos, setPos] = useState(null);            // {top,left} abierto · null cerrado
   const toggle = (e) => {
@@ -915,12 +930,22 @@ function Ayuda({ children, ancho = 260 }) {
   }, [pos]);
   return (
     <>
-      <button ref={btnRef} type="button" onClick={toggle} aria-label="Ayuda" title="Ayuda"
-        style={{ width: 16, height: 16, flexShrink: 0, padding: 0, borderRadius: 999, lineHeight: 1,
-          fontSize: 10.5, fontWeight: 800, fontFamily: 'inherit', cursor: 'pointer', verticalAlign: 'middle',
-          border: '1px solid var(--accent)',
-          background: pos ? 'rgba(0,243,255,0.25)' : 'rgba(0,243,255,0.10)',
-          color: 'var(--accent)' }}>?</button>
+      {disparador ? (
+        <button ref={btnRef} type="button" onClick={toggle} title={titulo || 'Ver el detalle'}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 999,
+            fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', flexShrink: 0,
+            border: '1px solid ' + (tono === 'aviso' ? 'var(--warning, #e0a020)' : 'var(--accent)'),
+            background: pos ? (tono === 'aviso' ? 'rgba(224,160,32,0.28)' : 'rgba(0,243,255,0.25)')
+                            : (tono === 'aviso' ? 'rgba(224,160,32,0.12)' : 'rgba(0,243,255,0.10)'),
+            color: tono === 'aviso' ? 'var(--warning, #e0a020)' : 'var(--accent)' }}>{disparador}</button>
+      ) : (
+        <button ref={btnRef} type="button" onClick={toggle} aria-label="Ayuda" title="Ayuda"
+          style={{ width: 16, height: 16, flexShrink: 0, padding: 0, borderRadius: 999, lineHeight: 1,
+            fontSize: 10.5, fontWeight: 800, fontFamily: 'inherit', cursor: 'pointer', verticalAlign: 'middle',
+            border: '1px solid var(--accent)',
+            background: pos ? 'rgba(0,243,255,0.25)' : 'rgba(0,243,255,0.10)',
+            color: 'var(--accent)' }}>?</button>
+      )}
       {pos && createPortal(
         <>
           {/* clic afuera cierra el globo */}
@@ -1369,6 +1394,72 @@ const _PALETA = ['#ffffff', '#000000', '#111417', '#e11d2e', '#f5a524', '#f7e733
 // en Arte no había «Nuevo pedido»…). Con un solo componente eso no puede volver a pasar:
 //   IZQUIERDA: ← volver · ↺ Nuevo pedido · acciones propias del paso
 //   DERECHA:   avisos · el botón que AVANZA
+// ── ALTO HASTA EL FONDO DE LA PANTALLA ──────────────────────────────────────────────────────
+// 🔴 Una pantalla que TERMINA en botones no puede depender de cuánto mida lo que tiene encima.
+// El visor de las tizadas estaba clavado en `74vh`: sumando el encabezado, las pestañas y un
+// cartel de aviso, los botones de abajo quedaban fuera de la pantalla y había que scrollear para
+// llegar (reporte del usuario 2026-09-15, con la captura). Restar una altura fija tampoco sirve:
+// miente en cuanto cambia el encabezado o aparece un aviso. Acá se MIDE dónde arranca el bloque y
+// se le da exactamente lo que queda hasta el borde de la ventana — con carteles o sin ellos.
+function useAltoHastaElFondo(activo = true, margen = 4) {
+  const [alto, setAlto] = useState(null);
+  // 🔴 REFERENCIA POR FUNCIÓN, no `useRef`. La pantalla de resultados no existe cuando el
+  // componente monta (el wizard arranca en otro paso): con un `useRef`, el efecto corría una vez
+  // con la referencia todavía vacía y no volvía a correr nunca — la tarjeta quedaba sin alto y el
+  // visor colapsado (medido: recién aparecía al redimensionar la ventana). Con la referencia por
+  // función, React avisa EXACTAMENTE cuando el elemento entra, y ahí se mide.
+  const [nodo, setNodo] = useState(null);
+  useEffect(() => {
+    if (!activo || !nodo) { setAlto(null); return; }
+    let ultimo = 0;
+    const medir = () => {
+      // ¿Quién scrollea de verdad? (`.main-content`). El alto disponible se mide contra ÉL, no
+      // contra la ventana: así quedan descontados sus paddings y los de todo lo que hay en el
+      // medio, sin escribir ninguno a mano.
+      let sc = nodo.parentElement;
+      while (sc && sc !== document.body) {
+        const oy = getComputedStyle(sc).overflowY;
+        if (oy === 'auto' || oy === 'scroll') break;
+        sc = sc.parentElement;
+      }
+      if (!sc || sc === document.body) sc = document.scrollingElement || document.documentElement;
+      // 🔴 LO QUE QUEDA DEBAJO se suma a mano, no con `scrollHeight`. Cuando el contenido NO
+      // desborda, `scrollHeight === clientHeight`: la cuenta «lo demás = scrollHeight − alto del
+      // nodo» se muerde la cola y el alto se achica 14 px en cada medición hasta el mínimo
+      // (pasó: la tarjeta quedaba clavada en 320 px con media pantalla vacía). Acá se recorren
+      // los hermanos que vienen después y los paddings de los ancestros, que NO dependen del
+      // alto que le demos al nodo — así la cuenta es estable de una.
+      let debajo = 0;
+      let el = nodo;
+      while (el && el !== sc) {
+        debajo += parseFloat(getComputedStyle(el).marginBottom) || 0;
+        for (let sib = el.nextElementSibling; sib; sib = sib.nextElementSibling) {
+          const cs = getComputedStyle(sib);
+          if (cs.position === 'fixed' || cs.position === 'absolute' || cs.display === 'none') continue;
+          debajo += sib.getBoundingClientRect().height + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+        }
+        el = el.parentElement;
+        if (el && el !== sc) debajo += parseFloat(getComputedStyle(el).paddingBottom) || 0;
+      }
+      debajo += parseFloat(getComputedStyle(sc).paddingBottom) || 0;
+      const fondo = Math.min(window.innerHeight, sc.getBoundingClientRect().bottom);
+      const h = Math.max(320, Math.round(fondo - nodo.getBoundingClientRect().top - debajo - margen));
+      // Sólo se aplica si cambió de verdad: sin esto, el propio cambio de alto vuelve a disparar
+      // la medición (el observer se ve a sí mismo) y queda temblando.
+      if (Math.abs(h - ultimo) > 1) { ultimo = h; setAlto(h); }
+    };
+    medir();
+    const t0 = setTimeout(medir, 0);          // tras el layout del primer render
+    const ro = new ResizeObserver(medir);
+    ro.observe(document.body);
+    window.addEventListener('resize', medir);
+    window.addEventListener('scroll', medir, true);
+    return () => { clearTimeout(t0); ro.disconnect(); window.removeEventListener('resize', medir); window.removeEventListener('scroll', medir, true); };
+  }, [nodo, activo, margen]);
+  return [setNodo, alto];
+}
+
+
 function BarraPaso({ volver, acciones, centro, derecha, siguiente, aviso }) {
   return (
     <div style={{ flexShrink: 0, marginTop: 4, borderTop: '1px solid var(--border-light)', paddingTop: 10 }}>
@@ -2623,28 +2714,10 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
   const pagEls = React.useRef([]);             // cada <img> de página, para saltar a ella
   const [actual, setActual] = React.useState(0);   // hoja visible (resalta su miniatura)
   const irAHoja = (i) => { pagEls.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setActual(i); };
-  // UN SOLO scroll: el de adentro del visor. Se mide el contenedor que REALMENTE scrollea (el
-  // ancestro con overflow, `.main-content`) y se encoge el visor exactamente lo que ese ancestro se
-  // pasa de alto → descuenta TODOS los paddings/márgenes de por medio, sin hardcodear ninguno.
-  const [alto, setAlto] = React.useState('74vh');
-  React.useEffect(() => {
-    const calc = () => {
-      const el = scrollRef.current; if (!el) return;
-      let sc = el.parentElement;
-      while (sc && sc !== document.body) {
-        const oy = getComputedStyle(sc).overflowY;
-        if (oy === 'auto' || oy === 'scroll') break;
-        sc = sc.parentElement;
-      }
-      if (!sc) sc = document.scrollingElement || document.documentElement;
-      // «otros» = todo lo que hay en el ancestro MENOS el visor (cabeceras, pestañas, paddings…).
-      const otros = sc.scrollHeight - el.clientHeight;
-      setAlto(Math.max(300, sc.clientHeight - otros - 2) + 'px');
-    };
-    const t = setTimeout(calc, 0);          // tras el layout
-    window.addEventListener('resize', calc);
-    return () => { clearTimeout(t); window.removeEventListener('resize', calc); };
-  }, [paginas]);
+  // UN SOLO scroll: el de adentro del visor. El ALTO ya no se calcula acá midiendo al ancestro
+  // que scrollea: desde 2026-09-15 la pantalla entera de resultados es una columna que ocupa lo
+  // que hay hasta el borde de la ventana (`useAltoHastaElFondo`) y este visor toma lo que sobra.
+  // Así el alto no depende de cuántos carteles haya arriba, que era el problema.
   // 🔴 EL PDF SE BAJA RECIÉN AL IMPRIMIR. El iframe oculto tenía el PDF puesto desde el momento
   // de abrir la pestaña: hasta 30 MB de vector bajados y parseados por el visor de PDF del
   // navegador cada vez, compitiendo con los dibujos de las páginas (medido 2026-09-14).
@@ -2674,8 +2747,8 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
   const btnMod = { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 16px', borderRadius: 999,
     fontSize: 13, fontWeight: 700, cursor: 'pointer', textDecoration: 'none', border: 'none', transition: 'all .15s' };
   return (
-    <div className="animate-fade">
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+    <div className="animate-fade" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexShrink: 0 }}>
         <a href={urlPdf} download="Ficha_tecnica.pdf" title="Descargar la ficha técnica completa"
           onClick={(e) => { e.preventDefault(); descargarArchivo(urlPdf, 'Ficha_tecnica.pdf', { avisar }); }}
           style={{ ...btnMod, background: 'var(--accent)', color: 'var(--bg-primary)' }}>
@@ -2689,7 +2762,9 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
       {/* DOS columnas dentro de una fila de alto FIJO (`alto`): las MINIATURAS a la izquierda (para
           saltar a una hoja) y las páginas grandes a la derecha. Cada columna scrollea por su cuenta
           → la página NO scrollea (un solo scroll por columna, con el estilo del sistema). */}
-      <div ref={scrollRef} style={{ height: alto, display: 'flex', gap: 12 }}>
+      {/* El alto ya no se calcula acá: la pantalla entera es una columna que ocupa lo que hay
+          hasta el borde de la ventana (`useAltoHastaElFondo`) y esta fila toma lo que sobra. */}
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12 }}>
         {/* Miniaturas — sólo si hay más de una hoja. El nombre va DEBAJO (fuera de la hoja), legible. */}
         {paginas > 1 && (
           <div className="ficha-scroll" style={{ width: 116, flexShrink: 0, overflowY: 'auto', paddingRight: 6,
@@ -2853,19 +2928,25 @@ function MesasInfinito({ mesas, job, avisar }) {
   const sanit = (s) => ((s || 'mesa').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa');
 
   return (
-    <div style={{ position: 'relative' }}>
+    // Columna que OCUPA lo que le den: el visor estira y nunca empuja a los botones de abajo
+    // fuera de la pantalla (ver `useAltoHastaElFondo`).
+    <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
         <button type="button" onClick={() => setView({ zoom: 1, panX: 0, panY: 0 })} title="Ver todo" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Ver todo</button>
         <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.max(0.15, v.zoom / 1.25) }))} title="Alejar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>−</button>
         <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.min(ZMAX, v.zoom * 1.25) }))} title="Acercar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>+</button>
       </div>
       <div ref={wrapRef} onMouseDown={startPan} onContextMenu={(e) => e.preventDefault()}
-        style={{ position: 'relative', height: '74vh', overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
+        style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
           {(() => { let gi = 0; return mesas.flatMap((hoja, hi) => {
-            const pvs = (hoja.previews && hoja.previews.length) ? hoja.previews : [null];
+            // Cuántas mesas tiene esta hoja. Sale de `paginas`, NO de la lista de vistas
+            // previas: esos SVG ya no se escriben (nadie los abría y costaban 25 s y cientos de
+            // MB por pedido, ver el motor). Lo que se dibuja es `mesa_img`, que va por ÍNDICE.
+            const _np = hoja.paginas || (hoja.previews && hoja.previews.length) || 1;
+            const pvs = Array.from({ length: _np }, (_, i) => i);
             const urlPdf = rutaApi(`/trabajos/${job.resultado.id}/${hoja.archivo}`);
-            return pvs.map((pv, pi) => {
+            return pvs.map((_pv, pi) => {
               const gidx = gi++;                        // índice global en orden de aparición
               const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
               const anchoCm = hoja.ancho_cm || 180;
@@ -2897,8 +2978,13 @@ function MesasInfinito({ mesas, job, avisar }) {
                       <Icon name="download" style={{ width: 14, height: 14 }} />
                     </a>
                   </div>
-                  {/* LA MESA a escala real (solo la hoja, sin marco extra) */}
-                  {pv
+                  {/* LA MESA a escala real (solo la hoja, sin marco extra).
+                      🔴 NO DEPENDE DE QUE EXISTA UN SVG. Esto decía `{pv ? … : «Sin vista previa»}`
+                      de cuando la previa era un archivo `prev_*.svg`. Al dejar de escribirlos
+                      (2026-09-15, nadie los abría) `pv` quedó en null y TODAS las mesas mostraban
+                      «Sin vista previa» con la tizada perfecta detrás. El dibujo sale de
+                      `mesa_img`, que va por ÍNDICE de página: no hay nada que condicionar. */}
+                  {true
                     ? <div ref={(el) => { if (el) mesaRefs.current[key] = el; else delete mesaRefs.current[key]; }}
                         style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
                         {/* 🔴 ACÁ VA LA VISTA LIVIANA, NO EL VECTOR. Diez mesas en SVG son 202 MB y
@@ -4695,6 +4781,9 @@ export default function App() {
   const [telaPorPieza, setTelaPorPieza] = useState(_wiz.telaPorPieza || {});
   // Wizard del Pedido: paso actual + índice del molde en el paso de diseños.
   const [pedidoPaso, setPedidoPaso] = useState(_wiz.pedidoPaso || 'diseno'); // diseno | moldes | arte | planilla | generar | resultados
+  // La pantalla de resultados ocupa lo que haya hasta el borde de la ventana: así los botones de
+  // abajo no dependen de cuántos carteles o pestañas tenga arriba (ver `useAltoHastaElFondo`).
+  const [cardResultados, altoResultados] = useAltoHastaElFondo(pedidoPaso === 'resultados');
   const [arteIdx, setArteIdx] = useState(_wiz.arteIdx || 0);
   const [moldePreviews, setMoldePreviews] = useState({}); // { [id]: {img_w, img_h, piezas} }
   const [arteCargado, setArteCargado] = useState(_wiz.arteCargado || {}); // { ["<diseno>|<moldId>"]: true } — arte cargado en ESTE pedido
@@ -11155,6 +11244,39 @@ export default function App() {
     });
     return [...(_ids)];
   };
+  // 🔴 RED DE SEGURIDAD AL ENTRAR: si esta pantalla NO tiene ningún molde efímero anotado pero el
+  // servidor todavía guarda alguno mío, es basura de un pedido anterior — se pide el barrido una
+  // sola vez. Existe porque el borrado del «Nuevo pedido» viaja por la red: si la página se va en
+  // el medio (una recarga, cerrar la pestaña) ese pedido no llega y los moldes quedan ahí para
+  // siempre (pasó: 4 moldes seguían en «Cargados» después de reiniciar el pedido). El servidor no
+  // se lleva ninguno que otra pantalla declare abierto en su latido, así que un pedido en curso en
+  // otra pestaña no corre riesgo.
+  // ⚠️ Y SE REINTENTA, NO SE PIDE UNA VEZ SOLA. El servidor NO se lleva un efímero que alguna
+  // pantalla haya declarado abierto en los últimos minutos (gracia del latido): recién reiniciado
+  // el pedido, los que se acaban de soltar todavía están dentro de esa ventana y el barrido los
+  // saltea. Con un intento único quedaban ahí para siempre. Se reintenta cada minuto mientras
+  // sigan apareciendo — es un POST minúsculo y el servidor decide.
+  const _ultimoBarridoEf = useRef(0);
+  useEffect(() => {
+    const barrer = async () => {
+      if (!(productosCat.productos || []).length) return;      // todavía no cargó el catálogo
+      if (efimerosDelPedido().length) return;                  // este pedido tiene los suyos: no se toca nada
+      if (!(productosCat.productos || []).some(p => p.efimero && !p.de_otro)) return;
+      if (Date.now() - _ultimoBarridoEf.current < 60000) return;
+      _ultimoBarridoEf.current = Date.now();
+      try {
+        const r = await fetch('/api/pedido/limpiar_efimeros', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pids: [], incluir_huerfanos: true }) });
+        const d = await r.json().catch(() => ({}));
+        if ((d?.borrados || []).length) fetchProductos();
+      } catch { /* el barrido horario del servidor los junta igual */ }
+    };
+    barrer();
+    const t = setInterval(barrer, 65000);
+    return () => clearInterval(t);
+  }, [productosCat]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // LO QUE ESTA PANTALLA TIENE ABIERTO, para que el latido lo diga y el servidor no lo dé por
   // huérfano. Es una variable global a propósito: el latido vive en otro componente y no puede
   // recibirlo por props sin arrastrar todo el estado del pedido.
@@ -11199,7 +11321,34 @@ export default function App() {
     setMarcasPedido({}); setSinMarcaPedido({}); setEditMarcas({}); setEditSinMarca({});
     // …y las tipografías subidas «sólo para este pedido» se borran: el sistema no tiene que
     // reconocerlas en el próximo (regla del usuario). Las del catálogo no se tocan.
+    // 🔴 LOS MOLDES EFÍMEROS SE PIDEN PRIMERO Y SIN ESPERAR A NADIE. Esto era una cadena de
+    // `await`: primero las tizadas, después las tipografías y RECIÉN ahí los moldes. Si la página
+    // se iba en el medio (una recarga, cerrar la pestaña), el pedido de borrar los moldes NUNCA
+    // salía y los moldes quedaban ahí — medido en el registro del servidor: en el reinicio de las
+    // 14:10 salió `limpiar_trabajos` y, en el mismo segundo, la página se recargó; `limpiar_efimeros`
+    // nunca se mandó y los 4 moldes siguieron apareciendo en «Cargados» (reporte del usuario).
+    // Ahora arranca ANTES que todo lo demás, en su propia tarea.
+    const _efPromesa = (async () => {
+      try {
+        const _ef = efimerosDelPedido();
+        const _r = await fetch('/api/pedido/limpiar_efimeros', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          // …y los HUÉRFANOS: los efímeros del pedido anterior, que ya no están anotados en
+          // ninguna pantalla. El servidor sólo se lleva los míos que nadie tenga abiertos.
+          body: JSON.stringify({ pids: _ef, incluir_huerfanos: true })
+        });
+        // SÓLO SE OLVIDAN LOS QUE EL SERVIDOR BORRÓ DE VERDAD. Si ignoró alguno (por ejemplo, una
+        // tizada de ese molde todavía generando), el que sobrevive sigue anotado y el próximo
+        // «Nuevo pedido» lo vuelve a pedir.
+        let _borrados = _ef;
+        try { _borrados = (await _r.json())?.borrados || _ef; } catch { /* respuesta rara */ }
+        setMoldesEfimeros(prev => Object.fromEntries(
+          Object.entries(prev || {}).filter(([id]) => !_borrados.includes(id))));
+        fetchProductos();
+      } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }
+    })();
     (async () => {
+      await _efPromesa;
       // ── LAS TIZADAS DEL PEDIDO SE VAN CON ÉL (regla del usuario 2026-09-11) ──────────────────
       // Los PDF ya se descargaron desde el paso Tizada; en el servidor no quedan (antes se
       // acumulaban para siempre). Se mandan las anotadas y `incluir_anteriores` se lleva también
@@ -11219,30 +11368,6 @@ export default function App() {
           await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
         } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
       }
-      // ── LOS MOLDES CON EL DISEÑO ADENTRO SE VAN CON EL PEDIDO ──────────────────────────────
-      // Se subieron «sólo para este pedido»: acá se borran de verdad (archivo, datos y base). Si
-      // no, cada pedido dejaría más de 100 MB en el servidor para siempre. El servidor sólo
-      // borra los que están marcados `efimero`, así que mandar un pid de más no hace daño.
-      try {
-        const _ef = efimerosDelPedido();
-        {
-          const _r = await fetch('/api/pedido/limpiar_efimeros', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            // …y los HUÉRFANOS: los efímeros del pedido anterior, que ya no están anotados en
-            // ninguna pantalla. El servidor sólo se lleva los míos que nadie tenga abiertos.
-            body: JSON.stringify({ pids: _ef, incluir_huerfanos: true })
-          });
-          // SÓLO SE OLVIDAN LOS QUE EL SERVIDOR BORRÓ DE VERDAD. Si ignoró alguno (por ejemplo,
-          // una tizada de ese molde todavía generando), antes se limpiaba igual el estado y no
-          // quedaba nadie que volviera a intentarlo: el molde se quedaba para siempre. Ahora el
-          // que sobrevive sigue anotado y el próximo «Nuevo pedido» lo vuelve a pedir.
-          let _borrados = _ef;
-          try { _borrados = (await _r.json())?.borrados || _ef; } catch { /* respuesta rara: se olvidan todos, como antes */ }
-          setMoldesEfimeros(prev => Object.fromEntries(
-            Object.entries(prev || {}).filter(([id]) => !_borrados.includes(id))));
-          fetchProductos();
-        }
-      } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }
     })();
     setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
     setEtqData(null); setEtqNombres({}); setVerVariante(null);
@@ -16305,20 +16430,60 @@ export default function App() {
               </div>
             )}
             {pedidoPaso === 'resultados' && trabajosMulti.length > 0 && (
-              <div className="card animate-fade" style={{ marginTop: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              // 🔴 ESTA PANTALLA ENTRA SIEMPRE EN LA VENTANA. El visor tenía un alto fijo (74vh) y
+              // con el encabezado + las pestañas + un cartel de aviso los botones de abajo quedaban
+              // fuera de la pantalla: había que scrollear para apretarlos (2026-09-15). Ahora la
+              // tarjeta es una columna que mide cuánto le queda hasta el borde y el visor toma lo
+              // que sobre: con carteles o sin ellos, los botones están siempre a la vista.
+              <div ref={cardResultados} className="card animate-fade"
+                style={{ marginTop: 8, height: altoResultados || undefined, display: 'flex',
+                         flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, flexShrink: 0 }}>
                   <div className="card-title" style={{ margin: 0 }}>
                     5 · Tizadas armadas
                     {trabajosMulti.some(t => t.estado === 'generando' || t.estado === 'en cola') && <span className="badge warning" style={{ marginLeft: 10 }}>Procesando</span>}
                   </div>
-                  <div style={{ display: 'flex', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    {(() => {
+                      // LOS AVISOS, en un botón con la cuenta: se leen de un toque y no le sacan
+                      // ni un píxel al visor (ver el comentario de más abajo).
+                      const j = trabajosMulti[0];
+                      if (j?.estado !== 'listo') return null;
+                      const ap = j.resultado?.avisos_pedido || [];
+                      const ab = j.resultado?.avisos || [];
+                      const n = ap.length + ab.length;
+                      if (!n) return null;
+                      return (
+                        <Ayuda ancho={380} tono="aviso" titulo="Avisos del pedido" disparador={<>
+                          <Icon name="alert" style={{ width: 14, height: 14 }} /> {n} aviso{n > 1 ? 's' : ''}
+                        </>}>
+                          <div style={{ lineHeight: 1.5 }}>
+                            La tizada se generó igual. Esto es lo que conviene revisar:
+                            {ap.length > 0 && <>
+                              <div style={{ marginTop: 8, fontWeight: 700 }}>Del pedido</div>
+                              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                {ap.map((a, i) => <li key={i} style={{ marginTop: 2 }}>{a}</li>)}
+                              </ul>
+                            </>}
+                            {ab.length > 0 && <>
+                              <div style={{ marginTop: 10, fontWeight: 700 }}>Piezas que salieron en blanco</div>
+                              <div style={{ marginTop: 2 }}>No tienen diseño: van con su borde de corte, sin gráfica.
+                                Si querés que lleven gráfica, agregá su mesa en el arte y volvé a generar.</div>
+                              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                                {ab.map((a, i) => <li key={i} style={{ marginTop: 2 }}>{a}</li>)}
+                              </ul>
+                            </>}
+                          </div>
+                        </Ayuda>
+                      );
+                    })()}
                     {(() => {
                       const j = trabajosMulti[0];
                       const hojas = (j?.estado === 'listo' && j?.resultado?.hojas) || [];
                       // En la pestaña «Ficha técnica» NO se muestra el «Descargar todo» de la TIZADA:
                       // confunde (la ficha tiene su propia descarga). Es sólo para las tizadas.
                       if (!hojas.length || vistaFicha) return null;
-                      const totalMesas = hojas.reduce((s, h) => s + ((h.previews && h.previews.length) ? h.previews.length : 1), 0);
+                      const totalMesas = hojas.reduce((s, h) => s + (h.paginas || (h.previews && h.previews.length) || 1), 0);
                       const sanit = (s) => ((s || 'mesa').replace(/[\\/:*?"<>|\n\r\t]+/g, '_').trim() || 'mesa');
                       return (
                         <button className="btn primary" data-tour="resultados-descargar" style={{ padding: '8px 14px', fontSize: 12.5 }}
@@ -16332,7 +16497,7 @@ export default function App() {
                             for (const tl of [...new Set(hojas.map(h => h.tela))]) {
                               let gi = 0;
                               for (const h of hojas.filter(x => x.tela === tl)) {
-                                const pvs = (h.previews && h.previews.length) ? h.previews : [null];
+                                const pvs = Array.from({ length: h.paginas || (h.previews && h.previews.length) || 1 }, () => null);
                                 for (let pi = 0; pi < pvs.length; pi++) {
                                   const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : ('Mesa ' + (gi + 1) + (tl ? ' - ' + tl : ''));
                                   gi++;
@@ -16380,35 +16545,18 @@ export default function App() {
                   // gráfica» cuando el arte estaba perfecto.
                   const avisosPedido = job.resultado?.avisos_pedido || [];
                   return (
-                    <div data-tour="resultados-mesas" style={{ marginTop: 16 }}>
-                      {avisosPedido.length > 0 && (
-                        <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', marginBottom: 16, padding: '13px 16px', borderRadius: 12, background: 'rgba(180,120,0,0.12)', border: '1px solid var(--warning, #e0a020)' }}>
-                          <Icon name="alert" style={{ width: 19, height: 19, color: 'var(--warning, #e0a020)', flexShrink: 0, marginTop: 1 }} />
-                          <div style={{ fontSize: 13, color: 'var(--warning, #e0a020)', lineHeight: 1.5 }}>
-                            <b>Revisá esto del pedido.</b> La tizada se generó igual:
-                            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                              {avisosPedido.map((a, i) => <li key={i} style={{ marginTop: 2 }}>{a}</li>)}
-                            </ul>
-                          </div>
-                        </div>
-                      )}
-                      {/* AVISO: piezas que salieron EN BLANCO por no tener diseño (la tizada SÍ se generó) */}
-                      {avisos.length > 0 && (
-                        <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', marginBottom: 16, padding: '13px 16px', borderRadius: 12, background: 'rgba(180,120,0,0.12)', border: '1px solid var(--warning, #e0a020)' }}>
-                          <Icon name="alert" style={{ width: 19, height: 19, color: 'var(--warning, #e0a020)', flexShrink: 0, marginTop: 1 }} />
-                          <div style={{ fontSize: 13, color: 'var(--warning, #e0a020)', lineHeight: 1.5 }}>
-                            <b>Algunas piezas salieron en blanco.</b> La tizada se generó, pero estas piezas no tienen diseño (van con su borde de corte, sin gráfica):
-                            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                              {avisos.map((a, i) => <li key={i} style={{ marginTop: 2 }}>{a}</li>)}
-                            </ul>
-                            <Ayuda ancho={330}>Si querés que lleven gráfica, agregá su mesa en el arte y volvé a generar.</Ayuda>
-                          </div>
-                        </div>
-                      )}
+                    <div data-tour="resultados-mesas"
+                      style={{ marginTop: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                      {/* 🔴 LOS AVISOS NO OCUPAN LA PANTALLA (2026-09-15, pedido del usuario).
+                          Antes iban como dos carteles arriba del visor: cada uno empujaba la
+                          tizada y los botones de abajo hacia afuera de la pantalla, y había que
+                          scrollear para llegar a ellos. Ahora van en un botón con la CUENTA, que
+                          los abre sin mover nada. La regla que queda: en esta pantalla, ningún
+                          cartel puede cambiar el alto del visor. */}
                       {/* PESTAÑAS: la(s) tela(s) + una pestaña «Ficha técnica» (si hay ficha). La ficha
                           ya NO es un banner: se ve en su propia pestaña, en el mismo espacio. */}
                       {(telas.length > 1 || job.resultado?.ficha) && (
-                        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', borderBottom: '1px solid var(--border-light)', paddingBottom: 12 }}>
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', borderBottom: '1px solid var(--border-light)', paddingBottom: 12, flexShrink: 0 }}>
                           {telas.map(tl => (
                             <button key={tl} type="button" onClick={() => { setVistaFicha(false); setTelaActiva(tl); }}
                               className={'chip' + (!vistaFicha && tl === tela ? ' active' : '')} style={{ padding: '9px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{tl}</button>
@@ -16484,7 +16632,7 @@ export default function App() {
                           </a>
                         </div>
                         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
-                          {hoja.previews?.map((pv, pIdx) => (
+                          {Array.from({ length: hoja.paginas || (hoja.previews && hoja.previews.length) || 1 }, (_pv, pIdx) => (
                             <div 
                               key={pIdx} 
                               className="preview-thumbnail"
@@ -16503,7 +16651,8 @@ export default function App() {
                                 padding: 4
                               }}
                               onClick={() => {
-                                setZoomPreviewUrl(rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${pv}`));
+                                // La hoja de verdad rasterizada (no el SVG: ya no se escribe).
+                                setZoomPreviewUrl(rutaApi(`/api/trabajos/${trabajoEstado.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pIdx}&w=2400`));
                                 setZoomState({ zoom: 1.0, pan: { x: 0, y: 0 } });
                                 setEsArrastrando(false);
                               }}
