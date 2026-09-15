@@ -9262,7 +9262,7 @@ def generar_multi():
             # dibuja UNA vez, en paralelo, y ese resultado sirve para las dos cosas.
             _mesas_err = []
             try:
-                _n_mesas, _mesas_err = _predibujar_mesas(tid, res.get("hojas") or [], prog)
+                _mesas_err = _predibujar_mesas(tid, res.get("hojas") or [], prog)[1]
             except Exception as _em:
                 print("  [!] pre-dibujado de las mesas:", repr(_em))
             _marca("mesas")

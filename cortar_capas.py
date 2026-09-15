@@ -9,7 +9,7 @@ el pico de memoria de un solo worker llegaba a **4.547 MB**, y el alta lanza has
 
 La idea: el content-stream marca cada capa con `/OC /MCn BDC … EMC`. Encontrar esos marcadores es
 un **escaneo de bytes**; parsear es construir 2,35 M de objetos Python. Cortando primero y
-parseando después **sólo el trozo del talle**, el pico baja a **607 MB** (medido, −87 %).
+parseando después **sólo el trozo del talle**, el pico baja a **420 MB** (medido, −91 %).
 
 🔴 ESTE MÓDULO NO DECIDE NADA SOBRE EL DIBUJO. Sólo dice **dónde empieza y dónde termina** cada
 capa. Quién se queda y quién se va lo siguen decidiendo `molde_real._saltar_bloques` /
@@ -32,8 +32,6 @@ _RX_MARCAS = re.compile(
     rb"/OC\s*(/[^\s/\[\]<>(){}%]+)\s*(BDC)"       # 1,2: apertura de capa con nombre
     rb"|(?<![\w.])(BDC|BMC|EMC)(?![\w.])"          # 3: cualquier otra marca
 )
-_RX_Q = re.compile(rb"(?<![\w.])q(?![\w.])")
-_RX_Q_MAY = re.compile(rb"(?<![\w.])Q(?![\w.])")
 _RX_QQ = re.compile(rb"(?<![\w.])([qQ])(?![\w.])")
 _RX_BTET = re.compile(rb"(?<![\w.])(BT|ET)(?![\w.])")
 
