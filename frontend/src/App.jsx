@@ -6,6 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
+import * as DESCARGAS from './descargas.js';
 
 // --- Inline SVG Icons Component for clean, dependency-free icons ---
 // Acepta `style` además de `className`. Si no se pasa ni estilo ni clase,
@@ -3796,6 +3797,93 @@ function AvisoReserva({ estado, que = 'esto' }) {
  *  2 minutos pasa a contar segundo a segundo, con el reloj del navegador (no machaca al servidor).
  *  Al llegar a cero el servidor se reinicia solo: acá se muestra «Actualizando…» y se reintenta
  *  hasta que vuelva, y ahí la página se recarga sola con la versión nueva. */
+function PanelDescargas() {
+  // 🔴 POR QUÉ EXISTE. Desde que la descarga pasa por el «Guardar como» nativo, el navegador ya no
+  // muestra SU barra: el archivo aparece en la carpeta apenas se elige el nombre y se termina de
+  // escribir al final, así que abrirlo antes daba un archivo incompleto y no había forma de
+  // saberlo (reporte del usuario 2026-09-14). Esto es esa forma.
+  const [items, setItems] = useState([]);
+  const [plegado, setPlegado] = useState(false);
+  useEffect(() => DESCARGAS.suscribir(setItems), []);
+
+  // Lo terminado se va SOLO a los 6 s; lo que falló se queda hasta que lo cierren (si no, el error
+  // desaparece antes de que alguien lo lea).
+  useEffect(() => {
+    const listas = items.filter((d) => d.estado === 'listo' && d.tFin);
+    if (!listas.length) return;
+    const t = setTimeout(() => listas.forEach((d) => {
+      if (Date.now() - d.tFin >= 6000) DESCARGAS.quitar(d.id);
+    }), 6200);
+    return () => clearTimeout(t);
+  }, [items]);
+
+  // 🔴 SI SE CIERRA LA PESTAÑA A MITAD DE UNA DESCARGA, EL ARCHIVO QUEDA CORTADO. El navegador sólo
+  // deja mostrar su propio cartel, pero al menos lo muestra.
+  useEffect(() => {
+    const antesDeIrse = (e) => { if (DESCARGAS.hayEnCurso()) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', antesDeIrse);
+    return () => window.removeEventListener('beforeunload', antesDeIrse);
+  }, []);
+
+  if (!items.length) return null;
+  const enCurso = items.filter((d) => d.estado === 'descargando');
+  const mb = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : Math.round(n / 1e3) + ' KB');
+  const COLOR = { descargando: 'var(--accent)', listo: '#16a34a', error: '#dc2626', cancelado: 'var(--text-muted)' };
+
+  return createPortal(
+    <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 10080, width: 330, maxWidth: 'calc(100vw - 32px)',
+      background: 'var(--bg-secondary, #15151a)', border: '1px solid var(--border-light, #333)', borderRadius: 12,
+      boxShadow: '0 14px 40px rgba(0,0,0,0.55)', overflow: 'hidden', fontSize: 13 }}>
+      <div onClick={() => setPlegado((v) => !v)} title={plegado ? 'Ver el detalle' : 'Plegar'}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer',
+          borderBottom: plegado ? 'none' : '1px solid var(--border-light, #333)' }}>
+        <span style={{ fontWeight: 700, flex: 1 }}>
+          {enCurso.length ? `Descargando ${enCurso.length} archivo${enCurso.length > 1 ? 's' : ''}…` : 'Descargas'}
+        </span>
+        {!enCurso.length && (
+          <button onClick={(e) => { e.stopPropagation(); DESCARGAS.limpiarTerminadas(); }}
+            style={{ border: 'none', background: 'none', color: 'var(--text-muted, #888)', cursor: 'pointer', fontSize: 12 }}>
+            Limpiar
+          </button>
+        )}
+        <span style={{ color: 'var(--text-muted, #888)' }}>{plegado ? '▴' : '▾'}</span>
+      </div>
+      {!plegado && (
+        <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+          {items.map((d) => {
+            const pct = d.total ? Math.min(100, (d.bytes / d.total) * 100) : 0;
+            return (
+              <div key={d.id} style={{ padding: '9px 12px', borderBottom: '1px solid var(--border-light, #2a2a2a)' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    title={d.nombre}>{d.nombre}</span>
+                  <span style={{ color: COLOR[d.estado], fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {d.estado === 'descargando' ? (d.total ? `${Math.round(pct)}%` : mb(d.bytes))
+                      : d.estado === 'listo' ? 'listo' : d.estado === 'cancelado' ? 'cancelado' : 'error'}
+                  </span>
+                </div>
+                {d.estado === 'descargando' && (
+                  <div style={{ height: 4, borderRadius: 4, background: 'var(--border-light, #333)', marginTop: 6, overflow: 'hidden' }}>
+                    {/* sin Content-Length no se miente un porcentaje: barra indeterminada */}
+                    <div style={{ height: '100%', borderRadius: 4, background: COLOR.descargando,
+                      width: d.total ? `${pct}%` : '35%', transition: d.total ? 'width .15s linear' : 'none',
+                      animation: d.total ? 'none' : 'descIndet 1.1s ease-in-out infinite alternate' }} />
+                  </div>
+                )}
+                <div style={{ color: 'var(--text-muted, #888)', fontSize: 11.5, marginTop: 4 }}>
+                  {d.estado === 'error' ? d.error
+                    : d.total ? `${mb(d.bytes)} de ${mb(d.total)}` : mb(d.bytes)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <style>{'@keyframes descIndet{from{margin-left:0}to{margin-left:65%}}'}</style>
+    </div>, document.body);
+}
+
+
 function AvisoActualizacion() {
   const [est, setEst] = useState(null);       // {version, pendiente:{version,segundos}, en_curso}
   const [seg, setSeg] = useState(null);       // segundos que faltan (los baja el reloj de acá)
@@ -3841,10 +3929,18 @@ function AvisoActualizacion() {
         if (d.en_curso) delay = 2000;
         else if (d.pendiente) delay = d.pendiente.segundos <= 15 ? 2000 : 10000;
       } catch {
-        // No contesta: casi seguro se está actualizando. Mostrar «Actualizando…» e insistir
-        // cada 2 s para recargar apenas vuelva.
+        // 🔴 «NO CONTESTA» NO ES «SE ESTÁ ACTUALIZANDO». Acá se ponía `en_curso: true` a secas:
+        // cualquier caída —el servidor sin memoria, el proceso muerto, la red— se anunciaba como
+        // una actualización en curso, con un cartel que encima dice «no cierres esta pantalla».
+        // El usuario veía «actualizando» sin haber mandado ninguna (2026-09-15) y el problema real
+        // quedaba tapado. Ahora sólo se supone actualización si SE SABÍA que había una; si no, se
+        // dice lo que pasa: no hay conexión con el servidor.
         if (!vivo) return;
-        setEst(e => (e ? { ...e, en_curso: true } : e));
+        setEst(e => {
+          const habia = !!(e && (e.pendiente || e.en_curso));
+          return { ...(e || {}), en_curso: habia, sin_conexion: true,
+                   caido_desde: (e && e.caido_desde) || Date.now() };
+        });
         delay = 2000;
       }
       if (vivo) timer = setTimeout(ciclo, delay);
@@ -3860,10 +3956,25 @@ function AvisoActualizacion() {
     return () => clearInterval(t);
   }, [seg == null]);
 
-  if (!est || (!est.pendiente && !est.en_curso)) return null;
+  if (!est || (!est.pendiente && !est.en_curso && !est.sin_conexion)) return null;
   // Pendiente MANUAL (año 2100): no hay cuenta regresiva que mostrar — se instala cuando
   // la apliquen en el servidor, no a una hora conocida.
   if (!est.en_curso && est.pendiente && (est.pendiente.manual || est.pendiente.segundos > 315360000)) return null;
+  // SIN CONEXIÓN y sin ninguna actualización conocida: es una caída, y se dice así.
+  if (est.sin_conexion && !est.en_curso && !est.pendiente) {
+    const mins = Math.floor((Date.now() - (est.caido_desde || Date.now())) / 60000);
+    return createPortal(
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10090, padding: '9px 16px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13.5,
+        fontWeight: 700, background: 'rgba(160,30,30,0.96)', color: '#fff',
+        borderBottom: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(4px)' }}>
+        <span className="status-dot" style={{ background: '#fff' }} />
+        <span>Sin conexión con el servidor{mins >= 1 ? ` desde hace ${mins} min` : ''} — reintentando…</span>
+        <span style={{ fontWeight: 400, opacity: 0.9 }}>
+          No es una actualización: el servidor no está contestando.
+        </span>
+      </div>, document.body);
+  }
   const enCurso = est.en_curso || seg === 0;
   const mm = String(Math.floor((seg || 0) / 60)).padStart(2, '0');
   const ss = String((seg || 0) % 60).padStart(2, '0');
@@ -12968,6 +13079,10 @@ export default function App() {
 
         {/* CUENTA REGRESIVA DE ACTUALIZACIÓN — sólo aparece si el servidor tiene una programada */}
         <AvisoActualizacion />
+
+        {/* QUÉ SE ESTÁ DESCARGANDO Y CUÁNTO VA. Global y montado UNA vez: la descarga se dispara
+            desde muchas pantallas (tizada, mesa suelta, ficha, ZIP) y el panel es el mismo. */}
+        <PanelDescargas />
 
         {/* SELECTOR DE COLOR — GLOBAL. Va acá arriba de todo y NO dentro de una pantalla: estaba
             montado sólo dentro de la tab "etiqueta" de Config, así que desde cualquier otro lado

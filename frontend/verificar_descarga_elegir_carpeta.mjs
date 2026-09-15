@@ -20,6 +20,7 @@ import fs from 'node:fs';
 
 const app = fs.readFileSync(new URL('./src/App.jsx', import.meta.url), 'utf8');
 const mod = fs.readFileSync(new URL('./src/descargar.js', import.meta.url), 'utf8');
+const est = fs.readFileSync(new URL('./src/descargas.js', import.meta.url), 'utf8');
 const fallos = [];
 
 function ok(cond, msg) {
@@ -82,6 +83,27 @@ ok(/function descargaClasica/.test(mod) && /if \(!puedeElegirDonde\(\)\) \{\s*de
 ok(/await fetch\(url\)/.test(mod) || /fetch\(url\)/.test(mod), 'el archivo se pide con fetch de la misma origen (viaja la sesión)');
 ok(!/\balert\(|\bconfirm\(/.test(mod), 'sin diálogos nativos: los errores van por `avisar`');
 ok(/suggestedName: nombre/.test(mod), 'el diálogo sugiere el nombre de la mesa/ficha');
+
+console.log('\n5 · 🔴 SE VE CUÁNTO VA CADA DESCARGA (el navegador ya no muestra SU barra)');
+// El usuario (2026-09-14): «hacé un espacio que nos vaya mostrando cuánto va la descarga de cada
+// archivo, porque a veces quiero abrir el archivo y aún no se descargó todo». Con el «Guardar
+// como» nativo el archivo se crea al principio y se llena al final: sin esto no había forma de
+// saber si ya estaba entero.
+ok(/r\.body[\s\S]{0,200}getReader\(\)/.test(mod), 'se lee `response.body` de a pedazos');
+ok(/Content-Length/.test(mod), 'el total sale del Content-Length que manda el servidor');
+ok(/DESC\.avance\(id, bytes, total\)/.test(mod), 'informa el avance por BYTES en cada pedazo');
+ok(/descargarArchivo[\s\S]{0,900}bajarA\(url, handle, nombre\)/.test(mod),
+   'un archivo suelto pasa por el streaming');
+ok(/descargarVarios[\s\S]{0,1600}bajarA\(it\.url, fh, it\.nombre\)/.test(mod),
+   '«Descargar todo» también');
+ok(/export function suscribir/.test(est) && /export function avance/.test(est),
+   'el estado compartido expone suscribir/avance');
+ok(/function PanelDescargas\(\)/.test(app), 'existe el panel en pantalla');
+ok(/<PanelDescargas \/>/.test(app), 'y está montado (una sola vez, global)');
+ok(/DESCARGAS\.suscribir\(setItems\)/.test(app), 'el panel se suscribe al estado');
+ok(/beforeunload/.test(app), 'avisa si se cierra la pestaña con una descarga a medias');
+ok(!/async function alCortarse[\s\S]{0,120}TODO\(human\)/.test(mod),
+   'está decidido qué pasa con el archivo si la descarga se corta (no quedó el TODO)');
 
 console.log('');
 if (fallos.length) {

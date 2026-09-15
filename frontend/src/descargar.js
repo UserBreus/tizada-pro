@@ -15,6 +15,8 @@
 //   · Ningún diálogo nativo (alert/confirm): los errores se avisan por `avisar`, que es el aviso
 //     de la app (regla del proyecto).
 
+import * as DESC from './descargas.js'
+
 const TIPOS = {
   pdf: { description: 'PDF', accept: { 'application/pdf': ['.pdf'] } },
   ai: { description: 'Illustrator', accept: { 'application/postscript': ['.ai'] } },
@@ -50,15 +52,7 @@ function descargaClasica(url, nombre) {
   a.remove()
 }
 
-async function traer(url) {
-  const r = await fetch(url)
-  if (!r.ok) {
-    let detalle = ''
-    try { detalle = (await r.json()).error || '' } catch { /* no era JSON */ }
-    throw new Error(detalle || `no se pudo descargar (${r.status})`)
-  }
-  return await r.blob()
-}
+// (el viejo `traer()` que devolvía el blob entero se fue con el streaming: ver `bajarA`)
 
 async function escribir(handle, blob) {
   const w = await handle.createWritable()
@@ -66,6 +60,88 @@ async function escribir(handle, blob) {
     await w.write(blob)
   } finally {
     await w.close()
+  }
+}
+
+/**
+ * Qué hacer con el archivo cuando la descarga se corta a la mitad.
+ *
+ * El «Guardar como» CREA el archivo apenas se elige el nombre, así que si esto falla queda uno
+ * incompleto (o de 0 bytes) con el nombre bueno, en la carpeta que el usuario eligió.
+ *
+ * `handle` = FileSystemFileHandle del destino · `w` = el writable ya abierto (hay que cerrarlo o
+ * abortarlo) · `nombre` = cómo se llama · `bytes`/`total` = cuánto alcanzó a bajar.
+ */
+async function alCortarse(handle, w, nombre, bytes, total) {
+  // DECISIÓN (2026-09-15): se DESCARTA lo escrito y NO se borra nada de la carpeta.
+  // `abort()` tira los bytes a medio escribir, así que el archivo nunca queda con contenido
+  // parcial que parezca bueno. Y no se llama a `handle.remove()`: borrar solo, en la carpeta que
+  // eligió la persona, choca con la regla dura del proyecto de no tocar sus archivos — y el
+  // navegador puede ni soportarlo. El aviso de que quedó incompleto lo da el panel de descargas,
+  // que marca la fila en rojo con el error.
+  // ⚠️ Todo en try/catch: esto corre DENTRO del manejo de otro error y no puede tirar uno nuevo.
+  try {
+    await w.abort()
+  } catch {
+    try { await w.close() } catch { /* el writable ya estaba cerrado o roto */ }
+  }
+}
+
+/**
+ * Baja `url` escribiéndola DE A PEDAZOS en `handle`, e informa el avance.
+ *
+ * 🔴 NO se usa `await r.blob()`. Eso se traga el archivo entero en memoria (una hoja de tizada son
+ * 14-34 MB) ANTES de escribir un solo byte: no hay nada que medir hasta que ya terminó, que es
+ * justo lo que el usuario no podía ver. Leyendo `response.body` de a chunks salen las tres cosas
+ * juntas: el avance real por bytes, mucha menos memoria, y el archivo llenándose de verdad.
+ */
+async function bajarA(url, handle, nombre) {
+  const id = DESC.abrir(nombre)
+  let r
+  try {
+    r = await fetch(url)
+  } catch (e) {
+    DESC.fallar(id, e.message || e)
+    throw e
+  }
+  if (!r.ok) {
+    let detalle = ''
+    try { detalle = (await r.json()).error || '' } catch { /* no era JSON */ }
+    const e = new Error(detalle || `no se pudo descargar (${r.status})`)
+    DESC.fallar(id, e.message)
+    throw e
+  }
+  // El servidor manda `Content-Length` en todas las descargas (hoja, mesa suelta, ficha y zip):
+  // verificado 2026-09-14. Si algún día faltara, `total` queda en 0 y la barra se muestra
+  // indeterminada en vez de mentir un porcentaje.
+  const total = Number(r.headers.get('Content-Length')) || 0
+  if (!r.body || !r.body.getReader) {           // navegador sin streams: el camino de antes
+    try {
+      await escribir(handle, await r.blob())
+      DESC.terminar(id)
+      return
+    } catch (e) {
+      DESC.fallar(id, e.message || e)
+      throw e
+    }
+  }
+  const w = await handle.createWritable()
+  const lector = r.body.getReader()
+  let bytes = 0
+  try {
+    for (;;) {
+      const { done, value } = await lector.read()
+      if (done) break
+      await w.write(value)
+      bytes += value.length
+      DESC.avance(id, bytes, total)
+    }
+    await w.close()
+    DESC.terminar(id)
+  } catch (e) {
+    await alCortarse(handle, w, nombre, bytes, total)
+    DESC.fallar(id, e.message || e)
+    throw e
   }
 }
 
@@ -90,8 +166,12 @@ export async function descargarArchivo(url, nombre, { avisar } = {}) {
     return false
   }
   try {
-    const blob = url.startsWith('blob:') ? await (await fetch(url)).blob() : await traer(url)
-    await escribir(handle, blob)
+    if (url.startsWith('blob:')) {
+      // ya está entero en memoria (el CSV de la planilla, la guía .ai): no hay nada que medir
+      await escribir(handle, await (await fetch(url)).blob())
+    } else {
+      await bajarA(url, handle, nombre)
+    }
     return true
   } catch (e) {
     if (avisar) avisar(`No se pudo guardar «${nombre}»: ${e.message || e}`)
@@ -141,9 +221,8 @@ export async function descargarVarios(items, { avisar, progreso } = {}) {
     const it = items[i]
     try {
       if (progreso) progreso(i + 1, items.length, it.nombre)
-      const blob = await traer(it.url)
       const fh = await carpeta.getFileHandle(it.nombre, { create: true })
-      await escribir(fh, blob)
+      await bajarA(it.url, fh, it.nombre)
       hechos++
     } catch (e) {
       fallas.push(`${it.nombre}: ${e.message || e}`)
