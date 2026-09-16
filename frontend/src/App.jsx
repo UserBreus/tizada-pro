@@ -1650,7 +1650,7 @@ function CfgPreview({ borde, etq }) {
   return (
     <div style={{ borderRadius: 12, background: '#fff', padding: 10, display: 'flex', justifyContent: 'center' }}>
       <svg viewBox="0 0 100 104" width="176" height="183">
-        {_b.activo !== false && <path d={d} fill="none" stroke={cmykHex(_b.color || [0, 0, 0, 0.85])} strokeWidth={Math.max(0.6, (parseFloat(_b.ancho_mm) || 2) * 0.6) * 2} />}
+        {_b.activo !== false && <path d={d} fill="none" stroke={cmykHex(_b.color || [0.75, 0.68, 0.67, 0.9])} strokeWidth={Math.max(0.6, (parseFloat(_b.ancho_mm) || 2) * 0.6) * 2} />}
         <path d={d} fill="#eef1f3" stroke="rgba(0,0,0,0.35)" strokeWidth="0.5" />
         {_e.activo !== false && (<>
           {_e.borde_activo !== false && (
@@ -3368,7 +3368,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                       {!pv && !telaModo && bordeConfig?.activo && (() => {
                         const pxmm = p.h_cm ? p.ph / (p.h_cm * 10) : (p.w_cm ? p.pw / (p.w_cm * 10) : 0.033);
                         const bw = Math.max(0.3, (bordeConfig.ancho_mm || 2) * pxmm * 2);
-                        const c = bordeConfig.color || [0, 0, 0, 0.85];
+                        const c = bordeConfig.color || [0.75, 0.68, 0.67, 0.9];
                         const rgb = `rgb(${Math.round(255 * (1 - (c[0] || 0)) * (1 - (c[3] || 0)))},${Math.round(255 * (1 - (c[1] || 0)) * (1 - (c[3] || 0)))},${Math.round(255 * (1 - (c[2] || 0)) * (1 - (c[3] || 0)))})`;
                         return (<>
                           <clipPath id={`bordeout-${p.idx}`}><path d={`M-99999 -99999H99999V99999H-99999Z ${p.path_svg}`} clipRule="evenodd" /></clipPath>
@@ -5127,7 +5127,7 @@ export default function App() {
   const [disenoBInput, setDisenoBInput] = useState('');
   const fileInputMoldeBRef = useRef(null);
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
-  const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0, 0, 0, 0.85], alineacion: 'fuera' });  // borde de corte del molde
+  const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0.75, 0.68, 0.67, 0.9], alineacion: 'fuera' });  // borde de corte del molde
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
   // ── Objetos editables (capa "Editable …" del diseño) ──
   const [editableData, setEditableData] = useState(null);      // {objetos, talles, piezas} del diseño activo
@@ -19481,7 +19481,7 @@ export default function App() {
                                           que cruzan el contorno quedan ocultos bajo el borde. */}
                                       <path d={p.path_svg} fill="none"
                                         clipPath={(bc.activo && !omit) ? `url(#etqout-${p.idx})` : undefined}
-                                        stroke={omit ? 'rgba(255,255,255,0.18)' : (bc.activo ? cssC(bc.color || [0, 0, 0, 0.85]) : 'rgba(0,243,255,0.4)')}
+                                        stroke={omit ? 'rgba(255,255,255,0.18)' : (bc.activo ? cssC(bc.color || [0.75, 0.68, 0.67, 0.9]) : 'rgba(0,243,255,0.4)')}
                                         strokeWidth={omit ? Math.max(0.05, 0.85 * pxmm) : (bc.activo ? Math.max(0.05, (bc.ancho_mm || 2) * pxmm * 2) : Math.max(0.05, 1.0 * pxmm))} />
                                       {/* etiqueta: SIGUE el contorno (text-on-path, como Illustrator) cuando está
                                           colocada; recta si es la posición por defecto. Recortada al contorno. */}
@@ -20845,7 +20845,7 @@ export default function App() {
                         <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
                           <CfgNum valor={_b.ancho_mm ?? 2} onChange={(v) => setB('ancho_mm', v)} unidad="mm" ancla="cfgb-borde-mm"
                             titulo="Grosor del borde" step="0.1" min="0.2" max="20" />
-                          <CfgColor valor={_b.color || [0, 0, 0, 0.85]} titulo="Color del borde" ancla="cfgb-borde-color"
+                          <CfgColor valor={_b.color || [0.75, 0.68, 0.67, 0.9]} titulo="Color del borde" ancla="cfgb-borde-color"
                             onPick={pick('Color del borde de corte', (col) => setB('color', col))} />
                         </div>
                         <CfgSeg valor={_b.alineacion || 'fuera'} onPick={(v) => setB('alineacion', v)} ancla="cfgb-borde-alin"

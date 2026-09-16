@@ -3825,7 +3825,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     prenda (`variante_clave`) elige su mapeo (regla 2026-07-13). Sin él,
     el arte se asume sobre la misma estructura del molde (modo clásico).
     `borde_corte` (opcional) = {activo, ancho_mm, color:[c,m,y,k]}: el borde de corte
-    de la tizada por molde (si no viene, default 2 mm, CMYK 0 0 0 0.85 = negro)."""
+    de la tizada por molde (si no viene, default 2 mm, negro rico 75/68/67/90: nunca sólo K,
+    que Corel y varios RIP importan como escala de grises)."""
     t0 = time.time()
     os.makedirs(salida, exist_ok=True)
     # Borde de corte configurable por molde. El margen de la pieza (B) = el ancho del
@@ -3833,7 +3834,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _bc = borde_corte or {}
     _bc_activo = _bc.get("activo", True)
     _bc_mm = max(0.2, float(_bc.get("ancho_mm", 2.0) or 2.0))
-    _bc_color = (_bc.get("color") or [0, 0, 0, 0.85])[:4]
+    _bc_color = (_bc.get("color") or [0.75, 0.68, 0.67, 0.90])[:4]
     # ALINEACIÓN del borde respecto de la línea del contorno (2026-08-20):
     #   'fuera' (default, lo de siempre) · 'centro' · 'dentro'. En los tres, `ancho_mm`
     #   es el ancho VISIBLE del borde.

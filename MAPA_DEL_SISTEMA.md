@@ -1482,6 +1482,17 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (470) — 🎨 «¿Por qué se descarga con CMYK + Grises?»: el borde de corte era negro
+  SÓLO K.** Medido en su mesa descargada (`Mesa 2 - Jacquard Charrúa (1,83).pdf`): sin
+  `DeviceGray`, sin ICC de 1 canal, sin `g`/`G`, perfil SWOP incrustado y declarado — todo `k`/`K`.
+  Pero el borde de corte iba `0 0 0 0.85 K` (C=M=Y=0), y un color así lo importan como ESCALA DE
+  GRISES Corel y varios RIP: era el único color de ese tipo que ponemos nosotros (el diseño del
+  usuario trae sus propios `0 0 0 1 K` y `0 0 0 0 k`, que son de su archivo). Default nuevo:
+  `_NEGRO_RICO` 75/68/67/90 (el negro rico de Illustrator, el mismo que ya usa su diseño) en
+  `_BORDE_DEFAULT`, `_cfg_con_diseno`, el motor y los cinco defaults de App.jsx. Un molde con el
+  default VIEJO guardado pasa solo al nuevo en `_borde_de` (único lugar donde se decide el borde);
+  un color elegido a mano no se toca. El contorno de la etiqueta (`0.01 0.01 0.01 0.05`) ya tenía
+  los cuatro canales.
 - **2026-09-16 (469) — ⚡ SEIS PEDIDOS DE FLUIDEZ, TODOS JUNTOS: zoom nítido al instante, ficha
   instantánea y con «NOMBRE»/«00», «Nuevo pedido» con cartel bloqueante, «Editar diseño» al toque
   y fondo gris detrás del TPU/bordado/DTF blanco.** El usuario, con la captura de un recorte

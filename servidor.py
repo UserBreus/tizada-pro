@@ -6180,7 +6180,15 @@ def eliminar_diseno():
 
 
 # ── Borde de corte por molde ────────────────────────────────────────────────
-_BORDE_DEFAULT = {"activo": True, "ancho_mm": 2.0, "color": [0, 0, 0, 0.85], "alineacion": "fuera"}
+# 🔴 NEGRO EN LOS CUATRO CANALES, NUNCA SÓLO K (2026-09-16). El default del borde era `0 0 0 0.85`
+# (sólo negro) y el usuario vio la mesa descargada como «CMYK + Grises»: un color con C=M=Y=0 lo
+# importan como ESCALA DE GRISES Corel y varios RIP. Medido en su mesa: era el ÚNICO color así que
+# ponemos nosotros (el resto, sólo `k`/`K` con los cuatro canales). Es el negro rico que ya usa su
+# propio diseño (75/68/67/90, el de Illustrator). Los moldes que tengan GUARDADO el default viejo
+# pasan solos al nuevo (`_borde_de`); un color elegido a mano no se toca.
+_NEGRO_RICO = [0.75, 0.68, 0.67, 0.90]
+_BORDE_COLOR_VIEJO = [0, 0, 0, 0.85]
+_BORDE_DEFAULT = {"activo": True, "ancho_mm": 2.0, "color": list(_NEGRO_RICO), "alineacion": "fuera"}
 
 
 @app.get("/api/productos/borde_corte")
@@ -6208,7 +6216,7 @@ def set_borde_corte():
         return jsonify({"error": "El borde de corte de los moldes con el diseño adentro se "
                                  "configura una sola vez, en Configuración → Molde con diseño."}), 409
     try:
-        color = [max(0.0, min(1.0, float(x))) for x in (cuerpo.get("color") or [0, 0, 0, 0.85])][:4]
+        color = [max(0.0, min(1.0, float(x))) for x in (cuerpo.get("color") or _NEGRO_RICO)][:4]
         while len(color) < 4:
             color.append(0.0)
         _alin = cuerpo.get("alineacion") or "fuera"
@@ -6279,8 +6287,16 @@ def _borde_de(prod, cat=None):
     tienen que leer LO MISMO: si uno lee el del molde y otro el global, lo que se ve deja de ser
     lo que se estampa (la ley del proyecto)."""
     if (prod or {}).get("origen") == "con_diseno":
-        return _cfg_con_diseno(cat)["borde_corte"]
-    return dict(_BORDE_DEFAULT, **((prod or {}).get("borde_corte") or {}))
+        b = dict(_cfg_con_diseno(cat)["borde_corte"])
+    else:
+        b = dict(_BORDE_DEFAULT, **((prod or {}).get("borde_corte") or {}))
+    # el default viejo (sólo K) guardado en el molde → el nuevo (ver `_NEGRO_RICO`)
+    try:
+        if [round(float(x), 3) for x in (b.get("color") or [])[:4]] == _BORDE_COLOR_VIEJO:
+            b["color"] = list(_NEGRO_RICO)
+    except (TypeError, ValueError):
+        pass
+    return b
 
 
 def _etiqueta_de(prod, cat=None):
