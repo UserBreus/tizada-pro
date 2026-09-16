@@ -6806,28 +6806,18 @@ def get_editables():
     diseno = request.args.get("diseno") or "principal"
     sub = _diseno_sub(diseno)
     arte = _ruta_entrada("arte.ai", pid, sub=sub)
-    objetos = []
-    if os.path.exists(arte):
-        try:
-            objetos = MP.extraer_editables(arte)
-        except Exception:
-            objetos = []
-    # mesa -> pieza (a qué pieza pertenece cada objeto, vía el mapeo del arte)
     mp = (_cargar("mapeo_arte.json", pid, sub=sub) or {}).get("mapeo", {})
     mesa2pieza = {int(v): k for k, v in mp.items() if v}
     reg = _cargar("registro_producto.json", pid) or {}
-    talles = sorted({t for v in reg.values() for t in (v or {}).keys()})
-    try:
-        pl = _ruta_entrada("plantilla.ai", pid)
-        if os.path.exists(pl):
-            talles = MP.talles_orden_archivo(pl, talles) or talles
-    except Exception:
-        pass
+    talles = _talles_editables(pid, reg)
+    # Lo pesado (recorrer el arte) viene del caché (ver `_editables_cacheados`).
+    _cr = _editables_cacheados(arte, _ruta_entrada("arte.ai", pid, sub=sub, original=True), reg, talles)
+    objetos = _cr["objetos"]
     # ARTE POR RANGO (#talle/#rango): los objetos editables pueden vivir en mesas POR TALLE
     # (ej. "#1-16 Frente" = mesa 28), que NO figuran en el mapeo default (mesas del 1er rango).
     # Sin esta asociación quedaban sin pieza → el editor no los mostraba ("no se pueden editar").
     try:
-        for _pz, _pt in (MP.mapeo_variantes_arte(arte, reg, talles) or {}).items():
+        for _pz, _pt in (_cr["mv"] or {}).items():
             for _m in (_pt or {}).values():
                 mesa2pieza.setdefault(int(_m), _pz)
     except Exception:
@@ -6839,17 +6829,10 @@ def get_editables():
     _eds = (((prod or {}).get("editables") or {}).get(_slugify_diseno(diseno)) or {})
     cfg = _eds.get(variante) or _eds.get("*") or {}
     ref_talle = (prod or {}).get("variante_guia")
-    # capas que agregó el usuario: son las únicas que se pueden volver a SACAR del arte. Se
-    # calculan contra el arte ORIGINAL (no contra un registro, que puede desincronizarse).
-    try:
-        _inyectadas = OA.capas_agregadas(_ruta_entrada("arte.ai", pid, sub=sub, original=True))
-    except Exception:
-        _inyectadas = set()
-    # ¿Cada capa admite cambio de COLOR? (relleno/trazo directo sí; XObject/imagen no, §10.b).
-    try:
-        _recol = MP.editables_recolorables(arte) if os.path.exists(arte) else {}
-    except Exception:
-        _recol = {}
+    # capas que agregó el usuario (las únicas que se pueden volver a SACAR del arte) y qué capas
+    # admiten cambio de COLOR: vienen del caché (`_editables_cacheados`).
+    _inyectadas = _cr["inyectadas"]
+    _recol = _cr["recol"]
     # UN ÍTEM POR CAPA: la capa "Editable …" ES el objeto editable — todo lo que tenga adentro se
     # mueve/rota/escala JUNTO (el agrupado de Illustrator no viaja en el .ai, así que la capa es la
     # unidad; ver §10.b). Su `bbox_mu`/`w_cm`/`h_cm` son los de la UNIÓN de sus figuras.
@@ -8533,6 +8516,7 @@ def generar():
                 print(f"  [!] no se pudo guardar pedido.json ({type(_e_pj).__name__}: {_e_pj}); "
                       f"la tizada está completa igual", flush=True)
             _tocar_trabajo(tid, resultado=res, estado="listo")
+            _predibujar_recortes_fondo(tid, res.get("hojas") or [])
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
         except Exception as e:
@@ -8790,7 +8774,16 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
             _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(arte, reg) or {}).items() if v}
         mapeo = ({"mapeo": _b or {}, "por_variable": _pv} if (_b or _pv) else None)
     # Una prenda de muestra con la variable del pedido: el motor arma sus piezas igual que la tizada.
-    fila = {"__variante": variante, "talle": talle, "nombre": "", "numero": ""}
+    # Con los MISMOS textos de muestra que el paso Arte («NOMBRE» / «00», ver `_piezas_base`): la
+    # personalización viaja por las columnas de ROL de la planilla, así que se setean las dos
+    # cosas, la clave directa y la columna por rol (regla del usuario 2026-09-16, ver abajo).
+    fila = {"__variante": variante, "talle": talle, "nombre": "NOMBRE", "numero": "00"}
+    for _c in (prod.get("columnas") or []):
+        _role = _c.get("role"); _cid = _c.get("id") or _c.get("label")
+        if _role == "nombre":
+            fila[_cid] = "NOMBRE"
+        elif _role == "numero":
+            fila[_cid] = "00"
     # la prenda de muestra del MOLDE GUÍA: no lleva las columnas obligatorias del pedido y no
     # tiene por qué — si se filtrara, la ficha se quedaría sin este molde.
     prendas = _traducir_prendas([fila], prod, cat=_cargar_catalogo(), reg=reg, exigir_obligatorias=False)
@@ -8806,11 +8799,15 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
     # tipografía que la tizada. `correr()` los pasa (los leyó cuando llegó el pedido).
     _rp = reempl if reempl is not None else _reempl_de_request()
     _cf = _fuentes_para(pid, _rp)
-    _mu = (var or {}).get("muestra") or {}
-    if _mu.get("nombre") or _mu.get("numero"):
-        prendas = [{**_p, "nombre": _mu.get("nombre") or "", "numero": _mu.get("numero") or "",
-                    "personalizacion": _mu.get("personalizacion") or _p.get("personalizacion")}
-                   for _p in prendas]
+    # 🔴 EL MOLDE GUÍA MUESTRA EL DISEÑO COMO SE VE DESDE EL INICIO (regla del usuario 2026-09-16:
+    # «la camiseta de la ficha debe ser con el número que viene desde el inicio, no hay que
+    # cambiarle ni el nombre ni el número»). Hasta hoy se estampaba el nombre/número de una fila
+    # del pedido (`muestra`). Ahora lleva EXACTAMENTE lo que muestra el paso Arte: «NOMBRE» y «00»
+    # (los mismos de `_piezas_base`), con la tipografía, curva y borde del diseño. Probado con
+    # `pers` vacío: el motor igual saca las capas de personalización y la pieza quedaba SIN número.
+    # Los nombres y números de cada prenda están en la tabla de arriba.
+    _mu = {}
+    prendas = [{**_p, "nombre": "NOMBRE", "numero": "00"} for _p in prendas]
     # ── LAS PIEZAS EXACTAS DEL PEDIDO ─────────────────────────────────────────────────────────
     # Los TOGGLES (manga corta/larga, con/sin capucha…) cambian QUÉ PIEZAS lleva la prenda. La
     # muestra salía siempre con la opción por defecto, así que un pedido entero de manga larga
@@ -9490,6 +9487,16 @@ def generar_multi():
                         _fd = _fz.open(_fp); res["ficha_paginas"] = _fd.page_count; _fd.close()
                     except Exception:
                         res["ficha_paginas"] = 1
+                    # 🔴 LA FICHA SE DEJA DIBUJADA ACÁ (2026-09-16, «le cuesta aparecer cuando debe
+                    # ser lo más instantáneo»): sus páginas llevan el arte vectorial completo de
+                    # cada pieza y rasterizarlas cuesta ~1 s por página — que se pagaba recién al
+                    # abrir la pestaña. Mismo dibujo y misma caché que sirve `pagina_img`.
+                    try:
+                        _predibujar_mesas(tid, [{"archivo": "FICHA_TECNICA.pdf",
+                                                 "paginas": res.get("ficha_paginas") or 1}],
+                                          prog, w=_FICHA_W, etiqueta="ficha")
+                    except Exception as _ef2:
+                        print("  [!] pre-dibujado de la ficha:", repr(_ef2))
             except Exception as _ef:
                 print("  [!] ficha técnica:", repr(_ef))
             _marca("ficha")
@@ -9506,6 +9513,7 @@ def generar_multi():
                 print(f"  [!] no se pudo guardar pedido.json ({type(_e_pj).__name__}: {_e_pj}); "
                       f"la tizada está completa igual", flush=True)
             _tocar_trabajo(tid, resultado=res, estado="listo")
+            _predibujar_recortes_fondo(tid, res.get("hojas") or [])
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
         except Exception as e:
@@ -9692,6 +9700,7 @@ def fuentes_estado():
     pid = request.args.get("pid") or _get_active_producto_id()
     sub = _diseno_sub(request.args.get("diseno"))
     arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    _precalentar_editables(pid, sub)      # para que «Editar diseño» abra al instante
     _catalogo = sorted(({"interno": i["interno"], "archivo": i["archivo"]}
                         for i in MP.catalogo_fuentes(FUENTES).values()), key=lambda x: x["interno"].lower())
     # 🔴 CAMINO B: no hay arte — la fuente que hay que tener es la del «NOMBRE» y el «00» que trae
@@ -10613,10 +10622,8 @@ def pagina_img(tid, archivo):
     _no = _trabajo_ajeno(tid)
     if _no:
         return _no
-    import io as _io
-    import fitz
     try:
-        pi = int(request.args.get("pi", 0))
+        pi = max(0, int(request.args.get("pi", 0)))
     except Exception:
         pi = 0
     try:
@@ -10626,33 +10633,19 @@ def pagina_img(tid, archivo):
     ruta = os.path.join(TRABAJOS, tid, archivo)
     if not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
-    # 🔴 SE DIBUJA UNA VEZ Y SE GUARDA. La ficha técnica lleva adentro el arte vectorial completo
-    # de cada pieza (`ficha_tecnica.py`: el molde guía es el MISMO PDF que nestea la tizada), así
-    # que rasterizar una página cuesta ~1 s aunque sea A4 — y esto lo rehacía en CADA request, sin
-    # guardar nada ni dejar que el navegador guardara (el `after_request` pone `no-store`). Cada
-    # vez que se tocaba la pestaña «Ficha técnica» eran ~4 s de espera (medido 2026-09-14).
-    # Igual que `mesa_img`: se guarda al lado del trabajo y se sirve desde ahí.
-    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_z{z:g}.png")
-    if os.path.exists(cache):
-        return _png_guardado(cache)
+    # 🔴 SE DIBUJA UNA VEZ Y SE GUARDA (2026-09-14: la ficha lleva el arte vectorial completo de
+    # cada pieza y rasterizar una página cuesta ~1 s aunque sea A4; se rehacía en cada request).
+    # Desde 2026-09-16 (changelog 469) es EXACTAMENTE el mismo camino que las mesas: display list
+    # en el pool del visor (`_dibujar_vista_mesa_en_pool`, el server no retiene el GIL) y la caché
+    # `vista_<archivo>_p<n>_w<px>.png`, que el PRE-DIBUJADO del final del pedido ya deja hecha.
+    # `z` se traduce a un ancho en px sobre una página A4 (`_A4_PT`): z=2 → `_FICHA_W`.
     try:
-        # `with`: si el dibujo de la vista previa falla, la hoja del trabajo no puede quedar
-        # abierta (después no se la puede reemplazar ni borrar).
-        with fitz.open(ruta) as d:
-            if pi < 0 or pi >= d.page_count:
-                pi = 0
-            pix = d[pi].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
-            png = pix.tobytes("png")
-        try:
-            with open(cache + ".tmp", "wb") as fh:
-                fh.write(png)
-            os.replace(cache + ".tmp", cache)
-            return _png_guardado(cache)
-        except Exception:
-            pass
-        return send_file(_io.BytesIO(png), mimetype="image/png")
+        cache = _dibujar_vista_mesa_en_pool(tid, archivo, pi, int(round(_A4_PT * z)))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    if not cache:
+        return jsonify({"error": "no existe"}), 404
+    return _png_guardado(cache)
 
 
 def _png_guardado(ruta):
@@ -10820,7 +10813,186 @@ def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
     return cache if os.path.exists(cache) else None
 
 
-def _predibujar_mesas(tid, hojas, prog=None):
+# ── LOS RECORTES, LISTOS ANTES DE QUE ALGUIEN HAGA ZOOM ──────────────────────────────────────
+# 🔴 POR QUÉ (2026-09-16, el usuario con la captura de un recorte borroso): «ahora aparecen
+# rápido pero si le hago zoom rápido se ve así. Debería verse bien, sea el zoom rápido o lento, e
+# instantáneo». Dibujar a pedido siempre tiene una espera (la primera lectura de la página son
+# segundos). La única forma de que sea instantáneo es que el recorte YA ESTÉ: apenas el pedido
+# queda listo, un hilo manda al pool del visor todos los recortes de todas las mesas, en los dos
+# escalones que pide la pantalla (`_RECORTE_W`, mismos cortes de medio metro que `TILE_CM` en
+# App.jsx). De a dos por vez: si mientras tanto la pantalla pide uno, espera a lo sumo dos
+# recortes (~0,6 s), no la cola entera. Se corta solo si el trabajo se borra (Nuevo pedido).
+# Los nombres tienen que coincidir con los que pide la pantalla: la fracción se redondea a 4
+# decimales como `toFixed(4)` de JS (mitad para arriba), no como el `format` de Python.
+_RECORTE_CM = 50
+_RECORTE_W = (800, 1600)
+_A4_PT = 595.276
+_FICHA_W = int(round(_A4_PT * 2))      # la ficha a z=2 (`pagina_img`)
+
+
+def _js4(x):
+    """`x.toFixed(4)` de JavaScript, como float: mitad para ARRIBA sobre el valor exacto."""
+    from decimal import Decimal, ROUND_HALF_UP
+    return float(Decimal(x).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
+
+def _recortes_de_pagina(ancho_cm, alto_cm):
+    """Los rectángulos (cx0, cy0, cx1, cy1) en que la pantalla parte una mesa, en su orden."""
+    import math
+    nx = max(1, math.ceil(float(ancho_cm or 180) / _RECORTE_CM))
+    ny = max(1, math.ceil(float(alto_cm or 0) / _RECORTE_CM))
+    return [(_js4(i / nx), _js4(j / ny), _js4((i + 1) / nx), _js4((j + 1) / ny))
+            for j in range(ny) for i in range(nx)]
+
+
+def _predibujar_recortes_fondo(tid, hojas):
+    """Deja dibujados en segundo plano todos los recortes de las mesas de un trabajo."""
+    hojas = list(hojas or [])
+    if not hojas:
+        return
+
+    def _correr():
+        t0, n, pendientes = time.time(), 0, []
+        try:
+            ex = _get_visor_pool()
+            for h in hojas:
+                for pi in range(int(h.get("paginas") or 1)):
+                    _alts = h.get("alturas_cm") or []
+                    alto = _alts[pi] if pi < len(_alts) and _alts[pi] is not None else h.get("consumo_cm")
+                    for w in _RECORTE_W:
+                        for rec in _recortes_de_pagina(h.get("ancho_cm"), alto):
+                            if not os.path.isdir(os.path.join(TRABAJOS, tid)):
+                                return                     # el trabajo se borró: no hay nada que dibujar
+                            if os.path.exists(_ruta_vista_mesa(tid, h["archivo"], pi, w, rec)):
+                                continue
+                            pendientes.append(ex.submit(_dibujar_una_mesa, (tid, h["archivo"], pi, w, rec)))
+                            if len(pendientes) >= 2:
+                                if pendientes.pop(0).result()[2]:
+                                    return                 # la hoja ya no está (o no se puede dibujar)
+                                n += 1
+            for f in pendientes:
+                if not f.result()[2]:
+                    n += 1
+            if n:
+                print(f"  [visor] {tid}: {n} recortes pre-dibujados en {time.time() - t0:.0f}s", flush=True)
+        except Exception as e:
+            print(f"  [visor] pre-dibujado de recortes de {tid}: {type(e).__name__}: {e}", flush=True)
+
+    threading.Thread(target=_correr, daemon=True, name=f"recortes-{tid}").start()
+
+
+# ── LOS EDITABLES DEL ARTE, LEÍDOS UNA VEZ ───────────────────────────────────────────────────
+# 🔴 POR QUÉ (2026-09-16, «entrar a Editar diseño tarda un montón; que sea instantáneo»).
+# `/api/productos/editables` recorría el arte entero TRES veces por cada apertura (medido con el
+# arte real de 7 MB: `extraer_editables` 1,5 s + `editables_recolorables` 1,6 s +
+# `mapeo_variantes_arte` 0,8 s → 3-4 s por llamada, con el GIL retenido). Nada de eso cambia
+# entre una apertura y otra si el archivo es el mismo: se lee UNA vez en un proceso del pool del
+# visor, queda en memoria por (archivo, mtime, tamaño, registro) y se CALIENTA al entrar al paso
+# Arte (`fuentes_estado` es la primera llamada de esa pantalla), así que al tocar «Editar
+# diseño» ya está. Las transformaciones y colores guardados NO van en la clave: se aplican
+# encima en cada respuesta, como siempre.
+_EDIT_CACHE = collections.OrderedDict()
+_EDIT_CACHE_MAX = 6
+_EDIT_CACHE_LOCK = threading.Lock()
+_EDIT_CALENTANDO = set()
+
+
+def _editables_crudos(arte, arte_orig, reg, talles):
+    """Worker: lo pesado de `get_editables`, sin nada que dependa de la configuración guardada."""
+    import motor_pedido as _MP
+    import objetos_agregados as _OA
+    out = {"objetos": [], "recol": {}, "inyectadas": set(), "mv": {}}
+    if os.path.exists(arte):
+        try:
+            out["objetos"] = _MP.extraer_editables(arte)
+        except Exception:
+            out["objetos"] = []
+        try:
+            out["recol"] = _MP.editables_recolorables(arte) or {}
+        except Exception:
+            out["recol"] = {}
+        try:
+            out["mv"] = _MP.mapeo_variantes_arte(arte, reg, talles) or {}
+        except Exception:
+            out["mv"] = {}
+    try:
+        out["inyectadas"] = set(_OA.capas_agregadas(arte_orig) or ())
+    except Exception:
+        out["inyectadas"] = set()
+    return out
+
+
+def _clave_editables(arte, reg, talles):
+    import hashlib as _hl
+    try:
+        st = os.stat(arte)
+        firma = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        firma = None
+    h = _hl.sha1(json.dumps([reg, talles], sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    return (os.path.normcase(arte), firma, h)
+
+
+def _editables_cacheados(arte, arte_orig, reg, talles):
+    """Lo crudo de los editables, del caché si el arte no cambió. Siempre una COPIA: el endpoint
+    lo modifica al armar la respuesta."""
+    k = _clave_editables(arte, reg, talles)
+    with _EDIT_CACHE_LOCK:
+        hit = _EDIT_CACHE.get(k)
+        if hit is not None:
+            _EDIT_CACHE.move_to_end(k)
+            return copy.deepcopy(hit)
+    try:
+        out = _get_visor_pool().submit(_editables_crudos, arte, arte_orig, reg, talles).result()
+    except Exception as e:
+        print(f"[editables] el pool del visor no pudo ({type(e).__name__}: {e}); leo en el server")
+        out = _editables_crudos(arte, arte_orig, reg, talles)
+    with _EDIT_CACHE_LOCK:
+        _EDIT_CACHE[k] = out
+        while len(_EDIT_CACHE) > _EDIT_CACHE_MAX:
+            _EDIT_CACHE.popitem(last=False)
+    return copy.deepcopy(out)
+
+
+def _talles_editables(pid, reg):
+    talles = sorted({t for v in (reg or {}).values() for t in (v or {}).keys()})
+    try:
+        pl = _ruta_entrada("plantilla.ai", pid)
+        if os.path.exists(pl):
+            talles = MP.talles_orden_archivo(pl, talles) or talles
+    except Exception:
+        pass
+    return talles
+
+
+def _precalentar_editables(pid, sub):
+    """Deja leídos los editables de un arte en segundo plano (al entrar al paso Arte)."""
+    if not pid:
+        return
+    arte = _ruta_entrada("arte.ai", pid, sub=sub)
+    if not os.path.exists(arte):
+        return
+    k0 = (os.path.normcase(arte), pid)
+    with _EDIT_CACHE_LOCK:
+        if k0 in _EDIT_CALENTANDO:
+            return
+        _EDIT_CALENTANDO.add(k0)
+
+    def _correr():
+        try:
+            reg = _cargar("registro_producto.json", pid) or {}
+            _editables_cacheados(arte, _ruta_entrada("arte.ai", pid, sub=sub, original=True),
+                                 reg, _talles_editables(pid, reg))
+        except Exception as e:
+            print(f"[editables] no se pudo precalentar {pid}: {type(e).__name__}: {e}")
+        finally:
+            with _EDIT_CACHE_LOCK:
+                _EDIT_CALENTANDO.discard(k0)
+
+    threading.Thread(target=_correr, daemon=True, name=f"editables-{pid}").start()
+
+
+def _predibujar_mesas(tid, hojas, prog=None, w=None, etiqueta="mesas"):
     """Deja dibujadas TODAS las mesas del pedido antes de que la pantalla las pida.
 
     🔴 POR QUÉ (2026-09-15, reporte del usuario: «las mesas demoran una eternidad en mostrarse
@@ -10837,7 +11009,7 @@ def _predibujar_mesas(tid, hojas, prog=None):
     este mismo trabajo por segunda vez (otros 26 s). Ahora se dibuja UNA vez y sirve para las dos
     cosas.
     """
-    tareas = [(tid, h["archivo"], pi, _VISTA_MESA_W)
+    tareas = [(tid, h["archivo"], pi, w or _VISTA_MESA_W)
               for h in (hojas or []) for pi in range(int(h.get("paginas") or 1))]
     total = len(tareas)
     if not total:
@@ -10851,7 +11023,7 @@ def _predibujar_mesas(tid, hojas, prog=None):
             errores.append(f"{r[0]} pág {r[1] + 1}: {r[2]}")
             print(f"  [!] no se pudo dibujar la mesa {r[1] + 1} de {r[0]}: {r[2]}")
         if prog:
-            prog("mesas", f"{hechas}/{total}", None)
+            prog(etiqueta, f"{hechas}/{total}", None)
 
     try:
         from concurrent.futures import as_completed

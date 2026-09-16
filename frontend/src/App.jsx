@@ -2841,9 +2841,13 @@ function MesasInfinito({ mesas, job, avisar }) {
   // NÍTIDO de la parte visible y se apoya encima del dibujo general, calzado al milímetro.
   // Los recortes se piden por una grilla fija de medio metro: moverse un poco reusa el mismo
   // pedazo (el servidor lo guarda) en vez de pedir uno nuevo a cada arrastre.
-  const TILE_CM = 50;              // cada recorte cubre a lo sumo medio metro de mesa
+  const TILE_CM = 50;              // cada recorte cubre a lo sumo medio metro de mesa (= `_RECORTE_CM`)
   const BASE_W = 1200;             // ancho del dibujo general de cada mesa, en px
-  const TOPE_RECORTES = 12;        // cuántos pueden estar vivos a la vez (memoria del navegador)
+  // 🔴 DOS ESCALONES FIJOS, 800 y 1600 px (= `_RECORTE_W` del servidor): son los que el servidor
+  // deja PRE-DIBUJADOS apenas termina el pedido, así el zoom —rápido o lento— encuentra el
+  // recorte ya hecho y se ve nítido al instante (reporte del usuario 2026-09-16). Cuántos pueden
+  // estar vivos a la vez por mesa depende del escalón (memoria del navegador).
+  const TOPE_RECORTES = { 800: 24, 1600: 12 };
   const [detalle, setDetalle] = useState({});   // clave de mesa → [{id, a, c, b, d, src}]
   const mesaRefs = useRef({});                  // clave → el div de esa mesa
   const mesaInfo = useRef({});                  // clave → {archivo, pi, anchoCm, altoCm}
@@ -2857,10 +2861,13 @@ function MesasInfinito({ mesas, job, avisar }) {
       if (!wrap || view.zoom < 1) { setDetalle({}); return; }
       const wb = wrap.getBoundingClientRect();
       const out = {};
-      let quedan = TOPE_RECORTES;
+      // 🔴 EN PÍXELES DE LA PANTALLA, no de CSS: con Windows al 125-150 % cada px de CSS son
+      // 1,25-1,5 px reales, y un recorte pedido al ancho de CSS se estiraba y se veía BORROSO
+      // aunque ya hubiera llegado el «nítido» (reporte del usuario 2026-09-16).
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
       for (const [key, el] of Object.entries(mesaRefs.current)) {
         const info = mesaInfo.current[key];
-        if (!el || !info || quedan <= 0) continue;
+        if (!el || !info) continue;
         const r = el.getBoundingClientRect();
         const ix0 = Math.max(wb.left, r.left), ix1 = Math.min(wb.right, r.right);
         const iy0 = Math.max(wb.top, r.top), iy1 = Math.min(wb.bottom, r.bottom);
@@ -2868,31 +2875,27 @@ function MesasInfinito({ mesas, job, avisar }) {
         // 🔴 CUÁNDO HACE FALTA EL DETALLE: cuando la PANTALLA está mostrando esta mesa más
         // grande de lo que el dibujo general puede dar. No es un zoom fijo — depende de cuánto
         // mide la mesa: una de 60 cm llega a ese punto mucho antes que una de 8 m.
-        if (r.width <= BASE_W * 1.05) continue;
+        if (r.width * dpr <= BASE_W * 1.05) continue;
         const nx = Math.max(1, Math.ceil(info.anchoCm / TILE_CM));
         const ny = Math.max(1, Math.ceil(info.altoCm / TILE_CM));
         const i0 = Math.max(0, Math.floor(((ix0 - r.left) / r.width) * nx));
         const i1 = Math.min(nx - 1, Math.floor(((ix1 - r.left) / r.width - 1e-6) * nx));
         const j0 = Math.max(0, Math.floor(((iy0 - r.top) / r.height) * ny));
         const j1 = Math.min(ny - 1, Math.floor(((iy1 - r.top) / r.height - 1e-6) * ny));
-        // El ancho del recorte, redondeado a unos pocos escalones: así al acercarse de a poco no
-        // se pide una imagen distinta cada vez (el servidor ya tiene guardada la del escalón).
-        // 🔴 EN PÍXELES DE LA PANTALLA, no de CSS: con Windows al 125-150 % cada px de CSS son
-        // 1,25-1,5 px reales, y un recorte pedido al ancho de CSS se estiraba y se veía BORROSO
-        // aunque ya hubiera llegado el «nítido» (reporte del usuario 2026-09-16).
-        const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        // El ancho del recorte, en uno de los dos escalones pre-dibujados: así al acercarse de a
+        // poco no se pide una imagen distinta cada vez.
         const necesario = (r.width / nx) * 1.25 * dpr;
-        const wpx = [600, 900, 1200, 1600].find(x => x >= necesario) || 1600;
+        const wpx = necesario <= 800 ? 800 : 1600;
+        const tope = TOPE_RECORTES[wpx];
         const tiles = [];
-        for (let j = j0; j <= j1 && quedan > 0; j++) {
-          for (let i = i0; i <= i1 && quedan > 0; i++) {
+        for (let j = j0; j <= j1 && tiles.length < tope; j++) {
+          for (let i = i0; i <= i1 && tiles.length < tope; i++) {
             const a = i / nx, b = (i + 1) / nx, c = j / ny, d = (j + 1) / ny;
             tiles.push({
               id: `${i}_${j}_${wpx}`, a, c, b, d,
               src: rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(info.archivo)}`
                 + `?pi=${info.pi}&w=${wpx}&cx0=${a.toFixed(4)}&cy0=${c.toFixed(4)}&cx1=${b.toFixed(4)}&cy1=${d.toFixed(4)}`),
             });
-            quedan--;
           }
         }
         if (tiles.length) out[key] = tiles;
@@ -4813,6 +4816,10 @@ export default function App() {
   // saber por qué. Ojo: los nativos son SÍNCRONOS y estos no → el handler se parte en dos
   // (abrir el modal / hacer la acción al confirmar).
   const [confirmar, setConfirmar] = useState(null);   // {titulo, texto, ok, peligro, onOk}
+  // «Nuevo pedido» en curso: cartel que tapa TODA la pantalla hasta que el servidor confirmó que
+  // borró lo del pedido anterior (regla del usuario 2026-09-16: «si demora en borrar debe
+  // aparecer un cartel de cargando y no dejar hacer otras cosas hasta que no se borre»).
+  const [borrandoPedido, setBorrandoPedido] = useState(null);
   // Resultado REAL del procesado de un molde (problemas/advertencias que antes se descartaban).
   const [avisoMolde, setAvisoMolde] = useState(null); // {tipo:'error'|'aviso', titulo, lineas:[]}
   const [pedirTexto, setPedirTexto] = useState(null); // {titulo, etiqueta, valor, ok, onOk}
@@ -10962,6 +10969,13 @@ export default function App() {
   // del pedido, incluido lo guardado en el navegador y las cachés en memoria.
   // NO se toca: las tizadas ya generadas (sus archivos) ni la configuración de los moldes.
   const _reiniciarPedido = () => {
+    // 0) A «¿CÓMO VAS A ARMAR ESTE TRABAJO?», desde donde sea que se haya tocado (regla del usuario
+    //    2026-09-16): se cierra lo que hubiera abierto (una moldería en Configuración, el mapeo
+    //    visual, «Mi molde», la vista del camino elegido) y se vuelve a la pantalla de Pedidos.
+    //    Y se tapa TODO con el cartel hasta que el servidor confirme el borrado.
+    setBorrandoPedido('Borrando el pedido anterior…');
+    setActivoTab('pedidos'); setVistaDiseno(null); setMapeandoOperario(false);
+    setMolderiaAbierta(null); setTabAjustesMolde('menu'); setModoMiMolde(null); setAdminSubView('dashboard');
     // 1) lo que se elige en el pedido
     setMoldesSeleccionados([]);
     setDisenosPedido([]); setDisenoMoldes({}); setDisenoVars({}); setDisenoActivo('');
@@ -11002,10 +11016,14 @@ export default function App() {
         try { _borrados = (await _r.json())?.borrados || _ef; } catch { /* respuesta rara */ }
         setMoldesEfimeros(prev => Object.fromEntries(
           Object.entries(prev || {}).filter(([id]) => !_borrados.includes(id))));
-        fetchProductos();
+        await fetchProductos();
       } catch { /* el barrido del servidor los junta igual cuando pasen las horas */ }
     })();
+    // El cartel se va cuando TERMINARON las tres limpiezas (o a los 90 s, si el servidor no
+    // contesta: la pantalla no puede quedar tapada para siempre).
+    const _fin = setTimeout(() => setBorrandoPedido(null), 90000);
     (async () => {
+      try {
       await _efPromesa;
       // ── LAS TIZADAS DEL PEDIDO SE VAN CON ÉL (regla del usuario 2026-09-11) ──────────────────
       // Los PDF ya se descargaron desde el paso Tizada; en el servidor no quedan (antes se
@@ -11025,6 +11043,10 @@ export default function App() {
         try {
           await fetch('/api/pedido/fuentes_pedido_limpiar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: _pids }) });
         } catch { /* si falla, sólo quedan archivos de más: no rompe el pedido nuevo */ }
+      }
+      } finally {
+        clearTimeout(_fin);
+        setBorrandoPedido(null);
       }
     })();
     setMapeoData(null); setMapeoValores({}); setSelectedPiezaMapeo('');
@@ -21589,6 +21611,25 @@ export default function App() {
       {/* CONFIRMAR — reemplaza `confirm()` del navegador (ver `abrirConfirmar`). Va acá, al final
           del render de App, para que se pueda abrir desde cualquier pantalla: un modal colgado de
           una rama condicional no se abre desde otra (trampa ya documentada en el MAPA §9). */}
+      {/* ── «NUEVO PEDIDO» EN CURSO: tapa todo hasta que el servidor borró lo anterior ── */}
+      {borrandoPedido && (
+        <div role="alert" aria-busy="true" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 6000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                   background: 'rgba(4,7,14,0.74)', backdropFilter: 'blur(3px)', cursor: 'wait' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px 28px', borderRadius: 16,
+                        border: '1px solid var(--border-light)', background: 'var(--bg-secondary, #10131c)',
+                        boxShadow: '0 16px 48px rgba(0,0,0,0.55)', maxWidth: 460 }}>
+            <span style={{ width: 26, height: 26, flexShrink: 0, borderRadius: '50%', border: '3px solid var(--border-light)',
+                           borderTopColor: 'var(--accent)', animation: 'perfilSpin 0.9s linear infinite' }} />
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>{borrandoPedido}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.45 }}>
+                Se borran del servidor los moldes con diseño, las tizadas y las tipografías del pedido anterior. Un momento…
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <Modal open={!!confirmar} onClose={() => setConfirmar(null)} centrado maxWidth={460}
         titulo={confirmar?.titulo || 'Confirmar'}>
         <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{confirmar?.texto}</div>

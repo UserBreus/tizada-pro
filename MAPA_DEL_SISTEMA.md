@@ -1482,6 +1482,55 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (469) — ⚡ SEIS PEDIDOS DE FLUIDEZ, TODOS JUNTOS: zoom nítido al instante, ficha
+  instantánea y con «NOMBRE»/«00», «Nuevo pedido» con cartel bloqueante, «Editar diseño» al toque
+  y fondo gris detrás del TPU/bordado/DTF blanco.** El usuario, con la captura de un recorte
+  borroso: *«ahora aparecen rápido pero si le hago zoom rápido se ve así… debe verse bien
+  instantáneo»*, más los otros cinco reclamos de la misma tanda.
+
+  1. **Recortes PRE-DIBUJADOS** (`_predibujar_recortes_fondo`, `_recortes_de_pagina`, `_js4`).
+     Dibujar a pedido siempre espera (la primera lectura de la página son segundos). Apenas el
+     pedido queda «listo» (los dos `_tocar_trabajo(..., "listo")`), un hilo manda al pool del
+     visor TODOS los recortes de todas las mesas en los dos escalones que pide la pantalla
+     (`_RECORTE_W` = 800 y 1600 px; App.jsx dejó los cuatro escalones 600/900/1200/1600 por estos
+     dos, `TOPE_RECORTES` por escalón: 24 y 12 por mesa). De a DOS por vez: si la pantalla pide
+     uno, espera a lo sumo dos (~0,6 s), no la cola. Se corta solo si el trabajo se borra. Los
+     nombres coinciden con los de la pantalla porque la fracción se redondea como `toFixed(4)`
+     de JS (mitad para arriba: 1/32 → 0.0313; el `format` de Python daba 0.0312 → caché perdida).
+     Medido en el sandbox: 256 recortes de 2 mesas en 22 s de fondo; zoom ×12 → el recorte
+     estaba en pantalla a los 350 ms. Y el umbral del detalle mide en px REALES
+     (`r.width * dpr <= BASE_W * 1.05`).
+  2. **Ficha técnica instantánea**: `pagina_img` va por el mismo camino que las mesas
+     (`_dibujar_vista_mesa_en_pool`, `z` → ancho sobre A4 `_A4_PT`; z=2 = `_FICHA_W` 1191 px) y
+     el final del pedido la deja dibujada (`_predibujar_mesas(..., w=_FICHA_W, etiqueta="ficha")`).
+     `_predibujar_mesas` ganó `w` y `etiqueta`.
+  3. **El molde guía lleva «NOMBRE» y «00»** (regla del usuario: *«con el número que viene desde
+     el inicio, no hay que cambiarle ni el nombre ni el número»*), los mismos textos de muestra
+     que el paso Arte (`_piezas_base`), y ya no el nombre/número de una fila del pedido
+     (`muestra`, línea «ejemplo:» eliminada de la ficha). ⚠️ Lo que salió mal: primero probé
+     `pers = {}` («que quede como viene») y la pieza salió SIN número — el motor saca las capas
+     de personalización igual; y setear sólo `prenda["nombre"]` tampoco alcanza: la
+     personalización viaja por las columnas de ROL de la planilla (`fila[_cid]`), igual que en
+     `_piezas_base`. Verificado renderizando la guía real (Frente con «00»).
+  4. **Fondo gris medio** (0.58) detrás del objeto en «NO SE SUBLIMA» (`ficha_tecnica.py`): un
+     TPU/bordado/DTF blanco sobre la hoja blanca no se veía. Verificado con un SVG blanco.
+  5. **«Editar diseño» al instante**: `/api/productos/editables` recorría el arte TRES veces por
+     apertura (medido con el arte real de 7 MB: `extraer_editables` 1,5 s + `editables_recolorables`
+     1,6 s + `mapeo_variantes_arte` 0,8 s = 3-4 s con el GIL retenido). Ahora lo crudo se lee UNA
+     vez en un worker del pool del visor (`_editables_crudos`), queda en `_EDIT_CACHE` por
+     (archivo, mtime, tamaño, registro) y se CALIENTA al entrar al paso Arte
+     (`_precalentar_editables` desde `fuentes_estado`, la primera llamada de esa pantalla).
+     Medido: 3,2 s → 0,12 s. La config guardada (transforms/colores) se aplica encima, como siempre.
+  6. **«Nuevo pedido»** va SIEMPRE a «¿Cómo vas a armar este trabajo?» desde donde se toque
+     (`setActivoTab('pedidos')`, `setVistaDiseno(null)`, cierra moldería/mapeo/«Mi molde») y tapa
+     toda la pantalla con un cartel (`borrandoPedido`, `role="alert" aria-busy`) hasta que
+     terminaron las tres limpiezas del servidor (tope de 90 s por si no contesta). Antes
+     `vistaDiseno` no se reseteaba: si estabas en «Cargar molde con diseño», volvías a la zona de
+     carga, no a las tarjetas.
+
+  Contrato: `verificar_visor_display_list.py` (secciones 5-8). ⚠️ Herramienta: el heredoc de la
+  consola se come las barras (`\n` llega como salto de línea real): para escribir un `\n`
+  literal en un archivo desde ahí, `chr(92) + "n"`.
 - **2026-09-16 (468) — 🐢 PASO TIZADAS FLUIDO CON UN DISEÑO PESADO: el recorte se dibuja desde
   un *display list* en un proceso aparte; la mesa suelta queda en disco.** El usuario, con 20
   camisetas + 16 shorts de un diseño pesado: *«desde cargar hasta el nesting excelente (1:10), pero

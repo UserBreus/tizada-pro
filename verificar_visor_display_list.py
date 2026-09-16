@@ -183,6 +183,55 @@ def main():
        "el ancho del recorte se pide en píxeles reales (devicePixelRatio)")
     ok('fetchPriority="low"' in app, "los recortes van con prioridad baja: la descarga y la app primero")
 
+    # ── 5. LOS RECORTES YA ESTÁN CUANDO ALGUIEN HACE ZOOM (changelog 469) ─────────────────
+    print("\n5 · 🔴 LOS RECORTES SE DEJAN DIBUJADOS AL TERMINAR EL PEDIDO, CON EL MISMO NOMBRE QUE PIDE LA PANTALLA")
+    ok(S._js4(1 / 32) == 0.0313 and S._js4(0.25) == 0.25 and S._js4(1 / 14) == 0.0714,
+       "la fracción se redondea como `toFixed(4)` de JS (1/32 → 0.0313, mitad para arriba)")
+    recs = S._recortes_de_pagina(180.0, 799.1)
+    ok(len(recs) == 4 * 16 and recs[0] == (0.0, 0.0, 0.25, 0.0625) and recs[-1] == (0.75, 0.9375, 1.0, 1.0),
+       f"una mesa de 180 × 799 cm son 4 × 16 recortes de medio metro ({len(recs)}), en el orden de la pantalla")
+    ok(S._RECORTE_W == (800, 1600) and "TOPE_RECORTES = { 800: 24, 1600: 12 }" in app
+       and "const wpx = necesario <= 800 ? 800 : 1600;" in app,
+       "los dos escalones del servidor (800 y 1600 px) son exactamente los que pide la pantalla")
+    srv = io.open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
+    ok(srv.count('_predibujar_recortes_fondo(tid, res.get("hojas") or [])') == 2,
+       "el pre-dibujado arranca cuando el pedido queda «listo», en `generar` y en `generar_multi`")
+    ok("if len(pendientes) >= 2:" in inspect.getsource(S._predibujar_recortes_fondo),
+       "…de a dos por vez: un recorte pedido por la pantalla no espera la cola entera")
+    ok("r.width * dpr <= BASE_W * 1.05" in app, "el detalle arranca cuando la PANTALLA (en px reales) supera el dibujo general")
+
+    # ── 6. LA FICHA TÉCNICA: INSTANTÁNEA, CON «NOMBRE» / «00» Y FONDO DETRÁS DEL OBJETO ────
+    print("\n6 · 🔴 LA FICHA TÉCNICA")
+    ok("_dibujar_vista_mesa_en_pool(tid, archivo, pi, int(round(_A4_PT * z)))" in inspect.getsource(S.pagina_img),
+       "`pagina_img` dibuja por el mismo camino que las mesas (display list, pool del visor)")
+    ok('"archivo": "FICHA_TECNICA.pdf"' in srv and "w=_FICHA_W, etiqueta=\"ficha\"" in srv,
+       "…y la ficha se deja dibujada al final del pedido (no al abrir la pestaña)")
+    _g = inspect.getsource(S._molde_guia_ficha)
+    ok('"nombre": "NOMBRE", "numero": "00"' in _g and 'fila[_cid] = "NOMBRE"' in _g and ".get(\"muestra\")" not in _g,
+       "el molde guía lleva «NOMBRE» y «00» como el paso Arte, nunca el nombre/número de una fila del pedido")
+    ok("pers = MP.extraer_personalizacion(pl if _cbf else arte)" in _g,
+       "…y con la personalización real del arte (con `pers` vacío la pieza quedaba SIN número)")
+    ft = io.open(os.path.join(_AQUI, "ficha_tecnica.py"), encoding="utf-8").read()
+    ok("pg.draw_rect(caja, color=LINEA, width=0.6, fill=(0.58, 0.60, 0.63))" in ft,
+       "el objeto que no se sublima (TPU / bordado / DTF) va sobre un fondo gris: uno blanco se ve")
+    ok('mg.get("ejemplo")' not in ft, "la ficha ya no dice «ejemplo: …» (no se estampa ninguna fila)")
+
+    # ── 7. «EDITAR DISEÑO» AL INSTANTE ──────────────────────────────────────────────────────
+    print("\n7 · «EDITAR DISEÑO» AL INSTANTE")
+    ok("_cr = _editables_cacheados(" in inspect.getsource(S.get_editables)
+       and "MP.extraer_editables(" not in inspect.getsource(S.get_editables),
+       "`/api/productos/editables` no recorre el arte en cada apertura: lo pesado viene del caché")
+    ok("_precalentar_editables(pid, sub)" in inspect.getsource(S.fuentes_estado),
+       "…y se calienta al entrar al paso Arte (`fuentes_estado`)")
+
+    # ── 8. «NUEVO PEDIDO» ───────────────────────────────────────────────────────────────────
+    print("\n8 · «NUEVO PEDIDO»: SIEMPRE A «¿CÓMO VAS A ARMAR ESTE TRABAJO?», CON CARTEL BLOQUEANTE")
+    ok("setBorrandoPedido('Borrando el pedido anterior…');" in app and 'role="alert" aria-busy="true"' in app,
+       "un cartel tapa toda la pantalla mientras el servidor borra lo anterior")
+    ok("setActivoTab('pedidos'); setVistaDiseno(null); setMapeandoOperario(false);" in app,
+       "y se vuelve a la pantalla de Pedidos con las dos tarjetas, desde donde sea")
+    ok("clearTimeout(_fin);\n        setBorrandoPedido(null);" in app, "el cartel se va cuando terminaron las tres limpiezas")
+
     print()
     if FALLOS:
         print(f"❌ CONTRATO ROTO — {len(FALLOS)} falla(s):")

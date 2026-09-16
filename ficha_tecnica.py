@@ -232,8 +232,6 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
             detalle.append(str(mg["opciones"]).strip())
         # El nombre/número que se ve estampado sale de UNA fila del pedido: se aclara para que no se
         # lea como «todas las prendas llevan esto» (los de cada prenda están en la tabla de arriba).
-        if str(mg.get("ejemplo") or "").strip():
-            detalle.append("ejemplo: " + str(mg["ejemplo"]).strip())
         detalle.append(f"{len(piezas)} pieza" + ("s" if len(piezas) != 1 else ""))
         detalle = "  ·  ".join(detalle)
         if y + 210 > A4_H - MARGEN:        # no entra ni el título + una fila → página nueva
@@ -309,7 +307,10 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
                 if y + ALTO_PR > A4_H - MARGEN:
                     pg = nueva_pagina(); y = 78
                 caja = fitz.Rect(MARGEN, y, MARGEN + 54, y + 48)
-                pg.draw_rect(caja, color=LINEA, width=0.6)
+                # FONDO GRIS MEDIO detrás del objeto (pedido del usuario 2026-09-16): un TPU,
+                # bordado o DTF BLANCO sobre la hoja blanca no se veía. En gris medio se ve tanto
+                # un objeto blanco como uno oscuro.
+                pg.draw_rect(caja, color=LINEA, width=0.6, fill=(0.58, 0.60, 0.63))
                 # EL OBJETO, DIBUJADO. Es lo que el taller tiene que bordar o pegar, así que se
                 # muestra tal cual: primero el vector (SVG) y, si no se puede, la miniatura PNG.
                 _dib = False
