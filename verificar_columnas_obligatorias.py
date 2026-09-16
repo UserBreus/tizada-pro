@@ -124,7 +124,7 @@ out4 = S._traducir_prendas([{"talle": "M", "manga": "corta", "diseno": "JUGADOR"
 ok(len(out4) == 1,
    f"🔴 la fila SE FABRICA aunque «Talle short» esté marcada obligatoria: este molde no la usa (salieron {len(out4)})")
 ok(getattr(S._TP, "obligatorias", []) == ["Talle"],
-   f"y sólo se exige la columna que el molde sí usa: {getattr(S._traducir_prendas, 'obligatorias', [])}")
+   f"y sólo se exige la columna que el molde sí usa: {getattr(S._TP, 'obligatorias', [])}")
 # …y si el molde SÍ la usa, entonces sí se exige
 prod5 = dict(prod4, mapeo_columnas={"talle": "talle_short", "nombre": "nombre",
                                     "numero": "numero", "manga": "manga"})
