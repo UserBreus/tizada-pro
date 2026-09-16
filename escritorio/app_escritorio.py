@@ -11,8 +11,8 @@ Qué hace este archivo, en orden:
      ciegas los segundos que tarda en cargar el motor.
   3. Busca el SQL Server de esta PC. El sistema lo necesita para guardar moldes y piezas: si no
      hay, la ventana lo explica y ofrece bajarlo, en vez de abrir un sistema que no guarda nada.
-  4. La primera vez crea SU base (`TizadaPro_Escritorio`, nunca la del sistema del taller) y pide
-     el usuario administrador en la misma ventana.
+  4. La primera vez crea SU base (`TizadaPro_Escritorio`, nunca la del sistema del taller) con el
+     usuario administrador de fábrica (`USUARIO_INICIAL`).
   5. Levanta el servidor de siempre (`servidor.arrancar()`) en un hilo, en 127.0.0.1 (nadie de la
      red entra), y cuando contesta muestra el sistema.
   6. Al cerrar la ventana se apaga todo: el Job de Windows se lleva los procesos de dibujo.
@@ -41,6 +41,10 @@ import multiprocessing  # noqa: E402
 NOMBRE = "TIZADA PRO"
 BASE_DB = "TizadaPro_Escritorio"
 PUERTO_PREFERIDO = 8765
+# EL USUARIO QUE TRAE LA APP (pedido del usuario 2026-09-16: «ponele un usuario al menos registrado
+# que sea Admin y contraseña Vilardebo2031»). Se crea SÓLO si la base de la app no tiene ningún
+# usuario: si ya hay, no se toca (ni la contraseña, si alguien la cambió desde Configuración).
+USUARIO_INICIAL = ("Admin", "Administrador", "Vilardebo2031")
 _MUTEX = None
 
 
@@ -112,10 +116,12 @@ def preparar_entorno():
         os.environ[k] = v
     # Las tipografías del sistema (Anton, la predeterminada, y las de muestra) se copian UNA vez;
     # las que suba el usuario quedan en la misma carpeta y nunca se pisan.
-    base_fuentes = os.path.join(prog, "catalogo_fuentes_base")
+    base_fuentes = os.path.join(prog, "catalogo_fuentes_base" if congelado() else "catalogo_fuentes")
     if os.path.isdir(base_fuentes):
         import shutil
         for f in os.listdir(base_fuentes):
+            if f.startswith("subida_"):
+                continue                      # las que subió alguien no vienen con el programa
             dst = os.path.join(rutas["TIZADA_FUENTES"], f)
             if not os.path.exists(dst):
                 try:
@@ -219,8 +225,8 @@ def buscar_sql():
 
 
 def preparar_base(servidor_sql):
-    """Crea la base propia de la app (si falta) y aplica el esquema. Devuelve True si ya hay
-    usuarios (se puede entrar) o False si hay que crear el administrador.
+    """Crea la base propia de la app (si falta), aplica el esquema y, si no hay ningún usuario,
+    crea el de fábrica (`USUARIO_INICIAL`). Devuelve True si lo creó recién.
 
     🔴 SÓLO SE TOCA LA BASE DE LA APP. Si ya existe una con ese nombre y tiene tablas que no son de
     TIZADA PRO, no se toca nada: es de otro sistema (el mismo seguro del instalador del servidor)."""
@@ -244,15 +250,12 @@ def preparar_base(servidor_sql):
     cfg = _config()
     cfg.update({"db_servidor": servidor_sql, "db_nombre": db.DB_NAME})
     _guardar_config(cfg)
-    return (db.valor("SELECT COUNT(*) FROM usuario") or 0) > 0
-
-
-def crear_admin(usuario, nombre, clave):
-    import auth
-    import db
     if (db.valor("SELECT COUNT(*) FROM usuario") or 0) > 0:
-        raise ValueError("ya hay un administrador creado")
-    auth.crear_usuario(usuario, nombre or usuario, clave, roles=["admin"])
+        return False
+    usuario, nombre, clave = USUARIO_INICIAL
+    auth.crear_usuario(usuario, nombre, clave, roles=["admin"])
+    _log(f"base nueva: se creó el usuario «{usuario}»")
+    return True
 
 
 # ══ SERVIDOR ════════════════════════════════════════════════════════════════════════════════
@@ -340,12 +343,9 @@ h1{margin:0 0 6px;font-size:22px}h1 b{color:#00f3ff}p{color:#9aa3b5;font-size:14
 .g{width:26px;height:26px;border-radius:50%;border:3px solid #2a3042;border-top-color:#00f3ff;
 animation:s .9s linear infinite;display:inline-block;vertical-align:middle;margin-right:12px}
 @keyframes s{to{transform:rotate(360deg)}}
-label{display:block;font-size:12px;color:#9aa3b5;margin:14px 0 5px;font-weight:600}
-input{width:100%;padding:11px 12px;border-radius:10px;border:1px solid #2a3042;background:#0b0e16;color:#fff;font-size:14px}
-input:focus{outline:none;border-color:#00f3ff}
 button{margin-top:20px;padding:11px 20px;border-radius:10px;border:0;background:#00f3ff;color:#06121a;
 font-weight:800;font-size:14px;cursor:pointer}button.s{background:transparent;color:#9aa3b5;border:1px solid #2a3042;margin-left:8px}
-.e{color:#ff6b81;font-size:13px;min-height:18px;margin-top:10px}.d{font-size:12px;color:#6b7386;word-break:break-word}
+.d{font-size:12px;color:#6b7386;word-break:break-word}
 """
 
 
@@ -381,26 +381,6 @@ def pagina_error(titulo, detalle):
         "<button onclick='pywebview.api.reintentar()'>Reintentar</button>")
 
 
-def pagina_primer_usuario():
-    return _pagina(
-        "<h1>Bienvenido a <b>TIZADA PRO</b></h1>"
-        "<p>Es la primera vez que se abre en esta PC. Creá el usuario <b>administrador</b>: con él "
-        "vas a entrar y, después, podés crear los usuarios de los demás desde Configuración.</p>"
-        "<label>Usuario</label><input id='u' value='admin' autocomplete='off'>"
-        "<label>Nombre</label><input id='n' placeholder='Tu nombre'>"
-        "<label>Contraseña</label><input id='p1' type='password'>"
-        "<label>Repetí la contraseña</label><input id='p2' type='password'>"
-        "<div class='e' id='e'></div>"
-        "<button id='b' onclick='crear()'>Crear y entrar</button>"
-        "<script>"
-        "async function crear(){const u=document.getElementById('u').value.trim(),n=document.getElementById('n').value.trim(),"
-        "a=document.getElementById('p1').value,b=document.getElementById('p2').value,e=document.getElementById('e');"
-        "if(!u){e.textContent='Falta el usuario.';return}if(a.length<6){e.textContent='La contraseña tiene que tener 6 caracteres o más.';return}"
-        "if(a!==b){e.textContent='Las dos contraseñas no coinciden.';return}"
-        "document.getElementById('b').disabled=true;e.textContent='';"
-        "const r=await pywebview.api.crear_admin(u,n,a);if(r!=='ok'){e.textContent=r;document.getElementById('b').disabled=false}}"
-        "document.addEventListener('keydown',ev=>{if(ev.key==='Enter')crear()});"
-        "</script>")
 
 
 # ══ LA VENTANA ══════════════════════════════════════════════════════════════════════════════
@@ -420,14 +400,6 @@ class Api:
         import threading
         threading.Thread(target=arranque, args=(self,), daemon=True).start()
 
-    def crear_admin(self, usuario, nombre, clave):
-        try:
-            crear_admin(str(usuario).strip(), str(nombre).strip(), str(clave))
-        except Exception as e:
-            return f"No se pudo crear el usuario: {e}"
-        import threading
-        threading.Thread(target=_mostrar_sistema, args=(self,), daemon=True).start()
-        return "ok"
 
 
 _ESTADO = {"puerto": None, "servidor_arriba": False}
@@ -484,10 +456,7 @@ def arranque(api):
             return
         _log(f"SQL Server: {srv} · base {os.environ.get('TIZADA_DB_NAME')}")
         v.load_html(pagina_cargando("Preparando la base de datos…"))
-        hay_usuarios = preparar_base(srv)
-        if not hay_usuarios:
-            v.load_html(pagina_primer_usuario())
-            return
+        preparar_base(srv)
         _mostrar_sistema(api)
     except Exception as e:
         import traceback

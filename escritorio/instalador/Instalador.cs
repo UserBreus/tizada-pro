@@ -32,13 +32,25 @@ namespace TizadaPro
         [DllImport("user32.dll")]
         static extern bool SetProcessDPIAware();
 
+        // `/prueba:<carpeta>` instala SIN ventana en esa carpeta, sin accesos directos ni registro
+        // de Windows, y termina con código 0 (bien) o 1 (mal). Sirve para verificar el instalador
+        // sin instalar nada de verdad en la PC donde se arma.
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
+            foreach (string a in args)
+            {
+                if (a.StartsWith("/prueba:", StringComparison.OrdinalIgnoreCase))
+                {
+                    try { Ventana.Trabajo(a.Substring(8).Trim('"'), false, true, null, null); return 0; }
+                    catch (Exception e) { Console.Error.WriteLine(e.Message); return 1; }
+                }
+            }
             try { SetProcessDPIAware(); } catch { }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new Ventana());
+            return 0;
         }
     }
 
@@ -295,7 +307,7 @@ namespace TizadaPro
             Thread hilo = new Thread(delegate ()
             {
                 string error = null;
-                try { Trabajo(escritorio); }
+                try { Trabajo(Comun.CarpetaPrograma, escritorio, false, Estado, Avance); }
                 catch (Exception e) { error = e.Message; }
                 BeginInvoke(new Action(delegate
                 {
@@ -320,10 +332,12 @@ namespace TizadaPro
             hilo.Start();
         }
 
-        void Trabajo(bool escritorio)
+        public static void Trabajo(string dir, bool escritorio, bool prueba, Action<string> Estado, Action<int> Avance)
         {
-            string dir = Comun.CarpetaPrograma;
-            if (Process.GetProcessesByName(Comun.Nombre).Length > 0)
+            if (Estado == null) Estado = delegate (string x) { };
+            if (Avance == null) Avance = delegate (int x) { };
+            string version = Comun.Recurso("version.txt");
+            if (!prueba && Process.GetProcessesByName(Comun.Nombre).Length > 0)
             {
                 Estado("Cerrando TIZADA PRO, que estaba abierto…");
                 if (!Comun.CerrarApp()) throw new Exception("TIZADA PRO sigue abierto. Cerralo y volvé a intentar.");
@@ -373,12 +387,13 @@ namespace TizadaPro
             }
 
             Estado("Creando los accesos directos…");
+            string exe = Path.Combine(dir, Comun.Nombre + ".exe");
             using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("desinstalar.exe"))
             using (FileStream f = new FileStream(Path.Combine(dir, "Desinstalar TIZADA PRO.exe"), FileMode.Create))
             {
                 s.CopyTo(f);
             }
-            string exe = Path.Combine(dir, Comun.Nombre + ".exe");
+            if (prueba) { Avance(100); return; }
             Comun.CrearAcceso(Comun.AccesoMenu, exe, dir);
             if (escritorio) Comun.CrearAcceso(Comun.AccesoEscritorio, exe, dir);
             else if (File.Exists(Comun.AccesoEscritorio)) File.Delete(Comun.AccesoEscritorio);
