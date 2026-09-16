@@ -116,7 +116,10 @@ def main():
     print("\n4 · 🔴 EL PASO TIZADA NO PUEDE CLAVAR EL NAVEGADOR")
     # El dibujo vive en `_dibujar_vista_mesa` desde 2026-09-15: el endpoint y el PRE-DIBUJADO del
     # final del pedido usan el mismo código y la misma caché (por eso se miran los dos).
-    src_img = inspect.getsource(S.mesa_img) + inspect.getsource(S._dibujar_vista_mesa)
+    # …y desde 2026-09-16 (changelog 468) la página se lee una vez a un display list
+    # (`_pagina_dibujable`) y el recorte se nombra en `_ruta_vista_mesa`: se miran los cuatro.
+    src_img = (inspect.getsource(S.mesa_img) + inspect.getsource(S._dibujar_vista_mesa)
+               + inspect.getsource(S._pagina_dibujable) + inspect.getsource(S._ruta_vista_mesa))
     ok("fitz.open(ruta)" in src_img and "get_pixmap" in src_img,
        "la vista sale de la HOJA (el PDF que se descarga), no del SVG")
     ok(".svg" not in src_img,

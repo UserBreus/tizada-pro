@@ -3,7 +3,7 @@ USER · Motor de Sublimación — servidor web local.
 Correr:  python servidor.py   y abrir  http://localhost:8000
 """
 import copy
-import os, re, sys, json, time, threading, uuid, traceback, contextlib
+import os, re, sys, json, time, threading, uuid, traceback, contextlib, collections
 from collections import OrderedDict
 from flask import (Flask, request, jsonify, send_from_directory, send_file, session,
                    has_request_context, g)
@@ -10679,8 +10679,61 @@ def _frac(v, por_defecto):
         return por_defecto
 
 
+def _ruta_vista_mesa(tid, archivo, pi, w, recorte=None):
+    """Dónde queda guardado el dibujo de una mesa (o de un recorte de ella)."""
+    entera = not recorte or tuple(recorte) == (0.0, 0.0, 1.0, 1.0)
+    cx0, cy0, cx1, cy1 = (0.0, 0.0, 1.0, 1.0) if entera else recorte
+    sufijo = "" if entera else f"_c{cx0:.4f}-{cy0:.4f}-{cx1:.4f}-{cy1:.4f}"
+    return os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}{sufijo}.png")
+
+
+# ── LA PÁGINA, LEÍDA UNA VEZ ─────────────────────────────────────────────────────────────────
+# 🔴 POR QUÉ (2026-09-16, reporte del usuario con 20 camisetas + 16 shorts de un diseño pesado:
+# «el paso de tizada demoró como 5 minutos en mostrar todo, se ve borroso y descargar una mesa ya
+# va 5 min y no se descargó»). Cada recorte de la mesa se dibujaba con `page.get_pixmap(clip=)`,
+# que VUELVE A LEER el contenido entero de la página (recorrer los XObjects de cada prenda, con
+# el diseño adentro) aunque pinte un pedacito: en su pedido, 4 a 17 s POR RECORTE, en serie
+# (medido en el registro: 12:02:10 → 12:05:36 para una pantalla). Y como PyMuPDF retiene el GIL
+# mientras dibuja, en esos 4-17 s el server no atendía NADA: ni el latido ni la descarga, que
+# avanzaba un pedacito entre recorte y recorte.
+#
+# Ahora la página se lee UNA vez a un *display list* (la lista de órdenes de dibujo ya
+# interpretada; MuPDF hace exactamente esto adentro de `get_pixmap`) y cada recorte se pinta
+# desde ahí: medido con una hoja de 28 MB, 0,5 s → 0,07 s por recorte, PÍXEL-IDÉNTICO al dibujo
+# directo (comparado byte a byte). El display list vive sin el documento abierto (se cierra
+# enseguida, así la carpeta del trabajo se puede borrar), y se guardan los últimos POR PROCESO.
+# No es rasterizar nada del usuario: es el mismo dibujo de siempre, hecho una vez en vez de
+# doce.
+_DL_CACHE = collections.OrderedDict()   # (ruta, pág, mtime, tamaño) → (rect, display list)
+_DL_CACHE_MAX = 2
+_DL_CACHE_LOCK = threading.Lock()
+
+
+def _pagina_dibujable(ruta, pi):
+    """`(rect, display list)` de una página de una hoja, del caché del proceso si ya se leyó."""
+    import fitz
+    st = os.stat(ruta)
+    with fitz.open(ruta) as d:
+        if pi >= d.page_count:
+            pi = 0
+        k = (os.path.normcase(ruta), pi, st.st_mtime_ns, st.st_size)
+        with _DL_CACHE_LOCK:
+            hit = _DL_CACHE.get(k)
+            if hit is not None:
+                _DL_CACHE.move_to_end(k)
+                return hit
+        pg = d[pi]
+        val = (fitz.Rect(pg.rect), pg.get_displaylist())
+    with _DL_CACHE_LOCK:
+        _DL_CACHE[k] = val
+        while len(_DL_CACHE) > _DL_CACHE_MAX:
+            _DL_CACHE.popitem(last=False)
+    return val
+
+
 def _dibujar_vista_mesa(tid, archivo, pi, w, recorte=None):
-    """Dibuja UNA mesa a PNG y la deja cacheada al lado del trabajo. Devuelve la ruta o None.
+    """Dibuja UNA mesa (o un recorte) a PNG y la deja cacheada al lado del trabajo. Devuelve la
+    ruta o None.
 
     Lo usan el endpoint `mesa_img` (cuando la pantalla la pide) y el PRE-DIBUJADO del final del
     pedido: son el mismo dibujo y la misma caché, así que la que hace el pedido es exactamente
@@ -10689,23 +10742,18 @@ def _dibujar_vista_mesa(tid, archivo, pi, w, recorte=None):
     import fitz
     entera = not recorte or tuple(recorte) == (0.0, 0.0, 1.0, 1.0)
     cx0, cy0, cx1, cy1 = (0.0, 0.0, 1.0, 1.0) if entera else recorte
-    sufijo = "" if entera else f"_c{cx0:.4f}-{cy0:.4f}-{cx1:.4f}-{cy1:.4f}"
-    cache = os.path.join(TRABAJOS, tid, f"vista_{os.path.splitext(archivo)[0]}_p{pi}_w{w}{sufijo}.png")
+    cache = _ruta_vista_mesa(tid, archivo, pi, w, recorte)
     if os.path.exists(cache):
         return cache
     ruta = os.path.join(TRABAJOS, tid, archivo)
     if not os.path.exists(ruta):
         return None
-    with fitz.open(ruta) as d:
-        if pi >= d.page_count:
-            pi = 0
-        pg = d[pi]
-        r = pg.rect
-        clip = None if entera else fitz.Rect(r.x0 + r.width * cx0, r.y0 + r.height * cy0,
-                                             r.x0 + r.width * cx1, r.y0 + r.height * cy1)
-        ancho_pt = (clip.width if clip is not None else r.width) or 1.0
-        z = w / ancho_pt
-        png = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=clip, alpha=False).tobytes("png")
+    r, dl = _pagina_dibujable(ruta, pi)
+    clip = None if entera else fitz.Rect(r.x0 + r.width * cx0, r.y0 + r.height * cy0,
+                                         r.x0 + r.width * cx1, r.y0 + r.height * cy1)
+    ancho_pt = (clip.width if clip is not None else r.width) or 1.0
+    z = w / ancho_pt
+    png = dl.get_pixmap(matrix=fitz.Matrix(z, z), clip=clip, alpha=False).tobytes("png")
     # .tmp + replace: dos pedidos de la misma mesa no se dejan un PNG a medias
     with open(cache + ".tmp", "wb") as fh:
         fh.write(png)
@@ -10714,13 +10762,62 @@ def _dibujar_vista_mesa(tid, archivo, pi, w, recorte=None):
 
 
 def _dibujar_una_mesa(args):
-    """Worker de proceso: una mesa a PNG. Devuelve `(archivo, pi, error|None)`."""
-    tid, archivo, pi, w = args
+    """Worker de proceso: una mesa (o un recorte, si viene) a PNG. Devuelve `(archivo, pi, error|None)`."""
+    tid, archivo, pi, w = args[:4]
+    recorte = args[4] if len(args) > 4 else None
     try:
-        _dibujar_vista_mesa(tid, archivo, pi, w)
+        _dibujar_vista_mesa(tid, archivo, pi, w, recorte)
         return (archivo, pi, None)
     except Exception as e:
         return (archivo, pi, f"{type(e).__name__}: {e}")
+
+
+# ── EL POOL DEL VISOR ────────────────────────────────────────────────────────────────────────
+# Los recortes que pide la pantalla se dibujan en procesos APARTE de los de la tizada: así el
+# hilo del server queda libre (el GIL lo retiene el worker, no el server) y un pedido que esté
+# generando no deja al visor esperando detrás de sus mesas. Son pocos (2) y viven atados al Job
+# del server como los demás ([[procesos-huerfanos]]). Cada worker guarda sus últimos display
+# lists, así los recortes de una misma mesa no vuelven a leerla.
+_VISOR_POOL = None
+_VISOR_POOL_LOCK = threading.Lock()
+
+
+def _get_visor_pool():
+    global _VISOR_POOL
+    with _VISOR_POOL_LOCK:
+        if _VISOR_POOL is not None and getattr(_VISOR_POOL, "_broken", False):
+            try:
+                _VISOR_POOL.shutdown(wait=False)
+            except Exception:
+                pass
+            _VISOR_POOL = None
+        if _VISOR_POOL is None:
+            from concurrent.futures import ProcessPoolExecutor
+            try:
+                n = int(os.environ.get("TIZADA_PROCESOS_VISOR") or 2)
+            except ValueError:
+                n = 2
+            _VISOR_POOL = ProcessPoolExecutor(max_workers=max(1, n))
+    return _VISOR_POOL
+
+
+def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
+    """Igual que `_dibujar_vista_mesa`, pero el dibujo lo hace un worker del visor. Si el pool
+    no está o se cae, se dibuja acá: se pierde la fluidez, no la imagen."""
+    cache = _ruta_vista_mesa(tid, archivo, pi, w, recorte)
+    if os.path.exists(cache):
+        return cache
+    if not os.path.exists(os.path.join(TRABAJOS, tid, archivo)):
+        return None
+    try:
+        fut = _get_visor_pool().submit(_dibujar_una_mesa, (tid, archivo, pi, w, recorte))
+        _arch, _pi, err = fut.result()
+    except Exception as e:
+        print(f"[mesa_img] el pool del visor no pudo ({type(e).__name__}: {e}); dibujo en el server")
+        return _dibujar_vista_mesa(tid, archivo, pi, w, recorte)
+    if err:
+        raise RuntimeError(err)
+    return cache if os.path.exists(cache) else None
 
 
 def _predibujar_mesas(tid, hojas, prog=None):
@@ -10811,7 +10908,7 @@ def mesa_img(tid, archivo):
     if cx1 - cx0 < 0.001 or cy1 - cy0 < 0.001:       # recorte degenerado: la mesa entera
         cx0, cy0, cx1, cy1 = 0.0, 0.0, 1.0, 1.0
     try:
-        cache = _dibujar_vista_mesa(tid, archivo, pi, w, (cx0, cy0, cx1, cy1))
+        cache = _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, (cx0, cy0, cx1, cy1))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     if not cache:
@@ -10853,7 +10950,6 @@ def descargar_mesa(tid, archivo):
     _no = _trabajo_ajeno(tid)
     if _no:
         return _no
-    import io as _io
     import pikepdf
     try:
         pi = int(request.args.get("pi", 0))
@@ -10866,23 +10962,25 @@ def descargar_mesa(tid, archivo):
         return jsonify({"error": "la mesa no existe"}), 404
     try:
         # Los dos `with`: si la copia falla, ni la hoja del trabajo ni el PDF nuevo pueden quedar
-        # abiertos. El `send_file` del caso de 1 página va AFUERA, con el archivo ya cerrado.
+        # abiertos. El `send_file` va AFUERA, con los archivos ya cerrados.
+        # 🔴 LA MESA SUELTA SE ARMA UNA VEZ Y QUEDA EN DISCO (`descarga_<hoja>_p<n>.pdf`, al lado
+        # del trabajo; se va con él). Antes se armaba en memoria en CADA descarga —«Descargar
+        # todo» la rehacía mesa por mesa— y se mandaba desde un buffer, que con la hoja de un
+        # diseño pesado son cientos de MB vivos por cada descarga en curso.
         with pikepdf.open(ruta) as src:
             n = len(src.pages)
             if pi < 0 or pi >= n:
                 pi = 0
+            cache = os.path.join(TRABAJOS, tid, f"descarga_{os.path.splitext(archivo)[0]}_p{pi}.pdf")
             if n == 1:                # hoja de 1 sola página → el archivo TAL CUAL (RIP-safe)
-                buf = None
-            else:
+                cache = None
+            elif not os.path.exists(cache):
                 # la página (ya aplanada) a su propio PDF, CON el perfil de color de la hoja
                 with _pdf_de_una_pagina(src, pi) as dst:
-                    buf = _io.BytesIO()
-                    dst.save(buf, force_version="1.6")
-        if buf is None:
-            return send_file(ruta, mimetype="application/pdf", as_attachment=True,
-                             download_name=fn + ".pdf")
-        buf.seek(0)
-        return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=fn + ".pdf")
+                    dst.save(cache + ".tmp", force_version="1.6")
+                os.replace(cache + ".tmp", cache)
+        return send_file(cache or ruta, mimetype="application/pdf", as_attachment=True,
+                         download_name=fn + ".pdf")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

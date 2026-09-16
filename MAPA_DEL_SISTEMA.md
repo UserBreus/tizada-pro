@@ -1482,6 +1482,65 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (468) — 🐢 PASO TIZADAS FLUIDO CON UN DISEÑO PESADO: el recorte se dibuja desde
+  un *display list* en un proceso aparte; la mesa suelta queda en disco.** El usuario, con 20
+  camisetas + 16 shorts de un diseño pesado: *«desde cargar hasta el nesting excelente (1:10), pero
+  el paso de tizada demoró como 5 minutos en mostrar todo, se ve borroso y descargar una mesa ya va
+  5 min y no se descargó»*.
+
+  **Medido en el registro** (`trabajos/20260916-115744-7a0d`): 40 recortes de `mesa_img` entre
+  12:02:10 y 12:05:36, **de 4 a 17 s cada uno y en serie**. Causa: `page.get_pixmap(clip=)`
+  vuelve a INTERPRETAR el contenido entero de la página por cada recorte (recorrer los XObjects
+  de las 36 prendas con el diseño adentro); recortar no ahorra nada de eso (ya estaba anotado en
+  la entrada 460). Y PyMuPDF **retiene el GIL** mientras dibuja: en esos 4-17 s el hilo del server
+  no atendía nada —ni el latido ni la DESCARGA, que es un bucle Python de chunks de 8 KB y
+  avanzaba un pedacito entre recorte y recorte—. Eso es el «5 min y no se descargó».
+
+  **Cómo quedó** (`servidor.py`, `_pagina_dibujable` / `_dibujar_vista_mesa` /
+  `_dibujar_vista_mesa_en_pool` / `descargar_mesa`):
+  1. La página se lee UNA vez a un `DisplayList` (la lista de órdenes ya interpretada) y cada
+     recorte se pinta desde ahí con `dl.get_pixmap(clip=)`. **Medido**: hoja de 28 MB, recorte
+     0,5 s → 0,07 s; hoja del sandbox (camino B, 20 camisetas) 7,3 s → 0,3 s. **Píxel-idéntico**
+     al dibujo directo (comparado `samples` byte a byte, contrato abajo). El display list vive con
+     el documento CERRADO (probado: rinde igual) → la carpeta del trabajo se puede borrar; caché
+     LRU de 2 páginas POR PROCESO (`_DL_CACHE`, clave ruta+pág+mtime+tamaño).
+  2. Los recortes que pide la pantalla van a un **pool del visor** de 2 procesos
+     (`_get_visor_pool`, `TIZADA_PROCESOS_VISOR`), aparte del pool de la tizada: el hilo del
+     server suelta el GIL mientras espera → el latido, las descargas y todo lo demás siguen
+     fluidos, y un pedido generando no deja al visor detrás de sus mesas. Si el pool se cae, se
+     dibuja en el server (se pierde fluidez, no la imagen). Cada worker guarda sus display lists:
+     el primer recorte de una mesa paga la lectura (los 7 s de siempre, una vez por worker); los
+     demás salen en 0,3 s. Los 12 recortes de una pantalla: ~8 s en vez de ~90.
+  3. `GET /api/trabajos/<tid>/mesa/<hoja>?pi=N` (mesa suelta de una hoja de varias páginas) se
+     arma UNA vez a `descarga_<hoja>_p<N>.pdf` al lado del trabajo y se sirve desde disco
+     (`send_file` de ruta, no de `BytesIO`): «Descargar todo» ya no la rehace mesa por mesa ni
+     tiene cientos de MB vivos por descarga. Se va con el trabajo (`_borrar_trabajo`).
+  4. **Borroso**: el ancho del recorte se pedía en px de CSS; con Windows al 125-150 % cada px
+     son 1,25-1,5 reales y el «nítido» llegaba estirado. Ahora `necesario` multiplica por
+     `devicePixelRatio` (tope 2). Y los `<img>` de los recortes llevan `fetchPriority="low"`: el
+     navegador atiende antes la descarga y las llamadas de la app que los pedacitos del visor.
+
+  **«Nuevo pedido» (el otro reclamo: «sigo viendo el anterior»)**: reproducido en el sandbox fiel
+  (8061, mismo bundle) con un pedido del camino B generado (6 mesas) → al confirmar «Empezar de 0»
+  salen `limpiar_efimeros` → `limpiar_trabajos` → `fuentes_pedido_limpiar`; quedan `trabajos/`
+  vacío, ningún `entrada/`/`datos/` de los efímeros, `tizada_wizard` en cero, latido sin efímeros
+  y la pantalla en «¿Cómo vas a armar este trabajo?» sin ningún «Cargado». En el registro REAL de
+  las 12:05:36 pasó lo mismo (los 4 efímeros `prod_20260916_1156*` ya no están en la base ni en
+  disco, `trabajos/20260916-115744-7a0d` borrado). **No se pudo reproducir que quede algo del
+  pedido anterior**: falta saber QUÉ ve el usuario (captura). Lo único que sobra son carpetas
+  `datos/<pid>` VACÍAS de los efímeros borrados (inofensivas) y `entrada/prod_20260916_095236_ef99`
+  (Buzo medio cierre, molde real del catálogo, no efímero).
+
+  Contrato: `verificar_visor_display_list.py` (recorte desde el display list = píxel-idéntico al
+  directo, con el documento cerrado; el endpoint pasa por el pool; la descarga cachea en disco).
+  ⚠️ Herramienta: el runner de contratos y las mediciones se hicieron en el sandbox 8061 (script
+  `scratchpad/sandbox_8061.py` de esta sesión, receta en 467); el pane del navegador sigue
+  reusando archivos de un selector anterior → la planilla se cargó INYECTANDO un CSV en
+  `#csvPedidoInput` con `DataTransfer` (sin tocar ningún selector).
+  Suite: 66 + 1 verdes; `verificar_mesa_por_talle` leía literales de `_dibujar_vista_mesa` y ahora
+  suma `_pagina_dibujable` + `_ruta_vista_mesa`. ⏳ `verificar_molde_con_diseno`, `verificar_sello`
+  y `verificar_tizada_con_diseno` pasan pero tardan 61-69 s SOLOS en esta máquina (tope del runner
+  60 s): correr la suite con `py correr_contratos.py 90` o hacerlos más rápidos.
 - **2026-09-16 (467) — 🔴 SEIS BUGS DEL PEDIDO, REPRODUCIDOS EN UN SANDBOX FIEL (datos + base
   copiados) Y ARREGLADOS.** El usuario: *«cuando entro al visor de pedido queda bugiado con moldes
   de configuración... cosas que no he visto arreglalo también»*.

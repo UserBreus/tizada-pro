@@ -2877,7 +2877,11 @@ function MesasInfinito({ mesas, job, avisar }) {
         const j1 = Math.min(ny - 1, Math.floor(((iy1 - r.top) / r.height - 1e-6) * ny));
         // El ancho del recorte, redondeado a unos pocos escalones: así al acercarse de a poco no
         // se pide una imagen distinta cada vez (el servidor ya tiene guardada la del escalón).
-        const necesario = (r.width / nx) * 1.25;
+        // 🔴 EN PÍXELES DE LA PANTALLA, no de CSS: con Windows al 125-150 % cada px de CSS son
+        // 1,25-1,5 px reales, y un recorte pedido al ancho de CSS se estiraba y se veía BORROSO
+        // aunque ya hubiera llegado el «nítido» (reporte del usuario 2026-09-16).
+        const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        const necesario = (r.width / nx) * 1.25 * dpr;
         const wpx = [600, 900, 1200, 1600].find(x => x >= necesario) || 1600;
         const tiles = [];
         for (let j = j0; j <= j1 && quedan > 0; j++) {
@@ -3009,7 +3013,7 @@ function MesasInfinito({ mesas, job, avisar }) {
                         {/* EL DETALLE NÍTIDO, calzado sobre su pedazo del dibujo general. Mientras
                             llega se ve el dibujo de abajo: nunca hay un hueco en blanco. */}
                         {(detalle[key] || []).map(t => (
-                          <img key={t.id} src={t.src} alt="" draggable={false} decoding="async"
+                          <img key={t.id} src={t.src} alt="" draggable={false} decoding="async" fetchPriority="low"
                             style={{ position: 'absolute', left: `${t.a * 100}%`, top: `${t.c * 100}%`,
                               width: `${(t.b - t.a) * 100}%`, height: `${(t.d - t.c) * 100}%`, display: 'block' }} />
                         ))}
