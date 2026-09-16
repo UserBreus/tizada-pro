@@ -315,6 +315,50 @@ const CFG_PARTES = [['grupos_variables', 'Grupos y variables'], ['telas', 'Telas
 // tamaño equivocado, ya impresa y cortada.
 // Mientras nadie eligió NO se muestra ninguna encendida: el default del catálogo apunta a la
 // primera columna, y mostrarlo como si fuera una decisión era la trampa.
+// ── QUÉ COLUMNAS DE LA PLANILLA USA UN MOLDE (Configuración › Planilla) ──────────────────────
+// 🔴 VARIAS DE NOMBRE Y DE NÚMERO (2026-09-16, pedido del usuario: «si usa talle de una columna o
+// de otra, eso bien, pero en las demás columnas no corre esa regla: puede crear 10 columnas de
+// número y usar las 10»). `mapeo_columnas` guarda UN id por rol, así que prender una segunda
+// columna de número apagaba la primera. Ahora:
+//   · talle y manga siguen siendo UNA por molde (la variante y el toggle no se pueden sumar);
+//   · nombre y número: la PRIMERA que se prende queda en `mapeo_columnas.numero` (es la que va a la
+//     capa «Número» del diseño) y las demás se anotan como `mapeo_columnas["col:<id>"] = <id>`: van a
+//     la capa que se llame como la columna («Número 2», «Número short»…).
+// Todo son textos: quien ya recorre `mapeo_columnas` buscando ids (`columnasActivasPlanilla`, el
+// servidor en `_aplica_al_molde`) las ve sin cambiar nada. Apagar una deja `""` (el guardado del
+// servidor mezcla, no reemplaza, y un `""` no cuenta como usada en ningún lado).
+const ROLES_UNA_COLUMNA = ['talle', 'manga'];
+const ROLES_VARIAS_COLUMNAS = ['nombre', 'numero'];
+function columnaUsadaEnMolde(mapeo, c) {
+  const role = c.role || 'none';
+  const m = mapeo || {};
+  if (ROLES_UNA_COLUMNA.includes(role)) return m[role] === c.id;
+  if (ROLES_VARIAS_COLUMNAS.includes(role)) return m[role] === c.id || m['col:' + c.id] === c.id;
+  return true;                                        // Diseño y datos libres: siempre
+}
+function alternarColumnaMolde(prev, c, cols) {
+  const role = c.role || 'none';
+  const n = { ...(prev || {}) };
+  if (ROLES_UNA_COLUMNA.includes(role)) {
+    n[role] = n[role] === c.id ? '' : c.id;
+    return n;
+  }
+  if (!ROLES_VARIAS_COLUMNAS.includes(role)) return n;
+  if (n[role] === c.id) {
+    // se apaga la principal: la próxima prendida del mismo rol pasa a ser la principal
+    const siguiente = (cols || []).find(x => (x.role || 'none') === role && x.id !== c.id && n['col:' + x.id] === x.id);
+    n[role] = siguiente ? siguiente.id : '';
+    if (siguiente) n['col:' + siguiente.id] = '';
+  } else if (n['col:' + c.id] === c.id) {
+    n['col:' + c.id] = '';
+  } else if (!n[role] || !(cols || []).some(x => x.id === n[role])) {
+    n[role] = c.id;                                   // la primera de ese rol: la principal
+  } else {
+    n['col:' + c.id] = c.id;                          // una más
+  }
+  return n;
+}
+
 function SelectorColumnaTalle({ colsTalle, valor, elegido, onElegir, ancla }) {
   if (!colsTalle || colsTalle.length <= 1) return null;   // una sola columna: no hay nada que decidir
   return (
@@ -4970,6 +5014,13 @@ export default function App() {
   const [fuentePrueba, setFuentePrueba] = useState('');          // texto de prueba: se dibuja EN VIVO con cada fuente del catálogo
   const [fuenteBuscar, setFuenteBuscar] = useState('');          // filtro de la lista por nombre
   const [fuenteFaltanteSel, setFuenteFaltanteSel] = useState(''); // cuál faltante se está resolviendo (si hay varias)
+  // EL CAMPO que se está eligiendo en el modal de fuentes (`@campo:…`). Se deriva: los carteles
+  // abren el modal con el nombre de una FUENTE, y ahí se toma el primer campo que la usa.
+  const _campoFuenteSel = (() => {
+    const cs = fuentesEstado?.campos || [];
+    if (!cs.length) return null;
+    return cs.find(c => c.clave === fuenteFaltanteSel) || cs.find(c => (c.fuentes || []).includes(fuenteFaltanteSel)) || cs[0];
+  })();
   const fuenteFileRef = useRef(null);
   // `reemplOverride`: el mapa que ACABA de elegirse (el estado de React aún no lo tiene). Sin esto
   // el cartel de «tipografía no encontrada» seguía puesto después de resolverla.
@@ -6186,7 +6237,7 @@ export default function App() {
         r = await fetch('/api/pedido/fuente_resolver', { method: 'POST', body: fd });
       } else {
         r = await fetch('/api/pedido/fuente_resolver', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pid, faltante: datos.faltante, usar: datos.usar }) });
+          body: JSON.stringify({ pid, faltante: datos.faltante, usar: datos.usar, original: datos.original || '' }) });
       }
       const d = await r.json();
       if (!r.ok) { showError(d.error || 'No se pudo resolver la fuente'); return; }
@@ -6200,7 +6251,7 @@ export default function App() {
         // cargar el archivo de una fuente que tenía reemplazo = volver a ella, en TODOS los
         // artes del pedido (el archivo es del sistema o del molde, no de un par)
         (d.alias_quitados || []).forEach(k => Object.keys(_nuevo).forEach(kk => { const n = { ...(_nuevo[kk] || {}) }; delete n[k]; _nuevo[kk] = n; }));
-      } else if (d.quitar) {
+      } else if (d.quitar && !datos.forzar) {
         delete _par[datos.faltante]; _nuevo[_k] = _par;      // eligió la original
       } else {
         _par[datos.faltante] = datos.usar; _nuevo[_k] = _par;
@@ -13115,7 +13166,34 @@ export default function App() {
                 </div>
               </div>
             )}
-            {(fuentesEstado?.reemplazables || fuentesEstado?.faltantes || []).length > 1 && (
+            {/* 🔴 LA TIPOGRAFÍA DE CADA CAMPO (2026-09-16, pedido del usuario: «si el molde viene con
+                nombre y número con diferentes fuentes, que tenga que asignarle la fuente a cada
+                una; que no sea obligatorio que los dos usen la misma»). Se elige el CAMPO y después
+                la tipografía: lo elegido para el campo manda sobre el reemplazo por fuente. */}
+            {(fuentesEstado?.campos || []).length > 0 && (
+              <div data-tour="arte-fuente-campo" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Tipografía de:</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {fuentesEstado.campos.map(c => {
+                    const sel = _campoFuenteSel && _campoFuenteSel.clave === c.clave;
+                    const usa = c.elegida || c.por_fuente || c.original || c.fuentes[0] || '—';
+                    return (
+                      <button key={c.clave} type="button" onClick={() => setFuenteFaltanteSel(c.clave)}
+                        title={`La fuente del diseño en «${c.campo}» es ${c.fuentes.join(', ') || '—'}`}
+                        style={{ padding: '6px 11px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
+                          border: '1px solid ' + (sel ? 'var(--accent)' : 'var(--border-light)'),
+                          background: sel ? 'rgba(0,243,255,0.10)' : 'transparent', color: '#fff' }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800 }}>{c.campo}</div>
+                        <div style={{ fontSize: 10.5, color: c.elegida ? 'var(--accent)' : 'var(--text-muted)' }}>
+                          {usa}{c.elegida ? ' (elegida)' : ''}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {!(fuentesEstado?.campos || []).length && (fuentesEstado?.reemplazables || fuentesEstado?.faltantes || []).length > 1 && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Resolviendo:</span>
                 <select value={fuenteFaltanteSel} onChange={(e) => setFuenteFaltanteSel(e.target.value)}
@@ -13143,16 +13221,22 @@ export default function App() {
               }).map(c => {
                 const interno = c.interno || String(c);
                 const archivo = c.archivo;
-                const _objetivo = fuenteFaltanteSel || (fuentesEstado?.reemplazables || fuentesEstado?.faltantes || [])[0];
-                const _repSel = _objetivo ? (fuentesEstado?.reemplazos || {})[_objetivo] : null;
+                // Con campos: el objetivo es EL CAMPO elegido (`@campo:numero`); sin campos (un arte
+                // sin capas de personalización), la fuente, como siempre.
+                const _cs = _campoFuenteSel;
+                const _objetivo = _cs ? _cs.clave : (fuenteFaltanteSel || (fuentesEstado?.reemplazables || fuentesEstado?.faltantes || [])[0]);
+                const _repSel = _cs ? (_cs.elegida || _cs.por_fuente) : (_objetivo ? (fuentesEstado?.reemplazos || {})[_objetivo] : null);
                 const _esActual = !!_repSel && _repSel === interno;
-                const _esOriginal = _objetivo && (fuentesEstado?.originales || {})[_objetivo] === interno;
+                const _esOriginal = _cs ? _cs.original === interno : (_objetivo && (fuentesEstado?.originales || {})[_objetivo] === interno);
                 const _enUso = _esActual || (_esOriginal && !_repSel);
                 const fam = 'fx-' + (archivo || interno).replace(/[^A-Za-z0-9_-]+/g, '_');
                 return (
                   <button key={interno} type="button" disabled={fuenteSubiendo || !_objetivo}
-                    title={_objetivo ? `Usar «${interno}» en lugar de «${_objetivo}»` : 'Este arte no tiene fuentes para reemplazar'}
-                    onClick={() => resolverFuente('reemplazar', { faltante: _objetivo, usar: interno })}
+                    title={_objetivo ? (_cs ? `Usar «${interno}» en «${_cs.campo}»` : `Usar «${interno}» en lugar de «${_objetivo}»`) : 'Este arte no tiene fuentes para reemplazar'}
+                    onClick={() => resolverFuente('reemplazar', { faltante: _objetivo, usar: interno,
+                      // «volver a la original» de un campo: si esa fuente tiene además un reemplazo
+                      // POR FUENTE, borrar la elección del campo no la devuelve: se fija la original.
+                      original: _cs ? (_cs.fuentes[0] || '') : '', forzar: !!(_cs && _cs.por_fuente) })}
                     style={{ textAlign: 'left', padding: '8px 11px', borderRadius: 7, border: '1px solid transparent', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,243,255,0.07)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
@@ -18410,6 +18494,11 @@ export default function App() {
                                   <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.06em', marginTop: 18, marginBottom: -2 }}>
                                     Textos que se personalizan{capasTexto.length ? ' · una capa por cada uno' : ''}
                                   </div>
+                                  {/* La capa «talle» (2026-09-16): opcional, no necesita columna propia — lleva
+                                      el talle de la columna de talle que usa este molde. */}
+                                  <Capa nombre="talle" color="#38bdf8" tipo="Texto · opcional">
+                                    El <b>talle</b> de cada prenda, el de la columna de talle que usa este molde. Hacé una capa llamada <b>talle</b> con un texto de muestra donde va; se reemplaza por el talle de cada fila, tal como está escrito en la planilla.
+                                  </Capa>
                                   {capasTexto.length ? capasTexto.map(ct => (
                                     <Capa key={ct.nombre} nombre={ct.nombre} color="#38bdf8" tipo={ct.comp === 'numero' ? 'Número' : 'Texto'}>
                                       El {ct.comp === 'numero' ? 'número' : 'texto'} de la columna <b>«{ct.columna}»</b> de la planilla. Hacé una capa con <b>este nombre exacto</b>; lo que escribas adentro es el placeholder. Se respeta su <b>tipografía, color y borde</b>.
@@ -19053,7 +19142,7 @@ export default function App() {
                         {tabAjustesMolde === 'planilla' ? (
                           probandoPlanilla ? (
                             <PlanillaTester
-                              columnas={(plantillasPlanillas.find(t => t.id === selectedPlanillaTemplateId)?.columnas || []).filter(c => { const role = c.role || 'none'; if (['talle', 'nombre', 'numero', 'manga'].includes(role)) return mapeoColumnas[role] === c.id; return true; })}
+                              columnas={(plantillasPlanillas.find(t => t.id === selectedPlanillaTemplateId)?.columnas || []).filter(c => columnaUsadaEnMolde(mapeoColumnas, c))}
                               reglas={reglasPlanilla}
                               variantes={tallesMolde || []}
                               onClose={() => setProbandoPlanilla(false)}
@@ -19064,11 +19153,7 @@ export default function App() {
                             {(() => {
                               const activeTemplate = plantillasPlanillas.find(t => t.id === selectedPlanillaTemplateId);
                               const cols = activeTemplate?.columnas || [];
-                              const usada = (c) => {
-                                const role = c.role || 'none';
-                                if (['talle', 'nombre', 'numero', 'manga'].includes(role)) return mapeoColumnas[role] === c.id;
-                                return true;
-                              };
+                              const usada = (c) => columnaUsadaEnMolde(mapeoColumnas, c);
                               const ej = { talle: ['M', 'L', 'S'], nombre: ['GONZALEZ', 'PEREZ', 'ALVAREZ'], numero: ['10', '7', '9'], manga: ['Corta', 'Larga', 'Corta'], none: ['Texto', 'Texto', 'Texto'] };
                               const boxLook = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '6px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)', fontSize: 13, color: 'var(--text-primary)', minHeight: 32, boxSizing: 'border-box' };
                               return (
@@ -19086,7 +19171,7 @@ export default function App() {
                                               const mapeable = ['talle', 'nombre', 'numero', 'manga'].includes(role);
                                               const on = usada(c);
                                               const esVariante = role === 'talle';
-                                              const toggle = () => { if (!mapeable) return; setMapeoColumnas(prev => ({ ...prev, [role]: prev[role] === c.id ? '' : c.id })); };
+                                              const toggle = () => { if (!mapeable) return; setMapeoColumnas(prev => alternarColumnaMolde(prev, c, cols)); };
                                               return (
                                                 <th key={c.id} style={{ padding: 8, borderRight: '1px solid var(--border-light)', borderBottom: '1px solid var(--border-light)', minWidth: 150, verticalAlign: 'top' }}>
                                                   <div onClick={toggle} title={mapeable ? (on ? 'Tocá para no usar en este molde' : 'Tocá para usar en este molde') : ''}

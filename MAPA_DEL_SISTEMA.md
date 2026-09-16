@@ -1482,6 +1482,53 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (475) — 🔤 TRES MEJORAS DE PERSONALIZACIÓN: tipografía POR CAMPO, varias columnas
+  de nombre/número por molde, y la capa «talle».** Pedido del usuario (con «sin romper nada»).
+
+  **1. Tipografía de cada campo.** *«Si un molde viene con nombre y número con diferentes fuentes,
+  que tenga que asignarle la fuente a cada una; que no sea obligatorio que los dos usen la misma»*.
+  El reemplazo del pedido (por par diseño|molde, 431) era `{fuente original → tipografía}`: con el
+  nombre y el número en la misma fuente, cambiarla cambiaba los dos. Ahora el MISMO mapa acepta
+  `@campo:<campo normalizado>` → tipografía (`MP.clave_fuente_campo`, usa `_CAMPO_ALIAS`: «00» es
+  número). `MP.fuente_de_campo(campo, fuente, carpeta)` → `(nombre, por_campo)`: lo elegido para el
+  campo manda y se resuelve SIN el reemplazo por fuente (`fuente(nombre, sin_alias=True)`, caché
+  aparte); sin elección por campo, todo exactamente como antes. Lo usan el estampado, la ficha
+  (`_fuentes_guia`), `fuente_chars` y `fuentes_estado`, que ahora devuelve `campos` =
+  `[{campo, clave, fuentes, original, elegida, por_fuente}]` (`_campos_de_fuentes`) y cuenta una
+  fuente como FALTANTE sólo si algún campo que la usa no tiene elegida. `fuente_resolver` recibe
+  `original` (la del campo) para «volver a la original». FRONT: el modal Fuentes muestra
+  «Tipografía de: Nombre · Número» (`arte-fuente-campo`, `_campoFuenteSel` derivado: los carteles
+  abren el modal con el nombre de una FUENTE y se toma el primer campo que la usa); tocar la
+  original borra la elección, salvo que la fuente tenga reemplazo por fuente (`forzar`: se fija la
+  original explícita). «Usar en otros moldes…» copia también las elecciones por campo. La clave del
+  caché de piezas ya firma los reemplazos del pedido: sin bump. **Verificado** con el arte real del
+  JUGADOR (Número en Bungee, Nombre en Anton, dibujado) y en pantalla (sandbox 8061): elegir y
+  volver a la original.
+
+  **2. Varias columnas de nombre y de número por molde.** *«Si usa talle de una columna o de otra
+  eso bien, pero en las demás columnas no corre esa regla: puede crear 10 columnas de número y usar
+  las 10»*. En Configuración › Planilla del molde, `mapeo_columnas` guarda UN id por rol: prender una
+  segunda columna de número apagaba la primera. Ahora (`columnaUsadaEnMolde` /
+  `alternarColumnaMolde`, módulo de App.jsx): talle y manga siguen siendo UNA; nombre y número, la
+  primera prendida queda en `mapeo_columnas.numero` (va a la capa «Número») y las demás como
+  `mapeo_columnas["col:<id>"] = <id>` (van a la capa que se llama como la columna). Todos textos:
+  `columnasActivasPlanilla` y `_aplica_al_molde` las ven sin cambios (activas y obligatorias); apagar
+  deja `""` (el guardado mezcla). Apagar la principal promueve la siguiente prendida.
+  🔴 **Y un bug que había**: en `_traducir_prendas` el nombre y el número elegidos entraban PRIMERO
+  a `persona` y después cada columna por su RÓTULO; el motor normaliza claves y se queda con la
+  última → con una columna rotulada «Número» y el molde apuntando a «Número short», el short salía
+  con el número de la camiseta. Ahora los rótulos van primero y los campos base (nombre, número,
+  talle) al final, desde la columna del molde.
+
+  **3. La capa «talle».** *«En el diseño con base, si viene con una capa que se llame talle, que tome
+  el texto y le ponga el talle de la columna correspondiente»*. `persona["talle"]` = el talle de la
+  columna de ESTE molde (`_tv`); el motor lo estampa TAL CUAL («Mfem», no «MFEM»; los demás campos
+  siguen en mayúsculas). La guía de capas de Configuración la explica. **Verificado**: copia
+  temporal del arte con una capa «talle» («XL» de muestra) → la pieza salió con «M».
+
+  Contrato `verificar_campos_por_molde.py` (incluye la regla de columnas ejecutada con Node).
+  Suite: 69 verdes (rojo sólo `verificar_color_nativo_cid`: arte del GOLERO reemplazado por el
+  usuario hoy, no es código).
 - **2026-09-16 (474) — 📦 «LO QUE MANDÉ AL SERVIDOR NO FUE COMPLETO: DICE QUE ES NUEVA Y ES VIEJA».
   Huella del código en el paquete + pools con `spawn` y con tope.** Un análisis del publicado
   (Linux) midió el JS sin comprimir (1.094.110 B con y sin gzip) aunque el commit de la compresión

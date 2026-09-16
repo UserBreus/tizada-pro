@@ -830,6 +830,11 @@ export const DICCIONARIO = {
     que: 'Guarda cómo quedó configurado este molde (nombres de las piezas, grupos, variables, telas y talle de guía) para volver a aplicarlo cuando se suba el mismo archivo en otro pedido.',
     como: 'Abrí las configuraciones guardadas.',
   },
+  'arte-fuente-campo': {
+    nombre: 'Tipografía de cada campo',
+    que: 'Cada texto que se personaliza —el nombre, el número, un número 2— puede llevar su propia tipografía, aunque en el diseño vengan con la misma. Primero elegís el campo y después la tipografía de la lista: sólo cambia ese campo. Tocar la original del diseño la devuelve.',
+    como: 'Tocá el campo (Nombre, Número…) y después la tipografía que querés para él.',
+  },
   'arte-fuente-copiar': {
     nombre: 'Usar la tipografía en otros moldes',
     que: 'La tipografía que elegís es de este molde en este diseño: cada uno tiene la suya. Con este botón la copiás a los otros moldes o diseños del pedido, todos de un toque o marcando cuáles, sin ir de molde en molde. Pisa lo que tuvieran elegido.',

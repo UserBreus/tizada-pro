@@ -8321,6 +8321,11 @@ def _talles_cruzados(pids, prendas, cat, reg_de=None):
 _TP = threading.local()      # lo que anota `_traducir_prendas` para quien la llama (por hilo)
 
 
+def _norm_campo(s):
+    """Nombre de campo/columna normalizado igual que el motor (`MP._norm_nombre`)."""
+    return MP._norm_nombre(s)
+
+
 def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None,
                       exigir_obligatorias=True):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
@@ -8543,13 +8548,29 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             translated_pr["_grupo"] = variantes_grupo[_vcl]   # grupo → acota la posición de etiqueta
         if _vcl and variantes_juntas.get(_vcl):
             translated_pr["juntas_piezas"] = variantes_juntas[_vcl]   # vínculos "van juntas" → atómicos frente al toggle
-        persona = {"nombre": translated_pr["nombre"], "numero": translated_pr["numero"]}
+        persona = {}
         for c in cols_template:
             if c.get("role") in ("diseno", "cantidad"):
                 continue  # ni el diseño ni la cantidad son datos a estampar
             cval = pr.get(c.get("id"), pr.get(c.get("label"), ""))
             if cval not in (None, ""):
                 persona[c.get("label") or c.get("id")] = cval
+        # 🔴 LOS CAMPOS BASE VAN AL FINAL, Y MANDAN (2026-09-16). Cada columna entra con su RÓTULO
+        # (así la capa «Número 2» del diseño toma la columna «Número 2»), y después el nombre, el
+        # número y el talle con la columna que ESTE molde eligió. Antes el nombre y el número
+        # entraban PRIMERO: con una columna rotulada «Número» en la planilla y el molde apuntando a
+        # «Número short», el rótulo pisaba la elección — el motor normaliza las claves y se queda
+        # con la última — y el short salía con el número de la camiseta, bien impreso.
+        # La capa «talle» del diseño (pedido del usuario 2026-09-16: «si viene con una capa que se
+        # llame talle, que tome el texto y le ponga el talle de la columna correspondiente») lleva
+        # el talle de la columna de ESTE molde, no el de otra columna rotulada «Talle».
+        for _k in list(persona):
+            if _norm_campo(_k) in ("nombre", "numero", "talle"):
+                del persona[_k]
+        persona["nombre"] = translated_pr["nombre"]
+        persona["numero"] = translated_pr["numero"]
+        if str(_tv or "").strip():
+            persona["talle"] = str(_tv).strip()
         translated_pr["personalizacion"] = persona
         # LA FILA SE REPITE `cantidad` VECES. Se hace acá —y no en el motor— a propósito: de este
         # punto para abajo TODO (nesting, numerado de la etiqueta #01…#05, consumo de tela, ficha)
@@ -8889,8 +8910,11 @@ def _fuentes_guia(pers, talle, carpeta):
         _cat = {}
     salida = []
     for _campo, _f in sorted(campos.items()):
+        # la tipografía que el pedido eligió para ESE campo manda (ver `MP.fuente_de_campo`)
+        _fc, _por_campo = MP.fuente_de_campo(_campo, _f, carpeta)
+        _carp = ({**carpeta, "alias": {}} if (_por_campo and isinstance(carpeta, dict)) else carpeta)
         try:
-            _ruta = MP.resolver_fuente(_f, carpeta)
+            _ruta = MP.resolver_fuente(_fc, _carp)
         except Exception:
             _ruta = None
         _sust = not _ruta
@@ -9922,9 +9946,9 @@ def fuentes_estado():
         for f in req:
             _r = MP.resolver_fuente(f, fx0)
             originales[f] = _cat_fx.get(_r) if _r else None
-        return jsonify({"ok": True, "requeridas": req,
-                        "faltantes": sorted(f for f in req if not MP.resolver_fuente(f, fx)),
-                        "reemplazables": req, "originales": originales,
+        _campos, _falt = _campos_de_fuentes(_persb, fx, fx0, _cat_fx)
+        return jsonify({"ok": True, "requeridas": req, "faltantes": _falt,
+                        "reemplazables": req, "originales": originales, "campos": _campos,
                         "catalogo": _catalogo, "reemplazos": fx.get("alias") or {}})
     if not os.path.exists(arte):
         return jsonify({"ok": True, "requeridas": [], "faltantes": [], "reemplazables": [],
@@ -9951,9 +9975,48 @@ def fuentes_estado():
         _r = MP.resolver_fuente(f, fx0)
         originales[f] = _cat_fx.get(_r) if _r else None
     faltantes = sorted(f for f in req if not MP.resolver_fuente(f, fx))
+    _campos = []
+    if pers:
+        _campos, faltantes = _campos_de_fuentes(pers, fx, fx0, _cat_fx)
     return jsonify({"ok": True, "requeridas": req, "faltantes": faltantes,
-                    "reemplazables": req, "originales": originales,
+                    "reemplazables": req, "originales": originales, "campos": _campos,
                     "catalogo": _catalogo, "reemplazos": fx.get("alias") or {}})
+
+
+def _campos_de_fuentes(pers, fx, fx0, cat_fx):
+    """Los CAMPOS de personalización con su tipografía, para elegir una por campo (2026-09-16).
+
+    Devuelve `(campos, faltantes)`. Cada campo: `{campo, clave, fuentes: [originales], original:
+    interno de la del diseño o None, elegida: la elegida para el campo o None, por_fuente: el
+    reemplazo por fuente que le toca si no hay por campo}`. Una fuente del archivo cuenta como
+    FALTANTE sólo si algún campo que la usa no tiene una elegida para él y el resolver tampoco la
+    encuentra: si el nombre y el número tienen cada uno la suya, la original ya no hace falta."""
+    por_campo = {}
+    for _m in (pers or {}).values():
+        for _campo, _c in (_m or {}).items():
+            if not isinstance(_c, dict):
+                continue
+            _fs = por_campo.setdefault(str(_campo), [])
+            for _f in [_c.get("fuente")] + [(pt or {}).get("fuente") for pt in (_c.get("por_talle") or {}).values()]:
+                if _f and _f not in _fs:
+                    _fs.append(_f)
+    alias = (fx or {}).get("alias") or {}
+    campos, faltan = [], set()
+    for _campo in sorted(por_campo):
+        _fs = por_campo[_campo]
+        _clave = MP.clave_fuente_campo(_campo)
+        _elegida = alias.get(_clave) or None
+        _orig = None
+        if _fs:
+            _r = MP.resolver_fuente(_fs[0], fx0)
+            _orig = cat_fx.get(_r) if _r else None
+        if not _elegida:
+            for _f in _fs:
+                if not MP.resolver_fuente(_f, fx):
+                    faltan.add(_f)
+        campos.append({"campo": _campo, "clave": _clave, "fuentes": _fs, "original": _orig,
+                       "elegida": _elegida, "por_fuente": next((alias[_f] for _f in _fs if alias.get(_f)), None)})
+    return campos, sorted(faltan)
 
 
 @app.post("/api/pedido/fuente_resolver")
@@ -10003,7 +10066,9 @@ def fuente_resolver():
     # Elegir la fuente ORIGINAL del texto = volver a ella: se devuelve `quitar` para que el front
     # borre el reemplazo en vez de guardar un X→X.
     fx0 = {"carpetas": [os.path.join(DATOS, "productos", pid, "fuentes"), FUENTES], "alias": {}}
-    _ro = MP.resolver_fuente(faltante, fx0)
+    # Para un CAMPO (`@campo:numero`) el front manda además `original` (la fuente del diseño en
+    # ese campo): elegir esa misma es «volver a la original» y se quita la elección.
+    _ro = MP.resolver_fuente((cuerpo.get("original") or "").strip() or faltante, fx0)
     _ru = MP.resolver_fuente(usar, fx0)
     _es_la_original = bool(_ro and _ru and os.path.normcase(os.path.abspath(_ro)) == os.path.normcase(os.path.abspath(_ru)))
     # NO se guarda nada: el reemplazo vive en el PEDIDO (lo lleva el front).
@@ -10748,19 +10813,27 @@ def fuente_chars():
         except Exception:
             return jsonify({"ok": False, "chars": "", "fuentes": [], "faltantes": []})
         # en el camino B cada TALLE trae su propio placeholder (con su tamaño y su fuente)
-        fuentes = sorted({f for m in pers.values() for c in (m or {}).values()
-                          for f in ([c.get("fuente")] + [(pt or {}).get("fuente")
-                                                         for pt in (c.get("por_talle") or {}).values()])
-                          if f})
+        pares = {(campo, f) for m in pers.values() for campo, c in (m or {}).items()
+                 for f in ([c.get("fuente")] + [(pt or {}).get("fuente")
+                                                for pt in (c.get("por_talle") or {}).values()])
+                 if f}
     else:
         try:
             pers = MP.extraer_personalizacion(_ruta_entrada("arte.ai", pid)) or {}
         except Exception:
             return jsonify({"ok": False, "chars": "", "fuentes": [], "faltantes": []})
-        fuentes = sorted({c.get("fuente") for m in pers.values() for c in (m or {}).values() if c.get("fuente")})
+        pares = {(campo, c.get("fuente")) for m in pers.values() for campo, c in (m or {}).items()
+                 if c.get("fuente")}
+    # La tipografía de CADA CAMPO (la elegida para el campo, si hay): es con la que se estampa.
+    _fx_ch = _fuentes_para(pid, _reempl_de_request())
+    _elegidas = {}
+    for campo, f in pares:
+        _fc, _pc = MP.fuente_de_campo(campo, f, _fx_ch)
+        _elegidas[_fc] = _elegidas.get(_fc, False) or _pc
+    fuentes = sorted(_elegidas)
     sets, ok_f, falta_f = [], [], []
     for f in fuentes:
-        ruta = MP.resolver_fuente(f, _fuentes_para(pid, _reempl_de_request()))
+        ruta = MP.resolver_fuente(f, ({**_fx_ch, "alias": {}} if _elegidas.get(f) else _fx_ch))
         if not ruta:
             falta_f.append(f); continue
         try:

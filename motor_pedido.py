@@ -2563,6 +2563,33 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
 
 
 # ════════════════ ARTE SEPARADO: detección y validación ════════════════
+# ── LA TIPOGRAFÍA DE CADA CAMPO ──────────────────────────────────────────────────────────────
+# 🔴 POR CAMPO, NO SÓLO POR FUENTE (pedido del usuario 2026-09-16: «si un molde viene con nombre y
+# número con diferentes fuentes, que tenga que asignarle la fuente a cada una; que no sea
+# obligatorio que los dos usen la misma»). El reemplazo del pedido era `{fuente original →
+# tipografía}`: si el nombre y el número usan la misma fuente en el archivo, cambiarla cambiaba
+# los dos. Ahora el mismo mapa acepta además `@campo:<campo>` → tipografía, que manda sobre la
+# elección por fuente para ESE campo. Lo de siempre sigue igual: sin elección por campo, vale la
+# elección por fuente, y sin ninguna, la fuente del diseño.
+PREFIJO_CAMPO_FUENTE = "@campo:"
+
+
+def clave_fuente_campo(campo):
+    """La clave del reemplazo de UN campo: `@campo:numero`, `@campo:numero 2`…"""
+    return PREFIJO_CAMPO_FUENTE + _norm_nombre(_CAMPO_ALIAS.get(_norm_nombre(campo), campo))
+
+
+def fuente_de_campo(campo, fuente_original, carpeta):
+    """`(nombre, elegida_por_campo)`: la tipografía con la que sale ESE campo. Si el pedido eligió
+    una para el campo, ésa (y NO se le vuelve a aplicar el reemplazo por fuente: es una elección
+    explícita); si no, la fuente del diseño (que el resolver reemplaza por fuente como siempre)."""
+    if isinstance(carpeta, dict):
+        _elegida = (carpeta.get("alias") or {}).get(clave_fuente_campo(campo))
+        if _elegida:
+            return _elegida, True
+    return fuente_original, False
+
+
 def _norm_nombre(s):
     if not s:
         return ""
@@ -3930,9 +3957,16 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
 
     fuentes_cache = {}
     _avisos_fuente = {}          # fuente → caracteres que ya se avisó que presta el respaldo
-    def fuente(nombre_ps):
-        if nombre_ps not in fuentes_cache:
-            ruta = resolver_fuente(nombre_ps, carpeta_fuentes)
+    def fuente(nombre_ps, sin_alias=False):
+        # `sin_alias`: la tipografía que se eligió PARA UN CAMPO se usa tal cual; si además se le
+        # aplicara el reemplazo por fuente, elegir «Anton» en el número podría terminar en otra.
+        _clave_cache = ("@sin_alias@" + nombre_ps) if sin_alias else nombre_ps
+        if _clave_cache in fuentes_cache:
+            return fuentes_cache[_clave_cache]
+        _carpeta = ({**carpeta_fuentes, "alias": {}}
+                    if (sin_alias and isinstance(carpeta_fuentes, dict)) else carpeta_fuentes)
+        if nombre_ps not in fuentes_cache or sin_alias:
+            ruta = resolver_fuente(nombre_ps, _carpeta)
             if not ruta:
                 # FUENTE NO ENCONTRADA → se estampa TEMPORALMENTE con Anton Regular (regla del
                 # usuario 2026-08-20) para que el texto NUNCA desaparezca ni frene el trabajo.
@@ -3953,8 +3987,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     except Exception:
                         fuentes_cache["__respaldo__"] = None
                 _resp = fuentes_cache["__respaldo__"]
-            fuentes_cache[nombre_ps] = FuenteCurvas(open(ruta, "rb").read(), respaldo=_resp)
-        return fuentes_cache[nombre_ps]
+            fuentes_cache[_clave_cache] = FuenteCurvas(open(ruta, "rb").read(), respaldo=_resp)
+        return fuentes_cache[_clave_cache]
 
     piezas_nombres = sorted(registro.keys())
     # Mapa pieza_idx -> nombre (para filtrar por VARIABLE de configuración: cada variable
@@ -4754,11 +4788,17 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # CAMINO B: cada talle trae su propio «00»/«NOMBRE», a su tamaño y en su lugar
                 # (`por_talle`, ver `piezas_con_diseno.personalizacion_con_diseno`).
                 pl = (pl.get("por_talle") or {}).get(str(talle)) or pl
-                texto = str(persona_n.get(_norm_nombre(campo), "")).strip().upper()
+                texto = str(persona_n.get(_norm_nombre(campo), "")).strip()
+                # El TALLE se estampa tal cual está en la planilla («Mfem» no es «MFEM»); los
+                # demás campos, en mayúsculas como siempre.
+                if _norm_nombre(campo) != "talle":
+                    texto = texto.upper()
                 if texto == "":
                     continue
                 try:
-                    fnom = fuente(pl["fuente"])     # cada placeholder usa su propia fuente
+                    # cada placeholder usa su propia fuente… o la que el pedido eligió para ESE campo
+                    _fnom_nombre, _por_campo = fuente_de_campo(campo, pl["fuente"], carpeta_fuentes)
+                    fnom = fuente(_fnom_nombre, sin_alias=_por_campo)
                 except Exception:
                     continue                        # fuente no disponible → no se estampa ESE campo (la tizada se arma igual)
                 size = pl["size"] * sp if mapeo_arte else pl["size"]
@@ -4789,7 +4829,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # `faltantes()` queda para lo que no puede dibujar NADIE: ahí sí se corta, con un
                 # mensaje que se entiende. Y el aviso llega antes: la planilla marca los caracteres
                 # que no son de la tipografía del diseño (`/api/pedido/fuente_chars`).
-                _fps = pl.get("fuente") or "?"
+                _fps = _fnom_nombre or pl.get("fuente") or "?"      # la que de verdad se usa
                 _prest = [c for c in fnom.prestados(texto) if c not in _avisos_fuente.get(_fps, set())]
                 if _prest:
                     _avisos_fuente.setdefault(_fps, set()).update(_prest)
