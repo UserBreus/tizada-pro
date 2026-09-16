@@ -32,7 +32,9 @@ import time
 import threading
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
-CARPETA = os.path.join(AQUI, "logs")
+# `TIZADA_LOGS`: la aplicación de escritorio manda el registro a la carpeta de datos del usuario
+# (la del programa instalado no es lugar para escribir). Los workers del pool la heredan por entorno.
+CARPETA = os.environ.get("TIZADA_LOGS") or os.path.join(AQUI, "logs")
 ARCHIVO = os.path.join(CARPETA, "eventos.jsonl")
 VIEJO = os.path.join(CARPETA, "eventos.anterior.jsonl")
 

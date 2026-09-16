@@ -59,3 +59,8 @@ certificados/
 # registro del servidor cuando arranca sin ventana (INICIAR-SIN-VENTANA.vbs)
 logs/
 _papelera/
+
+# App de escritorio: todo lo GENERADO (entorno, PyInstaller, instalador compilado). El codigo va.
+escritorio/.venv/
+escritorio/build/
+escritorio/build_instalador/
