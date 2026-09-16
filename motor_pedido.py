@@ -2312,6 +2312,56 @@ def _color_op(pl):
 
 
 _PERS_CACHE = {}   # memoización por (arte, mtime): extraer_personalizacion es talle/variable-INDEP
+
+# ── LO QUE DEPENDE SÓLO DEL ARCHIVO SE LEE UNA VEZ, PARA TODOS LOS PROCESOS ──────────────────
+# 🔴 POR QUÉ (2026-09-16, «subir el arte demora una eternidad»). Medido con cProfile sobre el
+# arte real de 7 MB: dibujar el talle guía en un worker recién levantado costaba 11-20 s, y de
+# eso `extraer_editables` eran 4,6 s y `extraer_personalizacion` 3,3 s — dos recorridos del arte
+# ENTERO que no dependen del talle ni de la variable. `_PERS_CACHE` sólo vale dentro del proceso
+# (cada worker del pool lo pagaba de nuevo) y los editables no tenían memoria ninguna: se leían
+# por CADA talle (×30 en el pre-dibujado). Ahora el resultado queda en el proceso Y en disco
+# (`memo_cache/<qué>_<mtime>_<tamaño>.pkl` al lado del arte, pickle porque hay tuplas que un
+# JSON no devuelve iguales): el primer proceso que lo calcula lo deja para los demás, y subir
+# otro arte cambia el sello del archivo → clave nueva, nada que invalidar a mano.
+_MEMO_ARTE = {}
+
+
+def _memo_arte(nombre, path_arte, calc):
+    """Resultado de `calc()` para ESTE archivo (por mtime + tamaño), memorizado en el proceso y
+    en disco. Devuelve una COPIA: quien lo use puede modificarlo sin ensuciar la memoria."""
+    import copy as _copy
+    import pickle as _pickle
+    try:
+        _st = os.stat(path_arte)
+        firma = (_st.st_mtime_ns, _st.st_size)
+    except OSError:
+        return calc()
+    k = (nombre, os.path.normcase(os.path.abspath(path_arte)), firma)
+    hit = _MEMO_ARTE.get(k)
+    if hit is not None:
+        return _copy.deepcopy(hit)
+    carpeta = os.path.join(os.path.dirname(path_arte), "memo_cache")
+    ruta = os.path.join(carpeta, f"{nombre}_{firma[0]}_{firma[1]}.pkl")
+    try:
+        with open(ruta, "rb") as fh:
+            val = _pickle.load(fh)
+        _MEMO_ARTE[k] = val
+        return _copy.deepcopy(val)
+    except Exception:
+        pass
+    val = calc()
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+        tmp = f"{ruta}.{os.getpid()}.tmp"          # .tmp + replace: nunca un pickle a medias
+        with open(tmp, "wb") as fh:
+            _pickle.dump(val, fh, protocol=_pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, ruta)
+    except Exception:
+        pass
+    if len(_MEMO_ARTE) > 32:
+        _MEMO_ARTE.clear()
+    _MEMO_ARTE[k] = val
+    return _copy.deepcopy(val)
                    # y CARA (parsea el content-stream de todo el arte); se llamaba 1× POR TALLE (×19)
 # Cómo se puede llamar la CAPA de un campo, y con qué campo se corresponde. La prenda trae
 # «nombre» y «numero» (o las columnas de la planilla): si la capa se rotula de otra forma, el
@@ -2332,6 +2382,15 @@ _CAMPO_ALIAS = {"00": "numero", "nro": "numero", "num": "numero",
 
 
 def extraer_personalizacion(path_arte, campos=None):
+    """Ver `_extraer_personalizacion_crudo`. El resultado auto-descubierto (sin `campos`) queda
+    memorizado en disco por sello del archivo (`_memo_arte`): un worker recién levantado no
+    vuelve a recorrer el arte entero."""
+    if campos is not None:
+        return _extraer_personalizacion_crudo(path_arte, campos)
+    return _memo_arte("personalizacion", path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
+
+
+def _extraer_personalizacion_crudo(path_arte, campos=None):
     """Lee los placeholders de personalización SOLO por CAPA: si hay una capa llamada
     como un campo (`nombre`, `numero`, `palabra`, `numero 2`, …) TODO el texto de esa
     capa es el placeholder de ese campo, diga lo que diga. `campos` = lista de nombres
@@ -2540,6 +2599,13 @@ def _nombre_editable(capa):
 
 
 def extraer_editables(path_arte, con_thumb=True):
+    """Ver `_extraer_editables_crudo`. Memorizado en disco por sello del archivo (`_memo_arte`):
+    el motor lo pedía por CADA talle (1,5-4,6 s cada vez sobre un arte de 7 MB)."""
+    return _memo_arte("editables_thumb" if con_thumb else "editables", path_arte,
+                      lambda: _extraer_editables_crudo(path_arte, con_thumb))
+
+
+def _extraer_editables_crudo(path_arte, con_thumb=True):
     """Detecta los OBJETOS EDITABLES del arte: cada capa OCG de primer nivel cuyo nombre
     empieza con 'editable' (ej. 'Editable Escudo'). Cada capa = un objeto independiente
     (mover/rotar/escalar por el usuario). El nombre de la capa de Illustrator de primer

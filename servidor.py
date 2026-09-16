@@ -6021,6 +6021,14 @@ def arte_asignar_todo():
         talles = [_guia] + [t for t in talles if t != _guia]
     _guia = _guia if _guia in talles else (talles[0] if talles else "")
     job = uuid.uuid4().hex[:8]
+    # 🔴 UN PRE-DIBUJADO NUEVO DEL MISMO ARTE CANCELA AL ANTERIOR (2026-09-16). El usuario subió
+    # el arte tres veces en un minuto: cada subida encolaba 30 talles al pool y el talle guía de
+    # la última esperaba detrás de los de las dos anteriores (medido: 24 s hasta `guia_lista`).
+    # El viejo deja de mandar talles al pool (lo que ya está en vuelo termina solo).
+    _clave_job = (pid, str(diseno or ""), variante)
+    for _vj in _ASIGNAR_JOBS.values():
+        if not _vj.get("done") and _vj.get("clave") == _clave_job:
+            _vj["cancelado"] = True
     # PROGRESO DE VERDAD: los talles terminan de a uno y de golpe (el primero tarda lo que tarda
     # levantar los procesos + renderizar entero) → el cartel se quedaba clavado en «0/20» y parecía
     # colgado. Los workers van dejando cada pieza en disco (`piezas_cache/<variable>/<talle>/*.svg`),
@@ -6031,7 +6039,8 @@ def arte_asignar_todo():
         _sub = os.path.join(_sub, re.sub(r"[^A-Za-z0-9_-]+", "_", str(talles[0]))[:24] or "guia")
     _dircache = _ruta_datos(_sub, pid, sub=_diseno_sub(diseno))
     _ASIGNAR_JOBS[job] = {"hecho": 0, "total": len(talles), "done": False, "guia_lista": False,
-                          "guia": _guia, "dir": _dircache, "desde": time.time() - 1, "fase": "arrancando"}
+                          "guia": _guia, "dir": _dircache, "desde": time.time() - 1, "fase": "arrancando",
+                          "clave": _clave_job, "cancelado": False}
     if len(_ASIGNAR_JOBS) > 40:   # no acumular jobs viejos
         for k in [k for k, v in list(_ASIGNAR_JOBS.items()) if v.get("done")][:20]:
             _ASIGNAR_JOBS.pop(k, None)
@@ -6063,6 +6072,8 @@ def arte_asignar_todo():
             _pend, _cola = set(), [(t, k) for t in _resto for k in ("render", "deteccion")]
             _es_render = set()          # la barra cuenta TALLES dibujados, no tareas sueltas:
             while _cola or _pend:       # por cada talle van un render y una detección
+                if _ASIGNAR_JOBS[job].get("cancelado"):
+                    _cola.clear()       # llegó otro pedido del mismo arte: éste no manda más
                 while _cola and len(_pend) < _a_la_vez:
                     _t, _k = _cola.pop(0)
                     _f = (pool.submit(_render_talle_worker, (pid, diseno, variante, _t, _mapeo_arg))

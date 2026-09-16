@@ -68,7 +68,7 @@ print("\n2 · 🔴 LOS TALLES NO SON CAMPOS DE PERSONALIZACIÓN")
 # sobre las 20. La exclusión vive en `extraer_personalizacion` y se comprueba leyendo su código
 # (probarlo de verdad pide un archivo con capas «nombre»/«00», que todavía no hay).
 import inspect                                                     # noqa: E402
-_src = inspect.getsource(MP.extraer_personalizacion)
+_src = inspect.getsource(MP._extraer_personalizacion_crudo)   # el cuerpo (el nombre publico es el memo de disco, changelog 471)
 ok("talles_del_molde" in _src and "es_camino_b" in _src,
    "🔴 el auto-descubrimiento de campos ya no excluye los talles del camino B: cada talle se "
    "tomaría como un campo de personalización")

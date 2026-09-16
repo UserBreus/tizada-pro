@@ -1482,6 +1482,22 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (471) — 🐢 «Subir el arte demora una eternidad» (39 s): lo que depende sólo del
+  archivo se lee UNA vez para todos los procesos, y un pre-dibujado nuevo cancela al viejo.**
+  Medido en el registro: subida 14 s + **25 s hasta el talle guía**. Con cProfile sobre el arte
+  real (7 MB), dibujar el talle guía en un worker recién levantado costaba 11-20 s: `extraer_editables`
+  4,6 s (el motor lo pedía por CADA talle, sin memoria alguna) + `extraer_personalizacion` 3,3 s
+  (memo sólo en el proceso: cada worker del pool lo pagaba de nuevo). Y el usuario había subido el
+  arte tres veces en un minuto: cada subida encolaba 30 talles al pool y el guía de la última
+  esperaba detrás de los anteriores.
+  **Cómo quedó**: `MP._memo_arte(nombre, path, calc)` — resultado por (archivo, mtime, tamaño) en
+  el proceso Y en disco (`memo_cache/<qué>_<mtime>_<tamaño>.pkl` al lado del arte; pickle porque el
+  resultado tiene tuplas que un JSON no devuelve iguales; devuelve COPIAS). `extraer_editables` y
+  `extraer_personalizacion` (sin `campos`) pasan por ahí; los cuerpos viejos son `_*_crudo`. Subir
+  otro arte cambia el sello → clave nueva, nada que invalidar. Medido: talle guía en frío 11-20 s →
+  3-4 s; los demás talles 2,7-4,3 s → 1,1-1,9 s. En `arte_asignar_todo`, un job nuevo con la misma
+  (pid, diseño, variable) marca `cancelado` a los anteriores no terminados: dejan de mandar talles
+  al pool (lo que ya está en vuelo termina solo).
 - **2026-09-16 (470) — 🎨 «¿Por qué se descarga con CMYK + Grises?»: el borde de corte era negro
   SÓLO K.** Medido en su mesa descargada (`Mesa 2 - Jacquard Charrúa (1,83).pdf`): sin
   `DeviceGray`, sin ICC de 1 canal, sin `g`/`G`, perfil SWOP incrustado y declarado — todo `k`/`K`.
