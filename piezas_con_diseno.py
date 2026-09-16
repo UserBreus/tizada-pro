@@ -1545,11 +1545,12 @@ def decidir_etiqueta_archivo(path_molde, talles, procesos=None, avisar=None):
     pendientes = list(range(len(tareas)))
     if procesos and procesos > 1 and len(tareas) > 1:
         try:
-            from concurrent.futures import ProcessPoolExecutor, as_completed
-            with ProcessPoolExecutor(max_workers=min(len(tareas), procesos)) as ex:
+            from concurrent.futures import as_completed
+            import procesos as _PR
+            with _PR.seguro(_PR.pool(min(len(tareas), procesos))) as ex:
                 futs = {ex.submit(buscar_candidatos_mesa, path_molde, m, list(tr), list(talles)): i
                         for i, (m, tr) in enumerate(tareas)}
-                for f in as_completed(futs):
+                for f in as_completed(futs, timeout=_PR.tope_segundos("TIZADA_TOPE_PROCESO_S", 1800)):
                     i = futs[f]
                     _m, cs = f.result()
                     cands.extend(cs)
@@ -2338,10 +2339,11 @@ def _armar_paginas(path_molde, mesa, talles, conts, marco, U, ocultar, destino, 
         try:
             from concurrent.futures import as_completed
             ph_t, lc_t, etq_t, hechos = {}, {}, {}, 0
-            with _POOL_FACTORY(max_workers=len(trozos)) as ex:
+            import procesos as _PR
+            with _PR.seguro(_POOL_FACTORY(max_workers=len(trozos))) as ex:
                 futs = [ex.submit(_paginas_worker, (path_molde, mesa, list(talles), tr, pa))
                         for tr, pa in zip(trozos, partes)]
-                for f in as_completed(futs):
+                for f in as_completed(futs, timeout=_PR.tope_segundos("TIZADA_TOPE_PROCESO_S", 1800)):
                     mis, ph, lc, etq = f.result()
                     ph_t.update(ph); lc_t.update(lc); etq_t.update(etq)
                     hechos += len(mis)
@@ -2443,8 +2445,8 @@ def _procesos_por_defecto():
 
 
 def _pool_por_defecto(max_workers):
-    from concurrent.futures import ProcessPoolExecutor
-    return ProcessPoolExecutor(max_workers=max_workers)
+    import procesos as _PR               # `spawn` en todos los sistemas: ver `procesos.contexto`
+    return _PR.pool(max_workers)
 
 
 # Ganchos para el contrato (`verificar_desplegado_pool.py`): un pool de mentira que hace fallar una
@@ -2482,11 +2484,12 @@ def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos
         # reintenta UNA vez en el pool y, si vuelve a fallar, sólo ESA va en serie al final.
         try:
             from concurrent.futures import as_completed
-            with _POOL_FACTORY(max_workers=min(n, procesos)) as ex:
+            import procesos as _PR
+            with _PR.seguro(_POOL_FACTORY(max_workers=min(n, procesos))) as ex:
                 futs = {ex.submit(_desplegar_mesa_worker, (path_molde, m, list(talles), contornos, paginas)): m for m in mesas}
                 reintentadas = set()
                 while futs:
-                    for f in as_completed(list(futs)):
+                    for f in as_completed(list(futs), timeout=_PR.tope_segundos("TIZADA_TOPE_PROCESO_S", 1800)):
                         mesa = futs.pop(f)
                         try:
                             mesa, conts = f.result()

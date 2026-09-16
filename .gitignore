@@ -59,3 +59,6 @@ certificados/
 # registro del servidor cuando arranca sin ventana (INICIAR-SIN-VENTANA.vbs)
 logs/
 _papelera/
+
+# huella del código: la escribe empaquetar.py DENTRO del paquete (nunca en el taller)
+_huella_publicada.py

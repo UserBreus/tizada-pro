@@ -145,3 +145,82 @@ def huerfanos():
         fuera.append((p.get("ProcessId"), (p.get("WorkingSetSize") or 0) / 1048576,
                       (p.get("CommandLine") or "")[:80]))
     return fuera
+
+
+# ══ CÓMO SE CREAN LOS PROCESOS DE DIBUJO ═════════════════════════════════════════════════════
+# 🔴 SIEMPRE `spawn`, EN TODOS LOS SISTEMAS (2026-09-16). Ningún pool elegía cómo arrancar a sus
+# hijos, y en Linux con Python 3.12 eso es `fork`: el servidor publicado (Linux, 8 hilos atendiendo
+# pedidos) se copiaba a sí mismo en medio de su trabajo. Si en ese instante otro hilo tenía tomado
+# un candado (el del registro, el de la base, uno interno de una biblioteca), el hijo lo heredaba
+# TRABADO para siempre. Es una trampa documentada (Python 3.12 lo avisa, 3.14 cambió el default) y
+# es la explicación más probable del cuelgue silencioso del 14/9 en el publicado: hilos esperando a
+# hijos que nunca contestan, sin errores ni muertes por memoria en el registro.
+# `spawn` arranca cada hijo limpio. Es lo que ya usa Windows desde siempre, así que el código ya
+# está preparado (`_es_proceso_principal`, las funciones de worker a nivel de módulo).
+# No `forkserver`: su proceso servidor importa el programa sin padre, y `servidor.py` lo tomaría
+# por el principal.
+
+def contexto():
+    """El contexto de multiprocessing de TODOS los pools del sistema."""
+    import multiprocessing
+    return multiprocessing.get_context("spawn")
+
+
+def pool(max_workers):
+    """Un `ProcessPoolExecutor` con el contexto correcto (ver arriba)."""
+    from concurrent.futures import ProcessPoolExecutor
+    return ProcessPoolExecutor(max_workers=max_workers, mp_context=contexto())
+
+
+def tope_segundos(variable, por_defecto):
+    """Cuánto se espera a un proceso antes de darlo por trabado (variable de entorno o default)."""
+    try:
+        return max(5.0, float(os.environ.get(variable) or por_defecto))
+    except ValueError:
+        return float(por_defecto)
+
+
+def descartar(ex):
+    """Apaga un pool SIN esperar a sus procesos: los mata.
+
+    🔴 `shutdown(wait=True)` —lo que hace el `with`— espera a que cada hijo termine: con uno trabado,
+    espera para siempre, y el hilo que atendía el pedido queda perdido. Un hijo trabado no se
+    destraba solo; lo único que sirve es matarlo."""
+    try:
+        for p in list((getattr(ex, "_processes", None) or {}).values()):
+            try:
+                p.terminate()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        ex.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        try:
+            ex.shutdown(wait=False)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+class seguro:
+    """`with seguro(pool(n)) as ex:` — como el `with` de siempre, pero si adentro salta cualquier
+    error (un tope de espera vencido, un hijo que murió) el pool se DESCARTA en vez de esperarlo."""
+
+    def __init__(self, ex):
+        self.ex = ex
+
+    def __enter__(self):
+        return self.ex
+
+    def __exit__(self, tipo, valor, tb):
+        if tipo is not None:
+            descartar(self.ex)
+            return False
+        try:
+            self.ex.shutdown(wait=True)
+        except Exception:
+            pass
+        return False

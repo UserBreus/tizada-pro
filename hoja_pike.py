@@ -290,8 +290,8 @@ def svgs_de_bases(bases, docs_base, procesos=None):
         ejecutor = procesos
     elif isinstance(procesos, int) and procesos > 1 and len(pendientes) > 1:
         try:
-            from concurrent.futures import ProcessPoolExecutor
-            propio = ejecutor = ProcessPoolExecutor(max_workers=min(procesos, len(pendientes)))
+            import procesos as _PR           # `spawn` en todos los sistemas: ver `procesos.contexto`
+            propio = ejecutor = _PR.pool(min(procesos, len(pendientes)))
         except Exception:
             ejecutor = None
     svgs = {}
@@ -303,6 +303,10 @@ def svgs_de_bases(bases, docs_base, procesos=None):
         except Exception as e:
             print(f"[preview] SVG de bases en paralelo falló ({e}); sigo en serie", flush=True)
             svgs = {}
+            if propio is not None:
+                import procesos as _PR
+                _PR.descartar(propio)        # uno trabado no se destraba: se mata
+                propio = None
         finally:
             if propio is not None:
                 propio.shutdown(wait=False)

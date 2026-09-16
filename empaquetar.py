@@ -88,6 +88,55 @@ def config_publicacion():
     return cfg
 
 
+# ── LA HUELLA DEL CÓDIGO ─────────────────────────────────────────────────────────────────────
+# 🔴 POR QUÉ (2026-09-16). El número de versión lo escribe una persona y NO dice qué código hay
+# adentro. El taller publicó «1.0.37» a las 15:20; después se escribió la compresión del JS y se
+# commiteó también como 1.0.37. El publicado decía 1.0.37, el taller decía 1.0.37, y el código era
+# otro: nada en pantalla lo mostraba (y el publicado encima informaba `commit 730693a`, el de un
+# checkout viejo de git que las actualizaciones por paquete nunca tocan).
+# La huella es un hash del CÓDIGO FUENTE que produce el paquete (los .py, la pantalla sin compilar,
+# el esquema, las tipografías). Viaja en `_huella_publicada.py` —un .py a propósito: el
+# actualizador del servidor respalda y restaura los .py, así una vuelta atrás también vuelve la
+# huella— y el taller la calcula en el momento sobre sus archivos: si difieren, el publicado NO
+# tiene lo que tiene esta máquina, diga el número que diga.
+HUELLA_ARCHIVO = "_huella_publicada.py"
+_HUELLA_CARPETAS = ["frontend/src", "db", "catalogo_fuentes"]
+_HUELLA_SUELTOS = ["requirements.txt", "frontend/index.html", "frontend/package.json",
+                   "frontend/vite.config.js"]
+
+
+def archivos_huella(aqui=AQUI):
+    """Las rutas relativas (con /) que entran en la huella, ordenadas."""
+    out = []
+    for f in os.listdir(aqui):
+        if f.endswith(".py") and f != HUELLA_ARCHIVO and not _excluido(f) \
+                and os.path.isfile(os.path.join(aqui, f)):
+            out.append(f)
+    for f in _HUELLA_SUELTOS:
+        if os.path.isfile(os.path.join(aqui, *f.split("/"))):
+            out.append(f)
+    for carpeta in _HUELLA_CARPETAS:
+        raiz = os.path.join(aqui, *carpeta.split("/"))
+        for dirpath, _dirs, files in os.walk(raiz):
+            for f in files:
+                rel = os.path.relpath(os.path.join(dirpath, f), aqui).replace("\\", "/")
+                if not _excluido(rel):
+                    out.append(rel)
+    return sorted(set(out))
+
+
+def huella_codigo(aqui=AQUI):
+    """Hash corto del código fuente. Los fines de línea se normalizan: un archivo con CRLF y el
+    mismo con LF (git en Windows los cambia solo) tienen que dar la misma huella."""
+    import hashlib
+    total = hashlib.sha256()
+    for rel in archivos_huella(aqui):
+        with open(os.path.join(aqui, *rel.split("/")), "rb") as fh:
+            contenido = fh.read().replace(b"\r\n", b"\n")
+        total.update(rel.encode("utf-8") + b"\0" + hashlib.sha256(contenido).digest())
+    return total.hexdigest()[:12]
+
+
 def version():
     v = "0.0.0"
     try:
@@ -119,7 +168,15 @@ def main():
                                    f"{'_COMPLETO' if completo else ''}.zip")
 
     n = 0
+    huella = huella_codigo()
     with zipfile.ZipFile(destino, "w", zipfile.ZIP_DEFLATED) as z:
+        # QUÉ CÓDIGO LLEVA ESTE PAQUETE (ver `huella_codigo`): el publicado lo informa tal cual.
+        import time as _t
+        z.writestr(HUELLA_ARCHIVO,
+                   "# Generado por empaquetar.py: identifica el código de esta instalación. No editar.\n"
+                   f"VERSION = {v!r}\nHUELLA = {huella!r}\nCOMMIT = {commit!r}\n"
+                   f"ARMADO = {_t.strftime('%Y-%m-%d %H:%M:%S')!r}\n"); n += 1
+        print(f"  + huella del código {huella}")
         # La CLAVE de actualización viaja SIEMPRE (también en el paquete de actualización): así el
         # servidor y el taller quedan con la misma sin que nadie tipee nada. En especial, el primer
         # servidor se instaló ANTES de que existiera la clave y no la tiene: este paquete se la lleva.
@@ -183,7 +240,7 @@ def main():
 
     mb = os.path.getsize(destino) / 2**20
     print(f"\n  PAQUETE LISTO: {destino}")
-    print(f"  {n} archivos · {mb:.1f} MB · versión {v} {commit} · frontend en '{base}'")
+    print(f"  {n} archivos · {mb:.1f} MB · versión {v} {commit} · huella {huella} · frontend en '{base}'")
     if completo:
         print("\n  Este paquete trae TODO (código + perfiles de color + datos + entrada).")
         print("  En el servidor: descomprimir y clic DERECHO en INSTALAR.bat,")

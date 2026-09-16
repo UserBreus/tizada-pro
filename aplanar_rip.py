@@ -529,6 +529,16 @@ def _aplanar_una_pagina(path):
         return False
 
 
+def _aplanar_en_proceso(path):
+    """Worker del aplanado aparte: None si salió bien, o el error (texto) si no. Devuelve el
+    motivo —y no sólo False— para que el aviso diga qué pasó."""
+    try:
+        _aplanar_archivo(path)
+        return None
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+
+
 def aplanar_para_rip(path):
     """Aplana la HOJA in-place para el RIP. Con >1 página, aplana cada página EN PARALELO
     (ProcessPool — pikepdf/fitz NO son thread-safe → procesos, nunca hilos) y las reensambla:
@@ -553,18 +563,25 @@ def aplanar_para_rip(path):
             if os.environ.get("TIZADA_APLANADO_EN_PROCESO"):
                 _aplanar_archivo(path)
                 return True
+            # 🔴 SIN «APLANO ACÁ MISMO» (2026-09-16). Si el proceso aparte falla, reintentar dentro
+            # del servidor vuelve a meter los ~620 MB justo cuando algo ya salió mal: si el hijo
+            # murió por memoria, el servidor se muere igual; si se trabó, se traba el hilo del
+            # pedido; si dio error, el mismo código da el mismo error. Se AVISA (el que llama lo
+            # pone en el pedido) y la hoja queda como estaba: `_aplanar_archivo` guarda al final,
+            # así que un fallo no la deja a medias.
+            # Y CON TOPE: sin él, un hijo trabado dejaba al pedido «armando» para siempre.
+            import procesos as _PR
+            from concurrent.futures import TimeoutError as _Tope
+            _tope = _PR.tope_segundos("TIZADA_TOPE_APLANADO_S", 1800)
             try:
-                from concurrent.futures import ProcessPoolExecutor
-                with ProcessPoolExecutor(max_workers=1) as ex:
-                    if ex.submit(_aplanar_una_pagina, path).result():
-                        return True
-                print("  [aplanar_rip] el proceso aparte no pudo; aplano acá mismo")
+                with _PR.seguro(_PR.pool(1)) as ex:
+                    err = ex.submit(_aplanar_en_proceso, path).result(timeout=_tope)
+            except _Tope:
+                raise RuntimeError(f"el aplanado para el RIP no terminó en {_tope / 60:.0f} min")
             except Exception as e:
-                print(f"  [aplanar_rip] no se pudo aplanar aparte ({e}); aplano acá mismo")
-            # Reintentar acá es seguro: `_aplanar_archivo` guarda al final, así que un fallo a
-            # mitad deja el archivo SIN tocar (es la misma garantía en la que ya se apoyaba el
-            # reintento serial del camino paralelo).
-            _aplanar_archivo(path)
+                raise RuntimeError(f"el proceso del aplanado se cayó ({type(e).__name__}: {e})")
+            if err:
+                raise RuntimeError(f"el aplanado para el RIP falló: {err}")
             return True
         # 🔴 TODO lo de abajo va con `finally`: si el paralelo falla, el que llama REINTENTA en
         # serie sobre el MISMO archivo. Sin cerrar los handles y sin borrar los temporales, ese
@@ -595,8 +612,10 @@ def aplanar_para_rip(path):
                 except ValueError:
                     _tope = 0
                 _w = max(1, _tope) if _tope else max(2, (os.cpu_count() or 4) - 1)
-                with ProcessPoolExecutor(max_workers=min(len(tmps), _w)) as ex:
-                    oks = list(ex.map(_aplanar_una_pagina, tmps))
+                import procesos as _PR
+                with _PR.seguro(_PR.pool(min(len(tmps), _w))) as ex:
+                    oks = list(ex.map(_aplanar_una_pagina, tmps,
+                                      timeout=_PR.tope_segundos("TIZADA_TOPE_APLANADO_S", 1800)))
             except Exception:
                 oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial
             if not all(oks):

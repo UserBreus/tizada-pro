@@ -1482,6 +1482,64 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (474) — 📦 «LO QUE MANDÉ AL SERVIDOR NO FUE COMPLETO: DICE QUE ES NUEVA Y ES VIEJA».
+  Huella del código en el paquete + pools con `spawn` y con tope.** Un análisis del publicado
+  (Linux) midió el JS sin comprimir (1.094.110 B con y sin gzip) aunque el commit de la compresión
+  ya estaba en GitHub.
+
+  **Qué pasó de verdad** (medido con el paquete que viajó, `dist/TIZADAPRO_1.0.37_1a2aa37.zip`,
+  15:20:00): su `servidor.py` es byte a byte el del commit `1a2aa37` (14:33) — llevan todo lo de
+  hasta ese momento (recortes, editables, borde, memo del arte). La compresión del JS la escribió
+  OTRA sesión recién a las 15:36 y la commiteó con VERSION 1.0.37 a las 15:42. El botón mandó TODO
+  lo que había en disco (`empaquetar.py` arma desde los archivos, no desde git); lo que no existía
+  era una forma de SABER qué código tiene cada lado: el número lo escribe una persona, y el
+  publicado encima informaba `commit 730693a` (29/07), el de un checkout de git que las
+  actualizaciones por paquete nunca tocan.
+
+  **Arreglo**:
+  1. `empaquetar.huella_codigo()`: hash (12 caracteres) del código FUENTE que produce el paquete
+     (`*.py`, `frontend/src`, `index.html`, `package.json`, `vite.config.js`, `db/`,
+     `catalogo_fuentes/`, `requirements.txt`), con fines de línea normalizados. Viaja en
+     `_huella_publicada.py` (VERSION, HUELLA, COMMIT, ARMADO) — un .py a propósito: el actualizador
+     respalda y restaura los .py, así una vuelta atrás también vuelve la huella. En `.gitignore`.
+  2. `_version()` → `{version, commit, huella, armado, origen}`: si existe `_huella_publicada.py`
+     manda ESO (y no pregunta a git); en el taller calcula la huella (`_huella_local`, 0,3 s).
+     `/api/actualizacion/estado` la informa; `publicacion_estado` la recalcula EN EL MOMENTO para
+     «acá»; la respuesta de publicar dice la huella del paquete.
+  3. Pantalla Publicación: debajo de las versiones, «Mismo código» / «El publicado NO tiene el
+     código de esta máquina aunque los dos digan X · huella acá / allá» / «No se puede comparar
+     (el publicado es de antes de este control)». «No hay nada para publicar» exige mismo número Y
+     misma huella.
+
+  **Del mismo análisis, verificado y arreglado**:
+  4. 🔴 **Ningún pool elegía cómo crear procesos**: en Linux + Python 3.12 es `fork`, desde un
+     servidor con 8 hilos → un hijo puede heredar un candado tomado y trabarse para siempre. Es la
+     explicación más probable del cuelgue silencioso del 14/9 (sin py-spy de ese momento no está
+     probado). Ahora TODOS pasan por `procesos.pool(n)` = `ProcessPoolExecutor(mp_context=spawn)`
+     (render, visor, aplanado, SVG de bases, desplegado y etiquetas del camino B). `spawn` es lo
+     que Windows ya usaba: el código estaba preparado. No `forkserver`: su servidor importa el
+     programa sin padre y `servidor.py` se creería el principal.
+  5. **Nada espera para siempre**: `procesos.seguro(ex)` = `with` que, si adentro salta cualquier
+     error (tope vencido, hijo muerto), MATA los procesos (`descartar`) en vez de `shutdown(wait=True)`
+     — esperar a un hijo trabado es colgarse con él (probado: hijo de 300 s abandonado a los 4 s y
+     el pool siguiente anda). Topes: `_TOPE_VISOR_S` 180 s (recorte y editables: si se traba, se
+     descarta el pool del visor y NO se dibuja en el server), `_TOPE_PROCESO_S` 1800 s (mesas del
+     pedido, pre-dibujado del arte con `wait(timeout)`, desplegado) y `TIZADA_TOPE_APLANADO_S`
+     1800 s. `_descartar_render_pool` / `_descartar_visor_pool` rearman el pool en el próximo uso.
+  6. **Aplanado sin «aplano acá mismo»**: si el proceso aparte falla, reintentar dentro del
+     servidor metía los ~620 MB justo cuando algo ya salió mal (OOM → muere el server; trabado → se
+     traba el hilo; error → el mismo error). Ahora lanza `RuntimeError` con el motivo
+     (`_aplanar_en_proceso` devuelve el texto del error) y los dos `correr()` aplanan HOJA POR HOJA:
+     una que falla no frena a las demás y queda en `res["avisos"]` («no se pudo preparar para el
+     RIP… volvé a generar»). Antes quedaba sólo en la consola.
+  7. `_ASIGNAR_JOBS` se recorría vivo (`for _vj in _ASIGNAR_JOBS.values()`, mío de la 471): dos
+     subidas a la vez → «dictionary changed size during iteration». Ahora `list(...)`.
+  8. `_predibujar_mesas`: el reintento en serie hacía `tareas[hechas:]`, que con el orden en que
+     terminan los procesos podía saltear una mesa sin dibujar y repetir otra; ahora rehace sólo las
+     que no terminaron.
+
+  Contrato `verificar_publicacion_y_procesos.py`. ⚠️ **Falta republicar**: el publicado sigue con el
+  paquete de las 15:20 (sin compresión, sin estos arreglos). Hay que publicar con un número nuevo.
 - **2026-09-16 (473) — 🐢 «LO VEO MUY LENTO» EN EL SERVIDOR PUBLICADO: el JS de 1 MB se bajaba entero,
   crudo, en cada carga · y el servidor corre código de hace 134 commits.** (La 472 la usa la sesión
   de la aplicación de escritorio.)

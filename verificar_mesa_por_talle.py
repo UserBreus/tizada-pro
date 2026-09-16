@@ -182,7 +182,8 @@ def main():
     ok("sufijo" in src_img, "cada recorte se guarda aparte (moverse un poco reusa el anterior)")
     ok("TILE_CM = 50" in app and "BASE_W = 1200" in app,
        "la pantalla pide los recortes por una grilla fija de medio metro")
-    ok("r.width <= BASE_W * 1.05) continue" in app,
+    # desde 2026-09-16 (changelog 469) se mide en píxeles REALES de la pantalla (`* dpr`)
+    ok("r.width * dpr <= BASE_W * 1.05) continue" in app,
        "🔴 …y sólo cuando la PANTALLA supera lo que da el dibujo general (no a un zoom inventado)")
     ok("TOPE_RECORTES" in app, "con un tope de recortes vivos, para no comerse la memoria")
 

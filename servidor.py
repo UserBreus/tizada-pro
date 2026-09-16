@@ -36,8 +36,13 @@ _PUERTO = [int(os.environ.get("PORT") or 8050)]   # lo usa el actualizador para 
 
 
 def _version():
-    """Versión del programa: el archivo VERSION + el commit corto si el repo está a mano.
-    Es lo que compara el circuito de actualización (taller vs publicado)."""
+    """Versión del programa: el archivo VERSION + QUÉ CÓDIGO es (commit y huella).
+    Es lo que compara el circuito de actualización (taller vs publicado).
+
+    🔴 EN UNA INSTALACIÓN POR PAQUETE manda `_huella_publicada.py` (lo escribe `empaquetar.py`).
+    Antes se preguntaba siempre a git, y el servidor publicado tiene un checkout VIEJO que las
+    actualizaciones por paquete nunca tocan: informaba `commit 730693a` (29/07) corriendo el código
+    del 16/09. En el TALLER (sin ese archivo) la huella se calcula sobre los archivos de acá."""
     if getattr(_version, "_v", None):
         return _version._v
     v = "0.0.0"
@@ -46,15 +51,36 @@ def _version():
             v = (fh.read().strip() or v)
     except OSError:
         pass
-    commit = ""
-    try:
-        import subprocess
-        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=AQUI,
-                                capture_output=True, text=True, timeout=5).stdout.strip()
-    except Exception:
-        pass
-    _version._v = {"version": v, "commit": commit}
+    commit, huella, armado, origen = "", "", "", "taller"
+    _hp = os.path.join(AQUI, "_huella_publicada.py")
+    if os.path.exists(_hp):
+        try:
+            _ns = {}
+            with open(_hp, encoding="utf-8") as fh:
+                exec(compile(fh.read(), _hp, "exec"), _ns)    # sólo asignaciones de texto
+            commit, huella = str(_ns.get("COMMIT") or ""), str(_ns.get("HUELLA") or "")
+            armado, origen = str(_ns.get("ARMADO") or ""), "paquete"
+        except Exception:
+            pass
+    else:
+        try:
+            import subprocess
+            commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=AQUI,
+                                    capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:
+            pass
+        huella = _huella_local()
+    _version._v = {"version": v, "commit": commit, "huella": huella, "armado": armado, "origen": origen}
     return _version._v
+
+
+def _huella_local():
+    """La huella del código de ESTA carpeta (ver `empaquetar.huella_codigo`). '' si no se puede."""
+    try:
+        import empaquetar as _EMPh
+        return _EMPh.huella_codigo(AQUI)
+    except Exception:
+        return ""
 
 
 # ── SESIÓN + API de usuarios/roles/permisos (base MSSQL, ver PLAN_MSSQL.md) ──
@@ -789,7 +815,8 @@ def publicacion_estado():
     """Para la pantalla de Publicación: qué versión hay acá, qué versión hay publicada y si hay
     algo pendiente allá. Si el servidor publicado no contesta, se dice y listo."""
     cfg = _pub_cfg()
-    out = {"local": _version(), "url": cfg.get("url"), "remoto": None, "error": None}
+    out = {"local": {**_version(), "huella": _huella_local()}, "url": cfg.get("url"),
+           "remoto": None, "error": None}
     try:
         import urllib.request
         _rq = urllib.request.Request(cfg["url"].rstrip("/") + "/api/actualizacion/estado",
@@ -888,7 +915,16 @@ def publicacion_publicar():
                               "X-Sha256": _hl.sha256(datos).hexdigest(),
                               "X-Cuando": str(float(cuerpo.get("cuando") or 0) or time.time())})
         with _ur.urlopen(req, timeout=300) as resp:
-            return jsonify({"ok": True, "paquete": os.path.basename(paq),
+            _hz = ""
+            try:
+                import zipfile as _zf
+                with _zf.ZipFile(paq) as _z:
+                    _txt = _z.read("_huella_publicada.py").decode("utf-8")
+                _hz = next((ln.split("=", 1)[1].strip().strip("'\"") for ln in _txt.splitlines()
+                            if ln.startswith("HUELLA")), "")
+            except Exception:
+                pass
+            return jsonify({"ok": True, "paquete": os.path.basename(paq), "huella": _hz,
                             "mb": round(len(datos) / 2**20, 2), **json.loads(resp.read())})
     except Exception as e:
         return jsonify({"error": str(e)[:300]}), 502
@@ -1004,6 +1040,8 @@ def actualizacion_estado():
     nada sensible (qué versión corre y cuánto falta para el corte) y lo necesita cualquiera que
     esté trabajando para enterarse de que el sistema se va a reiniciar."""
     _e = ACT.estado(_version()["version"])
+    _vv = _version()
+    _e.update({"commit": _vv.get("commit"), "huella": _vv.get("huella"), "armado": _vv.get("armado")})
     # La REVISIÓN DEL CATÁLOGO viaja acá (este latido ya lo hace la pantalla cada 30 s): si cambió,
     # el front vuelve a pedir `/api/productos` solo. Así un cambio de moldes/variables llega a
     # todos los que están trabajando, sin F5 (pedido del usuario 2026-09-08).
@@ -5972,9 +6010,26 @@ def _get_render_pool():
                 pass
             _RENDER_POOL = None
         if _RENDER_POOL is None:
-            from concurrent.futures import ProcessPoolExecutor
-            _RENDER_POOL = ProcessPoolExecutor(max_workers=procesos_render())
+            import procesos as _PR           # `spawn` en todos los sistemas: ver `procesos.contexto`
+            _RENDER_POOL = _PR.pool(procesos_render())
     return _RENDER_POOL
+
+
+def _descartar_render_pool():
+    """Un proceso de dibujo no contestó a tiempo: se mata el pool entero y el próximo pedido arma
+    uno nuevo. Un hijo trabado no se destraba solo y dejaría un lugar menos para siempre."""
+    global _RENDER_POOL
+    with _RENDER_POOL_LOCK:
+        if _RENDER_POOL is not None:
+            import procesos as _PR
+            _PR.descartar(_RENDER_POOL)
+            _RENDER_POOL = None
+
+
+# Cuánto se espera a un proceso antes de darlo por trabado. Largo a propósito: son topes contra
+# el cuelgue, no contra lo lento (un aplanado grande ya llegó a 9 minutos).
+_TOPE_PROCESO_S = float(os.environ.get("TIZADA_TOPE_PROCESO_S") or 1800)
+_TOPE_VISOR_S = float(os.environ.get("TIZADA_TOPE_VISOR_S") or 180)
 
 
 def _svg_worker(pdf_bytes):
@@ -6098,7 +6153,9 @@ def arte_asignar_todo():
     # la última esperaba detrás de los de las dos anteriores (medido: 24 s hasta `guia_lista`).
     # El viejo deja de mandar talles al pool (lo que ya está en vuelo termina solo).
     _clave_job = (pid, str(diseno or ""), variante)
-    for _vj in _ASIGNAR_JOBS.values():
+    # `list(...)`: dos subidas a la vez agregan jobs mientras se recorre, y recorrer el dict vivo
+    # tira «dictionary changed size during iteration» (un 500 esporádico).
+    for _vj in list(_ASIGNAR_JOBS.values()):
         if not _vj.get("done") and _vj.get("clave") == _clave_job:
             _vj["cancelado"] = True
     # PROGRESO DE VERDAD: los talles terminan de a uno y de golpe (el primero tarda lo que tarda
@@ -6129,7 +6186,7 @@ def arte_asignar_todo():
                 _resto.remove(_guia)
                 _f0 = pool.submit(_render_talle_worker, (pid, diseno, variante, _guia, _mapeo_arg))
                 _d0 = pool.submit(_deteccion_talle_worker, (pid, _guia))
-                for _f in as_completed([_f0, _d0]):
+                for _f in as_completed([_f0, _d0], timeout=_TOPE_PROCESO_S):
                     pass
                 _ASIGNAR_JOBS[job]["hecho"] += 1
             _ASIGNAR_JOBS[job]["guia_lista"] = True     # la pantalla ya puede seguir
@@ -6156,7 +6213,9 @@ def arte_asignar_todo():
                         _es_render.add(_f)
                 if not _pend:
                     break
-                _listos, _pend = wait(_pend, return_when=FIRST_COMPLETED)
+                _listos, _pend = wait(_pend, timeout=_TOPE_PROCESO_S, return_when=FIRST_COMPLETED)
+                if not _listos:
+                    raise TimeoutError(f"ningún talle terminó en {_TOPE_PROCESO_S:.0f} s")
                 for _f in _listos:
                     try:
                         _f.result()
@@ -6168,6 +6227,9 @@ def arte_asignar_todo():
             _ASIGNAR_JOBS[job]["fase"] = "midiendo"
         except Exception as e:
             _ASIGNAR_JOBS[job]["error"] = str(e)
+            from concurrent.futures import TimeoutError as _Tope
+            if isinstance(e, (_Tope, TimeoutError)):
+                _descartar_render_pool()
         finally:
             _ASIGNAR_JOBS[job]["done"] = True
     _en_hilo(_run)
@@ -8596,7 +8658,17 @@ def generar():
                     except Exception:
                         pass
                     _tr = time.time()
-                    aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    # 🔴 HOJA POR HOJA Y AVISANDO. Una hoja que no se pudo preparar para el RIP ya
+                    # no tira abajo a las demás, y el pedido lo DICE (antes quedaba sólo en la
+                    # consola del servidor y la hoja salía sin aplanar sin que nadie se enterara).
+                    try:
+                        aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    except Exception as _eh:
+                        print(f"  [!] aplanar RIP {h['archivo']}: {_eh}", flush=True)
+                        res.setdefault("avisos", []).append(
+                            f"La hoja «{h.get('tela') or h['archivo']}» no se pudo preparar para el RIP "
+                            f"({_eh}). Volvé a generar el pedido; si se repite, avisá.")
+                        continue
                     print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
                           f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
             except Exception as _ea:
@@ -9426,7 +9498,17 @@ def generar_multi():
                     except Exception:
                         pass
                     _tr = time.time()
-                    aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    # 🔴 HOJA POR HOJA Y AVISANDO. Una hoja que no se pudo preparar para el RIP ya
+                    # no tira abajo a las demás, y el pedido lo DICE (antes quedaba sólo en la
+                    # consola del servidor y la hoja salía sin aplanar sin que nadie se enterara).
+                    try:
+                        aplanar_para_rip(os.path.join(salida, h["archivo"]))
+                    except Exception as _eh:
+                        print(f"  [!] aplanar RIP {h['archivo']}: {_eh}", flush=True)
+                        res.setdefault("avisos", []).append(
+                            f"La hoja «{h.get('tela') or h['archivo']}» no se pudo preparar para el RIP "
+                            f"({_eh}). Volvé a generar el pedido; si se repite, avisá.")
+                        continue
                     print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
                           f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
             except Exception as _ea:
@@ -10884,13 +10966,22 @@ def _get_visor_pool():
                 pass
             _VISOR_POOL = None
         if _VISOR_POOL is None:
-            from concurrent.futures import ProcessPoolExecutor
+            import procesos as _PR
             try:
                 n = int(os.environ.get("TIZADA_PROCESOS_VISOR") or 2)
             except ValueError:
                 n = 2
-            _VISOR_POOL = ProcessPoolExecutor(max_workers=max(1, n))
+            _VISOR_POOL = _PR.pool(max(1, n))
     return _VISOR_POOL
+
+
+def _descartar_visor_pool():
+    global _VISOR_POOL
+    with _VISOR_POOL_LOCK:
+        if _VISOR_POOL is not None:
+            import procesos as _PR
+            _PR.descartar(_VISOR_POOL)
+            _VISOR_POOL = None
 
 
 def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
@@ -10901,9 +10992,19 @@ def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
         return cache
     if not os.path.exists(os.path.join(TRABAJOS, tid, archivo)):
         return None
+    from concurrent.futures import TimeoutError as _Tope
     try:
         fut = _get_visor_pool().submit(_dibujar_una_mesa, (tid, archivo, pi, w, recorte))
-        _arch, _pi, err = fut.result()
+        # 🔴 CON TOPE. Sin él, un proceso trabado dejaba al hilo que atiende este pedido
+        # esperando para siempre; con los 8 hilos así, el servidor dejaba de contestar sin decir
+        # nada (el cuelgue del 14/9 en el publicado).
+        _arch, _pi, err = fut.result(timeout=_TOPE_VISOR_S)
+    except _Tope:
+        print(f"[mesa_img] el dibujo no terminó en {_TOPE_VISOR_S:.0f} s: descarto el pool del visor")
+        _descartar_visor_pool()
+        # NO se dibuja acá: si se trabó en un proceso, en el hilo del server se trabaría igual y
+        # encima con el GIL tomado. Es un recorte de vista: la mesa se sigue viendo.
+        raise RuntimeError("el dibujo del recorte no terminó a tiempo")
     except Exception as e:
         print(f"[mesa_img] el pool del visor no pudo ({type(e).__name__}: {e}); dibujo en el server")
         return _dibujar_vista_mesa(tid, archivo, pi, w, recorte)
@@ -10966,16 +11067,19 @@ def _predibujar_recortes_fondo(tid, hojas):
                                 continue
                             pendientes.append(ex.submit(_dibujar_una_mesa, (tid, h["archivo"], pi, w, rec)))
                             if len(pendientes) >= 2:
-                                if pendientes.pop(0).result()[2]:
+                                if pendientes.pop(0).result(timeout=_TOPE_VISOR_S)[2]:
                                     return                 # la hoja ya no está (o no se puede dibujar)
                                 n += 1
             for f in pendientes:
-                if not f.result()[2]:
+                if not f.result(timeout=_TOPE_VISOR_S)[2]:
                     n += 1
             if n:
                 print(f"  [visor] {tid}: {n} recortes pre-dibujados en {time.time() - t0:.0f}s", flush=True)
         except Exception as e:
             print(f"  [visor] pre-dibujado de recortes de {tid}: {type(e).__name__}: {e}", flush=True)
+            from concurrent.futures import TimeoutError as _Tope
+            if isinstance(e, _Tope):
+                _descartar_visor_pool()
 
     threading.Thread(target=_correr, daemon=True, name=f"recortes-{tid}").start()
 
@@ -11041,10 +11145,14 @@ def _editables_cacheados(arte, arte_orig, reg, talles):
         if hit is not None:
             _EDIT_CACHE.move_to_end(k)
             return copy.deepcopy(hit)
+    from concurrent.futures import TimeoutError as _Tope
     try:
-        out = _get_visor_pool().submit(_editables_crudos, arte, arte_orig, reg, talles).result()
+        out = _get_visor_pool().submit(_editables_crudos, arte, arte_orig, reg, talles).result(
+            timeout=_TOPE_VISOR_S)
     except Exception as e:
         print(f"[editables] el pool del visor no pudo ({type(e).__name__}: {e}); leo en el server")
+        if isinstance(e, _Tope):
+            _descartar_visor_pool()
         out = _editables_crudos(arte, arte_orig, reg, talles)
     with _EDIT_CACHE_LOCK:
         _EDIT_CACHE[k] = out
@@ -11124,17 +11232,26 @@ def _predibujar_mesas(tid, hojas, prog=None, w=None, etiqueta="mesas"):
         if prog:
             prog(etiqueta, f"{hechas}/{total}", None)
 
+    hechas_ok = set()
     try:
-        from concurrent.futures import as_completed
+        from concurrent.futures import as_completed, TimeoutError as _Tope
         ex = _get_render_pool()
-        futs = [ex.submit(_dibujar_una_mesa, t) for t in tareas]
-        for f in as_completed(futs):
-            _anotar(f.result())
+        futs = {ex.submit(_dibujar_una_mesa, t): i for i, t in enumerate(tareas)}
+        try:
+            for f in as_completed(futs, timeout=_TOPE_PROCESO_S):
+                _anotar(f.result())
+                hechas_ok.add(futs[f])
+        except _Tope:
+            _descartar_render_pool()
+            raise
     except Exception as e:
         # Si el pool no arranca (o se cae), se hacen acá: se pierde la velocidad, no las mesas.
+        # Sólo las que NO terminaron (antes era `tareas[hechas:]`, que con el orden en que
+        # terminan los procesos podía saltear una sin dibujar y repetir otra ya hecha).
         print(f"  [!] el pool no pudo dibujar las mesas ({type(e).__name__}: {e}); las hago en serie")
-        for t in tareas[hechas:]:
-            _anotar(_dibujar_una_mesa(t))
+        for i, t in enumerate(tareas):
+            if i not in hechas_ok:
+                _anotar(_dibujar_una_mesa(t))
     return hechas, errores
 
 

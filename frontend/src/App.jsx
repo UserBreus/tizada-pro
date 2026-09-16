@@ -4492,7 +4492,15 @@ function PantallaPublicacion({ volver }) {
 
   const local = est?.local?.version, remoto = est?.remoto?.version;
   const pend = est?.remoto?.pendiente;
-  const igual = local && remoto && local === remoto;
+  // 🔴 LO QUE SE COMPARA ES EL CÓDIGO, NO EL NÚMERO (2026-09-16). El publicado decía «1.0.37»
+  // igual que esta máquina y tenía OTRO código: el número lo escribe una persona. La huella sale
+  // del código mismo (ver `empaquetar.huella_codigo`). Un publicado armado antes de este control no
+  // la informa: ahí no se puede saber y se dice.
+  const hLocal = est?.local?.huella || '', hRemoto = est?.remoto?.huella || '';
+  const codigoIgual = !!(hLocal && hRemoto && hLocal === hRemoto);
+  const codigoDesconocido = !hLocal || !hRemoto;
+  const igual = local && remoto && local === remoto && codigoIgual;
+  const mismoNumeroOtroCodigo = local && remoto && local === remoto && !codigoIgual;
   const caja = { padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border-light)',
     background: 'rgba(255,255,255,0.03)' };
 
@@ -4524,8 +4532,32 @@ function PantallaPublicacion({ volver }) {
                 {est?.error ? 'sin contacto' : (remoto || '—')}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, wordBreak: 'break-all' }}>{est?.url}</div>
+              {!est?.error && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                  código {hRemoto || 'sin informar'}{est?.remoto?.armado ? ` · armado ${est.remoto.armado}` : ''}
+                </div>
+              )}
             </div>
           </div>
+
+          {/* EL CÓDIGO, no el número: ¿el publicado tiene lo mismo que esta máquina? */}
+          {!est?.error && (
+            <div style={{ ...caja, fontSize: 12.5, lineHeight: 1.5,
+              borderColor: codigoIgual ? 'var(--success)' : (codigoDesconocido ? 'var(--warning, #e0a020)' : 'var(--error)') }}>
+              {codigoIgual ? (
+                <span><b style={{ color: 'var(--success)' }}>Mismo código.</b> El publicado tiene exactamente lo que hay en esta máquina (huella {hLocal}).</span>
+              ) : codigoDesconocido ? (
+                <span><b style={{ color: 'var(--warning, #e0a020)' }}>No se puede comparar el código.</b>{' '}
+                  {hRemoto ? 'Esta máquina no pudo calcular su huella.' : 'El publicado se armó antes de este control y no informa qué código tiene.'}{' '}
+                  Al publicar queda registrado y desde ahí se compara solo.</span>
+              ) : (
+                <span><b style={{ color: 'var(--error)' }}>El publicado NO tiene el código de esta máquina</b>
+                  {mismoNumeroOtroCodigo ? <> aunque los dos digan <b>{local}</b></> : null}.
+                  {' '}Huella acá {hLocal} · allá {hRemoto}. Hay cambios que todavía no viajaron: publicá
+                  {mismoNumeroOtroCodigo ? ' con un número nuevo, así las dos versiones no se confunden.' : '.'}</span>
+              )}
+            </div>
+          )}
 
           {est?.error && (est.sin_receptor ? (
             /* el servidor publicado corre una versión vieja: todavía no sabe recibir paquetes */
@@ -4567,8 +4599,10 @@ function PantallaPublicacion({ volver }) {
           {/* publicar */}
           <div style={{ ...caja, borderColor: igual ? 'var(--border-light)' : 'var(--accent)' }}>
             {igual ? (
-              <div style={{ fontSize: 13 }}>El servidor ya tiene <b>la misma versión</b> que esta máquina. No hay nada para publicar
+              <div style={{ fontSize: 13 }}>El servidor ya tiene <b>la misma versión y el mismo código</b> que esta máquina. No hay nada para publicar
                 <span style={{ color: 'var(--text-muted)' }}> (igual podés volver a mandarla si querés).</span></div>
+            ) : mismoNumeroOtroCodigo ? (
+              <div style={{ fontSize: 13 }}>Hay mejoras para publicar: el publicado dice <b>{remoto}</b> pero no tiene el código de acá.</div>
             ) : (
               <div style={{ fontSize: 13 }}>Hay mejoras para publicar: <b>{local}</b> → reemplaza a <b>{remoto || '—'}</b>.</div>
             )}
