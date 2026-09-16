@@ -102,7 +102,7 @@ def main():
         # ══ 1 y 7. LA PÁGINA DESPLEGADA ES LA DE SIEMPRE, BYTE A BYTE, Y SÓLO CON SUS RECURSOS ═
         print("1 · 🔴 LA PÁGINA DESPLEGADA ES LO QUE HACÍA EL MOTOR, BYTE A BYTE")
         t0 = time.time()
-        conts = PD.desplegar_mesa(COPIA, MESA, talles)
+        PD.desplegar_mesa(COPIA, MESA, talles)
         t_despl = time.time() - t0
         fp = os.path.join(tmp, PD.DESPLEGADO, f"m{MESA}.pdf")
         ok(os.path.exists(fp) and os.path.exists(fp[:-3] + "json"), f"deja m{MESA}.pdf + m{MESA}.json ({t_despl:.0f}s)")
@@ -207,7 +207,7 @@ def main():
         r = PD.ruta_desplegada(COPIA, MESA, TALLE)
         ok(r is not None and r[0] == fp and r[1] == talles.index(TALLE), f"ruta_desplegada → {os.path.basename(fp)} página {r[1] if r else '?'}")
         t0 = time.time()
-        pdf = pikepdf.open(r[0]); xo = pikepdf.Pdf.new().copy_foreign(pdf.pages[r[1]].as_form_xobject()); pdf.close()
+        pdf = pikepdf.open(r[0]); pikepdf.Pdf.new().copy_foreign(pdf.pages[r[1]].as_form_xobject()); pdf.close()
         ok(time.time() - t0 < 2.0, f"tomar la mesa como XObject: {time.time()-t0:.2f}s (antes: aislar 3-13 s)")
 
         # ══ 5. EL SELLO ════════════════════════════════════════════════════════════════════════

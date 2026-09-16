@@ -29,7 +29,6 @@ sublimación?». Tres respuestas, y dos eran nuestras:
 """
 import io
 import os
-import re
 import sys
 import types
 

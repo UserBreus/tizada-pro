@@ -72,7 +72,7 @@ async function escribir(handle, blob) {
  * `handle` = FileSystemFileHandle del destino · `w` = el writable ya abierto (hay que cerrarlo o
  * abortarlo) · `nombre` = cómo se llama · `bytes`/`total` = cuánto alcanzó a bajar.
  */
-async function alCortarse(handle, w, nombre, bytes, total) {
+async function alCortarse(handle, w) {
   // DECISIÓN (2026-09-15): se DESCARTA lo escrito y NO se borra nada de la carpeta.
   // `abort()` tira los bytes a medio escribir, así que el archivo nunca queda con contenido
   // parcial que parezca bueno. Y no se llama a `handle.remove()`: borrar solo, en la carpeta que

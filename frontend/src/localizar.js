@@ -612,7 +612,7 @@ export function anclaEfectiva(ancla) {
     const esc = CSS.escape ? CSS.escape(parte[1]) : parte[1];
     const z = document.querySelector(`[data-tour="${esc}"]`);
     if (z) {
-      let dentro = 0;
+      let dentro;
       try { dentro = z.querySelectorAll(CONTROLES).length; } catch { dentro = 0; }
       const esControl = (z.matches && z.matches(CONTROLES)) || dentro <= 1;
       if (esControl) return parte[1];

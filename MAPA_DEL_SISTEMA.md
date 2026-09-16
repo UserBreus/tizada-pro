@@ -1482,6 +1482,59 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (465) — 🧹 CÓDIGO LIMPIO: Python 31 → 0 avisos, frontend 284 → 0 errores (47 avisos
+  de dependencias, a propósito). Y EL INSTRUMENTO MENTÍA.**
+
+  🔴 **EL LINTER NO VEÍA LOS COMPONENTES USADOS EN JSX.** `no-unused-vars` de ESLint 9 no cuenta
+  `<ChipRol/>` como uso de `ChipRol`: de las «215 variables sin usar», **63 eran componentes que se
+  dibujan en pantalla** (`IcoLab`, `ChipRol`, `ResumenPermisos`, `AyudaGuiada`…). Borrarlas
+  confiando en el número rompía la app. Se agregó en `eslint.config.js` la regla local
+  `tizada/jsx-usa-variables` (lo mismo que `react/jsx-uses-vars`, sin sumar dependencia) y
+  `ignoreRestSiblings` (el `{a, ...resto}` para excluir claves es a propósito). **Antes de limpiar
+  con una herramienta, comprobar que la herramienta cuenta bien** — ver «el render no prueba nada».
+
+  **Frontend.** Las 152 reales se sacaron con un script sobre el AST (espree), no a mano: sólo lo
+  que eslint marca; una variable que se inicializa con una llamada NO se toca salvo revisada una
+  por una (13 lo fueron: cálculos puros); en dos pasadas porque borrar código muerto deja más
+  código muerto. **Trampa pagada**: sacar el único parámetro de `x => false` dejaba `( => false)` —
+  un error de sintaxis que cortó la compilación (la app en uso no se tocó: el `dist` viejo quedó).
+  Quedaron 11 `const [] = useState(...)` (estado sin valor ni setter) → fuera.
+  Errores de verdad que aparecieron al limpiar: dos `catch { }` vacíos **en llamadas que
+  escriben** (registrar un diseño, quitar un objeto de una pieza) fallaban en silencio — ahora
+  avisan; los `catch` que sólo leen dicen por qué se ignoran. `usoParalelo` se calculaba y nadie lo
+  leía; `imgPag(pi, z)` ignoraba `z` a propósito (un solo dibujo por página) → sin el parámetro.
+
+  🔴 **LA BARRA DE PASOS DEL PEDIDO PODÍA QUEDAR DESACTUALIZADA.** `pasoItems` era un `useMemo` al
+  que le faltaban **11 dependencias** (telas faltantes, fuentes, piezas sin nombre, etiquetas sin
+  ubicar, planilla inválida, artes sin cargar…). Ya se había parchado una vez con una «firma»
+  (`_avanceCat`: «nombrabas todas las piezas y el paso seguía en rojo»). Ahora se calcula en CADA
+  dibujo (es barata y varias entradas eran funciones nuevas en cada render: el memo nunca ahorraba
+  nada). `verificar_pasos_pedido.mjs` exige que no vuelva a ser memo. Otros `useMemo` con
+  dependencias faltantes (lista de piezas del arte con el filtro de variable, objetos del editor
+  con el mapeo) recibieron las suyas con `?.` — la lista se evalúa en cada render y un `.` sobre
+  algo null tiraría la pantalla.
+  **Los 47 avisos que quedan** son `useEffect` que corren a propósito sólo ante un cambio puntual
+  («cargar al cambiar el pid»): agregar la dependencia que pide el linter los haría recargar en
+  bucle. No se tocan sin mirar uno por uno.
+
+  **Python (pyflakes 31 → 0).** Ningún nombre indefinido. Variables muertas en motor y servidor,
+  revisadas antes de borrar por si eran un bug (un valor que se calcula y no se aplica): no lo
+  eran — `_redibujar_nombres` se chequea conjunto por conjunto en `_es_redibujado`; `_st`/`_detalle`
+  (filas sin talle) los pregunta la pantalla antes de armar con la MISMA regla. `for r, g, b` pisaba
+  el `g` de Flask dentro de `/api/color/convertir`. ⚠️ **Límite documentado**: `piezas_con_diseno`
+  no suma el espaciado de letra/palabra (Tc/Tw) al ancho de la caja de un texto — medido en los
+  moldes con diseño reales: 0 operadores Tc/Tw; si llega uno con tracking, el ancho sale corto.
+
+  **Verificado en navegador** (copia de sólo lectura en 8060, sin login, con los moldes reales):
+  11 secciones de Configuración, las 10 pestañas del molde, Nombrar piezas y el pedido hasta el
+  paso Arte — 0 errores de consola; la barra pasa de 1/2 a 2/2 en vivo al elegir el molde.
+  **Dos encimes viejos vistos de paso (no los causó la limpieza), arreglados:** con la ventana a
+  menos de ~1000 px, (1) la barra de abajo del pedido montaba el progreso del centro sobre «Nuevo
+  pedido» — iba `position:absolute`; ahora `BarraPaso` es una grilla `1fr auto 1fr`, que no puede
+  solapar (los botones bajan de renglón); y (2) el título del visor del arte («· Camiseta · JUGADOR»)
+  se metía debajo de «Ver todo» — ahora se recorta con «…» y muestra todo al pasar el mouse.
+  Verificado midiendo que ningún texto de la barra toque a otro, a 744 y a 1366 px.
+
 - **2026-09-15 (464) — 🔴 LA GUARDA LE PEDÍA `molde.editar` A 31 RUTAS QUE NO TOCAN NINGÚN
   MOLDE (y de paso las «protegía» con el permiso equivocado).**
 

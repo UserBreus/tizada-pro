@@ -612,7 +612,7 @@ function ComboCell({ value, options, onChange, onFocusCell, cellId, onNavKey, no
   // autoEdit: la celda entró en modo EDICIÓN (doble-click/Enter) → enfoca y abre la lista de una.
   // `autoSel` (entró por doble-click/Enter): selecciona todo y muestra TODAS las opciones (re-elegir).
   // Si entró por TIPEO (autoSel falso): NO selecciona (cursor al final) y FILTRA por lo tipeado.
-  useEffect(() => { if (autoEdit) { inputRef.current?.focus(); if (autoSel) { try { inputRef.current?.select(); } catch (_e) { /* no-op */ } } abrir(!!autoSel); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (autoEdit) { inputRef.current?.focus(); if (autoSel) { try { inputRef.current?.select(); } catch { /* no-op */ } } abrir(!!autoSel); } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (noAbrir) setOpen(false); }, [noAbrir]);   // al pasar a multi-selección, cerrar
   useEffect(() => {
     if (!open) return;
@@ -881,7 +881,7 @@ function VariantesPicker({ variantes, seleccion, bloqueadas, onChange, onClose }
           })}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-          <button type="button" className="btn ghost" onClick={() => onChange((seleccion || []).filter(x => false))} style={{ padding: '7px 12px' }}>Limpiar</button>
+          <button type="button" className="btn ghost" onClick={() => onChange([])} style={{ padding: '7px 12px' }}>Limpiar</button>
           <button type="button" className="btn ghost" onClick={() => onChange([...(variantes || [])].filter(x => !blk.has(x)))} style={{ padding: '7px 12px' }}>Todas (libres)</button>
           <button type="button" className="btn primary" onClick={onClose} style={{ padding: '7px 16px', marginLeft: 'auto' }}>Listo</button>
         </div>
@@ -1470,17 +1470,20 @@ function BarraPaso({ volver, acciones, centro, derecha, siguiente, aviso }) {
           {aviso}
         </div>
       )}
-      {/* `position: relative` + el centro en absolute: así el progreso queda centrado respecto de la
-          BARRA y no de lo que sobra entre los botones (que cambia de ancho en cada paso). */}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10 }}>
-        {volver}
-        {acciones}
-        {centro && (
-          <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', display: 'flex', alignItems: 'center' }}>
-            {centro}
-          </div>
-        )}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* TRES COLUMNAS: izquierda y derecha miden lo mismo (`1fr` cada una), así el progreso queda
+          centrado respecto de la BARRA y no de lo que sobra entre los botones. Antes el centro iba
+          `position: absolute`: con la ventana a menos de ~1000 px se montaba ENCIMA de «Nuevo
+          pedido» y no se leía ninguno de los dos (visto 2026-09-16). Una grilla no puede solapar:
+          si no entra, los botones de cada lado bajan de renglón. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {volver}
+          {acciones}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {centro}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
           {derecha}
           {siguiente}
         </div>
@@ -1854,7 +1857,7 @@ function LoginScreen({ onLogin }) {
       const d = await r.json();
       if (!r.ok) { setError(d.error || 'No se pudo entrar'); setCargando(false); return; }
       onLogin(d.usuario);
-    } catch (err) { setError('No hay conexión con el servidor.'); setCargando(false); }
+    } catch { setError('No hay conexión con el servidor.'); setCargando(false); }
   };
   const inp = { width: '100%', padding: '12px 14px', fontSize: 14, borderRadius: 10, marginBottom: 12,
     background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)', outline: 'none' };
@@ -2705,7 +2708,7 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
   // por página y, medido, `z=1` cuesta lo mismo que `z=2` (el costo es recorrer el vector, no
   // pintar píxeles). Ahora las dos usan el mismo `z=2` y la miniatura lo achica con CSS: mitad
   // de trabajo para el servidor y, como la dirección es idéntica, el navegador la reusa.
-  const imgPag = (pi, z = 2) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
+  const imgPag = (pi) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
   const printRef = React.useRef(null);
   const scrollRef = React.useRef(null);
@@ -2772,7 +2775,7 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
               <button key={i} type="button" onClick={() => irAHoja(i)} title={`Ir a la hoja ${i + 1}`}
                 style={{ padding: 0, border: 'none', cursor: 'pointer', background: 'transparent',
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-                <img src={imgPag(i, 1)} alt="" loading="lazy"
+                <img src={imgPag(i)} alt="" loading="lazy"
                   style={{ width: '100%', height: 'auto', borderRadius: 6, background: '#fff', display: 'block',
                     boxShadow: actual === i ? '0 0 0 2px var(--accent)' : '0 2px 8px rgba(0,0,0,0.4)' }} />
                 <span style={{ fontSize: 11.5, fontWeight: 700, color: actual === i ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -2820,12 +2823,12 @@ function MesasInfinito({ mesas, job, avisar }) {
   // tiene otro id → arranca con los nombres por defecto ("Mesa N"). Se guardan en localStorage.
   const LS_KEY = 'tizada_mesas_nombres_' + (job?.resultado?.id || '');
   const [nombres, setNombres] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch (_e) { return {}; }
+    try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
   });
   const [editando, setEditando] = useState(null);
   const [cargadas, setCargadas] = useState({});   // previa de cada mesa: true = dibujada · 'error'  // key de la mesa en edición
   useEffect(() => {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(nombres)); } catch (_e) { /* storage lleno/bloqueado */ }
+    try { localStorage.setItem(LS_KEY, JSON.stringify(nombres)); } catch { /* storage lleno/bloqueado */ }
   }, [LS_KEY, nombres]);
   const wrapRef = useRef(null);
   const viewRef = useRef(view); viewRef.current = view;
@@ -2938,13 +2941,12 @@ function MesasInfinito({ mesas, job, avisar }) {
       <div ref={wrapRef} onMouseDown={startPan} onContextMenu={(e) => e.preventDefault()}
         style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', borderRadius: 12, background: 'rgba(0,0,0,0.22)', backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '24px 24px', cursor: 'grab' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, transform: `translate(${view.panX}px, ${view.panY}px) scale(${view.zoom})`, transformOrigin: '0 0', display: 'flex', gap: 80, padding: 48, alignItems: 'flex-start' }}>
-          {(() => { let gi = 0; return mesas.flatMap((hoja, hi) => {
+          {(() => { let gi = 0; return mesas.flatMap((hoja) => {
             // Cuántas mesas tiene esta hoja. Sale de `paginas`, NO de la lista de vistas
             // previas: esos SVG ya no se escriben (nadie los abría y costaban 25 s y cientos de
             // MB por pedido, ver el motor). Lo que se dibuja es `mesa_img`, que va por ÍNDICE.
             const _np = hoja.paginas || (hoja.previews && hoja.previews.length) || 1;
             const pvs = Array.from({ length: _np }, (_, i) => i);
-            const urlPdf = rutaApi(`/trabajos/${job.resultado.id}/${hoja.archivo}`);
             return pvs.map((_pv, pi) => {
               const gidx = gi++;                        // índice global en orden de aparición
               const altoCm = (hoja.alturas_cm && hoja.alturas_cm[pi] != null) ? hoja.alturas_cm[pi] : hoja.consumo_cm;
@@ -3069,7 +3071,7 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onGuardar, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
+function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
                                   nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando }) {
   // RECUADRO DE SELECCIÓN (modo nombrar, camino B): arrastrar sobre el fondo elige todas las
   // piezas que abarca — el mismo gesto que Moldería. En coords de pantalla; se traduce a piezas
@@ -3145,7 +3147,9 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
   return (
     <div className="animate-fade" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 9, marginBottom: 9, borderBottom: '1px solid var(--border-light)', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+        {/* `flex: 1` + `overflow: hidden`: con la ventana angosta el título se recorta con «…» en vez
+            de meterse debajo de «Ver todo» (visto 2026-09-16 a 744 px). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, flex: 1, overflow: 'hidden' }}>
           {titulo || <div style={{ fontSize: 14, fontWeight: 700 }}>Mapear diseño</div>}
           <span title="Arrastrá cada diseño (panel derecho) sobre su pieza del molde. Al Guardar, el mapeo queda fijo en el molde: los próximos diseños con el mismo orden de mesas se aplican solos."
             style={{ cursor: 'help', color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, fontStyle: 'italic', border: '1px solid var(--border-light)', borderRadius: '50%', width: 17, height: 17, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>i</span>
@@ -3607,7 +3611,7 @@ const _rgb2cmyk = ({ r, g, b }) => { r /= 255; g /= 255; b /= 255; const k = 1 -
 const _rgb2hex = ({ r, g, b }) => '#' + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
 const _hex2rgb = (h) => { h = (h || '').replace('#', '').trim(); if (h.length === 3) h = h.split('').map(c => c + c).join(''); if (!/^[0-9a-fA-F]{6}$/.test(h)) return null; const n = parseInt(h, 16); return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }; };
 const _rgb2hsv = ({ r, g, b }) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0; if (d) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h *= 60; if (h < 0) h += 360; } return { h, s: mx ? d / mx : 0, v: mx }; };
-const _hsv2rgb = ({ h, s, v }) => { const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c; let r = 0, g = 0, b = 0; if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0]; else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c]; else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x]; return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) }; };
+const _hsv2rgb = ({ h, s, v }) => { const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c; let r, g, b; if (h < 60) [r, g, b] = [c, x, 0]; else if (h < 120) [r, g, b] = [x, c, 0]; else if (h < 180) [r, g, b] = [0, c, x]; else if (h < 240) [r, g, b] = [0, x, c]; else if (h < 300) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x]; return { r: Math.round((r + m) * 255), g: Math.round((g + m) * 255), b: Math.round((b + m) * 255) }; };
 
 // ── COLOR REAL (perfil ICC) ───────────────────────────────────────────────────────────────
 // La fórmula ingenua 255·(1-C)·(1-K) muestra un color FALSO: el verde C95 M0 Y91 K15 salía
@@ -3779,7 +3783,7 @@ async function esperarMoldeLeido(resp, onProgreso) {
       d = await r.json();
       if (!r.ok) throw new Error(d.error || 'el trabajo ya no está');
     } catch (e) {
-      throw new Error(`Se perdió el hilo mientras se leía el molde: ${e.message}`);
+      throw new Error(`Se perdió el hilo mientras se leía el molde: ${e.message}`, { cause: e });
     }
     if (onProgreso && d.progreso) onProgreso(d.progreso);
     if (d.estado === 'listo') return d.resultado || {};
@@ -4716,7 +4720,7 @@ export default function App() {
     return esRutaAdmin();
   });
   const [adminSubView, setAdminSubView] = useState('dashboard');
-  const [columnasConfig, setColumnasConfig] = useState([]);
+  const [, setColumnasConfig] = useState([]);
   const [config, setConfig] = useState(null);
   // TELAS: registro GLOBAL (nombre + ancho) + grupos combinables. La asignación pieza→tela vive
   // en el PEDIDO (telaBaseMolde/telaPorPieza, declarados abajo tras `_wiz`).
@@ -4724,7 +4728,7 @@ export default function App() {
   const [telaFiltroCfg, setTelaFiltroCfg] = useState('');                          // buscador de telas en Config
   const [telasRefrescando, setTelasRefrescando] = useState(false);                 // trayendo telas de la API del sistema
   const [telaConexion, setTelaConexion] = useState({ url: '', tiene_key: false, por_env: false });  // estado de la conexión con la API (sólo informativo)
-  const [telasAsigMolde, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición (unión plana)
+  const [, setTelasAsigMolde] = useState([]);                        // telas (ids) asignadas al molde en edición (unión plana)
   // Disponibilidad de telas POR PIEZA del molde en edición: {todas:[id], por_pieza:{pieza:[id]}}.
   const [telasCfgMolde, setTelasCfgMolde] = useState({ todas: [], por_pieza: {}, max_var: {} });
   const [telasPanelAbierto, setTelasPanelAbierto] = useState(false);               // «Mostrar telas asignadas»
@@ -4743,8 +4747,8 @@ export default function App() {
   const [telaSelPiezas, setTelaSelPiezas] = useState([]);                          // piezas (nombre genérico) seleccionadas para asignar tela
   const [telaModoVer, setTelaModoVer] = useState(false);                           // "Asignar telas": pinta por tela + panel de telas
   const [telaAsignMode, setTelaAsignMode] = useState(false);                       // panel de telas: false = ver asignadas · true = asignar
-  const [telaElegida, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
-  const [telaBuscarAsig, setTelaBuscarAsig] = useState('');                        // buscador de telas en el modo asignar
+  const [, setTelaElegida] = useState(null);                            // tela elegida en el modo asignar
+  const [, setTelaBuscarAsig] = useState('');                        // buscador de telas en el modo asignar
   const [telaAviso, setTelaAviso] = useState('');                                 // aviso SOBRE EL VISOR (ej. tope de telas)
   const telaAvisoT = useRef(null);
   // Muestra el aviso encima del molde unos segundos (no un cartel al costado de la pantalla).
@@ -4811,7 +4815,7 @@ export default function App() {
   const [pedirTextoVal, setPedirTextoVal] = useState('');
   const abrirConfirmar = (cfg) => setConfirmar(cfg);
   const abrirPedirTexto = (cfg) => { setPedirTextoVal(cfg.valor || ''); setPedirTexto(cfg); };
-  const [modalEtqOpen, setModalEtqOpen] = useState(false);
+  const [, setModalEtqOpen] = useState(false);
   const [mapeandoOperario, setMapeandoOperario] = useState(false); // vista de mapeo visual en Pedidos
   const [moldeReload, setMoldeReload] = useState(0); // disparador para recargar la detección del molde
   const [etqData, setEtqData] = useState(null);
@@ -4831,7 +4835,7 @@ export default function App() {
   const [etqApagarModo, setEtqApagarModo] = useState(false);
   // Ventana «a estos talles les faltan estas piezas» tras nombrar (changelog 179).
   const [avisoTalles, setAvisoTalles] = useState(null);
-  const [zonasModo, setZonasModo] = useState(false);     // ETIQUETA: modo "zonas de texto" (elegir esquinas → dividir la pieza en zonas)
+  const [zonasModo] = useState(false);     // ETIQUETA: modo "zonas de texto" (elegir esquinas → dividir la pieza en zonas)
   const [zonaSel, setZonaSel] = useState(0);             // índice de la zona cuyo contenido se edita
   const [etqSeleccion, setEtqSeleccion] = useState(null);
   const [etqNombres, setEtqNombres] = useState({});
@@ -4877,9 +4881,9 @@ export default function App() {
   const pintaOjo = useRef({ on: false, modo: 'ocultar' });
   const [tallesAbiertos, setTallesAbiertos] = useState(new Set());   // desplegables de la barra
   const [capaEdit, setCapaEdit] = useState(null);      // {talle, valor} — renombrado inline (doble click)
-  const [modalMapeoOpen, setModalMapeoOpen] = useState(false);
+  const [, setModalMapeoOpen] = useState(false);
   const [mapeoData, setMapeoData] = useState(null);
-  const [cargaArte, setCargaArte] = useState(null);            // {hechas,total} bajando el dibujo de cada mesa (sin cartel: sólo para saber si terminó)
+  const [, setCargaArte] = useState(null);            // {hechas,total} bajando el dibujo de cada mesa (sin cartel: sólo para saber si terminó)
   const [mapeoCargando, setMapeoCargando] = useState(false);   // cargando el mapeo de OTRA variable (1ª vez) → no dibujar diseños viejos
   const [asignando, setAsignando] = useState(null);            // ventana "Asignando el diseño a cada variante… {hecho,total,talle}" al cargar el arte
   const [mapeandoDiseno, setMapeandoDiseno] = useState(false); // tab Plantilla: false=medidas (default), true=mapear diseño sobre el molde
@@ -4922,7 +4926,6 @@ export default function App() {
   const [fuenteBuscar, setFuenteBuscar] = useState('');          // filtro de la lista por nombre
   const [fuenteFaltanteSel, setFuenteFaltanteSel] = useState(''); // cuál faltante se está resolviendo (si hay varias)
   const fuenteFileRef = useRef(null);
-  const fuenteDestinoRef = useRef('pedido');
   // `reemplOverride`: el mapa que ACABA de elegirse (el estado de React aún no lo tiene). Sin esto
   // el cartel de «tipografía no encontrada» seguía puesto después de resolverla.
   // Reintento del chequeo de tipografías mientras el molde con diseño se prepara: cada 6 s,
@@ -4978,8 +4981,6 @@ export default function App() {
     await Promise.all(tareas.map(t => cargarFuentesDeArte(t.did, t.mid, reemplOverride)));
   };
   const [selectedPiezaMapeo, setSelectedPiezaMapeo] = useState('');
-  const [piezasSeleccionadas, setPiezasSeleccionadas] = useState([]);
-  const [filtroPiezaConfig, setFiltroPiezaConfig] = useState('');
   const [modalConfirmOpen, setModalConfirmOpen] = useState(false);
   const [confirmProductoId, setConfirmProductoId] = useState('');
   const [modalTalleGuiaOpen, setModalTalleGuiaOpen] = useState(false);
@@ -5019,12 +5020,9 @@ export default function App() {
   // nuevo — como si no hubiera pasado nada. Se guarda el id, no un simple «ya está»: si mañana
   // guardás OTRA receta que le calce, esa sí se ofrece.
   const cfgAplicada = useRef({});   // { pid: id de la receta ya aplicada }
-  const [catalogoGrupos, setCatalogoGrupos] = useState([]);
-  const [nuevaPiezaInput, setNuevaPiezaInput] = useState('');
+  const [, setCatalogoGrupos] = useState([]);
   // Panel inline de selección de pieza en la barra lateral:
   // null = oculto · 'grupos' = lista de grupos · <nombre de grupo> = sus piezas
-  const [panelPiezas, setPanelPiezas] = useState(null);
-  const [nuevoGrupoInput, setNuevoGrupoInput] = useState('');
   
   // Spreadsheet template states
   const [plantillasPlanillas, setPlantillasPlanillas] = useState([]);
@@ -5102,14 +5100,13 @@ export default function App() {
   // Nombrado de las piezas de un molde del camino B, dentro del pedido. La selección es MÚLTIPLE
   // —el gesto de la pantalla de edición— porque nombrar de a una son nueve idas y vueltas:
   // eligiendo las dos mangas juntas y escribiendo «Manga Corta» quedan numeradas solas.
-  const [piezaBSel, setPiezaBSel] = useState(null);      // {mesa, t_idx} (compat: la última tocada)
+  const [, setPiezaBSel] = useState(null);      // {mesa, t_idx} (compat: la última tocada)
   const [selNombrarB, setSelNombrarB] = useState(new Set());   // idx de las piezas elegidas
   // El lienzo de TODOS los talles del molde con diseño (`/api/plantilla/deteccion_todas`), para
   // nombrar como en Moldería: una fila por talle. Lleva `pid` para no mostrar el de otro molde.
-  const [todasB, setTodasB] = useState(null);
-  const [nombreBInput, setNombreBInput] = useState('');
+  const [todasB] = useState(null);
   // ¿El visor está en modo «tocá dónde va la etiqueta»? (2ª tarea del cliente en el camino B)
-  const [etqPickB, setEtqPickB] = useState(false);
+  const [etqPickB] = useState(false);
   // ── POR DÓNDE SE EMPIEZA EL PEDIDO ──────────────────────────────────────────────────────────
   // null = todavía no eligió · 'base' = los pasos de siempre · 'con_diseno' = subir los archivos
   // que ya traen el diseño. NO es excluyente: un pedido puede llevar de los dos.
@@ -5123,7 +5120,6 @@ export default function App() {
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
   // ── Objetos editables (capa "Editable …" del diseño) ──
   const [editableData, setEditableData] = useState(null);      // {objetos, talles, piezas} del diseño activo
-  const [editableDisenos, setEditableDisenos] = useState([]);  // diseños del molde que tienen objetos editables
   const [editableDiseno, setEditableDiseno] = useState('principal');  // diseño (id) en edición
   const [editableSel, setEditableSel] = useState([]);          // nombres de los objetos seleccionados (multi: Ctrl/Shift+click)
   // Figura elegida DENTRO del objeto editable para pintarla: la capa se mueve/escala junta, pero
@@ -5134,7 +5130,6 @@ export default function App() {
   const [edSoloTalle, setEdSoloTalle] = useState(false);       // true = el ajuste va SOLO al talle en vista (no a todo el rango)
   const [edLink, setEdLink] = useState(true);                  // enlace An./Al.: true = escala proporcional
   const [editableTalle, setEditableTalle] = useState(null);    // talle/variante en edición
-  const [editableScope, setEditableScope] = useState('todas'); // alcance: 'una' | 'rango' | 'todas'
   const [editableVarsSel, setEditableVarsSel] = useState([]);  // talles/variantes ELEGIDOS (scope) — popup de tarjetas
   const [editVarPickerOpen, setEditVarPickerOpen] = useState(false);
   // ── Modelos / Variables (arquitectura genérica; el TALLE queda aparte) ──
@@ -5145,8 +5140,6 @@ export default function App() {
   const [asignandoGrupoPz, setAsignandoGrupoPz] = useState(null); // id del grupo al que se le eligen piezas en el visor
   const [nuevoGrupoPzNombre, setNuevoGrupoPzNombre] = useState(''); // nombre para crear un grupo nuevo
   const [nuevaVarNombre, setNuevaVarNombre] = useState('');  // nombre para crear una variable A MANO dentro del grupo
-  const [tiposAbierto, setTiposAbierto] = useState(true);   // sección "Tipos de pieza" expandida
-  const [varGuardando, setVarGuardando] = useState(false);  // guardando variantes
   const [asignandoTipo, setAsignandoTipo] = useState(null); // clave del tipo al que se están asignando piezas desde el visor (null = ninguno)
   const [vinculandoJuntas, setVinculandoJuntas] = useState(null); // clave de la variable en la que se está armando un vínculo "van juntas" (null = ninguno)
   const [juntasSel, setJuntasSel] = useState(new Set());   // idxs elegidos para el vínculo en curso
@@ -5203,14 +5196,12 @@ export default function App() {
   // chips y el mismo botón). Se muestra POR MINIATURA, filtrada por lo que falta, y una sola fila
   // abierta a la vez — el detalle (chips por talle) sólo aparece en la fila que se está mirando.
   const [empGuiaPzs, setEmpGuiaPzs] = useState([]);      // piezas del talle GUÍA (para las miniaturas)
-  const [empFiltro, setEmpFiltro] = useState('pend');    // 'pend' | 'listas' | 'todas'
-  const [empAbierto, setEmpAbierto] = useState(null);    // nombre del grupo expandido (uno solo)
-  const [empBuscar, setEmpBuscar] = useState('');
-  const [empRenombrar, setEmpRenombrar] = useState(null); // {nombre, valor} edición en línea del nombre
-  const empRenomCancel = React.useRef(false);            // Escape: el blur que viene después NO debe guardar
+  const [, setEmpFiltro] = useState('pend');    // 'pend' | 'listas' | 'todas'
+  const [, setEmpAbierto] = useState(null);    // nombre del grupo expandido (uno solo)
+  const [, setEmpBuscar] = useState('');
+  const [, setEmpRenombrar] = useState(null); // {nombre, valor} edición en línea del nombre
   const [resaltarNombre, setResaltarNombre] = useState(null); // nombre genérico resaltado en el visor (lista de piezas agrupada)
   const [grupoAislado, setGrupoAislado] = useState(null);   // clave del grupo abierto en DETALLE (visor aislado + edición); null = lista de grupos
-  const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState(''); // nombre para crear una VARIABLE nueva (Paso 2)
   // ── Visor "acomodar" con TODOS los talles nesteados por pieza ──
   const [nidoData, setNidoData] = useState(null);           // {vb,w,h,piezas:[{nombre,cx,cy,talles:[{talle,d}]}]}
   const [nidoLoading, setNidoLoading] = useState(false);
@@ -5222,7 +5213,6 @@ export default function App() {
   const [nidoMarco, setNidoMarco] = useState(null);         // recuadro de selección en curso, en coords del viewBox
   const [verVariante, setVerVariante] = useState(null);     // clave de la variante a VER acomodada en Plantilla/Etiqueta (null = todas, vista normal)
   const [comboVisor, setComboVisor] = useState(null);       // combinación (array de idx) que se está mostrando en el visor al tocar una variable generada
-  const [editableRangoTo, setEditableRangoTo] = useState(null); // talle "hasta" cuando el alcance es 'rango'
   const [editorEditOpen, setEditorEditOpen] = useState(false); // modal del editor de objetos (en Pedidos→Arte)
   const [editorTfs, setEditorTfs] = useState({});   // {obj: {talle: {dx,dy,rot,scale}}} transformaciones en edición
   // ── MARCAS DE PROCESO: TPU · BORDADO · DTF ────────────────────────────────────────────────
@@ -5328,7 +5318,7 @@ export default function App() {
   const editorCtx = useRef(null);                   // contexto cargado (pid|diseño|variante) → al reabrir el MISMO, conservar lo editado
   // ── Historial del editor de editables (deshacer/rehacer + Ctrl+Z) ──
   const editorHist = useRef({ stack: [], idx: -1 });   // pila de snapshots de editorTfs
-  const [editorHistVer, setEditorHistVer] = useState(0);   // fuerza re-render de los botones (habilitar/deshabilitar)
+  const [, setEditorHistVer] = useState(0);   // fuerza re-render de los botones (habilitar/deshabilitar)
   const _clonetf = (t) => JSON.parse(JSON.stringify(t || {}));
   const histReset = (tfs) => { editorHist.current = { stack: [_clonetf(tfs)], idx: 0 }; setEditorHistVer(v => v + 1); };
   const histCommit = (tfs) => {
@@ -5395,7 +5385,7 @@ export default function App() {
         return { zoom: 1.0, pan: { x: 0, y: 0 } };
       }
       
-      let newPan = prev.pan;
+      let newPan;
       if (clientX !== undefined && clientY !== undefined && viewerRef.current) {
         const rect = viewerRef.current.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
@@ -5489,7 +5479,6 @@ export default function App() {
     [mapeoData]);
   // Cuántas piezas tiene la variable que se está viendo: es el total contra el que se mide el
   // avance de «Poniendo el diseño sobre el molde…» (el server informa cuántas lleva dibujadas).
-  const piezasDeLaVariable = ((mapeoData || {}).piezas_variable || (mapeoData || {}).piezas || []).length || 8;
   const _asignEnCurso = React.useRef({});   // dibujos en curso: evita dos pasadas iguales a la vez
   useEffect(() => {
     const urls = _mesasImg ? _mesasImg.split('|') : [];
@@ -5613,16 +5602,6 @@ export default function App() {
   // Grupos para el selector: catálogo guardado + las piezas que ya tiene ESTE
   // molde (registro) se suman a "Prenda Superior". Así siempre se ven aunque
   // el catálogo falle.
-  const gruposParaElegir = React.useMemo(() => {
-    const grupos = (catalogoGrupos || []).map(g => ({ nombre: g.nombre, piezas: [...(g.piezas || [])] }));
-    let sup = grupos.find(g => (g.nombre || '').toLowerCase() === 'prenda superior');
-    if (!sup) { sup = { nombre: 'Prenda Superior', piezas: [] }; grupos.unshift(sup); }
-    const vistos = new Set(grupos.flatMap(g => g.piezas.map(p => p.toLowerCase())));
-    for (const p of Object.values(etqNombres || {}).map(v => String(v).trim()).filter(Boolean)) {
-      if (!vistos.has(p.toLowerCase())) { sup.piezas.push(p); vistos.add(p.toLowerCase()); }
-    }
-    return grupos;
-  }, [catalogoGrupos, etqNombres]);
 
   const canvasLayout = React.useMemo(() => {
     // AGRUPAR con todas las variantes juntas: el visor dibuja las piezas de TODOS los talles
@@ -5883,50 +5862,12 @@ export default function App() {
   useEffect(() => {
     try {
       Object.keys(localStorage).filter(k => k.startsWith('tizada_filas_')).forEach(k => localStorage.removeItem(k));
-    } catch (e) { /* localStorage no disponible → nada que limpiar */ }
+    } catch { /* localStorage no disponible → nada que limpiar */ }
   }, []);
 
-  const handleUpdateColumnConfig = (idx, field, val) => {
-    const next = [...columnasConfig];
-    next[idx][field] = val;
-    if (field === 'label') {
-      const norm = val.toLowerCase().replace(/[^a-z0-9]/g, '_').trim();
-      next[idx]['id'] = norm || `col_${idx}`;
-    }
-    setColumnasConfig(next);
-  };
 
-  const handleAddColumnConfig = () => {
-    setColumnasConfig([...columnasConfig, { id: `col_${columnasConfig.length}`, label: '', role: 'none' }]);
-  };
 
-  const handleRemoveColumnConfig = (idx) => {
-    setColumnasConfig(columnasConfig.filter((_, i) => i !== idx));
-  };
 
-  const handleSaveColumnConfig = async () => {
-    if (!columnasConfig.some(c => c.role === 'talle')) {
-      showError("Debe haber al menos una columna con el rol 'Talle'");
-      return;
-    }
-    try {
-      const res = await fetch('/api/productos/config_columnas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: productosCat.activo,
-          columnas: columnasConfig
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      
-      showMsg("Configuración de columnas guardada ✓");
-      await fetchProductos();
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
   // Al montar: SOLO el listener de teclado. Los datos de arranque se piden cuando la sesión está
   // lista (effect de `sesionLista`): pedirlos acá era antes del login → 401 y consola llena de rojos.
@@ -6010,7 +5951,7 @@ export default function App() {
     try {
       const r = await fetch('/api/telas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grupos }) });
       if (r.ok) { setTelasReg(await r.json()); showMsg('Grupos guardados ✓'); }
-    } catch (e) { showError('No se pudieron guardar los grupos'); }
+    } catch { showError('No se pudieron guardar los grupos'); }
   };
   // Lee la respuesta como JSON. Si NO es JSON (típico: el proxy de adelante devolvió su página de
   // error 502/504 en HTML), tira un error CON EL CÓDIGO REAL en vez del críptico
@@ -6040,7 +5981,7 @@ export default function App() {
     try {
       const r = await fetch('/api/telas/conexion');
       if (r.ok) setTelaConexion(await r.json());
-    } catch (e) { /* sin conexión al server: se deja el estado como está */ }
+    } catch { /* sin conexión al server: se deja el estado como está */ }
   };
   // La MESA de trabajo de una tela puesta A MANO (manda sobre el margen global). Vacío = volver al
   // automático (medida − margen). El server devuelve cómo queda la tela (`ancho_cm`, `manual`).
@@ -6076,7 +6017,6 @@ export default function App() {
     const i = (telasReg.telas || []).findIndex(t => t.id === telaId);
     return i >= 0 ? _PALETA_TELAS[i % _PALETA_TELAS.length] : '#9ca3af';
   };
-  const nombreDeTela = (telaId) => ((telasReg.telas || []).find(t => t.id === telaId) || {}).nombre || '';
 
   const fetchPlantillasPlanillas = async () => {
     try {
@@ -6114,13 +6054,13 @@ export default function App() {
     try {
       const r = await fetch('/api/perfiles');
       if (r.ok) setPerfilesData(await r.json());
-    } catch (e) { /* sin perfiles */ }
+    } catch { /* sin perfiles */ }
   };
   const guardarPerfilDefault = async (espacio, archivo) => {
     try {
       const r = await fetch('/api/perfiles/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [espacio]: archivo }) });
       if (r.ok) { const d = await r.json(); setPerfilesData(prev => prev ? { ...prev, config: d.config } : prev); showMsg('Perfil predeterminado guardado ✓'); }
-    } catch (e) { showError('No se pudo guardar el perfil'); }
+    } catch { showError('No se pudo guardar el perfil'); }
   };
   // Avisar el perfil de color del diseño recién cargado → ventana emergente CENTRADA.
   // Aparece YA con "Detectando perfil…" y se actualiza al detectarse (no demora en salir).
@@ -6137,7 +6077,7 @@ export default function App() {
         const efectivo = p.incrustado || p.predeterminado;
         setPerfilesArte(prev => ({ ...prev, [(diseno || 'principal') + '|' + moldId]: { nombre: efectivo, espacio: p.espacio } }));
       }
-    } catch (e) { setPerfilAviso(null); }
+    } catch { setPerfilAviso(null); }
   };
 
   // Ir del paso Arte a la Planilla. Si los diseños tienen perfiles de color DISTINTOS,
@@ -6277,7 +6217,7 @@ export default function App() {
     const todas = estado?.fuentes || [];
     if (!q) return todas;
     return todas.filter(f => _sinTildes(f.interno).includes(q) || _sinTildes(f.archivo).includes(q));
-  }, [estado?.fuentes, buscarFuente]);
+  }, [_sinTildes, buscarFuente, estado?.fuentes]);
 
   // Saca una tipografía del catálogo (ya confirmada EN la tarjeta, no hay diálogo del navegador).
   const eliminarFuente = async (archivo) => {
@@ -6332,17 +6272,6 @@ export default function App() {
     } catch (e) { showError('Error: ' + e.message); }
   };
 
-  const guardarGrupoTizada = async (productoId, grupo) => {
-    try {
-      const res = await fetch('/api/productos/grupo_tizada', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ producto_id: productoId, grupo_tizada: grupo }),
-      });
-      if (!res.ok) { const d = await leerJson(res); showError(d.error || 'No se pudo guardar'); return; }
-      await fetchProductos();
-      showMsg('Grupo de tizada actualizado ✓');
-    } catch (e) { showError('Error: ' + e.message); }
-  };
 
   const fetchCatalogoPiezas = async () => {
     try {
@@ -6350,7 +6279,7 @@ export default function App() {
       if (!res.ok) { setCatalogoGrupos([]); return; }  // server viejo → modal igual muestra piezas del molde
       const data = await leerJson(res);
       if (Array.isArray(data)) setCatalogoGrupos(data);
-    } catch (e) {
+    } catch {
       setCatalogoGrupos([]);  // sin catálogo: la unión con las piezas del molde sigue funcionando
     }
   };
@@ -6362,63 +6291,8 @@ export default function App() {
     if (sesionLista && productosCat.activo) fetchCatalogoPiezas();
   }, [productosCat.activo, sesionLista]);
 
-  const agregarPiezaCatalogo = async (asignarAlSeleccionado = false) => {
-    const nombre = nuevaPiezaInput.trim();
-    const grupo = (panelPiezas && panelPiezas !== 'grupos') ? panelPiezas : 'Prenda Superior';
-    if (!nombre) return;
-    try {
-      const res = await fetch('/api/catalogo_piezas/agregar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, grupo })
-      });
-      const data = await leerJson(res);
-      if (!res.ok) throw new Error(data.error);
-      setCatalogoGrupos(data.catalogo_grupos || []);
-      setNuevaPiezaInput('');
-      if (asignarAlSeleccionado && etqSeleccion !== null) {
-        setEtqNombres({ ...etqNombres, [etqSeleccion]: nombre });
-      }
-      showMsg('Pieza guardada en el grupo ✓');
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
-  const eliminarPiezaCatalogo = async (nombre, grupo) => {
-    try {
-      const res = await fetch('/api/catalogo_piezas/eliminar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, grupo })
-      });
-      const data = await leerJson(res);
-      if (!res.ok) throw new Error(data.error);
-      setCatalogoGrupos(data.catalogo_grupos || []);
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
-  const agregarGrupoCatalogo = async () => {
-    const nombre = nuevoGrupoInput.trim();
-    if (!nombre) return;
-    try {
-      const res = await fetch('/api/catalogo_grupos/agregar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre })
-      });
-      const data = await leerJson(res);
-      if (!res.ok) throw new Error(data.error);
-      setCatalogoGrupos(data.catalogo_grupos || []);
-      setNuevoGrupoInput('');
-      setPanelPiezas(nombre); // entrar al grupo recién creado
-      showMsg('Grupo creado ✓');
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
   const handleCreatePlanilla = () => {
     setPlanillaEditando({
@@ -6871,7 +6745,7 @@ export default function App() {
         x.send(formData);
       });
       let data;
-      try { data = JSON.parse(res.text || '{}'); } catch (e) { data = {}; }
+      try { data = JSON.parse(res.text || '{}'); } catch { data = {}; }
       if (!res.ok) throw new Error(data.error || "Error al procesar archivo");
       
       if (type === 'arte' && data.modo === 'separado' && (!data.auto || !data.aprobado)) {
@@ -6957,27 +6831,6 @@ export default function App() {
     }
   };
 
-  const abrirEtiquetador = async (talleRef = null) => {
-    // Evitar que el objeto del evento de React se tome como talle
-    const ref = (talleRef && typeof talleRef === 'string') ? talleRef : null;
-    showMsg("Cargando moldería...");
-    try {
-      const url = ref 
-        ? `/api/plantilla/deteccion?talle_ref=${encodeURIComponent(ref)}${qPid('&')}`
-        : `/api/plantilla/deteccion${qPid()}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      
-      setEtqData(data);
-      setEtqSeleccion(data.piezas?.length ? 0 : null);
-      setEtqNombres(data.nombres_existentes || {});
-      setModalEtqOpen(true);
-      showMsg("");
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
   // Resetear offsets cuando cambian las piezas o talle de guía
   useEffect(() => {
@@ -7253,25 +7106,6 @@ export default function App() {
     dragInfo.current.emp = false;
   };
 
-  const asignarNombresEtq = () => {
-    if (!etqNombreInput.trim()) return;
-    const indices = Array.from(etqSeleccion);
-    if (!indices.length) {
-      showError("Selecciona al menos una pieza");
-      return;
-    }
-    const nextNombres = { ...etqNombres };
-    if (indices.length === 1) {
-      nextNombres[indices[0]] = etqNombreInput.trim();
-    } else {
-      indices.forEach((idx, k) => {
-        nextNombres[idx] = `${etqNombreInput.trim()} ${k + 1}`;
-      });
-    }
-    setEtqNombres(nextNombres);
-    setEtqSeleccion(new Set());
-    setEtqNombreInput('');
-  };
 
   const guardarEtiquetas = async (excluirTalles) => {
     const asign = Object.entries(etqNombres).map(([idx, val]) => ({
@@ -7383,29 +7217,6 @@ export default function App() {
   const guardarMapeoAuto = (next) => { setMapeoValores(next); persistirMapeo(next, { silencioso: true }); };
 
   // Abre el mapeador VISUAL en el flujo del operario (mismo mapeador que el interno).
-  const abrirMapeoOperario = async () => {
-    showMsg("Cargando diseño y molde...");
-    try {
-      const res = await fetch(`/api/arte/deteccion?variante=${encodeURIComponent(verVariante || '')}${qPid('&')}`);
-      if (!res.ok) { const e = await leerJson(res); showError(e.error || 'No se pudo cargar el diseño'); return; }
-      const det = await res.json();
-      setMapeoData(det);
-      const prev = det.mapeo || {};
-      const inicial = { ...prev };
-      if (Object.keys(prev).length === 0) {
-        if (det.mapeo_fijo && Object.keys(det.mapeo_fijo).length) Object.assign(inicial, det.mapeo_fijo);
-        else det.mesas?.forEach(m => { if (m.sugerencia) inicial[m.sugerencia] = m.mesa; });
-      }
-      setMapeoValores(inicial);
-      setSelectedPiezaMapeo(det.piezas_variable?.[0] || det.piezas?.[0] || '');   // 1ª de la VARIABLE, no del molde
-      const r2 = await fetch(`/api/plantilla/deteccion${qPid()}`);
-      if (r2.ok) { const data = await r2.json(); setEtqData(data); setEtqNombres(data.nombres_existentes || {}); }
-      setMapeandoOperario(true);
-      showMsg("");
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
 
   // Mapeo y Sincronización del Espacio de Trabajo.
@@ -7569,7 +7380,7 @@ export default function App() {
     setGuiaPend(talleRef);                       // la pantalla ya muestra el nuevo
     if (pidCfg) {
       // Caché del navegador: al RECARGAR no se pierde, ande o no el servidor.
-      try { localStorage.setItem('tizada_talleguia_' + pidCfg, talleRef); } catch (e) { /* sin storage */ }
+      try { localStorage.setItem('tizada_talleguia_' + pidCfg, talleRef); } catch { /* sin storage */ }
       // Guardar es rápido y NO depende del dibujo: va en paralelo.
       fetch('/api/productos/variante_guia', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -7913,19 +7724,6 @@ export default function App() {
       return nx; });
   };
 
-  const centrarSeleccion = (eje) => {
-    const idxs = Array.from(selNombrar);
-    if (idxs.length < 2) { showError('Seleccioná 2 o más piezas para centrarlas entre sí.'); return; }
-    const pcs = idxs.map(i => canvasLayout.layout.find(p => p.idx === i)).filter(Boolean);
-    const cen = pcs.map(p => { const o = pzOffsets[p.idx] || { x: 0, y: 0 };
-      return { idx: p.idx, cx: p.px + o.x + p.pw / 2, cy: p.py + o.y + p.ph / 2 }; });
-    const mx = cen.reduce((a, c) => a + c.cx, 0) / cen.length;
-    const my = cen.reduce((a, c) => a + c.cy, 0) / cen.length;
-    setPzOffsets(prev => { const nx = { ...prev };
-      cen.forEach(c => { const o = nx[c.idx] || { x: 0, y: 0 };
-        nx[c.idx] = eje === 'h' ? { x: o.x + (mx - c.cx), y: o.y } : { x: o.x, y: o.y + (my - c.cy) }; });
-      return nx; });
-  };
 
   const guardarAcomodoPiezas = (offs) => {
     const g0 = (variantesEdit || []).find(g => g.clave === grupoAislado);
@@ -7935,7 +7733,6 @@ export default function App() {
     setVariantesEdit(nueva);
     guardarGruposCon(nueva, true);
   };
-  const guardarAcomodoPieza = (nombre, off) => guardarAcomodoPiezas({ [nombre]: off });
   // Acomodo MANUAL de la vista de la variable (coords del archivo, en mm del lienzo).
   // Clave por NOMBRE de pieza; se guarda en la variante y viaja con el catálogo.
   // Separado del `acomodo` viejo (unidades del nido) para no mezclar escalas.
@@ -8108,22 +7905,6 @@ export default function App() {
     return orden;
   };
   // Convierte un ORDEN (cm) a traslados de las piezas del molde (px) → { show, pos, vb }.
-  const varianteDesdeOrden = (orden, pcs) => {
-    if (!orden || !canvasLayout || !canvasLayout.cmPerUnit) return null;
-    const pxPorCm = 1 / canvasLayout.cmPerUnit;
-    const matched = [];
-    pcs.forEach(pc => { const nm = (etqNombres[pc.idx] || pc.name || '').trim(); const o = nm && orden[nm]; if (o) matched.push({ pc, o }); });
-    if (matched.length < Math.max(2, pcs.length * 0.6)) return null;
-    const pos = new Map(); let X0 = Infinity, Y0 = Infinity, X1 = -Infinity, Y1 = -Infinity;
-    matched.forEach(({ pc, o }) => {
-      const tcx = o.cx * pxPorCm, tcy = o.cy * pxPorCm;
-      pos.set(pc.idx, { dx: tcx - (pc.px + pc.pw / 2), dy: tcy - (pc.py + pc.ph / 2) });
-      if (tcx - pc.pw / 2 < X0) X0 = tcx - pc.pw / 2; if (tcy - pc.ph / 2 < Y0) Y0 = tcy - pc.ph / 2;
-      if (tcx + pc.pw / 2 > X1) X1 = tcx + pc.pw / 2; if (tcy + pc.ph / 2 > Y1) Y1 = tcy + pc.ph / 2;
-    });
-    const pad = (X1 - X0) * 0.06 + 25;
-    return { show: new Set(matched.map(m => m.pc.idx)), pos, vb: `${(X0 - pad).toFixed(1)} ${(Y0 - pad).toFixed(1)} ${(X1 - X0 + 2 * pad).toFixed(1)} ${(Y1 - Y0 + 2 * pad).toFixed(1)}` };
-  };
   // VER VARIANTE en Plantilla/Etiqueta: SOLO las piezas de la variante. Primero intenta reproducir
   // el ACOMODO del nido (así se ve igual que en Variables y en toda la app); si no hay nido/acomodo,
   // cae a una grilla compacta automática. Devuelve { show:Set(idx), pos:Map(idx→{dx,dy}), vb }.
@@ -8272,7 +8053,7 @@ export default function App() {
       p.x = clientX; p.y = clientY;
       const q = p.matrixTransform(m.inverse());
       return { x: q.x, y: q.y };
-    } catch (_e) { return null; }
+    } catch { return null; }
   };
   const nidoDragStart = (nombre, e) => {
     if (e.button !== 0 || !nidoData) return;
@@ -8414,7 +8195,6 @@ export default function App() {
       return { ...t, valores: vals };
     }));
   };
-  const quitarPieza = (idx) => aplicarVariantes(prev => prev.map(t => ({ ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) })));
   const quitarPiezaDeGrupo = (clave, idx) => aplicarVariantes(prev => prev.map(t => t.clave === clave ? { ...t, valores: (t.valores || []).filter(v => v.pieza_idx !== idx) } : t));
   const renombrarPieza = (idx, label) => aplicarVariantes(prev => prev.map(t => ({ ...t, valores: (t.valores || []).map(v => v.pieza_idx === idx ? { ...v, label } : v) })));
   // Agregar VARIAS piezas de una al grupo destino (selección por recuadro). MULTIGRUPO:
@@ -8593,7 +8373,7 @@ export default function App() {
     try {
       const r = await fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}${on ? '&candidatas=1' : ''}`);
       if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); }
-    } catch { }
+    } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
     if (on) {
       try {
         const r = await fetch(`/api/plantilla/variantes?pid=${encodeURIComponent(pid)}`);
@@ -8610,7 +8390,7 @@ export default function App() {
           varPzUltimo.current = _varPzSerial(a);
           setVarPzEstado(Object.keys(a).length ? 'guardado' : '');
         }
-      } catch { }
+      } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
     } else {
       varPzUltimo.current = null; setVarPzEstado('');
     }
@@ -8706,7 +8486,6 @@ export default function App() {
     setEtqNombres(next);
     setResaltarNombre(r => r === gen ? null : r);
   };
-  const quitarNombrePieza = (idx) => setEtqNombres(prev => ({ ...prev, [idx]: '' }));
   // 🔴 SE NOMBRA LO QUE ESTÁ SELECCIONADO Y NADA MÁS (regla del usuario 2026-09-15).
   // Antes acá se RENUMERABA TODO el genérico 1..N en cada gesto. Con dos piezas parecidas el
   // efecto era el que reportó el usuario: nombraba una «Manga», y al nombrar la otra —también
@@ -8804,48 +8583,8 @@ export default function App() {
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   };
 
-  const guardarConfig = async (nuevaConfig) => {
-    const targetConfig = nuevaConfig || config;
-    try {
-      const res = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...targetConfig, pid: pidCfg })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error("No se pudo guardar la configuración");
-      setConfig(data);
-      showMsg("Configuración guardada ✓");
-    } catch (err) {
-      showError(err.message);
-    }
-  };
 
-  const handleDropOnFabric = (pieza, fabricName) => {
-    if (!pieza || !fabricName) return;
-    const nextAsig = { ...config.asignacion };
-    
-    // Si la pieza arrastrada forma parte de la selección múltiple, mover todo el lote
-    if (piezasSeleccionadas.includes(pieza)) {
-      piezasSeleccionadas.forEach(p => {
-        nextAsig[p] = fabricName;
-      });
-      showMsg(`${piezasSeleccionadas.length} piezas reasignadas a la tela '${fabricName}' ✓`);
-      setPiezasSeleccionadas([]);
-    } else {
-      nextAsig[pieza] = fabricName;
-      showMsg(`Pieza '${pieza}' reasignada a la tela '${fabricName}' ✓`);
-    }
-    
-    const next = { ...config, asignacion: nextAsig };
-    setConfig(next);
-    guardarConfig(next);
-  };
 
-  const checkConfirmAndGenerate = () => {
-    setConfirmProductoId(productosCat.activo);
-    setModalConfirmOpen(true);
-  };
 
   const ejecutarGenerarSublimacion = async () => {
     setModalConfirmOpen(false);
@@ -8858,7 +8597,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: confirmProductoId })
         });
-      } catch (e) {
+      } catch {
         showError("Error al cambiar de producto activo antes de tizar");
         return;
       }
@@ -8897,21 +8636,6 @@ export default function App() {
   // pedido anterior, y el paso planilla pedía su arte. Se sacó a propósito: si no hay diseños, no
   // hay moldes.)
 
-  const toggleMoldeSeleccion = (id) => {
-    setMoldesSeleccionados(prev => {
-      if (prev.includes(id)) {
-        const next = prev.filter(x => x !== id);
-        return next.length ? next : prev; // siempre al menos 1
-      }
-      // Solo se pueden sumar moldes de la MISMA plantilla del primero elegido.
-      const tplBase = prev.length ? moldeById(prev[0])?.planilla_template_id : moldeById(id)?.planilla_template_id;
-      if (prev.length && moldeById(id)?.planilla_template_id !== tplBase) {
-        showError('Ese molde usa otra planilla. Solo podés combinar moldes con la misma planilla.');
-        return prev;
-      }
-      return [...prev, id];
-    });
-  };
 
   const generarMulti = async (filasUtiles = null) => {
     const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
@@ -9015,7 +8739,7 @@ export default function App() {
           }
           setTrabajosMulti(prev => prev.map(x => x.jobId === t.jobId
             ? { ...x, estado: d.estado, progreso: d.progreso, resultado: d.resultado ?? x.resultado, error: d.error } : x));
-        } catch (e) { /* reintenta al próximo tick */ }
+        } catch { /* reintenta al próximo tick */ }
       }
     }, 1200);
     return () => clearInterval(iv);
@@ -9031,7 +8755,7 @@ export default function App() {
         // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
         moldesEfimeros, marcasPedido, sinMarcaPedido,
       }));
-    } catch (e) { /* localStorage lleno o no disponible */ }
+    } catch { /* localStorage lleno o no disponible */ }
   }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, moldesEfimeros]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
@@ -9059,7 +8783,7 @@ export default function App() {
     try {
       const r = await fetch(`/api/productos/${id}/preview`);
       if (r.ok) { const data = await r.json(); setMoldePreviews(prev => ({ ...prev, [id]: data })); }
-    } catch (e) { /* sin preview: la tarjeta usa un ícono */ }
+    } catch { /* sin preview: la tarjeta usa un ícono */ }
   };
   useEffect(() => {
     if (activoTab === 'pedidos' || (activoTab === 'config' && adminSubView === 'nesting')) {
@@ -9073,12 +8797,6 @@ export default function App() {
   // recargas al pedo; pero sin ninguna dep del catálogo, un efecto que corrió ANTES de que
   // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
   const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
-  // 🔴 FIRMA DE LO QUE MIRA LA BARRA DE PASOS. `_idsCat` son sólo los IDs, y los pasos «Nombrar
-  // piezas» y «Ubicar etiqueta» miran CONTADORES que cambian sin que cambie ningún id: con la
-  // firma vieja, nombrabas todas las piezas y el paso seguía en rojo hasta cambiar de pantalla.
-  const _avanceCat = React.useMemo(
-    () => productosCat.productos.map(p => `${p.id}:${p.plantilla ? 1 : 0}:${p.piezas_nombradas || 0}/${p.piezas_registradas || 0}:${p.etiquetas_ubicadas || 0}/${p.etiquetas_total || 0}`).join(','),
-    [productosCat.productos]);
 
 
   // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
@@ -9201,7 +8919,7 @@ export default function App() {
         _talleDetCache.current[_k] = data;
         setEtqData(data); setEtqNombres(data.nombres_existentes || {}); setEtqPid(_p);
       }
-    } catch (e) { /* sin molde */ }
+    } catch { /* sin molde */ }
   };
 
   // Carga el mapeador (diseño sobre el molde) del molde ACTIVO, inline en el paso
@@ -9249,7 +8967,7 @@ export default function App() {
       // WYSIWYG: cargar el BORDE de corte + la ETIQUETA REALES del molde para mostrarlos en el visor
       // del arte tal cual saldrán en la tizada (no solo el diseño).
       cargarBorde(); cargarEtiqueta();
-    } catch (e) { /* sin mapeo */ }
+    } catch { /* sin mapeo */ }
     finally { setMapeoCargando(false); }
     return _mapa;
   };
@@ -9288,7 +9006,6 @@ export default function App() {
     try {
       // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.
       // PyMuPDF no es thread-safe → multiproceso. `talles` acota el trabajo al talle guía.
-      let usoParalelo = false;
       try {
         const r = await fetch('/api/arte/asignar_todo', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9298,10 +9015,9 @@ export default function App() {
         });
         if (r.ok) {
           const { job, total } = await r.json();
-          usoParalelo = true;
           for (let guard = 0; guard < 4000; guard++) {   // polling del progreso (hasta ~16min)
             await _sleep(250);
-            let s; try { s = await (await fetch('/api/arte/asignar_estado?job=' + job)).json(); } catch (e) { break; }
+            let s; try { s = await (await fetch('/api/arte/asignar_estado?job=' + job)).json(); } catch { break; }
             // `hecho` sube de a un TALLE ENTERO: con un arte pesado se queda quieto un buen rato y
             // parece colgado. `piezas` son las que los workers ya dejaron listas — eso se mueve
             // siempre, y `fase` dice qué está pasando cuando todavía no hay nada terminado.
@@ -9313,7 +9029,7 @@ export default function App() {
             if (s.done || s.guia_lista) break;
           }
         }
-      } catch (e) { usoParalelo = false; }
+      } catch { /* si no se pudo lanzar, se sigue con lo que ya haya en caché */ }
       // Cargar los renders (ya en caché de disco) + geometría a la MEMORIA del navegador
       // → el cambio entre variantes queda instantáneo. Salen del caché, es rápido.
       const _cargarTalle = async (t) => {
@@ -9325,13 +9041,13 @@ export default function App() {
               body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true, fuentes_reemplazo: _reemplDe(dis, pid) })
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
-          } catch (e) { /* sigue con el próximo talle */ }
+          } catch { /* sigue con el próximo talle */ }
         }
         if (!_talleDetCache.current[`${pid}|${t}`]) {
           try {
             const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(t)}${qPid('&')}`);
             if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
-          } catch (e) { /* sigue */ }
+          } catch { /* sigue */ }
         }
       };
       // 🔴 SE ESPERA AL TALLE QUE SE ESTÁ MIRANDO, Y NADA MÁS. Los otros diecinueve se cargan
@@ -9405,14 +9121,14 @@ export default function App() {
             });
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
             else if (res.status === 409) return;   // falta arte/registro: no martillar 30 veces
-          } catch (e) { /* siguiente talle */ }
+          } catch { /* siguiente talle */ }
         }
         if (tok !== _prefetchTok.current) return;
         if (!_talleDetCache.current[`${pid}|${t}`]) {
           try {
             const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(t)}${qPid('&')}`);
             if (r.ok) _talleDetCache.current[`${pid}|${t}`] = await r.json();
-          } catch (e) { /* siguiente */ }
+          } catch { /* siguiente */ }
         }
       }
     })();
@@ -9462,7 +9178,7 @@ export default function App() {
           }
         } catch { /* sin cuerpo */ }
       }
-    } catch (e) { /* cae al re-dibujo JS */ }
+    } catch { /* cae al re-dibujo JS */ }
   };
   // Al cambiar de variante/diseño: si eso YA está dibujado (se estuvo antes, o lo dejó listo la
   // precarga), se muestra AL INSTANTE. Sólo se limpia cuando de verdad no hay nada, para no
@@ -9528,7 +9244,7 @@ export default function App() {
         setEtqData(data); setEtqNombres(data.nombres_existentes || {});
         if (_prevHit) setPreviewPiezas(_prevHit);
       }
-    } catch (e) { /* mantiene la variante actual */ }
+    } catch { /* mantiene la variante actual */ }
   };
 
   // ── EMPAREJAR TALLES (§10.c) ──────────────────────────────────────────────────────────
@@ -9565,7 +9281,7 @@ export default function App() {
       const d = await r.json();
       _talleDetCache.current[k] = d;
       setEmpGuiaPzs(d.piezas || []);
-    } catch (e) { /* sin miniaturas: la lista funciona igual */ }
+    } catch { /* sin miniaturas: la lista funciona igual */ }
   };
 
   // TODAS LAS VARIANTES JUNTAS: las piezas de todos los talles en un solo lienzo, para que el
@@ -9726,19 +9442,6 @@ export default function App() {
   // Miniatura de la pieza del talle guía: en una lista de 36 filas el nombre solo no alcanza
   // para saber CUÁL es (y menos si todavía se llama «Pieza 7»). Es el mismo `path_svg` que
   // dibuja el visor, recortado al bbox de la pieza.
-  const miniPieza = (idx, col, tam = 30) => {
-    const p = (empGuiaPzs || []).find(x => x.idx === idx);
-    if (!p || !p.path_svg || !(p.pw > 0) || !(p.ph > 0)) {
-      return <div style={{ width: tam, height: tam, flex: '0 0 auto', borderRadius: 6, background: 'rgba(255,255,255,0.05)' }} />;
-    }
-    const pad = Math.max(p.pw, p.ph) * 0.05 + 0.5;
-    return (
-      <svg width={tam} height={tam} style={{ flex: '0 0 auto', display: 'block' }}
-        viewBox={`${p.px - pad} ${p.py - pad} ${p.pw + 2 * pad} ${p.ph + 2 * pad}`} preserveAspectRatio="xMidYMid meet">
-        <path d={p.path_svg} fill={col} fillOpacity={0.18} stroke={col} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
-      </svg>
-    );
-  };
 
   // Color estable por nombre de grupo: la MISMA pieza se pinta igual en todos los talles.
   const colorGrupo = (nombre) => {
@@ -9854,14 +9557,7 @@ export default function App() {
   };
 
   // Seleccionar en el visor todas las piezas de un grupo ya hecho (para revisarlo o rehacerlo).
-  const seleccionarGrupoTodas = (nombre) => {
-    const s = new Set();
-    (empTodasData?.piezas || []).forEach(p => { if (_nombreEnTalle(p.talle, p.t_idx) === nombre) s.add(p.idx); });
-    setSelNombrar(s);
-    setEmpNombreInput(esNombreProvisorio(nombre) ? '' : nombre);
-  };
 
-  const borrarGrupoPieza = (nombre) => _postGrupo({ nombre, eliminar: true }, `«${nombre}» deshecha`);
 
   // ══════ BARRA DE CAPAS estilo Illustrator (2026-08-21) ═══════════════════════════════════
   // MINIATURA: la del CONTORNO de UNA pieza (su `path_svg` + su bbox como viewBox). La fila de
@@ -9918,17 +9614,6 @@ export default function App() {
   };
 
   // Confirmar en bloque lo que propuso el sistema: pasa de «propuesto» a FIJO en todos los talles.
-  const confirmarTodoGrupo = (nombre) => {
-    const piezas = {};
-    (empData?.talles || []).forEach(t => {
-      if (t === empData?.guia) return;
-      const j = ((empData?.asignacion || {})[t] || {})[nombre];
-      if (j != null) piezas[t] = j;
-    });
-    if (!Object.keys(piezas).length) { showError('Todavía no hay ninguna propuesta que confirmar'); return; }
-    return _postGrupo({ nombre, guia_idx: parseInt(Object.keys(empData?.nombres_guia || {}).find(k => empData.nombres_guia[k] === nombre), 10), piezas },
-      `«${nombre}» confirmada en ${Object.keys(piezas).length} ${term.variante.toLowerCase()}s ✓`);
-  };
 
   // CONFIRMAR TODO DE UNA VEZ. Fila por fila eran 36 clics y 36 re-propagaciones del registro
   // (cada POST rehace el registro entero). Acá va UN solo POST a /api/plantilla/emparejado SIN
@@ -9969,13 +9654,6 @@ export default function App() {
 
   // Renombrar SIN tener que ir a buscar la pieza en el visor: la fila ya sabe cuál es (`idxGuia`).
   // Es el camino natural para reemplazar los provisorios «Pieza 3».
-  const renombrarGrupo = async (idxGuia, viejo, nuevo) => {
-    const nom = (nuevo || '').trim();
-    if (!nom || nom === viejo) { setEmpRenombrar(null); return; }
-    const ok = await _postGrupo({ nombre: nom, guia_idx: idxGuia, renombrar_de: viejo || '' },
-      `«${viejo}» ahora se llama «${nom}» ✓`);
-    if (ok) { setEmpRenombrar(null); setEmpAbierto(a => (a === viejo ? nom : a)); }
-  };
 
   // Nombre puesto por el sistema para que el registro exista (§10.c): no dice nada y hay que
   // reemplazarlo. Se marca distinto en la lista para que se note que es provisorio.
@@ -10013,20 +9691,11 @@ export default function App() {
   // (cambiarVistaEmp / aplicarEmparejado / soltarPiezaEmp / resetAcomodoEmp eliminados
   //  junto con el «Ajuste avanzado», 2026-08-20)
 
-  const revisarPiezaEnTalle = async (nombre, talle) => {
-    // Vista junta: NO hay que cambiar de talle (están todos a la vista) — sólo quedar esperando
-    // el clic sobre la pieza correcta, en el talle que sea.
-    if (empTodas) { setSelNombrar(new Set()); setEmpGrupoSel(nombre); setEmpFijar(nombre); return; }
-    if (talle === empData?.guia) { await abrirTalleEmp(talle); setEmpFijar(null); return; }
-    setEmpTalle(talle); setSelNombrar(new Set()); setEmpGrupoSel(nombre);
-    await verVarianteOperario(talle);
-    setEmpFijar(nombre);
-  };
 
   // Medidas de todas las variantes (para el modo 'rango': cubrir el talle más grande del rango).
   const cargarMedidasVar = async () => {
     if (medidasVar) return;
-    try { const r = await fetch(`/api/plantilla/medidas_variantes${qPid()}`); if (r.ok) setMedidasVar(await r.json()); } catch (e) { /* sin datos */ }
+    try { const r = await fetch(`/api/plantilla/medidas_variantes${qPid()}`); if (r.ok) setMedidasVar(await r.json()); } catch { /* sin datos */ }
   };
   // Cambiar la configuración de medida del visor (default / rango / talle).
   const cambiarConfigMedida = (k) => {
@@ -10152,7 +9821,7 @@ export default function App() {
         x.send(fd);
       });
       let data;
-      try { data = JSON.parse(res.text || '{}'); } catch (e) { data = {}; }
+      try { data = JSON.parse(res.text || '{}'); } catch { data = {}; }
       if (!res.ok) throw new Error(data.error || 'Error al procesar el diseño');
       _pvCache.current = {}; _detArteCache.current = {}; _prefetchTok.current++;   // arte NUEVO → tirar precargas (serían del arte viejo)
       setArteCargado(prev => ({ ...prev, [disenoActivo + '|' + id]: true }));
@@ -10165,7 +9834,7 @@ export default function App() {
       // como opción en la columna "Diseño" de la planilla.
       if (disenoActivo !== 'principal') {
         const nom = disenosPedido.find(d => d.id === disenoActivo)?.nombre || disenoActivo;
-        try { await fetch('/api/disenos/guardar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: id, nombre: nom }) }); } catch (e) {}
+        try { await fetch('/api/disenos/guardar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: id, nombre: nom }) }); } catch (e) { showError('No se pudo registrar el diseño «' + nom + '»: ' + e.message); }
       }
       await fetchEstado();
       await fetchProductos();
@@ -10480,7 +10149,7 @@ export default function App() {
       .filter(p => !vf || vf.show.has(p.idx))
       .map(p => _genTelaP((etqNombres?.[p.idx] || p.name || '').trim()));
     return [...new Set(nom)].filter(Boolean);
-  }, [canvasLayout, etqNombres, verVariante]);
+  }, [canvasLayout?.layout, etqNombres, varianteFiltro, verVariante]);
   // Se registra por (molde|variable del ítem): un mismo molde puede entrar con dos variables y cada
   // una tiene SUS piezas. El total suma sólo los ítems que HOY están en el pedido, así una variable
   // que se quitó no deja un bloqueo fantasma.
@@ -10537,7 +10206,6 @@ export default function App() {
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
-  const arteEnPedido = (mid) => _esConDiseno(mid) || disenosPedido.some(d => arteCargado[d.id + '|' + mid]);
 
   const moldesDeDiseno = (did) => disenoMoldes[did] || [];
 
@@ -10786,7 +10454,7 @@ export default function App() {
   // Borde de corte del molde: cargar / guardar.
   const cargarBorde = async () => {
     const pid = pidCfg; if (!pid) return;
-    try { const r = await fetch(`/api/productos/borde_corte?pid=${pid}`); if (r.ok) setBordeConfig(await r.json()); } catch { }
+    try { const r = await fetch(`/api/productos/borde_corte?pid=${pid}`); if (r.ok) setBordeConfig(await r.json()); } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
   };
   const guardarBorde = async (next) => {
     const pid = pidCfg; if (!pid) return;
@@ -10808,36 +10476,15 @@ export default function App() {
   // en Configuración): sin esto, ubicar la etiqueta de un molde con diseño leería la de otro.
   const cargarEtiqueta = async (pidEx = null) => {
     const pid = pidEx || pidCfg; if (!pid) return;
-    try { const r = await fetch(`/api/productos/etiqueta?pid=${pid}`); if (r.ok) setEtiquetaConfig(await r.json()); } catch { }
+    try { const r = await fetch(`/api/productos/etiqueta?pid=${pid}`); if (r.ok) setEtiquetaConfig(await r.json()); } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
   };
   const cargarTalleEtq = async (talle) => {
     // Re-detecta el molde al talle elegido. IMPORTANTE: actualizar TAMBIÉN etqNombres (idx→nombre)
     // al mismo talle, si no canvasLayout queda en ese talle y los nombres en el guía → el visor
     // no matchea la pieza y desaparece al cambiar de talle.
-    try { const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talle)}${qPid('&')}`); if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); } } catch { }
+    try { const r = await fetch(`/api/plantilla/deteccion?talle_ref=${encodeURIComponent(talle)}${qPid('&')}`); if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); } } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
   };
   // Carga los objetos editables: recorre los diseños del molde y deja los que TIENEN objetos.
-  const cargarEditables = async (preferido) => {
-    const pid = pidCfg; if (!pid) return;
-    let lista = [{ id: 'principal', nombre: 'Principal' }];
-    try { const rd = await fetch('/api/disenos?molds=' + encodeURIComponent(pid)); if (rd.ok) { const dd = await rd.json(); lista = (dd.por_molde || {})[pid] || lista; } } catch { }
-    const conObj = [];
-    for (const d of lista) {
-      try {
-        const r = await fetch(`/api/productos/editables?pid=${pid}&diseno=${encodeURIComponent(d.id)}`);
-        if (r.ok) { const dat = await r.json(); if ((dat.objetos || []).length) conObj.push({ ...d, ...dat }); }
-      } catch { }
-    }
-    setEditableDisenos(conObj.map(c => ({ id: c.id, nombre: c.nombre })));
-    const elegido = conObj.find(c => c.id === preferido) || conObj[0];
-    if (elegido) {
-      setEditableDiseno(elegido.id); setEditableData(elegido);
-      // editableSel es SIEMPRE un array (multi-selección): un string o null rompía todo el editor
-      // (`.length`/`.map`/`.includes` sobre null) al abrir un diseño sin objetos editables.
-      setEditableSel(elegido.objetos?.[0]?.nombre ? [elegido.objetos[0].nombre] : []);
-      setEditableTalle(elegido.talles?.[Math.floor((elegido.talles.length - 1) / 2)] || elegido.talles?.[0] || null);
-    } else { setEditableData({ objetos: [], talles: [], piezas: [] }); }
-  };
   // Config de TAMAÑO de capas editables (del molde, por nombre de capa). Sin gráficos: el
   // usuario escribe el nombre de la capa y define rangos de talles con su tamaño máximo (cm).
   const cargarEditConfig = async () => {
@@ -10845,7 +10492,7 @@ export default function App() {
     try {
       const r = await fetch(`/api/productos/editables_config?pid=${pid}`);
       if (r.ok) { const d = await r.json(); setEditConfig(d.config || []); setEditConfigVariantes(d.variantes || []); }
-    } catch { }
+    } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
   };
   const guardarEditConfig = async (cfg) => {
     const pid = pidCfg; if (!pid) return;
@@ -10882,7 +10529,7 @@ export default function App() {
         editorCtx.current = ctxKey;
         return d;
       }
-    } catch { }
+    } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
     return { objetos: [] };
   };
   // COLOR de un editable (CMYK, POR VARIABLE, a nivel objeto): guarda `color` (o lo LIMPIA con null =
@@ -10942,7 +10589,7 @@ export default function App() {
   };
   // El objeto se coloca EN EL PUNTO donde el usuario clickeó sobre el diseño: `tf0` trae el
   // dx/dy (fracción de la pieza) de ese punto, y `talles` el alcance en el que se aplica.
-  const asignarObjetoAPieza = async (pieza, tf0, talles) => {
+  const asignarObjetoAPieza = async (pieza, tf0) => {
     if (!objPendiente || !pieza) return;
     const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     const nombre = objPendiente.nombre, _oid = objPendiente._oid;
@@ -10993,7 +10640,7 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pid: _mid, diseno: editableDiseno, pieza: '' }),
       });
-    } catch { }
+    } catch (e) { showError('No se pudo quitar el objeto de la pieza: ' + e.message); }
   };
   // DUPLICAR: copia el objeto para poder ponerlo TAMBIÉN en otra pieza. La copia nace sin pieza.
   const duplicarObjetoAgregado = async (oid) => {
@@ -11064,12 +10711,11 @@ export default function App() {
           };
         });
     });
-  }, [editableData, editorTfs, canvasLayout, etqData, etqNombres]);
+  }, [editableData, canvasLayout?.layout, etqData?.talle_ref, editorTfs, etqNombres, mapeoData?.mapeo_talles, mapeoData?.mesas, mapeoValores]);
   // ── Zoom (rueda, AL CURSOR) y pan (click derecho) del Visor del Molde ──
   // Listener de rueda NATIVO no-pasivo: preventDefault corta el scroll de la página y
   // el zoom solo actúa cuando el mouse está SOBRE el visor (afuera, scroll normal).
   const visorWheel = useRef({ activo: false, el: null, h: null });
-  const esqCache = useRef(new Map());   // pathD -> esquinas (largos de arco) para no recalcular en cada hover
   const segCacheRef = useRef(new Map());   // ETIQUETA: cache de segmentoEdge (path+posición → baseline) para NO re-medir el contorno (getPointAtLength ×cientos) en cada re-render/hover
   visorWheel.current.activo = !!etqData && tabAjustesMolde !== 'planilla';
   const setVisorEl = React.useCallback((el) => {
@@ -11137,7 +10783,6 @@ export default function App() {
     const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', up);
   };
-  const resetVisor = () => verTodoVisor();   // "⟲" = Ver todo (encuadra el molde completo a escala real)
   // Al abrir el visor o cambiar de vista/variante, encuadrar automáticamente ("Ver todo").
   // Espera a tener el contenedor medido (visorW/H) y el svg montado (delay corto).
   // ⚠️ `grupoAislado` y `nidoData` VAN EN LAS DEPENDENCIAS: al abrir una variable el svg pasa a
@@ -11199,16 +10844,6 @@ export default function App() {
       return { ...prev, zonas };
     });
   };
-  const setZonaCont = (gen, i, patch) => {
-    setEtiquetaConfig(prev => {
-      const zonas = { ...((prev && prev.zonas) || {}) };
-      const z = zonas[gen]; if (!z) return prev;
-      const cont = (z.cont || []).slice(); cont[i] = { ...(cont[i] || _zonaDefault()), ...patch };
-      zonas[gen] = { ...z, cont };
-      return { ...prev, zonas };
-    });
-  };
-  const limpiarZonas = (gen) => setEtiquetaConfig(prev => { const zonas = { ...((prev && prev.zonas) || {}) }; delete zonas[gen]; return { ...prev, zonas }; });
   // Piezas del molde ACTIVO sin diseño asignado. No se avanza si hay alguna:
   // se marca en rojo (en el mapeador) y se salta a la pieza que falta.
   const bloqueaPorSinDiseno = () => {
@@ -11223,16 +10858,6 @@ export default function App() {
       return true;
     }
     return false;
-  };
-  const arteSiguiente = () => {
-    if (bloqueaPorSinDiseno()) return;
-    const itemsDis = itemsArteDe(disenoActivo);   // se avanza por variable (o por molde entero)
-    if (arteIdx < itemsDis.length - 1) { setArteIdx(arteIdx + 1); return; }
-    // siguiente diseño que tenga algo que cargar
-    const idx = disenosPedido.findIndex(d => d.id === disenoActivo);
-    const siguiente = disenosPedido.slice(idx + 1).find(d => itemsArteDe(d.id).length);
-    if (siguiente) { setDisenoActivo(siguiente.id); setArteIdx(0); }
-    else if (todasArteCargadas) irAPlanillaDesdeArte();
   };
 
   // Empezar un pedido nuevo desde 0: limpia toda la selección y vuelve al paso 1.
@@ -11400,9 +11025,9 @@ export default function App() {
       for (const k of Object.keys(localStorage)) {
         if (k.startsWith('tizada_mesas_nombres_')) localStorage.removeItem(k);
       }
-    } catch (_e) { /* storage bloqueado: no es motivo para frenar el pedido nuevo */ }
+    } catch { /* storage bloqueado: no es motivo para frenar el pedido nuevo */ }
     // 7) el avance guardado en el navegador (si no, «nuevo pedido» + F5 resucitaba el viejo)
-    try { localStorage.removeItem('tizada_wizard'); } catch (e) { /* sin storage: nada que borrar */ }
+    try { localStorage.removeItem('tizada_wizard'); } catch { /* sin storage: nada que borrar */ }
     setPedidoPaso('diseno');          // el wizard arranca por el DISEÑO (2026-08-21)
   };
 
@@ -11741,28 +11366,6 @@ export default function App() {
                     [nombrePieza]: { rx: snap.rx, ry: snap.ry, ang: snap.ang, t: snap.t } },
     }));
   };
-  const quitarEtiquetaB = (nombrePieza) => {
-    setEtiquetaConfig(prev => {
-      const _p = { ...((prev || {}).posiciones || {}) };
-      delete _p[nombrePieza];
-      return { ...(prev || {}), posiciones: _p };
-    });
-  };
-  const guardarEtiquetaPosicionesB = async (pid) => {
-    try {
-      const r = await fetch('/api/productos/etiqueta', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid, posiciones: (etiquetaConfig || {}).posiciones || {} })
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'No se pudo guardar dónde va la etiqueta');
-      setEtiquetaConfig(d);
-      // El render de la pieza incluye la etiqueta: si el preview no se rehace, el paso Arte
-      // mostraría la etiqueta en el lugar viejo aunque la tizada ya la ponga en el nuevo.
-      _pvCache.current = {};
-      showMsg('Listo: la etiqueta va donde la marcaste.');
-    } catch (err) { showError(err.message); }
-  };
 
   // ── CAMINO B: cargar VARIOS archivos, uno tras otro ─────────────────────────────────────────
   // Se suben de a uno (no en paralelo): cada uno son 100+ MB y el servidor los procesa con
@@ -11964,57 +11567,11 @@ export default function App() {
   // romperlo. `mesa` y `t_idx` son los que el visor ya trae en cada pieza.
   // `recargar: false` cuando se nombra un LOTE: recargar el catálogo y la detección entre pieza y
   // pieza son N idas y vueltas para tirar N-1; el llamador lo hace UNA vez al final.
-  const renombrarPiezaB = async (pid, mesa, t_idx, nombre, { recargar = true } = {}) => {
-    const n = (nombre || '').trim();
-    if (!n) return false;
-    try {
-      const r = await fetch('/api/plantilla/pieza_renombrar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid, mesa, t_idx, nombre: n })
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || 'No se pudo poner el nombre');
-      if (recargar) {
-        await fetchProductos();        // el conteo de piezas nombradas es lo que destraba el paso
-        // 🔴 Y se vuelve a pedir la DETECCIÓN: los nombres que muestra el panel salen de ahí
-        // (`nombres_existentes`), no del catálogo. Sin esto el nombre se guardaba bien y la
-        // pantalla seguía diciendo «sin nombre» — el usuario lo escribiría dos veces.
-        await cargarMoldeOperario(pid);
-      }
-      return true;
-    } catch (err) {
-      showError(err.message);
-      return false;
-    }
-  };
 
   // Nombra TODAS las elegidas con el mismo nombre. Si son varias, el servidor las desambigua con
   // la regla de siempre (`nombres_normalizados`): «Manga Corta» → «Manga Corta 1» y «Manga Corta 2».
   // Se mandan de a una y EN ORDEN, no en paralelo: cada renombrado reescribe el registro entero,
   // así que dos a la vez se pisarían y una de las dos se perdería.
-  const nombrarSeleccionB = async (pid) => {
-    const nom = nombreBInput.trim();
-    if (!nom || !selNombrarB.size) return;
-    // En el lienzo de todos los talles la selección trae la misma pieza 20 veces (una por
-    // talle): se renombra UNA vez por pieza —el registro es por pieza, para todos sus talles.
-    const _src = (!etqPickB && todasB?.piezas?.length && todasB.pid === pid) ? todasB.piezas : (etqData?.piezas || []);
-    const _vistos = new Set();
-    const _pzs = [];
-    _src.filter(p => selNombrarB.has(p.idx)).forEach(p => {
-      const k = `${p.mesa}|${p.t_idx}`;
-      if (!_vistos.has(k)) { _vistos.add(k); _pzs.push(p); }
-    });
-    let _ok = 0;
-    for (const pz of _pzs) {
-      if (await renombrarPiezaB(pid, pz.mesa, pz.t_idx, nom, { recargar: false })) _ok++;
-    }
-    setNombreBInput('');
-    setSelNombrarB(new Set());
-    setPiezaBSel(null);
-    await fetchProductos();
-    await cargarMoldeOperario(pid);       // los nombres del panel salen de la detección
-    if (_ok) showMsg(_ok === 1 ? `Listo: «${nom}».` : `Listo: ${_ok} piezas nombradas.`);
-  };
 
   const subirMoldeConDisenoPedido = async () => {
     const nombre = subirMoldeNombre.trim();
@@ -12101,7 +11658,6 @@ export default function App() {
 
   // Garments list helper — la fila nueva sale vacía, salvo las columnas de BOTÓN, que arrancan
   // con su opción por defecto (ver `_defaultRow`).
-  const addPrenda = () => setFilas([...filas, _defaultRow()]);
 
   // Agrega N filas de una (N = campo al lado del botón; default 1)
   const agregarFilas = () => {
@@ -12131,7 +11687,6 @@ export default function App() {
   const loteTalles = (estado?.talles || []);
   const loteTotal = Object.values(loteCant).reduce((n, v) => n + (parseInt(v, 10) || 0), 0);
   /** ¿Esta fila está en blanco? Los toggles no cuentan: nacen con una opción puesta. */
-  const planillaEnBlanco = () => (filas || []).every(filaVacia);
   /** Cuántas filas en blanco hay para aprovechar (van a ser las primeras que use el lote). */
   const filasVaciasCount = () => (filas || []).filter(filaVacia).length;
   const aplicarLote = () => {
@@ -12553,7 +12108,7 @@ export default function App() {
   // Enfoca la celda (r,c) por su marca data-plc — sea el div estático (selección) o el input (edición).
   const _focusCelda = (r, c) => {
     const el = document.querySelector(`[data-plc="${r}-${c}"]`);
-    if (el) { el.focus(); try { el.select && el.select(); } catch (_e) { /* no-op */ } }
+    if (el) { el.focus(); try { el.select && el.select(); } catch { /* no-op */ } }
   };
 
   // ── Modelo tipo Google Sheets: SELECCIONAR ≠ EDITAR ────────────────────────────────────────────
@@ -12666,7 +12221,7 @@ export default function App() {
         let inter = sets[0];
         for (const s of sets.slice(1)) inter = new Set([...inter].filter(c => s.has(c)));
         setFuenteChars(inter);
-      } catch (_e) { if (!cancelado) setFuenteChars(null); }
+      } catch { if (!cancelado) setFuenteChars(null); }
     })();
     return () => { cancelado = true; };
   }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo, sesionLista, fuenteCharsTick]);
@@ -12787,7 +12342,14 @@ export default function App() {
     if (activoTab === 'pedidos' && pedidoPaso === 'moldes') fetchProductos();
   }, [activoTab, pedidoPaso]);
 
-  const pasoItems = React.useMemo(() => {
+  // 🔴 LA BARRA DE PASOS SE CALCULA EN CADA DIBUJO, SIN MEMO (2026-09-16). Era un `useMemo` con
+  // una lista de dependencias que se había quedado corta: le faltaban 11 cosas que la barra mira
+  // (telas faltantes, fuentes, piezas sin nombre, etiquetas sin ubicar, planilla inválida…), y
+  // cada vez que el paso seguía en ROJO después de completarlo se parchaba con otra «firma»
+  // (`_avanceCat`: nombrabas todas las piezas y seguía en rojo hasta cambiar de pantalla). La
+  // cuenta es barata y varias de esas entradas son funciones nuevas en cada dibujo, así que el
+  // memo nunca ahorraba nada: calcularla siempre es lo único que no puede quedar desactualizado.
+  const pasoItems = (() => {
     const it = [];
     if (pedidoPaso === 'diseno') {
       it.push({ id: 'dis', label: 'elegir el diseño', corto: 'Elegir diseño', hecho: disenosPedido.length > 0,
@@ -12875,8 +12437,7 @@ export default function App() {
                 ok: listos.map(t => `Tizada lista${t.nombre ? `: ${t.nombre}` : ''}`) });
     }
     return it;
-  }, [pedidoPaso, disenosPedido, disenoMoldes, disenosSinMolde, tareasArte, arteCargado, disenoVars, _idsCat,
-      _avanceCat, telasIncompletas, telasFaltantesTotal, fuentesPorArte, filas, cols, moldesSeleccionados, trabajosMulti]);
+  })();
 
   const removeFila = (i) => {
     const next = filas.filter((_, idx) => idx !== i);
@@ -14896,7 +14457,6 @@ export default function App() {
                 const cargadoActual = !!arteCargado[disenoActivo + '|' + _id];
                 // VER VARIANTE en el pedido: las variantes del sistema (las de Variables) CON piezas. Al elegir
                 // una en las tarjetas, el visor muestra SOLO sus piezas acomodadas (mismo acomodo que en Variables).
-                const _varsPieza = (variantesEdit || []).filter(v => (v.valores || []).some(x => x.pieza_idx != null));
                 // VARIABLE-FIRST estricto: si hay una variable activa NUNCA se cae a dibujar el molde
                 // entero (135). Si `varianteFiltro` aún no resuelve (canvasLayout no listo / variable sin
                 // piezas), se usa un filtro VACÍO como piso — antes caía a `null` = las 135 del molde.
@@ -14946,13 +14506,10 @@ export default function App() {
                 // si la intersección queda vacía se apagaba solo (y con ella el pintado y el panel).
                 const _telaActiva = telaModoVer && (telasReg.telas || []).length > 0;
                 const _telasMap = _telasDe(disenoActivo, _id);
-                const _usoIds = new Set(Object.values(_telasMap).filter(Boolean));                         // telas EN USO en las piezas
-                const _telasEnUso = (telasReg.telas || []).filter(t => _usoIds.has(t.id));
                 const _sinTela = _todasGen.filter(g => !_telasMap[g]);                                     // piezas AÚN sin tela
                 // TOPE DE TELAS A LA VEZ (configurado por variable): cuántas telas DISTINTAS puede
                 // combinar esta prenda. No limita cuántas hay disponibles: limita cuántas se usan.
                 const _topeVar = parseInt((_tcfg.max_var || {})[varClaveActual], 10) || 0;
-                const _telasUsadasVar = new Set(_todasGen.map(g => _telasMap[g]).filter(Boolean));
                 // Asigna `telaId` a las piezas seleccionadas, o a TODAS si no hay selección (no hay base).
                 const aplicarTela = (telaId) => {
                   if (!telaId) return;
@@ -14981,10 +14538,6 @@ export default function App() {
                   // la lista de telas en uso y el «✓ Todas las piezas tienen tela».
                   setTelaAsignMode(false); setTelaBuscarAsig('');
                 };
-                const _telasAsigFiltradas = (() => {   // buscador del modo asignar
-                  const q = telaBuscarAsig.trim().toLowerCase();
-                  return q ? _telasMol.filter(t => (t.nombre || '').toLowerCase().includes(q)) : _telasMol;
-                })();
                 // ══ PANEL DE TELAS — rehecho 2026-08-21 ══════════════════════════════════
                 // El anterior era un formulario: dos vistas, una lista larga con buscador y un
                 // botón «Asignar» al final. Este cuenta la historia como la piensa el operario:
@@ -15016,8 +14569,6 @@ export default function App() {
                 // idx de ese lienzo; el panel lista las piezas del talle guía, así que se comparan
                 // por (mesa, índice en la mesa), que es la identidad de la pieza en el camino B.
                 const _todasBOn = _esB && !etqPickB && !!todasB?.piezas?.length && todasB.pid === _id;
-                const _clavePz = (pz) => `${pz.mesa}|${pz.t_idx}`;
-                const _selPares = new Set((_todasBOn ? todasB.piezas : _piezasB).filter(p => _selNomB.has(p.idx)).map(_clavePz));
                 // Los talles con el ojo cerrado no se dibujan (columna de la izquierda).
                 const _vfTodasB = _todasBOn
                   ? { show: new Set(todasB.piezas.filter(p => !tallesOcultos.has(p.talle)).map(p => p.idx)), pos: new Map(), vb: null }
@@ -15026,7 +14577,6 @@ export default function App() {
                 const _sinNombreB = _piezasB.filter(pz => _ES_PIEZA_SIN_NOMBRE.test(_nomB(pz)));
                 // Nombres sugeridos: los del catálogo del sistema. Ahorran teclado y, sobre todo,
                 // hacen que los toggles de la planilla encuentren su palabra («Manga Corta»).
-                const _sugeridos = [...new Set((catalogoGrupos || []).flatMap(g => g.piezas || []))].slice(0, 12);
                 // Cuántas piezas ya tienen ubicada su etiqueta (la del molde, no la global).
                 const _etqPos = (etiquetaConfig?.posiciones) || {};
                 // El CONTADOR del botón sale del servidor (que cuenta por nombre genérico, igual
@@ -15082,7 +14632,7 @@ export default function App() {
                                     if (!r.ok) { showError(d.error || 'No se pudo cambiar la etiqueta del diseño'); return; }
                                     showMsg(ocultar ? 'Se oculta esa etiqueta del diseño. Rehaciendo las piezas…' : 'Esa etiqueta del diseño se deja. Rehaciendo las piezas…');
                                     fetchProductos();
-                                  } catch (_e) { showError('No se pudo cambiar la etiqueta del diseño'); }
+                                  } catch { showError('No se pudo cambiar la etiqueta del diseño'); }
                                 }} />
                               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 <b>{fam.ocultar ? 'Oculta' : 'Se deja'}</b> · {String(fam.fuente || '').replace(/-?(Regular|MT)$/, '')} {fam.alto_mm} mm · {fam.piezas}/{fam.de}
@@ -15440,7 +14990,8 @@ export default function App() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                             <span style={{ width: 9, height: 9, borderRadius: '50%', background: colAct, flexShrink: 0 }} />
                             <span style={{ fontSize: 15, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vObjActual?.label || 'Variable'}</span>
-                            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>· {_m?.nombre} · {disenosPedido.find(d => d.id === disenoActivo)?.nombre}</span>
+                            <span title={`${_m?.nombre || ''} · ${disenosPedido.find(d => d.id === disenoActivo)?.nombre || ''}`}
+                              style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>· {_m?.nombre} · {disenosPedido.find(d => d.id === disenoActivo)?.nombre}</span>
                           </div>
                         )}
                         acciones={(<>
@@ -15642,7 +15193,6 @@ export default function App() {
                 // Las figuras de adentro llegan en `o.partes` y SOLO se usan para el COLOR (cada una
                 // guarda con su IDENT "capa␟obj_id", que arma el backend — nunca reconstruirlo acá).
                 const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.nombre === o.nombre) === i);
-                const toVB = (cx, cy) => { const svg = editorSvgRef.current; if (!svg) return { x: 0, y: 0 }; const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: q.x, y: q.y }; };
                 // Pan/zoom del visor del editor: rueda = zoom (al cursor); CLICK DERECHO arrastrado = mover el espacio.
                 const _edFullVB = () => { const s = (_vfEd && _vfEd.vb) ? _vfEd.vb : `0 0 ${canvasLayout.width} ${canvasLayout.height}`; const n = s.split(/\s+/).map(Number); return { x: n[0], y: n[1], w: n[2], h: n[3] }; };
                 const _edVBnow = edVB || _edFullVB();
@@ -15765,7 +15315,6 @@ export default function App() {
                   if (e.button === 0) setEditableSel([]);
                   edPan(e);
                 };
-                const chip = (txt, on, fn) => (<button type="button" onClick={fn} style={{ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{txt}</button>);
                 const selStyle = { padding: '5px 8px', borderRadius: 8, fontSize: 12, background: 'rgba(255,255,255,0.04)', color: '#fff', border: '1px solid var(--border-light)' };
                 // GUARDAR: persiste TODOS los objetos del diseño (con su transform actual) por VARIABLE +
                 // alcance de variantes → sobrevive al recargar y al reabrir (se relee de la base). Devuelve
@@ -16215,18 +15764,7 @@ export default function App() {
                       const _stroke = (_col && _col.stroke) || null;
                       const _rgb = (c) => cmykHex(c);      // color REAL por el perfil ICC (igual que Illustrator)
                       const _setFill = (arr) => guardarColorEditable(_target, { fill: arr, stroke: _stroke });
-                      const _commitCh = (i, val) => {
-                        const n = Math.max(0, Math.min(100, parseFloat(String(val).replace(',', '.')) || 0)) / 100;
-                        const nc = [..._cmyk]; nc[i] = n; _setFill(nc);
-                      };
-                      const _inp = { width: 46, padding: '4px 5px', borderRadius: 6, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12, fontWeight: 700, textAlign: 'right', outline: 'none' };
                       // Presets CMYK exactos (lo que se guarda es este CMYK, sin re-cuantizar).
-                      const _presets = [
-                        ['Rojo', [0, 0.9, 0.8, 0]], ['Naranja', [0, 0.5, 0.9, 0]], ['Amarillo', [0, 0.1, 0.9, 0]],
-                        ['Verde', [0.7, 0, 0.9, 0]], ['Cian', [0.85, 0, 0, 0]], ['Azul', [1, 0.7, 0, 0]],
-                        ['Violeta', [0.6, 0.7, 0, 0]], ['Magenta', [0, 0.9, 0, 0]], ['Negro', [0, 0, 0, 1]],
-                        ['Gris', [0, 0, 0, 0.5]], ['Blanco', [0, 0, 0, 0]],
-                      ];
                       return (
                         <div data-tour="edit-color" style={{ marginBottom: 6, flexShrink: 0 }}>
                           <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4, marginBottom: 7 }}>COLOR</div>
@@ -16498,7 +16036,7 @@ export default function App() {
                           onClick={async () => {
                             // Descarga CADA MESA por separado (una página = un archivo), con su NOMBRE,
                             // aunque varias sean del mismo PDF/tela. Usa los nombres editados (localStorage).
-                            const nombres = (() => { try { return JSON.parse(localStorage.getItem('tizada_mesas_nombres_' + j.resultado.id) || '{}'); } catch (_e) { return {}; } })();
+                            const nombres = (() => { try { return JSON.parse(localStorage.getItem('tizada_mesas_nombres_' + j.resultado.id) || '{}'); } catch { return {}; } })();
                             // Se arma la lista y se elige UNA carpeta: todas las mesas van ahí (ver descargar.js).
                             // Sin la API del navegador, cae a la descarga de a una, como siempre.
                             const items = [];
@@ -16547,11 +16085,9 @@ export default function App() {
                   const telas = [...new Set(hojas.map(h => h.tela))];
                   const tela = (telaActiva && telas.includes(telaActiva)) ? telaActiva : telas[0];
                   const mesas = hojas.filter(h => h.tela === tela);   // mesas de esa tela (una por grupo)
-                  const avisos = job.resultado?.avisos || [];
                   // Avisos del PEDIDO (variable sin elegir, etiqueta al lugar por defecto…). Van en
                   // su propio cartel: mezclarlos con los de «piezas en blanco» hacía leer «no tienen
                   // gráfica» cuando el arte estaba perfecto.
-                  const avisosPedido = job.resultado?.avisos_pedido || [];
                   return (
                     <div data-tour="resultados-mesas"
                       style={{ marginTop: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -17652,20 +17188,8 @@ export default function App() {
                         // CAMINO B: se apaga SOLO lo que decide el taller. Va bloque por bloque y no
                         // como envolvente: la opacidad de un padre no se puede revertir en el hijo.
                         const _soloTaller = _esConDiseno(pidCfg) ? { opacity: 0.45, pointerEvents: 'none' } : undefined;
-                        const pos = ec.posicion || { rx: 0.5, ry: 0.92 };
                         const align = ec.align || 'centro';
-                        const anchorSvg = align === 'izquierda' ? 'start' : align === 'derecha' ? 'end' : 'middle';
-                        const nombrePc = (pc) => etqNombres[pc.idx] || pc.name || 'Pieza';
-                        const muestraDe = (pc) => [ec.mostrar.talle && '2XL', ec.mostrar.pieza && nombreGenerico(nombrePc(pc)), ec.mostrar.numero && '#01'].filter(Boolean).join(ec.separador || '-') || '·';
-                        const piezasVisor = canvasLayout?.layout?.filter(p => (etqNombres[p.idx] || p.name)) || [];
                         // Click sobre el contorno → posición relativa (rx,ry) en el bbox de esa pieza; se aplica a todas.
-                        const onPickContorno = (e) => {
-                          const svg = e.currentTarget;
-                          let p; try { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; p = pt.matrixTransform(svg.getScreenCTM().inverse()); } catch { return; }
-                          const hit = piezasVisor.find(pc => p.x >= pc.px && p.x <= pc.px + pc.pw && p.y >= pc.py && p.y <= pc.py + pc.ph) || piezasVisor[0];
-                          if (!hit) return;
-                          setEtiquetaConfig(prev => ({ ...prev, posicion: { rx: Math.max(0, Math.min(1, (p.x - hit.px) / hit.pw)), ry: Math.max(0, Math.min(1, (p.y - hit.py) / hit.ph)) } }));
-                        };
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                             <Ayuda ancho={330}>La <b>etiqueta</b> identifica cada pieza cortada. Elegí qué muestra, dónde, en qué piezas, y su tamaño y color.</Ayuda>
@@ -18167,7 +17691,7 @@ export default function App() {
                                   try {
                                     const r = await fetch(`/api/plantilla/deteccion${qPid()}`);
                                     if (r.ok) { const d = await r.json(); setEtqData(d); setEtqNombres(d.nombres_existentes || {}); }
-                                  } catch { }
+                                  } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
                                 }}
                               >
                                 {/* MODO POR PIEZAS: el molde trae todo en una capa → se seleccionan
@@ -18975,18 +18499,8 @@ export default function App() {
                       )}
 
                       {tabAjustesMolde === 'variables' && (() => {
-                        const lbl = { display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' };
                         const inp = { width: '100%', padding: '8px 10px', fontSize: 13, borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
-                        const iconBtn = { width: 30, height: 30, flexShrink: 0, borderRadius: 8, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-                        const dangerBtn = { ...iconBtn, color: '#f87171', borderColor: 'rgba(248,113,113,0.3)' };
-                        const chip = (txt, on, onClick, key) => (<button key={key} type="button" onClick={onClick} style={{ padding: '5px 11px', borderRadius: 8, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'rgba(255,255,255,0.02)', color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{txt}</button>);
-                        const tipos = variantesEdit;
-                        const varTerm = (term.variante || 'Talle').toLowerCase();
-                        const valorLabel = (clave, vid) => { const t = tipos.find(x => x.clave === clave); const v = t && (t.valores || []).find(z => z.id === vid); return v ? v.label : null; };
-                        const addTipo = () => setVariantesEdit(prev => [...prev, { clave: 't_' + uidVar(), label: '', valores: [] }]);
                         const renameTipo = (i, label) => setVariantesEdit(prev => prev.map((t, k) => k === i ? { ...t, label } : t));
-                        const delTipo = (i) => setVariantesEdit(prev => prev.filter((_, k) => k !== i));
-                        const seedCamiseta = () => setVariantesEdit(['Frente', 'Espalda', 'Manga', 'Costadillo'].map(n => ({ clave: 't_' + uidVar(), label: n, valores: [] })));
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                             {/* Selector de pasos (se oculta al entrar al detalle de un grupo) */}
@@ -19708,7 +19222,6 @@ export default function App() {
                             const posPorPieza = ec.posiciones || {};
                             const bc = bordeConfig || {};   // borde de corte REAL configurado del molde
                             const align = ec.align || 'centro';
-                            const anchor = align === 'izquierda' ? 'start' : align === 'derecha' ? 'end' : 'middle';
                             const off = new Set((ec.piezas_off || []).map(nombreGenerico));   // piezas_off por NOMBRE GENÉRICO
                             // ETIQUETA POR PIEZA: con una pieza elegida, el visor muestra ESA pieza
                             // en todos sus talles (coordenadas del archivo, re-encuadre solamente).
@@ -19856,7 +19369,6 @@ export default function App() {
                                   // (proporcional). Chico al ver todo el molde (correcto), se agranda con el zoom.
                                   const pxmm = p.h_cm ? p.ph / (p.h_cm * 10) : (p.w_cm ? p.pw / (p.w_cm * 10) : p.ph * 0.0033);
                                   const fs = Math.max(0.05, (ec.size_mm || 3) * pxmm / CAP_RATIO_ETQ);   // mm de LETRA -> em
-                                  const tw = Math.max(fs, (muestraDe(p) || '').length * fs * 0.55);   // ancho aprox del texto
                                   const lx = p.px + rx * p.pw, ly = p.py + ry * p.ph;
                                   const vo = vf ? (vf.pos.get(p.idx) || { dx: 0, dy: 0 }) : null;   // traslado a la grilla compacta (Ver variante)
                                   const zonasPc = null;   // "Zonas de texto" ELIMINADO: se ignoran zonas guardadas
@@ -19900,7 +19412,6 @@ export default function App() {
                                           strokeWidth: _bw, strokeLinejoin: 'round', strokeLinecap: 'round', fill: 'none',
                                           fontFamily: 'sans-serif', pointerEvents: 'none' };
                                         const stlTexto = { stroke: 'none', fontFamily: 'sans-serif', pointerEvents: 'none' };
-                                        const stl = stlTexto;   // (compat: el resto del render usa `stl` para el texto)
                                         const _offIn = 0.18 * pxmm;   // apoyar sobre el borde (descendentes quedan ocultos bajo el contorno)
                                         const ccx = p.px + p.pw / 2, ccy = p.py + p.ph / 2;
                                         // ── ZONAS por esquinas: reemplazan la etiqueta única cuando la pieza tiene ≥2 puntos.
@@ -20179,7 +19690,6 @@ export default function App() {
                                 const nidoOn = tabAjustesMolde === 'variables' && varStep === 'grupos' && grupoAislado && !asignandoTipo && nidoData;
                                 const layoutN = nidoOn ? nidoLayoutVar() : null;
                                 if (nidoOn && layoutN) {
-                                  const vbWN = layoutN.vbW || 1100;
                                   const scN = 1;   // escala REAL (svg = px del nido); constante en pantalla = n/k
                                   const spn = (n) => n * scN / k;
                                   const talleSel = etqData?.talle_ref;

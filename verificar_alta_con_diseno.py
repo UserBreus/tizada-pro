@@ -38,7 +38,6 @@ sys.path.insert(0, RAIZ)
 os.environ.setdefault("TIZADA_DB_SERVER", r"localhost\NO_EXISTE_ES_UNA_PRUEBA")
 
 import motor_pedido as MP              # noqa: E402
-import molde_real as MR                # noqa: E402
 import piezas_con_diseno as PD         # noqa: E402
 
 def _molde_de_prueba():
@@ -277,7 +276,6 @@ ok(det_b.get("origen") == "con_diseno", "y lo que se sirve después de marcar es
 
 # ─────────────────────────────────────────────────────────────────
 print("\n5 · 🔴 LOS MOLDES DEL CAMINO A NO CAMBIAN EN NADA")
-import glob                                                    # noqa: E402
 import pymupdf as pdfmod                                       # noqa: E402
 _probados, _saltados = 0, 0
 # 🔴 SÓLO LOS MOLDES DEL CATÁLOGO. En `entrada/` pueden quedar carpetas de moldes ya borrados (un

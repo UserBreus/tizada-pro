@@ -22,7 +22,6 @@ Lo que cuida, con el molde real y 5 prendas (3 talles, rotación libre y 180):
 import os
 import shutil
 import sys
-import tempfile
 import time
 import types
 

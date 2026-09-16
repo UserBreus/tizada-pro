@@ -32,7 +32,7 @@
  * cuadro: el tutorial ya vive encima de una app pesada (el visor tiene cientos de piezas) y un
  * `setState` por cuadro le robaría fluidez justo a la pantalla que se está enseñando.
  */
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 const MS_CICLO = 2800;        // lo que dura el gesto completo, de punta a punta

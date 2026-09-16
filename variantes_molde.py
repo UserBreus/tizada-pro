@@ -244,7 +244,6 @@ def piezas_para_asignar(path_plantilla):
     """(mesa, capa, piezas) del bloque de molde a repartir en variantes: la mesa+capa con MÁS
     piezas dibujadas. En el caso que motiva esto hay una sola capa y una sola mesa; si hubiera
     varias, se trabaja sobre la que concentra el molde (y el llamador lo informa)."""
-    import motor_pedido as MP
     from molde_real import extraer_piezas_mesa
     doc = fitz.open(ruta_vigente(path_plantilla))
     try:

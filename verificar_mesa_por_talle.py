@@ -106,7 +106,7 @@ def main():
         reales = {}
         for p in (cat.get("productos") or []):
             reales.setdefault(S._columna_talle_de(p), []).append(p.get("nombre"))
-        print(f"          en el catálogo de hoy: " +
+        print("          en el catálogo de hoy: " +
               " · ".join(f"{k} → {len(v)} molde(s)" for k, v in reales.items()))
         ok(len(reales) >= 1, "el catálogo real agrupa por columna sin errores")
     except Exception as e:
@@ -137,7 +137,7 @@ def main():
        "…y el DETALLE abre la misma hoja, a más resolución")
     ok("/api/trabajos/${j.resultado.id}/mesa/${h.archivo}" in app,
        "🔴 y la DESCARGA sigue siendo el PDF vectorial de la mesa, no una imagen")
-    ok(f"/trabajos/${{job.resultado.id}}/${{hoja.archivo}}" in app or "download" in app,
+    ok("/trabajos/${job.resultado.id}/${hoja.archivo}" in app or "download" in app,
        "el PDF se sigue descargando tal cual")
 
     # MEDIDA EN VIVO, sobre la tizada MÁS PESADA que haya a mano: en una chiquita no hay nada que

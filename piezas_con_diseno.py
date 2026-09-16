@@ -1545,7 +1545,7 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
     tr = 0
     tf, tfs = None, 1.0
     tm = tlm = None
-    tl, tc, tw, th = 0.0, 0.0, 0.0, 1.0
+    tl, th = 0.0, 1.0
     encontrados = {}                      # campo → placeholder
     etiquetas = {}                        # idx_pieza → la etiqueta de corte que traía el archivo
     quitar = set()
@@ -1598,16 +1598,15 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
                     tl = -float(ops[1])
             elif op == "TL":
                 tl = float(ops[0])
-            elif op == "Tc":
-                tc = float(ops[0])
-            elif op == "Tw":
-                tw = float(ops[0])
+            elif op in ("Tc", "Tw"):
+                pass                     # espaciado de letra/palabra: no entra al ancho (ver `"` abajo)
             elif op == "Tz":
                 th = float(ops[0]) / 100.0
             elif op in ("T*", "'", '"') or op in ("Tj", "TJ"):
                 if op in ("T*", "'", '"'):
-                    if op == '"':
-                        tw, tc = float(ops[0]), float(ops[1])
+                    # `"` también fija el espaciado de palabra y de letra (Tw/Tc). NO se suma al
+                    # ancho de la caja: medido 2026-09-16, los moldes con diseño reales traen 0
+                    # operadores Tc/Tw. Si llega uno con tracking, el ancho sale corto.
                     tlm = _mul([1, 0, 0, 1, 0, -tl], tlm or [1, 0, 0, 1, 0, 0])
                     tm = list(tlm)
                 if op == "T*":
@@ -2279,7 +2278,6 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
     _d.close()
     mesas = list(range(1, n + 1))
     por_mesa = {}
-    hecho = 0
     # 🔴 UN CONSTRUCTOR POR MOLDE. Medido 2026-09-04: el hilo de fondo de la subida armaba las
     # páginas por proceso mientras un request, al ver que faltaban, las armaba de nuevo en su
     # hilo — el doble de trabajo y el servidor congelado. El segundo ahora ESPERA al primero

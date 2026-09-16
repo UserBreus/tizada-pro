@@ -2195,7 +2195,7 @@ def _pasadas_personalizable(path_arte):
         _op_n = {4: "k", 3: "rg", 1: "g"}
         # relleno y trazo son ESTADO GRÁFICO: `q` guarda y `Q` restaura (gotcha ya documentado).
         fcol, fcs_n, scol, scs_n, sw = None, None, None, None, None
-        dentro, per, _ult_txt, _hay_texto, _acum, _capa = 0, {}, "", False, "", ""
+        dentro, per, _acum, _capa = 0, {}, "", ""
         _gstack = []
 
         _acum, _pl = "", []      # texto y pasadas de la capa que se está recorriendo
@@ -3174,7 +3174,6 @@ def pdf_guia_medidas(path_plantilla, registro, config="default", talle=None,
     del archivo), cada talle en su propia CAPA (OCG) con el nombre de la variante para
     prender/apagar en Illustrator. Devuelve los bytes del PDF."""
     rango = rango or []
-    guia_es_ancho = str(referencia).lower().startswith("anch")
     MARG = 40; TOP = 90
     verde = (0.30, 0.55, 0.34); cyan = (0, 0.55, 0.7); tinta = (0.1, 0.1, 0.1)
 
@@ -3900,7 +3899,6 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             if isinstance(_info, dict) and _info.get("pieza_idx") is not None:
                 _idx_a_nombre.setdefault(int(_info["pieza_idx"]), _nom)
                 break
-    _toks_pieza = tokens_pieza      # (vive a nivel de módulo: lo comparte la validación del pedido)
 
     def partes_de(prenda):
         """Los toggles de la prenda, contra las piezas de ESTE molde. La regla vive suelta
@@ -4105,8 +4103,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         for _nom, _sm in (_objs or {}).items():
             if _sm:
                 _marcados_nombres.add(_norm_nombre(_nom))
-    # Conjunto a redibujar fuera del diseño base = editados ∪ con-tamaño ∪ recoloreados ∪ marcados.
-    _redibujar_nombres = _editados_nombres | _tamano_nombres | _coloreados_nombres | _marcados_nombres
+    # Lo que se redibuja fuera del diseño base (editados, con tamaño, recoloreados, marcados) lo
+    # decide `_es_redibujado`, conjunto por conjunto.
     SEP = ""                              # separa el nombre de capa del id de objeto en el IDENT
     def _ident(nombre, obj_id):
         return f"{nombre}{SEP}{obj_id}" if obj_id else nombre
@@ -4665,7 +4663,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             _cnt["seg_armado"] += time.time() - _t_a
         else:
             _cnt["reusadas"] += 1
-        out, page = b["out"], b["page"]
+        out = b["out"]
         mesa, _mesa_a, info = b["mesa"], b["_mesa_a"], b["info"]
         cont, W, H, S, clip = b["cont"], b["W"], b["H"], b["S"], b["clip"]
         x0, y0, x0m, y0m, Hp = b["x0"], b["y0"], b["x0m"], b["y0m"], b["Hp"]

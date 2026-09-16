@@ -501,11 +501,11 @@ def color_convertir():
     tr = _cms_tr("rgb2cmyk")
     if tr is None:
         out = []
-        for r, g, b in ent:
-            r, g, b = r/255., g/255., b/255.
-            k = 1 - max(r, g, b)
+        for rr, gg, bb in ent:
+            rr, gg, bb = rr/255., gg/255., bb/255.
+            k = 1 - max(rr, gg, bb)
             out.append([0, 0, 0, 1] if k >= 0.9999 else
-                       [round((1-r-k)/(1-k), 4), round((1-g-k)/(1-k), 4), round((1-b-k)/(1-k), 4), round(k, 4)])
+                       [round((1-rr-k)/(1-k), 4), round((1-gg-k)/(1-k), 4), round((1-bb-k)/(1-k), 4), round(k, 4)])
         return jsonify({"cmyk": out})
     im = Image.new("RGB", (len(ent), 1)); im.putdata([tuple(c) for c in ent])
     o = ImageCms.applyTransform(im, tr)
@@ -1162,7 +1162,6 @@ def _detectar_perfil_incrustado(pdf_path):
                         nombre = str(info)
             if not nombre:
                 # ICCBased en cualquier recurso
-                vis = set()
                 def walk(obj, d=0):
                     nonlocal nombre, espacio
                     if d > 8 or nombre:
@@ -8970,11 +8969,8 @@ def generar_multi():
         _vpd = {str(_sl): (_m or {}).get(pid) for _sl, _m in (cuerpo.get("vars_por_diseno") or {}).items()
                 if isinstance(_m, dict)}
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd)
-        # 🔴 FILAS SIN TALLE: se ignoran (antes salían como talle «M»), pero se DICE cuántas —
-        # callarlo es peor: la persona cuenta las prendas de la tizada y no le cierra con la
-        # planilla, y no sabe por qué.
-        _st = getattr(_traducir_prendas, "sin_talle", 0)
-        _flt = getattr(_traducir_prendas, "faltantes", {}) or {}
+        # Las filas sin algún dato obligatorio no se fabrican; lo pregunta la PANTALLA antes de
+        # armar (misma regla, `filasIncompletas`), así que acá no se repite.
         _obl = getattr(_traducir_prendas, "obligatorias", []) or []
         # 🔴 LOS TOGGLES QUE SE ELIGIERON SOLOS. Una celda vacía toma la primera opción («Manga
         # corta»): la prenda sale igual, pero hay que DECIRLO — si no, se imprime y se corta algo
@@ -8985,7 +8981,6 @@ def generar_multi():
                 "Hay filas sin elegir " + ", ".join(f"«{k}» ({v})" for k, v in sorted(_tgd.items()))
                 + ": salen con la primera opción. Si no es la que querías, completá esas celdas.")
         _traducir_prendas.toggles_por_defecto = {}
-        _detalle = ", ".join(f"{k} ({v})" for k, v in sorted(_flt.items(), key=lambda x: -x[1]))
         # (Las filas incompletas ya no se avisan ACÁ: la pantalla lo pregunta ANTES de armar la
         #  tizada y la persona elige seguir sin ellas o completarlas — pedido del usuario
         #  2026-08-31. Repetirlo después era ruido sobre una decisión ya tomada.)
@@ -10929,7 +10924,6 @@ def get_productos():
         if not _puede_ver_molde(p, _u):
             continue                     # molde de otro usuario: no existe para éste
         pid = p["id"]
-        reg_path = os.path.join(DATOS, "productos", pid, "registro_producto.json")
         # `plantilla` = HAY ARCHIVO DE MOLDE subido. Antes miraba la existencia de
         # `registro_producto.json` — y con el flujo nuevo eso rompía TODO el visor: la subida
         # deja el registro vacío (se nombra después) y el registro vive en la BASE (sin espejo),

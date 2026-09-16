@@ -24,7 +24,6 @@ reemplazado por un doble que explota, y borra el temporal al terminar.
 import os
 import shutil
 import sys
-import tempfile
 import time
 import types
 

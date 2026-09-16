@@ -26,7 +26,6 @@ Lo que este contrato protege:
 import io
 import os
 import sys
-import time
 import types
 import shutil
 import tempfile

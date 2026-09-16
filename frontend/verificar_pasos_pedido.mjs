@@ -26,7 +26,7 @@ const ok = (cond, que) => {
 console.log('CONTRATO DE LOS PASOS DEL PEDIDO\n');
 
 console.log('1) El molde con diseño tiene SUS pasos en la barra de abajo');
-const memo = APP.slice(APP.indexOf('const pasoItems = React.useMemo'),
+const memo = APP.slice(APP.indexOf('const pasoItems = '),
                        APP.indexOf('const removeFila'));
 ok(memo.includes("corto: 'Nombrar piezas'"), '«Nombrar piezas» es un paso propio');
 ok(memo.includes("corto: 'Ubicar etiqueta'"), '«Ubicar etiqueta» es un paso propio');
@@ -52,11 +52,14 @@ ok(!ir.includes('abrirNombrarB('),
    'y NO abre solo la herramienta de nombrar (se entra con su botón)');
 ok(APP.includes('texto="Al arte"'), 'el botón dice a dónde lleva de verdad');
 
-console.log('\n4) Los contadores que miran los pasos hacen recalcular la barra');
-// Sin esto, nombrabas todas las piezas y el paso seguía en rojo hasta cambiar de pantalla: los
-// contadores cambian sin que cambie ningún id, y la firma vieja eran sólo los ids.
-ok(APP.includes('const _avanceCat = React.useMemo'), 'hay una firma con el AVANCE de cada molde');
-ok(/\}, \[pedidoPaso[^\]]*_avanceCat/.test(APP), 'y la barra depende de ella');
+console.log('\n4) 🔴 La barra NO puede quedar desactualizada');
+// Nombrabas todas las piezas y el paso seguía en rojo hasta cambiar de pantalla: la barra era un
+// `useMemo` y a su lista de dependencias le faltaban cosas. Se parchó con una «firma»
+// (`_avanceCat`) y todavía le faltaban 11 (telas, fuentes, planilla…). Desde 2026-09-16 se
+// calcula en CADA dibujo: sin lista de dependencias no hay nada que se pueda olvidar.
+ok(APP.includes('const pasoItems = (() => {'), 'la barra se calcula en cada dibujo');
+ok(!APP.includes('const pasoItems = React.useMemo') && !APP.includes('const pasoItems = useMemo'),
+   '…y no vuelve a ser un memo (con una lista de dependencias que se queda corta)');
 
 console.log('\n5) 🔴 El aviso de «ya configuraste este molde» sale DONDE se trabaja el molde');
 // Pedido del usuario 2026-09-09: el aviso vivía sólo en Moldería y el panel del pedido apenas

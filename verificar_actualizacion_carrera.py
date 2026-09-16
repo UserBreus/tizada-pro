@@ -25,7 +25,6 @@ Acá se prueban las dos mitades del arreglo, sin tocar nada real (todo en una ca
 import os
 import sys
 import time
-import json
 import shutil
 import tempfile
 import threading

@@ -381,7 +381,7 @@ def escribir_config(puerto, perfiles, gs):
     lineas = [
         "@echo off",
         "REM  Generado por el instalador. La CLAVE no se cambia: si cambia, se cierra la sesion de todos.",
-        f"set TIZADA_MODO=publicado",
+        "set TIZADA_MODO=publicado",
         f"set TIZADA_SECRET={clave}",
         f"set PORT={puerto}",
         "set HOST=127.0.0.1",
@@ -507,7 +507,7 @@ def preparar_base(cfg_path):
         return
     sys.path.insert(0, AQUI)
     try:
-        import pyodbc
+        __import__("pyodbc")         # sólo se comprueba que cargue (driver + DLL)
     except Exception:
         aviso("falta el driver de SQL Server (pyodbc). Sin base no se puede iniciar sesión.")
         return

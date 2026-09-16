@@ -648,7 +648,7 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0, soloVer = fals
       }
     } catch { /* si no se puede saber, mejor frenar */ }
     return modalAb;
-  }, [modalAb, pasoGuion?.ancla, salto?.ancla]);
+  }, [modalAb, pasoGuion?.accion, pasoGuion?.ancla, pasoGuion?.modal, salto?.ancla]);
   // ⚠️ ESTE BLOQUE VA ANTES DE `paso`, Y NO ES COSMÉTICO: `paso` lee `modalDelPaso`, y leer una
   // `const` antes de su declaración es ReferenceError (zona muerta temporal) → se cae TODO React y
   // la pantalla queda NEGRA. No saltaba nunca porque el `&&` de `carga && !modalDelPaso` corta sin
@@ -712,7 +712,7 @@ function Tour({ guia, onCerrar, ir, donde, estado, desdePaso = 0, soloVer = fals
       : atender === 'carga' ? { x: carga.x, y: carga.y, w: carga.w, h: carga.h }
       : modalDelPaso ? { x: modalDelPaso.x, y: modalDelPaso.y, w: modalDelPaso.w, h: modalDelPaso.h }
       : rectAncla),
-    [carga, bloqueoModal, modalDelPaso, rectAncla]);
+    [atender, botonUnico, bloqueoModal?.x, bloqueoModal?.y, bloqueoModal?.w, bloqueoModal?.h, carga?.x, carga?.y, carga?.w, carga?.h, modalDelPaso, rectAncla]);
   // ESTADO REAL: se guarda en un ref (cambia en cada render de App) + la FOTO del arranque del paso.
   const estadoRef = useRef(estado);
   estadoRef.current = estado;
@@ -1300,7 +1300,6 @@ function EditorTutorial({ t, ir, donde, onCerrar, onGuardar, onProbar }) {
   });
   // ¿Es una ventana de TRABAJO (el sistema procesando) o un aviso que se responde? Se dibujan
   // distinto y se explican distinto: la de trabajo no se toca, se espera.
-  const esTrabajo = (titulo) => (AVISOS_CONOCIDOS.cargas || []).includes(titulo);
   // insertar en el HUECO `h` (0 = antes del primer paso) la ventana ya elegida del catálogo
   const ponerVentana = (h, titulo) => {
     setPasos((ps) => { const m = ps.slice();

@@ -22,7 +22,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import time
 
 sys.stdout.reconfigure(encoding="utf-8")
