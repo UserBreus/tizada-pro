@@ -2527,15 +2527,87 @@ def _error_no_controlado(e):
     return jsonify({"error": f"error interno del servidor: {e}"}), 500
 
 
+# Tipos que vale la pena comprimir: texto. Los PDF, PNG y ZIP ya vienen comprimidos (volver a
+# comprimirlos cuesta CPU y no ahorra nada — medido con el ZIP, changelog 448).
+_GZIP_TIPOS = ("text/", "application/javascript", "application/json", "image/svg+xml",
+               "application/xml")
+_GZIP_MIN = 1024                     # debajo de 1 KB el encabezado gzip no compensa
+_GZIP_MAX = 16 * 1024 * 1024         # arriba de 16 MB, comprimir al vuelo traba un hilo
+_GZIP_ASSETS = {}                    # (ruta, mtime, tamaño) -> bytes gzip: los assets no cambian
+
+
 @app.after_request
 def _evitar_cache(response):
-    # Excepción: lo que ya se marcó `immutable` (las mesas del arte) lleva la firma del archivo
-    # en su propia URL — cachearlo es justamente lo que evita volver a bajar megabytes de dibujo.
-    if "immutable" in (response.headers.get("Cache-Control") or ""):
-        return response
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
+    # 🔴 LOS ASSETS DE VITE SE CACHEAN PARA SIEMPRE. `/assets/index-CAf31Kcu.js` lleva el hash del
+    # contenido en el nombre: si el código cambia, cambia el nombre, y `index.html` (que sigue en
+    # no-store) apunta al nuevo. Antes les tocaba no-store como a todo: medido en el servidor
+    # publicado (2026-09-16), el navegador volvía a bajar **1,09 MB sin comprimir en cada carga**
+    # — 3 s por F5, por pestaña y por persona.
+    if request.path.startswith("/assets/") and response.status_code == 200:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers.pop("Pragma", None)
+        response.headers.pop("Expires", None)
+    elif "immutable" in (response.headers.get("Cache-Control") or ""):
+        # Excepción: lo que ya se marcó `immutable` (las mesas del arte) lleva la firma del
+        # archivo en su propia URL — cachearlo es lo que evita volver a bajar megabytes de dibujo.
+        pass
+    else:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return _comprimir(response)
+
+
+def _comprimir(response):
+    """gzip para las respuestas de TEXTO cuando el navegador lo acepta.
+
+    nginx del servidor publicado sólo comprime `text/html` (su `gzip_types` por defecto), así que
+    el JS de 1 MB, el CSS y los JSON de la API viajaban crudos. Se hace acá para no depender de la
+    configuración de cada servidor. El JS pasa de 1.094 KB a ~306 KB.
+    🔴 NUNCA toca: PDF/PNG/ZIP (ya comprimidos, y el panel de descargas mide contra su
+    `Content-Length`), respuestas parciales o en streaming, ni lo que ya venga codificado."""
+    try:
+        if response.status_code != 200 or response.headers.get("Content-Encoding"):
+            return response
+        if "gzip" not in (request.headers.get("Accept-Encoding") or "").lower():
+            return response
+        tipo = (response.mimetype or "").lower()
+        if not tipo.startswith(_GZIP_TIPOS):
+            return response
+        if response.is_streamed and not response.direct_passthrough:
+            return response
+        largo = response.calculate_content_length()
+        if largo is not None and not (_GZIP_MIN <= largo <= _GZIP_MAX):
+            return response
+        import gzip as _gz
+        clave = None
+        if request.path.startswith("/assets/"):
+            _f = os.path.join(app.static_folder, request.path.lstrip("/"))
+            try:
+                _st = os.stat(_f)
+                clave = (_f, _st.st_mtime, _st.st_size)
+            except OSError:
+                clave = None
+        comp = _GZIP_ASSETS.get(clave) if clave else None
+        if comp is None:
+            response.direct_passthrough = False       # los archivos estáticos vienen como stream
+            datos = response.get_data()
+            if not (_GZIP_MIN <= len(datos) <= _GZIP_MAX):
+                return response
+            comp = _gz.compress(datos, compresslevel=6 if clave else 5)
+            if len(comp) >= len(datos):
+                return response
+            if clave:
+                _GZIP_ASSETS[clave] = comp
+        response.direct_passthrough = False
+        response.set_data(comp)
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Content-Length"] = str(len(comp))
+        response.vary.add("Accept-Encoding")
+        # el ETag del archivo crudo ya no describe estos bytes
+        response.headers.pop("ETag", None)
+    except Exception:
+        pass                                        # comprimir es una optimización: nunca rompe
     return response
 
 

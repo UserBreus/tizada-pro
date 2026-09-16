@@ -1482,6 +1482,41 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (473) — 🐢 «LO VEO MUY LENTO» EN EL SERVIDOR PUBLICADO: el JS de 1 MB se bajaba entero,
+  crudo, en cada carga · y el servidor corre código de hace 134 commits.** (La 472 la usa la sesión
+  de la aplicación de escritorio.)
+
+  **MEDIDO desde afuera** (`https://tizadapro.user.com.uy`, sin iniciar sesión):
+  · Está ARRIBA: v1.0.37, commit `730693a`, **uptime 523 s** (se había caído, ver 4xx), Linux
+    (`/opt/tizadapro`), 150 GB libres, base OK, `procesos_render: 3` (en publicado sale de la RAM
+    libre → máquina justa de memoria). Ghostscript no encontrado (no crítico).
+  · API sin sesión: **0,12–0,57 s** con un piso de red de ~0,13 s (un 401 tarda eso). Aceptable.
+  · 🔴 **`/assets/index-*.js` = 1.094.110 bytes SIN `Content-Encoding` y con `no-store` → 3,0 s
+    de descarga en CADA F5, pestaña nueva y persona.** nginx sólo comprime `text/html` (su
+    `gzip_types` por defecto) y `_evitar_cache` le ponía no-store a todo, assets incluidos.
+  · 🔴 **El servidor está 134 commits atrás del taller**: NO tiene 451 (memo por página), 452
+    (aplanado en proceso aparte) ni el cartel honesto de «sin conexión». O sea: allá una tizada sigue
+    picando en **~2 GB**, en una máquina que sólo alcanza para 3 procesos de render. Encaja con la
+    caída de ayer.
+
+  **ARREGLADO (`servidor.py`, `_evitar_cache` + `_comprimir`):**
+  1. `/assets/*` → `Cache-Control: public, max-age=31536000, immutable`. Es seguro: Vite pone el
+     hash del contenido en el nombre, y `index.html` sigue en no-store, así que una versión nueva
+     aparece sola.
+  2. **gzip en la app** (no depende del nginx de cada servidor) para texto (`text/*`, JS, JSON, SVG,
+     XML) entre 1 KB y 16 MB, si el navegador lo acepta. Los assets comprimidos se guardan en memoria
+     por (ruta, mtime, tamaño). **El JS: 1.094 KB → 306 KB.**
+  3. 🔴 **NUNCA toca PDF/PNG/ZIP** (ya vienen comprimidos, y el panel de descargas mide el avance
+     contra su `Content-Length`), ni respuestas parciales, ni lo ya codificado.
+
+  **CONTRATO nuevo `verificar_compresion_assets.py`** (sin base, sin datos): asset inmutable + gzip +
+  descomprimido byte a byte igual; sin `Accept-Encoding` llega crudo; `index.html` sigue no-store;
+  JSON grande comprimido y válido; **PDF sin tocar y con su `Content-Length` real**; < 1 KB no se
+  comprime. Verde. Y por HTTP real contra el 8050: `Content-Encoding: gzip`, 306.280 bytes, 0,09 s.
+
+  **LO QUE FALTA, y es del usuario:** **publicar** para que el servidor tenga esto y los arreglos de
+  memoria. Hasta entonces sigue con el código de `730693a`.
+
 - **2026-09-16 (471) — 🐢 «Subir el arte demora una eternidad» (39 s): lo que depende sólo del
   archivo se lee UNA vez para todos los procesos, y un pre-dibujado nuevo cancela al viejo.**
   Medido en el registro: subida 14 s + **25 s hasta el talle guía**. Con cProfile sobre el arte
