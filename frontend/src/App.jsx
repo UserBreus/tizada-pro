@@ -14644,8 +14644,11 @@ export default function App() {
                 const _etqTotal = _prodB.etiquetas_total || _piezasB.length;
                 const _etqPuestas = _prodB.etiquetas_total != null ? (_prodB.etiquetas_ubicadas || 0)
                   : _piezasB.filter(pz => _etqPos[_nomB(pz)]).length;
+                // `overflowY: auto` + `maxHeight: 100%`: el panel mide lo que mide el visor y lo que no entra
+                // se desplaza ADENTRO. Sin esto, con una ventana angosta la lista de piezas crecía por
+                // debajo y se montaba sobre la barra de abajo (visto 2026-09-16 a ~800 px).
                 const panelNombrarJSX = !_esB ? null : (
-                  <div data-tour="pieza-b-lista" style={{ width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 11 }}>
+                  <div data-tour="pieza-b-lista" style={{ width: 258, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, maxHeight: '100%', overflowY: 'auto', gap: 11 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <Icon name="edit" style={{ width: 15, height: 15, color: 'var(--accent)' }} />
                       <span style={{ flex: 1, fontSize: 13.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Piezas y etiqueta</span>

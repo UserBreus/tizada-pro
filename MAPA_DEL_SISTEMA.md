@@ -1522,8 +1522,10 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 
   Verificado en el sandbox: pedido con base (arte real, tela, lote, tizada, PDF RIP-verde) y pedido
   camino B (2 moldes, nombrado, telas, planilla con dos columnas de talle).
-  Pendiente visto: en Arte camino B con ventana angosta (~800 px) el panel «Piezas y etiqueta»
-  se mete sobre la barra de abajo; a 1366 no.
+  7. **El panel «Piezas y etiqueta» (Arte, camino B) se montaba sobre la barra de abajo** con la
+     ventana angosta (~800 px): crecía con la lista de piezas por debajo del visor. Ahora mide lo
+     que mide el visor (`maxHeight: 100%`, `overflowY: auto`) y lo que no entra se desplaza adentro.
+     Medido a 800 px: panel termina en 505, barra empieza en 568, sin solape.
 
 - **2026-09-16 (466) — 🔴 MOLDE CON DISEÑO: «NOMBRO LAS VERDES Y SE NOMBRAN LAS NARANJAS». La
   pieza i NO era la misma en todos los talles.**
