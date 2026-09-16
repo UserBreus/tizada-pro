@@ -5854,8 +5854,16 @@ export default function App() {
     // completa a mano; no se arrastra ningún dato de ejemplo ni de pedidos anteriores.
     const defaultRow = {};
     cols.forEach(c => { defaultRow[c.id] = ''; });
+    // …salvo el DISEÑO, que ya viene puesto si el pedido tiene uno (misma regla que `_defaultRow`):
+    // al recargar parado en la planilla, las filas nacían sin diseño y «Enviar» quedaba apagado.
+    const _dc = cols.find(c => c.role === 'diseno');
+    if (_dc && disenosPedido.length) {
+      const _nom = (disenosPedido.length === 1 ? disenosPedido[0]
+        : (disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0]))?.nombre;
+      if (_nom) defaultRow[_dc.id] = _nom;
+    }
     setFilas(Array.from({ length: 5 }, () => ({ ...defaultRow })));   // 5 filas vacías, siempre
-  }, [productosCat.activo, productosCat.productos, estado?.talles]);
+  }, [productosCat.activo, productosCat.productos, estado?.talles]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Limpieza única al abrir: borrar del navegador cualquier planilla vieja guardada por versiones
   // anteriores (la "memoria de pedidos viejos" / el pedido de prueba que hubiera quedado ahí).
@@ -7909,7 +7917,11 @@ export default function App() {
   // el ACOMODO del nido (así se ve igual que en Variables y en toda la app); si no hay nido/acomodo,
   // cae a una grilla compacta automática. Devuelve { show:Set(idx), pos:Map(idx→{dx,dy}), vb }.
   const varianteFiltro = (clave) => {
-    const g = (variantesEdit || []).find(t => t.clave === clave);
+    // Primero el buffer de edición (Configuración); si no está ahí —el pedido muestra una variable
+    // de un molde que no es el que está abierto en Configuración— la del catálogo. El visor del
+    // pedido no puede depender de qué moldería quedó abierta en otra pestaña.
+    const g = (variantesEdit || []).find(t => t.clave === clave)
+      || (productosCat.productos || []).flatMap(p => p.variantes || []).find(t => t.clave === clave);
     if (!g || !canvasLayout || !canvasLayout.layout) return null;
     // Piezas de la variante por CLAVE ESTABLE (pieza_id → clave, talle-independiente). Antes se
     // resolvía por etqNombres[pieza_idx], pero el pieza_idx VARÍA por talle → al cambiar de talle
@@ -10874,6 +10886,16 @@ export default function App() {
     [...(moldesSeleccionados || []), ...Object.values(disenoMoldes || {}).flat()].forEach(id => {
       if ((productosCat.productos || []).find(p => p.id === id && p.efimero)) _ids.add(id);
     });
+    // 🔴 Y TODO LO QUE LA PANTALLA MUESTRA COMO «CARGADOS». Un molde con diseño MÍO, efímero, que
+    // todavía no entró a ningún diseño, es de este pedido igual (es lo que lista «Cargados (N)»).
+    // Con la pestaña recién abierta ni `moldesEfimeros` ni los diseños lo conocen, y como esta
+    // misma pantalla lo declara abierto en el latido, el barrido de huérfanos tampoco se lo lleva:
+    // «Nuevo pedido» decía «Empezar de 0» y los 4 moldes seguían en «Cargados» (2026-09-16).
+    // (sin mirar `origen`: mientras el alta corre todavía no está puesto, y en ese rato es cuando
+    // más importa que el barrido no lo confunda con basura)
+    (productosCat.productos || []).forEach(p => {
+      if (p.efimero && !p.de_otro) _ids.add(p.id);
+    });
     return [...(_ids)];
   };
   // 🔴 RED DE SEGURIDAD AL ENTRAR: si esta pantalla NO tiene ningún molde efímero anotado pero el
@@ -11390,6 +11412,10 @@ export default function App() {
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'No se pudo crear el molde');
+        // 🔴 SE ANOTA COMO DEL PEDIDO YA, ANTES DE SUBIRLO. Leer un molde de 100+ MB lleva minutos, y
+        // en ese rato el barrido de huérfanos (cada 65 s) no lo veía como del pedido: el servidor
+        // se lo llevaba a MITAD DEL ALTA (medido 2026-09-16: subido 11:16:57, borrado 11:17:05).
+        setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now(), subiendo: true } }));
         const fd = new FormData();
         fd.append('archivo', f);
         fd.append('pid', d.id);
@@ -11591,6 +11617,7 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'No se pudo crear el molde');
       pid = d.id;
+      setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now(), subiendo: true } }));   // ver `subirMoldesConDiseno`
       const fd = new FormData();
       fd.append('archivo', subirMoldeFile);
       fd.append('pid', pid);
@@ -12036,6 +12063,17 @@ export default function App() {
   const _defaultRow = () => {
     const r = {};
     cols.forEach(c => { r[c.id] = _colEsBoton(c) ? _botonDefault(c) : ''; });
+    // 🔴 EL DISEÑO YA VIENE PUESTO. Al entrar a la planilla las filas se sincronizan con el diseño
+    // preparado, pero las que se agregan DESPUÉS («Agregar fila», «Cargar por lote») nacían con el
+    // diseño vacío: con la columna marcada obligatoria, «Enviar» quedaba apagado («falta Diseño»)
+    // mientras la barra decía 3/3 (2026-09-16). Misma regla que al entrar: un solo diseño preparado
+    // → ése; varios → el activo.
+    const _dc = cols.find(c => c.role === 'diseno');
+    if (_dc && disenosPedido.length) {
+      const _nom = (disenosPedido.length === 1 ? disenosPedido[0]
+        : (disenosPedido.find(d => d.id === disenoActivo) || disenosPedido[0]))?.nombre;
+      if (_nom) r[_dc.id] = _nom;
+    }
     return r;
   };
   const importarCSVTexto = (texto) => {
@@ -12422,8 +12460,15 @@ export default function App() {
       const inv = planillaInvalidos();
       const colsInv = [...new Set(inv.map(x => x.label))];
       const sinArte = itemsSinArte;
-      it.push({ id: 'filas', label: 'cargar las prendas', corto: 'Cargar prendas', hecho: filas.length > 0,
-                faltan: filas.length ? [] : ['La planilla está vacía: agregá al menos una fila.'],
+      // «Cargar prendas» está hecho cuando hay AL MENOS UNA fila que se fabrica — el mismo criterio
+      // que apaga «Enviar». Antes contaba `filas.length > 0` y la barra decía ✓ con el botón apagado
+      // («Ninguna fila está completa: falta Diseño»), dos verdades distintas en la misma pantalla.
+      const _salen = filasQueSalen().length;
+      const _faltanTodas = filas.length && !_salen
+        ? [...new Set(filas.map(f => _faltaEnFila(f).map(c => c.label || c.id)).flat())].join(', ') : '';
+      it.push({ id: 'filas', label: 'cargar las prendas', corto: 'Cargar prendas', hecho: _salen > 0,
+                faltan: !filas.length ? ['La planilla está vacía: agregá al menos una fila.']
+                  : !_salen ? [`Ninguna fila está completa: falta ${_faltanTodas}. Cargá al menos una.`] : [],
                 ok: filas.length ? [`${filas.length} fila(s) cargada(s)`] : [] });
       it.push({ id: 'valores', label: 'valores válidos', corto: 'Revisar valores', hecho: inv.length === 0,
                 faltan: inv.length ? [`${inv.length} valor(es) fuera de las opciones en: ${colsInv.join(', ')}.`] : [],
@@ -12434,8 +12479,13 @@ export default function App() {
     } else if (pedidoPaso === 'resultados') {
       const enCurso = trabajosMulti.filter(t => t.estado === 'generando' || t.estado === 'en cola');
       const listos = trabajosMulti.filter(t => t.estado === 'listo');
-      it.push({ id: 'gen', label: 'armar la tizada', corto: 'Armar la tizada', hecho: trabajosMulti.length > 0 && !enCurso.length,
-                faltan: enCurso.length ? [`${enCurso.length} tizada(s) todavía en proceso.`] : (trabajosMulti.length ? [] : ['Todavía no se generó ninguna tizada.']),
+      const fallidos = trabajosMulti.filter(t => t.estado === 'error' || t.estado === 'cancelado');
+      // «Armar la tizada» está hecho cuando hay una tizada LISTA. Un trabajo que terminó en error
+      // no es una tizada armada: la barra decía ✓ 1/1 al lado del cartel rojo (2026-09-16).
+      it.push({ id: 'gen', label: 'armar la tizada', corto: 'Armar la tizada', hecho: listos.length > 0 && !enCurso.length,
+                faltan: enCurso.length ? [`${enCurso.length} tizada(s) todavía en proceso.`]
+                  : fallidos.length ? fallidos.map(t => t.estado === 'cancelado' ? 'La tizada se canceló.' : `No se pudo armar: ${t.error || 'error'}`)
+                    : (trabajosMulti.length ? [] : ['Todavía no se generó ninguna tizada.']),
                 ok: listos.map(t => `Tizada lista${t.nombre ? `: ${t.nombre}` : ''}`) });
     }
     return it;
@@ -12562,6 +12612,12 @@ export default function App() {
                 setActivoTab('pedidos');
                 setAdminSubView('dashboard');
                 setModoMiMolde(null);   // salir por el menú también sale del modo «mi molde»
+                // 🔴 …Y CIERRA LA MOLDERÍA ABIERTA EN CONFIGURACIÓN. `pidCfg` es «la moldería abierta, si
+                // hay»: con una abierta (Buzo), el buffer de variables (`variantesEdit`) se sembraba con
+                // las del Buzo y el visor del paso Arte —que filtra por variable— no encontraba la del
+                // pedido (Cuello redondo): quedaba en «Preparando las piezas…» para siempre. Reportado
+                // 2026-09-16 («entro al visor de pedido y queda bugiado con moldes de configuración»).
+                setMolderiaAbierta(null); setTabAjustesMolde('menu');
               }}
             >
               <Icon name="pedidos" />

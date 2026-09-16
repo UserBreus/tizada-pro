@@ -97,8 +97,8 @@ print("\n2 · 🔴 LA CELDA DEL SHORT VACÍA **NO** HEREDA EL TALLE DE LA CAMISE
 FILA_SIN = [{"talle": "M", "talle_short": "", "nombre": "JUAN", "numero": "10"}]
 _sho2 = S._traducir_prendas(FILA_SIN, SHORT, CAT_2T, reg=REG_SHORT)
 ok(_sho2 == [], f"esa fila NO fabrica el short (salieron {len(_sho2)})")
-ok(getattr(S._traducir_prendas, "faltantes", {}).get("Talle short") == 1,
-   f"y se dice qué columna faltó: {getattr(S._traducir_prendas, 'faltantes', {})}")
+ok(getattr(S._TP, "faltantes", {}).get("Talle short") == 1,
+   f"y se dice qué columna faltó: {getattr(S._TP, 'faltantes', {})}")
 _cam2 = S._traducir_prendas(FILA_SIN, CAMISETA, CAT_2T, reg=REG_CAMISETA)
 ok(len(_cam2) == 1 and _cam2[0]["talle"] == "M",
    "la camiseta de esa misma fila sí sale (cada molde se resuelve por su lado)")
@@ -110,16 +110,17 @@ FILA_MAL = [{"talle": "M", "talle_short": "L", "nombre": "", "numero": ""},
             {"talle": "M", "talle_short": "L", "nombre": "", "numero": ""},
             {"talle": "M", "talle_short": "2", "nombre": "", "numero": ""}]
 S._traducir_prendas(FILA_MAL, SHORT, CAT_2T, reg=REG_SHORT)
-_aj = getattr(S._traducir_prendas, "talle_ajeno", {})
+# (lo que la traducción anota vive en `S._TP`, hilo-local que cada llamada vacía — 2026-09-16)
+_aj = getattr(S._TP, "talle_ajeno", {})
 ok(_aj == {"L": 2}, f"el short avisa que «L» no es suyo, en 2 filas → {_aj}")
-ok(getattr(S._traducir_prendas, "col_talle", "") == "Talle short",
-   f"y de qué columna lo leyó, para poder explicarlo: {getattr(S._traducir_prendas, 'col_talle', '')!r}")
+ok(getattr(S._TP, "col_talle", "") == "Talle short",
+   f"y de qué columna lo leyó, para poder explicarlo: {getattr(S._TP, 'col_talle', '')!r}")
 S._traducir_prendas(FILA_MAL, CAMISETA, CAT_2T, reg=REG_CAMISETA)
-ok(getattr(S._traducir_prendas, "talle_ajeno", {}) == {},
+ok(getattr(S._TP, "talle_ajeno", {}) == {},
    "la camiseta, que sí tiene «M», no dispara nada")
 # Sin registro no se puede saber qué talles tiene: no se inventa una traba.
 S._traducir_prendas(FILA_MAL, SHORT, CAT_2T)
-ok(getattr(S._traducir_prendas, "talle_ajeno", {}) == {},
+ok(getattr(S._TP, "talle_ajeno", {}) == {},
    "sin registro del molde no se traba nada (no se sabe qué talles tiene)")
 
 print("\n3b · LA TRABA MIRA LA COLUMNA, NO EL MOLDE (un diseño vale si lo tiene UNO de sus moldes)")

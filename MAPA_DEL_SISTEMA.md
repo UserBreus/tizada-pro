@@ -1482,6 +1482,49 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (467) — 🔴 SEIS BUGS DEL PEDIDO, REPRODUCIDOS EN UN SANDBOX FIEL (datos + base
+  copiados) Y ARREGLADOS.** El usuario: *«cuando entro al visor de pedido queda bugiado con moldes
+  de configuración... cosas que no he visto arreglalo también»*.
+
+  **Cómo se reprodujo**: no alcanza el sandbox de sólo lectura (sin `activar` no se siembran las
+  variables y el visor miente). Receta que sirvió: copia de `datos/` + `entrada/` a un temporal
+  **y una copia de la BASE** (`BACKUP … WITH COPY_ONLY` a la carpeta de backups del SQL Server +
+  `RESTORE … MOVE` como `TizadaPro_sandbox`; `TIZADA_DB_NAME` la elige), `api_usuarios` saboteado
+  (sin login), puerto 8061. Script: `scratchpad/sandbox_8061.py`. ⚠️ El navegador del pane REUSA
+  los archivos elegidos en un file chooser anterior: un clic que abre el selector de archivos sube
+  solo lo que se subió antes (aparecieron 4 moldes que nadie eligió). No tocar zonas de carga.
+
+  1. **Visor del arte en «Preparando las piezas…» para siempre** (el reportado). `pidCfg` es «la
+     moldería abierta en Configuración, si hay»; con el Buzo abierto, el buffer de variables
+     (`variantesEdit`) era del Buzo y `varianteFiltro` no encontraba la del pedido. Ahora ir a
+     Pedidos por la barra cierra la moldería abierta, y `varianteFiltro` cae al catálogo si el
+     buffer no tiene la variable.
+  2. **«Nuevo pedido» dejaba «Cargados (4)»** (reporte del 15). `efimerosDelPedido()` sólo sumaba
+     lo anotado por esta pantalla; en una pestaña nueva no anotaba nada, y como el latido de esa
+     misma pestaña declaraba abiertos los moldes, el barrido tampoco. Ahora todo efímero MÍO es del
+     pedido: «Nuevo pedido» lo lista en el cartel y lo borra.
+  3. **El barrido de huérfanos borraba un molde A MITAD DEL ALTA** (medido: creado 11:16:57,
+     borrado 11:17:05). La pantalla lo anotaba como suyo recién al terminar (minutos). Ahora se
+     anota al crearlo, y el servidor no da por huérfano nada creado hace < 20 min ni con el
+     despliegue en curso (`_DESPL_FONDO`). `verificar_efimero` tiene el caso.
+  4. **Un molde sin filas tumbaba la tizada entera**: camiseta + short en el pedido, planilla con
+     «Talle» y sin «Talle short» → `generar_multi` contestaba 422 por el short y no salía NADA.
+     Ahora el molde sin filas se saltea con aviso; el 422 queda para cuando ningún molde tiene fila.
+     La barra de pasos ya no marca «Armar la tizada ✓» con un trabajo en error.
+  5. **Filas sin DISEÑO**: «Cargar por lote», «Agregar fila» y las 5 filas iniciales al recargar
+     nacían con el diseño vacío → con la columna obligatoria, «Enviar» apagado («falta Diseño») con
+     la barra en 3/3. Ahora nacen con el diseño del pedido, y «Cargar prendas» usa el mismo criterio
+     que el botón (`filasQueSalen`).
+  6. **«Hay filas sin elegir manga (2)» con UNA fila que sí la traía**: lo que `_traducir_prendas`
+     anota eran atributos de la función —compartidos entre hilos y nunca reiniciados—: las llamadas
+     de muestra (preview, fuentes, ficha) se acumulaban. Ahora es un hilo-local (`_TP`) que cada
+     llamada vacía; las muestras no cuentan.
+
+  Verificado en el sandbox: pedido con base (arte real, tela, lote, tizada, PDF RIP-verde) y pedido
+  camino B (2 moldes, nombrado, telas, planilla con dos columnas de talle).
+  Pendiente visto: en Arte camino B con ventana angosta (~800 px) el panel «Piezas y etiqueta»
+  se mete sobre la barra de abajo; a 1366 no.
+
 - **2026-09-16 (466) — 🔴 MOLDE CON DISEÑO: «NOMBRO LAS VERDES Y SE NOMBRAN LAS NARANJAS». La
   pieza i NO era la misma en todos los talles.**
 

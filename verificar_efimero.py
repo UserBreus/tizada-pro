@@ -64,9 +64,14 @@ def _catalogo():
         # 3. efímero abandonado (nadie lo tocó en 48 h): ESTE sí
         {"id": "prod_efim_viejo", "nombre": "Camiseta", "creado_por": 7, "propio": True,
          "efimero": True, "efimero_visto": VIEJO, "origen": "con_diseno", "creado": VIEJO},
-        # 4. efímero de un pedido ABIERTO ahora mismo (en otra pantalla): no se toca
+        # 4. efímero de un pedido ABIERTO ahora mismo (en otra pantalla): no se toca.
+        #    Creado hace media hora: ya pasó la gracia del recién subido (ver 5. y 4b).
         {"id": "prod_efim_hoy", "nombre": "Camiseta", "creado_por": 7, "propio": True,
-         "efimero": True, "efimero_visto": AHORA, "origen": "con_diseno", "creado": AHORA},
+         "efimero": True, "efimero_visto": AHORA, "origen": "con_diseno", "creado": AHORA - 30 * 60},
+        # 5. efímero RECIÉN SUBIDO (hace 1 minuto): su alta puede estar corriendo y la pantalla
+        #    todavía no lo anotó como suyo. Un barrido de huérfanos NO se lo puede llevar.
+        {"id": "prod_efim_recien", "nombre": "Short", "creado_por": 7, "propio": True,
+         "efimero": True, "efimero_visto": AHORA, "origen": "con_diseno", "creado": AHORA - 60},
     ]}
 
 
@@ -207,6 +212,17 @@ ok(sorted(_d.get("borrados") or []) == ["prod_efim_hoy", "prod_efim_viejo"],
    f"sin mandar ningún pid, se lleva mis dos efímeros huérfanos — borró {_d.get('borrados')}")
 ok("prod_catalogo" not in (_d.get("borrados") or []) and "prod_mio" not in (_d.get("borrados") or []),
    "🔴 se llevó un molde del catálogo o un «Mi artículo» de verdad")
+# 🔴 RECIÉN SUBIDO NO ES HUÉRFANO. El alta de un molde con diseño lleva minutos y la pantalla lo
+# anota como suyo recién al terminar: el barrido se llevaba el molde A MITAD DEL ALTA (medido
+# 2026-09-16: creado 11:16:57, borrado 11:17:05). Menos de 20 minutos de creado, no se toca.
+ok("prod_efim_recien" not in (_d.get("borrados") or []),
+   f"🔴 el barrido de huérfanos NO se lleva un molde subido hace un minuto ({_d.get('borrados')})")
+# …pero si el PEDIDO lo pide por su id («Nuevo pedido» lo lista como suyo), sí se va
+_instalar_dobles()
+_d2 = (S.app.test_client().post("/api/pedido/limpiar_efimeros",
+                                json={"pids": ["prod_efim_recien"]}).get_json() or {})
+ok("prod_efim_recien" in (_d2.get("borrados") or []),
+   f"…y pedido por su id (Nuevo pedido) sí se borra aunque sea reciente ({_d2.get('borrados')})")
 print(f"    OK    huérfanos borrados: {_d.get('borrados')}")
 
 # …pero NO el de una pantalla que lo tiene abierto (su latido lo declara cada 30 s)

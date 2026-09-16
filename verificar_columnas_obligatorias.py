@@ -83,10 +83,12 @@ FILAS = [
 
 print("\n1 · Sin nada configurado: vale el TALLE (el mínimo para poder cortar)")
 prod, cat = catalogo()
+# Lo que la traducción anota (descartadas, faltantes, obligatorias, toggles solos) vive en `S._TP`,
+# un hilo-local que cada llamada vacía al empezar: dos pedidos a la vez no se pisan (2026-09-16).
 out = S._traducir_prendas(FILAS, prod, cat)
 ok(len(out) == 1, f"🔴 de 5 filas se fabrica 1, la que tiene talle (salieron {len(out)})")
 ok(out and out[0]["talle"] == "M", "y es la del talle cargado")
-ok(getattr(S._traducir_prendas, "sin_talle", 0) == 4, "se cuentan las 4 que quedaron afuera")
+ok(getattr(S._TP, "sin_talle", 0) == 4, "se cuentan las 4 que quedaron afuera")
 ok(not any(p["talle"] == "M" for p in out[1:]), "no se rellena con «M» por defecto (era el bug)")
 
 print("\n2 · Con TALLE y DISEÑO obligatorios (el caso que pidió el usuario)")
@@ -99,10 +101,10 @@ filas2 = [
 out2 = S._traducir_prendas(filas2, prod2, cat2)
 ok(len(out2) == 1, f"🔴 sólo la fila COMPLETA se fabrica (salieron {len(out2)})")
 ok(out2 and out2[0]["talle"] == "M", "y es la que tiene las dos columnas")
-_f = getattr(S._traducir_prendas, "faltantes", {})
+_f = getattr(S._TP, "faltantes", {})
 ok(_f.get("Diseño") == 1 and _f.get("Talle") == 1,
    f"se dice QUÉ columna faltó en cada fila: {_f}")
-ok(sorted(getattr(S._traducir_prendas, "obligatorias", [])) == ["Diseño", "Talle"],
+ok(sorted(getattr(S._TP, "obligatorias", [])) == ["Diseño", "Talle"],
    "y cuáles eran las obligatorias, para poder explicarlo")
 
 print("\n3 · UNA COLUMNA QUE ESTE MOLDE NO USA NO SE PIDE (si no, no se fabricaría nada)")
@@ -121,7 +123,7 @@ cat4 = {"productos": [prod4],
 out4 = S._traducir_prendas([{"talle": "M", "manga": "corta", "diseno": "JUGADOR"}], prod4, cat4)
 ok(len(out4) == 1,
    f"🔴 la fila SE FABRICA aunque «Talle short» esté marcada obligatoria: este molde no la usa (salieron {len(out4)})")
-ok(getattr(S._traducir_prendas, "obligatorias", []) == ["Talle"],
+ok(getattr(S._TP, "obligatorias", []) == ["Talle"],
    f"y sólo se exige la columna que el molde sí usa: {getattr(S._traducir_prendas, 'obligatorias', [])}")
 # …y si el molde SÍ la usa, entonces sí se exige
 prod5 = dict(prod4, mapeo_columnas={"talle": "talle_short", "nombre": "nombre",

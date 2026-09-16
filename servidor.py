@@ -8174,6 +8174,9 @@ def _talles_cruzados(pids, prendas, cat, reg_de=None):
     return None
 
 
+_TP = threading.local()      # lo que anota `_traducir_prendas` para quien la llama (por hilo)
+
+
 def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None,
                       exigir_obligatorias=True):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
@@ -8186,6 +8189,13 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     que viaja en la fila es la de uno solo: para el otro, la fila llegaba SIN variable y el motor
     generaba TODAS sus piezas (y la etiqueta caía a la posición por defecto). Con este mapa, cada
     molde recupera la variable que ese espacio eligió PARA ÉL en el paso 1."""
+    # 🔴 LO QUE ESTA LLAMADA DEJA ANOTADO (filas descartadas, toggles elegidos solos, talles
+    # ajenos) vive en un hilo-local y se VACÍA acá, al empezar. Antes eran atributos de la función:
+    # compartidos por todos los hilos (dos pedidos a la vez se pisaban) y `toggles_por_defecto` no
+    # se reiniciaba nunca, así que las llamadas de MUESTRA (preview del arte, chequeo de fuentes,
+    # ficha: `exigir_obligatorias=False`, con filas sin manga) se acumulaban y el aviso del pedido
+    # decía «filas sin elegir manga (2)» con UNA fila que sí la traía (2026-09-16).
+    _TP.toggles = {}
     mapeo_columnas = {"talle": "talle", "nombre": "nombre", "numero": "numero",
                       "manga": "manga", "manga_corta_val": "corta", "manga_larga_val": "larga"}
     if prod and "mapeo_columnas" in prod:
@@ -8351,12 +8361,9 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             # ELEGIDO por el usuario nunca se agregaba** — la prenda salía con la opción por
             # defecto del motor. Lo agarró `verificar_cantidad.py`.
             opcion = val or (ti["opciones"][0] if ti["opciones"] else "")
-            if not val and opcion:
+            if not val and opcion and exigir_obligatorias:   # las muestras internas no se avisan
                 _lbl = ti.get("label") or ti.get("clave") or "opción"
-                _tg = getattr(_traducir_prendas, "toggles_por_defecto", None)
-                if _tg is None:
-                    _tg = _traducir_prendas.toggles_por_defecto = {}
-                _tg[_lbl] = _tg.get(_lbl, 0) + 1   # vacío → primera opción
+                _TP.toggles[_lbl] = _TP.toggles.get(_lbl, 0) + 1   # vacío → primera opción
             if opcion:
                 toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
         _tv = pr.get(talle_col, "")
@@ -8409,11 +8416,11 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
         for _ in range(_n - 1):
             out.append(copy.deepcopy(translated_pr))   # copia PROFUNDA: comparten listas si no
     # qué quedó afuera y por qué (la pantalla lo avisa; nunca en silencio)
-    _traducir_prendas.sin_talle = _descartadas
-    _traducir_prendas.faltantes = _faltantes
-    _traducir_prendas.obligatorias = [c.get("label") or c.get("id") for c in _oblig]
-    _traducir_prendas.talle_ajeno = _talle_ajeno       # talle que este molde NO tiene -> cuántas filas
-    _traducir_prendas.col_talle = _lbl_talle           # de qué columna lo leyó
+    _TP.sin_talle = _descartadas
+    _TP.faltantes = _faltantes
+    _TP.obligatorias = [c.get("label") or c.get("id") for c in _oblig]
+    _TP.talle_ajeno = _talle_ajeno       # talle que este molde NO tiene -> cuántas filas
+    _TP.col_talle = _lbl_talle           # de qué columna lo leyó
     return out
 
 
@@ -8952,6 +8959,7 @@ def generar_multi():
     #   `avisos_pedido` → cosas del PEDIDO (variable sin elegir, etiqueta al lugar por defecto…),
     #                     que no tienen nada que ver con el arte.
     avisos_pedido = []
+    _sin_filas, _obl_sin_filas = [], []      # moldes del pedido que no recibieron ninguna fila
     # FICHA TÉCNICA: un molde guía POR CADA DISEÑO del pedido (y por cada variable dentro del
     # diseño), en el orden en que aparecen. Antes era uno solo por molde — el de la 1ª fila — así
     # que un pedido con «Jugador» + «Golero» mostraba un solo diseño y escondía el otro.
@@ -9010,26 +9018,28 @@ def generar_multi():
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd)
         # Las filas sin algún dato obligatorio no se fabrican; lo pregunta la PANTALLA antes de
         # armar (misma regla, `filasIncompletas`), así que acá no se repite.
-        _obl = getattr(_traducir_prendas, "obligatorias", []) or []
+        _obl = getattr(_TP, "obligatorias", []) or []
         # 🔴 LOS TOGGLES QUE SE ELIGIERON SOLOS. Una celda vacía toma la primera opción («Manga
         # corta»): la prenda sale igual, pero hay que DECIRLO — si no, se imprime y se corta algo
         # que nadie pidió y se descubre con la prenda en la mano (auditoría 2026-09-14).
-        _tgd = getattr(_traducir_prendas, "toggles_por_defecto", {}) or {}
+        _tgd = getattr(_TP, "toggles", {}) or {}
         if _tgd:
             avisos_pedido.append(
                 "Hay filas sin elegir " + ", ".join(f"«{k}» ({v})" for k, v in sorted(_tgd.items()))
                 + ": salen con la primera opción. Si no es la que querías, completá esas celdas.")
-        _traducir_prendas.toggles_por_defecto = {}
         # (Las filas incompletas ya no se avisan ACÁ: la pantalla lo pregunta ANTES de armar la
         #  tizada y la persona elige seguir sin ellas o completarlas — pedido del usuario
         #  2026-08-31. Repetirlo después era ruido sobre una decisión ya tomada.)
         if not translated:
-            return jsonify({"error": "ninguna fila está completa",
-                            "detalle": "Para fabricar, cada fila necesita: "
-                                       + ", ".join(_obl)
-                                       + ". Ninguna fila de la planilla las tiene todas. "
-                                       "(Qué columnas hacen falta se configura en "
-                                       "Configuración → Planillas.)"}), 422
+            # 🔴 UN MOLDE SIN FILAS NO TUMBA EL PEDIDO ENTERO. Con la camiseta y el short en el mismo
+            # pedido, una planilla que sólo trae «Talle» (y no «Talle short») es un pedido válido de
+            # camisetas: la pantalla lo deja pasar («las columnas de talle son un grupo», 2026-09-14)
+            # y acá se contestaba 422 «ninguna fila está completa» por el short — y no salía NADA,
+            # ni la camiseta (medido 2026-09-16). El short se saltea y se avisa; el 422 queda para
+            # cuando NINGÚN molde tiene una fila.
+            _sin_filas.append(nombre)
+            _obl_sin_filas = list(_obl)
+            continue
         # AVISO (no traba): la posición de la etiqueta se guarda POR VARIABLE. Una fila que llega
         # sin variable —molde pedido entero, o variable cuyos valores no resuelven piezas— usa la
         # posición de la primera variable configurada (antes se iba al lugar por defecto, ver
@@ -9255,8 +9265,17 @@ def generar_multi():
                 "_gnombre": (gconf or {}).get("nombre") or _label_columna_talle(prod, cat)})
         if nombre not in nombres:
             nombres.append(nombre)
+    if not molds_data and _sin_filas:
+        return jsonify({"error": "ninguna fila está completa",
+                        "detalle": "Para fabricar, cada fila necesita: " + ", ".join(_obl_sin_filas)
+                                   + ". Ninguna fila de la planilla las tiene todas. "
+                                   "(Qué columnas hacen falta se configura en "
+                                   "Configuración → Planillas.)"}), 422
     if not molds_data:
         return jsonify({"error": "ninguna fila tiene un diseño con arte aprobado"}), 409
+    if _sin_filas:
+        avisos_pedido.append(("«" + "», «".join(_sin_filas) + "»: ninguna fila de la planilla trae su talle, "
+                              "así que no entró en la tizada. Si tenía que salir, cargale su columna de talle."))
     # Nesting y telas: del primer molde (espaciado/margen son a nivel de hoja; el
     # giro y la tela de cada pieza ya van por-molde).
     cfg_nesting = molds_data[0]["_cfg_n"]
@@ -10082,6 +10101,17 @@ def limpiar_efimeros():
                 continue
             if _efimero_abierto(_pid_h):
                 continue                 # hay otra pantalla trabajando con ese pedido
+            # 🔴 RECIÉN SUBIDO NO ES HUÉRFANO. El alta de un molde con diseño lleva minutos y la
+            # pantalla recién lo anota como suyo al terminar; en ese rato el barrido lo veía sin
+            # dueño y se lo llevaba A MITAD DEL ALTA (medido 2026-09-16: creado 11:16:57, borrado
+            # 11:17:05). Ni uno creado hace menos de 20 minutos, ni uno cuyo despliegue esté en curso.
+            if time.time() - float(_p.get("creado") or 0) < 20 * 60:
+                continue
+            _pl_h = os.path.normcase(os.path.abspath(_ruta_entrada("plantilla.ai", _pid_h)))
+            with _DESPL_FONDO_LOCK:
+                _en_alta = _pl_h in _DESPL_FONDO
+            if _en_alta:
+                continue
             pids.append(_pid_h)
     borrados, ignorados = [], []
     for pid in pids:
