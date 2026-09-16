@@ -270,7 +270,123 @@ def piezas_de_mesa(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
         if d is not None:
             import copy
             return copy.deepcopy(d["contornos"].get(talle) or [])
+        # Sin desplegado todavía: se leen TODOS los talles de la mesa para poder ponerlos en el
+        # orden de referencia (ver `canonizar_orden`). Cuesta lo mismo que desplegar la mesa, y se
+        # recuerda por archivo: es el camino lento de siempre, pero con los mismos índices.
+        import copy
+        return copy.deepcopy(_mesa_canonica(doc, mesa).get(talle) or [])
     return _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2, lado_min_cm)
+
+
+_CANON_CACHE = {}
+
+
+def _mesa_canonica(doc, mesa):
+    """`{talle: [piezas]}` de una mesa, leídas del archivo y en el orden de referencia."""
+    nombre = getattr(doc, "name", None) or ""
+    try:
+        clave = (os.path.normcase(os.path.abspath(nombre)), int(os.path.getmtime(nombre)), mesa)
+    except OSError:
+        clave = None
+    if clave is not None and clave in _CANON_CACHE:
+        return _CANON_CACHE[clave]
+    talles = talles_del_molde(doc)
+    conts = {}
+    for t in talles:
+        pzs = _piezas_de_mesa_cruda(doc, mesa, t)
+        if pzs:
+            conts[t] = pzs
+    conts, _ = canonizar_orden(conts, talles)
+    if clave is not None:
+        if len(_CANON_CACHE) > 20:
+            _CANON_CACHE.clear()
+        _CANON_CACHE[clave] = conts
+    return conts
+
+def canonizar_orden(conts, talles):
+    """Las piezas de cada talle, en el ORDEN DEL TALLE DE REFERENCIA. Devuelve `(conts, cambió)`.
+
+    🔴 POR QUÉ (2026-09-16, «BUZO CON CIERRE VOLEY»). Todo el camino B descansa en una regla: la
+    pieza *i* de la mesa *m* es la MISMA en todos los talles. Con eso se arma el registro, el visor
+    elige «las homólogas» de una pieza, se nombra, se guardan configuraciones y se decide la
+    etiqueta del archivo. Pero *i* salía del ORDEN EN QUE ESTÁ DIBUJADO cada talle, y nada obliga
+    al diseñador a dibujar las piezas en el mismo orden en todas las capas: en el buzo, los 10
+    talles femeninos traen las dos piezas curvas (51 × 10,5 cm, una girada) al revés que los otros
+    20. Síntoma que reportó el usuario: «nombro las verdes y se nombran las naranjas». Y no era
+    sólo el nombre: en esos talles la tela, la etiqueta y la variable de una iban a la otra.
+
+    La correspondencia sale del DIBUJO: los talles están anidados (la misma pieza de cada talle va
+    una encima de la otra), así que la homóloga es la que se SUPERPONE — `_emparejar_por_solape`,
+    la misma regla del camino A, que no se deja engañar por dos piezas del mismo tamaño.
+
+    · Referencia = el talle con MÁS piezas (a igualdad, el primero del archivo): determinista.
+    · Sólo se reordenan los talles con la MISMA cantidad de piezas que la referencia. Con otra
+      cantidad no hay forma de expresar «falta la pieza 3» en una lista, y esos talles quedan como
+      antes (pendiente conocido: «talles con distinta cantidad de piezas»).
+    · Una pieza sin superposición con ninguna se queda con su número si está libre: con el dibujo
+      en orden, el resultado es EXACTAMENTE el de siempre (medido en los 6 moldes del caché: sólo
+      el buzo cambia).
+    """
+    orden = [t for t in talles if t in conts] + [t for t in conts if t not in talles]
+    if len(orden) < 2:
+        return conts, False
+    ref_t = max(orden, key=lambda t: (len(conts[t]), -orden.index(t)))
+    ref = conts[ref_t]
+    n = len(ref)
+    import motor_pedido as MP
+    salida, cambio = {}, False
+    for t in orden:
+        pz = conts[t]
+        if t == ref_t or len(pz) != n:
+            salida[t] = pz
+            continue
+        eleccion = MP._emparejar_por_solape(ref, {i: i for i in range(n)}, pz)
+        mapa = {i: j for i, (j, _rot) in eleccion.items()}
+        usados = set(mapa.values())
+        libres = [j for j in range(n) if j not in usados]
+        for i in range(n):
+            if i in mapa:
+                continue
+            j = i if i in libres else libres[0]
+            mapa[i] = j
+            libres.remove(j)
+        if any(mapa[i] != i for i in range(n)):
+            cambio = True
+        salida[t] = [pz[mapa[i]] for i in range(n)]
+    return salida, cambio
+
+
+def refrescar_geometria(reg, doc):
+    """Pone al día la GEOMETRÍA de cada entrada del registro con el contorno que hoy tiene su
+    (mesa, talle, idx_mesa). Devuelve cuántas entradas cambiaron. Los NOMBRES no se tocan.
+
+    Para los moldes cargados antes de `canonizar_orden`: sus índices ya apuntan a la pieza
+    correcta (el registro se armó por índice y el índice ahora es el de referencia), pero el
+    ancho, el alto, la caja y el ancla por defecto se copiaron de la pieza que estaba en ese
+    lugar con el orden viejo. Son datos derivados: sólo los escribe el alta.
+    """
+    cambios = 0
+    cache = {}
+    for _nom, por_t in (reg or {}).items():
+        for talle, inf in (por_t or {}).items():
+            if not isinstance(inf, dict) or inf.get("mesa") is None or inf.get("idx_mesa") is None:
+                continue
+            k = (inf["mesa"], talle)
+            if k not in cache:
+                cache[k] = piezas_de_mesa(doc, inf["mesa"], talle)
+            pzs = cache[k]
+            i = int(inf["idx_mesa"])
+            if i >= len(pzs):
+                continue
+            cont = pzs[i]
+            nuevo = {"w_cm": round(cont["w"] / cont["user_unit"] / CM, 1),
+                     "h_cm": round(cont["h"] / cont["user_unit"] / CM, 1),
+                     "bbox_mu": [round(v, 2) for v in cont["bbox_mu"]],
+                     "ancla": _ancla_por_defecto(cont)}
+            if any(inf.get(c) != v for c, v in nuevo.items()):
+                inf.update(nuevo)
+                cambios += 1
+    return cambios
 
 
 def _piezas_de_mesa_cruda(doc, mesa, talle, area_min_cm2=0.25, lado_min_cm=0.3):
@@ -463,8 +579,11 @@ def alta_molde_con_diseno(path, avisar=None, procesos=None, paginas=True):
     las piezas entre talles por centroide, forma y solape — heurísticas que a veces cruzan piezas
     parecidas (de ahí salieron varios bugs del sistema). En el camino B **la correspondencia es
     exacta por construcción**: los talles son CAPAS de la misma mesa, así que la pieza *i* de la
-    mesa *m* en el talle T es la misma que la pieza *i* de la mesa *m* en el talle T'. No hay nada
-    que adivinar.
+    mesa *m* en el talle T es la misma que la pieza *i* de la mesa *m* en el talle T'.
+    ⚠️ Eso vale porque `canonizar_orden` (en `desplegar_mesa`) pone las piezas de cada talle en el
+    orden del talle de referencia. Antes *i* era el ORDEN DEL DIBUJO y se daba por hecho que era el
+    mismo en todas las capas: en el «BUZO CON CIERRE VOLEY» los talles femeninos traen dos piezas al
+    revés y el nombre, la tela y la etiqueta de una iban a la otra (2026-09-16).
 
     Las piezas salen con nombre PROVISORIO («Pieza 1», «Pieza 2»…) porque el usuario todavía no las
     nombró: se cargan TODAS igual (regla del 2026-08-18 — una pieza sin nombre tiene que entrar al
@@ -916,7 +1035,8 @@ _CONT_CACHE = {}          # {(carpeta, mesa): índice ya leído}  — no releer 
 # Versión de la REGLA DE CONTORNOS. Un `m{mesa}.json` con otra versión tiene contornos viejos:
 # se rehacen (5 s por mesa, en paralelo) y sus páginas por talle se conservan (no dependen de
 # la regla). 2 = el recorte con el diseño adentro, no el mayor del grupo (2026-09-07).
-_V_CONTORNOS = 3          # 3 = la línea de corte del archivo es el contorno (2026-09-07)
+_V_CONTORNOS = 4          # 3 = la línea de corte del archivo es el contorno (2026-09-07)
+                          # 4 = las piezas de cada talle en el orden del talle de referencia (2026-09-16)
 # Versión de la etapa de PÁGINAS. 3 = la línea de corte se saca del dibujo (`quitar_linea_de_corte`).
 # 4 = también se saca la ETIQUETA DE CORTE que ya trae el diseño. 5 = se decide POR FAMILIA a nivel
 # molde (`decidir_familias`), no por umbrales; el hash de la decisión (`etq`) también entra en la
@@ -1184,7 +1304,9 @@ def _ancho_texto(fuente, b, dec):
 import re as _re
 
 _ETQ_JSON = "etiqueta_archivo.json"
-_V_ETQ = 1                  # versión de la REGLA de decisión (subir si cambia el criterio)
+_V_ETQ = 2                  # versión de la REGLA de decisión (subir si cambia el criterio)
+                            # 2 = los índices de pieza son los del orden de referencia: una decisión
+                            #     vieja podía contar UNA pieza como dos (2026-09-16)
 _ETQ_FRACCION = 2.0 / 3.0   # una familia es etiqueta de corte si está en ≥ 2/3 de las piezas
 _ETQ_RADIO_MM = 40.0        # a qué pieza pertenece un texto: la más cercana, hasta 40 mm
 
@@ -1980,6 +2102,13 @@ def desplegar_mesa(path_molde, mesa, talles, carpeta=None, contornos=True, pagin
                 pzs = _piezas_de_mesa_cruda(doc, mesa, talle)
                 if pzs:
                     conts[talle] = pzs
+            # 🔴 LA PIEZA i ES LA MISMA EN TODOS LOS TALLES (ver `canonizar_orden`). Si el orden
+            # cambió respecto del dibujo, lo que el JSON anterior guardaba POR ÍNDICE (marcas «00» y
+            # «NOMBRE», línea de corte, etiqueta del archivo) apunta a otra pieza: no se reusa y las
+            # páginas se rehacen.
+            conts, _reordenado = canonizar_orden(conts, talles)
+            if _reordenado:
+                _viejo = None
             # el marco de la mesa (CropBox) y la escala de dispositivo: lo necesitan los
             # placeholders «00»/«NOMBRE» para expresar su posición como la de `bbox_mu`
             _pg = doc[mesa - 1]

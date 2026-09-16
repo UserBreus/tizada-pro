@@ -1482,6 +1482,66 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-16 (466) — 🔴 MOLDE CON DISEÑO: «NOMBRO LAS VERDES Y SE NOMBRAN LAS NARANJAS». La
+  pieza i NO era la misma en todos los talles.**
+
+  Archivo: `BUZO CON CIERRE VOLEY .ai` (molde «Buzo medio cierre», `prod_20260916_095236_ef99`, camino
+  B, 1 mesa, 7 piezas, 30 talles). Dos piezas curvas idénticas (51 × 10,5 cm, una girada 180°).
+
+  **Causa, medida.** Todo el camino B descansa en «la pieza *i* de la mesa *m* es la misma en todos
+  los talles»: con eso se arma el registro (`registro[Pieza n][talle] = pzs[i]`), el visor elige las
+  homólogas (`_homologasB`: misma mesa y mismo `t_idx`), se nombra (`crearGrupoTodas` junta los
+  `t_idx` de la selección), se guardan configuraciones (`(mesa, idx_mesa)`) y se decide la etiqueta
+  del archivo (`piezas_lista`). Pero *i* salía de `_piezas_de_mesa_cruda`, que ordena **por el orden
+  del dibujo en cada capa**. En este archivo los **10 talles femeninos** traen esas dos piezas al
+  revés que los otros 20. Al pintar la verde en todos los talles, la selección juntaba los índices
+  3 (20 talles) y 4 (femeninos) → se nombraban las dos («Int 1» e «Int 2»). Y no era sólo el nombre:
+  en los femeninos la tela, la etiqueta y la variable de una iban a la otra; y una etiqueta del
+  archivo que está en UNA pieza se contaba como en dos (cambia si se oculta).
+  🔴 El comentario del alta decía «la correspondencia es exacta por construcción, no hay nada que
+  adivinar». **Era falso**: nada obliga a dibujar las capas en el mismo orden.
+
+  **Arreglo en el ORIGEN, no en cada consumidor.** `PD.canonizar_orden(conts, talles)` pone las piezas
+  de cada talle en el orden del talle de REFERENCIA (el de más piezas; a igualdad, el primero del
+  archivo), emparejando por SUPERPOSICIÓN con `MP._emparejar_por_solape` — la regla del camino A, que
+  no se engaña con dos piezas del mismo tamaño (los talles están anidados). Se aplica en
+  `desplegar_mesa` (de donde leen motor, visor, marcas «00»/«NOMBRE», línea de corte y etiqueta) y
+  en `piezas_de_mesa` sin desplegado (`_mesa_canonica`). Con eso la invariante vuelve a ser verdad y
+  **ningún consumidor cambió**. Si el orden cambió, lo que el JSON viejo guardaba POR ÍNDICE no se
+  reusa y las páginas se rehacen.
+  Límites, a propósito: sólo se reordenan talles con la MISMA cantidad de piezas que la referencia
+  (una lista no puede expresar «falta la 3»: ver «talles con distinta cantidad de piezas»); una pieza
+  sin superposición conserva su número.
+  **Medido en los 6 moldes del caché de desplegados: sólo el buzo cambia** (10 talles); los otros 5
+  —incluido el de 14 piezas × 20 talles— dan exactamente lo mismo que antes.
+
+  **Lo ya guardado se rehace solo, una vez:** `_V_CONTORNOS` 3→4, `_V_ETQ` 1→2 (la decisión de la
+  etiqueta contaba por índice), `_CACHE_DESPL_VERSION` → `v466d`, y el visor guardado pasó a
+  `visor_contornos.v4.json` — al rehacerlo, `_refrescar_registro_b` pone al día la GEOMETRÍA del
+  registro (ancho, alto, caja, ancla por defecto; los NOMBRES no se tocan). En los moldes ya cargados
+  los índices del registro quedan apuntando a la pieza correcta sin migrar nada: el registro se armó
+  por índice, y el índice ahora es el de referencia.
+  `contrato_molde_b` suma las versiones del desplegado a su clave (si no, cada contrato re-desplegaba).
+
+  Contrato `verificar_orden_talles_camino_b.py`: la regla pura (cruzado se endereza, en orden no
+  cambia nada, otra cantidad no se toca, sin superposición conserva, referencia determinista), el
+  archivo real (cada pieza del mismo lado de la mesa en los 30 talles; el visor no rotula ninguna con
+  el nombre de otra) y las versiones. **Calibrado**: con la función desactivada da 5 fallas (2 piezas
+  cruzadas, 20 rótulos mal).
+
+  **Aplicado y medido en el molde real del usuario** (servidor reiniciado 10:25 con el código nuevo):
+  el visor se rehízo (`visor_contornos.v4.json`), `_refrescar_registro_b` puso al día **20 entradas**
+  (las 2 piezas × los 10 talles femeninos) y en los **30 talles** la curva de la derecha se llama
+  «Int 1» y la de la izquierda «Int 2». Verificado: 65 contratos + los 3 de integración del desplegado
+  (alta 186 s, desplegado 260 s, reparto 130 s) en verde.
+  ⏳ **Del lado del usuario**: el bug ya le había puesto a las dos piezas «Int 1» e «Int 2». Ahora cada
+  una es UNA pieza en todos los talles: hay que renombrarlas como corresponda.
+
+  **Trampa del instrumento, de paso:** `verificar_glifos_del_nombre` quedó en rojo al aparecer el buzo
+  — tomaba el PRIMER molde del camino B del catálogo, y el buzo no trae marcas «00»/«NOMBRE» (medido
+  con el código viejo y el nuevo: ninguna), así que devolver 0 caracteres era lo correcto. Ahora
+  elige un molde que tenga nombre y número, y si no hay lo dice.
+
 - **2026-09-16 (465) — 🧹 CÓDIGO LIMPIO: Python 31 → 0 avisos, frontend 284 → 0 errores (47 avisos
   de dependencias, a propósito). Y EL INSTRUMENTO MENTÍA.**
 

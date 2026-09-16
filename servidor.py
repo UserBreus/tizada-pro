@@ -2591,7 +2591,12 @@ _ES_PROVISORIO = re.compile(r"^Pieza( extra)? \d+'*$")
 # nombrar piezas y de ubicar la etiqueta abren **al instante**, por pesado que sea el diseño:
 # medido, armarlo a demanda cuesta 52 s por talle y son enteros leer los dibujos del archivo.
 # Es liviano: ~5 KB por talle (sólo contornos), ~100 KB el molde entero.
-_VISOR_JSON = "visor_contornos.json"
+# 🔴 CON VERSIÓN EN EL NOMBRE. El visor rotula cada pieza con su índice DENTRO DEL TALLE: desde que
+# esos índices salen del orden de referencia (`PD.canonizar_orden`, 2026-09-16) un visor guardado
+# antes rotularía cruzadas las piezas de los talles reordenados. Con otro nombre, el viejo no se
+# lee y el nuevo se arma solo la primera vez (ver `_visor_leer`).
+_VISOR_JSON = "visor_contornos.v4.json"
+_VISOR_JSON_VIEJOS = ("visor_contornos.json",)
 
 
 def _visor_guardar(pid, visor):
@@ -2634,6 +2639,14 @@ def _visor_leer(pid, talle_ref=None, todo=False):
                     _t0 = time.time()
                     _d = PD.visor_todos(_ruta_entrada("plantilla.ai", pid))
                     _visor_guardar(pid, _d)
+                    for _vn in _VISOR_JSON_VIEJOS:
+                        try:
+                            os.remove(_ruta_datos(_vn, pid))
+                        except OSError:
+                            pass
+                    # Si se rehízo porque el visor era de antes de `canonizar_orden`, la geometría
+                    # del registro de ese molde también es de antes: una vez, acá.
+                    _refrescar_registro_b(pid)
                     print(f"[camino B] visor de {pid} listo: {len(_d)} talles en {time.time()-_t0:.0f}s")
                 except Exception as e:
                     print(f"[camino B] no se pudo preparar el visor de {pid}: {e}")
@@ -2648,6 +2661,29 @@ def _visor_leer(pid, talle_ref=None, todo=False):
         return None              # pidieron un talle que no está: que lo calcule el motor
     _ts = list(_d)               # sin talle pedido: el del medio, igual que `detectar_para_visor`
     return _d[_ts[len(_ts) // 2]]
+
+
+def _refrescar_registro_b(pid):
+    """La geometría del registro de un molde del camino B, al día con sus contornos actuales
+    (`PD.refrescar_geometria`). Los nombres no se tocan; si nada cambió, no se escribe nada."""
+    try:
+        import piezas_con_diseno as PD
+        import pymupdf as fitz
+        reg = _cargar("registro_producto.json", pid) or {}
+        if not reg:
+            return 0
+        _doc = fitz.open(_ruta_entrada("plantilla.ai", pid))
+        try:
+            n = PD.refrescar_geometria(reg, _doc)
+        finally:
+            _doc.close()
+        if n:
+            _guardar_registro(pid, reg)
+            print(f"[camino B] registro de {pid}: {n} entrada(s) con la geometría al día")
+        return n
+    except Exception as e:
+        print(f"[camino B] no se pudo poner al día el registro de {pid}: {e}")
+        return 0
 
 
 def _es_camino_b(pid):
@@ -2870,10 +2906,11 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                 # Se re-subió por el camino de siempre encima de uno con diseño: el visor guardado
                 # es de OTRO archivo. Dejarlo haría que «nombrar piezas» mostrara las piezas del
                 # molde anterior — y como no se abre el PDF, nadie se enteraría.
-                try:
-                    os.remove(_ruta_datos(_VISOR_JSON, _PID))
-                except OSError:
-                    pass
+                for _vn in (_VISOR_JSON,) + _VISOR_JSON_VIEJOS:
+                    try:
+                        os.remove(_ruta_datos(_vn, _PID))
+                    except OSError:
+                        pass
                 # Lo mismo con el molde DESPLEGADO (páginas por talle + contornos): es del archivo
                 # anterior. El sello lo invalidaría igual, pero son decenas de MB que no sirven.
                 import shutil as _sh
@@ -3089,7 +3126,8 @@ def _procesos_alta():
 
 _CACHE_DESPL = os.path.join(DATOS, "desplegado_cache")
 _CACHE_DESPL_MAX = 6          # los últimos N archivos distintos (~120 MB cada uno)
-_CACHE_DESPL_VERSION = "v394c"     # c: la línea de corte del archivo es el contorno y sale del dibujo
+_CACHE_DESPL_VERSION = "v466d"     # c: la línea de corte del archivo es el contorno y sale del dibujo
+                                   # d: las piezas de cada talle en el orden del talle de referencia
 
 
 def _sha1_archivo(path):
@@ -4231,7 +4269,8 @@ def _emparejado_camino_b(pid):
 
     Es la misma pantalla que el camino A (regla del usuario 2026-09-04: «exactamente la misma
     herramienta»), pero acá no hay nada que emparejar: los talles son capas de la misma mesa y la
-    pieza *i* de la mesa *m* es la misma en todos. Así que la «asignación» sale del registro tal
+    pieza *i* de la mesa *m* es la misma en todos — porque el desplegado las pone en el orden del
+    talle de referencia (`PD.canonizar_orden`), no en el del dibujo. Así que la «asignación» sale del registro tal
     cual y viene TODA confirmada (`manual` = la asignación menos la guía): la lista no tiene
     pendientes, sólo nombres por poner. `nombres_guia` va por `pieza_idx` del talle guía, que es
     el `idx` con que el visor de ese talle rotula cada pieza."""

@@ -118,17 +118,24 @@ def main():
        "`fuente_chars` mira el molde cuando es del camino B (antes leía sólo `arte.ai`)")
     ok("por_talle" in fuente_chars_src,
        "…y junta también la tipografía de CADA TALLE (en el camino B cada talle trae la suya)")
+    # 🔴 UN MOLDE QUE TRAIGA NOMBRE Y NÚMERO. Antes se tomaba el PRIMER molde del camino B del
+    # catálogo, y el 2026-09-16 ése pasó a ser el «Buzo medio cierre», que no tiene marcas «00» ni
+    # «NOMBRE» (medido con el código viejo y el nuevo: ninguna). Devolver 0 caracteres ahí es lo
+    # CORRECTO, y el contrato quedaba rojo por elegir mal el caso, no por un error del sistema.
+    import piezas_con_diseno as _PDg
     cb = []
     try:
         cat_prod = S._cargar_catalogo()
         for p in (cat_prod.get("productos") or []):
             pid = p.get("id")
             if pid and S._es_camino_b(pid):
-                cb.append(pid)
+                _pl = S._ruta_entrada("plantilla.ai", pid)
+                if _PDg.desplegado_listo(_pl) and (_PDg.personalizacion_con_diseno(_pl, armar=False) or {}):
+                    cb.append(pid)
     except Exception:
         pass
     if not cb:
-        print("    ⚠️    no hay ningún molde del camino B cargado: no se puede probar en vivo")
+        print("    ⚠️    no hay ningún molde del camino B cargado CON nombre/número: no se puede probar en vivo")
     else:
         pid = cb[0]
         with S.app.test_request_context(f"/api/pedido/fuente_chars?producto_id={pid}"):

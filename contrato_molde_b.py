@@ -46,8 +46,12 @@ def espacio_desplegado(origen, prefijo, procesos=None, alta=None):
     """
     import piezas_con_diseno as PD
     alta = alta or PD.alta_molde_con_diseno
+    # Las versiones del desplegado entran en la clave: un espacio guardado con contornos de otra
+    # regla (p. ej. antes de `canonizar_orden`) se re-desplegaría ADENTRO de cada contrato, y cada
+    # uno pagaría los ~100 s que este módulo existe para ahorrar.
     guardado = os.path.join(tempfile.gettempdir(),
-                            f"contrato_molde_b_{_clave(origen)}_{VERSION}")
+                            f"contrato_molde_b_{_clave(origen)}_{VERSION}"
+                            f"_c{PD._V_CONTORNOS}p{PD._V_PAGINAS}e{PD._V_ETQ}")
     listo = os.path.join(guardado, ".listo")
     reusado = os.path.exists(listo) and not os.environ.get("VERIF_SIN_CACHE")
     if not reusado:

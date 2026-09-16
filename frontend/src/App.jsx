@@ -11304,7 +11304,9 @@ export default function App() {
 
   // ── CAMINO B: elegir piezas y nombrarlas, como en la pantalla de edición ────────────────────
   // En el lienzo de TODOS los talles, una pieza es la MISMA en cada talle (misma mesa, mismo
-  // índice: en el camino B la correspondencia es exacta). Tocar una elige sus homólogas de una:
+  // índice). Eso lo garantiza el SERVIDOR (`PD.canonizar_orden`): el índice es el del talle de
+  // referencia, no el orden del dibujo — con el orden del dibujo, en el buzo de vóley tocar la pieza
+  // verde elegía la naranja en los talles femeninos (2026-09-16). Tocar una elige sus homólogas de una:
   // es lo que en Moldería se hace a mano seleccionando «las que son la misma pieza».
   const _todasBActivo = () => !etqPickB && !!todasB?.piezas?.length && todasB.pid === etqPid;
   const _homologasB = (pz) => (todasB?.piezas || []).filter(p => p.mesa === pz.mesa && p.t_idx === pz.t_idx).map(p => p.idx);
