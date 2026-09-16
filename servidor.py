@@ -12978,14 +12978,7 @@ def _atar_hijos_a_este_proceso():
 
 
 
-
-def arrancar():
-    """Arranca el servidor y se queda atendiendo (bloquea).
-
-    Es el cuerpo de siempre del `__main__`, puesto en una función para que la APLICACIÓN DE
-    ESCRITORIO (`escritorio/app_escritorio.py`, changelog 472) lo pueda levantar en un hilo mientras
-    la ventana de Windows ocupa el hilo principal. `py servidor.py` hace exactamente lo mismo que
-    antes. Las variables de entorno (PORT, HOST, TIZADA_DATOS…) se leen acá, al arrancar."""
+if __name__ == "__main__":
     # Puerto y host configurables por variable de entorno (sin tocar el código).
     #   PORT=8001 py servidor.py     → cambia el puerto si el 8050 está ocupado
     host = os.environ.get("HOST", "0.0.0.0")
@@ -13089,7 +13082,3 @@ def arrancar():
                 print(f"  (aviso: no se pudo escuchar en [{h}]: {e})")
         threading.Thread(target=lambda: _serve("::1"), daemon=True).start()   # IPv6 (localhost→::1)
         _serve(host, principal=True)                                          # IPv4 (bloquea)
-
-
-if __name__ == "__main__":
-    arrancar()
