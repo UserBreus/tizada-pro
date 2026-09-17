@@ -5,6 +5,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
          esArrastre } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
+import { navegadorPreparaMoldes, prepararMoldeEnNavegador } from './motor/prepararMolde.js';
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -1230,7 +1231,7 @@ function CargaCircular({ fase, pct = 0, seg = 0 }) {
       <div className="centro">
         {subiendo
           ? <><span className="valor">{Math.round(_p)}</span><span className="unidad">%</span></>
-          : <><span className="valor">{mm}:{String(ss).padStart(2, '0')}</span><span className="unidad">leyendo</span></>}
+          : <><span className="valor">{mm}:{String(ss).padStart(2, '0')}</span><span className="unidad">{fase === 'preparando' ? 'preparando' : 'leyendo'}</span></>}
       </div>
     </div>
   );
@@ -11502,6 +11503,18 @@ export default function App() {
     }));
   };
 
+  // ── CAMINO B: PREPARAR EL MOLDE EN ESTA COMPUTADORA ─────────────────────────────────────────
+  // (PLAN_NAVEGADOR.md, etapa 1). Devuelve el paquete (bytes del ZIP) o null si el servidor todavía
+  // prepara los moldes él (interruptor `/api/navegador/config`). Si esta computadora no puede, tira
+  // un error con el motivo: el molde NO se manda para que lo haga el servidor.
+  const _prepararPaquete = async (archivo, fase) => {
+    if (!(await navegadorPreparaMoldes())) return null;
+    fase({ fase: 'preparando', nota: 'Abriendo el archivo en tu computadora…' });
+    const r = await prepararMoldeEnNavegador(archivo, (a) => fase({ fase: 'preparando', nota: a.texto }));
+    fase({ fase: 'subiendo', pct: 0, nota: '' });
+    return r.zip;
+  };
+
   // ── CAMINO B: cargar VARIOS archivos, uno tras otro ─────────────────────────────────────────
   // Se suben de a uno (no en paralelo): cada uno son 100+ MB y el servidor los procesa con
   // PyMuPDF, así que mandarlos todos juntos sólo haría que todos tarden más y que la barra no
@@ -11517,6 +11530,8 @@ export default function App() {
       setSubirBFase({ fase: 'subiendo', pct: 0, seg: 0, nombre, i: i + 1, total: files.length });
       const reloj = setInterval(() => setSubirBFase(x => x ? { ...x, seg: Math.round((Date.now() - t0) / 1000) } : x), 1000);
       try {
+        // Se prepara ANTES de crear el molde: si esta computadora no puede, no queda uno vacío.
+        const paquete = await _prepararPaquete(f, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));
         const r = await fetch('/api/productos/crear', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
@@ -11527,10 +11542,14 @@ export default function App() {
         // en ese rato el barrido de huérfanos (cada 65 s) no lo veía como del pedido: el servidor
         // se lo llevaba a MITAD DEL ALTA (medido 2026-09-16: subido 11:16:57, borrado 11:17:05).
         setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now(), subiendo: true } }));
+        // 🔴 LO PESADO, EN ESTA COMPUTADORA (PLAN_NAVEGADOR.md, etapa 1): el molde se prepara acá y
+        // viaja ya preparado; el servidor sólo lo guarda. Si esta computadora no puede, se avisa y
+        // NO se manda a que lo haga el servidor («quien no tenga la potencia no podrá enviar»).
         const fd = new FormData();
         fd.append('archivo', f);
         fd.append('pid', d.id);
         fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
+        if (paquete) fd.append('paquete', new Blob([paquete], { type: 'application/zip' }), 'paquete.zip');
         const d2 = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', rutaApi('/api/plantilla'));   // el XHR no pasa por el envoltorio de fetch
@@ -11721,6 +11740,7 @@ export default function App() {
     const reloj = setInterval(() => setSubirBFase(f => f ? { ...f, seg: Math.round((Date.now() - t0) / 1000) } : f), 1000);
     let pid = null;
     try {
+      const paquete = await _prepararPaquete(subirMoldeFile, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));   // ver `subirMoldesConDiseno`
       const r = await fetch('/api/productos/crear', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
@@ -11733,6 +11753,7 @@ export default function App() {
       fd.append('archivo', subirMoldeFile);
       fd.append('pid', pid);
       fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
+      if (paquete) fd.append('paquete', new Blob([paquete], { type: 'application/zip' }), 'paquete.zip');
       const d2 = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         // `rutaApi` y no '/api/plantilla' pelado: el XHR NO pasa por el envoltorio de `fetch`,
@@ -13713,7 +13734,9 @@ export default function App() {
                       <CargaCircular fase={subirBFase.fase} pct={subirBFase.pct} seg={subirBFase.seg} />
                       <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <span style={{ fontSize: 13.5, fontWeight: 800 }}>
-                          {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}
+                          {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…'
+                            : subirBFase.fase === 'preparando' ? 'Preparando el molde en tu computadora…'
+                            : 'Leyendo el archivo y detectando las piezas…'}
                         </span>
                         {subirBFase.nombre && (
                           <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -21697,12 +21720,14 @@ export default function App() {
               <CargaCircular fase={subirBFase.fase} pct={subirBFase.pct} seg={subirBFase.seg} />
               <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={{ fontSize: 13, fontWeight: 800 }}>
-                  {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…' : 'Leyendo el archivo y detectando las piezas…'}
+                  {subirBFase.fase === 'subiendo' ? 'Subiendo el archivo…'
+                            : subirBFase.fase === 'preparando' ? 'Preparando el molde en tu computadora…'
+                            : 'Leyendo el archivo y detectando las piezas…'}
                 </span>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
                   {subirBFase.fase === 'subiendo'
                     ? 'No cierres la ventana.'
-                    : 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.'}
+                    : (subirBFase.nota || 'Con un archivo grande esto lleva un par de minutos. Al terminar queda listo para siempre.')}
                 </span>
               </div>
             </div>

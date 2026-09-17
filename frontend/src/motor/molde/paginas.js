@@ -1023,6 +1023,10 @@ export function paginasDeTalles(mupdf, doc, mesa, talles, conts, marco, U, ocult
     paginaDesplegada(mupdf, out, mapa, page, salida)
   }
   const pdf = out.saveToBuffer('compress').asUint8Array().slice()
+  // Soltar YA la memoria de WebAssembly de esta mesa: el recolector de JavaScript no sabe cuánto
+  // pesa del otro lado y, con 9 mesas de 50 MB, la pestaña llegaba al tope de 4 GB.
+  try { mapa.destroy() } catch { /* nada */ }
+  try { out.destroy() } catch { /* nada */ }
   page.destroy()
   return { pdf, placeholders, lineas, etiqueta_archivo: etqArchivo }
 }

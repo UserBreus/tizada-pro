@@ -3365,6 +3365,15 @@ def subir_plantilla():
     return jsonify({"job": tid, "procesando": True, "en_cola": max(0, _EN_COLA_ALTA[0])})
 
 
+@app.get("/api/navegador/config")
+def navegador_config():
+    """Qué trabajo pesado hace el NAVEGADOR en vez del servidor (PLAN_NAVEGADOR.md, regla 5: cada
+    etapa entra detrás de un interruptor). `molde`: preparar los moldes con diseño en la
+    computadora de la persona y mandarlos como paquete. `TIZADA_NAVEGADOR_MOLDE=0` lo apaga (vuelve
+    a prepararlos el servidor, como antes) sin tocar el código."""
+    return jsonify({"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0"})
+
+
 def _procesos_alta():
     """Cuántos procesos para desplegar un molde: uno por mesa hasta los núcleos de la máquina
     (`TIZADA_PROCESOS` manda si está). Cada uno pesa ~200 MB."""
