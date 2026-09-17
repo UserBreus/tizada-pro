@@ -538,6 +538,24 @@ def color_convertir():
     return jsonify({"cmyk": [[round(v/255., 4) for v in o.getpixel((i, 0))[:4]] for i in range(len(ent))]})
 
 
+def _maquina():
+    """Núcleos, RAM total y libre (MB) y el cupo de procesos de trabajo: qué aguanta esta máquina."""
+    import procesos as _PR
+    total = None
+    try:
+        if os.name != "nt":
+            with open("/proc/meminfo", encoding="ascii", errors="replace") as fh:
+                for ln in fh:
+                    if ln.startswith("MemTotal:"):
+                        total = round(float(ln.split()[1]) / 1024)
+    except Exception:
+        total = None
+    libre = _PR.memoria_libre_mb()
+    return {"nucleos": os.cpu_count(), "ram_total_mb": total,
+            "ram_libre_mb": round(libre) if libre else None,
+            "cupo_procesos": _PR.cupo_total(), "cupo_usado": _PR.cupo_usado()}
+
+
 @app.get("/api/salud")
 def salud():
     """Estado del servidor — LO MIRA EL ACTUALIZADOR para decidir si una publicación salió bien
@@ -703,6 +721,8 @@ def salud():
         "uptime_s": round(time.time() - ARRANQUE, 1),
         # cada proceso de render pesa ~200 MB → sirve para entender un servidor lento o sin memoria
         "procesos_render": procesos_render(),
+        # la máquina: para saber qué aguanta el publicado sin entrar por SSH (2026-09-17)
+        "maquina": _maquina(),
         "chequeos": chequeos,
     }), (200 if not fallas else 503)
 
