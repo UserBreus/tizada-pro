@@ -1557,7 +1557,7 @@ def decidir_etiqueta_archivo(path_molde, talles, procesos=None, avisar=None):
 
         res = _repartir({i: (path_molde, m, list(tr), list(talles)) for i, (m, tr) in enumerate(tareas)},
                         procesos, _candidatos_worker, _tope_etiquetas_s(), "la búsqueda de etiquetas",
-                        al_terminar=_avance)
+                        al_terminar=_avance, avisar_espera=_espera_de(avisar, len(tareas)))
         for i in sorted(res):
             cands.extend(res[i][1])
     else:
@@ -2350,7 +2350,8 @@ def _armar_paginas(path_molde, mesa, talles, conts, marco, U, ocultar, destino, 
         try:
             res = _repartir({i: (path_molde, mesa, list(talles), tr, pa) for i, (tr, pa) in enumerate(zip(trozos, partes))},
                             len(trozos), _paginas_worker, _tope_desplegado_s(),
-                            f"las páginas por talle de la mesa {mesa}", al_terminar=_avance)
+                            f"las páginas por talle de la mesa {mesa}", al_terminar=_avance,
+                            avisar_espera=_espera_de(avisar, len(talles)))
             for i in sorted(res):
                 _mis, ph, lc, etq = res[i]
                 ph_t.update(ph); lc_t.update(lc); etq_t.update(etq)
@@ -2443,9 +2444,9 @@ def _procesos_por_defecto():
     return max(1, n) if n else max(2, (os.cpu_count() or 2) - 1)
 
 
-def _pool_por_defecto(max_workers):
+def _pool_por_defecto(max_workers, al_esperar=None):
     import procesos as _PR               # `spawn` en todos los sistemas: ver `procesos.contexto`
-    return _PR.pool(max_workers, que="el desplegado de un molde")
+    return _PR.pool(max_workers, que="el desplegado de un molde", al_esperar=al_esperar)
 
 
 # Ganchos para el contrato (`verificar_desplegado_pool.py`, `verificar_sin_plan_b_en_el_servidor.py`):
@@ -2453,6 +2454,13 @@ def _pool_por_defecto(max_workers):
 # proceso. En producción son el ProcessPool y `desplegar_mesa`.
 _POOL_FACTORY = _pool_por_defecto
 _MESA_EN_SERIE = None          # se fija abajo, después de definir `desplegar_mesa`
+
+
+def _espera_de(avisar, total):
+    """El aviso de «estoy esperando procesos» para la pantalla, o None si nadie escucha."""
+    if not avisar:
+        return None
+    return lambda: avisar(0, total, "esperando procesos libres (otro molde en curso)")
 
 
 class ProcesoNoTermino(RuntimeError):
@@ -2472,7 +2480,7 @@ def _tope_etiquetas_s():
     return _PR.tope_segundos("TIZADA_TOPE_ETIQUETAS_S", 600)
 
 
-def _repartir(tareas, procesos, worker, tope, que, al_terminar=None):
+def _repartir(tareas, procesos, worker, tope, que, al_terminar=None, avisar_espera=None):
     """Corre `tareas` (`{clave: args}`) en procesos y devuelve `{clave: resultado}`.
 
     🔴 NUNCA HACE EL TRABAJO EN ESTE PROCESO (2026-09-17, «Plan B dentro del servidor»). Cada
@@ -2489,15 +2497,20 @@ def _repartir(tareas, procesos, worker, tope, que, al_terminar=None):
         tareas pendientes se reintentan UNA vez en procesos nuevos;
       · si tampoco, `ProcesoNoTermino` con un mensaje para la pantalla. El que llama no lo tapa.
     `procesos` es cuántos pedir (el cupo global puede dar menos, ver `procesos.pool`).
-    `al_terminar(clave, resultado)` avisa el avance a medida que llegan."""
+    `al_terminar(clave, resultado)` avisa el avance a medida que llegan; `avisar_espera()` se
+    llama si hubo que esperar un lugar en el cupo (para que la pantalla lo diga)."""
     import procesos as _PR
     from concurrent.futures import as_completed
     hechos, pendientes, motivo = {}, dict(tareas), ""
     for intento in (1, 2):
         if not pendientes:
             break
+        _cuantos = max(1, min(len(pendientes), int(procesos or 1)))
         try:
-            ex = _POOL_FACTORY(max_workers=max(1, min(len(pendientes), int(procesos or 1))))
+            try:
+                ex = _POOL_FACTORY(max_workers=_cuantos, al_esperar=avisar_espera)
+            except TypeError:                  # un pool de mentira del contrato, sin `al_esperar`
+                ex = _POOL_FACTORY(max_workers=_cuantos)
         except Exception as e:
             raise ProcesoNoTermino(
                 f"No se pudo preparar el molde ({que}): no hubo procesos libres en el servidor "
@@ -2567,7 +2580,7 @@ def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos
         # publicado el 16/09 (ver `_repartir`).
         _repartir({m: (path_molde, m, list(talles), contornos, paginas) for m in mesas}, procesos,
                   _desplegar_mesa_worker, _tope_desplegado_s(), "el desplegado de las mesas",
-                  al_terminar=lambda _m, r: _listo(r[0], r[1]))
+                  al_terminar=lambda _m, r: _listo(r[0], r[1]), avisar_espera=_espera_de(avisar, n))
         return por_mesa
     # sin procesos (un script, o ya adentro de un worker): en este proceso, a propósito
     for mesa in pendientes:

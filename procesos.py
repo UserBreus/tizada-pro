@@ -178,7 +178,8 @@ def contexto():
 # Ahora todos los pools de trabajo (desplegado, etiquetas, páginas por talle, aplanado, SVG) toman
 # lugar de UN cupo (`cupo_total`): el que no tiene lugar ESPERA a que otro termine —avisando en la
 # consola— y si no lo consigue en `TIZADA_ESPERA_LUGAR_S` falla con un error claro en vez de
-# sumarse al ahogo. Con lugar para algunos, arranca con menos procesos antes que esperar a todos.
+# sumarse al ahogo. El reparto es JUSTO (ver `_tomar`): nadie espera mientras haya un proceso
+# libre y ningún trabajo toma más de la mitad del cupo — dos personas avanzan a la vez.
 # Los dos pools permanentes del servidor (render y visor) no cuentan: son fijos y viven siempre.
 # `TIZADA_PROCESOS` manda si está; si no, los núcleos menos uno, acotado por la RAM libre (cada
 # proceso con un molde pesado adentro pesa ~400 MB).
@@ -259,10 +260,20 @@ def _soltar(ex):
             cond.notify_all()
 
 
-def _tomar(n, espera, que):
-    """Toma `n` lugares (o menos, si hay algunos libres tras una espera corta). Devuelve cuántos."""
+def _tomar(n, espera, que, al_esperar=None):
+    """Toma hasta `n` lugares y devuelve cuántos tomó.
+
+    🔴 REPARTO JUSTO (el usuario, 2026-09-17: «te pedí una resolución, no que dos usuarios no
+    puedan usar el sistema al mismo tiempo»). Dos reglas:
+      · **nadie espera mientras haya un proceso libre**: se arranca con los que haya (aunque sea
+        uno) en vez de esperar a tener todos;
+      · **ningún trabajo toma más de la MITAD del cupo**: el primero que llega no se queda con
+        todo. Con 2 lugares, dos moldes van con 1 proceso cada uno, a la vez; con 11, 6 y 5.
+    Sólo se espera con el cupo LLENO (un tercer molde con 2 lugares), y `al_esperar()` avisa
+    para que la pantalla lo diga."""
     total = cupo_total()
-    n = max(1, min(int(n or 1), total))
+    mitad = total if total < 2 else (total + 1) // 2
+    n = max(1, min(int(n or 1), mitad))
     cond = _cond()
     t0 = time.time()
     avisado = False
@@ -270,7 +281,7 @@ def _tomar(n, espera, que):
         while True:
             libres = total - _CUPO["usado"]
             pasado = time.time() - t0
-            if libres >= n or (libres >= 1 and pasado >= 10):
+            if libres >= 1:
                 tomo = min(n, libres)
                 _CUPO["usado"] += tomo
                 _CUPO["quien"][que] = tomo
@@ -284,6 +295,11 @@ def _tomar(n, espera, que):
             if not avisado:
                 avisado = True
                 print(f"[procesos] {que}: sin lugar ({_CUPO['usado']} de {total} procesos ocupados); espero")
+                if al_esperar:
+                    try:
+                        al_esperar()
+                    except Exception:
+                        pass
             cond.wait(timeout=max(0.5, min(5.0, espera - pasado)))
 
 
@@ -305,7 +321,7 @@ def _pool_crudo(max_workers):
     return _PoolConLugar(max_workers=max_workers, mp_context=contexto())
 
 
-def pool(max_workers, cupo=True, espera=None, que="un trabajo"):
+def pool(max_workers, cupo=True, espera=None, que="un trabajo", al_esperar=None):
     """Un `ProcessPoolExecutor` con el contexto correcto (ver arriba) y, con `cupo`, con lugar
     tomado del cupo global (se devuelve solo al apagar el pool: `shutdown`, `descartar`, `seguro`).
     `cupo=False` es para los pools permanentes del servidor. Levanta `SinLugar` si no hay lugar."""
@@ -313,7 +329,7 @@ def pool(max_workers, cupo=True, espera=None, que="un trabajo"):
         return _pool_crudo(max_workers)
     if espera is None:
         espera = tope_segundos("TIZADA_ESPERA_LUGAR_S", 900)
-    n = _tomar(max_workers, espera, que)
+    n = _tomar(max_workers, espera, que, al_esperar)
     ex = None
     try:
         ex = _pool_crudo(n)

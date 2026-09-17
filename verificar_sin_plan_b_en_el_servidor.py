@@ -18,8 +18,9 @@ Lo que protege, simulando ese día con topes de 5 segundos y procesos que NUNCA 
   Para cada uno: la llamada termina en segundos (no en 30 minutos), con un error claro o sin ese
   resultado; la tarea NO se ejecutó en el proceso que llama; y `GET /api/salud` siguió
   contestando al instante mientras tanto.
-  7. Todos los pools de trabajo toman lugar de UN cupo global (`procesos.pool`): con el cupo
-     lleno, el siguiente espera y falla con `SinLugar` en vez de sumar procesos.
+  7. Todos los pools de trabajo toman lugar de UN cupo global (`procesos.pool`) con REPARTO
+     JUSTO: ninguno toma más de la mitad (dos moldes avanzan a la vez), nadie espera mientras
+     haya un proceso libre, y con el cupo lleno el siguiente espera y falla con `SinLugar`.
 
 ⚠️ No toca nada del usuario: `DATOS` va a un temporal y el módulo `db` se reemplaza por un doble
 (ver [[test-no-toca-mssql]]). No se lanza ningún proceso de verdad: los pools son de mentira.
@@ -212,22 +213,32 @@ print(f"  · {dt:.1f} s · {_res6}")
 # 7. el cupo global
 print("7. el cupo global de procesos")
 PR._CUPO.update(total=2, usado=0, quien={})
-_p1 = PR.pool(2, que="prueba A")
-ok(PR.cupo_usado() == 2, f"el primer pool tendría que ocupar 2 lugares, ocupa {PR.cupo_usado()}")
+_p1 = PR.pool(3, que="molde A")
+ok(getattr(_p1, "_lugares", 0) == 1, f"con cupo 2 el primer molde toma la MITAD (1), tomó {getattr(_p1, '_lugares', 0)}")
+_t0 = time.time()
+_p2 = PR.pool(3, que="molde B")
+ok(getattr(_p2, "_lugares", 0) == 1 and time.time() - _t0 < 1, "el segundo molde tendría que arrancar AL INSTANTE con el otro lugar")
+ok(PR.cupo_usado() == 2, f"dos moldes a la vez ocupan los 2 lugares, ocupan {PR.cupo_usado()}")
+_esperas = []
 _t0 = time.time()
 try:
-    PR.pool(1, que="prueba B")
-    ok(False, "con el cupo lleno el segundo pool tendría que fallar con SinLugar")
+    PR.pool(1, que="molde C", al_esperar=lambda: _esperas.append(1))
+    ok(False, "con el cupo LLENO el tercero tendría que fallar con SinLugar")
 except PR.SinLugar as e:
     ok(4 <= time.time() - _t0 < 15, f"SinLugar tendría que llegar a los ~5 s, llegó a los {time.time() - _t0:.0f} s")
-    ok("prueba A" in str(e), f"el mensaje tendría que decir quién ocupa el cupo: {e}")
+    ok("molde A" in str(e) and "molde B" in str(e), f"el mensaje tendría que decir quién ocupa el cupo: {e}")
+ok(_esperas == [1], "el que espera tendría que avisar (al_esperar) una vez")
 _p1.shutdown(wait=False)
-ok(PR.cupo_usado() == 0, f"al apagar el pool el lugar tendría que volver, quedó {PR.cupo_usado()}")
-_p2 = PR.pool(5, que="prueba C")
-ok(getattr(_p2, "_lugares", 0) == 2, f"pedir 5 con cupo 2 tendría que dar 2, dio {getattr(_p2, '_lugares', 0)}")
+ok(PR.cupo_usado() == 1, f"al apagar un pool vuelve su lugar, quedó {PR.cupo_usado()}")
 PR.descartar(_p2)
 ok(PR.cupo_usado() == 0, f"`descartar` también devuelve el lugar, quedó {PR.cupo_usado()}")
-print(f"  · cupo 2: el segundo espera y falla con SinLugar; el lugar vuelve al apagar")
+PR._CUPO.update(total=11, usado=0, quien={})
+_p3 = PR.pool(11, que="molde D")
+ok(getattr(_p3, "_lugares", 0) == 6, f"con cupo 11 un molde toma a lo sumo 6, tomó {getattr(_p3, '_lugares', 0)}")
+_p4 = PR.pool(11, que="molde E")
+ok(getattr(_p4, "_lugares", 0) == 5, f"y el segundo se lleva los otros 5, se llevó {getattr(_p4, '_lugares', 0)}")
+_p3.shutdown(wait=False); _p4.shutdown(wait=False)
+print("  · cupo 2: dos moldes a la vez con 1 proceso cada uno; el tercero espera y avisa; cupo 11: 6 + 5")
 
 # ── el texto: no vuelve el reflejo ──────────────────────────────────────────────────────────
 import re  # noqa: E402

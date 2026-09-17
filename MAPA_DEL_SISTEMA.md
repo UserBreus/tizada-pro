@@ -308,8 +308,9 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
     proceso web: el 16/09 el reflejo «el pool falló; sigo en serie acá» tuvo al servidor publicado
     armando camisetas con el GIL tomado de 17:23 a 18:02, con los 8 hilos trabados. Y **todos los
     pools de trabajo toman lugar de UN cupo global** (`procesos.pool` → `cupo_total`, por RAM y
-    núcleos): dos moldes a la vez ya no suman procesos hasta ahogar la máquina; el segundo espera.
-    Los pools permanentes (render, visor) van con `cupo=False`. Contrato:
+    núcleos) con **reparto justo**: ningún trabajo toma más de la mitad y nadie espera mientras
+    haya un proceso libre — dos personas avanzan a la vez, sin sumar procesos hasta ahogar la
+    máquina. Los pools permanentes (render, visor) van con `cupo=False`. Contrato:
     `verificar_sin_plan_b_en_el_servidor.py` (simula el 16/09 con topes de 5 s).
 
 ---
@@ -1519,11 +1520,16 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   fuera del semáforo de altas. Ahora **`procesos.pool` toma lugar de un cupo global**
   (`cupo_total()`: `TIZADA_PROCESOS` si está; si no, núcleos − 1 acotado por la RAM libre a
   ~400 MB por proceso — se mide también en Linux vía `/proc/meminfo`, antes `procesos_render`
-  sólo miraba la memoria en Windows y el publicado corre en Linux). El que no tiene lugar
-  **espera** (avisa en la consola: `[procesos] …: sin lugar (N de M ocupados); espero`), con lugar
-  para algunos arranca con menos, y si en `TIZADA_ESPERA_LUGAR_S` (15 min) no consigue nada
-  falla con `SinLugar` y el nombre de quién ocupa el cupo. El lugar vuelve al apagar el pool
-  (`shutdown`, `descartar`, `seguro`). Los pools permanentes (render, visor) van con `cupo=False`.
+  sólo miraba la memoria en Windows y el publicado corre en Linux). **Reparto justo** (el
+  usuario, mismo día: *«te pedí una resolución, no que dos usuarios no puedan usar el sistema al
+  mismo tiempo»* — la primera versión dejaba al primer molde con todo el cupo y al segundo
+  esperando): **ningún trabajo toma más de la mitad del cupo** (con 2 lugares, 1 y 1; con 11,
+  6 y 5) y **nadie espera mientras haya un proceso libre**. Sólo con el cupo LLENO (un tercer
+  molde en el VPS) se espera: la pantalla dice «esperando procesos libres (otro molde en curso)»
+  (`avisar_espera` → `al_esperar`), la consola `[procesos] …: sin lugar (N de M ocupados);
+  espero`, y si en `TIZADA_ESPERA_LUGAR_S` (15 min) no consigue nada falla con `SinLugar` y el
+  nombre de quién ocupa el cupo. El lugar vuelve al apagar el pool (`shutdown`, `descartar`,
+  `seguro`). Los pools permanentes (render, visor) van con `cupo=False`.
 
   **2. El reflejo «si el pool falla, sigo en serie acá»**, en SEIS lugares (los cinco del informe
   + `_predibujar_mesas`, + el «dibujo en el server» del recorte del visor, el «leo en el server»
@@ -1555,8 +1561,9 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   5-10 s con `ProcesoNoTermino` o sin ese adorno, **nada se ejecutó en el proceso que llama**
   (centinelas en `buscar_candidatos_mesa`, `_paginas_de_talles`, `_MESA_EN_SERIE`,
   `get_svg_image`, `_dibujar_una_mesa`), y **`GET /api/salud` contestó siempre** (vigilante en un
-  hilo, peor respuesta < 2 s); más el cupo (con 2 lugares el segundo pool espera y falla con
-  `SinLugar`; el lugar vuelve al apagar) y un grep que corta si vuelve el reflejo.
+  hilo, peor respuesta < 2 s); más el cupo (con 2 lugares dos moldes arrancan a la vez con 1
+  cada uno, el tercero espera, avisa y falla con `SinLugar`; con 11, 6 + 5; el lugar vuelve al
+  apagar) y un grep que corta si vuelve el reflejo.
   `verificar_desplegado_pool.py` cambió de contrato: una mesa que falla dos veces o un pool que no
   arranca → `ProcesoNoTermino`, nunca en serie. `verificar_publicacion_y_procesos.py` verde.
 
