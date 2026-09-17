@@ -2396,6 +2396,37 @@ def _candado(path_molde):
         return c
 
 
+def paginas_vigentes(path_molde, talles=None):
+    """¿Todas las mesas tienen sus páginas por talle de ESTE archivo, con la regla actual y la
+    decisión de la etiqueta vigente? Es sólo leer JSON: no abre el dibujo.
+
+    🔴 POR QUÉ (2026-09-17, PLAN_NAVEGADOR etapa 1). Cuando el desplegado ya está completo —lo
+    mandó hecho el navegador, o salió de la caché por archivo— `desplegar_molde(paginas=True)`
+    igual levantaba un pool de procesos para que cada mesa descubriera que no tenía nada que hacer.
+    En el servidor chico eso son varios procesos `spawn` importando el sistema entero por nada."""
+    try:
+        doc = fitz.open(path_molde)
+        try:
+            n = doc.page_count
+            talles = list(talles) if talles is not None else talles_del_molde(doc)
+        finally:
+            doc.close()
+        dec = leer_decision(path_molde)
+        if dec is None:
+            return False
+        h = hash_ocultas(familias_ocultas(dec))
+        sello = _sello(path_molde)
+        carpeta = _carpeta_desplegado(path_molde)
+        for mesa in range(1, n + 1):
+            d = _json_vigente(os.path.join(carpeta, f"m{mesa}.json"), sello, talles)
+            if (d is None or not d.get("paginas") or d.get("vp") != _V_PAGINAS or d.get("etq") != h
+                    or not os.path.exists(os.path.join(carpeta, f"m{mesa}.pdf"))):
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=True, paginas=True):
     """Despliega TODAS las mesas y devuelve `{mesa: {talle: [contornos]}}`.
 
@@ -2416,6 +2447,13 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
     _cand = _candado(path_molde)
     _cand.acquire()
     try:
+        if paginas and not contornos and paginas_vigentes(path_molde, talles):
+            # ya está todo (lo mandó el navegador o vino de la caché): ni pool ni decisión
+            for mesa in mesas:
+                d = _leer_desplegado(path_molde, mesa)
+                if d is not None and any(d["contornos"].values()):
+                    por_mesa[mesa] = d["contornos"]
+            return por_mesa
         if paginas:
             # 🔴 LA DECISIÓN VA ANTES QUE LAS PÁGINAS: necesita los candidatos de TODAS las mesas
             # (la familia se decide por cuántas piezas la traen), y las páginas la aplican. Si los

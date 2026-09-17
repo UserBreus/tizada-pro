@@ -2918,8 +2918,110 @@ _SEM_ALTA = threading.BoundedSemaphore(_ALTAS_A_LA_VEZ)
 _EN_COLA_ALTA = [0]          # cuántos están esperando lugar (para poder decirlo en pantalla)
 
 
+# ── EL PAQUETE QUE PREPARÓ EL NAVEGADOR (PLAN_NAVEGADOR.md, etapa 1) ─────────────────────────
+# El molde del camino B se prepara en la computadora de la persona (`frontend/src/motor`): el
+# navegador manda el archivo original y un ZIP con el desplegado entero y el alta. El servidor NO
+# vuelve a calcular nada: valida y guarda. Validar es barato (leer JSON, contar páginas) y es lo
+# que impide que un paquete roto o de OTRO archivo quede como molde:
+#   · lista CERRADA de archivos y tope de tamaño descomprimido;
+#   · el SHA-1 del manifiesto tiene que ser el del archivo subido;
+#   · las versiones de las reglas (contornos, páginas, etiqueta) tienen que ser las del servidor;
+#   · una mesa por página del archivo, cada una con su JSON y su PDF con una página por talle;
+#   · el hash de la decisión de la etiqueta de cada mesa tiene que ser el de la decisión que viene.
+# Todo se escribe en una carpeta aparte y recién al final reemplaza al desplegado: si algo falla,
+# no queda nada a medias.
+_PAQUETE_FORMATO = "tizada.molde_con_diseno"
+_PAQUETE_VERSION = 1
+_PAQUETE_TOPE_BYTES = 4 * 1024 ** 3
+
+
+def _paquete_molde_aplicar(tmp, ruta_zip):
+    """Valida el paquete y deja su desplegado al lado de `tmp`. Devuelve el `alta`. Levanta
+    `ValueError` con un mensaje para la pantalla si el paquete no sirve."""
+    import re as _re
+    import shutil
+    import zipfile
+    import pymupdf as fitz
+    import piezas_con_diseno as PD
+    permitido = _re.compile(r"^(manifest\.json|alta\.json|desplegado/(m[1-9][0-9]{0,3}\.(json|pdf)|etiqueta_archivo\.json))$")
+    destino = PD._carpeta_desplegado(tmp)
+    armado = destino + ".paquete-" + uuid.uuid4().hex[:8]
+    try:
+        with zipfile.ZipFile(ruta_zip) as z:
+            infos = z.infolist()
+            for i in infos:
+                if not permitido.match(i.filename):
+                    raise ValueError(f"el paquete trae un archivo que no corresponde: {i.filename[:80]}")
+            if sum(i.file_size for i in infos) > _PAQUETE_TOPE_BYTES:
+                raise ValueError("el paquete es demasiado grande")
+            nombres = {i.filename for i in infos}
+
+            def _json(nombre):
+                if nombre not in nombres:
+                    raise ValueError(f"al paquete le falta {nombre}")
+                return json.loads(z.read(nombre).decode("utf-8"))
+
+            man = _json("manifest.json")
+            if man.get("formato") != _PAQUETE_FORMATO or man.get("version") != _PAQUETE_VERSION:
+                raise ValueError("el paquete es de un formato que este servidor no conoce: actualizá la página")
+            if (man.get("v_contornos") != PD._V_CONTORNOS or man.get("v_paginas") != PD._V_PAGINAS
+                    or man.get("v_etq") != PD._V_ETQ):
+                raise ValueError("el molde se preparó con otra versión del sistema: recargá la página y volvé a cargarlo")
+            if str(man.get("sha1") or "") != _sha1_archivo(tmp):
+                raise ValueError("el paquete no corresponde a este archivo")
+            doc = fitz.open(tmp)
+            try:
+                n = doc.page_count
+                talles = PD.talles_del_molde(doc)
+            finally:
+                doc.close()
+            alta = _json("alta.json")
+            if alta.get("mesas") != n or list(alta.get("talles") or []) != list(talles):
+                raise ValueError("el paquete no coincide con las mesas o los talles del archivo")
+            if not isinstance(alta.get("registro"), dict) or not isinstance(alta.get("visor"), dict):
+                raise ValueError("el paquete no trae el registro de las piezas")
+            os.makedirs(armado)
+            sello = PD._sello(tmp)
+            etq = _json("desplegado/etiqueta_archivo.json")
+            if etq.get("v") != PD._V_ETQ:
+                raise ValueError("la decisión de la etiqueta es de otra versión")
+            h = PD.hash_ocultas(PD.familias_ocultas(etq))
+            etq["sello"] = sello
+            with open(os.path.join(armado, "etiqueta_archivo.json"), "w", encoding="utf-8") as fh:
+                json.dump(etq, fh, ensure_ascii=False, indent=1)
+            for mesa in range(1, n + 1):
+                j = _json(f"desplegado/m{mesa}.json")
+                if (list(j.get("orden") or []) != list(talles) or j.get("v") != PD._V_CONTORNOS
+                        or j.get("vp") != PD._V_PAGINAS or not j.get("paginas") or j.get("etq") != h):
+                    raise ValueError(f"la mesa {mesa} del paquete no está completa o es de otra versión")
+                j["sello"] = sello
+                with open(os.path.join(armado, f"m{mesa}.json"), "w", encoding="utf-8") as fh:
+                    json.dump(j, fh)
+                nombre_pdf = f"desplegado/m{mesa}.pdf"
+                if nombre_pdf not in nombres:
+                    raise ValueError(f"al paquete le falta {nombre_pdf}")
+                ruta_pdf = os.path.join(armado, f"m{mesa}.pdf")
+                with z.open(nombre_pdf) as src, open(ruta_pdf, "wb") as dst:
+                    shutil.copyfileobj(src, dst, 1 << 20)
+                d = fitz.open(ruta_pdf)
+                try:
+                    if d.page_count != len(talles):
+                        raise ValueError(f"la mesa {mesa} del paquete no trae una página por talle")
+                finally:
+                    d.close()
+        shutil.rmtree(destino, ignore_errors=True)
+        os.replace(armado, destino)
+        armado = None
+        return alta
+    except zipfile.BadZipFile:
+        raise ValueError("el paquete llegó dañado: volvé a intentarlo")
+    finally:
+        if armado:
+            shutil.rmtree(armado, ignore_errors=True)
+
+
 def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
-                           _corresp_nueva, _con_diseno, _motivo_b, _t_subida):
+                           _corresp_nueva, _con_diseno, _motivo_b, _t_subida, paquete=None):
     """LO CARO de subir un molde: leerlo, detectar las piezas y dejarlo en su lugar.
 
     🔴 Corre FUERA del hilo que atiende la llamada web. Medido el 2026-09-10 con el molde real del
@@ -2931,7 +3033,20 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     Devuelve `(resumen, None)` o `(None, (mensaje, código))`. No toca `request`: todo por parámetro.
     """
     nombre = (_ARCH or "").lower()      # el nombre del archivo, que acá sólo sirve para ver si es DXF
-    if dxf_resumen:
+    if paquete:
+        # El navegador ya lo preparó entero: acá sólo se valida y se guarda (ver arriba).
+        try:
+            alta = _paquete_molde_aplicar(tmp, paquete)
+        except Exception as e:
+            _descartar_tmp(tmp)
+            return None, (f"no se pudo guardar el molde: {e}", 422)
+        finally:
+            try:
+                os.remove(paquete)
+            except OSError:
+                pass
+        _con_diseno, _motivo_b = True, "lo preparó el navegador"
+    elif dxf_resumen:
         # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
         # pone → solo genera ruido y tarda). Los talles ya vienen del DXF; las piezas se
         # nombran en el visor. Resumen mínimo.
@@ -3160,6 +3275,7 @@ def subir_plantilla():
     _ARCH = f.filename or ""
     _PIDE_B = str(request.form.get("con_diseno") or "") == "1"
     destino = _ruta_entrada("plantilla.ai", pid=_PID, original=True)
+    _pq = request.files.get("paquete")        # el molde ya preparado por el navegador (PLAN_NAVEGADOR)
     _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
     # ── SUBIDA ATÓMICA ───────────────────────────────────────────────────────────────────────
     # El archivo entra a un TEMPORAL y sólo reemplaza al molde bueno si se pudo procesar.
@@ -3209,6 +3325,10 @@ def subir_plantilla():
     else:
         # .ai / .pdf (Illustrator, Corel, InDesign…): PyMuPDF los lee directo.
         f.save(tmp)
+    _paquete = None
+    if _pq is not None and not nombre.endswith(".dxf"):
+        _paquete = os.path.join(os.path.dirname(destino), "plantilla.subiendo.paquete.zip")
+        _pq.save(_paquete)
     # 🔴 DE ACÁ EN MÁS, EN SEGUNDO PLANO. Lo que sigue son minutos de CPU (118 MB = 297 s medidos)
     # y no puede quedarse con un hilo del servidor: la pantalla ya muestra «Leyendo el archivo…»
     # con su reloj, así que ahora pregunta cómo va, igual que con la tizada.
@@ -3227,7 +3347,8 @@ def subir_plantilla():
             try:
                 _tocar_trabajo(tid, estado="generando", progreso="leyendo el archivo")
                 res, err = _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
-                                                  _corresp_nueva, _con_diseno, _motivo_b, _t_subida)
+                                                  _corresp_nueva, _con_diseno, _motivo_b, _t_subida,
+                                                  paquete=_paquete)
             finally:
                 _SEM_ALTA.release()
             if err:

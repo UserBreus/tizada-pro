@@ -12,6 +12,7 @@
     "build:publicado": "node verificar_diccionario.mjs && node verificar_guion.mjs && node verificar_estilo_ui.mjs && node verificar_localizar.mjs && node verificar_tdz.mjs && node verificar_pasos_pedido.mjs && node verificar_columna_talle.mjs && node verificar_descarga_elegir_carpeta.mjs && vite build --base=/Tizadapro/"
   },
   "dependencies": {
+    "fflate": "0.8.2",
     "mupdf": "1.26.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
