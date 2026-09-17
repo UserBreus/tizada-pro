@@ -1495,6 +1495,33 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (480) — 📏 ¿CUÁNTO USA DEL SERVIDOR QUE 10 PERSONAS GUARDEN UN MOLDE A LA VEZ? Medido.**
+  El usuario: *«si lo envío al servidor, ¿qué tal funcionaría? ¿cuánto me usaría del servidor si
+  entran 10 personas al mismo tiempo?»*. Se simuló lo que hace el servidor con un molde que preparó
+  el navegador (guardar el archivo, validar y guardar la fase A, guardar y validar la fase B), con el
+  proceso atado a **3 núcleos** como el VPS (`scratchpad/carga10/medir.py`, sin MSSQL, carpeta
+  temporal propia). Molde CAMISETA JUGADOR, 117 MB:
+
+  | | 1 persona | 10 a la vez |
+  |---|---|---|
+  | tiempo del servidor | 1,0 s | 5,7 s en total (la más demorada) |
+  | CPU | 0,7 s | 11,9 s (≈70 % de 3 núcleos durante esos 5,7 s) |
+  | memoria pico del proceso | 141 MB | 166 MB |
+  | disco por molde | 245 MB | 2,4 GB |
+
+  **Lo que pesa de verdad es lo que viaja por internet:** cada persona sube el .ai (117 MB) y el
+  paquete de páginas (133 MB; son instrucciones de dibujo, a zlib máximo bajarían sólo a 112 MB) =
+  **~250 MB por molde**. Con una subida de 20 Mbit/s son ~100 s; con 100 Mbit/s, ~20 s. Lo que sigue
+  en el servidor (visor de mesas, arte, tizada: etapas 2-4) no cambió con esto.
+  **Falla encontrada y arreglada:** el molde con paquete esperaba en el MISMO cupo que las altas
+  que el servidor calcula él mismo (`_SEM_ALTA`, 2 a la vez en 3 núcleos): detrás de un DXF o de un
+  molde sin diseño podía esperar minutos para un trabajo de 1 s. Ahora va por `_SEM_PAQUETE`
+  (`TIZADA_PAQUETES`, por defecto max(4, núcleos)) con su propia cola. Contrato:
+  `verificar_paquete_molde.py` §5 (con todas las altas ocupadas se guarda en 0,2 s).
+  **Pendiente (anotado en PLAN_NAVEGADOR):** no subir el .ai si el servidor ya tiene uno con la
+  misma SHA-1; y que las páginas no tengan que viajar (cuando la tizada se arme en el navegador,
+  etapa 4, se pueden rehacer en la computadora desde el .ai).
+
 - **2026-09-17 (479) — ⏩ PLAN_NAVEGADOR ETAPA 1: el molde con diseño se prepara en la
   computadora de la persona, EN DOS TIEMPOS y con varios hilos.** El usuario, en medio del trabajo:
   *«si un molde con diseño demora 1 minuto o más ya es muchísimo… debe de ser muy pocos segundos»*.

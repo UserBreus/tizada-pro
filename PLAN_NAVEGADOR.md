@@ -267,6 +267,8 @@ para repetir la prueba con archivos nuevos.
 > diseño (camino B), idénticos al servidor, en dos tiempos y con varios hilos (la persona sigue a
 > los 3,5-5,4 s). FALTA: paso 7 (camino A y DXF), no re-subir un archivo que el servidor ya tiene
 > (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`.
+> MEDIDO (MAPA 480): 10 personas guardando a la vez el molde de 117 MB = 5,7 s y 166 MB en un
+> servidor de 3 núcleos. Lo caro es internet: ~250 MB por molde (archivo + páginas).
 
 **Lógica (traducción de `piezas_con_diseno.py`, función por función):**
 1. `capas.js`: `talles_del_molde` — las capas OCG del documento en el orden de `/OCProperties

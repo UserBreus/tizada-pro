@@ -2937,6 +2937,13 @@ def _descartar_tmp(ruta):
 
 _ALTAS_A_LA_VEZ = int(os.environ.get("TIZADA_ALTAS") or 0) or max(2, (os.cpu_count() or 4) // 4)
 _SEM_ALTA = threading.BoundedSemaphore(_ALTAS_A_LA_VEZ)
+# 🔴 El molde que YA PREPARÓ EL NAVEGADOR va por otro cupo (PLAN_NAVEGADOR, etapa 1). Guardarlo es
+# validar y mover archivos: medido el 2026-09-17 con 3 núcleos, 10 personas guardando a la vez el molde
+# de 117 MB = 5,7 s en total y 166 MB de memoria. Con el cupo de las altas esperaba detrás de un
+# DXF o un molde sin diseño que el servidor todavía calcula él mismo (minutos), justo lo que la
+# preparación en la computadora vino a sacar del medio. Tiene tope igual: es disco y memoria.
+_SEM_PAQUETE = threading.BoundedSemaphore(int(os.environ.get("TIZADA_PAQUETES") or 0) or max(4, os.cpu_count() or 4))
+_EN_COLA_PAQUETE = [0]
 _EN_COLA_ALTA = [0]          # cuántos están esperando lugar (para poder decirlo en pantalla)
 
 
@@ -3438,20 +3445,22 @@ def subir_plantilla():
     _tocar_trabajo(tid, progreso="leyendo el archivo")
 
     def _correr_alta():
-        _EN_COLA_ALTA[0] += 1
+        # Cupo: varias altas a la vez se pelean por la CPU y terminan TODAS más tarde. Se atienden
+        # de a `_ALTAS_A_LA_VEZ` y al resto se le dice que está esperando lugar. El molde que trae
+        # su paquete del navegador no calcula nada y va por su propio cupo (`_SEM_PAQUETE`).
+        sem, cola = (_SEM_PAQUETE, _EN_COLA_PAQUETE) if _paquete else (_SEM_ALTA, _EN_COLA_ALTA)
+        cola[0] += 1
         try:
-            # Cupo: varias altas a la vez se pelean por la CPU y terminan TODAS más tarde. Se
-            # atienden de a `_ALTAS_A_LA_VEZ` y al resto se le dice que está esperando lugar.
-            if not _SEM_ALTA.acquire(blocking=False):
-                _tocar_trabajo(tid, progreso=f"esperando lugar ({_EN_COLA_ALTA[0] - 1} adelante)")
-                _SEM_ALTA.acquire()
+            if not sem.acquire(blocking=False):
+                _tocar_trabajo(tid, progreso=f"esperando lugar ({cola[0] - 1} adelante)")
+                sem.acquire()
             try:
                 _tocar_trabajo(tid, estado="generando", progreso="leyendo el archivo")
                 res, err = _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                                                   _corresp_nueva, _con_diseno, _motivo_b, _t_subida,
                                                   paquete=_paquete)
             finally:
-                _SEM_ALTA.release()
+                sem.release()
             if err:
                 _tocar_trabajo(tid, estado="error", error=err[0])
             else:
@@ -3460,10 +3469,11 @@ def subir_plantilla():
             traceback.print_exc()
             _tocar_trabajo(tid, estado="error", error=f"{e}")
         finally:
-            _EN_COLA_ALTA[0] -= 1
+            cola[0] -= 1
 
     _en_hilo(_correr_alta)
-    return jsonify({"job": tid, "procesando": True, "en_cola": max(0, _EN_COLA_ALTA[0])})
+    return jsonify({"job": tid, "procesando": True,
+                    "en_cola": max(0, (_EN_COLA_PAQUETE if _paquete else _EN_COLA_ALTA)[0])})
 
 
 @app.post("/api/plantilla/paginas")

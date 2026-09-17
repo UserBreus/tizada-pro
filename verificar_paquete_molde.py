@@ -260,6 +260,22 @@ else:
     time.sleep(2)
     ok(not _LLAMADAS, f"sin que el servidor calcule nada en ningún momento ({_LLAMADAS or 'nada'})")
 
+print("\n5 · EL MOLDE CON PAQUETE NO HACE FILA DETRÁS DE LO QUE EL SERVIDOR CALCULA")
+# Con el cupo de las altas LLENO (un DXF o un molde sin diseño que tarda minutos), guardar lo que ya
+# preparó el navegador no puede esperar: no calcula nada y va por `_SEM_PAQUETE`.
+_tomados = 0
+while S._SEM_ALTA.acquire(blocking=False):
+    _tomados += 1
+try:
+    _t = time.time()
+    _st, _fin = subir(_COPIA, _paq)
+    _tarda = time.time() - _t
+    ok(_st == 200 and _fin.get("estado") == "listo" and _tarda < 60,
+       f"con las {_tomados} altas ocupadas, el molde con paquete se guarda igual en {_tarda:.1f} s («{_fin.get('estado')}»)")
+finally:
+    for _ in range(_tomados):
+        S._SEM_ALTA.release()
+
 print()
 shutil.rmtree(_TMP, ignore_errors=True)
 if FALLOS:
