@@ -4181,12 +4181,18 @@ def _nido_clave():
         # Los nidos cacheados con v6 se armaron sin las piezas dibujadas sólo con quads (tiras
         # finas: cuellos, tapacosturas) y su clave —mtimes de plantilla y registro— no cambió, así
         # que no se invalidaban solos. Subir la versión es lo que los rehace.
+        # El TALLE GUÍA también arma el nido (`nido_piezas(talle_guia=…)`) y se cambia en la pantalla
+        # (`/api/productos/variante_guia`) sin tocar ningún archivo: sin él en la clave, cambiarlo
+        # seguía mostrando el nido de la guía anterior, incluso después de reiniciar (caché en disco).
+        _guia = next((x.get("variante_guia") for x in _cargar_catalogo().get("productos", [])
+                      if x.get("id") == _pid_nc), None) or ""
         return ["v8", pl, os.path.getmtime(pl),   # v8: orden de piezas del archivo (entrada 182)
                 _reg_rev(_pid_nc),
                 os.path.getmtime(cor_path) if os.path.exists(cor_path) else 0,
-                os.path.getmtime(emp_path) if os.path.exists(emp_path) else 0]
+                os.path.getmtime(emp_path) if os.path.exists(emp_path) else 0,
+                _guia]
     except OSError:
-        return ["v8", pl, 0, 0, 0, 0]
+        return ["v8", pl, 0, 0, 0, 0, ""]
 
 def _nido_obtener():
     """Devuelve el nido (calculándolo si hace falta) con caché en memoria + DISCO
@@ -11868,11 +11874,40 @@ def _contar_piezas_registro(reg_path):
 
 
 def _pags_nav(pid):
+    """`None` si el molde NO tiene páginas pendientes del navegador; si las tiene, cuántos segundos
+    pasaron desde el último LATIDO de la pestaña que las está preparando (`/api/plantilla/paginas/latido`
+    toca la marca). La pantalla ofrece «Terminar de preparar» sólo si ese latido se cortó: sin esto,
+    las OTRAS pestañas de quien lo subió lo ofrecían mientras la primera todavía trabajaba, y un clic
+    lo preparaba dos veces."""
     try:
         import piezas_con_diseno as _PD
-        return _PD.paginas_pendientes_navegador(_ruta_entrada("plantilla.ai", pid))
+        pl = _ruta_entrada("plantilla.ai", pid)
+        if not _PD.paginas_pendientes_navegador(pl):
+            return None
+        marca = os.path.join(_PD._carpeta_desplegado(pl), _PD.PENDIENTE_NAVEGADOR)
+        return max(0, int(time.time() - os.path.getmtime(marca)))
     except Exception:
-        return False
+        return None
+
+
+@app.post("/api/plantilla/paginas/latido")
+def latido_paginas_plantilla():
+    """La pestaña que prepara la FASE B avisa que sigue viva (cada 15 s). Sólo toca la fecha de la
+    marca de pendientes: si no hay marca (ya terminó, o el molde se volvió a subir) no hace nada."""
+    cuerpo = request.get_json(silent=True) or {}
+    pid = str(cuerpo.get("pid") or "") or _pid_de_request()
+    _no = _guard_id({"id": pid}, permiso=None) if pid else None
+    if _no:
+        return _no
+    try:
+        import piezas_con_diseno as _PD
+        marca = os.path.join(_PD._carpeta_desplegado(_ruta_entrada("plantilla.ai", pid)), _PD.PENDIENTE_NAVEGADOR)
+        if os.path.exists(marca):
+            os.utime(marca, None)
+            return jsonify({"ok": True, "pendiente": True})
+    except Exception:
+        pass
+    return jsonify({"ok": True, "pendiente": False})
 
 
 @app.get("/api/productos")
@@ -12006,7 +12041,9 @@ def get_productos():
             "efimero": bool(p.get("efimero")),
             # las páginas por talle las está terminando (o las dejó a medias) un NAVEGADOR: la marca
             # del desplegado es la fuente de verdad (PLAN_NAVEGADOR, «dos tiempos»)
-            "paginas_navegador": bool(has_plantilla and _pags_nav(pid)),
+            "paginas_navegador": bool(has_plantilla and _pags_nav(pid) is not None),
+            # Segundos desde el último latido de la pestaña que prepara las páginas (None = nada pendiente).
+            "paginas_navegador_hace": _pags_nav(pid) if has_plantilla else None,
             "planilla_template_id": tid or "plan_default",
             "nesting_preset_id": p.get("nesting_preset_id") or "nesting_default",
             "grupo_tizada": p.get("grupo_tizada") or "General",
@@ -12047,8 +12084,13 @@ def get_productos():
             # Se deriva de `telas_asignadas` en los moldes viejos (ver `_telas_cfg_prod`).
             "telas_cfg": _telas_cfg_prod(p),
         })
+    # 🔴 EL ACTIVO DE ESTA SESIÓN, no el global. El global lo reescribe cualquiera que elige un molde
+    # (y sube la revisión del catálogo): devolverlo hacía que al elegir un molde, las pantallas de
+    # los DEMÁS cambiaran de molde en el próximo latido — la planilla se vaciaba a 5 filas y el paso
+    # Arte lo volvía a activar, pisando al otro de vuelta. `_get_active_producto_id` cae al global
+    # sólo si la sesión no eligió ninguno.
     return jsonify({
-        "activo": cat["activo"],
+        "activo": _get_active_producto_id(),
         "productos": res_prods
     })
 

@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **160 endpoints**. Generado automáticamente del código.
+Total: **161 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -140,6 +140,7 @@ Total: **160 endpoints**. Generado automáticamente del código.
 | POST | `/api/plantillas_planillas/eliminar` |  | body: id |
 | POST | `/api/plantillas_planillas/guardar` |  | body: columnas, id, nombre, role |
 | POST | `/api/plantilla/paginas` | FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta y los JSON completos, sobre el molde que ya se guardó en  | file: paquete |
+| POST | `/api/plantilla/paginas/latido` | La pestaña que prepara la FASE B avisa que sigue viva (cada 15 s). Sólo toca la fecha de la marca de pendientes: si no hay marca (ya terminó, o el mol | body: pid |
 
 ## Variables / Modelos / Grupos
 

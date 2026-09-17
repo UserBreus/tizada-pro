@@ -1495,6 +1495,44 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (481) — 🔄 ¿LO QUE CAMBIA UNA PERSONA SE VE ENSEGUIDA? Relevado, y 3 fallas arregladas.**
+  El usuario: *«si suben moldes nuevos, o editan algunos desde Configuración, o configuran algo, ¿se
+  ve reflejado enseguida?»*. **Cómo es hoy (leído del código):**
+  - **Servidor:** el catálogo se lee de la base en cada llamada (nada viejo en memoria). Las cachés
+    de dibujos, piezas, detección y registro se validan solas por fecha/versión. Quedan dos que
+    viven hasta reiniciar o 5 min: la lista de perfiles ICC y las telas de la API externa (300 s;
+    «Actualizar telas» la fuerza).
+  - **La misma persona, en la misma pantalla:** sí, al guardar se vuelve a pedir lo que cambió.
+  - **Otras personas / otras pestañas:** el único aviso en vivo es el latido de
+    `AvisoActualizacion` (cada 30 s, y al volver a la pestaña) que compara `catalogo_rev` y vuelve
+    a pedir **sólo `/api/productos`** (la lista de moldes). Llega solo en ≤ 30 s: moldes nuevos,
+    borrados, renombrados, variables/grupos guardados. **NO llega sin recargar o cambiar de
+    pestaña:** planillas y reglas, config general (`/api/config`), fuentes, telas, config con
+    diseño, permisos propios, tutoriales, las miniaturas del molde (`moldePreviews`) y las previas
+    de piezas cacheadas en la pantalla (`_pvCache`, `_talleDetCache`, `_detArteCache`). Un editor
+    de variables ya abierto no se re-siembra con lo que guardó otro.
+    Escrituras que no suben `catalogo_rev`: registro de piezas (tiene `registro_rev` propio),
+    `/api/config`, fuentes, `resumen_plantilla`, `emparejado_talles`, usuarios/permisos.
+  **Fallas encontradas y arregladas (contrato `verificar_activo_por_sesion.py`):**
+  1. 🔴 `/api/productos` devolvía el activo GLOBAL: al elegir un molde, en ≤ 30 s las pantallas de
+     los DEMÁS cambiaban de molde, **la planilla que estaban cargando se vaciaba a 5 filas** y el
+     paso Arte lo re-activaba (ping-pong entre dos personas). Ahora devuelve el de la sesión
+     (`_get_active_producto_id`). Queda: dos pestañas de la MISMA sesión comparten activo.
+  2. Mientras una pestaña preparaba las páginas por talle (fase B), las otras pestañas de la misma
+     persona mostraban «Terminar de preparar» y un clic lo preparaba dos veces. Ahora la pestaña que
+     trabaja late cada 15 s (`POST /api/plantilla/paginas/latido` toca la marca) y `/api/productos`
+     manda `paginas_navegador_hace`; se ofrece terminar sólo si pasaron ≥ 45 s sin latido.
+  3. El nido no tenía `variante_guia` en su clave (memoria + `nido_cache.json`): cambiar el talle
+     guía seguía mostrando el nido viejo, también tras reiniciar. Ahora va en la clave.
+  **Pendiente si se quiere TODO en vivo (decisión del usuario, no hecho):** que el latido traiga
+  también las revisiones de config, planillas, fuentes, telas y registro, y que cada pantalla
+  escuche la suya (mismo patrón que `tizada:catalogo`); versionar las claves de `_pvCache` y
+  compañía con esas revisiones; y re-sembrar el editor de variables cuando cambia el molde que está
+  abierto, sin pisar lo que la persona está tocando (avisar «otra persona cambió esto»). Verificar
+  además si `guardarGruposCon` (manda el arreglo entero de variantes) puede pisar variables
+  guardadas por otro desde un editor abierto antes (las reservas «lo está editando fulano»
+  deberían evitarlo: comprobarlo con dos sesiones).
+
 - **2026-09-17 (480) — 📏 ¿CUÁNTO USA DEL SERVIDOR QUE 10 PERSONAS GUARDEN UN MOLDE A LA VEZ? Medido.**
   El usuario: *«si lo envío al servidor, ¿qué tal funcionaría? ¿cuánto me usaría del servidor si
   entran 10 personas al mismo tiempo?»*. Se simuló lo que hace el servidor con un molde que preparó

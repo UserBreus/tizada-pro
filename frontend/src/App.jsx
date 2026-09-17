@@ -6077,6 +6077,20 @@ export default function App() {
     window.addEventListener('beforeunload', avisar);
     return () => window.removeEventListener('beforeunload', avisar);
   }, [prepPaginas]);
+  // LATIDO: mientras esta pestaña prepara las páginas de un molde, se lo dice al servidor cada 15 s.
+  // Las otras pestañas (y las otras computadoras de la misma persona) ofrecen «Terminar de preparar»
+  // sólo cuando el latido se corta; si no, lo preparaban dos veces a la vez.
+  const pidsPreparando = Object.values(prepPaginas).filter(x => x && x.pid && x.fase !== 'error').map(x => x.pid).sort().join('|');
+  useEffect(() => {
+    if (!pidsPreparando) return undefined;
+    const latir = () => pidsPreparando.split('|').forEach(pid => {
+      fetch(rutaApi('/api/plantilla/paginas/latido'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid }) }).catch(() => {});
+    });
+    latir();
+    const t = setInterval(latir, 15000);
+    return () => clearInterval(t);
+  }, [pidsPreparando]);   // eslint-disable-line react-hooks/exhaustive-deps
   const fetchProductos = async () => {
     try {
       const res = await fetch('/api/productos');
@@ -12853,6 +12867,7 @@ export default function App() {
       <PanelPaginasEnPreparacion
         enCurso={prepPaginas}
         pendientes={(productosCat.productos || []).filter(p => p.paginas_navegador && !p.de_otro
+          && !(p.paginas_navegador_hace != null && p.paginas_navegador_hace < 45)   // otra pestaña la está preparando
           && !Object.values(prepPaginas).some(x => x && x.pid === p.id))}
         onTerminar={terminarPaginasMolde}
         onDescartar={(clave) => setPrepPaginas(p => { const n = { ...p }; delete n[clave]; return n; })} />
