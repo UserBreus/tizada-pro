@@ -19,8 +19,10 @@ for (let i = 0; i < n; i++) {
   const geo = geometriaPagina(page)
   geos.set(i + 1, geo)
   if (talles.length) {
-    const dib = dibujosDePagina(mupdf, page)
-    const r = contornosDeMesa(dib, geo, i + 1, talles)
+    // la lectura LIGERA, como en `molde/desplegar.js` (la completa sólo si hace falta el respaldo)
+    let completos = null
+    const r = contornosDeMesa(dibujosDePagina(mupdf, page, { ligero: true }), geo, i + 1, talles,
+      () => (completos = completos || dibujosDePagina(mupdf, page)))
     mesas[i + 1] = { orden: talles, talles: aJSON(r.talles), marco: r.marco, U: r.U }
     if (r.talles.size) porMesa.set(i + 1, r.talles)
   }

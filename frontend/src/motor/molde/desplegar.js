@@ -45,7 +45,10 @@ export function desplegarMolde(mupdf, doc, { avisar = null, manual = {} } = {}) 
     const geo = geometriaPagina(page)
     geos.set(m, geo)
     if (talles.length) {
-      const r = contornosDeMesa(dibujosDePagina(mupdf, page), geo, m, talles)
+      // lectura LIGERA (sin recorrer los rellenos del diseño); la completa sólo si hace falta el respaldo
+      let completos = null
+      const r = contornosDeMesa(dibujosDePagina(mupdf, page, { ligero: true }), geo, m, talles,
+        () => (completos = completos || dibujosDePagina(mupdf, page)))
       mesas.set(m, { json: { sello: null, orden: talles.slice(), talles: r.talles, v: V_CONTORNOS, paginas: false, marco: r.marco, U: r.U } })
       if (r.talles.size) porMesa.set(m, r.talles)
     }

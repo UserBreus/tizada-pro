@@ -194,7 +194,7 @@ export function contornoDeDrawing(items, r, cb, U, mesa, talle) {
 }
 
 // ─── las piezas de una mesa en un talle ──────────────────────────────────────────────────────
-export function piezasDeMesaCruda(dibujos, geo, mesa, talle, areaMin = 0.25, ladoMin = 0.3) {
+export function piezasDeMesaCruda(dibujos, geo, mesa, talle, areaMin = 0.25, ladoMin = 0.3, completos = null) {
   const { rect, cb, U } = geo
   const cands = [], rects = []
   dibujos.forEach((d, k) => {
@@ -206,7 +206,8 @@ export function piezasDeMesaCruda(dibujos, geo, mesa, talle, areaMin = 0.25, lad
     cands.push(k)
     rects.push(r)
   })
-  if (!cands.length) return respaldoPorTrazados(dibujos, geo, mesa, talle, areaMin, ladoMin)
+  // sin recortes: el respaldo necesita la caja de cada relleno, que la lectura ligera no calcula
+  if (!cands.length) return respaldoPorTrazados(completos ? completos() : dibujos, geo, mesa, talle, areaMin, ladoMin)
 
   const pintado = pintadoPorClip(dibujos, talle)
   const trazos = dibujos.filter((x) => x.type === 's' && x.layer === talle).map(rectDe)
@@ -325,10 +326,10 @@ export function canonizarOrden(conts, talles) {
 
 // ─── la mesa desplegada (sólo contornos) ─────────────────────────────────────────────────────
 /** Lo que `desplegar_mesa(contornos=True, paginas=False)` escribe en `m{mesa}.json` (sin el sello). */
-export function contornosDeMesa(dibujos, geo, mesa, talles) {
+export function contornosDeMesa(dibujos, geo, mesa, talles, completos = null) {
   const conts = new Map()
   for (const t of talles) {
-    const pzs = piezasDeMesaCruda(dibujos, geo, mesa, t)
+    const pzs = piezasDeMesaCruda(dibujos, geo, mesa, t, 0.25, 0.3, completos)
     if (pzs.length) conts.set(t, pzs)
   }
   const [canon, reordenado] = canonizarOrden(conts, talles)

@@ -1022,7 +1022,9 @@ export function paginasDeTalles(mupdf, doc, mesa, talles, conts, marco, U, ocult
     if (lc.size) lineas.set(talle, new Map([...lc].map(([k, v]) => [String(k), v])))
     paginaDesplegada(mupdf, out, mapa, page, salida)
   }
-  const pdf = out.saveToBuffer('compress').asUint8Array().slice()
+  // compresión RÁPIDA (nivel ~1, lo mismo que usa el servidor con pikepdf): sin pérdida, 5 veces más
+  // rápida que la normal y ~15 % más pesada — medido con 20 MB de contenido real: 0,4 s contra 2 s
+  const pdf = out.saveToBuffer('compress,compression-effort=15').asUint8Array().slice()
   // Soltar YA la memoria de WebAssembly de esta mesa: el recolector de JavaScript no sabe cuánto
   // pesa del otro lado y, con 9 mesas de 50 MB, la pestaña llegaba al tope de 4 GB.
   try { mapa.destroy() } catch { /* nada */ }

@@ -55,8 +55,14 @@ function mismosItems(a, b) {
  * Los dibujos de `page` (un `mupdf.Page`), como `page.get_cdrawings(extended=True)`.
  * Cada uno: {type, items, rect|scissor, level, layer, closePath, even_odd, seqno, width, ...}.
  */
-export function dibujosDePagina(mupdf, page) {
+export function dibujosDePagina(mupdf, page, { ligero = false } = {}) {
+  // `ligero` (para encontrar piezas, no para el contrato de dibujos): los RELLENOS no se recorren
+  // punto por punto. Para las piezas de un relleno sólo importan su capa, su nivel y su tipo —
+  // lo caro (recorrer cada trazado del diseño: 140 mil en una camiseta) no hace falta. Se recorre
+  // igual cuando cambia algo: si viene un trazo después (PyMuPDF los junta en «fs» si son el mismo
+  // trazado) o si el trazado podría estar vacío (PyMuPDF no lo anota).
   const out = []
+  let ultimoRelleno = null          // {path, ctm, entrada} del último relleno ligero anotado
   const dev = {
     seqno: 0, depth: 0, scissors: [], layer: '',
     ctm: null, pathType: 0, pathrect: INFINITO, pathdict: null,
@@ -152,6 +158,23 @@ export function dibujosDePagina(mupdf, page) {
     if (pd.type !== 's') return append()
     const prev = out[out.length - 1]
     if (prev.type !== 'f') return append()
+    if (prev.ligero) {
+      // el relleno anterior no se recorrió: se recorre ahora para poder comparar
+      const guardado = dev.pathdict
+      const r = ultimoRelleno && ultimoRelleno.entrada === prev ? ultimoRelleno : null
+      if (!r) { dev.pathdict = guardado; return append() }
+      const ctmG = dev.ctm, tipoG = dev.pathType, rectG = dev.pathrect
+      dev.ctm = r.ctm
+      dev.pathType = FILL
+      recorrer(r.path)
+      const relleno = dev.pathdict
+      prev.items = relleno ? relleno.items : []
+      if (relleno && 'closePath' in relleno) prev.closePath = relleno.closePath
+      prev.rect = aRect(dev.pathrect)
+      delete prev.ligero
+      dev.ctm = ctmG; dev.pathType = tipoG; dev.pathrect = rectG
+      dev.pathdict = guardado
+    }
     if (!mismosItems(prev.items, pd.items)) return append()
     for (const [k, v] of Object.entries(pd)) if (!(k in prev)) prev[k] = v
     prev.type = 'fs'
@@ -168,6 +191,17 @@ export function dibujosDePagina(mupdf, page) {
 
   const device = new mupdf.Device({
     fillPath(path, evenOdd, ctm) {
+      if (ligero) {
+        const b = path.getBounds(null, ctm)
+        // vacío o un solo punto: puede no tener tramos → se recorre para saberlo
+        if (!(b[0] > b[2] || (b[0] === b[2] && b[1] === b[3]))) {
+          const entrada = { type: 'f', layer: dev.layer, level: dev.depth, ligero: true }
+          out.push(entrada)                // un relleno nunca se funde con el anterior: va derecho
+          ultimoRelleno = { path, ctm, entrada }
+          dev.seqno += 1
+          return
+        }
+      }
       dev.ctm = ctm
       dev.pathType = FILL
       recorrer(path)
