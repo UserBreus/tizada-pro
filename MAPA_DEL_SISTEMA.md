@@ -1550,6 +1550,15 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     WebAssembly, un mini-benchmark) y si no alcanza lo dice con claridad y no deja subir ni
     generar. Sin adivinar: se calibra con lo medido en la etapa 0.
 
+  **Cómo se trabaja (el usuario, mismo día): «que cargar el molde haga toda la configuración y
+  vaya armando un PAQUETE; después de tener pronto le dan a un botón Guardar y envía el paquete:
+  una lógica profesional».** O sea: la persona trabaja en su navegador sobre un ESPACIO LOCAL
+  (el molde preparado, sus piezas nombradas, la etiqueta, el diseño puesto, la tizada armada) sin
+  hablar con el servidor a cada toque; al terminar, **Guardar** arma un paquete (archivos +
+  configuración) y lo manda de una vez. El servidor lo recibe entero o no lo recibe (atómico),
+  lo guarda y desde ahí lo entrega al instante a todos. Lo del momento (probar, mirar, acomodar)
+  no viaja nunca. Como un programa de diseño: se trabaja local, se guarda al final.
+
   **Qué queda en el servidor:** usuarios, permisos, catálogo, planillas, telas (API externa),
   los archivos (moldes, desplegados, artes, tizadas) y su entrega, el registro. Nada que parsee
   o dibuje un PDF. Los pools y el cupo (476) quedan como red de seguridad mientras se migra.
