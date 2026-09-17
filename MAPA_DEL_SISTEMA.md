@@ -142,9 +142,10 @@ Librerías clave del motor: **pymupdf (fitz)** (render/SVG/pixmap), **pikepdf** 
   y `motor_pedido.fuentes_requeridas_arte` para las fuentes.
 
 ### `nesting_contorno.py` (acomodo)
-- `anidar_contorno(piezas, cfg)` → coloca las piezas (rasteriza a máscara con `_mascara`, prueba estrategias `bl`/`bandas`, rota según `_angulos`). Devuelve colocaciones + área.
+- `anidar_contorno(piezas, cfg)` → coloca las piezas (máscara del CONTORNO con `_mascara_contorno` cuando la pieza trae `base.cont` —camino B y sello—; el raster del documento `_mascara(doc)` sólo queda para piezas sin base o con `TIZADA_MASCARA_LEGACY=1`; prueba estrategias `bl`/`bandas`, rota según `_angulos`). Devuelve colocaciones + área.
 - `componer_pdf_contorno(colocaciones, cfg, path, etiquetas)` → arma el **HOJA_*.pdf** final.
 - cfg default: `ancho_cm=180, altura_max_cm=500, espaciado_cm=0.5, márgenes, resolucion_mm=3, estrategias=["bl","bandas"]`.
+- 🧭 **Gemelo en el navegador: `frontend/src/motor/nesting/contorno.js`** (`anidarContorno`, PLAN_NAVEGADOR etapa 4 · changelog 487). SÓLO el camino del contorno (no rasteriza). Contrato `verificar_navegador_nesting.py`: mismas colocaciones, máscaras, área y consumo. Si se toca el nesting de un lado, va del otro y el contrato lo dice.
 
 ### `texto_curvas.py` (`FuenteCurvas`)
 - Renderiza texto como **curvas vectoriales** (no fuentes PDF embebidas). `ops_texto` (recto), `ops_texto_curva` (sobre un arco), `ops_texto_fiel` (fiel a puntos de baseline = curva+multilínea del placeholder original), `ancho_texto`.
@@ -1494,6 +1495,117 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > referencias también viven en los contratos. Para citar una entrada de este tramo, **decí el número
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
+
+- **2026-09-17 (487) — 🧩 PLAN_NAVEGADOR ETAPA 4, PUNTO 1: EL NESTING POR CONTORNO EN EL NAVEGADOR.**
+  `nesting_contorno.py` (`poligonos_contorno`, `_mascara_contorno`, `_angulos`, `_rotar`,
+  `_elegir_posicion`, `_preparar`, `anidar_contorno`, `_anidar_estrategia`) traducido a
+  `frontend/src/motor/nesting/contorno.js` (`anidarContorno(piezas, cfg)` → `{colocaciones,
+  area, consumo}`; harness `pruebas/nesting.mjs`). Contrato `verificar_navegador_nesting.py`
+  (sin base: `db` doble, sin servidor; lee sólo `entrada/prod_20260916_095236_ef99/desplegado/
+  m1.json`): 5 escenarios con contornos reales (un talle × 3 prendas sin giro · 3 talles a 180° ·
+  8 piezas a 90° con los 4 órdenes × 2 estrategias · 5 piezas libres cada 15° · 77 piezas en 2
+  hojas) → **iguales**: hojas, orden, ángulo, `cx`/`cy` bit a bit, máscara de cada pieza (alto,
+  ancho, celdas, hash), área y consumo. Tiempo: Python 7,6-9,7 s en total vs Node 4,8-6,9 s
+  (Python gana en el escenario sin repetidas —FFT contra barrido—, Node en los de pocos giros).
+  **Decisión: el navegador tiene UN solo camino para la silueta, el del contorno.** Python tiene
+  dos (`_mascara(doc)` rasteriza el documento de la pieza —legado, `TIZADA_MASCARA_LEGACY`— y
+  `_mascara_contorno` pinta el polígono); en el navegador no se rasteriza nada (regla «siempre el
+  vector original») y el contrato fuerza a Python al mismo camino (piezas con `base.cont`, sin
+  `doc`, variable de entorno quitada).
+  **Lo no obvio que hubo que copiar bit a bit** (está comentado arriba del módulo):
+  · `fftconvolve(...) < 0.5` es «ninguna celda se pisa»: se cuenta EXACTO con bits (una palabra
+    de 32 celdas), y como `_elegir_posicion` se queda con la primera posición en el orden
+    `(y+hh, x)` (bl) o `((y+hh)//25, x, y)` (bandas), se recorre en ese orden y se corta.
+  · La silueta la pinta Pillow 12.2 (`ImageDraw.polygon(fill=1, outline=1)` modo "1"): con
+    `outline == fill` NO traza el contorno; el relleno es `ImagingDrawPolygon` + `polygon_generic`
+    (Draw.c) con vértices `(int)` truncados, pendiente en `float` de 32 bits, corrección de
+    esquinas y `ROUND_UP/DOWN` con `+ 0.5F` — portado línea por línea con `Math.fround`.
+  · `ndimage.rotate(order=0)` (sólo giro libre): cos/sin en GRADOS (cephes `cosdg`/`sindg`,
+    portados; `Math.cos(rad)` difiere en el último bit en 19 de 360 grados), forma `int(ptp+0.5)`,
+    vecino `floor(cc+0.5)`, fuera de `[0, len-1]` → 0, y **el `@` de numpy usa los kernels con
+    FMA de OpenBLAS**: `gemv` = `fma(m00, v0, fl(m01·v1))`, `gemm` = `fma(m01, b1, fl(m00·b0))`
+    (medido en 2492 giros, 100 % cada una; la suma en doble sólo acierta la mitad). Se emula el
+    FMA exacto con BigInt. Sin eso, 2 de 116 máscaras de calibración tenían una celda distinta.
+    ⚠️ Es la aritmética de ESTA máquina/ese OpenBLAS: en una CPU sin FMA Python daría otra celda
+    en esos casos raros; cuando Python se apague (etapa 6) la referencia pasa a ser el navegador.
+  · `math.cos/sin` para el bbox (`bw`/`bh`): UCRT y V8 difieren 1 ulp en 19 de 360 grados
+    enteros (ninguno múltiplo de 90) → el contrato compara `bw`/`bh` y el área (`** 2` vs `k·k`)
+    con 1e-9 relativo; todo lo demás, exacto.
+  · `sorted(reverse=True)` es estable (los empates en orden de entrada) = `sort` de JS con
+    comparador descendente; `int()` = `Math.trunc`; `//` de no negativos = `Math.floor`.
+  **Lo que salió mal:** el `<<` de BigInt tiene menos precedencia que `+` (faltaron paréntesis:
+  «Maximum BigInt size exceeded»); y en un ESM de Node un import con ruta absoluta de Windows
+  tiene que ser `file:///C:/...` con `%20` en los espacios. `curl` con `cd ""` dejó los fuentes C
+  bajados dentro de `frontend/` (movidos al scratchpad; no quedaron en el repo).
+  **Pendiente (no bloquea):** el barrido por filas de Node es más lento que la FFT de Python
+  cuando no hay geometrías repetidas (1,3-1,8 s vs 0,6-0,8 s a 21 piezas): si a 100 prendas
+  molesta, barrer la fila con máscaras de bits en paralelo (saltar de choque en choque). Y el
+  punto 1 sigue con `nesting/grupos.js` (`generar_multi`: una mesa por molde, grupos por tela y
+  columna de talle, filas sin talle → traba, toggles, variables por fila).
+- **2026-09-17 (486) — 🔤 PLAN_NAVEGADOR ETAPA 3.2: TEXTO A CURVAS EN EL NAVEGADOR (`texto/curvas.js`).**
+  `frontend/src/motor/texto/curvas.js` traduce `texto_curvas.py` entero (`FuenteCurvas`: `capRatio`,
+  `sizeParaAlto`, `faltantes`, `prestados`, `anchoTexto`, `opsTexto`, `opsTextoCurva`, `opsTextoFiel`,
+  respaldo con la escala upem × cap_ratio, `sustituidos`) con opentype.js 2.0. **Contrato
+  `verificar_navegador_curvas.py`** (16 tipografías del catálogo + Anton de respaldo, 8 textos ×
+  3 tamaños × 4 ángulos + arco con 3 alineaciones + fiel de dos renglones): los operadores del texto
+  RECTO son la MISMA CADENA byte a byte; `ancho_texto`, `cap_ratio` y `size_para_alto` el mismo
+  double. Corre en la tanda de `correr_contratos.py` (~30 s). Lo que hubo que reproducir de fontTools
+  y de Python, y NO es obvio (leer `curvas.js` arriba antes de tocarlo):
+  - **El `path` de opentype.js NO sirve para las TrueType**: arranca cada contorno en otro punto y
+    parte los off-curve seguidos. Se leen los puntos crudos de `glyf` y se recorre como `Glyph.draw`
+    de fontTools (rotar hasta terminar en on-curve, `moveTo` al último, `qCurveTo` con todos los
+    off-curve, `lineTo` final implícito). Compuestos como `DecomposingRecordingPen` + `TransformPen`
+    (matriz compuesta para los anidados; sin `ARGS_ARE_XY_VALUES` es error en las dos puntas).
+    fontTools corre el glifo de primer nivel `lsb − xMin` en x. Las CFF (.otf) sí usan el `path` de
+    opentype.js (M/L/C/Z = moveTo/lineTo/curveTo/closePath del `T2OutlineExtractor`).
+  - **El `cmap` se elige como `getBestCmap`** ((3,10) (0,6) (0,4) (3,1) (0,3) (0,2) (0,1) (0,0))
+    leyendo la tabla cruda: opentype.js elige otra subtabla y acepta Mac Roman. `_cmap_de_respaldo`
+    (MoreggiTFont4: sólo Mac Roman + símbolo) reproducido con la tabla `mac_roman` de Python.
+  - **`sum()` de Python 3.12 no es una suma simple**: enteros exactos aparte, floats con la
+    compensación de Neumaier (`py.js: pySum`). Se vio en `ancho_texto` con glifos prestados (anchos
+    float mezclados con enteros): un bit distinto corre el nombre entero. `pyIsSpace`/`pyStrip`
+    también en `py.js` (los espacios de Python no son los de `\s`).
+  - **Lo irreducible (documentado en el contrato):** el arco usa `numpy.polyfit` (SVD de LAPACK)
+    — en JS son los mismos mínimos cuadrados por QR (coeficientes a ~1e-14 relativo) — y `atan2`
+    de la CRT de Windows difiere de V8 en el último bit para algunas tangentes. Mueve cada
+    coordenada ~1e-13 pt y sólo se ve cuando cae JUSTO en un …5 del `.2f`; con los datos del
+    contrato (37,5 sobre upem 1000) pasa a propósito: 627 «bordes» sobre 1,9 millones de números,
+    tolerados a 1 centésima y contados (tope: uno por mil). `cos`/`sin` no difirieron en ninguno.
+  - `curvas.js` importa `import * as _ot from 'opentype.js'` y toma `_ot.parse ?? _ot.default`:
+    Vite usa el `module` (ESM con nombres) y Node el `main` (CommonJS, todo en `default`).
+  **Falta de la etapa 3:** `texto/fuentes.js` (3.1), `arte/*` (3.3), `pieza/*` (3.4), el paso Arte (3.5).
+
+- **2026-09-17 (485) — 📄 PLAN_NAVEGADOR ETAPA 4.2: LA HOJA CON EL SELLO SE COMPONE EN EL NAVEGADOR.**
+  `frontend/src/motor/hoja/componer.js` es la traducción de `hoja_pike.componer_hoja_sello` (+
+  `matriz_colocacion`, `_remapear`, `_num`, `altos_de_hojas`, y `servidor._embeber_perfil_pdf` como
+  `embeberPerfil`) sobre mupdf.js: una página por mesa física, el dibujo de cada mesa desplegada UNA
+  vez como Form XObject `/S0…` (por orden de primera aparición, deduplicado por `(origen, página)`,
+  con `/TizadaBase true` si es del molde y no anida otros dibujos, sin `/OC` ni `/Group`), y cada
+  pieza `q <matriz> 0 0 W H re W n <base_stream remapeado> <estampado> Q`; cada página con SU tabla
+  de recursos (sólo los dibujos que usa); mesas de más de 5,08 m con `/UserUnit` y todo dibujado
+  dividido; sin comprimir (el aplanado la reescribe). **El contrato de entrada** (colocaciones del
+  nesting `{cx, cy, bw, bh, ang, pieza: {base, estampado}}`, bases de `pieza/base.js` con
+  `baseStream/B/W/Hp/fuentesXo/delMolde`, `origenes` = los `m{mesa}.pdf`) está documentado en el
+  encabezado del archivo. **Contrato `verificar_navegador_hoja.py`** (CONTRATO_LENTO, ~100 s):
+  copia el molde `prod_20260916_095236_ef99` a un temporal, corre el motor REAL con
+  `componer_hoja_sello` interceptado (vuelca lo que recibe a JSON y llama al original), compone lo
+  mismo en Node (`pruebas/hoja.mjs`) y compara páginas, MediaBox, `/UserUnit`, `OutputIntents`
+  (con un ICC real de la máquina), cada XObject (BBox, Matrix, TizadaBase, recursos, contenido byte a
+  byte), el content-stream de cada página BYTE A BYTE y el render a 60 dpi con la regla estructural
+  de la vista. Verde: 7 prendas / 49 colocaciones / 2 páginas, giros 0-270 y libres (120°), 862.736
+  bytes idénticos, **0 píxeles distintos**; y la misma tizada corrida 420 cm más abajo → `/UserUnit
+  [2, 2]`, también 0 píxeles. **Lo no obvio que hubo que replicar**: (a) `as_form_xobject()` de qpdf
+  lee TrimBox → CropBox → MediaBox y `/Rotate`/`/UserUnit` HEREDABLES (`getInheritable`), y sólo
+  escribe `/Matrix` si hay alguno de los dos; (b) el orden de los nombres globales depende del orden
+  de recorrido (hojas → colocaciones → `fuentes_xo`): con otro orden los streams difieren aunque el
+  dibujo sea el mismo; (c) las 6 cifras de la matriz salen de `pyFixed` (redondeo de Python) y
+  `Math.cos/sin` dieron los mismos 6 decimales que la libm de C en todos los giros probados; (d) los
+  reales de mupdf son `float32`: MediaBox/BBox se comparan con tolerancia 0,01 pt (el contenido, que
+  es texto que escribimos nosotros, es idéntico). **No se portaron a propósito**: `componer_hoja_pike`
+  (el compositor anterior al sello, sólo con `TIZADA_SIN_SELLO=1`) y `preview_svg`/`svgs_de_bases`
+  (nadie abre las previas SVG desde el 458). Trampa del contrato: `MP.detectar_piezas` devuelve
+  `mesa=None` en el camino B → el registro se arma con `PD.alta_molde_con_diseno(pl, paginas=False)`
+  sobre la copia (con el desplegado ya hecho no despliega nada), no con `alta_plantilla_manual`.
 
 - **2026-09-17 (484) — 🖼️ PLAN_NAVEGADOR ETAPA 2: LA VISTA DE LAS MESAS SE DIBUJA EN EL NAVEGADOR.**
   El usuario: *«cuando es todo es hasta la última etapa»*. Lo que dibujaba el pool del visor del

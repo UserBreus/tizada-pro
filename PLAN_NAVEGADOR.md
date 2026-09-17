@@ -339,6 +339,10 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 ### ETAPA 3 — El arte en el navegador (6-8 semanas)
 
+> ⏩ **EN CURSO 2026-09-17** (MAPA 486): punto 2 HECHO — `texto/curvas.js` + contrato
+> `verificar_navegador_curvas.py` (texto recto byte a byte en las 16 tipografías del catálogo; el
+> arco a 1 centésima porque `polyfit`/`atan2` no son reproducibles bit a bit, documentado ahí).
+
 1. `texto/fuentes.js`: el catálogo de fuentes lo sigue sirviendo el servidor
    (`/api/fuentes/catalogo`, ya existe) — el navegador baja el archivo de la tipografía una vez
    (caché); alias, reemplazos por pedido y por campo (`@campo:`), «la elección manda».
@@ -363,6 +367,11 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 7. **Publicación:** `navegador.arte`.
 
 ### ETAPA 4 — La tizada entera en el navegador (8-12 semanas)
+
+> ⏩ **EN CURSO 2026-09-17** (MAPA changelog 487). HECHO: punto 1, `nesting/contorno.js`
+> (`anidarContorno`, sólo el camino del contorno) con contrato `verificar_navegador_nesting.py`
+> verde: 5 escenarios con contornos reales, colocaciones/máscaras/área/consumo IGUALES a Python.
+> Falta del punto 1: `nesting/grupos.js` (`generar_multi`).
 
 1. `nesting/contorno.js`: `poligonos_contorno`, `anidar_contorno` (mismos giros, mismo orden de
    prueba, mismos empates) y `nesting/grupos.js` (`generar_multi`: una mesa por molde, grupos por

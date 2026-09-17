@@ -2372,7 +2372,7 @@ _API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_mu
 
 # Endpoints que MUESTRAN el molde en una lista, sin trabajar con él: la miniatura de la grilla y la
 # descarga del archivo. No cuentan como «este molde está en uso» para los efímeros (ver la guardia).
-_API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla")
+_API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla", "/motor_b", "/prendas")
 
 
 # 🔴 RUTAS QUE ESCRIBEN PERO NO TRABAJAN SOBRE NINGUN MOLDE (auditoria 2026-09-15).
@@ -7986,6 +7986,9 @@ def subir_fuente():
     return jsonify(res)
 
 
+_re_pid_seguro = __import__("re").compile(r"^prod_[A-Za-z0-9_]+$")
+
+
 @app.get("/api/fuente/archivo/<path:nombre>")
 def fuente_archivo(nombre):
     """Sirve el .ttf/.otf del catálogo para que el navegador lo dibuje (@font-face) en las
@@ -7996,7 +7999,14 @@ def fuente_archivo(nombre):
     if not base.lower().endswith((".ttf", ".otf")):
         return jsonify({"error": "no es una fuente"}), 400
     ruta = os.path.realpath(os.path.join(FUENTES, base))
-    if os.path.dirname(ruta) != os.path.realpath(FUENTES) or not os.path.exists(ruta):
+    # `?pid=`: primero la carpeta de tipografías PROPIAS de ese molde (las subidas «sólo para este
+    # pedido»), que es lo que el motor mira primero (`_fuentes_para`). El navegador las necesita
+    # para estampar él (PLAN_NAVEGADOR, etapa 3).
+    _pid = request.args.get("pid") or ""
+    _dir_propia = os.path.realpath(os.path.join(DATOS, "productos", _pid, "fuentes")) if _re_pid_seguro.match(_pid) else None
+    if _dir_propia and os.path.exists(os.path.join(_dir_propia, base)):
+        ruta = os.path.realpath(os.path.join(_dir_propia, base))
+    if os.path.dirname(ruta) not in (os.path.realpath(FUENTES), _dir_propia) or not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
     return send_file(ruta, mimetype="font/ttf" if base.lower().endswith(".ttf") else "font/otf",
                      max_age=86400)   # el archivo no cambia (mismo nombre = misma fuente)
@@ -9437,11 +9447,19 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
                                         marcas=marcas_ped, sin_marca=sin_marca_ped)}
 
 
-@app.post("/api/generar_multi")
-def generar_multi():
-    """Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA.
-    Body: {molds: [pid, ...], prendas: [...]}."""
-    cuerpo = request.get_json(force=True)
+class _PlanInvalido(Exception):
+    """El pedido no se puede fabricar: `resp` (y `code`) es la respuesta para la pantalla."""
+    def __init__(self, resp, code=None):
+        super().__init__("plan inválido")
+        self.resp, self.code = resp, code
+
+
+def _plan_del_pedido(cuerpo):
+    """TODO lo que hay que decidir y validar ANTES de generar una tizada, sin tocar ningún PDF:
+    traducir las filas a prendas, la traba antes de fabricar, telas, rotaciones, tipografías,
+    grupos de mesa y las guías de la ficha. Lo usan `generar_multi` (el servidor genera) y
+    `/api/pedido/plan` (el NAVEGADOR genera con este plan: PLAN_NAVEGADOR.md, etapa 4). Levanta
+    `_PlanInvalido` con la respuesta para la pantalla."""
     prendas = cuerpo.get("prendas", [])
     pids = cuerpo.get("molds") or cuerpo.get("productos") or []
     default_diseno = cuerpo.get("default_diseno") or "principal"  # diseño de la fila si no hay columna
@@ -9465,9 +9483,9 @@ def generar_multi():
         if isinstance(_pm, dict) and _pm:
             _moldes_por_dis.setdefault(_slugify_diseno(_sl), [str(x) for x in _pm.keys()])
     if not prendas:
-        return jsonify({"error": "el pedido no tiene prendas"}), 400
+        raise _PlanInvalido(jsonify({"error": "el pedido no tiene prendas"}), 400)
     if not pids:
-        return jsonify({"error": "no hay moldes elegidos"}), 400
+        raise _PlanInvalido(jsonify({"error": "no hay moldes elegidos"}), 400)
     # GUARDA DE DUEÑO, MOLDE POR MOLDE. Los pids llegan en una LISTA (`molds`), que
     # `_pid_de_request` no mira (sólo `pid`/`producto_id`/la ruta) → esta ruta no pasaba por
     # ninguna guarda y generaba —y devolvía— la tizada de moldes ajenos, con su registro y su
@@ -9475,14 +9493,14 @@ def generar_multi():
     for _p in pids:
         _no = _guard_molde(str(_p))
         if _no:
-            return _no
+            raise _PlanInvalido(_no)
     cat = _cargar_catalogo()
     # 🔴 ANTES DE ARMAR NADA: que ninguna fila pida en una columna de talle algo que ningún molde
     # del pedido tiene ahí (la columna equivocada no falla: sale impresa). La pantalla ya lo frena;
     # esto es el cinturón para quien pegue a la API directo.
     _cruz = _talles_cruzados([str(x) for x in pids], prendas, cat)
     if _cruz:
-        return jsonify(_cruz), 409
+        raise _PlanInvalido(jsonify(_cruz), 409)
     grupos_cfg = cat.get("grupos_tizada", [])
     def _grupo_de(_pid):
         for gr in grupos_cfg:
@@ -9507,7 +9525,7 @@ def generar_multi():
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
         nombre = (prod or {}).get("nombre", pid)
         if not reg:
-            return jsonify({"error": f"falta el molde «{nombre}»"}), 409
+            raise _PlanInvalido(jsonify({"error": f"falta el molde «{nombre}»"}), 409)
         _cfg_n, rot, _telas, asig = _config_produccion(pid)
         # Tela del PEDIDO: una tela BASE para todo el molde + overrides por pieza.
         #   tela_base:   {pid: tela_nombre}
@@ -9615,7 +9633,7 @@ def generar_multi():
         # fallan, producen algo que PARECE correcto. Por eso se frena antes y se dice qué fila.
         _err = _validar_pedido(pid, nombre, prod, cat, translated, _asig_de, reg)
         if _err:
-            return jsonify({"error": _err[0], "detalle": _err[1]}), 422
+            raise _PlanInvalido(jsonify({"error": _err[0], "detalle": _err[1]}), 422)
         por_diseno = OrderedDict()
         for pr in translated:
             por_diseno.setdefault(pr.get("_diseno") or "principal", []).append(pr)
@@ -9762,6 +9780,7 @@ def generar_multi():
                                      # de la ficha se estampa con la misma que la tizada.
                                      "reempl": _reempl_de_request(dslug, pid)})
             molds_data.append({
+                "pid": pid, "diseno": dslug,
                 "plantilla": _ruta_entrada("plantilla.ai", pid),
                 # CAMINO B: sin arte. El motor lo detecta por la marca del molde, pero mandarle
                 # la ruta de un `arte.ai` que no existe lo haría abrirlo igual para leer sus capas.
@@ -9802,13 +9821,13 @@ def generar_multi():
         if nombre not in nombres:
             nombres.append(nombre)
     if not molds_data and _sin_filas:
-        return jsonify({"error": "ninguna fila está completa",
+        raise _PlanInvalido(jsonify({"error": "ninguna fila está completa",
                         "detalle": "Para fabricar, cada fila necesita: " + ", ".join(_obl_sin_filas)
                                    + ". Ninguna fila de la planilla las tiene todas. "
                                    "(Qué columnas hacen falta se configura en "
-                                   "Configuración → Planillas.)"}), 422
+                                   "Configuración → Planillas.)"}), 422)
     if not molds_data:
-        return jsonify({"error": "ninguna fila tiene un diseño con arte aprobado"}), 409
+        raise _PlanInvalido(jsonify({"error": "ninguna fila tiene un diseño con arte aprobado"}), 409)
     if _sin_filas:
         avisos_pedido.append(("«" + "», «".join(_sin_filas) + "»: ninguna fila de la planilla trae su talle, "
                               "así que no entró en la tizada. Si tenía que salir, cargale su columna de talle."))
@@ -9823,6 +9842,178 @@ def generar_multi():
         grupos_map.setdefault(md["_gkey"], []).append(md)
     grupos = [{"nombre": lst[0]["_gnombre"], "nombres": list(dict.fromkeys(m["_nombre"] for m in lst)), "moldes": lst}
               for g, lst in grupos_map.items()]
+    return {"prendas": prendas, "pids": pids, "default_diseno": default_diseno, "planilla_ficha": planilla_ficha,
+            "perfil_forzado": perfil_forzado, "_reempl": _reempl, "_moldes_por_dis": _moldes_por_dis, "cat": cat,
+            "nombres": nombres, "avisos": avisos, "avisos_pedido": avisos_pedido, "_guias_ficha": _guias_ficha,
+            "_guias_pedidas": _guias_pedidas, "grupos": grupos, "cfg_nesting": cfg_nesting, "telas_cfg": telas_cfg,
+            "molds_data": molds_data}
+
+
+def _plan_para_navegador(plan):
+    """El plan, en JSON, con lo que el navegador necesita para generar él (etapa 4)."""
+    moldes = []
+    for md in plan["molds_data"]:
+        fu = md.get("fuentes") or {}
+        catalogo = []
+        for ruta, info in MP.catalogo_fuentes(fu).items():
+            catalogo.append({**info, "propia": os.path.dirname(ruta) not in (FUENTES, os.path.realpath(FUENTES))})
+        moldes.append({
+            "pid": md.get("pid"), "nombre": md.get("_nombre"), "diseno": md.get("diseno"),
+            "camino_b": md.get("arte") is None,
+            "prendas": json.loads(json.dumps(md.get("prendas") or [], default=str, ensure_ascii=False)),
+            "pers": md.get("pers") or {},
+            "asignacion_tela": md.get("asignacion_tela") or {}, "rotaciones": md.get("rotaciones") or {},
+            "borde_corte": md.get("borde_corte"), "etiqueta": md.get("etiqueta"),
+            "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
+            "referencia": md.get("referencia") or "alto",
+            "gkey": str(md.get("_gkey")), "gnombre": md.get("_gnombre"),
+        })
+    grupos = []
+    for g in plan["grupos"]:
+        grupos.append({"nombre": g["nombre"], "nombres": g["nombres"],
+                       "moldes": [plan["molds_data"].index(m) for m in g["moldes"]]})
+    guias = []
+    for g in plan["_guias_ficha"]:
+        guias.append({k: v for k, v in g.items() if k not in ("_combos_vistos", "reempl")})
+    _icc, _icc_nom, _icc_n = _icc_para_salida([], plan["cat"], forzado=plan.get("perfil_forzado"))
+    return {
+        "moldes": moldes, "grupos": grupos, "nombres": plan["nombres"],
+        "cfg_nesting": plan["cfg_nesting"], "telas_cfg": plan["telas_cfg"],
+        "avisos": plan["avisos"], "avisos_pedido": plan["avisos_pedido"],
+        "guias": guias, "planilla_ficha": plan.get("planilla_ficha"), "prendas": plan["prendas"],
+        "default_diseno": plan["default_diseno"],
+        "perfil": ({"nombre": _icc_nom, "n": _icc_n, "bytes": len(_icc)} if _icc else None),
+        "todo_camino_b": all(m["camino_b"] for m in moldes),
+    }
+
+
+@app.post("/api/pedido/plan")
+def plan_pedido():
+    """El PLAN del pedido para que lo genere el navegador (PLAN_NAVEGADOR.md, etapa 4): mismas
+    validaciones y misma traducción que `generar_multi`, sin generar nada. Mismo cuerpo que
+    `/api/generar_multi`."""
+    cuerpo = request.get_json(force=True) or {}
+    try:
+        plan = _plan_del_pedido(cuerpo)
+    except _PlanInvalido as _e:
+        return _e.resp if _e.code is None else (_e.resp, _e.code)
+    return jsonify(_plan_para_navegador(plan))
+
+
+@app.get("/api/pedido/perfil_salida")
+def perfil_salida_pedido():
+    """El perfil ICC que lleva la hoja (OutputIntent), en bytes, para que el navegador lo incruste."""
+    cat = _cargar_catalogo()
+    _icc, _icc_nom, _icc_n = _icc_para_salida([], cat, forzado=request.args.get("forzado") or None)
+    if not _icc:
+        return jsonify({"error": "no hay ningún perfil .icc/.icm en esta máquina"}), 404
+    from flask import Response
+    return Response(_icc, mimetype="application/vnd.iccprofile",
+                    headers={"X-Perfil-Nombre": str(_icc_nom).encode("ascii", "replace").decode(), "X-Perfil-N": str(_icc_n)})
+
+
+_RE_HOJA = __import__("re").compile(r"^HOJA_[A-Za-z0-9_]{1,60}\.pdf$")
+
+
+@app.post("/api/paquetes/pedido")
+def paquete_pedido():
+    """EL PEDIDO QUE GENERÓ EL NAVEGADOR (PLAN_NAVEGADOR.md, etapa 4). Llega como multipart:
+      · `resultado` — el JSON que hoy arma el motor (`hojas`, `validaciones`, `ficha`, …);
+      · `prendas`, `nombres`, `pids` — para el testigo `pedido.json` y el registro del trabajo;
+      · archivos: cada `HOJA_*.pdf` (ya aplanada para el RIP y con su perfil) y `FICHA_TECNICA.pdf`.
+    El servidor NO calcula nada: valida que lo que llegó sea coherente (nombres permitidos, una hoja
+    por entrada de `resultado.hojas`, la cantidad de páginas de cada una, PDF que abre) y lo deja como
+    un trabajo más en `trabajos/<id>/`, con el mismo `resultado` que devolvería `generar_multi`: la
+    pantalla del paso Tizada, las descargas y «Nuevo pedido» no distinguen quién lo generó."""
+    import pymupdf as fitz
+    try:
+        res = json.loads(request.form.get("resultado") or "{}")
+        prendas = json.loads(request.form.get("prendas") or "[]")
+        nombres = json.loads(request.form.get("nombres") or "[]")
+        pids = [str(x) for x in json.loads(request.form.get("pids") or "[]")]
+    except Exception as e:
+        return jsonify({"error": f"el paquete del pedido no se entiende: {e}"}), 400
+    if not isinstance(res, dict) or not isinstance(res.get("hojas"), list) or not res["hojas"]:
+        return jsonify({"error": "el paquete no trae hojas"}), 400
+    for _p in pids:
+        _no = _guard_molde(_p)
+        if _no:
+            return _no
+    archivos = request.files
+    for h in res["hojas"]:
+        nom = str(h.get("archivo") or "")
+        if not _RE_HOJA.match(nom):
+            return jsonify({"error": f"nombre de hoja que no corresponde: {nom[:60]}"}), 400
+        if nom not in archivos:
+            return jsonify({"error": f"al paquete le falta la hoja {nom}"}), 400
+    for nom in archivos:
+        if not (_RE_HOJA.match(nom) or nom == "FICHA_TECNICA.pdf"):
+            return jsonify({"error": f"el paquete trae un archivo que no corresponde: {nom[:60]}"}), 400
+    tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    salida = os.path.join(TRABAJOS, tid)
+    os.makedirs(salida, exist_ok=True)
+    _nuevo_trabajo(tid, producto_id=",".join(pids), producto_nombre=" + ".join(nombres) or "pedido")
+    try:
+        _tocar_trabajo(tid, estado="generando", progreso="guardando lo que preparó el navegador")
+        for nom, f in archivos.items():
+            f.save(os.path.join(salida, nom))
+        for h in res["hojas"]:
+            with fitz.open(os.path.join(salida, h["archivo"])) as d:
+                if d.page_count != int(h.get("paginas") or len(h.get("alturas_cm") or []) or 1):
+                    raise ValueError(f"la hoja {h['archivo']} trae {d.page_count} páginas y el resultado dice {h.get('paginas')}")
+        res = dict(res)
+        res["id"] = tid
+        res["moldes"] = nombres
+        res["navegador"] = True
+        if "FICHA_TECNICA.pdf" in archivos:
+            res["ficha"] = "FICHA_TECNICA.pdf"
+            with fitz.open(os.path.join(salida, "FICHA_TECNICA.pdf")) as d:
+                res["ficha_paginas"] = d.page_count
+        # la verificación para el RIP es la misma de siempre (no dibuja: es leer la estructura)
+        try:
+            from verificar_rip_compatible import verificar as _verif_rip
+            _fallas = []
+            for h in res["hojas"]:
+                _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]), balance=False, dibujar=False)
+                if not _okr:
+                    _fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
+            res["rip_compatible"] = not _fallas
+            if _fallas:
+                res["avisos_pedido"] = list(res.get("avisos_pedido") or []) + [
+                    "La hoja tiene algo que un RIP podría rechazar: " + " · ".join(_fallas[:4])]
+        except Exception as _er:
+            print("  [rip] no se pudo verificar la compatibilidad:", _er)
+        try:
+            with open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8") as _fp:
+                json.dump({"prendas": prendas, "moldes": nombres,
+                           "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res.get("hojas") or []}},
+                          _fp, ensure_ascii=False)
+        except Exception as _e_pj:
+            print(f"  [!] no se pudo guardar pedido.json ({_e_pj})", flush=True)
+        _tocar_trabajo(tid, resultado=res, estado="listo", progreso="")
+        print(f"  [tiempos] pedido {tid}: guardado (lo generó el navegador)", flush=True)
+        return jsonify({"id": tid, "resultado": res})
+    except Exception as e:
+        _tocar_trabajo(tid, estado="error", error=f"{e}")
+        shutil.rmtree(salida, ignore_errors=True)
+        return jsonify({"error": f"no se pudo guardar el pedido: {e}"}), 422
+
+
+@app.post("/api/generar_multi")
+def generar_multi():
+    """Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA.
+    Body: {molds: [pid, ...], prendas: [...]}."""
+    cuerpo = request.get_json(force=True)
+    try:
+        _plan = _plan_del_pedido(cuerpo)
+    except _PlanInvalido as _e:
+        return _e.resp if _e.code is None else (_e.resp, _e.code)
+    prendas, pids, default_diseno = _plan["prendas"], _plan["pids"], _plan["default_diseno"]
+    planilla_ficha, perfil_forzado, _reempl = _plan["planilla_ficha"], _plan["perfil_forzado"], _plan["_reempl"]
+    _moldes_por_dis, cat, nombres = _plan["_moldes_por_dis"], _plan["cat"], _plan["nombres"]
+    avisos, avisos_pedido = _plan["avisos"], _plan["avisos_pedido"]
+    _guias_ficha, _guias_pedidas, grupos = _plan["_guias_ficha"], _plan["_guias_pedidas"], _plan["grupos"]
+    cfg_nesting, telas_cfg = _plan["cfg_nesting"], _plan["telas_cfg"]
     tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     salida = os.path.join(TRABAJOS, tid)
     _nuevo_trabajo(tid, producto_id=",".join(pids), producto_nombre=" + ".join(nombres))
@@ -12984,6 +13175,116 @@ def config_mapeo():
         
     _guardar_catalogo(cat)
     return jsonify({"ok": True})
+
+
+@app.get("/api/productos/<pid>/desplegado/<archivo>")
+def desplegado_archivo_producto(pid, archivo):
+    """Un archivo del molde DESPLEGADO (`m{mesa}.pdf` / `m{mesa}.json` / `etiqueta_archivo.json`),
+    para que el navegador arme las piezas él (PLAN_NAVEGADOR.md, etapas 3 y 4). El servidor sólo
+    entrega: lo cachea el navegador por el sello de la mesa (`/motor_b`)."""
+    import re as _re
+    if not _re.match(r"^(m[1-9][0-9]{0,3}\.(pdf|json)|etiqueta_archivo\.json)$", archivo or ""):
+        return jsonify({"error": "no es un archivo del desplegado"}), 400
+    carpeta = os.path.join(ENTRADA, pid, "desplegado")
+    if not os.path.exists(os.path.join(carpeta, archivo)):
+        return jsonify({"error": "el molde no tiene esa mesa desplegada"}), 404
+    return send_from_directory(carpeta, archivo, max_age=0)
+
+
+@app.get("/api/productos/<pid>/motor_b")
+def motor_b_producto(pid):
+    """TODO lo que el navegador necesita para armar las piezas de un molde con diseño (PLAN_NAVEGADOR,
+    etapa 3): las mesas desplegadas (con su sello, para cachear), el registro, los placeholders,
+    el borde y la etiqueta que rigen, las tipografías (catálogo + reemplazos del pedido) y las
+    variables. Nada pesado: son los mismos JSON que ya sirven otras pantallas."""
+    import piezas_con_diseno as _PD
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde inexistente"}), 404
+    pl = _ruta_entrada("plantilla.ai", pid=pid, original=True)
+    if not os.path.exists(pl) or not _PD.es_camino_b(pl):
+        return jsonify({"camino_b": False})
+    mesas = []
+    m = 1
+    while True:
+        d = _PD._leer_desplegado(pl, m)
+        if d is None:
+            break
+        mesas.append({"mesa": m, "sello": list(d.get("sello") or []), "orden": list(d.get("orden") or []),
+                      "paginas": d.get("pdf") is not None})
+        m += 1
+    fu = _fuentes_para(pid, _reempl_de_request(pid=pid))
+    catalogo = []
+    for ruta, info in MP.catalogo_fuentes(fu).items():
+        catalogo.append({**info, "propia": os.path.dirname(ruta) != os.path.realpath(FUENTES)
+                                          and os.path.dirname(ruta) != FUENTES})
+    return jsonify({
+        "camino_b": True,
+        "paginas_pendientes": _PD.paginas_pendientes_navegador(pl),
+        "mesas": mesas,
+        "registro": _cargar("registro_producto.json", pid) or {},
+        "pers": _PD.personalizacion_guardada(pl, armar=False),
+        "borde": _borde_de(prod, cat),
+        "etiqueta": _etiqueta_de(prod, cat),
+        "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
+        "variante_guia": prod.get("variante_guia"),
+        "variantes": prod.get("variantes") or [],
+        "referencia_medida": prod.get("referencia_medida") or "alto",
+    })
+
+
+def _filas_de_muestra(prod, cat, variante, talle):
+    """Las filas de MUESTRA de la vista previa del Arte («NOMBRE» / «00» en el talle, más una fila
+    por cada opción restante de cada toggle), exactamente como las arma `_piezas_base`."""
+    fila = {"__variante": variante, "talle": talle, "nombre": "NOMBRE", "numero": "00"}
+    for c in (prod.get("columnas") or []):
+        _role = c.get("role"); _cid = c.get("id") or c.get("label")
+        if _role == "talle": fila[_cid] = talle
+        elif _role == "nombre": fila[_cid] = "NOMBRE"
+        elif _role == "numero": fila[_cid] = "00"
+    filas = [dict(fila)]
+    _tpl = next((t for t in cat.get("plantillas_planillas", []) if t.get("id") == prod.get("planilla_template_id")), None)
+    _reglas = {r.get("id"): r for r in cat.get("reglas_planilla", [])}
+    for c in ((_tpl or {}).get("columnas") or []):
+        if c.get("role") != "manga":
+            continue
+        _rg = _reglas.get(c.get("reglaId")) or {}
+        _ops = [o.strip() for o in str(c.get("opciones") or _rg.get("opciones") or "Corta, Larga").split(",") if o.strip()]
+        _cid = c.get("id") or c.get("label")
+        for _op in _ops[1:]:
+            _f2 = dict(fila); _f2[_cid] = _op
+            filas.append(_f2)
+    return filas
+
+
+@app.post("/api/productos/<pid>/prendas")
+def prendas_producto(pid):
+    """Las filas de la planilla TRADUCIDAS a prendas (`_traducir_prendas`), para que el navegador
+    arme las piezas él (PLAN_NAVEGADOR, etapas 3 y 4). Es liviano: no abre ningún PDF.
+      · `muestra: {variante, talle}` → las filas de muestra de la vista previa del Arte;
+      · `filas: [...]` + `diseno` + `var_por_diseno` → las filas reales del pedido.
+    Cada prenda trae talle, personalización, toggles, `variante_clave`, `variante_piezas`,
+    `_grupo` y `juntas_piezas`: lo que `piezas_de` necesita para decidir qué piezas lleva."""
+    cuerpo = request.get_json(force=True) or {}
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde inexistente"}), 404
+    reg = _cargar("registro_producto.json", pid) or {}
+    if not reg:
+        return jsonify({"error": "el molde no tiene piezas registradas", "falta": "registro"}), 409
+    muestra = cuerpo.get("muestra")
+    if muestra:
+        talle = muestra.get("talle") or prod.get("variante_guia") or next(iter(next(iter(reg.values()), {})), None)
+        filas = _filas_de_muestra(prod, cat, muestra.get("variante"), talle)
+        prendas = _traducir_prendas(filas, prod, cat, reg=reg, exigir_obligatorias=False)
+    else:
+        filas = cuerpo.get("filas") or []
+        prendas = _traducir_prendas(filas, prod, cat, default_diseno=cuerpo.get("diseno") or "principal",
+                                    reg=reg, var_por_diseno=cuerpo.get("var_por_diseno") or None,
+                                    exigir_obligatorias=bool(cuerpo.get("exigir_obligatorias", True)))
+    return jsonify({"prendas": json.loads(json.dumps(prendas, default=str, ensure_ascii=False))})
 
 
 @app.get("/api/productos/<pid>/descargar_plantilla")

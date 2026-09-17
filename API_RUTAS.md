@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **161 endpoints**. Generado automáticamente del código.
+Total: **167 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -37,6 +37,9 @@ Total: **161 endpoints**. Generado automáticamente del código.
 | POST | `/api/pedido/fuente_resolver` | Resuelve una fuente NO reconocida del arte. · **Subiéndola** (multipart): `destino=sistema` la deja en el catálogo global —el sistema la va a reconoce | body: faltante, usar · form: destino, pid · file: archivo |
 | GET | `/api/pedido/fuentes_estado` | Fuentes que pide el arte del diseño vs las que el sistema puede resolver (catálogo + las de este pedido + reemplazos). ⚠️ Los faltantes AVISAN, no tra | q: diseno, pid |
 | POST | `/api/pedido/fuentes_pedido_limpiar` | Borra las tipografías subidas «sólo para este pedido» (`datos/<pid>/fuentes`). Regla del usuario (2026-08-21): «si carga una tipografía tiene la opció | — |
+| POST | `/api/paquetes/pedido` | EL PEDIDO QUE GENERÓ EL NAVEGADOR (PLAN_NAVEGADOR.md, etapa 4). Llega como multipart: · `resultado` — el JSON que hoy arma el motor (`hojas`, `validac | form: nombres, pids, prendas, resultado |
+| GET | `/api/pedido/perfil_salida` | El perfil ICC que lleva la hoja (OutputIntent), en bytes, para que el navegador lo incruste. | q: forzado |
+| POST | `/api/pedido/plan` | El PLAN del pedido para que lo genere el navegador (PLAN_NAVEGADOR.md, etapa 4): mismas validaciones y misma traducción que `generar_multi`, sin gener | — |
 
 ## Nesting / Grupos de tizada
 
@@ -114,6 +117,9 @@ Total: **161 endpoints**. Generado automáticamente del código.
 | POST | `/api/molde/config/guardar` | Guarda la configuración del molde con un nombre: `{pid, nombre, id?}` (con `id` la pisa). | body: id, nombre, pid |
 | GET | `/api/molde/config/lista` | Las configuraciones guardadas, con QUÉ TAN BIEN le calzan a este molde (`pid`). No se aplica ninguna sola: la pantalla las muestra y el usuario elige  | q: pid |
 | POST | `/api/pedido/limpiar_trabajos` | Borra las TIZADAS del pedido que se cierra: los PDF de `trabajos/<id>`, la fila y la memoria. Lo llaman «Nuevo pedido» y «Terminar pedido». 🔴 REGLA DE | body: ids, incluir_anteriores |
+| GET | `/api/productos/<pid>/desplegado/<archivo>` | Un archivo del molde DESPLEGADO (`m{mesa}.pdf` / `m{mesa}.json` / `etiqueta_archivo.json`), para que el navegador arme las piezas él (PLAN_NAVEGADOR.m | — |
+| GET | `/api/productos/<pid>/motor_b` | TODO lo que el navegador necesita para armar las piezas de un molde con diseño (PLAN_NAVEGADOR, etapa 3): las mesas desplegadas (con su sello, para ca | — |
+| POST | `/api/productos/<pid>/prendas` | Las filas de la planilla TRADUCIDAS a prendas (`_traducir_prendas`), para que el navegador arme las piezas él (PLAN_NAVEGADOR, etapas 3 y 4). Es livia | body: diseno, exigir_obligatorias, filas, muestra, var_por_diseno |
 
 ## Plantilla (molde)
 

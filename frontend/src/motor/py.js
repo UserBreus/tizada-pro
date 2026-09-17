@@ -80,3 +80,45 @@ export function compararTuplas(a, b) {
   }
   return a.length - b.length
 }
+
+// `str.isspace()` de Python: los espacios de Python NO son los de `\s` de JavaScript (Python cuenta
+// \x1c-\x1f y no cuenta ﻿). Importa porque un espacio sin glifo se estampa con un avance en
+// vez de reventar, y tiene que ser el MISMO conjunto de caracteres en las dos puntas.
+const ESPACIO_PY = /^[\t\n\v\f\r\x1c-\x1f \x85\xa0  - \u2028\u2029  　]$/
+export function pyIsSpace(ch) {
+  return ESPACIO_PY.test(ch)
+}
+
+/** `str.strip()` de Python (sin argumentos): saca los espacios de Python en las dos puntas. */
+export function pyStrip(s) {
+  const c = Array.from(s)
+  let i = 0, j = c.length
+  while (i < j && pyIsSpace(c[i])) i++
+  while (j > i && pyIsSpace(c[j - 1])) j--
+  return c.slice(i, j).join('')
+}
+
+// `sum(lista)` de Python 3.12 para números. NO es una suma simple: mientras los ítems son enteros
+// acumula exacto; con el primer float pasa a double y de ahí en más los floats se suman con la
+// compensación de Neumaier (Kahan–Babuška) y los enteros se suman a secas; al final agrega la
+// compensación si es finita. Se notó en `ancho_texto` con glifos prestados (anchos float mezclados
+// con enteros): un bit distinto en el ancho corre el nombre entero en la pieza.
+export function pySum(valores, esEntero) {
+  const n = valores.length
+  let i = 0, iResult = 0
+  while (i < n && esEntero(i)) { iResult += valores[i]; i++ }
+  if (i === n) return iResult
+  let fResult = iResult + valores[i]
+  i++
+  let c = 0.0
+  for (; i < n; i++) {
+    const x = valores[i]
+    if (esEntero(i)) { fResult += x; continue }
+    const t = fResult + x
+    if (Math.abs(fResult) >= Math.abs(x)) c += (fResult - t) + x
+    else c += (x - t) + fResult
+    fResult = t
+  }
+  if (c !== 0 && Number.isFinite(c)) fResult += c
+  return fResult
+}

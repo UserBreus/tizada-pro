@@ -15,6 +15,10 @@ const responder = (msg, transfer) => canal.postMessage(msg, transfer || [])
 let mupdf = null
 let doc = null
 let M = null           // módulos del motor
+// ── PIEZAS (etapas 3 y 4): las mesas desplegadas abiertas y las tipografías listas ──────────
+const mesas = new Map()        // mesa → PDFDocument de m{mesa}.pdf
+let P = null                   // módulos de la pieza (base, estampar, svg, fuentes, curvas)
+let abridor = null             // el que abre tipografías por nombre (`texto/fuentes.js`)
 
 async function cargar() {
   if (M) return
@@ -81,7 +85,56 @@ const TAREAS = {
   },
   async cerrar() {
     if (doc) { try { doc.destroy() } catch { /* nada */ } doc = null }
+    for (const d of mesas.values()) { try { d.destroy() } catch { /* nada */ } }
+    mesas.clear()
     return true
+  },
+
+  // ── LAS PIEZAS EN EL NAVEGADOR (PLAN_NAVEGADOR.md, etapas 3 y 4) ─────────────────────────
+  /** Abre una mesa desplegada (`m{mesa}.pdf`) para armar piezas de ella. */
+  async mesa_abrir({ mesa, bytes }) {
+    await cargar()
+    if (mesas.has(mesa)) { try { mesas.get(mesa).destroy() } catch { /* nada */ } }
+    mesas.set(mesa, mupdf.Document.openDocument(bytes, 'application/pdf'))
+    return true
+  },
+  /** Las tipografías: el catálogo del servidor, los archivos ya bajados y los reemplazos. */
+  async fuentes({ catalogo, archivos, alias }) {
+    await cargar()
+    if (!P) {
+      P = {
+        ...(await import('./pieza/base.js')), ...(await import('./pieza/estampar.js')),
+        ...(await import('./pieza/svg.js')), ...(await import('./texto/fuentes.js')),
+        FuenteCurvas: (await import('./texto/curvas.js')).FuenteCurvas,
+      }
+    }
+    abridor = P.crearAbridor({
+      catalogo, alias: alias || {}, FuenteCurvas: P.FuenteCurvas,
+      traer: async (e) => { const b = archivos[e.archivo]; if (!b) throw new Error(`falta el archivo de «${e.interno}»`); return b },
+    })
+    await abridor.precargar(Object.keys(archivos).map((a) => (catalogo.find((c) => c.archivo === a) || {}).interno).filter(Boolean))
+    return true
+  },
+  /** La BASE + el ESTAMPADO de una pieza (los operadores), y si se pide, su SVG o su PDF. */
+  async pieza({ mesa, pagina, cont, borde, etiqueta, ph, persona, talle, pieza, nro, variante, grupo, info, alias, salida }) {
+    await cargar()
+    if (!P || !abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
+    const d = mesas.get(mesa)
+    if (!d) throw new Error(`la mesa ${mesa} no está abierta`)
+    const pageObj = d.findPage(pagina)
+    const uu = pageObj.get('UserUnit')
+    const S = (uu && uu.isNumber && uu.isNumber()) ? Number(uu.asNumber()) : 1.0
+    const base = P.armarBase(cont, S, borde)
+    const estampado = P.estamparPieza({ base, ph, persona, talle, pieza, nro, variante, grupo, etiqueta,
+                                        fuente: abridor.abrir, alias: alias || {}, info: info || {} })
+    const r = { baseStream: base.baseStream, clip: base.clip, estampado, W: base.W, H: base.H, B: base.B, Hp: base.Hp, S,
+                w: base.W + 2 * base.B, h: base.Hp }
+    if (salida === 'svg' || salida === 'pdf') {
+      const pdf = P.documentoPieza(mupdf, d, pagina, base, estampado)
+      if (salida === 'pdf') return { valor: { ...r, pdf }, transfer: [pdf.buffer] }
+      r.svg = P.svgDePdf(mupdf, pdf)
+    }
+    return r
   },
 }
 
