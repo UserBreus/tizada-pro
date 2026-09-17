@@ -1514,6 +1514,11 @@ def buscar_candidatos_mesa(path_molde, mesa, talles, orden=None):
     return mesa, out
 
 
+def _candidatos_worker(args):
+    """WORKER de proceso de `decidir_etiqueta_archivo`: `(mesa, candidatos)`."""
+    return buscar_candidatos_mesa(*args)
+
+
 def decidir_etiqueta_archivo(path_molde, talles, procesos=None, avisar=None):
     """Junta los candidatos de TODAS las mesas, decide por familia y escribe
     `etiqueta_archivo.json`. Conserva lo que el usuario fijó a mano (`manual`). Devuelve la
@@ -1542,27 +1547,24 @@ def decidir_etiqueta_archivo(path_molde, talles, procesos=None, avisar=None):
         tareas = [(m, tr) for m in mesas for tr in _trozos_de_talles(talles, max(1, procesos // n))]
     else:
         tareas = [(m, list(talles)) for m in mesas]
-    pendientes = list(range(len(tareas)))
     if procesos and procesos > 1 and len(tareas) > 1:
-        try:
-            from concurrent.futures import as_completed
-            import procesos as _PR
-            with _PR.seguro(_PR.pool(min(len(tareas), procesos))) as ex:
-                futs = {ex.submit(buscar_candidatos_mesa, path_molde, m, list(tr), list(talles)): i
-                        for i, (m, tr) in enumerate(tareas)}
-                for f in as_completed(futs, timeout=_PR.tope_segundos("TIZADA_TOPE_PROCESO_S", 1800)):
-                    i = futs[f]
-                    _m, cs = f.result()
-                    cands.extend(cs)
-                    pendientes.remove(i)
-                    if avisar:
-                        avisar(len(tareas) - len(pendientes), len(tareas), f"etiquetas · mesa {_m}")
-        except Exception as e:
-            print(f"[camino B] la búsqueda de etiquetas en paralelo falló ({type(e).__name__}: {e}); sigo en serie")
-    for i in pendientes:
-        m, tr = tareas[i]
-        _m, cs = buscar_candidatos_mesa(path_molde, m, list(tr), list(talles))
-        cands.extend(cs)
+        hechas = [0]
+
+        def _avance(_i, r):
+            hechas[0] += 1
+            if avisar:
+                avisar(hechas[0], len(tareas), f"etiquetas · mesa {r[0]}")
+
+        res = _repartir({i: (path_molde, m, list(tr), list(talles)) for i, (m, tr) in enumerate(tareas)},
+                        procesos, _candidatos_worker, _tope_etiquetas_s(), "la búsqueda de etiquetas",
+                        al_terminar=_avance)
+        for i in sorted(res):
+            cands.extend(res[i][1])
+    else:
+        # sin procesos (un script, o ya adentro de un worker): acá, a propósito
+        for m, tr in tareas:
+            _m, cs = buscar_candidatos_mesa(path_molde, m, list(tr), list(talles))
+            cands.extend(cs)
     # cuántas piezas tiene el molde (mesa + índice), de los contornos ya desplegados
     total = set()
     sello = _sello(path_molde)
@@ -2330,25 +2332,28 @@ def _armar_paginas(path_molde, mesa, talles, conts, marco, U, ocultar, destino, 
     nada: 20 talles en fila en un proceso, 197 s (medido 2026-09-14). Cada talle es una página
     independiente, así que se arman en trozos y se pegan EN ORDEN. Cada proceso vuelve a parsear
     la mesa (5 s en ese archivo); recién vale la pena con varios talles por trozo, por eso el
-    corte de `_trozos`. Si el pool no arranca o un trozo falla, se hace todo acá: se pierde la
-    velocidad, no el desplegado."""
+    corte de `_trozos`. Un trozo que no termina se reintenta en procesos nuevos (los que ya
+    terminaron se conservan) y, si tampoco, el desplegado FALLA con un error claro: nunca se arma
+    la mesa entera en este proceso (ver `_repartir`)."""
     trozos = (_trozos_de_talles(talles, procesos)
               if (procesos and procesos > 1 and len(talles) > 1) else [list(talles)])
     if len(trozos) > 1:
         partes = [destino + f".p{i}" for i in range(len(trozos))]
+        hechos = [0]
+
+        def _avance(_i, r):
+            hechos[0] += len(r[0])
+            if avisar:
+                avisar(hechos[0], len(talles), f"talle {hechos[0]} de {len(talles)}")
+
+        ph_t, lc_t, etq_t = {}, {}, {}
         try:
-            from concurrent.futures import as_completed
-            ph_t, lc_t, etq_t, hechos = {}, {}, {}, 0
-            import procesos as _PR
-            with _PR.seguro(_POOL_FACTORY(max_workers=len(trozos))) as ex:
-                futs = [ex.submit(_paginas_worker, (path_molde, mesa, list(talles), tr, pa))
-                        for tr, pa in zip(trozos, partes)]
-                for f in as_completed(futs, timeout=_PR.tope_segundos("TIZADA_TOPE_PROCESO_S", 1800)):
-                    mis, ph, lc, etq = f.result()
-                    ph_t.update(ph); lc_t.update(lc); etq_t.update(etq)
-                    hechos += len(mis)
-                    if avisar:
-                        avisar(hechos, len(talles), f"talle {hechos} de {len(talles)}")
+            res = _repartir({i: (path_molde, mesa, list(talles), tr, pa) for i, (tr, pa) in enumerate(zip(trozos, partes))},
+                            len(trozos), _paginas_worker, _tope_desplegado_s(),
+                            f"las páginas por talle de la mesa {mesa}", al_terminar=_avance)
+            for i in sorted(res):
+                _mis, ph, lc, etq = res[i]
+                ph_t.update(ph); lc_t.update(lc); etq_t.update(etq)
             # pegar los trozos EN ORDEN (el pool los devuelve como terminan, no como van)
             abiertos = []
             try:
@@ -2365,20 +2370,13 @@ def _armar_paginas(path_molde, mesa, talles, conts, marco, U, ocultar, destino, 
                         p.close()
                     except Exception:
                         pass
-                for pa in partes:
-                    try:
-                        os.remove(pa)
-                    except Exception:
-                        pass
-            return ph_t, lc_t, etq_t
-        except Exception as e:
-            print(f"[camino B] el reparto por talle falló ({type(e).__name__}: {e}); "
-                  f"armo la mesa {mesa} entera acá")
+        finally:
             for pa in partes:
                 try:
                     os.remove(pa)
                 except Exception:
                     pass
+        return ph_t, lc_t, etq_t
     return _paginas_de_talles(path_molde, mesa, list(talles), conts, marco, U, ocultar, destino)
 
 
@@ -2401,8 +2399,9 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
     """Despliega TODAS las mesas y devuelve `{mesa: {talle: [contornos]}}`.
 
     Con `procesos` > 1 va una mesa por proceso (ProcessPool: PyMuPDF/pikepdf no son thread-safe).
-    Si el pool no arranca o se cae, las mesas que falten se hacen acá, en serie: se pierde la
-    velocidad, no el alta. `avisar(hecho, total, texto)` recibe el avance mesa a mesa.
+    Si los procesos no terminan, se reintenta en procesos nuevos y después FALLA con
+    `ProcesoNoTermino` (nunca se arma en este proceso: ver `_repartir`). `avisar(hecho, total,
+    texto)` recibe el avance mesa a mesa.
     `contornos` / `paginas`: las dos etapas de `desplegar_mesa` (el servidor las separa)."""
     _d = fitz.open(path_molde)
     n = _d.page_count
@@ -2446,13 +2445,98 @@ def _procesos_por_defecto():
 
 def _pool_por_defecto(max_workers):
     import procesos as _PR               # `spawn` en todos los sistemas: ver `procesos.contexto`
-    return _PR.pool(max_workers)
+    return _PR.pool(max_workers, que="el desplegado de un molde")
 
 
-# Ganchos para el contrato (`verificar_desplegado_pool.py`): un pool de mentira que hace fallar una
-# mesa, y contar qué se armó en serie. En producción son el ProcessPool y `desplegar_mesa`.
+# Ganchos para el contrato (`verificar_desplegado_pool.py`, `verificar_sin_plan_b_en_el_servidor.py`):
+# un pool de mentira que hace fallar una mesa o no termina nunca, y contar qué se armó en este
+# proceso. En producción son el ProcessPool y `desplegar_mesa`.
 _POOL_FACTORY = _pool_por_defecto
 _MESA_EN_SERIE = None          # se fija abajo, después de definir `desplegar_mesa`
+
+
+class ProcesoNoTermino(RuntimeError):
+    """El trabajo en procesos no terminó (o no pudo arrancar). El mensaje es para la pantalla."""
+
+
+def _tope_desplegado_s():
+    """Cuánto se espera a los procesos del desplegado (contornos, páginas por talle). Medido: las
+    mesas del 16/09 tardaron 57-72 s; 15 minutos es un tope contra el cuelgue, no contra lo lento."""
+    import procesos as _PR
+    return _PR.tope_segundos("TIZADA_TOPE_DESPLEGADO_S", 900)
+
+
+def _tope_etiquetas_s():
+    """La búsqueda de etiquetas es de segundos por mesa: 10 minutos es de sobra."""
+    import procesos as _PR
+    return _PR.tope_segundos("TIZADA_TOPE_ETIQUETAS_S", 600)
+
+
+def _repartir(tareas, procesos, worker, tope, que, al_terminar=None):
+    """Corre `tareas` (`{clave: args}`) en procesos y devuelve `{clave: resultado}`.
+
+    🔴 NUNCA HACE EL TRABAJO EN ESTE PROCESO (2026-09-17, «Plan B dentro del servidor»). Cada
+    lugar tenía su propio «si el pool falla, sigo en serie acá»: el 16/09 en el publicado los
+    procesos no terminaron en 30 minutos (la máquina ahogada, ver `procesos.cupo_total`) y el
+    servidor se puso a armar camisetas enteras con el GIL tomado hasta las 18:02, con los 8 hilos
+    trabados y hasta la base dando «Query timeout». Un trabajo que no cabe en un proceso aparte
+    tampoco cabe en el servidor: lo único que hace el plan B es matarlo.
+    Lo que se hace en cambio:
+      · lo que terminó se conserva (nada se rehace);
+      · una tarea que revienta se reintenta UNA vez en el mismo pool; si revienta dos veces es un
+        error del archivo, y se avisa;
+      · si el pool no termina a tiempo (o se cae), se DESCARTA —sus procesos se matan— y las
+        tareas pendientes se reintentan UNA vez en procesos nuevos;
+      · si tampoco, `ProcesoNoTermino` con un mensaje para la pantalla. El que llama no lo tapa.
+    `procesos` es cuántos pedir (el cupo global puede dar menos, ver `procesos.pool`).
+    `al_terminar(clave, resultado)` avisa el avance a medida que llegan."""
+    import procesos as _PR
+    from concurrent.futures import as_completed
+    hechos, pendientes, motivo = {}, dict(tareas), ""
+    for intento in (1, 2):
+        if not pendientes:
+            break
+        try:
+            ex = _POOL_FACTORY(max_workers=max(1, min(len(pendientes), int(procesos or 1))))
+        except Exception as e:
+            raise ProcesoNoTermino(
+                f"No se pudo preparar el molde ({que}): no hubo procesos libres en el servidor "
+                f"({type(e).__name__}: {e}). Volvé a intentarlo en unos minutos; si se repite, avisá.") from e
+        try:
+            with _PR.seguro(ex):
+                futs = {ex.submit(worker, args): k for k, args in pendientes.items()}
+                reintentadas = set()
+                while futs:
+                    for f in as_completed(list(futs), timeout=tope):
+                        k = futs.pop(f)
+                        try:
+                            r = f.result()
+                        except Exception as e:
+                            if k not in reintentadas:
+                                reintentadas.add(k)
+                                print(f"[camino B] {que}: la tarea {k} falló en el pool ({type(e).__name__}: {e}); la reintento")
+                                futs[ex.submit(worker, pendientes[k])] = k
+                                continue
+                            raise ProcesoNoTermino(
+                                f"No se pudo preparar el molde ({que}, tarea {k}): falló dos veces "
+                                f"({type(e).__name__}: {e}).") from e
+                        hechos[k] = r
+                        pendientes.pop(k, None)
+                        if al_terminar:
+                            al_terminar(k, r)
+        except ProcesoNoTermino:
+            raise
+        except Exception as e:
+            motivo = f"{type(e).__name__}: {e}"
+            print(f"[camino B] {que}: {len(pendientes)} tarea(s) sin terminar en el intento {intento} "
+                  f"({motivo}); " + ("las reintento en procesos nuevos" if intento == 1 else "no insisto"))
+    if pendientes:
+        _cuanto = f"{tope:.0f} segundos" if tope < 120 else f"{tope / 60:.0f} minutos"
+        raise ProcesoNoTermino(
+            f"No se pudo preparar el molde: {que} no terminó en {_cuanto} "
+            f"({len(pendientes)} de {len(tareas)} tareas sin terminar; {motivo}). "
+            f"Volvé a intentarlo; si se repite, avisá.")
+    return hechos
 
 
 def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos, paginas, n, mesas, por_mesa):
@@ -2476,37 +2560,16 @@ def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos
                                         paginas=paginas, procesos=procesos, avisar=avisar))
         return por_mesa
     if procesos and procesos > 1 and n > 1:
-        # 🔴 UNA MESA QUE FALLA NO TIRA EL POOL. Antes el `except` envolvía al pool entero: la
-        # primera mesa que reventaba (un «Acceso denegado» porque el motor tenía abierta su
-        # página) abandonaba el pool y TODAS las que faltaban se armaban en serie dentro del
-        # servidor, con el GIL tomado — medido 2026-09-11: 3 minutos de servidor a los tumbos
-        # justo en el paso Tizada. Ahora cada mesa se recoge por separado: la que falla se
-        # reintenta UNA vez en el pool y, si vuelve a fallar, sólo ESA va en serie al final.
-        try:
-            from concurrent.futures import as_completed
-            import procesos as _PR
-            with _PR.seguro(_POOL_FACTORY(max_workers=min(n, procesos))) as ex:
-                futs = {ex.submit(_desplegar_mesa_worker, (path_molde, m, list(talles), contornos, paginas)): m for m in mesas}
-                reintentadas = set()
-                while futs:
-                    for f in as_completed(list(futs), timeout=_PR.tope_segundos("TIZADA_TOPE_PROCESO_S", 1800)):
-                        mesa = futs.pop(f)
-                        try:
-                            mesa, conts = f.result()
-                        except Exception as e:
-                            if mesa not in reintentadas:
-                                reintentadas.add(mesa)
-                                print(f"[camino B] la mesa {mesa} falló en el pool ({type(e).__name__}: {e}); la reintento")
-                                futs[ex.submit(_desplegar_mesa_worker, (path_molde, mesa, list(talles), contornos, paginas))] = mesa
-                            else:
-                                print(f"[camino B] la mesa {mesa} falló dos veces en el pool ({type(e).__name__}: {e}); "
-                                      f"va en serie al final")
-                            continue
-                        _listo(mesa, conts)
-                        pendientes.remove(mesa)
-        except Exception as e:
-            print(f"[camino B] el pool del desplegado no arrancó ({type(e).__name__}: {e}); "
-                  f"sigo en serie con {len(pendientes)} mesa(s)")
+        # 🔴 UNA MESA QUE FALLA NO TIRA EL POOL, Y NADA SE ARMA EN ESTE PROCESO. La mesa que
+        # revienta (un «Acceso denegado» porque el motor tenía abierta su página) se reintenta en
+        # el pool; la que no termina se reintenta en procesos nuevos; y si tampoco, el desplegado
+        # falla con un mensaje claro. El «sigo en serie» de antes se llevó puesto al servidor
+        # publicado el 16/09 (ver `_repartir`).
+        _repartir({m: (path_molde, m, list(talles), contornos, paginas) for m in mesas}, procesos,
+                  _desplegar_mesa_worker, _tope_desplegado_s(), "el desplegado de las mesas",
+                  al_terminar=lambda _m, r: _listo(r[0], r[1]))
+        return por_mesa
+    # sin procesos (un script, o ya adentro de un worker): en este proceso, a propósito
     for mesa in pendientes:
         _listo(mesa, _MESA_EN_SERIE(path_molde, mesa, list(talles), contornos=contornos, paginas=paginas))
     return por_mesa

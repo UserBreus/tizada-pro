@@ -61,8 +61,11 @@ def espacio_desplegado(origen, prefijo, procesos=None, alta=None):
         print(f"    desplegando el molde ({os.path.getsize(origen)/1e6:.0f} MB) — "
               f"la primera vez tarda, después se reusa…", flush=True)
         shutil.copy2(origen, os.path.join(guardado, "plantilla.ai"))
-        alta(os.path.join(guardado, "plantilla.ai"),
-             procesos=procesos or max(2, (os.cpu_count() or 4) - 1))
+        # 🔴 EN SERIE salvo que el contrato pida procesos (2026-09-17): un script sin guardián
+        # `__main__` no puede abrir un pool (los hijos `spawn` lo vuelven a correr entero y
+        # mueren: BrokenProcessPool). Antes eso lo tapaba el «sigo en serie» del desplegado, que
+        # se eliminó — el trabajo pesado ya no se rehace en el proceso que llama.
+        alta(os.path.join(guardado, "plantilla.ai"), procesos=procesos)
         open(listo, "w").close()
         print(f"    desplegado en {time.time() - t:.0f}s", flush=True)
     carpeta = tempfile.mkdtemp(prefix=prefijo)
@@ -75,7 +78,7 @@ def espacio_desplegado(origen, prefijo, procesos=None, alta=None):
     copia = os.path.join(carpeta, "plantilla.ai")
     # El alta se vuelve a pedir sobre la copia: con el `desplegado/` ya al lado no lo rehace,
     # sólo lo LEE — que es justamente lo que el contrato 4 quiere comprobar.
-    datos = alta(copia, procesos=procesos or max(2, (os.cpu_count() or 4) - 1))
+    datos = alta(copia, procesos=procesos)
     if reusado:
         print("    (molde desplegado reutilizado de una corrida anterior)", flush=True)
     return carpeta, copia, datos, reusado

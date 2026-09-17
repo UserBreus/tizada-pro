@@ -3536,6 +3536,8 @@ def _prewarm_desplegado(path, talles, alta=None):
             _cache_desplegado_guardar(path, alta)
     except Exception as e:
         print(f"[camino B] no se pudieron preparar las páginas por talle de {path}: {e}")
+        LOG.error("molde", "No se pudo preparar el molde (páginas por talle)", str(e)[:400],
+                  molde=_pid_de_ruta_molde(path) or "", error=f"{type(e).__name__}")
     finally:
         with _DESPL_FONDO_LOCK:
             _DESPL_FONDO.discard(_k)
@@ -5975,25 +5977,13 @@ def procesos_render():
     # servidor tuviera 32 núcleos. Se mide: un proceso pesa ~200 MB, así que manda la RAM LIBRE
     # (con 250 MB de margen por proceso) y nunca más de un proceso por núcleo. Si no se puede
     # medir la memoria, queda el tope de siempre.
-    try:
-        import ctypes
-
-        class _MEM(ctypes.Structure):
-            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
-        _m = _MEM(); _m.dwLength = ctypes.sizeof(_MEM)
-        # ⚠️ `restype` explícito: sin él, ctypes asume int y el fallo pasa en silencio.
-        ctypes.windll.kernel32.GlobalMemoryStatusEx.restype = ctypes.c_int
-        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(_m)):
-            raise OSError("GlobalMemoryStatusEx")
-        # Se reserva 1 GB para el propio servidor y el sistema.
-        _libre_mb = max(0, (_m.ullAvailPhys / (1024 * 1024)) - 1024)
-        return max(1, min(_cpu, int(_libre_mb // 250)))
-    except Exception:
+    # 2026-09-17: la memoria se mide con `procesos.memoria_libre_mb` (antes era sólo Windows, y el
+    # publicado corre en LINUX: ahí caía al tope de siempre sin mirar la RAM).
+    import procesos as _PR
+    _libre = _PR.memoria_libre_mb()
+    if not _libre:
         return min(_cpu, 6)
+    return max(1, min(_cpu, int(max(0.0, _libre - 1024) // 250)))
 
 
 def _get_render_pool():
@@ -6011,7 +6001,7 @@ def _get_render_pool():
             _RENDER_POOL = None
         if _RENDER_POOL is None:
             import procesos as _PR           # `spawn` en todos los sistemas: ver `procesos.contexto`
-            _RENDER_POOL = _PR.pool(procesos_render())
+            _RENDER_POOL = _PR.pool(procesos_render(), cupo=False)   # permanente: fuera del cupo
     return _RENDER_POOL
 
 
@@ -6030,6 +6020,7 @@ def _descartar_render_pool():
 # el cuelgue, no contra lo lento (un aplanado grande ya llegó a 9 minutos).
 _TOPE_PROCESO_S = float(os.environ.get("TIZADA_TOPE_PROCESO_S") or 1800)
 _TOPE_VISOR_S = float(os.environ.get("TIZADA_TOPE_VISOR_S") or 180)
+_TOPE_SVG_S = float(os.environ.get("TIZADA_TOPE_SVG_S") or 120)      # los SVG de una previa, todos juntos
 
 
 def _svg_worker(pdf_bytes):
@@ -6054,20 +6045,32 @@ def _svgs_de_piezas(piezas, paralelo=True):
     n = len(piezas)
     if n == 0:
         return []
-    if paralelo and n >= 2 and _mp.current_process().name == "MainProcess":
+    if _mp.current_process().name == "MainProcess":
+        # 🔴 EN EL SERVIDOR, SIEMPRE EN PROCESOS Y NUNCA EN SERIE ACÁ (2026-09-17): si el pool
+        # no responde, la previa sale sin esos SVG (`None`) y el pool se descarta. Se esperan
+        # todas juntas con UN tope, no 120 s por pieza en fila (con 6 trabadas eran 12 minutos).
+        from concurrent.futures import wait as _esperar
         try:
             pool = _get_render_pool()
             futs = [pool.submit(_svg_worker, pz["doc"].tobytes()) for pz in piezas]
-            out = []
-            for f in futs:
-                try:
-                    out.append(f.result(timeout=120))
-                except Exception:
-                    out.append(None)
-            if any(out):
-                return out
         except Exception as e:
-            print(f"[preview] SVG en paralelo falló ({e}); sigo en serie")
+            print(f"[preview] el pool de render no pudo con los SVG ({type(e).__name__}: {e}); la previa sale sin ellos")
+            _descartar_render_pool()
+            return [None] * n
+        _listos, _sin = _esperar(futs, timeout=_TOPE_SVG_S)
+        if _sin:
+            print(f"[preview] {len(_sin)} SVG de {n} no terminaron en {_TOPE_SVG_S:.0f} s: descarto el pool de render")
+            for f in _sin:
+                try:
+                    f.cancel()
+                except Exception:
+                    pass
+            _descartar_render_pool()
+        _terminados = [f for f in futs if f in _listos and f.exception() is None]
+        out = []
+        for f in futs:                      # `.result()` sólo sobre los que YA terminaron
+            out.append(f.result() if f in _terminados else None)
+        return out
     out = []
     for pz in piezas:
         try:
@@ -6972,7 +6975,10 @@ def get_editables():
     reg = _cargar("registro_producto.json", pid) or {}
     talles = _talles_editables(pid, reg)
     # Lo pesado (recorrer el arte) viene del caché (ver `_editables_cacheados`).
-    _cr = _editables_cacheados(arte, _ruta_entrada("arte.ai", pid, sub=sub, original=True), reg, talles)
+    try:
+        _cr = _editables_cacheados(arte, _ruta_entrada("arte.ai", pid, sub=sub, original=True), reg, talles)
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e), "objetos": []}), 503
     objetos = _cr["objetos"]
     # ARTE POR RANGO (#talle/#rango): los objetos editables pueden vivir en mesas POR TALLE
     # (ej. "#1-16 Frente" = mesa 28), que NO figuran en el mapeo default (mesas del 1er rango).
@@ -11044,7 +11050,7 @@ def _get_visor_pool():
                 n = int(os.environ.get("TIZADA_PROCESOS_VISOR") or 2)
             except ValueError:
                 n = 2
-            _VISOR_POOL = _PR.pool(max(1, n))
+            _VISOR_POOL = _PR.pool(max(1, n), cupo=False)       # permanente: fuera del cupo
     return _VISOR_POOL
 
 
@@ -11059,7 +11065,7 @@ def _descartar_visor_pool():
 
 def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
     """Igual que `_dibujar_vista_mesa`, pero el dibujo lo hace un worker del visor. Si el pool
-    no está o se cae, se dibuja acá: se pierde la fluidez, no la imagen."""
+    no está o se cae, el recorte falla con aviso: NUNCA se dibuja en el servidor."""
     cache = _ruta_vista_mesa(tid, archivo, pi, w, recorte)
     if os.path.exists(cache):
         return cache
@@ -11079,8 +11085,11 @@ def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
         # encima con el GIL tomado. Es un recorte de vista: la mesa se sigue viendo.
         raise RuntimeError("el dibujo del recorte no terminó a tiempo")
     except Exception as e:
-        print(f"[mesa_img] el pool del visor no pudo ({type(e).__name__}: {e}); dibujo en el server")
-        return _dibujar_vista_mesa(tid, archivo, pi, w, recorte)
+        # Tampoco acá: el pool se descarta (el próximo pedido arma otro) y el recorte falla con
+        # un aviso; la mesa se sigue viendo (2026-09-17).
+        print(f"[mesa_img] el pool del visor no pudo ({type(e).__name__}: {e}); descarto el pool")
+        _descartar_visor_pool()
+        raise RuntimeError(f"los procesos de dibujo no respondieron ({type(e).__name__}); volvé a intentar")
     if err:
         raise RuntimeError(err)
     return cache if os.path.exists(cache) else None
@@ -11223,10 +11232,11 @@ def _editables_cacheados(arte, arte_orig, reg, talles):
         out = _get_visor_pool().submit(_editables_crudos, arte, arte_orig, reg, talles).result(
             timeout=_TOPE_VISOR_S)
     except Exception as e:
-        print(f"[editables] el pool del visor no pudo ({type(e).__name__}: {e}); leo en el server")
-        if isinstance(e, _Tope):
-            _descartar_visor_pool()
-        out = _editables_crudos(arte, arte_orig, reg, talles)
+        # Tampoco se leen acá (2026-09-17): el pool se descarta y el editor avisa; se reintenta.
+        print(f"[editables] el pool del visor no pudo ({type(e).__name__}: {e}); descarto el pool")
+        _descartar_visor_pool()
+        raise RuntimeError("No se pudieron leer los editables del arte: los procesos de dibujo no "
+                           f"respondieron ({type(e).__name__}). Volvé a intentarlo; si se repite, avisá.")
     with _EDIT_CACHE_LOCK:
         _EDIT_CACHE[k] = out
         while len(_EDIT_CACHE) > _EDIT_CACHE_MAX:
@@ -11318,13 +11328,13 @@ def _predibujar_mesas(tid, hojas, prog=None, w=None, etiqueta="mesas"):
             _descartar_render_pool()
             raise
     except Exception as e:
-        # Si el pool no arranca (o se cae), se hacen acá: se pierde la velocidad, no las mesas.
-        # Sólo las que NO terminaron (antes era `tareas[hechas:]`, que con el orden en que
-        # terminan los procesos podía saltear una sin dibujar y repetir otra ya hecha).
-        print(f"  [!] el pool no pudo dibujar las mesas ({type(e).__name__}: {e}); las hago en serie")
+        # NO se dibujan acá (2026-09-17): las que no salieron del pool las dibuja el visor
+        # cuando alguien las mira (`mesa_img`, por el pool del visor). Es un pre-dibujo.
+        print(f"  [!] el pool no pudo dibujar las mesas ({type(e).__name__}: {e}); "
+              f"{total - len(hechas_ok)} quedan para cuando se miren")
         for i, t in enumerate(tareas):
             if i not in hechas_ok:
-                _anotar(_dibujar_una_mesa(t))
+                _anotar((t[1], t[2], f"sin pre-dibujar ({type(e).__name__})"))
     return hechas, errores
 
 

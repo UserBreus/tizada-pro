@@ -300,6 +300,18 @@ Entra: `plantilla.ai`, `arte.ai`, `registro`, `pers` (placeholders de personaliz
     **`_poner_base_al_dia_al_arrancar()`**, llamada desde `__main__`, o detrás de
     **`_es_proceso_principal()`**. Contrato: `verificar_arranque_workers.py`.
 
+15. 🔴 **EL TRABAJO PESADO NUNCA SE HACE ADENTRO DEL SERVIDOR, NI COMO PLAN B.** Si un pool no
+    termina o no arranca, la respuesta es **descartarlo** (`procesos.descartar`), **reintentar
+    UNA vez en procesos nuevos** conservando lo que ya terminó, y si tampoco, **fallar con un
+    mensaje claro** (`piezas_con_diseno.ProcesoNoTermino`, `_repartir`) o salir sin ese adorno
+    (`None` en los SVG de la previa). Lo que no cabe en un proceso aparte tampoco cabe en el
+    proceso web: el 16/09 el reflejo «el pool falló; sigo en serie acá» tuvo al servidor publicado
+    armando camisetas con el GIL tomado de 17:23 a 18:02, con los 8 hilos trabados. Y **todos los
+    pools de trabajo toman lugar de UN cupo global** (`procesos.pool` → `cupo_total`, por RAM y
+    núcleos): dos moldes a la vez ya no suman procesos hasta ahogar la máquina; el segundo espera.
+    Los pools permanentes (render, visor) van con `cupo=False`. Contrato:
+    `verificar_sin_plan_b_en_el_servidor.py` (simula el 16/09 con topes de 5 s).
+
 ---
 
 ## 9. 🐛 TRAMPAS CONOCIDAS (gotchas que ya me mordieron)
@@ -1481,6 +1493,76 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > referencias también viven en los contratos. Para citar una entrada de este tramo, **decí el número
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
+
+- **2026-09-17 (476) — 🧯 EL «PLAN B» YA NO CORRE ADENTRO DEL SERVIDOR + un CUPO GLOBAL de
+  procesos.** El usuario trajo el informe `plan-b-dentro-del-servidor.pdf` sobre el 16/09 en el
+  publicado: *«quiero que repares todo; el sistema no puede matar al servidor»*.
+
+  **Lo que pasó, leído del registro del publicado** (`/api/consola`): a las 16:51-16:53 se subieron
+  cuatro moldes seguidos. Los dos shorts salieron bien (páginas por talle en 57 s y 72 s, en
+  paralelo). Las dos camisetas (más pesadas) arrancaron a las 16:53 **a la vez**: cada una con su
+  propio pool de 3 procesos `spawn` parseando el molde entero, en un servidor de **3 núcleos** y
+  poca RAM (`procesos_render` = 3; el pool permanente de render y el del visor también viven ahí).
+  A las **16:55 la cola de waitress ya iba en 5 y a las 17:14 en 31**: los 8 hilos trabados ANTES
+  de cualquier plan B — la máquina entera ahogada. A las 17:23 vence el primer tope de 30 min
+  (`TimeoutError: 3 (of 3) futures unfinished`, la búsqueda de etiquetas) y entra el reflejo
+  «sigo en serie»: el servidor se pone a buscar etiquetas y armar la camiseta entera en su propio
+  proceso con el GIL tomado; en ese rato **hasta la base da `Query timeout expired`** («[catalogo]
+  sin base, uso JSON» ×13). 17:55 vence el reparto por talle («armo la mesa 1 entera acá»), 17:58
+  otra vez las etiquetas, y recién a las 18:01-18:02 salen las «páginas por talle listas» —
+  **4111 s y 2176 s** por lo que de a uno tarda un minuto. Subida de CAMISETA JUGADOR: 1897 s.
+
+  **Dos causas, dos arreglos:**
+
+  **1. Nadie sumaba los procesos.** `_procesos_alta()`, `_procesos_por_defecto()` y
+  `_armar_paginas(len(trozos))` decidían cada uno por su cuenta, y `_prewarm_desplegado` corre
+  fuera del semáforo de altas. Ahora **`procesos.pool` toma lugar de un cupo global**
+  (`cupo_total()`: `TIZADA_PROCESOS` si está; si no, núcleos − 1 acotado por la RAM libre a
+  ~400 MB por proceso — se mide también en Linux vía `/proc/meminfo`, antes `procesos_render`
+  sólo miraba la memoria en Windows y el publicado corre en Linux). El que no tiene lugar
+  **espera** (avisa en la consola: `[procesos] …: sin lugar (N de M ocupados); espero`), con lugar
+  para algunos arranca con menos, y si en `TIZADA_ESPERA_LUGAR_S` (15 min) no consigue nada
+  falla con `SinLugar` y el nombre de quién ocupa el cupo. El lugar vuelve al apagar el pool
+  (`shutdown`, `descartar`, `seguro`). Los pools permanentes (render, visor) van con `cupo=False`.
+
+  **2. El reflejo «si el pool falla, sigo en serie acá»**, en SEIS lugares (los cinco del informe
+  + `_predibujar_mesas`, + el «dibujo en el server» del recorte del visor, el «leo en el server»
+  de los editables y el serial del aplanado paralelo). Se reemplazó por **`_repartir`**
+  (`piezas_con_diseno.py`): lo que terminó se conserva; una tarea que revienta se reintenta UNA
+  vez en el pool y si insiste es error del archivo; un pool que no termina se DESCARTA (sus
+  procesos se matan) y las pendientes se reintentan UNA vez en procesos nuevos; si tampoco,
+  **`ProcesoNoTermino`** con el mensaje para la pantalla («No se pudo preparar el molde: … no
+  terminó en N minutos. Volvé a intentarlo; si se repite, avisá»). Lo usan la búsqueda de
+  etiquetas, las páginas por talle y el desplegado por mesa (`decidir_etiqueta_archivo` pasa por
+  `_POOL_FACTORY` como los otros). `_prewarm_desplegado` anota el error en el Registro del
+  sistema. Los SVG de la previa (`hoja_pike.svgs_de_bases`) esperan **todos juntos con un tope**
+  (`TIZADA_TOPE_SVG_S`, 300 s), conservan los que llegaron (antes `svgs = {}` tiraba todo),
+  reintentan una vez en un pool nuevo y los que faltan salen como `None`: `preview_svg` dibuja un
+  símbolo vacío en vez de convertir la base ahí mismo. `servidor._svgs_de_piezas` igual, con UN
+  `wait` de 120 s para todas (antes 120 s POR pieza, en fila) y `_descartar_render_pool()` si
+  alguna no llegó; en el servidor va SIEMPRE por procesos (también el prewarm de fondo). El
+  recorte del visor y los editables descartan el pool del visor y fallan con aviso
+  (`get_editables` → 503 con el mensaje). `_predibujar_mesas` deja anotadas las mesas sin
+  pre-dibujar: el visor las dibuja cuando se miran.
+
+  **Topes proporcionales a la tarea** (eran 30 min para todo): etiquetas
+  `TIZADA_TOPE_ETIQUETAS_S` = 600 s; desplegado y páginas por talle `TIZADA_TOPE_DESPLEGADO_S` =
+  900 s; SVG 120/300 s; el aplanado sigue en 1800 (ya llegó a 9 min). Son topes contra el
+  cuelgue, y ahora se miden desde que el trabajo ARRANCA (la espera por lugar va aparte).
+
+  **Contratos.** Nuevo `verificar_sin_plan_b_en_el_servidor.py`: simula el 16/09 con topes de
+  5 s y pools cuyos futuros no se resuelven nunca en los seis lugares — cada llamada termina en
+  5-10 s con `ProcesoNoTermino` o sin ese adorno, **nada se ejecutó en el proceso que llama**
+  (centinelas en `buscar_candidatos_mesa`, `_paginas_de_talles`, `_MESA_EN_SERIE`,
+  `get_svg_image`, `_dibujar_una_mesa`), y **`GET /api/salud` contestó siempre** (vigilante en un
+  hilo, peor respuesta < 2 s); más el cupo (con 2 lugares el segundo pool espera y falla con
+  `SinLugar`; el lugar vuelve al apagar) y un grep que corta si vuelve el reflejo.
+  `verificar_desplegado_pool.py` cambió de contrato: una mesa que falla dos veces o un pool que no
+  arranca → `ProcesoNoTermino`, nunca en serie. `verificar_publicacion_y_procesos.py` verde.
+
+  **Pendiente / a mirar en el publicado:** cuánta RAM tiene el VPS (con 3 núcleos, el cupo va a
+  ser 2 y `procesos_render` lo que dé la memoria); si un molde pesado sigue pasando los 15 min de
+  a uno, es la máquina (subir la instancia), no el código. Invariante 15 de §8.
 
 - **2026-09-16 (475) — 🔤 TRES MEJORAS DE PERSONALIZACIÓN: tipografía POR CAMPO, varias columnas
   de nombre/número por molde, y la capa «talle».** Pedido del usuario (con «sin romper nada»).

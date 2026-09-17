@@ -15,6 +15,7 @@ BREAKAWAY_OK deja que un hijo se salga si lo PIDE (lo necesita el ayudante de ac
 en vez de que se acumulen en silencio.
 """
 import os
+import time
 
 _JOB = None
 
@@ -166,10 +167,165 @@ def contexto():
     return multiprocessing.get_context("spawn")
 
 
-def pool(max_workers):
-    """Un `ProcessPoolExecutor` con el contexto correcto (ver arriba)."""
+# ══ CUÁNTOS PROCESOS DE TRABAJO A LA VEZ, EN TODO EL SERVIDOR ═══════════════════════════════
+# 🔴 EL CUPO ES GLOBAL (2026-09-17, por lo del 16/09 en el publicado). Cada tarea abría SU pool
+# con sus propios procesos y nadie los sumaba: a las 16:53 había DOS camisetas preparándose a la
+# vez, cada una con 3 procesos nuevos parseando el molde entero, en un servidor de 3 núcleos y
+# poca RAM. La máquina se ahogó (hasta el SQL Server dio «Query timeout»), ninguno de los 6 terminó
+# en 30 minutos, y de ahí en más el «plan B» de cada lugar hizo el trabajo ADENTRO del servidor con
+# el GIL tomado hasta las 18:02 — 8 hilos trabados, 34 pedidos en cola. Las mismas mesas, de a una,
+# tardan un minuto (16:52: 57 s y 72 s).
+# Ahora todos los pools de trabajo (desplegado, etiquetas, páginas por talle, aplanado, SVG) toman
+# lugar de UN cupo (`cupo_total`): el que no tiene lugar ESPERA a que otro termine —avisando en la
+# consola— y si no lo consigue en `TIZADA_ESPERA_LUGAR_S` falla con un error claro en vez de
+# sumarse al ahogo. Con lugar para algunos, arranca con menos procesos antes que esperar a todos.
+# Los dos pools permanentes del servidor (render y visor) no cuentan: son fijos y viven siempre.
+# `TIZADA_PROCESOS` manda si está; si no, los núcleos menos uno, acotado por la RAM libre (cada
+# proceso con un molde pesado adentro pesa ~400 MB).
+
+class SinLugar(RuntimeError):
+    """No hubo procesos libres en el tiempo de espera: el servidor está ocupado con otros trabajos."""
+
+
+_CUPO = {"total": None, "usado": 0, "cond": None, "quien": {}}
+
+
+def _cond():
+    if _CUPO["cond"] is None:
+        import threading
+        _CUPO["cond"] = threading.Condition()
+    return _CUPO["cond"]
+
+
+def memoria_libre_mb():
+    """MB de RAM disponible, o None si no se puede saber."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _MEM(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            m = _MEM()
+            m.dwLength = ctypes.sizeof(_MEM)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx.restype = ctypes.c_int
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+                return None
+            return m.ullAvailPhys / (1024 * 1024)
+        with open("/proc/meminfo", encoding="ascii", errors="replace") as fh:
+            for ln in fh:
+                if ln.startswith("MemAvailable:"):
+                    return float(ln.split()[1]) / 1024
+    except Exception:
+        return None
+    return None
+
+
+def _cupo_por_defecto():
+    try:
+        n = int(os.environ.get("TIZADA_PROCESOS") or 0)
+    except ValueError:
+        n = 0
+    if n:
+        return max(1, n)
+    n = max(1, (os.cpu_count() or 2) - 1)
+    libre = memoria_libre_mb()
+    if libre:
+        n = max(1, min(n, int(max(0.0, libre - 1024) // 400)))
+    return n
+
+
+def cupo_total():
+    """Cuántos procesos de trabajo puede haber a la vez (se decide una vez, al primer uso)."""
+    if _CUPO["total"] is None:
+        _CUPO["total"] = _cupo_por_defecto()
+    return _CUPO["total"]
+
+
+def cupo_usado():
+    return _CUPO["usado"]
+
+
+def _soltar(ex):
+    n, ex._lugares = getattr(ex, "_lugares", 0), 0
+    if n:
+        cond = _cond()
+        with cond:
+            _CUPO["usado"] = max(0, _CUPO["usado"] - n)
+            _CUPO["quien"].pop(getattr(ex, "_que", None), None)
+            cond.notify_all()
+
+
+def _tomar(n, espera, que):
+    """Toma `n` lugares (o menos, si hay algunos libres tras una espera corta). Devuelve cuántos."""
+    total = cupo_total()
+    n = max(1, min(int(n or 1), total))
+    cond = _cond()
+    t0 = time.time()
+    avisado = False
+    with cond:
+        while True:
+            libres = total - _CUPO["usado"]
+            pasado = time.time() - t0
+            if libres >= n or (libres >= 1 and pasado >= 10):
+                tomo = min(n, libres)
+                _CUPO["usado"] += tomo
+                _CUPO["quien"][que] = tomo
+                if avisado:
+                    print(f"[procesos] {que}: lugar para {tomo} proceso(s) tras {pasado:.0f} s de espera")
+                return tomo
+            if pasado >= espera:
+                ocupados = ", ".join(f"{k} ({v})" for k, v in _CUPO["quien"].items())
+                raise SinLugar(f"no hubo procesos libres en {espera/60:.0f} minutos: "
+                               f"{_CUPO['usado']} de {total} ocupados por {ocupados or 'otros trabajos'}")
+            if not avisado:
+                avisado = True
+                print(f"[procesos] {que}: sin lugar ({_CUPO['usado']} de {total} procesos ocupados); espero")
+            cond.wait(timeout=max(0.5, min(5.0, espera - pasado)))
+
+
+def _pool_crudo(max_workers):
     from concurrent.futures import ProcessPoolExecutor
-    return ProcessPoolExecutor(max_workers=max_workers, mp_context=contexto())
+
+    class _PoolConLugar(ProcessPoolExecutor):
+        _lugares = 0
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            try:
+                super().shutdown(wait=wait, cancel_futures=cancel_futures)
+            finally:
+                _soltar(self)
+
+        def __del__(self):
+            _soltar(self)
+
+    return _PoolConLugar(max_workers=max_workers, mp_context=contexto())
+
+
+def pool(max_workers, cupo=True, espera=None, que="un trabajo"):
+    """Un `ProcessPoolExecutor` con el contexto correcto (ver arriba) y, con `cupo`, con lugar
+    tomado del cupo global (se devuelve solo al apagar el pool: `shutdown`, `descartar`, `seguro`).
+    `cupo=False` es para los pools permanentes del servidor. Levanta `SinLugar` si no hay lugar."""
+    if not cupo:
+        return _pool_crudo(max_workers)
+    if espera is None:
+        espera = tope_segundos("TIZADA_ESPERA_LUGAR_S", 900)
+    n = _tomar(max_workers, espera, que)
+    ex = None
+    try:
+        ex = _pool_crudo(n)
+        ex._lugares = n
+        ex._que = que
+    finally:
+        if ex is None:                      # no se pudo armar: el lugar vuelve al cupo
+            with _cond():
+                _CUPO["usado"] = max(0, _CUPO["usado"] - n)
+                _CUPO["quien"].pop(que, None)
+                _CUPO["cond"].notify_all()
+    return ex
 
 
 def tope_segundos(variable, por_defecto):

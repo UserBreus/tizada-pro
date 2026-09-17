@@ -613,11 +613,13 @@ def aplanar_para_rip(path):
                     _tope = 0
                 _w = max(1, _tope) if _tope else max(2, (os.cpu_count() or 4) - 1)
                 import procesos as _PR
-                with _PR.seguro(_PR.pool(min(len(tmps), _w))) as ex:
+                with _PR.seguro(_PR.pool(min(len(tmps), _w), que="el aplanado para el RIP")) as ex:
                     oks = list(ex.map(_aplanar_una_pagina, tmps,
                                       timeout=_PR.tope_segundos("TIZADA_TOPE_APLANADO_S", 1800)))
-            except Exception:
-                oks = [_aplanar_una_pagina(t) for t in tmps]   # si el pool no arranca, serial
+            except Exception as e:
+                # NUNCA se aplana acá: lo que no cabe en un proceso aparte tampoco cabe en el
+                # servidor (2026-09-17). El que llama ya sabe fallar con mensaje claro.
+                raise RuntimeError(f"el aplanado en paralelo no terminó ({type(e).__name__}: {e})") from e
             if not all(oks):
                 raise RuntimeError("una página no se aplanó en paralelo")
             # 3) reensamblar las páginas ya aplanadas. IMPORTANTE: mantener CADA PDF fuente ABIERTO

@@ -295,25 +295,56 @@ def svgs_de_bases(bases, docs_base, procesos=None):
         except Exception:
             ejecutor = None
     svgs = {}
+    en_procesos = ejecutor is not None
     if ejecutor is not None:
-        try:
-            futs = {k: ejecutor.submit(svg_de_pdf_bytes, docs_base(b).tobytes()) for k, b, _c, _r in pendientes}
-            for k, f in futs.items():
-                svgs[k] = f.result(timeout=300)
-        except Exception as e:
-            print(f"[preview] SVG de bases en paralelo falló ({e}); sigo en serie", flush=True)
-            svgs = {}
+        # 🔴 LO QUE TERMINÓ SE CONSERVA Y NADA SE CONVIERTE ACÁ (2026-09-17). Antes, con UNA base
+        # que no llegaba a tiempo se tiraban todas las convertidas y se hacían TODAS en este
+        # proceso, con el GIL tomado: en el servidor publicado eso es el pedido entero clavado. Se
+        # esperan todas juntas con UN tope, las que faltan se reintentan una vez en un pool nuevo
+        # (si el pool es propio) y las que aun así faltan salen de la previa como `None`: la vista
+        # previa es un adorno best-effort, la tizada no depende de ella.
+        import procesos as _PR
+        from concurrent.futures import wait as _esperar
+        tope = _PR.tope_segundos("TIZADA_TOPE_SVG_S", 300)
+        faltan = list(pendientes)
+        for intento in (1, 2):
+            try:
+                futs = {k: ejecutor.submit(svg_de_pdf_bytes, docs_base(b).tobytes()) for k, b, _c, _r in faltan}
+                _listos, _sin = _esperar(list(futs.values()), timeout=tope)
+                for k, f in futs.items():
+                    if f in _listos and f.exception() is None:
+                        svgs[k] = f.result()
+                    else:
+                        try:
+                            f.cancel()
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"[preview] SVG de bases en paralelo falló ({type(e).__name__}: {e})", flush=True)
+            faltan = [p for p in faltan if p[0] not in svgs]
+            if not faltan:
+                break
+            print(f"[preview] {len(faltan)} base(s) sin SVG en el intento {intento} (tope {tope:.0f} s)", flush=True)
             if propio is not None:
-                import procesos as _PR
                 _PR.descartar(propio)        # uno trabado no se destraba: se mata
-                propio = None
-        finally:
-            if propio is not None:
-                propio.shutdown(wait=False)
+                propio = ejecutor = None
+                if intento == 1:
+                    try:
+                        propio = ejecutor = _PR.pool(min(procesos, len(faltan)), que="los SVG de la previa")
+                    except Exception as e:
+                        print(f"[preview] sin procesos para reintentar los SVG ({type(e).__name__}: {e})", flush=True)
+                        break
+            else:
+                break                        # el pool es ajeno (el del servidor): no se reintenta acá
+        if propio is not None:
+            propio.shutdown(wait=False)
     for k, b, carpeta, ruta in pendientes:
         svg = svgs.get(k)
         if svg is None:
-            svg = docs_base(b)[0].get_svg_image()
+            if en_procesos:
+                out[k] = None                # la previa sale sin esta base; NO se convierte acá
+                continue
+            svg = docs_base(b)[0].get_svg_image()   # sin procesos (un script): acá, a propósito
         out[k] = svg
         if ruta:
             try:
@@ -414,8 +445,13 @@ def preview_svg(hoja, cfg, alto_pag, simbolos, docs_base, signo_rotacion=1, crud
             ids[k] = sid
             sym = simbolos.get(k)
             if sym is None:
-                _raw = (crudos or {}).get(k)          # ya convertida (en paralelo, `svgs_de_bases`)
-                sym = _svg_interior(_raw, sid + "_") if _raw is not None else svg_base_cacheado(b, docs_base, sid + "_")
+                if crudos is not None and k in crudos:
+                    # ya convertida (en paralelo, `svgs_de_bases`); `None` = los procesos no la
+                    # terminaron: la previa sale SIN esa base antes que convertirla acá con el GIL
+                    _raw = crudos[k]
+                    sym = _svg_interior(_raw, sid + "_") if _raw is not None else ""
+                else:
+                    sym = svg_base_cacheado(b, docs_base, sid + "_")
                 simbolos[k] = sym
             defs.append(f'<symbol id="{sid}" viewBox="0 0 {W:.3f} {H:.3f}" overflow="visible">{sym}</symbol>')
         cx = m["izq"] * CM + c["cx"]
