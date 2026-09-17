@@ -553,6 +553,13 @@ def _maquina():
     libre = _PR.memoria_libre_mb()
     return {"nucleos": os.cpu_count(), "ram_total_mb": total,
             "ram_libre_mb": round(libre) if libre else None,
+            # qué trabajo pesado quedó en el navegador (PLAN_NAVEGADOR): con todo prendido, el
+            # servidor del camino B sólo valida y guarda
+            "navegador": {"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0",
+                          "vista": _navegador_dibuja_vista(),
+                          "arte": str(os.environ.get("TIZADA_NAVEGADOR_ARTE") or "1") != "0",
+                          "tizada": str(os.environ.get("TIZADA_NAVEGADOR_TIZADA") or "1") != "0",
+                          "solo": _solo_navegador()},
             "cupo_procesos": _PR.cupo_total(), "cupo_usado": _PR.cupo_usado()}
 
 
@@ -3139,6 +3146,10 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         _con_diseno, _motivo_b = True, "lo preparó el navegador"
         if _fase_paq == "contornos":
             _motivo_b += " (las páginas por talle llegan en segundo plano)"
+    elif _solo_navegador() and _PIDE_B:
+        _descartar_tmp(tmp)
+        return None, ("Este molde con diseño se prepara en tu computadora, no en el servidor (volvé a cargarlo "
+                      "desde la pantalla; si tu computadora no puede, usá una con más memoria).", 409)
     elif dxf_resumen:
         # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
         # pone → solo genera ruido y tarda). Los talles ya vienen del DXF; las piezas se
@@ -3545,7 +3556,17 @@ def navegador_config():
                     # el navegador y manda el paquete (etapa 4). `TIZADA_NAVEGADOR_TIZADA=0` lo apaga.
                     "tizada": str(os.environ.get("TIZADA_NAVEGADOR_TIZADA") or "1") != "0",
                     # `arte`: las previas por pieza del paso Arte (etapa 3, camino B).
-                    "arte": str(os.environ.get("TIZADA_NAVEGADOR_ARTE") or "1") != "0"})
+                    "arte": str(os.environ.get("TIZADA_NAVEGADOR_ARTE") or "1") != "0",
+                    # `solo`: el servidor ya no hace lo pesado del camino B ni como respaldo (etapa 6)
+                    "solo": _solo_navegador()})
+
+
+def _solo_navegador():
+    """ETAPA 6 (PLAN_NAVEGADOR): con `TIZADA_SOLO_NAVEGADOR=1` el servidor NO hace ningún trabajo
+    pesado del camino B (ni preparar moldes con diseño, ni previas por pieza, ni tizadas): lo hace
+    la computadora de la persona o no se hace. Es el «apagar lo pesado» para el molde con diseño;
+    el camino A y el DXF siguen en el servidor hasta la etapa 1b."""
+    return str(os.environ.get("TIZADA_SOLO_NAVEGADOR") or "0") == "1"
 
 
 def _navegador_dibuja_vista():
@@ -9898,6 +9919,12 @@ def plan_pedido():
     validaciones y misma traducción que `generar_multi`, sin generar nada. Mismo cuerpo que
     `/api/generar_multi`."""
     cuerpo = request.get_json(force=True) or {}
+    # la guarda de dueño, molde por molde, igual que `generar_multi` (el plan devuelve el registro
+    # y las prendas de cada molde: no puede salir para un molde ajeno)
+    for pid in (cuerpo.get("molds") or cuerpo.get("productos") or []):
+        _no = _guard_molde(str(pid))
+        if _no:
+            return _no
     try:
         plan = _plan_del_pedido(cuerpo)
     except _PlanInvalido as _e:
@@ -10013,6 +10040,9 @@ def generar_multi():
         _plan = _plan_del_pedido(cuerpo)
     except _PlanInvalido as _e:
         return _e.resp if _e.code is None else (_e.resp, _e.code)
+    if _solo_navegador() and all(md.get("arte") is None for md in _plan["molds_data"]):
+        return jsonify({"error": "La tizada de un molde con diseño se genera en tu computadora, no en el servidor. "
+                                 "Si tu computadora no puede, usá una con más memoria."}), 409
     prendas, pids, default_diseno = _plan["prendas"], _plan["pids"], _plan["default_diseno"]
     planilla_ficha, perfil_forzado, _reempl = _plan["planilla_ficha"], _plan["perfil_forzado"], _plan["_reempl"]
     _moldes_por_dis, cat, nombres = _plan["_moldes_por_dis"], _plan["cat"], _plan["nombres"]
@@ -13217,7 +13247,8 @@ def motor_b_producto(pid):
         if d is None:
             break
         mesas.append({"mesa": m, "sello": list(d.get("sello") or []), "orden": list(d.get("orden") or []),
-                      "paginas": d.get("pdf") is not None})
+                      "paginas": d.get("pdf") is not None,
+                      "bytes": (os.path.getsize(d["pdf"]) if d.get("pdf") and os.path.exists(d["pdf"]) else 0)})
         m += 1
     fu = _fuentes_para(pid, _reempl_de_request(pid=pid))
     catalogo = []

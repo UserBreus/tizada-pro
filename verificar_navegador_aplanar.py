@@ -28,6 +28,8 @@ y esa misma HOJA re-anidada dos niveles adentro de una capa (contenido real, sin
 """
 import glob
 import io
+
+CONTRATO_LENTO = True   # hojas reales de 8 m aplanadas dos veces y dibujadas: minutos, no segundos
 import json
 import math
 import os

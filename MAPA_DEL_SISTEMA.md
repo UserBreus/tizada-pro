@@ -1496,6 +1496,60 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (491) — 🏁 PLAN_NAVEGADOR: LAS SEIS ETAPAS, CERRADAS PARA EL MOLDE CON DISEÑO (camino B).**
+  El usuario: *«cuando es todo es hasta la última puta etapa»*. Lo que quedó, etapa por etapa
+  (todo detrás de interruptores en `/api/navegador/config`; con todo prendido, para un molde con
+  diseño **el servidor no calcula nada: valida y guarda**):
+  - **Etapa 3 — el arte en el navegador.** `pieza/base.js` + `pieza/estampar.js` (la base con el
+    borde de corte, nombre/número/talle en su placeholder, la etiqueta del sistema recta, sobre el
+    borde y por zonas: letra por letra lo mismo que `_armar_base`/`generar_pieza`, contrato
+    `verificar_navegador_pieza.py`), `texto/curvas.js` (486) + `texto/fuentes.js` (el catálogo
+    resuelto como `resolver_fuente`, Anton de respaldo), `pieza/svg.js` (el escritor SVG de mupdf.js
+    da el mismo SVG que `get_svg_image`, salvo que los `id` de clipPath arrancan en 0),
+    `arte/prendas.js` (`tokens_pieza`/`partes_de_libre`/`piezas_de`), `arte/previa.js` (las previas
+    por pieza del paso Arte armadas acá: `/api/productos/<pid>/motor_b` + `/desplegado/<archivo>` +
+    `/prendas`, tipografías por `/api/fuente/archivo/<a>?pid=`, todo cacheado en IndexedDB
+    (`motor/cache.js`)). Interruptor `arte`.
+  - **Etapa 4 — la tizada entera.** `nesting/contorno.js` (487), `hoja/componer.js` (485),
+    `rip/aplanar.js` (`aplanarParaRip`, contrato `verificar_navegador_aplanar.py`: estructura,
+    content-streams instrucción por instrucción y píxeles), `ficha/ficha.js` (la ficha A4 con las
+    reglas de PyMuPDF calcadas, contrato `verificar_navegador_ficha.py`; el objeto que no se sublima
+    va como PDF o miniatura: el lector de SVG no está en mupdf.js), `hoja/validar.js` (las cuatro
+    validaciones con los mismos textos) y `pedido/generar.js`: el servidor VALIDA y TRADUCE
+    (`POST /api/pedido/plan` = `_plan_del_pedido`, en lo que se partió `generar_multi`: misma traba
+    antes de fabricar, mismas prendas, telas, giros, guías de la ficha), esta computadora arma las
+    piezas, acomoda, escribe la hoja, la aplana, le pone el perfil (`/api/pedido/perfil_salida`) y
+    arma la ficha, y manda el PAQUETE DEL PEDIDO (`POST /api/paquetes/pedido`): el servidor lo deja
+    como un trabajo más (`trabajos/<id>/`, `pedido.json`, `resultado` idéntico, `navegador: true`).
+    **Contrato `verificar_navegador_tizada.py`**: el mismo pedido de los dos lados → hoja con el
+    MISMO content-stream, mismo perfil ICC, 0 píxeles distintos fuera de bordes a 60 dpi, misma
+    ficha (texto y píxeles), mismas validaciones. Probado también en el navegador de verdad
+    (sandbox 8061, `window.__tizada.generarPedidoEnNavegador`): 42 piezas, 11 s, el servidor
+    escribió «guardado (lo generó el navegador)». Interruptor `tizada`.
+  - **Etapa 5 — la puerta de potencia.** `motor/capacidad.js`: hilos y memoria declarada, reserva
+    de prueba de la memoria que pide el trabajo (regla medida: ~3,5 MB de WebAssembly por MB de
+    archivo, por hilo; 200 MB por hoja) y un benchmark corto («puntos de potencia», ~100 en esta PC
+    → umbral 12). Si no alcanza, el molde NO se manda al servidor y la tizada no se genera: cartel
+    con el motivo y qué hacer. Contrato `verificar_navegador_capacidad.py` (1 GB declarado → cierra;
+    8 GB → abre). ⚠️ `--max-old-space-size` no sirve para simular poca memoria: los ArrayBuffer viven
+    fuera del heap de V8.
+  - **Etapa 6 — apagar lo pesado del servidor.** Con la vista en el navegador el servidor ya no
+    pre-dibuja; con `TIZADA_SOLO_NAVEGADOR=1` además **rechaza** preparar un molde con diseño sin
+    paquete y generar una tizada del camino B (409 con el motivo). `/api/salud` → `maquina.navegador`
+    dice qué interruptores están prendidos. Los pools del servidor siguen existiendo porque el
+    **camino A y el DXF** (moldes sin diseño adentro) todavía se procesan ahí: es el pendiente 1b
+    del plan, anotado ahí. Borrar PyMuPDF/pikepdf del servidor recién tiene sentido cuando 1b esté.
+  **Lo que NO se hizo, con motivo:** `nesting/grupos.js` no existe porque el agrupado por tela y por
+  columna de talle lo sigue haciendo el servidor en el PLAN (es liviano y así el navegador y el
+  servidor deciden igual); el arte SEPARADO (camino A: `extraer_personalizacion`, editables,
+  mapeo, `_encaje`) no está en el navegador (1b). **Diagnóstico:** `window.__tizada` expone el
+  motor desde la consola (generar un pedido a mano, medir la puerta).
+  **Trampas de esta tanda:** (1) U+2028/U+2029 dentro de una regex literal de JS parten la línea
+  (el archivo no compila y el mensaje engaña: «missing /»); escribirlos como `\u2028`; (2) un
+  `import * as mupdf` arriba de un Web Worker deja al hilo mudo: siempre `await import('mupdf')`;
+  (3) el escritor SVG de mupdf.js numera los clipPath desde 0; (4) `_dibujos` de
+  `piezas_con_diseno` cachea por `id(doc)` → `PD.olvidar(doc)` antes de cerrar.
+
 - **2026-09-17 (487) — 🧩 PLAN_NAVEGADOR ETAPA 4, PUNTO 1: EL NESTING POR CONTORNO EN EL NAVEGADOR.**
   `nesting_contorno.py` (`poligonos_contorno`, `_mascara_contorno`, `_angulos`, `_rotar`,
   `_elegir_posicion`, `_preparar`, `anidar_contorno`, `_anidar_estrategia`) traducido a

@@ -87,14 +87,16 @@ ok(S._marcas_del_pedido(CUERPO, "p1", "golero", "sin_marca_pedido") == {"v_1": {
 print("\n3 · LA GENERACIÓN Y LA FICHA LEEN LAS MISMAS")
 # Si la tizada mirara una cosa y la ficha otra, el taller aplicaría un proceso que la tela no pidió.
 _src = open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
-_gm = _src[_src.index('@app.post("/api/generar_multi")'):]
+# (2026-09-17) el armado del pedido se partió: `_plan_del_pedido` (valida y traduce, lo comparte
+# el navegador) + `generar_multi` (genera). Las marcas viajan en el plan.
+_gm = _src[_src.index('def _plan_del_pedido('):]
 ok('"editables_marca": _marcas_del_pedido(cuerpo, pid, dslug)' in _gm,
    "🔴 el motor recibe las del pedido")
 ok('"editables_sin_marca": _marcas_del_pedido(cuerpo, pid, dslug, "sin_marca_pedido")' in _gm,
    "y las de «sin marca» también")
 ok("marcas_ped=_marcas_del_pedido(cuerpo, _pf, _dsf)" in _gm,
    "la ficha técnica recibe las mismas")
-_mg = _src[_src.index("def _molde_guia_ficha("):_src.index("@app.post(\"/api/generar_multi\")")]
+_mg = _src[_src.index("def _molde_guia_ficha("):_src.index("def _plan_del_pedido(")]
 ok("_editables_marca(prod" not in _mg and "_editables_sin_marca(prod" not in _mg,
    "🔴 y el molde guía de la ficha ya NO las saca del catálogo")
 

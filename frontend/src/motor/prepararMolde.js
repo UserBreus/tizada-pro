@@ -9,6 +9,7 @@
 
 import { crearPool } from './pool.js'
 import { abrirEnPool, faseA, faseB, pareceConDiseno } from './molde/desplegar_paralelo.js'
+import { puedeHacer } from './capacidad.js'
 
 let _config = null
 const MOTOR = 'mupdf.js · navegador'
@@ -67,6 +68,10 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
   let cerrado = false
   const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
   try {
+    // LA PUERTA (etapa 5): si esta computadora no tiene la memoria o la potencia, se dice y NO se
+    // manda al servidor (regla del usuario: «quien no tenga la potencia no podrá enviar»).
+    const puerta = puedeHacer({ tipo: 'molde', mb: archivo.size / 1048576, hilos: hilosRecomendados() })
+    if (!puerta.puede) { const e = new Error(puerta.motivo); e.capacidad = true; throw e }
     onA && onA({ texto: 'Abriendo el archivo en tu computadora…' })
     const bytes = new Uint8Array(await archivo.arrayBuffer())
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
@@ -102,6 +107,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     }
   } catch (e) {
     cerrar()
+    if (e && e.capacidad) throw e
     throw new Error(mensajeDeError(e))
   }
 }

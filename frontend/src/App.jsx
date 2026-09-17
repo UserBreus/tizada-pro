@@ -7,6 +7,13 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
 import { navegadorDibujaVista, abrirVista, cerrarVistas } from './motor/vista/vista.js';
+import { previasCaminoB } from './motor/arte/previa.js';
+import { generarPedidoEnNavegador } from './motor/pedido/generar.js';
+import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
+// PARA DIAGNÓSTICO (Registro del sistema / soporte): el motor del navegador a mano desde la consola.
+// `window.__tizada.generarPedidoEnNavegador(cuerpo, {rutaApi})` genera un pedido acá y lo guarda;
+// `window.__tizada.puedeHacer({tipo:'molde', mb})` dice qué mide la puerta de potencia.
+if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, puedeHacer: _puedeHacer, rutaApi };
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -8982,7 +8989,29 @@ export default function App() {
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
       const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
-      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl }) });
+      const _cuerpo = { molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
+      // 🔴 LA TIZADA SE GENERA EN ESTA COMPUTADORA (PLAN_NAVEGADOR, etapa 4): el servidor revisa
+      // el pedido, esta máquina arma las piezas, las acomoda, escribe la hoja y la ficha, y manda
+      // el paquete; el servidor lo guarda como un trabajo más. Si el pedido trae un molde que no es
+      // del camino B (o el servidor lo tiene apagado), `null` → lo genera el servidor como siempre.
+      let _local = null;
+      try {
+        setTrabajosMulti(prev => prev.map(t => ({ ...t, estado: 'generando', progreso: 'Revisando el pedido…' })));
+        _local = await generarPedidoEnNavegador(_cuerpo, { rutaApi, avisar: (txt) => setTrabajosMulti(prev => prev.map(t => ({ ...t, estado: 'generando', progreso: txt }))) });
+      } catch (err) {
+        // el servidor ya dijo que no (traba antes de fabricar, filas incompletas): se muestra tal cual
+        if (err && err.datos && err.datos.error) throw err;
+        // esta computadora no tiene la potencia (etapa 5): se dice y NO se manda al servidor
+        if (err && err.capacidad) throw err;
+        console.warn('la tizada no se pudo generar en esta computadora; la genera el servidor:', err);
+        _local = null;
+      }
+      if (_local) {
+        setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: _local.id, estado: 'listo', resultado: _local.resultado, progreso: '' })));
+        showMsg(`Tizada lista en ${Math.round(_local.segundos)} s (generada en esta computadora)`);
+        return;
+      }
+      const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_cuerpo) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: data.id, estado: 'generando' })));
@@ -9426,6 +9455,23 @@ export default function App() {
       return;
     }
     const req = ++_pvReq.current;
+    // CAMINO B (PLAN_NAVEGADOR, etapa 3): las previas se arman ACÁ, con el mismo motor de la
+    // tizada; el servidor sólo entrega el molde desplegado y las tipografías. Si no se puede
+    // (molde sin diseño adentro, servidor con esto apagado, navegador sin hilos), sigue el servidor.
+    try {
+      const _prodB = (productosCat.productos || []).find(p => p.id === pid);
+      if (_prodB && _prodB.origen === 'con_diseno') {
+        const _d = await previasCaminoB({ pid, variante: clave, talle, rutaApi, reemplazos: _reemplDe(disenoActivo, pid, _reempl) });
+        if (req !== _pvReq.current) return;
+        if (_d) {
+          if (_d.preparando) { _reintentoFuentes('pv|' + k, () => cargarPreviewPiezas()); return; }
+          setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('previa de piezas en esta computadora: cae al servidor', e);
+    }
     try {
       const res = await fetch('/api/arte/preview_piezas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

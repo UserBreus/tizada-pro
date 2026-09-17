@@ -339,7 +339,9 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 ### ETAPA 3 — El arte en el navegador (6-8 semanas)
 
-> ⏩ **EN CURSO 2026-09-17** (MAPA 486): punto 2 HECHO — `texto/curvas.js` + contrato
+> ✅ **HECHA 2026-09-17 para el camino B** (MAPA 491): pieza (base + estampado), tipografías,
+> catálogo, previas del paso Arte en el navegador. Pendiente 1b: el arte SEPARADO (camino A).
+> (Antes: EN CURSO, MAPA 486: punto 2 HECHO — `texto/curvas.js` + contrato
 > `verificar_navegador_curvas.py` (texto recto byte a byte en las 16 tipografías del catálogo; el
 > arco a 1 centésima porque `polyfit`/`atan2` no son reproducibles bit a bit, documentado ahí).
 
@@ -368,7 +370,10 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 ### ETAPA 4 — La tizada entera en el navegador (8-12 semanas)
 
-> ⏩ **EN CURSO 2026-09-17** (MAPA changelog 487). HECHO: punto 1, `nesting/contorno.js`
+> ✅ **HECHA 2026-09-17 para el camino B** (MAPA 491): nesting, hoja con el sello, aplanado para el
+> RIP, perfil, ficha técnica, validaciones y el paquete del pedido; contrato de punta a punta
+> `verificar_navegador_tizada.py`. `nesting/grupos.js` no hace falta: el plan lo arma el servidor.
+> (Antes: EN CURSO, MAPA 487. HECHO: punto 1, `nesting/contorno.js`
 > (`anidarContorno`, sólo el camino del contorno) con contrato `verificar_navegador_nesting.py`
 > verde: 5 escenarios con contornos reales, colocaciones/máscaras/área/consumo IGUALES a Python.
 > Falta del punto 1: `nesting/grupos.js` (`generar_multi`).
@@ -397,6 +402,8 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 ### ETAPA 5 — «Quien no tenga la potencia no podrá enviar» (1-2 semanas)
 
+> ✅ **HECHA 2026-09-17** (MAPA 491): `motor/capacidad.js` + contrato `verificar_navegador_capacidad.py`.
+
 - `capacidad.js`: al abrir la app y antes de cada trabajo pesado: `navigator.hardwareConcurrency`,
   `navigator.deviceMemory` (Chrome/Edge), una **reserva de prueba** de memoria WebAssembly (pedir
   el bloque que el trabajo va a necesitar, según el tamaño del archivo: la etapa 0 da la regla
@@ -412,6 +419,10 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
   chica → la puerta cierra; con memoria de sobra → abre).
 
 ### ETAPA 6 — Apagar lo pesado del servidor (1-2 semanas)
+
+> ✅ **HECHA 2026-09-17 para el camino B** (MAPA 491): el servidor no pre-dibuja, y con
+> `TIZADA_SOLO_NAVEGADOR=1` rechaza preparar o generar un molde con diseño. Borrar PyMuPDF/pikepdf
+> del servidor queda para cuando el camino A y el DXF (1b) también estén en el navegador.
 
 - Borrar endpoints, pools, `procesos.py`, los módulos del motor y sus contratos de servidor
   (§4). `servidor.py` queda sin PyMuPDF ni pikepdf; `requirements.txt` sin ellos. El paquete de

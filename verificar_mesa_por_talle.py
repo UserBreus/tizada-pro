@@ -92,7 +92,9 @@ def main():
 
     # ── 3. ES LO QUE USA EL PEDIDO ──────────────────────────────────────────────────────────
     print("\n3 · Y ES LA CLAVE QUE USA EL PEDIDO DE VERDAD")
-    src = inspect.getsource(S.generar_multi)
+    # (2026-09-17) la clave se decide en `_plan_del_pedido` (lo comparte el navegador) y
+    # `generar_multi` la usa: se miran las dos
+    src = inspect.getsource(S._plan_del_pedido) + inspect.getsource(S.generar_multi)
     ok('"_gkey": _columna_talle_de(prod)' in src,
        "la clave de agrupación del pedido es la columna de talle")
     ok('"_gkey": (gconf or {}).get("id")' not in src,

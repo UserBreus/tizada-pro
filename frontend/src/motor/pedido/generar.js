@@ -15,6 +15,7 @@ import { motorDe, cerrarMotores } from '../arte/previa.js'
 import { piezasDe } from '../arte/prendas.js'
 import { traerConCache } from '../cache.js'
 import { pyRound } from '../py.js'
+import { puedeHacer } from '../capacidad.js'
 
 const CM = 28.3465
 const PIEZAS_RIB = new Set(['Cuello', 'TC', 'Tapacostura'])     // van a la tela RIB (motor_pedido)
@@ -75,6 +76,16 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   decir('Revisando el pedido…')
   const plan = await json(rutaApi('/api/pedido/plan'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) })
   if (!plan.todo_camino_b) return null
+  // LA PUERTA (etapa 5): la memoria que piden las mesas desplegadas de todos los moldes del pedido
+  {
+    let mb = 0
+    for (const md of plan.moldes) {
+      const m = await motorDe(md.pid, rutaApi)
+      if (m) for (const x of m.info.mesas) mb += (x.bytes || 0) / 1048576
+    }
+    const puerta = puedeHacer({ tipo: 'tizada', mb, hojas: Math.max(1, plan.grupos.length) })
+    if (!puerta.puede) { const e = new Error(puerta.motivo); e.capacidad = true; throw e }
+  }
   // el perfil de salida (OutputIntent), una vez
   let perfil = null
   if (plan.perfil) {
