@@ -3540,7 +3540,12 @@ def navegador_config():
     return jsonify({"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0",
                     # `vista`: las mesas y la ficha las dibuja la computadora de quien mira
                     # (etapa 2). Con esto prendido el servidor tampoco las pre-dibuja.
-                    "vista": _navegador_dibuja_vista()})
+                    "vista": _navegador_dibuja_vista(),
+                    # `tizada`: el pedido entero (piezas, acomodo, hoja, aplanado, ficha) lo genera
+                    # el navegador y manda el paquete (etapa 4). `TIZADA_NAVEGADOR_TIZADA=0` lo apaga.
+                    "tizada": str(os.environ.get("TIZADA_NAVEGADOR_TIZADA") or "1") != "0",
+                    # `arte`: las previas por pieza del paso Arte (etapa 3, camino B).
+                    "arte": str(os.environ.get("TIZADA_NAVEGADOR_ARTE") or "1") != "0"})
 
 
 def _navegador_dibuja_vista():

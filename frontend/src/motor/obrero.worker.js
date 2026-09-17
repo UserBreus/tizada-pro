@@ -136,6 +136,52 @@ const TAREAS = {
     }
     return r
   },
+  /**
+   * UNA HOJA DE TIZADA (etapa 4): acomoda las piezas de una tela (`nesting/contorno.js`), compone
+   * la hoja con el sello (`hoja/componer.js`), la aplana para el RIP (`rip/aplanar.js`) y le
+   * incrusta el perfil de salida. Es `_nestear_y_componer` + el final de `generar_multi`, para una
+   * tela. `piezas` = las entradas del motor (`{w, h, base, estampado, pieza, talle, variante,
+   * etiqueta, rotacion, borde_cm}`) con `base.fuentesXo` apuntando a las mesas ya abiertas acá.
+   */
+  /** La FICHA TÉCNICA (etapa 4): `ficha/ficha.js` sobre mupdf, acá para no cargar mupdf en la pantalla. */
+  async ficha({ titulo, subtitulo, planilla, moldesGuia }) {
+    await cargar()
+    const F = await import('./ficha/ficha.js')
+    const pdf = F.generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
+    return { valor: pdf, transfer: [pdf.buffer] }
+  },
+  async hoja({ piezas, cfg, perfil, avisar }) {
+    await cargar()
+    const N = await import('./nesting/contorno.js')
+    const H = await import('./hoja/componer.js')
+    let R = null
+    try { R = await import('./rip/aplanar.js') } catch { R = null }
+    const { colocaciones, area } = N.anidarContorno(piezas, cfg)
+    const origenes = {}
+    for (const [clave, d] of mesas) origenes[String(clave)] = d
+    const hoja = H.componerHoja(mupdf, { hojas: colocaciones, cfg, origenes })
+    let pdf = hoja.pdf
+    if (R && R.aplanarParaRip) pdf = R.aplanarParaRip(mupdf, pdf)
+    if (perfil && perfil.icc) {
+      const out = mupdf.Document.openDocument(pdf, 'application/pdf')
+      H.embeberPerfil(out, perfil)
+      pdf = out.saveToBuffer('compress').asUint8Array().slice()
+      out.destroy()
+    }
+    // `validar_salida`: la hoja final no puede tener recursos de fuente (todo el texto va en curvas)
+    let tieneFuente = false
+    {
+      const d = mupdf.Document.openDocument(pdf, 'application/pdf')
+      for (let i = 0; i < d.countPages(); i++) {
+        const res = d.findPage(i).get('Resources')
+        if (res && res.get && res.get('Font') && !res.get('Font').isNull()) { tieneFuente = true; break }
+      }
+      d.destroy()
+    }
+    const r = { pdf, consumoCm: hoja.consumoCm, alturasCm: hoja.alturasCm, area, tieneFuente,
+                piezas: colocaciones.reduce((n, h) => n + h.length, 0) }
+    return { valor: r, transfer: [pdf.buffer] }
+  },
 }
 
 escuchar(async (msg) => {
