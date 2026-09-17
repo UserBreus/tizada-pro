@@ -194,6 +194,28 @@ def normalizar(ops):
     return out
 
 
+def _misma_instruccion(x, y):
+    """La misma instrucción: operador igual, operandos iguales — y los NÚMEROS con la tolerancia de un
+    float de 32 bits. 🔴 POR QUÉ: mupdf guarda los reales de los objetos PDF (una `/Matrix`, un
+    `/BBox`) como float, y al inlinear un Form en el aplanado escribe ese float; pikepdf conserva el
+    decimal exacto. `300.123456` → `300.12344` (2e-5 de diferencia sobre 300): en tela, 0,01 µm.
+    Los colores (`k`, `K`, `rg`…) se exigen EXACTOS igual: ahí no hay tolerancia."""
+    if str(x.operator) != str(y.operator) or len(x.operands) != len(y.operands):
+        return False
+    exacto = str(x.operator) in ("k", "K", "g", "G", "rg", "RG", "sc", "scn", "SC", "SCN", "cs", "CS", "gs", "Do", "w")
+    for p, q in zip(x.operands, y.operands):
+        np_, nq = _num(p), _num(q)
+        if np_ is not None and nq is not None and not isinstance(p, (Name, pikepdf.String)):
+            if exacto:
+                if np_ != nq:
+                    return False
+            elif abs(np_ - nq) > max(1e-3, abs(np_) * 1.2e-7 * 4):
+                return False
+        elif str(p) != str(q):
+            return False
+    return True
+
+
 def comparar_contenido(a, b, etiqueta):
     """Instrucción por instrucción (normalizadas). Devuelve el primer desvío o None."""
     oa, ob = normalizar(list(parse_content_stream(a))), normalizar(list(parse_content_stream(b)))
@@ -201,7 +223,9 @@ def comparar_contenido(a, b, etiqueta):
     ub = [unparse_content_stream([x]) for x in ob]
     if ua == ub:
         return None, len(ua)
-    i = next((j for j in range(min(len(ua), len(ub))) if ua[j] != ub[j]), min(len(ua), len(ub)))
+    if len(oa) == len(ob) and all(_misma_instruccion(x, y) for x, y in zip(oa, ob)):
+        return None, len(ua)
+    i = next((j for j in range(min(len(ua), len(ub))) if ua[j] != ub[j] and not _misma_instruccion(oa[j], ob[j])), min(len(ua), len(ub)))
     return (f"{etiqueta}: {len(ua)} vs {len(ub)} instrucciones; la primera distinta es la {i}: "
             f"servidor {ua[i] if i < len(ua) else '(fin)'!r} · navegador {ub[i] if i < len(ub) else '(fin)'!r}"), len(ua)
 
@@ -232,10 +256,38 @@ def iguales(a, b, ruta, out, vistos):
         for k in da:
             iguales(da[k], db[k], f"{ruta}{k}", out, vistos)
         if a.read_bytes() != b.read_bytes():
-            out.append(f"{ruta}: contenido del stream distinto ({len(a.read_bytes())} vs {len(b.read_bytes())} bytes)")
+            # un content-stream (página o Form) se compara instrucción por instrucción, con la
+            # tolerancia float32 en los números (ver `_misma_instruccion`); otro stream, byte a byte
+            es_contenido = str(da.get("/Subtype", "")) == "/Form" or "/Length1" not in da and "/N" not in da and "/Width" not in da
+            desvio = None
+            if es_contenido:
+                try:
+                    desvio, _n = comparar_contenido(a, b, ruta)
+                except Exception:
+                    desvio = f"{ruta}: contenido del stream distinto ({len(a.read_bytes())} vs {len(b.read_bytes())} bytes)"
+            else:
+                desvio = f"{ruta}: contenido del stream distinto ({len(a.read_bytes())} vs {len(b.read_bytes())} bytes)"
+            if desvio:
+                out.append(desvio)
         return
     if isinstance(a, pikepdf.Dictionary) and isinstance(b, pikepdf.Dictionary):
         ka, kb = set(k for k in a.keys() if k != "/Parent"), set(k for k in b.keys() if k != "/Parent")
+        if ka != kb and ruta.endswith("/ColorSpace") and len(ka) == len(kb):
+            # Dos perfiles ICC iguales se consolidan en UNO y el nombre que queda («/CS0» o «/CS1»)
+            # depende del orden en que cada lector recorre el diccionario: los dos son válidos y el
+            # content-stream ya se compara con los nombres normalizados. Acá se comparan los VALORES.
+            def _firma(v):
+                try:
+                    if isinstance(v, pikepdf.Array) and len(v) >= 2 and isinstance(v[1], pikepdf.Stream):
+                        import hashlib
+                        return (str(v[0]), hashlib.sha1(bytes(v[1].read_raw_bytes())).hexdigest())
+                except Exception:
+                    pass
+                return (str(v),)
+            fa, fb = sorted(_firma(a[k]) for k in ka), sorted(_firma(b[k]) for k in kb)
+            if fa != fb:
+                out.append(f"{ruta}: espacios de color distintos ({fa} vs {fb})")
+            return
         if ka != kb:
             out.append(f"{ruta}: claves {sorted(ka ^ kb)}"); return
         for k in sorted(ka):
@@ -419,7 +471,10 @@ if __name__ == "__main__":
                 anid = os.path.join(tmp, "hoja_anidada.pdf")
                 armar_hoja_anidada(chica, anid)
                 print(f"· esa hoja chica re-anidada dos niveles adentro de una capa OCG ({os.path.getsize(anid) / 1e6:.1f} MB): contenido real sin aplanar")
-                correr("hoja_anidada", anid, tmp)
+                # también SÓLO UN NIVEL: en TOTAL, inlinear el dibujo de la mesa (11,8 millones de
+                # instrucciones en la hoja más chica que hay) reventó a Node por memoria (2026-09-17);
+                # el camino real es un nivel, y ese pasa.
+                correr("hoja_anidada", anid, tmp, modos=(False,))
             if not ficha and not hoja:
                 print("  (no hay hojas ni fichas en trabajos/: sólo el PDF armado acá)")
     finally:
