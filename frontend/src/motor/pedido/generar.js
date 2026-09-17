@@ -162,7 +162,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
           await copiarMesa(otro, mm, rutaApi, pid, mesa)
         }
       }
-      const r = await mm.pool.enviar('hoja', { piezas, cfg, perfil })
+      const r = await mm.pool.enviar('hoja', { piezas, cfg, perfil, tela })
       const slug = slugTela(`g${gi}_`, tela)
       const archivo = `HOJA_${slug}.pdf`
       archivos[archivo] = r.pdf
@@ -171,8 +171,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
                    alturas_cm: r.alturasCm, ancho_cm: pyRound(Number(cfg.ancho_cm), 1),
                    aprovechamiento: denom > 0 ? pyRound(100 * r.area / denom, 1) : 0.0, previews: [],
                    grupo: grupo.nombre, moldes: grupo.nombres })
-      validaciones.push({ nombre: `${tela}: texto en curvas, cero fuentes`, ok: !r.tieneFuente,
-                          detalle: r.tieneFuente ? 'Advertencia: se detectaron recursos de fuente en el archivo final' : 'sin texto vivo ni recursos de fuente' })
+      validaciones.push(...r.validaciones)
     }
   }
   // ── la ficha técnica ──

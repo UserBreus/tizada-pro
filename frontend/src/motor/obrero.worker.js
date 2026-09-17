@@ -150,7 +150,7 @@ const TAREAS = {
     const pdf = F.generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
     return { valor: pdf, transfer: [pdf.buffer] }
   },
-  async hoja({ piezas, cfg, perfil, avisar }) {
+  async hoja({ piezas, cfg, perfil, tela }) {
     await cargar()
     const N = await import('./nesting/contorno.js')
     const H = await import('./hoja/componer.js')
@@ -168,17 +168,10 @@ const TAREAS = {
       pdf = out.saveToBuffer('compress').asUint8Array().slice()
       out.destroy()
     }
-    // `validar_salida`: la hoja final no puede tener recursos de fuente (todo el texto va en curvas)
-    let tieneFuente = false
-    {
-      const d = mupdf.Document.openDocument(pdf, 'application/pdf')
-      for (let i = 0; i < d.countPages(); i++) {
-        const res = d.findPage(i).get('Resources')
-        if (res && res.get && res.get('Font') && !res.get('Font').isNull()) { tieneFuente = true; break }
-      }
-      d.destroy()
-    }
-    const r = { pdf, consumoCm: hoja.consumoCm, alturasCm: hoja.alturasCm, area, tieneFuente,
+    // `validar_salida`: las cuatro validaciones de la hoja, con los mismos textos que el servidor
+    const V = await import('./hoja/validar.js')
+    const validaciones = V.validarHoja(mupdf, pdf, tela, Number(cfg.espaciado_cm ?? 0.5) * 10.0)
+    const r = { pdf, consumoCm: hoja.consumoCm, alturasCm: hoja.alturasCm, area, validaciones,
                 piezas: colocaciones.reduce((n, h) => n + h.length, 0) }
     return { valor: r, transfer: [pdf.buffer] }
   },
