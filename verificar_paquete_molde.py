@@ -203,6 +203,63 @@ ok(not _LLAMADAS, f"y ninguno terminó calculando en el servidor ({_LLAMADAS or 
 ok(not os.path.exists(os.path.join(_TMP, "pisar.txt")) and not os.path.exists(os.path.join(_TMP, "entrada", "pisar.txt")),
    "el archivo con ruta «../» no se escribió en ningún lado")
 
+print("\n4 · LOS DOS TIEMPOS: PRIMERO LO NECESARIO PARA SEGUIR, LAS PÁGINAS DESPUÉS")
+_ZA, _ZB = os.path.join(_TMP, "faseA.zip"), os.path.join(_TMP, "faseB.zip")
+_t = time.time()
+_r = subprocess.run(["node", "--max-old-space-size=4096", NODE, _COPIA, _ZA, _ZB], capture_output=True, text=True, timeout=3600)
+ok(_r.returncode == 0, f"el motor del navegador armó los dos paquetes ({time.time() - _t:.1f} s)")
+if _r.returncode != 0:
+    print(_r.stderr[-800:])
+else:
+    _info = json.loads(_r.stdout.strip().splitlines()[-1])
+    print(f"    fase A lista a los {_info['faseA_s']:.1f} s ({_info['bytesA'] / 1024:.0f} KB) · "
+          f"fase B a los {_info['total_s']:.1f} s ({_info['bytesB'] / 1048576:.1f} MB) · {_info['hilos']} hilos")
+    _st, _fin = subir(_COPIA, open(_ZA, "rb").read())
+    ok(_fin.get("estado") == "listo", f"la fase A se guarda ({_fin.get('estado')} {str(_fin.get('error') or '')[:120]})")
+    _res = _fin.get("resultado") or {}
+    ok(_res.get("paginas_pendientes") is True, "y el resumen dice que las páginas están pendientes")
+    ok(PD.paginas_pendientes_navegador(_DESTINO), "queda la marca de páginas pendientes")
+    ok(not PD.desplegado_listo(_DESTINO), "el desplegado NO figura listo todavía")
+    ok(bool((next(p for p in _DOCS["catalogo"]["productos"] if p["id"] == "pX")).get("paginas_navegador")),
+       "el molde queda marcado en el catálogo (para que la pantalla lo retome si se cerró)")
+    time.sleep(2)
+    ok(not _LLAMADAS, f"y el servidor no se puso a armar las páginas ({_LLAMADAS or 'nada'})")
+    try:
+        PD.desplegar_molde.__wrapped__ if hasattr(PD.desplegar_molde, "__wrapped__") else None
+        import pymupdf as _fz
+        _d = _fz.open(_DESTINO)
+        _tl = PD.talles_del_molde(_d)
+        _d.close()
+        PD.desplegar_molde(_DESTINO, _tl, contornos=False, paginas=True)
+        ok(False, "pedir las páginas mientras están pendientes tendría que dar un aviso claro")
+    except PD.PaginasPendientes as e:
+        ok("terminando de preparar" in str(e), f"pedir las páginas mientras están pendientes da un aviso claro ({str(e)[:70]}…)")
+    # fase B de OTRO archivo: se rechaza
+    with open(_ZB, "rb") as fh:
+        _paqB = fh.read()
+    _otroB = _rearmar.__globals__["zipfile"]
+    _falso = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(_paqB)) as _zs, zipfile.ZipFile(_falso, "w") as _zd:
+        for _i in _zs.infolist():
+            _dat = _zs.read(_i.filename)
+            if _i.filename == "manifest.json":
+                _dat = json.dumps({**json.loads(_dat), "sha1": "0" * 40}).encode()
+            _zd.writestr(_i.filename, _dat)
+    _r2 = CLI.post("/api/plantilla/paginas", data={"pid": "pX", "paquete": (io.BytesIO(_falso.getvalue()), "p.zip")},
+                   content_type="multipart/form-data")
+    ok(_r2.status_code == 422 and PD.paginas_pendientes_navegador(_DESTINO),
+       f"una fase B de otro archivo se rechaza y el molde sigue pendiente (HTTP {_r2.status_code})")
+    _t = time.time()
+    _r3 = CLI.post("/api/plantilla/paginas", data={"pid": "pX", "paquete": (io.BytesIO(_paqB), "p.zip")},
+                   content_type="multipart/form-data")
+    ok(_r3.status_code == 200, f"la fase B se guarda (HTTP {_r3.status_code} {(_r3.get_json() or {}).get('error', '')[:120]}) en {time.time() - _t:.1f} s")
+    ok(not PD.paginas_pendientes_navegador(_DESTINO), "se saca la marca de pendientes")
+    ok(PD.desplegado_listo(_DESTINO) and PD.paginas_vigentes(_DESTINO), "y el desplegado queda listo y vigente")
+    ok(not (next(p for p in _DOCS["catalogo"]["productos"] if p["id"] == "pX")).get("paginas_navegador"),
+       "y el molde deja de estar marcado en el catálogo")
+    time.sleep(2)
+    ok(not _LLAMADAS, f"sin que el servidor calcule nada en ningún momento ({_LLAMADAS or 'nada'})")
+
 print()
 shutil.rmtree(_TMP, ignore_errors=True)
 if FALLOS:

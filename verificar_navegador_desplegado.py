@@ -31,7 +31,9 @@ import pikepdf
 sys.stdout.reconfigure(encoding="utf-8")
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, AQUI)
-NODE = os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "desplegar.mjs")
+# `VERIF_NAV_PARALELO=1`: el desplegado con VARIOS HILOS (`desplegar_paralelo.mjs`, el que usa el navegador)
+NODE = os.path.join(AQUI, "frontend", "src", "motor", "pruebas",
+                    "desplegar_paralelo.mjs" if os.environ.get("VERIF_NAV_PARALELO") == "1" else "desplegar.mjs")
 from verificar_navegador_molde import _normal, diferencias  # noqa: E402
 
 

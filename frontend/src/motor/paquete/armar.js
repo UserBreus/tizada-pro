@@ -26,20 +26,22 @@ const texto = (o) => new TextEncoder().encode(JSON.stringify(o))
 
 /**
  * `archivo` = los bytes del .ai tal cual los eligió la persona; `desplegado` = lo que devolvió
- * `desplegarMolde`. Devuelve `{zip: Uint8Array, sha1}`.
+ * `desplegarMolde` (o `faseA`/`faseB` de `desplegar_paralelo.js`). Devuelve `{zip: Uint8Array, sha1}`.
+ * `fase`: 'completo' (todo), 'contornos' (fase A: alta + contornos, sin páginas) o 'paginas'
+ * (fase B: páginas, decisión de la etiqueta y JSON completos). `sha1` se puede pasar ya calculado.
  */
-export function armarPaqueteMolde(archivo, desplegado, { motor = 'mupdf.js' } = {}) {
-  const sha1 = sha1HexBytes(archivo)
+export function armarPaqueteMolde(archivo, desplegado, { motor = 'mupdf.js', fase = 'completo', sha1 = null } = {}) {
+  sha1 = sha1 || sha1HexBytes(archivo)
   const entradas = {
-    'manifest.json': [texto({ formato: FORMATO, version: VERSION_PAQUETE, sha1, bytes: archivo.length,
+    'manifest.json': [texto({ formato: FORMATO, version: VERSION_PAQUETE, fase, sha1, bytes: archivo ? archivo.length : null,
       v_contornos: V_CONTORNOS, v_paginas: V_PAGINAS, v_etq: V_ETQ, mesas: desplegado.mesas.size,
       talles: desplegado.talles, motor, armado: new Date().toISOString() }), { level: 6 }],
     'alta.json': [texto(aJSON(desplegado.alta)), { level: 6 }],
   }
   for (const [m, { json, pdf }] of desplegado.mesas) {
     entradas[`desplegado/m${m}.json`] = [texto(aJSON(json)), { level: 6 }]
-    if (pdf) entradas[`desplegado/m${m}.pdf`] = [pdf, { level: 0 }]   // ya viene comprimido
+    if (pdf && fase !== 'contornos') entradas[`desplegado/m${m}.pdf`] = [pdf, { level: 0 }]   // ya viene comprimido
   }
-  if (desplegado.etiqueta) entradas['desplegado/etiqueta_archivo.json'] = [texto(aJSON(desplegado.etiqueta)), { level: 6 }]
+  if (desplegado.etiqueta && fase !== 'contornos') entradas['desplegado/etiqueta_archivo.json'] = [texto(aJSON(desplegado.etiqueta)), { level: 6 }]
   return { zip: zipSync(entradas), sha1 }
 }

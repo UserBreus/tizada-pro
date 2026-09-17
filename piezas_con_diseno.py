@@ -2396,6 +2396,26 @@ def _candado(path_molde):
         return c
 
 
+PENDIENTE_NAVEGADOR = "pendiente_navegador.json"
+
+
+class PaginasPendientes(RuntimeError):
+    """Las páginas por talle de este molde las está terminando el navegador de quien lo cargó."""
+
+
+def paginas_pendientes_navegador(path_molde):
+    """¿Las páginas por talle de este molde las está terminando de preparar un NAVEGADOR?
+
+    🔴 (PLAN_NAVEGADOR.md, etapa 1, «dos tiempos»). El navegador guarda primero lo que hace falta
+    para seguir (piezas, registro, visor) y manda las páginas por talle después, en segundo plano.
+    Mientras tanto el SERVIDOR NO LAS ARMA: si lo hiciera, el trabajo pesado volvería al servidor
+    —justo lo que el plan saca de acá— y encima dos veces (él y el navegador)."""
+    try:
+        return os.path.exists(os.path.join(_carpeta_desplegado(path_molde), PENDIENTE_NAVEGADOR))
+    except Exception:
+        return False
+
+
 def paginas_vigentes(path_molde, talles=None):
     """¿Todas las mesas tienen sus páginas por talle de ESTE archivo, con la regla actual y la
     decisión de la etiqueta vigente? Es sólo leer JSON: no abre el dibujo.
@@ -2444,6 +2464,10 @@ def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=Tr
     # páginas por proceso mientras un request, al ver que faltaban, las armaba de nuevo en su
     # hilo — el doble de trabajo y el servidor congelado. El segundo ahora ESPERA al primero
     # (el candado se suelta al terminar) y, al re-mirar, encuentra todo hecho.
+    if paginas and paginas_pendientes_navegador(path_molde):
+        raise PaginasPendientes(
+            "El molde todavía se está terminando de preparar en la computadora de quien lo cargó. "
+            "Esperá a que termine (lo dice abajo en la pantalla) y volvé a intentarlo.")
     _cand = _candado(path_molde)
     _cand.acquire()
     try:

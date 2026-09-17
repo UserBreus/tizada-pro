@@ -2935,16 +2935,24 @@ _PAQUETE_VERSION = 1
 _PAQUETE_TOPE_BYTES = 4 * 1024 ** 3
 
 
-def _paquete_molde_aplicar(tmp, ruta_zip):
-    """Valida el paquete y deja su desplegado al lado de `tmp`. Devuelve el `alta`. Levanta
-    `ValueError` con un mensaje para la pantalla si el paquete no sirve."""
+def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
+    """Valida el paquete y deja su desplegado al lado de `archivo`. Devuelve `(fase, alta)`.
+    Levanta `ValueError` con un mensaje para la pantalla si el paquete no sirve.
+
+    Tres FASES (el manifiesto la dice; PLAN_NAVEGADOR.md, etapa 1, «dos tiempos»):
+      · `completo`  — todo junto (el desplegado entero reemplaza al que hubiera);
+      · `contornos` — FASE A: el alta y los contornos de cada mesa, sin páginas. Se deja la marca
+        `pendiente_navegador.json` (con el alta, para la caché) y el servidor NO arma las páginas;
+      · `paginas`   — FASE B: sobre el molde YA guardado (mismo archivo: SHA-1), las páginas por
+        talle, la decisión de la etiqueta y los JSON completos. Al terminar se saca la marca.
+    `fases` = las que acepta quien llama (la subida acepta A o completo; `/api/plantilla/paginas`, B)."""
     import re as _re
     import shutil
     import zipfile
     import pymupdf as fitz
     import piezas_con_diseno as PD
     permitido = _re.compile(r"^(manifest\.json|alta\.json|desplegado/(m[1-9][0-9]{0,3}\.(json|pdf)|etiqueta_archivo\.json))$")
-    destino = PD._carpeta_desplegado(tmp)
+    destino = PD._carpeta_desplegado(archivo)
     armado = destino + ".paquete-" + uuid.uuid4().hex[:8]
     try:
         with zipfile.ZipFile(ruta_zip) as z:
@@ -2964,24 +2972,47 @@ def _paquete_molde_aplicar(tmp, ruta_zip):
             man = _json("manifest.json")
             if man.get("formato") != _PAQUETE_FORMATO or man.get("version") != _PAQUETE_VERSION:
                 raise ValueError("el paquete es de un formato que este servidor no conoce: actualizá la página")
+            fase = man.get("fase") or "completo"
+            if fase not in fases:
+                raise ValueError(f"el paquete es de la fase «{fase}», que no va acá")
             if (man.get("v_contornos") != PD._V_CONTORNOS or man.get("v_paginas") != PD._V_PAGINAS
                     or man.get("v_etq") != PD._V_ETQ):
                 raise ValueError("el molde se preparó con otra versión del sistema: recargá la página y volvé a cargarlo")
-            if str(man.get("sha1") or "") != _sha1_archivo(tmp):
+            if str(man.get("sha1") or "") != _sha1_archivo(archivo):
                 raise ValueError("el paquete no corresponde a este archivo")
-            doc = fitz.open(tmp)
+            doc = fitz.open(archivo)
             try:
                 n = doc.page_count
                 talles = PD.talles_del_molde(doc)
             finally:
                 doc.close()
-            alta = _json("alta.json")
-            if alta.get("mesas") != n or list(alta.get("talles") or []) != list(talles):
-                raise ValueError("el paquete no coincide con las mesas o los talles del archivo")
-            if not isinstance(alta.get("registro"), dict) or not isinstance(alta.get("visor"), dict):
-                raise ValueError("el paquete no trae el registro de las piezas")
+            alta = None
+            if fase in ("completo", "contornos") or "alta.json" in nombres:
+                alta = _json("alta.json")
+                if alta.get("mesas") != n or list(alta.get("talles") or []) != list(talles):
+                    raise ValueError("el paquete no coincide con las mesas o los talles del archivo")
+                if not isinstance(alta.get("registro"), dict) or not isinstance(alta.get("visor"), dict):
+                    raise ValueError("el paquete no trae el registro de las piezas")
             os.makedirs(armado)
-            sello = PD._sello(tmp)
+            sello = PD._sello(archivo)
+
+            if fase == "contornos":
+                if any(x.endswith(".pdf") for x in nombres) or "desplegado/etiqueta_archivo.json" in nombres:
+                    raise ValueError("el paquete de la primera parte no puede traer páginas")
+                for mesa in range(1, n + 1):
+                    j = _json(f"desplegado/m{mesa}.json")
+                    if list(j.get("orden") or []) != list(talles) or j.get("v") != PD._V_CONTORNOS or j.get("paginas"):
+                        raise ValueError(f"la mesa {mesa} del paquete no corresponde o es de otra versión")
+                    j["sello"] = sello
+                    with open(os.path.join(armado, f"m{mesa}.json"), "w", encoding="utf-8") as fh:
+                        json.dump(j, fh)
+                with open(os.path.join(armado, PD.PENDIENTE_NAVEGADOR), "w", encoding="utf-8") as fh:
+                    json.dump({"sha1": man.get("sha1"), "desde": time.time(), "alta": alta}, fh)
+                shutil.rmtree(destino, ignore_errors=True)
+                os.replace(armado, destino)
+                armado = None
+                return fase, alta
+
             etq = _json("desplegado/etiqueta_archivo.json")
             if etq.get("v") != PD._V_ETQ:
                 raise ValueError("la decisión de la etiqueta es de otra versión")
@@ -2994,6 +3025,15 @@ def _paquete_molde_aplicar(tmp, ruta_zip):
                 if (list(j.get("orden") or []) != list(talles) or j.get("v") != PD._V_CONTORNOS
                         or j.get("vp") != PD._V_PAGINAS or not j.get("paginas") or j.get("etq") != h):
                     raise ValueError(f"la mesa {mesa} del paquete no está completa o es de otra versión")
+                if fase == "paginas":
+                    # las piezas tienen que ser las MISMAS que las que se guardaron en la primera parte
+                    try:
+                        with open(os.path.join(destino, f"m{mesa}.json"), encoding="utf-8") as fh:
+                            actual = json.load(fh)
+                    except Exception:
+                        actual = None
+                    if actual is not None and actual.get("talles") != j.get("talles"):
+                        raise ValueError(f"las piezas de la mesa {mesa} no coinciden con las del molde guardado")
                 j["sello"] = sello
                 with open(os.path.join(armado, f"m{mesa}.json"), "w", encoding="utf-8") as fh:
                     json.dump(j, fh)
@@ -3009,10 +3049,31 @@ def _paquete_molde_aplicar(tmp, ruta_zip):
                         raise ValueError(f"la mesa {mesa} del paquete no trae una página por talle")
                 finally:
                     d.close()
-        shutil.rmtree(destino, ignore_errors=True)
-        os.replace(armado, destino)
-        armado = None
-        return alta
+        if fase == "completo":
+            shutil.rmtree(destino, ignore_errors=True)
+            os.replace(armado, destino)
+            armado = None
+            return fase, alta
+        # FASE B: se suman al desplegado que ya está. Primero los PDF, después los JSON (que dicen
+        # «páginas: sí») y la decisión; la marca se saca AL FINAL: si algo se corta en el medio, el
+        # molde sigue pendiente y el navegador puede volver a mandarlo.
+        import piezas_con_diseno as PD
+        marca = os.path.join(destino, PD.PENDIENTE_NAVEGADOR)
+        try:
+            with open(marca, encoding="utf-8") as fh:
+                pendiente = json.load(fh)
+        except Exception:
+            pendiente = {}
+        os.makedirs(destino, exist_ok=True)
+        orden = sorted(os.listdir(armado), key=lambda x: (not x.endswith(".pdf"), x == "etiqueta_archivo.json", x))
+        for nombre in orden:
+            PD._reemplazar(os.path.join(armado, nombre), os.path.join(destino, nombre))
+            PD._CONT_CACHE.pop((destino, int(nombre[1:-5])), None) if nombre.startswith("m") and nombre.endswith(".json") else None
+        try:
+            os.remove(marca)
+        except OSError:
+            pass
+        return fase, (alta or pendiente.get("alta"))
     except zipfile.BadZipFile:
         raise ValueError("el paquete llegó dañado: volvé a intentarlo")
     finally:
@@ -3036,7 +3097,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     if paquete:
         # El navegador ya lo preparó entero: acá sólo se valida y se guarda (ver arriba).
         try:
-            alta = _paquete_molde_aplicar(tmp, paquete)
+            _fase_paq, alta = _paquete_molde_aplicar(tmp, paquete)
         except Exception as e:
             _descartar_tmp(tmp)
             return None, (f"no se pudo guardar el molde: {e}", 422)
@@ -3046,6 +3107,8 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
             except OSError:
                 pass
         _con_diseno, _motivo_b = True, "lo preparó el navegador"
+        if _fase_paq == "contornos":
+            _motivo_b += " (las páginas por talle llegan en segundo plano)"
     elif dxf_resumen:
         # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
         # pone → solo genera ruido y tarda). Los talles ya vienen del DXF; las piezas se
@@ -3190,6 +3253,13 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
             # De qué camino es este molde, en el catálogo: es lo que mira la UI para saber que NO
             # hay que pedirle un arte ni un mapeo. La marca de disco manda para el motor; ésta es
             # para las pantallas.
+            # las páginas por talle las está terminando el navegador (fase A): la pantalla lo muestra
+            # y sabe que tiene que mandarlas (o retomarlas si se cerró la página)
+            import piezas_con_diseno as _PDc
+            if _con_diseno and _PDc.paginas_pendientes_navegador(tmp):
+                prod_r["paginas_navegador"] = True
+            else:
+                prod_r.pop("paginas_navegador", None)
             if _con_diseno:
                 prod_r["origen"] = "con_diseno"
                 # LA PLANILLA LA DEJA EL TALLER, no el cliente: todo molde con diseño arranca con
@@ -3249,7 +3319,16 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     # abiertos y trababan el molde recién subido (en Windows no se puede reemplazar ni borrar un
     # archivo abierto) — y es justo el momento en que el usuario puede volver a subirlo.
     _en_hilo(lambda: _prewarm_deteccion_todas(_pid_reset))
-    if _con_diseno:
+    import piezas_con_diseno as _PDp
+    if _con_diseno and _PDp.paginas_pendientes_navegador(destino):
+        # FASE A del navegador: las páginas las está terminando SU computadora y llegan por
+        # `/api/plantilla/paginas`. El servidor no las arma (ver `paginas_pendientes_navegador`).
+        resumen["paginas_pendientes"] = True
+        try:
+            json.dump(resumen, open(_ruta_datos("resumen_plantilla.json", _PID), "w", encoding="utf-8"), ensure_ascii=False)
+        except Exception:
+            pass
+    elif _con_diseno:
         # CAMINO B: las páginas por talle del molde desplegado, ahora que el archivo ya está en
         # su lugar (el sello es el mismo: `os.replace` conserva la fecha). El usuario mientras
         # tanto nombra las piezas; si genera antes de que termine, el motor arma esa mesa solo.
@@ -3261,6 +3340,54 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     return resumen, None
 
 
+
+
+@app.post("/api/plantilla/paginas")
+def subir_paginas_plantilla():
+    """FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta
+    y los JSON completos, sobre el molde que ya se guardó en la fase A (PLAN_NAVEGADOR.md, etapa 1).
+    No calcula nada: valida y guarda (`_paquete_molde_aplicar`)."""
+    pq = request.files.get("paquete")
+    if not pq:
+        return jsonify({"error": "falta el paquete"}), 400
+    pid = _pid_de_request() or _get_active_producto_id()
+    path = _ruta_entrada("plantilla.ai", pid=pid, original=True)
+    if not os.path.exists(path):
+        return jsonify({"error": "el molde ya no está (¿se borró o se volvió a subir?)"}), 409
+    ruta_zip = os.path.join(os.path.dirname(path), "paginas.subiendo." + uuid.uuid4().hex[:8] + ".zip")
+    pq.save(ruta_zip)
+    try:
+        _fase, alta = _paquete_molde_aplicar(path, ruta_zip, fases=("paginas",))
+    except Exception as e:
+        return jsonify({"error": f"no se pudieron guardar las páginas del molde: {e}"}), 422
+    finally:
+        try:
+            os.remove(ruta_zip)
+        except OSError:
+            pass
+    try:
+        _sincronizar_etiqueta_auto(pid, path)
+    except Exception as e:
+        print(f"[camino B] no se pudo sincronizar la etiqueta automática de {pid}: {e}")
+    try:
+        cat_p = _cargar_catalogo_para_editar()
+        prod_p = next((x for x in cat_p["productos"] if x["id"] == pid), None)
+        if prod_p is not None and prod_p.pop("paginas_navegador", None):
+            _guardar_catalogo(cat_p)
+    except Exception as e:
+        print(f"[camino B] no se pudo sacar la marca de páginas pendientes de {pid}: {e}")
+    finally:
+        _soltar_edicion_catalogo()
+    if alta:
+        _en_hilo(lambda: _cache_desplegado_guardar(path, alta))
+    try:
+        _r = _cargar("resumen_plantilla.json", pid) or {}
+        if _r.pop("paginas_pendientes", None):
+            json.dump(_r, open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+    print(f"  [tiempos] páginas por talle de {pid}: guardadas (las preparó el navegador)", flush=True)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/plantilla")
@@ -3668,7 +3795,14 @@ def _sincronizar_etiqueta_auto(pid, path):
 def _prewarm_desplegado(path, talles, alta=None):
     """Segunda etapa del desplegado del camino B (ver `piezas_con_diseno.desplegar_mesa`): las
     páginas por talle, una mesa por proceso, después de responder la subida. Best-effort.
-    Al terminar, el desplegado completo va a la caché por archivo (`_cache_desplegado_guardar`)."""
+    Al terminar, el desplegado completo va a la caché por archivo (`_cache_desplegado_guardar`).
+    Si las está terminando un NAVEGADOR (`paginas_pendientes_navegador`), no hace nada."""
+    try:
+        import piezas_con_diseno as _PDx
+        if _PDx.paginas_pendientes_navegador(path):
+            return
+    except Exception:
+        pass
     # Se anota en `_DESPL_FONDO` para que `_desplegar_en_fondo` (un endpoint que ve el molde
     # «preparando» mientras esto corre) no lance OTRO hilo para el mismo molde.
     _k = os.path.normcase(os.path.abspath(path))
