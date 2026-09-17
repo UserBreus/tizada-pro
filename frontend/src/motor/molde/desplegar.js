@@ -8,25 +8,10 @@
 
 import { dibujosDePagina } from '../pdf/dibujos.js'
 import { tallesDelMolde, geometriaPagina, contornosDeMesa, altaDesdeContornos } from './contornos.js'
-import { buscarCandidatosMesa, decidirFamilias, familiasOcultas, hashOcultas, paginasDeTalles, V_ETQ } from './paginas.js'
+import { buscarCandidatosMesa, decidirFamilias, familiasOcultas, hashOcultas, paginasDeTalles, prepararMesa, V_ETQ } from './paginas.js'
 
 export const V_CONTORNOS = 4
 export const V_PAGINAS = 6
-
-function contenidoDe(page) {
-  const obj = page.getObject()
-  const c = obj.get('Contents')
-  if (!c || c.isNull()) return new Uint8Array(0)
-  if (c.isArray()) {
-    const partes = []
-    for (let i = 0; i < c.length; i++) partes.push(c.get(i).readStream().asUint8Array().slice())
-    const u8 = new Uint8Array(partes.reduce((a, x) => a + x.length, 0) + Math.max(0, partes.length - 1))
-    let p = 0
-    partes.forEach((x, k) => { if (k) u8[p++] = 10; u8.set(x, p); p += x.length })
-    return u8
-  }
-  return c.readStream().asUint8Array().slice()
-}
 
 /**
  * `avisar(etapa, hecho, total, texto)` recibe el avance. `manual` = lo que el usuario fijó a mano
@@ -59,14 +44,14 @@ export function desplegarMolde(mupdf, doc, { avisar = null, manual = {} } = {}) 
     return { talles, mesas, etiqueta: null, alta: altaDesdeContornos(porMesa, geos, talles, n) }
   }
 
-  // 2) la etiqueta que trae el diseño
+  // 2) la etiqueta que trae el diseño. El contenido de cada mesa se lee y se corta por capas UNA
+  //    vez y sirve también para las páginas (antes se leía y descomprimía dos veces)
   const cands = []
   for (let m = 1; m <= n; m++) {
-    const { json } = mesas.get(m)
-    const page = doc.loadPage(m - 1)
-    const recursos = page.getObject().get('Resources')
-    cands.push(...buscarCandidatosMesa(contenidoDe(page), recursos, m, talles, json.talles, json.marco, json.U))
-    page.destroy()
+    const entrada = mesas.get(m)
+    entrada.prep = prepararMesa(doc, m)
+    const j = entrada.json
+    cands.push(...buscarCandidatosMesa(entrada.prep, talles, j.talles, j.marco, j.U))
     if (avisar) avisar('etiquetas', m, n, `etiquetas · mesa ${m}`)
   }
   const total = new Set()
@@ -81,7 +66,8 @@ export function desplegarMolde(mupdf, doc, { avisar = null, manual = {} } = {}) 
   for (let m = 1; m <= n; m++) {
     const entrada = mesas.get(m)
     const j = entrada.json
-    const r = paginasDeTalles(mupdf, doc, m, talles, j.talles, j.marco, j.U, ocultar)
+    const r = paginasDeTalles(mupdf, doc, entrada.prep, talles, j.talles, j.marco, j.U, ocultar)
+    delete entrada.prep                      // el contenido de la mesa ya no hace falta
     entrada.pdf = r.pdf
     entrada.json = { sello: null, orden: j.orden, talles: j.talles, paginas: true, v: V_CONTORNOS, vp: V_PAGINAS,
       marco: j.marco, U: j.U, placeholders: r.placeholders, linea_corte: r.lineas,
