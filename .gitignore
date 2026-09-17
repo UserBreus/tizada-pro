@@ -64,6 +64,6 @@ _papelera/
 _huella_publicada.py
 
 # Moldes de prueba del laboratorio del navegador (archivos del usuario, pesados: no se versionan)
-laboratorio/
+/laboratorio/
 frontend/public/_lab/
 *.referencia.json

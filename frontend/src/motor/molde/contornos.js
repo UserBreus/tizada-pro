@@ -444,7 +444,7 @@ export function altaDesdeContornos(porMesa, geos, talles, nMesas) {
   const antes = new Map(), acum = new Map()
   for (const mesa of mesas) {
     for (const talle of talles) {
-      antes.set(`${talle} ${mesa}`, acum.get(talle) || 0)
+      antes.set(`${talle}\u0000${mesa}`, acum.get(talle) || 0)
       acum.set(talle, (acum.get(talle) || 0) + ((porMesa.get(mesa).get(talle) || []).length))
     }
   }
@@ -460,7 +460,7 @@ export function altaDesdeContornos(porMesa, geos, talles, nMesas) {
         const cont = pzs[i]
         if (!registro.has(nombre)) registro.set(nombre, new Map())
         registro.get(nombre).set(talle, {
-          mesa, pieza_idx: antes.get(`${talle} ${mesa}`) + i, idx_mesa: i,
+          mesa, pieza_idx: antes.get(`${talle}\u0000${mesa}`) + i, idx_mesa: i,
           w_cm: pyRound(cont.w / cont.user_unit / CM, 1), h_cm: pyRound(cont.h / cont.user_unit / CM, 1),
           bbox_mu: cont.bbox_mu.map((v) => pyRound(v, 2)), ancla: anclaPorDefecto(cont),
         })

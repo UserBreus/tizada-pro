@@ -164,14 +164,15 @@ function lector(b) {
   }
 
   function imagenEnLinea() {
-    // después de BI: pares clave/valor hasta ID, un espacio, los datos hasta «EI» entre espacios
-    const d = new Map()
+    // después de BI: pares clave/valor hasta ID, UN espacio, y los datos CRUDOS hasta «EI». Como
+    // QPDF, los datos incluyen el espacio que va antes de «EI» (así se reescriben idénticos).
+    const pares = []
     for (;;) {
       const k = token()
       if (k === null) return null
       if (k.t === 'op' && k.v === 'ID') break
       const v = token()
-      if (k.t === 'valor' && k.v && k.v.n !== undefined) d.set(k.v.n, valorCompuesto(v))
+      if (k.t === 'valor' && k.v && k.v.n !== undefined) pares.push([k.v.n, valorCompuesto(v)])
     }
     if (ESPACIO[b[p]]) p++
     const ini = p
@@ -179,11 +180,9 @@ function lector(b) {
       if (b[p] === 69 && b[p + 1] === 73 && ESPACIO[b[p - 1]] && (p + 2 >= n || ESPACIO[b[p + 2]] || DELIM[b[p + 2]])) break
       p++
     }
-    let fin = p
-    if (fin > ini && ESPACIO[b[fin - 1]]) fin--
-    const datos = b.subarray(ini, fin)
+    const datos = b.subarray(ini, p)
     p += 2
-    return { op: 'INLINE IMAGE', dict: d, datos }
+    return { op: 'INLINE IMAGE', dict: new Map(pares), pares, datos }
   }
 
   return { token, valorCompuesto, imagenEnLinea, pos: () => p }
@@ -220,12 +219,125 @@ export function contenidoCrudo(page) {
   if (!c || c.isNull()) return new Uint8Array(0)
   if (c.isArray()) {
     const partes = []
-    for (let i = 0; i < c.length; i++) partes.push(c.get(i).readStream().asUint8Array())
+    for (let i = 0; i < c.length; i++) partes.push(c.get(i).readStream().asUint8Array().slice())
     const total = partes.reduce((a, x) => a + x.length, 0) + Math.max(0, partes.length - 1)
     const out = new Uint8Array(total)
     let pos = 0
     partes.forEach((x, k) => { if (k) out[pos++] = 10; out.set(x, pos); pos += x.length })
     return out
   }
-  return c.readStream().asUint8Array()
+  return c.readStream().asUint8Array().slice()
+}
+
+// ─── ESCRIBIR: las instrucciones → bytes, IGUAL que `pikepdf.unparse_content_stream` ───────────
+// (QPDF 12: `QPDFObjectHandle::unparse`). Mismos bytes = misma página, y el contrato puede
+// comparar los content-streams del navegador y del servidor byte a byte.
+const ABREV = { Width: 'W', Height: 'H', BitsPerComponent: 'BPC', ImageMask: 'IM', ColorSpace: 'CS',
+  Filter: 'F', DecodeParms: 'DP', DeviceGray: 'G', DeviceRGB: 'RGB', DeviceCMYK: 'CMYK', Indexed: 'I',
+  ASCIIHexDecode: 'AHx', ASCII85Decode: 'A85', LZWDecode: 'LZW', RunLengthDecode: 'RL',
+  CCITTFaxDecode: 'CCF', DCTDecode: 'DCT' }
+
+const hex2 = (c) => (c < 16 ? '0' : '') + c.toString(16)
+
+function nombreTexto(n) {
+  // QPDF_Name::normalizeName: #xx (minúsculas) para #()<>[]{}/% y lo que no es 33..126
+  let s = '/'
+  for (let i = 0; i < n.length; i++) {
+    const c = n.charCodeAt(i) & 255
+    if (c === 0) s += '#'
+    else if ('#()<>[]{}/%'.includes(n[i]) || c < 33 || c > 126) s += '#' + hex2(c)
+    else s += n[i]
+  }
+  return s
+}
+
+function textoTexto(u8) {
+  // QPDF_String: hexadecimal si hay un control «duro» o si más de 1/5 no es ASCII
+  let noAscii = 0, hex = false
+  for (const c of u8) {
+    if (c > 126) noAscii++
+    else if (c >= 32) continue
+    else if (c >= 24) noAscii++
+    else if (!(c === 10 || c === 13 || c === 9 || c === 8 || c === 12)) { hex = true; break }
+  }
+  if (hex || 5 * noAscii > u8.length) {
+    let s = '<'
+    for (const c of u8) s += hex2(c)
+    return s + '>'
+  }
+  let s = '('
+  for (const c of u8) {
+    // (escapes escritos con String.fromCharCode(92): la barra invertida literal)
+    const B = String.fromCharCode(92)
+    if (c === 10) s += B + 'n'
+    else if (c === 13) s += B + 'r'
+    else if (c === 9) s += B + 't'
+    else if (c === 8) s += B + 'b'
+    else if (c === 12) s += B + 'f'
+    else if (c === 40) s += B + '('
+    else if (c === 41) s += B + ')'
+    else if (c === 92) s += B + B
+    else if ((c >= 32 && c <= 126) || c >= 160) s += String.fromCharCode(c)
+    else s += B + c.toString(8).padStart(3, '0')
+  }
+  return s + ')'
+}
+
+/** Un operando → texto (latin-1, un carácter por byte). */
+export function operandoTexto(v) {
+  if (v === null) return 'null'
+  if (v === true) return 'true'
+  if (v === false) return 'false'
+  if (Array.isArray(v)) return v.length ? '[ ' + v.map(operandoTexto).join(' ') + ' ]' : '[ ]'
+  if (v.i !== undefined) return String(Number(v.i)).replace(/^-0$/, '0')
+  if (v.r !== undefined) return v.r
+  if (v.n !== undefined) return nombreTexto(v.n)
+  if (v.s !== undefined) return textoTexto(v.s)
+  if (v.d !== undefined) {
+    const claves = [...v.d.keys()].filter((k) => v.d.get(k) !== null).sort((a, b) => (nombreTexto(a) < nombreTexto(b) ? -1 : nombreTexto(a) > nombreTexto(b) ? 1 : 0))
+    return '<< ' + claves.map((k) => nombreTexto(k) + ' ' + operandoTexto(v.d.get(k)) + ' ').join('') + '>>'
+  }
+  if (v.op_suelto !== undefined) return v.op_suelto
+  return ''
+}
+
+function aBytesLatin1(s) {
+  const u = new Uint8Array(s.length)
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i) & 255
+  return u
+}
+
+/** Las instrucciones → bytes del content-stream (como `pikepdf.unparse_content_stream`). */
+export function escribir(instrucciones) {
+  const partes = []
+  let total = 0
+  let primera = true
+  const empujar = (u8) => { partes.push(u8); total += u8.length }
+  let buf = ''
+  const volcar = () => { if (buf) { empujar(aBytesLatin1(buf)); buf = '' } }
+  for (const ins of instrucciones) {
+    if (!primera) buf += '\n'
+    primera = false
+    if (ins.op === 'INLINE IMAGE') {
+      const meta = []
+      for (const [k, v] of (ins.pares || [...ins.dict])) {
+        const kk = ABREV[k] || k
+        const vv = (v && v.n !== undefined && ABREV[v.n]) ? { n: ABREV[v.n] } : v
+        meta.push(nombreTexto(kk), operandoTexto(vv))
+      }
+      buf += 'BI\n' + meta.join(' ') + '\nID\n'
+      volcar()
+      empujar(ins.datos)
+      buf += 'EI'
+      continue
+    }
+    if (ins.args.length) buf += ins.args.map(operandoTexto).join(' ') + ' '
+    buf += ins.op
+    if (buf.length > 1 << 20) volcar()
+  }
+  volcar()
+  const out = new Uint8Array(total)
+  let pos = 0
+  for (const p of partes) { out.set(p, pos); pos += p.length }
+  return out
 }
