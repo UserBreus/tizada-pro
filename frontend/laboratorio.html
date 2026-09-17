@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TIZADA PRO · laboratorio: el molde en el navegador</title>
+    <style>
+      body { font-family: system-ui, sans-serif; background: #0f1218; color: #e8eaf0; margin: 0; padding: 24px; }
+      h1 { font-size: 18px; margin: 0 0 6px; }
+      p.nota { color: #9aa3b5; font-size: 13px; margin: 0 0 18px; max-width: 900px; }
+      .fila { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+      label { font-size: 13px; color: #c9cfdb; }
+      button { background: #00f3ff; color: #06202a; border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 800; cursor: pointer; }
+      button:disabled { opacity: .4; cursor: default; }
+      pre { background: #161b24; border: 1px solid #262d3a; border-radius: 10px; padding: 14px; font-size: 12.5px; white-space: pre-wrap; max-width: 1100px; }
+      .ok { color: #4ade80; } .mal { color: #f87171; } .gris { color: #9aa3b5; }
+    </style>
+  </head>
+  <body>
+    <h1>Laboratorio: ¿el navegador ve el molde igual que el servidor?</h1>
+    <p class="nota">Elegí un molde (.ai). Se abre acá, en tu computadora, con el mismo motor de PDF que usa el
+      servidor (compilado para el navegador), y se mide cuánto tarda y cuánta memoria usa. Si además elegís la
+      referencia del servidor (<code>*.referencia.json</code>, la escribe <code>py laboratorio_navegador.py
+      &lt;molde.ai&gt;</code>), se compara mesa por mesa. Nada viaja al servidor.</p>
+    <div class="fila">
+      <label>Molde <input id="molde" type="file" accept=".ai,.pdf" /></label>
+      <label>Referencia (opcional) <input id="ref" type="file" accept=".json" /></label>
+      <button id="ir" disabled>Abrir y medir</button>
+    </div>
+    <pre id="salida" class="gris">Esperando los archivos…</pre>
+    <script type="module" src="/src/laboratorio/main.js"></script>
+  </body>
+</html>

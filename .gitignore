@@ -62,3 +62,8 @@ _papelera/
 
 # huella del código: la escribe empaquetar.py DENTRO del paquete (nunca en el taller)
 _huella_publicada.py
+
+# Moldes de prueba del laboratorio del navegador (archivos del usuario, pesados: no se versionan)
+laboratorio/
+frontend/public/_lab/
+*.referencia.json

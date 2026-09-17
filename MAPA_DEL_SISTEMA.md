@@ -1495,6 +1495,54 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (478) — ✅ PLAN_NAVEGADOR ETAPA 0 CERRADA: VIABLE. El navegador ve, lee y dibuja
+  los moldes igual que el servidor.** El usuario: *«ejecutá el PLAN_NAVEGADOR»*.
+
+  **Lo construido:** `frontend/src/motor/pdf/dibujos.js` (traducción línea por línea del device de
+  PyMuPDF para `get_cdrawings(extended=True)`: `Walker`, `jm_checkrect`, `jm_checkquad`,
+  `jm_append_merge`, `compute_scissor`, con `Math.fround` en cada operación porque MuPDF
+  transforma en `float` de C), `frontend/src/motor/pdf/contenido.js` (parser de content-streams =
+  `pikepdf.parse_content_stream`: enteros ≠ reales, nombres con `#xx`, textos literales y hex,
+  arreglos, diccionarios, imágenes en línea; `contenidoCrudo` = `cortar_capas.contenido_crudo`),
+  sus corredores en Node (`frontend/src/motor/pruebas/{dibujos,contenido,render}.mjs`), tres
+  contratos (`verificar_navegador_{dibujos,contenido,render}.py`, sin argumentos usan los moldes
+  del camino B de `entrada/` y los de `laboratorio/`), y la página `frontend/laboratorio.html`
+  (worker con mupdf.js que mide en un navegador de verdad y compara con
+  `py laboratorio_navegador.py molde.ai`). `mupdf` fijado en **1.26.4** (`--save-exact`; el
+  servidor tiene PyMuPDF 1.26.7 = MuPDF 1.26.12; npm no publica 1.26.12). Vite: segunda entrada
+  `laboratorio.html`, `build.target='esnext'` (mupdf.js usa `await` de módulo), `worker.format='es'`.
+
+  **MEDIDO** con los archivos reales del usuario (sólo lectura: CAMISETA JUGADOR 117 MB de
+  «PRUEBA TIZADA PRO», CAMISETA JUGADOR/LIBERO 28 MB, buzo con cierre hexagonal 43 MB, el molde
+  de `entrada/…ef99`):
+  | prueba | resultado |
+  |---|---|
+  | dibujos (`get_cdrawings`) | **idénticos número a número**: 139.742 (LIBERO), 139.592 (JUGADOR 28), las 9 mesas del de 117 MB, 32 (buzo), 901 (ef99) |
+  | instrucciones del contenido | **idénticas**: 2.351.438 (LIBERO), 6,3 millones en las 9 mesas del de 117 MB; mismos bytes (SHA-1) |
+  | render (vista en pantalla) | mismo dibujo; difieren sólo píxeles de borde suavizado y la última fila parcial (ver abajo) |
+  | Chrome real, 28 MB | igual al servidor · 5,4 s · 155 MB de memoria WebAssembly |
+  | Chrome real, 117 MB | igual al servidor en las 9 mesas · **19 s** · **639 MB** (tope de WebAssembly: 4 GB) |
+  | Node vs servidor, lectura de instrucciones | 8× más rápido (117 MB, mesa 2: 4 s contra 33 s) |
+
+  **Lo que salió mal y por qué (no repetir):**
+  1. `fz_intersect_rect` de MuPDF 1.26 NO colapsa un resultado vacío (queda «al revés», x0 > x1)
+     y PyMuPDF lo devuelve así. Mi primera traducción lo colapsaba: 60 recortes distintos en una
+     mesa del de 117 MB. Traducir el comportamiento real, no el «razonable».
+  2. Render: las diferencias de píxel NO son por versión. Lo comprobé con MuPDF 1.26.2 en los dos
+     lados (PyMuPDF 1.26.1 en un entorno aparte contra mupdf.js 1.26.2): las MISMAS diferencias.
+     Es WebAssembly contra nativo redondeando bordes suavizados + la última fila/columna cuando la
+     página no mide un número entero de píxeles. El contrato acepta SÓLO eso con una regla
+     estructural (vecindario 3×3 con contraste ≥ la diferencia, o última fila/columna); no un
+     umbral a ojo. Con la ICC apagada difieren 625 mil valores: va prendida (como PyMuPDF).
+  3. Un JSON de 140 mil dibujos pasa el tope de largo de texto de V8 → los corredores escriben
+     NDJSON (una línea por dibujo) y el contrato compara en streaming.
+  4. Bash de heredoc volvió a romper `\n` dentro de f-strings de Python → los archivos con
+     escapes se escriben con la herramienta de archivos, no con heredoc.
+
+  **Pendiente de la etapa 0 que queda para el usuario:** probar el laboratorio en Firefox (Edge
+  es el mismo motor que Chrome) y en la PC más floja que vaya a usar el sistema. Sigue la
+  etapa 1 (PLAN_NAVEGADOR.md §6).
+
 - **2026-09-17 (477) — 🧭 DECISIÓN: LO PESADO SE HACE EN EL NAVEGADOR; EL SERVIDOR SÓLO GUARDA Y
   ENTREGA (PLAN, nada codeado todavía).** El usuario, después del 16/09: *«quiero que lo puedan
   usar cientos de personas a la vez, y el servidor no es fuerte, así que debemos hacer que no

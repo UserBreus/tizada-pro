@@ -13,6 +13,12 @@ const BASE = process.env.TIZADA_BASE || '/'
 export default defineConfig({
   base: BASE,
   plugins: [react()],
+  // Dos páginas: la app (index.html) y el LABORATORIO de «lo pesado en el navegador»
+  // (PLAN_NAVEGADOR.md, etapa 0). mupdf.js (MuPDF en WebAssembly) usa `await` a nivel de módulo:
+  // por eso el destino es `esnext` y los workers son módulos.
+  build: { target: 'esnext', rollupOptions: { input: { main: 'index.html', laboratorio: 'laboratorio.html' } } },
+  worker: { format: 'es' },
+  optimizeDeps: { exclude: ['mupdf'] },
   server: {
     port: 3000,
     proxy: {

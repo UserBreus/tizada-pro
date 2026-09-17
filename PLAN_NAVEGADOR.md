@@ -225,6 +225,11 @@ los PDF desde el navegador directamente (ya están ahí).
 
 ### ETAPA 0 — Viabilidad: ¿el navegador ve el molde igual que el servidor? (1-2 semanas)
 
+> ✅ **CERRADA 2026-09-17 — VIABLE** (MAPA changelog 478). Dibujos e instrucciones idénticos
+> número a número en 5 moldes reales (hasta 117 MB, 6,3 M de instrucciones); render igual salvo
+> bordes suavizados (WebAssembly vs nativo, comprobado que no es la versión); Chrome real con el
+> de 117 MB: 19 s y 639 MB. Falta sólo que el usuario lo pruebe en Firefox y en su PC más floja.
+
 **Qué se construye (ya empezado, sin commitear):**
 - `laboratorio_navegador.py`: escribe `<molde>.dibujos_ref.json` con lo que PyMuPDF ve
   (`get_cdrawings(extended=True)`): por mesa, cada recorte/relleno/trazo con su capa, nivel y
