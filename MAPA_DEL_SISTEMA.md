@@ -1495,6 +1495,33 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (482) — 🧪 PROBADO CON DOS NAVEGADORES A LA VEZ (dos personas de verdad).**
+  El usuario: *«¿podés abrir el sistema desde 2 navegadores diferentes y hacer prueba al mismo
+  tiempo?»*. **Cómo se montó** (sirve para repetirlo): sandbox del repo en 8061
+  (`scratchpad/sandbox_8061.py`: copia de datos/entrada en %TEMP%, base `TizadaPro_sandbox`, sin
+  login) + **persona A** en el navegador del panel (`localhost:8061`) y **persona B** en un
+  **Microsoft Edge aparte**, con perfil nuevo y manejado por el protocolo DevTools
+  (`--remote-debugging-port=9333`, ayudante `scratchpad/edge.mjs`: eval / ir / archivo / foto;
+  `DOM.setFileInputFiles` para meterle el .ai al `input[type=file]`). Dos navegadores = dos
+  sesiones de verdad (cookies separadas), que es justo lo que no se puede probar con dos pestañas.
+  **Resultados (14:28-14:38):**
+
+  | Prueba | Resultado |
+  |---|---|
+  | A elige «Camiseta de futbol», B elige «LIBERO rapido» | A sigue en el suyo; el registro muestra UNA activación por persona (sin ping-pong). El arreglo 481 anda |
+  | B crea un molde | A lo ve a los **26 s**, sin recargar (latido del catálogo) |
+  | B crea una planilla | A **no** la ve en 57 s, ni volviendo a entrar a Planillas; aparece al cambiar Pedidos↔Configuración. Confirma lo relevado en 481 |
+  | B prepara un molde de 117 MB (fase B) | A **nunca** ofreció «Terminar de preparar» (247 muestras, una por segundo); el latido llegó al servidor cada 15 s |
+  | Marca de pendiente envejecida a mano (10 min sin latido) | A **sí** ofrece «Terminar de preparar», y deja de ofrecerlo al sacar la marca |
+
+  🔴 **Hueco encontrado en la prueba:** «Subir mi propio molde» de **Mis artículos**
+  (`App.jsx` ~7004, `propio: true`) manda el archivo **sin paquete**: ese molde lo prepara el
+  SERVIDOR, no el navegador (en la prueba se salvó por la caché por SHA-1, 4,6 s; con un archivo
+  nuevo serían los minutos de antes). Es el mismo pendiente de la etapa 1 (camino A y DXF en el
+  navegador): esa pantalla acepta .ai, .pdf y .dxf, así que primero hay que saber EN EL NAVEGADOR
+  si el molde trae el diseño adentro (portar `parece_molde_con_diseno`) y recién ahí prepararlo;
+  si es DXF o camino A, sigue el servidor. Anotado en PLAN_NAVEGADOR (etapa 1).
+
 - **2026-09-17 (481) — 🔄 ¿LO QUE CAMBIA UNA PERSONA SE VE ENSEGUIDA? Relevado, y 3 fallas arregladas.**
   El usuario: *«si suben moldes nuevos, o editan algunos desde Configuración, o configuran algo, ¿se
   ve reflejado enseguida?»*. **Cómo es hoy (leído del código):**
