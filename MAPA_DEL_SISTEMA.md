@@ -1495,6 +1495,32 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (484) — 🖼️ PLAN_NAVEGADOR ETAPA 2: LA VISTA DE LAS MESAS SE DIBUJA EN EL NAVEGADOR.**
+  El usuario: *«cuando es todo es hasta la última etapa»*. Lo que dibujaba el pool del visor del
+  servidor (`_dibujar_vista_mesa`: lista de dibujo → `get_pixmap(clip)` → PNG, más el pre-dibujado
+  de todos los recortes al final del pedido) ahora lo hace la computadora de quien mira:
+  - `frontend/src/motor/vista/dibujar.js` (`dibujarMesa`: misma lista de dibujo, mismo recorte por
+    fracciones, misma escala, `fz_round_rect` con su margen de 0,001 — sin él una hoja de 8 m
+    salía una fila más alta), `vista.worker.js` (un hilo por archivo abierto, listas de dibujo
+    guardadas por página), `vista/vista.js` (`abrirVista`: el archivo se baja UNA vez, queda en
+    IndexedDB junto con cada PNG dibujado; `navegadorDibujaVista` lee el interruptor).
+  - Pantalla: `useVistaLocal` en `MesasInfinito` (mesa entera a 1200 px y los recortes de 800/1600)
+    y en `VisorFicha` (A4 a z=2). Devuelve la URL local si ya está y, mientras tanto, la del
+    servidor: nunca un hueco. Tope 400 MB por archivo (más grande, lo dibuja el servidor).
+  - Servidor: `/api/navegador/config` → `vista` (`TIZADA_NAVEGADOR_VISTA=0` lo apaga);
+    `_predibujar_recortes_fondo` no hace nada con la vista en el navegador.
+  - **Contrato `verificar_navegador_vista.py`**: hojas reales de `trabajos/`, tres casos por página
+    (1200 entera, 800 y 1600 con recorte): 0 píxeles distintos fuera de bordes/última fila. Y en el
+    navegador de verdad (laboratorio 2 de `laboratorio.html`): el PNG del navegador tiene la MISMA
+    huella SHA-1 que el de Node → navegador = Node = servidor.
+  - Tiempos: la primera mesa 11-13 s (arranque de WebAssembly), las siguientes 1-2 s; el servidor
+    0,2-1,6 s. Lo que se gana no es la mesa suelta sino que el servidor ya no dibuja NADA por
+    persona (ni pre-dibuja).
+  **Trampa:** un `import * as mupdf` arriba de un Web Worker deja el hilo mudo (mupdf.js usa
+  `await` a nivel de módulo): siempre `await import('mupdf')` adentro, como `obrero.worker.js`.
+  **Lo que NO cambió todavía:** las previas por pieza del paso Arte (`preview_piezas`, SVG por
+  `get_svg_image` en el pool de render) — es la etapa 3.
+
 - **2026-09-17 (483) — 🧭 TODAS LAS VÍAS DE SUBIDA PREPARAN EL MOLDE CON DISEÑO EN EL NAVEGADOR.**
   El usuario, al ver el hueco de 482: *«yo no quiero que demore ni que rompa las bolas si dos suben
   moldes diferentes. Quiero que funcione de punta a punta… así se conecte una o 100 personas; para

@@ -28,6 +28,17 @@
       <button id="ir" disabled>Abrir y medir</button>
     </div>
     <pre id="salida" class="gris">Esperando los archivos…</pre>
+    <h1 style="margin-top:28px">Laboratorio 2: ¿el navegador DIBUJA la mesa igual que el servidor?</h1>
+    <p class="nota">Elegí una hoja de tizada (.pdf). Se dibuja acá, en tu computadora, con el mismo motor
+      (<code>motor/vista/dibujar.js</code>): la mesa entera a 1200 px y un recorte a 800 px, igual que la
+      pantalla del paso Tizada. Se informa el tamaño, el tiempo y la huella del PNG, para compararla con la
+      del servidor (<code>py verificar_navegador_vista.py</code>).</p>
+    <div class="fila">
+      <label>Hoja <input id="hoja" type="file" accept=".pdf,.ai" /></label>
+      <button id="dibujar" disabled>Dibujar</button>
+    </div>
+    <pre id="salida2" class="gris">Esperando la hoja…</pre>
+    <div id="lienzo" style="display:flex; gap:12px; flex-wrap:wrap"></div>
     <script type="module" src="/src/laboratorio/main.js"></script>
   </body>
 </html>

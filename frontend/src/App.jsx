@@ -6,6 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
+import { navegadorDibujaVista, abrirVista, cerrarVistas } from './motor/vista/vista.js';
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -2800,6 +2801,51 @@ function DetalleFuente({ f, onVolver }) {
   );
 }
 
+/**
+ * LA VISTA DE LAS MESAS, DIBUJADA EN ESTA COMPUTADORA (PLAN_NAVEGADOR.md, etapa 2).
+ *
+ * Devuelve `urlDe(archivo, pagina, ancho, recorte, urlServidor)`: la dirección de la imagen a
+ * mostrar. Si esta computadora puede dibujar (y el servidor lo tiene prendido), el archivo se baja
+ * UNA vez y todas las vistas —la mesa entera, cada recorte del zoom, cada hoja de la ficha— salen
+ * de acá, sin pedirle nada más al servidor; si no, se devuelve la del servidor, como siempre. El
+ * dibujo es el mismo: contrato `verificar_navegador_vista.py`.
+ */
+function useVistaLocal(idTrabajo) {
+  const [vistas, setVistas] = useState({});        // archivo → Vista abierta
+  const [urls, setUrls] = useState({});            // clave → object URL ya dibujada
+  const pidiendo = useRef(new Set());
+  const abriendo = useRef(new Set());
+  useEffect(() => () => { cerrarVistas(); }, [idTrabajo]);
+
+  const abrir = async (archivo) => {
+    if (!idTrabajo || abriendo.current.has(archivo)) return;
+    abriendo.current.add(archivo);
+    try {
+      if (!(await navegadorDibujaVista(rutaApi))) return;
+      const v = await abrirVista(`${idTrabajo}|${archivo}`, async () => {
+        const r = await fetch(rutaApi(`/trabajos/${idTrabajo}/${encodeURIComponent(archivo)}`));
+        if (!r.ok) return null;
+        return await r.arrayBuffer();
+      });
+      if (v) setVistas(x => ({ ...x, [archivo]: v }));
+    } catch { /* lo dibuja el servidor */ }
+  };
+
+  return (archivo, pagina, ancho, recorte, urlServidor) => {
+    const clave = `${archivo}|${pagina}|${ancho}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
+    if (urls[clave]) return urls[clave];
+    const v = vistas[archivo];
+    if (!v) { abrir(archivo); return urlServidor; }
+    if (!pidiendo.current.has(clave)) {
+      pidiendo.current.add(clave);
+      v.dibujo(pagina, ancho, recorte)
+        .then(u => setUrls(x => ({ ...x, [clave]: u })))
+        .catch(() => { /* lo dibuja el servidor */ });
+    }
+    return urlServidor;
+  };
+}
+
 /** VISOR de la FICHA TÉCNICA, integrado al diseño del sistema: las páginas se muestran como
  *  imágenes en un contenedor con el SCROLL del sistema (no el del visor de PDF del navegador), y
  *  los botones usan los estilos de la app (sin recuadros). Descargar todo / una hoja / imprimir. */
@@ -2809,7 +2855,11 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
   // por página y, medido, `z=1` cuesta lo mismo que `z=2` (el costo es recorrer el vector, no
   // pintar píxeles). Ahora las dos usan el mismo `z=2` y la miniatura lo achica con CSS: mitad
   // de trabajo para el servidor y, como la dirección es idéntica, el navegador la reusa.
-  const imgPag = (pi) => rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`);
+  // La ficha también se dibuja acá cuando se puede (etapa 2): `z=2` sobre el A4 son 1191 px de
+  // ancho, el mismo dibujo que hace el servidor (`_FICHA_W`).
+  const urlVistaF = useVistaLocal(id);
+  const imgPag = (pi) => urlVistaF(archivo, pi, Math.round(595.276 * 2), null,
+    rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`));
   const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
   const printRef = React.useRef(null);
   const scrollRef = React.useRef(null);
@@ -2950,6 +3000,7 @@ function MesasInfinito({ mesas, job, avisar }) {
   // estar vivos a la vez por mesa depende del escalón (memoria del navegador).
   const TOPE_RECORTES = { 800: 24, 1600: 12 };
   const [detalle, setDetalle] = useState({});   // clave de mesa → [{id, a, c, b, d, src}]
+  const urlVista = useVistaLocal(job?.resultado?.id);   // se dibuja acá si se puede (etapa 2)
   const mesaRefs = useRef({});                  // clave → el div de esa mesa
   const mesaInfo = useRef({});                  // clave → {archivo, pi, anchoCm, altoCm}
 
@@ -2992,10 +3043,11 @@ function MesasInfinito({ mesas, job, avisar }) {
         for (let j = j0; j <= j1 && tiles.length < tope; j++) {
           for (let i = i0; i <= i1 && tiles.length < tope; i++) {
             const a = i / nx, b = (i + 1) / nx, c = j / ny, d = (j + 1) / ny;
+            const _srvTile = rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(info.archivo)}`
+              + `?pi=${info.pi}&w=${wpx}&cx0=${a.toFixed(4)}&cy0=${c.toFixed(4)}&cx1=${b.toFixed(4)}&cy1=${d.toFixed(4)}`);
             tiles.push({
               id: `${i}_${j}_${wpx}`, a, c, b, d,
-              src: rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(info.archivo)}`
-                + `?pi=${info.pi}&w=${wpx}&cx0=${a.toFixed(4)}&cy0=${c.toFixed(4)}&cx1=${b.toFixed(4)}&cy1=${d.toFixed(4)}`),
+              src: urlVista(info.archivo, info.pi, wpx, [a, c, b, d], _srvTile),
             });
           }
         }
@@ -3100,7 +3152,7 @@ function MesasInfinito({ mesas, job, avisar }) {
                             dibujo de LA HOJA DE VERDAD a 1200 px: 2,7 MB las diez, y se distingue
                             cada pieza. El vector sigue intacto en el PDF que se descarga, y el
                             detalle (tocar la mesa) lo abre. Mientras llega, se avisa. */}
-                        <img src={rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=1200`)} alt={nombre} draggable={false} decoding="async"
+                        <img src={urlVista(hoja.archivo, pi, 1200, null, rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=1200`))} alt={nombre} draggable={false} decoding="async"
                           onLoad={() => setCargadas(c => (c[key] ? c : { ...c, [key]: true }))}
                           onError={() => setCargadas(c => ({ ...c, [key]: 'error' }))}
                           style={{ width: w, height: h, display: 'block' }} />

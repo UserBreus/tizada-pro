@@ -3537,7 +3537,16 @@ def navegador_config():
     etapa entra detrás de un interruptor). `molde`: preparar los moldes con diseño en la
     computadora de la persona y mandarlos como paquete. `TIZADA_NAVEGADOR_MOLDE=0` lo apaga (vuelve
     a prepararlos el servidor, como antes) sin tocar el código."""
-    return jsonify({"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0"})
+    return jsonify({"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0",
+                    # `vista`: las mesas y la ficha las dibuja la computadora de quien mira
+                    # (etapa 2). Con esto prendido el servidor tampoco las pre-dibuja.
+                    "vista": _navegador_dibuja_vista()})
+
+
+def _navegador_dibuja_vista():
+    """¿La vista de las mesas la dibuja el navegador? (`TIZADA_NAVEGADOR_VISTA=0` la devuelve al
+    servidor). PLAN_NAVEGADOR.md, etapa 2: es el mismo dibujo (`verificar_navegador_vista.py`)."""
+    return str(os.environ.get("TIZADA_NAVEGADOR_VISTA") or "1") != "0"
 
 
 def _procesos_alta():
@@ -11457,7 +11466,13 @@ def _recortes_de_pagina(ancho_cm, alto_cm):
 
 
 def _predibujar_recortes_fondo(tid, hojas):
-    """Deja dibujados en segundo plano todos los recortes de las mesas de un trabajo."""
+    """Deja dibujados en segundo plano todos los recortes de las mesas de un trabajo.
+
+    🔴 Con la vista en el navegador (etapa 2) NO se hace nada: los recortes los dibuja la
+    computadora de quien mira, y pre-dibujarlos acá era el trabajo más largo del final del pedido
+    (todas las mesas × dos escalones, en el pool del visor)."""
+    if _navegador_dibuja_vista():
+        return
     hojas = list(hojas or [])
     if not hojas:
         return

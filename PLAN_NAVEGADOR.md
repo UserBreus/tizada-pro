@@ -323,6 +323,9 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 ### ETAPA 2 — El visor dibuja en el navegador (2-3 semanas)
 
+> ✅ **HECHA 2026-09-17** (MAPA 484): mesas y ficha del paso Tizada dibujadas en el navegador,
+> contrato píxel a píxel, interruptor `vista`. IndexedDB en vez de «espacio local» aparte.
+
 - `vista/dibujar.js`: rasterizar una mesa o un recorte con mupdf.js (`toPixmap` a la escala
   pedida, en un worker, a un `OffscreenCanvas` → `ImageBitmap`), con caché en IndexedDB por
   (huella, mesa, escala, recorte). Reemplaza `mesa_img`, los escalones 800/1600 de recortes y el

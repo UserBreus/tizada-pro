@@ -75,3 +75,51 @@ if (q.get('molde')) {
     correr()
   })()
 }
+
+// ── LABORATORIO 2: la VISTA (PLAN_NAVEGADOR.md, etapa 2) ─────────────────────────────────────
+// Dibuja una hoja de tizada acá mismo, con el mismo motor que usa la pantalla del paso Tizada, y
+// muestra la huella del PNG: tiene que ser la misma que la del contrato en Node (y ese, píxel a
+// píxel, la del servidor).
+import { abrirVista } from '../motor/vista/vista.js'
+import { sha1HexBytes } from '../motor/sha1.js'
+
+let hoja = null
+const $2 = (id) => document.getElementById(id)
+$2('hoja').onchange = (e) => { hoja = e.target.files[0] || null; $2('dibujar').disabled = !hoja }
+$2('dibujar').onclick = async () => {
+  const s2 = $2('salida2'), lienzo = $2('lienzo')
+  $2('dibujar').disabled = true
+  s2.className = 'gris'
+  s2.textContent = 'Abriendo la hoja…'
+  lienzo.innerHTML = ''
+  try {
+    const bytes = new Uint8Array(await hoja.arrayBuffer())
+    const t0 = performance.now()
+    const v = await abrirVista('lab|' + hoja.name + '|' + bytes.length, async () => bytes.buffer)
+    if (!v) throw new Error('este navegador no puede dibujar la vista')
+    const l = [`hoja: ${hoja.name} (${(bytes.length / 1048576).toFixed(1)} MB) · abierta en ${((performance.now() - t0) / 1000).toFixed(1)} s`]
+    const casos = [{ ancho: 1200, recorte: null }, { ancho: 800, recorte: [0, 0, 0.5, 0.5] }]
+    const salida = []
+    for (const c of casos) {
+      const t = performance.now()
+      const url = await v.dibujo(0, c.ancho, c.recorte)
+      const seg = (performance.now() - t) / 1000
+      const png = new Uint8Array(await (await fetch(url)).arrayBuffer())
+      const img = new Image()
+      img.src = url
+      img.style.maxWidth = '380px'
+      img.style.background = '#fff'
+      lienzo.appendChild(img)
+      const huella = sha1HexBytes(png)
+      salida.push({ ancho: c.ancho, recorte: c.recorte, bytes: png.length, sha1: huella, segundos: seg })
+      l.push(`${c.recorte ? 'recorte' : 'mesa entera'} a ${c.ancho} px: ${png.length} bytes de PNG · sha1 ${huella} · ${seg.toFixed(2)} s`)
+    }
+    window.__vista = { hoja: hoja.name, casos: salida }
+    s2.textContent = l.join('\n')
+    s2.className = 'ok'
+  } catch (err) {
+    s2.textContent = '✗ ' + (err.message || err)
+    s2.className = 'mal'
+  }
+  $2('dibujar').disabled = false
+}
