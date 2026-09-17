@@ -1563,8 +1563,10 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
   los archivos (moldes, desplegados, artes, tizadas) y su entrega, el registro. Nada que parsee
   o dibuje un PDF. Los pools y el cupo (476) quedan como red de seguridad mientras se migra.
 
-  **Estimación honesta:** etapa 0 dos semanas; 1 y 2 un mes o dos; 3 varios meses. Se publica
-  etapa por etapa: cada una alivia el servidor por su cuenta. Memoria: [[pesado-en-el-navegador]].
+  **EL PLAN COMPLETO, PASO A PASO, ESTÁ EN `PLAN_NAVEGADOR.md`** (raíz del repo): reglas, qué
+  va a dónde, tecnología, arquitectura del navegador y del servidor, la lógica «paquete +
+  Guardar», las 7 etapas con su lógica y sus contratos, riesgos y cronograma (6-8 meses).
+  Pendiente de la confirmación del usuario para empezar la etapa 0. Memoria: [[pesado-en-el-navegador]].
 
 - **2026-09-17 (476) — 🧯 EL «PLAN B» YA NO CORRE ADENTRO DEL SERVIDOR + un CUPO GLOBAL de
   procesos.** El usuario trajo el informe `plan-b-dentro-del-servidor.pdf` sobre el 16/09 en el
