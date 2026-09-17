@@ -1148,8 +1148,8 @@ def actualizacion_cancelar():
 
 def _listar_perfiles():
     """Lista los perfiles ICC reales del sistema con su NOMBRE real (tag desc),
-    espacio (RGB/CMYK) y un swatch de colores reales. Cacheado, dedup por nombre.
-    Devuelve [{archivo, nombre, espacio, ruta, colores}]."""
+    espacio (RGB/CMYK). Cacheado, dedup por nombre. Los colores de muestra van aparte (`_con_colores`).
+    Devuelve [{archivo, nombre, espacio, ruta}]."""
     global _perfiles_cache
     if _perfiles_cache is not None:
         return _perfiles_cache
@@ -1174,9 +1174,31 @@ def _listar_perfiles():
             if nombre.lower() in vistos_nombre:   # mismo nombre repetido (ej. HDTV) → uno solo
                 continue
             vistos_nombre.add(nombre.lower())
-            out.append({"archivo": fn, "nombre": nombre, "espacio": espacio, "ruta": ruta,
-                        "colores": _colores_perfil(p, espacio)})
+            # 🔴 Sin los colores de muestra: armarlos pide una transformada ICC por perfil (1,5 s los
+            # 33 perfiles de Windows), y esta lista la usa también `/api/salud` — la primera consulta
+            # de salud dejaba al servidor sin contestar ese rato. Los colores se agregan sólo en la
+            # pantalla que los muestra (`listar_perfiles`, `_con_colores`).
+            out.append({"archivo": fn, "nombre": nombre, "espacio": espacio, "ruta": ruta})
     _perfiles_cache = out
+    return out
+
+
+_colores_cache = {}
+
+
+def _con_colores(perfiles):
+    """La lista de perfiles con sus colores de muestra (cacheados por archivo)."""
+    out = []
+    for p in perfiles:
+        q = dict(p)
+        if p["ruta"] not in _colores_cache:
+            try:
+                from PIL import ImageCms
+                _colores_cache[p["ruta"]] = _colores_perfil(ImageCms.ImageCmsProfile(p["ruta"]), p["espacio"])
+            except Exception:
+                _colores_cache[p["ruta"]] = []
+        q["colores"] = _colores_cache[p["ruta"]]
+        out.append(q)
     return out
 
 
@@ -3342,54 +3364,6 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
 
 
 
-@app.post("/api/plantilla/paginas")
-def subir_paginas_plantilla():
-    """FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta
-    y los JSON completos, sobre el molde que ya se guardó en la fase A (PLAN_NAVEGADOR.md, etapa 1).
-    No calcula nada: valida y guarda (`_paquete_molde_aplicar`)."""
-    pq = request.files.get("paquete")
-    if not pq:
-        return jsonify({"error": "falta el paquete"}), 400
-    pid = _pid_de_request() or _get_active_producto_id()
-    path = _ruta_entrada("plantilla.ai", pid=pid, original=True)
-    if not os.path.exists(path):
-        return jsonify({"error": "el molde ya no está (¿se borró o se volvió a subir?)"}), 409
-    ruta_zip = os.path.join(os.path.dirname(path), "paginas.subiendo." + uuid.uuid4().hex[:8] + ".zip")
-    pq.save(ruta_zip)
-    try:
-        _fase, alta = _paquete_molde_aplicar(path, ruta_zip, fases=("paginas",))
-    except Exception as e:
-        return jsonify({"error": f"no se pudieron guardar las páginas del molde: {e}"}), 422
-    finally:
-        try:
-            os.remove(ruta_zip)
-        except OSError:
-            pass
-    try:
-        _sincronizar_etiqueta_auto(pid, path)
-    except Exception as e:
-        print(f"[camino B] no se pudo sincronizar la etiqueta automática de {pid}: {e}")
-    try:
-        cat_p = _cargar_catalogo_para_editar()
-        prod_p = next((x for x in cat_p["productos"] if x["id"] == pid), None)
-        if prod_p is not None and prod_p.pop("paginas_navegador", None):
-            _guardar_catalogo(cat_p)
-    except Exception as e:
-        print(f"[camino B] no se pudo sacar la marca de páginas pendientes de {pid}: {e}")
-    finally:
-        _soltar_edicion_catalogo()
-    if alta:
-        _en_hilo(lambda: _cache_desplegado_guardar(path, alta))
-    try:
-        _r = _cargar("resumen_plantilla.json", pid) or {}
-        if _r.pop("paginas_pendientes", None):
-            json.dump(_r, open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"), ensure_ascii=False)
-    except Exception:
-        pass
-    print(f"  [tiempos] páginas por talle de {pid}: guardadas (las preparó el navegador)", flush=True)
-    return jsonify({"ok": True})
-
-
 @app.post("/api/plantilla")
 def subir_plantilla():
     f = request.files.get("archivo")
@@ -3490,6 +3464,54 @@ def subir_plantilla():
 
     _en_hilo(_correr_alta)
     return jsonify({"job": tid, "procesando": True, "en_cola": max(0, _EN_COLA_ALTA[0])})
+
+
+@app.post("/api/plantilla/paginas")
+def subir_paginas_plantilla():
+    """FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta
+    y los JSON completos, sobre el molde que ya se guardó en la fase A (PLAN_NAVEGADOR.md, etapa 1).
+    No calcula nada: valida y guarda (`_paquete_molde_aplicar`)."""
+    pq = request.files.get("paquete")
+    if not pq:
+        return jsonify({"error": "falta el paquete"}), 400
+    pid = _pid_de_request() or _get_active_producto_id()
+    path = _ruta_entrada("plantilla.ai", pid=pid, original=True)
+    if not os.path.exists(path):
+        return jsonify({"error": "el molde ya no está (¿se borró o se volvió a subir?)"}), 409
+    ruta_zip = os.path.join(os.path.dirname(path), "paginas.subiendo." + uuid.uuid4().hex[:8] + ".zip")
+    pq.save(ruta_zip)
+    try:
+        _fase, alta = _paquete_molde_aplicar(path, ruta_zip, fases=("paginas",))
+    except Exception as e:
+        return jsonify({"error": f"no se pudieron guardar las páginas del molde: {e}"}), 422
+    finally:
+        try:
+            os.remove(ruta_zip)
+        except OSError:
+            pass
+    try:
+        _sincronizar_etiqueta_auto(pid, path)
+    except Exception as e:
+        print(f"[camino B] no se pudo sincronizar la etiqueta automática de {pid}: {e}")
+    try:
+        cat_p = _cargar_catalogo_para_editar()
+        prod_p = next((x for x in cat_p["productos"] if x["id"] == pid), None)
+        if prod_p is not None and prod_p.pop("paginas_navegador", None):
+            _guardar_catalogo(cat_p)
+    except Exception as e:
+        print(f"[camino B] no se pudo sacar la marca de páginas pendientes de {pid}: {e}")
+    finally:
+        _soltar_edicion_catalogo()
+    if alta:
+        _en_hilo(lambda: _cache_desplegado_guardar(path, alta))
+    try:
+        _r = _cargar("resumen_plantilla.json", pid) or {}
+        if _r.pop("paginas_pendientes", None):
+            json.dump(_r, open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+    print(f"  [tiempos] páginas por talle de {pid}: guardadas (las preparó el navegador)", flush=True)
+    return jsonify({"ok": True})
 
 
 @app.get("/api/navegador/config")
@@ -7863,7 +7885,7 @@ def objeto_agregado_borrar(oid):
 # ── Perfiles ICC ─────────────────────────────────────────────────────────────
 @app.get("/api/perfiles")
 def listar_perfiles():
-    perfiles = _listar_perfiles()
+    perfiles = _con_colores(_listar_perfiles())
     defs = _perfil_default_cfg()
     return jsonify({
         "perfiles": perfiles,
@@ -11835,6 +11857,14 @@ def _contar_piezas_registro(reg_path):
     return n
 
 
+def _pags_nav(pid):
+    try:
+        import piezas_con_diseno as _PD
+        return _PD.paginas_pendientes_navegador(_ruta_entrada("plantilla.ai", pid))
+    except Exception:
+        return False
+
+
 @app.get("/api/productos")
 def get_productos():
     cat = _cargar_catalogo()
@@ -11964,6 +11994,9 @@ def get_productos():
             # `efimero` = se subió para UN pedido y no queda guardado (ver MOLDE_CON_DISENO.md).
             "origen": p.get("origen") or "molde",
             "efimero": bool(p.get("efimero")),
+            # las páginas por talle las está terminando (o las dejó a medias) un NAVEGADOR: la marca
+            # del desplegado es la fuente de verdad (PLAN_NAVEGADOR, «dos tiempos»)
+            "paginas_navegador": bool(has_plantilla and _pags_nav(pid)),
             "planilla_template_id": tid or "plan_default",
             "nesting_preset_id": p.get("nesting_preset_id") or "nesting_default",
             "grupo_tizada": p.get("grupo_tizada") or "General",

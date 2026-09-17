@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **158 endpoints**. Generado automáticamente del código.
+Total: **160 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -52,6 +52,7 @@ Total: **158 endpoints**. Generado automáticamente del código.
 | POST | `/api/nesting_presets/guardar` |  | body: alto_max_cm, espaciado_mm, id, margen_mm, nombre, rotacion |
 | POST | `/api/productos/grupo_tizada` | Grupo de tizada del molde: los moldes con el MISMO grupo comparten mesa de trabajo; grupos distintos se arman en tizadas separadas. | body: grupo_tizada, id, producto_id |
 | POST | `/api/productos/nesting_preset` |  | body: id, nesting_preset_id, producto_id |
+| GET | `/api/navegador/config` | Qué trabajo pesado hace el NAVEGADOR en vez del servidor (PLAN_NAVEGADOR.md, regla 5: cada etapa entra detrás de un interruptor). `molde`: preparar lo | — |
 
 ## Perfiles de color
 
@@ -138,6 +139,7 @@ Total: **158 endpoints**. Generado automáticamente del código.
 | GET | `/api/plantillas_planillas` |  | — |
 | POST | `/api/plantillas_planillas/eliminar` |  | body: id |
 | POST | `/api/plantillas_planillas/guardar` |  | body: columnas, id, nombre, role |
+| POST | `/api/plantilla/paginas` | FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta y los JSON completos, sobre el molde que ya se guardó en  | file: paquete |
 
 ## Variables / Modelos / Grupos
 

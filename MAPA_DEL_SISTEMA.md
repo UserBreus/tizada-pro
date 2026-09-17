@@ -1495,6 +1495,52 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (479) — ⏩ PLAN_NAVEGADOR ETAPA 1: el molde con diseño se prepara en la
+  computadora de la persona, EN DOS TIEMPOS y con varios hilos.** El usuario, en medio del trabajo:
+  *«si un molde con diseño demora 1 minuto o más ya es muchísimo… debe de ser muy pocos segundos»*.
+  **Qué quedó (commits 4753957 → este):**
+  - **Traducción idéntica al servidor** (`frontend/src/motor/molde/`): contornos, registro, visor,
+    candidatos de etiqueta y páginas por talle. Verificado byte a byte contra Python con
+    `verificar_navegador_{molde,reescribir,desplegado}.py` y `verificar_paquete_molde.py` sobre 5
+    moldes reales.
+  - **Velocidad** (de 94 s a pocos segundos): lectura ligera de dibujos (los rellenos no se
+    recorren salvo que haga falta), compresión rápida, contenido leído a COLUMNAS
+    (`pdf/columnas.js`, arrays tipados, escritura idéntica a pikepdf), el trabajo de cada talle en
+    JS puro sin motor PDF (`molde/talle.js`), y un EQUIPO DE HILOS (`pool.js` +
+    `obrero.worker.js`; cantidad = núcleos − 1 con tope por memoria, `hilosRecomendados`).
+  - **Dos tiempos** (`prepararMolde.prepararEnDosTiempos`): FASE A = piezas + registro + visor
+    (paquete `fase: contornos`, se sube con el archivo y la persona SIGUE); FASE B = etiqueta que
+    trae el diseño + páginas por talle, en segundo plano, se sube sola a
+    `POST /api/plantilla/paginas` (paquete `fase: paginas`). Mientras falte B el servidor deja la
+    marca `desplegado/pendiente_navegador.json` y **nunca arma páginas por su cuenta**
+    (`piezas_con_diseno.PaginasPendientes`); el catálogo y `/api/productos` exponen
+    `paginas_navegador`. Pantalla: panel abajo a la izquierda con el avance, reintento, aviso al
+    cerrar la pestaña, y «Terminar de preparar» para un molde que quedó a medias (baja la
+    plantilla y rehace sólo B).
+  - **`/api/salud` ya no traba al servidor la primera vez**: `_listar_perfiles` armaba los colores
+    de muestra de los 33 perfiles ICC (1,5 s de `ImageCms.buildTransform`) y salud lo usa. Ahora
+    los colores se agregan sólo en `listar_perfiles` (`_con_colores`, cacheado por archivo).
+    Lo destapó `verificar_subida_no_traba.py` («contestó 1 llamadas en 2 s»).
+  - `verificar_color_nativo_cid.py` exigía el rojo exacto del arte del GOLERO: el usuario reemplazó
+    ese arte el 2026-09-16 (texto blanco) y el contrato quedó en rojo sin nada roto. Ahora exige la
+    PROPIEDAD (color nativo, escrito tal cual), como ya hacía con JUGADOR; el rojo exacto por capa
+    con fuente CID sigue cubierto por el arte sintético de la sección 1.
+  **Tiempos medidos (esta PC, Chrome):**
+
+  | Molde | Servidor antes | Navegador: la persona sigue | Navegador: todo listo |
+  |---|---|---|---|
+  | LIBERO 28 MB | 115-132 s | 3,5-5 s | 10-12 s |
+  | JUGADOR 117 MB | — | 4,5-5,4 s | 16-20 s |
+
+  **Lo que salió mal y por qué:** (1) los `asUint8Array()` de mupdf.js son VISTAS que se invalidan
+  cuando crece la memoria de WebAssembly → siempre `.slice()`; (2) los heredoc de bash comen las
+  barras invertidas (f-strings y escapes JS rotos) → escribir con Write o con un .py;
+  (3) `.gitignore` con `laboratorio/` escondía `frontend/src/laboratorio` → `/laboratorio/`;
+  (4) el primer tiempo medido en Chrome (13 s) estaba inflado por el server sandbox corriendo en la
+  misma PC: medir el paso del servidor aparte (0,5-1,1 s). **Pendiente de la etapa 1:** camino A y
+  DXF en el navegador (1b); no volver a subir un archivo que el servidor ya tiene (misma huella
+  SHA-1); la subida por internet de un .ai grande sigue siendo lo que más tarda fuera del taller.
+
 - **2026-09-17 (478) — ✅ PLAN_NAVEGADOR ETAPA 0 CERRADA: VIABLE. El navegador ve, lee y dibuja
   los moldes igual que el servidor.** El usuario: *«ejecutá el PLAN_NAVEGADOR»*.
 

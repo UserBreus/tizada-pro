@@ -5,7 +5,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
          esArrastre } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
-import { navegadorPreparaMoldes, prepararMoldeEnNavegador } from './motor/prepararMolde.js';
+import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -1200,6 +1200,62 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** LAS PÁGINAS QUE SE ESTÁN TERMINANDO EN ESTA COMPUTADORA (PLAN_NAVEGADOR.md, etapa 1).
+ *
+ * El molde con diseño se guarda en dos tiempos: lo necesario para seguir (piezas, visor) en unos
+ * segundos, y las páginas por talle después, en segundo plano. Este aviso chico, abajo a la
+ * izquierda, dice cómo van. Si quedó alguno pendiente (se cerró la página, se cortó la conexión,
+ * falló) ofrece terminarlo. La tizada de ese molde espera a que termine (el servidor lo avisa). */
+function PanelPaginasEnPreparacion({ enCurso, pendientes, onTerminar, onDescartar }) {
+  const filas = Object.entries(enCurso || {});
+  if (!filas.length && !(pendientes || []).length) return null;
+  return (
+    <div style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 10070, width: 320, maxWidth: 'calc(100vw - 32px)',
+                  display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {filas.map(([clave, x]) => (
+        <div key={clave} style={{ background: 'rgba(12,16,24,0.96)', border: '1px solid ' + (x.fase === 'error' ? 'rgba(248,113,113,0.5)' : 'var(--border-light)'),
+                                  borderRadius: 12, padding: '10px 12px', boxShadow: '0 10px 24px rgba(0,0,0,0.45)' }}>
+          <div style={{ fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {x.fase === 'error' ? 'No se terminó de preparar' : 'Terminando de preparar'} «{x.nombre}»
+          </div>
+          {x.fase === 'error' ? (
+            <>
+              <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 4, lineHeight: 1.4 }}>{x.error}</div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                {x.pid && <button type="button" className="btn success" style={{ padding: '4px 10px', fontSize: 11.5 }}
+                  onClick={() => onTerminar(x.pid, x.nombre, clave)}>Reintentar</button>}
+                <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11.5 }}
+                  onClick={() => onDescartar(clave)}>Cerrar</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{x.texto}</div>
+              <div style={{ height: 4, borderRadius: 3, background: 'rgba(255,255,255,0.08)', marginTop: 7, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.max(3, Math.min(100, x.pct || 0))}%`, background: 'var(--accent)', transition: 'width .3s' }} />
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 5 }}>
+                Podés seguir trabajando. No cierres la página hasta que termine.
+              </div>
+            </>
+          )}
+        </div>
+      ))}
+      {(pendientes || []).map(p => (
+        <div key={p.id} style={{ background: 'rgba(12,16,24,0.96)', border: '1px solid rgba(251,191,36,0.45)', borderRadius: 12,
+                                 padding: '10px 12px', boxShadow: '0 10px 24px rgba(0,0,0,0.45)' }}>
+          <div style={{ fontSize: 12, fontWeight: 800 }}>A «{p.nombre}» le falta terminar de prepararse</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>
+            Se preparaba en una computadora y se cortó antes de terminar. Se termina acá mismo.
+          </div>
+          <button type="button" className="btn success" style={{ padding: '4px 10px', fontSize: 11.5, marginTop: 8 }}
+            onClick={() => onTerminar(p.id, p.nombre)}>Terminar de preparar</button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -3827,8 +3883,14 @@ function ColorPickerModal({ open, color, titulo, onClose, onApply }) {
 // pero preguntando cómo va. Si el servidor es viejo y contesta el resumen directo, se usa tal cual.
 async function esperarMoldeLeido(resp, onProgreso) {
   if (!resp || !resp.job) return resp;
+  // Se pregunta enseguida y después cada vez más espaciado: un molde que preparó el navegador lo
+  // guarda el servidor en ~1 s, y esperar 1,2 s fijos antes de la primera pregunta era la mitad de
+  // la espera (PLAN_NAVEGADOR, «que tarde pocos segundos»). Uno que prepara el servidor tarda
+  // minutos: ahí el intervalo llega a 1,2 s como antes.
+  let espera = 250;
   for (;;) {
-    await new Promise(r => setTimeout(r, 1200));
+    await new Promise(r => setTimeout(r, espera));
+    espera = Math.min(1200, Math.round(espera * 1.5));
     let d;
     try {
       const r = await fetch(rutaApi(`/api/trabajo/${resp.job}`));
@@ -6004,6 +6066,17 @@ export default function App() {
     }
   };
 
+  // Las páginas por talle de los moldes que se están terminando de preparar EN ESTA COMPUTADORA
+  // (fase B, en segundo plano). clave → {nombre, pid, fase: 'preparando'|'subiendo'|'error', texto, pct, error}
+  const [prepPaginas, setPrepPaginas] = useState({});
+  // Mientras haya una fase B andando, cerrar la página la perdería: el navegador pregunta antes.
+  useEffect(() => {
+    const andando = Object.values(prepPaginas).some(x => x && x.fase !== 'error');
+    if (!andando) return undefined;
+    const avisar = (e) => { e.preventDefault(); e.returnValue = ''; return ''; };
+    window.addEventListener('beforeunload', avisar);
+    return () => window.removeEventListener('beforeunload', avisar);
+  }, [prepPaginas]);
   const fetchProductos = async () => {
     try {
       const res = await fetch('/api/productos');
@@ -11503,16 +11576,64 @@ export default function App() {
     }));
   };
 
-  // ── CAMINO B: PREPARAR EL MOLDE EN ESTA COMPUTADORA ─────────────────────────────────────────
-  // (PLAN_NAVEGADOR.md, etapa 1). Devuelve el paquete (bytes del ZIP) o null si el servidor todavía
-  // prepara los moldes él (interruptor `/api/navegador/config`). Si esta computadora no puede, tira
-  // un error con el motivo: el molde NO se manda para que lo haga el servidor.
-  const _prepararPaquete = async (archivo, fase) => {
+  // ── CAMINO B: PREPARAR EL MOLDE EN ESTA COMPUTADORA, EN DOS TIEMPOS ─────────────────────────
+  // (PLAN_NAVEGADOR.md, etapa 1). Pedido del usuario: «si un molde con diseño demora un minuto o más
+  // ya es muchísimo; debe ser muy pocos segundos». La computadora de la persona hace el trabajo con
+  // varios hilos y en dos tiempos: FASE A (piezas, registro, visor) en unos segundos → se sube con
+  // el archivo y se sigue; FASE B (etiqueta y páginas por talle) en segundo plano → se sube sola
+  // (`prepPaginas` la muestra abajo a la izquierda). Devuelve `{zipA, clave, prep}` o null si el
+  // servidor todavía prepara los moldes él. Si esta computadora no puede, tira el motivo: el molde NO
+  // se manda para que lo haga el servidor.
+  const _prepararDosTiempos = async (archivo, nombre, fase) => {
     if (!(await navegadorPreparaMoldes())) return null;
+    const clave = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     fase({ fase: 'preparando', nota: 'Abriendo el archivo en tu computadora…' });
-    const r = await prepararMoldeEnNavegador(archivo, (a) => fase({ fase: 'preparando', nota: a.texto }));
+    const prep = await prepararEnDosTiempos(archivo, {
+      onA: (a) => fase({ fase: 'preparando', nota: a.texto }),
+      onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
+        pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
+    });
+    setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid: null, fase: 'preparando', texto: 'Separando los talles…', pct: 0 } }));
     fase({ fase: 'subiendo', pct: 0, nota: '' });
-    return r.zip;
+    return { zipA: prep.zipA, clave, prep };
+  };
+  // Cuando la fase A ya se guardó (hay `pid`): esperar la fase B y subirla.
+  const _seguirPaginas = (clave, pid, prep) => {
+    setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], pid } }) : p);
+    prep.paginas.then(async (zipB) => {
+      setPrepPaginas(p => ({ ...p, [clave]: { ...(p[clave] || {}), fase: 'subiendo', texto: 'Guardando las páginas…', pct: 0 } }));
+      await subirPaginas(rutaApi, pid, zipB, (pct) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], pct } }) : p));
+      setPrepPaginas(p => { const n = { ...p }; delete n[clave]; return n; });
+      fetchProductos();
+    }).catch((err) => {
+      setPrepPaginas(p => ({ ...p, [clave]: { ...(p[clave] || {}), pid, fase: 'error', error: err.message } }));
+    });
+  };
+  // La fase A no se pudo guardar: la B no sirve para nada.
+  const _cancelarPaginas = (r) => {
+    if (!r) return;
+    try { r.prep.cancelar(); } catch { /* nada */ }
+    setPrepPaginas(p => { const n = { ...p }; delete n[r.clave]; return n; });
+  };
+  // RETOMAR: un molde que quedó con las páginas pendientes (se cerró la página, se cortó la conexión,
+  // o falló). Se baja el archivo del servidor, se vuelve a preparar ACÁ y se sube sólo la fase B.
+  const terminarPaginasMolde = async (pid, nombre, claveVieja = null) => {
+    if (claveVieja) setPrepPaginas(p => { const n = { ...p }; delete n[claveVieja]; return n; });
+    const clave = 'r' + Date.now().toString(36);
+    setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid, fase: 'preparando', texto: 'Bajando el archivo del molde…', pct: 0 } }));
+    try {
+      const r = await fetch(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`);
+      if (!r.ok) throw new Error('No se pudo bajar el archivo del molde');
+      const archivo = new File([await r.blob()], 'plantilla.ai');
+      const prep = await prepararEnDosTiempos(archivo, {
+        onA: (a) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: a.texto } }) : p),
+        onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
+          pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
+      });
+      _seguirPaginas(clave, pid, prep);
+    } catch (err) {
+      setPrepPaginas(p => ({ ...p, [clave]: { ...(p[clave] || {}), nombre, pid, fase: 'error', error: err.message } }));
+    }
   };
 
   // ── CAMINO B: cargar VARIOS archivos, uno tras otro ─────────────────────────────────────────
@@ -11525,13 +11646,15 @@ export default function App() {
     setSubirMoldeBusy(true);
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
+      let preparado = null;          // lo que preparó esta computadora (fase A lista, fase B en camino)
       const nombre = (f.name || 'Molde').replace(/\.(ai|pdf)$/i, '').trim() || 'Molde';
       const t0 = Date.now();
       setSubirBFase({ fase: 'subiendo', pct: 0, seg: 0, nombre, i: i + 1, total: files.length });
       const reloj = setInterval(() => setSubirBFase(x => x ? { ...x, seg: Math.round((Date.now() - t0) / 1000) } : x), 1000);
       try {
         // Se prepara ANTES de crear el molde: si esta computadora no puede, no queda uno vacío.
-        const paquete = await _prepararPaquete(f, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));
+        preparado = await _prepararDosTiempos(f, nombre, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));
+        const paquete = preparado && preparado.zipA;
         const r = await fetch('/api/productos/crear', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
@@ -11572,7 +11695,9 @@ export default function App() {
             + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '') + '. Quedó cargado igual, pero necesita el arte aparte.');
         }
         setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
+        if (preparado) _seguirPaginas(preparado.clave, d.id, preparado.prep);
       } catch (err) {
+        _cancelarPaginas(preparado);
         showError(`«${nombre}»: ${err.message}`);
       } finally {
         clearInterval(reloj);
@@ -11739,8 +11864,10 @@ export default function App() {
     const t0 = Date.now();
     const reloj = setInterval(() => setSubirBFase(f => f ? { ...f, seg: Math.round((Date.now() - t0) / 1000) } : f), 1000);
     let pid = null;
+    let preparado = null;
     try {
-      const paquete = await _prepararPaquete(subirMoldeFile, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));   // ver `subirMoldesConDiseno`
+      preparado = await _prepararDosTiempos(subirMoldeFile, nombre, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));   // ver `subirMoldesConDiseno`
+      const paquete = preparado && preparado.zipA;
       const r = await fetch('/api/productos/crear', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre, efimero: true, planilla_template_id: plantillaComun || undefined })
@@ -11783,9 +11910,11 @@ export default function App() {
           + '. Quedó cargado como molde común: necesita que le cargues el arte aparte.');
       }
       setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now() } }));
+      if (preparado) _seguirPaginas(preparado.clave, pid, preparado.prep);
       avisarAltaMolde(d2);
       toggleMoldeEnDiseno(pid);          // queda ELEGIDO en el diseño activo: ya es parte del pedido
     } catch (err) {
+      _cancelarPaginas(preparado);
       showError(err.message);
     } finally {
       clearInterval(reloj);
@@ -12721,6 +12850,12 @@ export default function App() {
 
   return (
     <div className="app-container">
+      <PanelPaginasEnPreparacion
+        enCurso={prepPaginas}
+        pendientes={(productosCat.productos || []).filter(p => p.paginas_navegador && !p.de_otro
+          && !Object.values(prepPaginas).some(x => x && x.pid === p.id))}
+        onTerminar={terminarPaginasMolde}
+        onDescartar={(clave) => setPrepPaginas(p => { const n = { ...p }; delete n[clave]; return n; })} />
       {/* Sidebar Panel */}
       {modoDisenador && (
         <aside className="sidebar">

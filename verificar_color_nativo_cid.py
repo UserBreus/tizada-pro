@@ -153,12 +153,19 @@ real = os.path.join(RAIZ, "entrada", pid, "disenos")
 if os.path.exists(os.path.join(real, "golero", "arte.ai")):
     g = MP.extraer_personalizacion(os.path.join(real, "golero", "arte.ai"))
     m2 = g.get("2") or {}
-    ok(m2.get("Nombre", {}).get("colorn") == ("k", [0.0, 0.996, 1.0, 0.002]),
-       "🔴 GOLERO mesa 2 · Nombre: el rojo exacto del arte (antes: None → 0/87,3/84,8/7,1)")
-    ok(m2.get("Número", {}).get("colorn") == ("k", [0.0, 0.996, 1.0, 0.002]),
-       "🔴 GOLERO mesa 2 · Número: ídem")
-    ok(all(MP._color_op(pl) == ROJO for pl in m2.values()),
-       "y lo que se escribe en la tizada es «0 0.996 1 0.002 k», el del arte, sin calcular nada")
+    # 🔴 NO se clava el valor (mismo motivo que JUGADOR, abajo): el 2026-09-16 el usuario reemplazó
+    # el arte del GOLERO y el texto pasó del rojo 0/0,996/1/0,002 a blanco, lo que ponía este
+    # contrato en rojo sin nada roto. El rojo EXACTO por capa con fuente CID lo cubre la sección 1
+    # (arte sintético). Acá se exige la PROPIEDAD sobre el arte real: los dos campos de la fuente CID
+    # traen color NATIVO (antes: None → se calculaba 0/87,3/84,8/7,1) y se escribe tal cual.
+    for campo in ("Nombre", "Número"):
+        cn = m2.get(campo, {}).get("colorn")
+        ok(bool(cn) and cn[0] in ("k", "rg", "g", "sc", "scn") and cn[1] is not None,
+           f"🔴 GOLERO mesa 2 · {campo}: color NATIVO del arte, no calculado (hoy: {cn})")
+    ok(m2 and all(MP._color_op(pl) == " ".join(f"{v:g}" for v in pl["colorn"][1]) + " " + pl["colorn"][0]
+                  for pl in m2.values() if pl.get("colorn")),
+       "y lo que se escribe en la tizada es ESE color tal cual, sin calcular nada "
+       f"(hoy: {sorted({MP._color_op(pl) for pl in m2.values()})})")
     # JUGADOR usa una fuente SIMPLE (no CID): tiene que salir por el camino de siempre, con su
     # color nativo leído del archivo. 🔴 NO se clava el valor: el arte es del usuario y lo cambia
     # cuando quiere (2026-09-14 lo reemplazó por el «PESADO» y el texto pasó de negro a blanco, lo

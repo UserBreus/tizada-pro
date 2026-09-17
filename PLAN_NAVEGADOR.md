@@ -263,6 +263,11 @@ para repetir la prueba con archivos nuevos.
 
 ### ETAPA 1 — El molde se prepara en el navegador y se guarda como paquete (4-6 semanas)
 
+> ⏩ **EN CURSO 2026-09-17** (MAPA changelog 479). HECHO: pasos 1-6 y 8-9 para el molde CON
+> diseño (camino B), idénticos al servidor, en dos tiempos y con varios hilos (la persona sigue a
+> los 3,5-5,4 s). FALTA: paso 7 (camino A y DXF), no re-subir un archivo que el servidor ya tiene
+> (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`.
+
 **Lógica (traducción de `piezas_con_diseno.py`, función por función):**
 1. `capas.js`: `talles_del_molde` — las capas OCG del documento en el orden de `/OCProperties
    /D /Order`; nombres tal cual (regla: del archivo sólo el TALLE; «Editable …», «guías» se
