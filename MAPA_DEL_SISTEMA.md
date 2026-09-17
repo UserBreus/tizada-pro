@@ -1495,6 +1495,68 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (477) — 🧭 DECISIÓN: LO PESADO SE HACE EN EL NAVEGADOR; EL SERVIDOR SÓLO GUARDA Y
+  ENTREGA (PLAN, nada codeado todavía).** El usuario, después del 16/09: *«quiero que lo puedan
+  usar cientos de personas a la vez, y el servidor no es fuerte, así que debemos hacer que no
+  dependa del servidor»* → *«me tiro por que todo lo pesado lo use el navegador de la persona,
+  que dependa de los componentes de la PC que lo levante; el servidor sirva para guardar y enviar
+  las cosas; quien no tenga la potencia no podrá enviar»*. Descartado a propósito: la app de
+  escritorio (*«olvidate por completo»*) y máquinas ayudantes (no hay otras PC; el servidor es un
+  VPS de Hostinger). Todo por el navegador en https://tizadapro.user.com.uy/.
+
+  **Qué es «lo pesado» hoy (todo en Python, en el servidor):** (1) el desplegado del molde del
+  camino B (`piezas_con_diseno.py`, 2,7k líneas: contornos por capa con `get_drawings`, páginas
+  por talle filtrando el content-stream, placeholders, etiquetas); (2) el alta del camino A
+  (`molde_real.py`, `detectar_piezas`); (3) el motor (`motor_pedido.py` 5,5k + `nesting_contorno.py`
+  + `hoja_pike.py` + `aplanar_rip.py` + `texto_curvas.py` + `ficha_tecnica.py`): nesting, armar cada
+  pieza (XObjects del diseño), estampar nombre/número (fuentes → curvas con fontTools), escribir la
+  hoja, aplanarla para el RIP, ficha, previas; (4) el visor (rasterizar recortes con PyMuPDF).
+  Dependencias nativas: **PyMuPDF** (~90 usos) y **pikepdf** (~95 usos), fontTools, numpy.
+
+  **Con qué se haría en el navegador:** **mupdf.js** (MuPDF oficial compilado a WebAssembly — el
+  MISMO motor que PyMuPDF, así que los contornos y los renders pueden salir idénticos): recorrer
+  paths de una página (`Device` propio = `get_drawings`), leer/escribir objetos PDF (streams,
+  XObjects, OCG = lo que hoy hace pikepdf), rasterizar. Fuentes → curvas con **opentype.js**
+  (= fontTools). El nesting es Python puro → se porta a JS. Pyodide (Python en el navegador) NO
+  sirve: PyMuPDF y pikepdf no existen para WebAssembly. ⚠️ Licencia: MuPDF es AGPL (igual que
+  PyMuPDF, que ya se usa): para un producto comercial cerrado hace falta la licencia de Artifex;
+  decisión del usuario, no técnica.
+
+  **Ley que no se negocia:** la tizada que arma el navegador tiene que ser **idéntica** a la que
+  hoy arma el servidor (vector original, CMYK exacto). Cada etapa se verifica comparando la
+  salida del navegador contra la de Python con los mismos archivos (harness de comparación,
+  como `scratchpad/verif_tizada.py` hizo con el Arte WYSIWYG).
+
+  **Etapas — cada una funciona sola y se publica:**
+  - **0. Prueba de viabilidad (1-2 semanas, decide todo).** Una página aparte del sistema
+    (`/laboratorio`) carga mupdf.js, abre un molde real del camino B (30-120 MB), recorre los
+    paths de UNA mesa por capa y compara contra `desplegado/m1.json` del servidor: ¿mismos
+    contornos? ¿cuánto tarda y cuánta memoria en Chrome/Edge/Firefox? ¿aguanta el .ai de 123 MB
+    (límite de memoria de WebAssembly: 4 GB)? Si no es idéntico o no entra en memoria, se para
+    acá y se decide otra cosa. Medir es lo primero: no se promete sin esto.
+  - **1. El desplegado del molde en el navegador.** Al subir un molde del camino B, el navegador
+    arma `desplegado/` (m{mesa}.json + m{mesa}.pdf por talle + placeholders + etiquetas) y lo
+    SUBE con el archivo; el servidor sólo guarda (ya tiene la caché por huella,
+    `_cache_desplegado_tomar`). Con esto desaparece lo que mató al servidor el 16/09. El servidor
+    conserva su código como verificador (`verificar_*` comparan ambos).
+  - **2. Vistas y visor en el navegador.** Los recortes de las mesas y las previas se dibujan en
+    el navegador desde el vector (mupdf.js rasteriza o el SVG directo): el servidor deja de
+    dibujar (hoy: pool del visor + pre-dibujado, `_predibujar_mesas`).
+  - **3. El motor en el navegador** (la obra grande): nesting + armar piezas + estampar +
+    escribir la hoja + aplanar para el RIP + ficha. El navegador genera los PDF y los sube; el
+    servidor los guarda y los entrega. Se porta módulo por módulo con su comparación.
+  - **4. «Quien no tenga la potencia no podrá enviar».** Antes de empezar, el navegador mide
+    (núcleos `navigator.hardwareConcurrency`, memoria `navigator.deviceMemory`, memoria real de
+    WebAssembly, un mini-benchmark) y si no alcanza lo dice con claridad y no deja subir ni
+    generar. Sin adivinar: se calibra con lo medido en la etapa 0.
+
+  **Qué queda en el servidor:** usuarios, permisos, catálogo, planillas, telas (API externa),
+  los archivos (moldes, desplegados, artes, tizadas) y su entrega, el registro. Nada que parsee
+  o dibuje un PDF. Los pools y el cupo (476) quedan como red de seguridad mientras se migra.
+
+  **Estimación honesta:** etapa 0 dos semanas; 1 y 2 un mes o dos; 3 varios meses. Se publica
+  etapa por etapa: cada una alivia el servidor por su cuenta. Memoria: [[pesado-en-el-navegador]].
+
 - **2026-09-17 (476) — 🧯 EL «PLAN B» YA NO CORRE ADENTRO DEL SERVIDOR + un CUPO GLOBAL de
   procesos.** El usuario trajo el informe `plan-b-dentro-del-servidor.pdf` sobre el 16/09 en el
   publicado: *«quiero que repares todo; el sistema no puede matar al servidor»*.
