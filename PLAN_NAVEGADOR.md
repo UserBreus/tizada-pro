@@ -266,10 +266,10 @@ para repetir la prueba con archivos nuevos.
 > ⏩ **EN CURSO 2026-09-17** (MAPA changelog 479). HECHO: pasos 1-6 y 8-9 para el molde CON
 > diseño (camino B), idénticos al servidor, en dos tiempos y con varios hilos (la persona sigue a
 > los 3,5-5,4 s). FALTA: paso 7 (camino A y DXF), no re-subir un archivo que el servidor ya tiene
-> (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`. 🔴 Falta también que
-> «Subir mi propio molde» (Mis artículos) prepare en el navegador: hoy manda el archivo sin
-> paquete y lo prepara el servidor (MAPA 482); para eso hay que detectar en el navegador si el
-> molde trae el diseño adentro, porque esa pantalla también acepta camino A y DXF.
+> (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`. ✅ Las TRES vías de subida
+> (Cargar molde con diseño incluido · Mis artículos · Configuración → Moldería) preparan el
+> molde con diseño en el navegador; el navegador detecta si trae el diseño con la misma regla
+> que el servidor (MAPA 483).
 > MEDIDO (MAPA 480): 10 personas guardando a la vez el molde de 117 MB = 5,7 s y 166 MB en un
 > servidor de 3 núcleos. Lo caro es internet: ~250 MB por molde (archivo + páginas).
 

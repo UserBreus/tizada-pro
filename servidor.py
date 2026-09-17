@@ -3111,7 +3111,8 @@ def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
 
 
 def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
-                           _corresp_nueva, _con_diseno, _motivo_b, _t_subida, paquete=None):
+                           _corresp_nueva, _con_diseno, _motivo_b, _t_subida, paquete=None,
+                           sabe_sin_diseno=False):
     """LO CARO de subir un molde: leerlo, detectar las piezas y dejarlo en su lugar.
 
     🔴 Corre FUERA del hilo que atiende la llamada web. Medido el 2026-09-10 con el molde real del
@@ -3158,6 +3159,9 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                 # costaba 12,5 s (leer los dibujos de dos mesas) antes de empezar el alta, y el alta
                 # misma avisa si el archivo no trae piezas con máscara. Ver changelog 386.
                 _con_diseno, _motivo_b = True, "lo eligió el usuario al cargarlo"
+            elif sabe_sin_diseno:
+                # El navegador ya miró las dos primeras mesas con la misma regla (`conteoConDiseno`).
+                _con_diseno, _motivo_b = False, "el navegador lo miró: no trae el diseño adentro"
             else:
                 _d = fitz.open(tmp)
                 _con_diseno, _motivo_b = PD.parece_molde_con_diseno(_d)
@@ -3382,6 +3386,9 @@ def subir_plantilla():
     _PID = _pid_de_request() or _get_active_producto_id()
     _ARCH = f.filename or ""
     _PIDE_B = str(request.form.get("con_diseno") or "") == "1"
+    # «0» = el navegador YA miró el archivo y no trae el diseño adentro: no se vuelve a adivinar
+    # (eran 12 s leyendo dos mesas). Sin el campo (pantallas viejas, scripts), se adivina como antes.
+    _SABE_SIN = str(request.form.get("con_diseno") or "") == "0"
     destino = _ruta_entrada("plantilla.ai", pid=_PID, original=True)
     _pq = request.files.get("paquete")        # el molde ya preparado por el navegador (PLAN_NAVEGADOR)
     _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
@@ -3458,7 +3465,7 @@ def subir_plantilla():
                 _tocar_trabajo(tid, estado="generando", progreso="leyendo el archivo")
                 res, err = _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                                                   _corresp_nueva, _con_diseno, _motivo_b, _t_subida,
-                                                  paquete=_paquete)
+                                                  paquete=_paquete, sabe_sin_diseno=_SABE_SIN)
             finally:
                 sem.release()
             if err:

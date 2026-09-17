@@ -193,6 +193,33 @@ export function contornoDeDrawing(items, r, cb, U, mesa, talle) {
     w: ancho(r), h: alto(r), mesa, talle }
 }
 
+// ─── ¿es un molde con el diseño adentro? ─────────────────────────────────────────────────────
+/**
+ * `parece_molde_con_diseno`, por mesa: cuántos recortes (que no sean el marco de la mesa) y
+ * cuántos rellenos trae. El que llama suma las mesas (el servidor mira las dos primeras) y decide:
+ * sin recortes → molde pelado (camino A); recortes sin nada pintado → tampoco; si no, camino B.
+ * Sirve con la lectura LIGERA: los rellenos ligeros también entran como `f`.
+ */
+export function conteoConDiseno(dibujos, geo) {
+  let clips = 0, pintados = 0
+  for (const d of dibujos) {
+    if (d.type === 'clip') {
+      const r = rectDe(d)
+      if (r && ancho(r) > 0 && alto(r) > 0 && !esMarcoDeMesa(r, geo.rect)) clips++
+    } else if (d.type === 'f' || d.type === 'fs') {
+      pintados++
+    }
+  }
+  return { clips, pintados }
+}
+
+/** La decisión con los conteos sumados: `{si, motivo}` con los mismos textos que el servidor. */
+export function decidirConDiseno({ clips, pintados }) {
+  if (clips === 0) return { si: false, motivo: 'el archivo no trae máscaras de recorte: parece un molde sin diseño' }
+  if (pintados === 0) return { si: false, motivo: 'el archivo trae recortes pero nada pintado adentro' }
+  return { si: true, motivo: `${clips} máscaras de recorte con dibujo adentro` }
+}
+
 // ─── las piezas de una mesa en un talle ──────────────────────────────────────────────────────
 export function piezasDeMesaCruda(dibujos, geo, mesa, talle, areaMin = 0.25, ladoMin = 0.3, completos = null) {
   const { rect, cb, U } = geo

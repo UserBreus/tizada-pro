@@ -6918,7 +6918,18 @@ export default function App() {
     setProcesando(type === 'plantilla'
       ? (grande ? 'Procesando el molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando el molde…')
       : 'Subiendo y procesando el archivo…');
+    // El molde que trae el diseño adentro se prepara EN ESTA COMPUTADORA también desde acá
+    // (Configuración → Moldería): antes esta vía mandaba el archivo pelado y el servidor tardaba
+    // minutos. `null` = molde sin diseño o DXF → lo lee el servidor como siempre.
+    let preparado = null;
+    const _pidMolde = pidCfg || productosCat.activo;
     try {
+      if (type === 'plantilla') {
+        preparado = await _prepararDosTiempos(file, file.name || 'molde', (x) => setProcesando(x.nota || 'Preparando el molde en tu computadora…'), { detectar: true });
+        formData.append('con_diseno', preparado ? '1' : '0');
+        if (preparado) formData.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
+        setProcesando('Subiendo el archivo…');
+      }
       // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Con un arte de 8 MB (y más todavía
       // cuando el sistema esté publicado) el usuario se queda mirando un cartel quieto sin saber
       // si avanza. Así ve el porcentaje real de envío y después el aviso de que se está procesando.
@@ -6939,7 +6950,9 @@ export default function App() {
       let data;
       try { data = JSON.parse(res.text || '{}'); } catch { data = {}; }
       if (!res.ok) throw new Error(data.error || "Error al procesar archivo");
-      
+      if (type === 'plantilla') data = await esperarMoldeLeido(data, (p) => setProcesando(p));
+      if (preparado) { _seguirPaginas(preparado.clave, _pidMolde, preparado.prep); preparado = null; }
+
       if (type === 'arte' && data.modo === 'separado' && (!data.auto || !data.aprobado)) {
         showMsg("Arte subido. Asigna las piezas.");
         abrirMapeo(data);
@@ -6956,6 +6969,7 @@ export default function App() {
       setMoldeReload(v => v + 1);    // y recargar la detección visual al instante
       if (type === 'plantilla') { invalidarNido(); setSembrarGen(v => v + 1); }   // registro nuevo
     } catch (err) {
+      _cancelarPaginas(preparado);
       showError(err.message);
     } finally {
       setProcesando(null);
@@ -6984,6 +6998,7 @@ export default function App() {
     const grande = subirMoldeFile.size > 3 * 1024 * 1024 || /\.dxf$/i.test(subirMoldeFile.name || '');
     setProcesando(grande ? 'Procesando tu molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando tu molde…');
     let pid = null;
+    let preparado = null;
     try {
       // Si ya tenés un artículo con ese nombre, se RE-SUBE el molde ahí en vez de crear otro:
       // cada reintento creaba un artículo nuevo y quedaban tres "Molde short" iguales.
@@ -6998,17 +7013,25 @@ export default function App() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'No se pudo crear el artículo');
       pid = d.id;
+      // Con el diseño adentro se prepara EN ESTA COMPUTADORA (medido: el servidor tardaba 2 a 5
+      // minutos por esta vía). Sin diseño o DXF: `null`, y lo lee el servidor como siempre.
+      preparado = await _prepararDosTiempos(subirMoldeFile, nombre, (x) => setProcesando(x.nota || 'Preparando tu molde en tu computadora…'), { detectar: true });
       const fd = new FormData();
       fd.append('archivo', subirMoldeFile);
       fd.append('pid', pid);
+      fd.append('con_diseno', preparado ? '1' : '0');
+      if (preparado) fd.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
+      setProcesando('Subiendo el archivo…');
       const r2 = await fetch('/api/plantilla', { method: 'POST', body: fd });
       const _j2 = await r2.json();
       if (!r2.ok) throw new Error(_j2.error || 'No se pudo procesar el molde');
       const d2 = await esperarMoldeLeido(_j2, (p) => setProcesando(p));
+      if (preparado) { _seguirPaginas(preparado.clave, pid, preparado.prep); preparado = null; }
       // MISMO aviso que en Configuración: es la ruta por la que entran los moldes de cliente
       // (DXF de cualquier lado), o sea la que MÁS necesita que se diga qué salió mal.
       avisarAltaMolde(d2);
     } catch (err) {
+      _cancelarPaginas(preparado);
       showError(err.message);
     } finally {
       setSubirMoldeBusy(false);
@@ -11598,15 +11621,21 @@ export default function App() {
   // (`prepPaginas` la muestra abajo a la izquierda). Devuelve `{zipA, clave, prep}` o null si el
   // servidor todavía prepara los moldes él. Si esta computadora no puede, tira el motivo: el molde NO
   // se manda para que lo haga el servidor.
-  const _prepararDosTiempos = async (archivo, nombre, fase) => {
+  // `detectar`: para las pantallas que aceptan cualquier molde (.ai/.pdf/.dxf, con o sin diseño):
+  // un DXF va directo al servidor; un .ai/.pdf se mira acá y, si es un molde pelado, devuelve null
+  // (lo lee el servidor). Ninguna vía deja un molde CON diseño para que lo prepare el servidor.
+  const _prepararDosTiempos = async (archivo, nombre, fase, { detectar = false } = {}) => {
     if (!(await navegadorPreparaMoldes())) return null;
+    if (detectar && /\.dxf$/i.test(archivo.name || '')) return null;
     const clave = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     fase({ fase: 'preparando', nota: 'Abriendo el archivo en tu computadora…' });
     const prep = await prepararEnDosTiempos(archivo, {
+      soloSiTraeDiseno: detectar,
       onA: (a) => fase({ fase: 'preparando', nota: a.texto }),
       onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
         pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
     });
+    if (!prep) return null;            // molde pelado: lo lee el servidor
     setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid: null, fase: 'preparando', texto: 'Separando los talles…', pct: 0 } }));
     fase({ fase: 'subiendo', pct: 0, nota: '' });
     return { zipA: prep.zipA, clave, prep };

@@ -19,6 +19,11 @@ export async function abrirEnPool(pool, bytes) {
   return r[0]                                   // {mesas, talles}
 }
 
+/** ¿El molde abierto trae el diseño adentro? `{si, motivo}` (un solo hilo lo mira). */
+export function pareceConDiseno(pool) {
+  return pool.enviar('parece', {})
+}
+
 /** FASE A. Devuelve `{talles, n, mesas: Map(mesa → {json}), geos, alta}`. */
 export async function faseA(pool, info, { avisar = null } = {}) {
   const { talles } = info

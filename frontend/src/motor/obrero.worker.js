@@ -34,6 +34,20 @@ const TAREAS = {
     doc = mupdf.Document.openDocument(bytes, 'application/pdf')
     return { mesas: doc.countPages(), talles: M.tallesDelMolde(doc) }
   },
+  // ¿Trae el diseño adentro? Se miran las dos primeras mesas, como el servidor
+  // (`parece_molde_con_diseno`). Es lo que decide si este molde se prepara acá o lo lee el
+  // servidor por el camino de siempre (molde pelado, camino A).
+  async parece({ mesas = 2 } = {}) {
+    const total = { clips: 0, pintados: 0 }
+    for (let m = 0; m < Math.min(doc.countPages(), mesas); m++) {
+      const page = doc.loadPage(m)
+      const c = M.conteoConDiseno(M.dibujosDePagina(mupdf, page, { ligero: true }), M.geometriaPagina(page))
+      page.destroy()
+      total.clips += c.clips
+      total.pintados += c.pintados
+    }
+    return M.decidirConDiseno(total)
+  },
   async contornos({ mesa, talles }) {
     const page = doc.loadPage(mesa - 1)
     const geo = M.geometriaPagina(page)

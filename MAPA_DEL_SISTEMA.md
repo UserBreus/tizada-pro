@@ -1495,6 +1495,36 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-17 (483) — 🧭 TODAS LAS VÍAS DE SUBIDA PREPARAN EL MOLDE CON DISEÑO EN EL NAVEGADOR.**
+  El usuario, al ver el hueco de 482: *«yo no quiero que demore ni que rompa las bolas si dos suben
+  moldes diferentes. Quiero que funcione de punta a punta… así se conecte una o 100 personas; para
+  eso te dije que se maneje la mayoría desde el navegador»*. Hasta acá sólo «Cargar molde con diseño
+  incluido» preparaba en la computadora; «Subir mi propio molde» (Mis artículos) y Configuración →
+  Moldería (subir/re-subir plantilla) mandaban el archivo pelado y el servidor tardaba 2-5 min.
+  **Lo que cambió:**
+  - Esas dos pantallas aceptan CUALQUIER molde (.ai/.pdf/.dxf, con o sin diseño), así que primero
+    el navegador MIRA si trae el diseño adentro con la misma regla que el servidor
+    (`parece_molde_con_diseno` → `contornos.conteoConDiseno` + `decidirConDiseno`; tarea `parece`
+    del obrero; `prepararEnDosTiempos({soloSiTraeDiseno})`; en la pantalla `_prepararDosTiempos(…,
+    {detectar: true})`). Con diseño → se prepara acá en dos tiempos y va con paquete
+    (`con_diseno=1`). Sin diseño → `con_diseno=0` y el servidor lo lee por el camino A **sin volver
+    a adivinar** (`sabe_sin_diseno`; eran 12 s). DXF → directo al servidor, como siempre.
+  - Contrato: `verificar_navegador_molde.py` compara la decisión (sí/no y motivo) con el servidor
+    en TODOS los moldes de `entrada/` (2 con diseño, 2 sin). 🔴 Trampa que se comió media hora:
+    `piezas_con_diseno._dibujos` cachea por `id(doc)`; abrir y cerrar moldes seguidos sin
+    `PD.olvidar(doc)` hace que el segundo herede los dibujos del primero (Python reusa la
+    dirección) y la decisión sale de OTRO archivo. El servidor ya llama a `olvidar`; el contrato
+    no lo hacía.
+  **Medido en la copia de prueba (Edge, sesión aparte), servidor de por medio:**
+
+  | Vía | Molde | Servidor | Todo listo |
+  |---|---|---|---|
+  | Mis artículos | LIBERO 28 MB con diseño | 0,6 s | páginas 12 s después |
+  | Mis artículos | molde sin diseño (camino A) | 2,2 s, sin adivinar | — |
+  | Configuración → Moldería, re-subir | LIBERO 28 MB con diseño | 0,4 s | páginas 9 s después |
+
+  Queda para la etapa 1b lo ya anotado: el camino A y el DXF también en el navegador.
+
 - **2026-09-17 (482) — 🧪 PROBADO CON DOS NAVEGADORES A LA VEZ (dos personas de verdad).**
   El usuario: *«¿podés abrir el sistema desde 2 navegadores diferentes y hacer prueba al mismo
   tiempo?»*. **Cómo se montó** (sirve para repetirlo): sandbox del repo en 8061

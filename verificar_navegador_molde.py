@@ -115,8 +115,42 @@ def moldes_por_defecto():
     return out + sorted(glob.glob(os.path.join(AQUI, "laboratorio", "*.ai")))
 
 
+PARECE = os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "parece.mjs")
+
+
+def comparar_deteccion():
+    """¿Trae el diseño adentro? El navegador tiene que decidir IGUAL que el servidor, porque de
+    eso depende quién prepara el molde (Mis artículos y Configuración → Moldería aceptan cualquier
+    molde; changelog 483). Se prueba con TODOS los moldes de entrada/, con y sin diseño."""
+    import pymupdf as fitz
+    import piezas_con_diseno as PD
+    lineas, ok_todo = [], True
+    for p in sorted(glob.glob(os.path.join(AQUI, "entrada", "*", "plantilla.ai"))):
+        d = fitz.open(p)
+        try:
+            si_py, motivo_py = PD.parece_molde_con_diseno(d)
+        finally:
+            # 🔴 `_dibujos` cachea por `id(doc)`: sin `olvidar`, el siguiente molde que se abra puede
+            # heredar los dibujos de éste (Python reusa la dirección) y la decisión sale de OTRO archivo.
+            PD.olvidar(d)
+            d.close()
+        r = subprocess.run(["node", PARECE, p], capture_output=True, text=True, encoding="utf-8", timeout=600)
+        if r.returncode != 0:
+            ok_todo = False
+            lineas.append(f"  ✗ {os.path.basename(os.path.dirname(p))}: Node falló: {r.stderr[-300:]}")
+            continue
+        nav = json.loads(r.stdout.strip().splitlines()[-1])
+        igual = nav.get("si") == si_py and nav.get("motivo") == motivo_py
+        ok_todo = ok_todo and igual
+        lineas.append(f"  {'✓' if igual else '✗'} {os.path.basename(os.path.dirname(p))}: "
+                      f"{'con' if si_py else 'sin'} diseño · servidor «{motivo_py}» · navegador «{nav.get('motivo')}»")
+    return ok_todo, "\n".join(lineas)
+
+
 if __name__ == "__main__":
-    ok_todo = True
+    print("· ¿trae el diseño adentro? (el navegador decide igual que el servidor)")
+    ok_todo, txt = comparar_deteccion()
+    print(txt)
     for p in (sys.argv[1:] or moldes_por_defecto()):
         print(f"· {os.path.basename(p)} ({os.path.getsize(p) / 1e6:.1f} MB)")
         ok, txt = comparar(p)

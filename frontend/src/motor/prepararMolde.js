@@ -8,7 +8,7 @@
 // El servidor no calcula nada: valida y guarda (`servidor._paquete_molde_aplicar`).
 
 import { crearPool } from './pool.js'
-import { abrirEnPool, faseA, faseB } from './molde/desplegar_paralelo.js'
+import { abrirEnPool, faseA, faseB, pareceConDiseno } from './molde/desplegar_paralelo.js'
 
 let _config = null
 const MOTOR = 'mupdf.js · navegador'
@@ -55,8 +55,14 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
  * `archivo` = el File elegido. `onA({texto})` y `onB({texto, hecho, total})` reciben el avance.
  * Devuelve (cuando termina la FASE A) `{zipA, sha1, resumen, paginas: Promise<zipB>, cancelar()}`.
  * Tira un Error con un mensaje para la pantalla si esta computadora no puede.
+ *
+ * `soloSiTraeDiseno`: las pantallas que aceptan CUALQUIER molde (Mis artículos, Configuración →
+ * Moldería) no saben de antemano si el archivo trae el diseño adentro. Con esto se mira primero
+ * (dos mesas, igual que el servidor) y, si es un molde pelado (camino A), se devuelve `null` sin
+ * preparar nada: ese lo lee el servidor por el camino de siempre. Así NINGUNA vía de subida deja
+ * un molde con diseño para que lo prepare el servidor (pedido del usuario, 2026-09-17).
  */
-export async function prepararEnDosTiempos(archivo, { onA = null, onB = null } = {}) {
+export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false } = {}) {
   let pool = null
   let cerrado = false
   const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
@@ -66,6 +72,11 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null } =
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
     pool = crearPool(hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }))
     const info = await abrirEnPool(pool, bytes)
+    if (soloSiTraeDiseno) {
+      onA && onA({ texto: 'Mirando si trae el diseño adentro…' })
+      const p = await pareceConDiseno(pool)
+      if (!p.si) { cerrar(); return null }
+    }
     const A = await faseA(pool, info, {
       avisar: (_etapa, hecho, total) => onA && onA({ texto: `Detectando las piezas · mesa ${hecho} de ${total}` }),
     })
