@@ -9,6 +9,7 @@
 // es enorme), `localizarMesas` deja las URLs del servidor como estaban: nada se degrada.
 import { traerConCache } from '../cache.js'
 import { navegadorHace } from '../vista/vista.js'
+import { registrarHilo } from '../monitor.js'
 
 const artes = new Map()             // `${pid}|${diseno}|${firma}` → {obrero, pendientes, n, urls}
 const TOPE_MB = 300
@@ -20,6 +21,7 @@ function abridor(clave) {
   a.enviar = (tipo, datos, transfer) => new Promise((ok, no) => {
     if (!a.obrero) {
       a.obrero = new Worker(new URL('../obrero.worker.js', import.meta.url), { type: 'module' })
+      registrarHilo(a.obrero, 'mesa del arte')
       a.obrero.onmessage = (e) => {
         const m = e.data || {}
         const p = a.pendientes.get(m.id)

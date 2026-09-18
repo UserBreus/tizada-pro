@@ -3,6 +3,8 @@
 // PLAN_NAVEGADOR.md. Todo es best-effort: en una ventana privada o con el espacio lleno se sigue
 // sin caché, nunca se corta nada.
 
+import { bytesBajados } from './monitor.js'
+
 const DB = 'tizada-motor'
 const STORE = 'archivos'
 
@@ -56,6 +58,7 @@ export async function traerConCache(clave, url) {
   const r = await fetch(url)
   if (!r.ok) throw new Error(`no se pudo bajar ${url} (${r.status})`)
   const bytes = new Uint8Array(await r.arrayBuffer())
+  bytesBajados(bytes.length)
   guardarCache(clave, bytes)
   return bytes
 }

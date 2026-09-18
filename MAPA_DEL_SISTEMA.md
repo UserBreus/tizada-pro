@@ -1498,6 +1498,34 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (497) — 📊 EL MONITOR (servidor + esta computadora) Y EL CHIP «TU PC: APTA / JUSTA / NO PUEDE».**
+  El usuario: *«algo para controlar y ver qué se está ejecutando en el servidor, qué en el navegador,
+  cuánta memoria, cuánta RAM, cuánto procesador… y que el usuario pueda ver si su PC está apta sin
+  hacer un proceso»*.
+  - **`monitor.py`** (nuevo): `muestra()` = CPU % del proceso y de la máquina (medidos contra la
+    muestra anterior; sin psutil: `os.times`, `GetSystemTimes`/`/proc/stat`), RAM total/libre/del
+    proceso (`K32GetProcessMemoryInfo`/`VmRSS`), hilos, cupo de procesos; `anotar(quien, que,
+    detalle, seg)` = la cola de los últimos 300 trabajos con QUIÉN los hizo. **Hooks en
+    `servidor.py`**: subida de molde (navegador si vino paquete / servidor), páginas por talle, arte
+    (paquete / analizado acá), previa generada en el servidor (`_piezas_base` miss), mesa del arte
+    dibujada por el servidor, desplegado en el servidor, `asignar_todo`, tizada (navegador / servidor).
+    **`GET /api/monitor`** (`config.ver`): medidas + `trabajos` en curso + `eventos` + interruptores.
+  - **`frontend/src/motor/monitor.js`**: hilos vivos (`registrarHilo`, envuelve `terminate`), tareas
+    en curso y las últimas 200 con ms (`pool.js` las anota), bytes bajados (`cache.js`),
+    `performance.memory` (Chrome/Edge). **`motor/apto.js`**: `evaluarEquipo()` = una medición al
+    entrar (núcleos, memoria declarada, WebAssembly/hilos, benchmark de 0,5 s) → `apta` / `justa` /
+    `no` + «molde más grande» (~3,5 MB por MB de archivo por hilo sobre el 60 % de la memoria);
+    guardado en `sessionStorage`. Pantalla: `ChipEquipo` en la cabecera (todos los usuarios;
+    tocarlo abre el detalle y «Volver a medir») y **Configuración → Monitor** (`PantallaMonitor`,
+    cada 2 s: servidor a la izquierda con procesador/RAM/procesos/paquetes/en curso/últimos trabajos
+    con rótulo verde «navegador» o amarillo «servidor»; esta computadora a la derecha con núcleos,
+    memoria, puntos, memoria de la página, hilos vivos, bajado, tareas). Anclas `chip-equipo`,
+    `cfg-monitor`, `monitor-pantalla` en el diccionario. Contrato `verificar_monitor.py`.
+    Verificado en Edge (sandbox 8061): chip «Tu PC: apta» (12 núcleos, 270 puntos, ~667 MB) y el
+    monitor con las tareas `pieza_a`/`contexto_a` de una previa listadas con sus ms y el servidor
+    en 0,1 % de CPU. ⚠️ `navigator.deviceMemory` en Edge informa 32 (Chrome topa en 8): se muestra
+    «o más» sólo cuando dice 8.
+
 - **2026-09-18 (496) — 🧹 LOS TRES PENDIENTES DEL PLAN_NAVEGADOR, CERRADOS: nombres unificados, no re-subir por SHA-1, «el servidor no calcula» desde la pantalla.**
   El usuario: *«hacé esos tres puntos que faltan»*.
   - **Un solo lugar para los nombres como Python** — `frontend/src/motor/nombres.js`: `splitPy`,

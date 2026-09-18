@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **172 endpoints**. Generado automáticamente del código.
+Total: **173 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -124,6 +124,7 @@ Total: **172 endpoints**. Generado automáticamente del código.
 | GET | `/api/productos/<pid>/arte_contexto` | Lo que el navegador necesita para analizar un arte separado ÉL (etapa 3, camino A): el registro, el mapeo FIJO del molde, el alcance de las variables, | — |
 | GET | `/api/productos/<pid>/objeto_agregado/<oid>` | El archivo de un objeto agregado (PNG/SVG/PDF/AI), para el motor del navegador. | q: diseno |
 | POST | `/api/productos/<pid>/editables_cfg` | `_editables_cfg(prod, diseño, override)`: la config de los editables del catálogo con el AJUSTE del pedido encima (lo que la persona movió sin guardar | body: diseno, editables |
+| GET | `/api/monitor` | QUÉ ESTÁ HACIENDO EL SERVIDOR Y CUÁNTO LE CUESTA (pedido del usuario 2026-09-18): CPU y RAM de la máquina y del proceso, hilos, cupos, los trabajos en | — |
 
 ## Plantilla (molde)
 

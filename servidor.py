@@ -739,6 +739,7 @@ def salud():
 # Ver `actualizaciones.py`, `actualizador.py` y PLAN_PUBLICACION.md §Etapa 2.
 import actualizaciones as ACT
 import registro as LOG
+import monitor as MON          # qué hace el servidor y cuánto le cuesta (`/api/monitor`)
 
 # 🔴 TODO lo que el servidor imprima queda guardado en `logs/consola.log` con su fecha y hora.
 # Es lo mismo que se ve en la ventana de PowerShell, pero que sobrevive a cerrarla — y que existe
@@ -3471,6 +3472,8 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         _en_hilo(lambda: _prewarm_desplegado(destino, list(alta.get("talles") or []), alta))
     print(f"  [tiempos] subida de {_ARCH}: {time.time() - _t_subida:.1f}s"
           + (f" ({_motivo_b})" if _con_diseno else ""), flush=True)
+    MON.anotar("navegador" if paquete else "servidor", "molde", f"{_ARCH} · {'con' if _con_diseno else 'sin'} diseño"
+               + (" (lo preparó el navegador; el servidor guardó)" if paquete else " (lo leyó el servidor)"), time.time() - _t_subida)
     return resumen, None
 
 
@@ -3629,6 +3632,7 @@ def subir_paginas_plantilla():
     except Exception:
         pass
     print(f"  [tiempos] páginas por talle de {pid}: guardadas (las preparó el navegador)", flush=True)
+    MON.anotar("navegador", "molde (páginas por talle)", pid)
     return jsonify({"ok": True})
 
 
@@ -3786,6 +3790,36 @@ def _archivo_subido(campo="archivo"):
         if ruta:
             return _ArchivoLocal(ruta, request.form.get(campo + "_nombre") or os.path.basename(ruta))
     return None
+
+
+@app.get("/api/monitor")
+def monitor_estado():
+    """QUÉ ESTÁ HACIENDO EL SERVIDOR Y CUÁNTO LE CUESTA (pedido del usuario 2026-09-18): CPU y RAM
+    de la máquina y del proceso, hilos, cupos, los trabajos en curso y los últimos trabajos con
+    QUIÉN los hizo (navegador o servidor) y cuánto tardaron. Lo lee Configuración → Monitor."""
+    _u = _usuario_actual()
+    if _u and "config.ver" not in (_u.get("permisos") or []):
+        return jsonify({"error": "No tenés permiso para ver la configuración (config.ver)."}), 403
+    m = MON.muestra()
+    ahora = time.time()
+    activos = []
+    for tid, t in list(trabajos.items()):
+        if t.get("estado") in ("listo", "error", "cancelado"):
+            continue
+        activos.append({"id": tid, "tipo": t.get("tipo") or "tizada", "estado": t.get("estado"), "progreso": t.get("progreso"),
+                        "hace_seg": round(ahora - float(t.get("creado") or ahora)), "molde": t.get("producto_nombre"),
+                        "navegador": bool((t.get("resultado") or {}).get("navegador"))})
+    try:
+        _paq_usados = _SEM_PAQUETE._initial_value - _SEM_PAQUETE._value
+    except Exception:
+        _paq_usados = None
+    return jsonify({**m, "trabajos": activos, "eventos": MON.eventos(60),
+                    "paquetes_en_curso": _paq_usados, "paquetes_en_cola": _EN_COLA_PAQUETE[0],
+                    "navegador": {"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0",
+                                  "vista": _navegador_dibuja_vista(),
+                                  "arte": str(os.environ.get("TIZADA_NAVEGADOR_ARTE") or "1") != "0",
+                                  "tizada": str(os.environ.get("TIZADA_NAVEGADOR_TIZADA") or "1") != "0",
+                                  "solo": _solo_navegador()}})
 
 
 @app.get("/api/archivos/tengo")
@@ -3957,7 +3991,9 @@ def _desplegar_en_fondo(path):
                 talles = PD.talles_del_molde(d)
             finally:
                 d.close()
+            _t_d = time.time()
             _prewarm_desplegado(path, talles, None)
+            MON.anotar("servidor", "molde (desplegado)", os.path.basename(os.path.dirname(path)), time.time() - _t_d)
         except Exception as e:
             print(f"[camino B] no se pudo rehacer el desplegado de {path}: {e}")
         finally:
@@ -5885,7 +5921,11 @@ def subir_arte():
     if _solo_navegador():
         return jsonify({"error": "El arte se analiza en tu computadora, no en el servidor (volvé a cargarlo "
                                  "desde la pantalla; si tu computadora no puede, usá una con más memoria)."}), 409
-    return _subir_arte_analizar(destino, plantilla, f, sub)
+    _t_arte = time.time()
+    try:
+        return _subir_arte_analizar(destino, plantilla, f, sub)
+    finally:
+        MON.anotar("servidor", "arte", f"{f.filename} ({sub or 'principal'}) · lo analizó el servidor", time.time() - _t_arte)
 
 
 def _subir_arte_paquete(destino, plantilla, f, sub, ruta_zip):
@@ -5953,8 +5993,10 @@ def _subir_arte_paquete(destino, plantilla, f, sub, ruta_zip):
         else:
             det.update({"auto": False, "faltan": val.get("faltan") or []})
         print(f"  [tiempos] arte {sub or 'principal'}: guardado (lo preparó el navegador)", flush=True)
+        MON.anotar("navegador", "arte", f"{f.filename} ({sub or 'principal'}) · lo analizó el navegador; el servidor guardó")
         return jsonify(det)
     print(f"  [tiempos] arte {sub or 'principal'}: guardado (lo preparó el navegador)", flush=True)
+    MON.anotar("navegador", "arte", f"{f.filename} ({sub or 'principal'}) · lo analizó el navegador; el servidor guardó")
     return jsonify(val)
 
 
@@ -6162,6 +6204,7 @@ def arte_mesa_img():
                 with open(tmp, "w", encoding="utf-8", newline="") as f:
                     f.write(pg.get_svg_image())
                 os.replace(tmp, dest)
+            MON.anotar("servidor", "vista (mesa del arte)", f"mesa {mesa} de {sub or 'principal'}")
         except Exception as e:
             return jsonify({"error": f"no se pudo dibujar la mesa: {e}"}), 500
     r = send_file(dest, mimetype="image/svg+xml", conditional=True)
@@ -6522,6 +6565,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
         try: _pers = (MP.extraer_personalizacion(pl) if _cb else MP.extraer_personalizacion(arte))
         except Exception: _pers = {}
         tmp = tempfile.mkdtemp()
+        _t_pv = time.time()
         try:
             ppt = MP.generar_pedido(pl, (None if _cb else arte), reg, _pers, prendas,
                                     _fuentes_para(pid, _reempl), tmp,
@@ -6576,6 +6620,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
                     except Exception: pass
             json.dump({"clave": clave, "piezas": piezas_man},
                       open(manifest_path, "w", encoding="utf-8"), ensure_ascii=False)
+            MON.anotar("servidor", "previa", f"{pid} · {diseno or 'principal'} · {variante} · talle {talle} ({len(out)} piezas)", time.time() - _t_pv)
             return {"piezas": out, "talle": talle, "cache": False}
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -6848,6 +6893,7 @@ def arte_asignar_todo():
     mapeo = {k: int(v) for k, v in (cuerpo.get("mapeo") or {}).items() if v}
     pid = cuerpo.get("pid") or _get_active_producto_id()
     prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    MON.anotar("servidor", "previas (todos los talles)", f"{pid} · {diseno or 'principal'} · {variante}")
     reg = _cargar("registro_producto.json", pid)
     if not prod or not reg:
         return jsonify({"error": "falta producto/registro"}), 409
@@ -10390,6 +10436,7 @@ def paquete_pedido():
             print(f"  [!] no se pudo guardar pedido.json ({_e_pj})", flush=True)
         _tocar_trabajo(tid, resultado=res, estado="listo", progreso="")
         print(f"  [tiempos] pedido {tid}: guardado (lo generó el navegador)", flush=True)
+        MON.anotar("navegador", "tizada", f"pedido {tid} · {res.get('piezas')} piezas · lo generó el navegador; el servidor guardó", res.get("duracion_s"))
         return jsonify({"id": tid, "resultado": res})
     except Exception as e:
         _tocar_trabajo(tid, estado="error", error=f"{e}")
@@ -10643,6 +10690,7 @@ def generar_multi():
             _marca("ficha")
             print("  [tiempos] pedido " + tid + ": " + " · ".join(f"{k}: {v:.0f}s" for k, v in _crono.items())
                   + f" · total: {sum(_crono.values()):.0f}s", flush=True)
+            MON.anotar("servidor", "tizada", f"pedido {tid} · lo generó el servidor", sum(_crono.values()))
             # 🔴 LO MISMO ACÁ: el testigo del pedido no puede marcar «error» una tizada que ya
             # está completa y ripeada en disco (auditoría 2026-09-14).
             try:

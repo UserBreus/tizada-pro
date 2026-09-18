@@ -74,7 +74,7 @@ export function puntosDePotencia(ms = 800) {
   return Math.round(porMs / 900)             // ~90.000 ops/ms en la PC de referencia → 100 puntos
 }
 
-const UMBRAL_PUNTOS = 12                    // por debajo, un molde de 100 MB tarda más de un minuto
+export const UMBRAL_PUNTOS = 12                    // por debajo, un molde de 100 MB tarda más de un minuto
 
 /**
  * ¿Se puede hacer este trabajo acá? `trabajo` = {tipo: 'molde'|'tizada', mb, hilos?, hojas?}.

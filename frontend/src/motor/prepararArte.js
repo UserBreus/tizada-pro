@@ -8,6 +8,7 @@
 import { navegadorHace } from './vista/vista.js'
 import { puedeHacer } from './capacidad.js'
 import { traerConCache } from './cache.js'
+import { registrarHilo } from './monitor.js'
 
 async function json(url, opts) {
   const r = await fetch(url, opts)
@@ -33,6 +34,7 @@ export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rut
     : null
   const bytes = new Uint8Array(await archivo.arrayBuffer())
   const w = new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' })
+  registrarHilo(w, 'arte')
   try {
     const r = await new Promise((ok, no) => {
       w.onmessage = (e) => { const m = e.data || {}; m.error ? no(new Error(m.error)) : ok(m.valor) }

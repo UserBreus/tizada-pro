@@ -9,6 +9,8 @@
 // apagada), se devuelve `null` y la pantalla sigue usando las imágenes del servidor. Nada se
 // degrada: el dibujo es el mismo (contrato `verificar_navegador_vista.py`).
 
+import { registrarHilo } from '../monitor.js'
+
 const DB = 'tizada-vista'
 const ARCHIVOS = 'archivos'      // huella → bytes del PDF
 const DIBUJOS = 'dibujos'        // huella|página|ancho|recorte → PNG
@@ -84,6 +86,7 @@ class Vista {
   _obrero() {
     if (this.obrero) return this.obrero
     this.obrero = new Worker(new URL('../vista.worker.js', import.meta.url), { type: 'module' })
+    registrarHilo(this.obrero, 'vista')
     this.obrero.onmessage = (e) => {
       const { id, ok, valor, error } = e.data || {}
       const p = this.pendientes.get(id)

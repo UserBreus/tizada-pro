@@ -10,6 +10,8 @@ import { navegadorDibujaVista, abrirVista, cerrarVistas } from './motor/vista/vi
 import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
+import { estado as estadoNavegador } from './motor/monitor.js';   // qué está haciendo esta computadora
+import { evaluarEquipo } from './motor/apto.js';   // ¿esta computadora está apta?
 import { localizarMesas, cerrarArtes } from './motor/arte/mesa.js';   // la mesa del arte dibujada acá (camino A)
 import { generarPedidoEnNavegador } from './motor/pedido/generar.js';
 import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
@@ -4276,6 +4278,184 @@ function AvisoActualizacion() {
  * llega por SSH, así que el diagnóstico dependió de atar cabos por las horas. Ahora cada cosa que
  * sale mal deja escrito **qué pasó y por qué**, acá adentro — de este sistema y del PUBLICADO.
  */
+// ── ¿ESTA COMPUTADORA ESTÁ APTA? (pedido del usuario 2026-09-18) ─────────────────────────────
+// El veredicto se mide una vez al entrar (menos de un segundo, `motor/apto.js`) y queda a la vista
+// en la cabecera: verde = apta, amarillo = justa, rojo = no puede. Tocarlo muestra el detalle.
+function ChipEquipo() {
+  const [v, setV] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+  useEffect(() => {
+    // fuera del primer pintado: el benchmark ocupa medio segundo de CPU
+    const t = setTimeout(() => { try { setV(evaluarEquipo()); } catch { setV(null); } }, 800);
+    return () => clearTimeout(t);
+  }, []);
+  if (!v) return null;
+  const col = v.nivel === 'apta' ? 'var(--success, #34d399)' : v.nivel === 'justa' ? 'var(--warning, #f59e0b)' : 'var(--error, #ff6b6b)';
+  const txt = v.nivel === 'apta' ? 'Tu PC: apta' : v.nivel === 'justa' ? 'Tu PC: justa' : 'Tu PC: no puede';
+  return (
+    <div style={{ position: 'relative' }}>
+      <button data-tour="chip-equipo" onClick={() => setAbierto(a => !a)} title={v.motivo}
+        style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
+          border: `1px solid ${col}`, background: 'rgba(255,255,255,0.04)', color: col }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, boxShadow: `0 0 8px ${col}` }} />{txt}
+      </button>
+      {abierto && (
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 340, zIndex: 50, padding: 14, borderRadius: 12,
+          background: 'var(--bg-card, #14181c)', border: '1px solid var(--border-light)', boxShadow: '0 16px 40px rgba(0,0,0,0.5)', fontSize: 12.5, lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 800, color: col, marginBottom: 6 }}>{txt}</div>
+          <p style={{ margin: '0 0 10px', color: 'var(--text-secondary)' }}>{v.motivo}</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', color: 'var(--text-secondary)' }}>
+            <span>Núcleos</span><b style={{ color: 'var(--text-primary)' }}>{v.nucleos ?? '—'}</b>
+            <span>Memoria (según el navegador)</span><b style={{ color: 'var(--text-primary)' }}>{v.memoriaGb ? `${v.memoriaGb} GB${v.memoriaGb === 8 ? ' o más' : ''}` : 'no la informa'}</b>
+            <span>Puntos de potencia</span><b style={{ color: 'var(--text-primary)' }}>{v.puntos}</b>
+            <span>Hilos que va a usar</span><b style={{ color: 'var(--text-primary)' }}>{v.hilos}</b>
+            <span>Molde más grande</span><b style={{ color: 'var(--text-primary)' }}>{v.moldeMaxMb ? `~${v.moldeMaxMb} MB` : '—'}</b>
+          </div>
+          <button className="btn ghost" style={{ marginTop: 10, fontSize: 12, padding: '5px 10px' }}
+            onClick={() => { try { setV(evaluarEquipo(true)); } catch { /* nada */ } }}>Volver a medir</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── EL MONITOR: qué hace el servidor, qué hace esta computadora y cuánto cuesta ──────────────
+// las tareas de los hilos, con nombre para personas (la clave es el `tipo` de `obrero.worker.js`)
+const NOMBRE_TAREA = {
+  abrir: 'abrir el molde', parece: 'mirar si trae el diseño', contornos: 'contornos de una mesa', preparar: 'cortar una mesa por talle',
+  talle: 'páginas de un talle', armar: 'PDF de una mesa', paquete: 'armar el paquete', cerrar: 'cerrar',
+  mesa_abrir: 'abrir una mesa', fuentes: 'tipografías', pieza: 'una pieza (molde con diseño)', ficha: 'ficha técnica', hoja: 'hoja de tizada',
+  dxf_convertir: 'convertir el DXF', alta_a: 'alta del molde', molde_a_abrir: 'abrir el molde pelado', contexto_a: 'preparar el arte',
+  pieza_a: 'una pieza (arte separado)', cerrar_a: 'cerrar', arte_preparar: 'analizar el arte', arte_abrir: 'abrir el arte', arte_svg: 'mesa del arte',
+};
+const nombreTarea = (t) => NOMBRE_TAREA[t] || t;
+
+function PantallaMonitor({ volver }) {
+  const [srv, setSrv] = useState(null);
+  const [err, setErr] = useState(null);
+  const [nav, setNav] = useState(() => { try { return estadoNavegador(); } catch { return null; } });
+  const [apto] = useState(() => { try { return evaluarEquipo(); } catch { return null; } });
+  useEffect(() => {
+    let vivo = true;
+    const tick = async () => {
+      try {
+        const r = await fetch(rutaApi('/api/monitor'));
+        const d = await r.json();
+        if (!vivo) return;
+        if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); return; }
+        setErr(null); setSrv(d);
+      } catch (e) { if (vivo) setErr(e.message); }
+      try { if (vivo) setNav(estadoNavegador()); } catch { /* nada */ }
+    };
+    tick();
+    const t = setInterval(tick, 2000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+  const mb = (x) => (x == null ? '—' : x >= 1024 ? `${(x / 1024).toFixed(1)} GB` : `${Math.round(x)} MB`);
+  const pct = (x) => (x == null ? '—' : `${x} %`);
+  const hora = (t) => new Date(t * 1000).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const Barra = ({ v, col }) => (
+    <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 4 }}>
+      <div style={{ width: `${Math.max(0, Math.min(100, v || 0))}%`, height: '100%', background: col || 'var(--accent)', transition: 'width .4s' }} />
+    </div>
+  );
+  const Dato = ({ titulo, valor, sub, barra, col }) => (
+    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{titulo}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, marginTop: 2 }}>{valor}</div>
+      {sub && <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{sub}</div>}
+      {barra != null && <Barra v={barra} col={col} />}
+    </div>
+  );
+  const ramUsadaPct = srv && srv.ram_total_mb && srv.ram_libre_mb != null ? Math.round(100 * (srv.ram_total_mb - srv.ram_libre_mb) / srv.ram_total_mb) : null;
+  const colApto = apto ? (apto.nivel === 'apta' ? 'var(--success, #34d399)' : apto.nivel === 'justa' ? 'var(--warning, #f59e0b)' : 'var(--error, #ff6b6b)') : 'var(--text-muted)';
+  return (
+    <div className="panel animate-fade" data-tour="monitor-pantalla">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginBottom: 6 }}>
+        <button className="btn ghost" onClick={volver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '7px 12px' }}>⬅ Configuración</button>
+        <h2 style={{ margin: 0, fontSize: 20 }}>Monitor</h2>
+        {srv && srv.navegador && (
+          <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, padding: '5px 11px', borderRadius: 999,
+            color: srv.navegador.solo ? 'var(--success, #34d399)' : 'var(--warning, #f59e0b)',
+            background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-light)' }}>
+            {srv.navegador.solo ? 'El servidor no calcula: todo en el navegador' : 'Lo pesado en el navegador · el servidor de respaldo'}
+          </span>
+        )}
+      </div>
+      <p style={{ color: 'var(--text-secondary)', fontSize: 12.5, margin: '0 0 16px' }}>
+        Qué está haciendo el servidor y qué está haciendo esta computadora, en vivo (cada 2 segundos).
+      </p>
+      {err && <p style={{ color: 'var(--error, #ff6b6b)' }}>No se pudo leer el servidor: {err}</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'start' }}>
+
+        {/* ── EL SERVIDOR ── */}
+        <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.18)' }}>
+          <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Servidor {srv && <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}>· {srv.nucleos} núcleos · arrancó {hora(srv.arranque)}</span>}</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Dato titulo="Procesador (máquina)" valor={pct(srv?.cpu_maquina_pct)} barra={srv?.cpu_maquina_pct} col={(srv?.cpu_maquina_pct || 0) > 80 ? 'var(--error, #ff6b6b)' : undefined} />
+            <Dato titulo="Procesador (TIZADA)" valor={pct(srv?.cpu_proceso_pct)} barra={srv?.cpu_proceso_pct} />
+            <Dato titulo="RAM de la máquina" valor={srv ? `${mb(srv.ram_total_mb != null && srv.ram_libre_mb != null ? srv.ram_total_mb - srv.ram_libre_mb : null)}` : '—'}
+              sub={srv ? `de ${mb(srv.ram_total_mb)} · libre ${mb(srv.ram_libre_mb)}` : ''} barra={ramUsadaPct} col={(ramUsadaPct || 0) > 85 ? 'var(--error, #ff6b6b)' : undefined} />
+            <Dato titulo="RAM de TIZADA" valor={mb(srv?.proceso_mb)} sub={srv ? `${srv.hilos} hilos` : ''} />
+            <Dato titulo="Procesos de trabajo" valor={srv ? `${srv.cupo_usado} / ${srv.cupo_procesos}` : '—'} sub="pesados (motor en el servidor)" />
+            <Dato titulo="Paquetes guardándose" valor={srv ? `${srv.paquetes_en_curso ?? 0}` : '—'} sub={srv && srv.paquetes_en_cola ? `${srv.paquetes_en_cola} en cola` : 'moldes que llegan preparados'} />
+          </div>
+          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>En curso ahora</h4>
+          {(!srv || !srv.trabajos.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Nada: el servidor está libre.</p> : (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
+              {srv.trabajos.map(t => <li key={t.id}>{t.tipo} {t.molde ? `«${t.molde}»` : ''} · {t.estado}{t.progreso ? ` · ${t.progreso}` : ''} · hace {t.hace_seg} s{t.navegador ? ' · lo genera el navegador' : ''}</li>)}
+            </ul>
+          )}
+          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>Últimos trabajos · quién los hizo</h4>
+          {(!srv || !srv.eventos.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Todavía nada desde que arrancó.</p> : (
+            <div style={{ maxHeight: 320, overflowY: 'auto', fontSize: 12.5 }}>
+              {srv.eventos.map((e, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'baseline' }}>
+                  <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{hora(e.t)}</span>
+                  <span style={{ flexShrink: 0, fontWeight: 800, fontSize: 11, padding: '1px 7px', borderRadius: 999,
+                    color: e.quien === 'navegador' ? 'var(--success, #34d399)' : 'var(--warning, #f59e0b)',
+                    background: e.quien === 'navegador' ? 'rgba(52,211,153,0.12)' : 'rgba(245,158,11,0.12)' }}>{e.quien}</span>
+                  <span style={{ minWidth: 0 }}><b>{e.que}</b>{e.detalle ? ` · ${e.detalle}` : ''}{e.seg != null ? ` · ${e.seg} s` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── ESTA COMPUTADORA ── */}
+        <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.18)' }}>
+          <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Esta computadora {apto && <span style={{ fontWeight: 800, fontSize: 12, color: colApto }}>· {apto.nivel === 'apta' ? 'apta' : apto.nivel === 'justa' ? 'justa' : 'no puede'}</span>}</h3>
+          {apto && <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px' }}>{apto.motivo}</p>}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <Dato titulo="Núcleos" valor={nav?.nucleos ?? '—'} sub={apto ? `usa ${apto.hilos} hilos` : ''} />
+            <Dato titulo="Memoria" valor={nav?.memoria_gb ? `${nav.memoria_gb} GB${nav.memoria_gb === 8 ? '+' : ''}` : '—'} sub="según el navegador" />
+            <Dato titulo="Puntos de potencia" valor={apto ? apto.puntos : '—'} sub="hacen falta 12" />
+            <Dato titulo="Memoria de la página" valor={mb(nav?.js_usado_mb)} sub={nav?.js_tope_mb ? `tope ${mb(nav.js_tope_mb)}` : 'sólo Chrome/Edge la cuentan'}
+              barra={nav?.js_tope_mb ? Math.round(100 * nav.js_usado_mb / nav.js_tope_mb) : null} />
+            <Dato titulo="Hilos de trabajo vivos" valor={nav ? nav.hilos.length : '—'} sub={nav && nav.hilos.length ? nav.hilos.map(h => h.nombre).join(', ') : 'ninguno abierto'} />
+            <Dato titulo="Bajado del servidor" valor={mb(nav ? nav.bytes_bajados / 1048576 : null)} sub={nav ? `${nav.tareas_total} tareas hechas` : ''} />
+          </div>
+          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>En curso ahora</h4>
+          {(!nav || !nav.en_curso.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Nada: los hilos están libres.</p> : (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>{nav.en_curso.map((t, i) => <li key={i}>{nombreTarea(t.tipo)} · {(t.ms / 1000).toFixed(1)} s</li>)}</ul>
+          )}
+          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>Últimas tareas de esta computadora</h4>
+          {(!nav || !nav.tareas.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Todavía nada en esta pestaña.</p> : (
+            <div style={{ maxHeight: 320, overflowY: 'auto', fontSize: 12.5 }}>
+              {nav.tareas.map((t, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{new Date(t.t).toLocaleTimeString('es-UY')}</span>
+                  <b>{nombreTarea(t.tipo)}</b><span style={{ marginLeft: 'auto', color: t.ok ? 'var(--text-secondary)' : 'var(--error, #ff6b6b)' }}>{t.ok ? `${t.ms} ms` : 'falló'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PantallaRegistro({ volver }) {
   const [eventos, setEventos] = useState([]);
   const [resumen, setResumen] = useState(null);
@@ -13197,6 +13377,7 @@ export default function App() {
               {/* AYUDA para quien NO tiene la barra lateral (pedido del usuario 2026-08-28): el
                   operario trabaja en este panel y no llegaba al menú de tutoriales. Mismo
                   `data-tour` que el de la barra: nunca están los dos a la vez. */}
+              <ChipEquipo />
               <button data-tour="nav-ayuda" onClick={() => setAyudaAbierta(true)}
                 title="Te guío paso a paso, marcándote qué tocar"
                 style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 13px',
@@ -16936,6 +17117,19 @@ export default function App() {
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Publicación</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
                         Mandar las mejoras al sistema publicado en internet. Podés hacerlo ahora o dejarlo programado para la madrugada.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* EL MONITOR (2026-09-18): qué hace el servidor, qué hace esta computadora y cuánto cuesta. */}
+                  <div className="crm-config-card cyan" data-tour="cfg-monitor" onClick={() => setAdminSubView('monitor')}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="distribucion" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Monitor</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        Qué está haciendo el servidor y qué esta computadora: procesador, memoria, trabajos en curso y quién hizo cada uno.
                       </p>
                     </div>
                   </div>
@@ -21741,6 +21935,7 @@ export default function App() {
             {/* Perfil de color (ICC) */}
             {adminSubView === 'publicacion' && <PantallaPublicacion volver={() => setAdminSubView('dashboard')} />}
             {adminSubView === 'registro' && <PantallaRegistro volver={() => setAdminSubView('dashboard')} />}
+            {adminSubView === 'monitor' && <PantallaMonitor volver={() => setAdminSubView('dashboard')} />}
 
             {adminSubView === 'perfil' && (
               <div className="panel animate-fade">

@@ -358,6 +358,21 @@ export const DICCIONARIO = {
     que: 'La altura de la letra, en milímetros, del texto que se imprime al borde de cada pieza (talle, nombre y número).',
     como: 'Escribí el tamaño de letra en milímetros.',
   },
+  'cfg-monitor': {
+    nombre: 'Monitor',
+    que: 'Qué está haciendo el servidor y qué esta computadora: procesador, memoria, trabajos en curso y quién hizo cada uno (el navegador o el servidor).',
+    como: 'Tocá la tarjeta. Se actualiza solo cada dos segundos.',
+  },
+  'monitor-pantalla': {
+    nombre: 'Monitor',
+    que: 'A la izquierda, el servidor; a la derecha, esta computadora. Verde = lo hizo el navegador; amarillo = lo hizo el servidor.',
+    como: 'Mirá; no hay nada que tocar.',
+  },
+  'chip-equipo': {
+    nombre: 'Tu PC',
+    que: 'Si esta computadora está apta para preparar moldes y tizadas rápido (verde), justa (amarillo) o no puede (rojo). Se mide sola al entrar.',
+    como: 'Tocalo para ver el detalle o volver a medir.',
+  },
   'cfgb-solo-navegador': {
     nombre: 'El servidor no calcula',
     que: 'Si todo lo pesado (preparar moldes, analizar diseños, previas y tizadas) lo hace la computadora de cada persona, y el servidor sólo valida y guarda.',

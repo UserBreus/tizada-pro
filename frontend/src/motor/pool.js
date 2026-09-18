@@ -4,12 +4,15 @@
 // va al hilo con menos trabajo pendiente. `crearObrero()` devuelve algo con la forma de un Worker
 // del navegador (`postMessage`, `onmessage`, `terminate`); en Node se adapta `worker_threads`.
 
+import { registrarHilo, tareaEmpieza, tareaTermina } from './monitor.js'
+
 export function crearPool(n, crearObrero) {
   const obreros = []
   let siguienteId = 1
   const pendientes = new Map()      // id → {resolve, reject, obrero}
   for (let i = 0; i < n; i++) {
     const w = crearObrero()
+    registrarHilo(w, 'obrero')
     const o = { w, carga: 0, i }
     w.onmessage = (ev) => {
       const m = ev.data !== undefined ? ev.data : ev
@@ -17,6 +20,7 @@ export function crearPool(n, crearObrero) {
       if (!p) return
       pendientes.delete(m.id)
       o.carga--
+      tareaTermina(p.mon, !m.error)
       if (m.error) {
         const err = new Error(m.error)
         err.pila = m.pila
@@ -30,7 +34,7 @@ export function crearPool(n, crearObrero) {
   }
   const mandar = (o, tipo, datos, transfer) => new Promise((resolve, reject) => {
     const id = siguienteId++
-    pendientes.set(id, { resolve, reject, obrero: o })
+    pendientes.set(id, { resolve, reject, obrero: o, mon: tareaEmpieza(tipo) })
     o.carga++
     o.w.postMessage({ id, tipo, datos }, transfer || [])
   })
