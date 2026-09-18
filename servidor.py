@@ -11386,8 +11386,19 @@ def limpiar_efimeros():
     # Igual que el barrido: el candado se suelta antes de los `rmtree` (decenas de segundos con
     # el caché de piezas) para no dejar la configuración del taller esperando.
     _soltar_edicion_catalogo()
-    for pid in borrados:
-        _borrar_archivos_y_base(pid, efimero=True)
+    # 🔴 LO PESADO, DE FONDO (reporte del usuario 2026-09-18: «¿por qué demora tanto borrar el pedido
+    # anterior?»). Borrar las carpetas de un molde con diseño (el archivo de 100 MB, el desplegado
+    # por talle, el caché de piezas) tarda decenas de segundos, y la pantalla esperaba esta
+    # respuesta con el cartel «Borrando el pedido» tapando todo. El molde YA salió del catálogo
+    # (eso es lo que la pantalla necesita); los archivos y la base se borran en un hilo aparte y
+    # el Monitor anota cuánto tardó.
+    def _borrar_de_fondo(_pids):
+        for _p in _pids:
+            _t = time.time()
+            _borrar_archivos_y_base(_p, efimero=True)
+            MON.anotar("servidor", "borrar molde", f"{_p} (efímero, con «Nuevo pedido»)", time.time() - _t)
+    if borrados:
+        _en_hilo(lambda: _borrar_de_fondo(list(borrados)))
     if ignorados:
         print(f"[limpiar_efimeros] no se tocaron (no son efímeros o están generando): {ignorados}")
     return jsonify({"ok": True, "borrados": borrados, "ignorados": ignorados})

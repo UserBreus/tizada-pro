@@ -1498,6 +1498,14 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (501) — 🐌 «NUEVO PEDIDO» TARDABA EN BORRAR EL ANTERIOR.** `/api/pedido/limpiar_efimeros`
+  borraba las carpetas de cada molde con diseño (100 MB de archivo, el desplegado por talle, el
+  caché de piezas: decenas de segundos) DENTRO del request, y la pantalla esperaba con el cartel
+  «Borrando el pedido». Ahora el molde sale del catálogo al instante y los archivos y la base se
+  borran en un hilo de fondo (`_borrar_archivos_y_base` por `_en_hilo`; el Monitor anota «borrar
+  molde» con su duración). Nada cambia en qué se borra ni en las reglas (efímeros propios, no
+  generando).
+
 - **2026-09-18 (500) — 🖼️ EL VISOR ES UNA REPRESENTACIÓN, Y SE ARMA ENTERO DE UNA VEZ.** El usuario:
   *«cuando la crea ya debe dejar todo armado, que no importe si hacemos zoom… el visor es sólo para ver
   qué se va a descargar, como la foto de una remera en una web: se ve real y nítida para ver errores,
