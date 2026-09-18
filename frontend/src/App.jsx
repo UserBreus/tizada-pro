@@ -6,7 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
-import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, TILE_PX } from './motor/vista/vista.js';
+import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
@@ -2822,7 +2822,7 @@ function DetalleFuente({ f, onVolver }) {
  * de acá, sin pedirle nada más al servidor; si no, se devuelve la del servidor, como siempre. El
  * dibujo es el mismo: contrato `verificar_navegador_vista.py`.
  */
-function useVistaLocal(idTrabajo) {
+function useVistaLocal(idTrabajo, pxcm = null) {
   const [vistas, setVistas] = useState({});        // archivo → Vista abierta
   const [urls, setUrls] = useState({});            // clave → object URL ya dibujada
   const pidiendo = useRef(new Set());
@@ -2843,9 +2843,9 @@ function useVistaLocal(idTrabajo) {
       });
       if (v) {
         setVistas(x => ({ ...x, [archivo]: v }));
-        // TODO DE UNA VEZ (2026-09-18): los generales y los recortes en alta de todas las mesas se
-        // dibujan de fondo apenas se abre; lo que la pantalla pide se adelanta (lo más nuevo primero)
-        precalentarTodo(v, { tiles: !/FICHA_TECNICA/i.test(archivo), anchos: /FICHA_TECNICA/i.test(archivo) ? [Math.round(595.276 * 2)] : [300, 1200] });
+        // TODO DE UNA VEZ (2026-09-18): la foto de cada mesa (una sola calidad) se dibuja de fondo
+        // apenas se abre; lo que la pantalla pide se adelanta (lo más nuevo primero)
+        precalentarTodo(v, /FICHA_TECNICA/i.test(archivo) ? { anchos: [Math.round(595.276 * 2)] } : { pxcm });
       }
     } catch { /* lo dibuja el servidor */ }
   };
@@ -2857,22 +2857,18 @@ function useVistaLocal(idTrabajo) {
       .then(u => setUrls(x => ({ ...x, [clave]: u })))
       .catch(() => { /* lo dibuja el servidor */ });
   };
+  // `ancho`: un número de píxeles, o 'foto' = LA FOTO de esa mesa a la calidad del pedido (`pxcm`).
+  // UNA SOLA CALIDAD (decisión del usuario 2026-09-18): no hay versión chica de espera ni pedazos
+  // en alta; mientras la foto se dibuja se muestra el aviso, y cuando llega es la definitiva.
   return (archivo, pagina, ancho, recorte, urlServidor) => {
-    const clave = `${archivo}|${pagina}|${ancho}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
-    if (urls[clave]) return urls[clave];
     const v = vistas[archivo];
     // 🔴 CON LA VISTA EN ESTA COMPUTADORA, AL SERVIDOR NO SE LE PIDE NINGÚN DIBUJO (ni mientras se
     // baja el archivo): con 100 personas mirando, el servidor no dibuja. Se muestra el aviso.
     if (!v) { abrir(archivo); return localOn.current ? null : urlServidor; }
-    pedir(v, clave, pagina, ancho, recorte);
-    // MIENTRAS LLEGA EL GRANDE, EL CHICO: el dibujo general de una mesa pesada tarda segundos;
-    // uno de 300 px sale en una fracción y se muestra primero (se pide DESPUÉS, así con «lo más
-    // nuevo primero» sale antes). Nada de miniaturas fijas: es el mismo dibujo, sólo más chico.
-    if (!recorte && ancho >= 1200) {
-      const claveChica = `${archivo}|${pagina}|300|todo`;
-      if (urls[claveChica]) { pedir(v, claveChica, pagina, 300, null); return urls[claveChica]; }
-      pedir(v, claveChica, pagina, 300, null);
-    }
+    const px = ancho === 'foto' ? v.anchoFoto(pagina, pxcm || 16) : ancho;
+    const clave = `${archivo}|${pagina}|${px}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
+    if (urls[clave]) return urls[clave];
+    pedir(v, clave, pagina, px, recorte);
     return null;
   };
 }
@@ -3019,79 +3015,18 @@ function MesasInfinito({ mesas, job, avisar }) {
   const viewRef = useRef(view); viewRef.current = view;
 
   // ── EL DETALLE: SÓLO LO QUE SE ESTÁ MIRANDO ────────────────────────────────────────────────
-  // 🔴 POR QUÉ. El dibujo de la mesa entera es liviano (2,7 MB las diez, contra 202 MB en vector)
-  // pero grueso: a 1200 px de ancho una etiqueta de 3 mm mide 2 píxeles y no se lee (reporte del
-  // usuario 2026-09-14, con la captura). Subir la resolución de la mesa ENTERA no es opción: 8 m
-  // a 30 px/cm son 155 millones de píxeles por mesa. Así que, al acercarse, se pide un recorte
-  // NÍTIDO de la parte visible y se apoya encima del dibujo general, calzado al milímetro.
-  // Los recortes se piden por una grilla fija de medio metro: moverse un poco reusa el mismo
-  // pedazo (el servidor lo guarda) en vez de pedir uno nuevo a cada arrastre.
-  const TILE_CM = 50;              // cada recorte cubre a lo sumo medio metro de mesa (= `_RECORTE_CM`)
-  const BASE_W = 1200;             // ancho del dibujo general de cada mesa, en px
-  // 🔴 DOS ESCALONES FIJOS, 800 y 1600 px (= `_RECORTE_W` del servidor): son los que el servidor
-  // deja PRE-DIBUJADOS apenas termina el pedido, así el zoom —rápido o lento— encuentra el
-  // recorte ya hecho y se ve nítido al instante (reporte del usuario 2026-09-16). Cuántos pueden
-  // estar vivos a la vez por mesa depende del escalón (memoria del navegador).
-  const TOPE_RECORTES = { 800: 24, 1600: 24 };
-  const [detalle, setDetalle] = useState({});   // clave de mesa → [{id, a, c, b, d, src}]
-  const urlVista = useVistaLocal(job?.resultado?.id);   // se dibuja acá si se puede (etapa 2)
-  const mesaRefs = useRef({});                  // clave → el div de esa mesa
-  const mesaInfo = useRef({});                  // clave → {archivo, pi, anchoCm, altoCm}
-
-  useEffect(() => {
-    // Se espera un toque a que la mano pare (pedir recortes en mitad de un arrastre es tirar
-    // trabajo), pero poco: el usuario reportó que «al hacer zoom rápido queda borroso y demora en
-    // mostrarse nítido» (2026-09-14). 90 ms no se perciben y el recorte sale enseguida.
-    const t = setTimeout(() => {
-      const wrap = wrapRef.current;
-      if (!wrap || view.zoom < 1) { setDetalle({}); return; }
-      const wb = wrap.getBoundingClientRect();
-      const out = {};
-      // 🔴 EN PÍXELES DE LA PANTALLA, no de CSS: con Windows al 125-150 % cada px de CSS son
-      // 1,25-1,5 px reales, y un recorte pedido al ancho de CSS se estiraba y se veía BORROSO
-      // aunque ya hubiera llegado el «nítido» (reporte del usuario 2026-09-16).
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      for (const [key, el] of Object.entries(mesaRefs.current)) {
-        const info = mesaInfo.current[key];
-        if (!el || !info) continue;
-        const r = el.getBoundingClientRect();
-        const ix0 = Math.max(wb.left, r.left), ix1 = Math.min(wb.right, r.right);
-        const iy0 = Math.max(wb.top, r.top), iy1 = Math.min(wb.bottom, r.bottom);
-        if (ix1 <= ix0 || iy1 <= iy0 || !r.width || !r.height) continue;   // esta mesa no se ve
-        // 🔴 CUÁNDO HACE FALTA EL DETALLE: cuando la PANTALLA está mostrando esta mesa más
-        // grande de lo que el dibujo general puede dar. No es un zoom fijo — depende de cuánto
-        // mide la mesa: una de 60 cm llega a ese punto mucho antes que una de 8 m.
-        if (r.width * dpr <= BASE_W * 1.05) continue;
-        const nx = Math.max(1, Math.ceil(info.anchoCm / TILE_CM));
-        const ny = Math.max(1, Math.ceil(info.altoCm / TILE_CM));
-        const i0 = Math.max(0, Math.floor(((ix0 - r.left) / r.width) * nx));
-        const i1 = Math.min(nx - 1, Math.floor(((ix1 - r.left) / r.width - 1e-6) * nx));
-        const j0 = Math.max(0, Math.floor(((iy0 - r.top) / r.height) * ny));
-        const j1 = Math.min(ny - 1, Math.floor(((iy1 - r.top) / r.height - 1e-6) * ny));
-        // El ancho del recorte, en uno de los dos escalones pre-dibujados: así al acercarse de a
-        // poco no se pide una imagen distinta cada vez.
-        // UN SOLO NIVEL en alta (`TILE_PX`): ya está dibujado de fondo para todas las mesas, así que
-        // el zoom no dibuja nada, muestra lo que hay (decisión del usuario 2026-09-18)
-        const wpx = TILE_PX;
-        const tope = TOPE_RECORTES[wpx];
-        const tiles = [];
-        for (let j = j0; j <= j1 && tiles.length < tope; j++) {
-          for (let i = i0; i <= i1 && tiles.length < tope; i++) {
-            const a = i / nx, b = (i + 1) / nx, c = j / ny, d = (j + 1) / ny;
-            const _srvTile = rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(info.archivo)}`
-              + `?pi=${info.pi}&w=${wpx}&cx0=${a.toFixed(4)}&cy0=${c.toFixed(4)}&cx1=${b.toFixed(4)}&cy1=${d.toFixed(4)}`);
-            tiles.push({
-              id: `${i}_${j}_${wpx}`, a, c, b, d,
-              src: urlVista(info.archivo, info.pi, wpx, [a, c, b, d], _srvTile),
-            });
-          }
-        }
-        if (tiles.length) out[key] = tiles;
-      }
-      setDetalle(out);
-    }, 90);
-    return () => clearTimeout(t);
-  }, [view, mesas, job?.resultado?.id]);
+  // 🔴 UNA FOTO POR MESA, UNA SOLA CALIDAD (decisión del usuario 2026-09-18). Antes el visor era un
+  // dibujo general a 1200 px más recortes nítidos de medio metro que se pedían al acercarse (nacieron
+  // el 2026-09-14 porque a 1200 px una etiqueta de 3 mm medía 2 píxeles). El usuario pidió sacarlos:
+  // «es una foto, una sola calidad; si es buena se ve bien completa y si me acerco». La calidad la
+  // fija `calidadFoto` para TODO el pedido (16 px/cm salvo pedidos enormes) y el zoom sólo agranda
+  // la imagen. El techo está medido y explicado en `vista/vista.js`.
+  // 🔴 CON TODAS LAS HOJAS DEL PEDIDO, no con `mesas`: acá `mesas` son sólo las de la tela que se está
+  // mirando, y al generar la calidad se calcula con el pedido entero (`precalentarVista`). Con otro
+  // conjunto el número puede dar distinto (un pedido de 28 m: 15 contra 16 px/cm) y la foto ya
+  // preparada no serviría: se dibujaría de nuevo, a otra calidad.
+  const pxcm = calidadFoto(job?.resultado?.hojas || mesas);
+  const urlVista = useVistaLocal(job?.resultado?.id, pxcm);   // se dibuja acá si se puede (etapa 2)
 
   // ZOOM con la rueda: listener nativo NO pasivo → preventDefault corta el scroll de la página
   useEffect(() => {
@@ -3160,7 +3095,6 @@ function MesasInfinito({ mesas, job, avisar }) {
               const tela = hoja.tela || '';
               const nombreDef = 'Mesa ' + (gidx + 1) + (tela ? ' - ' + tela : '');   // secuencial + guión + tela
               const nombre = nombres[key] != null ? nombres[key] : nombreDef;
-              mesaInfo.current[key] = { archivo: hoja.archivo, pi, anchoCm, altoCm };
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
                   {/* ARRIBA: nombre a la IZQUIERDA (doble-click para renombrar) y el ícono de
@@ -3188,14 +3122,14 @@ function MesasInfinito({ mesas, job, avisar }) {
                       (2026-09-15, nadie los abría) `pv` quedó en null y TODAS las mesas mostraban
                       «Sin vista previa» con la tizada perfecta detrás. El dibujo sale de
                       `mesa_img`, que va por ÍNDICE de página: no hay nada que condicionar. */}
-                  <div ref={(el) => { if (el) mesaRefs.current[key] = el; else delete mesaRefs.current[key]; }}
-                        style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
-                        {/* 🔴 ACÁ VA LA VISTA LIVIANA, NO EL VECTOR. Diez mesas en SVG son 202 MB y
-                            el navegador se clava («La página no responde», 2026-09-14). Esto es un
-                            dibujo de LA HOJA DE VERDAD a 1200 px: 2,7 MB las diez, y se distingue
-                            cada pieza. El vector sigue intacto en el PDF que se descarga, y el
-                            detalle (tocar la mesa) lo abre. Mientras llega, se avisa. */}
-                        <img src={urlVista(hoja.archivo, pi, 1200, null, rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=1200`))} alt={nombre} draggable={false} decoding="async"
+                  <div style={{ position: 'relative', width: w, height: h, background: '#fff' }}>
+                        {/* 🔴 ACÁ VA LA FOTO DE LA MESA, NO EL VECTOR. Diez mesas en SVG son 202 MB y
+                            el navegador se clava («La página no responde», 2026-09-14). Esto es UNA
+                            imagen de LA HOJA DE VERDAD a la calidad del pedido (`pxcm`): el zoom la
+                            agranda, no la cambia. El vector sigue intacto en el PDF que se descarga.
+                            Mientras se dibuja, se avisa. (Sin la vista en esta computadora, la del
+                            servidor a 1200 px, como antes.) */}
+                        <img src={urlVista(hoja.archivo, pi, 'foto', null, rutaApi(`/api/trabajos/${job.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pi}&w=1200`))} alt={nombre} draggable={false} decoding="async"
                           onLoad={() => setCargadas(c => (c[key] ? c : { ...c, [key]: true }))}
                           onError={() => setCargadas(c => ({ ...c, [key]: 'error' }))}
                           style={{ width: w, height: h, display: 'block' }} />
@@ -3209,13 +3143,6 @@ function MesasInfinito({ mesas, job, avisar }) {
                             No se pudo traer la vista previa (la mesa está bien: descargala)
                           </div>
                         )}
-                        {/* EL DETALLE NÍTIDO, calzado sobre su pedazo del dibujo general. Mientras
-                            llega se ve el dibujo de abajo: nunca hay un hueco en blanco. */}
-                        {(detalle[key] || []).filter(t => t.src).map(t => (
-                          <img key={t.id} src={t.src} alt="" draggable={false} decoding="async" fetchPriority="low"
-                            style={{ position: 'absolute', left: `${t.a * 100}%`, top: `${t.c * 100}%`,
-                              width: `${(t.b - t.a) * 100}%`, height: `${(t.d - t.c) * 100}%`, display: 'block' }} />
-                        ))}
                       </div>
                   {/* ABAJO: tamaño ancho × alto */}
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
@@ -9241,7 +9168,8 @@ export default function App() {
         try {
           for (const [nombre, bytes] of Object.entries(_local.archivos || {})) {
             const esFicha = nombre === 'FICHA_TECNICA.pdf';
-            precalentarVista(`${_local.id}|${nombre}`, bytes, { anchos: esFicha ? [Math.round(595.276 * 2)] : [300, 1200] });
+            precalentarVista(`${_local.id}|${nombre}`, bytes, esFicha ? { anchos: [Math.round(595.276 * 2)] }
+              : { pxcm: calidadFoto((_local.resultado || {}).hojas) });
           }
         } catch { /* se dibuja cuando se mire */ }
         return;
@@ -9542,7 +9470,10 @@ export default function App() {
     try {
       // CON EL ARTE EN EL NAVEGADOR (camino A, PLAN_NAVEGADOR 1b) no hay nada que precalentar
       // en el servidor: cada talle se dibuja acá cuando se lo pide (`previasCaminoA`).
-      const _local = !_esB(pid) && (await previasCaminoA({ pid, diseno: dis, variante: clave, talle: _guia, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) })
+      // (`_esB` de otras partes de la pantalla NO existe acá: usarlo tiraba «_esB is not defined» al
+      // cargar un diseño y los talles no se preparaban — bug del 2026-09-18, lo destapó el linter.)
+      const _moldeConDiseno = ((productosCat.productos || []).find(x => x.id === pid) || {}).origen === 'con_diseno';
+      const _local = !_moldeConDiseno && (await previasCaminoA({ pid, diseno: dis, variante: clave, talle: _guia, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) })
         .then((d) => { if (d && d.piezas) _pvGuardar(_pvKeyCon(mapeo, _guia, fuentesReempl), d.piezas); return !!d; })
         .catch(() => false));
       // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.

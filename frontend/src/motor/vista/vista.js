@@ -158,6 +158,12 @@ class Vista {
     return r[0]
   }
 
+  /** El ancho en píxeles de la FOTO de la página `pagina` a `pxcm` px por cm. */
+  anchoFoto(pagina, pxcm) {
+    const m = (this.medidas || [])[pagina]
+    return m ? Math.max(1, Math.round((m.ancho / CM_PT) * pxcm)) : Math.round(180 * pxcm)
+  }
+
   claveDe(pagina, ancho, recorte = null) {
     return `${this.huella}|${pagina}|${ancho}|${recorte ? recorte.map((x) => x.toFixed(4)).join(',') : 'todo'}`
   }
@@ -222,17 +228,43 @@ function hilosParaVista(bytes) {
 }
 
 const abiertas = new Map()          // huella → Vista
-// LA VISTA ES UNA REPRESENTACIÓN (decisión del usuario 2026-09-18): «como la foto de una remera en
-// una web; descargo las mesas reales pero antes veo una representación, nítida para ver errores,
-// pero ágil». Así que se arma ENTERA y de una vez, apenas está la tizada: el dibujo general de cada
-// mesa y todos los recortes en alta (un nivel: `TILE_PX` por cada `TILE_CM` de mesa), en todos los
-// hilos, de fondo; queda en IndexedDB y el zoom no dibuja nada, sólo muestra lo que ya está.
-export const TILE_CM = 50                 // cada recorte cubre a lo sumo medio metro de mesa (= `_RECORTE_CM`)
-export const TILE_PX = 1600               // el nivel en alta: 1600 px por medio metro (32 px/cm)
+// LA VISTA ES UNA FOTO DE CADA MESA, DE UNA SOLA CALIDAD (decisión del usuario 2026-09-18):
+// «muchas imágenes pequeñas formando una es lo que lo hace lento… debe ser UNA sola calidad, como
+// una foto: si es buena se ve bien completa y se ve bien si me acerco». Así que cada mesa se dibuja
+// UNA vez, entera, a `pxcm` píxeles por centímetro, y el zoom sólo agranda esa imagen (no hay
+// pedazos ni cambios de calidad). La calidad es la MISMA para todas las mesas del pedido.
+//
+// 🔴 EL TECHO DE UNA FOTO (medido con una mesa real de 1,80 × 8 m): a 16 px/cm son 2880 × 12 779 px,
+// 7 s de dibujo, 3 MB de PNG y ~147 MB de memoria cuando el navegador la muestra; a 32 px/cm (lo que
+// daban los pedazos) serían ~590 MB por mesa: no entra. A 16 px/cm el nombre, el número y el talle
+// se ven nítidos con zoom fuerte; la letra de 3 mm de la etiqueta del cuello apenas se lee. Es el
+// límite que motivó los pedazos el 2026-09-14 (a 1200 px esa etiqueta medía 2 px); el usuario
+// eligió la foto única sabiéndolo. Si hay que afinarlo, es este número.
+export const FOTO_PXCM = 16                // la calidad pedida
+const TOPE_MPX_PEDIDO = 120                // todas las mesas del pedido juntas en pantalla: ~480 MB como mucho
+const TOPE_LADO_PX = 15000                 // un lado más largo que esto el navegador no lo decodifica bien
 const CM_PT = 28.3465
 const _progreso = new Map()          // `${huella}|${página}` → {total, hechos}: el precalentado POR MESA
 
-/** Cuánto falta del precalentado, por MESA: `{mesas, listas}` (una mesa está lista cuando tiene todos sus dibujos). */
+/**
+ * La calidad de la foto para ESTE pedido, en px por cm (la misma para todas sus mesas).
+ * `hojas` = `resultado.hojas` (`ancho_cm`, `alturas_cm`). Baja de `FOTO_PXCM` sólo si el pedido es
+ * tan grande que todas las fotos juntas no entrarían en memoria, o si una mesa es tan larga que
+ * su foto pasaría el lado máximo que el navegador maneja (una mesa de 50 m, por ejemplo).
+ */
+export function calidadFoto(hojas) {
+  let area = 0, ladoMax = 0
+  for (const h of (hojas || [])) {
+    const ancho = Number(h.ancho_cm) || 180
+    const altos = (h.alturas_cm && h.alturas_cm.length) ? h.alturas_cm : [Number(h.consumo_cm) || 0]
+    for (const alto of altos) { area += ancho * (Number(alto) || 0); ladoMax = Math.max(ladoMax, ancho, Number(alto) || 0) }
+  }
+  if (!area || !ladoMax) return FOTO_PXCM
+  const q = Math.min(FOTO_PXCM, Math.sqrt(TOPE_MPX_PEDIDO * 1e6 / area), TOPE_LADO_PX / ladoMax)
+  return Math.max(4, Math.floor(q * 2) / 2)          // en pasos de medio px/cm: el mismo número al generar y al mirar
+}
+
+/** Cuánto falta del precalentado, por MESA: `{mesas, listas}`. */
 export function progresoVistas() {
   let mesas = 0, listas = 0
   for (const m of _progreso.values()) { mesas++; if (m.hechos >= m.total) listas++ }
@@ -251,24 +283,15 @@ function _anotarFondo(clave, p) {
   p.then(fin, fin)
 }
 
-/** Los recortes en alta de la página `p` de la vista `v`, en el mismo orden y con las mismas fracciones que la pantalla. */
-export function recortesDe(v, p) {
-  const m = (v.medidas || [])[p]
-  if (!m) return []
-  const nx = Math.max(1, Math.ceil((m.ancho / CM_PT) / TILE_CM)), ny = Math.max(1, Math.ceil((m.alto / CM_PT) / TILE_CM))
-  const out = []
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) out.push([i / nx, j / ny, (i + 1) / nx, (j + 1) / ny])
-  return out
-}
-
-/** Dibuja de fondo TODO lo que la pantalla puede pedir de esta vista: los generales y los recortes en alta. */
-export function precalentarTodo(v, { anchos = [300, 1200], tiles = true } = {}) {
+/**
+ * Dibuja de fondo lo que la pantalla va a pedir de esta vista: con `pxcm`, LA FOTO de cada mesa;
+ * con `anchos`, esos anchos (la ficha técnica). Lo que ya está o ya se pidió no se cuenta dos veces.
+ */
+export function precalentarTodo(v, { pxcm = null, anchos = [] } = {}) {
   const paginas = (v.medidas || []).length
-  // lo que ya está (o ya se pidió) no se cuenta: si no, abrir la misma vista dos veces (al generar
-  // y al entrar al paso) mostraba el doble en el cartel («43/226» → «458»)
-  const pedir = (p, ancho, rec) => { if (!v.yaPedido(p, ancho, rec)) _anotarFondo(`${v.huella}|${p}`, v.dibujo(p, ancho, rec, true)) }
-  for (const ancho of anchos) for (let p = 0; p < paginas; p++) pedir(p, ancho, null)
-  if (tiles) for (let p = 0; p < paginas; p++) for (const rec of recortesDe(v, p)) pedir(p, TILE_PX, rec)
+  const pedir = (p, ancho) => { if (!v.yaPedido(p, ancho, null)) _anotarFondo(`${v.huella}|${p}`, v.dibujo(p, ancho, null, true)) }
+  if (pxcm) for (let p = 0; p < paginas; p++) pedir(p, v.anchoFoto(p, pxcm))
+  for (const ancho of anchos) for (let p = 0; p < paginas; p++) pedir(p, ancho)
 }
 
 /**
@@ -300,18 +323,17 @@ export async function abrirVista(huella, traer, { topeMb = 400 } = {}) {
 
 /**
  * PRECALENTAR: apenas esta computadora generó el pedido ya tiene los bytes de cada hoja y de la
- * ficha. Se guardan en la caché (no se vuelven a bajar del servidor) y se dibujan de fondo las
- * vistas que la pantalla va a pedir (el dibujo general de cada mesa, chico y grande, y las hojas
- * de la ficha): cuando la persona abre el paso Tizada, ya están.
+ * ficha. Se guardan en la caché (no se vuelven a bajar del servidor) y se dibuja de fondo la foto
+ * de cada mesa (`pxcm`) o las hojas de la ficha (`anchos`): al abrir el paso Tizada, ya están.
  */
-export async function precalentarVista(huella, bytes, { anchos = [300, 1200], tiles = true } = {}) {
+export async function precalentarVista(huella, bytes, { pxcm = null, anchos = [] } = {}) {
   if (typeof Worker === 'undefined' || !bytes || !bytes.byteLength) return null
   try {
     const copia = new Uint8Array(bytes.slice ? bytes.slice() : bytes)
     guardar(ARCHIVOS, huella, new Blob([copia], { type: 'application/pdf' }))
     const v = await abrirVista(huella, async () => copia.buffer)
     if (!v) return null
-    precalentarTodo(v, { anchos, tiles })
+    precalentarTodo(v, { pxcm, anchos })
     return v
   } catch {
     return null

@@ -1498,6 +1498,34 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (503) — 📷 EL VISOR ES UNA FOTO POR MESA, UNA SOLA CALIDAD.** El usuario: *«muchas
+  imágenes pequeñas formando una es lo que hace todo lento… debe ser 1 sola calidad, como una foto:
+  si hago zoom y es buena se verá bien, y si la veo completa también»*. Reemplaza el esquema de la
+  entrada 500 (general 300/1200 px + recortes de 50 cm a 32 px/cm):
+  - `vista/vista.js`: `FOTO_PXCM = 16`; `calidadFoto(hojas)` baja la calidad sólo si la mesa más
+    grande pasaría de 120 Mpx o de 15 000 px de lado (en pasos de 0,5, mínimo 4) y es UNA para todo
+    el pedido; `anchoFoto(pagina, pxcm)`; `precalentarVista/precalentarTodo(…, { pxcm })` dibujan
+    una foto por mesa. Se borraron `TILE_PX`, `TILE_CM` y `recortesDe`. La ficha sigue con `anchos: [1191]`.
+  - `App.jsx` (`MesasInfinito`): un solo `<img>` por mesa con ancho `'foto'`; el zoom sólo la agranda
+    (nada se vuelve a pedir). Se sacó toda la maquinaria de recortes (`detalle`, `mesaRefs`, `mesaInfo`).
+    Cartel «Preparando la vista en alta · n de N mesas listas».
+  - 🔴 **La calidad tiene que ser la MISMA al precalentar y al mirar** (es parte de la clave del
+    dibujo). El visor la calculaba con las hojas de la tela abierta (16) y la generación con las del
+    pedido entero (15): no encontraba lo precalentado y dibujaba de nuevo. Ahora los dos usan
+    `calidadFoto(job.resultado.hojas)`.
+  - Medido en Edge (sandbox 8061, `HOJA_g1_Principal.pdf` real, 12 MB): 3 mesas → **3 dibujos**
+    guardados (3,0 / 5,3 / 0,2 MB), todas listas a los **18,5 s**. Una mesa de 8 m a 16 px/cm =
+    2880 × 12 779 px (~147 MB de memoria de pantalla); dibujo 8-10 s + PNG 2 s.
+  - **Límite honesto:** a 16 px/cm el nombre y el número se leen nítidos con zoom; el texto de una
+    etiqueta de cuello de 3 mm apenas se lee. La perilla es `FOTO_PXCM` (el costo sube al cuadrado).
+  - 🐛 **Bug encontrado en la tanda: `_esB is not defined`** al cargar un diseño
+    (`asignarTodasLasVariantes`, entró en 3e54018). Arreglado con `_moldeConDiseno` local. Pasó el
+    candado porque `verificar_tdz.mjs` sumaba en App.jsx «usado antes de declarar» + «no existe»
+    contra un tope: al borrar código inofensivo bajó la suma y el bug entró por debajo. Ahora
+    `no-undef` es tolerancia CERO en todo `src` y el tope de App.jsx (304) cuenta sólo lo otro.
+    Probado: con un nombre inexistente el build sale 1; sin él, 0.
+  `verificar_navegador_vista.py` verde; build verde.
+
 - **2026-09-18 (502) — 🐇 EL VISOR SEGUÍA LENTO: SE DIBUJABA LO QUE CAÍA FUERA DEL RECORTE.** Reporte del
   usuario: «la vista sigue siendo lenta de la tizada, ¿por qué?». Tenía razón, y por dos motivos:
   - **La causa.** `vista/replay.js` (499) interpretaba cada dibujo de origen una vez, pero al DIBUJAR
@@ -2093,7 +2121,8 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     salía una fila más alta), `vista.worker.js` (un hilo por archivo abierto, listas de dibujo
     guardadas por página), `vista/vista.js` (`abrirVista`: el archivo se baja UNA vez, queda en
     IndexedDB junto con cada PNG dibujado; `navegadorDibujaVista` lee el interruptor).
-  - Pantalla: `useVistaLocal` en `MesasInfinito` (mesa entera a 1200 px y los recortes de 800/1600)
+  - Pantalla: `useVistaLocal` en `MesasInfinito` (UNA foto por mesa a `calidadFoto(hojas)` px/cm,
+    ancho `'foto'`; sin recortes desde la entrada 503)
     y en `VisorFicha` (A4 a z=2). Devuelve la URL local si ya está y, mientras tanto, la del
     servidor: nunca un hueco. Tope 400 MB por archivo (más grande, lo dibuja el servidor).
   - Servidor: `/api/navegador/config` → `vista` (`TIZADA_NAVEGADOR_VISTA=0` lo apaga);
