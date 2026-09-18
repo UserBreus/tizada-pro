@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **171 endpoints**. Generado automáticamente del código.
+Total: **172 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -184,6 +184,7 @@ Total: **171 endpoints**. Generado automáticamente del código.
 | GET | `/api/arte/mesa_img` | UNA mesa del arte, para el visor. Ver `_urls_mesas`. **Sale VECTORIAL (SVG), siempre**: lo que se ve en pantalla tiene que ser el diseño de verdad, no una foto  | q: diseno, mesa |
 | GET | `/api/arte/perfil` | Detecta el perfil incrustado del arte recién subido (o de ese diseño) y devuelve el aviso (sin perfil / distinto / ok). | q: diseno |
 | POST | `/api/arte/preview_piezas` | PREVIEW REAL per-pieza (CACHEADO): sirve el render del motor por pieza desde `_piezas_base`. La 1ª vez por config arma y guarda; las siguientes son instantáneas | body: bg, diseno, editables, mapeo, pid, sin_prewarm, talle, variante |
+| GET | `/api/archivos/tengo` | ¿El servidor ya tiene un archivo con este SHA-1? (para no volver a subirlo). | q: sha1 |
 
 ## Editables / Objetos agregados
 

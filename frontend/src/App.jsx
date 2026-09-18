@@ -9,6 +9,7 @@ import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './mo
 import { navegadorDibujaVista, abrirVista, cerrarVistas } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
+import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
 import { localizarMesas, cerrarArtes } from './motor/arte/mesa.js';   // la mesa del arte dibujada acá (camino A)
 import { generarPedidoEnNavegador } from './motor/pedido/generar.js';
 import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
@@ -6989,8 +6990,9 @@ export default function App() {
         preparado = await _prepararDosTiempos(file, file.name || 'molde', (x) => setProcesando(x.nota || 'Preparando el molde en tu computadora…'), { detectar: true });
         formData.append('con_diseno', preparado && !preparado.caminoA ? '1' : '0');
         if (preparado) formData.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
-        // un DXF ya convertido acá: se sube el PDF (el DXF original va adentro del paquete)
-        if (preparado && preparado.archivo && preparado.archivo !== file) formData.set('archivo', preparado.archivo, preparado.archivo.name);
+        // un DXF ya convertido acá: se sube el PDF (el DXF original va adentro del paquete); y si
+        // el servidor ya tiene el archivo (mismo sha1), no viaja
+        await adjuntarArchivo(formData, (preparado && preparado.archivo) || file, preparado && preparado.sha1, rutaApi);
         setProcesando('Subiendo el archivo…');
       }
       if (type === 'arte') {
@@ -6998,6 +7000,7 @@ export default function App() {
         // viajan en el paquete; el servidor sólo comprueba y guarda. `null` = lo analiza el servidor.
         const _pa = await prepararArteEnNavegador(file, { pid: _pidMolde, diseno: null, rutaApi, avisar: (t) => setProcesando(t) });
         if (_pa) formData.append('paquete', new Blob([_pa.zip], { type: 'application/zip' }), 'paquete.zip');
+        await adjuntarArchivo(formData, file, _pa && _pa.sha1, rutaApi);
         setProcesando('Subiendo el archivo…');
       }
       // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Con un arte de 8 MB (y más todavía
@@ -7088,7 +7091,7 @@ export default function App() {
       // minutos por esta vía). Sin diseño o DXF: `null`, y lo lee el servidor como siempre.
       preparado = await _prepararDosTiempos(subirMoldeFile, nombre, (x) => setProcesando(x.nota || 'Preparando tu molde en tu computadora…'), { detectar: true });
       const fd = new FormData();
-      fd.append('archivo', (preparado && preparado.archivo) || subirMoldeFile);   // un DXF viaja ya convertido
+      await adjuntarArchivo(fd, (preparado && preparado.archivo) || subirMoldeFile, preparado && preparado.sha1, rutaApi);   // un DXF viaja ya convertido; nada viaja dos veces
       fd.append('pid', pid);
       fd.append('con_diseno', preparado && !preparado.caminoA ? '1' : '0');
       if (preparado) fd.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
@@ -10156,6 +10159,7 @@ export default function App() {
       // el archivo y el servidor sólo comprueba y guarda. `null` = el servidor lo analiza como antes.
       const _pa = await prepararArteEnNavegador(file, { pid: id, diseno: disenoActivo, rutaApi, avisar: (t) => showMsg(t) });
       if (_pa) fd.append('paquete', new Blob([_pa.zip], { type: 'application/zip' }), 'paquete.zip');
+      await adjuntarArchivo(fd, file, _pa && _pa.sha1, rutaApi);
       // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Un arte puede pesar 8 MB o más y
       // procesarlo lleva unos segundos; sin esto el usuario mira un cartel quieto sin saber si
       // avanza (justamente lo que reportó). Ver también `handleUploadFile`.
@@ -11772,11 +11776,11 @@ export default function App() {
     if (prep.caminoA) {
       // molde SIN diseño o DXF (camino A): el alta viaja entera en el paquete, no hay fase B
       fase({ fase: 'subiendo', pct: 0, nota: '' });
-      return { zipA: prep.zipA, clave, prep, caminoA: true, archivo: prep.archivo, resumen: prep.resumen };
+      return { zipA: prep.zipA, clave, prep, caminoA: true, archivo: prep.archivo, resumen: prep.resumen, sha1: prep.sha1 };
     }
     setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid: null, fase: 'preparando', texto: 'Separando los talles…', pct: 0 } }));
     fase({ fase: 'subiendo', pct: 0, nota: '' });
-    return { zipA: prep.zipA, clave, prep };
+    return { zipA: prep.zipA, clave, prep, sha1: prep.sha1 };
   };
   // Cuando la fase A ya se guardó (hay `pid`): esperar la fase B y subirla.
   const _seguirPaginas = (clave, pid, prep) => {
@@ -11850,7 +11854,7 @@ export default function App() {
         // viaja ya preparado; el servidor sólo lo guarda. Si esta computadora no puede, se avisa y
         // NO se manda a que lo haga el servidor («quien no tenga la potencia no podrá enviar»).
         const fd = new FormData();
-        fd.append('archivo', (preparado && preparado.archivo) || f);   // un DXF viaja ya convertido
+        await adjuntarArchivo(fd, (preparado && preparado.archivo) || f, preparado && preparado.sha1, rutaApi);   // un DXF viaja ya convertido; nada viaja dos veces
         fd.append('pid', d.id);
         // el servidor no tiene que adivinar el camino (12 s menos); un DXF va por el camino A
         fd.append('con_diseno', preparado && preparado.caminoA ? '0' : '1');
@@ -21300,6 +21304,20 @@ export default function App() {
 
                   {!c ? <p style={{ color: 'var(--text-muted)' }}>Cargando…</p> : (
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(292px, 1fr))', gap: 14, alignItems: 'start' }}>
+
+                      {/* PLAN_NAVEGADOR, etapa 6: «el servidor no calcula». Prendido, todo lo pesado
+                          (preparar moldes, analizar artes, previas, tizadas) lo hace la computadora de
+                          cada persona o no se hace; el servidor sólo valida y guarda. */}
+                      <CfgCard icono="molderia" titulo="El servidor no calcula"
+                        extra={<CfgSw on={!!c.navegador_solo} onClick={() => !c.navegador_solo_forzado && setCfgConDiseno(p => ({ ...p, navegador_solo: !p.navegador_solo }))}
+                          ancla="cfgb-solo-navegador" titulo={c.navegador_solo_forzado ? 'Lo fija el entorno del servidor (TIZADA_SOLO_NAVEGADOR)' : 'Todo lo pesado en la computadora de cada persona'} />}>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
+                          Prendido: los moldes, los diseños, las previas y las tizadas se preparan en la computadora de quien los
+                          carga, y el servidor sólo valida y guarda. Si una computadora no puede, se le avisa y no se manda nada.
+                          Apagado: el servidor sigue haciendo el trabajo pesado cuando el navegador no lo hace.
+                          {c.navegador_solo_forzado && <> <b>Lo está fijando el entorno del servidor.</b></>}
+                        </p>
+                      </CfgCard>
 
                       <CfgCard icono="bordeCorte" titulo="Borde de corte"
                         extra={<CfgSw on={_b.activo !== false} onClick={() => setB('activo', _b.activo === false)} ancla="cfgb-borde-on" titulo="Dibujar el borde de corte" />}>

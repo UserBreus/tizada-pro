@@ -152,6 +152,43 @@ def caso(titulo, origen, pid):
     ok(not _LLAMADAS, f"sin leer el molde ({_LLAMADAS or 'nada'})")
 
 
+def caso_sha1(origen):
+    """El mismo archivo, subido otra vez SIN los bytes: el servidor ya lo tiene (`archivos_sha1.json`)."""
+    print(chr(10) + "3 · UN ARCHIVO QUE EL SERVIDOR YA TIENE NO VIAJA DOS VECES")
+    tmp = tempfile.mkdtemp(prefix="subida_sha1_", dir=_TMP)
+    copia = os.path.join(tmp, os.path.basename(origen))
+    shutil.copy2(origen, copia)
+    pdf, zip_, res = (os.path.join(tmp, x) for x in ("archivo.pdf", "paquete.zip", "resumen.json"))
+    r = subprocess.run(["node", NODE, copia, pdf, zip_, res], capture_output=True, text=True, encoding="utf-8", timeout=900)
+    nav = json.load(open(res, encoding="utf-8"))
+    time.sleep(1.5)                                   # el sha1 del molde se anota en segundo plano
+    t = CLI.get("/api/archivos/tengo?sha1=" + nav["sha1"]).get_json() or {}
+    ok(t.get("tengo") is True, f"el servidor dice que ya tiene el archivo (sha1 {nav['sha1'][:8]}…, {t.get('bytes')} bytes)")
+    t2 = CLI.get("/api/archivos/tengo?sha1=" + "0" * 40).get_json() or {}
+    ok(t2.get("tengo") is False, "y que no tiene uno inventado")
+    pid = "pS"
+    _DOCS["catalogo"] = {"activo": pid, "productos": [{"id": pid, "nombre": "otro artículo con el mismo molde"}]}
+    os.makedirs(os.path.join(_TMP, "entrada", pid), exist_ok=True)
+    os.makedirs(os.path.join(_TMP, "productos", pid), exist_ok=True)
+    with open(zip_, "rb") as fp:
+        r = CLI.post("/api/plantilla", data={"archivo_sha1": nav["sha1"], "archivo_nombre": "el_mismo_molde.pdf", "pid": pid,
+                                             "con_diseno": "0", "paquete": (fp, "paquete.zip")}, content_type="multipart/form-data")
+    job = (r.get_json() or {}).get("job")
+    fin = {}
+    for _ in range(3000):
+        fin = _TRAB.get(job) or {}
+        if fin.get("estado") in ("listo", "error"):
+            break
+        time.sleep(0.1)
+    ok(r.status_code == 200 and fin.get("estado") == "listo", f"la subida SIN los bytes termina bien (HTTP {r.status_code}, «{fin.get('estado')}» {str(fin.get('error') or '')[:160]})")
+    destino = S._ruta_entrada("plantilla.ai", pid=pid, original=True)
+    ok(os.path.exists(destino) and S._sha1_archivo(destino) == nav["sha1"], "y el molde quedó en su lugar, byte a byte el mismo")
+    ok(len(_REG.get(pid) or {}) == nav["piezas"], f"con su registro ({len(_REG.get(pid) or {})} piezas)")
+    ok(not _LLAMADAS, f"sin leer el molde ({_LLAMADAS or 'nada'})")
+    r = CLI.post("/api/plantilla", data={"archivo_sha1": "f" * 40, "archivo_nombre": "x.pdf", "pid": pid, "con_diseno": "0"}, content_type="multipart/form-data")
+    ok(r.status_code == 400, f"un sha1 que el servidor no tiene se rechaza ({r.status_code}: {(r.get_json() or {}).get('error')})")
+
+
 _AI = os.path.join(_AQUI, "entrada", "prod_20260911_165624_1ed7", "plantilla.ai")
 _DXF = os.path.join(_AQUI, "entrada", "prod_20260911_165624_1ed7", "plantilla_fuente.dxf")
 if len(sys.argv) > 1:
@@ -161,6 +198,7 @@ else:
         caso("1 · UN MOLDE .AI SIN DISEÑO", _AI, "pA")
     if os.path.exists(_DXF):
         caso("2 · UN MOLDE EN DXF", _DXF, "pD")
+        caso_sha1(_DXF)
 
 print()
 if FALLOS:

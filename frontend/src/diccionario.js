@@ -358,6 +358,11 @@ export const DICCIONARIO = {
     que: 'La altura de la letra, en milímetros, del texto que se imprime al borde de cada pieza (talle, nombre y número).',
     como: 'Escribí el tamaño de letra en milímetros.',
   },
+  'cfgb-solo-navegador': {
+    nombre: 'El servidor no calcula',
+    que: 'Si todo lo pesado (preparar moldes, analizar diseños, previas y tizadas) lo hace la computadora de cada persona, y el servidor sólo valida y guarda.',
+    como: 'Tocá el interruptor y guardá. Si lo fija el entorno del servidor, acá no se puede cambiar.',
+  },
   'cfgb-borde-on': {
     nombre: 'Dibujar el borde de corte',
     que: 'Si las piezas de estos moldes salen con la línea de corte alrededor o sin ella.',

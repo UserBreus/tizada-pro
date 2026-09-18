@@ -16,13 +16,11 @@ import { abrir, capasUi, configurarCapa, nombresOcgs, normNombre, normGenerico, 
 import { extraerPersonalizacion, esCapaEditable, CAPAS_GRAFICAS } from './personalizacion.js'
 
 export const CM = 28.3465
-export const CAPAS_SISTEMA = new Set(['Fondo', 'Capa 1', 'Personalizable', '0', 'referencia', 'Referencia'])
+import { CAPAS_SISTEMA, esCapaGuia } from '../nombres.js'
+export { CAPAS_SISTEMA, esCapaGuia }
 const STOP_ROTULO = new Set(['diseno', 'guia', 'guias', 'numero', 'nombre', 'palabra', 'personalizable', 'editable', 'texto'])
 const RX_PREFIJO_HASH = new RegExp('^[' + WS_PY + ']*#[^' + WS_PY + ']+[' + WS_PY + ']+', 'u')
 const RX_RANGO = new RegExp('^[' + WS_PY + ']*#([^' + WS_PY + ']+)', 'u')
-
-/** `_es_capa_guia`: la capa GUÍA (texto que orienta al sistema; nunca se imprime). */
-export const esCapaGuia = (nombre) => ['guias', 'guia', 'guides'].includes(normNombre(nombre))
 
 /** `_texto_mesa(doc, mesa)`: las líneas de texto (no vacías) de la mesa, en orden. */
 export function textoMesa(page) {

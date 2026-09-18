@@ -269,8 +269,9 @@ para repetir la prueba con archivos nuevos.
 
 > ✅ **HECHA 2026-09-18** (MAPA 495): pasos 1-9 para los dos caminos. El molde CON diseño en dos
 > tiempos (3,5-5,4 s); el molde SIN diseño y el DXF en un paquete `alta_a` (3 s en Edge; el
-> servidor guarda en 1,3 s). FALTA (no bloquea): no re-subir un archivo que el servidor ya tiene
-> (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`.
+> servidor guarda en 1,3 s). **2026-09-18 (MAPA 496): no re-subir un archivo que el servidor ya
+> tiene (misma SHA-1) HECHO** (`/api/archivos/tengo`, `motor/subida.js`). Sin hacer, y no hace
+> falta: el modo comparación `TIZADA_NAVEGADOR_COMPARAR` (los contratos comparan bit a bit).
 > (Antes: EN CURSO 2026-09-17, MAPA 479.)
 > ⏩ **2026-09-18 (MAPA 492): paso 7, camino A, HECHO en el motor** — `molde/caminoA.js`
 > (`alta_plantilla`, `detectar_piezas`, `detectar_piezas_todas`, `alta_plantilla_manual`, talles,
@@ -452,8 +453,10 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 > ✅ **HECHA 2026-09-18 para los dos caminos** (MAPA 491 y 495): el servidor no pre-dibuja, y con
 > `TIZADA_SOLO_NAVEGADOR=1` rechaza preparar CUALQUIER molde o arte sin paquete y generar por el
-> camino B (el A se genera acá con `todo_navegador`). Borrar PyMuPDF/pikepdf del servidor (y sus
-> contratos) es una decisión aparte: hoy siguen como red de seguridad con los interruptores apagados.
+> camino B (el A se genera acá con `todo_navegador`). **2026-09-18 (MAPA 496):** el interruptor se
+> prende desde la pantalla (Configuración → Molde con diseño → «El servidor no calcula»,
+> `cat["navegador_solo"]`; el entorno manda si está). PyMuPDF/pikepdf NO se borran: son la referencia
+> de los contratos y la red de seguridad con el interruptor apagado (ver MAPA 496).
 
 - Borrar endpoints, pools, `procesos.py`, los módulos del motor y sus contratos de servidor
   (§4). `servidor.py` queda sin PyMuPDF ni pikepdf; `requirements.txt` sin ellos. El paquete de

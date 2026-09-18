@@ -1498,6 +1498,41 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (496) — 🧹 LOS TRES PENDIENTES DEL PLAN_NAVEGADOR, CERRADOS: nombres unificados, no re-subir por SHA-1, «el servidor no calcula» desde la pantalla.**
+  El usuario: *«hacé esos tres puntos que faltan»*.
+  - **Un solo lugar para los nombres como Python** — `frontend/src/motor/nombres.js`: `splitPy`,
+    `normNombre`, `normCapa`, `normGenerico`, `esCapaGuia`, `esCapaEditable`, `nombreEditable`,
+    `CAPAS_SISTEMA`, `CAPAS_NO_PERS`, `CAPAS_GRAFICAS`, `WS_PY`. Las copias de `pieza/estampar.js`,
+    `pieza/caminoA.js`, `arte/texto.js`, `arte/personalizacion.js`, `arte/mapeo.js`,
+    `arte/editables.js`, `arte/capas.js`, `molde/talle.js` y `molde/caminoA.js` ahora reexportan de
+    ahí (los `import` viejos siguen valiendo); `molde/capas.js` usa el `reprPy` de `arte/texto.js`.
+    Se quedó la versión EXACTA de cada regla (la de `\p{Nd}`/`WS_PY` y el `\b` de Python en
+    `nombreEditable`), no la de `\s`/`\d` de JS. Contratos pieza, pieza_a, arte, camino_a, molde,
+    arte_mesa, curvas, tizada y tizada_a: verdes después del cambio. Las DOS implementaciones de
+    «objetos de una capa» (`molde/capas.analizarCapa` sobre instrucciones y `arte/editables.
+    objetosDeCapa` sobre la página) siguen separadas a propósito: reciben cosas distintas y cada una
+    tiene su contrato; comparten el `repr`.
+  - **No re-subir un archivo que el servidor ya tiene** — el navegador ya calculaba el SHA-1 del
+    molde y del arte para sus paquetes; ahora pregunta `GET /api/archivos/tengo?sha1=` y, si el
+    servidor lo tiene, manda `archivo_sha1` + `archivo_nombre` en vez de los bytes
+    (`motor/subida.js` → `adjuntarArchivo`, en las 4 subidas de molde y las 2 de arte). Servidor:
+    índice `datos/archivos_sha1.json` (sha1 → ruta, bytes; tope 2000 entradas; escritura atómica),
+    `_sha1_registrar` al dejar un molde/arte en su lugar, `_sha1_buscar` VERIFICA (existe, tamaño,
+    se re-hashea) antes de usar una entrada, `_archivo_subido()` en `/api/plantilla` y `/api/arte`
+    (`_ArchivoLocal` con la cara de un `FileStorage`). Un sha1 desconocido → 400 «falta el archivo».
+    Contrato: `verificar_navegador_subida_a.py` §3.
+  - **«El servidor no calcula», desde la pantalla** — Configuración → Molde con diseño → tarjeta
+    «El servidor no calcula» (`CfgSw`, ancla `cfgb-solo-navegador`): `cat["navegador_solo"]` vía
+    `GET/POST /api/config_con_diseno` (`config.editar`); `_solo_navegador()` lo lee del catálogo y
+    `TIZADA_SOLO_NAVEGADOR=0/1` manda si está (`navegador_solo_forzado`, la pantalla lo dice).
+    Prendido: molde sin paquete (con o sin diseño, DXF), arte sin paquete y tizada del camino B en
+    el servidor → 409 con el motivo, sin correr nada pesado. Contrato `verificar_navegador_solo.py`.
+    **Decisión sobre «borrar PyMuPDF/pikepdf del servidor»**: NO se borran. Son la REFERENCIA de
+    los 17 contratos `verificar_navegador_*` (la prueba de que el navegador da lo mismo que el motor)
+    y la red de seguridad con el interruptor apagado; con el interruptor prendido no corren para
+    nadie, que es lo que se buscaba. Borrarlos es borrar la prueba: si algún día se decide, va con
+    los contratos convertidos a comparar contra salidas GUARDADAS (fixtures), no contra Python vivo.
+
 - **2026-09-18 (495) — 🏁 PLAN_NAVEGADOR 1b CERRADO: EL CAMINO A (molde sin diseño, DXF y arte separado) TAMBIÉN VA ENTERO EN EL NAVEGADOR.**
   El usuario: *«no entendí cómo quedó por fuera si era el siguiente paso»*. Con esto, para CUALQUIER
   molde el servidor no calcula nada: valida y guarda (interruptores de `/api/navegador/config`).

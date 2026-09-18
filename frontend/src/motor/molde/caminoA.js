@@ -45,7 +45,8 @@ import { CM, geometriaPagina, contornoDeDrawing, itemVisor, emparejarPorSolape }
 
 export const MM = 2.83465                          // puntos por mm (molde_real.MM)
 export const MARGEN_MESA_CM = 2.0                  // margen sugerido por lado (motor_pedido)
-export const CAPAS_SISTEMA = new Set(['Fondo', 'Capa 1', 'Personalizable', '0', 'referencia', 'Referencia'])
+import { CAPAS_SISTEMA } from '../nombres.js'
+export { CAPAS_SISTEMA }
 
 // Las opciones de `get_text("dict")` de PyMuPDF (`TEXTFLAGS_DICT` = 199): ligaduras, espacios,
 // imágenes, recorte al MediaBox y CID para los glifos sin unicode. Con otro juego de opciones

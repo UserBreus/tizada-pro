@@ -14,15 +14,10 @@ import { pyRound, pyStrip } from '../py.js'
 import { instrucciones, contenidoCrudo } from '../pdf/contenido.js'
 import { abrir, capasUi, configurarCapa, nombresOc, normNombre, textoDict, strOperando, floatOperando } from './texto.js'
 
-// `CAPAS_NO_PERS` de motor_pedido: cualquier OTRA capa es un campo de personalización
-export const CAPAS_NO_PERS = new Set(['diseño', 'diseno', 'personalizable', 'guias', 'guías', 'guides',
-  'guia', 'guía', 'fondo', 'capa 1', 'referencia', '0'])
-export const CAPAS_GRAFICAS = new Set([...CAPAS_NO_PERS].filter((x) => x !== 'personalizable'))
+import { CAPAS_NO_PERS, CAPAS_GRAFICAS, esCapaEditable } from '../nombres.js'
+export { CAPAS_NO_PERS, CAPAS_GRAFICAS, esCapaEditable }
 export const CLAVE_CAPA = '\x00capa:'
 export const CAMPO_ALIAS = { '00': 'numero', nro: 'numero', num: 'numero', jugador: 'nombre', apellido: 'nombre' }
-
-/** `_es_capa_editable`: la capa es un OBJETO editable (mover/rotar/escalar), no un campo. */
-export const esCapaEditable = (nombre) => normNombre(nombre).startsWith('editable')
 
 /** `_texto_de_tj`: el texto de un Tj/TJ/'/" tal como lo decodifica pikepdf. */
 export function textoDeTj(ins) {

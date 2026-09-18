@@ -3325,6 +3325,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     except Exception as e:
         _descartar_tmp(tmp)
         return None, (f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}", 422)
+    _en_hilo(lambda: _sha1_registrar(destino))    # para no volver a subirlo (ver `_sha1_buscar`)
     # ── LA MARCA DEL CAMINO, CON EL ARCHIVO YA EN SU LUGAR ──────────────────────────────────────
     # Va DESPUÉS del `os.replace` a propósito: si se marcara el temporal y la subida fallara,
     # quedaría marcado el molde VIEJO, que es de otro camino. Y se BORRA cuando el archivo nuevo
@@ -3477,7 +3478,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
 
 @app.post("/api/plantilla")
 def subir_plantilla():
-    f = request.files.get("archivo")
+    f = _archivo_subido("archivo")            # los bytes, o el archivo que el servidor ya tenía
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
     # 🔴 TODO LO QUE SALE DEL REQUEST SE CAPTURA ACÁ. De acá para abajo el trabajo pesado corre
@@ -3651,11 +3652,20 @@ def navegador_config():
 
 
 def _solo_navegador():
-    """ETAPA 6 (PLAN_NAVEGADOR): con `TIZADA_SOLO_NAVEGADOR=1` el servidor NO hace ningún trabajo
-    pesado del camino B (ni preparar moldes con diseño, ni previas por pieza, ni tizadas): lo hace
-    la computadora de la persona o no se hace. Es el «apagar lo pesado» para el molde con diseño;
-    el camino A y el DXF siguen en el servidor hasta la etapa 1b."""
-    return str(os.environ.get("TIZADA_SOLO_NAVEGADOR") or "0") == "1"
+    """ETAPA 6 (PLAN_NAVEGADOR): con esto prendido el servidor NO hace ningún trabajo pesado (ni
+    preparar moldes —con o sin diseño, ni DXF—, ni analizar artes, ni previas por pieza, ni
+    tizadas): lo hace la computadora de la persona o no se hace (409 con el motivo). Se prende
+    desde la pantalla (Configuración → Molde con diseño → «El servidor no calcula», guardado en el
+    catálogo como `navegador_solo`) o con `TIZADA_SOLO_NAVEGADOR=1` en el entorno (manda si está).
+    PyMuPDF/pikepdf quedan en el servidor como la REFERENCIA de los contratos `verificar_navegador_*`
+    (la prueba de que el navegador hace lo mismo): con esto prendido no corren para nadie."""
+    env = str(os.environ.get("TIZADA_SOLO_NAVEGADOR") or "").strip()
+    if env in ("0", "1"):
+        return env == "1"
+    try:
+        return bool(_cargar_catalogo().get("navegador_solo"))
+    except Exception:
+        return False
 
 
 def _navegador_dibuja_vista():
@@ -3687,6 +3697,102 @@ def _sha1_archivo(path):
         for bloque in iter(lambda: fh.read(1 << 22), b""):
             h.update(bloque)
     return h.hexdigest()
+
+
+# ── NO RE-SUBIR UN ARCHIVO QUE EL SERVIDOR YA TIENE (PLAN_NAVEGADOR, pendiente de la etapa 1) ──
+# El navegador calcula el SHA-1 del archivo antes de subirlo (ya lo hacía para el paquete) y
+# pregunta `GET /api/archivos/tengo?sha1=`; si el servidor lo tiene, manda `archivo_sha1` +
+# `archivo_nombre` en vez de los bytes y el servidor lo COPIA de donde está. Un molde de 120 MB
+# que se vuelve a subir (otro pedido, otro artículo, un reintento) no viaja dos veces.
+# El índice es un JSON en DATOS (sha1 → {ruta, bytes}); antes de usar una entrada se vuelve a
+# calcular el sha1 del archivo apuntado (0,2 s por 120 MB): una entrada vieja nunca engaña.
+_ARCHIVOS_SHA1 = os.path.join(DATOS, "archivos_sha1.json")
+_ARCHIVOS_SHA1_LOCK = threading.Lock()
+
+
+def _sha1_indice_leer():
+    try:
+        with open(_ARCHIVOS_SHA1, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _sha1_registrar(ruta, sha1=None):
+    """Anota que `ruta` tiene ese contenido. Best-effort: nunca frena una subida."""
+    try:
+        if not os.path.exists(ruta):
+            return
+        sha1 = sha1 or _sha1_archivo(ruta)
+        with _ARCHIVOS_SHA1_LOCK:
+            d = _sha1_indice_leer()
+            d[sha1] = {"ruta": os.path.abspath(ruta), "bytes": os.path.getsize(ruta)}
+            if len(d) > 2000:                     # nunca crece sin tope: se quedan las últimas
+                d = dict(list(d.items())[-2000:])
+            tmp = _ARCHIVOS_SHA1 + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(d, fh)
+            os.replace(tmp, _ARCHIVOS_SHA1)
+    except Exception as e:
+        print(f"[archivos] no se pudo anotar el sha1: {e}", flush=True)
+
+
+def _sha1_buscar(sha1):
+    """La ruta de un archivo con ese contenido, VERIFICADA (existe, mismo tamaño y mismo sha1), o None."""
+    sha1 = str(sha1 or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha1):
+        return None
+    e = _sha1_indice_leer().get(sha1)
+    if not e:
+        return None
+    ruta = e.get("ruta")
+    try:
+        if not ruta or not os.path.exists(ruta) or os.path.getsize(ruta) != int(e.get("bytes") or -1):
+            return None
+        if _sha1_archivo(ruta) != sha1:
+            return None
+    except Exception:
+        return None
+    return ruta
+
+
+class _ArchivoLocal:
+    """Un archivo que ya está en el servidor, con la cara de un `FileStorage` (lo que usan las
+    subidas: `.filename`, `.save()`, `.read()`)."""
+
+    def __init__(self, ruta, nombre):
+        self.ruta, self.filename = ruta, nombre
+
+    def save(self, destino):
+        import shutil
+        if os.path.abspath(destino) != os.path.abspath(self.ruta):
+            shutil.copyfile(self.ruta, destino)
+
+    def read(self):
+        with open(self.ruta, "rb") as fh:
+            return fh.read()
+
+
+def _archivo_subido(campo="archivo"):
+    """El archivo de la subida: los bytes (`request.files`) o, si el navegador dijo que el servidor
+    ya lo tiene (`archivo_sha1` + `archivo_nombre`), el que está acá. None si no vino nada."""
+    f = request.files.get(campo)
+    if f:
+        return f
+    sha1 = request.form.get(campo + "_sha1")
+    if sha1:
+        ruta = _sha1_buscar(sha1)
+        if ruta:
+            return _ArchivoLocal(ruta, request.form.get(campo + "_nombre") or os.path.basename(ruta))
+    return None
+
+
+@app.get("/api/archivos/tengo")
+def archivos_tengo():
+    """¿El servidor ya tiene un archivo con este SHA-1? (para no volver a subirlo)."""
+    ruta = _sha1_buscar(request.args.get("sha1"))
+    return jsonify({"tengo": bool(ruta), "bytes": (os.path.getsize(ruta) if ruta else None)})
 
 
 def _contenido_carpeta(carpeta):
@@ -5749,7 +5855,7 @@ def _mapeo_efectivo(base, pv, variante):
 
 @app.post("/api/arte")
 def subir_arte():
-    f = request.files.get("archivo")
+    f = _archivo_subido("archivo")            # los bytes, o el archivo que el servidor ya tenía
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
     sub = _diseno_sub(request.form.get("diseno"))  # arte de un DISEÑO nombrado (o el por defecto)
@@ -5758,6 +5864,7 @@ def subir_arte():
         return jsonify({"error": "primero subí la plantilla base"}), 409
     destino = _ruta_entrada("arte.ai", sub=sub, original=True)
     f.save(destino)
+    _sha1_registrar(destino)      # para no volver a subirlo (ver `_sha1_buscar`)
     OA.reset_versiones(destino)   # arte nuevo = se descartan las ediciones (versiones) del anterior
     _pq = request.files.get("paquete")
     if _pq is not None:
@@ -7034,6 +7141,11 @@ def _cfg_con_diseno(cat=None):
         # La PLANILLA (las columnas del Excel) que se le pone a todo molde con diseño al subirlo:
         # el cliente no la elige, la deja el taller acá (pedido del usuario 2026-09-04).
         "planilla_template_id": _c.get("planilla_template_id") or "plan_default",
+        # «El servidor no calcula»: todo lo pesado en el navegador o nada (PLAN_NAVEGADOR, etapa 6).
+        # Vive en la raíz del catálogo (`navegador_solo`) porque no es sólo del camino B; se muestra
+        # acá porque esta es la pantalla de «cómo se preparan los moldes».
+        "navegador_solo": bool((cat if cat is not None else _cargar_catalogo()).get("navegador_solo")),
+        "navegador_solo_forzado": (str(os.environ.get("TIZADA_SOLO_NAVEGADOR") or "").strip() in ("0", "1")),
     }
 
 
@@ -13972,8 +14084,12 @@ def set_config_con_diseno():
             return jsonify({"error": "esa planilla no existe"}), 404
         _prev["planilla_template_id"] = str(_pt)
 
+    if "navegador_solo" in cuerpo:
+        cat["navegador_solo"] = bool(cuerpo.get("navegador_solo"))
+    _prev.pop("navegador_solo", None); _prev.pop("navegador_solo_forzado", None)
     cat["config_con_diseno"] = _prev
     _guardar_catalogo(cat)
+    _prev = _cfg_con_diseno(cat)
     _prev["moldes"] = sum(1 for p in cat.get("productos", []) if p.get("origen") == "con_diseno")
     return jsonify(_prev)
 

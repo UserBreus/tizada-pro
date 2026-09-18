@@ -18,39 +18,14 @@
 //     PDF `bidi` es siempre 0 y `char_flags` sólo cambia si el mismo texto se rellena Y se traza;
 //   · el canal alfa del color (`argb >> 24`): PyMuPDF también parte por él;
 //   · el ascender/descender de una fuente SIN /FontDescriptor (MuPDF los toma de la cara FreeType).
-import { pyIsSpace, pyStrip } from '../py.js'
 
 const f = Math.fround
 export const FLT_EPSILON = 1.1920928955078125e-7
 
 // ─── cadenas como Python ─────────────────────────────────────────────────────────────────────
-/** `str.split()` de Python (sin argumento): por corridas de espacios de Python, sin vacíos. */
-export function splitPy(s) {
-  const out = []
-  let cur = ''
-  for (const ch of String(s)) {
-    if (pyIsSpace(ch)) { if (cur) { out.push(cur); cur = '' } } else cur += ch
-  }
-  if (cur) out.push(cur)
-  return out
-}
-
-/** `_norm_nombre` de motor_pedido: NFKD, sin marcas combinantes, minúsculas, guión → espacio. */
-export function normNombre(s) {
-  if (!s) return ''
-  // `unicodedata.combining(c) != 0` ≈ la categoría Mn (para nombres de capa en español es lo mismo)
-  const t = String(s).normalize('NFKD').replace(/\p{Mn}/gu, '')
-  return splitPy(t.toLowerCase().replace(/-/g, ' ')).join(' ')
-}
-
-// los espacios de Python (`str.isspace`), como clase de expresión regular
-export const WS_PY = '\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
-const RX_GENERICO = new RegExp('[' + WS_PY + ']+\\p{Nd}+[' + WS_PY + ']*$', 'u')
-
-/** `_norm_generico`: además sin el número final («Frente 8» → «frente»). */
-export function normGenerico(s) {
-  return pyStrip(normNombre(s).replace(RX_GENERICO, ''))
-}
+// los nombres como Python viven en `motor/nombres.js`; se reexportan para quien importaba de acá
+import { splitPy, normNombre, normGenerico, WS_PY } from '../nombres.js'
+export { splitPy, normNombre, normGenerico, WS_PY }
 
 /** `str.isdigit()` de Python sobre una palabra ya normalizada (NFKD): dígitos decimales. */
 export const esDigitoPy = (w) => /^\p{Nd}+$/u.test(w)

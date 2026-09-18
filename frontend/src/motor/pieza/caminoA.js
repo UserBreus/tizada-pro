@@ -22,22 +22,10 @@ import { recursosLigeros, sanearOc } from '../molde/paginas.js'
 import { suprimirCapas, aislarCapa, recolorarCapa, aislarObjeto, aislarCapaObjetos,
   limpiarCapasConservandoTalle } from '../molde/capas.js'
 import { MM, CM, opsCont, configBorde, componerBase } from './base.js'
-import { normNombre } from './estampar.js'
 import { pyFixed } from '../py.js'
-
-// ─── capas del arte (motor_pedido) ───────────────────────────────────────────────────────────
-export const CAPAS_NO_PERS = new Set(['diseño', 'diseno', 'personalizable', 'guias', 'guías', 'guides',
-  'guia', 'guía', 'fondo', 'capa 1', 'referencia', '0'])
-/** `_es_capa_guia`. */
-export const esCapaGuia = (n) => ['guias', 'guia', 'guides'].includes(normNombre(n))
-/** `_es_capa_editable`. */
-export const esCapaEditable = (n) => normNombre(n).startsWith('editable')
-/** `_nombre_editable`: quita el prefijo «editable» (con o sin separador). */
-export function nombreEditable(capa) {
-  const s = String(capa).trim()
-  const m = /^\s*editable\b[\s\-_]*/i.exec(s)
-  return (m ? s.slice(m[0].length).trim() : s) || 'Editable'
-}
+// las capas del arte y los nombres como Python: `motor/nombres.js` (un solo lugar)
+import { normNombre, CAPAS_NO_PERS, esCapaGuia, esCapaEditable, nombreEditable } from '../nombres.js'
+export { CAPAS_NO_PERS, esCapaGuia, esCapaEditable, nombreEditable }
 
 // ─── marcas de proceso ───────────────────────────────────────────────────────────────────────
 export const MARCAS_PROCESO = {

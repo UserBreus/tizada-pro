@@ -8,24 +8,11 @@
 // `fuente(nombrePs, {sinAlias})` devuelve una con `opsTexto`, `anchoTexto`, `sizeParaAlto`,
 // `faltantes` y `prestados`.
 import { pyFixed, pyG, pyRound } from '../py.js'
-import { splitPy } from '../molde/talle.js'
+import { normNombre, normGenerico } from '../nombres.js'
+export { normNombre, normGenerico }
 import { MM } from './base.js'
 
 // ─── nombres ─────────────────────────────────────────────────────────────────────────────────
-/** `_norm_nombre`: sin acentos, minúsculas, guiones a espacio, espacios colapsados. Los espacios
- *  son los de `str.split()` de PYTHON (incluye U+001C-U+001F: el separador de los idents de las
- *  figuras editables, «escudo\x1f11018b89» → «escudo 11018b89»). */
-export function normNombre(s) {
-  if (!s) return ''
-  const sin = String(s).normalize('NFKD').replace(/\p{Mn}/gu, '')
-  return splitPy(sin.toLowerCase().replace(/-/g, ' ')).join(' ')
-}
-
-/** `_norm_generico`: además sin el número final («Frente 8» → «frente»). */
-export function normGenerico(s) {
-  return normNombre(s).replace(/\s+\d+\s*$/, '').trim()
-}
-
 const RE_ETQ = /\s+\d+\s*$/
 const CAMPO_ALIAS = { '00': 'numero', nro: 'numero', num: 'numero', jugador: 'nombre', apellido: 'nombre' }
 export const PREFIJO_CAMPO_FUENTE = '@campo:'

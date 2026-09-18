@@ -13,7 +13,8 @@
 // la página (`molde/paginas.js:recursosLigeros` → `R.props[nombre] = [capas]`), así que corre en
 // cualquier hilo y no toca el PDF hasta que alguien escribe el resultado.
 
-import { normCapa } from './talle.js'
+import { normCapa } from '../nombres.js'
+import { reprPy } from '../arte/texto.js'
 import { pyRound, pyFixed } from '../py.js'
 import { sha1Hex } from '../sha1.js'
 
@@ -182,26 +183,8 @@ const mmul = (a, b) => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3],
 const mpt = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
 
 /** `repr()` de un float de Python (los de este sistema: redondeados a 1-3 decimales). */
-export function pyReprFloat(x) {
-  if (Object.is(x, -0)) return '-0.0'
-  if (!Number.isFinite(x)) return x > 0 ? 'inf' : (x < 0 ? '-inf' : 'nan')
-  if (Number.isInteger(x) && Math.abs(x) < 1e16) return String(x) + '.0'
-  const s = String(x)
-  if (s.includes('e')) {
-    // Python: mantisa + 'e' + signo + al menos dos dígitos (1e-05, 1e+16)
-    const [m, e] = s.split('e')
-    const sig = e[0] === '-' ? '-' : '+'
-    const d = e.replace(/^[-+]/, '')
-    return m + 'e' + sig + (d.length < 2 ? '0' + d : d)
-  }
-  if (Math.abs(x) < 1e-4) {                          // JS escribe 0.00001; Python 1e-05
-    const [m, e] = x.toExponential().split('e')
-    const sig = e[0] === '-' ? '-' : '+'
-    const d = e.replace(/^[-+]/, '')
-    return m + 'e' + sig + (d.length < 2 ? '0' + d : d)
-  }
-  return s
-}
+/** `repr()` de un float de Python: el de `arte/texto.js` (un solo lugar). */
+export const pyReprFloat = (x) => reprPy(x)
 
 /** `repr()` de un str de Python (comillas simples salvo que el texto las tenga y no tenga dobles). */
 function pyReprStr(s) {

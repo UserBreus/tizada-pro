@@ -9,16 +9,16 @@
 // svg: null, objetos: [{obj_id, kind, bbox_mu, mesa_rect, w_cm, h_cm, fill, recolorable, thumb,
 // svg}]}]. El `obj_id` es `sha1(repr(firma))[:8]` con el `repr` de Python reproducido letra por
 // letra (`reprPy`): un id distinto rompería la configuración guardada de cada objeto.
-import { pyRound, pyStrip } from '../py.js'
+import { pyRound } from '../py.js'
 import { sha1Hex } from '../sha1.js'
 import { instrucciones, contenidoCrudo } from '../pdf/contenido.js'
 import { dibujosDePagina } from '../pdf/dibujos.js'
 import { cropboxPyMuPDF } from '../molde/contornos.js'
-import { abrir, nombresOc, normNombre, reprPy, strOperando, floatOperando, transformarRect, rectVacio, WS_PY } from './texto.js'
-import { esCapaEditable } from './personalizacion.js'
+import { abrir, nombresOc, normNombre, reprPy, strOperando, floatOperando, transformarRect, rectVacio } from './texto.js'
+import { esCapaEditable, nombreEditable } from '../nombres.js'
+export { nombreEditable }
 
 export const CM = 28.3465
-const RX_WS = new RegExp('[' + WS_PY + ']', 'u')
 
 const CONSTRUCCION = new Set(['m', 'l', 'c', 'v', 'y', 're', 'h'])
 const PAINT_PATH = new Set(['S', 's', 'f', 'F', 'f*', 'B', 'B*', 'b', 'b*'])
@@ -195,26 +195,6 @@ export function bboxlog(mupdf, page) {
   return out
 }
 
-/** `_nombre_editable(capa)`: sin el prefijo «editable» (con o sin separador). */
-export function nombreEditable(capa) {
-  const s = pyStrip(String(capa))
-  const chars = Array.from(s)
-  let i = 0
-  const esWs = (ch) => RX_WS.test(ch)
-  while (i < chars.length && esWs(chars[i])) i++
-  const pal = chars.slice(i, i + 8).join('')
-  let fin = null
-  if (pal.toLowerCase() === 'editable') {
-    const sig = chars[i + 8]
-    // `\b`: después de «editable» no puede seguir otro carácter de palabra
-    if (sig === undefined || !/[\p{L}\p{N}_]/u.test(sig)) {
-      let j = i + 8
-      while (j < chars.length && (esWs(chars[j]) || chars[j] === '-' || chars[j] === '_')) j++
-      fin = j
-    }
-  }
-  return (fin === null ? s : pyStrip(chars.slice(fin).join(''))) || 'Editable'
-}
 
 /**
  * `_extraer_editables_crudo(path_arte, con_thumb=False)` sobre los bytes del arte.
