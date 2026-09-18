@@ -32,7 +32,7 @@ export function recorteDeFracciones(r, recorte) {
  * margen de 0,001 para que el ruido del float no agregue una fila de más.
  * 🔴 Sin ese margen, una hoja de 8 m salía 5328 px de alto donde el servidor la hace de 5327.
  */
-function aEntero(r) {
+export function aEntero(r) {
   const f = Math.fround
   return [Math.floor(f(r[0]) + 0.001), Math.floor(f(r[1]) + 0.001),
           Math.ceil(f(r[2]) - 0.001), Math.ceil(f(r[3]) - 0.001)]

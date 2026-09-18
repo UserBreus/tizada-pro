@@ -38,6 +38,7 @@ async function cargarPieza() {
 async function cargar() {
   if (M) return
   mupdf = await import('mupdf')
+  mupdf.enableICC()               // es lo que hace PyMuPDF; apagada, los colores de un dibujo difieren
   const dib = await import('./pdf/dibujos.js')
   const cont = await import('./molde/contornos.js')
   const pag = await import('./molde/paginas.js')

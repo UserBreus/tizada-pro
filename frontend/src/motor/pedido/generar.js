@@ -338,7 +338,8 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
   fd.append('pids', JSON.stringify(cuerpo.molds || cuerpo.productos || []))
   for (const [nombre, bytes] of Object.entries(archivos)) fd.append(nombre, new Blob([bytes], { type: 'application/pdf' }), nombre)
   const d = await json(rutaApi('/api/paquetes/pedido'), { method: 'POST', body: fd })
-  return { id: d.id, resultado: d.resultado, segundos: (performance.now() - t0) / 1000 }
+  // `archivos`: la pantalla los usa para precalentar el visor sin volver a bajarlos (`precalentarVista`)
+  return { id: d.id, resultado: d.resultado, segundos: (performance.now() - t0) / 1000, archivos }
 }
 
 async function bajarFuentes(fuentes, pid, rutaApi) {

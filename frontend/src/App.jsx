@@ -6,7 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
-import { navegadorDibujaVista, abrirVista, cerrarVistas } from './motor/vista/vista.js';
+import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
@@ -18,7 +18,7 @@ import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
 // PARA DIAGNÓSTICO (Registro del sistema / soporte): el motor del navegador a mano desde la consola.
 // `window.__tizada.generarPedidoEnNavegador(cuerpo, {rutaApi})` genera un pedido acá y lo guarda;
 // `window.__tizada.puedeHacer({tipo:'molde', mb})` dice qué mide la puerta de potencia.
-if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, previasCaminoA, prepararEnDosTiempos, prepararArteEnNavegador, puedeHacer: _puedeHacer, rutaApi };
+if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, previasCaminoA, prepararEnDosTiempos, prepararArteEnNavegador, abrirVista, precalentarVista, puedeHacer: _puedeHacer, rutaApi };
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -2843,16 +2843,26 @@ function useVistaLocal(idTrabajo) {
     } catch { /* lo dibuja el servidor */ }
   };
 
+  const pedir = (v, clave, pagina, ancho, recorte) => {
+    if (pidiendo.current.has(clave)) return;
+    pidiendo.current.add(clave);
+    v.dibujo(pagina, ancho, recorte)
+      .then(u => setUrls(x => ({ ...x, [clave]: u })))
+      .catch(() => { /* lo dibuja el servidor */ });
+  };
   return (archivo, pagina, ancho, recorte, urlServidor) => {
     const clave = `${archivo}|${pagina}|${ancho}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
     if (urls[clave]) return urls[clave];
     const v = vistas[archivo];
     if (!v) { abrir(archivo); return urlServidor; }
-    if (!pidiendo.current.has(clave)) {
-      pidiendo.current.add(clave);
-      v.dibujo(pagina, ancho, recorte)
-        .then(u => setUrls(x => ({ ...x, [clave]: u })))
-        .catch(() => { /* lo dibuja el servidor */ });
+    pedir(v, clave, pagina, ancho, recorte);
+    // MIENTRAS LLEGA EL GRANDE, EL CHICO: el dibujo general de una mesa pesada tarda segundos;
+    // uno de 300 px sale en una fracción y se muestra primero (se pide DESPUÉS, así con «lo más
+    // nuevo primero» sale antes). Nada de miniaturas fijas: es el mismo dibujo, sólo más chico.
+    if (!recorte && ancho >= 1200) {
+      const claveChica = `${archivo}|${pagina}|300|todo`;
+      if (urls[claveChica]) { pedir(v, claveChica, pagina, 300, null); return urls[claveChica]; }
+      pedir(v, claveChica, pagina, 300, null);
     }
     return urlServidor;
   };
@@ -9205,6 +9215,14 @@ export default function App() {
       if (_local) {
         setTrabajosMulti(prev => prev.map(t => ({ ...t, jobId: _local.id, estado: 'listo', resultado: _local.resultado, progreso: '' })));
         showMsg(`Tizada lista en ${Math.round(_local.segundos)} s (generada en esta computadora)`);
+        // EL VISOR, YA DIBUJADO: los bytes de cada hoja y de la ficha están acá; se guardan y se
+        // dibujan de fondo ahora, así el paso Tizada no espera (reporte del usuario 2026-09-18).
+        try {
+          for (const [nombre, bytes] of Object.entries(_local.archivos || {})) {
+            const esFicha = nombre === 'FICHA_TECNICA.pdf';
+            precalentarVista(`${_local.id}|${nombre}`, bytes, { anchos: esFicha ? [Math.round(595.276 * 2)] : [300, 1200] });
+          }
+        } catch { /* se dibuja cuando se mire */ }
         return;
       }
       const res = await fetch('/api/generar_multi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_cuerpo) });

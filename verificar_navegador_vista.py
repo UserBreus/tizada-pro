@@ -34,8 +34,9 @@ NODE = os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "vista.mjs")
 CASOS = [(1200, None), (800, (0.0, 0.0, 0.5, 0.5)), (1600, (0.25, 0.25, 0.5, 0.5))]
 
 
-def _distintos(py_bytes, js_bytes, W, H):
-    """(cuántos valores distintos, cuántos NO se explican por borde/última fila, el peor salto)."""
+def _distintos(py_bytes, js_bytes, W, H, tolerancia=0):
+    """(cuántos valores distintos, cuántos NO se explican por borde/última fila, el peor salto).
+    `tolerancia`: una diferencia de hasta tantos niveles no cuenta como «fuera de borde»."""
     distintos = peor = fuera = 0
     for k in range(min(len(py_bytes), len(js_bytes))):
         a, b = py_bytes[k], js_bytes[k]
@@ -44,6 +45,8 @@ def _distintos(py_bytes, js_bytes, W, H):
         distintos += 1
         d = abs(a - b)
         peor = max(peor, d)
+        if d <= tolerancia:
+            continue
         px = (k // 3) % W
         py_ = (k // 3) // W
         if px >= W - 1 or py_ >= H - 1:
@@ -104,6 +107,27 @@ def comparar(path):
                         if ok else
                         f"  ✗ {etiqueta}: {fuera} píxel(es) distintos que NO son borde (peor salto {peor})")
                     lineas[-1] += f" · servidor {t_py:.2f} s · navegador {info['segundos']:.2f} s"
+                    # EL REPLAY (lo que usa el visor, 2026-09-18): cada dibujo de origen interpretado
+                    # una vez. Es el mismo rasterizador; lo único que cambia es el redondeo del color
+                    # (± 1-2 niveles, invisible) y el suavizado de algún borde. Se exige eso: ninguna
+                    # diferencia mayor a 2 niveles fuera de los bordes.
+                    rr2 = subprocess.run(cmd + ["--replay"], capture_output=True, text=True, encoding="utf-8", timeout=1800)
+                    if rr2.returncode == 2:
+                        lineas.append(f"  · {etiqueta}: esta página no se puede repetir (va por el camino exacto)")
+                    elif rr2.returncode != 0:
+                        fallas += 1
+                        lineas.append(f"  ✗ {etiqueta}: el replay falló: {rr2.stderr[-300:]}")
+                    else:
+                        info2 = json.loads(rr2.stdout.strip().splitlines()[-1])
+                        js2 = fitz.Pixmap(salida)
+                        if (js2.width, js2.height) != (pix.width, pix.height):
+                            fallas += 1
+                            lineas.append(f"  ✗ {etiqueta} (replay): tamaño {pix.width}x{pix.height} vs {js2.width}x{js2.height}")
+                        else:
+                            d2, fuera2, peor2 = _distintos(pix.samples, js2.samples, pix.width, pix.height, tolerancia=2)
+                            ok2 = fuera2 == 0
+                            fallas += 0 if ok2 else 1
+                            lineas.append(f"  {'✓' if ok2 else '✗'} {etiqueta} (replay): {d2} valores distintos, {fuera2} fuera de borde con más de 2 niveles (peor {peor2}) · navegador {info2['segundos']:.2f} s")
                 dl = None
         return fallas == 0, "\n".join(lineas)
     finally:

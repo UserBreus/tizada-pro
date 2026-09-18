@@ -15,19 +15,24 @@ const responder = (msg, transfer) => canal.postMessage(msg, transfer || [])
 
 let mupdf = null
 let dibujarMesa = null
+let replay = null                 // `vista/replay.js`: la hoja repetida con cada dibujo de origen interpretado UNA vez
 let doc = null
 const listas = new Map()          // página → lista de dibujo ya armada
+const preps = new Map()           // página → preparado del replay (o null si esa página no se puede repetir)
 
 async function cargar() {
   if (mupdf) return
   mupdf = await import('mupdf')
   dibujarMesa = (await import('./vista/dibujar.js')).dibujarMesa
+  replay = await import('./vista/replay.js')
   mupdf.enableICC()               // es lo que hace PyMuPDF; apagada, los colores difieren
 }
 
 function cerrarTodo() {
   for (const dl of listas.values()) { try { dl.destroy() } catch { /* nada */ } }
   listas.clear()
+  for (const p of preps.values()) { if (p) { try { p.destroy() } catch { /* nada */ } } }
+  preps.clear()
   if (doc) { try { doc.destroy() } catch { /* nada */ } doc = null }
 }
 
@@ -54,8 +59,24 @@ const TAREAS = {
     }
     return { paginas: medidas.length, medidas }
   },
-  async dibujar({ pagina, ancho, recorte }) {
+  async dibujar({ pagina, ancho, recorte, exacto = false }) {
     await cargar()
+    // LO RÁPIDO PRIMERO (2026-09-18): la hoja de tizada se «repite» con cada dibujo de origen
+    // interpretado una sola vez (`vista/replay.js`: 2-5 s en vez de 20-30 s por página). Si la
+    // página no se puede repetir (algo fuera del repertorio) o se pide `exacto` (el contrato de la
+    // vista compara bit a bit contra PyMuPDF), va por la lista de dibujo de siempre.
+    if (!exacto) {
+      if (!preps.has(pagina)) {
+        let p = null
+        try { p = replay.prepararReplay(mupdf, doc, pagina) } catch { p = null }
+        preps.set(pagina, p)
+      }
+      const prep = preps.get(pagina)
+      if (prep) {
+        const r = replay.dibujarConReplay(mupdf, doc, pagina, prep, { ancho, recorte })
+        return { valor: { png: r.png, w: r.w, h: r.h }, transfer: [r.png.buffer] }
+      }
+    }
     const r = dibujarMesa(mupdf, doc, pagina, { ancho, recorte, lista: listaDe(pagina) })
     return { valor: { png: r.png, w: r.w, h: r.h }, transfer: [r.png.buffer] }
   },

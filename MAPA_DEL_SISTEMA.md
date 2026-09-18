@@ -1498,6 +1498,40 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (499) — 🐢→🐇 EL VISOR DE LA TIZADA Y LA FICHA TÉCNICA, RÁPIDOS.** Reporte del usuario:
+  «visor de tizada armada malísimo, le re cuesta mostrar todo; mostrar ficha técnica malísimo, y
+  esto debe ser lo más rápido de todo: planilla A4 con una visual básica del molde, nítida para
+  imprimir en A4 y más nada». Medido sobre su pedido real (20 prendas, hojas de 11 MB):
+  - **La ficha pesaba 26 MB** porque cada pieza de la guía llevaba el arte ENTERO como vector, y
+    dibujar una página tardaba segundos. **Decisión del usuario**: la pieza de la guía va como
+    IMAGEN a 300 dpi del tamaño impreso (`ficha_tecnica.py` `get_pixmap` + `insert_image`;
+    `ficha/ficha.js` con `dibujarMesa` + `insertarImagen`, el mismo dibujo). Resultado: 1,1 MB, la
+    página se dibuja en 0,1 s. Contrato `verificar_navegador_ficha.py` verde (las dos fichas iguales).
+    La sección de objetos con proceso (TPU/bordado) sigue como estaba.
+  - **El visor**: una hoja de 10 MB tardaba 20-30 s en armar su lista de dibujo en mupdf.js (y
+    31-44 s por dibujo). No es el tamaño: son 100 `Do` de 7 dibujos de origen (la mesa desplegada
+    de cada talle, 117 000 operadores) y MuPDF re-interpreta el dibujo ENTERO en cada `Do`.
+    **`vista/replay.js`**: cada XObject de la página se convierte en lista de dibujo UNA vez (con un
+    documento de una página `/X Do` y deshaciendo la transformación de esa página) y el contenido
+    de la página (nuestro: `q/Q/cm`, trazados, `W n`, `k/K`, `f/S`, `Do`) se repite sobre el
+    `DrawDevice` de MuPDF con la matriz de cada colocación. Mismo rasterizador; lo único que cambia
+    es el redondeo del color (±1-2 niveles). Si aparece un operador fuera del repertorio, cae al
+    camino exacto (`dibujarMesa`). Medido en Edge con la hoja real: primer dibujo 18 s → 5 s,
+    dibujo general 16 s → 6,5 s. **`vista/vista.js`**: hasta 6 hilos por archivo (según núcleos,
+    memoria y tamaño), la cola se atiende de lo MÁS NUEVO a lo más viejo (lo que se está mirando;
+    antes se seguían dibujando recortes que ya no se veían), `precalentarVista` (al terminar de
+    generar en el navegador, los bytes de cada hoja y de la ficha se guardan en la caché y se
+    dibujan de fondo: el paso Tizada no baja nada ni espera), y `useVistaLocal` muestra primero el
+    dibujo de 300 px mientras llega el de 1200 (es el mismo dibujo, no una miniatura fija).
+    `verificar_navegador_vista.py` compara ahora TAMBIÉN el replay contra PyMuPDF (tolerancia 2
+    niveles fuera de bordes) sobre las hojas reales: verde.
+  - **Lo que NO se puede bajar más (medido):** rasterizar un recorte del zoom a 1600 px de una
+    tela jacquard densa tarda 7-20 s en WebAssembly (PyMuPDF nativo: 0,4-0,7 s — WASM es 10-20×
+    más lento en esto). Es el precio de dibujar en la computadora de la persona; se paga en
+    paralelo y una sola vez (queda en IndexedDB). Si algún día pesa demasiado, la salida es
+    recortar el dibujo de origen a la caja de cada pieza al armar la hoja (menos operadores por
+    `Do`), no bajar la calidad.
+
 - **2026-09-18 (498) — 🐛 UNA TELA CON ACENTO REBOTABA LA TIZADA DEL NAVEGADOR.** Reporte del usuario:
   «nombre de hoja que no corresponde: HOJA_g0_Jacquard_Charrúa__1_83_.pdf» (400 en
   `/api/paquetes/pedido`). El slug de la tela lo arma el motor con `str.isalnum()` (letras de

@@ -43,6 +43,7 @@
 // Devuelve los bytes del PDF (Uint8Array).
 import { pyRound, pyStrip } from '../py.js'
 import { sha1HexBytes } from '../sha1.js'
+import { dibujarMesa } from '../vista/dibujar.js'
 
 // A4 en puntos (72 dpi). Retrato.
 export const A4_W = 595.28
@@ -519,7 +520,11 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = 5) {
         const aw = r0w * esc, ah = r0h * esc
         const dst = [card[0] + (cardW - aw) / 2, card[1] + (cardH - ah) / 2,
           card[0] + (cardW + aw) / 2, card[1] + (cardH + ah) / 2]
-        mostrarPagina(ctx, pg, dst, src, 0)
+        // la pieza como IMAGEN a 300 dpi del tamaño impreso (ver `ficha_tecnica.py`): el mismo
+        // dibujo que hace PyMuPDF (`dibujarMesa` = `get_pixmap`, contrato de la vista)
+        const anchoPx = Math.max(1, Math.round((dst[2] - dst[0]) * 300.0 / 72.0))
+        const dib = dibujarMesa(ctx.mupdf, src, 0, { ancho: anchoPx })
+        insertarImagen(ctx, pg, dst, dib.png, true)
       } catch {
         // como el Python: si el PDF de la pieza no se puede leer, la tarjeta queda vacía
       } finally {

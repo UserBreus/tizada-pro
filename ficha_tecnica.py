@@ -149,7 +149,17 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
                 aw, ah = r0.width * esc, r0.height * esc
                 dst = fitz.Rect(card.x0 + (card.width - aw) / 2, card.y0 + (card.height - ah) / 2,
                                 card.x0 + (card.width + aw) / 2, card.y0 + (card.height + ah) / 2)
-                page.show_pdf_page(dst, src, 0)
+                # LA PIEZA VA COMO IMAGEN A 300 DPI DEL TAMAÑO IMPRESO (decisión del usuario
+                # 2026-09-18: «la ficha es una planilla A4 con una visual básica del molde, nítida
+                # para imprimir en A4 y más nada»). Con el vector entero adentro la ficha pesaba
+                # 26 MB y tardaba segundos en mostrarse (cada pieza traía el arte completo); con
+                # la imagen pesa poco y se ve al toque. 300 dpi sobre 4-5 cm de tarjeta: nítida
+                # en papel. El navegador dibuja EXACTAMENTE lo mismo (`ficha/ficha.js` +
+                # `vista/dibujar.js`, contrato `verificar_navegador_ficha.py`).
+                _ancho_px = max(1, int(round(dst.width * 300.0 / 72.0)))
+                _z = _ancho_px / r0.width if r0.width else 1.0
+                _pix = src[0].get_pixmap(matrix=fitz.Matrix(_z, _z), alpha=False)
+                page.insert_image(dst, stream=_pix.tobytes("png"), keep_proportion=True)
             except Exception:
                 pass
             finally:
