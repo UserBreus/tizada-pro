@@ -46,6 +46,7 @@ import pymupdf as fitz                         # noqa: E402
 import motor_pedido as MP                      # noqa: E402
 
 NODE = os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "pieza_a.mjs")
+NODE_REPETIDO = os.path.join(AQUI, "frontend", "src", "motor", "pruebas", "contexto_a_repetido.mjs")
 FUENTES = os.environ.get("TIZADA_FUENTES") or os.path.join(AQUI, "catalogo_fuentes")
 PID = "prod_20260820_095558_38bc"
 ARTES = ["jugador", "golero", "refwerrf"]
@@ -246,7 +247,9 @@ def main():
         # refwerrf: el escudo de 4 figuras con color por figura (M) y, por eso, también en el talle 8.
         ok(con_e >= 5, f"el motor redibujó editables aparte en {con_e} piezas")
         ok(con_oa >= 2 and con_cruz >= 1, f"objetos agregados en {con_oa} piezas · cruz de proceso en {con_cruz}")
-        fixture = {"borde": BORDE, "etiqueta": ETIQUETA, "catalogo": catalogo, "alias": {}, "casos": fx_casos}
+        fixture = {"borde": BORDE, "etiqueta": ETIQUETA, "catalogo": catalogo, "alias": {}, "casos": fx_casos,
+                   # para §4 (el hilo de trabajo real con el contexto rearmado)
+                   "plantilla": pl, "registro": reg, "orden_var": vorden}
         fx = os.path.join(tmp, "fixture.json")
         with open(fx, "w", encoding="utf-8") as fh:
             json.dump(fixture, fh, ensure_ascii=False)
@@ -321,6 +324,20 @@ def main():
                 if fuera:
                     ok(False, f"{cs['nombre']}/{p['pieza']}/{p['talle']}/{p['variante']}: {fuera} píxeles distintos que no son borde ({distintos} en total)")
         ok(peor == 0 and hechas == total, f"las {hechas} piezas dibujadas a 100 dpi: 0 píxeles distintos fuera de bordes")
+
+        print("\n4 · UN ARTE NUEVO CON EL VISOR YA MOSTRANDO EL ANTERIOR (el hilo de trabajo real)")
+        # Reporte 2026-09-18 «tarda en cargar un arte»: el hilo rearmaba el contexto del arte pero
+        # seguía usando las piezas armadas con el anterior (documentos ya destruidos) → «cannot find
+        # page tree» / «invalid page number» → la pantalla le tiraba todos los talles al servidor.
+        sal4 = os.path.join(tmp, "repetido.json")
+        r4 = subprocess.run(["node", "--max-old-space-size=4096", NODE_REPETIDO, fx, sal4],
+                            capture_output=True, text=True, encoding="utf-8", timeout=900)
+        ok(r4.returncode == 0, "el hilo de trabajo terminó" + ("" if r4.returncode == 0 else f": {r4.stderr[-1200:]}"))
+        if r4.returncode == 0:
+            rep = json.load(open(sal4, encoding="utf-8"))
+            for p in rep["pasos"]:
+                ok(p["ok"], f"{p['nombre']} ({rep.get('pieza')})" + ("" if p["ok"] else f": {p.get('error')}"))
+            ok(rep.get("iguales"), "🔴 y sale IGUAL las tres veces (nada de la base vieja se cuela)")
     finally:
         MP.cerrar_abiertos() if hasattr(MP, "cerrar_abiertos") else None
         shutil.rmtree(tmp, ignore_errors=True)

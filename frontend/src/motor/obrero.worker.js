@@ -131,6 +131,8 @@ const TAREAS = {
     if (moldesA.has(clave)) { try { moldesA.get(clave).destroy() } catch { /* nada */ } }
     moldesA.set(clave, new CA.MoldeA(mupdf, mupdf.Document.openDocument(bytes, 'application/pdf')))
     for (const k of [...contornosA.keys()]) if (k.startsWith(clave + '|')) contornosA.delete(k)
+    // las bases llevan el contorno del molde anterior: con otra plantilla quedarían con la forma vieja
+    for (const k of [...basesA.keys()]) if (k.split('|').includes(clave)) basesA.delete(k)
     const m = moldesA.get(clave)
     const talles = CA.tallesDePlantilla(m)
     return { talles, ordenVar: CA.ordenarPorArchivo(m, [...talles].sort()) }
@@ -149,6 +151,12 @@ const TAREAS = {
     const MA = await import('./arte/mapeo.js')
     const ED = await import('./arte/editables.js')
     if (contextosA.has(clave)) { try { contextosA.get(clave).ctx.cerrar() } catch { /* nada */ } }
+    // 🔴 Las bases armadas con el contexto anterior NOMBRAN sus documentos (el arte, los editables),
+    // y `cerrar()` acaba de destruirlos. Si quedaban en `basesA`, la próxima pieza del mismo
+    // talle/variable reusaba una base muerta y reventaba con «cannot find page tree» o «invalid
+    // page number»: pasaba al cargar un arte nuevo con el visor ya mostrando el anterior, y la
+    // pantalla le tiraba TODOS los talles al servidor (reporte 2026-09-18: «tarda en cargar un arte»).
+    for (const k of [...basesA.keys()]) if (k.startsWith(clave + '|')) basesA.delete(k)
     let mapeoVar
     try { mapeoVar = MA.mapeoVariantesArte(mupdf, arteBytes, registro, ordenVar || []) } catch { mapeoVar = {} }
     let editables = []

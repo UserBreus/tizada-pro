@@ -9475,7 +9475,7 @@ export default function App() {
       const _moldeConDiseno = ((productosCat.productos || []).find(x => x.id === pid) || {}).origen === 'con_diseno';
       const _local = !_moldeConDiseno && (await previasCaminoA({ pid, diseno: dis, variante: clave, talle: _guia, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) })
         .then((d) => { if (d && d.piezas) _pvGuardar(_pvKeyCon(mapeo, _guia, fuentesReempl), d.piezas); return !!d; })
-        .catch(() => false));
+        .catch((e) => { console.warn('[arte] el navegador no pudo dibujar el talle', _guia, '→ lo dibuja el servidor:', e); return false; }));
       // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.
       // PyMuPDF no es thread-safe → multiproceso. `talles` acota el trabajo al talle guía.
       try {

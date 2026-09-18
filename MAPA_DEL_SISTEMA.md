@@ -1498,6 +1498,31 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (505) — 🐛 «TARDA EN CARGAR UN ARTE»: EL HILO REUSABA PIEZAS ARMADAS CON EL ARTE ANTERIOR.**
+  Reporte del usuario: *«¿por qué demora tanto en cargar un arte? veníamos bien»*. El registro del
+  servidor mostraba `POST /api/arte/asignar_todo` y `[piezas] armadas de cero` para TODOS los talles:
+  el servidor estaba dibujando lo que en el camino A hace el navegador (495), y con la máquina
+  cargada (otro programa usando ~5 núcleos) cada talle le llevaba 3-5 s.
+  - **La causa (reproducida en la pantalla real, sandbox 8061):** con el visor mostrando el arte
+    anterior, cargar uno nuevo rearma el contexto del arte en el hilo (`contexto_a`, misma clave
+    `pid|diseño|previa`) y `ctx.cerrar()` destruye sus documentos; pero `basesA` (las bases ya
+    armadas, que NOMBRAN esos documentos) no se limpiaba. La siguiente pieza del mismo talle y
+    variable reusaba una base muerta → «cannot find page tree» / «invalid page number: 7» →
+    `previasCaminoA` fallaba → `asignarTodasLasVariantes` caía a `/api/arte/asignar_todo`. En una
+    página recién abierta no pasaba (por eso las pruebas sueltas daban bien).
+  - **Arreglo** (`obrero.worker.js`): al rearmar un contexto se borran las bases de esa clave; al
+    reabrir un molde, las bases de ese molde (llevan su contorno).
+  - **«Veníamos bien»:** este camino es de hoy (3e54018) y además el `_esB is not defined` (503)
+    cortaba `asignarTodasLasVariantes` antes de llegar acá: al arreglar eso apareció esto.
+  - **La falla ya no es muda:** `asignarTodasLasVariantes` escribe en la consola por qué el
+    navegador no pudo y le pasó el trabajo al servidor.
+  - Medido (Edge, arte real de 7 MB): preparar el arte UNA vez ~9 s; cada talle después ~2 s
+    (7 piezas). El arte no se relee por talle: por talle cambia la forma de la pieza y lo
+    manipulable (editables, nombre, número).
+  - Contrato: `verificar_navegador_pieza_a.py` §4 (`pruebas/contexto_a_repetido.mjs`, el hilo REAL
+    con worker_threads): pieza → contexto rearmado → la misma pieza → molde reabierto → la misma
+    pieza, idénticas. **Probado que caza el bug:** sin el arreglo da «cannot find page tree» (sale 1).
+
 - **2026-09-18 (504) — 🐧 EL `.wasm` DEL MOTOR SE SIRVE CON SU TIPO TAMBIÉN EN LINUX.** Pregunta del
   usuario: «¿con el botón de enviar alcanza para el servidor Linux?». Revisado: el paquete lleva
   todos los `*.py` (incluido `monitor.py`) y `frontend/dist` (con `mupdf-wasm-*.wasm`), no hay
