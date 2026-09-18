@@ -201,10 +201,53 @@ function hilosParaVista(bytes) {
   const nucleos = n.hardwareConcurrency || 4
   const memGb = n.deviceMemory || 4
   const mb = bytes / 1048576
-  return Math.max(1, Math.min(6, nucleos - 1, Math.floor(memGb / 2), mb > 60 ? 1 : mb > 25 ? 2 : 6))
+  // el cupo es de TODAS las vistas abiertas (un pedido son varias hojas): con 4 hojas y 6 hilos
+  // cada una serían 24 hilos y 24 copias del PDF
+  const abiertosYa = [...abiertas.values()].reduce((k, v) => k + v.obreros.length, 0)
+  // medido (2026-09-18, 12 núcleos / 32 GB): 24 hilos dejaron listos 258 dibujos de un pedido de
+  // 28 m de tela en ~8 min; cada hilo pesa ~150-300 MB con una hoja de 11 MB → un hilo por núcleo
+  // (menos uno para la pantalla) mientras la memoria declarada dé (≈ 1 hilo por cada 0,8 GB)
+  const cupo = Math.max(1, Math.min(12, nucleos - 1, Math.floor(memGb * 1.25)))
+  return Math.max(1, Math.min(cupo - abiertosYa, mb > 60 ? 1 : mb > 25 ? 2 : 6))
 }
 
 const abiertas = new Map()          // huella → Vista
+// LA VISTA ES UNA REPRESENTACIÓN (decisión del usuario 2026-09-18): «como la foto de una remera en
+// una web; descargo las mesas reales pero antes veo una representación, nítida para ver errores,
+// pero ágil». Así que se arma ENTERA y de una vez, apenas está la tizada: el dibujo general de cada
+// mesa y todos los recortes en alta (un nivel: `TILE_PX` por cada `TILE_CM` de mesa), en todos los
+// hilos, de fondo; queda en IndexedDB y el zoom no dibuja nada, sólo muestra lo que ya está.
+export const TILE_CM = 50                 // cada recorte cubre a lo sumo medio metro de mesa (= `_RECORTE_CM`)
+export const TILE_PX = 1600               // el nivel en alta: 1600 px por medio metro (32 px/cm)
+const CM_PT = 28.3465
+const _progreso = { total: 0, hechos: 0 }    // el precalentado en curso (todas las vistas)
+
+/** Cuánto falta del precalentado: `{total, hechos}` (0/0 = nada en curso). */
+export function progresoVistas() { return { ..._progreso } }
+
+function _anotarFondo(p) {
+  _progreso.total++
+  p.then(() => { _progreso.hechos++ }, () => { _progreso.hechos++ }).finally(() => {
+    if (_progreso.hechos >= _progreso.total) { _progreso.total = 0; _progreso.hechos = 0 }
+  })
+}
+
+/** Los recortes en alta de la página `p` de la vista `v`, en el mismo orden y con las mismas fracciones que la pantalla. */
+export function recortesDe(v, p) {
+  const m = (v.medidas || [])[p]
+  if (!m) return []
+  const nx = Math.max(1, Math.ceil((m.ancho / CM_PT) / TILE_CM)), ny = Math.max(1, Math.ceil((m.alto / CM_PT) / TILE_CM))
+  const out = []
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) out.push([i / nx, j / ny, (i + 1) / nx, (j + 1) / ny])
+  return out
+}
+
+/** Dibuja de fondo TODO lo que la pantalla puede pedir de esta vista: los generales y los recortes en alta. */
+export function precalentarTodo(v, { anchos = [300, 1200], tiles = true } = {}) {
+  const paginas = (v.medidas || []).length
+  for (const ancho of anchos) for (let p = 0; p < paginas; p++) _anotarFondo(v.dibujo(p, ancho, null, true))
+  if (tiles) for (let p = 0; p < paginas; p++) for (const rec of recortesDe(v, p)) _anotarFondo(v.dibujo(p, TILE_PX, rec, true))
+}
 
 /**
  * Abre un archivo para dibujarlo acá. `huella` identifica al archivo (trabajo + nombre); `traer()`
@@ -239,17 +282,14 @@ export async function abrirVista(huella, traer, { topeMb = 400 } = {}) {
  * vistas que la pantalla va a pedir (el dibujo general de cada mesa, chico y grande, y las hojas
  * de la ficha): cuando la persona abre el paso Tizada, ya están.
  */
-export async function precalentarVista(huella, bytes, { anchos = [300, 1200] } = {}) {
+export async function precalentarVista(huella, bytes, { anchos = [300, 1200], tiles = true } = {}) {
   if (typeof Worker === 'undefined' || !bytes || !bytes.byteLength) return null
   try {
     const copia = new Uint8Array(bytes.slice ? bytes.slice() : bytes)
     guardar(ARCHIVOS, huella, new Blob([copia], { type: 'application/pdf' }))
     const v = await abrirVista(huella, async () => copia.buffer)
     if (!v) return null
-    const paginas = (v.medidas || []).length
-    for (const ancho of anchos) {
-      for (let p = 0; p < paginas; p++) v.dibujo(p, ancho, null, true).catch(() => {})
-    }
+    precalentarTodo(v, { anchos, tiles })
     return v
   } catch {
     return null

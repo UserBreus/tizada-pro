@@ -6,7 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
-import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista } from './motor/vista/vista.js';
+import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, TILE_PX } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
@@ -2827,19 +2827,26 @@ function useVistaLocal(idTrabajo) {
   const [urls, setUrls] = useState({});            // clave → object URL ya dibujada
   const pidiendo = useRef(new Set());
   const abriendo = useRef(new Set());
+  const localOn = useRef(null);                    // ¿el servidor quiere que dibuje esta computadora?
   useEffect(() => () => { cerrarVistas(); }, [idTrabajo]);
 
   const abrir = async (archivo) => {
     if (!idTrabajo || abriendo.current.has(archivo)) return;
     abriendo.current.add(archivo);
     try {
-      if (!(await navegadorDibujaVista(rutaApi))) return;
+      localOn.current = await navegadorDibujaVista(rutaApi);
+      if (!localOn.current) return;
       const v = await abrirVista(`${idTrabajo}|${archivo}`, async () => {
         const r = await fetch(rutaApi(`/trabajos/${idTrabajo}/${encodeURIComponent(archivo)}`));
         if (!r.ok) return null;
         return await r.arrayBuffer();
       });
-      if (v) setVistas(x => ({ ...x, [archivo]: v }));
+      if (v) {
+        setVistas(x => ({ ...x, [archivo]: v }));
+        // TODO DE UNA VEZ (2026-09-18): los generales y los recortes en alta de todas las mesas se
+        // dibujan de fondo apenas se abre; lo que la pantalla pide se adelanta (lo más nuevo primero)
+        precalentarTodo(v, { tiles: !/FICHA_TECNICA/i.test(archivo), anchos: /FICHA_TECNICA/i.test(archivo) ? [Math.round(595.276 * 2)] : [300, 1200] });
+      }
     } catch { /* lo dibuja el servidor */ }
   };
 
@@ -2854,7 +2861,9 @@ function useVistaLocal(idTrabajo) {
     const clave = `${archivo}|${pagina}|${ancho}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
     if (urls[clave]) return urls[clave];
     const v = vistas[archivo];
-    if (!v) { abrir(archivo); return urlServidor; }
+    // 🔴 CON LA VISTA EN ESTA COMPUTADORA, AL SERVIDOR NO SE LE PIDE NINGÚN DIBUJO (ni mientras se
+    // baja el archivo): con 100 personas mirando, el servidor no dibuja. Se muestra el aviso.
+    if (!v) { abrir(archivo); return localOn.current ? null : urlServidor; }
     pedir(v, clave, pagina, ancho, recorte);
     // MIENTRAS LLEGA EL GRANDE, EL CHICO: el dibujo general de una mesa pesada tarda segundos;
     // uno de 300 px sale en una fracción y se muestra primero (se pide DESPUÉS, así con «lo más
@@ -2864,7 +2873,7 @@ function useVistaLocal(idTrabajo) {
       if (urls[claveChica]) { pedir(v, claveChica, pagina, 300, null); return urls[claveChica]; }
       pedir(v, claveChica, pagina, 300, null);
     }
-    return urlServidor;
+    return null;
   };
 }
 
@@ -3000,6 +3009,9 @@ function MesasInfinito({ mesas, job, avisar }) {
   });
   const [editando, setEditando] = useState(null);
   const [cargadas, setCargadas] = useState({});   // previa de cada mesa: true = dibujada · 'error'  // key de la mesa en edición
+  // el precalentado de la vista (esta computadora dibuja todas las mesas y sus recortes en alta de fondo)
+  const [progVista, setProgVista] = useState({ total: 0, hechos: 0 });
+  useEffect(() => { const t = setInterval(() => setProgVista(progresoVistas()), 700); return () => clearInterval(t); }, []);
   useEffect(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify(nombres)); } catch { /* storage lleno/bloqueado */ }
   }, [LS_KEY, nombres]);
@@ -3020,7 +3032,7 @@ function MesasInfinito({ mesas, job, avisar }) {
   // deja PRE-DIBUJADOS apenas termina el pedido, así el zoom —rápido o lento— encuentra el
   // recorte ya hecho y se ve nítido al instante (reporte del usuario 2026-09-16). Cuántos pueden
   // estar vivos a la vez por mesa depende del escalón (memoria del navegador).
-  const TOPE_RECORTES = { 800: 24, 1600: 12 };
+  const TOPE_RECORTES = { 800: 24, 1600: 24 };
   const [detalle, setDetalle] = useState({});   // clave de mesa → [{id, a, c, b, d, src}]
   const urlVista = useVistaLocal(job?.resultado?.id);   // se dibuja acá si se puede (etapa 2)
   const mesaRefs = useRef({});                  // clave → el div de esa mesa
@@ -3058,8 +3070,9 @@ function MesasInfinito({ mesas, job, avisar }) {
         const j1 = Math.min(ny - 1, Math.floor(((iy1 - r.top) / r.height - 1e-6) * ny));
         // El ancho del recorte, en uno de los dos escalones pre-dibujados: así al acercarse de a
         // poco no se pide una imagen distinta cada vez.
-        const necesario = (r.width / nx) * 1.25 * dpr;
-        const wpx = necesario <= 800 ? 800 : 1600;
+        // UN SOLO NIVEL en alta (`TILE_PX`): ya está dibujado de fondo para todas las mesas, así que
+        // el zoom no dibuja nada, muestra lo que hay (decisión del usuario 2026-09-18)
+        const wpx = TILE_PX;
         const tope = TOPE_RECORTES[wpx];
         const tiles = [];
         for (let j = j0; j <= j1 && tiles.length < tope; j++) {
@@ -3115,6 +3128,14 @@ function MesasInfinito({ mesas, job, avisar }) {
     // Columna que OCUPA lo que le den: el visor estira y nunca empuja a los botones de abajo
     // fuera de la pantalla (ver `useAltoHastaElFondo`).
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* EL AVANCE, HONESTO: esta computadora está dejando dibujadas todas las mesas y sus recortes en
+          alta; mientras tanto, lo que falta se muestra en cuanto llega (nunca una aproximación). */}
+      {progVista.total > 0 && progVista.hechos < progVista.total && (
+        <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 3, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)',
+          background: 'rgba(0,0,0,0.6)', border: '1px solid var(--border-light)', borderRadius: 999, padding: '4px 11px' }}>
+          Preparando la vista en alta · {progVista.hechos}/{progVista.total}
+        </div>
+      )}
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
         <button type="button" onClick={() => setView({ zoom: 1, panX: 0, panY: 0 })} title="Ver todo" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>Ver todo</button>
         <button type="button" onClick={() => setView(v => ({ ...v, zoom: Math.max(0.15, v.zoom / 1.25) }))} title="Alejar" style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid var(--border-light)', color: 'var(--text-secondary)', borderRadius: 5, cursor: 'pointer', fontSize: 14, padding: '0 9px', lineHeight: '22px' }}>−</button>
@@ -3190,7 +3211,7 @@ function MesasInfinito({ mesas, job, avisar }) {
                         )}
                         {/* EL DETALLE NÍTIDO, calzado sobre su pedazo del dibujo general. Mientras
                             llega se ve el dibujo de abajo: nunca hay un hueco en blanco. */}
-                        {(detalle[key] || []).map(t => (
+                        {(detalle[key] || []).filter(t => t.src).map(t => (
                           <img key={t.id} src={t.src} alt="" draggable={false} decoding="async" fetchPriority="low"
                             style={{ position: 'absolute', left: `${t.a * 100}%`, top: `${t.c * 100}%`,
                               width: `${(t.b - t.a) * 100}%`, height: `${(t.d - t.c) * 100}%`, display: 'block' }} />

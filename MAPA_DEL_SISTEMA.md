@@ -1498,6 +1498,22 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (500) — 🖼️ EL VISOR ES UNA REPRESENTACIÓN, Y SE ARMA ENTERO DE UNA VEZ.** El usuario:
+  *«cuando la crea ya debe dejar todo armado, que no importe si hacemos zoom… el visor es sólo para ver
+  qué se va a descargar, como la foto de una remera en una web: se ve real y nítida para ver errores,
+  pero ágil»*. Entonces: apenas la tizada está (en el navegador, o al abrir el paso con una del
+  servidor), `precalentarTodo` dibuja de fondo, en todos los hilos, el dibujo general de cada mesa
+  (300 y 1200 px) y TODOS sus recortes en alta en UN solo nivel (`TILE_PX` = 1600 px por cada
+  `TILE_CM` = 50 cm, 32 px/cm); quedan en IndexedDB y el zoom no dibuja nada: muestra lo que hay.
+  Lo que la pantalla pide se adelanta (lo más nuevo primero). Con la vista en el navegador **al
+  servidor no se le pide ningún dibujo**, ni mientras se baja el archivo (antes, mientras llegaba
+  el local, se le pedía el recorte al servidor: con 100 personas era el servidor dibujando).
+  Cartel honesto «Preparando la vista en alta · n/N» (`progresoVistas`). Un recorte sin dibujo no
+  se pinta. Cupo de hilos de TODAS las vistas: un hilo por núcleo (menos uno) mientras la memoria
+  declarada dé (~1 por 0,8 GB), tope 12. Medido en Edge con el pedido real (4 hojas, 7 mesas,
+  28 m de tela, 244 recortes + 14 generales): todo listo en ~8 min de fondo con 24 hilos; el
+  general de cada mesa está en los primeros segundos. Se sacó el nivel de 800 px.
+
 - **2026-09-18 (499) — 🐢→🐇 EL VISOR DE LA TIZADA Y LA FICHA TÉCNICA, RÁPIDOS.** Reporte del usuario:
   «visor de tizada armada malísimo, le re cuesta mostrar todo; mostrar ficha técnica malísimo, y
   esto debe ser lo más rápido de todo: planilla A4 con una visual básica del molde, nítida para
