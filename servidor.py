@@ -10356,7 +10356,10 @@ def perfil_salida_pedido():
                     headers={"X-Perfil-Nombre": str(_icc_nom).encode("ascii", "replace").decode(), "X-Perfil-N": str(_icc_n)})
 
 
-_RE_HOJA = __import__("re").compile(r"^HOJA_[A-Za-z0-9_]{1,60}\.pdf$")
+# El nombre lleva la tela tal como la escribió el usuario («Jacquard Charrúa»): el slug del motor
+# deja letras y números de CUALQUIER idioma (`str.isalnum`), así que acá también (ya rebotó una
+# tizada entera por un acento, 2026-09-18).
+_RE_HOJA = __import__("re").compile(r"^HOJA_[^\W]{1,60}\.pdf$", __import__("re").UNICODE)
 
 
 @app.post("/api/paquetes/pedido")

@@ -1498,6 +1498,14 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (498) — 🐛 UNA TELA CON ACENTO REBOTABA LA TIZADA DEL NAVEGADOR.** Reporte del usuario:
+  «nombre de hoja que no corresponde: HOJA_g0_Jacquard_Charrúa__1_83_.pdf» (400 en
+  `/api/paquetes/pedido`). El slug de la tela lo arma el motor con `str.isalnum()` (letras de
+  cualquier idioma) y el navegador igual (`\p{L}\p{N}`), pero `_RE_HOJA` sólo aceptaba
+  `[A-Za-z0-9_]`. Ahora `^HOJA_[^\W]{1,60}\.pdf$` (Unicode); sigue rechazando `..`, espacios y
+  otras extensiones. Contrato `verificar_paquete_pedido.py`. Los «invalid marked content and clip
+  nesting» de la consola son avisos de MuPDF sobre el archivo (también los da PyMuPDF): no son error.
+
 - **2026-09-18 (497) — 📊 EL MONITOR (servidor + esta computadora) Y EL CHIP «TU PC: APTA / JUSTA / NO PUEDE».**
   El usuario: *«algo para controlar y ver qué se está ejecutando en el servidor, qué en el navegador,
   cuánta memoria, cuánta RAM, cuánto procesador… y que el usuario pueda ver si su PC está apta sin
