@@ -42,12 +42,8 @@ const colorOp = (vals, op) => vals.map((v) => pyG(Number(v))).join(' ') + ' ' + 
  * `B` = margen y mitad del ancho del borde: `(ancho_mm si activo, si no 2.0) * MM`.
  */
 export function armarBase(cont, S, borde, nom = '/A0') {
-  const bc = borde || {}
-  const bcActivo = bc.activo !== false
-  const bcMm = Math.max(0.2, Number(bc.ancho_mm ?? 2.0))
-  const bcColor = (bc.color || [0.75, 0.68, 0.67, 0.90]).slice(0, 4)
-  const bcAlin = bc.alineacion || 'fuera'
-  const B = (bcActivo ? bcMm : 2.0) * MM
+  const bc = configBorde(borde)
+  const { B } = bc
   const [x0, y0] = cont.bbox_raw
   const W = cont.w, H = cont.h
   const [x0m, y0m] = cont.bbox_mu
@@ -56,6 +52,33 @@ export function armarBase(cont, S, borde, nom = '/A0') {
   const clip = opsCont(cont, S, B - x0 * S, B - y0 * S)
   const arteDraw = `q\n1 0 0 1 ${pyFixed(B - x0 * S, 3)} ${pyFixed(B - y0 * S, 3)} cm\n` +
                    `q\n${ops}\nW n\n${nom} Do\nQ\nQ\n`
+  const baseStream = componerBase(bc, cont, S, clip, W, H, arteDraw)
+  return { baseStream, clip, W, H, Hp, x0, y0, x0m, y0m, S, B, nom,
+           bcActivo: bc.bcActivo, bcColor: bc.bcColor, bcAlin: bc.bcAlin, cont }
+}
+
+/**
+ * La configuración del borde de corte como la lee `generar_pedido` (`_bc_*`, `B`): `{bcActivo,
+ * bcMm, bcColor, bcAlin, B}`. `B` = margen de la pieza y mitad del ancho del borde.
+ */
+export function configBorde(borde) {
+  const bc = borde || {}
+  // `_bc.get("activo", True)`: sin la clave, prendido; con ella, su verdad (0/None/false apagan)
+  const bcActivo = bc.activo === undefined ? true : !!bc.activo
+  const bcMm = Math.max(0.2, Number(bc.ancho_mm ?? 2.0) || 2.0)
+  const bcColor = (bc.color || [0.75, 0.68, 0.67, 0.90]).slice(0, 4)
+  let bcAlin = bc.alineacion || 'fuera'
+  if (!['fuera', 'centro', 'dentro'].includes(bcAlin)) bcAlin = 'fuera'
+  const B = (bcActivo ? bcMm : 2.0) * MM
+  return { bcActivo, bcMm, bcColor, bcAlin, B }
+}
+
+/**
+ * El borde de corte y la línea de corte del archivo, como en `_armar_base` (compartido por los
+ * dos caminos): `{bordeOps, bordePost}`. `bc` = `configBorde(...)`.
+ */
+export function bloqueBorde(bc, cont, S, clip, W, H) {
+  const { bcActivo, bcColor, bcAlin, B } = bc
   let bordeOps = ''
   const bcol = colorOp(bcColor, 'K')
   if (bcActivo) {
@@ -82,13 +105,16 @@ export function armarBase(cont, S, borde, nom = '/A0') {
       bordePost = `q\n${clip}\nW n\n${clip}\n${pyFixed(wl, 3)} w 0 j 0 J 10 M ${bcol}\nS\nQ\n`
     }
   }
-  const baseStream = bcAlin === 'fuera' ? `${bordeOps}${arteDraw}${bordePost}` : `${arteDraw}${bordeOps}${bordePost}`
-  return { baseStream, clip, W, H, Hp, x0, y0, x0m, y0m, S, B, nom, bcActivo, bcColor, bcAlin, cont }
+  return { bordeOps, bordePost }
+}
+
+/** `_base_stream`: el orden del borde respecto del dibujo depende de la alineación. */
+export function componerBase(bc, cont, S, clip, W, H, arteDraw) {
+  const { bordeOps, bordePost } = bloqueBorde(bc, cont, S, clip, W, H)
+  return bc.bcAlin === 'fuera' ? `${bordeOps}${arteDraw}${bordePost}` : `${arteDraw}${bordeOps}${bordePost}`
 }
 
 // ─── el documento de UNA pieza (para la vista previa y los contratos) ────────────────────────
-const CLAVES_CAJA = ['MediaBox', 'CropBox', 'BleedBox', 'TrimBox', 'ArtBox']
-
 function leerCaja(pageObj, clave) {
   const v = pageObj.get(clave)
   if (!v || !v.isArray || !v.isArray()) return null

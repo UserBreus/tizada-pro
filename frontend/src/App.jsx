@@ -7,13 +7,15 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
 import { navegadorDibujaVista, abrirVista, cerrarVistas } from './motor/vista/vista.js';
-import { previasCaminoB } from './motor/arte/previa.js';
+import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
+import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
+import { localizarMesas, cerrarArtes } from './motor/arte/mesa.js';   // la mesa del arte dibujada acá (camino A)
 import { generarPedidoEnNavegador } from './motor/pedido/generar.js';
 import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
 // PARA DIAGNÓSTICO (Registro del sistema / soporte): el motor del navegador a mano desde la consola.
 // `window.__tizada.generarPedidoEnNavegador(cuerpo, {rutaApi})` genera un pedido acá y lo guarda;
 // `window.__tizada.puedeHacer({tipo:'molde', mb})` dice qué mide la puerta de potencia.
-if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, puedeHacer: _puedeHacer, rutaApi };
+if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, previasCaminoA, prepararEnDosTiempos, prepararArteEnNavegador, puedeHacer: _puedeHacer, rutaApi };
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -6985,8 +6987,17 @@ export default function App() {
     try {
       if (type === 'plantilla') {
         preparado = await _prepararDosTiempos(file, file.name || 'molde', (x) => setProcesando(x.nota || 'Preparando el molde en tu computadora…'), { detectar: true });
-        formData.append('con_diseno', preparado ? '1' : '0');
+        formData.append('con_diseno', preparado && !preparado.caminoA ? '1' : '0');
         if (preparado) formData.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
+        // un DXF ya convertido acá: se sube el PDF (el DXF original va adentro del paquete)
+        if (preparado && preparado.archivo && preparado.archivo !== file) formData.set('archivo', preparado.archivo, preparado.archivo.name);
+        setProcesando('Subiendo el archivo…');
+      }
+      if (type === 'arte') {
+        // EL ARTE TAMBIÉN SE ANALIZA ACÁ (camino A): mesas, personalización, mapeo y validación
+        // viajan en el paquete; el servidor sólo comprueba y guarda. `null` = lo analiza el servidor.
+        const _pa = await prepararArteEnNavegador(file, { pid: _pidMolde, diseno: null, rutaApi, avisar: (t) => setProcesando(t) });
+        if (_pa) formData.append('paquete', new Blob([_pa.zip], { type: 'application/zip' }), 'paquete.zip');
         setProcesando('Subiendo el archivo…');
       }
       // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Con un arte de 8 MB (y más todavía
@@ -7010,7 +7021,8 @@ export default function App() {
       try { data = JSON.parse(res.text || '{}'); } catch { data = {}; }
       if (!res.ok) throw new Error(data.error || "Error al procesar archivo");
       if (type === 'plantilla') data = await esperarMoldeLeido(data, (p) => setProcesando(p));
-      if (preparado) { _seguirPaginas(preparado.clave, _pidMolde, preparado.prep); preparado = null; }
+      if (preparado && !preparado.caminoA) { _seguirPaginas(preparado.clave, _pidMolde, preparado.prep); }
+      preparado = null;
 
       if (type === 'arte' && data.modo === 'separado' && (!data.auto || !data.aprobado)) {
         showMsg("Arte subido. Asigna las piezas.");
@@ -7076,16 +7088,17 @@ export default function App() {
       // minutos por esta vía). Sin diseño o DXF: `null`, y lo lee el servidor como siempre.
       preparado = await _prepararDosTiempos(subirMoldeFile, nombre, (x) => setProcesando(x.nota || 'Preparando tu molde en tu computadora…'), { detectar: true });
       const fd = new FormData();
-      fd.append('archivo', subirMoldeFile);
+      fd.append('archivo', (preparado && preparado.archivo) || subirMoldeFile);   // un DXF viaja ya convertido
       fd.append('pid', pid);
-      fd.append('con_diseno', preparado ? '1' : '0');
+      fd.append('con_diseno', preparado && !preparado.caminoA ? '1' : '0');
       if (preparado) fd.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
       setProcesando('Subiendo el archivo…');
       const r2 = await fetch('/api/plantilla', { method: 'POST', body: fd });
       const _j2 = await r2.json();
       if (!r2.ok) throw new Error(_j2.error || 'No se pudo procesar el molde');
       const d2 = await esperarMoldeLeido(_j2, (p) => setProcesando(p));
-      if (preparado) { _seguirPaginas(preparado.clave, pid, preparado.prep); preparado = null; }
+      if (preparado && !preparado.caminoA) { _seguirPaginas(preparado.clave, pid, preparado.prep); }
+      preparado = null;
       // MISMO aviso que en Configuración: es la ruta por la que entran los moldes de cliente
       // (DXF de cualquier lado), o sea la que MÁS necesita que se diga qué salió mal.
       avisarAltaMolde(d2);
@@ -7623,7 +7636,7 @@ export default function App() {
         try {
           const res = await fetch(`/api/arte/deteccion?variante=${encodeURIComponent(verVariante || '')}${qPid('&')}`);
           if (res.ok) {
-            const data = await res.json();
+            const data = await localizarMesas(await res.json(), { pid: pidCfg, rutaApi });
             setMapeoData(data);
             setMapeoValores(data.mapeo || {});
             setSelectedPiezaMapeo(data.piezas?.[0] || '');
@@ -9253,7 +9266,8 @@ export default function App() {
       const _qp = _p ? `&pid=${encodeURIComponent(_p)}` : '';
       const res = await fetch(`/api/arte/deteccion?diseno=${encodeURIComponent(disenoActivo)}&variante=${encodeURIComponent(verVariante || '')}${_qp}`);
       if (!res.ok) { if (!_hit) setMapeoData(null); return null; }
-      const det = await res.json();
+      // las mesas se dibujan en ESTA computadora si el servidor lo pide (`arte/mesa.js`)
+      const det = await localizarMesas(await res.json(), { pid: _p, diseno: disenoActivo, rutaApi });
       _detArteCache.current[_dk] = det;
       if (!_hit) _mapa = _aplicarDetArte(det);   // con caché ya aplicado, solo refrescamos el caché (sin re-pintar)
       // Geometría del molde al talle guía: también cacheada → revisitar variable = instantáneo.
@@ -9304,9 +9318,15 @@ export default function App() {
     setAsignando({ hecho: 0, total: talles.length, talle: '', piezas: 0, fase: 'arrancando', seg: 0 });
     const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
     try {
+      // CON EL ARTE EN EL NAVEGADOR (camino A, PLAN_NAVEGADOR 1b) no hay nada que precalentar
+      // en el servidor: cada talle se dibuja acá cuando se lo pide (`previasCaminoA`).
+      const _local = !_esB(pid) && (await previasCaminoA({ pid, diseno: dis, variante: clave, talle: _guia, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) })
+        .then((d) => { if (d && d.piezas) _pvGuardar(_pvKeyCon(mapeo, _guia, fuentesReempl), d.piezas); return !!d; })
+        .catch(() => false));
       // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.
       // PyMuPDF no es thread-safe → multiproceso. `talles` acota el trabajo al talle guía.
       try {
+        if (_local) throw new Error('local');
         const r = await fetch('/api/arte/asignar_todo', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           // `talle_guia` = el que el visor está mostrando: el servidor lo dibuja PRIMERO y avisa
@@ -9334,7 +9354,12 @@ export default function App() {
       // → el cambio entre variantes queda instantáneo. Salen del caché, es rápido.
       const _cargarTalle = async (t) => {
         const k = _pvKeyCon(mapeo, t, fuentesReempl);
-        if (!_pvCache.current[k]) {
+        if (!_pvCache.current[k] && _local) {
+          try {
+            const d = await previasCaminoA({ pid, diseno: dis, variante: clave, talle: t, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) });
+            if (d && d.piezas) _pvGuardar(k, d.piezas);
+          } catch { /* ese talle se dibuja cuando se lo toque */ }
+        } else if (!_pvCache.current[k]) {
           try {
             const res = await fetch('/api/arte/preview_piezas', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9468,6 +9493,12 @@ export default function App() {
           setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas);
           return;
         }
+      } else if (_prodB) {
+        // CAMINO A (PLAN_NAVEGADOR 1b): el molde pelado + el arte separado, con el mismo motor
+        const _d = await previasCaminoA({ pid, diseno: disenoActivo, variante: clave, talle, rutaApi, mapeo,
+                                          editables: { [clave || '*']: editorTfs }, reemplazos: _reemplDe(disenoActivo, pid, _reempl) });
+        if (req !== _pvReq.current) return;
+        if (_d) { setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas); _prefetchTalles(mapeo, talle, _reempl); return; }
       }
     } catch (e) {
       console.warn('previa de piezas en esta computadora: cae al servidor', e);
@@ -10121,6 +10152,10 @@ export default function App() {
     const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo); if (id) fd.append('pid', id);
     showMsg('Subiendo y procesando el diseño…');
     try {
+      // EL ARTE SE ANALIZA EN ESTA COMPUTADORA (camino A, PLAN_NAVEGADOR 1b): el paquete viaja con
+      // el archivo y el servidor sólo comprueba y guarda. `null` = el servidor lo analiza como antes.
+      const _pa = await prepararArteEnNavegador(file, { pid: id, diseno: disenoActivo, rutaApi, avisar: (t) => showMsg(t) });
+      if (_pa) fd.append('paquete', new Blob([_pa.zip], { type: 'application/zip' }), 'paquete.zip');
       // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Un arte puede pesar 8 MB o más y
       // procesarlo lleva unos segundos; sin esto el usuario mira un cartel quieto sin saber si
       // avanza (justamente lo que reportó). Ver también `handleUploadFile`.
@@ -11370,6 +11405,7 @@ export default function App() {
     } catch { /* storage bloqueado: no es motivo para frenar el pedido nuevo */ }
     // 7) el avance guardado en el navegador (si no, «nuevo pedido» + F5 resucitaba el viejo)
     try { localStorage.removeItem('tizada_wizard'); } catch { /* sin storage: nada que borrar */ }
+    cerrarArtes();                    // los hilos que dibujaban los artes del pedido viejo
     setPedidoPaso('diseno');          // el wizard arranca por el DISEÑO (2026-08-21)
   };
 
@@ -11724,7 +11760,6 @@ export default function App() {
   // (lo lee el servidor). Ninguna vía deja un molde CON diseño para que lo prepare el servidor.
   const _prepararDosTiempos = async (archivo, nombre, fase, { detectar = false } = {}) => {
     if (!(await navegadorPreparaMoldes())) return null;
-    if (detectar && /\.dxf$/i.test(archivo.name || '')) return null;
     const clave = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     fase({ fase: 'preparando', nota: 'Abriendo el archivo en tu computadora…' });
     const prep = await prepararEnDosTiempos(archivo, {
@@ -11733,7 +11768,12 @@ export default function App() {
       onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
         pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
     });
-    if (!prep) return null;            // molde pelado: lo lee el servidor
+    if (!prep) return null;
+    if (prep.caminoA) {
+      // molde SIN diseño o DXF (camino A): el alta viaja entera en el paquete, no hay fase B
+      fase({ fase: 'subiendo', pct: 0, nota: '' });
+      return { zipA: prep.zipA, clave, prep, caminoA: true, archivo: prep.archivo, resumen: prep.resumen };
+    }
     setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid: null, fase: 'preparando', texto: 'Separando los talles…', pct: 0 } }));
     fase({ fase: 'subiendo', pct: 0, nota: '' });
     return { zipA: prep.zipA, clave, prep };
@@ -11810,9 +11850,10 @@ export default function App() {
         // viaja ya preparado; el servidor sólo lo guarda. Si esta computadora no puede, se avisa y
         // NO se manda a que lo haga el servidor («quien no tenga la potencia no podrá enviar»).
         const fd = new FormData();
-        fd.append('archivo', f);
+        fd.append('archivo', (preparado && preparado.archivo) || f);   // un DXF viaja ya convertido
         fd.append('pid', d.id);
-        fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
+        // el servidor no tiene que adivinar el camino (12 s menos); un DXF va por el camino A
+        fd.append('con_diseno', preparado && preparado.caminoA ? '0' : '1');
         if (paquete) fd.append('paquete', new Blob([paquete], { type: 'application/zip' }), 'paquete.zip');
         const d2 = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -11836,7 +11877,7 @@ export default function App() {
             + (d2.motivo_origen ? ` (${d2.motivo_origen})` : '') + '. Quedó cargado igual, pero necesita el arte aparte.');
         }
         setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
-        if (preparado) _seguirPaginas(preparado.clave, d.id, preparado.prep);
+        if (preparado && !preparado.caminoA) _seguirPaginas(preparado.clave, d.id, preparado.prep);
       } catch (err) {
         _cancelarPaginas(preparado);
         showError(`«${nombre}»: ${err.message}`);
@@ -12018,9 +12059,10 @@ export default function App() {
       pid = d.id;
       setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now(), subiendo: true } }));   // ver `subirMoldesConDiseno`
       const fd = new FormData();
-      fd.append('archivo', subirMoldeFile);
+      fd.append('archivo', (preparado && preparado.archivo) || subirMoldeFile);   // un DXF viaja ya convertido
       fd.append('pid', pid);
-      fd.append('con_diseno', '1');   // el servidor no tiene que adivinar el camino (12 s menos)
+      // el servidor no tiene que adivinar el camino (12 s menos); un DXF va por el camino A
+      fd.append('con_diseno', preparado && preparado.caminoA ? '0' : '1');
       if (paquete) fd.append('paquete', new Blob([paquete], { type: 'application/zip' }), 'paquete.zip');
       const d2 = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -12051,7 +12093,7 @@ export default function App() {
           + '. Quedó cargado como molde común: necesita que le cargues el arte aparte.');
       }
       setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now() } }));
-      if (preparado) _seguirPaginas(preparado.clave, pid, preparado.prep);
+      if (preparado && !preparado.caminoA) _seguirPaginas(preparado.clave, pid, preparado.prep);
       avisarAltaMolde(d2);
       toggleMoldeEnDiseno(pid);          // queda ELEGIDO en el diseño activo: ya es parte del pedido
     } catch (err) {

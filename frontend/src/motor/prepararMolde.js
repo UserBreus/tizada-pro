@@ -6,6 +6,11 @@
 //   · FASE B (en segundo plano): la etiqueta que trae el diseño y las páginas por talle. Se sube
 //     sola por `/api/plantilla/paginas` cuando termina.
 // El servidor no calcula nada: valida y guarda (`servidor._paquete_molde_aplicar`).
+//
+// El molde SIN diseño adentro (camino A) y el DXF también se preparan acá (PLAN_NAVEGADOR 1b): un
+// DXF se convierte primero a PDF (`dxf/importar.js`) y después se da de alta como un .ai; el alta
+// (registro, detección por talle, lienzo de todas) viaja en UN paquete (`alta_a`) con el archivo.
+// Para esos no hay fase B: `paginas` es `null` y `caminoA` es `true`.
 
 import { crearPool } from './pool.js'
 import { abrirEnPool, faseA, faseB, pareceConDiseno } from './molde/desplegar_paralelo.js'
@@ -59,9 +64,12 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
  *
  * `soloSiTraeDiseno`: las pantallas que aceptan CUALQUIER molde (Mis artículos, Configuración →
  * Moldería) no saben de antemano si el archivo trae el diseño adentro. Con esto se mira primero
- * (dos mesas, igual que el servidor) y, si es un molde pelado (camino A), se devuelve `null` sin
- * preparar nada: ese lo lee el servidor por el camino de siempre. Así NINGUNA vía de subida deja
- * un molde con diseño para que lo prepare el servidor (pedido del usuario, 2026-09-17).
+ * (dos mesas, igual que el servidor) y, si es un molde pelado (camino A), se prepara COMO CAMINO A
+ * acá mismo (`{caminoA: true, paginas: null}`). Un `.dxf` va siempre por el camino A (se convierte
+ * primero). Así NINGUNA vía de subida deja un molde para que lo lea el servidor.
+ *
+ * Con `caminoA`, `archivo` es el archivo a SUBIR (para un DXF: el PDF ya convertido, con el DXF
+ * original adentro del paquete) y `resumen.dxf` el resumen de la conversión.
  */
 export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false } = {}) {
   let pool = null
@@ -73,14 +81,45 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     const puerta = puedeHacer({ tipo: 'molde', mb: archivo.size / 1048576, hilos: hilosRecomendados() })
     if (!puerta.puede) { const e = new Error(puerta.motivo); e.capacidad = true; throw e }
     onA && onA({ texto: 'Abriendo el archivo en tu computadora…' })
-    const bytes = new Uint8Array(await archivo.arrayBuffer())
+    let bytes = new Uint8Array(await archivo.arrayBuffer())
+    const esDxf = /\.dxf$/i.test(archivo.name || '')
+    let dxf = null, dxfBytes = null, archivoSubir = archivo
+    if (esDxf) {
+      // el DXF se convierte a PDF en UN hilo; el PDF resultante es lo que se sube (con el DXF adentro)
+      onA && onA({ texto: 'Convirtiendo el DXF en tu computadora…' })
+      const uno = crearPool(1, () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }))
+      try {
+        const r = await uno.enviar('dxf_convertir', { bytes: bytes.slice() })
+        dxf = r.resumen
+        dxfBytes = bytes
+        bytes = new Uint8Array(r.pdf)
+        archivoSubir = new File([bytes], (archivo.name || 'molde').replace(/\.dxf$/i, '') + '.pdf', { type: 'application/pdf' })
+      } finally {
+        uno.cerrar()
+      }
+    }
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
-    pool = crearPool(hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }))
+    const caminoA = esDxf || soloSiTraeDiseno
+    // el camino A lee el molde en UN hilo (el alta es secuencial); el B abre el archivo en todos
+    pool = crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }))
     const info = await abrirEnPool(pool, bytes)
-    if (soloSiTraeDiseno) {
-      onA && onA({ texto: 'Mirando si trae el diseño adentro…' })
-      const p = await pareceConDiseno(pool)
-      if (!p.si) { cerrar(); return null }
+    if (caminoA) {
+      let esA = esDxf
+      if (!esA) {
+        onA && onA({ texto: 'Mirando si trae el diseño adentro…' })
+        esA = !(await pareceConDiseno(pool)).si
+      }
+      if (esA) {
+        onA && onA({ texto: 'Detectando las piezas y los talles…' })
+        const indices = dxf && dxf.indices ? dxf.indices : null
+        const dxfMan = dxf ? { ...dxf } : null
+        if (dxfMan) delete dxfMan.indices
+        const r = await pool.enviar('alta_a', { sha1, motor: MOTOR, dxf: dxfMan ? { ...dxfMan, indices } : null, dxfBytes, indices },
+          dxfBytes ? [dxfBytes.buffer] : [])
+        cerrar()
+        return { zipA: r.zip, sha1, paginas: null, caminoA: true, cancelar: () => {}, archivo: archivoSubir,
+                 resumen: { ...r.resumen, dxf: r.resumen.dxf || dxf } }
+      }
     }
     const A = await faseA(pool, info, {
       avisar: (_etapa, hecho, total) => onA && onA({ texto: `Detectando las piezas · mesa ${hecho} de ${total}` }),

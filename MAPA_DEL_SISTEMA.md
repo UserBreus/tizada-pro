@@ -134,6 +134,7 @@ Librerías clave del motor: **pymupdf (fitz)** (render/SVG/pixmap), **pikepdf** 
 
 ### `molde_real.py` (parsing del molde + capas)
 - `extraer_contorno_mesa(doc, mesa, talle)` / `extraer_piezas_mesa(doc, mesa, talle, ...)` → **contornos** de las piezas (segmentos, bbox_raw/bbox_mu, w/h, user_unit). Es de acá que sale la geometría real de cada pieza.
+- 🧭 **Gemelo en el navegador (camino A): `frontend/src/motor/molde/caminoA.js`** (changelog 492): `extraerPiezasMesa` / `extraerContornoMesa` + el alta entera de `motor_pedido` para el molde sin diseño (`altaPlantilla`, `detectarPiezas`, `detectarPiezasTodas`, `altaPlantillaManual`, `prepararCaminoA`) y el paquete `alta_a` (`paquete/armar.js: armarPaqueteCaminoA`). Contrato `verificar_navegador_camino_a.py`: mismos números, textos y orden de claves; el ZIP lo valida el servidor. Si se toca el alta del camino A de un lado, va del otro y el contrato lo dice.
 - Manipulación OCG (capas): `limpiar_capas`, `suprimir_capas`, `aislar_capa`, `sanear_oc`, `limpiar_capas_conservando_talle`, `geometrias_base`.
 - `estampar_etiqueta` (legacy/util) y `validar_fuente_subida` (comprueba que el .ttf subido sea la
   fuente pedida). ⚠️ 2026-09-07: se **borraron** `generar_pieza_real`, `extraer_ancla_etiqueta`,
@@ -153,6 +154,7 @@ Librerías clave del motor: **pymupdf (fitz)** (render/SVG/pixmap), **pikepdf** 
 
 ### `importar_dxf.py` (BETA)
 - Importa el MOLDE desde `.dxf` (AAMA/Optitex) con `ezdxf`. Ver [[importar-molde-formatos]]. El ARTE sigue siendo solo `.ai`.
+- 🧭 **Gemelo en el navegador: `frontend/src/motor/dxf/`** (changelog 493): `leer.js` (lector propio de pares código/valor: HEADER, BLOCKS, ENTITIES; sin `dxf-parser`), `geometria.js` (la parte de ezdxf 1.4.4 que usa este módulo, traducida de sus `.pyx`: bulge→arco→Bézier, elipse/círculo, SPLINE por descomposición exacta o aproximación, INSERT con Matrix44) e `importar.js` (`dxfAPdf(mupdf, bytes)` → `{pdf, resumen}`: los tres parsers, `_stitch`, el ajuste Schneider, y el PDF escrito con los operadores de PyMuPDF). Contrato: `verificar_navegador_dxf.py` (resumen, página, capas, content-stream token por token y píxeles; verde exacto con el Optitex real de 19×20). Harness: `motor/pruebas/dxf.mjs`.
 
 ### `migrar_ids.py`
 - Migración de identidad de piezas (`pieza_id` estable ↔ nombre). Ver [[identidad-pieza-id-nombre]].
@@ -1496,6 +1498,269 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (495) — 🏁 PLAN_NAVEGADOR 1b CERRADO: EL CAMINO A (molde sin diseño, DXF y arte separado) TAMBIÉN VA ENTERO EN EL NAVEGADOR.**
+  El usuario: *«no entendí cómo quedó por fuera si era el siguiente paso»*. Con esto, para CUALQUIER
+  molde el servidor no calcula nada: valida y guarda (interruptores de `/api/navegador/config`).
+  Lo que las entradas 492-494 dejaron en el motor (alta, DXF, arte, pieza), acá está ENCHUFADO:
+  - **Subida del molde sin diseño y del DXF** — `prepararMolde.js`: si el archivo es `.dxf` se
+    convierte en un hilo (`obrero.worker.js` → `dxf_convertir` = `dxf/importar.js`) y se sube el
+    PDF resultante con el DXF original ADENTRO del paquete; si es `.ai`/`.pdf` sin diseño adentro
+    (mismo `parece` que el servidor) se da de alta ahí mismo (`alta_a` = `prepararCaminoA` +
+    `armarPaqueteCaminoA`). `{caminoA: true, paginas: null, archivo}`; las CUATRO vías de subida
+    (`handleUploadFile`, `subirMiMolde`, `subirMoldesConDiseno`, la del pedido) mandan
+    `con_diseno=0` + `paquete`. Servidor: `_paquete_molde_aplicar` fase `alta_a` (valida sha1,
+    mesas, talles, registro), `_procesar_molde_subido` escribe las detecciones del visor como caché
+    con la fecha final del archivo (`_escribir_deteccion_paquete`), NO recalcula el auto-nombrado
+    del DXF (lo hizo el navegador), y con `TIZADA_SOLO_NAVEGADOR=1` rechaza cualquier alta sin
+    paquete. Contrato `verificar_navegador_subida_a.py` (.ai y DXF, servidor saboteado).
+  - **Subida del arte** — `prepararArte.js` → hilo `arte_preparar` (`arte/preparar.js`, 494): el
+    paquete (`manifest/det/auto/pers/mapeo/pv/validacion.json`) viaja con el `.ai` en `POST
+    /api/arte`; `_subir_arte_paquete` comprueba sha1 y modo (`arte_es_separado`), guarda
+    `validacion_arte.json`, `registro_personalizacion.json`, `mapeo_arte.json` y la caché de
+    detección con la clave del servidor. `GET /api/productos/<pid>/arte_contexto` (registro, mapeo
+    fijo, alcance, variables, orden, fuentes, sello de la plantilla). Con `solo` prendido, un arte
+    sin paquete se rechaza (409).
+  - **Mesa del arte** — `arte/mesa.js` (`localizarMesas`): `/api/arte/deteccion` sigue igual pero
+    `m.img` pasa a ser un SVG dibujado acá (`arte_abrir` apaga «guías»/«Editable …» como
+    `/api/arte/mesa_img`, `arte_svg` = `svgDePagina`); el arte se baja UNA vez por
+    `/api/productos/<pid>/arte_archivo?diseno=`. Contrato `verificar_navegador_arte_mesa.py` (8/8
+    mesas iguales salvo los contadores de `id`).
+  - **Previas del paso Arte (camino A)** — `arte/previa.js` → `previasCaminoA` (`motorDe` acepta
+    `camino_a`: `/motor_b` devuelve para el camino A la plantilla, el registro, los diseños con su
+    arte/mapeo/editables/objetos, `orden_var`): hilo del molde con `molde_a_abrir` (contornos de la
+    plantilla por `idx_mesa`/`pieza_idx` o el contorno mayor), `contexto_a` (`mapeoVariantesArte` +
+    `extraerEditables` + `contextoCaminoA` + `extraerPersonalizacion`, objetos agregados por
+    `/objeto_agregado/<id>`) y `pieza_a` (base del arte + estampado `separado`). El ajuste de
+    editables del pedido se mergea en el servidor (`POST /api/productos/<pid>/editables_cfg` =
+    `_editables_cfg(prod, dslug, override)`). `asignarTodasLasVariantes` ya no precalienta en el
+    servidor (`/api/arte/asignar_todo`) cuando esto está prendido. Medido en Edge (sandbox 8061):
+    7 piezas, 21 s la primera vez (baja arte de 7 MB + plantilla + tipografías), 4 s el talle siguiente.
+  - **Tizada (camino A)** — `pedido/generar.js`: `todo_navegador` en el plan; la hoja se compone en
+    el hilo del PRIMER molde del grupo (las bases del camino A viven ahí — `basesA`, `base: {id}`
+    se sustituye antes del nesting porque `anidarContorno` lee `base.cont` — y las mesas del camino
+    B de otros moldes se copian); la guía de la ficha con su propio contexto (`marcas_como_cruz=
+    False`) y SIEMPRE «NOMBRE»/«00» (`_molde_guia_ficha`); `_fuentes_guia` con la sustitución
+    («Anton Regular (falta «X», se sustituyó)»). **Contrato `verificar_navegador_tizada_a.py`**: el
+    molde real nombrado + arte «jugador» (editables movidos, nombre en curva) → hojas token por
+    token, 0 píxeles, misma ficha. En Edge: 3 prendas, 15 piezas, 27 s, `navegador: true`.
+  **Bugs que aparecieron al enchufar (arreglados):** (1) `numeroExacto`: `asNumber()` de mupdf.js
+  pasa por float32 (2214.33 → 2214.330078) y la escala del arte (`H / alto`) cambiaba en la 6ª
+  cifra en algunas piezas — las cajas, `/BBox` y `/Matrix` se leen con `toString()`
+  (`pieza/caminoA.js`, `hoja/componer.js`); (2) `motor/cache.js`: el Blob se armaba DESPUÉS de un
+  `await` y el que llama ya había TRANSFERIDO el buffer al hilo → se guardaban 0 bytes y la próxima
+  carga fallaba con «no objects found» (afectaba también al camino B); ahora el Blob se arma antes
+  y un guardado vacío no es acierto. **Trampa:** con `camino_a`, `m.info.mesas` no existe (la
+  puerta de potencia suma plantilla + arte). **Pendiente:** unificar los duplicados 493/494
+  (`esCapaGuia`, `normNombre`, `reprPy`, `objetosDeCapa`) con los dos contratos verdes; borrar
+  PyMuPDF/pikepdf del servidor (etapa 6 completa) es una decisión aparte. ⚠️ `verificar_subida_no_traba.py`
+  §2 («contestó N llamadas en 2 s») da 1-19 en esta máquina TAMBIÉN con el código de `bf50f75` limpio
+  (medido en un worktree): no es de esta tanda, es el reloj del test; el resto del contrato verde.
+
+- **2026-09-18 (493) — 📐 PLAN_NAVEGADOR ETAPA 1, PASO 7 (1b): EL MOLDE EN DXF SE IMPORTA EN EL NAVEGADOR.**
+  `frontend/src/motor/dxf/importar.js` es `importar_dxf.py` función por función (`_segs_de`, `_stitch`,
+  `_contorno_suave` con el ajuste Schneider, `_parse_optitex` / `_parse_optitex_lineas` / `_parse_generico`,
+  `_escala_cm`, `_construir_pdf`), sobre un lector de DXF propio (`dxf/leer.js`: pares código/valor →
+  HEADER `$INSUNITS`/`$ACADVER`/`$DWGCODEPAGE`, BLOCKS con punto base, ENTITIES; los VERTEX cuelgan del
+  POLYLINE y los ATTRIB del INSERT, el paperspace queda afuera, y la codificación es la de ezdxf: cp1252
+  antes de R2007, UTF-8 después) y de `dxf/geometria.js`, que es la parte de **ezdxf 1.4.4** que
+  `make_path` usa, traducida de los `.pyx` de `ezdxf.acc` (con la extensión en C prendida el Python puro
+  no es lo que corre): `Vec3.isclose` por componente (rel 1e-9, abs 1e-12), `bulge_to_arc` →
+  `ConstructionEllipse.from_arc` (ida y vuelta grados↔radianes, que cambia bits y se reproduce) →
+  `cubic_bezier_arc_parameters` (cuartos, tangente 4/3·tan(θ/4)) con el «dar vuelta si el primer
+  control cayó en el vértice final», `add_bezier4p` (degrada a recta si los controles coinciden a
+  1e-15), SPLINE cúbica sujeta no racional por **descomposición exacta** (NURBS Book A5.6) y el resto por
+  **aproximación** (parámetros por cuerda subdivididos 3 veces, `Evaluator.point` con A2.2, interpolación
+  cúbica con solver tridiagonal), `spline.point(0)` como principio del trazado, `INSERT.virtual_entities`
+  con `Matrix44.ucs`·`axis_rotate`·traslación menos el punto base (LWPOLYLINE, CIRCLE, SPLINE, LINE;
+  un ELLIPSE/POLYLINE adentro de un bloque no se transforma y se avisa en `omitidas`). El PDF se escribe
+  con mupdf.js copiando lo que hace PyMuPDF, no «PDF en general»: `fz_transform_point` en float32 con
+  la inversa de la página (1,0,0,−1,−0,H32), `JM_TUPLE` (`round(x,5)`, 0 si |x|<1e-4), el `%g` de MuPDF
+  vía `newReal(v).toString()`, `m` sólo cuando el último punto no es EXACTAMENTE el mismo, `/OC /MCn BDC`
+  con los nombres por orden de primer uso (sólo los talles que dibujan), `.16 .62 .42 RG S`, un `q…Q` por
+  `finish`, y el fondo `0 0 W H re h 1 1 1 rg f` con W/H en doble (el MediaBox va en float32: por eso
+  el `re` dice 9016.019 y el MediaBox 9016.02, y las dos cosas son correctas). OCG con `/Type/OCG`,
+  `/Intent[/View]`, `/OCProperties` con `/OCGs`, `/D << /ON /OFF /Order /RBGroups >>`.
+  **Contrato `verificar_navegador_dxf.py`** (16 s, entra en la tanda rápida): copia a un temporal el
+  Optitex real (`entrada/prod_20260911_165624_1ed7/plantilla_fuente.dxf`, 19 piezas × 20 talles, 380
+  POLYLINE + 817 TEXT; el de Descargas es el MISMO archivo, md5 igual, se compara una vez) y tres DXF
+  sintéticos que escribe con ezdxf (AAMA con bulges/círculo/elipse/tres splines/abierta/chica; AAMA
+  explotado en LINEs con y sin esquinas; genérico con talle por capa, TEXT/MTEXT cercano e INSERT
+  girado 30° y escalado 1,5), y compara resumen (dict igual), página (1e-3), capas (`/D/Order`),
+  content-stream token por token con `/MCn` normalizado, y píxeles con la regla estructural de
+  `verificar_navegador_vista` (entera a ≤ 2000 px + recorte ¼ a 100 dpi). **Resultado: los 4 archivos
+  EXACTOS** — 34 348 tokens iguales en el real, 0 píxeles distintos en todos.
+  **Lo que no se puede reproducir bit a bit, con la evidencia:** medido con 60 000 muestras (Python/UCRT
+  contra Node/V8): `sin` 2,7 %, `cos` 2,8 %, `tan` 4,1 %, `atan` 0,6 %, `atan2` 21 %, `acos` 0,4 %,
+  `x**2` 0,065 %, `x**3` 0,04 % (el `pow` de UCRT ni siquiera da `x*x`), `Math.hypot` 38 % — `hypot`
+  se porta exacto (`pyHypot`, ya estaba en `py.js`), el resto no tiene port. Esos bits entran al ajuste
+  Schneider (`**`, `acos` sólo en el umbral de 32°) y a los arcos de ezdxf, y desaparecen con
+  `round(x,5)`+float32 salvo que un valor caiga en el borde del redondeo o un empate del `argmax` del
+  error se decida distinto: el contrato tolera un número distinto sólo a 1 ulp de float32 y lo informa
+  (hoy: cero). Si algún día aparece, la salida es cambiar `x**3` por `x*x*x` en los DOS lados.
+  **Lo que salió mal:** (1) escribí un `pyHypot` en `py.js` sin ver que otra tanda de la misma sesión
+  acababa de agregar uno igual (el árbol de trabajo ya no estaba limpio): se sacó el duplicado, quedó el
+  suyo — antes de agregar a un módulo compartido, `grep` primero. (2) `msp.add_spline` de ezdxf toma
+  fit points; con puntos de control es `add_open_spline`/`add_rational_spline`. (3) El `/Order` viene
+  como «n 0 R n 0 R»: tomar «todo dígito» agarraba los ceros de generación. (4) `_parse_optitex_lineas`
+  corta la pieza SÓLO en «Size:», no en «Piece Name:»: dos piezas seguidas sin un Size entre medio se
+  funden en una (el sintético lo mostraba como «1 pieza»); es lo que hace el Python y se reproduce, no
+  se arregló — Optitex escribe el Size por pieza. Firma: `dxfAPdf(mupdf, bytes)` (el motor recibe
+  `mupdf` como parámetro, igual que `generarFicha`). Falta (no bloquea): la pantalla de subida del
+  camino A/DXF todavía manda el archivo al servidor (`navegador.molde` cubre el camino B).
+- **2026-09-18 (494) — 🖼️ PLAN_NAVEGADOR ETAPA 3, PUNTO 3 (1b): EL ARTE SEPARADO (camino A) SE LEE EN EL NAVEGADOR — personalización, editables, mapeo, detección, validación y el paquete de `POST /api/arte`.**
+  Cuatro módulos nuevos en `frontend/src/motor/arte/`, traducción función por función de
+  `motor_pedido` sobre mupdf.js: **`texto.js`** = lo que PyMuPDF le pone encima a MuPDF y mupdf.js
+  no trae: `page.get_text("dict")` (`textoDict`: los spans de `JM_make_spanlist` partidos por
+  tamaño/flags/fuente/color, `JM_char_bbox`, `detect_super_script`, y **`JM_char_quad` entero** —
+  la corrección del recuadro cuando ascender−descender < 1, con el ascender/descender leídos del
+  `/FontDescriptor` como `pdf_load_font_descriptor` (`/1000.0f`, `FZ_MAX_TRUSTWORTHY_ASCENT 8` /
+  `DESCENT −2` → 0,8/−0,2) y el nombre de la fuente cortado a 31 bytes como `fz_font.name[32]`),
+  `layer_ui_configs`/`set_layer_ui_config` (`capasUi`/`configurarCapa`: **`action=1` es TOGGLE, no
+  «ocultar»** — el motor lo usa así y se copia tal cual), `get_ocgs`, `_nombres_oc`, `get_pixmap`
+  por lista de dibujo (`pixmapMesa`) y `a.std(axis=(0,1)).mean()` de numpy (`desvioMedio`), más
+  `str(pikepdf.String)` (UTF-16 con BOM o PDFDocEncoding de QPDF, tabla incluida), `str(pikepdf.Name)`
+  y el `repr()` de Python (`reprPy`: floats con la regla de exponente de `repr`, `-0.0`, `1e+16`,
+  tuplas, cadenas con comillas y escapes). **`personalizacion.js`** = `extraer_personalizacion` con
+  sus tres lectores del content-stream (`_colores_/_trazo_/_pasadas_personalizable`, con `q/Q`,
+  `cs`+`scn`, la `CLAVE_CAPA` y `_match_texto`). **`editables.js`** = `_extraer_editables_crudo(
+  con_thumb=False)`: `get_drawings` (= `dibujosDePagina` filtrado a f/s/fs), `get_bboxlog(layers=
+  True)` (un `Device` con `fillText/strokeText/ignoreText/fillShade/fillImage/fillImageMask` y
+  `fz_transform_rect` en float32), `objetosDeCapa` (= `_analizar_capa`, `obj_id` = sha1 del `repr`
+  de la firma). **`mapeo.js`** = `mapeo_por_nombre`, `mapeo_variantes_arte`, `arte_es_separado`,
+  `detectar_arte` (miniatura PNG con mupdf.js a la misma escala), `fuentes_requeridas_arte`,
+  `validar_arte_separado` y `validar_arte` (con `_separaciones`: recorre el grafo de objetos con las
+  claves ORDENADAS como QPDF y el corte a profundidad 16). **`preparar.js`** = `prepararArte(mupdf,
+  bytes, contexto)` → el ZIP de 7 archivos que recibe `_subir_arte_paquete` (regla de
+  `_subir_arte_analizar`: auto + fijo sin pisar mesas, `pv` por variable, `validacion` completa o
+  el aviso «faltan asignar»). Contexto = `GET /api/productos/<pid>/arte_contexto` (+ `plantilla`
+  opcional para el modo clásico). Harness `pruebas/arte.mjs`. **Contrato `verificar_navegador_arte.py`
+  (VERDE, ~90 s)**: los 11 artes reales del molde `prod_20260820_095558_38bc` (registro armado desde
+  `resumen_plantilla.json`, orden de variantes = `talles`), todo EXACTO: personalización (incluida la
+  fuente Adidas de «edwdwe», asc−desc = 0,844, que sí pasa por la corrección del recuadro, y los
+  nombres en curva), editables con sus `obj_id`, mapeos, detección (todo menos los bytes del PNG),
+  las dos validaciones y cada JSON del paquete. Node tarda lo mismo que el servidor en los artes
+  chicos y 1,3× en los de 7 MB (18-21 s, la mitad en `validar` + `personalización`).
+  **Tolerancia única, y es de Python:** `detectar_arte.sugerencia` desempata `min(libres,
+  key=_dist)` por el orden de un `set` → cambia con `PYTHONHASHSEED` (medido: seeds 0-2 dan «Manga
+  larga derecha 2» en la mesa 5 de «csac», seed 3 «Manga larga izquierda 1», misma distancia
+  0,2277); el contrato acepta una sugerencia a la MISMA distancia. Igual `list(set(capas))` de
+  `_capas_mesa` y las tintas: el navegador usa orden de aparición. **Lo que mupdf.js no deja leer
+  (asumido constante, verificado en los artes):** `char_flags`/`bidi`/alfa del color por carácter
+  (PyMuPDF parte spans también por eso), `c > 0xFFFF` en el walker (`fromCharCode`), el ascender de
+  una fuente SIN `/FontDescriptor` (lo pone la cara FreeType), `fz_bound_shade(shade, ctm)` (sólo
+  hay `getBounds()` a identidad; se transforma después). **Trampas que costaron:** (1) la CTM de
+  `_analizar_capa` arranca como tupla de ENTEROS: sin ningún `cm` antes de un `Do`, la firma lleva
+  `1, 1, 0, 0` (repr «1») y no «1.0» → `ctmInt` en `objetosDeCapa`; (2) los reales del PDF llegan a
+  mupdf.js como float32: para `/BBox` y `/Matrix` del XObject se lee `obj.toString()` (la escritura
+  más corta que vuelve al float = el texto original de Illustrator) y no `asNumber()`; (3) la
+  herramienta de escritura convirtió `\u2028` dentro de un LITERAL de regex en el carácter real y
+  rompió el módulo — las clases de espacios de Python van por `WS_PY` (cadena con escapes) y
+  `new RegExp`; (4) `str(pikepdf.Name)` NO re-escapa (`/Fm#20x` → «/Fm x», bytes como UTF-8).
+  ⚠️ **Duplicados con 493** (a unificar corriendo los dos contratos): `esCapaGuia`/`esCapaEditable`
+  (`arte/capas.js`, `pieza/caminoA.js`), `normNombre`, `reprPy`/`pyReprFloat`, `objetosDeCapa`/
+  `analizarCapa`. **Falta:** enchufar `prepararArte` en la subida del arte de `App.jsx` (mandar
+  `paquete` junto con `archivo`) y el paso Arte leyendo `detectarArte`/`extraerEditables` del
+  espacio local; el DXF (1b).
+- **2026-09-18 (493) — 🎨 PLAN_NAVEGADOR ETAPA 3, PUNTO 4 (1b): LA PIEZA DEL ARTE SEPARADO (camino A) SE ARMA EN EL NAVEGADOR.**
+  `frontend/src/motor/pieza/caminoA.js` traduce los ramales del arte separado de
+  `motor_pedido._armar_base` y sus ayudantes: `pagina_arte_pieza` (la mesa del arte sin guías,
+  «Personalizable» ni capas de campo, con `suprimir_capas` + `sanear_oc`; los editables que se
+  redibujan salen de la base), `pagina_arte_solo` (una capa «Editable …» aislada, recoloreada de
+  capa entera —recolorar ANTES de aislar— o figura por figura), `_form_de`/`as_form_xobject`
+  (`infoFormPagina`: BBox = TrimBox → CropBox → MediaBox, `/Matrix` sólo con `/Rotate` o
+  `/UserUnit`), `_bbox_arte` + `cm_encajar` + `cm_tamano_editable` (alto/ancho manda por
+  `referencia`), `mesa_arte` (#talle exacto > #rango > mapeo de la variable > base; `mapeo_arte`
+  plano o `{mapeo, por_variable}` con la unión cuando la base viene vacía), `_encaje`/`_pos_en_pieza`/
+  `_centro_editable`/`_matriz_editable`, `_cfg_var` (fila sin variable → la única configurada),
+  `_ops_cruz_proceso` (cruz de 3 cm + letra del proceso, negro puro), «sin marca»,
+  `_dibujar_objetos_agregados` (`pos_agregado_en_diseno`, transforms por variable/talle) y la
+  garantía anti-desaparición (`_redibujar_validos`: el aislado se valida con un `Device` de
+  mupdf.js —trazados pintados, texto— más las imágenes de los recursos, como `get_drawings() or
+  get_images() or get_text()`). `molde/capas.js` es el port de `molde_real`: `_raspar_pintado`
+  (`mapaOc`, `bloquesOc`, `saltarBloques`, `rasparInstrucciones`), `suprimir_capas`, `aislar_capa`,
+  `recolorar_capa`, `_analizar_capa` (firma de geometría → `obj_id` = sha1 del `repr()` de Python,
+  con `pyReprFloat`/tuplas), `aislar_objeto`, `aislar_capa_objetos`, `capa_admite_color` y
+  `limpiar_capas_conservando_talle` (arte CLÁSICO), sobre las instrucciones de `pdf/contenido.js`
+  (se escribe byte a byte como pikepdf). `pieza/estampar.js` ganó el modo `separado` (`arteRect` →
+  `sp = H/ha`, `aw_arte`, tamaño × `sp`, `_T`, pasadas y trazo a escala) y el texto FIEL
+  (`baseline_pts` ≥ 3 con arco o multilínea → `opsTextoFiel`), que también corre en el camino B
+  (allí `baseline_pts` siempre está vacío: salida idéntica, contrato B verde). `pieza/base.js` quedó
+  partido en `configBorde` / `bloqueBorde` / `componerBase` (compartidos por los dos caminos) sin
+  cambiar un byte. `paginas.js` exporta `sanearOc`. **Contrato `verificar_navegador_pieza_a.py`
+  (VERDE, ~80 s)**: el molde real `prod_20260820_095558_38bc` (registro con `alta_plantilla_manual`
+  desde `piezas.json` + `emparejado_talles.json`, guía M) y tres artes suyos —jugador (escudo movido
+  + con tamaño, TPU → cruz, recoloreado, sin marca, fila sin variable, objeto agregado fabricado con
+  pikepdf: identidad y con transform, y una pieza SIN diseño «Tapa costura»), golero (fuente CID
+  Anton-Regular) y refwerrf (mesas `#rango`, mapeo por variable, nombre sobre una CURVA con trazo y
+  pila de apariencias, escudo de 4 figuras con color por figura, un talle infantil «8»)—: 19 piezas
+  con la misma mesa del arte, base y clip letra por letra, estampado letra por letra y 0 píxeles
+  distintos a 100 dpi (diff vectorizado con numpy: las piezas miden hasta 2600×3300 px).
+  **Trampas que costaron:** (1) el separador del IDENT de una figura (`SEP` del motor, `_EDIT_SEP`
+  del servidor) es **U+001F**, invisible en el editor —parece `""`—; y como Python lo cuenta como
+  espacio, `_norm_nombre("escudo\x1f11018b89")` da «escudo 11018b89». Con `""` el navegador
+  redibujaba figuras que el motor no, y `normNombre` de `estampar.js` partía con `\s` de JS (que no
+  incluye U+001C-U+001F): ahora usa `splitPy`. (2) `if ph and persona_n` de Python: un `{}` es
+  falso allá y verdadero en JS — la pieza sin diseño reventaba pidiendo `arteRect`. (3) `_cfg_var`
+  con la fila sin variable cae a la ÚNICA variable configurada **por cada mapa** (posición, color,
+  marca, sin marca por separado): en el contrato la fila sin variable terminó con marca de `v_b` y
+  «sin marca» de `v_d` → nada dibujado; es lo que hace el motor y así se compara. (4) Un objeto JS
+  reordena las claves enteras: el `next(v for v in _pv.values())` de los objetos agregados (talle
+  sin transform propio) puede elegir otro talle que Python si los talles son «10», «12»… —
+  documentado, sin caso en el contrato. **No cubierto por contrato:** el arte CLÁSICO
+  (`armarBaseClasico`, `limpiarCapasConservandoTalle`) — no hay un arte clásico entre los archivos
+  de referencia. **Cómo se enchufa:** `contextoCaminoA(mupdf, {arte, mapeoArte, mapeoVar,
+  editables, editablesCfg, editablesTamano, editablesColor, editablesMarca, editablesSinMarca,
+  marcasComoCruz, referencia, borde, objetosAgregados: {objetos, abrir}, fuente})` una vez por
+  arte; `ctx.armarBase({cont, pieza, talle, variante})` por (pieza, talle, variable) →
+  `{baseStream, clip, …, mesaA, arteRect, fuentesXo: [[nombre, {origen, pagina, doc}]]}`;
+  `estamparPieza({…, separado: true, arteRect: base.arteRect, ph: pers[mesaA] o {}})`;
+  `documentoPiezaCaminoA(mupdf, base, estampado)` para el PDF suelto. `editables` es lo que
+  devuelve `extraer_editables(con_thumb=False)` (en el navegador: `arte/editables.js`, que la
+  sesión paralela de hoy escribió junto con `arte/mapeo.js`, `arte/personalizacion.js`,
+  `arte/texto.js` y `arte/capas.js`). ⚠️ **Duplicado a unificar** (no se tocó lo ajeno mientras
+  se escribía): `esCapaGuia` / `esCapaEditable` / `nombreEditable` / `CAPAS_NO_PERS` viven en
+  `pieza/caminoA.js` Y en `arte/capas.js` / `arte/editables.js` / `arte/personalizacion.js`; el
+  `repr()` de Python (`pyReprFloat`, tuplas) en `molde/capas.js` Y en `arte/texto.js:reprPy`; la
+  firma de geometría en `molde/capas.js:analizarCapa` Y en `arte/editables.js:objetosDeCapa`;
+  `normNombre` en `pieza/estampar.js` Y en `arte/texto.js`. Antes de unificar, correr los dos
+  contratos (`verificar_navegador_pieza_a.py` y `verificar_navegador_arte.py`). **Falta de
+  1b/etapa 3:** el DXF, y enchufar el camino A en `pedido/generar.js` / `obrero.worker.js` (hoy
+  sólo arman el camino B) alimentando el contexto con `arte/mapeo.js` + `arte/editables.js`.
+- **2026-09-18 (492) — 📐 PLAN_NAVEGADOR ETAPA 1, PASO 7 (1b): EL MOLDE SIN DISEÑO (camino A) SE LEE EN EL NAVEGADOR.**
+  `frontend/src/motor/molde/caminoA.js` traduce, función por función, lo que el servidor hace con
+  un molde pelado: `molde_real._candidatos_mesa` / `extraer_contorno_mesa` / `extraer_piezas_mesa`
+  (un trazado = una pieza, orden del archivo) y, de `motor_pedido`, `_talles_de_plantilla` (con la
+  regla del talle «0»), `_ordenar_por_archivo` (el `/Order` de `/OCProperties`, como
+  `layer_ui_configs`), `_etiqueta_de_mesa` (primera línea con texto vía `toStructuredText`),
+  `alta_plantilla` (etiquetas «TALLE-Pieza-#», Manga corta/larga, ancla con ángulo, problemas y
+  advertencias con los textos exactos), `detectar_piezas` (capa «referencia», ranking por trazos,
+  visor en mm con la mezcla px/path tal cual), `detectar_piezas_todas` y `alta_plantilla_manual`
+  entero (`nombres_normalizados`, exacto del DXF / índice / solape / forma, `emp_offsets`,
+  `emp_fijos`, `_aplicar_fijos`, segunda pasada «Pieza extra N», faltantes/sobrantes/excluidos).
+  Más `prepararCaminoA` (alta + detección auto/por talle/TODAS, y el alta manual con los nombres del
+  DXF si son ≤ 25, como `_procesar_molde_subido`) y `paquete/armar.js: armarPaqueteCaminoA` → el ZIP
+  `alta_a` que `servidor._paquete_molde_aplicar` ya valida (manifest, alta.json, deteccion/auto,
+  deteccion/<talle>, deteccion/todas). Script: `node frontend/src/motor/pruebas/caminoA.mjs
+  molde.ai salida.json [--manual m.json] [--paquete p.zip]`. **Contrato
+  `verificar_navegador_camino_a.py` (VERDE)**: los dos moldes reales de `entrada/` (con la
+  correspondencia del DXF y el `emparejado_talles.json` de `datos/productos/`) + dos moldes
+  sintéticos generados con PyMuPDF (etiquetas de texto rotadas/repetidas/mal escritas, capa
+  «Referencia», «0» basura vs. talle, talles con más piezas que la guía, acomodo y fijos a mano);
+  compara cada número como double, cada texto, cada lista y **el orden de las claves** de cada dict;
+  y el paquete lo valida el propio servidor (`_paquete_molde_aplicar(fases=("alta_a",))`) y se
+  compara lo que guardaría. **Lo que costó / trampas:** (1) `getLayerName(i)` de mupdf.js NO sigue
+  el orden de `/OCGs`: MuPDF ordena su lista interna por número de objeto DESCENDENTE; se resuelve
+  por número y se verifica contra el nombre. (2) `Math.hypot`, `Math.log` y `Math.atan2` de V8 dan
+  otro último bit que la libm de MSVC (medido: 35 % / 2,3 % / 17 % de 40 000 valores): `hypot` se
+  portó exacto (`py.js: pyHypot`, doble-double como CPython 3.12; 0 diferencias en 100 006 pares);
+  `log`/`atan2` no tienen port y sólo pesan en un empate exacto del costo de forma o en el ángulo
+  redondeado a 1 decimal — documentado en el contrato. (3) Un objeto JS reordena las claves que
+  parecen enteros («0», «1», «2» = talles): todo dict por talle/pieza es un `Map` y el JSON se escribe
+  con `aTextoJSON`. (4) `get_drawings()` sin `extended` normaliza los «re» (`Rect.normalize()`) y
+  el camino B no: se normaliza acá antes de `contornoDeDrawing`. (5) Un heredoc de Git Bash con
+  `'EOF'` igual se come las barras dobles (`'\\'` → `'\'`): para escribir código con barras, el
+  Edit/Write, no `cat <<`. **Pendiente de 1b:** ~~el DXF~~ (hecho en 493: `motor/dxf/`) y que la pantalla de
+  subida del camino A use el paquete (`navegador.molde` hoy sólo cubre el camino B).
 - **2026-09-17 (491) — 🏁 PLAN_NAVEGADOR: LAS SEIS ETAPAS, CERRADAS PARA EL MOLDE CON DISEÑO (camino B).**
   El usuario: *«cuando es todo es hasta la última puta etapa»*. Lo que quedó, etapa por etapa
   (todo detrás de interruptores en `/api/navegador/config`; con todo prendido, para un molde con

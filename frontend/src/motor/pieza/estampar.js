@@ -8,14 +8,17 @@
 // `fuente(nombrePs, {sinAlias})` devuelve una con `opsTexto`, `anchoTexto`, `sizeParaAlto`,
 // `faltantes` y `prestados`.
 import { pyFixed, pyG, pyRound } from '../py.js'
+import { splitPy } from '../molde/talle.js'
 import { MM } from './base.js'
 
 // ─── nombres ─────────────────────────────────────────────────────────────────────────────────
-/** `_norm_nombre`: sin acentos, minúsculas, guiones a espacio, espacios colapsados. */
+/** `_norm_nombre`: sin acentos, minúsculas, guiones a espacio, espacios colapsados. Los espacios
+ *  son los de `str.split()` de PYTHON (incluye U+001C-U+001F: el separador de los idents de las
+ *  figuras editables, «escudo\x1f11018b89» → «escudo 11018b89»). */
 export function normNombre(s) {
   if (!s) return ''
-  const sin = String(s).normalize('NFKD').replace(/[̀-ͯ]/g, '')
-  return sin.toLowerCase().replace(/-/g, ' ').split(/\s+/).filter(Boolean).join(' ')
+  const sin = String(s).normalize('NFKD').replace(/\p{Mn}/gu, '')
+  return splitPy(sin.toLowerCase().replace(/-/g, ' ')).join(' ')
 }
 
 /** `_norm_generico`: además sin el número final («Frente 8» → «frente»). */
@@ -314,12 +317,27 @@ const colorCmyk = (vals, op) => vals.slice(0, 4).map((v) => pyG(Number(v))).join
  * `avisos` (opcional) junta los caracteres prestados por tipografía, como el registro del server.
  */
 export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante = null, grupo = null,
-                                etiqueta = null, fuente, alias = {}, info = {}, avisos = null }) {
-  const { clip, cont, x0, y0, x0m, y0m, Hp, S, B, bcActivo } = base
+                                etiqueta = null, fuente, alias = {}, info = {}, avisos = null,
+                                separado = false, arteRect = null }) {
+  const { clip, cont, x0, y0, x0m, y0m, Hp, S, B, bcActivo, W, H } = base
   const bloques = []
   const personaN = {}
   for (const [k, v] of Object.entries(persona || {})) personaN[normNombre(k)] = v
-  if (ph && Object.keys(personaN).length) {
+  if (ph && Object.keys(ph).length && Object.keys(personaN).length) {     // `if ph and persona_n`
+    // ARTE SEPARADO (camino A): el placeholder vive en la mesa del arte y se escala con el diseño
+    // (`sp = H / ha`, alto manda); `arteRect` = `arte_rect(_mesa_a)` = [x0, y0, ancho, alto].
+    // Una pieza SIN mesa de arte (`mapeo_arte and not _mesa_a`) llega con `ph = {}` y sin
+    // `arteRect`: nada que estampar, como en el Python (`ph = {}` antes de este bucle).
+    let sp = 1.0, awArte = 0.0, ha = 1.0
+    if (separado) {
+      if (!arteRect) throw new Error('arte separado: falta `arteRect` (la mesa del arte de esta pieza)')
+      const wa = Number(arteRect[2]); ha = Number(arteRect[3])
+      sp = H / ha
+      awArte = wa * sp
+    }
+    // `_T`: un punto del arte → coordenadas de la pieza (la misma transformación que el texto plano)
+    const T = separado ? (px, py) => [B + (W - awArte) / 2 + px * sp, B + H - py * sp]
+                       : (px, py) => [px - x0m + B, Hp - (py - y0m + B)]
     for (const [campo, pl0] of Object.entries(ph)) {
       const pl = ((pl0.por_talle || {})[String(talle)]) || pl0
       let texto = String(personaN[normNombre(campo)] ?? '').trim()
@@ -333,7 +351,22 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
       } catch {
         continue                        // tipografía no disponible → no se estampa ESE campo
       }
-      const size = pl.size
+      const size = separado ? pl.size * sp : pl.size
+      // ¿el placeholder ORIGINAL va sobre una CURVA o tiene VARIAS LÍNEAS? Sus glifos trazan la
+      // línea base: con arco (y varía) o salto de línea se reproduce fiel; si no, texto plano.
+      const bp = pl.baseline_pts || []
+      const size0 = pl.size
+      let fiel = false
+      if (bp.length >= 3) {
+        const xs = bp.map((p) => p[0]), ys = bp.map((p) => p[1])
+        const xr = Math.max(...xs) - Math.min(...xs)
+        const curva = xr > 0 && (Math.max(...ys) - Math.min(...ys)) > 0.03 * xr
+        let multi = false
+        for (let i = 1; i < bp.length; i++) {
+          if (Math.abs(bp[i][1] - bp[i - 1][1]) > 0.6 * size0 || (bp[i][0] - bp[i - 1][0]) < -0.4 * size0) { multi = true; break }
+        }
+        fiel = curva || multi
+      }
       const fps = fnomNombre || pl.fuente || '?'
       if (avisos) {
         const prest = fnom.prestados(texto).filter((c) => !(avisos[fps] || new Set()).has(c))
@@ -344,23 +377,39 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
         const c = falta.map((x) => `«${x}»`).join(' ni ')
         throw new Error(`La tipografía «${fps}» no puede estampar ${c} de «${texto}», y la predeterminada tampoco. Sacá ${falta.length === 1 ? 'ese carácter' : 'esos caracteres'} del texto.`)
       }
-      // camino B: `baseline_pts` siempre vacío → texto plano centrado en el placeholder
-      const cxFinal = pl.cx - x0m + B
-      const ty = Hp - (pl.baseline_y - y0m + B)
-      const ops = fnom.opsTexto(texto, size, cxFinal - fnom.anchoTexto(texto, size) / 2, ty)
+      let ops
+      if (fiel) {
+        // (x, y, x0, x1) del arte → coords de la pieza (posición + bordes del renglón)
+        const glifos = bp.map(([px, py, ex0, ex1]) => [...T(px, py), T(ex0, py)[0], T(ex1, py)[0]])
+        ops = fnom.opsTextoFiel(texto, size, glifos)
+      } else {
+        // texto plano centrado en el placeholder (en el camino B `baseline_pts` siempre está vacío)
+        let cxFinal, ty
+        if (separado) {
+          cxFinal = B + (W - awArte) / 2 + pl.cx * sp
+          ty = B + (1 - pl.baseline_y / ha) * H
+        } else {
+          cxFinal = pl.cx - x0m + B
+          ty = Hp - (pl.baseline_y - y0m + B)
+        }
+        ops = fnom.opsTexto(texto, size, cxFinal - fnom.anchoTexto(texto, size) / 2, ty)
+      }
       const pas = pl.pasadas
       if (pas && pas.length) {
         for (const p of pas) {
           const c = p.color
           const vals = c[1].map((v) => pyG(Number(v))).join(' ')
           if (p.t === 'f') bloques.push(`q ${vals} ${c[0]}\n${ops}\nf\nQ\n`)
-          else bloques.push(`q ${vals} ${String(c[0]).toUpperCase()}\n${pyFixed(p.w, 3)} w 1 j 1 J\n${ops}\nS\nQ\n`)
+          else {
+            const w = Number(p.w) * (separado ? sp : 1.0)          // a la escala del texto
+            bloques.push(`q ${vals} ${String(c[0]).toUpperCase()}\n${pyFixed(w, 3)} w 1 j 1 J\n${ops}\nS\nQ\n`)
+          }
         }
         continue
       }
       const tz = pl.trazo
       if (tz) {
-        const sw = tz[2]
+        const sw = Number(tz[2]) * (separado ? sp : 1.0)
         const scol = tz[1].map((v) => pyG(Number(v))).join(' ') + ' ' + String(tz[0]).toUpperCase()
         bloques.push(`q ${scol}\n${pyFixed(sw, 3)} w 1 j 1 J\n${ops}\nS\nQ\n`)
         bloques.push(`q ${colorOp(pl)}\n${ops}\nf\nQ\n`)
@@ -381,7 +430,7 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
   const zna = zonasN[normGenerico(piezaLimpia)]
   const usaZonas = !!(etOn && zna && (zna.puntos || []).length >= 2)
   if (usaZonas) {
-    let zeops = null
+    let zeops
     try {
       const fetq = fuente('Arial-BoldMT')
       const esize = fetq.sizeParaAlto(Number(et.size_mm || 3.0) * MM)
@@ -405,7 +454,7 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
     if (mos.numero ?? true) partes.push('#' + String(nro).padStart(2, '0'))
     const etTxt = partes.join(et.separador === undefined ? '-' : (et.separador || '-'))
     if (etTxt) {
-      let fmet = null
+      let fmet
       try { fmet = fuente('Arial-BoldMT') } catch { fmet = null }
       let esize = Number(et.size_mm || 3.0) * MM
       esize = fmet ? fmet.sizeParaAlto(esize) : esize / 0.72

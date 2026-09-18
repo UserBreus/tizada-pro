@@ -28,6 +28,12 @@ export async function navegadorDibujaVista(rutaApi = (x) => x) {
   return !!_config.vista
 }
 
+/** ¿El servidor quiere que el navegador haga `que` (`vista`, `arte`, `molde`, `tizada`)? */
+export async function navegadorHace(que, rutaApi = (x) => x) {
+  if (_config === null) await navegadorDibujaVista(rutaApi)
+  return !!_config[que]
+}
+
 function abrirDb() {
   return new Promise((ok, no) => {
     const p = indexedDB.open(DB, 1)

@@ -130,8 +130,10 @@ def comparar_hoja(py_path, js_path, etiqueta):
                f"{etiqueta} pág {i + 1}: mismo tamaño ({ma[2]:.1f}×{ma[3]:.1f} pt, UserUnit {pa.get('/UserUnit')})")
             ca = _normalizar(b"".join(pikepdf.unparse_content_stream(pikepdf.parse_content_stream(pa)).split()))
             cb = _normalizar(b"".join(pikepdf.unparse_content_stream(pikepdf.parse_content_stream(pb)).split()))
+            _k = next((k for k, (x, y) in enumerate(zip(ca, cb)) if x != y), min(len(ca), len(cb)))
             ok(ca == cb, f"{etiqueta} pág {i + 1}: el mismo content-stream ({len(ca)} bytes)" if ca == cb
-               else f"{etiqueta} pág {i + 1}: content-stream distinto (servidor {len(ca)} bytes, navegador {len(cb)}; 1ª diferencia en {next((k for k, (x, y) in enumerate(zip(ca, cb)) if x != y), min(len(ca), len(cb)))})")
+               else f"{etiqueta} pág {i + 1}: content-stream distinto (servidor {len(ca)} bytes, navegador {len(cb)}; 1ª diferencia en {_k}: "
+                    f"servidor …{ca[max(0, _k - 60):_k + 60]!r}… navegador …{cb[max(0, _k - 60):_k + 60]!r}…)")
     da, db = fitz.open(py_path), fitz.open(js_path)
     for i in range(min(da.page_count, db.page_count)):
         z = 60 / 72

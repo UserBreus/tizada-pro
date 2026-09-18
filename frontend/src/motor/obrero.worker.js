@@ -19,6 +19,21 @@ let M = null           // módulos del motor
 const mesas = new Map()        // mesa → PDFDocument de m{mesa}.pdf
 let P = null                   // módulos de la pieza (base, estampar, svg, fuentes, curvas)
 let abridor = null             // el que abre tipografías por nombre (`texto/fuentes.js`)
+let arte = null                // el arte separado abierto (camino A), para dibujar sus mesas
+// ── LA TIZADA DEL CAMINO A: el molde pelado, el contexto del arte y las bases armadas ─────────
+const moldesA = new Map()      // clave → MoldeA (la plantilla abierta con `molde/caminoA.js`)
+const contornosA = new Map()   // `${clave}|${mesa}|${talle}` → contornos de esa mesa/talle
+const contextosA = new Map()   // clave del arte → contexto (`pieza/caminoA.js`)
+const basesA = new Map()       // id → base armada (queda acá: nombra documentos abiertos acá)
+
+async function cargarPieza() {
+  if (P) return
+  P = {
+    ...(await import('./pieza/base.js')), ...(await import('./pieza/estampar.js')),
+    ...(await import('./pieza/svg.js')), ...(await import('./texto/fuentes.js')),
+    FuenteCurvas: (await import('./texto/curvas.js')).FuenteCurvas,
+  }
+}
 
 async function cargar() {
   if (M) return
@@ -83,8 +98,151 @@ const TAREAS = {
     sha1 = r.sha1
     return { valor: { zip, sha1 }, transfer: [zip.buffer] }
   },
+  // ── EL MOLDE SIN DISEÑO (camino A) y el DXF (PLAN_NAVEGADOR.md, 1b) ────────────────────────
+  /** Un DXF de moldería → el PDF con una capa por talle (`dxf/importar.js`) + su resumen. */
+  async dxf_convertir({ bytes }) {
+    await cargar()
+    const { dxfAPdf } = await import('./dxf/importar.js')
+    const r = dxfAPdf(mupdf, bytes)
+    return { valor: { pdf: r.pdf, resumen: r.resumen, omitidas: r.omitidas || null }, transfer: [r.pdf.buffer] }
+  },
+  /**
+   * El alta del molde abierto (`abrir`) SIN diseño adentro: registro por etiquetas (o manual con
+   * los nombres del DXF), la detección del visor por talle y el lienzo de todas, y el paquete
+   * `alta_a` que el servidor valida y guarda (`_paquete_molde_aplicar`).
+   */
+  async alta_a({ sha1, motor, dxf = null, dxfBytes = null, indices = null, emparejado = null }) {
+    await cargar()
+    if (!doc) throw new Error('el molde no está abierto')
+    const CA = await import('./molde/caminoA.js')
+    const molde = new CA.MoldeA(mupdf, doc)
+    const preparado = CA.prepararCaminoA(molde, { indices, emparejado, dxf })
+    const { zip } = M.armarPaqueteCaminoA(null, preparado, { motor, sha1, dxfBytes })
+    const alta = preparado.alta
+    return { valor: { zip, resumen: { mesas: alta.mesas, talles: alta.talles, piezas: alta.registro.size,
+                                      dxf: preparado.dxf || null } }, transfer: [zip.buffer] }
+  },
+  // ── LA TIZADA DEL CAMINO A (PLAN_NAVEGADOR.md, 1b): pieza = molde pelado + arte separado ───
+  /** Abre la plantilla (molde sin diseño) para leer los contornos de sus piezas. */
+  async molde_a_abrir({ clave, bytes }) {
+    await cargar()
+    const CA = await import('./molde/caminoA.js')
+    if (moldesA.has(clave)) { try { moldesA.get(clave).destroy() } catch { /* nada */ } }
+    moldesA.set(clave, new CA.MoldeA(mupdf, mupdf.Document.openDocument(bytes, 'application/pdf')))
+    for (const k of [...contornosA.keys()]) if (k.startsWith(clave + '|')) contornosA.delete(k)
+    const m = moldesA.get(clave)
+    const talles = CA.tallesDePlantilla(m)
+    return { talles, ordenVar: CA.ordenarPorArchivo(m, [...talles].sort()) }
+  },
+  /**
+   * Lo que `generar_pedido` prepara UNA vez para el arte separado: el mapeo por variante
+   * (`mapeo_variantes_arte`), los editables (`extraer_editables`) y el contexto que arma bases.
+   * `objetos` = los objetos agregados con sus bytes (`{...objeto, bytes}`).
+   */
+  async contexto_a({ clave, arte: arteBytes, registro, ordenVar, mapeoArte, editablesCfg, editablesTamano, editablesColor,
+                     editablesMarca, editablesSinMarca, marcasComoCruz = true, referencia, borde, objetos = [], conPersonalizacion = false }) {
+    await cargar()
+    await cargarPieza()
+    if (!abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
+    const PA = await import('./pieza/caminoA.js')
+    const MA = await import('./arte/mapeo.js')
+    const ED = await import('./arte/editables.js')
+    if (contextosA.has(clave)) { try { contextosA.get(clave).ctx.cerrar() } catch { /* nada */ } }
+    let mapeoVar
+    try { mapeoVar = MA.mapeoVariantesArte(mupdf, arteBytes, registro, ordenVar || []) } catch { mapeoVar = {} }
+    let editables = []
+    if (mapeoArte && editablesCfg !== null && editablesCfg !== undefined) {
+      try { editables = ED.extraerEditables(mupdf, arteBytes) } catch { editables = [] }
+    }
+    const porArchivo = new Map(objetos.map((o) => [o.archivo, o.bytes]))
+    const ctx = PA.contextoCaminoA(mupdf, {
+      arte: arteBytes, mapeoArte, mapeoVar, editables, editablesCfg, editablesTamano, editablesColor,
+      editablesMarca, editablesSinMarca, marcasComoCruz, referencia: referencia || 'alto', borde,
+      objetosAgregados: objetos.length ? { objetos: objetos.map(({ bytes: _b, ...o }) => o), abrir: (a) => porArchivo.get(a) } : null,
+      fuente: abridor.abrir,
+    })
+    let pers = null
+    if (conPersonalizacion) {
+      const PE = await import('./arte/personalizacion.js')
+      try { pers = PE.extraerPersonalizacion(mupdf, arteBytes) } catch { pers = {} }
+    }
+    contextosA.set(clave, { ctx, arteRect: ctx.arteRect })
+    return { pers }
+  },
+  /**
+   * Una pieza del camino A: el contorno sale de la plantilla (`extraer_piezas_mesa` por
+   * `idx_mesa`/`pieza_idx`, o el contorno mayor), la base del contexto del arte y el estampado
+   * como en el camino B (con `separado`). La base queda ACÁ (`basesA`) y se devuelve su `baseId`.
+   */
+  async pieza_a({ molde, arte: claveArte, mesa, talle, pieza, info, persona, nro, variante, grupo, ph, etiqueta, alias, salida }) {
+    await cargar()
+    if (!P || !abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
+    const m = moldesA.get(molde)
+    if (!m) throw new Error(`el molde «${molde}» no está abierto`)
+    const c = contextosA.get(claveArte)
+    if (!c) throw new Error(`el arte «${claveArte}» no está preparado`)
+    const CA = await import('./molde/caminoA.js')
+    const PA = await import('./pieza/caminoA.js')
+    const kc = `${molde}|${mesa}|${talle}`
+    let cont
+    if (info && info.pieza_idx !== undefined && info.pieza_idx !== null) {
+      if (!contornosA.has(kc)) contornosA.set(kc, CA.extraerPiezasMesa(m, mesa, talle))
+      cont = contornosA.get(kc)[info.idx_mesa ?? info.pieza_idx]
+    } else {
+      cont = CA.extraerContornoMesa(m, mesa, talle)
+    }
+    if (!cont) throw new Error(`la pieza «${pieza}» (talle ${talle}) no está en la mesa ${mesa}`)
+    const kb = `${claveArte}|${molde}|${pieza}|${talle}|${variante ?? ''}`
+    let base = basesA.get(kb)
+    if (!base) {
+      base = c.ctx.armarBase({ cont, pieza, talle, variante: variante ?? null })
+      basesA.set(kb, base)
+    }
+    const phMesa = base.mesaA ? ((ph || {})[String(base.mesaA)] || {}) : {}
+    const estampado = P.estamparPieza({ base, ph: phMesa, persona, talle, pieza, nro, variante: variante ?? null, grupo: grupo ?? null,
+                                        etiqueta, fuente: abridor.abrir, alias: alias || {}, info: info || {},
+                                        separado: true, arteRect: base.arteRect })
+    const r = { baseId: kb, estampado, W: base.W, H: base.H, B: base.B, Hp: base.Hp, S: base.S, mesaA: base.mesaA,
+                w: base.W + 2 * base.B, h: base.Hp }
+    if (salida === 'svg' || salida === 'pdf') {
+      const pdf = PA.documentoPiezaCaminoA(mupdf, base, estampado)
+      if (salida === 'pdf') return { valor: { ...r, pdf }, transfer: [pdf.buffer] }
+      r.svg = P.svgDePdf(mupdf, pdf)
+    }
+    return r
+  },
+  /** Cierra lo del camino A de un pedido (moldes, contextos y bases). */
+  async cerrar_a() {
+    for (const m of moldesA.values()) { try { m.destroy() } catch { /* nada */ } }
+    for (const c of contextosA.values()) { try { c.ctx.cerrar() } catch { /* nada */ } }
+    moldesA.clear(); contextosA.clear(); contornosA.clear(); basesA.clear()
+    return true
+  },
+  /** El arte separado analizado acá (`arte/preparar.js`): el paquete que `POST /api/arte` guarda. */
+  async arte_preparar({ bytes, contexto }) {
+    await cargar()
+    const { prepararArte } = await import('./arte/preparar.js')
+    const r = prepararArte(mupdf, bytes, contexto)
+    return { valor: { zip: r.zip, sha1: r.sha1, modo: r.modo, validacion: r.validacion, mapeo: r.mapeo }, transfer: [r.zip.buffer] }
+  },
+  // ── EL ARTE SEPARADO (camino A): sus mesas como SVG para el paso Arte ─────────────────────
+  /** Abre el arte y apaga las capas que no se imprimen (guías y editables), como `/api/arte/mesa_img`. */
+  async arte_abrir({ bytes }) {
+    await cargar()
+    await cargarPieza()
+    if (arte) { try { arte.destroy() } catch { /* nada */ } arte = null }
+    arte = mupdf.Document.openDocument(bytes, 'application/pdf')
+    const { apagarCapasNoImpresas } = await import('./arte/capas.js')
+    apagarCapasNoImpresas(arte)
+    return arte.countPages()
+  },
+  async arte_svg({ pagina }) {
+    if (!arte) throw new Error('el arte no está abierto')
+    return P.svgDePagina(mupdf, arte, pagina)
+  },
   async cerrar() {
     if (doc) { try { doc.destroy() } catch { /* nada */ } doc = null }
+    if (arte) { try { arte.destroy() } catch { /* nada */ } arte = null }
     for (const d of mesas.values()) { try { d.destroy() } catch { /* nada */ } }
     mesas.clear()
     return true
@@ -101,13 +259,7 @@ const TAREAS = {
   /** Las tipografías: el catálogo del servidor, los archivos ya bajados y los reemplazos. */
   async fuentes({ catalogo, archivos, alias }) {
     await cargar()
-    if (!P) {
-      P = {
-        ...(await import('./pieza/base.js')), ...(await import('./pieza/estampar.js')),
-        ...(await import('./pieza/svg.js')), ...(await import('./texto/fuentes.js')),
-        FuenteCurvas: (await import('./texto/curvas.js')).FuenteCurvas,
-      }
-    }
+    await cargarPieza()
     abridor = P.crearAbridor({
       catalogo, alias: alias || {}, FuenteCurvas: P.FuenteCurvas,
       traer: async (e) => { const b = archivos[e.archivo]; if (!b) throw new Error(`falta el archivo de «${e.interno}»`); return b },
@@ -156,9 +308,21 @@ const TAREAS = {
     const H = await import('./hoja/componer.js')
     let R = null
     try { R = await import('./rip/aplanar.js') } catch { R = null }
+    // camino A: `base` llegó como `{id}`; la de verdad (con su contorno y sus documentos de
+    // origen) está acá. Va ANTES del nesting, que lee `base.cont`.
+    const origenesA = {}
+    for (const p of piezas) {
+      if (p.base && p.base.id !== undefined && !p.base.baseStream) {
+        const b = basesA.get(p.base.id)
+        if (!b) throw new Error(`la base «${p.base.id}» no está armada en este hilo`)
+        p.base = b
+        for (const [, ref] of (b.fuentesXo || [])) if (ref && ref.doc && !(ref.origen in origenesA)) origenesA[ref.origen] = ref.doc
+      }
+    }
     const { colocaciones, area } = N.anidarContorno(piezas, cfg)
     const origenes = {}
     for (const [clave, d] of mesas) origenes[String(clave)] = d
+    Object.assign(origenes, origenesA)
     const hoja = H.componerHoja(mupdf, { hojas: colocaciones, cfg, origenes })
     let pdf = hoja.pdf
     if (R && R.aplanarParaRip) pdf = R.aplanarParaRip(mupdf, pdf)

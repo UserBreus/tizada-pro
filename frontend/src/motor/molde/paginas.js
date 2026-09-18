@@ -431,7 +431,8 @@ function quitarMarcadores(stream) {
   } catch { /* como el Python */ }
 }
 
-function sanearOc(pagina, vistos) {
+/** `molde_real.sanear_oc`: borra /OC y los marcadores de contenido opcional en los XObjects de la página. */
+export function sanearOc(pagina, vistos) {
   const caminar = (res) => {
     if (nulo(res)) return
     const xo = res.get('XObject')

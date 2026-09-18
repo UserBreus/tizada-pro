@@ -164,7 +164,8 @@ function leerCaja(pageObj, clave) {
   const v = pageObj.getInheritable(clave)
   if (nulo(v) || !v.isArray() || v.length !== 4) return null
   const out = []
-  for (let i = 0; i < 4; i++) { const x = v.get(i); if (!x.isNumber()) return null; out.push(x.asNumber()) }
+  // `toString()` y no `asNumber()`: los reales de mupdf son float32 (2214.33 → 2214.330078)
+  for (let i = 0; i < 4; i++) { const x = v.get(i); if (!x.isNumber()) return null; out.push(x.isInteger() ? x.asNumber() : Number(x.toString())) }
   return out
 }
 
@@ -190,7 +191,7 @@ function formDeOrigen(out, mapa, srcDoc, pagina, delMolde) {
     // qpdf `getMatrixForTransformations(invert=false)`: la escala de /UserUnit y el giro de /Rotate
     const [llx, lly, urx, ury] = caja
     const width = urx - llx, height = ury - lly
-    const scale = hayUU && uuO.isNumber() ? uuO.asNumber() : 1.0
+    const scale = hayUU && uuO.isNumber() ? (uuO.isInteger() ? uuO.asNumber() : Number(uuO.toString())) : 1.0
     const rotate = hayRot && rotO.isNumber() ? Math.trunc(rotO.asNumber()) : 0
     let mtx
     switch (rotate) {

@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **167 endpoints**. Generado automáticamente del código.
+Total: **171 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -120,6 +120,10 @@ Total: **167 endpoints**. Generado automáticamente del código.
 | GET | `/api/productos/<pid>/desplegado/<archivo>` | Un archivo del molde DESPLEGADO (`m{mesa}.pdf` / `m{mesa}.json` / `etiqueta_archivo.json`), para que el navegador arme las piezas él (PLAN_NAVEGADOR.m | — |
 | GET | `/api/productos/<pid>/motor_b` | TODO lo que el navegador necesita para armar las piezas de un molde con diseño (PLAN_NAVEGADOR, etapa 3): las mesas desplegadas (con su sello, para ca | — |
 | POST | `/api/productos/<pid>/prendas` | Las filas de la planilla TRADUCIDAS a prendas (`_traducir_prendas`), para que el navegador arme las piezas él (PLAN_NAVEGADOR, etapas 3 y 4). Es livia | body: diseno, exigir_obligatorias, filas, muestra, var_por_diseno |
+| GET | `/api/productos/<pid>/arte_archivo` | El arte VIGENTE de un diseño (con las ediciones), para que el navegador lo dibuje y arme las piezas él (etapas 2-4, camino A). | q: diseno |
+| GET | `/api/productos/<pid>/arte_contexto` | Lo que el navegador necesita para analizar un arte separado ÉL (etapa 3, camino A): el registro, el mapeo FIJO del molde, el alcance de las variables, | — |
+| GET | `/api/productos/<pid>/objeto_agregado/<oid>` | El archivo de un objeto agregado (PNG/SVG/PDF/AI), para el motor del navegador. | q: diseno |
+| POST | `/api/productos/<pid>/editables_cfg` | `_editables_cfg(prod, diseño, override)`: la config de los editables del catálogo con el AJUSTE del pedido encima (lo que la persona movió sin guardar | body: diseno, editables |
 
 ## Plantilla (molde)
 

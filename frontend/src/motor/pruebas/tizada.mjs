@@ -43,6 +43,20 @@ globalThis.fetch = async (url, opts = {}) => {
   if ((m = u.match(/^\/api\/productos\/([^/]+)\/desplegado\/([^/?]+)/))) {
     return resp(fs.readFileSync(path.join(E.desplegado[dec(m[1])], dec(m[2]))), 'application/octet-stream')
   }
+  // camino A: la plantilla pelada, el arte de cada diseño y los objetos agregados
+  if ((m = u.match(/^\/api\/productos\/([^/]+)\/descargar_plantilla/))) {
+    return resp(fs.readFileSync((E.plantilla || {})[dec(m[1])]), 'application/octet-stream')
+  }
+  if ((m = u.match(/^\/api\/productos\/([^/]+)\/arte_archivo(?:\?diseno=([^&]+))?/))) {
+    const ruta = (E.artes || {})[`${dec(m[1])}|${m[2] ? dec(m[2]) : 'principal'}`]
+    if (!ruta) return resp({ error: 'no hay arte cargado' }, 'application/json', 404)
+    return resp(fs.readFileSync(ruta), 'application/octet-stream')
+  }
+  if ((m = u.match(/^\/api\/productos\/([^/]+)\/objeto_agregado\/([^/?]+)(?:\?diseno=([^&]+))?/))) {
+    const ruta = (E.objetos || {})[`${dec(m[1])}|${m[3] ? dec(m[3]) : 'principal'}|${dec(m[2])}`]
+    if (!ruta) return resp({ error: 'no existe' }, 'application/json', 404)
+    return resp(fs.readFileSync(ruta), 'application/pdf')
+  }
   if ((m = u.match(/^\/api\/fuente\/archivo\/([^/?]+)/))) {
     const ruta = E.fuentes[dec(m[1])]
     if (!ruta) return resp({ error: 'no existe' }, 'application/json', 404)

@@ -2379,7 +2379,7 @@ _API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_mu
 
 # Endpoints que MUESTRAN el molde en una lista, sin trabajar con él: la miniatura de la grilla y la
 # descarga del archivo. No cuentan como «este molde está en uso» para los efímeros (ver la guardia).
-_API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla", "/motor_b", "/prendas")
+_API_NO_USA_EL_MOLDE = ("/preview", "/descargar_plantilla", "/motor_b", "/prendas", "/arte_contexto", "/arte_archivo", "/objeto_agregado/", "/editables_cfg")
 
 
 # 🔴 RUTAS QUE ESCRIBEN PERO NO TRABAJAN SOBRE NINGUN MOLDE (auditoria 2026-09-15).
@@ -2987,7 +2987,8 @@ def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
     import zipfile
     import pymupdf as fitz
     import piezas_con_diseno as PD
-    permitido = _re.compile(r"^(manifest\.json|alta\.json|desplegado/(m[1-9][0-9]{0,3}\.(json|pdf)|etiqueta_archivo\.json))$")
+    permitido = _re.compile(r"^(manifest\.json|alta\.json|desplegado/(m[1-9][0-9]{0,3}\.(json|pdf)|etiqueta_archivo\.json)"
+                            r"|deteccion/[A-Za-z0-9_.-]{1,80}\.json|plantilla_fuente\.dxf)$")
     destino = PD._carpeta_desplegado(archivo)
     armado = destino + ".paquete-" + uuid.uuid4().hex[:8]
     try:
@@ -3011,6 +3012,39 @@ def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
             fase = man.get("fase") or "completo"
             if fase not in fases:
                 raise ValueError(f"el paquete es de la fase «{fase}», que no va acá")
+            if fase == "alta_a":
+                # MOLDE SIN DISEÑO (camino A) preparado en el navegador (PLAN_NAVEGADOR, 1b): el alta
+                # (registro por etiquetas o manual/DXF), la detección del visor por talle y el lienzo
+                # TODAS. Acá se valida contra el archivo y se devuelve; quien llama escribe las cachés
+                # con la fecha final del archivo (los nombres llevan el mtime) — ver
+                # `_escribir_deteccion_paquete`.
+                if str(man.get("sha1") or "") != _sha1_archivo(archivo):
+                    raise ValueError("el paquete no corresponde a este archivo")
+                alta = _json("alta.json")
+                doc = fitz.open(archivo)
+                try:
+                    n = doc.page_count
+                    capas = [c.get("text") for c in doc.layer_ui_configs()]
+                finally:
+                    doc.close()
+                if alta.get("mesas") != n:
+                    raise ValueError("el paquete no coincide con las mesas del archivo")
+                if any(t not in capas for t in (alta.get("talles") or [])):
+                    raise ValueError("el paquete nombra talles que el archivo no tiene")
+                reg = alta.get("registro")
+                if not isinstance(reg, dict) or not all(
+                        isinstance(v, dict) and all(isinstance(i, dict) and "mesa" in i and "w_cm" in i and "bbox_mu" in i
+                                                    for i in v.values()) for v in reg.values()):
+                    raise ValueError("el paquete no trae el registro de las piezas")
+                det = {}
+                for nom in nombres:
+                    if nom.startswith("deteccion/"):
+                        det[nom[len("deteccion/"):-5]] = _json(nom)
+                alta["_deteccion"] = det
+                if "plantilla_fuente.dxf" in nombres:
+                    alta["_dxf_bytes"] = z.read("plantilla_fuente.dxf")
+                alta["_dxf"] = man.get("dxf")
+                return fase, alta
             if (man.get("v_contornos") != PD._V_CONTORNOS or man.get("v_paginas") != PD._V_PAGINAS
                     or man.get("v_etq") != PD._V_ETQ):
                 raise ValueError("el molde se preparó con otra versión del sistema: recargá la página y volvé a cargarlo")
@@ -3117,6 +3151,33 @@ def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
             shutil.rmtree(armado, ignore_errors=True)
 
 
+def _escribir_deteccion_paquete(pid, destino, det):
+    """Las detecciones del visor que preparó el navegador (camino A), con los nombres que busca
+    `_deteccion_base_cached` (`{mtime}_dv3_{talle|auto}.json`) y `_prewarm_deteccion_todas`
+    (`{mtime}_dv2_TODAS.json`). `det` = {"auto": {...}, "<talle>": {...}, "todas": {...}}."""
+    import re as _re
+    mt = int(os.path.getmtime(destino))
+    cdir = _ruta_datos("deteccion_cache", pid)
+    os.makedirs(cdir, exist_ok=True)
+    for clave, valor in det.items():
+        if not isinstance(valor, dict):
+            continue
+        if clave == "todas":
+            if "formato" not in valor:
+                try:
+                    import variantes_molde as VM
+                    valor["formato"] = VM.analizar(destino).get("formato") or "extendido"
+                except Exception:
+                    valor["formato"] = "extendido"
+            fp = os.path.join(cdir, f"{mt}_dv2_TODAS.json")
+        else:
+            fp = os.path.join(cdir, _re.sub(r"[^A-Za-z0-9_-]+", "_", f"{mt}_dv3_{clave}") + ".json")
+        tmpf = fp + ".tmp"
+        with open(tmpf, "w", encoding="utf-8") as fh:
+            json.dump(valor, fh, ensure_ascii=False)
+        os.replace(tmpf, fp)
+
+
 def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                            _corresp_nueva, _con_diseno, _motivo_b, _t_subida, paquete=None,
                            sabe_sin_diseno=False):
@@ -3131,10 +3192,11 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     Devuelve `(resumen, None)` o `(None, (mensaje, código))`. No toca `request`: todo por parámetro.
     """
     nombre = (_ARCH or "").lower()      # el nombre del archivo, que acá sólo sirve para ver si es DXF
+    _det_paq = None                       # detección del navegador (camino A): se escribe al final
     if paquete:
         # El navegador ya lo preparó entero: acá sólo se valida y se guarda (ver arriba).
         try:
-            _fase_paq, alta = _paquete_molde_aplicar(tmp, paquete)
+            _fase_paq, alta = _paquete_molde_aplicar(tmp, paquete, fases=("completo", "contornos", "alta_a"))
         except Exception as e:
             _descartar_tmp(tmp)
             return None, (f"no se pudo guardar el molde: {e}", 422)
@@ -3143,12 +3205,26 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                 os.remove(paquete)
             except OSError:
                 pass
-        _con_diseno, _motivo_b = True, "lo preparó el navegador"
-        if _fase_paq == "contornos":
-            _motivo_b += " (las páginas por talle llegan en segundo plano)"
-    elif _solo_navegador() and _PIDE_B:
+        if _fase_paq == "alta_a":
+            # molde SIN diseño: el alta viene hecha; el archivo puede ser un DXF ya convertido a PDF
+            # por el navegador (viene el DXF original aparte, para diagnosticar/reimportar)
+            _con_diseno, _motivo_b = False, "lo preparó el navegador"
+            _det_paq = alta.pop("_deteccion", None) or {}
+            _dxf_bytes = alta.pop("_dxf_bytes", None)
+            _dxf_man = alta.pop("_dxf", None)
+            if _dxf_bytes:
+                with open(_ruta_entrada("plantilla_fuente.dxf", pid=_PID), "wb") as _g:
+                    _g.write(_dxf_bytes)
+            if isinstance(_dxf_man, dict) and _dxf_man:
+                dxf_resumen = dict(_dxf_man)
+                _corresp_nueva = dxf_resumen.pop("indices", None) or _corresp_nueva
+        else:
+            _con_diseno, _motivo_b = True, "lo preparó el navegador"
+            if _fase_paq == "contornos":
+                _motivo_b += " (las páginas por talle llegan en segundo plano)"
+    elif _solo_navegador():
         _descartar_tmp(tmp)
-        return None, ("Este molde con diseño se prepara en tu computadora, no en el servidor (volvé a cargarlo "
+        return None, ("Este molde se prepara en tu computadora, no en el servidor (volvé a cargarlo "
                       "desde la pantalla; si tu computadora no puede, usá una con más memoria).", 409)
     elif dxf_resumen:
         # DXF: NO corremos alta_plantilla (busca etiquetas «Talle-Pieza-#» que Optitex no
@@ -3211,7 +3287,12 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     # nombres, emparejando por posición). SOLO para moldes chicos: con muchas piezas el
     # emparejado es carísimo (O(n²)×talles, +30s) → se saltea y se nombran en el visor/modelos.
     _nombres = [n for n in (dxf_resumen.get("nombres") or []) if str(n).strip()] if dxf_resumen else []
-    if _nombres and len(_nombres) <= 25:
+    if _det_paq is not None:
+        # el navegador ya aplicó los nombres del DXF al armar el paquete (`prepararCaminoA`):
+        # acá no se recalcula nada (PLAN_NAVEGADOR 1b)
+        if _nombres and not dxf_resumen.get("nombres_aplicados"):
+            dxf_resumen["nombres_pendientes"] = len(_nombres)
+    elif _nombres and len(_nombres) <= 25:
         try:
             det = MP.detectar_piezas(tmp)
             nombres = dxf_resumen["nombres"]
@@ -3362,7 +3443,15 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     # `teardown_request`, así que sin ese envoltorio los PDFs que abre esta precarga quedaban
     # abiertos y trababan el molde recién subido (en Windows no se puede reemplazar ni borrar un
     # archivo abierto) — y es justo el momento en que el usuario puede volver a subirlo.
-    _en_hilo(lambda: _prewarm_deteccion_todas(_pid_reset))
+    if _det_paq:
+        # la detección que armó el navegador queda como caché con la fecha FINAL del archivo (los
+        # nombres llevan el mtime): el visor la encuentra sin que el servidor lea el molde
+        try:
+            _escribir_deteccion_paquete(_pid_reset, destino, _det_paq)
+        except Exception as _ed:
+            print(f"[camino A] no se pudo guardar la detección del navegador: {_ed}", flush=True)
+    if not (_det_paq and "todas" in _det_paq):
+        _en_hilo(lambda: _prewarm_deteccion_todas(_pid_reset))
     import piezas_con_diseno as _PDp
     if _con_diseno and _PDp.paginas_pendientes_navegador(destino):
         # FASE A del navegador: las páginas las está terminando SU computadora y llegan por
@@ -3423,7 +3512,7 @@ def subir_plantilla():
     dxf_resumen = None
     _corresp_nueva = None          # correspondencia pieza↔talle del DXF (se escribe con el commit)
     _con_diseno, _motivo_b = False, ""   # ¿camino B? se decide más abajo, sobre el temporal
-    if nombre.endswith(".dxf"):
+    if nombre.endswith(".dxf") and _pq is None:
         # Molde en DXF (AAMA/ASTM de Optitex, Gerber, Lectra…): se CONVIERTE a un PDF
         # con una capa por talle + los contornos de cada pieza, igual que un .ai.
         # Las curvas del archivo (bulge/spline/elipse) se conservan EXACTAS (Bézier).
@@ -3452,7 +3541,7 @@ def subir_plantilla():
         # .ai / .pdf (Illustrator, Corel, InDesign…): PyMuPDF los lee directo.
         f.save(tmp)
     _paquete = None
-    if _pq is not None and not nombre.endswith(".dxf"):
+    if _pq is not None:
         _paquete = os.path.join(os.path.dirname(destino), "plantilla.subiendo.paquete.zip")
         _pq.save(_paquete)
     # 🔴 DE ACÁ EN MÁS, EN SEGUNDO PLANO. Lo que sigue son minutos de CPU (118 MB = 297 s medidos)
@@ -5670,7 +5759,163 @@ def subir_arte():
     destino = _ruta_entrada("arte.ai", sub=sub, original=True)
     f.save(destino)
     OA.reset_versiones(destino)   # arte nuevo = se descartan las ediciones (versiones) del anterior
+    _pq = request.files.get("paquete")
+    if _pq is not None:
+        # EL NAVEGADOR YA LO ANALIZÓ (PLAN_NAVEGADOR, etapa 3 camino A): la detección de las mesas,
+        # la personalización, el mapeo por nombre y la validación vienen hechos; acá se valida que
+        # correspondan a este archivo y se guardan igual que si los hubiera calculado el servidor.
+        ruta_zip = destino + ".paquete." + uuid.uuid4().hex[:8] + ".zip"
+        _pq.save(ruta_zip)
+        try:
+            return _subir_arte_paquete(destino, plantilla, f, sub, ruta_zip)
+        except Exception as e:
+            return jsonify({"error": f"no se pudo guardar el arte preparado en el navegador: {e}"}), 422
+        finally:
+            try:
+                os.remove(ruta_zip)
+            except OSError:
+                pass
+    if _solo_navegador():
+        return jsonify({"error": "El arte se analiza en tu computadora, no en el servidor (volvé a cargarlo "
+                                 "desde la pantalla; si tu computadora no puede, usá una con más memoria)."}), 409
     return _subir_arte_analizar(destino, plantilla, f, sub)
+
+
+def _subir_arte_paquete(destino, plantilla, f, sub, ruta_zip):
+    """Guarda lo que el navegador preparó para un arte: `manifest.json` (sha1 del archivo, modo),
+    `det.json` (`detectar_arte`, con las miniaturas), `auto.json` (mapeo por nombre), `pers.json`
+    (personalización), `mapeo.json` (el mapeo final, ya con los fijos del molde), `pv.json`
+    (por variable) y `validacion.json`. El servidor NO abre el arte para calcular: sólo comprueba."""
+    import zipfile
+    with zipfile.ZipFile(ruta_zip) as z:
+        nombres = set(z.namelist())
+        permitidos = {"manifest.json", "det.json", "auto.json", "pers.json", "mapeo.json", "pv.json", "validacion.json"}
+        if not nombres <= permitidos:
+            raise ValueError("el paquete trae archivos que no corresponden")
+        def _json(nombre, obligatorio=True):
+            if nombre not in nombres:
+                if obligatorio:
+                    raise ValueError(f"al paquete le falta {nombre}")
+                return None
+            return json.loads(z.read(nombre).decode("utf-8"))
+        man = _json("manifest.json")
+        if str(man.get("sha1") or "") != _sha1_archivo(destino):
+            raise ValueError("el paquete no corresponde a este archivo")
+        det = _json("det.json")
+        val = _json("validacion.json")
+        pers = _json("pers.json", False) or {}
+        auto = _json("auto.json", False) or {}
+        mapeo = {k: int(v) for k, v in (_json("mapeo.json", False) or {}).items() if v}
+        pv_ini = _json("pv.json", False) or {}
+    import pymupdf as fitz
+    with fitz.open(destino) as d:
+        n = d.page_count
+    if not isinstance(det, dict) or len(det.get("mesas") or []) != n:
+        raise ValueError("la detección del paquete no coincide con las mesas del archivo")
+    modo = "separado" if MP.arte_es_separado(destino, plantilla) else "clasico"
+    if str(man.get("modo")) != modo:
+        raise ValueError(f"el paquete es de un arte «{man.get('modo')}» y este archivo es «{modo}»")
+    reg = _cargar("registro_producto.json")
+    if modo == "separado" and not reg:
+        return jsonify({"error": "primero registrá las piezas del molde (subí o etiquetá la plantilla)"}), 409
+    # la caché de detección, con la clave que el servidor calcula (así `/api/arte/deteccion` la
+    # encuentra sin dibujar nada)
+    try:
+        import hashlib
+        clave = hashlib.sha1(json.dumps([os.path.abspath(destino), int(os.path.getmtime(destino)),
+                                         os.path.getsize(destino), sorted((reg or {}).keys()), _DETECCION_CACHE_V]).encode("utf-8")).hexdigest()
+        ruta = os.path.join(os.path.dirname(destino), ".deteccion_cache.json")
+        with open(ruta + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump({"clave": clave, "det": det}, fh)
+        os.replace(ruta + ".tmp", ruta)
+    except Exception as e:
+        print(f"[arte] no se pudo guardar la detección del navegador: {e}", flush=True)
+    val = dict(val or {})
+    val["archivo"] = f.filename
+    val["modo"] = modo
+    json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+    json.dump(val.get("personalizacion") or pers, open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
+    if modo == "separado":
+        json.dump({"mapeo": mapeo, "por_variable": pv_ini}, open(_ruta_datos("mapeo_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
+        det = _urls_mesas(det, destino, request.form.get("diseno"))
+        det.update({"modo": "separado", "archivo": f.filename, "mapeo": mapeo, "por_nombre": sorted(auto.keys())})
+        if val.get("aprobado") is not None and "faltan" not in val:
+            det.update({"auto": True, "aprobado": val.get("aprobado"), "checks": val.get("checks") or [],
+                        "por_mapeo_fijo": sorted(set(mapeo) - set(auto)),
+                        "campos_personalizacion": sorted({c for m in (val.get("personalizacion") or {}).values() for c in m})})
+        else:
+            det.update({"auto": False, "faltan": val.get("faltan") or []})
+        print(f"  [tiempos] arte {sub or 'principal'}: guardado (lo preparó el navegador)", flush=True)
+        return jsonify(det)
+    print(f"  [tiempos] arte {sub or 'principal'}: guardado (lo preparó el navegador)", flush=True)
+    return jsonify(val)
+
+
+@app.get("/api/productos/<pid>/arte_contexto")
+def arte_contexto_producto(pid):
+    """Lo que el navegador necesita para analizar un arte separado ÉL (etapa 3, camino A): el
+    registro, el mapeo FIJO del molde, el alcance de las variables, el orden de variables y las
+    tipografías. Nada pesado."""
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde inexistente"}), 404
+    reg = _cargar("registro_producto.json", pid) or {}
+    fijo = {k: int(v) for k, v in ((prod or {}).get("mapeo_arte") or {}).items() if v and k in reg}
+    pv = {}
+    for _v in (prod.get("variantes") or []):
+        _vcl = _v.get("clave")
+        _pzv = _piezas_de_variable(prod, _vcl, reg)
+        if _vcl and _pzv:
+            pv[_vcl] = sorted(_pzv)
+    fu = _fuentes_para(pid, _reempl_de_request(pid=pid))
+    catalogo = [{**info, "propia": os.path.dirname(ruta) not in (FUENTES, os.path.realpath(FUENTES))}
+                for ruta, info in MP.catalogo_fuentes(fu).items()]
+    _pl = _ruta_entrada("plantilla.ai", pid=pid, original=True)
+    _st = os.stat(_pl) if os.path.exists(_pl) else None
+    return jsonify({"registro": reg, "fijo": fijo, "alcance": sorted(_alcance_variables(prod, reg)),
+                    "variantes": pv, "orden_var": _orden_var(reg), "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
+                    "plantilla_es_b": _es_camino_b(pid),
+                    "plantilla_sello": ([_st.st_size, int(_st.st_mtime)] if _st else None)})
+
+
+@app.post("/api/productos/<pid>/editables_cfg")
+def editables_cfg_producto(pid):
+    """`_editables_cfg(prod, diseño, override)`: la config de los editables del catálogo con el
+    AJUSTE del pedido encima (lo que la persona movió sin guardar), para que la vista previa del
+    Arte armada en el navegador (camino A) use la misma que usaría `/api/arte/preview_piezas`."""
+    cuerpo = request.get_json(silent=True) or {}
+    cat = _cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde inexistente"}), 404
+    dslug = cuerpo.get("diseno") or "principal"
+    override = cuerpo.get("editables") if isinstance(cuerpo.get("editables"), dict) else None
+    return jsonify({"editables_cfg": _editables_cfg(prod, dslug, override),
+                    "editables_color": _editables_color(prod, dslug),
+                    "editables_tamano": _editables_tamano(prod)})
+
+
+@app.get("/api/productos/<pid>/arte_archivo")
+def arte_archivo_producto(pid):
+    """El arte VIGENTE de un diseño (con las ediciones), para que el navegador lo dibuje y arme las
+    piezas él (etapas 2-4, camino A)."""
+    sub = _diseno_sub(request.args.get("diseno"))
+    ruta = _ruta_entrada("arte.ai", pid, sub=sub)
+    if not os.path.exists(ruta):
+        return jsonify({"error": "no hay arte cargado"}), 404
+    return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), max_age=0)
+
+
+@app.get("/api/productos/<pid>/objeto_agregado/<oid>")
+def objeto_agregado_archivo(pid, oid):
+    """El archivo de un objeto agregado (PNG/SVG/PDF/AI), para el motor del navegador."""
+    sub = _diseno_sub(request.args.get("diseno"))
+    data = _oa_cargar(pid, sub)
+    o = next((x for x in (data.get("objetos") or []) if str(x.get("id")) == str(oid)), None)
+    if not o or not o.get("archivo"):
+        return jsonify({"error": "no existe"}), 404
+    return send_from_directory(OA.carpeta(DATOS, pid, sub), os.path.basename(o["archivo"]), max_age=0)
 
 
 def _subir_arte_analizar(destino, plantilla, f, sub):
@@ -9893,6 +10138,13 @@ def _plan_para_navegador(plan):
             "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
             "referencia": md.get("referencia") or "alto",
             "gkey": str(md.get("_gkey")), "gnombre": md.get("_gnombre"),
+            # camino A: el arte separado y su configuración (el navegador baja el arte por
+            # `/arte_archivo?diseno=` y los objetos agregados por `/objeto_agregado/<id>`)
+            "mapeo_arte": md.get("mapeo_arte"),
+            "editables_cfg": md.get("editables_cfg"), "editables_tamano": md.get("editables_tamano"),
+            "editables_color": md.get("editables_color"), "editables_marca": md.get("editables_marca"),
+            "editables_sin_marca": md.get("editables_sin_marca"),
+            "objetos_agregados": (md.get("objetos_agregados") or {}).get("objetos") if md.get("objetos_agregados") else None,
         })
     grupos = []
     for g in plan["grupos"]:
@@ -9910,6 +10162,8 @@ def _plan_para_navegador(plan):
         "default_diseno": plan["default_diseno"],
         "perfil": ({"nombre": _icc_nom, "n": _icc_n, "bytes": len(_icc)} if _icc else None),
         "todo_camino_b": all(m["camino_b"] for m in moldes),
+        # el navegador puede generar TODO el pedido: cada molde es del camino B, o del A con su arte
+        "todo_navegador": all(m["camino_b"] or bool(m.get("mapeo_arte")) for m in moldes),
     }
 
 
@@ -13238,8 +13492,43 @@ def motor_b_producto(pid):
     if prod is None:
         return jsonify({"error": "molde inexistente"}), 404
     pl = _ruta_entrada("plantilla.ai", pid=pid, original=True)
-    if not os.path.exists(pl) or not _PD.es_camino_b(pl):
-        return jsonify({"camino_b": False})
+    if not os.path.exists(pl):
+        return jsonify({"camino_b": False, "sin_molde": True})
+    if not _PD.es_camino_b(pl):
+        # CAMINO A: el molde pelado + los artes de cada diseño (el navegador los baja aparte)
+        fu = _fuentes_para(pid, _reempl_de_request(pid=pid))
+        catalogo = [{**info, "propia": os.path.dirname(ruta) not in (FUENTES, os.path.realpath(FUENTES))}
+                    for ruta, info in MP.catalogo_fuentes(fu).items()]
+        disenos = []
+        for d in ([{"id": "principal", "nombre": "Principal"}] + list(prod.get("disenos") or [])):
+            sub = _diseno_sub(d["id"])
+            arte = _ruta_entrada("arte.ai", pid, sub=sub)
+            if not os.path.exists(arte):
+                continue
+            base, pv = _mapeo_estructura(pid, sub=sub)
+            st = os.stat(arte)
+            disenos.append({"id": d["id"], "nombre": d.get("nombre") or d["id"], "sub": sub,
+                            "sello": [st.st_size, int(st.st_mtime)],
+                            "mapeo": {"mapeo": base, "por_variable": pv},
+                            "validacion": _cargar("validacion_arte.json", pid, sub=sub) or {},
+                            "pers": _cargar("registro_personalizacion.json", pid, sub=sub) or {},
+                            "editables_cfg": _editables_cfg(prod, d["id"]), "editables_color": _editables_color(prod, d["id"]),
+                            "editables_marca": _editables_marca(prod, d["id"]),
+                            "editables_sin_marca": _editables_sin_marca(prod, d["id"]),
+                            "objetos": (_oa_cargar(pid, sub) or {}).get("objetos") or []})
+        st = os.stat(pl)
+        return jsonify({
+            "camino_b": False, "camino_a": True,
+            "plantilla": {"sello": [st.st_size, int(st.st_mtime)], "bytes": st.st_size},
+            "registro": _cargar("registro_producto.json", pid) or {},
+            "borde": _borde_de(prod, cat), "etiqueta": _etiqueta_de(prod, cat),
+            "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
+            "variante_guia": prod.get("variante_guia"), "variantes": prod.get("variantes") or [],
+            "referencia_medida": prod.get("referencia_medida") or "alto",
+            "editables_tamano": _editables_tamano(prod), "disenos": disenos,
+            "orden_var": _orden_var(_cargar("registro_producto.json", pid) or {}),
+            "columnas": prod.get("columnas") or [],
+        })
     mesas = []
     m = 1
     while True:

@@ -25,7 +25,8 @@ export async function leerCache(clave) {
       p.onerror = () => ok(null)
     })
     if (!v) return null
-    return new Uint8Array(v instanceof Blob ? await v.arrayBuffer() : v)
+    const u8 = new Uint8Array(v instanceof Blob ? await v.arrayBuffer() : v)
+    return u8.length ? u8 : null            // un guardado vacío (ver `guardarCache`) no es un acierto
   } catch {
     return null
   }
@@ -33,11 +34,16 @@ export async function leerCache(clave) {
 
 /** Guarda `bytes` (Uint8Array) bajo `clave`. */
 export async function guardarCache(clave, bytes) {
+  // 🔴 el Blob se arma AHORA, antes de cualquier `await`: quien llama suele TRANSFERIR `bytes.buffer`
+  // a un hilo apenas recibe los bytes, y un Blob armado después quedaba VACÍO (se guardaban 0
+  // bytes y la próxima carga fallaba con «no objects found»)
+  const blob = new Blob([bytes])
+  if (!blob.size) return
   try {
     const db = await abrirDb()
     await new Promise((ok) => {
       const t = db.transaction(STORE, 'readwrite')
-      t.objectStore(STORE).put(new Blob([bytes]), clave)
+      t.objectStore(STORE).put(blob, clave)
       t.oncomplete = t.onerror = t.onabort = () => ok()
     })
   } catch { /* sin caché */ }

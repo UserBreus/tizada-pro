@@ -49,7 +49,7 @@
 | Leer el molde del camino B: capas = talles, contornos por capa (`get_drawings`), marco, línea de corte | `piezas_con_diseno.py` (2,7k líneas), `molde_real.py` | Navegador (`motor/molde/desplegar.js`) | 1 |
 | Páginas por talle (cortar el content-stream por capa, `cortar_capas.py`) | `piezas_con_diseno._paginas_de_talles`, `molde_real.limpiar_capas` | Navegador (`motor/molde/paginas.js`) | 1 |
 | Placeholders NOMBRE/00 por talle, etiqueta que trae el archivo (familias), personalización | `piezas_con_diseno` (buscar_candidatos, decidir_familias) | Navegador (`motor/molde/placeholders.js`, `etiqueta_archivo.js`) | 1 |
-| Alta del camino A (molde solo, `detectar_piezas`, emparejado de talles) y DXF (`importar_dxf.py`, ezdxf) | `motor_pedido.alta_plantilla*`, `importar_dxf.py` | Navegador (`motor/molde/camino_a.js`, DXF con `dxf-parser`) | 1b |
+| Alta del camino A (molde solo, `detectar_piezas`, emparejado de talles) y DXF (`importar_dxf.py`, ezdxf) | `motor_pedido.alta_plantilla*`, `importar_dxf.py` | Navegador (`motor/molde/caminoA.js`, `motor/dxf/` — lector propio, sin `dxf-parser`) ✅ | 1b |
 | Guardar el molde (registro, catálogo, base) | `servidor.py` + MSSQL | Servidor: **recibe el paquete** y guarda | 1 |
 | Vistas del molde y de las mesas de una tizada (`mesa_img`, recortes, pre-dibujado, pool del visor) | `servidor.py` (`_dibujar_una_mesa`, `_predibujar_mesas`) | Navegador dibuja desde el vector (`motor/vista/`) | 2 |
 | Leer el arte: personalización (fuentes, curvas, bordes), editables, mapeo por nombre, perfil ICC | `motor_pedido.extraer_personalizacion/extraer_editables` | Navegador (`motor/arte/`) | 3 |
@@ -119,7 +119,8 @@ frontend/src/
     pdf/mupdf.js               ← carga mupdf.js una vez por worker; envoltorios (abrir, página,
                                   recorrer trazados, texto, escribir objetos, guardar)
     pdf/contenido.js           ← parser/escritor de content-streams (operadores, BDC/EMC de capas)
-    molde/capas.js             ← talles = capas OCG (orden, nombres, «Editable …», guías)
+    molde/capas.js             ← molde_real: suprimir/aislar/recolorar capas, objetos por capa
+                                  (obj_id), limpiar_capas_conservando_talle — sobre pdf/contenido.js
     molde/contornos.js         ← _piezas_de_mesa_cruda: recortes por capa, marco, agrupar por
                                   solape, pintado por recorte, línea de corte, respaldo por trazados
     molde/orden.js             ← canonizar_orden (piezas en el orden del talle de referencia)
@@ -127,14 +128,17 @@ frontend/src/
     molde/placeholders.js      ← NOMBRE / 00 / talle por talle: fuente, tamaño, curva, borde
     molde/etiqueta_archivo.js  ← candidatos + decidir_familias (la etiqueta que trae el molde)
     molde/camino_a.js          ← detectar_piezas / alta_plantilla / emparejado (molde sin diseño)
-    molde/dxf.js               ← importar_dxf (AAMA) con dxf-parser
+    dxf/importar.js            ← importar_dxf (AAMA/Optitex/genérico); dxf/leer.js (lector propio,
+                                  sin dxf-parser) + dxf/geometria.js (la parte de ezdxf que usa)
     arte/personalizacion.js    ← extraer_personalizacion (capas Nombre/Número/talle, curvas, bordes)
     arte/editables.js          ← extraer_editables (capas «Editable …», pila de apariencias)
     arte/mapeo.js              ← mapeo por nombre de capa guía → pieza
     texto/fuentes.js           ← catálogo de fuentes (lo sirve el servidor), alias, reemplazos
     texto/curvas.js            ← FuenteCurvas con opentype.js; ops_texto_curva (arco)
     pieza/base.js              ← _armar_base: contorno + diseño + borde de corte + marcas de proceso
-    pieza/estampar.js          ← nombre/número/talle por prenda sobre la base
+    pieza/estampar.js          ← nombre/número/talle por prenda sobre la base (clásico y separado)
+    pieza/caminoA.js           ← _armar_base del arte SEPARADO: mesa del arte encajada, editables
+                                  redibujados, cruz de proceso, objetos agregados, mesa_arte
     nesting/contorno.js        ← nesting_contorno (polígonos, giros, mesa por tela)
     nesting/grupos.js          ← generar_multi: una mesa por molde, grupos por columna de talle/tela
     hoja/componer.js           ← componer_hoja_pike / sello: XObjects, /UserUnit, hoja compartida
@@ -263,10 +267,20 @@ para repetir la prueba con archivos nuevos.
 
 ### ETAPA 1 — El molde se prepara en el navegador y se guarda como paquete (4-6 semanas)
 
-> ⏩ **EN CURSO 2026-09-17** (MAPA changelog 479). HECHO: pasos 1-6 y 8-9 para el molde CON
-> diseño (camino B), idénticos al servidor, en dos tiempos y con varios hilos (la persona sigue a
-> los 3,5-5,4 s). FALTA: paso 7 (camino A y DXF), no re-subir un archivo que el servidor ya tiene
-> (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`. ✅ Las TRES vías de subida
+> ✅ **HECHA 2026-09-18** (MAPA 495): pasos 1-9 para los dos caminos. El molde CON diseño en dos
+> tiempos (3,5-5,4 s); el molde SIN diseño y el DXF en un paquete `alta_a` (3 s en Edge; el
+> servidor guarda en 1,3 s). FALTA (no bloquea): no re-subir un archivo que el servidor ya tiene
+> (misma SHA-1), y el modo comparación `TIZADA_NAVEGADOR_COMPARAR`.
+> (Antes: EN CURSO 2026-09-17, MAPA 479.)
+> ⏩ **2026-09-18 (MAPA 492): paso 7, camino A, HECHO en el motor** — `molde/caminoA.js`
+> (`alta_plantilla`, `detectar_piezas`, `detectar_piezas_todas`, `alta_plantilla_manual`, talles,
+> etiquetas) + `paquete/armar.js: armarPaqueteCaminoA` (el ZIP `alta_a` que el servidor valida).
+> ✅ **2026-09-18 (MAPA 493): paso 7, DXF, HECHO en el motor** — `motor/dxf/importar.js` (+ `leer.js`,
+> `geometria.js`) = `importar_dxf.py` idéntico: contrato `verificar_navegador_dxf.py` verde y EXACTO
+> (resumen, página, capas, 34 348 tokens del content-stream y píxeles) con el Optitex real de 19×20.
+> Lo que resta del paso 7 es la pantalla: que la subida del camino A/DXF use el paquete.
+> Contrato `verificar_navegador_camino_a.py` verde (moldes reales + sintéticos, orden de claves
+> incluido). Falta: el DXF en el navegador y que la pantalla de subida del camino A mande el paquete. ✅ Las TRES vías de subida
 > (Cargar molde con diseño incluido · Mis artículos · Configuración → Moldería) preparan el
 > molde con diseño en el navegador; el navegador detecta si trae el diseño con la misma regla
 > que el servidor (MAPA 483).
@@ -300,7 +314,9 @@ para repetir la prueba con archivos nuevos.
 6. `etiqueta_archivo.js`: `buscar_candidatos_mesa` + `decidir_familias` (fuente + alto; la que
    está en ≥ 2/3 de las piezas se oculta; lo fijado a mano manda).
 7. `camino_a.js` (1b): `detectar_piezas`, `alta_plantilla`, `alta_plantilla_manual`, emparejado
-   por centroide/forma/solape; `dxf.js`: `importar_dxf` (AAMA/Optitex) con `dxf-parser`.
+   por centroide/forma/solape; `dxf/importar.js`: `importar_dxf` (AAMA/Optitex/genérico) con un
+   lector propio (`dxf/leer.js`; `dxf-parser` no expone la tolerancia de nudos ni el punto base
+   del bloque) y la geometría de ezdxf traducida (`dxf/geometria.js`). HECHO 2026-09-18 (MAPA 493).
 8. `espacio.js` + `armar.js` + `POST /api/paquetes/molde` (§5). En el servidor: `paquetes.py`
    (validar manifest, huella, mover atómico, versión/409) y en modo comparación (taller,
    `TIZADA_NAVEGADOR_COMPARAR=1`) recalcula con Python y compara; una diferencia va al registro
@@ -340,7 +356,21 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 ### ETAPA 3 — El arte en el navegador (6-8 semanas)
 
 > ✅ **HECHA 2026-09-17 para el camino B** (MAPA 491): pieza (base + estampado), tipografías,
-> catálogo, previas del paso Arte en el navegador. Pendiente 1b: el arte SEPARADO (camino A).
+> catálogo, previas del paso Arte en el navegador. **Camino A (1b), 2026-09-18:** punto 3 HECHO
+> (MAPA 494: `arte/texto.js`, `personalizacion.js`, `editables.js`, `mapeo.js`, `preparar.js` +
+> contrato `verificar_navegador_arte.py` verde sobre los 11 artes reales) y punto 4 HECHO (MAPA
+> 493: `pieza/caminoA.js`). **2026-09-18 (MAPA 495): enchufado y cerrado** — `prepararArte.js`
+> en las dos subidas del arte, `arte/mesa.js` (la mesa del arte dibujada acá), `previasCaminoA`.
+> ⏩ **2026-09-18 (MAPA 493): punto 4 para el camino A, HECHO en el motor** — `pieza/caminoA.js`
+> (`contextoCaminoA` / `armarBase` / `documentoPiezaCaminoA`: mesa del arte limpia y encajada,
+> editables redibujados —movidos, con tamaño, recoloreados por capa o por figura—, cruz de
+> proceso, «sin marca», objetos agregados, `mesa_arte` con `#rango` y por variable),
+> `molde/capas.js` (`suprimir_capas`/`aislar_capa`/`recolorar_capa`/`aislar_objeto`/
+> `aislar_capa_objetos` de `molde_real`) y `pieza/estampar.js` en modo `separado` (+ texto FIEL).
+> Contrato `verificar_navegador_pieza_a.py` verde: molde real + 3 artes reales, 19 piezas letra
+> por letra y 0 píxeles. Falta: enchufarlo en `pedido/generar.js`/`obrero.worker.js` (hoy sólo
+> arman el camino B) alimentándolo con `arte/mapeo.js` + `arte/editables.js`; el arte CLÁSICO
+> está portado (`armarBaseClasico`) pero sin contrato (no hay archivo de referencia).
 > (Antes: EN CURSO, MAPA 486: punto 2 HECHO — `texto/curvas.js` + contrato
 > `verificar_navegador_curvas.py` (texto recto byte a byte en las 16 tipografías del catálogo; el
 > arco a 1 centésima porque `polyfit`/`atan2` no son reproducibles bit a bit, documentado ahí).
@@ -420,9 +450,10 @@ prende en el publicado. El desplegado del servidor deja de correr para las subid
 
 ### ETAPA 6 — Apagar lo pesado del servidor (1-2 semanas)
 
-> ✅ **HECHA 2026-09-17 para el camino B** (MAPA 491): el servidor no pre-dibuja, y con
-> `TIZADA_SOLO_NAVEGADOR=1` rechaza preparar o generar un molde con diseño. Borrar PyMuPDF/pikepdf
-> del servidor queda para cuando el camino A y el DXF (1b) también estén en el navegador.
+> ✅ **HECHA 2026-09-18 para los dos caminos** (MAPA 491 y 495): el servidor no pre-dibuja, y con
+> `TIZADA_SOLO_NAVEGADOR=1` rechaza preparar CUALQUIER molde o arte sin paquete y generar por el
+> camino B (el A se genera acá con `todo_navegador`). Borrar PyMuPDF/pikepdf del servidor (y sus
+> contratos) es una decisión aparte: hoy siguen como red de seguridad con los interruptores apagados.
 
 - Borrar endpoints, pools, `procesos.py`, los módulos del motor y sus contratos de servidor
   (§4). `servidor.py` queda sin PyMuPDF ni pikepdf; `requirements.txt` sin ellos. El paquete de
