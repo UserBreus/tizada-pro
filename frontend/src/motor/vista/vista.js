@@ -158,9 +158,19 @@ class Vista {
     return r[0]
   }
 
+  claveDe(pagina, ancho, recorte = null) {
+    return `${this.huella}|${pagina}|${ancho}|${recorte ? recorte.map((x) => x.toFixed(4)).join(',') : 'todo'}`
+  }
+
+  /** ¿Este dibujo ya está (o ya se está haciendo)? */
+  yaPedido(pagina, ancho, recorte = null) {
+    const k = this.claveDe(pagina, ancho, recorte)
+    return this.urls.has(k) || this.enCurso.has(k)
+  }
+
   /** `recorte` = [cx0, cy0, cx1, cy1] en fracciones, o null. Devuelve una URL para un `<img>`. */
   async dibujo(pagina, ancho, recorte = null, fondo = false) {
-    const clave = `${this.huella}|${pagina}|${ancho}|${recorte ? recorte.map((x) => x.toFixed(4)).join(',') : 'todo'}`
+    const clave = this.claveDe(pagina, ancho, recorte)
     if (this.urls.has(clave)) return this.urls.get(clave)
     if (this.enCurso.has(clave)) return this.enCurso.get(clave)
     const p = (async () => {
@@ -245,8 +255,11 @@ export function recortesDe(v, p) {
 /** Dibuja de fondo TODO lo que la pantalla puede pedir de esta vista: los generales y los recortes en alta. */
 export function precalentarTodo(v, { anchos = [300, 1200], tiles = true } = {}) {
   const paginas = (v.medidas || []).length
-  for (const ancho of anchos) for (let p = 0; p < paginas; p++) _anotarFondo(v.dibujo(p, ancho, null, true))
-  if (tiles) for (let p = 0; p < paginas; p++) for (const rec of recortesDe(v, p)) _anotarFondo(v.dibujo(p, TILE_PX, rec, true))
+  // lo que ya está (o ya se pidió) no se cuenta: si no, abrir la misma vista dos veces (al generar
+  // y al entrar al paso) mostraba el doble en el cartel («43/226» → «458»)
+  const pedir = (p, ancho, rec) => { if (!v.yaPedido(p, ancho, rec)) _anotarFondo(v.dibujo(p, ancho, rec, true)) }
+  for (const ancho of anchos) for (let p = 0; p < paginas; p++) pedir(p, ancho, null)
+  if (tiles) for (let p = 0; p < paginas; p++) for (const rec of recortesDe(v, p)) pedir(p, TILE_PX, rec)
 }
 
 /**

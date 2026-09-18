@@ -3133,7 +3133,8 @@ function MesasInfinito({ mesas, job, avisar }) {
       {progVista.total > 0 && progVista.hechos < progVista.total && (
         <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 3, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)',
           background: 'rgba(0,0,0,0.6)', border: '1px solid var(--border-light)', borderRadius: 999, padding: '4px 11px' }}>
-          Preparando la vista en alta · {progVista.hechos}/{progVista.total}
+          Preparando la vista en alta · {progVista.hechos} de {progVista.total} recortes
+          <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}> (cada mesa se dibuja en pedazos de 50 cm; el zoom ya no espera)</span>
         </div>
       )}
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
