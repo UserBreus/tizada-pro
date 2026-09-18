@@ -22,6 +22,14 @@ if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador,
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
+// LOS CARTELES DE «CARGANDO» SON UNA TRABA DE SEGURIDAD, NO UN ADORNO (regla del usuario 2026-09-18):
+// tienen que aparecer EN EL ACTO, por más lento que ande el sistema, para que nadie toque otra cosa
+// mientras tanto. React dibuja el cartel recién cuando el hilo de la página queda libre; si justo
+// después viene trabajo pesado (leer un archivo de 7 MB traba ~0,8 s), el cartel sale tarde. Esto
+// espera DOS cuadros: el primero es cuando React lo agrega, el segundo cuando ya está pintado.
+// Uso: `setAlgo('Cargando…'); await pintarYa();` y recién ahí el trabajo.
+const pintarYa = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
 // --- Inline SVG Icons Component for clean, dependency-free icons ---
 // Acepta `style` además de `className`. Si no se pasa ni estilo ni clase,
 // usa un tamaño por defecto (18px) para que ningún icono se renderice gigante.
@@ -5707,6 +5715,13 @@ export default function App() {
   const [editModal, setEditModal] = useState(null);  // {idx, draft} de la capa en edición en el modal (o null)
   const [verAyudaExport, setVerAyudaExport] = useState(false);  // Molde: guía de cómo exportar desde AI/Corel/Optitex
   const [procesando, setProcesando] = useState(null);          // overlay "cargando" al subir molde/arte (null = oculto)
+  // CARGAR EL ARTE = UN SOLO CARTEL QUE TAPA TODO, de punta a punta (pedido del usuario 2026-09-18:
+  // «los modales de cargando deben ser seguridad: no importa lo lento que ande el sistema, el
+  // usuario no tiene que poder tocar nada»). Medido antes: 8,7 s con la pantalla libre (sólo un
+  // aviso chico) y después tres ventanas que se abrían y cerraban. El ref es el candado sincrónico:
+  // un segundo archivo elegido mientras tanto no arranca otra carga.
+  const [cargandoArte, setCargandoArte] = useState(null);      // texto de la etapa, o null
+  const _cargandoArteRef = React.useRef(false);
   const [configMedida, setConfigMedida] = useState('default');  // Plantilla: cómo se adapta el diseño → 'default' | 'rango' | 'talle'
   const [rangoMedida, setRangoMedida] = useState([]);           // variantes del rango (modo 'rango')
   const rangoLastRef = useRef(null);                            // para shift+click en el rango
@@ -7119,6 +7134,7 @@ export default function App() {
     setProcesando(type === 'plantilla'
       ? (grande ? 'Procesando el molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando el molde…')
       : 'Subiendo y procesando el archivo…');
+    await pintarYa();   // el cartel ANTES del trabajo pesado (ver `pintarYa`)
     // El molde que trae el diseño adentro se prepara EN ESTA COMPUTADORA también desde acá
     // (Configuración → Moldería): antes esta vía mandaba el archivo pelado y el servidor tardaba
     // minutos. `null` = molde sin diseño o DXF → lo lee el servidor como siempre.
@@ -7210,6 +7226,7 @@ export default function App() {
     setSubirMoldeBusy(true);
     const grande = subirMoldeFile.size > 3 * 1024 * 1024 || /\.dxf$/i.test(subirMoldeFile.name || '');
     setProcesando(grande ? 'Procesando tu molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando tu molde…');
+    await pintarYa();   // el cartel ANTES del trabajo pesado (ver `pintarYa`)
     let pid = null;
     let preparado = null;
     try {
@@ -10312,13 +10329,24 @@ export default function App() {
   // Subir el diseño del cliente DENTRO del wizard (inline, sin pantalla completa).
   const cargarDisenoWizard = async (file) => {
     if (!file) return;
+    if (_cargandoArteRef.current) return;          // ya hay una carga en curso: no se arranca otra
+    _cargandoArteRef.current = true;
+    // EL CARTEL VA PRIMERO Y SE PINTA ANTES DE CUALQUIER TRABAJO: leer el archivo traba la pantalla
+    // casi un segundo (medido: 831 ms), y si el cartel se pide en el mismo tramo recién aparece
+    // después. Con dos cuadros de espera el navegador ya lo dibujó; el giro es CSS, sigue aunque
+    // el resto de la página esté ocupada.
+    setCargandoArte('Leyendo el arte…');
+    await pintarYa();
+    const _etapa = (t) => setCargandoArte(t);
     const id = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId;   // VARIABLE-FIRST: el molde es el del ítem actual
     const fd = new FormData(); fd.append('archivo', file); fd.append('diseno', disenoActivo); if (id) fd.append('pid', id);
-    showMsg('Subiendo y procesando el diseño…');
+    // lo que avisa con ventanas propias (perfil de color, capas que faltan) va DESPUÉS del cartel:
+    // antes se abrían en el medio y la carga parecía terminada
+    let _alFinal = null;
     try {
       // EL ARTE SE ANALIZA EN ESTA COMPUTADORA (camino A, PLAN_NAVEGADOR 1b): el paquete viaja con
       // el archivo y el servidor sólo comprueba y guarda. `null` = el servidor lo analiza como antes.
-      const _pa = await prepararArteEnNavegador(file, { pid: id, diseno: disenoActivo, rutaApi, avisar: (t) => showMsg(t) });
+      const _pa = await prepararArteEnNavegador(file, { pid: id, diseno: disenoActivo, rutaApi, avisar: (t) => _etapa(t) });
       if (_pa) fd.append('paquete', new Blob([_pa.zip], { type: 'application/zip' }), 'paquete.zip');
       await adjuntarArchivo(fd, file, _pa && _pa.sha1, rutaApi);
       // XHR y no fetch: `fetch` no avisa cuánto lleva SUBIDO. Un arte puede pesar 8 MB o más y
@@ -10330,8 +10358,7 @@ export default function App() {
         x.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
           const pct = Math.round(100 * e.loaded / e.total);
-          showMsg(pct >= 100 ? 'Procesando el diseño… (leyendo el original, puede tardar)'
-                             : `Subiendo el diseño… ${pct}%`);
+          _etapa(pct >= 100 ? 'Guardando el diseño…' : `Subiendo el diseño… ${pct}%`);
         };
         x.onload = () => ok({ ok: x.status >= 200 && x.status < 300, text: x.responseText });
         x.onerror = () => no(new Error('no se pudo subir el diseño (¿se cortó la conexión?)'));
@@ -10346,7 +10373,7 @@ export default function App() {
       // El panel de telas vuelve a la vista de «Telas asignadas»: cargar el arte tarda, y si queda
       // en la pantalla de asignar (vacía) parece que se perdió lo que ya se había asignado.
       setTelaAsignMode(false); setTelaSelPiezas([]); setTelaElegida(null); setTelaBuscarAsig('');
-      avisarPerfilDiseno(disenoActivo, id);   // dispara YA el cartel del perfil (no espera los refrescos)
+      _etapa('Preparando el diseño en el molde…');
       // Si es un diseño NO principal, lo registro en el molde para que aparezca
       // como opción en la columna "Diseño" de la planilla.
       if (disenoActivo !== 'principal') {
@@ -10358,12 +10385,22 @@ export default function App() {
       // Con el pid del ítem, SIEMPRE: el arte se subió a ESE molde, así que el mapeador y el
       // precalentado tienen que ser de ése y no del molde «activo» del server.
       const _mapa = await cargarMapeadorOperario(id);
-      if (data.campos_personalizacion) avisarCapasFaltantes(data.campos_personalizacion);
-      showMsg('Diseño cargado ✓');
-      // Una sola espera, VISIBLE: se asigna el diseño a todos los talles ahora (ventana con
-      // progreso) → después navegar entre variantes es instantáneo desde memoria.
+      _alFinal = () => {
+        avisarPerfilDiseno(disenoActivo, id);
+        if (data.campos_personalizacion) avisarCapasFaltantes(data.campos_personalizacion);
+      };
+      _etapa('Poniendo el diseño sobre el molde…');
+      // Una sola espera, VISIBLE: se asigna el diseño a todos los talles ahora (el avance se ve
+      // dentro de este mismo cartel) → después navegar entre variantes es instantáneo.
       await asignarTodasLasVariantes(_mapa || {}, id);
+      showMsg('Diseño cargado ✓');
     } catch (e) { showError(e.message); }
+    finally {
+      _cargandoArteRef.current = false;
+      setCargandoArte(null);
+      if (fileInputArteRef.current) fileInputArteRef.current.value = '';   // elegir el MISMO archivo otra vez también dispara
+      if (_alFinal) _alFinal();
+    }
   };
 
   // Avanzar/retroceder el wizard del pedido.
@@ -13393,6 +13430,36 @@ export default function App() {
             <div style={{ width: 46, height: 46, border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'ldspin 0.8s linear infinite' }} />
             <div data-cargando="Se está procesando el archivo." style={{ color: '#fff', fontSize: 14, fontWeight: 600, maxWidth: 440, textAlign: 'center', lineHeight: 1.5, padding: '0 20px' }}>{procesando}</div>
             <style>{`@keyframes ldspin{to{transform:rotate(360deg)}}`}</style>
+          </div>,
+          document.body
+        )}
+
+        {/* CARGANDO EL ARTE: UN cartel de punta a punta que no deja tocar nada (ver `cargandoArte`).
+            Adentro va el avance de «poner el diseño sobre el molde», que antes era otra ventana. */}
+        {cargandoArte && createPortal(
+          <div role="alert" aria-busy="true" data-cargando="Se está cargando el arte."
+            onPointerDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onKeyDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }} tabIndex={-1} autoFocus
+            style={{ position: 'fixed', inset: 0, zIndex: 10060, background: 'rgba(2,6,12,0.84)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'wait' }}>
+            <div style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340, maxWidth: 460 }}>
+              <div style={{ width: 40, height: 40, margin: '0 auto 14px', border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'ldspin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 6 }}>Cargando el arte</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{cargandoArte}</div>
+              {asignando && (
+                <>
+                  <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 12 }}>
+                    <div style={{ height: '100%', width: `${Math.max(3, Math.round(100 * (asignando.hecho || 0) / Math.max(1, asignando.total || 1)))}%`, background: 'var(--accent)', borderRadius: 999, transition: 'width .3s' }} />
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--accent)', marginTop: 8 }}>
+                    {asignando.piezas ? `${asignando.piezas} pieza${asignando.piezas === 1 ? '' : 's'} dibujada${asignando.piezas === 1 ? '' : 's'}` : 'Recortando el diseño pieza por pieza…'}
+                    {asignando.seg > 2 ? <span style={{ color: 'var(--text-muted)' }}> · {asignando.seg}s</span> : null}
+                  </div>
+                </>
+              )}
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 14 }}>Esperá a que termine: mientras tanto la pantalla queda bloqueada.</div>
+              <style>{`@keyframes ldspin{to{transform:rotate(360deg)}}`}</style>
+            </div>
           </div>,
           document.body
         )}
@@ -16657,7 +16724,7 @@ export default function App() {
                   muestra cuántas mesas llegaron — con un arte muy cargado esto puede tardar, y es
                   a propósito: se muestra el diseño de verdad, no una versión liviana. */}
               {/* Ventana "Asignando el diseño a cada variante…" (al cargar el arte, una sola vez) */}
-              {asignando && (
+              {asignando && !cargandoArte && (
                 <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(2,6,12,0.82)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <div data-cargando="Se está poniendo el diseño sobre el molde." style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340 }}>
                     <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 8 }}>Poniendo el diseño sobre el molde…</div>

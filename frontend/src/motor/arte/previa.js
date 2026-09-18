@@ -66,14 +66,18 @@ async function indiceMesa(m, rutaApi, mesa) {
 
 async function asegurarFuentes(m, rutaApi) {
   if (m.fuentesListas) return
-  const { catalogo, alias } = m.info.fuentes
-  const archivos = {}
-  await Promise.all(catalogo.map(async (f) => {
-    const url = rutaApi(`/api/fuente/archivo/${encodeURIComponent(f.archivo)}` + (f.propia ? `?pid=${encodeURIComponent(m.pid)}` : ''))
-    archivos[f.archivo] = await traerConCache(`fuente|${f.hash}|${f.archivo}`, url)
-  }))
-  await m.pool.enviar('fuentes', { catalogo, archivos, alias }, Object.values(archivos).map((b) => b.buffer))
-  m.fuentesListas = true
+  if (m.fuentesEnCurso) return m.fuentesEnCurso        // uno solo en curso (ver `asegurarContextoA`)
+  m.fuentesEnCurso = (async () => {
+    const { catalogo, alias } = m.info.fuentes
+    const archivos = {}
+    await Promise.all(catalogo.map(async (f) => {
+      const url = rutaApi(`/api/fuente/archivo/${encodeURIComponent(f.archivo)}` + (f.propia ? `?pid=${encodeURIComponent(m.pid)}` : ''))
+      archivos[f.archivo] = await traerConCache(`fuente|${f.hash}|${f.archivo}`, url)
+    }))
+    await m.pool.enviar('fuentes', { catalogo, archivos, alias }, Object.values(archivos).map((b) => b.buffer))
+    m.fuentesListas = true
+  })()
+  try { await m.fuentesEnCurso } finally { m.fuentesEnCurso = null }
 }
 
 /**
@@ -136,9 +140,16 @@ export async function asegurarMoldeA(m, rutaApi, pid, sello, hilo = null) {
   const h = hilo || m
   h.moldesA = h.moldesA || new Set()
   if (h.moldesA.has(pid)) return
-  const bytes = await traerConCache(`plantilla|${pid}|${(sello || []).join(',')}`, rutaApi(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`))
-  await h.pool.enviar('molde_a_abrir', { clave: pid, bytes }, [bytes.buffer])
-  h.moldesA.add(pid)
+  // uno solo en curso (dos pedidos a la vez abrían el molde dos veces; ver `asegurarContextoA`)
+  h.moldesAEnCurso = h.moldesAEnCurso || new Map()
+  if (h.moldesAEnCurso.has(pid)) return h.moldesAEnCurso.get(pid)
+  const p = (async () => {
+    const bytes = await traerConCache(`plantilla|${pid}|${(sello || []).join(',')}`, rutaApi(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`))
+    await h.pool.enviar('molde_a_abrir', { clave: pid, bytes }, [bytes.buffer])
+    h.moldesA.add(pid)
+  })()
+  h.moldesAEnCurso.set(pid, p)
+  try { await p } finally { h.moldesAEnCurso.delete(pid) }
 }
 
 /** El diseño `id` del motor del camino A (`principal` si no se dice). */
@@ -161,6 +172,18 @@ export async function asegurarContextoA(m, rutaApi, diseno, cfg, { hilo = null, 
   const firma = JSON.stringify([k, cfg, conPersonalizacion])
   h.contextosA = h.contextosA || new Map()
   if (h.contextosA.get(k) && h.contextosA.get(k).firma === firma) return { clave: k, pers: h.contextosA.get(k).pers }
+  // 🔴 UNO SOLO EN CURSO POR CLAVE Y FIRMA. Al cargar un arte lo piden a la vez la carga (todos los
+  // talles) y el visor: los dos veían «no está» y lo armaban DOS veces seguidas en el mismo hilo
+  // (medido 2026-09-18: dos `contexto_a` a 260 ms, ~9 s cada uno). El segundo espera al primero.
+  h.contextosEnCurso = h.contextosEnCurso || new Map()
+  const enCurso = h.contextosEnCurso.get(k)
+  if (enCurso && enCurso.firma === firma) return enCurso.promesa
+  const promesa = _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizacion)
+  h.contextosEnCurso.set(k, { firma, promesa })
+  try { return await promesa } finally { if (h.contextosEnCurso.get(k)?.promesa === promesa) h.contextosEnCurso.delete(k) }
+}
+
+async function _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizacion) {
   const arte = await traerConCache(`arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
     rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
   const objetos = []

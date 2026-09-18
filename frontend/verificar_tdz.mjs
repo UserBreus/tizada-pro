@@ -56,7 +56,7 @@ for (const r of res) {
 // ⚠️ Si limpiás alguno, BAJÁ el tope. Nunca subirlo para «que pase».
 // 🔴 SÓLO cuenta «usado antes de declarar». Lo que NO EXISTE (`no-undef`) va aparte, más abajo, con
 // tolerancia cero: mezclarlos en una suma dejó pasar un bug (ver el encabezado).
-const TOPE_APP = 304;
+const TOPE_APP = 301;
 const resApp = await eslint.lintFiles(['src/App.jsx']);
 const nApp = resApp.reduce((n, r) => n + r.messages.filter(
   (m) => m.ruleId === 'no-use-before-define').length, 0);

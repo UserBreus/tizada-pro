@@ -1498,6 +1498,29 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (507) — 🔒 CARGAR EL ARTE: UN SOLO CARTEL, EN EL ACTO, QUE NO DEJA TOCAR NADA (y 3× más rápido).**
+  El usuario: *«los modales de cargando deben ser seguridad: no importa lo lento que funcione el
+  sistema, tienen que ser flash para que el usuario no genere más problemas»*. Medido antes (Edge,
+  sandbox, arte real de 7 MB): **8,7 s con la pantalla LIBRE** (sólo un aviso chico abajo), después
+  la ventana del perfil de color en el medio, la de «Poniendo el diseño…», y todo listo a los 36 s.
+  - **Un cartel de punta a punta** (`cargandoArte` + candado `_cargandoArteRef` en
+    `cargarDisenoWizard`): «Leyendo el diseño en tu computadora… → Subiendo n% → Guardando →
+    Preparando → Poniendo el diseño sobre el molde» con el avance de piezas adentro (la ventana de
+    `asignando` no se muestra aparte mientras tanto). Tapa todo (captura puntero, clic y teclado),
+    y un segundo archivo elegido durante la carga no arranca otra. El perfil de color y el aviso de
+    capas que faltan salen AL FINAL (`_alFinal`), no en el medio. Se limpia el `<input>` para que
+    elegir el mismo archivo otra vez también funcione.
+  - **`pintarYa()`** (App.jsx, arriba): `setCartel(…); await pintarYa();` espera dos cuadros para que
+    el cartel esté DIBUJADO antes del trabajo pesado. Medido: el cartel está en pantalla a los
+    8-15 ms del clic; la traba de leer el archivo (~0,87 s) viene después y el giro (CSS) sigue.
+    Aplicado también a subir molde/arte desde Configuración (`handleUploadFile`) y a «Mi molde».
+  - **El arte se preparaba DOS veces**: la carga y el visor pedían `contexto_a` a la vez (medido:
+    dos a 260 ms, ~9 s cada uno, en el mismo hilo). `asegurarContextoA`, `asegurarMoldeA` y
+    `asegurarFuentes` (`motor/arte/previa.js`) ahora tienen UNO en curso: el segundo espera al primero.
+  - **Medido después:** bloqueado de punta a punta, todo listo a los **12,3 s** (antes 36 s), sin
+    ningún dibujo en el servidor.
+  - `verificar_tdz.mjs`: `TOPE_APP` 304 → 301 (bajaron los casos viejos).
+
 - **2026-09-18 (506) — 🐛 «PUSE NUEVO PEDIDO Y ME SIGUE SALIENDO EL ARTE DEL PEDIDO ANTERIOR».** Reproducido
   en la pantalla real (sandbox 8061): pedido con el arte cargado → «Nuevo pedido» → JUGADOR + el
   mismo molde → paso Arte: el cartel decía «Sin diseño / Asignar arte ✗» pero el visor dibujaba las
