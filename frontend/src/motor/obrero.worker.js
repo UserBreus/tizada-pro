@@ -205,6 +205,12 @@ const TAREAS = {
     let base = basesA.get(kb)
     if (!base) {
       base = c.ctx.armarBase({ cont, pieza, talle, variante: variante ?? null })
+      // 🔴 EL ORIGEN DE CADA DIBUJO LLEVA SU ARTE. El contexto lo nombra por mesa (`arte|2`,
+      // `editable|…`), y la hoja comparte un dibujo entre piezas por ese nombre: con JUGADOR y
+      // GOLERO del mismo molde en la misma hoja, las del golero salían con el arte del jugador
+      // (nombre y número bien: van aparte). Reporte 2026-09-18. Con la clave del arte adelante,
+      // dos artes distintos nunca comparten dibujo; las piezas del MISMO arte lo siguen compartiendo.
+      base.fuentesXo = (base.fuentesXo || []).map(([nom, ref]) => [nom, { ...ref, origen: `${claveArte}§${ref.origen}` }])
       basesA.set(kb, base)
     }
     const phMesa = base.mesaA ? ((ph || {})[String(base.mesaA)] || {}) : {}

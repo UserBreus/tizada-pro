@@ -1498,6 +1498,19 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (508) — 🐛 JUGADOR Y GOLERO DEL MISMO MOLDE: EL GOLERO SALÍA CON EL ARTE DEL JUGADOR.** Reporte
+  del usuario: *«cuando hace la tizada no mantiene el arte de cada molde; números y nombres sí»*.
+  Visto en su tizada real (`20260918-165842-b3f9`, 18 filas JUGADOR + 2 GOLERO): todas las piezas
+  rojo/azul, las del golero también (su arte es verde/negro). **Causa (navegador):** el contexto del
+  arte nombra cada dibujo por mesa (`arte|2`, `editable|…`, `oa|…`) y la hoja comparte un dibujo
+  entre piezas por ese nombre (`origenesA` en la tarea `hoja` + `porFuente` de `componerHoja`): dos
+  artes del mismo molde chocaban y ganaba el primero. **Arreglo:** `pieza_a` (`obrero.worker.js`)
+  antepone la clave del arte al origen (`<claveArte>§arte|2`). **Servidor (`hoja_pike.py`):** la
+  misma trampa latente — deduplicaba por `objgen`, que es el número DENTRO de cada archivo; dos
+  artes salidos de la misma plantilla de Illustrator pueden repetirlo. Ahora compara también el
+  dueño (`same_owner_as`). `verificar_navegador_tizada_a.py` suma un 2º diseño (golero) del mismo
+  molde en la misma hoja. **Sin correr: lo prueba el usuario** (regla [[el-usuario-prueba]]).
+
 - **2026-09-18 (507) — 🔒 CARGAR EL ARTE: UN SOLO CARTEL, EN EL ACTO, QUE NO DEJA TOCAR NADA (y 3× más rápido).**
   El usuario: *«los modales de cargando deben ser seguridad: no importa lo lento que funcione el
   sistema, tienen que ser flash para que el usuario no genere más problemas»*. Medido antes (Edge,

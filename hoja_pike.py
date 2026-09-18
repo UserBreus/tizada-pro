@@ -536,16 +536,29 @@ def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progre
     consumo_cm, alturas_cm = 0.0, []
     xobjs = pikepdf.Dictionary()
     ren_por_base = {}          # id(base) → {nombre_local: nombre_global}
-    por_fuente = {}            # objgen del objeto de origen → nombre global
+    # objgen del objeto de origen → [(objeto, nombre global)]. 🔴 El objgen SOLO NO ALCANZA: es el
+    # número del objeto DENTRO DE SU ARCHIVO, y dos artes distintos (JUGADOR y GOLERO del mismo
+    # molde, salidos de la misma plantilla de Illustrator) pueden tener el mismo número: la hoja
+    # le ponía a uno el dibujo del otro. Se compara también el dueño (`same_owner_as`).
+    por_fuente = {}
     abiertos = []
 
     def _global(fuente, del_molde=False):
         """El nombre global de un dibujo de origen; lo copia a la hoja la primera vez."""
         try:
             k = fuente.objgen
+            if k == (0, 0):                 # objeto directo: no tiene número propio
+                k = ("id", id(fuente))
         except Exception:
-            k = id(fuente)
-        nm = por_fuente.get(k)
+            k = ("id", id(fuente))
+        nm = None
+        for _f0, _nm0 in por_fuente.get(k, ()):
+            try:
+                if _f0 is fuente or _f0.same_owner_as(fuente):
+                    nm = _nm0
+                    break
+            except Exception:
+                continue
         if nm is None:
             xo = pdf.copy_foreign(fuente)
             if "/OC" in xo:
@@ -559,8 +572,8 @@ def componer_hoja_sello(colocaciones, cfg, path_salida, signo_rotacion=1, progre
             # (changelog 393: aplanado 15 → 4 s), y se pone SÓLO si no anida otros dibujos adentro.
             if del_molde and "/XObject" not in (xo.get("/Resources") or {}):
                 xo["/TizadaBase"] = True
-            nm = f"/S{len(por_fuente)}"
-            por_fuente[k] = nm
+            nm = f"/S{len(xobjs)}"
+            por_fuente.setdefault(k, []).append((fuente, nm))
             xobjs[nm] = xo
         return nm
 

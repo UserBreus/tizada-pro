@@ -33,6 +33,11 @@ PID = "prod_tizada_a"
 ORIGEN = os.path.join(AQUI, "entrada", "prod_20260820_095558_38bc")
 DATOS_ORIGEN = os.path.join(AQUI, "datos", "productos", "prod_20260820_095558_38bc")
 DISENO = "jugador"
+# 🔴 UN SEGUNDO DISEÑO DEL MISMO MOLDE EN LA MISMA HOJA (reporte 2026-09-18: «en la tizada no mantiene
+# el arte de cada molde; nombres y números sí»). La hoja compartía el dibujo del arte por «mesa N»
+# sin mirar de qué arte era: las piezas del golero salían con el arte del jugador. Con los dos
+# diseños acá, la comparación píxel a píxel contra el servidor lo agarra.
+DISENO2 = "golero"
 
 
 def main():
@@ -60,21 +65,37 @@ def main():
     json.dump(pers, open(os.path.join(ddir, sub, "registro_personalizacion.json"), "w", encoding="utf-8"))
     json.dump({"aprobado": True, "modo": "separado", "checks": [], "mapeo": mapeo, "personalizacion": pers},
               open(os.path.join(ddir, sub, "validacion_arte.json"), "w", encoding="utf-8"))
+    sub2 = S._diseno_sub(DISENO2)
+    os.makedirs(os.path.join(carpeta, sub2))
+    arte2 = os.path.join(carpeta, sub2, "arte.ai")
+    shutil.copy2(os.path.join(ORIGEN, "disenos", DISENO2, "arte.ai"), arte2)
+    os.makedirs(os.path.join(ddir, sub2), exist_ok=True)
+    mapeo2 = MP.mapeo_por_nombre(arte2, registro)
+    pers2 = MP.extraer_personalizacion(arte2)
+    json.dump({"mapeo": mapeo2, "por_variable": {}}, open(os.path.join(ddir, sub2, "mapeo_arte.json"), "w", encoding="utf-8"))
+    json.dump(pers2, open(os.path.join(ddir, sub2, "registro_personalizacion.json"), "w", encoding="utf-8"))
+    json.dump({"aprobado": True, "modo": "separado", "checks": [], "mapeo": mapeo2, "personalizacion": pers2},
+              open(os.path.join(ddir, sub2, "validacion_arte.json"), "w", encoding="utf-8"))
     VT._DOCS["catalogo"] = {"activo": PID, "productos": [{
         "id": PID, "nombre": "Molde de prueba A", "planilla_template_id": "plan_default", "variante_guia": "M",
-        "disenos": [{"id": DISENO, "nombre": "Jugador"}], "mapeo_arte": mapeo, "referencia_medida": "alto",
+        "disenos": [{"id": DISENO, "nombre": "Jugador"}, {"id": DISENO2, "nombre": "Golero"}], "mapeo_arte": mapeo, "referencia_medida": "alto",
         "editables": {DISENO: {"*": {"escudo": {"transforms": {"M": {"dx": 0.06, "dy": -0.04, "rot": 12, "scale": 1.15}}}}}},
         "borde_corte": {"activo": True, "color": [0, 0, 0, 1], "mm": 2.0}}],
         "plantillas_planillas": [{"id": "plan_default", "nombre": "Estándar", "columnas": [
             {"id": "talle", "label": "Talle", "role": "talle"}, {"id": "nombre", "label": "Nombre", "role": "nombre"},
-            {"id": "numero", "label": "Número", "role": "numero"}]}],
+            {"id": "numero", "label": "Número", "role": "numero"}, {"id": "diseno", "label": "Diseño", "role": "diseno"}]}],
         "reglas_planilla": [], "telas": []}
     comunes = [t for t in ["S", "M", "L", "XL"] if t in talles] or talles[:3]
     elegidos = [comunes[0], comunes[len(comunes) // 2], comunes[-1]][:3]
-    filas = [{"talle": t, "nombre": n, "numero": num} for t, (n, num) in zip(elegidos, [("PÉREZ", "10"), ("GÓMEZ", "7"), ("DÍAZ", "23")])]
-    filas.append({"talle": elegidos[0], "nombre": "LÓPEZ", "numero": "1"})
+    filas = [{"talle": t, "nombre": n, "numero": num, "diseno": "Jugador"} for t, (n, num) in zip(elegidos, [("PÉREZ", "10"), ("GÓMEZ", "7"), ("DÍAZ", "23")])]
+    filas.append({"talle": elegidos[0], "nombre": "LÓPEZ", "numero": "1", "diseno": "Jugador"})
+    # las del golero, en los mismos talles que el jugador: comparten mesas del molde y de nombre de arte
+    filas.append({"talle": elegidos[1], "nombre": "NACHO", "numero": "12", "diseno": "Golero"})
+    filas.append({"talle": elegidos[-1], "nombre": "RAMOS", "numero": "25", "diseno": "Golero"})
     cuerpo = {"molds": [PID], "prendas": filas, "default_diseno": DISENO,
-              "planilla": {"columnas": [{"id": "talle", "label": "Talle"}, {"id": "nombre", "label": "Nombre"}, {"id": "numero", "label": "Número"}],
+              "moldes_por_diseno": {DISENO: [PID], DISENO2: [PID]},
+              "planilla": {"columnas": [{"id": "talle", "label": "Talle"}, {"id": "nombre", "label": "Nombre"}, {"id": "numero", "label": "Número"},
+                                        {"id": "diseno", "label": "Diseño"}],
                            "filas": filas}}
     ok(len(registro) >= 30 and len(mapeo) > 0, f"{len(registro)} piezas · mapeo por nombre de {len(mapeo)} · talles {elegidos} · {len(filas)} prendas")
 
@@ -85,6 +106,8 @@ def main():
         cat = S._cargar_catalogo()
         _icc, _icc_nom, _icc_n = S._icc_para_salida([], cat, forzado=None)
     ok(plan_nav.get("todo_navegador") and not plan_nav.get("todo_camino_b"), "el plan dice que el navegador puede generarlo (camino A)")
+    _dis_plan = sorted({str(md.get("diseno")) for md in plan_nav.get("moldes") or []})
+    ok(_dis_plan == sorted([DISENO, DISENO2]), f"el pedido lleva los DOS diseños del mismo molde ({', '.join(_dis_plan)})")
     salida_py = os.path.join(_TMP, "trabajos", "py_a")
     os.makedirs(salida_py)
     t = time.time()
@@ -121,7 +144,7 @@ def main():
         with open(perfil_path, "wb") as fh:
             fh.write(_icc)
     entorno = {"plan": plan_nav, "cuerpo": cuerpo, "motor_b": {PID: motor}, "desplegado": {},
-               "plantilla": {PID: pl}, "artes": {f"{PID}|{DISENO}": arte}, "objetos": {},
+               "plantilla": {PID: pl}, "artes": {f"{PID}|{DISENO}": arte, f"{PID}|{DISENO2}": arte2}, "objetos": {},
                "fuentes": fuentes, "perfil": perfil_path}
     ep = os.path.join(_TMP, "entorno_a.json")
     with open(ep, "w", encoding="utf-8") as fh:
