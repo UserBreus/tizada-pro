@@ -230,16 +230,25 @@ const abiertas = new Map()          // huella → Vista
 export const TILE_CM = 50                 // cada recorte cubre a lo sumo medio metro de mesa (= `_RECORTE_CM`)
 export const TILE_PX = 1600               // el nivel en alta: 1600 px por medio metro (32 px/cm)
 const CM_PT = 28.3465
-const _progreso = { total: 0, hechos: 0 }    // el precalentado en curso (todas las vistas)
+const _progreso = new Map()          // `${huella}|${página}` → {total, hechos}: el precalentado POR MESA
 
-/** Cuánto falta del precalentado: `{total, hechos}` (0/0 = nada en curso). */
-export function progresoVistas() { return { ..._progreso } }
+/** Cuánto falta del precalentado, por MESA: `{mesas, listas}` (una mesa está lista cuando tiene todos sus dibujos). */
+export function progresoVistas() {
+  let mesas = 0, listas = 0
+  for (const m of _progreso.values()) { mesas++; if (m.hechos >= m.total) listas++ }
+  return { mesas, listas }
+}
 
-function _anotarFondo(p) {
-  _progreso.total++
-  p.then(() => { _progreso.hechos++ }, () => { _progreso.hechos++ }).finally(() => {
-    if (_progreso.hechos >= _progreso.total) { _progreso.total = 0; _progreso.hechos = 0 }
-  })
+function _anotarFondo(clave, p) {
+  const m = _progreso.get(clave) || { total: 0, hechos: 0 }
+  m.total++
+  _progreso.set(clave, m)
+  const fin = () => {
+    m.hechos++
+    // cuando TODAS las mesas están, el cartel se va y la cuenta arranca de cero la próxima vez
+    if ([..._progreso.values()].every((x) => x.hechos >= x.total)) _progreso.clear()
+  }
+  p.then(fin, fin)
 }
 
 /** Los recortes en alta de la página `p` de la vista `v`, en el mismo orden y con las mismas fracciones que la pantalla. */
@@ -257,7 +266,7 @@ export function precalentarTodo(v, { anchos = [300, 1200], tiles = true } = {}) 
   const paginas = (v.medidas || []).length
   // lo que ya está (o ya se pidió) no se cuenta: si no, abrir la misma vista dos veces (al generar
   // y al entrar al paso) mostraba el doble en el cartel («43/226» → «458»)
-  const pedir = (p, ancho, rec) => { if (!v.yaPedido(p, ancho, rec)) _anotarFondo(v.dibujo(p, ancho, rec, true)) }
+  const pedir = (p, ancho, rec) => { if (!v.yaPedido(p, ancho, rec)) _anotarFondo(`${v.huella}|${p}`, v.dibujo(p, ancho, rec, true)) }
   for (const ancho of anchos) for (let p = 0; p < paginas; p++) pedir(p, ancho, null)
   if (tiles) for (let p = 0; p < paginas; p++) for (const rec of recortesDe(v, p)) pedir(p, TILE_PX, rec)
 }

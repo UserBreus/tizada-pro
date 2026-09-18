@@ -3010,7 +3010,7 @@ function MesasInfinito({ mesas, job, avisar }) {
   const [editando, setEditando] = useState(null);
   const [cargadas, setCargadas] = useState({});   // previa de cada mesa: true = dibujada · 'error'  // key de la mesa en edición
   // el precalentado de la vista (esta computadora dibuja todas las mesas y sus recortes en alta de fondo)
-  const [progVista, setProgVista] = useState({ total: 0, hechos: 0 });
+  const [progVista, setProgVista] = useState({ mesas: 0, listas: 0 });
   useEffect(() => { const t = setInterval(() => setProgVista(progresoVistas()), 700); return () => clearInterval(t); }, []);
   useEffect(() => {
     try { localStorage.setItem(LS_KEY, JSON.stringify(nombres)); } catch { /* storage lleno/bloqueado */ }
@@ -3130,11 +3130,10 @@ function MesasInfinito({ mesas, job, avisar }) {
     <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* EL AVANCE, HONESTO: esta computadora está dejando dibujadas todas las mesas y sus recortes en
           alta; mientras tanto, lo que falta se muestra en cuanto llega (nunca una aproximación). */}
-      {progVista.total > 0 && progVista.hechos < progVista.total && (
+      {progVista.mesas > 0 && progVista.listas < progVista.mesas && (
         <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 3, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)',
           background: 'rgba(0,0,0,0.6)', border: '1px solid var(--border-light)', borderRadius: 999, padding: '4px 11px' }}>
-          Preparando la vista en alta · {progVista.hechos} de {progVista.total} recortes
-          <span style={{ fontWeight: 400, color: 'var(--text-secondary)' }}> (cada mesa se dibuja en pedazos de 50 cm; el zoom ya no espera)</span>
+          Preparando la vista en alta · {progVista.listas} de {progVista.mesas} mesas listas
         </div>
       )}
       <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 3, display: 'flex', gap: 4 }}>
