@@ -1498,6 +1498,25 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (506) — 🐛 «PUSE NUEVO PEDIDO Y ME SIGUE SALIENDO EL ARTE DEL PEDIDO ANTERIOR».** Reproducido
+  en la pantalla real (sandbox 8061): pedido con el arte cargado → «Nuevo pedido» → JUGADOR + el
+  mismo molde → paso Arte: el cartel decía «Sin diseño / Asignar arte ✗» pero el visor dibujaba las
+  piezas CON el arte viejo. **Causa:** lo que estaba EN CAMINO al tocar «Nuevo pedido» llegaba
+  después y se pintaba en el pedido nuevo. `_reiniciarPedido` vaciaba las cachés pero no invalidaba
+  los pedidos en curso: `cargarPreviewPiezas` descarta respuestas viejas sólo si `_pvReq` cambió (y no
+  cambiaba), el hilo que se cerraba hacía que la previa del navegador saliera «cancelado» y cayera
+  a `/api/arte/preview_piezas` con los datos del pedido viejo, y la precarga de talles y la de
+  «todos los talles» (`asignarTodasLasVariantes`) seguían guardando.
+  **Arreglo** (`App.jsx`): `_reiniciarPedido` sube `_pvReq`, `_prefetchTok` y la nueva
+  `_pedidoEpoca`, vacía `_asignEnCurso`, el visor (`setPreviewPiezas({})`) y el cartel de avance, y
+  cierra los hilos de las previas (`cerrarMotores()`, que existía y nadie llamaba);
+  `cargarPreviewPiezas` no cae al servidor si el pedido cambió; `asignarTodasLasVariantes` y
+  `_prefetchTalles` dejan de guardar/seguir si su época o su turno ya no es el vigente.
+  **Verificado en la pantalla:** mismo recorrido → el visor queda con el molde vacío (líneas
+  punteadas) y, después de `limpiar_efimeros`, no sale NINGÚN pedido de dibujo del arte viejo.
+  Regla para [[pedido-sin-arrastre]]: *limpiar las cachés no alcanza; hay que invalidar lo que está
+  en camino*.
+
 - **2026-09-18 (505) — 🐛 «TARDA EN CARGAR UN ARTE»: EL HILO REUSABA PIEZAS ARMADAS CON EL ARTE ANTERIOR.**
   Reporte del usuario: *«¿por qué demora tanto en cargar un arte? veníamos bien»*. El registro del
   servidor mostraba `POST /api/arte/asignar_todo` y `[piezas] armadas de cero` para TODOS los talles:

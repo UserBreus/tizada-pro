@@ -7,7 +7,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
 import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
-import { previasCaminoB, previasCaminoA } from './motor/arte/previa.js';
+import { previasCaminoB, previasCaminoA, cerrarMotores } from './motor/arte/previa.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
 import { estado as estadoNavegador } from './motor/monitor.js';   // qué está haciendo esta computadora
@@ -5839,6 +5839,7 @@ export default function App() {
   // Cuántas piezas tiene la variable que se está viendo: es el total contra el que se mide el
   // avance de «Poniendo el diseño sobre el molde…» (el server informa cuántas lleva dibujadas).
   const _asignEnCurso = React.useRef({});   // dibujos en curso: evita dos pasadas iguales a la vez
+  const _pedidoEpoca = React.useRef(0);     // sube con «Nuevo pedido»: lo que venía del pedido anterior se descarta
   useEffect(() => {
     const urls = _mesasImg ? _mesasImg.split('|') : [];
     if (!urls.length) { setCargaArte(null); return; }
@@ -9464,6 +9465,8 @@ export default function App() {
     let _fin;
     _asignEnCurso.current[_kEnCurso] = new Promise(r => { _fin = r; });
     _prefetchTok.current++;   // esta pasada manda: abortar cualquier precarga de fondo previa
+    // si en el medio se toca «Nuevo pedido», nada de esta pasada llega al pedido nuevo
+    const _epoca = _pedidoEpoca.current, _vigente = () => _epoca === _pedidoEpoca.current;
     const _tIni = Date.now();   // para mostrar los segundos: así SIEMPRE hay algo moviéndose
     setAsignando({ hecho: 0, total: talles.length, talle: '', piezas: 0, fase: 'arrancando', seg: 0 });
     const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -9474,10 +9477,11 @@ export default function App() {
       // cargar un diseño y los talles no se preparaban — bug del 2026-09-18, lo destapó el linter.)
       const _moldeConDiseno = ((productosCat.productos || []).find(x => x.id === pid) || {}).origen === 'con_diseno';
       const _local = !_moldeConDiseno && (await previasCaminoA({ pid, diseno: dis, variante: clave, talle: _guia, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) })
-        .then((d) => { if (d && d.piezas) _pvGuardar(_pvKeyCon(mapeo, _guia, fuentesReempl), d.piezas); return !!d; })
+        .then((d) => { if (d && d.piezas && _vigente()) _pvGuardar(_pvKeyCon(mapeo, _guia, fuentesReempl), d.piezas); return !!d; })
         .catch((e) => { console.warn('[arte] el navegador no pudo dibujar el talle', _guia, '→ lo dibuja el servidor:', e); return false; }));
       // GENERACIÓN EN PARALELO en el server (ProcessPool): las piezas del talle van a la vez.
       // PyMuPDF no es thread-safe → multiproceso. `talles` acota el trabajo al talle guía.
+      if (!_vigente()) return;
       try {
         if (_local) throw new Error('local');
         const r = await fetch('/api/arte/asignar_todo', {
@@ -9490,6 +9494,7 @@ export default function App() {
           const { job, total } = await r.json();
           for (let guard = 0; guard < 4000; guard++) {   // polling del progreso (hasta ~16min)
             await _sleep(250);
+            if (!_vigente()) return;
             let s; try { s = await (await fetch('/api/arte/asignar_estado?job=' + job)).json(); } catch { break; }
             // `hecho` sube de a un TALLE ENTERO: con un arte pesado se queda quieto un buen rato y
             // parece colgado. `piezas` son las que los workers ya dejaron listas — eso se mueve
@@ -9506,11 +9511,12 @@ export default function App() {
       // Cargar los renders (ya en caché de disco) + geometría a la MEMORIA del navegador
       // → el cambio entre variantes queda instantáneo. Salen del caché, es rápido.
       const _cargarTalle = async (t) => {
+        if (!_vigente()) return;
         const k = _pvKeyCon(mapeo, t, fuentesReempl);
         if (!_pvCache.current[k] && _local) {
           try {
             const d = await previasCaminoA({ pid, diseno: dis, variante: clave, talle: t, rutaApi, mapeo, reemplazos: _reemplDe(dis, pid) });
-            if (d && d.piezas) _pvGuardar(k, d.piezas);
+            if (d && d.piezas && _vigente()) _pvGuardar(k, d.piezas);
           } catch { /* ese talle se dibuja cuando se lo toque */ }
         } else if (!_pvCache.current[k]) {
           try {
@@ -9518,7 +9524,7 @@ export default function App() {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, sin_prewarm: true, fuentes_reemplazo: _reemplDe(dis, pid) })
             });
-            if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
+            if (res.ok) { const d = await res.json(); if (d.piezas && _vigente()) _pvGuardar(k, d.piezas); }
           } catch { /* sigue con el próximo talle */ }
         }
         if (!_talleDetCache.current[`${pid}|${t}`]) {
@@ -9536,7 +9542,7 @@ export default function App() {
       await _cargarTalle(_guia);
       setAsignando(null);
       // De fondo, uno por uno para no pelear la CPU con lo que el usuario esté haciendo.
-      (async () => { for (const t of _resto) await _cargarTalle(t); })()
+      (async () => { for (const t of _resto) { if (!_vigente()) break; await _cargarTalle(t); } })()
         .catch(() => { /* si algo falla, ese talle se dibuja cuando se lo toque */ })
         .then(() => { delete _asignEnCurso.current[_kEnCurso]; if (_fin) { _fin(); _fin = null; } });
       return;
@@ -9597,6 +9603,7 @@ export default function App() {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true, fuentes_reemplazo: _reemplDe(dis, pid, _reempl) })
             });
+            if (tok !== _prefetchTok.current) return;   // llegó tarde (otro talle, o «Nuevo pedido»)
             if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
             else if (res.status === 409) return;   // falta arte/registro: no martillar 30 veces
           } catch { /* siguiente talle */ }
@@ -9654,8 +9661,12 @@ export default function App() {
         if (_d) { setPreviewPiezas(_d.piezas || {}); if (_d.piezas) _pvGuardar(k, _d.piezas); _prefetchTalles(mapeo, talle, _reempl); return; }
       }
     } catch (e) {
+      // si el pedido cambió mientras tanto (Nuevo pedido cierra los hilos y esto sale «cancelado»),
+      // no se le pide nada al servidor: sería dibujar el arte del pedido que ya no existe
+      if (req !== _pvReq.current) return;
       console.warn('previa de piezas en esta computadora: cae al servidor', e);
     }
+    if (req !== _pvReq.current) return;
     try {
       const res = await fetch('/api/arte/preview_piezas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -11548,6 +11559,15 @@ export default function App() {
     //    indexadas por molde/diseño/variable, pero si el pedido nuevo usa el mismo molde con otro
     //    arte mostrarían el anterior hasta recargar la página.
     _pvCache.current = {}; _talleDetCache.current = {}; _detArteCache.current = {};
+    // 🔴 …Y LOS DIBUJOS QUE TODAVÍA ESTABAN EN CAMINO (reporte 2026-09-18: «puse nuevo pedido y me
+    //    sigue saliendo el arte del pedido anterior en el molde»). Un dibujo del pedido viejo que
+    //    llegaba DESPUÉS del reinicio se pintaba en el visor del nuevo: `cargarPreviewPiezas` sólo
+    //    descarta respuestas viejas si `_pvReq` cambió, y acá no cambiaba; la precarga de talles y
+    //    la de «todos los talles» tampoco se cortaban. Ahora se invalida todo lo que estaba en curso,
+    //    se vacía el visor y se cierran los hilos que armaban las previas (con sus artes adentro).
+    _pvReq.current++; _prefetchTok.current++; _pedidoEpoca.current++; _asignEnCurso.current = {};
+    setPreviewPiezas({}); setAsignando(null);
+    cerrarMotores();
     // …y la BASURA GUARDADA EN EL NAVEGADOR de los pedidos anteriores: los nombres que se le
     // pusieron a las mesas se guardan por trabajo (`tizada_mesas_nombres_<id>`) y quedaban para
     // siempre, uno por pedido. Un pedido nuevo empieza sin nada de lo de antes (pedido del
