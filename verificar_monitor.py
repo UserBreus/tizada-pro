@@ -10,6 +10,7 @@ duración. `monitor.py` se prueba también solo (CPU % contra la muestra anterio
 
 ⚠️ No toca nada del usuario: DATOS a un temporal y `db` es un doble.
 """
+import io
 import json
 import os
 import shutil
@@ -126,6 +127,54 @@ ok(len(nav) == 1 and nav[0]["seg"] is not None, f"el molde preparado figura como
 ok(len(srv) == 1 and srv[0]["seg"] is not None, f"el molde pelado figura como «servidor» con su duración ({srv[0]['seg'] if srv else '?'} s)")
 ok(ev and ev[0]["t"] >= ev[-1]["t"], "los eventos vienen del más nuevo al más viejo")
 ok(d.get("trabajos") == [], "y no hay trabajos en curso (los dos terminaron)")
+
+print(chr(10) + "3 · EL CAMINO DE LINUX (el publicado): /proc simulado")
+# El servidor publicado es Linux y acá no hay Linux para correrlo: se simula lo que Linux le da al
+# código (`/proc/stat`, `/proc/self/status`, `/proc/meminfo`, `sysconf`) con valores reales de un
+# servidor, y se exige que las cuentas salgan bien. Si la lectura de esos archivos se rompe, esto lo ve.
+import builtins
+import procesos as _PR
+_PROC = {
+    "/proc/stat": "cpu  100000 200 50000 800000 1000 0 500 0 0 0" + chr(10) + "cpu0 1 2 3 4 5 6 7 0 0 0" + chr(10),
+    "/proc/self/status": "Name:	python3" + chr(10) + "VmPeak:	 900000 kB" + chr(10) + "VmRSS:	  262144 kB" + chr(10),
+    "/proc/meminfo": "MemTotal:        8000000 kB" + chr(10) + "MemFree:         1000000 kB" + chr(10) + "MemAvailable:    3000000 kB" + chr(10),
+}
+_open0 = builtins.open
+
+
+def _open_sim(ruta, *a, **k):
+    if isinstance(ruta, str) and ruta in _PROC:
+        return io.StringIO(_PROC[ruta])
+    return _open0(ruta, *a, **k)
+
+
+_name0, _sysconf0 = MON.os.name, getattr(MON.os, "sysconf", None)
+try:
+    MON.os.name = "posix"
+    _PR.os.name = "posix"
+    MON.os.sysconf = lambda n: 100
+    builtins.open = _open_sim
+    MON._ULTIMA.update(t=None, proc=None, sis=None)
+    ok(MON._memoria_total_mb() == 7812, f"RAM total desde /proc/meminfo: {MON._memoria_total_mb()} MB (esperado 7812)")
+    ok(MON._memoria_proceso_mb() == 256, f"RAM del proceso desde /proc/self/status: {MON._memoria_proceso_mb()} MB (esperado 256)")
+    ok(_PR.memoria_libre_mb() and round(_PR.memoria_libre_mb()) == 2930, f"RAM libre desde MemAvailable: {_PR.memoria_libre_mb()} MB (esperado 2930)")
+    sis = MON._cpu_sistema_seg()
+    ok(sis and abs(sis[1] - 9517.0) < 0.01 and abs(sis[0] - (9517.0 - 8010.0)) < 0.01, f"CPU de la máquina desde /proc/stat: ocupado {sis and sis[0]} s de {sis and sis[1]} s")
+    m0 = MON.muestra()
+    _PROC["/proc/stat"] = "cpu  100200 200 50100 800600 1000 0 500 0 0 0" + chr(10)
+    time.sleep(0.3)
+    m1 = MON.muestra()
+    ok(m1["cpu_maquina_pct"] is not None and 30 <= m1["cpu_maquina_pct"] <= 40, f"CPU % de la máquina entre dos muestras: {m1['cpu_maquina_pct']} % (esperado ~33)")
+    ok(m1["ram_total_mb"] == 7812 and m1["proceso_mb"] == 256, "y `muestra()` junta todo con los valores de Linux")
+finally:
+    builtins.open = _open0
+    MON.os.name = _name0
+    _PR.os.name = _name0
+    if _sysconf0 is None:
+        try: del MON.os.sysconf
+        except Exception: pass
+    else:
+        MON.os.sysconf = _sysconf0
 
 shutil.rmtree(_TMP, ignore_errors=True)
 print()

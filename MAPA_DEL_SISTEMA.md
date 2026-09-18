@@ -1582,7 +1582,10 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
     Verificado en Edge (sandbox 8061): chip «Tu PC: apta» (12 núcleos, 270 puntos, ~667 MB) y el
     monitor con las tareas `pieza_a`/`contexto_a` de una previa listadas con sus ms y el servidor
     en 0,1 % de CPU. ⚠️ `navigator.deviceMemory` en Edge informa 32 (Chrome topa en 8): se muestra
-    «o más» sólo cuando dice 8.
+    «o más» sólo cuando dice 8. **Linux (el publicado):** `monitor.py` lee `/proc/stat`,
+    `/proc/self/status` y `/proc/meminfo`; acá no hay Linux para correrlo, así que
+    `verificar_monitor.py` §3 SIMULA esos archivos con valores reales y exige las cuentas (el
+    código elige por `os.name`; una actualización va al publicado sin tocar nada a mano).
 
 - **2026-09-18 (496) — 🧹 LOS TRES PENDIENTES DEL PLAN_NAVEGADOR, CERRADOS: nombres unificados, no re-subir por SHA-1, «el servidor no calcula» desde la pantalla.**
   El usuario: *«hacé esos tres puntos que faltan»*.
