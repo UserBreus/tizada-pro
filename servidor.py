@@ -26,6 +26,14 @@ for d in (ENTRADA, FUENTES, TRABAJOS, DATOS):
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
 
+# El motor del navegador (mupdf) es un `.wasm`. Flask adivina el tipo con `mimetypes`, que en
+# Linux lee `/etc/mime.types` de la máquina: si esa lista no conoce `.wasm`, sale como
+# `application/octet-stream` y el navegador no puede compilarlo al vuelo (cae a un camino más
+# lento, o falla según el navegador). Se declara acá para que Windows y Linux sirvan lo mismo.
+import mimetypes
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("text/javascript", ".mjs")
+
 # ── MODO: taller (la máquina del usuario, como siempre) o PUBLICADO (el servidor de
 #    internet). Ver `PLAN_PUBLICACION.md`. El default es "taller": nada cambia para quien
 #    corre `py servidor.py` como hasta hoy. ────────────────────────────────────────────

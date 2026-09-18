@@ -1498,6 +1498,14 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (504) — 🐧 EL `.wasm` DEL MOTOR SE SIRVE CON SU TIPO TAMBIÉN EN LINUX.** Pregunta del
+  usuario: «¿con el botón de enviar alcanza para el servidor Linux?». Revisado: el paquete lleva
+  todos los `*.py` (incluido `monitor.py`) y `frontend/dist` (con `mupdf-wasm-*.wasm`), no hay
+  dependencias Python ni cambios de base nuevos, y nginx ya acepta 512 MB. El único hueco: Flask
+  adivina el tipo con `mimetypes`, que en Linux sale de `/etc/mime.types` de la máquina; si no
+  conoce `.wasm` lo manda como `octet-stream` y el navegador no lo compila al vuelo. `servidor.py`
+  ahora declara `application/wasm` (y `.mjs`) al arrancar. Verificado en 8050: `application/wasm`.
+
 - **2026-09-18 (503) — 📷 EL VISOR ES UNA FOTO POR MESA, UNA SOLA CALIDAD.** El usuario: *«muchas
   imágenes pequeñas formando una es lo que hace todo lento… debe ser 1 sola calidad, como una foto:
   si hago zoom y es buena se verá bien, y si la veo completa también»*. Reemplaza el esquema de la
