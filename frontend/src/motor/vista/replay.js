@@ -119,16 +119,37 @@ const mul = (a, b) => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2
  * Repite la página preparada sobre `dev` con la matriz `ctm0` (la del dibujo: escala y recorte).
  * Es la parte del intérprete de MuPDF (`pdf-op-run.c`) que estas hojas usan.
  */
-export function correrReplay(mupdf, prep, dev, ctm0) {
+// ── cajas en el espacio del dispositivo, para NO dibujar lo que cae fuera del recorte pedido ──
+const cajaDe = (b, m) => {
+  if (!b) return null
+  const xs = [], ys = []
+  for (const [x, y] of [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]) { xs.push(m[0] * x + m[2] * y + m[4]); ys.push(m[1] * x + m[3] * y + m[5]) }
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+}
+const cortar = (a, b) => (!a ? b : !b ? a : [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])])
+const vacia = (r) => !!r && (r[0] >= r[2] || r[1] >= r[3])
+
+/**
+ * `caja` = el rectángulo del dibujo pedido, en píxeles del dispositivo. LO QUE CAE FUERA NO SE
+ * DIBUJA (2026-09-18, «la vista sigue lenta»): un recorte del zoom cubre 50 cm de una mesa de 8 m,
+ * pero se corría el dibujo de origen ENTERO (117 000 elementos) por cada una de las ~100 piezas de
+ * la hoja, aunque la pieza estuviera a metros del recorte. Ahora se lleva la caja del recorte de
+ * cada pieza (`W n`) y, si no toca el dibujo pedido, ni su `Do` ni sus rellenos van al dispositivo.
+ * El resultado tiene que ser idéntico (lo salteado quedaba fuera del lienzo): se verifica byte a byte.
+ */
+export function correrReplay(mupdf, prep, dev, ctm0, caja = null) {
   const CMYK = mupdf.ColorSpace.DeviceCMYK, GRAY = mupdf.ColorSpace.DeviceGray, RGB = mupdf.ColorSpace.DeviceRGB
   const base = mul(prep.base, ctm0)
-  let gs = { ctm: base, fillCs: GRAY, fill: [0], strokeCs: GRAY, stroke: [0], lw: 1, cap: 0, join: 0, miter: 10, clips: 0 }
+  let gs = { ctm: base, fillCs: GRAY, fill: [0], strokeCs: GRAY, stroke: [0], lw: 1, cap: 0, join: 0, miter: 10, clips: 0,
+             clipBox: caja ? caja.slice() : null, oculto: false }
+  let pb = null                        // la caja del trazado en curso, espacio del usuario (con los puntos de control)
+  const pt = (x, y) => { if (!pb) pb = [x, y, x, y]; else { if (x < pb[0]) pb[0] = x; if (y < pb[1]) pb[1] = y; if (x > pb[2]) pb[2] = x; if (y > pb[3]) pb[3] = y } }
   const pila = []
   let path = null
   let clipPendiente = null            // 'nz' | 'eo' hasta el operador de pintado
   let cur, inicio = [0, 0]
   const nuevoPath = () => { if (!path) path = new mupdf.Path(); return path }
-  const soltarPath = () => { if (path) { try { path.destroy() } catch { /* nada */ } } path = null }
+  const soltarPath = () => { if (path) { try { path.destroy() } catch { /* nada */ } } path = null; pb = null }
   const stroke = () => new mupdf.StrokeState({ lineCap: gs.cap, lineJoin: gs.join, lineWidth: gs.lw, miterLimit: gs.miter })
   const pintar = (op) => {
     const p = path || new mupdf.Path()
@@ -136,14 +157,23 @@ export function correrReplay(mupdf, prep, dev, ctm0) {
     const rellena = /^(f|F|f\*|B|B\*|b|b\*)$/.test(op)
     const traza = /^(S|s|B|B\*|b|b\*)$/.test(op)
     if (op === 's' || op === 'b' || op === 'b*') p.closePath()
+    const cajaPath = cajaDe(pb, gs.ctm)
     // el orden de MuPDF: primero el recorte pendiente, después rellenar, después trazar
     if (clipPendiente) {
-      dev.clipPath(p, clipPendiente === 'eo', gs.ctm)
-      gs.clips++
+      if (caja) {
+        gs.clipBox = cortar(gs.clipBox, cajaPath || [0, 0, 0, 0])
+        if (vacia(gs.clipBox)) gs.oculto = true          // todo lo que sigue hasta el `Q` cae fuera
+      }
+      if (!gs.oculto) { dev.clipPath(p, clipPendiente === 'eo', gs.ctm); gs.clips++ }
       clipPendiente = null
     }
-    if (rellena) dev.fillPath(p, eo, gs.ctm, gs.fillCs, gs.fill, 1)
-    if (traza) { const ss = stroke(); try { dev.strokePath(p, ss, gs.ctm, gs.strokeCs, gs.stroke, 1) } finally { ss.destroy() } }
+    let visible = !gs.oculto
+    if (visible && caja && cajaPath) {
+      const g = traza ? gs.lw * Math.max(Math.hypot(gs.ctm[0], gs.ctm[1]), Math.hypot(gs.ctm[2], gs.ctm[3])) * Math.max(1, gs.miter) : 0
+      visible = !vacia(cortar(gs.clipBox, [cajaPath[0] - g, cajaPath[1] - g, cajaPath[2] + g, cajaPath[3] + g]))
+    }
+    if (visible && rellena) dev.fillPath(p, eo, gs.ctm, gs.fillCs, gs.fill, 1)
+    if (visible && traza) { const ss = stroke(); try { dev.strokePath(p, ss, gs.ctm, gs.strokeCs, gs.stroke, 1) } finally { ss.destroy() } }
     if (!path) p.destroy()
     soltarPath()
   }
@@ -151,22 +181,23 @@ export function correrReplay(mupdf, prep, dev, ctm0) {
     for (const { op, args } of prep.ops) {
       const a = args
       switch (op) {
-        case 'q': pila.push({ ...gs }); gs = { ...gs, clips: 0 }; break
+        case 'q': pila.push({ ...gs }); gs = { ...gs, clips: 0, clipBox: gs.clipBox ? gs.clipBox.slice() : null }; break
         case 'Q': {
           for (let i = 0; i < gs.clips; i++) dev.popClip()
           gs = pila.pop() || gs
           break
         }
         case 'cm': gs.ctm = mul(a.map(num), gs.ctm); break
-        case 'm': cur = inicio = [num(a[0]), num(a[1])]; nuevoPath().moveTo(cur[0], cur[1]); break
-        case 'l': cur = [num(a[0]), num(a[1])]; nuevoPath().lineTo(cur[0], cur[1]); break
-        case 'c': cur = [num(a[4]), num(a[5])]; nuevoPath().curveTo(num(a[0]), num(a[1]), num(a[2]), num(a[3]), cur[0], cur[1]); break
-        case 'v': cur = [num(a[2]), num(a[3])]; nuevoPath().curveToV(num(a[0]), num(a[1]), cur[0], cur[1]); break
-        case 'y': cur = [num(a[2]), num(a[3])]; nuevoPath().curveToY(num(a[0]), num(a[1]), cur[0], cur[1]); break
+        case 'm': cur = inicio = [num(a[0]), num(a[1])]; pt(cur[0], cur[1]); nuevoPath().moveTo(cur[0], cur[1]); break
+        case 'l': cur = [num(a[0]), num(a[1])]; pt(cur[0], cur[1]); nuevoPath().lineTo(cur[0], cur[1]); break
+        case 'c': cur = [num(a[4]), num(a[5])]; pt(num(a[0]), num(a[1])); pt(num(a[2]), num(a[3])); pt(cur[0], cur[1]); nuevoPath().curveTo(num(a[0]), num(a[1]), num(a[2]), num(a[3]), cur[0], cur[1]); break
+        case 'v': cur = [num(a[2]), num(a[3])]; pt(num(a[0]), num(a[1])); pt(cur[0], cur[1]); nuevoPath().curveToV(num(a[0]), num(a[1]), cur[0], cur[1]); break
+        case 'y': cur = [num(a[2]), num(a[3])]; pt(num(a[0]), num(a[1])); pt(cur[0], cur[1]); nuevoPath().curveToY(num(a[0]), num(a[1]), cur[0], cur[1]); break
         case 'h': if (path) { path.closePath(); cur = inicio }; break
         case 're': {
           const [x, y, w, h] = a.map(num)
           const p = nuevoPath()
+          pt(x, y); pt(x + w, y + h)
           p.moveTo(x, y); p.lineTo(x + w, y); p.lineTo(x + w, y + h); p.lineTo(x, y + h); p.closePath()
           cur = inicio = [x, y]
           break
@@ -186,6 +217,7 @@ export function correrReplay(mupdf, prep, dev, ctm0) {
         case 'J': gs.cap = num(a[0]); break
         case 'M': gs.miter = num(a[0]); break
         case 'Do': {
+          if (gs.oculto) break                           // la pieza cae fuera del dibujo pedido
           const x = prep.xobjs.get(a[0].n)
           x.dl.run(dev, mul(x.inv, gs.ctm))
           break
@@ -214,7 +246,7 @@ export function dibujarConReplay(mupdf, doc, pagina, prep, { ancho = 1200, recor
   pix.clear(255)
   const dev = new mupdf.DrawDevice(mupdf.Matrix.identity, pix)
   try {
-    correrReplay(mupdf, prep, dev, m)
+    correrReplay(mupdf, prep, dev, m, caja)
   } finally {
     dev.close()
   }

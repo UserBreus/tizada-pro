@@ -1498,6 +1498,32 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-18 (502) — 🐇 EL VISOR SEGUÍA LENTO: SE DIBUJABA LO QUE CAÍA FUERA DEL RECORTE.** Reporte del
+  usuario: «la vista sigue siendo lenta de la tizada, ¿por qué?». Tenía razón, y por dos motivos:
+  - **La causa.** `vista/replay.js` (499) interpretaba cada dibujo de origen una vez, pero al DIBUJAR
+    corría la lista entera de la mesa (117 000 elementos) por CADA `Do` de la hoja (~100 piezas),
+    aunque el recorte pedido fuera de 50 cm y la pieza estuviera a metros. Ahora `correrReplay`
+    recibe la `caja` del dibujo pedido (en píxeles), lleva la caja del recorte de cada pieza (`W n`,
+    con los puntos de control de las curvas) y, si no toca el dibujo pedido, ni su `Do` ni sus
+    rellenos/trazos van al dispositivo (`gs.oculto`; el `clipPath`/`popClip` se saltea en pareja).
+    Medido sobre una hoja real de 12 MB: un recorte del zoom a 1600 px pasa de 9,8-10,3 s a
+    0,4-1,1 s, con **0 bytes distintos** contra el mismo replay sin salteo (lo salteado quedaba
+    fuera del lienzo). El dibujo general de la mesa no cambia (3,7 s): ahí nada cae fuera.
+    `verificar_navegador_vista.py` verde.
+  - **El número que se le dio al usuario estaba mal medido.** En la entrada 500 se anotó «todo listo
+    en ~8 min»: eso se midió con 24 hilos (4 vistas × 6) y DESPUÉS se bajó el cupo a
+    `min(12, núcleos − 1, memoria × 1,25)` sin volver a medir. Con el cupo real la preparación era
+    más lenta que lo informado. **Regla que sale de acá: si se cambia el cupo o cualquier cosa que
+    afecte un tiempo ya informado, se vuelve a medir antes de darlo por bueno.**
+  - **Medido de nuevo, con el código que corre de verdad** (Edge, sandbox 8061, la hoja real
+    `HOJA_g1_Principal.pdf` de 12 MB: 3 mesas — dos de 8 m y una de 41 cm —, 132 recortes + 6
+    generales, 6 hilos): primer dibujo general a los 5 s; **todo listo a los 35 s**.
+    Receta: `scratchpad/medir_precalentado.mjs <idTrabajo> <archivo>` (cuenta las claves del store
+    `dibujos` de IndexedDB contra lo esperado según las medidas de cada página).
+  **Trampa de herramienta (otra vez):** un heredoc de Git Bash con comillas simples adentro del
+  JavaScript no parsea («unexpected EOF») y NO aplica nada, en silencio si no se mira la salida.
+  Los scripts van con Write a un archivo, siempre.
+
 - **2026-09-18 (501) — 🐌 «NUEVO PEDIDO» TARDABA EN BORRAR EL ANTERIOR.** `/api/pedido/limpiar_efimeros`
   borraba las carpetas de cada molde con diseño (100 MB de archivo, el desplegado por talle, el
   caché de piezas: decenas de segundos) DENTRO del request, y la pantalla esperaba con el cartel
