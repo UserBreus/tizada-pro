@@ -12,8 +12,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 
-# Fuentes subidas en runtime
-catalogo_fuentes/subida_*
+# Fuentes subidas en runtime: SÍ van a git (2026-09-18). Ignorarlas dejaba una copia de git distinta
+# del servidor (el paquete sí las lleva) y un diseño que las usa salía con la de reemplazo.
 
 # Respaldos pesados y logs
 respaldo*.rar
