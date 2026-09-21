@@ -4870,7 +4870,7 @@ def plantilla_pieza_renombrar():
         return jsonify({"error": "falta decir qué pieza (mesa y t_idx)"}), 400
     reg = _cargar("registro_producto.json", pid) or {}
     try:
-        reg2, ren = PD.renombrar(reg, mesa, t_idx, cuerpo.get("nombre"))
+        reg2, ren = PD.renombrar(reg, mesa, t_idx, cuerpo.get("nombre"), talle=cuerpo.get("talle"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
     if ren:
@@ -5404,6 +5404,42 @@ def plantilla_grupo_pieza():
         reg = _cargar("registro_producto.json", pid) or {}
         nombre = (cuerpo.get("nombre") or "").strip()
         eliminar = bool(cuerpo.get("eliminar"))
+        # 🔴 LA SELECCIÓN, CADA PIEZA EN SU TALLE (2026-09-21, «nombro unas piezas y me nombra
+        # otras»). La pantalla mandaba el índice de la pieza DENTRO DE SU TALLE como si fuera el
+        # del talle guía: en un talle con una pieza de menos (XS del «SHORT PR GOLERA») esa
+        # posición es OTRA pieza, y la misma pieza tocada en dos talles nombraba dos piezas
+        # distintas. Ahora cada (talle, t_idx) se busca en el registro de ESE talle; lo que no
+        # está se AVISA y no se toca (no se elige ninguna otra).
+        _sel = cuerpo.get("seleccion")
+        if isinstance(_sel, list) and not eliminar:
+            if not nombre:
+                return jsonify({"error": "escribí qué es la pieza (Frente, Espalda, Manga…)"}), 400
+            claves, no_encontradas = [], []
+            for _p in _sel:
+                _t, _ti = str((_p or {}).get("talle")), (_p or {}).get("t_idx")
+                _k = next((n for n, por_t in reg.items()
+                           if ((por_t or {}).get(_t) or {}).get("pieza_idx") == _ti), None)
+                if _k is None:
+                    no_encontradas.append(f"{_t} #{(_ti or 0) + 1}")
+                elif _k not in claves:
+                    claves.append(_k)
+            if no_encontradas:
+                return jsonify({"error": "No encontré en el registro: " + ", ".join(no_encontradas)
+                                         + ". No se nombró nada; volvé a subir el molde."}), 422
+            ren_total = {}
+            for _k in claves:
+                _k = ren_total.get(_k, _k)
+                _inf = next(iter(reg[_k].values()), {}) or {}
+                try:
+                    reg, ren = PD.renombrar(reg, int(_inf.get("mesa")), int(_inf.get("idx_mesa", _inf.get("pieza_idx"))),
+                                            nombre, clave=_k)
+                except (ValueError, TypeError) as e:
+                    return jsonify({"error": str(e)}), 422
+                ren_total.update(ren or {})
+            if ren_total:
+                _migrar_nombres_pieza(pid, ren_total)
+            _guardar_registro(pid, reg)
+            return jsonify({"ok": True, "nombradas": len(claves), **_emparejado_camino_b(pid)})
         if eliminar:
             _viejo = nombre
         else:
@@ -5429,7 +5465,7 @@ def plantilla_grupo_pieza():
                 _k += 1
             nombre = f"Pieza {_k}"
         try:
-            reg2, ren = PD.renombrar(reg, int(_mesa_p), int(_idx_p), nombre)
+            reg2, ren = PD.renombrar(reg, int(_mesa_p), int(_idx_p), nombre, clave=_viejo)
         except ValueError as e:
             return jsonify({"error": str(e)}), 422
         if ren:
@@ -7263,7 +7299,7 @@ def _etq_mismo_lugar(a, b):
             and (a or {}).get("align") == (b or {}).get("align"))
 
 
-def _etq_posiciones_por_pieza(posiciones):
+def _etq_posiciones_por_pieza(posiciones, nombres=None):
     """Pasa las posiciones de la etiqueta al modelo **POR PIEZA** (2026-08-18).
 
     Antes cada posición se guardaba con namespace: `v_xxx§Frente 8` (por variable, lo que armaba
@@ -7285,20 +7321,36 @@ def _etq_posiciones_por_pieza(posiciones):
     variables sólo puede quedar una: gana la primera (orden estable) y la otra se informa — el
     usuario tiene que enterarse acá, no descubrirlo cuando salga la tizada.
     """
-    con_ns = [(k, v) for k, v in (posiciones or {}).items() if "§" in k]
-    sin_ns = [(k, v) for k, v in (posiciones or {}).items() if "§" not in k]
-    out, por_clave, conflictos = {}, {}, []
-    for k, v in con_ns + sin_ns:
+    # 🔴 CAMBIÓ (2026-09-21, reporte: «marco de nuevo donde quiero y el aviso vuelve a salir»):
+    #   · Lo que está SIN namespace es el modelo actual —lo que el usuario acaba de marcar— y
+    #     GANA siempre. Antes iban primero las claves viejas `variable§pieza`, así que una
+    #     posición vieja le ganaba a la recién marcada: la marca no quedaba y el aviso volvía.
+    #   · Si para una pieza quedan posiciones DISTINTAS y ninguna es la marcada ahora, NO se elige
+    #     ninguna (regla del usuario: «no debe tomar decisiones»): la pieza queda sin posición
+    #     propia y se AVISA para que la marque. Antes «quedaba la primera».
+    #   · `nombres` (las claves del registro): entre dos claves sin namespace que son la misma
+    #     pieza escrita distinto («Manga derecha» / «manga derecha»), gana la que es el nombre real.
+    reales = {str(n) for n in (nombres or [])}
+    grupos = {}                              # clave normalizada → [(nombre, valor, sin_ns)]
+    for k, v in (posiciones or {}).items():
         nombre = str(k.split("§", 1)[1] if "§" in k else k).strip()
         clave = MP._norm_nombre(nombre)      # POR PIEZA: el nombre completo, con su número
-        if not clave:
-            continue
-        if clave in por_clave:
-            if not _etq_mismo_lugar(por_clave[clave], v) and nombre not in conflictos:
-                conflictos.append(nombre)   # esa pieza tenía DOS lugares distintos: queda el primero
-            continue
-        por_clave[clave] = v
-        out[nombre] = v
+        if clave:
+            grupos.setdefault(clave, []).append((nombre, v, "§" not in k))
+    out, conflictos = {}, []
+    for clave, items in grupos.items():
+        actuales = [it for it in items if it[2]]
+        candidatas = actuales or items
+        if len(actuales) > 1 and reales:
+            exactas = [it for it in actuales if it[0] in reales]
+            if len(exactas) == 1:
+                candidatas = exactas
+        base = candidatas[0]
+        if all(_etq_mismo_lugar(base[1], it[1]) for it in candidatas[1:]):
+            nombre = next((it[0] for it in candidatas if it[0] in reales), base[0])
+            out[nombre] = base[1]
+        elif base[0] not in conflictos:
+            conflictos.append(base[0])       # lugares distintos y ninguno marcado ahora: no se elige
     return out, conflictos
 
 
@@ -7341,7 +7393,8 @@ def get_etiqueta():
     et["posicion"] = {**_ETIQUETA_DEFAULT["posicion"], **(et.get("posicion") or {})}
     # La pantalla trabaja POR PIEZA: se devuelve ya migrado (en memoria; se persiste cuando el
     # usuario guarda). `migradas`/`conflictos` son para avisarle qué pasó con lo que ya tenía.
-    _pos, _conf = _etq_posiciones_por_pieza(et.get("posiciones"))
+    _pos, _conf = _etq_posiciones_por_pieza(et.get("posiciones"),
+                                            list((_cargar("registro_producto.json", pid) or {}).keys()))
     et["migradas"] = sum(1 for k in (et.get("posiciones") or {}) if "§" in k)
     et["conflictos"] = _conf
     et["posiciones"] = _pos
@@ -7417,7 +7470,8 @@ def set_etiqueta():
     # clave vieja, el motor le daría MÁS prioridad que a la nueva y la etiqueta saldría en el
     # lugar de antes aunque la pantalla mostrara el nuevo — el bug clásico de esta pantalla:
     # se ve bien y sale movida (ver changelog 146).
-    et["posiciones"], _conf_mig = _etq_posiciones_por_pieza(et.get("posiciones"))
+    et["posiciones"], _conf_mig = _etq_posiciones_por_pieza(
+        et.get("posiciones"), list((_cargar("registro_producto.json", pid) or {}).keys()))
     if (prod or {}).get("origen") == "con_diseno":
         # 🔴 En el camino B el cliente SÓLO ubica la etiqueta: la forma (tamaño, color, qué
         # muestra) es del admin y vale para todos los moldes. Este POST es replace —escribe el
@@ -11565,10 +11619,15 @@ def molde_config_guardar():
     # que ya se cerró en aplicar y borrar. Mismo 404 que si no existiera.
     if cuerpo.get("id"):
         try:
-            if not _config_es_mia(db.leer_config_molde(cuerpo.get("id"))):
+            _cfg_prev = db.leer_config_molde(cuerpo.get("id"))
+            if not _config_es_mia(_cfg_prev):
                 return jsonify({"error": "esa configuración ya no está"}), 404
         except Exception as e:
             return jsonify({"error": f"no se pudo leer de la base: {e}"}), 500
+        # pisar la receta de OTRO molde con este la dejaría mezclada: se guarda como una nueva
+        if not _config_es_de_este_molde(_cfg_prev, pid):
+            return jsonify({"error": f"«{_cfg_prev.get('nombre')}» se guardó en un molde con OTRAS "
+                                     "piezas: no se pisa. Guardala con un nombre nuevo."}), 409
     reg = _cargar("registro_producto.json", pid) or {}
     piezas = _piezas_del_registro(reg)
     if not piezas:
@@ -11595,6 +11654,26 @@ def molde_config_guardar():
     except Exception as e:
         return jsonify({"error": f"no se pudo guardar en la base: {e}"}), 500
     return jsonify({"ok": True, "id": _id, "piezas": len(piezas)})
+
+
+def _config_es_de_este_molde(cfg, pid):
+    """¿La configuración guardada es de ESTE molde? Sólo si es el mismo archivo (sha1) o el mismo
+    molde con otro diseño adentro (misma huella de piezas).
+
+    🔴 REGLA DEL USUARIO (2026-09-21): «eso que está ahí no debería afectar»: una configuración de
+    OTRO molde no se aplica ni se pisa desde acá. Antes el estado («parecida», «distinta») era sólo
+    una ayuda y se podía aplicar igual: entraban los nombres y la etiqueta de otro molde (así salió
+    el aviso de las mangas en lugares distintos)."""
+    if not cfg:
+        return False
+    try:
+        _sha = _sha1_molde(_ruta_entrada("plantilla.ai", pid))
+    except Exception:
+        _sha = None
+    if _sha and cfg.get("sha1") == _sha:
+        return True
+    _h, _pz = _huella_molde(_cargar("registro_producto.json", pid) or {})
+    return bool(_h) and cfg.get("huella") == _h
 
 
 @app.get("/api/molde/config/lista")
@@ -11696,6 +11775,10 @@ def molde_config_aplicar():
                             "error": "Todavía se está leyendo el molde. La configuración se aplica "
                                      "sola apenas termine."}), 409
         return jsonify({"error": "Todavía no hay molde cargado: subilo y volvé a probar."}), 409
+    if not _config_es_de_este_molde(cfg, pid):
+        return jsonify({"error": f"«{cfg.get('nombre')}» se guardó en un molde con OTRAS piezas"
+                                 + (f" («{cfg.get('molde')}»)" if cfg.get("molde") else "")
+                                 + ": no calza en este. No se tocó nada."}), 409
     import piezas_con_diseno as PD
     # 1) EL NOMBRADO. Pieza por pieza, por (mesa, idx_mesa): es la identidad que no depende del
     #    talle. Lo que no está en este molde se informa y no se toca.
@@ -11743,6 +11826,32 @@ def molde_config_aplicar():
                     vals.append({**val, "pieza_idx": _i})
             v["valores"] = vals
         campos["variantes"] = [v for v in campos["variantes"] if v.get("valores")]
+    # 2.b) 🔴 CÓDIGOS PROPIOS PARA ESTE MOLDE (regla del usuario 2026-09-21: «no se debe mezclar
+    #      nada, todos los moldes deben ser diferentes; si suben 2 veces el mismo molde, para el
+    #      sistema son 2 moldes»). La receta trae las variables y los grupos con los códigos del
+    #      molde donde se guardó (`v_…`, `gp_…`): copiarlos tal cual dejaba dos moldes con la MISMA
+    #      variable, y lo que se guarda sólo por código (las marcas de TPU/Bordado/DTF del editor,
+    #      entre otras) pasaba de un molde al otro. Acá cada código recibe uno nuevo y se reemplaza
+    #      en TODA la receta (variables, grupos, modelos, telas por variable…), como texto entero.
+    import re as _re_cfg
+    import secrets as _sec_cfg
+    _viejos = {str(v.get("clave")) for v in (campos.get("variantes") or []) if v.get("clave")}
+    _viejos |= {str(g.get("id")) for g in (campos.get("grupos") or []) if g.get("id")}
+    if _viejos:
+        _abc = "abcdefghijklmnopqrstuvwxyz0123456789"
+        _en_uso = set(_re_cfg.findall(r"\b(?:v|gp)_[a-z0-9]+\b", json.dumps(
+            next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), {}) or {})))
+        _nuevo = {}
+        for _k in sorted(_viejos):
+            _pref = _k.split("_", 1)[0] + "_"
+            while True:
+                _n = _pref + "".join(_sec_cfg.choice(_abc) for _ in range(7))
+                if _n not in _en_uso and _n not in _viejos and _n not in _nuevo.values():
+                    break
+            _nuevo[_k] = _n
+        _txt = _re_cfg.sub(r"\b(?:v|gp)_[a-z0-9]+\b", lambda m: _nuevo.get(m.group(0), m.group(0)),
+                           json.dumps(campos, ensure_ascii=False))
+        campos = json.loads(_txt)
     # 3) LA ETIQUETA SIEMPRE; el resto, sólo lo que el usuario haya tildado (ver `_PARTES_CONFIG`).
     # Las que manda la pantalla; y si NO manda ninguna (el aviso de «ya configuraste este molde»
     # aplica sin abrir el modal), las que la receta tiene guardadas. Así la receta se aplica
@@ -11760,8 +11869,25 @@ def molde_config_aplicar():
         _soltar_edicion_catalogo()
         return jsonify({"error": "no está ese molde"}), 404
     for k, v in campos.items():
-        if k in _permitidos:
-            prod[k] = v
+        if k not in _permitidos:
+            continue
+        if k == "etiqueta" and isinstance(v, dict):
+            # 🔴 LO QUE YA ESTÁ MARCADO EN ESTE MOLDE NO SE PISA (regla del usuario 2026-09-21).
+            # La receta completa las piezas que todavía no tienen su lugar; las que el usuario ya
+            # marcó (posición, zonas) quedan como están, y una pieza marcada no se apaga por la receta.
+            _act = prod.get("etiqueta") or {}
+            _pos_act = dict(_act.get("posiciones") or {})
+            _marcadas = {MP._norm_nombre(x) for x in _pos_act} | {MP._norm_nombre(x) for x in (_act.get("zonas") or {})}
+            _et = dict(v)
+            _et["posiciones"] = {**{kk: vv for kk, vv in (v.get("posiciones") or {}).items()
+                                    if MP._norm_nombre(kk) not in _marcadas}, **_pos_act}
+            _et["zonas"] = {**{kk: vv for kk, vv in (v.get("zonas") or {}).items()
+                               if MP._norm_nombre(kk) not in _marcadas}, **(_act.get("zonas") or {})}
+            _off = [x for x in (v.get("piezas_off") or []) if MP._norm_nombre(x) not in _marcadas]
+            _et["piezas_off"] = sorted(set(_off) | set(_act.get("piezas_off") or []))
+            prod[k] = _et
+            continue
+        prod[k] = v
     _guardar_catalogo(cat)
     if datos.get("produccion") and "produccion" in _partes:
         json.dump(datos["produccion"], open(_ruta_datos("config_produccion.json", pid), "w",

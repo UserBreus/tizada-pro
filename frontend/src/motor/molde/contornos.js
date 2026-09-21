@@ -351,6 +351,37 @@ export function canonizarOrden(conts, talles) {
   return [salida, cambio]
 }
 
+/**
+ * `correspondencia_incompletos`: para los talles con OTRA cantidad de piezas que la referencia
+ * (a los que `canonizarOrden` no puede reordenar), qué pieza de ese talle es cada pieza *i* de la
+ * referencia: Map(talle → Map(i → j)). Una *i* sin homóloga (la pieza que a ese talle le falta)
+ * no aparece. Los talles completos no figuran: ahí *i* ya es *i*.
+ *
+ * 🔴 POR QUÉ (2026-09-21, «SHORT PR GOLERA»): al talle XS le falta una pieza. El registro tomaba
+ * «la pieza i de cada talle» por posición, así que de la pieza que falta en adelante XS quedaba
+ * CORRIDO: se nombraba la espalda y en XS se nombraba el frente («nombro unas piezas y me nombra
+ * otras que no se tocan»), y lo mismo con la tela y la tizada. La homóloga sale del dibujo
+ * (superposición, la misma regla), no de la posición.
+ */
+export function correspondenciaIncompletos(conts, talles) {
+  const orden = [...talles.filter((t) => conts.has(t)), ...[...conts.keys()].filter((t) => !talles.includes(t))]
+  const out = new Map()
+  if (orden.length < 2) return out
+  const refT = pyMax(orden, (t) => [conts.get(t).length, -orden.indexOf(t)])
+  const ref = conts.get(refT)
+  const n = ref.length
+  for (const t of orden) {
+    const pz = conts.get(t)
+    if (t === refT || pz.length === n) continue
+    const nombres = new Map()
+    for (let i = 0; i < n; i++) nombres.set(i, i)
+    const mapa = new Map()
+    for (const [i, [j]] of emparejarPorSolape(ref, nombres, pz)) mapa.set(i, j)
+    out.set(t, mapa)
+  }
+  return out
+}
+
 // ─── la mesa desplegada (sólo contornos) ─────────────────────────────────────────────────────
 /** Lo que `desplegar_mesa(contornos=True, paginas=False)` escribe en `m{mesa}.json` (sin el sello). */
 export function contornosDeMesa(dibujos, geo, mesa, talles, completos = null) {
@@ -480,15 +511,18 @@ export function altaDesdeContornos(porMesa, geos, talles, nMesas) {
   for (const mesa of mesas) {
     const pm = porMesa.get(mesa)
     const cuantas = Math.max(...[...pm.values()].map((v) => v.length))
+    // los talles con una pieza de menos: cada pieza por su homóloga del dibujo, no por posición
+    const eq = correspondenciaIncompletos(pm, talles)
     for (let i = 0; i < cuantas; i++) {
       n += 1
       const nombre = `Pieza ${n}`
       for (const [talle, pzs] of pm) {
-        if (i >= pzs.length) continue
-        const cont = pzs[i]
+        const j = eq.has(talle) ? eq.get(talle).get(i) : i
+        if (j === undefined || j >= pzs.length) continue     // este talle no tiene esa pieza: no se inventa
+        const cont = pzs[j]
         if (!registro.has(nombre)) registro.set(nombre, new Map())
         registro.get(nombre).set(talle, {
-          mesa, pieza_idx: antes.get(`${talle}\u0000${mesa}`) + i, idx_mesa: i,
+          mesa, pieza_idx: antes.get(`${talle}\u0000${mesa}`) + j, idx_mesa: j,
           w_cm: pyRound(cont.w / cont.user_unit / CM, 1), h_cm: pyRound(cont.h / cont.user_unit / CM, 1),
           bbox_mu: cont.bbox_mu.map((v) => pyRound(v, 2)), ancla: anclaPorDefecto(cont),
         })
@@ -517,8 +551,16 @@ export function altaDesdeContornos(porMesa, geos, talles, nMesas) {
       talle_mayor_cm: { w: mayor.w_cm, h: mayor.h_cm },
     })
   }
+  // AVISAR lo que a un talle le falta (no se inventa ni se reemplaza por otra pieza)
+  const con = talles.filter((t) => [...registro.values()].some((pt) => pt.has(t)))
+  const faltan = new Map()
+  for (const [pieza, porTalle] of registro) {
+    for (const t of con) if (!porTalle.has(t)) { if (!faltan.has(t)) faltan.set(t, []); faltan.get(t).push(pieza) }
+  }
+  const advertencias = [...faltan].map(([t, ps]) => `Al talle ${t} le falta${ps.length > 1 ? 'n' : ''} ${ps.join(', ')}: ` +
+    `en ese talle no se registra${ps.length > 1 ? 'n' : ''}.`)
   return { mesas: nMesas, talles, piezas: [...registro.keys()].sort(), completos, registro, problemas,
-    advertencias: [], piezas_detalle: detalle, origen: 'con_diseno', visor }
+    advertencias, piezas_detalle: detalle, origen: 'con_diseno', visor }
 }
 
 /** Map → objeto plano, recursivo (para escribir JSON como lo escribe Python). */

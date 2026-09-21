@@ -74,10 +74,12 @@ ok(APP.includes('cfgSugeridas[_id]') && APP.includes('cfgSugeridas[pidCfg]'),
    'cada pantalla mira la de SU molde');
 ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id/.test(APP),
    'y aplicar recibe el molde por argumento (no por estado, que React no tiene actualizado)');
-// El aviso aplica con lo que trae LA RECETA (`null`), no con lo que haya quedado tildado en
-// una pantalla que ni siquiera está abierta.
-ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id, 0, null\)/.test(APP),
-   'y desde el aviso entra lo que la receta tiene guardado');
+// CAMBIÓ (regla del usuario 2026-09-21): desde el aviso entran SÓLO los nombres y la etiqueta
+// (`[]`); grupos, variables, telas y planilla van únicamente si se tildan en la ventana. Antes
+// entraba lo que traía la receta (`null`) sin que nadie lo eligiera en ese momento.
+ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id, 0, \[\]\)/.test(APP)
+   && /aplicarCfgMolde\(cfgSugeridas\[pidCfg\], pidCfg, 0, \[\]\)/.test(APP),
+   'y desde el aviso entran SÓLO los nombres y la etiqueta (lo demás se tilda en la ventana)');
 
 console.log('\n6) Aplicada una vez, el cartel NO vuelve; y una receta se puede EDITAR');
 // 🔴 Aplicar recarga el molde (`moldeReload`) y eso vuelve a disparar la búsqueda: sin recordar

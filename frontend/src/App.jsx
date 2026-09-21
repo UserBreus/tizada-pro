@@ -10011,14 +10011,11 @@ export default function App() {
     // cualquier otro talle, así que no hace falta tocar la del guía — cada pieza seleccionada
     // (por su índice dentro del talle) se nombra, y el server renumera si hay varias.
     if (empData?.origen === 'con_diseno') {
-      const idxs = [...new Set(sel.map(p => p.t_idx))];
-      let ok = true;
-      for (let k = 0; k < idxs.length; k++) {
-        const gi = idxs[k];
-        const viejo = (empData?.nombres_guia || {})[String(gi)] || '';
-        const msg = k === idxs.length - 1 ? (idxs.length === 1 ? `«${nom}» ✓` : `${idxs.length} piezas nombradas «${nom}» ✓`) : null;
-        ok = (await _postGrupo({ nombre: nom, guia_idx: gi, renombrar_de: viejo && viejo !== nom ? viejo : '' }, msg)) && ok;
-      }
+      // 🔴 Cada pieza con SU talle: el índice es el de su talle, no el del guía (en un talle con una
+      // pieza de menos, la misma posición es otra pieza). El servidor la busca en ese talle y, si
+      // no la encuentra, avisa y no nombra nada (2026-09-21).
+      const seleccion = sel.map(p => ({ talle: p.talle, t_idx: p.t_idx }));
+      const ok = await _postGrupo({ nombre: nom, seleccion }, `«${nom}» ✓`);
       if (ok) { setEmpNombreInput(''); setSelNombrar(new Set()); }
       return;
     }
@@ -15452,7 +15449,7 @@ export default function App() {
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                           <button type="button" className="btn primary" data-tour="pieza-b-sugerida-aplicar"
                             disabled={cfgBusy} style={{ flex: 1, minWidth: 96, padding: '7px 10px', fontSize: 12, borderRadius: 9 }}
-                            onClick={() => { setCfgPid(_id); aplicarCfgMolde(cfgSugeridas[_id], _id, 0, null); }}>
+                            onClick={() => { setCfgPid(_id); aplicarCfgMolde(cfgSugeridas[_id], _id, 0, []); }}>   {/* desde el aviso: sólo nombres + etiqueta; lo demás se tilda en la ventana (regla 2026-09-21) */}
                             Aplicar
                           </button>
                           <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
@@ -18082,7 +18079,7 @@ export default function App() {
                                   )}
                                   {!!(ec.conflictos || []).length && (
                                     <div style={{ marginTop: 7, fontSize: 11.5, color: 'var(--warning, #f5a623)', lineHeight: 1.45 }}>
-                                      Estas piezas tenían la etiqueta en <b>lugares distintos según la variable</b>: {(ec.conflictos || []).join(', ')}. Ahora la posición es de la pieza — quedó la primera. Revisalas y volvé a marcarlas si hace falta.
+                                      Estas piezas tenían la etiqueta en <b>lugares distintos según la variable</b>: {(ec.conflictos || []).join(', ')}. No se eligió ninguno: <b>marcá dónde va</b> en cada una y guardá.
                                     </div>
                                   )}
                                 </div>
@@ -18618,7 +18615,7 @@ export default function App() {
                                     </span>
                                     <button type="button" className="btn" disabled={cfgBusy}
                                       data-tour="molde-cfg-sugerida-aplicar"
-                                      onClick={async () => { setCfgPid(null); await aplicarCfgMolde(cfgSugeridas[pidCfg], pidCfg, 0, null); setCfgModalOpen(true); }}>
+                                      onClick={async () => { setCfgPid(null); await aplicarCfgMolde(cfgSugeridas[pidCfg], pidCfg, 0, []); setCfgModalOpen(true); }}>
                                       Aplicar
                                     </button>
                                     <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11 }}
@@ -22796,13 +22793,16 @@ export default function App() {
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.detalle}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          {/* Sólo se aplica/pisa una de ESTE molde (regla del usuario 2026-09-21: la
+                              de otro molde no tiene que afectar). El servidor también lo corta. */}
                           <button type="button" className={_calza ? 'btn primary' : 'btn'} data-tour="molde-cfg-aplicar"
-                            disabled={cfgBusy} style={{ padding: '8px 16px', fontSize: 12.5 }}
+                            disabled={cfgBusy || !_calza} style={{ padding: '8px 16px', fontSize: 12.5 }}
+                            title={_calza ? '' : 'Se guardó en un molde con otras piezas: no calza en este'}
                             onClick={() => aplicarCfgMolde(c)}>Aplicar</button>
                           {/* GUARDAR ENCIMA de esta receta: corregís algo del molde y lo dejás en
                               la que ya tenías, en vez de juntar cuatro casi iguales. */}
                           <button type="button" className="btn" data-tour="molde-cfg-actualizar"
-                            disabled={cfgBusy} title={`Guardar cómo está el molde ahora dentro de «${c.nombre}»`}
+                            disabled={cfgBusy || !_calza} title={_calza ? `Guardar cómo está el molde ahora dentro de «${c.nombre}»` : 'Se guardó en un molde con otras piezas: no se pisa'}
                             style={{ padding: '8px 12px', fontSize: 12.5 }}
                             onClick={() => actualizarCfgMolde(c)}>Actualizar</button>
                           <button type="button" className="btn danger-ghost" data-tour="molde-cfg-borrar"

@@ -356,6 +356,34 @@ def canonizar_orden(conts, talles):
     return salida, cambio
 
 
+def correspondencia_incompletos(conts, talles):
+    """Para los talles con OTRA cantidad de piezas que la referencia (los que `canonizar_orden` no
+    puede reordenar): qué pieza de ese talle es cada pieza *i* de la referencia →
+    `{talle: {i: j}}`. Una *i* sin homóloga (la que a ese talle le falta) no aparece. Los talles
+    completos no figuran: ahí *i* ya es *i*.
+
+    🔴 POR QUÉ (2026-09-21, «SHORT PR GOLERA»): al talle XS le falta una pieza. El registro tomaba
+    «la pieza i de cada talle» por POSICIÓN, así que de la que falta en adelante XS quedaba corrido:
+    se nombraba la espalda y en XS se nombraba el frente («nombro unas piezas y me nombra otras que
+    no se tocan»), y lo mismo con la tela y la tizada. La homóloga sale del dibujo (superposición,
+    `_emparejar_por_solape`, la misma regla), no de la posición."""
+    orden = [t for t in talles if t in conts] + [t for t in conts if t not in talles]
+    out = {}
+    if len(orden) < 2:
+        return out
+    ref_t = max(orden, key=lambda t: (len(conts[t]), -orden.index(t)))
+    ref = conts[ref_t]
+    n = len(ref)
+    import motor_pedido as MP
+    for t in orden:
+        pz = conts[t]
+        if t == ref_t or len(pz) == n:
+            continue
+        eleccion = MP._emparejar_por_solape(ref, {i: i for i in range(n)}, pz)
+        out[t] = {i: j for i, (j, _rot) in eleccion.items()}
+    return out
+
+
 def refrescar_geometria(reg, doc):
     """Pone al día la GEOMETRÍA de cada entrada del registro con el contorno que hoy tiene su
     (mesa, talle, idx_mesa). Devuelve cuántas entradas cambiaron. Los NOMBRES no se tocan.
@@ -626,17 +654,20 @@ def alta_molde_con_diseno(path, avisar=None, procesos=None, paginas=True):
         n = 0
         for mesa in sorted(por_mesa):
             cuantas = max(len(v) for v in por_mesa[mesa].values())
+            # los talles con una pieza de menos: cada pieza por su homóloga del dibujo, no por posición
+            _eq = correspondencia_incompletos(por_mesa[mesa], talles)
             for i in range(cuantas):
                 n += 1
                 nombre = f"Pieza {n}"
                 for talle, pzs in por_mesa[mesa].items():
-                    if i >= len(pzs):
+                    j = _eq[talle].get(i) if talle in _eq else i
+                    if j is None or j >= len(pzs):
                         continue                     # este talle no tiene esa pieza: no se inventa
-                    cont = pzs[i]
+                    cont = pzs[j]
                     registro.setdefault(nombre, {})[talle] = {
                         "mesa": mesa,
-                        "pieza_idx": antes[(talle, mesa)] + i,   # dentro del TALLE (único)
-                        "idx_mesa": i,                           # dentro de la MESA (para el motor)
+                        "pieza_idx": antes[(talle, mesa)] + j,   # dentro del TALLE (único)
+                        "idx_mesa": j,                           # dentro de la MESA (para el motor)
                         "w_cm": round(cont["w"] / cont["user_unit"] / CM, 1),
                         "h_cm": round(cont["h"] / cont["user_unit"] / CM, 1),
                         "bbox_mu": [round(v, 2) for v in cont["bbox_mu"]],
@@ -674,9 +705,19 @@ def alta_molde_con_diseno(path, avisar=None, procesos=None, paginas=True):
             detalle[pieza] = {"mesas": sorted({v["mesa"] for v in por_talle.values()}),
                               "talles": [t for t in talles if t in por_talle],
                               "talle_mayor_cm": {"w": mayor["w_cm"], "h": mayor["h_cm"]}}
+        # AVISAR lo que a un talle le falta (no se inventa ni se reemplaza por otra pieza)
+        _con = [t for t in talles if any(t in pt for pt in registro.values())]
+        _faltan = {}
+        for pieza, por_talle in registro.items():
+            for t in _con:
+                if t not in por_talle:
+                    _faltan.setdefault(t, []).append(pieza)
+        advertencias = [f"Al talle {t} le falta{'n' if len(ps) > 1 else ''} {', '.join(ps)}: "
+                        f"en ese talle no se registra{'n' if len(ps) > 1 else ''}."
+                        for t, ps in _faltan.items()]
         return {"mesas": doc.page_count, "talles": talles, "piezas": sorted(registro),
                 "completos": completos, "registro": registro, "problemas": problemas,
-                "advertencias": [], "piezas_detalle": detalle, "origen": "con_diseno",
+                "advertencias": advertencias, "piezas_detalle": detalle, "origen": "con_diseno",
                 # el visor ya armado, talle por talle (lo guarda el servidor: ver `_visor_guardar`)
                 "visor": visor}
     finally:
@@ -925,7 +966,7 @@ def _ancla_por_defecto(cont):
 # Nombrar es, literalmente, cambiar la clave de un dict.
 
 
-def renombrar(reg, mesa, idx_mesa, nombre):
+def renombrar(reg, mesa, idx_mesa, nombre, talle=None, clave=None):
     """Le pone `nombre` a la pieza que ocupa (`mesa`, `idx_mesa`). Devuelve `(reg_nuevo, ren)`,
     con `ren = {nombre_viejo: nombre_nuevo}` para que el llamador arrastre lo que colgaba del
     nombre (etiqueta, telas, acomodos) con `_migrar_nombres_pieza`.
@@ -945,18 +986,25 @@ def renombrar(reg, mesa, idx_mesa, nombre):
     if not nombre:
         raise ValueError("el nombre no puede estar vacío")
 
-    # 1. Encontrar la pieza. Basta con que UN talle la ubique en ese (mesa, idx_mesa): la posición
-    #    es la misma en todos los talles (son capas de la misma mesa).
-    objetivo = None
-    for clave, por_t in reg.items():
-        for inf in (por_t or {}).values():
-            if not isinstance(inf, dict):
-                continue
-            if inf.get("mesa") == mesa and inf.get("idx_mesa") == idx_mesa:
-                objetivo = clave
-                break
-        if objetivo:
-            break
+    # 1. Encontrar la pieza. Si el llamador ya sabe cuál es (`clave`), ésa. Si no, por (mesa,
+    #    idx_mesa) — y 🔴 NO «basta con que UN talle la ubique»: un talle con una pieza de menos
+    #    tiene sus posiciones corridas (`correspondencia_incompletos`), así que en XS la posición 1
+    #    puede ser OTRA pieza (2026-09-21, «SHORT PR GOLERA»). Con `talle`, se mira sólo ese talle.
+    #    Sin él, sólo si en TODOS los talles esa posición es la misma pieza: si no, se AVISA y no se
+    #    elige nada (regla del usuario: «si no la encuentra debe avisar y más nada»).
+    objetivo = clave if (clave and clave in reg) else None
+    if objetivo is None:
+        candidatas = []
+        for _c, por_t in reg.items():
+            for _t, inf in (por_t or {}).items():
+                if not isinstance(inf, dict) or (talle is not None and str(_t) != str(talle)):
+                    continue
+                if inf.get("mesa") == mesa and inf.get("idx_mesa") == idx_mesa and _c not in candidatas:
+                    candidatas.append(_c)
+        if len(candidatas) > 1:
+            raise ValueError(f"en la mesa {mesa}, posición {idx_mesa}, hay piezas distintas según el "
+                             f"talle ({', '.join(candidatas)}): elegí la pieza en un talle")
+        objetivo = candidatas[0] if candidatas else None
     if objetivo is None:
         raise ValueError(f"no hay ninguna pieza en la mesa {mesa}, posición {idx_mesa}")
     if objetivo == nombre:

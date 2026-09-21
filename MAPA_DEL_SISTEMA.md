@@ -1498,6 +1498,72 @@ guardando **el nombrado de piezas en el molde equivocado** (reproducido: `POST
 > Y la fecha** — o el tema, que las distingue solo: las del camino B hablan del molde con el diseño
 > adentro. **La numeración sigue en 400.**
 
+- **2026-09-21 (513) — CONFIGURACIÓN GUARDADA: el aviso aplica sólo nombres + etiqueta, y aplicar no pisa
+  lo ya marcado.** Pedido del usuario («sí, dale»). (1) Los dos «Aplicar» del aviso verde (panel del
+  pedido y Moldería) mandan `partes: []`: entran SÓLO los nombres y la etiqueta; grupos, variables,
+  telas y planilla sólo si se tildan en la ventana. `verificar_pasos_pedido.mjs` §5 exigía lo
+  contrario (`null` = lo que trae la receta): actualizado a la regla nueva. (2) `molde_config_aplicar`
+  mezcla la ETIQUETA: las piezas que el molde ya tiene marcadas (posición o zonas) quedan como están,
+  la receta completa las demás, y una pieza marcada no se apaga por la receta (`piezas_off`). Sin
+  correr pruebas ([[el-usuario-prueba]]).
+
+- **2026-09-21 (512) — 🔒 CADA MOLDE ES ÚNICO: aplicar una configuración le da CÓDIGOS PROPIOS.** Regla del
+  usuario: *«no se debe mezclar nada, todos los moldes deben ser diferentes; si suben 2 veces el mismo
+  molde, para el sistema son 2 moldes»*. La receta traía las variables y los grupos con los códigos
+  del molde donde se guardó (`v_…`, `gp_…`) y los copiaba tal cual: dos moldes con la MISMA variable,
+  y lo guardado sólo por código (p. ej. `editMarcas[verVariante]`, las marcas TPU/Bordado/DTF del
+  editor) pasaba de uno a otro. Ahora `molde_config_aplicar` genera un código nuevo por cada variable
+  y grupo de la receta (sin chocar con los del molde) y lo reemplaza en TODA la receta como palabra
+  entera (variables, grupos, modelos, telas por variable…). Sigue valiendo 511: se aplica sólo si la
+  receta es de un molde con las MISMAS piezas (mismo archivo o misma huella); el texto ahora dice «se
+  guardó en un molde con otras piezas». ⚠️ Trampa repetida: un script generador con `"\b"` dejó
+  BACKSPACES reales en la regex (se vio con `cat -A`); corregido.
+
+- **2026-09-21 (511) — 🔒 UNA CONFIGURACIÓN GUARDADA DE OTRO MOLDE YA NO SE APLICA NI SE PISA.** Regla del
+  usuario: *«no es ni el mismo molde; eso que está ahí no debería afectar»*. Antes el estado de la
+  lista («parecida», «distinta») era sólo una ayuda y «Aplicar» andaba igual: entraban los nombres y
+  las posiciones de etiqueta de OTRO molde (origen probable del aviso de las mangas, 510: el registro
+  muestra dos «aplicar» a las 11:23/11:24 antes del guardado de la etiqueta). Ahora
+  `_config_es_de_este_molde(cfg, pid)` (mismo sha1 del archivo, o misma huella de piezas = mismo molde
+  con otro diseño) lo exige `POST /api/molde/config/aplicar` (409, no toca nada) y el «guardar encima»
+  (`/guardar` con `id`); en la ventana, «Aplicar» y «Actualizar» quedan apagados para las de otro
+  molde, con el motivo. Sin correr pruebas ([[el-usuario-prueba]]).
+
+- **2026-09-21 (510) — 🐛 ETIQUETA: «MARCO DE NUEVO DONDE QUIERO Y EL AVISO VUELVE A SALIR».** El aviso
+  «tenían la etiqueta en lugares distintos según la variable… quedó la primera» reaparecía después
+  de volver a marcar las mangas. **Causa:** `_etq_posiciones_por_pieza` recorría PRIMERO las claves
+  viejas `variable§pieza` y después las sin namespace, y ante dos lugares distintos se quedaba con la
+  primera → una posición vieja le ganaba a la recién marcada (la marca no quedaba) y el aviso volvía.
+  **Arreglo:** lo sin namespace (lo marcado ahora) GANA; si quedan lugares distintos y ninguno es el
+  actual, **no se elige ninguno** (regla del usuario: no tomar decisiones): la pieza queda sin
+  posición propia y se avisa «marcá dónde va». Entre dos claves que son la misma pieza escrita
+  distinto, gana la que es el nombre real del registro (GET y POST pasan `nombres`). No se pudo ver
+  el caso exacto: el molde (`prod_20260921_111547_1ae8`) ya se borró con «Nuevo pedido». Sin correr
+  pruebas ([[el-usuario-prueba]]).
+
+- **2026-09-21 (509) — 🐛 «NOMBRO UNAS PIEZAS Y ME NOMBRA OTRAS» (molde con diseño con un talle INCOMPLETO).**
+  Molde «SHORT PR GOLERA» (`prod_20260921_104210_f91c`, camino B, 8 piezas): al talle **XS le falta
+  una pieza** (7). `canonizar_orden` sólo reordena talles con la MISMA cantidad (pendiente anotado),
+  y el alta armaba el registro con «la pieza *i* de cada talle» por POSICIÓN → en XS, de la que falta
+  en adelante todo quedaba corrido (medido por superposición: XS = [0, 2, 1, 4, 5, 6, 7] respecto del
+  talle 2). **Arreglo:** `correspondencia_incompletos` (`piezas_con_diseno.py`) /
+  `correspondenciaIncompletos` (`molde/contornos.js`): para los talles incompletos, la homóloga de cada
+  pieza sale del dibujo (`_emparejar_por_solape`, la misma regla) y el registro guarda ESE
+  `idx_mesa`/`pieza_idx`; la que falta no se registra (regla [[talles-piezas-desiguales]]).
+  `PD.renombrar` ya no toma «el primer talle que tenga esa posición»: acepta `clave` (el llamador
+  que ya sabe cuál es) o `talle`, y si no, gana la pieza que ocupa esa posición en MÁS talles.
+  **Segunda vuelta (mismo día), la causa de lo que veía el usuario:** en «Nombrar piezas» con todos
+  los talles a la vista, la pantalla mandaba el `t_idx` de la pieza DENTRO DE SU TALLE como si fuera
+  el del talle guía (`guia_idx`). Tocando la espalda en XS se nombraba el frente del guía, y la misma
+  pieza tocada en dos talles nombraba DOS piezas (de ahí «Espalda derecha 1/2»). Ahora el camino B
+  manda `seleccion: [{talle, t_idx}]` a `/api/plantilla/grupo_pieza` y el servidor busca cada una en
+  el registro de SU talle; si alguna no está, **avisa y no nombra nada**. Regla del usuario: *«si no la
+  encuentra debe avisar y más nada; no debe tomar decisiones»* → `PD.renombrar` sin votación (con
+  posición ambigua entre talles, error), y el alta avisa «Al talle X le falta …» en `advertencias`.
+  ⚠️ Un molde ya cargado conserva su registro viejo: hay que **volver a subirlo**. Sin correr pruebas:
+  lo prueba el usuario ([[el-usuario-prueba]]). Nota: `todasB` en App.jsx nunca se llena
+  (`useState(null)` sin setter): `_homologasB` es código muerto.
+
 - **2026-09-18 (508) — 🐛 JUGADOR Y GOLERO DEL MISMO MOLDE: EL GOLERO SALÍA CON EL ARTE DEL JUGADOR.** Reporte
   del usuario: *«cuando hace la tizada no mantiene el arte de cada molde; números y nombres sí»*.
   Visto en su tizada real (`20260918-165842-b3f9`, 18 filas JUGADOR + 2 GOLERO): todas las piezas
