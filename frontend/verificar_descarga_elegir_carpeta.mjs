@@ -63,7 +63,8 @@ const aMano = [...app.matchAll(/a\.download\s*=/g)];
 ok(aMano.length === 0, `🔴 ningún \`a.download = …\` suelto en App.jsx (hay ${aMano.length})`);
 ok(/import \{[^}]*descargarBlob[^}]*\} from '\.\/descargar\.js'/.test(app), 'se importa `descargarBlob` para los archivos armados en memoria (CSV, guía .ai)');
 ok(/descargarBlob\(blob,\s*`planilla_/.test(app), 'el CSV de la planilla va por descargarBlob');
-ok(/descargarBlob\(blob,\s*m \? m\[1\] : 'guia\.ai'/.test(app), 'la guía .ai va por descargarBlob');
+// (desde 2026-09-22 el .ai se arma en esta computadora: el Blob sale del hilo, no del servidor)
+ok(/descargarBlob\(new Blob\(\[bytes\], \{ type: 'application\/postscript' \}\),\s*`guia_/.test(app), 'la guía .ai va por descargarBlob');
 
 console.log('\n3 · «Descargar todo» elige UNA carpeta');
 ok(/descargarVarios\(items,\s*\{\s*avisar/.test(app), '🔴 «Descargar todo» llama a descargarVarios con la lista de mesas');
@@ -78,7 +79,7 @@ ok(/function esCancelacion[\s\S]*AbortError/.test(mod), 'reconoce la cancelació
 ok(/if \(esCancelacion\(e\)\) return false\s*\/\/ canceló/.test(mod),
    '🔴 cancelar NO descarga nada (ni al respaldo)');
 ok(/if \(esCancelacion\(e\)\) return -1/.test(mod), 'cancelar la carpeta tampoco');
-ok(/function descargaClasica/.test(mod) && /if \(!puedeElegirDonde\(\)\) \{\s*descargaClasica/.test(mod),
+ok(/function descargaClasica/.test(mod) && /if \(!puedeElegirDonde\(\)\) \{\s*(?:try \{ await )?descargaClasica/.test(mod),
    'sin la API cae al <a download> de siempre: la descarga nunca deja de funcionar');
 ok(/await fetch\(url\)/.test(mod) || /fetch\(url\)/.test(mod), 'el archivo se pide con fetch de la misma origen (viaja la sesión)');
 ok(!/\balert\(|\bconfirm\(/.test(mod), 'sin diálogos nativos: los errores van por `avisar`');
@@ -92,7 +93,7 @@ console.log('\n5 · 🔴 SE VE CUÁNTO VA CADA DESCARGA (el navegador ya no mues
 ok(/r\.body[\s\S]{0,200}getReader\(\)/.test(mod), 'se lee `response.body` de a pedazos');
 ok(/Content-Length/.test(mod), 'el total sale del Content-Length que manda el servidor');
 ok(/DESC\.avance\(id, bytes, total\)/.test(mod), 'informa el avance por BYTES en cada pedazo');
-ok(/descargarArchivo[\s\S]{0,900}bajarA\(url, handle, nombre\)/.test(mod),
+ok(/descargarArchivo[\s\S]{0,1800}bajarA\(url, handle, nombre\)/.test(mod),
    'un archivo suelto pasa por el streaming');
 ok(/descargarVarios[\s\S]{0,1600}bajarA\(it\.url, fh, it\.nombre\)/.test(mod),
    '«Descargar todo» también');

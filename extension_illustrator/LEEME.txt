@@ -1,0 +1,22 @@
+USER PRO para Illustrator
+=========================
+
+Arma la plantilla del molde directo en Illustrator: una mesa de trabajo por pieza (con el nombre
+que lee el sistema), las capas (diseno, Editable..., Nombre, Numero..., guias) y el contorno de
+cada pieza. Sin descargar archivos.
+
+Instalar
+--------
+Windows: lo comun es "Instalar-USER-PRO-Illustrator.exe" (se baja desde USER PRO).
+         A mano: doble click en INSTALAR-WINDOWS.bat
+Mac:     doble click en INSTALAR-MAC.command (si no abre: click derecho > Abrir)
+Despues cerrar Illustrator y volver a abrirlo.
+
+Como se usa
+-----------
+El tutorial esta DENTRO de la extension: en Illustrator, Ventana > Extensiones > USER PRO >
+"Como conectar con USER PRO". La primera vez despues de instalar se abre solo.
+
+Ver si esta conectada: en Illustrator, Ventana > Extensiones > USER PRO.
+Usa el puerto 47850 de la propia computadora (solo acepta conexiones de esta misma PC).
+Funciona con Illustrator 2020 o posterior.

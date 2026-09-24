@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>USER PRO · puente</title>
+</head>
+<body>
+  <!-- Invisible: arranca con Illustrator y deja el puente escuchando (ver js/puente.js). -->
+  <script src="./js/puente.js"></script>
+  <script>
+    window.tizadaPuente.iniciar()
+    // La PRIMERA vez con esta versión (recién instalada) se abre solo el panel de USER PRO: ahí está
+    // el tutorial de cómo conectar Illustrator con USER PRO. Un respiro para que Illustrator termine
+    // de abrir.
+    try {
+      var k = 'userpro_panel_abierto_' + window.tizadaPuente.VERSION
+      if (!localStorage.getItem(k)) {
+        setTimeout(function () {
+          try { window.__adobe_cep__.requestOpenExtension('com.tizadapro.illustrator.panel', '') } catch (e) { }
+          try { localStorage.setItem(k, '1') } catch (e) { }
+        }, 3000)
+      }
+    } catch (e) { }
+  </script>
+</body>
+</html>

@@ -158,7 +158,7 @@ export function trazoPersonalizable(doc) {
         if (op === 'BDC' && ins.args.length === 2 && ins.args[0].n === 'OC') {
           const nombres = nombresDe(ins)
           if (nombres.some((x) => !CAPAS_GRAFICAS.has(x))) {
-            if (dentro === 0) { scol = null; sw = null; capa = nombres.find((x) => !CAPAS_GRAFICAS.has(x)) || '' }
+            if (dentro === 0) { capa = nombres.find((x) => !CAPAS_GRAFICAS.has(x)) || '' }   // el trazo vigente se hereda (ver pasadas)
             dentro += 1; continue
           } else if (dentro) dentro += 1
         } else if ((op === 'BDC' || op === 'BMC') && dentro) dentro += 1
@@ -211,7 +211,8 @@ export function pasadasPersonalizable(doc) {
         if (op === 'BDC' && ins.args.length === 2 && ins.args[0].n === 'OC') {
           const nombres = nombresDe(ins)
           if (nombres.some((x) => !CAPAS_GRAFICAS.has(x))) {
-            if (dentro === 0) { scol = null; sw = null; acum = ''; pl = []; capa = nombres.find((x) => !CAPAS_GRAFICAS.has(x)) || '' }
+            // el trazo vigente se HEREDA, como en el PDF (ver `_pasadas_personalizable`, 2026-09-21)
+            if (dentro === 0) { acum = ''; pl = []; capa = nombres.find((x) => !CAPAS_GRAFICAS.has(x)) || '' }
             dentro += 1; continue
           } else if (dentro) dentro += 1
         } else if ((op === 'BDC' || op === 'BMC') && dentro) dentro += 1

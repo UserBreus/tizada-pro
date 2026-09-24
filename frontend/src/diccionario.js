@@ -76,8 +76,6 @@ export const AVISOS_CONOCIDOS = {
     // Las de CONFIGURACIÓN, que estaban hechas a mano y la ayuda no veía (2026-09-01)
     'Crear Nuevo Molde',
     'Piezas del grupo',
-    'Vista previa del molde',
-    'Confirmar Tizada de Sublimación',
   ],
   // cargas (aparecen solas y se van solas: se espera a que terminen)
   cargas: [
@@ -369,14 +367,9 @@ export const DICCIONARIO = {
     como: 'Mirá; no hay nada que tocar.',
   },
   'chip-equipo': {
-    nombre: 'Tu PC',
-    que: 'Si esta computadora está apta para preparar moldes y tizadas rápido (verde), justa (amarillo) o no puede (rojo). Se mide sola al entrar.',
-    como: 'Tocalo para ver el detalle o volver a medir.',
-  },
-  'cfgb-solo-navegador': {
-    nombre: 'El servidor no calcula',
-    que: 'Si todo lo pesado (preparar moldes, analizar diseños, previas y tizadas) lo hace la computadora de cada persona, y el servidor sólo valida y guarda.',
-    como: 'Tocá el interruptor y guardá. Si lo fija el entorno del servidor, acá no se puede cambiar.',
+    nombre: 'Requisitos',
+    que: 'Si esta computadora está apta para TIZADA: verde si llega al ideal, amarillo si cumple el mínimo, rojo si no llega al mínimo. Se mide sola al entrar.',
+    como: 'Tocalo para ver el mínimo, el ideal y lo que tiene esta PC (núcleos, memoria, potencia), con una barra y por cuánto le falta o le sobra.',
   },
   'cfgb-borde-on': {
     nombre: 'Dibujar el borde de corte',
@@ -792,11 +785,6 @@ export const DICCIONARIO = {
     que: 'Mientras se arma, va mostrando en qué va. Al terminar quedan las mesas listas para imprimir.',
     como: 'Esperá a que termine de armar la tizada.',
   },
-  'resultados-hojas': {
-    nombre: 'Hojas para imprimir',
-    que: 'Cada hoja es una mesa de tela lista para el RIP.',
-    como: 'Mirá las hojas que salieron.',
-  },
   'tizada-cancelar': {
     nombre: 'Cancelar',
     que: 'Para la tizada que se está armando. Se frena al terminar el paso en curso, así no queda ningún archivo a medias, y se borra lo que alcanzó a generar.',
@@ -824,6 +812,16 @@ export const DICCIONARIO = {
     nombre: 'Nueva Moldería',
     que: 'Crea una moldería vacía; después se le sube el archivo.',
     como: 'Tocá «Nueva Moldería».',
+  },
+  'molde-buscar': {
+    nombre: 'Buscar molde o variable',
+    que: 'Filtra las molderías mientras escribís. Busca por el nombre del molde o por el de una de sus variables: si escribís una variable, aparece el molde que la tiene. Con el nombre completo muestra sólo ése.',
+    como: 'Escribí parte del nombre del molde o de la variable.',
+  },
+  'pedido-buscar-variable': {
+    nombre: 'Buscar variable',
+    que: 'Filtra las variables mientras escribís. Si escribís el nombre de un molde, aparecen todas sus variables. Con el nombre completo muestra sólo ésa.',
+    como: 'Escribí parte del nombre de la variable o del molde.',
   },
   'molde-nombre': {
     nombre: 'Nombre del molde',
@@ -946,20 +944,6 @@ export const DICCIONARIO = {
     como: 'Revisá las piezas del grupo.',
     ventana: { contenido: 'La lista de piezas de ese grupo',
                botones: ['Asignar piezas'], cuando: 'al terminar de nombrar un grupo', paso: 'config' },
-  },
-  'modal:vista previa del molde': {
-    nombre: 'Vista previa del molde',
-    que: 'El molde en grande, para mirarlo de cerca antes de seguir.',
-    como: 'Mirá el molde y cerrá la ventana cuando termines.',
-    ventana: { contenido: 'El dibujo del molde a pantalla completa',
-               botones: ['Cerrar'], cuando: 'al ampliar el molde', paso: 'config' },
-  },
-  'modal:confirmar tizada de sublimacion': {
-    nombre: 'Confirmar Tizada de Sublimación',
-    que: 'El último repaso antes de mandar a fabricar: qué se va a generar con lo cargado.',
-    como: 'Revisá lo que dice y confirmá.',
-    ventana: { contenido: 'El resumen de lo que se va a fabricar',
-               botones: ['Cancelar', 'Confirmar'], cuando: 'antes de armar la tizada', paso: 'planilla' },
   },
   // La lista de talles de esa ventana: son intercambiables (cada uno elige el suyo).
   'molde-guia-talles': {
@@ -1150,7 +1134,7 @@ export const DICCIONARIO = {
   },
   'var-nombre': {
     nombre: 'Nombre de la variable',
-    que: 'Una variable es una combinación de piezas: «manga corta», «musculosa», «con capucha».',
+    que: 'Una variable es una combinación de piezas; por ejemplo manga corta, musculosa o con capucha.',
     como: 'Escribí el nombre de la variable.',
   },
   'var-elegir-piezas': {

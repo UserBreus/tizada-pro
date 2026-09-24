@@ -7,7 +7,7 @@
 // `null` y el arte se manda pelado, como siempre.
 import { navegadorHace } from './vista/vista.js'
 import { puedeHacer } from './capacidad.js'
-import { traerConCache } from './cache.js'
+import { traerConCache, claveDe, urlDe } from './cache.js'
 import { registrarHilo } from './monitor.js'
 
 async function json(url, opts) {
@@ -30,7 +30,7 @@ export async function prepararArteEnNavegador(archivo, { pid, diseno = null, rut
   const contexto = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_contexto`))
   // la plantilla decide el modo (`arte_es_separado`) igual que en el servidor
   const plantilla = contexto.plantilla_sello
-    ? await traerConCache(`plantilla|${pid}|${contexto.plantilla_sello.join(',')}`, rutaApi(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`))
+    ? await traerConCache(claveDe.plantilla(pid, contexto.plantilla_sello), rutaApi(urlDe.plantilla(pid)))
     : null
   const bytes = new Uint8Array(await archivo.arrayBuffer())
   const w = new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' })

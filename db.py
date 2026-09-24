@@ -14,6 +14,17 @@ import contextlib
 
 import pyodbc
 
+# 🔴 SIN RECICLADO DE CONEXIONES (2026-09-23). `pyodbc.pooling` viene prendido: el `close()` de
+# `cursor()` NO cerraba la conexión, la dejaba guardada para reusarla, y como ningún servidor tiene
+# `CPTimeout` configurado en el driver, las guardadas no vencían nunca: el publicado juntó 134
+# sesiones dormidas en 24 minutos de vida (medido por el usuario, sys.dm_exec_sessions). Apagado,
+# `close()` cierra de verdad. Cuesta reconectar en cada operación (milisegundos), que no se nota: el
+# trabajo pesado ya lo hace el navegador. Va en el CÓDIGO (y no en /etc/odbcinst.ini) para que
+# viaje con el paquete y no dependa de cómo esté configurado cada servidor.
+# ⚠️ Tiene que quedar ANTES de la primera conexión del proceso (el driver lo toma al conectar la
+# primera vez): por eso vive acá, al importar este módulo, que es el único que conecta.
+pyodbc.pooling = False
+
 DB_SERVER = os.environ.get("TIZADA_DB_SERVER") or r"localhost\SQLEXPRESS"
 DB_NAME = os.environ.get("TIZADA_DB_NAME") or "TizadaPro"
 DB_USER = os.environ.get("TIZADA_DB_USER")
@@ -86,8 +97,18 @@ def cursor(commit=True):
 
     Que el rollback sea automático es medio punto de tener la base: una operación a medias
     (p. ej. crear el usuario pero no asignarle el rol) no puede quedar guardada.
+
+    🔴 LEER NO ABRE TRANSACCIÓN (2026-09-22, el usuario con la captura de `sys.dm_exec_sessions`:
+    9 sesiones dormidas con `open_transaction_count = 1`, una de 1420 minutos, todas con el mismo
+    `SELECT registro_rev FROM producto`). Con `autocommit=False` el driver pone IMPLICIT_TRANSACTIONS
+    ON y el primer SELECT ABRE una transacción; `filas()`/`valor()` entran con `commit=False`, así
+    que nadie la cerraba, y como pyodbc reusa las conexiones (pool del driver ODBC), la sesión
+    quedaba dormida con la transacción abierta hasta que a alguien le tocara esa conexión. Eso deja
+    el log de la base sin poder truncarse y traba cualquier cambio de estructura (ALTER/CREATE
+    INDEX espera por el Sch-S de la transacción viva). La lectura ahora va en autocommit: no hay
+    transacción que cerrar y no cuesta ninguna ida y vuelta de más.
     """
-    cn = conectar()
+    cn = conectar(autocommit=not commit)
     try:
         cur = cn.cursor()
         yield cur
@@ -112,7 +133,9 @@ def cursor(commit=True):
 
 
 def filas(sql, *args):
-    """SELECT -> lista de dicts (no tuplas: el código de arriba no debe depender del orden)."""
+    """SELECT -> lista de dicts (no tuplas: el código de arriba no debe depender del orden).
+
+    `commit=False` = SÓLO LECTURA (va en autocommit): no escribir nada acá adentro."""
     with cursor(commit=False) as cur:
         cur.execute(sql, args)
         cols = [c[0] for c in cur.description]
@@ -721,7 +744,7 @@ def _proyectar_un_producto(pid, p, cur=None):
 _PT_IDX_MESA = None
 
 
-def _pt_tiene_idx_mesa():
+def _pt_tiene_idx_mesa(cur=None):
     """¿La base ya tiene la columna `idx_mesa` (camino B)? Cacheado: es una pregunta por proceso.
 
     Se pregunta en vez de asumir porque un servidor publicado puede estar corriendo con el
@@ -731,7 +754,14 @@ def _pt_tiene_idx_mesa():
     global _PT_IDX_MESA
     if _PT_IDX_MESA is None:
         try:
-            _PT_IDX_MESA = valor("SELECT COL_LENGTH('dbo.pieza_talle','idx_mesa')") is not None
+            # con `cur`, en la MISMA conexión de quien llama: dentro de una transacción de
+            # escritura no se abre una segunda conexión (ver el comentario de `_producto_id`)
+            if cur is not None:
+                cur.execute("SELECT COL_LENGTH('dbo.pieza_talle','idx_mesa')")
+                _r = cur.fetchone()
+                _PT_IDX_MESA = bool(_r) and _r[0] is not None
+            else:
+                _PT_IDX_MESA = valor("SELECT COL_LENGTH('dbo.pieza_talle','idx_mesa')") is not None
         except Exception:
             _PT_IDX_MESA = False
     return _PT_IDX_MESA
@@ -788,7 +818,7 @@ def guardar_registro(legacy_pid, piezas, reg):
         cur.execute("UPDATE producto SET registro_rev = registro_rev + 1 WHERE id=?", pid)
         # EN LOTE: con 30 talles son ~1000 filas; de a una eran ~1000 idas y vueltas al
         # server por cada guardado de un nombre. `fast_executemany` las manda juntas.
-        _con_im = _pt_tiene_idx_mesa()
+        _con_im = _pt_tiene_idx_mesa(cur)
         _filas_pt = []
         for clave, por_t in (reg or {}).items():
             fid = fila_id.get(clave)

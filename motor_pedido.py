@@ -247,6 +247,40 @@ CAPAS_GRAFICAS = CAPAS_NO_PERS - {"personalizable"}
 
 
 # ════════════════ CATÁLOGO DE FUENTES ════════════════
+# 🔴 LO QUE SE SABE DE CADA ARCHIVO, UNA SOLA VEZ (2026-09-22, «el servidor sólo sostiene el sistema
+# y la base»). El catálogo se pide en casi cada request (`motor_b`, `arte_contexto`, el plan, cada
+# `resolver_fuente`) y abría CADA tipografía con PyMuPDF y le calculaba el md5, todas, cada vez. El
+# nombre interno y el hash sólo cambian si cambia el archivo: se guardan por (ruta, mtime, tamaño).
+# `registrar_fuente` lo deja anotado al subirla con el nombre que leyó el navegador.
+_FUENTE_INFO = {}
+
+
+def _info_fuente(ruta):
+    st = os.stat(ruta)
+    k = (os.path.normcase(os.path.abspath(ruta)), st.st_mtime_ns, st.st_size)
+    hit = _FUENTE_INFO.get(k)
+    if hit is None:
+        with open(ruta, "rb") as fh:
+            datos = fh.read()
+        hit = {"interno": _FUENTE_INTERNO.pop(k, None) or fitz.Font(fontbuffer=datos).name,
+               "hash": hashlib.md5(datos).hexdigest()[:12]}
+        _FUENTE_INFO[k] = hit
+    return hit
+
+
+_FUENTE_INTERNO = {}
+
+
+def registrar_fuente(ruta, interno):
+    """Anota el nombre interno de una tipografía recién guardada (lo leyó el navegador con el mismo
+    MuPDF): el catálogo no la vuelve a abrir para saberlo."""
+    try:
+        st = os.stat(ruta)
+        _FUENTE_INTERNO[(os.path.normcase(os.path.abspath(ruta)), st.st_mtime_ns, st.st_size)] = str(interno)
+    except OSError:
+        pass
+
+
 def catalogo_fuentes(carpeta):
     """`carpeta` puede ser una ruta, una LISTA de rutas (las primeras PISAN a las últimas:
     fuentes del pedido antes que las del sistema) o `{"carpetas": [...], "alias": {...}}`."""
@@ -264,9 +298,8 @@ def catalogo_fuentes(carpeta):
             if not ruta.lower().endswith((".ttf", ".otf")):
                 continue
             try:
-                f = fitz.Font(fontfile=ruta)
-                cat[ruta] = {"interno": f.name, "archivo": os.path.basename(ruta),
-                             "hash": hashlib.md5(open(ruta, "rb").read()).hexdigest()[:12]}
+                _inf = _info_fuente(ruta)
+                cat[ruta] = {"interno": _inf["interno"], "archivo": os.path.basename(ruta), "hash": _inf["hash"]}
             except Exception:
                 pass
     return cat
@@ -375,12 +408,28 @@ def _ordenar_por_archivo(doc, nombres):
     return [n for n in orden if n in set_nombres] + [n for n in nombres if n not in set_orden]
 
 
+_ORDEN_CAPAS = {}
+
+
 def talles_orden_archivo(path, talles):
     """Ordena una lista de talles según el orden de capas del archivo .ai/.pdf.
-    Pensada para usarse desde el servidor sin reconstruir el registro."""
+    Pensada para usarse desde el servidor sin reconstruir el registro.
+
+    El orden de las capas se lee UNA vez por archivo (ruta, fecha, tamaño): el servidor lo pedía en
+    casi cada request (`_orden_var`, los editables) y abría el molde cada vez (2026-09-22)."""
     try:
-        with fitz.open(path) as doc:
-            return _ordenar_por_archivo(doc, talles)
+        st = os.stat(path)
+        k = (os.path.normcase(os.path.abspath(path)), st.st_mtime_ns, st.st_size)
+        orden = _ORDEN_CAPAS.get(k)
+        if orden is None:
+            with fitz.open(path) as doc:
+                orden = _orden_capas_archivo(doc)
+            if len(_ORDEN_CAPAS) > 64:
+                _ORDEN_CAPAS.clear()
+            _ORDEN_CAPAS[k] = orden
+        nombres = list(talles)
+        set_n, set_o = set(nombres), set(orden)
+        return [n for n in orden if n in set_n] + [n for n in nombres if n not in set_o]
     except Exception:
         return list(talles)
 
@@ -2123,7 +2172,7 @@ def _trazo_personalizable(path_arte):
                 _nombres = [_norm_nombre(n) for n in _nombres_oc(inst.operands[1], pg)]
                 if any(n not in CAPAS_GRAFICAS for n in _nombres):
                     if dentro == 0:
-                        scol, sw = None, None   # reset al entrar (sin arrastrar estado de afuera)
+                        # el trazo vigente se HEREDA, como en el PDF (ver `_pasadas_personalizable`)
                         _capa = next((n for n in _nombres if n not in CAPAS_GRAFICAS), "")
                     dentro += 1; continue
                 elif dentro:
@@ -2248,7 +2297,12 @@ def _pasadas_personalizable(path_arte):
                 _nombres = [_norm_nombre(n) for n in _nombres_oc(inst.operands[1], pg)]
                 if any(n not in CAPAS_GRAFICAS for n in _nombres):
                     if dentro == 0:
-                        scol, sw = None, None    # sin arrastrar el estado de trazo de afuera
+                        # 🔴 EL TRAZO VIGENTE SE HEREDA (2026-09-21, «el número de la espalda salió sin
+                        # contorno»). Acá se borraban `scol`/`sw` al entrar a la capa, pero el PDF NO
+                        # los borra: en el arte «jugador» la mesa 2 fija el color y el grosor del
+                        # contorno UNA vez, en la capa del nombre, y el número los reusa (sus `S` no
+                        # vuelven a poner `K`/`w`). Con el borrado esos `S` no tenían color y el número
+                        # quedaba con la pila sólo de relleno. `q`/`Q` ya lleva el estado real.
                         _acum, _pl = "", []      # arranca la capa
                         _capa = next((n for n in _nombres if n not in CAPAS_GRAFICAS), "")
                     dentro += 1; continue
@@ -2326,6 +2380,51 @@ _PERS_CACHE = {}   # memoización por (arte, mtime): extraer_personalizacion es 
 _MEMO_ARTE = {}
 
 
+def memo_arte_leer(nombre, path_arte):
+    """Lo que `_memo_arte` ya tiene de ESTE archivo (en el proceso o en disco), o None. Para el
+    servidor que no calcula (2026-09-22): si ya está, se usa; si no, lo calcula el navegador."""
+    import copy as _copy
+    import pickle as _pickle
+    try:
+        _st = os.stat(path_arte)
+        firma = (_st.st_mtime_ns, _st.st_size)
+    except OSError:
+        return None
+    k = (nombre, os.path.normcase(os.path.abspath(path_arte)), firma)
+    hit = _MEMO_ARTE.get(k)
+    if hit is not None:
+        return _copy.deepcopy(hit)
+    ruta = os.path.join(os.path.dirname(path_arte), "memo_cache", f"{nombre}_{firma[0]}_{firma[1]}.pkl")
+    try:
+        with open(ruta, "rb") as fh:
+            val = _pickle.load(fh)
+        _MEMO_ARTE[k] = val
+        return _copy.deepcopy(val)
+    except Exception:
+        return None
+
+
+def memo_arte_guardar(nombre, path_arte, val):
+    """Deja en la memoria de `_memo_arte` un resultado que calculó el NAVEGADOR (mismo formato)."""
+    import pickle as _pickle
+    try:
+        _st = os.stat(path_arte)
+        firma = (_st.st_mtime_ns, _st.st_size)
+    except OSError:
+        return
+    _MEMO_ARTE[(nombre, os.path.normcase(os.path.abspath(path_arte)), firma)] = val
+    carpeta = os.path.join(os.path.dirname(path_arte), "memo_cache")
+    ruta = os.path.join(carpeta, f"{nombre}_{firma[0]}_{firma[1]}.pkl")
+    try:
+        os.makedirs(carpeta, exist_ok=True)
+        tmp = f"{ruta}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as fh:
+            _pickle.dump(val, fh, protocol=_pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, ruta)
+    except Exception:
+        pass
+
+
 def _memo_arte(nombre, path_arte, calc):
     """Resultado de `calc()` para ESTE archivo (por mtime + tamaño), memorizado en el proceso y
     en disco. Devuelve una COPIA: quien lo use puede modificarlo sin ensuciar la memoria."""
@@ -2387,7 +2486,10 @@ def extraer_personalizacion(path_arte, campos=None):
     vuelve a recorrer el arte entero."""
     if campos is not None:
         return _extraer_personalizacion_crudo(path_arte, campos)
-    return _memo_arte("personalizacion", path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
+    # «_v2» (2026-09-22): la pila de apariencias ahora hereda el trazo vigente (ver
+    # `_pasadas_personalizable`). El memo en disco va por archivo, no por versión del código: sin
+    # cambiarle el nombre, un arte ya leído seguía devolviendo el número SIN su borde.
+    return _memo_arte("personalizacion_v2", path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
 
 
 def _extraer_personalizacion_crudo(path_arte, campos=None):
@@ -2613,16 +2715,25 @@ def _norm_generico(s):
 
 
 def _es_capa_editable(nombre):
-    """True si la capa OCG es un OBJETO EDITABLE: su nombre empieza con 'editable'."""
-    return _norm_nombre(nombre).startswith("editable")
+    """True si la capa OCG es un OBJETO EDITABLE: la palabra «editable» aparece EN CUALQUIER PARTE
+    del nombre, en mayúsculas o minúsculas («Editable TPU», «EDITABLE», «Editablecosopere»,
+    «Editable_coso. pere», «Logo editable»). Regla del usuario 2026-09-23: «detecta la palabra
+    editable y ya dice esto es editable». Antes tenía que EMPEZAR con «editable».
+    ⚠️ Idéntico en `frontend/src/motor/nombres.js esCapaEditable`."""
+    return "editable" in _norm_nombre(nombre)
+
+
+# la palabra «editable» con los separadores que la rodean (espacios, guiones, guion bajo, puntos)
+_RX_EDITABLE = __import__("re").compile(r"[\s\-_.]*editable(?:s(?=[\s\-_.]|$))?[\s\-_.]*", __import__("re").I)
 
 
 def _nombre_editable(capa):
-    """Nombre legible del objeto: quita el prefijo 'editable' (con o sin separador)."""
-    import re as _re
-    s = str(capa).strip()
-    m = _re.match(r'(?i)^\s*editable\b[\s\-_]*', s)
-    return (s[m.end():].strip() if m else s) or "Editable"
+    """Nombre legible del objeto: la capa SIN la palabra «editable» (esté donde esté) ni los
+    separadores que la rodean: «Editable TPU» y «Editable_TPU» → «TPU» (el MISMO objeto: antes el
+    guion bajo no se sacaba y eran dos), «Editablecosopere» → «cosopere», «Logo editable» → «Logo».
+    ⚠️ Idéntico en `frontend/src/motor/nombres.js nombreEditable`."""
+    s = " ".join(_RX_EDITABLE.sub(" ", str(capa)).split())
+    return s.strip(" -_.") or "Editable"
 
 
 def extraer_editables(path_arte, con_thumb=True):
@@ -2915,6 +3026,10 @@ MARCAS_PROCESO = {
 CRUZ_MM = 30.0        # 3 cm de PUNTA A PUNTA (1,5 cm cada brazo)
 CRUZ_TRAZO_MM = 1.6   # bien gruesa: tiene que verse de lejos en la mesa (pedido del usuario)
 CRUZ_LETRA_MM = 7.0   # alto de la letra, que va DENTRO de un cuadrante de la cruz
+# HALO BLANCO alrededor de la cruz y de la letra (2026-09-22, «la marca tiene que resaltar sobre el
+# diseño»): negro puro sobre un diseño oscuro no se veía. Blanco en sublimación = tela sin tinta, así
+# que con el halo la marca se ve sobre CUALQUIER fondo, sin adivinar colores. Mm de cada lado.
+CRUZ_HALO_MM = 1.2
 
 
 def _centro_editable(tf, obj, cont, W, H, B, pos_override=None, referencia="alto"):
@@ -2941,9 +3056,11 @@ def _ops_cruz_proceso(cx, cy, marca, fuente=None):
         return ""
     r = (CRUZ_MM * MM) / 2.0
     w = CRUZ_TRAZO_MM * MM
-    ops = ["q", "0 0 0 1 K", f"{w:.3f} w", "0 J",
-           f"{cx - r:.3f} {cy:.3f} m {cx + r:.3f} {cy:.3f} l S",
-           f"{cx:.3f} {cy - r:.3f} m {cx:.3f} {cy + r:.3f} l S"]
+    _hw = w + 2.0 * CRUZ_HALO_MM * MM
+    _lh = f"{cx - r:.3f} {cy:.3f} m {cx + r:.3f} {cy:.3f} l S"
+    _lv = f"{cx:.3f} {cy - r:.3f} m {cx:.3f} {cy + r:.3f} l S"
+    ops = ["q", "0 0 0 0 K", f"{_hw:.3f} w", "1 J", _lh, _lv,      # el halo blanco, debajo
+           "0 0 0 1 K", f"{w:.3f} w", "0 J", _lh, _lv]
     # LA LETRA VA ADENTRO DE UN CUADRANTE (el de arriba a la derecha), no al costado: así la marca
     # entra completa en los 3 cm y el cruce —que es el punto exacto donde va el objeto— queda libre.
     if fuente is not None:
@@ -2956,9 +3073,15 @@ def _ops_cruz_proceso(cx, cy, marca, fuente=None):
                 _an = CRUZ_LETRA_MM * MM * 0.7
             # centro del cuadrante = a mitad de camino entre el cruce y la punta de cada brazo
             _qx, _qy = cx + r / 2.0, cy + r / 2.0
-            ops.append("0 0 0 1 k")
             # ojo: la firma es ops_texto(texto, size, x, y) — y devuelve SOLO el path (sin pintar)
-            ops.append(fuente.ops_texto(info["letra"], size, _qx - _an / 2.0, _qy - (CRUZ_LETRA_MM * MM) / 2.0))
+            _pl = fuente.ops_texto(info["letra"], size, _qx - _an / 2.0, _qy - (CRUZ_LETRA_MM * MM) / 2.0)
+            ops.append("0 0 0 0 K")                                  # halo blanco de la letra
+            ops.append(f"{2.0 * CRUZ_HALO_MM * MM:.3f} w")
+            ops.append("1 j")
+            ops.append(_pl)
+            ops.append("S")
+            ops.append("0 0 0 1 k")
+            ops.append(_pl)
             ops.append("f")
         except Exception:
             pass
@@ -3202,34 +3325,90 @@ def _segmentos_vector(page, segs, T, color, width, oc=0):
     sh.commit()
 
 
-def _guia_capas_data(path_plantilla, registro, config, talle_guia, rango, referencia, piezas_incluir, limpio):
+def _contorno_corrido(c, dx):
+    """Copia del contorno corrida `dx` en x (segmentos y caja): para poner varias mesas de un molde
+    una al lado de la otra en la misma guía."""
+    import copy as _cp
+    c = _cp.deepcopy(c)
+    segs = []
+    for sg in c.get("segmentos") or []:
+        sg = list(sg)
+        if sg and sg[0] in ("m", "l") and len(sg) >= 3:
+            sg[1] += dx
+        elif sg and sg[0] == "c" and len(sg) >= 7:
+            sg[1] += dx; sg[3] += dx; sg[5] += dx
+        elif sg and sg[0] == "re" and len(sg) >= 5:
+            sg[1] += dx
+        segs.append(sg)
+    c["segmentos"] = segs
+    for _k in ("bbox_raw", "bbox_mu"):
+        if c.get(_k) and len(c[_k]) == 4:
+            b = list(c[_k]); b[0] += dx; b[2] += dx; c[_k] = b
+    return c
+
+
+def _guia_capas_data(path_plantilla, registro, config, talle_guia, rango, referencia, piezas_incluir, limpio,
+                     detectar=None, extraer=None, anchos=None, talles_sel=None):
     """Geometría de la guía (compartida por el PDF y el .ai): detecta las piezas y arma, por talle
     incluido, la lista de items {segs, nombre, ccx, ccy, wC (caja diseño), hC} + el bbox del conjunto.
-    Devuelve (base_deteccion, capas_data)."""
+    Devuelve (base_deteccion, capas_data).
+
+    `detectar(talle_ref)`, `extraer(mesa, talle)` y `anchos()` (ancho de cada mesa) son los
+    cálculos sobre el ARCHIVO: sin darlos se hacen acá; el servidor los pide al navegador
+    (2026-09-22, `servidor._calcular`).
+
+    `talles_sel` (sólo en «por talle»): QUÉ talles incluir (uno, algunos o todos; 2026-09-23,
+    «Crear en Illustrator» con los talles elegidos). Sin él, todos. Se respeta el orden del archivo."""
     rango = rango or []
     guia_es_ancho = str(referencia).lower().startswith("anch")
-    base = detectar_piezas(path_plantilla, talle_ref=talle_guia, ancho_preview=300)
+    base = (detectar(talle_guia) if detectar else detectar_piezas(path_plantilla, talle_ref=talle_guia, ancho_preview=300))
     mesa = base["mesa"]
     if config == "talle":
         talles_inc = base.get("talles", []) or [base["talle_ref"]]
+        if talles_sel:
+            _sel = {str(t) for t in talles_sel}
+            talles_inc = [t for t in talles_inc if str(t) in _sel]
     else:
         talles_inc = [talle_guia or base["talle_ref"]]
-    doc_src = _abrir(path_plantilla)
+    doc_src = None if (extraer and anchos) else _abrir(path_plantilla)
+    _anchos = anchos() if anchos else [doc_src[_i].rect.width for _i in range(doc_src.page_count)]
+    _extraer = extraer or (lambda _m, _t: extraer_piezas_mesa(doc_src, _m, _t))
+    # 🔴 MOLDE CON EL DISEÑO ADENTRO (camino B): la detección devuelve `mesa: None` porque sus
+    # piezas están repartidas en UNA O VARIAS mesas. Antes se pedía `extraer_piezas_mesa(doc, None,
+    # t)` y reventaba con «unsupported operand type(s) for -: 'NoneType' and 'int'» al descargar la
+    # base o la guía (reporte del usuario 2026-09-21, servidor). Ahora se recorren TODAS sus mesas y
+    # se ponen una al lado de la otra (cada una corrida el ancho de las anteriores).
+    if mesa is None:
+        _mesas = list(range(1, len(_anchos) + 1))
+    else:
+        _mesas = [mesa]
+    _dx_mesa, _acum = {}, 0.0
+    for _m in _mesas:
+        _dx_mesa[_m] = _acum
+        _acum += _anchos[_m - 1] + 60.0
     capas_data = []   # [{talle, items:[{segs,nombre,ccx,ccy,wC,hC}], minX,minY,maxX,maxY}]
     for t in talles_inc:
-        conts = extraer_piezas_mesa(doc_src, mesa, t)
+        conts = []                      # (mesa, índice en la mesa, contorno) de todas las mesas
+        for _m in _mesas:
+            for _i, _c in enumerate(_extraer(_m, t) or []):
+                conts.append((_m, _i, _c))
         if not conts:
             continue
-        nombres = {}
+        nombres = {}                    # (mesa, índice en la mesa) → nombre
         for nombre, por_talle in (registro or {}).items():
             info = por_talle.get(t)
-            if info and info.get("mesa") == mesa and info.get("pieza_idx") is not None:
-                nombres[info["pieza_idx"]] = nombre
+            if not info or info.get("mesa") not in _mesas:
+                continue
+            _k = info.get("idx_mesa", info.get("pieza_idx"))
+            if _k is not None:
+                nombres[(info.get("mesa"), int(_k))] = nombre
         md = medidas_diseno(registro, referencia, talle_guia=t) if (config == "default" and registro) else {}
         items = []; minX = minY = 1e18; maxX = maxY = -1e18
-        for i, c in enumerate(conts):
+        for _m, i, c in conts:
+            if _dx_mesa[_m]:
+                c = _contorno_corrido(c, _dx_mesa[_m])
             U = c["user_unit"]; w_cm = c["w"] / U / CM; h_cm = c["h"] / U / CM
-            nombre = nombres.get(i, "")
+            nombre = nombres.get((_m, i), "")
             if piezas_incluir is not None and nombre not in piezas_incluir:
                 continue   # SOLO las piezas de la variante en curso (el resto no se dibuja)
             if config == "talle":

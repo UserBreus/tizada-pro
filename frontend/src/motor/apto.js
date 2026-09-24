@@ -46,3 +46,59 @@ export function evaluarEquipo(forzar = false) {
   try { sessionStorage.setItem('tizada_apto', JSON.stringify(_cache)) } catch { /* sin storage */ }
   return _cache
 }
+
+// ── REQUISITOS: MÍNIMO E IDEAL (pedido del usuario 2026-09-24: «en el pedido, un espacio que diga el
+// requisito mínimo para que TIZADA funcione correcto y ágil, el ideal, lo que tiene la PC, si está
+// apta o no, con una barra de si está más cerca del mínimo o del ideal, si supera el ideal o está
+// por debajo del mínimo, y por cuánto»). El MÍNIMO es el mismo umbral de «apta» de `evaluarEquipo`
+// (por debajo, el veredicto es «justa» o «no»: NO APTA — el servidor no hace el trabajo por ella).
+// El IDEAL: el doble de núcleos y de memoria, y la potencia de una PC de escritorio actual (la
+// de referencia, 12 hilos, da ~100 puntos).
+export const REQUISITOS = {
+  nucleos: { nombre: 'Núcleos del procesador', corto: 'núcleos', unidad: 'núcleos', minimo: 4, ideal: 8 },
+  memoria: { nombre: 'Memoria RAM', corto: 'memoria RAM', unidad: 'GB', minimo: 8, ideal: 16 },
+  potencia: { nombre: 'Potencia medida', corto: 'potencia', unidad: 'puntos', minimo: UMBRAL_PUNTOS * 2, ideal: 60 },
+}
+
+/**
+ * Lo que tiene esta PC contra los requisitos. `v` = `evaluarEquipo()`; `ramExactaGb` = la RAM
+ * exacta si se sabe (la da la extensión de Illustrator): el navegador la informa redondeada y con
+ * tope en 8 GB, así que sin eso «8» quiere decir «8 o más».
+ * → `{items: [{clave, nombre, unidad, tiene, minimo, ideal, pos, estado, texto, tope}], general: {estado, pos, texto}}`
+ *   · `pos` 0..1 para la barra: el mínimo en la MITAD, el ideal al final;
+ *   · `estado`: 'debajo' (no llega al mínimo) · 'entre' (entre mínimo e ideal) · 'ideal' (llega o pasa).
+ */
+export function compararRequisitos(v, ramExactaGb = null) {
+  const num = (x) => Math.round(x * 10) / 10
+  const fmt = (x) => String(num(x)).replace('.', ',')
+  const medir = (clave, tiene, tope = false) => {
+    const r = REQUISITOS[clave]
+    if (tiene == null) return { clave, ...r, tiene: null, pos: 0, estado: 'debajo', texto: 'el navegador no lo informa', tope }
+    const pos = tiene < r.minimo ? 0.5 * tiene / r.minimo
+      : tiene < r.ideal ? 0.5 + 0.5 * (tiene - r.minimo) / (r.ideal - r.minimo) : 1
+    let estado, texto
+    if (tiene < r.minimo) { estado = 'debajo'; texto = `le faltan ${fmt(r.minimo - tiene)} ${r.unidad} para el mínimo` }
+    else if (tiene < r.ideal) {
+      estado = 'entre'
+      texto = tope ? `cumple el mínimo · el navegador no deja saber si llega al ideal (${r.ideal} ${r.unidad})`
+        : `cumple el mínimo · le faltan ${fmt(r.ideal - tiene)} ${r.unidad} para el ideal`
+    } else { estado = 'ideal'; texto = tiene > r.ideal ? `supera el ideal por ${fmt(tiene - r.ideal)} ${r.unidad}` : 'llega justo al ideal' }
+    return { clave, ...r, tiene, pos, estado, texto, tope }
+  }
+  const memTope = !ramExactaGb && v && v.memoriaGb >= 8
+  const items = [
+    medir('nucleos', v ? v.nucleos : null),
+    medir('memoria', ramExactaGb || (v ? v.memoriaGb : null), memTope),
+    medir('potencia', v ? v.puntos : null),
+  ]
+  const navOk = !(v && v.nivel === 'no' && /navegador/i.test(v.motivo || ''))
+  const peor = items.reduce((a, b) => (b.pos < a.pos ? b : a))
+  let estado, texto
+  if (!navOk) { estado = 'debajo'; texto = 'Este navegador no puede: usá Chrome o Edge actualizados.' }
+  else if (items.some((i) => i.estado === 'debajo')) {
+    estado = 'debajo'
+    texto = 'NO APTA: no llega al mínimo en ' + items.filter((i) => i.estado === 'debajo').map((i) => i.corto).join(', ') + '.'
+  } else if (items.every((i) => i.estado === 'ideal')) { estado = 'ideal'; texto = 'APTA · llega al ideal: TIZADA anda rápido.' }
+  else { estado = 'entre'; texto = 'APTA · cumple el mínimo: TIZADA funciona bien; con el ideal los moldes grandes van más rápido.' }
+  return { items, navOk, general: { estado, pos: navOk ? peor.pos : 0, texto } }
+}

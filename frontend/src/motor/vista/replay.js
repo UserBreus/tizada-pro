@@ -25,7 +25,7 @@ const OPS = new Set(['q', 'Q', 'cm', 'm', 'l', 'c', 'v', 'y', 'h', 're', 'W', 'W
  * Prepara la página `pagina` de `doc` para repetirla: parsea su contenido y arma una lista de
  * dibujo por XObject. Devuelve `null` si la página no se puede repetir (algo fuera del repertorio).
  */
-export function prepararReplay(mupdf, doc, pagina) {
+export function prepararReplay(mupdf, doc, pagina, cacheXO = null, claveDe = null) {
   const page = doc.loadPage(pagina)
   try {
     const obj = page.getObject()
@@ -43,6 +43,17 @@ export function prepararReplay(mupdf, doc, pagina) {
       xo.forEach((v, k) => {
         const st = v.get('Subtype')
         if (!st || st.isNull() || st.asName() !== 'Form') { xobjs.set(String(k), null); return }
+        // `cacheXO` (Map): la lista de un XObject que YA se armó en OTRO documento con el mismo
+        // dibujo se reusa. Lo usa la ficha: cada pieza de la guía es un PDF aparte que trae la MESA
+        // entera del talle como XObject — sin esto se interpretaba la mesa completa una vez POR
+        // PIEZA (2026-09-22, «la ficha tarda más de 40 s»).
+        if (cacheXO) {
+          const kx = claveDe ? claveDe(v, String(k)) : claveXObject(v)
+          let l = kx ? cacheXO.get(kx) : undefined
+          if (!l) { l = listaDeXObject(mupdf, doc, v); if (kx) cacheXO.set(kx, l) }
+          xobjs.set(String(k), l)
+          return
+        }
         xobjs.set(String(k), listaDeXObject(mupdf, doc, v))
       })
     }
@@ -53,10 +64,30 @@ export function prepararReplay(mupdf, doc, pagina) {
       }
     }
     const b = page.getBounds()
-    return { ops, xobjs, base, bounds: b, destroy() { for (const x of xobjs.values()) if (x) { try { x.dl.destroy() } catch { /* nada */ } } xobjs.clear() } }
+    // con `cacheXO` las listas son del que armó la caché: las destruye él (`destruirCacheXO`)
+    return { ops, xobjs, base, bounds: b, destroy() { if (!cacheXO) for (const x of xobjs.values()) if (x) { try { x.dl.destroy() } catch { /* nada */ } } xobjs.clear() } }
   } finally {
     page.destroy()
   }
+}
+
+/** Huella de un Form XObject (su contenido crudo + caja + matriz): dos iguales dan la misma lista. */
+function claveXObject(xobj) {
+  try {
+    const raw = xobj.readRawStream().asUint8Array()
+    let h = 2166136261 >>> 0
+    for (let i = 0; i < raw.length; i++) { h ^= raw[i]; h = Math.imul(h, 16777619) >>> 0 }
+    const bb = xobj.get('BBox'), mo = xobj.get('Matrix')
+    return `${raw.length}|${h}|${bb && !bb.isNull() ? bb.toString() : ''}|${mo && !mo.isNull() ? mo.toString() : ''}`
+  } catch {
+    return null
+  }
+}
+
+/** Libera las listas de una caché de `prepararReplay`. */
+export function destruirCacheXO(cacheXO) {
+  for (const x of (cacheXO || new Map()).values()) if (x) { try { x.dl.destroy() } catch { /* nada */ } }
+  if (cacheXO) cacheXO.clear()
 }
 
 function leerContenido(pageObj) {

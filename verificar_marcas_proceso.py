@@ -55,6 +55,12 @@ ok(abs(_largo_v - 30.0) < 0.01, f"el brazo vertical mide 3 cm ({_largo_v:.2f} mm
 ok("0 0 0 1 K" in ops, "va en negro puro (0 0 0 1 K), sin depender del perfil de color")
 ok(f"{MP.CRUZ_TRAZO_MM * MP.MM:.3f} w" in ops, f"la línea es GRUESA ({MP.CRUZ_TRAZO_MM} mm)")
 ok(MP.CRUZ_TRAZO_MM >= 1.2, f"…y se ve de lejos: {MP.CRUZ_TRAZO_MM} mm de trazo")
+# HALO BLANCO (2026-09-22, «la marca tiene que resaltar sobre el diseño»): primero el blanco más
+# grueso, después el negro encima — se ve sobre un diseño claro Y sobre uno oscuro
+_hw = MP.CRUZ_TRAZO_MM * MP.MM + 2.0 * MP.CRUZ_HALO_MM * MP.MM
+ok("0 0 0 0 K" in ops and ops.index("0 0 0 0 K") < ops.index("0 0 0 1 K"),
+   "lleva HALO blanco (0 0 0 0 K) DEBAJO de la cruz negra")
+ok(f"{_hw:.3f} w" in ops, f"el halo es más grueso que la cruz ({MP.CRUZ_HALO_MM} mm de cada lado)")
 ok(MP._ops_cruz_proceso(0, 0, "no_existe") == "", "una marca desconocida no dibuja nada")
 ok(sorted(MP.MARCAS_PROCESO) == ["bordado", "dtf", "tpu"], "las tres opciones son TPU, Bordado y DTF")
 ok([v["letra"] for v in MP.MARCAS_PROCESO.values()] == ["T", "B", "D"], "cada una con su letra")

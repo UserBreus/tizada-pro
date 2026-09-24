@@ -31,7 +31,6 @@ export const normCapa = (s) => normNombre(String(s))
 // los espacios de Python (`str.isspace`), como clase de expresión regular
 export const WS_PY = '\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
 const RX_GENERICO = new RegExp('[' + WS_PY + ']+\\p{Nd}+[' + WS_PY + ']*$', 'u')
-const RX_WS = new RegExp('^[' + WS_PY + ']$')
 
 /** `_norm_generico`: además sin el número final («Frente 8» → «frente»). */
 export function normGenerico(s) {
@@ -40,32 +39,25 @@ export function normGenerico(s) {
 
 /** `_es_capa_guia`: la capa «guías» del arte (texto para el sistema; nunca se imprime). */
 export const esCapaGuia = (nombre) => ['guias', 'guia', 'guides'].includes(normNombre(nombre || ''))
-/** `_es_capa_editable`: una capa OCG «Editable …». */
-export const esCapaEditable = (nombre) => normNombre(nombre || '').startsWith('editable')
+/**
+ * `_es_capa_editable`: la palabra «editable» EN CUALQUIER PARTE del nombre de la capa, en
+ * mayúsculas o minúsculas (regla del usuario 2026-09-23: «Editablecosopere», «Editable_coso. pere»,
+ * «Logo editable» también son editables). Antes tenía que EMPEZAR con «editable».
+ */
+export const esCapaEditable = (nombre) => normNombre(nombre || '').includes('editable')
+
+// la palabra «editable» con los separadores que la rodean — `_RX_EDITABLE` del Python
+const RX_EDITABLE = new RegExp('[' + WS_PY + '\\-_.]*editable(?:s(?=[' + WS_PY + '\\-_.]|$))?[' + WS_PY + '\\-_.]*', 'giu')
 
 /**
- * `_nombre_editable(capa)`: sin el prefijo «editable» (con o sin separador), como el Python
- * (`re.sub(r"^\s*editable\b[\s\-_]*", "", s.strip(), flags=re.I)`, con `\s`/`\b` de Python).
+ * `_nombre_editable(capa)`: la capa SIN la palabra «editable» (esté donde esté) ni los separadores
+ * que la rodean: «Editable TPU» y «Editable_TPU» → «TPU» (el MISMO objeto), «Editablecosopere» →
+ * «cosopere», «Logo editable» → «Logo». Igual que el Python (`" ".join(sub(...).split())` y
+ * `strip(" -_.")`).
  */
 export function nombreEditable(capa) {
-  const s = pyStrip(String(capa))
-  const chars = Array.from(s)
-  let i = 0
-  const esWs = (ch) => RX_WS.test(ch)
-  while (i < chars.length && esWs(chars[i])) i++
-  const pal = chars.slice(i, i + 8).join('')
-  let fin = null
-  if (pal.toLowerCase() === 'editable') {
-    const sig = chars[i + 8]
-    // `\b`: después de «editable» no puede seguir otro carácter de palabra
-    if (sig === undefined || !/[\p{L}\p{N}_]/u.test(sig)) {
-      let j = i + 8
-      while (j < chars.length && (esWs(chars[j]) || chars[j] === '-' || chars[j] === '_')) j++
-      fin = j
-    }
-  }
-  const r = fin === null ? s : chars.slice(fin).join('')
-  return pyStrip(r) || 'Editable'
+  const s = splitPy(String(capa).replace(RX_EDITABLE, ' ')).join(' ')
+  return s.replace(/^[ \-_.]+|[ \-_.]+$/g, '') || 'Editable'
 }
 
 /** Capas que no son talles ni piezas (`molde_real.CAPAS_SISTEMA`). */

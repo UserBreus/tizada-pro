@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  USER PRO para Illustrator (CEP). Dos extensiones en un paquete:
+  - «puente»: invisible, arranca sola con Illustrator y escucha en 127.0.0.1:47850 lo que le manda
+    USER PRO desde el navegador de ESTA PC (arma la plantilla: mesas, capas, guías).
+  - «panel»: Ventana › Extensiones › USER PRO. Muestra si está conectada, lo último que armó y el
+    TUTORIAL de cómo conectarla con USER PRO (se abre solo la primera vez); si el puente no arrancó
+    solo, el panel lo levanta.
+  CEP y no UXP: en 2026 UXP para Illustrator todavía no está abierto a terceros.
+-->
+<ExtensionManifest Version="9.0" ExtensionBundleId="com.tizadapro.illustrator" ExtensionBundleVersion="1.25.0"
+  ExtensionBundleName="USER PRO" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ExtensionList>
+    <Extension Id="com.tizadapro.illustrator.puente" Version="1.25.0" />
+    <Extension Id="com.tizadapro.illustrator.panel" Version="1.25.0" />
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <Host Name="ILST" Version="[24.0,99.9]" />
+    </HostList>
+    <LocaleList>
+      <Locale Code="All" />
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="9.0" />
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.tizadapro.illustrator.puente">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./puente.html</MainPath>
+          <ScriptPath>./jsx/tizada.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>false</AutoVisible>
+          <StartOn>
+            <Event>applicationActivate</Event>
+            <Event>com.adobe.csxs.events.ApplicationActivate</Event>
+          </StartOn>
+        </Lifecycle>
+        <UI>
+          <Type>Custom</Type>
+          <Geometry>
+            <Size>
+              <Height>1</Height>
+              <Width>1</Width>
+            </Size>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+    <Extension Id="com.tizadapro.illustrator.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./jsx/tizada.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>USER PRO</Menu>
+          <Geometry>
+            <!-- grande: adentro va el TUTORIAL, con letra grande y un dibujo por paso -->
+            <Size>
+              <Height>640</Height>
+              <Width>420</Width>
+            </Size>
+            <MinSize>
+              <Height>360</Height>
+              <Width>300</Width>
+            </MinSize>
+          </Geometry>
+          <!-- el ISOTIPO del sistema (lo dibuja `construir.py` desde frontend/public/logo.svg) -->
+          <Icons>
+            <Icon Type="Normal">./img/icono.png</Icon>
+            <Icon Type="RollOver">./img/icono.png</Icon>
+            <Icon Type="DarkNormal">./img/icono.png</Icon>
+            <Icon Type="DarkRollOver">./img/icono.png</Icon>
+          </Icons>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

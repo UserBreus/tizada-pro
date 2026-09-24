@@ -7,17 +7,28 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
 import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
-import { previasCaminoB, previasCaminoA, cerrarMotores } from './motor/arte/previa.js';
+import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
+import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
+import { analizarFuente, adjuntarAnalisis, aliasQuitados, revalidarArte } from './motor/arte/fuentesSubir.js';
+import { mesaSuelta } from './motor/mesaSuelta.js';
+import { instalarCalculos } from './motor/calculos.js';
+import { enHiloSuelto } from './motor/hiloSuelto.js';
+import { agregarObjeto as agregarObjetoLocal, colocarObjeto, quitarDelDiseno, duplicarObjeto } from './motor/arte/editarDiseno.js';
 import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte separado analizado acá (camino A)
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
-import { estado as estadoNavegador } from './motor/monitor.js';   // qué está haciendo esta computadora
-import { evaluarEquipo } from './motor/apto.js';   // ¿esta computadora está apta?
+import { estado as estadoNavegador, medirHilos } from './motor/monitor.js';   // qué está haciendo esta computadora
+import { bajarTodosLosMoldes, escucharDescarga, estadoDescarga, cerrarAvisoDescarga } from './motor/bajarMoldes.js';   // todos los moldes en esta PC
+import { buscarIllustrator, enviarAIllustrator, planIllustrator, repartirEnArchivos, escalaRecomendada, versionDelServidor, LIENZO_M, TOPE_MESAS } from './motor/molde/illustrator.js';   // la plantilla armada en Illustrator
+import { evaluarEquipo, compararRequisitos } from './motor/apto.js';   // ¿esta computadora está apta?
 import { localizarMesas, cerrarArtes } from './motor/arte/mesa.js';   // la mesa del arte dibujada acá (camino A)
 import { generarPedidoEnNavegador } from './motor/pedido/generar.js';
 import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
 // PARA DIAGNÓSTICO (Registro del sistema / soporte): el motor del navegador a mano desde la consola.
 // `window.__tizada.generarPedidoEnNavegador(cuerpo, {rutaApi})` genera un pedido acá y lo guarda;
 // `window.__tizada.puedeHacer({tipo:'molde', mb})` dice qué mide la puerta de potencia.
+// 🔴 LOS CÁLCULOS QUE PIDE EL SERVIDOR (428) SE HACEN ACÁ, para TODAS las pantallas (ver
+// `motor/calculos.js`): el servidor sólo sostiene el sistema y la base (2026-09-22).
+instalarCalculos(rutaApi);
 if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, previasCaminoA, prepararEnDosTiempos, prepararArteEnNavegador, abrirVista, precalentarVista, puedeHacer: _puedeHacer, rutaApi };
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
@@ -29,6 +40,38 @@ import * as DESCARGAS from './descargas.js';
 // espera DOS cuadros: el primero es cuando React lo agrega, el segundo cuando ya está pintado.
 // Uso: `setAlgo('Cargando…'); await pintarYa();` y recién ahí el trabajo.
 const pintarYa = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+// BUSCADOR INTELIGENTE (pedido del usuario 2026-09-21): filtra mientras se escribe, sin tildes ni
+// mayúsculas, y cuanto más se escribe más preciso. Puntaje de 0 (no coincide) a 100 (es EXACTO):
+// exacto > empieza igual > cada palabra empieza una palabra > está adentro > están todas las palabras.
+const _normBusq = (s) => (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/\s+/g, ' ').trim();
+function puntajeBusqueda(q, texto) {
+  const qq = _normBusq(q), t = _normBusq(texto);
+  if (!qq) return 1;
+  if (!t) return 0;
+  if (t === qq) return 100;
+  if (t.startsWith(qq)) return 60;
+  const pal = qq.split(' '), pt = t.split(' ');
+  if (pal.every(w => pt.some(x => x.startsWith(w)))) return 40;
+  if (t.includes(qq)) return 30;
+  if (pal.every(w => t.includes(w))) return 20;
+  return 0;
+}
+// Filtra y ordena `items` por `textosDe(item)` (varios textos: gana el mejor). Si alguno coincide
+// EXACTO, quedan sólo los exactos («si escribo el nombre completo, muestra exactamente ése»).
+// Devuelve [{item, puntaje, cual}] — `cual` = el índice del texto que coincidió mejor.
+function filtrarBusqueda(q, items, textosDe) {
+  if (!_normBusq(q)) return items.map(item => ({ item, puntaje: 1, cual: -1 }));
+  const out = [];
+  items.forEach((item, orden) => {
+    let mejor = 0, cual = -1;
+    (textosDe(item) || []).forEach((tx, i) => { const p = puntajeBusqueda(q, tx); if (p > mejor) { mejor = p; cual = i; } });
+    if (mejor > 0) out.push({ item, puntaje: mejor, cual, orden });
+  });
+  const exactos = out.filter(x => x.puntaje === 100);
+  return (exactos.length ? exactos : out).sort((a, b) => b.puntaje - a.puntaje || a.orden - b.orden);
+}
 
 // --- Inline SVG Icons Component for clean, dependency-free icons ---
 // Acepta `style` además de `className`. Si no se pasa ni estilo ni clase,
@@ -456,7 +499,11 @@ const getProgresoDetalle = (progresoStr, estado) => {
   if (!progresoStr) {
     return { pct: 10, texto: 'Iniciando procesamiento de archivos...' };
   }
-  
+  // LA TIZADA ARMADA EN ESTA COMPUTADORA manda el % REAL de lo hecho (`nav|pct|texto`, ver
+  // `pedido/generar.js`). Antes mandaba sólo texto, sin «:», y la barra quedaba clavada en 15 %.
+  const _nav = /^nav\|(\d{1,3})\|([\s\S]*)$/.exec(String(progresoStr));
+  if (_nav) return { pct: Math.min(99, parseInt(_nav[1], 10) || 0), texto: _nav[2] };
+
   const parts = progresoStr.split(':');
   if (parts.length < 2) {
     return { pct: 15, texto: progresoStr };
@@ -1231,12 +1278,51 @@ function NombrarVariantes({ pid, term, onListo, showError, showMsg, modoPiezas, 
  * segundos, y las páginas por talle después, en segundo plano. Este aviso chico, abajo a la
  * izquierda, dice cómo van. Si quedó alguno pendiente (se cerró la página, se cortó la conexión,
  * falló) ofrece terminarlo. La tizada de ese molde espera a que termine (el servidor lo avisa). */
-function PanelPaginasEnPreparacion({ enCurso, pendientes, onTerminar, onDescartar }) {
+function PanelPaginasEnPreparacion({ enCurso, pendientes, onTerminar, onDescartar, descarga, onReintentarDescarga }) {
   const filas = Object.entries(enCurso || {});
-  if (!filas.length && !(pendientes || []).length) return null;
+  // TODOS LOS MOLDES EN ESTA PC (`motor/bajarMoldes.js`): mientras baja, una tarjeta con el avance;
+  // si algo no bajó (o no entra en el navegador), una con el motivo. No tapa nada: se sigue trabajando.
+  const d = descarga || {};
+  const verBajando = d.fase === 'bajando' && d.bytesTotal > 0;
+  const verAviso = !verBajando && ((d.fallidos || []).length > 0 || d.sinEspacio);
+  if (!filas.length && !(pendientes || []).length && !verBajando && !verAviso) return null;
+  const _mb = (b) => `${Math.round((b || 0) / 1048576)} MB`;
   return (
     <div style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 10070, width: 320, maxWidth: 'calc(100vw - 32px)',
                   display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {verBajando && (
+        <div style={{ background: 'rgba(12,16,24,0.96)', border: '1px solid var(--border-light)',
+                                  borderRadius: 12, padding: '10px 12px', boxShadow: '0 10px 24px rgba(0,0,0,0.45)' }}>
+          <div style={{ fontSize: 12, fontWeight: 800 }}>Bajando los moldes a esta PC · {d.moldesListos} de {d.moldes}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {d.actual ? `«${d.actual}» · ` : ''}{_mb(d.bytesHechos)} de {_mb(d.bytesTotal)}
+          </div>
+          <div style={{ height: 4, borderRadius: 3, background: 'rgba(255,255,255,0.08)', marginTop: 7, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${Math.max(3, Math.min(100, 100 * (d.bytesHechos || 0) / (d.bytesTotal || 1)))}%`, background: 'var(--accent)', transition: 'width .3s' }} />
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 5 }}>
+            Podés seguir trabajando. Se baja una sola vez por versión.
+          </div>
+        </div>
+      )}
+      {verAviso && (
+        <div style={{ background: 'rgba(12,16,24,0.96)', border: '1px solid rgba(251,191,36,0.45)', borderRadius: 12,
+                      padding: '10px 12px', boxShadow: '0 10px 24px rgba(0,0,0,0.45)' }}>
+          <div style={{ fontSize: 12, fontWeight: 800 }}>
+            {(d.fallidos || []).length ? `No se ${d.fallidos.length === 1 ? 'pudo' : 'pudieron'} bajar ${d.fallidos.length} molde${d.fallidos.length === 1 ? '' : 's'}` : 'No entran todos los moldes en esta PC'}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>
+            {(d.fallidos || []).slice(0, 3).map((f, i) => <div key={i}>«{f.nombre}»: {f.error}</div>)}
+            {d.sinEspacio && <div>El navegador no tiene lugar para todos: los que faltan se bajan cuando se usen.</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {(d.fallidos || []).length > 0 && <button type="button" className="btn success" style={{ padding: '4px 10px', fontSize: 11.5 }}
+              onClick={onReintentarDescarga}>Reintentar</button>}
+            <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11.5 }}
+              onClick={cerrarAvisoDescarga}>Cerrar</button>
+          </div>
+        </div>
+      )}
       {filas.map(([clave, x]) => (
         <div key={clave} style={{ background: 'rgba(12,16,24,0.96)', border: '1px solid ' + (x.fase === 'error' ? 'rgba(248,113,113,0.5)' : 'var(--border-light)'),
                                   borderRadius: 12, padding: '10px 12px', boxShadow: '0 10px 24px rgba(0,0,0,0.45)' }}>
@@ -1310,6 +1396,212 @@ function CargaCircular({ fase, pct = 0, seg = 0 }) {
           ? <><span className="valor">{Math.round(_p)}</span><span className="unidad">%</span></>
           : <><span className="valor">{mm}:{String(ss).padStart(2, '0')}</span><span className="unidad">{fase === 'preparando' ? 'preparando' : 'leyendo'}</span></>}
       </div>
+    </div>
+  );
+}
+
+/**
+ * LA PLANTILLA EN ILLUSTRATOR (2026-09-23): el estado de la conexión con la extensión de USER PRO
+ * del Illustrator de ESTA computadora y el botón que arma la plantilla allá en vez de descargarla.
+ * Pedido del usuario: «desde el sistema, en vez de descargar, que me cree la plantilla directo;
+ * debo poder conectar».
+ * - «Conectar con Illustrator» la busca (el permiso del navegador lo dispara ESE clic, no la
+ *   pantalla al abrirse); si no la encuentra, AVISA (`onNoEncontrado`) y nada más.
+ * - Conectada una vez, se vuelve a mirar sola cada 5 s mientras esta pantalla esté abierta: si se
+ *   cierra Illustrator pasa a «sin conectar», y al abrirlo vuelve a «conectado» sin tocar nada.
+ * - Conectada → el botón principal es «Crear en Illustrator». La descarga de siempre queda abajo.
+ */
+// ACOMODAR LAS MESAS DE TRABAJO A MANO (pedido del usuario 2026-09-23: «una función de acomodar la
+// mesa de trabajo: acomodar 1 para que todas sigan esa; opcional»). Se acomodan las mesas del
+// TALLE GUÍA (arrastrando, o con las flechas) y al crear en Illustrator todos los talles copian
+// sus posiciones y sus separaciones de borde a borde (`planIllustrator` → `copiarSeparaciones`).
+// Medidas en puntos reales, «y» hacia abajo. `mesas` = [{ref, nombre, x, y, w, h}].
+function EditorAcomodoMesas({ mesas, aMano, guardando, error, onGuardar, onAutomatico, onCerrar }) {
+  const CM = 72 / 2.54;
+  const [pos, setPos] = useState(() => Object.fromEntries(mesas.map(m => [m.ref, { x: m.x, y: m.y }])));
+  const [sel, setSel] = useState(null);
+  const [iman, setIman] = useState(true);
+  const svgRef = useRef(null);
+  const drag = useRef(null);
+  const caja = (m) => ({ x: pos[m.ref].x, y: pos[m.ref].y, w: m.w, h: m.h });
+  // el encuadre se fija al abrir y se recalcula al soltar (moverlo mientras se arrastra hace saltar todo)
+  const encuadre = () => {
+    const cs = mesas.map(caja);
+    const x0 = Math.min(...cs.map(c => c.x)), y0 = Math.min(...cs.map(c => c.y));
+    const x1 = Math.max(...cs.map(c => c.x + c.w)), y1 = Math.max(...cs.map(c => c.y + c.h));
+    const mg = 0.12 * Math.max(x1 - x0, y1 - y0, 1);
+    return { x: x0 - mg, y: y0 - mg, w: x1 - x0 + 2 * mg, h: y1 - y0 + 2 * mg };
+  };
+  const [vb, setVb] = useState(encuadre);
+  const aSvg = (e) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+    const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { x: q.x, y: q.y };
+  };
+  // IMÁN: los bordes y el centro se pegan a los de las otras mesas cuando quedan cerca
+  const pegar = (m, x, y) => {
+    if (!iman) return { x, y };
+    const umbral = vb.w * 0.008;
+    let bx = x, by = y, dx = umbral, dy = umbral;
+    for (const o of mesas) {
+      if (o.ref === m.ref) continue;
+      const c = caja(o);
+      for (const [mio, suyo] of [[x, c.x], [x, c.x + c.w], [x + m.w, c.x], [x + m.w, c.x + c.w], [x + m.w / 2, c.x + c.w / 2]]) {
+        const d = Math.abs(mio - suyo); if (d < dx) { dx = d; bx = x + (suyo - mio); }
+      }
+      for (const [mio, suyo] of [[y, c.y], [y, c.y + c.h], [y + m.h, c.y], [y + m.h, c.y + c.h], [y + m.h / 2, c.y + c.h / 2]]) {
+        const d = Math.abs(mio - suyo); if (d < dy) { dy = d; by = y + (suyo - mio); }
+      }
+    }
+    return { x: bx, y: by };
+  };
+  const mover = (ref, x, y) => setPos(p => ({ ...p, [ref]: { x, y } }));
+  const pisa = (a, b) => a.x < b.x + b.w - 0.01 && b.x < a.x + a.w - 0.01 && a.y < b.y + b.h - 0.01 && b.y < a.y + a.h - 0.01;
+  const encimadas = new Set();
+  mesas.forEach((a, i) => mesas.forEach((b, j) => { if (j > i && pisa(caja(a), caja(b))) { encimadas.add(a.ref); encimadas.add(b.ref); } }));
+  // la separación de la elegida con su vecina de cada lado (de borde a borde, en cm)
+  const seps = (() => {
+    const m = mesas.find(x => x.ref === sel);
+    if (!m) return null;
+    const a = caja(m);
+    const r = { izq: null, der: null, arr: null, aba: null };
+    const min = (k, v) => { if (v >= -0.01 && (r[k] == null || v < r[k])) r[k] = v; };
+    for (const o of mesas) {
+      if (o.ref === m.ref) continue;
+      const b = caja(o);
+      const enfY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 0.5;
+      const enfX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0.5;
+      if (enfY) { min('izq', a.x - (b.x + b.w)); min('der', b.x - (a.x + a.w)); }
+      if (enfX) { min('arr', a.y - (b.y + b.h)); min('aba', b.y - (a.y + a.h)); }
+    }
+    return { m, r };
+  })();
+  const fmt = (v) => (v == null ? '—' : (Math.max(0, v) / CM).toFixed(2).replace('.', ',') + ' cm');
+  const tecla = (e) => {
+    if (!sel) return;
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const paso = (e.shiftKey ? 1 : 0.1) * CM;       // 1 mm; con Shift, 1 cm
+    const p = pos[sel];
+    mover(sel, p.x + d[0] * paso, p.y + d[1] * paso);
+  };
+  const tamLetra = Math.max(vb.w, vb.h) * 0.014;
+  return (
+    <div onKeyDown={tecla} tabIndex={0} style={{ outline: 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+          <input type="checkbox" checked={iman} onChange={e => setIman(e.target.checked)} /> Imán
+        </label>
+        <Ayuda ancho={300}>Arrastrá cada mesa a donde la quieras. Con <b>Imán</b>, los bordes se alinean solos con los de las otras mesas. Con una mesa elegida, las <b>flechas</b> la mueven de a 1 mm (con <b>Shift</b>, de a 1 cm). Al crear en Illustrator, <b>todos los talles</b> usan estas posiciones y estas separaciones.</Ayuda>
+        <span style={{ flex: 1 }} />
+        {seps ? (
+          <span>«{seps.m.nombre}» · izq {fmt(seps.r.izq)} · der {fmt(seps.r.der)} · arriba {fmt(seps.r.arr)} · abajo {fmt(seps.r.aba)}</span>
+        ) : <span style={{ color: 'var(--text-muted)' }}>Tocá una mesa para ver sus separaciones</span>}
+      </div>
+      <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} preserveAspectRatio="xMidYMid meet"
+        style={{ width: '100%', height: '58vh', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)', borderRadius: 10, touchAction: 'none', userSelect: 'none' }}
+        onPointerMove={(e) => {
+          const d = drag.current; if (!d) return;
+          const q = aSvg(e);
+          const m = mesas.find(x => x.ref === d.ref);
+          const p = pegar(m, d.ox + (q.x - d.sx), d.oy + (q.y - d.sy));
+          mover(d.ref, p.x, p.y);
+        }}
+        onPointerUp={() => { if (drag.current) { drag.current = null; setVb(encuadre()); } }}
+        onPointerLeave={() => { if (drag.current) { drag.current = null; setVb(encuadre()); } }}
+        onPointerDown={(e) => { if (e.target === svgRef.current) setSel(null); }}>
+        {mesas.map(m => {
+          const c = caja(m);
+          const mal = encimadas.has(m.ref), elegida = sel === m.ref;
+          return (
+            <g key={m.ref} style={{ cursor: 'move' }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                const q = aSvg(e);
+                setSel(m.ref);
+                drag.current = { ref: m.ref, sx: q.x, sy: q.y, ox: c.x, oy: c.y };
+                try { svgRef.current.setPointerCapture(e.pointerId); } catch { /* nada */ }
+              }}>
+              <rect x={c.x} y={c.y} width={c.w} height={c.h}
+                fill={mal ? 'rgba(255,80,80,0.18)' : elegida ? 'rgba(0,243,255,0.16)' : 'rgba(200,200,200,0.10)'}
+                stroke={mal ? '#ff5050' : elegida ? 'var(--accent)' : 'rgba(255,255,255,0.45)'} strokeWidth={Math.max(vb.w, vb.h) * 0.0015} />
+              <text x={c.x + tamLetra * 0.5} y={c.y + tamLetra * 1.3} fontSize={Math.min(tamLetra, c.h * 0.4)} fill="var(--text-secondary)" style={{ pointerEvents: 'none' }}>{m.nombre}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {encimadas.size > 0 && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--error, #ff5050)' }}>Hay mesas encimadas (en rojo): separalas para poder guardar.</div>}
+      {error && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--error, #ff5050)' }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 12 }}>
+        {aMano && <button type="button" className="btn ghost" disabled={guardando} onClick={onAutomatico}>Volver al automático</button>}
+        <button type="button" className="btn ghost" disabled={guardando} onClick={onCerrar}>Cancelar</button>
+        <button type="button" className="btn primary" disabled={guardando || encimadas.size > 0}
+          onClick={() => onGuardar(Object.fromEntries(mesas.map(m => { const c = caja(m); return [m.ref, [c.x, c.y, c.w, c.h]]; })))}>
+          {guardando ? 'Guardando…' : 'Guardar'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlantillaIllustrator({ onCrear, onDescargar, textoDescargar, ocupado, onNoEncontrado, ayuda, versionNueva, onBajar }) {
+  const [con, setCon] = useState(null);                 // null = sin mirar · objeto = conectada · false = no
+  const [vigilar, setVigilar] = useState(() => { try { return !!localStorage.getItem('userpro_illustrator_ok'); } catch { return false; } });
+  const [buscando, setBuscando] = useState(false);
+  useEffect(() => {
+    if (!vigilar) return undefined;
+    let vivo = true;
+    const mirar = async () => { const d = await buscarIllustrator(1500); if (vivo) setCon(d || false); };
+    mirar();
+    const t = setInterval(mirar, 5000);
+    return () => { vivo = false; clearInterval(t); };
+  }, [vigilar]);
+  const conectar = async () => {
+    setBuscando(true);
+    const d = await buscarIllustrator();
+    setBuscando(false);
+    setCon(d || false);
+    if (d) { try { localStorage.setItem('userpro_illustrator_ok', '1'); } catch { /* nada */ } setVigilar(true); }
+    else onNoEncontrado();
+  };
+  const ok = !!con;
+  return (
+    <div style={{ marginTop: 11, padding: 10, borderRadius: 10, border: '1px solid ' + (ok ? 'rgba(52,211,153,0.45)' : 'var(--border-light)'), background: ok ? 'rgba(52,211,153,0.06)' : 'transparent' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: ok ? '#34d399' : 'var(--text-muted)', boxShadow: ok ? '0 0 8px rgba(52,211,153,0.8)' : 'none' }} />
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>
+          {ok ? 'Illustrator conectado' : 'Illustrator sin conectar'}
+          {ok && con.version ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · extensión {con.version}</span> : null}
+        </span>
+        {ayuda}
+      </div>
+      {/* la extensión de esa PC es de otra versión que la del sistema: se dice cuál tiene y cuál hay */}
+      {ok && versionNueva && con.version && con.version !== versionNueva && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '7px 9px', borderRadius: 8,
+          background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.45)', fontSize: 11.5 }}>
+          <span style={{ flex: 1 }}>Hay una versión nueva de la extensión: tenés la <b>{con.version}</b>, la nueva es la <b>{versionNueva}</b>.</span>
+          <button type="button" className="btn ghost" style={{ padding: '4px 9px', fontSize: 11 }} onClick={onBajar}>Bajar</button>
+        </div>
+      )}
+      {ok ? (
+        <button type="button" className="btn primary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          onClick={onCrear} disabled={ocupado}>
+          <Icon name="productos" style={{ width: 14, height: 14 }} />
+          Crear en Illustrator
+        </button>
+      ) : (
+        <button type="button" className="btn" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          onClick={conectar} disabled={buscando}>
+          {buscando ? 'Buscando Illustrator…' : 'Conectar con Illustrator'}
+        </button>
+      )}
+      <button type="button" className="btn ghost" style={{ width: '100%', marginTop: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={onDescargar}>
+        <Icon name="download" style={{ width: 12, height: 12 }} />
+        {textoDescargar}
+      </button>
     </div>
   );
 }
@@ -2836,7 +3128,15 @@ function useVistaLocal(idTrabajo, pxcm = null) {
   const pidiendo = useRef(new Set());
   const abriendo = useRef(new Set());
   const localOn = useRef(null);                    // ¿el servidor quiere que dibuje esta computadora?
-  useEffect(() => () => { cerrarVistas(); }, [idTrabajo]);
+  const [fallidas, setFallidas] = useState({});     // archivo → esta PC no lo pudo abrir: lo dibuja el servidor
+  // 🔴 OTRA TIZADA = EMPEZAR LIMPIO. Lo abierto se guarda por NOMBRE de archivo («HOJA_g0_…pdf»), y
+  // los nombres se repiten entre pedidos: sin vaciar esto, la tizada nueva encontraba la hoja VIEJA
+  // (ya cerrada) con el mismo nombre y no mostraba nada (2026-09-22).
+  useEffect(() => {
+    setVistas({}); setUrls({}); setFallidas({});
+    pidiendo.current = new Set(); abriendo.current = new Set(); localOn.current = null;
+    return () => { cerrarVistas(); };
+  }, [idTrabajo]);
 
   const abrir = async (archivo) => {
     if (!idTrabajo || abriendo.current.has(archivo)) return;
@@ -2849,13 +3149,14 @@ function useVistaLocal(idTrabajo, pxcm = null) {
         if (!r.ok) return null;
         return await r.arrayBuffer();
       });
+      if (!v) setFallidas(x => ({ ...x, [archivo]: true }));
       if (v) {
         setVistas(x => ({ ...x, [archivo]: v }));
         // TODO DE UNA VEZ (2026-09-18): la foto de cada mesa (una sola calidad) se dibuja de fondo
         // apenas se abre; lo que la pantalla pide se adelanta (lo más nuevo primero)
         precalentarTodo(v, /FICHA_TECNICA/i.test(archivo) ? { anchos: [Math.round(595.276 * 2)] } : { pxcm });
       }
-    } catch { /* lo dibuja el servidor */ }
+    } catch { setFallidas(x => ({ ...x, [archivo]: true })); /* lo dibuja el servidor */ }
   };
 
   const pedir = (v, clave, pagina, ancho, recorte) => {
@@ -2872,7 +3173,12 @@ function useVistaLocal(idTrabajo, pxcm = null) {
     const v = vistas[archivo];
     // 🔴 CON LA VISTA EN ESTA COMPUTADORA, AL SERVIDOR NO SE LE PIDE NINGÚN DIBUJO (ni mientras se
     // baja el archivo): con 100 personas mirando, el servidor no dibuja. Se muestra el aviso.
-    if (!v) { abrir(archivo); return localOn.current ? null : urlServidor; }
+    // 🔴 `localOn` arranca en `null` = «todavía no se sabe»: eso NO es «no». Antes el primer pintado
+    // (antes de que conteste `navegadorDibujaVista`) devolvía la URL del servidor y el `<img>` ya le
+    // pedía la mesa a 1200 px: el servidor dibujaba imágenes de metros compitiendo con esta PC
+    // (visto 2026-09-22: `mesa_img?w=1200` de las 4 mesas, la última a los 80 s). Al servidor sólo si
+    // dijo que NO dibuja esta computadora.
+    if (!v) { abrir(archivo); return (localOn.current === false || fallidas[archivo]) ? urlServidor : null; }
     const px = ancho === 'foto' ? v.anchoFoto(pagina, pxcm || 16) : ancho;
     const clave = `${archivo}|${pagina}|${px}|${recorte ? recorte.map(x => x.toFixed(4)).join(',') : 'todo'}`;
     if (urls[clave]) return urls[clave];
@@ -2895,7 +3201,6 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
   const urlVistaF = useVistaLocal(id);
   const imgPag = (pi) => urlVistaF(archivo, pi, Math.round(595.276 * 2), null,
     rutaApi(`/api/trabajos/${id}/pagina_img/${archivo}?pi=${pi}&z=2`));
-  const urlHoja = (pi) => rutaApi(`/api/trabajos/${id}/mesa/${archivo}?pi=${pi}&nombre=${encodeURIComponent('Ficha_hoja_' + (pi + 1))}`);
   const printRef = React.useRef(null);
   const scrollRef = React.useRef(null);
   const pagsRef = React.useRef(null);          // columna donde están las páginas grandes (para scrollear)
@@ -2987,8 +3292,8 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
                 style={{ width: '100%', height: 'auto', borderRadius: 10, background: '#fff', display: 'block',
                   boxShadow: '0 8px 30px rgba(0,0,0,0.45)' }} />
               {/* botón de descarga de ESA hoja, en el borde superior */}
-              <a href={urlHoja(i)} download={`Ficha_hoja_${i + 1}.pdf`} title={`Descargar sólo la hoja ${i + 1}`}
-                onClick={(e) => { e.preventDefault(); descargarArchivo(urlHoja(i), `Ficha_hoja_${i + 1}.pdf`, { avisar }); }}
+              <a href="#" download={`Ficha_hoja_${i + 1}.pdf`} title={`Descargar sólo la hoja ${i + 1}`}
+                onClick={(e) => { e.preventDefault(); descargarArchivo(mesaSuelta({ tid: id, archivo, pi: i, rutaApi }), `Ficha_hoja_${i + 1}.pdf`, { avisar }); }}
                 style={{ position: 'absolute', top: 10, right: 10, width: 34, height: 34, borderRadius: 999,
                   display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
                   background: 'rgba(15,20,26,0.72)', backdropFilter: 'blur(3px)', border: '1px solid rgba(255,255,255,0.18)' }}>
@@ -3117,8 +3422,8 @@ function MesasInfinito({ mesas, job, avisar }) {
                           style={{ fontSize: 12, fontWeight: 700, color: '#000', background: '#fff', border: '1px solid var(--accent)', borderRadius: 5, padding: '2px 6px', flex: 1, minWidth: 0, marginRight: 8, outline: 'none' }} />
                       : <span onDoubleClick={() => setEditando(key)} title="Doble-click para renombrar"
                           style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'text', userSelect: 'none' }}>{nombre}</span>}
-                    <a href={rutaApi(`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`)} download={sanit(nombre) + '.pdf'} title="Descargar esta mesa"
-                      onClick={(e) => { e.preventDefault(); descargarArchivo(rutaApi(`/api/trabajos/${job.resultado.id}/mesa/${hoja.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`), sanit(nombre) + '.pdf', { avisar }); }}
+                    <a href="#" download={sanit(nombre) + '.pdf'} title="Descargar esta mesa"
+                      onClick={(e) => { e.preventDefault(); descargarArchivo(mesaSuelta({ tid: job.resultado.id, archivo: hoja.archivo, pi, rutaApi }), sanit(nombre) + '.pdf', { avisar }); }}
                       onMouseDown={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}
                       style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, background: 'var(--accent)', color: '#000', borderRadius: 7, textDecoration: 'none' }}>
                       <Icon name="download" style={{ width: 14, height: 14 }} />
@@ -4120,6 +4425,18 @@ function AvisoActualizacion() {
   const [seg, setSeg] = useState(null);       // segundos que faltan (los baja el reloj de acá)
   const verRef = useRef(null);
   const catRevRef = useRef(null);   // última revisión del catálogo vista (ver el ciclo de abajo)
+  // LA PANTALLA QUEDÓ VIEJA (2026-09-23): el servidor dice qué `main-XXXX.js` sirve (`front`); si no
+  // es el de ESTA pestaña, se recompiló después de abrirla y sus archivos de trabajo ya no existen
+  // (la guía .ai daba error). No se recarga sola —perdería lo que se esté haciendo—: se avisa con
+  // un botón «Recargar».
+  const [pantallaVieja, setPantallaVieja] = useState(false);
+  const frontPropio = useMemo(() => {
+    try {
+      const s = [...document.querySelectorAll('script[type="module"][src]')].map(x => x.getAttribute('src') || '')
+        .find(x => /\/assets\/main-[^/]+\.js$/.test(x));
+      return s ? s.split('/').pop() : null;
+    } catch { return null; }
+  }, []);
   // Los moldes efímeros que el PEDIDO tiene abiertos viajan en el latido: es como el servidor sabe
   // que no son huérfanos y no se los lleva la limpieza (los mantiene la pantalla, no el catálogo).
 
@@ -4146,6 +4463,7 @@ function AvisoActualizacion() {
         // Si el servidor contesta con OTRA versión, esta pantalla quedó vieja → recargar YA.
         if (verRef.current && d.version && d.version !== verRef.current) { window.location.reload(); return; }
         verRef.current = d.version || verRef.current;
+        if (frontPropio && d.front && d.front !== frontPropio) setPantallaVieja(true);
         // EL CATÁLOGO CAMBIÓ (otra persona, u otra pestaña): se vuelve a pedir SOLO. No se recarga
         // la página —eso perdería lo que el usuario esté escribiendo—, sólo el catálogo, que es de
         // donde salen los moldes y sus variables (pedido del usuario 2026-09-08: «cuando hago un
@@ -4187,6 +4505,20 @@ function AvisoActualizacion() {
     return () => clearInterval(t);
   }, [seg == null]);
 
+  if (pantallaVieja && !(est && (est.pendiente || est.en_curso || est.sin_conexion))) {
+    return createPortal(
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10090, padding: '8px 16px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13.5,
+        fontWeight: 700, background: 'rgba(180,90,0,0.96)', color: '#fff',
+        borderBottom: '1px solid rgba(255,255,255,0.25)', backdropFilter: 'blur(4px)' }}>
+        <span>Hay una versión nueva de USER PRO.</span>
+        <button type="button" onClick={() => window.location.reload()}
+          style={{ padding: '4px 14px', borderRadius: 8, border: 'none', background: '#fff', color: '#000', fontWeight: 800, cursor: 'pointer' }}>
+          Recargar
+        </button>
+        <span style={{ fontWeight: 400, opacity: 0.9 }}>Guardá lo que estés haciendo antes de recargar.</span>
+      </div>, document.body);
+  }
   if (!est || (!est.pendiente && !est.en_curso && !est.sin_conexion)) return null;
   // Pendiente MANUAL (año 2100): no hay cuenta regresiva que mostrar — se instala cuando
   // la apliquen en el servidor, no a una hora conocida.
@@ -4247,41 +4579,123 @@ function AvisoActualizacion() {
 // ── ¿ESTA COMPUTADORA ESTÁ APTA? (pedido del usuario 2026-09-18) ─────────────────────────────
 // El veredicto se mide una vez al entrar (menos de un segundo, `motor/apto.js`) y queda a la vista
 // en la cabecera: verde = apta, amarillo = justa, rojo = no puede. Tocarlo muestra el detalle.
+// ── REQUISITOS DE LA PC: MÍNIMO, IDEAL Y LO QUE TIENE (pedido del usuario 2026-09-24) ─────────────
+// Una barra por requisito: el MÍNIMO marcado en la mitad y el IDEAL al final. Rojo = no llega al
+// mínimo; amarillo = entre el mínimo y el ideal; verde = llega o pasa el ideal. La comparación la
+// arma `motor/apto.js compararRequisitos` con la medición de `evaluarEquipo`.
+const COL_REQ = { debajo: 'var(--error, #ff6b6b)', entre: 'var(--warning, #f59e0b)', ideal: 'var(--success, #34d399)' };
+function BarraRequisito({ pos, estado, alto = 8 }) {
+  const col = COL_REQ[estado] || 'var(--text-muted)';
+  return (
+    <div style={{ position: 'relative', marginTop: 6, marginBottom: 14 }}>
+      <div style={{ height: alto, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+        <div style={{ width: `${Math.max(2, Math.min(100, 100 * (pos || 0)))}%`, height: '100%', background: col, transition: 'width .4s' }} />
+      </div>
+      {/* las marcas: MÍNIMO en la mitad, IDEAL al final */}
+      <div style={{ position: 'absolute', left: '50%', top: -3, height: alto + 6, width: 2, background: 'rgba(255,255,255,0.7)' }} />
+      <div style={{ position: 'absolute', right: 0, top: -3, height: alto + 6, width: 2, background: 'rgba(255,255,255,0.7)' }} />
+      <span style={{ position: 'absolute', left: '50%', top: alto + 3, transform: 'translateX(-50%)', fontSize: 10, color: 'var(--text-muted)' }}>mínimo</span>
+      <span style={{ position: 'absolute', right: 0, top: alto + 3, fontSize: 10, color: 'var(--text-muted)' }}>ideal</span>
+    </div>
+  );
+}
+
+/** El detalle: cada requisito con lo que pide el mínimo, el ideal, lo que tiene la PC y su barra. */
+function DetalleRequisitos() {
+  const [v, setV] = useState(() => { try { return evaluarEquipo(); } catch { return null; } });
+  // la RAM exacta: el navegador la da con tope en 8 GB; la extensión de Illustrator, si ya se
+  // conectó alguna vez, la da exacta (si no, no se le pregunta: el navegador pediría «permitir»)
+  const [ramGb, setRamGb] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    let conectada = false;
+    try { conectada = !!localStorage.getItem('userpro_illustrator_ok'); } catch { /* nada */ }
+    if (conectada) {
+      buscarIllustrator(900).then(e => { if (vivo && e && e.sistema && e.sistema.ram_total_mb) setRamGb(Math.round(e.sistema.ram_total_mb / 1024)); }).catch(() => {});
+    }
+    return () => { vivo = false; };
+  }, []);
+  if (!v) return <p style={{ color: 'var(--text-muted)' }}>Midiendo esta computadora…</p>;
+  const c = compararRequisitos(v, ramGb);
+  const g = c.general;
+  return (
+    <div>
+      <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${COL_REQ[g.estado]}`, background: 'rgba(255,255,255,0.03)', marginBottom: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: COL_REQ[g.estado] }}>{g.estado === 'debajo' ? 'Esta computadora NO está apta' : 'Esta computadora está apta'}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 3 }}>{g.texto}</div>
+        <BarraRequisito pos={g.pos} estado={g.estado} alto={10} />
+        {g.estado === 'debajo' && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>El servidor no hace el trabajo por una computadora que no llega: con esta PC los moldes, los diseños y las tizadas no se pueden preparar bien.</div>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 12 }}>
+        {c.items.map(it => (
+          <div key={it.clave} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <b style={{ fontSize: 13 }}>{it.nombre}</b>
+              <Ayuda ancho={300}>{it.clave === 'nucleos' ? <>Cuántas cosas a la vez puede hacer el procesador. TIZADA reparte el trabajo pesado (abrir moldes, dibujar, armar la tizada) entre los núcleos: con más, termina antes.</>
+                : it.clave === 'memoria' ? <>La memoria de trabajo de la computadora. Cada molde que se abre ocupa memoria; si falta, un molde grande no se puede preparar. El navegador sólo dice hasta 8 GB: si la PC tiene más, dice 8{ramGb ? '' : ' (con la extensión de Illustrator conectada se ve la cantidad exacta)'}.</>
+                : <>Una prueba corta que hace TIZADA al entrar: mide qué tan rápido hace cuentas esta computadora. Una PC de escritorio actual da unos 100 puntos.</>}</Ayuda>
+              <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: COL_REQ[it.estado] }}>{it.estado === 'debajo' ? 'no llega' : it.estado === 'entre' ? 'cumple el mínimo' : 'ideal'}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 6, fontSize: 12 }}>
+              <div><div style={{ color: 'var(--text-muted)' }}>Mínimo</div><b>{it.minimo} {it.unidad}</b></div>
+              <div><div style={{ color: 'var(--text-muted)' }}>Ideal</div><b>{it.ideal} {it.unidad}</b></div>
+              <div><div style={{ color: 'var(--text-muted)' }}>Esta PC</div><b style={{ color: COL_REQ[it.estado] }}>{it.tiene == null ? '—' : `${it.tiene}${it.tope ? ' o más' : ''} ${it.unidad}`}</b></div>
+            </div>
+            <BarraRequisito pos={it.pos} estado={it.estado} />
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{it.texto}</div>
+          </div>
+        ))}
+      </div>
+      {/* lo demás que se midió de esta PC */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginTop: 14, fontSize: 12.5 }}>
+        <div style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border-light)' }}>
+          <div style={{ color: 'var(--text-muted)' }}>Navegador</div>
+          <b style={{ color: c.navOk ? COL_REQ.ideal : COL_REQ.debajo }}>{c.navOk ? 'Cumple' : 'No puede'}</b>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>Hace falta Chrome o Edge actualizados.</div>
+        </div>
+        <div style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border-light)' }}>
+          <div style={{ color: 'var(--text-muted)' }}>Molde más grande que puede preparar</div>
+          <b>{v.moldeMaxMb ? `~${v.moldeMaxMb} MB` : '—'}</b>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>Según la memoria que informa el navegador.</div>
+        </div>
+        <div style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border-light)' }}>
+          <div style={{ color: 'var(--text-muted)' }}>Trabajos a la vez</div>
+          <b>{v.hilos}</b>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 11.5 }}>Cuántos trabajos pesados reparte TIZADA a la vez en esta PC.</div>
+        </div>
+      </div>
+      <button className="btn ghost" style={{ marginTop: 12, fontSize: 12, padding: '5px 10px' }}
+        onClick={() => { try { setV(evaluarEquipo(true)); } catch { /* nada */ } }}>Volver a medir</button>
+    </div>
+  );
+}
+
 function ChipEquipo() {
+  // REQUISITOS, arriba a la derecha (pedido del usuario 2026-09-24): el botón muestra con su color
+  // si esta PC está apta y abre UNA ventana grande con todo (el veredicto con su barra, los
+  // requisitos uno por uno, lo demás que se midió). Ya no hay franja en el pedido.
   const [v, setV] = useState(null);
   const [abierto, setAbierto] = useState(false);
   useEffect(() => {
-    // fuera del primer pintado: el benchmark ocupa medio segundo de CPU
+    // fuera del primer pintado: la medición ocupa medio segundo de CPU
     const t = setTimeout(() => { try { setV(evaluarEquipo()); } catch { setV(null); } }, 800);
     return () => clearTimeout(t);
   }, []);
-  if (!v) return null;
-  const col = v.nivel === 'apta' ? 'var(--success, #34d399)' : v.nivel === 'justa' ? 'var(--warning, #f59e0b)' : 'var(--error, #ff6b6b)';
-  const txt = v.nivel === 'apta' ? 'Tu PC: apta' : v.nivel === 'justa' ? 'Tu PC: justa' : 'Tu PC: no puede';
+  const g = v ? compararRequisitos(v).general : null;
+  const col = g ? COL_REQ[g.estado] : 'var(--text-muted)';
   return (
-    <div style={{ position: 'relative' }}>
-      <button data-tour="chip-equipo" onClick={() => setAbierto(a => !a)} title={v.motivo}
+    <>
+      <button data-tour="chip-equipo" onClick={() => setAbierto(true)} title={g ? g.texto : 'Midiendo esta computadora…'}
         style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 9, cursor: 'pointer', fontSize: 12.5, fontWeight: 700,
           border: `1px solid ${col}`, background: 'rgba(255,255,255,0.04)', color: col }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, boxShadow: `0 0 8px ${col}` }} />{txt}
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: col, boxShadow: `0 0 8px ${col}` }} />
+        Requisitos{g ? ` · ${g.estado === 'debajo' ? 'NO apta' : 'apta'}` : ''}
       </button>
-      {abierto && (
-        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 340, zIndex: 50, padding: 14, borderRadius: 12,
-          background: 'var(--bg-card, #14181c)', border: '1px solid var(--border-light)', boxShadow: '0 16px 40px rgba(0,0,0,0.5)', fontSize: 12.5, lineHeight: 1.5 }}>
-          <div style={{ fontWeight: 800, color: col, marginBottom: 6 }}>{txt}</div>
-          <p style={{ margin: '0 0 10px', color: 'var(--text-secondary)' }}>{v.motivo}</p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', color: 'var(--text-secondary)' }}>
-            <span>Núcleos</span><b style={{ color: 'var(--text-primary)' }}>{v.nucleos ?? '—'}</b>
-            <span>Memoria (según el navegador)</span><b style={{ color: 'var(--text-primary)' }}>{v.memoriaGb ? `${v.memoriaGb} GB${v.memoriaGb === 8 ? ' o más' : ''}` : 'no la informa'}</b>
-            <span>Puntos de potencia</span><b style={{ color: 'var(--text-primary)' }}>{v.puntos}</b>
-            <span>Hilos que va a usar</span><b style={{ color: 'var(--text-primary)' }}>{v.hilos}</b>
-            <span>Molde más grande</span><b style={{ color: 'var(--text-primary)' }}>{v.moldeMaxMb ? `~${v.moldeMaxMb} MB` : '—'}</b>
-          </div>
-          <button className="btn ghost" style={{ marginTop: 10, fontSize: 12, padding: '5px 10px' }}
-            onClick={() => { try { setV(evaluarEquipo(true)); } catch { /* nada */ } }}>Volver a medir</button>
-        </div>
-      )}
-    </div>
+      <Modal open={abierto} onClose={() => setAbierto(false)} titulo="Requisitos de la computadora"
+        subtitulo="Lo mínimo para que TIZADA funcione bien y ágil, lo ideal, y lo que tiene esta PC" maxWidth={980}>
+        <DetalleRequisitos />
+      </Modal>
+    </>
   );
 }
 
@@ -4296,14 +4710,56 @@ const NOMBRE_TAREA = {
 };
 const nombreTarea = (t) => NOMBRE_TAREA[t] || t;
 
+// Los cuadros del Monitor, FUERA de la pantalla: definidos adentro, React los rearmaba en cada
+// vuelta (cada segundo) y el «?» abierto se cerraba solo.
+const Barra = ({ v, col }) => (
+  <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 4 }}>
+    <div style={{ width: `${Math.max(0, Math.min(100, v || 0))}%`, height: '100%', background: col || 'var(--accent)', transition: 'width .4s' }} />
+  </div>
+);
+const Dato = ({ titulo, valor, sub, barra, col, ayuda }) => (
+  <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 700 }}>{titulo}</span>
+      {ayuda && <Ayuda ancho={310}>{ayuda}</Ayuda>}
+    </div>
+    <div style={{ fontSize: 20, fontWeight: 800, marginTop: 2 }}>{valor}</div>
+    {sub && <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{sub}</div>}
+    {barra != null && <Barra v={barra} col={col} />}
+  </div>
+);
+const Titulo = ({ children, ayuda }) => (
+  <h4 style={{ margin: '14px 0 6px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>{children}{ayuda && <Ayuda ancho={310}>{ayuda}</Ayuda>}</h4>
+);
+
 function PantallaMonitor({ volver }) {
   const [srv, setSrv] = useState(null);
   const [err, setErr] = useState(null);
   const [nav, setNav] = useState(() => { try { return estadoNavegador(); } catch { return null; } });
+  const [desc, setDesc] = useState(() => estadoDescarga());   // los moldes guardados en esta PC
+  useEffect(() => escucharDescarga(setDesc), []);
   const [apto] = useState(() => { try { return evaluarEquipo(); } catch { return null; } });
+  // LA RAM TOTAL DE ESTA PC, sólo para la BARRA de «TIZADA · RAM» (cuánto de la PC usa TIZADA). El
+  // navegador la da redondeada y con tope en 8 GB (`deviceMemory`); si la extensión de Illustrator
+  // ya se conectó alguna vez, ella da la exacta (si no, no se le pregunta: el navegador pediría
+  // «permitir» sin que nadie lo haya pedido). Se pide al entrar y cada 30 s.
+  const [ramPcMb, setRamPcMb] = useState(null);
   useEffect(() => {
     let vivo = true;
-    const tick = async () => {
+    let conectada = false;
+    try { conectada = !!localStorage.getItem('userpro_illustrator_ok'); } catch { /* nada */ }
+    if (!conectada) return undefined;
+    const pedir = async () => {
+      try { const e = await buscarIllustrator(900); if (vivo && e && e.sistema && e.sistema.ram_total_mb) setRamPcMb(e.sistema.ram_total_mb); } catch { /* nada */ }
+    };
+    pedir();
+    const t = setInterval(pedir, 30000);
+    return () => { vivo = false; clearInterval(t); };
+  }, []);
+  useEffect(() => {
+    let vivo = true;
+    let enCurso = false;              // una vuelta por vez (medir los hilos puede tardar hasta 0,7 s)
+    const tick1 = async () => {
       try {
         const r = await fetch(rutaApi('/api/monitor'));
         const d = await r.json();
@@ -4311,76 +4767,134 @@ function PantallaMonitor({ volver }) {
         if (!r.ok) { setErr(d.error || `HTTP ${r.status}`); return; }
         setErr(null); setSrv(d);
       } catch (e) { if (vivo) setErr(e.message); }
-      try { if (vivo) setNav(estadoNavegador()); } catch { /* nada */ }
+      // cada hilo dice cuánta memoria usa su motor (lo que gasta TIZADA en esta PC)
+      try { await medirHilos(); if (vivo) setNav(estadoNavegador()); } catch { /* nada */ }
+    };
+    const tick = async () => {
+      if (enCurso) return;
+      enCurso = true;
+      try { await tick1(); } finally { enCurso = false; }
     };
     tick();
-    const t = setInterval(tick, 2000);
+    // EN TIEMPO REAL (pedido del usuario 2026-09-24): cada segundo
+    const t = setInterval(tick, 1000);
     return () => { vivo = false; clearInterval(t); };
   }, []);
   const mb = (x) => (x == null ? '—' : x >= 1024 ? `${(x / 1024).toFixed(1)} GB` : `${Math.round(x)} MB`);
   const pct = (x) => (x == null ? '—' : `${x} %`);
   const hora = (t) => new Date(t * 1000).toLocaleTimeString('es-UY', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const Barra = ({ v, col }) => (
-    <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden', marginTop: 4 }}>
-      <div style={{ width: `${Math.max(0, Math.min(100, v || 0))}%`, height: '100%', background: col || 'var(--accent)', transition: 'width .4s' }} />
-    </div>
-  );
-  const Dato = ({ titulo, valor, sub, barra, col }) => (
-    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-light)' }}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{titulo}</div>
-      <div style={{ fontSize: 20, fontWeight: 800, marginTop: 2 }}>{valor}</div>
-      {sub && <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{sub}</div>}
-      {barra != null && <Barra v={barra} col={col} />}
-    </div>
-  );
-  const ramUsadaPct = srv && srv.ram_total_mb && srv.ram_libre_mb != null ? Math.round(100 * (srv.ram_total_mb - srv.ram_libre_mb) / srv.ram_total_mb) : null;
-  const colApto = apto ? (apto.nivel === 'apta' ? 'var(--success, #34d399)' : apto.nivel === 'justa' ? 'var(--warning, #f59e0b)' : 'var(--error, #ff6b6b)') : 'var(--text-muted)';
+  // 🔴 UN MONITOR QUE ENTIENDA CUALQUIERA (pedido del usuario 2026-09-24: «que lo entienda cualquier
+  // persona; que cada cosa se entienda qué es lo que está usando y qué está midiendo, con
+  // explicaciones en un botón de ?»). Cada cuadro: un título en palabras de todos los días, el
+  // número, una línea que dice de qué es, y un «?» con la explicación larga.
+  const colApto = apto ? (apto.nivel === 'apta' ? 'var(--success, #34d399)' : 'var(--error, #ff6b6b)') : 'var(--text-muted)';
+  // LOS HILOS DE ESTA PC, agrupados por PARA QUÉ SON (pedido del usuario 2026-09-24: «lo que no
+  // entiendo es qué hilos son de qué»): el nombre con que se registró cada uno (`registrarHilo` /
+  // `crearPool(..., nombre)`) → un título y qué hace, dicho directo.
+  const QUE_HILO = {
+    'motor del molde': ['Motor del molde', 'Arma la tizada y la vista previa del arte de un molde. Hay uno por cada molde que abriste en el pedido.'],
+    'preparar molde': ['Preparar molde', 'Abre el molde que estás subiendo y separa sus piezas por talle. Se cierra al terminar.'],
+    'convertir DXF': ['Convertir DXF', 'Pasa un molde DXF a PDF antes de subirlo. Se cierra al terminar.'],
+    molde: ['Cálculos del molde', 'Hace las cuentas del molde que pide el servidor (piezas, talles, guía de la plantilla).'],
+    'visor molde con diseño': ['Visor del molde con diseño', 'Lee las mesas de un molde que trae el diseño adentro para mostrarlo.'],
+    vista: ['Dibujo de la tizada', 'Dibuja las hojas de la tizada que estás mirando. Se cierran al salir de la tizada.'],
+    arte: ['Lectura del arte', 'Abre el arte que subiste y lo separa por pieza. Se cierra al terminar.'],
+    'mesa del arte': ['Mesas del arte', 'Dibuja las mesas del arte en el editor.'],
+    descarga: ['Descarga', 'Arma un archivo para descargar. Se cierra al terminar.'],
+    fuente: ['Tipografía', 'Revisa una tipografía antes de subirla. Se cierra al terminar.'],
+    objeto: ['Objeto del arte', 'Prepara un objeto que agregaste al arte. Se cierra al terminar.'],
+    pieza: ['Pieza', 'Arma una pieza suelta. Se cierra al terminar.'],
+    obrero: ['Motor', 'Trabajo pesado del motor.'],
+  };
+  const trabaja = (h) => h.ocupado || (h.cpu || 0) >= 5;
+  const grupos = [];
+  if (nav) {
+    const por = new Map();
+    for (const h of nav.hilos) {
+      const [n, que] = QUE_HILO[h.nombre] || [h.nombre, ''];
+      const g = por.get(n) || { nombre: n, que, cant: 0, mb: 0, trabajando: 0 };
+      g.cant++; g.mb += h.mb || 0; if (trabaja(h)) g.trabajando++;
+      por.set(n, g);
+    }
+    grupos.push(...por.values());
+  }
+  const nTrabajando = nav ? nav.hilos.filter(trabaja).length : 0;
+  const ramPc = ramPcMb || (nav && nav.memoria_gb ? nav.memoria_gb * 1024 : null);
+  const ramPcPct = nav && ramPc ? Math.round(100 * nav.tizada_mb / ramPc) : null;
+  const tzRamSrv = srv ? (srv.tizada_mb ?? srv.proceso_mb) : null;
+  const tzCpuSrv = srv ? (srv.tizada_cpu_pct ?? srv.cpu_proceso_pct) : null;
+  const tarjeta = { padding: 14, borderRadius: 12, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.18)' };
   return (
     <div className="panel animate-fade" data-tour="monitor-pantalla">
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginBottom: 6 }}>
         <button className="btn ghost" onClick={volver} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, padding: '7px 12px' }}>⬅ Configuración</button>
         <h2 style={{ margin: 0, fontSize: 20 }}>Monitor</h2>
+        <Ayuda ancho={340}>Muestra <b>cuánto está usando TIZADA</b>, en vivo (se actualiza cada segundo), en los dos lugares donde trabaja:
+          <br /><br /><b>El servidor</b>: la computadora donde vive TIZADA y guarda todo (moldes, artes, tizadas). La usan todos los que se conectan.
+          <br /><br /><b>Esta computadora</b>: la tuya, desde donde estás usando TIZADA en el navegador. Acá se hace el trabajo pesado (abrir moldes, dibujar, armar la tizada).
+          <br /><br />Sólo cuenta lo de TIZADA: lo que usan otros programas no aparece.</Ayuda>
         {srv && srv.navegador && (
           <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, padding: '5px 11px', borderRadius: 999,
             color: srv.navegador.solo ? 'var(--success, #34d399)' : 'var(--warning, #f59e0b)',
             background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-light)' }}>
-            {srv.navegador.solo ? 'El servidor no calcula: todo en el navegador' : 'Lo pesado en el navegador · el servidor de respaldo'}
+            El trabajo pesado lo hace cada computadora
           </span>
         )}
       </div>
       <p style={{ color: 'var(--text-secondary)', fontSize: 12.5, margin: '0 0 16px' }}>
-        Qué está haciendo el servidor y qué está haciendo esta computadora, en vivo (cada 2 segundos).
+        Cuánto usa TIZADA del servidor y de esta computadora, en vivo. Tocá el <b>?</b> de cada cuadro para ver qué mide.
       </p>
       {err && <p style={{ color: 'var(--error, #ff6b6b)' }}>No se pudo leer el servidor: {err}</p>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'start' }}>
 
         {/* ── EL SERVIDOR ── */}
-        <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.18)' }}>
-          <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Servidor {srv && <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}>· {srv.nucleos} núcleos · arrancó {hora(srv.arranque)}</span>}</h3>
+        <div style={tarjeta}>
+          <h3 style={{ margin: '0 0 2px', fontSize: 15 }}>El servidor</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+            La computadora donde vive TIZADA{srv ? ` · ${srv.nucleos} núcleos · prendido desde las ${hora(srv.arranque)}` : ''}
+          </p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <Dato titulo="Procesador (máquina)" valor={pct(srv?.cpu_maquina_pct)} barra={srv?.cpu_maquina_pct} col={(srv?.cpu_maquina_pct || 0) > 80 ? 'var(--error, #ff6b6b)' : undefined} />
-            <Dato titulo="Procesador (TIZADA)" valor={pct(srv?.cpu_proceso_pct)} barra={srv?.cpu_proceso_pct} />
-            <Dato titulo="RAM de la máquina" valor={srv ? `${mb(srv.ram_total_mb != null && srv.ram_libre_mb != null ? srv.ram_total_mb - srv.ram_libre_mb : null)}` : '—'}
-              sub={srv ? `de ${mb(srv.ram_total_mb)} · libre ${mb(srv.ram_libre_mb)}` : ''} barra={ramUsadaPct} col={(ramUsadaPct || 0) > 85 ? 'var(--error, #ff6b6b)' : undefined} />
-            <Dato titulo="RAM de TIZADA" valor={mb(srv?.proceso_mb)} sub={srv ? `${srv.hilos} hilos` : ''} />
-            <Dato titulo="Procesos de trabajo" valor={srv ? `${srv.cupo_usado} / ${srv.cupo_procesos}` : '—'} sub="pesados (motor en el servidor)" />
-            <Dato titulo="Paquetes guardándose" valor={srv ? `${srv.paquetes_en_curso ?? 0}` : '—'} sub={srv && srv.paquetes_en_cola ? `${srv.paquetes_en_cola} en cola` : 'moldes que llegan preparados'} />
+            <Dato titulo="Memoria RAM que usa" valor={mb(tzRamSrv)}
+              sub={srv && srv.ram_total_mb ? `de ${mb(srv.ram_total_mb)} que tiene el servidor` : ''}
+              barra={srv && srv.ram_total_mb ? Math.round(100 * (tzRamSrv || 0) / srv.ram_total_mb) : null}
+              ayuda={<>Mide la <b>memoria RAM</b> que usa TIZADA en el servidor: lo que tiene abierto en este momento. Se libera cuando termina.
+                <br /><br />Cuenta el programa de TIZADA y sus procesos de trabajo{srv && (srv.tizada_procesos || 1) > 1 ? ` (ahora son ${srv.tizada_procesos} procesos)` : ''}. La barra es qué parte de toda la RAM del servidor está usando.
+                <br /><br />Si la barra se pone <b>roja</b>, el servidor se está quedando sin memoria.</>} />
+            <Dato titulo="Procesador que usa" valor={pct(tzCpuSrv)}
+              sub={srv ? `de los ${srv.nucleos} núcleos del servidor` : ''} barra={tzCpuSrv}
+              ayuda={<>Mide qué parte del <b>procesador</b> del servidor usa TIZADA ahora.
+                <br /><br />Cerca de 0 % es lo normal cuando nadie está trabajando: el trabajo pesado lo hace cada computadora, no el servidor.</>} />
+            <Dato titulo="Espacio en disco que ocupa" valor={mb(srv && srv.disco ? srv.disco.total_mb : null)}
+              sub={srv && srv.disco ? (srv.disco.total_mb == null ? 'midiendo…'
+                : [['moldes y artes', 'moldes y artes'], ['tizadas', 'tizadas'], ['datos', 'configuración']]
+                    .filter(([k]) => srv.disco.partes && srv.disco.partes[k] != null)
+                    .map(([k, l]) => `${l} ${mb(srv.disco.partes[k])}`).join(' · ')) : ''}
+              ayuda={<>Mide el espacio en <b>disco</b> que ocupa TIZADA en el servidor: el programa, los <b>moldes y artes</b> que se subieron, las <b>tizadas</b> generadas y la <b>configuración</b>.
+                <br /><br />Contar todos los archivos tarda, así que se mide cada 10 minutos{srv && srv.disco && srv.disco.medido ? ` (última vez: ${hora(srv.disco.medido)})` : ''}.</>} />
+            <Dato titulo="Trabajos pesados en el servidor" valor={srv ? `${srv.cupo_usado}` : '—'}
+              sub={srv ? (srv.cupo_usado ? 'no debería haber: avisá' : 'ninguno, como tiene que ser') : ''}
+              barra={srv && srv.cupo_procesos ? Math.round(100 * srv.cupo_usado / srv.cupo_procesos) : null}
+              ayuda={<>Mide cuántos trabajos pesados (abrir un molde, armar una tizada) está haciendo el <b>servidor</b> ahora.
+                <br /><br />Tiene que ser siempre <b>0</b>: ese trabajo lo hace la computadora de cada persona. Si una computadora no alcanza, TIZADA le avisa y no lo hace; el servidor nunca lo hace por ella.</>} />
+            <Dato titulo="Moldes guardándose" valor={srv ? `${srv.paquetes_en_curso ?? 0}` : '—'}
+              sub={srv && srv.paquetes_en_cola ? `${srv.paquetes_en_cola} esperando su turno` : 'moldes que llegan preparados'}
+              ayuda={<>Cuando alguien sube un molde, su computadora lo prepara y se lo manda al servidor ya listo. Este número dice cuántos se están guardando en este momento.</>} />
           </div>
-          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>En curso ahora</h4>
+          <Titulo ayuda={<>Lo que el servidor está haciendo en este momento, con cuánto hace que empezó.</>}>Haciendo ahora</Titulo>
           {(!srv || !srv.trabajos.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Nada: el servidor está libre.</p> : (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
-              {srv.trabajos.map(t => <li key={t.id}>{t.tipo} {t.molde ? `«${t.molde}»` : ''} · {t.estado}{t.progreso ? ` · ${t.progreso}` : ''} · hace {t.hace_seg} s{t.navegador ? ' · lo genera el navegador' : ''}</li>)}
+              {srv.trabajos.map(t => <li key={t.id}>{t.tipo} {t.molde ? `«${t.molde}»` : ''} · {t.estado}{t.progreso ? ` · ${t.progreso}` : ''} · hace {t.hace_seg} s{t.navegador ? ' · lo hace la computadora' : ''}</li>)}
             </ul>
           )}
-          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>Últimos trabajos · quién los hizo</h4>
-          {(!srv || !srv.eventos.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Todavía nada desde que arrancó.</p> : (
+          <Titulo ayuda={<>Los últimos trabajos de TIZADA y <b>quién los hizo</b>: <b style={{ color: 'var(--success, #34d399)' }}>computadora</b> = los hizo la computadora de la persona (lo normal); <b style={{ color: 'var(--warning, #f59e0b)' }}>servidor</b> = los tuvo que hacer el servidor. Al lado, cuánto tardó.</>}>Últimos trabajos · quién los hizo</Titulo>
+          {(!srv || !srv.eventos.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Todavía nada desde que se prendió.</p> : (
             <div style={{ maxHeight: 320, overflowY: 'auto', fontSize: 12.5 }}>
               {srv.eventos.map((e, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', alignItems: 'baseline' }}>
                   <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{hora(e.t)}</span>
                   <span style={{ flexShrink: 0, fontWeight: 800, fontSize: 11, padding: '1px 7px', borderRadius: 999,
                     color: e.quien === 'navegador' ? 'var(--success, #34d399)' : 'var(--warning, #f59e0b)',
-                    background: e.quien === 'navegador' ? 'rgba(52,211,153,0.12)' : 'rgba(245,158,11,0.12)' }}>{e.quien}</span>
+                    background: e.quien === 'navegador' ? 'rgba(52,211,153,0.12)' : 'rgba(245,158,11,0.12)' }}>{e.quien === 'navegador' ? 'computadora' : 'servidor'}</span>
                   <span style={{ minWidth: 0 }}><b>{e.que}</b>{e.detalle ? ` · ${e.detalle}` : ''}{e.seg != null ? ` · ${e.seg} s` : ''}</span>
                 </div>
               ))}
@@ -4389,29 +4903,76 @@ function PantallaMonitor({ volver }) {
         </div>
 
         {/* ── ESTA COMPUTADORA ── */}
-        <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.18)' }}>
-          <h3 style={{ margin: '0 0 10px', fontSize: 15 }}>Esta computadora {apto && <span style={{ fontWeight: 800, fontSize: 12, color: colApto }}>· {apto.nivel === 'apta' ? 'apta' : apto.nivel === 'justa' ? 'justa' : 'no puede'}</span>}</h3>
-          {apto && <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px' }}>{apto.motivo}</p>}
+        <div style={tarjeta}>
+          <h3 style={{ margin: '0 0 2px', fontSize: 15, display: 'flex', alignItems: 'center', gap: 6 }}>
+            Esta computadora
+            {apto && <span style={{ fontWeight: 800, fontSize: 12, color: colApto }}>· {apto.nivel === 'apta' ? 'apta' : 'NO apta'}</span>}
+            {apto && <Ayuda ancho={310}>Se mide al entrar cuánta fuerza tiene esta computadora (núcleos y memoria) para el trabajo pesado de TIZADA. {apto.motivo}</Ayuda>}
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>La tuya, desde donde usás TIZADA{nav && nav.nucleos ? ` · ${nav.nucleos} núcleos` : ''}</p>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <Dato titulo="Núcleos" valor={nav?.nucleos ?? '—'} sub={apto ? `usa ${apto.hilos} hilos` : ''} />
-            <Dato titulo="Memoria" valor={nav?.memoria_gb ? `${nav.memoria_gb} GB${nav.memoria_gb === 8 ? '+' : ''}` : '—'} sub="según el navegador" />
-            <Dato titulo="Puntos de potencia" valor={apto ? apto.puntos : '—'} sub="hacen falta 12" />
-            <Dato titulo="Memoria de la página" valor={mb(nav?.js_usado_mb)} sub={nav?.js_tope_mb ? `tope ${mb(nav.js_tope_mb)}` : 'sólo Chrome/Edge la cuentan'}
-              barra={nav?.js_tope_mb ? Math.round(100 * nav.js_usado_mb / nav.js_tope_mb) : null} />
-            <Dato titulo="Hilos de trabajo vivos" valor={nav ? nav.hilos.length : '—'} sub={nav && nav.hilos.length ? nav.hilos.map(h => h.nombre).join(', ') : 'ninguno abierto'} />
-            <Dato titulo="Bajado del servidor" valor={mb(nav ? nav.bytes_bajados / 1048576 : null)} sub={nav ? `${nav.tareas_total} tareas hechas` : ''} />
+            {/* LO QUE USA TIZADA EN ESTA PC (aprox.: el navegador no deja medir más): RAM = la página + el
+                motor de cada ayudante; procesador = cuánto del rato estuvieron trabajando, sobre todos
+                los núcleos; disco = lo que tiene guardado este sitio. Ver `motor/monitor.js medirHilos`. */}
+            <Dato titulo="Memoria RAM que usa" valor={mb(nav ? nav.tizada_mb : null)}
+              sub={ramPc ? `de ${mb(ramPc)}${ramPcMb ? '' : (nav && nav.memoria_gb >= 8 ? ' o más' : '')} que tiene la PC` : 'aproximado'}
+              barra={ramPcPct} col={(ramPcPct || 0) > 85 ? 'var(--error, #ff6b6b)' : undefined}
+              ayuda={<>Mide la memoria RAM que usa TIZADA en esta PC: la página más sus <b>procesos</b> (ver abajo), cada uno con el molde, el arte o la tizada que tiene abierto.
+                <br /><br />Es <b>aproximado</b>: el navegador no deja medir lo que gasta para mostrar la pantalla.{!ramPcMb ? ' El navegador tampoco dice exacta la RAM total de la PC: con 8 GB o más dice «8 GB», así que la barra puede verse más llena de lo que está.' : ''}</>} />
+            <Dato titulo="Procesador que usa" valor={pct(nav ? nav.tizada_cpu_pct : null)}
+              sub={nav ? `de los ${nav.nucleos || '?'} núcleos de la PC` : ''} barra={nav ? nav.tizada_cpu_pct : null}
+              ayuda={<>Mide qué parte del procesador de esta PC usa TIZADA ahora: cuánto tiempo estuvieron trabajando sus procesos, sobre todos los núcleos del procesador.
+                <br /><br />Sube mientras se abre un molde, se dibuja o se arma una tizada, y vuelve cerca de 0 % cuando termina. Es aproximado.</>} />
+            <Dato titulo="Espacio en disco que ocupa" valor={mb(nav ? nav.tizada_disco_mb : null)}
+              sub={nav && nav.tizada_disco_cuota_mb ? `puede usar hasta ${mb(nav.tizada_disco_cuota_mb)}` : 'moldes y artes guardados'}
+              barra={nav && nav.tizada_disco_cuota_mb ? Math.round(100 * (nav.tizada_disco_mb || 0) / nav.tizada_disco_cuota_mb) : null}
+              ayuda={<>Los moldes y artes que TIZADA guardó en tu computadora para no tener que bajarlos del servidor cada vez (así abre más rápido).
+                <br /><br />«Puede usar hasta» es el lugar que el navegador le deja a TIZADA. Si se llena, TIZADA deja de guardar y lo que falte lo baja del servidor cuando hace falta.</>} />
+            {/* «PROCESOS DE TIZADA», no «hilos» (pedido del usuario 2026-09-24): «hilos» se confundía con
+                los hilos del PROCESADOR. Para el chip se dice sólo «núcleos». */}
+            <Dato titulo="Procesos de TIZADA" valor={nav ? `${nav.hilos.length} abiertos · ${nTrabajando} trabajando` : '—'}
+              sub={nav ? `trabajando a la vez: hasta ${nav.nucleos || '?'} (los núcleos de la PC)` : ''}
+              barra={nav && nav.nucleos ? Math.round(100 * nTrabajando / nav.nucleos) : null}
+              ayuda={<>Mide los <b>procesos de TIZADA</b> en esta PC: partes del propio programa que TIZADA abre en el navegador para hacer el trabajo pesado (abrir moldes, dibujar, armar la tizada) sin trabar la pantalla. La lista de abajo dice qué hace cada uno. No son los hilos del procesador.
+                <br /><br />Cuando uno trabaja, la computadora lo pone a correr en un <b>núcleo</b> del procesador.
+                <br /><br /><b>Abiertos</b>: los que existen ahora. La mayoría espera con un archivo cargado: usan memoria RAM, no procesador.
+                <br /><b>Trabajando</b>: los que están haciendo algo en este momento: usan procesador.
+                <br /><br />La barra: trabajando sobre los núcleos de la PC. Más de eso no trabajan a la vez; los demás esperan su turno.</>} />
+            <Dato titulo="Moldes guardados en esta PC" valor={desc && desc.moldes ? `${desc.moldesListos} de ${desc.moldes}` : '—'}
+              sub={desc ? (desc.fase === 'bajando' ? `bajando ${Math.round(desc.bytesHechos / 1048576)} de ${Math.round(desc.bytesTotal / 1048576)} MB`
+                : desc.fase === 'revisando' ? 'revisando qué falta' : `${mb(desc.mbEnPc)} guardados`) : ''}
+              barra={desc && desc.moldes ? Math.round(100 * desc.moldesListos / desc.moldes) : null}
+              ayuda={<>TIZADA baja de a poco, sin molestar, todos los moldes a tu computadora, así al elegir uno ya está y abre al instante. Muestra cuántos ya están guardados.</>} />
+            <Dato titulo="Bajado del servidor" valor={mb(nav ? nav.bytes_bajados / 1048576 : null)} sub={nav ? `${nav.tareas_total} tareas hechas por los procesos` : ''}
+              ayuda={<>Cuánto bajó esta pestaña del servidor desde que la abriste (moldes, artes, dibujos). Lo que ya estaba guardado en la PC no se vuelve a bajar.</>} />
           </div>
-          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>En curso ahora</h4>
-          {(!nav || !nav.en_curso.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Nada: los hilos están libres.</p> : (
+          <Titulo ayuda={<>Qué procesos de TIZADA hay abiertos, <b>para qué es cada uno</b>, cuántos hay de cada tipo, cuánta memoria RAM usan entre todos y si están trabajando o esperando.</>}>Qué hace cada proceso</Titulo>
+          {!grupos.length ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Ninguno abierto ahora.</p> : (
+            <div style={{ fontSize: 12.5 }}>
+              {grupos.map(g => (
+                <div key={g.nombre} style={{ padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <b style={{ minWidth: 0 }}>{g.nombre}</b>
+                    <span style={{ color: 'var(--text-muted)' }}>{g.cant} {g.cant === 1 ? 'abierto' : 'abiertos'}</span>
+                    <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{mb(g.mb)} de RAM</span>
+                    <span style={{ width: 96, textAlign: 'right', color: g.trabajando ? 'var(--accent)' : 'var(--text-muted)' }}>{g.trabajando ? `${g.trabajando} trabajando` : 'esperando'}</span>
+                  </div>
+                  {g.que && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{g.que}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          <Titulo ayuda={<>Lo que los procesos de TIZADA en esta PC están haciendo en este momento y cuánto hace que empezaron.</>}>Haciendo ahora</Titulo>
+          {(!nav || !nav.en_curso.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Nada: los procesos están esperando.</p> : (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>{nav.en_curso.map((t, i) => <li key={i}>{nombreTarea(t.tipo)} · {(t.ms / 1000).toFixed(1)} s</li>)}</ul>
           )}
-          <h4 style={{ margin: '14px 0 6px', fontSize: 13 }}>Últimas tareas de esta computadora</h4>
+          <Titulo ayuda={<>Las últimas tareas que hizo esta computadora desde que abriste la pestaña, con cuánto tardó cada una. En rojo, las que fallaron.</>}>Últimas tareas de esta computadora</Titulo>
           {(!nav || !nav.tareas.length) ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Todavía nada en esta pestaña.</p> : (
             <div style={{ maxHeight: 320, overflowY: 'auto', fontSize: 12.5 }}>
               {nav.tareas.map((t, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                   <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{new Date(t.t).toLocaleTimeString('es-UY')}</span>
-                  <b>{nombreTarea(t.tipo)}</b><span style={{ marginLeft: 'auto', color: t.ok ? 'var(--text-secondary)' : 'var(--error, #ff6b6b)' }}>{t.ok ? `${t.ms} ms` : 'falló'}</span>
+                  <b>{nombreTarea(t.tipo)}</b><span style={{ marginLeft: 'auto', color: t.ok ? 'var(--text-secondary)' : 'var(--error, #ff6b6b)' }}>{t.ok ? (t.ms >= 1000 ? `${(t.ms / 1000).toFixed(1)} s` : `${t.ms} ms`) : 'falló'}</span>
                 </div>
               ))}
             </div>
@@ -4715,6 +5276,10 @@ function PantallaPublicacion({ volver }) {
     `${_hoy.getFullYear()}-${String(_hoy.getMonth() + 1).padStart(2, '0')}-${String(_hoy.getDate()).padStart(2, '0')}`);
   const [hora, setHora] = useState('03:00');
   const [nuevaVer, setNuevaVer] = useState('');    // número de versión que escribe el usuario
+  // VOLVER A UNA VERSIÓN ANTERIOR (2026-09-23): cada paquete publicado queda guardado
+  // (`respaldos_publicado/`) y se puede volver a mandar tal cual.
+  const [respaldos, setRespaldos] = useState([]);
+  const [volverA, setVolverA] = useState(null);    // el respaldo elegido, esperando confirmación
 
   /** Sugiere el próximo número subiendo el último tramo: 1.0.4 → 1.0.5. Es sólo una propuesta. */
   const _sugerir = (v) => {
@@ -4729,6 +5294,7 @@ function PantallaPublicacion({ volver }) {
       const r = await fetch('/api/publicacion/estado');
       const d = await r.json();
       setEst(d);
+      try { const rr = await fetch('/api/publicacion/respaldos'); const dr = await rr.json(); setRespaldos(dr.respaldos || []); } catch { /* sin lista */ }
       // al abrir, proponer el próximo número (sobre el más alto entre acá y lo publicado)
       const vloc = d?.local?.version, vrem = d?.remoto?.version;
       setNuevaVer(prev => prev || _sugerir(vloc || vrem || '1.0.0'));
@@ -4790,6 +5356,23 @@ function PantallaPublicacion({ volver }) {
       if (!r.ok) throw new Error(d.error || 'falló la publicación');
       setMsg({ tipo: 'ok', txt: `Enviado (${d.mb} MB). ` + (momento()
         ? _resumen() : 'Se está instalando ahora; en un minuto vuelve.') });
+      await cargar();
+    } catch (e) { setMsg({ tipo: 'error', txt: e.message }); }
+    setTrabajando('');
+  };
+
+  const volver_ = async (r) => {
+    setVolverA(null);
+    setTrabajando(`Mandando la versión ${r.version}…`);
+    setMsg(null);
+    try {
+      const x = await fetch('/api/publicacion/volver', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ archivo: r.archivo, cuando: 0 }),
+      });
+      const d = await x.json();
+      if (!x.ok) throw new Error(d.error || 'no se pudo volver');
+      setMsg({ tipo: 'ok', txt: `Enviada la versión ${r.version} (${d.mb} MB): se está instalando ahora; en un minuto vuelve.` });
       await cargar();
     } catch (e) { setMsg({ tipo: 'error', txt: e.message }); }
     setTrabajando('');
@@ -5036,6 +5619,44 @@ function PantallaPublicacion({ volver }) {
             <div style={{ ...caja, borderColor: msg.tipo === 'ok' ? 'var(--success)' : 'var(--error)',
               color: msg.tipo === 'ok' ? 'var(--success)' : 'var(--error)', fontSize: 13 }}>{msg.txt}</div>
           )}
+
+          {/* VOLVER A UNA VERSIÓN ANTERIOR */}
+          <div style={caja}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: 0.4 }}>VOLVER A UNA VERSIÓN ANTERIOR</span>
+              <Ayuda ancho={340}>Cada versión que se publica queda guardada en esta máquina. Si una actualización sale mal, elegí la versión anterior y tocá «Volver a esta»: se manda tal cual estaba y se instala como cualquier actualización. <b>Los moldes, artes, pedidos y la base no se tocan</b>: sólo cambia el programa.</Ayuda>
+            </div>
+            {!respaldos.length ? (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Todavía no hay versiones guardadas: se guardan solas cada vez que publicás.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {respaldos.map(r => {
+                  const enServidor = !!(r.huella && hRemoto && r.huella === hRemoto);
+                  return (
+                    <div key={r.archivo} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9,
+                      border: '1px solid ' + (enServidor ? 'var(--success)' : 'var(--border-light)'), background: 'rgba(0,0,0,0.15)' }}>
+                      <span style={{ fontSize: 15, fontWeight: 800, minWidth: 64 }}>{r.version || '—'}</span>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)', flex: 1 }}>
+                        armada {r.armado || '—'} · código {r.huella || '—'} · {r.mb} MB
+                      </span>
+                      {enServidor ? (
+                        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--success)' }}>EN EL SERVIDOR AHORA</span>
+                      ) : volverA && volverA.archivo === r.archivo ? (
+                        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, color: 'var(--warning, #e0a020)', fontWeight: 700 }}>¿Volver a la {r.version}?</span>
+                          <button className="btn ghost" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => setVolverA(null)}>No</button>
+                          <button className="btn primary" style={{ padding: '5px 10px', fontSize: 12 }} disabled={!!trabajando || !!est?.error} onClick={() => volver_(r)}>Sí, volver</button>
+                        </span>
+                      ) : (
+                        <button className="btn ghost" style={{ padding: '5px 12px', fontSize: 12 }} disabled={!!trabajando || !!est?.error}
+                          onClick={() => setVolverA(r)}>Volver a esta</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -5119,8 +5740,6 @@ export default function App() {
   // asignadas, porque el contador viejo sólo se recalculaba al volver a ese ítem y su clave ni
   // siquiera distinguía el DISEÑO (dos diseños del mismo molde se pisaban el número).
   const [piezasPorItem, setPiezasPorItem] = useState({});
-  const [trabajoId, setTrabajoId] = useState(null);
-  const [trabajoEstado, setTrabajoEstado] = useState(null);
   // Avance del wizard guardado (para no perderlo al recargar la página). Se lee
   // una sola vez (no en cada render).
   const _wizRef = useRef(undefined);
@@ -5308,9 +5927,8 @@ export default function App() {
   const cargarFuentesEstado = async (reemplOverride) => {
     const pid = pidCfg || productosCat.activo; if (!pid) return;
     try {
-      const r = await fetch(`/api/pedido/fuentes_estado?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(disenoActivo || 'principal')}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(_reemplDe(disenoActivo, pid, reemplOverride)))}`);
-      if (!r.ok) return;
-      const d = await r.json();
+      // en ESTA computadora (`motor/arte/fuentesEstado.js`): el servidor sólo entrega los datos
+      const d = await fuentesEstadoLocal({ pid, diseno: disenoActivo || 'principal', reemplazos: _reemplDe(disenoActivo, pid, reemplOverride), rutaApi });
       // CAMINO B recién subido: el servidor todavía está preparando el molde en segundo plano y
       // NO construye nada por nosotros (congelaba todo). Se vuelve a preguntar en unos segundos.
       if (d.preparando) { _reintentoFuentes(pid, () => cargarFuentesEstado(reemplOverride)); return; }
@@ -5328,10 +5946,7 @@ export default function App() {
   const cargarFuentesDeArte = async (did, mid, reemplOverride) => {
     if (!did || !mid) return;
     try {
-      const q = `pid=${encodeURIComponent(mid)}&diseno=${encodeURIComponent(did)}&fuentes_reemplazo=${encodeURIComponent(JSON.stringify(_reemplDe(did, mid, reemplOverride)))}`;
-      const r = await fetch(`/api/pedido/fuentes_estado?${q}`);
-      if (!r.ok) return;
-      const d = await r.json();
+      const d = await fuentesEstadoLocal({ pid: mid, diseno: did, reemplazos: _reemplDe(did, mid, reemplOverride), rutaApi });
       if (d.preparando) { _reintentoFuentes(did + '|' + mid, () => cargarFuentesDeArte(did, mid, reemplOverride)); return; }
       setFuentesPorArte(prev => ({ ...prev, [did + '|' + mid]: d.faltantes || [] }));
     } catch { /* sin red: no bloquear por esto */ }
@@ -5348,8 +5963,6 @@ export default function App() {
     await Promise.all(tareas.map(t => cargarFuentesDeArte(t.did, t.mid, reemplOverride)));
   };
   const [selectedPiezaMapeo, setSelectedPiezaMapeo] = useState('');
-  const [modalConfirmOpen, setModalConfirmOpen] = useState(false);
-  const [confirmProductoId, setConfirmProductoId] = useState('');
   const [modalTalleGuiaOpen, setModalTalleGuiaOpen] = useState(false);
   // EL TALLE DE GUÍA QUE SE ACABA DE TOCAR. Vale MÁS que el que dice el dibujo: el dibujo tarda
   // (hay que leer el molde en ese talle) y hasta que llegaba, la pantalla seguía mostrando el
@@ -5449,6 +6062,8 @@ export default function App() {
   }, []);
   // Pestaña de la grilla del paso "Diseños": el catálogo compartido o lo que subió el usuario.
   const [pedidoTabMoldes, setPedidoTabMoldes] = useState('catalogo'); // 'catalogo' | 'mios'
+  const [buscarVariable, setBuscarVariable] = useState('');   // buscador del paso Moldes del pedido (variables, o el molde → todas sus variables)
+  const [buscarMolderia, setBuscarMolderia] = useState('');   // buscador de Configuración › Moldería (moldes, o una variable → su molde)
   // Modal "Subir mi propio molde" (nombre + archivo).
   const [subirMoldeOpen, setSubirMoldeOpen] = useState(false);
   const [borrarArt, setBorrarArt] = useState(null);   // artículo propio a eliminar (modal de confirmación)
@@ -5739,71 +6354,6 @@ export default function App() {
   const [terminologiaEdit, setTerminologiaEdit] = useState({ variante: 'Talle', molde: 'Molde' });
   const [nombreMoldeEdit, setNombreMoldeEdit] = useState('');
   
-  // Previsualizador Vectorial Zoom
-  const [zoomPreviewUrl, setZoomPreviewUrl] = useState(null);
-  const [zoomState, setZoomState] = useState({ zoom: 1.0, pan: { x: 0, y: 0 } });
-  const zoomLevel = zoomState.zoom;
-  const panOffset = zoomState.pan;
-  const [esArrastrando, setEsArrastrando] = useState(false);
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef({ x: 0, y: 0 });
-  const viewerRef = useRef(null);
-  const [zoomSvgContent, setZoomSvgContent] = useState('');
-
-  const handleZoom = (newScale, clientX, clientY) => {
-    setZoomState(prev => {
-      // Limit zoom: max 50,000% (scale 500.0), min 100% (scale 1.0)
-      const clampedScale = Math.max(1.0, Math.min(500.0, newScale));
-      
-      if (clampedScale === 1.0) {
-        return { zoom: 1.0, pan: { x: 0, y: 0 } };
-      }
-      
-      let newPan;
-      if (clientX !== undefined && clientY !== undefined && viewerRef.current) {
-        const rect = viewerRef.current.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        
-        const cx = clientX - centerX;
-        const cy = clientY - centerY;
-        
-        const k = clampedScale / prev.zoom;
-        newPan = {
-          x: cx * (1 - k) + prev.pan.x * k,
-          y: cy * (1 - k) + prev.pan.y * k
-        };
-      } else {
-        const k = clampedScale / prev.zoom;
-        newPan = {
-          x: prev.pan.x * k,
-          y: prev.pan.y * k
-        };
-      }
-      
-      return { zoom: clampedScale, pan: newPan };
-    });
-  };
-
-  useEffect(() => {
-    if (!zoomPreviewUrl) {
-      setZoomSvgContent('');
-      return;
-    }
-    fetch(zoomPreviewUrl)
-      .then(res => {
-        if (!res.ok) throw new Error("Error loading SVG");
-        return res.text();
-      })
-      .then(text => {
-        setZoomSvgContent(text);
-      })
-      .catch(err => {
-        console.error("Error fetching preview SVG:", err);
-        setZoomSvgContent('');
-      });
-  }, [zoomPreviewUrl]);
-
   // Feedback
   const [mensajeInformativo, setMensajeInformativo] = useState('');
   const [errorInformativo, setErrorInformativo] = useState('');
@@ -6259,7 +6809,6 @@ export default function App() {
       if (e.key === 'Escape') {
         setModalEtqOpen(false);
         setModalMapeoOpen(false);
-        setModalConfirmOpen(false);
         setModalTalleGuiaOpen(false);
         setCreandoProducto(false);
       }
@@ -6313,7 +6862,6 @@ export default function App() {
       if (!res.ok) return;               // sin sesión (401) → NO pisar el catálogo con {error}
       const data = await res.json();
       setProductosCat(data);
-      setConfirmProductoId(data.activo);
     } catch (e) {
       console.error("Error al obtener catálogo", e);
     }
@@ -6533,11 +7081,15 @@ export default function App() {
     setFuenteSubiendo(true);
     try {
       let r;
+      let _an = null;
       if (accion === 'subir') {
+        // la tipografía se lee EN ESTA COMPUTADORA (nombre, glifos, choque); el servidor sólo la guarda
+        _an = await analizarFuente(datos.archivo, { pid, destino: datos.destino, rutaApi });
         const fd = new FormData();
         fd.append('archivo', datos.archivo);
         fd.append('destino', datos.destino);
         fd.append('pid', pid);
+        adjuntarAnalisis(fd, _an);
         r = await fetch('/api/pedido/fuente_resolver', { method: 'POST', body: fd });
       } else {
         r = await fetch('/api/pedido/fuente_resolver', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6554,7 +7106,10 @@ export default function App() {
       if (accion === 'subir') {
         // cargar el archivo de una fuente que tenía reemplazo = volver a ella, en TODOS los
         // artes del pedido (el archivo es del sistema o del molde, no de un par)
-        (d.alias_quitados || []).forEach(k => Object.keys(_nuevo).forEach(kk => { const n = { ...(_nuevo[kk] || {}) }; delete n[k]; _nuevo[kk] = n; }));
+        // qué reemplazos soltar lo calcula esta computadora (la nueva resuelve, sin alias, a sí misma)
+        const _todosRe = Object.assign({}, ...Object.values(fuentesReempl || {}));
+        const _quitar = _an ? aliasQuitados(_an, _todosRe, datos.destino) : (d.alias_quitados || []);
+        _quitar.forEach(k => Object.keys(_nuevo).forEach(kk => { const n = { ...(_nuevo[kk] || {}) }; delete n[k]; _nuevo[kk] = n; }));
       } else if (d.quitar && !datos.forzar) {
         delete _par[datos.faltante]; _nuevo[_k] = _par;      // eligió la original
       } else {
@@ -6895,34 +7450,6 @@ export default function App() {
     }
   }, [activoTab, sesionLista]);
 
-  // Polling for tizada job
-  useEffect(() => {
-    let interval;
-    if (trabajoId) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch(rutaApi(`/api/trabajo/${trabajoId}`));
-          const data = await res.json();
-          // 🔴 Si el trabajo ya no existe (se reinició el servidor, o pasaron horas) hay que
-          // CORTAR y decirlo. Antes se sondeaba para siempre un id que nunca iba a contestar.
-          if (!res.ok) {
-            setTrabajoEstado({ estado: 'error', error: data.motivo || data.error || 'El trabajo ya no existe.' });
-            setTrabajoId(null);
-            return;
-          }
-          setTrabajoEstado(data);
-          if (data.estado === 'listo' || data.estado === 'error' || data.estado === 'cancelado') {
-            setTrabajoId(null);
-            fetchEstado();
-            fetchProductos();
-          }
-        } catch (e) {
-          console.error("Error al sondear trabajo", e);
-        }
-      }, 1500);
-    }
-    return () => clearInterval(interval);
-  }, [trabajoId]);
 
 
   const handleCrearProducto = async (e) => {
@@ -7067,8 +7594,12 @@ export default function App() {
     if (!file) return;
     setPzNuevaCargando(true);
     try {
+      // los contornos de la pieza se leen EN ESTA COMPUTADORA y viajan con el archivo
+      const _b = new Uint8Array(await file.arrayBuffer());
+      const contornosJson = await enHiloSuelto('contornos_de_pdf', { bytes: _b.slice() }, [], 'pieza');
       const fd = new FormData();
       fd.append('archivo', file);
+      fd.append('contornos_json', contornosJson);
       if (pidCfg) fd.append('pid', pidCfg);
       const r = await fetch('/api/plantilla/pieza_archivo', { method: 'POST', body: fd });
       const d = await leerJson(r);
@@ -7150,6 +7681,11 @@ export default function App() {
         await adjuntarArchivo(formData, (preparado && preparado.archivo) || file, preparado && preparado.sha1, rutaApi);
         setProcesando('Subiendo el archivo…');
       }
+      if (type === 'fuente') {
+        // la tipografía se lee EN ESTA COMPUTADORA; el servidor sólo la guarda (y la revalidación
+        // del arte también se hace acá, después)
+        adjuntarAnalisis(formData, await analizarFuente(file, { pid: _pidMolde, destino: 'sistema', rutaApi }));
+      }
       if (type === 'arte') {
         // EL ARTE TAMBIÉN SE ANALIZA ACÁ (camino A): mesas, personalización, mapeo y validación
         // viajan en el paquete; el servidor sólo comprueba y guarda. `null` = lo analiza el servidor.
@@ -7193,6 +7729,10 @@ export default function App() {
         if (type === 'arte' && data.campos_personalizacion) avisarCapasFaltantes(data.campos_personalizacion);
       }
       if (type === 'arte') avisarPerfilDiseno('principal');   // cartel del perfil YA
+      if (type === 'fuente') {
+        try { setProcesando('Revisando el diseño con la tipografía nueva…'); await revalidarArte({ pid: _pidMolde, rutaApi }); }
+        catch (e) { console.warn('revalidar el arte en esta computadora:', e); }
+      }
       fetchEstado();
       await fetchProductos();        // esperar a que el molde figure con plantilla
       setMoldeReload(v => v + 1);    // y recargar la detección visual al instante
@@ -7636,12 +8176,16 @@ export default function App() {
       if (mesa) mapeo[pieza] = parseInt(mesa);
     });
     try {
+      // 🔴 LA VALIDACIÓN LA HACE ESTA COMPUTADORA (2026-09-22, «el servidor sólo sostiene el sistema
+      // y la base»): antes el servidor abría el arte y lo revisaba entero en cada arrastre. Acá se
+      // valida con el mismo motor del paquete del arte y el servidor sólo guarda lo que llega.
+      const validacion = await validarMapeoEnNavegador({ pid: pidCfg, diseno: disenoActivo, mapeo, variante: verVariante || '', rutaApi });
       const res = await fetch('/api/arte/mapeo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // REGLA mapeo-por-variable: el mapeo se guarda PARA la variable activa (v_xxx);
         // sin variable (molde sin variables) va a la base compartida.
-        body: JSON.stringify({ pid: pidCfg, mapeo, diseno: disenoActivo, variante: verVariante || '' })
+        body: JSON.stringify({ pid: pidCfg, mapeo, diseno: disenoActivo, variante: verVariante || '', validacion })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -9036,40 +9580,6 @@ export default function App() {
 
 
 
-  const ejecutarGenerarSublimacion = async () => {
-    setModalConfirmOpen(false);
-    
-    // Si eligió un producto diferente en la confirmación, primero lo activamos
-    if (confirmProductoId !== productosCat.activo) {
-      try {
-        await fetch('/api/productos/activar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: confirmProductoId })
-        });
-      } catch {
-        showError("Error al cambiar de producto activo antes de tizar");
-        return;
-      }
-    }
-
-    try {
-      const res = await fetch('/api/generar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prendas: filas })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      
-      setTrabajoId(data.id);
-      setTrabajoEstado({ estado: 'en cola', progreso: '', resultado: null, error: null });
-      showMsg("Tizada enviada a cola de procesamiento...");
-    } catch (err) {
-      showError(err.message);
-    }
-  };
-
   // ── Pedido multi-molde ──
   const moldeById = (id) => productosCat.productos.find(p => p.id === id);
   // Plantilla común de la selección (todos deben usar la misma).
@@ -9097,7 +9607,7 @@ export default function App() {
       showError('Cargá el diseño en el paso Arte para: ' + sinArte.map(x => _arteLbl(x.did, x)).join(' · '));
       return;
     }
-    setTrabajoEstado(null); setTrabajoId(null); setTelaActiva(null);
+    setTelaActiva(null);
     // UN solo trabajo: todos los moldes en la MISMA tizada, agrupados por tela.
     setTrabajosMulti([{ productoId: ids.join(','), nombre: ids.map(id => moldeById(id)?.nombre).join(' + '), jobId: null, estado: 'en cola', resultado: null, error: null, progreso: '' }]);
     setPedidoPaso('resultados');   // navegar al paso 5 SOLO cuando el trabajo ya arrancó (evita pantalla en negro)
@@ -9169,6 +9679,8 @@ export default function App() {
       let _local = null;
       try {
         setTrabajosMulti(prev => prev.map(t => ({ ...t, estado: 'generando', progreso: 'Revisando el pedido…' })));
+        // lo que quedara dibujándose de un pedido anterior se corta: la tizada nueva usa toda la máquina
+        cerrarVistas();
         _local = await generarPedidoEnNavegador(_cuerpo, { rutaApi, avisar: (txt) => setTrabajosMulti(prev => prev.map(t => ({ ...t, estado: 'generando', progreso: txt }))) });
       } catch (err) {
         // el servidor ya dijo que no (traba antes de fabricar, filas incompletas): se muestra tal cual
@@ -9278,6 +9790,33 @@ export default function App() {
   // recargas al pedo; pero sin ninguna dep del catálogo, un efecto que corrió ANTES de que
   // llegaran los productos no se entera nunca (el paso Arte quedaba vacío hasta recargar).
   const _idsCat = React.useMemo(() => productosCat.productos.map(p => p.id).join(','), [productosCat.productos]);
+
+  // TODOS LOS MOLDES EN ESTA PC (pedido del usuario 2026-09-23): apenas hay sesión y catálogo, se
+  // bajan de fondo (`motor/bajarMoldes.js`) y quedan guardados por versión. Se revisa de nuevo
+  // cada vez que el catálogo se recarga (un molde nuevo o editado: se baja sólo ése), al volver a
+  // la pestaña y cada 10 minutos (lo que otro usuario cambió desde otra PC). Revisar es barato: el
+  // servidor sólo lista tamaños y fechas, y lo que ya está en la PC no se vuelve a bajar.
+  const [descargaMoldes, setDescargaMoldes] = useState(() => estadoDescarga());
+  useEffect(() => escucharDescarga(setDescargaMoldes), []);
+  const _puedeBajar = authListo && !sinBase && (!authOn || !!yo);
+  useEffect(() => {
+    if (!_puedeBajar || !productosCat.productos.length) return undefined;
+    // un respiro: `fetchProductos` se llama en ráfagas (después de guardar, de subir…)
+    const t = setTimeout(() => { bajarTodosLosMoldes(rutaApi); }, 3000);
+    return () => clearTimeout(t);
+  }, [_puedeBajar, productosCat.productos]);
+  useEffect(() => {
+    if (!_puedeBajar) return undefined;
+    let ultima = Date.now();
+    const revisar = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - ultima < 60000) return;
+      ultima = Date.now();
+      bajarTodosLosMoldes(rutaApi);
+    };
+    const iv = setInterval(() => { ultima = 0; revisar(); }, 10 * 60 * 1000);
+    document.addEventListener('visibilitychange', revisar);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', revisar); };
+  }, [_puedeBajar]);
 
 
   // Ítems del paso ARTE de un diseño (lo que recorre `arteIdx`): cada VARIABLE elegida, con su
@@ -9615,15 +10154,24 @@ export default function App() {
         // `bg: true` → el server le CEDE EL PASO a lo que pida el usuario (nunca compite).
         const k = _pvKeyCon(mapeo, t, _reempl);
         if (!_pvCache.current[k]) {
+          // 🔴 EN ESTA COMPUTADORA, NO EN EL SERVIDOR (2026-09-22): la precarga le pedía cada talle
+          // al servidor (`/api/arte/preview_piezas`, el motor entero en Python) aunque la vista
+          // del talle actual ya se hubiera armado acá. Ahora usa el mismo motor del navegador que
+          // la vista; si acá no se puede, NO se le pasa al servidor: es una precarga, y el talle
+          // se arma igual cuando el usuario llegue a él.
           try {
-            const res = await fetch('/api/arte/preview_piezas', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pid, diseno: dis, variante: clave, mapeo, editables: { [clave || '*']: {} }, talle: t, bg: true, fuentes_reemplazo: _reemplDe(dis, pid, _reempl) })
-            });
+            const _prod = (productosCat.productos || []).find(p => p.id === pid);
+            let d = null;
+            if (_prod && _prod.origen === 'con_diseno') {
+              d = await previasCaminoB({ pid, variante: clave, talle: t, rutaApi, reemplazos: _reemplDe(dis, pid, _reempl) });
+            } else if (_prod) {
+              d = await previasCaminoA({ pid, diseno: dis, variante: clave, talle: t, rutaApi, mapeo,
+                                         editables: { [clave || '*']: {} }, reemplazos: _reemplDe(dis, pid, _reempl) });
+            }
             if (tok !== _prefetchTok.current) return;   // llegó tarde (otro talle, o «Nuevo pedido»)
-            if (res.ok) { const d = await res.json(); if (d.piezas) _pvGuardar(k, d.piezas); }
-            else if (res.status === 409) return;   // falta arte/registro: no martillar 30 veces
-          } catch { /* siguiente talle */ }
+            if (!d || d.preparando) return;             // no se puede acá (o el molde se está preparando)
+            if (d.piezas) _pvGuardar(k, d.piezas);
+          } catch { return; }                            // el motor de acá falló: no insistir con los demás
         }
         if (tok !== _prefetchTok.current) return;
         if (!_talleDetCache.current[`${pid}|${t}`]) {
@@ -10272,23 +10820,276 @@ export default function App() {
     // SOLO las piezas de la variable en curso (las que no trabajamos no van en la descarga).
     if (verVariante) { const keys = nombresDeVariante(verVariante); if (keys.length) params.set('piezas', JSON.stringify(keys)); }
     try {
+      // 🔴 EL .ai SE ARMA EN ESTA COMPUTADORA (2026-09-22): el servidor sólo da la geometría
+      // (`datos=1`) y un hilo arma el archivo (`molde/herramientas.js aiGuiaMedidas`)
+      params.set('datos', '1');
       const res = await fetch('/api/plantilla/pdf_guia?' + params.toString());
-      if (!res.ok) { const e = await res.json().catch(() => ({})); showError(e.error || 'No se pudo generar la guía .ai'); return; }
-      const blob = await res.blob();
-      const cd = res.headers.get('Content-Disposition') || '';
-      const m = cd.match(/filename="?([^"]+)"?/);
-      await descargarBlob(blob, m ? m[1] : 'guia.ai', { avisar: showError });
-    } catch { showError('No se pudo generar la guía .ai'); }
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { showError(d.error || 'No se pudo generar la guía .ai'); return; }
+      const bytes = await enHiloSuelto('guia_archivo', { capas_data: d.capas_data, formato: 'ai',
+        opciones: { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas: capasArteNombres(), editables: null } }, [], 'guia');
+      const slug = String(d.titulo || 'guia').replace(/[^A-Za-z0-9._-]/g, '_').replace(/^_+|_+$/g, '') || 'guia';
+      await descargarBlob(new Blob([bytes], { type: 'application/postscript' }), `guia_${slug}.ai`, { avisar: showError });
+    } catch (e) { showError('No se pudo generar la guía .ai: ' + (e.message || e)); }
   };
-  // Descargar la BASE (contornos del molde, sin recuadro/nombre/medidas). Si hay una VARIABLE
+  // ABRIR EN ILLUSTRATOR (2026-09-23, pedido del usuario: «en vez de descargar un archivo, que se
+  // conecte con una extensión de Illustrator y cree las mesas, capas, guías y el acomodo»). La
+  // extensión de TIZADA PRO (`extension_illustrator/`) escucha en el Illustrator de ESTA PC; acá se
+  // calcula el plan con la MISMA geometría que la guía .ai (`motor/molde/illustrator.js`) y ella
+  // sólo dibuja: una mesa por pieza con el nombre que lee el motor, las capas y los contornos. Si no
+  // la encuentra, AVISA (ventana con cómo instalarla) y nada más: no decide nada por su cuenta.
+  const [armandoIllustrator, setArmandoIllustrator] = useState(null);   // texto del cartel, o null
+  const [illustratorFalta, setIllustratorFalta] = useState(false);
+  // QUÉ TALLES y A QUÉ ESCALA (pedido del usuario 2026-09-23: «talle por talle se podrán elegir
+  // algunos o todos los talles, o uno solo, y crearlo a escala: todo en un solo archivo de
+  // Illustrator, bien organizado por talles sin que se mezclen»). `tallesIllu` null = TODOS (así un
+  // molde con otros talles arranca con todos, sin arrastrar la elección del anterior).
+  const [tallesIllu, setTallesIllu] = useState(null);
+  const [escalaIllu, setEscalaIllu] = useState(100);                    // PORCENTAJE: 100 … 10, de 10 en 10
+  // VARIOS RANGOS para Illustrator (pedido del usuario 2026-09-23: «crear varios rangos antes de
+  // crear el Illustrator, para que cree el archivo con todos»): [{talles, guia}]. Vacía = el rango
+  // elegido, como siempre.
+  const [rangosIllu, setRangosIllu] = useState([]);
+  useEffect(() => { setTallesIllu(null); setRangosIllu([]); }, [pidCfg]);
+  const _illustratorRef = useRef(false);
+  // 🔴 SI NO ENTRA EN UN DOCUMENTO DE ILLUSTRATOR (lienzo de ~5,7 m, hasta 1000 mesas): nunca se
+  // corta con un error (pedido del usuario 2026-09-23: «esto no puede pasar más, así sean miles de
+  // mesas»). La RECOMENDACIÓN va en los mismos botones de % (color suave + leyenda, sin ventanas:
+  // «no debe hacerse en un modal nuevo»), y abajo dice en cuántos archivos sale el % elegido. Al
+  // crear, lo que no entra en uno se reparte en varios (`repartirEnArchivos`), como ya se avisó.
+  // LOS DATOS DE LA PLANTILLA para Illustrator (la geometría de `pdf_guia?datos=1`), UNA pedida por
+  // combinación: los usan la ESCALA RECOMENDADA (se calcula sola al cambiar algo) y «Crear en
+  // Illustrator» (que así no los vuelve a pedir). La clave lleva los nombres de las piezas: si se
+  // renombra algo, se piden de nuevo.
+  const _guiaIllu = useRef(new Map());          // clave → promesa (las últimas 30)
+  const _tallesSelIllu = () => (configMedida === 'talle' && tallesIllu ? tallesMolde.filter(t => tallesIllu.includes(t)) : null);
+  const _claveDatosIllu = (tSel, rg = null) => {
+    // la MISMA pedida que la guía .ai: modo, rango, guía del rango y sólo la variable en curso
+    const params = new URLSearchParams({ config: configMedida, formato: 'ai', datos: '1' });
+    if (pidCfg) params.set('pid', pidCfg);
+    const _rango = rg ? rg.talles : rangoMedida;
+    if (configMedida === 'rango' && _rango.length) params.set('rango', _rango.join(','));
+    if (tSel) params.set('talles', tSel.join(','));
+    // 🔴 EL TALLE QUE SE ESTÁ VIENDO, en todos los modos (no sólo en rango): las piezas, sus cajas
+    // y su acomodo tienen que ser los del visor, no los del talle guía del molde. Con varios
+    // rangos, cada uno con SU guía.
+    const _guia = rg ? rg.guia : etqData?.talle_ref;
+    if (_guia) params.set('guia', _guia);
+    if (verVariante) { const keys = nombresDeVariante(verVariante); if (keys.length) params.set('piezas', JSON.stringify(keys)); }
+    return params.toString() + '#' + JSON.stringify(etqNombres || {});
+  };
+  // las claves de lo que se pide: UNA, o una por rango si se armó la lista de rangos
+  const _SEP_ILLU = '\u0001';
+  const _clavesIllu = (tSel) => (configMedida === 'rango' && rangosIllu.length
+    ? rangosIllu.map(rg => _claveDatosIllu(null, rg)) : [_claveDatosIllu(tSel)]).join(_SEP_ILLU);
+  const _unaIllu = (clave) => {
+    const cache = _guiaIllu.current;
+    if (!cache.has(clave)) {
+      const promesa = fetch('/api/plantilla/pdf_guia?' + clave.split('#')[0]).then(async (res) => {
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'No se pudo calcular la plantilla');
+        return d;
+      });
+      // una que falló no queda guardada: la próxima vez se vuelve a pedir
+      promesa.catch(() => { if (cache.get(clave) === promesa) cache.delete(clave); });
+      cache.set(clave, promesa);
+      while (cache.size > 30) cache.delete(cache.keys().next().value);
+    }
+    return cache.get(clave);
+  };
+  const _datosIllu = async (claves) => {
+    const lista = claves.split(_SEP_ILLU);
+    if (lista.length === 1) return _unaIllu(lista[0]);
+    // VARIOS RANGOS: un bloque por rango, cada uno con SU rango (así su título y el nombre de sus
+    // mesas —«#XS-M Frente»— salen del rango que le toca; ver `planIllustrator`)
+    const ds = await Promise.all(lista.map(_unaIllu));
+    return {
+      ...ds[0],
+      capas_data: ds.map((d, i) => {
+        const rg = (new URLSearchParams(lista[i].split('#')[0]).get('rango') || '').split(',').filter(Boolean);
+        return d.capas_data && d.capas_data[0] ? { ...d.capas_data[0], rango: rg } : null;
+      }).filter(Boolean),
+    };
+  };
+  // el acomodo A MANO de las mesas guardado en el molde para esta variable (ver `EditorAcomodoMesas`)
+  const _claveAcomodo = verVariante || '_molde';
+  const _acomodoGuardado = (prodCfg?.acomodo_illustrator || {})[_claveAcomodo] || null;
+  const _optsIllu = (d) => {
+    // 🔴 EL ACOMODO = EL DEL VISOR (pedido del usuario 2026-09-23 con captura: «en Illustrator no
+    // se ve igual que en el sistema»). Dónde dibuja el visor cada pieza (centro de su caja, en
+    // puntos reales, «y» hacia abajo): Illustrator arma cada mesa AHÍ, con las mismas distancias.
+    // 🔴 CON UNA VARIABLE ELEGIDA, EL ACOMODO ES EL DE LA VARIABLE (pedido del usuario 2026-09-23:
+    // «no debe acomodar como se ve el molde completo, debe acomodar como la variante elegida»): sólo
+    // sus piezas y con el acomodo que tiene guardado (`varianteFiltro`: `show` + `pos`, lo mismo
+    // que dibuja el visor con «Ver variante»). Sin variable, el molde completo.
+    const _posVisor = {};
+    const _cmU = canvasLayout && canvasLayout.cmPerUnit;
+    const _vf = verVariante ? varianteFiltro(verVariante) : null;
+    if (_cmU > 0) {
+      const PT = 72 / 2.54;
+      (canvasLayout.layout || []).forEach(p => {
+        if (_vf && !_vf.show.has(p.idx)) return;
+        const nm = (etqNombres[p.idx] || p.name || '').trim();
+        if (!nm) return;
+        const o = _vf && _vf.pos.get(p.idx);
+        (_posVisor[nm] = _posVisor[nm] || []).push({ x: (p.px + p.pw / 2 + (o ? o.dx : 0)) * _cmU * PT, y: (p.py + p.ph / 2 + (o ? o.dy : 0)) * _cmU * PT });
+      });
+    }
+    return { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas: capasArteNombres(), editables: null,
+      referencia: d.referencia || 'alto', posiciones: _posVisor, talleVisor: etqData?.talle_ref || null,
+      acomodoGuia: _acomodoGuardado };
+  };
+  // ACOMODAR LAS MESAS A MANO (opcional; ver `EditorAcomodoMesas`): se guarda por VARIABLE en el
+  // molde y, si está, manda sobre el acomodo automático — en la recomendación y al crear.
+  const [acomodoIllu, setAcomodoIllu] = useState(null);   // {mesas, error, guardando} o null
+  const abrirAcomodoMesas = async () => {
+    const tSel = _tallesSelIllu();
+    setArmandoIllustrator('Preparando las mesas del talle guía…');
+    await pintarYa();
+    try {
+      const d = await _datosIllu(_clavesIllu(tSel && tSel.length ? tSel : null));
+      const mesas = planIllustrator(d.capas_data, { ..._optsIllu(d), soloGuia: true });
+      if (!mesas.length) throw new Error('no hay mesas para acomodar');
+      setAcomodoIllu({ mesas, error: null, guardando: false });
+    } catch (e) {
+      setAcomodoIllu({ mesas: null, error: 'No se pudieron preparar las mesas: ' + ((e && e.message) || e), guardando: false });
+    } finally {
+      setArmandoIllustrator(null);
+    }
+  };
+  // `acomodo` null = volver al automático
+  const guardarAcomodoMesas = async (acomodo) => {
+    setAcomodoIllu(a => a && { ...a, guardando: true, error: null });
+    try {
+      const r = await fetch('/api/productos/acomodo_illustrator', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pidCfg, pid: pidCfg, clave: _claveAcomodo, acomodo }),
+      });
+      const d = await leerJson(r);
+      if (!r.ok) throw new Error(d.error || 'no se pudo guardar');
+      await fetchProductos();
+      setAcomodoIllu(null);
+    } catch (e) {
+      setAcomodoIllu(a => a && { ...a, guardando: false, error: 'No se pudo guardar: ' + ((e && e.message) || e) });
+    }
+  };
+  // LA ESCALA RECOMENDADA, SOLA (pedido del usuario 2026-09-23: «que el sistema me recomiende en
+  // qué escala hacerlo: todo debe entrar en el espacio de Illustrator»). Con la sección a la vista,
+  // cada vez que cambia algo (talles, modo, rango, variable, molde) se mide —un rato después, para
+  // no medir en cada toque— y se marca el % más grande al que entra todo. No elige: lo marca.
+  const [recoIllu, setRecoIllu] = useState(null);   // {clave, calculando | error | porc, med, med100}
+  const _tSelVista = _tallesSelIllu();
+  const _claveIllu = (tabAjustesMolde === 'diseno' && prodCfg?.plantilla && tallesMolde.length && !(_tSelVista && !_tSelVista.length))
+    ? _clavesIllu(_tSelVista) : null;
+  useEffect(() => {
+    if (!_claveIllu) { setRecoIllu(null); return undefined; }
+    let vivo = true;
+    const t = setTimeout(async () => {
+      setRecoIllu({ clave: _claveIllu, calculando: true });
+      try {
+        const d = await _datosIllu(_claveIllu);
+        const o = _optsIllu(d);
+        const r = escalaRecomendada(d.capas_data, o);
+        if (vivo) setRecoIllu({ clave: _claveIllu, ...r, capas: d.capas_data, opts: o });
+      } catch (e) {
+        if (vivo) setRecoIllu({ clave: _claveIllu, error: (e && e.message) || String(e) });
+      }
+    }, 800);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [_claveIllu, JSON.stringify(_acomodoGuardado)]);
+  // en cuántos archivos sale el % ELEGIDO (1 = entra en uno), para decirlo antes de crear
+  const _archivosSelIllu = useMemo(() => {
+    if (!recoIllu || recoIllu.clave !== _claveIllu || !recoIllu.capas) return null;
+    try { return repartirEnArchivos(recoIllu.capas, recoIllu.opts, Math.min(100, Math.max(10, Number(escalaIllu) || 100))).length; }
+    catch { return null; }
+  }, [recoIllu, _claveIllu, escalaIllu]);
+  const abrirEnIllustrator = async () => {
+    if (_illustratorRef.current) return;             // ya hay una en curso: no se arranca otra
+    // por talle: los elegidos, en el orden del molde; ninguno → se avisa y no se arranca
+    const _tallesSel = _tallesSelIllu();
+    const _porcElegido = Math.min(100, Math.max(10, Math.round(Number(escalaIllu) || 100)));
+    _illustratorRef.current = true;
+    try {
+      // (el aviso sale por el mismo cartel de error de abajo: una llamada más a `showMsg` acá la
+      // contaría el control de TDZ, que tiene el tope congelado)
+      if (_tallesSel && !_tallesSel.length) throw new Error(`elegí al menos un ${(term?.variante || 'talle').toLowerCase()}.`);
+      setArmandoIllustrator('Buscando Illustrator en esta computadora…');
+      await pintarYa();
+      const ext = await buscarIllustrator();
+      if (!ext) { setIllustratorFalta(true); return; }
+      setArmandoIllustrator('Calculando las mesas y las guías…');
+      const d = await _datosIllu(_clavesIllu(_tallesSel));
+      // el ARCHIVO se guarda con el nombre del molde y de la variable que se mandó (pedido del usuario
+      // 2026-09-23): «Camiseta de futbol - Jugador.ai»
+      const _var = verVariante ? (variantesEdit || []).find(t => t.clave === verVariante) : null;
+      const ctx = {
+        opts: _optsIllu(d),
+        base: [d.titulo || 'Molde', _var && _var.label].filter(Boolean).join(' - '),
+        talles: configMedida === 'rango' && rangosIllu.length
+          ? rangosIllu.map(rg => `${rg.talles[0]}-${rg.talles[rg.talles.length - 1]}`)
+          : (_tallesSel && _tallesSel.length < tallesMolde.length ? _tallesSel : null),
+        capas: d.capas_data,
+      };
+      setArmandoIllustrator('Midiendo si entra en Illustrator…');
+      await pintarYa();
+      // todo en UN archivo si entra; si no, repartido en los que hagan falta (talles enteros, en orden)
+      const archivos = repartirEnArchivos(d.capas_data, ctx.opts, _porcElegido);
+      const porc = _porcElegido;
+      const extra = [], guardados = [];
+      let totalMesas = 0, fallidos = 0;
+      for (let i = 0; i < archivos.length; i++) {
+        const cd = archivos[i];
+        // cada archivo lleva en el nombre SUS talles (si son varios archivos), el % y «2 de 3»
+        const _etq = (b) => (b.rango && b.rango.length ? `${b.rango[0]}-${b.rango[b.rango.length - 1]}` : b.talle);
+        const _tArch = archivos.length > 1 && (ctx.opts.config === 'talle' || cd.some(b => b.rango && b.rango.length)) ? [...new Set(cd.map(_etq))] : ctx.talles;
+        const nombre = [ctx.base, _tArch && _tArch.length ? _tArch.join(' ') : null, porc < 100 ? `al ${porc}%` : null,
+          archivos.length > 1 ? `${i + 1} de ${archivos.length}` : null].filter(Boolean).join(' - ');
+        const { plan, avisos, nMesas } = planIllustrator(cd, { ...ctx.opts, archivo: nombre, escala: 100 / porc });
+        setArmandoIllustrator((archivos.length > 1 ? `Archivo ${i + 1} de ${archivos.length}: ` : '') + `armando ${nMesas} mesa${nMesas === 1 ? '' : 's'} en Illustrator…`);
+        const r = await enviarAIllustrator(plan);
+        for (const a of avisos) if (!extra.includes(a)) extra.push(a);
+        totalMesas += r.mesas || 0;
+        fallidos += r.textosFallidos || 0;
+        if (r.archivo) guardados.push(`«${r.archivo}»`);
+      }
+      const _vs = (await versionDelServidor(rutaApi)).version;
+      if (_vs && ext.version !== _vs) extra.push(`Hay una versión nueva de la extensión (tenés la ${ext.version}, la nueva es la ${_vs}): bajá el instalador desde el «?» de «Illustrator conectado» y volvé a instalar.`);
+      const _guardado = guardados.length ? ` Guardado${guardados.length > 1 ? 's' : ''} como ${guardados.join(', ')} en Documentos › USER PRO › Plantillas.` : '';
+      if (fallidos) extra.push(`${fallidos} mesa${fallidos === 1 ? '' : 's'} quedó sin su nombre escrito: Illustrator no lo aceptó.`);
+      showMsg(`Listo en Illustrator: ${totalMesas} mesa${totalMesas === 1 ? '' : 's'} de trabajo${archivos.length > 1 ? ` en ${archivos.length} archivos` : ''}.` + _guardado + (extra.length ? ' ' + extra.join(' ') : ''));
+    } catch (e) {
+      showError('No se pudo armar en Illustrator: ' + (e.message || e));
+    } finally {
+      setArmandoIllustrator(null);
+      _illustratorRef.current = false;
+    }
+  };
+  // Windows → el INSTALADOR .exe (doble clic, «Instalar»); Mac → el ZIP con su instalador
+  const _esMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
+  // el nombre del archivo lleva la VERSIÓN (la del servidor; se pide al abrir la Plantilla, así el
+  // «Guardar como» se abre en el mismo clic)
+  const [_verIllu, setVerIllu] = useState(null);
+  useEffect(() => { versionDelServidor(rutaApi).then(d => setVerIllu((d && d.version) || null)); }, []);
+  const bajarExtensionIllustrator = () => descargarArchivo(
+    rutaApi(_esMac ? '/api/illustrator/extension.zip' : '/api/illustrator/instalador'),
+    _esMac ? `USER-PRO-Illustrator-Mac${_verIllu ? '-' + _verIllu : ''}.zip`
+      : `Instalar-USER-PRO-Illustrator${_verIllu ? '-' + _verIllu : ''}.exe`, { avisar: showError });  // Descargar la BASE (contornos del molde, sin recuadro/nombre/medidas). Si hay una VARIABLE
   // elegida → SOLO sus piezas (lo que se está trabajando). Sin variable → el .ai base completo.
-  const descargarBase = () => {
+  const descargarBase = async () => {
     if (verVariante) {
-      const params = new URLSearchParams({ config: configMedida, limpio: '1' });
+      const params = new URLSearchParams({ config: configMedida, limpio: '1', datos: '1' });
       if (pidCfg) params.set('pid', pidCfg);
       if (configMedida === 'rango' && rangoMedida.length) { params.set('rango', rangoMedida.join(',')); if (etqData?.talle_ref) params.set('guia', etqData.talle_ref); }
       const keys = nombresDeVariante(verVariante); if (keys.length) params.set('piezas', JSON.stringify(keys));
-      window.open(rutaApi('/api/plantilla/pdf_guia?' + params.toString()), '_blank');
+      // el PDF de la base se arma EN ESTA COMPUTADORA con la geometría que da el servidor
+      try {
+        const res = await fetch('/api/plantilla/pdf_guia?' + params.toString());
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { showError(d.error || 'No se pudo generar la base'); return; }
+        const bytes = await enHiloSuelto('guia_archivo', { capas_data: d.capas_data, formato: 'pdf',
+          opciones: { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', limpio: true } }, [], 'guia');
+        await descargarBlob(new Blob([bytes], { type: 'application/pdf' }), 'base_molde.pdf', { avisar: showError });
+      } catch (e) { showError('No se pudo generar la base: ' + (e.message || e)); }
     } else {
       window.open(rutaApi(`/api/productos/${pidCfg}/descargar_plantilla`), '_blank');
     }
@@ -11059,11 +11860,14 @@ export default function App() {
     cargarMarcasEditables(pid, diseno);   // qué objetos van por TPU/Bordado/DTF (botones encendidos)
     if (!pid) return { objetos: [] };
     try {
-      const r = await fetch(`/api/productos/editables?pid=${encodeURIComponent(pid)}&diseno=${encodeURIComponent(diseno || 'principal')}&variante=${encodeURIComponent(variante || '*')}`);   // transforms POR VARIABLE
-      if (r.ok) {
-        const d = await r.json();
-        // Los OBJETOS AGREGADOS ya vienen en `d.objetos` desde /api/productos/editables, con la
-        // MISMA forma que los del arte. Sólo se marcan para las acciones de la barra.
+      // 🔴 EN ESTA COMPUTADORA (2026-09-22): el servidor sólo entrega los datos
+      // (`/editables_datos`); recorrer el arte y dibujar cada objeto lo hace `editablesVista.js`.
+      // Sin arte (o molde con el diseño adentro) no hay editables.
+      const d = (await editablesEnNavegador({ pid, diseno: diseno || 'principal', variante: variante || '*', rutaApi }))
+        || { objetos: [], talles: [], piezas: [] };   // transforms POR VARIABLE
+      {
+        // Los OBJETOS AGREGADOS ya vienen en `d.objetos` con la MISMA forma que los del arte.
+        // Sólo se marcan para las acciones de la barra.
         d.objetos = (d.objetos || []).map(o => (o.agregado ? _objAgregadoAEditable(o, '') : o));
         setEditableData(d); setEditableDiseno(diseno || 'principal');
         // Al reabrir el MISMO contexto (mismo molde+diseño+variable) con ediciones en memoria, NO pisar:
@@ -11080,7 +11884,7 @@ export default function App() {
         editorCtx.current = ctxKey;
         return d;
       }
-    } catch { /* si la lectura falla, queda lo que ya estaba en pantalla */ }
+    } catch (e) { console.warn('editables del diseño (en esta computadora):', e); /* queda lo que ya estaba en pantalla */ }
     return { objetos: [] };
   };
   // COLOR de un editable (CMYK, POR VARIABLE, a nivel objeto): guarda `color` (o lo LIMPIA con null =
@@ -11127,15 +11931,13 @@ export default function App() {
     const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     setSubiendoObjeto(true);
     try {
-      const fd = new FormData();
-      fd.append('archivo', file); fd.append('pid', _mid); fd.append('diseno', editableDiseno);
-      const r = await fetch('/api/productos/objeto_agregar', { method: 'POST', body: fd });
-      const d = await r.json();
-      if (!r.ok) { showError(d.error || 'No se pudo agregar el objeto'); return; }
+      // el archivo se prepara EN ESTA COMPUTADORA (PDF de una página, su medida y su vista); el
+      // servidor sólo lo guarda (`motor/arte/editarDiseno.js`)
+      const objeto = await agregarObjetoLocal(file, { pid: _mid, diseno: editableDiseno, rutaApi });
       // Subido: ahora el usuario ELIGE en qué pieza va (no se asigna solo). `_nuevo` = si cancela,
       // se borra (no quedan huérfanos); un objeto YA existente que se recoloca no se borra.
-      setObjPendiente({ ..._objAgregadoAEditable(d.objeto, ''), _nuevo: true });
-    } catch (e) { showError('No se pudo subir: ' + e.message); }
+      setObjPendiente({ ..._objAgregadoAEditable(objeto, ''), _nuevo: true });
+    } catch (e) { showError('No se pudo agregar el objeto: ' + (e.message || e)); }
     finally { setSubiendoObjeto(false); }
   };
   // El objeto se coloca EN EL PUNTO donde el usuario clickeó sobre el diseño: `tf0` trae el
@@ -11150,13 +11952,12 @@ export default function App() {
     // ni datos que sincronizar — el editor, el visor del Arte y el motor lo tratan igual.
     const tf = { dx: 0, dy: 0, ...(tf0 || {}) };
     try {
-      const r = await fetch(`/api/productos/objeto_agregado/${_oid}/colocar`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, pieza,
-                               fx: 0.5 + (tf.dx || 0), fy: 0.5 + (tf.dy || 0) }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showError(d.error || 'No se pudo colocar el objeto'); return; }
+      // el arte se edita EN ESTA COMPUTADORA y se sube como versión nueva
+      setProcesando(`Agregando «${nombre}» al diseño…`);
+      await pintarYa();
+      try {
+        await colocarObjeto({ pid: _mid, diseno: editableDiseno, oid: _oid, pieza, fx: 0.5 + (tf.dx || 0), fy: 0.5 + (tf.dy || 0), rutaApi });
+      } finally { setProcesando(null); }
       // El arte cambió → se relee todo desde el diseño (única fuente de verdad).
       editorCtx.current = null;                 // fuerza recargar la base
       await cargarEditablesPedido(_mid, editableDiseno, verVariante);
@@ -11169,12 +11970,10 @@ export default function App() {
   const quitarObjetoDelArte = async (capa) => {
     const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     try {
-      const r = await fetch('/api/productos/editable_quitar', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: _mid, diseno: editableDiseno, capa }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showError(d.error || 'No se pudo quitar del diseño'); return; }
+      setProcesando('Quitando el objeto del diseño…');
+      await pintarYa();
+      try { await quitarDelDiseno({ pid: _mid, diseno: editableDiseno, capa, rutaApi }); }
+      finally { setProcesando(null); }
       editorCtx.current = null;                 // el arte cambió → se relee todo
       await cargarEditablesPedido(_mid, editableDiseno, verVariante);
       setEditableSel([]);
@@ -11197,13 +11996,7 @@ export default function App() {
   const duplicarObjetoAgregado = async (oid) => {
     const _mid = (itemsArteDe(disenoActivo)[arteIdx] || {}).moldeId || productosCat.activo;
     try {
-      const r = await fetch(`/api/productos/objeto_agregado/${oid}/duplicar`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pid: _mid, diseno: editableDiseno }),
-      });
-      const d = await r.json();
-      if (!r.ok) { showError(d.error || 'No se pudo duplicar'); return; }
-      const copia = _objAgregadoAEditable(d.objeto, '');
+      const copia = _objAgregadoAEditable(await duplicarObjeto({ pid: _mid, diseno: editableDiseno, oid, rutaApi }), '');
       setEditableData(prev => ({ ...(prev || {}), objetos: [...((prev || {}).objetos || []), copia] }));
       showMsg(`"${copia.nombre}" creado. Tocá "Colocar" y elegí la pieza.`);
     } catch (e) { showError('No se pudo duplicar: ' + e.message); }
@@ -11559,7 +12352,7 @@ export default function App() {
       // las mías que esta pantalla ya no tiene. El servidor no borra una que esté generando ni
       // una de otro usuario.
       try {
-        const _tids = [...new Set([...(trabajosMulti || []).map(t => t && t.jobId), trabajoId].filter(Boolean))];
+        const _tids = [...new Set([...(trabajosMulti || []).map(t => t && t.jobId)].filter(Boolean))];
         await fetch('/api/pedido/limpiar_trabajos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ids: _tids, incluir_anteriores: true }) });
       } catch { /* quedan archivos de más; el próximo «Nuevo pedido» los vuelve a pedir */ }
@@ -11587,7 +12380,7 @@ export default function App() {
     setFilas(Array.from({ length: 5 }, () => ({ ..._fila0 })));
     filasInitRef.current = null;
     // 5) resultados
-    setTrabajosMulti([]); setTrabajoId(null); setTrabajoEstado(null);
+    setTrabajosMulti([]);
     setTelaActiva(null); setVistaFicha(false);
     // 6) CACHÉS EN MEMORIA (render de piezas, geometría por talle y detección del arte). Están
     //    indexadas por molde/diseño/variable, pero si el pedido nuevo usa el mismo molde con otro
@@ -11602,6 +12395,9 @@ export default function App() {
     _pvReq.current++; _prefetchTok.current++; _pedidoEpoca.current++; _asignEnCurso.current = {};
     setPreviewPiezas({}); setAsignando(null);
     cerrarMotores();
+    // …y las FOTOS de las mesas del pedido anterior, que se seguían dibujando de fondo con hasta 11
+    // hilos mientras se armaba el pedido nuevo (le robaban máquina a la tizada nueva, 2026-09-22)
+    cerrarVistas();
     // …y la BASURA GUARDADA EN EL NAVEGADOR de los pedidos anteriores: los nombres que se le
     // pusieron a las mesas se guardan por trabajo (`tizada_mesas_nombres_<id>`) y quedaban para
     // siempre, uno por pedido. Un pedido nuevo empieza sin nada de lo de antes (pedido del
@@ -12004,17 +12800,29 @@ export default function App() {
     try { r.prep.cancelar(); } catch { /* nada */ }
     setPrepPaginas(p => { const n = { ...p }; delete n[r.clave]; return n; });
   };
+  // Lo que el usuario fijó A MANO de la etiqueta que trae el diseño (vacío si nunca tocó nada).
+  const manualEtiquetaDe = async (pid) => {
+    try {
+      const r = await fetch(`/api/productos/${encodeURIComponent(pid)}/desplegado/etiqueta_archivo.json`);
+      if (!r.ok) return {};
+      const d = await r.json();
+      return (d && typeof d.manual === 'object' && d.manual) || {};
+    } catch { return {}; }
+  };
   // RETOMAR: un molde que quedó con las páginas pendientes (se cerró la página, se cortó la conexión,
   // o falló). Se baja el archivo del servidor, se vuelve a preparar ACÁ y se sube sólo la fase B.
-  const terminarPaginasMolde = async (pid, nombre, claveVieja = null) => {
+  // `manual`: la decisión de la etiqueta fijada a mano. Sin pasarla, se lee la guardada (retomar);
+  // el interruptor de la etiqueta la manda ya cambiada.
+  const terminarPaginasMolde = async (pid, nombre, claveVieja = null, manual = null) => {
     if (claveVieja) setPrepPaginas(p => { const n = { ...p }; delete n[claveVieja]; return n; });
     const clave = 'r' + Date.now().toString(36);
     setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid, fase: 'preparando', texto: 'Bajando el archivo del molde…', pct: 0 } }));
     try {
+      if (manual === null) manual = await manualEtiquetaDe(pid);
       const r = await fetch(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`);
       if (!r.ok) throw new Error('No se pudo bajar el archivo del molde');
       const archivo = new File([await r.blob()], 'plantilla.ai');
-      const prep = await prepararEnDosTiempos(archivo, {
+      const prep = await prepararEnDosTiempos(archivo, { manual,
         onA: (a) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: a.texto } }) : p),
         onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
           pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
@@ -12899,9 +13707,9 @@ export default function App() {
       try {
         const sets = [];
         for (const id of ids) {
-          const r = await fetch(`/api/pedido/fuente_chars?producto_id=${encodeURIComponent(id)}`);
-          if (!r.ok) continue;                 // 401/404: se ignora, no rompe el paso
-          const d = await r.json();
+          // en ESTA computadora (`motor/arte/fuentesEstado.js`): antes el servidor abría cada fuente
+          let d;
+          try { d = await fuenteCharsLocal({ pid: id, rutaApi }); } catch { continue; }   // 401/404: no rompe el paso
           // El molde con diseño todavía se está armando: sin esto el aviso de caracteres no
           // aparecía NUNCA para ese molde y el nombre con un carácter raro se descubría recién
           // al fallar la tizada.
@@ -13247,7 +14055,8 @@ export default function App() {
           && !(p.paginas_navegador_hace != null && p.paginas_navegador_hace < 45)   // otra pestaña la está preparando
           && !Object.values(prepPaginas).some(x => x && x.pid === p.id))}
         onTerminar={terminarPaginasMolde}
-        onDescartar={(clave) => setPrepPaginas(p => { const n = { ...p }; delete n[clave]; return n; })} />
+        onDescartar={(clave) => setPrepPaginas(p => { const n = { ...p }; delete n[clave]; return n; })}
+        descarga={descargaMoldes} onReintentarDescarga={() => bajarTodosLosMoldes(rutaApi)} />
       {/* Sidebar Panel */}
       {modoDisenador && (
         <aside className="sidebar">
@@ -13368,6 +14177,15 @@ export default function App() {
       {/* Main Panel Content */}
       <main className="main-content">
         
+        {/* REQUISITOS también en ADMIN (reporte del usuario 2026-09-24: «si entro como admin no me lo
+            muestra»): el modo admin no tiene la cabecera del operario (tiene la barra lateral), así
+            que el botón va en una fila propia arriba a la derecha. Nunca están los dos a la vez. */}
+        {modoDisenador && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <ChipEquipo />
+          </div>
+        )}
+
         {/* Operator Top Header Bar */}
         {!modoDisenador && (
           <header style={{
@@ -13430,6 +14248,61 @@ export default function App() {
           </div>,
           document.body
         )}
+
+        {/* ARMANDO EN ILLUSTRATOR: un cartel de punta a punta que no deja tocar nada (ver `abrirEnIllustrator`). */}
+        {armandoIllustrator && createPortal(
+          <div role="alert" aria-busy="true" data-cargando="Se está armando la plantilla en Illustrator."
+            onPointerDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onKeyDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }} tabIndex={-1} autoFocus
+            style={{ position: 'fixed', inset: 0, zIndex: 10060, background: 'rgba(2,6,12,0.84)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'wait' }}>
+            <div style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340, maxWidth: 460 }}>
+              <div style={{ width: 40, height: 40, margin: '0 auto 14px', border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'ldspin 0.8s linear infinite' }} />
+              <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 6 }}>Creando en Illustrator</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{armandoIllustrator}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 14 }}>Esperá a que termine: mientras tanto la pantalla queda bloqueada.</div>
+              <style>{`@keyframes ldspin{to{transform:rotate(360deg)}}`}</style>
+            </div>
+          </div>,
+          document.body
+        )}
+        <Modal open={illustratorFalta} onClose={() => setIllustratorFalta(false)} centrado maxWidth={520}
+          titulo="No encontré Illustrator" subtitulo="Hace falta Illustrator abierto en esta computadora, con la extensión de USER PRO">
+          <ol style={{ margin: '0 0 14px', paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+            <li>Si esta computadora todavía no la tiene: tocá <b>Bajar el instalador</b>, abrilo con doble clic y tocá <b>Instalar</b>{_esMac ? ' (en Mac: descomprimí el ZIP y abrí INSTALAR-MAC.command)' : ''}.</li>
+            <li>Abrí Illustrator (si estaba abierto, cerralo y volvelo a abrir después de instalar).</li>
+            <li>Tocá <b>Conectar con Illustrator</b> otra vez. Si el navegador pide permiso, tocá <b>Permitir</b>: es esta misma computadora.</li>
+          </ol>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+            En Illustrator, <b>Ventana › Extensiones › USER PRO</b> muestra si está conectada y trae el tutorial de cómo conectarla, paso a paso y con dibujos.
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button type="button" className="btn ghost" onClick={() => setIllustratorFalta(false)}>Cerrar</button>
+            <button type="button" className="btn" onClick={bajarExtensionIllustrator}>
+              <Icon name="download" style={{ width: 13, height: 13, marginRight: 6 }} />Bajar el instalador
+            </button>
+          </div>
+        </Modal>
+
+
+        {/* ACOMODAR LAS MESAS DE TRABAJO (ver `EditorAcomodoMesas`) */}
+        <Modal open={!!acomodoIllu} onClose={() => { if (!acomodoIllu?.guardando) setAcomodoIllu(null); }} maxWidth={1000}
+          titulo="Acomodar mesas de trabajo"
+          subtitulo={`${term?.variante || 'Talle'} guía ${etqData?.talle_ref || ''}: todos los ${(term?.variante || 'talle').toLowerCase()}s siguen esta posición y esta separación`}>
+          {acomodoIllu && (acomodoIllu.mesas ? (
+            <EditorAcomodoMesas mesas={acomodoIllu.mesas} aMano={!!_acomodoGuardado}
+              guardando={acomodoIllu.guardando} error={acomodoIllu.error}
+              onGuardar={guardarAcomodoMesas} onAutomatico={() => guardarAcomodoMesas(null)}
+              onCerrar={() => setAcomodoIllu(null)} />
+          ) : (
+            <div>
+              <div style={{ fontSize: 13, color: 'var(--error, #ff5050)', marginBottom: 12 }}>{acomodoIllu.error}</div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn ghost" onClick={() => setAcomodoIllu(null)}>Cerrar</button>
+              </div>
+            </div>
+          ))}
+        </Modal>
 
         {/* CARGANDO EL ARTE: UN cartel de punta a punta que no deja tocar nada (ver `cargandoArte`).
             Adentro va el avance de «poner el diseño sobre el molde», que antes era otra ventana. */}
@@ -14450,54 +15323,22 @@ export default function App() {
                     <Ayuda ancho={330}><Icon name="edit" style={{ width: 14, height: 14, opacity: 0.6, flexShrink: 0 }} />
                       Escribí un diseño arriba y después tocá las variables que van en él.</Ayuda>
                   )}
-                  {/* ── POR QUÉ UN MOLDE NO APARECE ACÁ ──────────────────────────────────────
-                      El pedido es VARIABLE-FIRST: se elige una VARIABLE, no un molde. Un molde
-                      recién creado no tiene ninguna, así que **no aparece** — y antes no lo decía
-                      en ningún lado. El usuario lo reportó como «lo creé y después no lo veo en
-                      pedido», sospechando de los permisos; no es eso, le faltaban las variables. */}
-                  {pedidoTabMoldes === 'catalogo' && (() => {
-                    const faltan = (productosCat.productos || []).filter(p => !p.personal && p.plantilla
-                      && !(p.variantes || []).some(v => (v.valores || []).some(x => x.pieza_idx != null)));
-                    if (!faltan.length) return null;
-                    // QUÉ le falta a cada uno: no es lo mismo «no creaste ninguna variable» que
-                    // «la variable está creada pero vacía» — el usuario veía el mismo cartel en los
-                    // dos casos y, con su variable ya armada, no entendía qué le pedían (2026-09-08).
-                    const _vacias = faltan.filter(p => (p.variantes || []).length > 0);
-                    const _sinNada = faltan.filter(p => !(p.variantes || []).length);
-                    return (
-                      <div style={{ fontSize: 12, lineHeight: 1.5, padding: '10px 12px', marginBottom: 12, borderRadius: 10,
-                        background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: 'var(--text-secondary)' }}>
-                        <b style={{ color: '#fbbf24' }}>{faltan.length === 1 ? 'Esta moldería todavía no se puede pedir' : `${faltan.length} molderías todavía no se pueden pedir`}</b>
-                        {_sinNada.length > 0 && (
-                          <div style={{ marginTop: 4 }}>
-                            {_sinNada.map(p => p.nombre).join(', ')} — {_sinNada.length === 1 ? 'no tiene' : 'no tienen'} ninguna <b>variable</b>.
-                            {' '}Acá se elige una variable («manga corta», «musculosa»), no el molde entero.
-                          </div>
-                        )}
-                        {_vacias.length > 0 && (
-                          <div style={{ marginTop: 4 }}>
-                            {_vacias.map(p => `${p.nombre} («${((p.variantes || [])[0] || {}).label || 'sin nombre'}»)`).join(', ')} —
-                            {' '}{_vacias.length === 1 ? 'su variable está creada pero SIN PIEZAS' : 'sus variables están creadas pero SIN PIEZAS'}.
-                            {' '}Hay que decirle qué piezas lleva.
-                          </div>
-                        )}
-                        <div style={{ marginTop: 5, color: 'var(--text-muted)' }}>
-                          Se arma en <b>Configuración › Molderías › {faltan[0].nombre} › Variables</b>: se abre el <b>grupo</b>,
-                          se toca <b>«+ Elegir piezas»</b> de la variable y se marcan sus piezas en el visor.
-                        </div>
-                        <button type="button" className="btn ghost" style={{ marginTop: 8, fontSize: 11.5, padding: '5px 10px' }}
-                          onClick={() => fetchProductos()}>↻ Ya las configuré, actualizá</button>
-                      </div>
-                    );
-                  })()}
-                  {pedidoTabMoldes === 'catalogo' && moldesIncompletos > 0 && (
-                  <div style={{ flexShrink: 0, marginTop: 12, padding: '9px 12px', borderRadius: 9, fontSize: 12,
-                    border: '1px solid var(--border-light)', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                    {moldesIncompletos === 1 ? 'Hay 1 molde que no se muestra' : `Hay ${moldesIncompletos} moldes que no se muestran`} porque
-                    todavía no se pueden fabricar: les falta el archivo del molde o nombrar sus piezas.
-                    Se terminan de configurar en Configuración → Moldes.
-                  </div>
-                )}
+                  {/* El paso Moldes del pedido muestra SÓLO VARIABLES (regla del usuario 2026-09-21): el cartel
+                      de «molderías que todavía no se pueden pedir» y la nota de moldes ocultos se
+                      sacaron — hablaban de moldes en una pantalla donde se eligen variables. Un molde sin
+                      variables se arma en Configuración › Moldería. */}
+                  {pedidoTabMoldes === 'catalogo' && (
+                    <div style={{ position: 'relative', marginBottom: 12, maxWidth: 420 }}>
+                      <Icon name="search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, opacity: 0.5, pointerEvents: 'none' }} />
+                      <input type="text" value={buscarVariable} onChange={(e) => setBuscarVariable(e.target.value)}
+                        data-tour="pedido-buscar-variable" placeholder="Buscar variable, o el molde para ver todas sus variables…"
+                        style={{ width: '100%', padding: '8px 30px 8px 30px', borderRadius: 9, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', fontSize: 12.5 }} />
+                      {buscarVariable && (
+                        <button type="button" onClick={() => setBuscarVariable('')} title="Borrar la búsqueda"
+                          style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                      )}
+                    </div>
+                  )}
                 {pedidoTabMoldes === 'catalogo' && varsCatalogo.length === 0 && (
                     <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '12px 0' }}>No hay variables creadas. Armalas en <b>Configuración › Variables</b>.</div>
                   )}
@@ -14611,8 +15452,11 @@ export default function App() {
                     );
                   })()}
 
+                  {pedidoTabMoldes === 'catalogo' && buscarVariable.trim() && !filtrarBusqueda(buscarVariable, varsCatalogo, v => [v.label, v.moldeNombre, `${v.moldeNombre} ${v.label}`]).length && (
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '8px 0' }}>Ninguna variable ni molde coincide con «{buscarVariable.trim()}».</div>
+                  )}
                   <div style={{ display: pedidoTabMoldes === 'catalogo' ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
-                      {varsCatalogo.map(v => {
+                      {filtrarBusqueda(buscarVariable, varsCatalogo, v => [v.label, v.moldeNombre, `${v.moldeNombre} ${v.label}`]).map(({ item: v }) => {
                         const susDisenos = disenosPedido.filter(d => varsDeDiseno(d.id).includes(v.clave));
                         // Marcada = está en el diseño que se está armando. Que otro diseño la use
                         // no la marca acá: cada diseño lleva la suya, aunque sea la misma.
@@ -15411,14 +16255,15 @@ export default function App() {
                               <input type="checkbox" checked={!!fam.ocultar} style={{ margin: 0, flexShrink: 0 }}
                                 onChange={async (e) => {
                                   const ocultar = e.target.checked;
+                                  // 🔴 LAS PÁGINAS SE REHACEN EN ESTA COMPUTADORA (2026-09-22): antes el
+                                  // servidor volvía a desplegar el molde entero en su pool de procesos.
+                                  // Acá se rearma con la decisión nueva y se sube hecho (la barra de
+                                  // «preparando páginas» muestra el avance).
                                   try {
-                                    const r = await fetch('/api/productos/etiqueta_archivo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ id: _id, clave: fam.clave, ocultar }) });
-                                    const d = await r.json().catch(() => ({}));
-                                    if (!r.ok) { showError(d.error || 'No se pudo cambiar la etiqueta del diseño'); return; }
+                                    const manual = { ...(await manualEtiquetaDe(_id)), [fam.clave]: !!ocultar };
                                     showMsg(ocultar ? 'Se oculta esa etiqueta del diseño. Rehaciendo las piezas…' : 'Esa etiqueta del diseño se deja. Rehaciendo las piezas…');
-                                    fetchProductos();
-                                  } catch { showError('No se pudo cambiar la etiqueta del diseño'); }
+                                    await terminarPaginasMolde(_id, _prodB.nombre || 'Molde', null, manual);
+                                  } catch (err) { showError('No se pudo cambiar la etiqueta del diseño: ' + (err.message || err)); }
                                 }} />
                               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 <b>{fam.ocultar ? 'Oculta' : 'Se deja'}</b> · {String(fam.fuente || '').replace(/-?(Regular|MT)$/, '')} {fam.alto_mm} mm · {fam.piezas}/{fam.de}
@@ -16833,7 +17678,7 @@ export default function App() {
                                 for (let pi = 0; pi < pvs.length; pi++) {
                                   const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : ('Mesa ' + (gi + 1) + (tl ? ' - ' + tl : ''));
                                   gi++;
-                                  items.push({ url: rutaApi(`/api/trabajos/${j.resultado.id}/mesa/${h.archivo}?pi=${pi}&nombre=${encodeURIComponent(sanit(nombre))}`), nombre: sanit(nombre) + '.pdf' });
+                                  items.push({ url: mesaSuelta({ tid: j.resultado.id, archivo: h.archivo, pi, rutaApi }), nombre: sanit(nombre) + '.pdf' });
                                 }
                               }
                             }
@@ -16919,106 +17764,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Job Execution & Results */}
-            {trabajoEstado && (
-              <div className="card animate-fade" style={{ marginTop: 24 }}>
-                <div className="card-title">
-                  Estado del Trabajo
-                  {trabajoId && <span className="badge warning" style={{ marginLeft: 10 }}>Procesando</span>}
-                </div>
-                
-                {trabajoEstado.estado === 'generando' || trabajoEstado.estado === 'en cola' ? (() => {
-                  const det = getProgresoDetalle(trabajoEstado.progreso, trabajoEstado.estado);
-                  return <TizadaLoader det={det} onCancelar={() => cancelarTrabajo(trabajoId)} />;
-                })() : trabajoEstado.estado === 'cancelado' ? (
-                  <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', color: 'var(--text-muted)' }}>
-                    <Icon name="alert" style={{ width: 18, height: 18 }} />
-                    <span>Cancelaste esta tizada. Podés volver a generarla cuando quieras.</span>
-                  </div>
-                ) : trabajoEstado.estado === 'error' ? (
-                  <div style={{ color: 'var(--error)', marginTop: 8, display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <Icon name="alert" style={{ width: 18, height: 18 }} />
-                    <span>Error al generar: {trabajoEstado.error}</span>
-                  </div>
-                ) : trabajoEstado.estado === 'listo' ? (
-                  <div data-tour="resultados-hojas" style={{ marginTop: 16 }} className="animate-fade">
-                    <div className="card-title" style={{ fontSize: 15, marginBottom: 12 }}>Tizada Completa</div>
-                    
-                    {/* Render sheets */}
-                    {trabajoEstado.resultado?.hojas?.map((hoja, k) => (
-                      <div key={k} className="hoja" style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 16, backgroundColor: 'rgba(255,255,255,0.01)', marginBottom: 16 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 12 }}>
-                          <span style={{ fontWeight: 700, fontSize: 14 }}>Tela {hoja.tela}</span>
-                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                            <b style={{ color: 'var(--accent)' }}>{hoja.ancho_cm} cm de ancho</b> · {hoja.paginas} pág(s) · {(hoja.consumo_cm / 100).toFixed(2)} m de largo · {hoja.aprovechamiento}% eficiencia
-                          </span>
-                          <a 
-                            href={rutaApi(`/trabajos/${trabajoEstado.resultado.id}/${hoja.archivo}`)} 
-                            download 
-                            className="btn" 
-                            style={{ padding: '6px 12px', fontSize: 12, marginLeft: 'auto' }}
-                          >
-                            <Icon name="download" style={{ width: 12, height: 12 }} /> Descargar PDF
-                          </a>
-                        </div>
-                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
-                          {Array.from({ length: hoja.paginas || (hoja.previews && hoja.previews.length) || 1 }, (_pv, pIdx) => (
-                            <div 
-                              key={pIdx} 
-                              className="preview-thumbnail"
-                              style={{ 
-                                width: 100, 
-                                height: 140, 
-                                border: '1px solid var(--border-light)', 
-                                borderRadius: 8, 
-                                overflow: 'hidden', 
-                                cursor: 'pointer',
-                                transition: 'transform 0.2s, border-color 0.2s',
-                                backgroundColor: '#fff',
-                                display: 'flex',
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                                padding: 4
-                              }}
-                              onClick={() => {
-                                // La hoja de verdad rasterizada (no el SVG: ya no se escribe).
-                                setZoomPreviewUrl(rutaApi(`/api/trabajos/${trabajoEstado.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pIdx}&w=2400`));
-                                setZoomState({ zoom: 1.0, pan: { x: 0, y: 0 } });
-                                setEsArrastrando(false);
-                              }}
-                              title="Click para ver a detalle (Vectorial)"
-                            >
-                              {/* Miniatura LIVIANA (ver `/api/trabajos/…/mesa_img`): en vector,
-                                  diez de éstas clavaban el navegador. Tocarla abre el vector. */}
-                              <img 
-                                src={rutaApi(`/api/trabajos/${trabajoEstado.resultado.id}/mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pIdx}&w=900`)} 
-                                alt="Preview" 
-                                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-
-                    <div className="card-title" style={{ fontSize: 14, marginTop: 24, marginBottom: 8 }}>Validaciones de Seguridad Imprenta</div>
-                    <ul style={{ listStyle: 'none' }}>
-                      {trabajoEstado.resultado?.validaciones?.map((val, vIdx) => (
-                        <li key={vIdx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px dashed var(--border-light)' }}>
-                          <span style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-                            <span style={{ color: val.ok ? 'var(--success)' : 'var(--error)', fontWeight: 800 }}>
-                              {val.ok ? "✓" : "✗"}
-                            </span>
-                            {val.nombre}
-                          </span>
-                      <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-secondary)' }}>{val.detalle}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            )}
           </div>
         )}
 
@@ -17243,6 +17988,19 @@ export default function App() {
                         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>Moldería
                           <Ayuda ancho={300}>Tus molderías registradas. Hacé clic en una para configurar molde, diseño y planilla.</Ayuda></h2>
                       </div>
+                      {/* BUSCADOR (pedido del usuario 2026-09-21): por nombre del molde o de una de sus
+                          VARIABLES — si se busca una variable, se ve el molde que la tiene. Cuanto más
+                          se escribe, más preciso; con el nombre completo, sólo ése. */}
+                      <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 420 }}>
+                        <Icon name="search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: 'var(--text-muted)', pointerEvents: 'none' }} />
+                        <input type="text" value={buscarMolderia} onChange={(e) => setBuscarMolderia(e.target.value)}
+                          data-tour="molde-buscar" placeholder="Buscar molde o variable…"
+                          style={{ width: '100%', padding: '8px 30px', borderRadius: 9, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', fontSize: 12.5 }} />
+                        {buscarMolderia && (
+                          <button type="button" onClick={() => setBuscarMolderia('')} title="Borrar la búsqueda"
+                            style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                        )}
+                      </div>
                       {puedo('molde.crear') && (
                       <button className="btn primary" data-tour="molde-nuevo" onClick={() => setCreandoProducto(true)}>
                         <Icon name="plus" style={{ width: 14, height: 14 }} /> Nueva Moldería
@@ -17263,8 +18021,13 @@ export default function App() {
                         con la que vas a trabajar». Antes marcaba la 1ª tarjeta (`molde-tarjeta`) y
                         mandaba a abrir la equivocada. */}
                     <div className="product-crm-grid" data-tour="molde-grilla" style={{ marginBottom: 24 }}>
-                      {productosCat.productos.filter(p => !p.personal).map((p, _i) => {
+                      {buscarMolderia.trim() && !filtrarBusqueda(buscarMolderia, productosCat.productos.filter(p => !p.personal), p => [p.nombre, ...(p.variantes || []).map(v => v.label)]).length && (
+                        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '8px 0' }}>Ningún molde ni variable coincide con «{buscarMolderia.trim()}».</div>
+                      )}
+                      {filtrarBusqueda(buscarMolderia, productosCat.productos.filter(p => !p.personal), p => [p.nombre, ...(p.variantes || []).map(v => v.label)]).map(({ item: p, cual }, _i) => {
                         const esActivo = p.id === productosCat.activo;
+                        // si lo que coincidió fue una VARIABLE (no el nombre del molde), se muestra cuál
+                        const _varHallada = cual > 0 ? ((p.variantes || [])[cual - 1] || {}).label : null;
                         return (
                           <div
                             key={p.id}
@@ -17277,6 +18040,9 @@ export default function App() {
                               <div className="product-card-title">{p.nombre}</div>
                               {esActivo && <div className="badge success" style={{ fontSize: 9 }}>Activo</div>}
                             </div>
+                            {_varHallada && (
+                              <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: -4 }}>variable: <b>{_varHallada}</b></div>
+                            )}
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: -4, fontSize: 11, color: 'var(--text-muted)' }}>
                               <Icon name="productos" style={{ width: 12, height: 12 }} />
@@ -18979,13 +19745,36 @@ export default function App() {
                               )}
                               {configMedida === 'talle' && (
                                 <div style={{ marginTop: 9 }}>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                    {tallesMolde.map(t => (
-                                      <button key={t} type="button" onClick={() => verVarianteOperario(t)}
-                                        className={`chip ${etqData.talle_ref === t ? 'active' : ''}`} style={{ padding: '5px 11px' }}>{t}</button>
-                                    ))}
-                                  </div>
-                                  <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 7, lineHeight: 1.4 }}>Cada pieza con su tamaño real en el {(term?.variante || 'variante').toLowerCase()} elegido (un diseño por {(term?.variante || 'variante').toLowerCase()}, mesa <code>#{etqData.talle_ref || 'XS'} Pieza</code>).</small>
+                                  {/* LOS MISMOS botones eligen qué talles van (uno, algunos o todos; pedido del usuario
+                                      2026-09-23: «usá lo que ya está, no dupliques»). Tocar uno lo suma/saca y el visor
+                                      muestra el último sumado; el que está en el visor lleva el borde grueso. */}
+                                  {(() => {
+                                    const _sel = tallesIllu || tallesMolde;
+                                    const _todos = _sel.length === tallesMolde.length;
+                                    const _mini = (on) => ({ padding: '3px 9px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.15)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-muted)' });
+                                    const tocar = (t) => {
+                                      if (!_sel.includes(t)) { setTallesIllu(tallesMolde.filter(x => x === t || _sel.includes(x))); verVarianteOperario(t); return; }
+                                      const resto = _sel.filter(x => x !== t);
+                                      setTallesIllu(resto);
+                                      // se sacó el que se estaba viendo → el visor pasa a otro de los elegidos
+                                      if (etqData.talle_ref === t && resto.length) verVarianteOperario(resto[0]);
+                                    };
+                                    return (<>
+                                      <div style={{ display: 'flex', gap: 6, marginBottom: 7 }}>
+                                        <button type="button" style={_mini(_todos)} onClick={() => setTallesIllu(null)}>Todos</button>
+                                        <button type="button" style={_mini(!_sel.length)} onClick={() => setTallesIllu([])}>Ninguno</button>
+                                      </div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                        {tallesMolde.map(t => (
+                                          <button key={t} type="button" onClick={() => tocar(t)}
+                                            className={`chip ${_sel.includes(t) ? 'active' : ''}`}
+                                            style={{ padding: '5px 11px', boxShadow: etqData.talle_ref === t ? '0 0 0 2px var(--accent)' : undefined }}>{t}</button>
+                                        ))}
+                                      </div>
+                                      {!_sel.length && <small style={{ color: 'var(--warning)', display: 'block', marginTop: 6 }}>Elegí al menos uno.</small>}
+                                    </>);
+                                  })()}
+                                  <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 7, lineHeight: 1.4 }}>Tocá los {(term?.variante || 'variante').toLowerCase()}s que van (uno, algunos o todos); el de <b>borde grueso</b> es el que se ve en el visor. Cada pieza con su tamaño real en su {(term?.variante || 'variante').toLowerCase()} (mesa <code>#{etqData.talle_ref || 'XS'} Pieza</code>).</small>
                                 </div>
                               )}
                               {configMedida === 'rango' && (
@@ -19009,13 +19798,104 @@ export default function App() {
                                       </div>
                                     </div>
                                   )}
+                                  {/* VARIOS RANGOS en un mismo archivo de Illustrator: se arma la lista y se crean todos juntos */}
+                                  {(() => {
+                                    const _lbl = (t) => `${t[0]}${t.length > 1 ? '–' + t[t.length - 1] : ''}`;
+                                    const _ya = rangoMedida.length > 0 && rangosIllu.some(rg => rg.talles.join('|') === rangoMedida.join('|'));
+                                    const agregar = () => {
+                                      if (!rangoMedida.length || _ya) return;
+                                      const guia = rangoMedida.includes(etqData?.talle_ref) ? etqData.talle_ref : rangoMedida[0];
+                                      setRangosIllu(l => [...l, { talles: [...rangoMedida], guia }]);
+                                    };
+                                    return (
+                                      <div style={{ marginTop: 10 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                          <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11.5 }}
+                                            disabled={!rangoMedida.length || _ya} onClick={agregar}>Agregar rango</button>
+                                          <Ayuda ancho={300}>Para crear <b>varios rangos</b> en un mismo archivo de Illustrator: elegí un rango y su guía, tocá <b>Agregar rango</b> y repetí con el siguiente. Cada rango sale en su bloque, con su título y el nombre de sus mesas (<code>#XS-M Pieza</code>). Si no agregás ninguno, se crea sólo el rango elegido.</Ayuda>
+                                          {rangosIllu.length > 0 && <button type="button" className="btn ghost" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => setRangosIllu([])}>Quitar todos</button>}
+                                        </div>
+                                        {rangosIllu.length > 0 && (
+                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                                            {rangosIllu.map((rg, i) => (
+                                              <span key={rg.talles.join('|')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 10px', borderRadius: 8, fontSize: 11.5, fontWeight: 700, border: '1px solid var(--accent)', background: 'rgba(0,243,255,0.10)', color: 'var(--accent)' }}>
+                                                {_lbl(rg.talles)} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>guía {rg.guia}</span>
+                                                <button type="button" title="Quitar" onClick={() => setRangosIllu(l => l.filter((_, j) => j !== i))}
+                                                  style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px' }}>×</button>
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {rangosIllu.length > 0 && <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 5 }}>Crear en Illustrator va a crear estos {rangosIllu.length} rango{rangosIllu.length === 1 ? '' : 's'} en un archivo.</small>}
+                                      </div>
+                                    );
+                                  })()}
                                   <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 7, lineHeight: 1.4 }}>Elegí el rango (click o <b>shift+click</b>) y la <b>guía del rango</b>. La caja iguala la dimensión de referencia de la <b>guía elegida</b> y crece con la proporción crítica <b>de ese rango</b>. En el arte: <code>#{rangoMedida[0] || 'XS'}-{rangoMedida[rangoMedida.length - 1] || 'L'} Pieza</code>.</small>
                                 </div>
                               )}
-                              <button type="button" className="btn ghost" style={{ width: '100%', marginTop: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={descargarPdfGuia}>
-                                <Icon name="download" style={{ width: 14, height: 14 }} />
-                                {verVariante ? 'Descargar guía .ai (solo esta variable)' : 'Descargar guía .ai (molde completo)'}
-                              </button>
+                              {/* A QUÉ TAMAÑO se crea en Illustrator, en todos los modos (todo se achica igual; ver
+                                  `planIllustrator`). Los talles se eligen con los botones de «Talle por talle» de arriba. */}
+                              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border-light)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>Escala</label>
+                                  <Ayuda ancho={290}>A qué tamaño se crea en Illustrator. <b>100%</b> = tamaño real. <b>50%</b> = todo a la mitad: las mesas, el contorno y las distancias entre ellas, <b>todo igual</b>. Sirve para que entren todos los {(term?.variante || 'talle').toLowerCase()}s en un archivo. El nombre del archivo lleva el porcentaje.</Ayuda>
+                                </div>
+                                {/* 100 % a 10 %, de 10 en 10 (pedido del usuario 2026-09-23) */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
+                                  {[100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map(n => {
+                                    // la RECOMENDADA va con un verde suave (la leyenda de abajo dice qué es); la elegida, como siempre
+                                    const _rec = !!(recoIllu && recoIllu.clave === _claveIllu && recoIllu.porc === n);
+                                    const _sel = escalaIllu === n;
+                                    return (
+                                      <button key={n} type="button" onClick={() => setEscalaIllu(n)}
+                                        style={{ padding: '4px 8px', borderRadius: 8, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                                          border: '1px solid ' + (_rec ? 'rgba(52,211,153,0.75)' : _sel ? 'var(--accent)' : 'var(--border-light)'),
+                                          background: _sel ? 'rgba(0,243,255,0.15)' : _rec ? 'rgba(52,211,153,0.12)' : 'transparent',
+                                          color: _sel ? 'var(--accent)' : _rec ? '#34d399' : 'var(--text-muted)' }}>{n}%</button>
+                                    );
+                                  })}
+                                </div>
+                                {/* LA LEYENDA del color recomendado + en cuántos archivos sale el % elegido. Sin ventanas
+                                    (pedido del usuario 2026-09-23: «no en un modal: que marque la escala con un color sutil
+                                    y especifique que ese color es el recomendado»). */}
+                                {recoIllu && recoIllu.clave === _claveIllu && (() => {
+                                  const _lz = String(LIENZO_M).replace('.', ',');
+                                  const r = recoIllu;
+                                  const _nSel = _archivosSelIllu;
+                                  return (
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 7, lineHeight: 1.45 }}>
+                                      {r.calculando ? 'Calculando la escala recomendada…'
+                                        : r.error ? `No se pudo calcular la escala recomendada: ${r.error}`
+                                        : r.porc ? (
+                                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={{ width: 11, height: 11, borderRadius: 3, flexShrink: 0, background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.75)' }} />
+                                            <span>En verde, la escala <b style={{ color: '#34d399' }}>recomendada</b>: todo entra en el espacio de Illustrator ({_lz} × {_lz} m).</span>
+                                          </span>
+                                        )
+                                        : `Ni al 10% entra todo en el espacio de Illustrator (${_lz} × ${_lz} m).`}
+                                      {!r.calculando && !r.error && _nSel > 1 && (
+                                        <div style={{ marginTop: 4 }}>Al {escalaIllu}% no entra en un archivo: se va a crear en <b>{_nSel} archivos</b>{r.med && r.med.nMesas > TOPE_MESAS && r.porc && escalaIllu <= r.porc ? ` (son ${r.med.nMesas} mesas e Illustrator admite ${TOPE_MESAS} por archivo)` : ''}.</div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                                {/* ACOMODAR LAS MESAS A MANO (opcional): se acomoda el talle guía y todos lo siguen */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                                  <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11.5 }}
+                                    disabled={!!armandoIllustrator} onClick={abrirAcomodoMesas}>Acomodar mesas</button>
+                                  <Ayuda ancho={300}><b>Opcional.</b> Acomodás a mano las mesas de trabajo del {(term?.variante || 'talle').toLowerCase()} guía y, al crear en Illustrator, <b>todos los {(term?.variante || 'talle').toLowerCase()}s</b> siguen ese acomodo: mismo orden y la <b>misma separación</b> entre mesas. Se guarda con el molde{verVariante ? ' (para esta variable)' : ''}. Si no lo usás, se acomodan solas como en el visor.</Ayuda>
+                                  <span style={{ fontSize: 11, color: _acomodoGuardado ? 'var(--accent)' : 'var(--text-muted)' }}>{_acomodoGuardado ? 'Acomodadas a mano' : 'Acomodo automático'}</span>
+                                </div>
+                              </div>
+                              <PlantillaIllustrator onCrear={() => abrirEnIllustrator()} onDescargar={descargarPdfGuia}
+                                textoDescargar={verVariante ? 'Descargar guía .ai (solo esta variable)' : 'Descargar guía .ai (molde completo)'}
+                                ocupado={!!armandoIllustrator} onNoEncontrado={() => setIllustratorFalta(true)}
+                                versionNueva={_verIllu} onBajar={bajarExtensionIllustrator}
+                                ayuda={<Ayuda ancho={320}>
+                                  Con Illustrator conectado, <b>Crear en Illustrator</b> arma la plantilla directo allá, sin descargar nada: <b>una mesa de trabajo por pieza</b> con el nombre que lee el sistema{configMedida === 'talle' ? ' (una por cada talle elegido, cada talle en su bloque)' : ''}, a la <b>escala</b> elegida, las <b>capas</b> (diseño, Editable, Nombre, Número…, guias) y el <b>contorno</b> de cada pieza en «guias».{verVariante ? ' Solo las piezas de esta variable.' : ''}
+                                  <br /><br />Para conectar: Illustrator abierto en <b>esta</b> computadora, con la extensión de USER PRO (se instala una sola vez). Tocá <b>Conectar con Illustrator</b> y, la primera vez, <b>Permitir</b> en el navegador. Después se conecta sola cada vez que abrís Illustrator. El tutorial está en Illustrator: <b>Ventana › Extensiones › USER PRO</b>.
+                                  <br /><button type="button" className="btn ghost" style={{ marginTop: 8, padding: '5px 10px', fontSize: 11.5 }} onClick={bajarExtensionIllustrator}>Bajar el instalador</button>
+                                </Ayuda>} />
                             </div>
                           )}
 
@@ -21556,14 +22436,14 @@ export default function App() {
                       {/* PLAN_NAVEGADOR, etapa 6: «el servidor no calcula». Prendido, todo lo pesado
                           (preparar moldes, analizar artes, previas, tizadas) lo hace la computadora de
                           cada persona o no se hace; el servidor sólo valida y guarda. */}
+                      {/* 🔴 YA NO SE PUEDE APAGAR (regla del usuario 2026-09-24: si la computadora no alcanza,
+                          el servidor NO hace su trabajo; que se compre una nueva). Queda como cartel. */}
                       <CfgCard icono="molderia" titulo="El servidor no calcula"
-                        extra={<CfgSw on={!!c.navegador_solo} onClick={() => !c.navegador_solo_forzado && setCfgConDiseno(p => ({ ...p, navegador_solo: !p.navegador_solo }))}
-                          ancla="cfgb-solo-navegador" titulo={c.navegador_solo_forzado ? 'Lo fija el entorno del servidor (TIZADA_SOLO_NAVEGADOR)' : 'Todo lo pesado en la computadora de cada persona'} />}>
+                        extra={<span data-ancla="cfgb-solo-navegador" style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--success, #34d399)' }}>Siempre</span>}>
                         <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
-                          Prendido: los moldes, los diseños, las previas y las tizadas se preparan en la computadora de quien los
-                          carga, y el servidor sólo valida y guarda. Si una computadora no puede, se le avisa y no se manda nada.
-                          Apagado: el servidor sigue haciendo el trabajo pesado cuando el navegador no lo hace.
-                          {c.navegador_solo_forzado && <> <b>Lo está fijando el entorno del servidor.</b></>}
+                          Los moldes, los diseños, las previas y las tizadas se preparan en la computadora de quien los carga;
+                          el servidor sólo valida y guarda. Si una computadora no alcanza, se le avisa y no se hace: el servidor
+                          nunca hace ese trabajo por ella.
                         </p>
                       </CfgCard>
 
@@ -22577,55 +23457,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- MODAL 4: Confirmación antes de Generar Sublimación --- */}
-      {modalConfirmOpen && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target.classList.contains('modal-overlay')) setModalConfirmOpen(false); }}>
-          <div className="modal-content" data-modal="Confirmar Tizada de Sublimación" style={{ maxWidth: 480 }}>
-            <div className="modal-header">
-              <h3>Confirmar Tizada de Sublimación</h3>
-              <button className="quitar" style={{ border: 'none', background: 'none', fontSize: 24, cursor: 'pointer' }} onClick={() => setModalConfirmOpen(false)}>×</button>
-            </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 }}>
-              <div>
-                <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Molde a Utilizar</label>
-                <select 
-                  value={confirmProductoId}
-                  onChange={(e) => setConfirmProductoId(e.target.value)}
-                >
-                  {productosCat.productos.map(p => (
-                    <option key={p.id} value={p.id}>{p.nombre} {p.id === productosCat.activo ? "(Activo)" : ""}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 14, backgroundColor: 'rgba(0,0,0,0.2)', fontSize: 13 }}>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Resumen de producción:</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', marginBottom: 4 }}>
-                  <span>Prendas a procesar</span>
-                  <b>{filas.length}</b>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                  <span>Espaciado entre piezas</span>
-                  <b>{(config?.espaciado_mm || 5)} mm</b>
-                </div>
-              </div>
-              
-              <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                Se generarán los moldes vectoriales recortados por su contorno y se estamparán las personalizaciones en curvas en los archivos correspondientes.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-              <button className="btn ghost" onClick={() => setModalConfirmOpen(false)}>Cancelar</button>
-              <button className="btn primary" onClick={ejecutarGenerarSublimacion}>
-                Confirmar e Iniciar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* --- MODAL: Piezas de un TIPO (Variables). Ventana emergente con la lista de
               piezas asignadas + botón para asignar en el visor. --- */}
       {modalTipoClave && (() => {
@@ -22911,167 +23742,6 @@ export default function App() {
                   {t}
                 </button>
               ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Lightbox de Previsualización Vectorial */}
-      {zoomPreviewUrl && (
-        <div 
-          className="modal-overlay" 
-          style={{ 
-            position: 'fixed', 
-            top: 0, 
-            left: 0, 
-            width: '100vw', 
-            height: '100vh', 
-            backgroundColor: 'rgba(0, 0, 0, 0.85)', 
-            backdropFilter: 'blur(8px)',
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            zIndex: 3000,
-            animation: 'fadeIn 0.2s ease-out',
-            padding: 20
-          }}
-        >
-          <div className="card animate-fade" data-modal="Vista previa del molde" style={{ width: '92vw', height: '92vh', padding: 20, display: 'flex', flexDirection: 'column', backgroundColor: 'var(--bg-dark)', border: '1px solid var(--border-light)' }}>
-            
-            {/* Header / Barra de Controles */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 15 }}>Vista Previa Vectorial</span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Mesa de Tizada</span>
-              </div>
-              
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <button 
-                  className="btn secondary" 
-                  style={{ padding: '6px 12px', fontSize: 12 }} 
-                  onClick={() => handleZoom(zoomLevel / 1.15)}
-                >
-                  Zoom -
-                </button>
-                <span style={{ fontFamily: 'monospace', fontSize: 13, minWidth: 55, textAlign: 'center', fontWeight: 'bold' }}>
-                  {Math.round(zoomLevel * 100)}%
-                </span>
-                <button 
-                  className="btn secondary" 
-                  style={{ padding: '6px 12px', fontSize: 12 }} 
-                  onClick={() => handleZoom(zoomLevel * 1.15)}
-                >
-                  Zoom +
-                </button>
-                <button 
-                  className="btn secondary" 
-                  style={{ padding: '6px 12px', fontSize: 12 }} 
-                  onClick={() => handleZoom(1.0)}
-                >
-                  Restablecer
-                </button>
-                <button 
-                  className="btn" 
-                  style={{ padding: '6px 12px', fontSize: 12, backgroundColor: 'var(--error)', color: '#fff', marginLeft: 10 }} 
-                  onClick={() => {
-                    setZoomPreviewUrl(null);
-                    handleZoom(1.0);
-                    setEsArrastrando(false);
-                    isDraggingRef.current = false;
-                  }}
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-            
-            {/* Contenedor del Visor */}
-            <div 
-              ref={viewerRef}
-              style={{ 
-                flex: 1, 
-                overflow: 'hidden', 
-                border: '1px solid var(--border-light)', 
-                borderRadius: 8, 
-                backgroundColor: 'rgba(0,0,0,0.6)', 
-                display: 'flex', 
-                justifyContent: 'center', 
-                alignItems: 'center',
-                padding: 20,
-                position: 'relative',
-                cursor: esArrastrando ? 'grabbing' : 'grab',
-                userSelect: 'none'
-              }}
-              onMouseDown={(e) => {
-                if (zoomLevel <= 1.0) return; // Disable drag/pan when zoom is 1.0
-                if (e.button === 2) {
-                  isDraggingRef.current = true;
-                  dragStartRef.current = { x: e.clientX, y: e.clientY };
-                  setEsArrastrando(true);
-                  e.preventDefault();
-                }
-              }}
-              onMouseMove={(e) => {
-                if (zoomLevel <= 1.0) return; // Disable drag/pan when zoom is 1.0
-                if (isDraggingRef.current) {
-                  const dx = e.clientX - dragStartRef.current.x;
-                  const dy = e.clientY - dragStartRef.current.y;
-                  setZoomState(prev => ({
-                    ...prev,
-                    pan: { x: prev.pan.x + dx, y: prev.pan.y + dy }
-                  }));
-                  dragStartRef.current = { x: e.clientX, y: e.clientY };
-                }
-              }}
-              onMouseUp={(e) => {
-                if (e.button === 2) {
-                  isDraggingRef.current = false;
-                  setEsArrastrando(false);
-                }
-              }}
-              onMouseLeave={() => {
-                isDraggingRef.current = false;
-                setEsArrastrando(false);
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-              onWheel={(e) => {
-                e.preventDefault();
-                const zoomFactor = 1.15;
-                const nextScale = e.deltaY < 0 ? zoomLevel * zoomFactor : zoomLevel / zoomFactor;
-                handleZoom(nextScale, e.clientX, e.clientY);
-              }}
-            >
-              <style>{`
-                .viewer-svg-container svg {
-                  max-width: 85vw !important;
-                  max-height: 80vh !important;
-                  width: auto !important;
-                  height: auto !important;
-                  display: block !important;
-                }
-              `}</style>
-              
-              {zoomSvgContent ? (
-                <div 
-                  className="viewer-svg-container"
-                  dangerouslySetInnerHTML={{ __html: zoomSvgContent }} 
-                  style={{ 
-                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
-                    transformOrigin: 'center center', 
-                    display: 'inline-block', 
-                    boxShadow: '0 8px 30px rgba(0,0,0,0.7)',
-                    borderRadius: 4,
-                    backgroundColor: 'white',
-                    transition: 'none',
-                    pointerEvents: 'none',
-                    userSelect: 'none'
-                  }} 
-                />
-              ) : (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-                  Cargando vista previa vectorial...
-                </div>
-              )}
             </div>
           </div>
         </div>

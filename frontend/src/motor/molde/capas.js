@@ -361,7 +361,15 @@ export function reescribirPorIndice(inst, suprimirIdx, recolorIdx = null, conser
 
 /** `aislar_objeto`: deja SOLO la figura `objId` de la capa (y los clips de la capa), opcionalmente recoloreada. */
 export function aislarObjeto(inst, R, objetivo, objId, cmykFill = null, cmykStroke = null, xobjInfo = null) {
-  const a = analizarCapa(inst, R, objetivo, xobjInfo)
+  return aislarObjetoDe(inst, analizarCapa(inst, R, objetivo, xobjInfo), objId, cmykFill, cmykStroke)
+}
+
+/**
+ * `aislarObjeto` con el análisis de la capa YA HECHO (`analizarCapa`, que es lo caro: recorre la
+ * mesa entera). El editor de editables aísla todas las figuras de una misma capa y mesa: analizarla
+ * una vez y no una por figura bajó un arte real de 31 s a pocos (2026-09-23). Mismo resultado.
+ */
+export function aislarObjetoDe(inst, a, objId, cmykFill = null, cmykStroke = null) {
   const tgt = a.objetos.find((o) => o.obj_id === objId) || null
   const keep = new Set(tgt ? tgt.iPaints : [])
   for (const i of a.clipsCapaIdx) keep.add(i)
@@ -375,7 +383,11 @@ export function aislarObjeto(inst, R, objetivo, objId, cmykFill = null, cmykStro
 
 /** `aislar_capa_objetos`: la capa ENTERA, recoloreando cada figura (`colores` = {obj_id: [fill, stroke]}). */
 export function aislarCapaObjetos(inst, R, objetivo, colores = null, xobjInfo = null) {
-  const a = analizarCapa(inst, R, objetivo, xobjInfo)
+  return aislarCapaObjetosDe(inst, analizarCapa(inst, R, objetivo, xobjInfo), colores)
+}
+
+/** `aislarCapaObjetos` con el análisis de la capa ya hecho (ver `aislarObjetoDe`). */
+export function aislarCapaObjetosDe(inst, a, colores = null) {
   const keep = new Set(a.clipsCapaIdx)
   const recolor = new Map()
   for (const o of a.objetos) {

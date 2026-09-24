@@ -8,7 +8,7 @@
 // estampado, `obrero.worker.js` → `pieza`) y la convierte a SVG. El resultado tiene la MISMA forma
 // que la respuesta del servidor: `{piezas: {nombre: {svg, w_cm, h_cm}}, talle}`.
 import { crearPool } from '../pool.js'
-import { traerConCache, base64DeTexto } from '../cache.js'
+import { traerConCache, base64DeTexto, claveDe, urlDe } from '../cache.js'
 import { piezasDe } from './prendas.js'
 export { asegurarFuentes }
 import { pyRound } from '../py.js'
@@ -35,7 +35,7 @@ export async function motorDe(pid, rutaApi, { reemplazos = null } = {}) {
   if (m && m.firma !== firma) { try { m.pool.cerrar() } catch { /* nada */ } motores.delete(pid); m = null }
   if (!m) {
     m = { pid, info, firma, mesasAbiertas: new Set(), fuentesListas: false,
-          pool: crearPool(1, () => new Worker(new URL('../obrero.worker.js', import.meta.url), { type: 'module' })) }
+          pool: crearPool(1, () => new Worker(new URL('../obrero.worker.js', import.meta.url), { type: 'module' }), 'motor del molde') }
     motores.set(pid, m)
   } else {
     m.info = info
@@ -47,8 +47,7 @@ async function asegurarMesa(m, rutaApi, mesa) {
   if (m.mesasAbiertas.has(mesa)) return
   const md = m.info.mesas.find((x) => x.mesa === mesa)
   if (!md || !md.paginas) throw new Error(`la mesa ${mesa} todavía no tiene sus páginas por talle`)
-  const clave = `${m.pid}|m${mesa}.pdf|${(md.sello || []).join(',')}`
-  const bytes = await traerConCache(clave, rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/desplegado/m${mesa}.pdf`))
+  const bytes = await traerConCache(claveDe.mesaPdf(m.pid, mesa, md.sello), rutaApi(urlDe.mesa(m.pid, mesa, 'pdf')))
   await m.pool.enviar('mesa_abrir', { mesa, bytes }, [bytes.buffer])
   m.mesasAbiertas.add(mesa)
 }
@@ -57,8 +56,7 @@ async function indiceMesa(m, rutaApi, mesa) {
   m.indices = m.indices || new Map()
   if (!m.indices.has(mesa)) {
     const md = m.info.mesas.find((x) => x.mesa === mesa)
-    const clave = `${m.pid}|m${mesa}.json|${(md.sello || []).join(',')}`
-    const bytes = await traerConCache(clave, rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/desplegado/m${mesa}.json`))
+    const bytes = await traerConCache(claveDe.mesaJson(m.pid, mesa, md.sello), rutaApi(urlDe.mesa(m.pid, mesa, 'json')))
     m.indices.set(mesa, JSON.parse(new TextDecoder().decode(bytes)))
   }
   return m.indices.get(mesa)
@@ -144,12 +142,67 @@ export async function asegurarMoldeA(m, rutaApi, pid, sello, hilo = null) {
   h.moldesAEnCurso = h.moldesAEnCurso || new Map()
   if (h.moldesAEnCurso.has(pid)) return h.moldesAEnCurso.get(pid)
   const p = (async () => {
-    const bytes = await traerConCache(`plantilla|${pid}|${(sello || []).join(',')}`, rutaApi(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`))
+    // la VERSIÓN VIGENTE del molde (variantes nombradas, piezas agregadas): la del registro
+    const bytes = await traerConCache(claveDe.plantilla(pid, sello), rutaApi(urlDe.plantilla(pid)))
     await h.pool.enviar('molde_a_abrir', { clave: pid, bytes }, [bytes.buffer])
     h.moldesA.add(pid)
   })()
   h.moldesAEnCurso.set(pid, p)
   try { await p } finally { h.moldesAEnCurso.delete(pid) }
+}
+
+/**
+ * La validación del arte separado con un mapeo NUEVO, armada en esta computadora (lo que
+ * `POST /api/arte/mapeo` calculaba en el servidor). Devuelve la validación (con
+ * `campos_personalizacion`) o `null` si este molde no es del camino A o el diseño no tiene arte.
+ */
+export async function validarMapeoEnNavegador({ pid, diseno = null, mapeo, variante = '', rutaApi }) {
+  const m = await motorDe(pid, rutaApi)
+  if (!m || !m.info.camino_a) return null
+  const d = disenoDe(m, diseno)
+  if (!d) return null
+  const arte = await traerConCache(`arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
+    rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
+  const contexto = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_contexto`))
+  const bytes = arte.slice()
+  return m.pool.enviar('arte_validar', { bytes, contexto, mapeo, variante: variante || '' }, [bytes.buffer])
+}
+
+/** El motor ya abierto de este molde (con los reemplazos que tenga) o uno nuevo: para lo que sólo
+ *  LEE el arte, así no se rearma el hilo por un cambio de tipografías que no le importa. */
+async function motorParaLeer(pid, rutaApi) {
+  return motores.get(pid) || motorDe(pid, rutaApi)
+}
+
+/**
+ * Los editables del arte para el editor, armados en esta computadora (lo que era
+ * `GET /api/productos/editables`). Devuelve `{objetos, talles, piezas}` o null si el molde no es
+ * del camino A o el diseño no tiene arte.
+ */
+export async function editablesEnNavegador({ pid, diseno = 'principal', variante = '*', rutaApi }) {
+  const m = await motorParaLeer(pid, rutaApi)
+  if (!m || !m.info.camino_a) return null
+  const d = disenoDe(m, diseno)
+  if (!d) return null
+  const q = `?diseno=${encodeURIComponent(diseno || 'principal')}&variante=${encodeURIComponent(variante || '*')}`
+  const datos = await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/editables_datos${q}`))
+  const arte = await traerConCache(`arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`,
+    rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/arte_archivo` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))
+  const agregados = []
+  for (const o of (datos.agregados || [])) {
+    let bytes = null
+    if (o.archivo) {
+      try {
+        bytes = (await traerConCache(`oa|${m.pid}|${d.id}|${o.id}|${o.archivo}`,
+          rutaApi(`/api/productos/${encodeURIComponent(m.pid)}/objeto_agregado/${encodeURIComponent(o.id)}` + (d.id !== 'principal' ? `?diseno=${encodeURIComponent(d.id)}` : '')))).slice()
+      } catch { bytes = null }
+    }
+    agregados.push({ ...o, bytes })
+  }
+  const bytes = arte.slice()
+  const clave = `arte|${m.pid}|${d.id}|${(d.sello || []).join(',')}`
+  return m.pool.enviar('editables_vista', { bytes, datos: { ...datos, agregados, clave } },
+                       [bytes.buffer, ...agregados.filter((a) => a.bytes).map((a) => a.bytes.buffer)])
 }
 
 /** El diseño `id` del motor del camino A (`principal` si no se dice). */
@@ -199,6 +252,7 @@ async function _armarContextoA(m, rutaApi, h, d, k, firma, cfg, conPersonalizaci
     editablesColor: cfg.editablesColor ?? null, editablesMarca: cfg.editablesMarca ?? null, editablesSinMarca: cfg.editablesSinMarca ?? null,
     marcasComoCruz: cfg.marcasComoCruz !== false, referencia: cfg.referencia || m.info.referencia_medida || 'alto',
     borde: cfg.borde === undefined ? m.info.borde : cfg.borde, objetos, conPersonalizacion,
+    molde: m.pid,               // el arte clásico se limpia con las capas y la moldería del molde
   }, [...objetos.map((o) => o.bytes.buffer)])
   h.contextosA.set(k, { firma, pers: r.pers })
   return { clave: k, pers: r.pers }

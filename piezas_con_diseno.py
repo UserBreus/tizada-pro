@@ -1722,12 +1722,14 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
     encontrados = {}                      # campo → placeholder
     etiquetas = {}                        # idx_pieza → la etiqueta de corte que traía el archivo
     quitar = set()
-    cajas_sacadas = []                    # (idx_pieza|None, x, baseline, ancho, alto) de cada texto sacado
+    cajas_sacadas = []                    # (idx_pieza|("campo", c), x, baseline, ancho, alto) de cada texto sacado
+    _est_q = {}                           # índice de cada `q` → (trazo, ancho, ctm) vigentes ahí
     for i, inst in enumerate(salida):
         op = str(inst.operator)
         ops = inst.operands
         try:
             if op == "q":
+                _est_q[i] = (scol, sw, list(ctm))
                 pila.append((ctm, fcol, fcs_n, scol, scs_n, sw, tr, tf, tfs))
             elif op == "Q":
                 if pila:
@@ -1836,6 +1838,7 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
                           "ancho": round(ancho * U, 2), "color": 0, "colorn": None, "trazo": None,
                           "pasadas": [], "baseline_pts": [], "texto": txt.strip()}
                     encontrados[campo] = ph
+                ph.setdefault("_i_tj", i)       # dónde está el texto (para ordenar el borde de glifo)
                 # pasadas de apariencia, en orden: relleno y/o trazo según el modo de texto
                 def _add(p):
                     if not ph["pasadas"] or ph["pasadas"][-1] != p:
@@ -1850,7 +1853,7 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
                     if ph["trazo"] is None:
                         ph["trazo"] = [scol[0], list(scol[1]), round(_w, 4)]
                 quitar.add(i)
-                cajas_sacadas.append((None, dx, dy, ancho * U, esc * U))
+                cajas_sacadas.append((("campo", campo), dx, dy, ancho * U, esc * U))
         except Exception:
             continue
     if not quitar:
@@ -1862,8 +1865,50 @@ def quitar_placeholders(salida, page, marco, U, talle=None, contornos=None, ocul
     # cuya caja cae dentro de la caja del texto sacado—, que vale para cualquier fuente.
     for i_q, i_Q, ip in _bloques_de_contorno(salida, cajas_sacadas, marco, U):
         quitar.update(range(i_q, i_Q + 1))
-        if ip is not None and ip in etiquetas:
+        if isinstance(ip, tuple) and ip and ip[0] == "campo":
+            # 🔴 EL CONTORNO DEL NOMBRE/NÚMERO (2026-09-21, «sale sin el contorno que trae»). Ese
+            # borde viene como contornos de glifo trazados APARTE del texto, así que el modo de texto
+            # (`Tr`) no lo ve y se sacaba sin anotarlo: el molde con diseño estampaba SIEMPRE el
+            # nombre y el número sin borde. Se lee el trazo con que se pinta el bloque (el estado
+            # heredado en su `q` + lo que el bloque cambie) y entra a la pila en el orden del dibujo:
+            # antes del texto = borde detrás.
+            _ph = encontrados.get(ip[1])
+            if _ph is not None and not any(pp.get("t") == "S" for pp in _ph["pasadas"]):
+                _sc, _w, _ct = _est_q.get(i_q, (None, 1.0, [1, 0, 0, 1, 0, 0]))
+                _pinta = None
+                for _k in range(i_q + 1, i_Q):
+                    _o, _a = str(salida[_k].operator), salida[_k].operands
+                    try:
+                        if _o in ("K", "RG", "G"):
+                            _sc = (_o.lower(), [round(float(v), 4) for v in _a])
+                        elif _o in ("SC", "SCN"):
+                            _n = [round(float(v), 4) for v in _a if not isinstance(v, pikepdf.Name)]
+                            _o2 = _op_n.get(len(_n))
+                            if _o2:
+                                _sc = (_o2, _n)
+                        elif _o == "w":
+                            _w = float(_a[0])
+                        elif _o == "cm":
+                            _ct = _mul([float(v) for v in _a], _ct)
+                        elif _o in ("S", "s"):
+                            _pinta = (_sc, _w, list(_ct))
+                            break
+                    except Exception:
+                        continue
+                if _pinta and _pinta[0] and _pinta[1]:
+                    _c, _ww, _m = _pinta
+                    _wd = round(_ww * ((_m[0] ** 2 + _m[1] ** 2) ** 0.5) * U, 4)
+                    _pas = {"t": "S", "color": [_c[0], list(_c[1])], "w": _wd}
+                    if i_q < _ph.get("_i_tj", i_q + 1):
+                        _ph["pasadas"].insert(0, _pas)       # dibujado antes del texto: borde detrás
+                    else:
+                        _ph["pasadas"].append(_pas)
+                    if _ph.get("trazo") is None:
+                        _ph["trazo"] = [_c[0], list(_c[1]), _wd]
+        elif ip is not None and ip in etiquetas:
             etiquetas[ip]["contornos"] = etiquetas[ip].get("contornos", 0) + 1
+    for _ph in encontrados.values():
+        _ph.pop("_i_tj", None)
     return [inst for i, inst in enumerate(salida) if i not in quitar], encontrados, etiquetas
 
 
@@ -2701,15 +2746,32 @@ def _desplegar_molde_sin_candado(path_molde, talles, avisar, procesos, contornos
 _PERS_JSON = "personalizacion.json"
 
 
+_N_Y_TALLES = {}
+
+
+def _n_y_talles(path_molde):
+    """`(cantidad de mesas, talles)` del molde, leídos UNA vez por archivo (ruta, fecha, tamaño):
+    las pantallas lo preguntan en casi cada request (2026-09-22: el servidor no repite trabajo)."""
+    st = os.stat(path_molde)
+    k = (os.path.normcase(os.path.abspath(path_molde)), st.st_mtime_ns, st.st_size)
+    hit = _N_Y_TALLES.get(k)
+    if hit is None:
+        doc = fitz.open(path_molde)
+        try:
+            hit = (doc.page_count, list(talles_del_molde(doc)))
+        finally:
+            doc.close()
+        if len(_N_Y_TALLES) > 64:
+            _N_Y_TALLES.clear()
+        _N_Y_TALLES[k] = hit
+    return hit[0], list(hit[1])
+
+
 def desplegado_listo(path_molde):
     """¿Todas las mesas tienen sus páginas por talle (y del archivo actual)? Es lo que dice si
     los placeholders ya se pueden leer sin construir nada."""
     try:
-        doc = fitz.open(path_molde)
-        try:
-            n = doc.page_count
-        finally:
-            doc.close()
+        n, _t = _n_y_talles(path_molde)
     except Exception:
         return False
     for mesa in range(1, n + 1):
@@ -2734,12 +2796,7 @@ def personalizacion_con_diseno(path_molde, armar=True, procesos=None):
     cualquier request) las mesas sin páginas se saltan y el que llama decide qué hacer
     (ver `desplegado_listo`)."""
     import json
-    doc = fitz.open(path_molde)
-    try:
-        n = doc.page_count
-        talles = talles_del_molde(doc)
-    finally:
-        doc.close()
+    n, talles = _n_y_talles(path_molde)
     if armar and talles and not desplegado_listo(path_molde):
         # una sola pasada por todas las mesas, una mesa por proceso (las que ya están se saltan
         # por sello adentro de `desplegar_mesa`)

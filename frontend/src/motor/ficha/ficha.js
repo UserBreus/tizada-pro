@@ -36,7 +36,8 @@
 // ENTRADA: `generarFicha(mupdf, {titulo, subtitulo, planilla, moldesGuia})`
 //   planilla   = {columnas: [{id, label}], filas: [{colId: valor}]}
 //   moldesGuia = [{nombre, diseno, variante, opciones,
-//                  piezas:   [{nombre, tela, pdf: Uint8Array}],
+//                  pdf_guia: Uint8Array (una página por pieza, `guia_pdf`),
+//                  piezas:   [{nombre, tela, pagina, w_pt, h_pt}  (o, viejo, pdf: Uint8Array)],
 //                  fuentes:  [{campo, fuente, pedida, sustituida}],
 //                  procesos: [{nombre, proceso, pieza, sin_marca, pdf?: Uint8Array, svg?: b64,
 //                              thumb?: b64|Uint8Array, medidas: [{talles, texto}], nota?}]}]
@@ -44,6 +45,7 @@
 import { pyRound, pyStrip } from '../py.js'
 import { sha1HexBytes } from '../sha1.js'
 import { dibujarMesa } from '../vista/dibujar.js'
+import { prepararReplay, dibujarConReplay, destruirCacheXO } from '../vista/replay.js'
 
 // A4 en puntos (72 dpi). Retrato.
 export const A4_W = 595.28
@@ -55,6 +57,8 @@ const LINEA = [0.75, 0.75, 0.75]
 const ACENTO = [0.0, 0.55, 0.62]
 const ROJO = [0.72, 0.13, 0.13]        // falta un dato que alguien tiene que completar
 const FONT = 'helv'
+// La TARJETA de cada pieza del molde guía (`dibujarPiezas`)
+const GUIA_COLS = 5, GUIA_GAP = 5, GUIA_HCEL = 134, GUIA_PAD = 7
 const FONT_B = 'hebo'
 
 const f32 = Math.fround
@@ -155,9 +159,17 @@ const FUENTES = {
 function crearCtx(mupdf) {
   const doc = new mupdf.PDFDocument()
   const fuentes = {}
-  for (const [k, v] of Object.entries(FUENTES)) fuentes[k] = { ...v, font: new mupdf.Font(v.nombre), obj: null }
+  for (const [k, v] of Object.entries(FUENTES)) fuentes[k] = { ...v, font: new mupdf.Font(v.nombre), obj: null, avance: new Map() }
   // `_format_g` = el `%g` de MuPDF: se lo pide al propio mupdf, que imprime un real con esa rutina
-  const g = (v) => { const o = doc.newReal(v); const s = o.toString(); try { o.destroy() } catch { /* nada */ } return s }
+  // Con MEMORIA (2026-09-22, «la ficha en menos de 1 s aunque tenga 60 hojas»): una planilla larga
+  // imprime las mismas cifras (x de cada columna, alto de fila, tamaños) miles de veces, y cada una
+  // era un objeto de mupdf creado y destruido. Mismo texto: la rutina es la misma, sólo no se repite.
+  const memo = new Map()
+  const g = (v) => {
+    let s = memo.get(v)
+    if (s === undefined) { const o = doc.newReal(v); s = o.toString(); try { o.destroy() } catch { /* nada */ } memo.set(v, s) }
+    return s
+  }
   return { mupdf, doc, fuentes, g, paginas: [] }
 }
 
@@ -184,7 +196,7 @@ const cp1252 = (u) => (u < 128 ? u : (u >= 160 && u < 256) ? u : (CP1252[u] ?? -
 
 /** `fitz.get_text_length(text, fontname, fontsize)` con la Base-14 (`util_measure_string`). */
 export function largoTexto(ctx, texto, fontname, size) {
-  const font = ctx.fuentes[fontname].font
+  const fd = ctx.fuentes[fontname], font = fd.font
   const cs = Array.from(texto)
   let w = 0, pos = 0
   while (pos < cs.length) {
@@ -193,7 +205,10 @@ export function largoTexto(ctx, texto, fontname, size) {
     pos += u < 0x80 ? 1 : u < 0x800 ? 2 : u < 0x10000 ? 3 : 4
     let c = cp1252(u)
     if (c < 0) c = 0xB7
-    w += font.advanceGlyph(font.encodeCharacter(c), 0)
+    // el ancho de cada letra se pide a mupdf UNA vez por fuente (la planilla repite las mismas)
+    let a = fd.avance.get(c)
+    if (a === undefined) { a = font.advanceGlyph(font.encodeCharacter(c), 0); fd.avance.set(c, a) }
+    w += a
   }
   return w * size
 }
@@ -383,6 +398,29 @@ function mostrarPagina(ctx, pg, rect, srcDoc, pno = 0) {
   }
 }
 
+/**
+ * Una pieza del MOLDE GUÍA pegada tal cual (vectorial) en `dst`: su página del PDF de la guía
+ * (`guia_pdf` del hilo del molde) como Form XObject. Los recursos pasan por el graft map de ESA
+ * guía, así la mesa (o el arte) que nombran todas las piezas entra UNA sola vez en la ficha.
+ */
+function pegarPiezaGuia(ctx, pg, dst, guia, pno) {
+  const doc = ctx.doc
+  const src = guia.doc.findPage(pno)
+  const caja = leerCaja(src.getInheritable('MediaBox')) || [0, 0, 1, 1]
+  const d = doc.newDictionary()
+  d.put('Type', doc.newName('XObject'))
+  d.put('Subtype', doc.newName('Form'))
+  const bb = doc.newArray(); for (const v of caja) bb.push(doc.newReal(v)); d.put('BBox', bb)
+  const res = src.getInheritable('Resources')
+  if (res && !res.isNull()) d.put('Resources', guia.mapa.graftObject(res))
+  const xo = doc.addStream(leerContenido(src), d)
+  const s = (dst[2] - dst[0]) / Math.max(1e-6, caja[2] - caja[0])
+  const tx = dst[0] - s * caja[0], ty = (A4_H - dst[3]) - s * caja[1]
+  const nombre = `fzFrm${pg.nFrm++}`
+  pg.xobjs.push([nombre, xo])
+  pg.trozos.push(`\nq\n${ctx.g(s)} 0 0 ${ctx.g(s)} ${ctx.g(tx)} ${ctx.g(ty)} cm\n/${nombre} Do\nQ\n`)
+}
+
 // ─── insert_image: la miniatura PNG (el respaldo cuando no hay vector) ──────────────────────
 function calcMatrizImagen(width, height, trect, keep) {
   // `calc_image_matrix(w, h, clip, rotate=0, keep)`: los cocientes en doble sobre un rect float32;
@@ -485,14 +523,14 @@ function dibujarTabla(ctx, pg, y, columnas, filas, yMax, fila0 = 0) {
 }
 
 // ── MOLDE GUÍA (piezas de la variable, con el diseño recortado — el MISMO PDF que la tizada) ───
-function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = 5) {
+function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
   // Grilla de `cols` columnas; cada pieza en su TARJETA (sombra + fondo claro + borde) y adentro
   // el PDF real de la pieza (recorte NATIVO). Devuelve [yFinal, restantes].
   const x0 = MARGEN
   const ancho = A4_W - 2 * MARGEN
   const wCel = ancho / cols
-  const gap = 5                          // aire entre tarjetas
-  const hCel = 134                       // alto de la celda (tarjeta + rótulo)
+  const gap = GUIA_GAP                   // aire entre tarjetas
+  const hCel = GUIA_HCEL                 // alto de la celda (tarjeta + rótulo)
   const hCard = hCel - 28                // alto de la tarjeta (la imagen); el rótulo es nombre + tela
   let restantes = [], filaY = y, i = 0
   while (i < piezas.length) {
@@ -508,11 +546,18 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = 5) {
       dibujarRect(ctx, pg, card, { color: [0.80, 0.82, 0.84], width: 0.8, fill: [0.985, 0.99, 0.995] })
       let src = null
       try {
-        src = new ctx.mupdf.PDFDocument(pz.pdf)
-        const p0 = src.loadPage(0)
-        const r0 = p0.getBounds()
-        p0.destroy()
-        const pad = 7
+        // la guía llega como IMAGEN hecha en el hilo de la pieza (`generar.js`, 2026-09-22): sólo
+        // se ubica. El PDF por pieza queda para quien lo mande así.
+        let r0
+        if (pz._guia && pz.pagina !== undefined && pz.pagina !== null) {
+          r0 = [0, 0, Number(pz.w_pt) || 1, Number(pz.h_pt) || 1]
+        } else {
+          src = new ctx.mupdf.PDFDocument(pz.pdf)
+          const p0 = src.loadPage(0)
+          r0 = p0.getBounds()
+          p0.destroy()
+        }
+        const pad = GUIA_PAD
         const cardW = Math.max(0, card[2] - card[0]), cardH = Math.max(0, card[3] - card[1])
         const dispoW = cardW - 2 * pad, dispoH = cardH - 2 * pad
         const r0w = Math.max(0, r0[2] - r0[0]), r0h = Math.max(0, r0[3] - r0[1])
@@ -522,9 +567,23 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = 5) {
           card[0] + (cardW + aw) / 2, card[1] + (cardH + ah) / 2]
         // la pieza como IMAGEN a 300 dpi del tamaño impreso (ver `ficha_tecnica.py`): el mismo
         // dibujo que hace PyMuPDF (`dibujarMesa` = `get_pixmap`, contrato de la vista)
+        if (pz._guia && pz.pagina !== undefined && pz.pagina !== null) {
+          // la pieza TAL CUAL el archivo (sin `continue`: el rótulo de abajo va igual)
+          pegarPiezaGuia(ctx, pg, dst, pz._guia, pz.pagina)
+        } else {
         const anchoPx = Math.max(1, Math.round((dst[2] - dst[0]) * 300.0 / 72.0))
-        const dib = dibujarMesa(ctx.mupdf, src, 0, { ancho: anchoPx })
+        // 🔴 LA MESA SE PREPARA UNA VEZ PARA TODAS SUS PIEZAS (2026-09-22, «la ficha tarda más de
+        // 40 s»): cada pieza trae como XObject la mesa ENTERA del talle (miles de trazos) y MuPDF
+        // la interpretaba completa por cada pieza. Con el repetidor del visor (`replay.js`) la lista
+        // de la mesa se arma una vez (`ctx.cacheXO`) y de cada pieza se dibuja sólo lo que cae en
+        // su recuadro: mismo dispositivo y mismo dibujo. Si la pieza trae algo que el repetidor no
+        // cubre, se dibuja como antes.
+        let dib = null
+        const prep = prepararReplay(ctx.mupdf, src, 0, ctx.cacheXO)
+        if (prep) { try { dib = dibujarConReplay(ctx.mupdf, src, 0, prep, { ancho: anchoPx }) } finally { prep.destroy() } }
+        if (!dib) dib = dibujarMesa(ctx.mupdf, src, 0, { ancho: anchoPx })
         insertarImagen(ctx, pg, dst, dib.png, true)
+        }
       } catch {
         // como el Python: si el PDF de la pieza no se puede leer, la tarjeta queda vacía
       } finally {
@@ -552,6 +611,8 @@ const LABEL_CAMPO = { nombre: 'Nombre', numero: 'Número', 'numero 2': 'Número 
  */
 export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia }) {
   const ctx = crearCtx(mupdf)
+  ctx.cacheXO = new Map()          // listas de las mesas, compartidas entre las piezas de la guía
+  ctx.guias = []                   // los PDF de la guía abiertos (y sus graft maps), se cierran al final
   try {
     const columnas = (planilla || {}).columnas || []
     const filas = (planilla || {}).filas || []
@@ -577,7 +638,9 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
     const enc = new TextEncoder()
     for (const mg of guias) {
       const partes = []
-      for (const p of (mg.piezas || [])) { partes.push(enc.encode(pyStr(oVacio(p.nombre)))); partes.push(aBytes(p.pdf) || new Uint8Array(0)) }
+      for (const p of (mg.piezas || [])) { partes.push(enc.encode(pyStr(oVacio(p.nombre)) + '|' + pyStr(p.pagina))); partes.push(aBytes(p.pdf) || new Uint8Array(0)) }
+      const bg = aBytes(mg.pdf_guia)
+      if (bg) { let h = 2166136261 >>> 0; for (let i = 0; i < bg.length; i++) { h ^= bg[i]; h = Math.imul(h, 16777619) >>> 0 } partes.push(enc.encode(`guia:${bg.length}:${h}`)) }
       const todo = new Uint8Array(partes.reduce((a, x) => a + x.length, 0))
       let k = 0
       for (const x of partes) { todo.set(x, k); k += x.length }
@@ -592,7 +655,17 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
     const claveRep = (mg) => JSON.stringify([mg.nombre ?? null, mg.diseno ?? null])
     for (const mg of guias) rep.set(claveRep(mg), (rep.get(claveRep(mg)) || 0) + 1)
     guias.forEach((mg, iMg) => {
-      const piezas = mg.piezas || []
+      // la guía de este molde: su PDF se abre UNA vez y todas sus piezas lo comparten
+      let guiaDoc = null
+      const bg = aBytes(mg.pdf_guia)
+      if (bg && bg.length) {
+        try {
+          const gd = new ctx.mupdf.PDFDocument(bg)
+          guiaDoc = { doc: gd, mapa: ctx.doc.newGraftMap() }
+          ctx.guias.push(guiaDoc)
+        } catch { guiaDoc = null }
+      }
+      const piezas = (mg.piezas || []).map((p) => (guiaDoc ? { ...p, _guia: guiaDoc } : p))
       const tituloMg = `MOLDE GUÍA · ${'nombre' in mg ? fstr(mg.nombre) : ''}` + (verdad(mg.diseno) ? `  ·  ${fstr(mg.diseno)}` : '')
       // Línea gris de abajo: la variable (si distingue), QUÉ OPCIONES lleva y cuántas piezas son.
       const varn = pyStrip(pyStr(oVacio(mg.variante)))
@@ -744,8 +817,15 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
       doc.insertPage(doc.countPages(), page)
     }
     // `doc.save(garbage=3, deflate=True)`
-    return doc.saveToBuffer('garbage=3,compress').asUint8Array().slice()
+    // sin la deduplicación de `garbage=3`: compara objeto por objeto los recursos de la mesa y no
+    // cambia lo que se ve; con `garbage` sólo se quita lo que nadie usa
+    return doc.saveToBuffer('garbage,compress').asUint8Array().slice()
   } finally {
+    for (const gd of ctx.guias || []) {
+      try { gd.mapa.destroy() } catch { /* nada */ }
+      try { gd.doc.destroy() } catch { /* nada */ }
+    }
+    destruirCacheXO(ctx.cacheXO)
     cerrarCtx(ctx)
   }
 }

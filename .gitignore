@@ -67,3 +67,9 @@ _huella_publicada.py
 /laboratorio/
 frontend/public/_lab/
 *.referencia.json
+
+# intermedios del instalador de la extensión de Illustrator (el .exe final SÍ va a git)
+extension_illustrator/build/
+
+# respaldos de lo publicado (llevan la clave de actualizacion y la api-key: NUNCA a git)
+respaldos_publicado/

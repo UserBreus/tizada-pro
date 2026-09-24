@@ -295,6 +295,21 @@ export function precalentarTodo(v, { pxcm = null, anchos = [] } = {}) {
 }
 
 /**
+ * Los bytes de un archivo de un trabajo: de la caché del navegador si ya están (se guardan al
+ * generar el pedido acá o al verlo) y, si no, `traer()` una vez y quedan guardados.
+ */
+export async function bytesDeArchivo(huella, traer) {
+  let bytes = null
+  try { bytes = await leer(ARCHIVOS, huella) } catch { bytes = null }
+  if (bytes) return new Uint8Array(bytes instanceof Blob ? await bytes.arrayBuffer() : bytes)
+  const b = await traer()
+  if (!b) return null
+  const u = new Uint8Array(b)
+  try { guardar(ARCHIVOS, huella, new Blob([u], { type: 'application/pdf' })) } catch { /* sin caché */ }
+  return u
+}
+
+/**
  * Abre un archivo para dibujarlo acá. `huella` identifica al archivo (trabajo + nombre); `traer()`
  * devuelve sus bytes (se llama sólo la primera vez). Devuelve la `Vista` o `null` si no se puede.
  * `topeMb`: por arriba de eso no vale la pena bajarlo para verlo (lo sigue dibujando el servidor).

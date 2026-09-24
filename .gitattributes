@@ -7,3 +7,5 @@
 *.vbs text eol=crlf
 # Los .sh corren en el servidor Linux: nunca CRLF (un \r al final de la shebang lo rompe).
 *.sh text eol=lf
+# El instalador de Mac de la extensión de Illustrator: bash, nunca CRLF.
+*.command text eol=lf

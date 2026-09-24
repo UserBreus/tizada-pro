@@ -22,6 +22,8 @@ const preps = new Map()           // página → preparado del replay (o null si
 
 async function cargar() {
   if (mupdf) return
+  // los avisos de estructura de los archivos (miles) no se imprimen: ver `mupdfSilencio.js`
+  ;(await import('./mupdfSilencio.js')).silenciarAvisosMupdf()
   mupdf = await import('mupdf')
   dibujarMesa = (await import('./vista/dibujar.js')).dibujarMesa
   replay = await import('./vista/replay.js')
@@ -86,13 +88,35 @@ const TAREAS = {
   },
 }
 
+// EL MONITOR pregunta cuánta memoria usa este hilo (`monitor.js medirHilos`): la del motor de PDF
+// (la memoria de WebAssembly de mupdf, que es casi todo lo que gasta un hilo). Contesta por el
+// canal que le mandan, así nadie más que escuche este hilo ve la respuesta.
+// y cuánto tiempo lleva TRABAJANDO (con al menos una tarea en curso): con eso el monitor saca el %
+// de procesador que usa TIZADA en esta PC (el navegador no deja medir el procesador de otra forma)
+let _activos = 0, _desde = 0, _trabajadoMs = 0
+function empiezaTarea() { if (_activos++ === 0) _desde = performance.now() }
+function terminaTarea() { if (--_activos === 0) _trabajadoMs += performance.now() - _desde }
+function contestarMemoria(puerto) {
+  let bytes = 0
+  try {
+    const m = globalThis.$libmupdf_wasm_Module
+    bytes = (m && m.HEAPU8 && m.HEAPU8.buffer && m.HEAPU8.buffer.byteLength) || 0
+  } catch { /* nada */ }
+  const trabajadoMs = _trabajadoMs + (_activos ? performance.now() - _desde : 0)
+  try { puerto.postMessage({ bytes, trabajadoMs }) } catch { /* nada */ }
+}
+
 escuchar(async (msg) => {
+  if (msg && msg.__memoria) { contestarMemoria(msg.__memoria); return }
   const { id, tipo, datos } = msg || {}
+  empiezaTarea()
   try {
     const r = await TAREAS[tipo](datos || {})
     if (r && r.transfer) responder({ id, ok: true, valor: r.valor }, r.transfer)
     else responder({ id, ok: true, valor: r })
   } catch (err) {
     responder({ id, ok: false, error: String((err && err.message) || err) })
+  } finally {
+    terminaTarea()
   }
 })

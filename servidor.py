@@ -940,28 +940,103 @@ def publicacion_publicar():
         if not zips:
             return jsonify({"error": "no apareció el paquete"}), 500
         paq = max(zips, key=os.path.getmtime)
-        datos = open(paq, "rb").read()
         # 2) subirlo
-        req = _ur.Request(cfg["url"].rstrip("/") + "/api/actualizacion/subir", data=datos,
-                          method="POST", headers={
-                              "Content-Type": "application/zip",
-                              "User-Agent": _UA_PUB,
-                              "X-Token-Act": cfg["token"],
-                              "X-Version": v,
-                              "X-Sha256": _hl.sha256(datos).hexdigest(),
-                              "X-Cuando": str(float(cuerpo.get("cuando") or 0) or time.time())})
-        with _ur.urlopen(req, timeout=300) as resp:
-            _hz = ""
-            try:
-                import zipfile as _zf
-                with _zf.ZipFile(paq) as _z:
-                    _txt = _z.read("_huella_publicada.py").decode("utf-8")
-                _hz = next((ln.split("=", 1)[1].strip().strip("'\"") for ln in _txt.splitlines()
-                            if ln.startswith("HUELLA")), "")
-            except Exception:
-                pass
-            return jsonify({"ok": True, "paquete": os.path.basename(paq), "huella": _hz,
-                            "mb": round(len(datos) / 2**20, 2), **json.loads(resp.read())})
+        r2 = _subir_paquete_publicado(cfg, paq, v, cuerpo.get("cuando"))
+        # 3) guardarlo como RESPALDO: es exactamente lo que va a tener el servidor, y es con lo que
+        # se vuelve a esta versión si la próxima sale mal (ver `/api/publicacion/volver`)
+        _respaldo_publicado_guardar(paq)
+        return jsonify(r2)
+    except Exception as e:
+        return jsonify({"error": str(e)[:300]}), 502
+
+
+# ── RESPALDOS DE LO PUBLICADO (2026-09-23) ──────────────────────────────────────────────────────
+# Pedido del usuario: «un respaldo de lo que tenemos en el servidor, así mando esta actualización
+# pero si algo no funciona bien podamos volver». Cada paquete que se publica se guarda acá (el
+# servidor sólo guarda UNA copia del programa anterior y la usa sólo si la versión nueva no ARRANCA;
+# si arranca pero algo anda mal, no había cómo volver). `dist/` no sirve de respaldo: LIBERAR-ESPACIO
+# lo vacía. 🔴 Estos paquetes llevan la clave de actualización y la api-key de telas: la carpeta está
+# en .gitignore y nunca se sirve para descargar.
+RESPALDOS_PUB = os.path.join(AQUI, "respaldos_publicado")
+
+
+def _info_paquete(ruta):
+    """VERSION / HUELLA / COMMIT / ARMADO del paquete (su `_huella_publicada.py`)."""
+    import zipfile as _zf
+    info = {"archivo": os.path.basename(ruta), "mb": round(os.path.getsize(ruta) / 2**20, 2)}
+    try:
+        with _zf.ZipFile(ruta) as z:
+            txt = z.read("_huella_publicada.py").decode("utf-8")
+        for ln in txt.splitlines():
+            if "=" in ln and not ln.startswith("#"):
+                k, v = ln.split("=", 1)
+                info[k.strip().lower()] = v.strip().strip("'\"")
+    except Exception:
+        pass
+    return info
+
+
+def _respaldo_publicado_guardar(paq):
+    import shutil
+    try:
+        os.makedirs(RESPALDOS_PUB, exist_ok=True)
+        dest = os.path.join(RESPALDOS_PUB, os.path.basename(paq))
+        shutil.copy2(paq, dest + ".tmp")
+        os.replace(dest + ".tmp", dest)
+    except Exception as e:
+        print(f"[publicación] no se pudo guardar el respaldo de {paq}: {e}")
+
+
+def _subir_paquete_publicado(cfg, paq, version, cuando):
+    """Sube un paquete al servidor publicado (lo instala a la hora `cuando`; 0 = ya). Es lo mismo
+    que hace «Publicar», sirve también para VOLVER a un paquete guardado."""
+    import hashlib as _hl, urllib.request as _ur
+    datos = open(paq, "rb").read()
+    req = _ur.Request(cfg["url"].rstrip("/") + "/api/actualizacion/subir", data=datos,
+                      method="POST", headers={
+                          "Content-Type": "application/zip",
+                          "User-Agent": _UA_PUB,
+                          "X-Token-Act": cfg["token"],
+                          "X-Version": version,
+                          "X-Sha256": _hl.sha256(datos).hexdigest(),
+                          "X-Cuando": str(float(cuando or 0) or time.time())})
+    with _ur.urlopen(req, timeout=300) as resp:
+        return {"ok": True, "paquete": os.path.basename(paq), "huella": _info_paquete(paq).get("huella", ""),
+                "mb": round(len(datos) / 2**20, 2), **json.loads(resp.read())}
+
+
+@app.get("/api/publicacion/respaldos")
+def publicacion_respaldos():
+    """Las versiones guardadas a las que se puede VOLVER, de la más nueva a la más vieja."""
+    out = []
+    if os.path.isdir(RESPALDOS_PUB):
+        for f in os.listdir(RESPALDOS_PUB):
+            if f.lower().endswith(".zip"):
+                out.append(_info_paquete(os.path.join(RESPALDOS_PUB, f)))
+    out.sort(key=lambda x: x.get("armado") or "", reverse=True)
+    return jsonify({"respaldos": out})
+
+
+@app.post("/api/publicacion/volver")
+def publicacion_volver():
+    """VUELVE el servidor publicado a una versión guardada: sube ese paquete tal cual se publicó y
+    se instala como cualquier actualización (el servidor igual se revisa solo). Los moldes, artes,
+    pedidos y la base NO se tocan: no viajan en el paquete."""
+    _u = _usuario_actual()
+    if _u and "config.editar" not in (_u.get("permisos") or []):
+        return jsonify({"error": "No tenés permiso para publicar (config.editar)."}), 403
+    cuerpo = request.get_json(force=True) or {}
+    nombre = str(cuerpo.get("archivo") or "")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\.zip", nombre):
+        return jsonify({"error": "paquete inválido"}), 400
+    paq = os.path.join(RESPALDOS_PUB, nombre)
+    if not os.path.isfile(paq):
+        return jsonify({"error": "ese respaldo no existe"}), 404
+    info = _info_paquete(paq)
+    if not info.get("version"):
+        return jsonify({"error": "el paquete no dice qué versión es"}), 422
+    try:
+        return jsonify(_subir_paquete_publicado(_pub_cfg(), paq, info["version"], cuerpo.get("cuando")))
     except Exception as e:
         return jsonify({"error": str(e)[:300]}), 502
 
@@ -1070,6 +1145,29 @@ def publicacion_registro():
     return jsonify(out)
 
 
+_FRONT_ARMADO = {"mt": None, "v": None}
+
+
+def _front_armado():
+    """El archivo principal de la PANTALLA que se sirve hoy (`frontend/dist/index.html` →
+    `main-XXXX.js`). Cambia con cada `npm run build`. La pantalla lo compara con el suyo: si difiere,
+    esa pestaña quedó VIEJA — sus archivos de trabajo (`obrero.worker-….js`) ya no existen en el
+    servidor (404) y fallaba, por ejemplo, la guía .ai (2026-09-23). El número de VERSION no alcanza:
+    lo escribe una persona y no cambia en cada compilación."""
+    p = os.path.join(AQUI, "frontend", "dist", "index.html")
+    try:
+        mt = os.path.getmtime(p)
+    except OSError:
+        return None
+    if _FRONT_ARMADO["mt"] != mt:
+        try:
+            m = re.search(r"assets/(main-[A-Za-z0-9_-]+\.js)", open(p, encoding="utf-8").read())
+        except OSError:
+            m = None
+        _FRONT_ARMADO.update(mt=mt, v=m.group(1) if m else None)
+    return _FRONT_ARMADO["v"]
+
+
 @app.get("/api/actualizacion/estado")
 def actualizacion_estado():
     """Lo consulta la PANTALLA para mostrar la cuenta regresiva. Sin clave a propósito: no revela
@@ -1077,7 +1175,8 @@ def actualizacion_estado():
     esté trabajando para enterarse de que el sistema se va a reiniciar."""
     _e = ACT.estado(_version()["version"])
     _vv = _version()
-    _e.update({"commit": _vv.get("commit"), "huella": _vv.get("huella"), "armado": _vv.get("armado")})
+    _e.update({"commit": _vv.get("commit"), "huella": _vv.get("huella"), "armado": _vv.get("armado"),
+               "front": _front_armado()})
     # La REVISIÓN DEL CATÁLOGO viaja acá (este latido ya lo hace la pantalla cada 30 s): si cambió,
     # el front vuelve a pedir `/api/productos` solo. Así un cambio de moldes/variables llega a
     # todos los que están trabajando, sin F5 (pedido del usuario 2026-09-08).
@@ -1294,10 +1393,11 @@ def _detectar_perfil_incrustado(pdf_path):
     return {"tiene": bool(nombre), "nombre": nombre, "espacio": espacio or "CMYK"}
 
 
-def _perfil_info(pdf_path, cat=None):
-    """Compara el perfil incrustado contra el predeterminado y arma el aviso."""
+def _perfil_info(pdf_path, cat=None, det=None):
+    """Compara el perfil incrustado contra el predeterminado y arma el aviso. `det` = lo que
+    detectó el navegador (`arte/perfil.js`); sin eso, se lee acá."""
     cat = cat or _cargar_catalogo()
-    det = _detectar_perfil_incrustado(pdf_path)
+    det = det if isinstance(det, dict) else _detectar_perfil_incrustado(pdf_path)
     espacio = det["espacio"]
     defs = _perfil_default_cfg(cat)
     def_file = defs["rgb"] if espacio == "RGB" else defs["cmyk"]
@@ -2318,7 +2418,7 @@ def _ruta_entrada(nombre, pid=None, sub=None, original=False):
 _DETECCION_CACHE_V = 2     # subir esto invalida TODAS las cachés (cambió el formato de `det`)
 
 
-def _deteccion_cache(arte, reg):
+def _deteccion_cache(arte, reg, pid=None, diseno=None):
     """`MP.detectar_arte` con caché en disco: es lo que hace lento el paso Arte.
 
     Con un arte pesado tarda ~5 s (el 95% es vectorizar cada mesa a SVG) y se vuelve a pedir
@@ -2337,6 +2437,9 @@ def _deteccion_cache(arte, reg):
     except Exception:
         return MP.detectar_arte(arte, reg)     # sin clave confiable, mejor no cachear
     ruta = os.path.join(os.path.dirname(arte), ".deteccion_cache.json")
+    # sin la caché, la detección la hace el navegador (`arte/mapeo.js detectarArte`, 2026-09-22)
+    _det = (lambda: _calcular("arte_detectar", lambda: MP.detectar_arte(arte, reg),
+                              **_id_arte(pid, diseno), registro=reg)) if pid else (lambda: MP.detectar_arte(arte, reg))
     try:
         with open(ruta, encoding="utf-8") as f:
             g = json.load(f)
@@ -2344,7 +2447,7 @@ def _deteccion_cache(arte, reg):
             return g["det"]
     except Exception:
         pass
-    det = MP.detectar_arte(arte, reg)
+    det = _det()
     try:
         tmp = ruta + ".tmp"                    # atómico: dos pestañas pueden pedirlo a la vez
         with open(tmp, "w", encoding="utf-8") as f:
@@ -2384,7 +2487,7 @@ _API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/")
 # POSTs que reciben un molde pero NO lo modifican: rendes y generación de tizada. No pueden pedir
 # `molde.editar` — un Operario (sólo `molde.ver` + los de pedido) tiene que poder generar y ver el
 # preview del catálogo. Todo lo demás que llegue por POST/PUT/PATCH/DELETE con `pid` SÍ escribe.
-_API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar", "/api/generar_multi")
+_API_LEE_CON_PID = ("/api/arte/preview_piezas", "/api/generar_multi", "/api/plantilla/pdf_guia")
 
 # Endpoints que MUESTRAN el molde en una lista, sin trabajar con él: la miniatura de la grilla y la
 # descarga del archivo. No cuentan como «este molde está en uso» para los efímeros (ver la guardia).
@@ -2424,6 +2527,7 @@ _API_SIN_MOLDE = {
     "/api/registro/limpiar": "config.editar",
     "/api/config_con_diseno": "config.editar",
     "/api/publicacion/publicar": "config.editar",
+    "/api/publicacion/volver": "config.editar",
     "/api/publicacion/cancelar": "config.editar",
     # tipografias del catalogo
     "/api/fuente/archivo/<path:nombre>": "fuente.gestionar",
@@ -2443,6 +2547,9 @@ _API_SIN_MOLDE = {
     "/api/pedido/fuentes_pedido_limpiar": "dueño",
     # "libre" = no hay nada que proteger: no escribe nada, es una cuenta
     "/api/color/convertir": "libre",
+    # el resultado de un cálculo que hizo el navegador (en memoria y POR USUARIO: cada uno sólo le
+    # sirve a sus propios pedidos; ver `_calcular`)
+    "/api/calculos": "dueño",
 }
 
 # PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
@@ -2605,6 +2712,220 @@ def _cerrar_pdfs(_exc=None):
         _PDt.olvidar()
     except Exception:
         pass
+
+
+# ════════════════ LOS CÁLCULOS PESADOS LOS HACE EL NAVEGADOR ════════════════
+# 🔴 2026-09-22, regla del usuario: «el servidor será sólo para sostener el sistema para que
+# puedan acceder y la base de datos; el resto lo debe hacer todo la PC del usuario».
+#
+# Las herramientas del molde (nombrar, emparejar talles, agrupar, variantes, nido…) mezclan dos
+# cosas: la LÓGICA de qué guardar (liviana: registro, catálogo, JSON) y unos pocos cálculos sobre
+# el ARCHIVO (leer los dibujos del molde, emparejar piezas por forma), que son los caros. La lógica
+# queda acá, sin duplicarse; cada cálculo pasa por `_calcular`:
+#   · con «El servidor no calcula» PRENDIDO, si el navegador ya lo mandó (`_calculos`) se usa ese
+#     resultado; si no, la ruta contesta 428 `{calcular: {clave, fn, args}}` y el navegador lo hace
+#     con el MISMO motor que usa al subir el molde (`motor/molde/caminoA.js`, verificado contra
+#     este Python por `verificar_navegador_*`) y vuelve a pedir la ruta con el resultado;
+#   · APAGADO, se calcula acá como siempre (el respaldo del taller).
+# `args` nombra el archivo por su identidad (`_id_plantilla`: molde, cuál y sello), así el
+# resultado de un archivo nunca se usa para otro.
+class _FaltaCalculo(Exception):
+    def __init__(self, pedido):
+        super().__init__(pedido.get("fn"))
+        self.pedido = pedido
+
+
+_CALCULOS = {}                         # clave → resultado que mandó el navegador (en memoria)
+_CALCULOS_LOCK = threading.Lock()
+_CALCULOS_TOPE = 400
+
+
+def _sello_archivo(ruta):
+    """El sello de un archivo que el navegador guarda en su caché: `[tamaño, fecha en µs]`.
+
+    🔴 UNO SOLO PARA TODO (2026-09-23). Había dos: los cálculos usaban la fecha en NANOsegundos y
+    `/motor_b` / `/arte_contexto` en segundos, y el navegador guarda el archivo POR SELLO → el
+    mismo molde (y el mismo arte) se bajaba y se guardaba DOS veces. Microsegundos y no nanos: un
+    número de nanosegundos (~1,8e18) no entra exacto en un número de JavaScript (tope 2^53 ≈ 9e15)
+    y la clave que arma el navegador no coincidiría con la del servidor."""
+    try:
+        st = os.stat(ruta)
+    except OSError:
+        return None
+    return [st.st_size, st.st_mtime_ns // 1000]
+
+
+def _id_plantilla(pid, original=False):
+    """La identidad del archivo del molde para un cálculo: el mismo archivo = el mismo sello."""
+    ruta = _ruta_entrada("plantilla.ai", pid, original=original)
+    return {"molde": pid, "archivo": "original" if original else "vigente", "sello": _sello_archivo(ruta)}
+
+
+def _resultado_calculo(r):
+    """Un cálculo del navegador que FALLÓ viene como `{"__error__": motivo}`: acá se vuelve a
+    levantar como el ValueError que habría tirado el Python, así la ruta hace lo mismo que antes
+    (su `except` de siempre: otra variante, «falta nombrar», el 422 con el motivo)."""
+    if isinstance(r, dict) and "__error__" in r and len(r) == 1:
+        raise ValueError(str(r["__error__"]))
+    return r
+
+
+_SIN_VACIO = object()
+
+
+def _calcular(fn, llamar, _vacio=_SIN_VACIO, **args):
+    """El resultado de un cálculo pesado (ver el bloque de arriba). `llamar()` lo hace en el
+    servidor, sólo con «El servidor no calcula» apagado.
+
+    `_vacio` + `g._juntar` (una lista): en vez de cortar la ruta en el PRIMER cálculo que falta, se
+    anota el pedido, se devuelve `_vacio` y la ruta sigue — al final contesta UN 428 con TODOS
+    (`calculos`). Antes eran de a uno y con muchos talles la guía pasaba el tope de idas y vueltas
+    del navegador («el servidor pidió demasiados cálculos seguidos», 2026-09-23)."""
+    clave = json.dumps([fn, args], sort_keys=True, ensure_ascii=False, default=str)
+    if has_request_context():
+        propios = getattr(g, "_calculos", None)
+        if propios is None:
+            propios = {}
+            try:
+                cuerpo = request.get_json(silent=True) if request.method in ("POST", "PUT", "PATCH") else None
+                for it in ((cuerpo or {}).get("_calculos") or []):
+                    if isinstance(it, dict) and it.get("clave"):
+                        propios[it["clave"]] = json.loads(it["resultado_json"]) if "resultado_json" in it else it.get("resultado")
+            except Exception:
+                propios = {}
+            g._calculos = propios
+        if clave in propios:
+            return _resultado_calculo(propios[clave])
+    with _CALCULOS_LOCK:
+        _k = (_uid_actual() if has_request_context() else None, clave)
+        _hit = _CALCULOS.get(_k, _CALCULOS)
+    if _hit is not _CALCULOS:
+        return _resultado_calculo(_hit)
+    if _solo_navegador():
+        if _vacio is not _SIN_VACIO and has_request_context() and isinstance(getattr(g, "_juntar", None), list):
+            g._juntar.append({"clave": clave, "fn": fn, "args": args})
+            return _vacio
+        raise _FaltaCalculo({"clave": clave, "fn": fn, "args": args})
+    return llamar()
+
+
+def _id_arte(pid, diseno):
+    """La identidad del ARTE de un diseño para un cálculo del navegador (ver `_calcular`)."""
+    ruta = _ruta_entrada("arte.ai", pid, sub=_diseno_sub(diseno))
+    return {"molde": pid, "arte": diseno or "principal", "sello": _sello_archivo(ruta)}
+
+
+def _arte_calc(fn, pid, diseno, llamar, memo=None, **extra):
+    """Un cálculo sobre el ARTE: si ya está en la memoria del archivo (`memo`, la de
+    `MP._memo_arte`) se usa; si no, lo hace el navegador (o el servidor con «El servidor no
+    calcula» apagado) y queda en esa memoria."""
+    ruta = _ruta_entrada("arte.ai", pid, sub=_diseno_sub(diseno))
+    if memo:
+        hit = MP.memo_arte_leer(memo, ruta)
+        if hit is not None:
+            return hit
+    val = _calcular(fn, llamar, **_id_arte(pid, diseno), **extra)
+    if memo:
+        MP.memo_arte_guardar(memo, ruta, val)
+    return val
+
+
+def _no_con_solo(motivo):
+    """Las rutas de RESPALDO que calculan en el servidor (dibujar mesas, armar la tizada o las
+    previas en Python): con «El servidor no calcula» contestan 409 con el motivo — eso lo hace la
+    computadora de quien está conectado (regla del usuario 2026-09-22)."""
+    import functools
+
+    def deco(f):
+        @functools.wraps(f)
+        def envuelta(*a, **k):
+            if _solo_navegador():
+                return jsonify({"error": motivo, "solo_navegador": True}), 409
+            return f(*a, **k)
+        return envuelta
+    return deco
+
+
+def _relanzar_calculo(e):
+    """Dentro de un `except Exception` que envuelve un cálculo: si lo que pasó es que el cálculo lo
+    tiene que hacer el navegador, eso NO es un error de la ruta — se deja subir hasta el 428."""
+    if isinstance(e, _FaltaCalculo):
+        raise e
+
+
+@app.post("/api/calculos")
+def guardar_calculos():
+    """El navegador deja acá el resultado de un cálculo que le pidió una ruta (428): la próxima
+    vez que la ruta lo necesite, lo encuentra. No se calcula ni se abre nada."""
+    # Una operación que REESCRIBE el molde (agregar pieza, nombrar variantes, partir en
+    # variantes) llega como formulario con el archivo nuevo: se guarda aparte (`calc_<id>.pdf`) y
+    # la ruta que lo pidió lo pasa a versión nueva recién cuando termina bien.
+    if request.files.get("archivo") is not None:
+        clave = request.form.get("clave") or ""
+        try:
+            _fn, _args = json.loads(clave)
+            _pid_c = str((_args or {}).get("molde") or "")
+        except Exception:
+            return jsonify({"error": "cálculo inválido"}), 400
+        _no = _guard_molde(_pid_c, "molde.editar") if _pid_c else None
+        if _no:
+            return _no
+        _d = os.path.join(ENTRADA, _pid_c)
+        if not os.path.isdir(_d):
+            return jsonify({"error": "molde inexistente"}), 404
+        _tmp = os.path.join(_d, f"calc_{uuid.uuid4().hex[:12]}.pdf")
+        request.files["archivo"].save(_tmp + ".subiendo")
+        with open(_tmp + ".subiendo", "rb") as _fh:
+            _ok = _fh.read(5) == b"%PDF-"
+        if not _ok:
+            os.remove(_tmp + ".subiendo")
+            return jsonify({"error": "el archivo no llegó bien (no es un PDF)"}), 422
+        os.replace(_tmp + ".subiendo", _tmp)
+        try:
+            _res = json.loads(request.form.get("resultado_json") or "{}")
+        except Exception:
+            _res = {}
+        _res["__archivo__"] = os.path.basename(_tmp)
+        with _CALCULOS_LOCK:
+            _CALCULOS[((_usuario_actual() or {}).get("id"), clave)] = _res
+        return jsonify({"ok": True})
+    cuerpo = request.get_json(force=True) or {}
+    items = cuerpo.get("calculos") or []
+    # 🔒 por usuario: el resultado que manda una persona sólo lo usan SUS pedidos (nadie puede
+    # meterle un cálculo a otro); el dueño se controla acá, por eso la ruta va como «dueño»
+    uid = (_usuario_actual() or {}).get("id")
+    with _CALCULOS_LOCK:
+        for it in items:
+            if not isinstance(it, dict) or not it.get("clave"):
+                continue
+            try:
+                _CALCULOS[(uid, it["clave"])] = json.loads(it["resultado_json"]) if "resultado_json" in it else it.get("resultado")
+            except Exception:
+                continue
+            while len(_CALCULOS) > _CALCULOS_TOPE:
+                _CALCULOS.pop(next(iter(_CALCULOS)))
+    return jsonify({"ok": True})
+
+
+def _version_plantilla_desde(pid, nombre_tmp):
+    """El molde que REESCRIBIÓ el navegador (`calc_<id>.pdf`, ver `/api/calculos`) pasa a ser la
+    versión siguiente (`plantilla.v<N+1>.ai`); el archivo del usuario no se toca."""
+    base = _ruta_entrada("plantilla.ai", pid, original=True)
+    tmp = os.path.join(ENTRADA, pid, os.path.basename(str(nombre_tmp)))
+    if not (os.path.basename(tmp).startswith("calc_") and os.path.exists(tmp)):
+        raise ValueError("el molde nuevo no llegó (volvé a intentarlo)")
+    n = OA._ver_actual(base)
+    destino = OA._ver_path(base, n + 1)
+    os.replace(tmp, destino)
+    OA.fijar_version(base, n + 1)
+    return destino
+
+
+@app.errorhandler(_FaltaCalculo)
+def _pedir_calculo(e):
+    """Una ruta necesita un cálculo que hace el navegador: se lo pide (428) y el navegador
+    vuelve a llamar con el resultado (`motor/calculos.js`)."""
+    return jsonify({"calcular": e.pedido}), 428
 
 
 @app.errorhandler(Exception)
@@ -2805,7 +3126,9 @@ def _visor_leer(pid, talle_ref=None, todo=False):
                     import piezas_con_diseno as PD
                     print(f"[camino B] preparando el visor de {pid} (molde cargado antes; se hace una vez)…")
                     _t0 = time.time()
-                    _d = PD.visor_todos(_ruta_entrada("plantilla.ai", pid))
+                    # lo arma el navegador con las mismas piezas del alta (`faseA`, 2026-09-22)
+                    _d = _calcular("visor_todos_b", lambda: PD.visor_todos(_ruta_entrada("plantilla.ai", pid)),
+                                   **_id_plantilla(pid))
                     _visor_guardar(pid, _d)
                     for _vn in _VISOR_JSON_VIEJOS:
                         try:
@@ -2813,10 +3136,13 @@ def _visor_leer(pid, talle_ref=None, todo=False):
                         except OSError:
                             pass
                     # Si se rehízo porque el visor era de antes de `canonizar_orden`, la geometría
-                    # del registro de ese molde también es de antes: una vez, acá.
-                    _refrescar_registro_b(pid)
+                    # del registro de ese molde también es de antes: una vez, acá (no con «El
+                    # servidor no calcula»: eso relee el molde entero).
+                    if not _solo_navegador():
+                        _refrescar_registro_b(pid)
                     print(f"[camino B] visor de {pid} listo: {len(_d)} talles en {time.time()-_t0:.0f}s")
                 except Exception as e:
+                    _relanzar_calculo(e)
                     print(f"[camino B] no se pudo preparar el visor de {pid}: {e}")
                     _d = None
     if not isinstance(_d, dict) or not _d:
@@ -3173,7 +3499,10 @@ def _escribir_deteccion_paquete(pid, destino, det):
             continue
         if clave == "todas":
             if "formato" not in valor:
+                # lo manda el navegador; sólo un paquete viejo llega sin él
                 try:
+                    if _solo_navegador():
+                        raise RuntimeError("sin calcular en el servidor")
                     import variantes_molde as VM
                     valor["formato"] = VM.analizar(destino).get("formato") or "extendido"
                 except Exception:
@@ -3673,11 +4002,14 @@ def _solo_navegador():
     (la prueba de que el navegador hace lo mismo): con esto prendido no corren para nadie."""
     env = str(os.environ.get("TIZADA_SOLO_NAVEGADOR") or "").strip()
     if env in ("0", "1"):
+        # sólo para los contratos `verificar_navegador_*` (comparan el navegador contra el Python)
         return env == "1"
-    try:
-        return bool(_cargar_catalogo().get("navegador_solo"))
-    except Exception:
-        return False
+    # 🔴 SIEMPRE PRENDIDO (regla del usuario 2026-09-24: «¿el servidor hará el trabajo que una
+    # computadora no pueda? no: si la computadora no está apta, que se compre una nueva»). Antes un
+    # `navegador_solo: false` guardado en Configuración lo apagaba y el servidor hacía el trabajo
+    # pesado de respaldo (el publicado lo tenía apagado): ya no se lee. El trabajo pesado lo hace la
+    # computadora de cada persona o no se hace, y se le avisa por qué.
+    return True
 
 
 def _navegador_dibuja_vista():
@@ -3821,7 +4153,15 @@ def monitor_estado():
         _paq_usados = _SEM_PAQUETE._initial_value - _SEM_PAQUETE._value
     except Exception:
         _paq_usados = None
-    return jsonify({**m, "trabajos": activos, "eventos": MON.eventos(60),
+    # lo que ocupa TIZADA en el disco: la carpeta entera y, aparte, los moldes/artes y las tizadas
+    # (si están configuradas fuera de la carpeta, se suman aparte)
+    _cps = {"todo": AQUI, "moldes y artes": ENTRADA, "tizadas": TRABAJOS, "datos": DATOS}
+    _dis = MON.disco(_cps)
+    if _dis.get("total_mb") is not None:
+        _fuera = sum(v for k, v in (_dis.get("partes") or {}).items()
+                     if not os.path.abspath(_cps.get(k) or "").startswith(os.path.abspath(AQUI)))
+        _dis["total_mb"] += _fuera
+    return jsonify({**m, "trabajos": activos, "eventos": MON.eventos(60), "disco": _dis,
                     "paquetes_en_curso": _paq_usados, "paquetes_en_cola": _EN_COLA_PAQUETE[0],
                     "navegador": {"molde": str(os.environ.get("TIZADA_NAVEGADOR_MOLDE") or "1") != "0",
                                   "vista": _navegador_dibuja_vista(),
@@ -3984,6 +4324,10 @@ def _desplegar_en_fondo(path):
     que nadie había lanzado (el de la subida ya pasó) y la pantalla se quedaba en «preparando»
     para siempre. Los contornos se rehacen (5 s por mesa, en paralelo); las páginas por talle
     que ya estaban se conservan."""
+    # 🔴 Con «El servidor no calcula» el desplegado lo arma SÓLO el navegador (al subir, al retomar
+    # o al cambiar la etiqueta): acá no se lanza nada.
+    if _solo_navegador():
+        return
     k = os.path.normcase(os.path.abspath(path))
     with _DESPL_FONDO_LOCK:
         if k in _DESPL_FONDO:
@@ -4110,6 +4454,8 @@ def _prewarm_desplegado(path, talles, alta=None):
     páginas por talle, una mesa por proceso, después de responder la subida. Best-effort.
     Al terminar, el desplegado completo va a la caché por archivo (`_cache_desplegado_guardar`).
     Si las está terminando un NAVEGADOR (`paginas_pendientes_navegador`), no hace nada."""
+    if _solo_navegador():
+        return                          # el desplegado lo arma el navegador (ver `_desplegar_en_fondo`)
     try:
         import piezas_con_diseno as _PDx
         if _PDx.paginas_pendientes_navegador(path):
@@ -4179,7 +4525,10 @@ def _deteccion_base_cached(pid, talle_ref, candidatas=False):
         return json.load(open(fp, encoding="utf-8"))
     except Exception:
         pass
-    res = MP.detectar_piezas(pl, talle_ref=talle_ref, capas_candidatas=candidatas)
+    res = _calcular("detectar_piezas",
+                    lambda: MP.detectar_piezas(pl, talle_ref=talle_ref, capas_candidatas=candidatas),
+                    **_id_plantilla(pid, original=bool(candidatas)), talle_ref=talle_ref,
+                    capas_candidatas=bool(candidatas))
     try:
         os.makedirs(cdir, exist_ok=True)
         json.dump(res, open(fp, "w", encoding="utf-8"), ensure_ascii=False)
@@ -4208,13 +4557,15 @@ def plantilla_deteccion():
             talle_ref = prod["variante_guia"]
     try:
         res = _deteccion_base_cached(_pid_act, talle_ref, _cand)
-    except Exception:
+    except Exception as _e0:
+        _relanzar_calculo(_e0)
         # La variante guardada puede ya no existir en la plantilla → reintentar
         # con la automática para no romper la carga.
         if talle_ref:
             try:
                 res = _deteccion_base_cached(_pid_act, None, _cand)
             except Exception as e:
+                _relanzar_calculo(e)
                 if _falta_nombrar_variantes(_pid_act):
                     return jsonify(_deteccion_pendiente())
                 return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
@@ -4319,6 +4670,8 @@ def _prewarm_deteccion_todas(pid):
     archivo peleándose por la misma CPU y el mismo archivo. La clave lleva el mtime: un molde
     nuevo SÍ vuelve a calcular."""
     _clave = None
+    if _solo_navegador():
+        return                          # lo arma el navegador cuando la pantalla lo pide
     try:
         pl = _ruta_entrada("plantilla.ai", pid)
         # CAMINO B: no hay nada que pre-calentar y sí mucho que romper. El lienzo TODAS existe
@@ -4406,8 +4759,9 @@ def plantilla_deteccion_todas():
     # extraer las piezas de los 20 talles para tirarlas es regalar varios segundos por request.
     try:
         import variantes_molde as VM
-        formato = VM.analizar(pl).get("formato") or "extendido"
-    except Exception:
+        formato = _calcular("analizar_variantes", lambda: VM.analizar(pl), **_id_plantilla(pid)).get("formato") or "extendido"
+    except Exception as e:
+        _relanzar_calculo(e)
         formato = "extendido"
     if False:      # ⛔ ANTES se cortaba acá: con un molde ANIDADO se devolvía la lista VACÍA
         # porque "mostrar los talles juntos sería ilegible". Pero es lo que el molde ES: los talles
@@ -4417,8 +4771,9 @@ def plantilla_deteccion_todas():
         res = {"formato": "anidado", "piezas": [], "talles": []}
     else:
         try:
-            res = MP.detectar_piezas_todas(pl)
+            res = _calcular("detectar_piezas_todas", lambda: MP.detectar_piezas_todas(pl), **_id_plantilla(pid))
         except Exception as e:
+            _relanzar_calculo(e)
             return jsonify({"error": f"no se pudieron detectar las piezas: {e}"}), 422
         res["formato"] = formato
     try:
@@ -4498,9 +4853,12 @@ def _nido_obtener():
     prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
     if prod and prod.get("variante_guia"):
         talle_guia = prod["variante_guia"]
-    nido = MP.nido_piezas(_ruta_entrada("plantilla.ai"), reg, talle_guia=talle_guia,
-                          indices=_cargar("correspondencia_piezas.json") or None,
-                          emparejado=_emparejado_cfg())
+    _ind = _cargar("correspondencia_piezas.json") or None
+    _emp = _emparejado_cfg()
+    nido = _calcular("nido_piezas",
+                     lambda: MP.nido_piezas(_ruta_entrada("plantilla.ai"), reg, talle_guia=talle_guia,
+                                            indices=_ind, emparejado=_emp),
+                     **_id_plantilla(pid), registro=reg, talle_guia=talle_guia, indices=_ind, emparejado=_emp)
     _NIDO_CACHE[ck] = nido
     try:
         json.dump({"clave": clave, "nido": nido}, open(cache_path, "w", encoding="utf-8"))
@@ -4542,6 +4900,7 @@ def plantilla_nido():
     except LookupError as e:
         return jsonify({"error": str(e)}), 409
     except Exception as e:
+        _relanzar_calculo(e)
         return jsonify({"error": f"no se pudo armar el nido: {e}"}), 422
 
 
@@ -4563,7 +4922,10 @@ def plantilla_medidas_variantes():
     return jsonify({"talles": _orden_var(reg), "piezas": piezas})
 
 
-@app.get("/api/plantilla/pdf_guia")
+# POST sólo para volver a pedirla con los cálculos del navegador ADENTRO (`_calculos`, ver
+# `motor/calculos.js`): con muchos talles son cientos y no se guardan en la memoria del servidor.
+# Los parámetros van siempre en la URL; no escribe nada (por eso está en `_API_LEE_CON_PID`).
+@app.route("/api/plantilla/pdf_guia", methods=["GET", "POST"])
 def plantilla_pdf_guia():
     """PDF imprimible con el molde de guía + el recuadro de medida y el nombre de cada
     pieza, según el modo elegido en el visor (default / rango / talle)."""
@@ -4588,6 +4950,36 @@ def plantilla_pdf_guia():
     talle_guia = request.args.get("guia") or (prod or {}).get("variante_guia") or None
     limpio = request.args.get("limpio") in ("1", "true", "True")   # BASE: solo contornos, sin recuadro/nombre/medidas
     from flask import Response
+    # 🔴 `datos=1` (2026-09-22): sólo la GEOMETRÍA (`capas_data`), para que el navegador arme el
+    # PDF o el .ai (`molde/herramientas.js pdfGuiaMedidas / aiGuiaMedidas`). Los cálculos sobre el
+    # archivo (detectar, las piezas de cada mesa, el ancho de las mesas) también los hace él.
+    if request.args.get("datos") == "1":
+        _idp = _id_plantilla(pid)
+        # «por talle»: los talles ELEGIDOS (uno, algunos o todos); sin el parámetro, todos
+        _tsel = [t for t in (request.args.get("talles", "").split(",")) if t] or None
+        g._juntar = []                  # las piezas de cada mesa/talle que falten, TODAS juntas
+        try:
+            _b, _cd = MP._guia_capas_data(
+                pl, reg, config, talle_guia, rango, referencia, piezas_incluir,
+                limpio if request.args.get("formato") != "ai" else False, talles_sel=_tsel,
+                detectar=lambda _t: _calcular("detectar_piezas", lambda: MP.detectar_piezas(pl, talle_ref=_t),
+                                              **_idp, talle_ref=_t, capas_candidatas=False),
+                extraer=lambda _m, _t: _calcular("extraer_piezas_mesa", lambda: MP.extraer_piezas_mesa(MP._abrir(pl), _m, _t),
+                                                 _vacio=[], **_idp, mesa=_m, talle=_t),
+                anchos=lambda: _calcular("anchos_mesas", lambda: [p.rect.width for p in MP._abrir(pl)], **_idp))
+        except Exception as e:
+            _relanzar_calculo(e)
+            return jsonify({"error": f"no se pudo armar la guía: {e}"}), 422
+        finally:
+            _faltan = g._juntar
+            g._juntar = None
+        if _faltan:
+            # lo armado con huecos se descarta: el navegador hace todos y la vuelve a pedir
+            return jsonify({"calcular": _faltan[0], "calculos": _faltan, "reenviar": "post"}), 428
+        return jsonify({"capas_data": _cd, "titulo": titulo, "config": config, "rango": rango, "limpio": limpio,
+                        "referencia": referencia})
+    if _solo_navegador():
+        return jsonify({"error": "la guía la arma tu computadora: recargá la página"}), 409
     # GUÍA en .ai NATIVO (capas reales en Illustrator): `formato=ai`. Trae las capas del arte
     # (diseño, guias, número…) creadas. El PDF sigue disponible para "Descargar base" (limpio).
     if request.args.get("formato") == "ai":
@@ -4683,16 +5075,20 @@ def _falta_nombrar_variantes(pid=None):
     capas sin nombrar (o con todo en «Capa 1»). NO es un error: es un paso pendiente del alta, y
     tratarlo como error dejaba la pantalla vacía y la consola llena de 422 en rojo."""
     try:
-        import fitz
         pl = _ruta_entrada("plantilla.ai", pid)
         if not os.path.exists(pl):
             return False
-        d = fitz.open(pl)
-        try:
-            return not MP._talles_de_plantilla(d)
-        finally:
-            d.close()
-    except Exception:
+
+        def _local():
+            import fitz
+            d = fitz.open(pl)
+            try:
+                return MP._talles_de_plantilla(d)
+            finally:
+                d.close()
+        return not _calcular("talles_de_plantilla", _local, **_id_plantilla(pid or _get_active_producto_id()))
+    except Exception as e:
+        _relanzar_calculo(e)
         return False
 
 
@@ -4709,12 +5105,21 @@ def producto_preview(pid):
         return jsonify({"img_w": 0, "img_h": 0, "piezas": [], "sin_molde": True})
     prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
     talle_ref = (prod or {}).get("variante_guia")
+    # 🔴 DE LA DETECCIÓN YA GUARDADA, NO DEL ARCHIVO (2026-09-22, «¿sigue calculando en el servidor
+    # en vez de usar la computadora de quien lo tiene abierto?»). Pedidos pide esta miniatura para
+    # CADA molde del catálogo al abrirse, y acá se corría `MP.detectar_piezas` (get_drawings del
+    # molde entero, ~2 s por molde en el camino A) con una memoria de sólo 6 entradas: con más
+    # moldes que eso, el servidor volvía a leer todos los archivos cada vez. `_deteccion_base_cached`
+    # sirve lo mismo desde el visor del camino B o desde el caché en disco (que deja el paquete
+    # del navegador al subir el molde): se calcula a lo sumo UNA vez por archivo.
     try:
-        res = MP.detectar_piezas(pl, talle_ref=talle_ref)
-    except Exception:
+        res = _deteccion_base_cached(pid, talle_ref)
+    except Exception as _e0:
+        _relanzar_calculo(_e0)
         try:
-            res = MP.detectar_piezas(pl, talle_ref=None)
+            res = _deteccion_base_cached(pid, None)
         except Exception as e:
+            _relanzar_calculo(e)
             # Molde recién subido al que le falta nombrar las variantes: es un PASO PENDIENTE, no
             # un error. Se devuelve 200 con la miniatura vacía y el estado, así la tarjeta se
             # dibuja "en preparación" en vez de tirar 422 en la consola.
@@ -4799,7 +5204,8 @@ def plantilla_etiquetas():
         # Sin guía elegida a mano la detección la resuelve sola; hay que abrir el PDF para saberla.
         try:
             _guia = _guia_y_asignaciones(_pid)[3]
-        except Exception:
+        except Exception as e:
+            _relanzar_calculo(e)
             _guia = None
     # El nombrado que YA existe en la guía, acotado a la MESA que mandó la pantalla: con otra mesa
     # los índices no son comparables y mezclarlos escribiría piezas equivocadas.
@@ -4813,22 +5219,24 @@ def plantilla_etiquetas():
             # Piezas nombradas en otro talle que el registro todavía no conoce: no hay puente, se
             # las empareja por forma desde el talle visto y se lee dónde caen en la guía.
             try:
-                _n = MP.alta_plantilla_manual(pl, _sin, mesa, talle_ref, indices=_indices, emparejado=_emp)
+                _n = _alta_manual(_pid, pl, _sin, mesa, talle_ref, _emp, indices=_indices)
                 for _nom, _por_t in (_n.get("registro") or {}).items():
                     _g = (_por_t or {}).get(_guia) or {}
                     if _g.get("pieza_idx") is not None:
                         _trad.append({"idx": int(_g["pieza_idx"]), "nombre": _nom})
             except Exception as e:
+                _relanzar_calculo(e)
                 print(f"[etiquetas] no se pudieron llevar a la guía las piezas nuevas: {e}")
         asign, talle_ref = _merge_asignaciones(_asign_base, _trad), _guia
     # «Cargar sin esos talles»: el front reenvía la misma llamada con los talles que el usuario
     # decidió dejar afuera en la ventana de piezas faltantes (changelog 179).
     _excluir = (request.get_json(silent=True) or {}).get("excluir_talles") or []
-    alta = MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=_indices, emparejado=_emp,
-                                    excluir_talles=_excluir)
+    alta = _alta_manual(_pid, pl, asign, mesa, talle_ref, _emp, excluir_talles=_excluir, indices=_indices)
     if not alta["registro"]:
         return jsonify({"error": "; ".join(alta["problemas"]) or "no se registró ninguna pieza"}), 422
-        _guardar_registro(_get_active_producto_id(), alta["registro"])
+    # 🔴 BUG ARREGLADO 2026-09-22: esta línea estaba sangrada DENTRO del `if` de arriba (después de
+    # su `return`), así que nunca corría: «Etiquetas guardadas» y el registro seguía igual.
+    _guardar_registro(_pid, alta["registro"])
     resumen = {"archivo": (_cargar("resumen_plantilla.json") or {}).get("archivo", "plantilla.ai"),
                "mesas": alta["mesas"], "piezas": alta["piezas"], "talles": alta["talles"],
                "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
@@ -4895,7 +5303,9 @@ def _guia_y_asignaciones(pid=None):
     pid = pid or _get_active_producto_id()
     pl = _ruta_entrada("plantilla.ai", pid)
     prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
-    det = MP.detectar_piezas(pl, talle_ref=(prod or {}).get("variante_guia") or None)
+    _tr = (prod or {}).get("variante_guia") or None
+    det = _calcular("detectar_piezas", lambda: MP.detectar_piezas(pl, talle_ref=_tr),
+                    **_id_plantilla(pid), talle_ref=_tr, capas_candidatas=False)
     mesa, guia = det["mesa"], det["talle_ref"]
     reg = _cargar("registro_producto.json", pid) or {}
     asign = []
@@ -4917,30 +5327,48 @@ def _asignacion_actual(reg, mesa):
     return out
 
 
+def _alta_manual(pid, pl, asign, mesa, talle_ref, cfg, excluir_talles=None, indices=False):
+    """`MP.alta_plantilla_manual` (emparejar por forma y armar el registro): lo calcula el
+    navegador (ver `_calcular`). `indices=False` = los de `correspondencia_piezas.json`."""
+    idx = (_cargar("correspondencia_piezas.json", pid) or None) if indices is False else indices
+    exc = list(excluir_talles or [])
+    return _calcular("alta_plantilla_manual",
+                     lambda: MP.alta_plantilla_manual(pl, asign, mesa, talle_ref, indices=idx, emparejado=cfg,
+                                                      excluir_talles=exc),
+                     **_id_plantilla(pid), asign=asign, mesa=mesa, talle_ref=talle_ref, indices=idx,
+                     emparejado=cfg, excluir_talles=exc)
+
+
 def _guardar_y_repropagar(pid, cfg, asign=None):
     """Persiste el ajuste del emparejado y RE-ARMA el registro con él.
 
     Guardar sin re-armar no sirve: el emparejado se resuelve al CONSTRUIR el registro.
     `asign` = nombrado del talle guía a usar ([{idx,nombre}]); si no viene se relee del
     registro (re-propagar es idempotente). Devuelve la respuesta Flask ya lista."""
-    json.dump(cfg, open(_ruta_datos("emparejado_talles.json", pid), "w", encoding="utf-8"),
-              ensure_ascii=False)
+    def _guardar_cfg():
+        _r = _ruta_datos("emparejado_talles.json", pid)
+        with open(_r + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(cfg, fh, ensure_ascii=False)
+        os.replace(_r + ".tmp", _r)
     try:
         pl, det, mesa, guia, asign_reg, _reg = _guia_y_asignaciones(pid)
     except Exception as e:
+        _relanzar_calculo(e)
         return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
     if asign is None:
         asign = asign_reg
     if not asign:
+        _guardar_cfg()
         # Sin nombres todavía no hay nada que propagar, pero el ajuste queda guardado
         # y se va a aplicar solo la primera vez que se nombren las piezas.
         return jsonify({"ok": True, "guia": guia, "talles": det.get("talles") or [],
                         "nombres_guia": {}, "asignacion": {},
                         "acomodo": cfg["acomodo"], "manual": cfg["manual"],
                         "aviso": "todavía no hay piezas nombradas: el ajuste queda guardado"})
-    alta = MP.alta_plantilla_manual(pl, asign, mesa, guia,
-                                    indices=_cargar("correspondencia_piezas.json", pid) or None,
-                                    emparejado=cfg)
+    # el cálculo ANTES de escribir nada: si lo tiene que hacer el navegador (428), la ruta se
+    # vuelve a llamar entera y no puede quedar nada a medio guardar
+    alta = _alta_manual(pid, pl, asign, mesa, guia, cfg)
+    _guardar_cfg()
     if not alta.get("registro"):
         return jsonify({"error": "; ".join(alta.get("problemas") or []) or "no se registró ninguna pieza"}), 422
     _guardar_registro(pid, alta["registro"])
@@ -4971,6 +5399,7 @@ def plantilla_emparejado_get():
     try:
         _pl, det, mesa, guia, asign, reg = _guia_y_asignaciones(pid)
     except Exception as e:
+        _relanzar_calculo(e)
         return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
     cfg = _emparejado_cfg(pid)
     return jsonify({"guia": guia, "mesa": mesa, "talles": det.get("talles") or [],
@@ -5090,9 +5519,17 @@ def plantilla_pieza_archivo():
     import uuid as _uuid
     _nom = f"pieza_nueva_{_uuid.uuid4().hex[:8]}.ai"
     destino = _ruta_entrada(_nom, pid, original=True)
+    # 🔴 LOS CONTORNOS LOS LEE EL NAVEGADOR (2026-09-22, `molde/herramientas.js contornosDePdf`) y
+    # viajan con el archivo; quedan al lado (`.json`) para cuando se guarde la pieza.
+    _cj = request.form.get("contornos_json")
+    if _cj is None and _solo_navegador():
+        return jsonify({"error": "la pieza la lee tu computadora y no llegó: recargá la página"}), 409
     f.save(destino)
     try:
-        conts = PM.contornos_de_pdf(destino)
+        conts = json.loads(_cj) if _cj is not None else PM.contornos_de_pdf(destino)
+        with open(destino + ".json.tmp", "w", encoding="utf-8") as _fh:
+            json.dump(conts, _fh)
+        os.replace(destino + ".json.tmp", destino + ".json")
     except Exception as e:
         return jsonify({"error": f"no se pudo leer el archivo: {e}"}), 422
     if not conts:
@@ -5102,13 +5539,15 @@ def plantilla_pieza_archivo():
     try:
         pl = _ruta_entrada("plantilla.ai", pid)
         if os.path.exists(pl):
-            d = MP._abrir(pl)
-            try:
-                _n_talles = len(MP._talles_de_plantilla(d))
-            finally:
-                d.close()
-    except Exception:
-        pass
+            def _tl():
+                d = MP._abrir(pl)
+                try:
+                    return MP._talles_de_plantilla(d)
+                finally:
+                    d.close()
+            _n_talles = len(_calcular("talles_de_plantilla", _tl, **_id_plantilla(pid)))
+    except Exception as e:
+        _relanzar_calculo(e)
     c = conts[0]
     return jsonify({"ok": True, "archivo": _nom, "contornos": len(conts), "talles": _n_talles,
                     "completo": (not _n_talles) or len(conts) >= _n_talles,
@@ -5177,16 +5616,21 @@ def plantilla_pieza_agregar():
         return jsonify({"error": "primero subí el molde"}), 409
     reg = _cargar("registro_producto.json", pid) or {}
     try:
-        doc = MP._abrir(pl)
-        try:
-            talles = MP._talles_de_plantilla(doc)
-            det = MP.detectar_piezas(pl, talle_ref=(_prod_de(pid) or {}).get("variante_guia") or None)
-        finally:
-            doc.close()
+        def _tl():
+            doc = MP._abrir(pl)
+            try:
+                return MP._talles_de_plantilla(doc)
+            finally:
+                doc.close()
+        talles = _calcular("talles_de_plantilla", _tl, **_id_plantilla(pid))
+        _tr = (_prod_de(pid) or {}).get("variante_guia") or None
+        det = _calcular("detectar_piezas", lambda: MP.detectar_piezas(pl, talle_ref=_tr),
+                        **_id_plantilla(pid), talle_ref=_tr, capas_candidatas=False)
         mesa, guia = det["mesa"], det["talle_ref"]
         if not talles:
             return jsonify({"error": "el molde no tiene talles"}), 422
-        antes = PM.detectar_por_talle(pl, mesa, talles)
+        antes = _calcular("detectar_por_talle", lambda: PM.detectar_por_talle(pl, mesa, talles),
+                          **_id_plantilla(pid), mesa=mesa, talles=talles)
 
         def _homologas(i):
             """`({talle: idx}, nombre)` de la pieza `i` del talle GUÍA en cada talle.
@@ -5239,7 +5683,14 @@ def plantilla_pieza_agregar():
                 _f = _ruta_entrada(_nombre_arch, pid, original=True)
                 if not os.path.exists(_f):
                     return jsonify({"error": "primero subí el archivo de la pieza"}), 409
-                conts = PM.contornos_de_pdf(_f)
+                # los contornos que leyó el navegador al subirla (`pieza_archivo`)
+                try:
+                    with open(_f + ".json", encoding="utf-8") as _fh:
+                        conts = json.load(_fh)
+                except Exception:
+                    if _solo_navegador():
+                        return jsonify({"error": "volvé a subir el archivo de la pieza"}), 409
+                    conts = PM.contornos_de_pdf(_f)
                 # 🔴 EL ARCHIVO TIENE QUE TRAER LA PIEZA EN TODOS LOS TALLES. Una pieza de moldería
                 # cambia de forma con el talle: meter la MISMA forma en los 20 sería una pieza que
                 # no escala, y saldría mal cortada en todos menos uno.
@@ -5266,15 +5717,23 @@ def plantilla_pieza_agregar():
         if not colocaciones:
             return jsonify({"error": "no hay ninguna pieza para agregar"}), 400
         # ── SE ESCRIBE (una sola versión para todas las preparadas) ────────────────────────────
-        destino, puestos = PM.agregar_pieza(pl_base, colocaciones, mesa=mesa)   # ← la BASE, no la vigente
+        # 🔴 LA ESCRIBE EL NAVEGADOR (2026-09-22): `agregar_pieza` sobre la vigente, y el archivo
+        # nuevo llega por `/api/calculos`; acá sólo pasa a ser la versión siguiente.
+        def _agregar_local():
+            _d, _p = PM.agregar_pieza(pl_base, colocaciones, mesa=mesa)   # ← la BASE, no la vigente
+            return {"puestos": _p, "__destino__": _d}
+        _rag = _calcular("agregar_pieza", _agregar_local, **_id_plantilla(pid), colocaciones=colocaciones, mesa=mesa)
+        puestos = _rag.get("puestos") or []
+        destino = _rag.get("__destino__") or _version_plantilla_desde(pid, _rag.get("__archivo__"))
         # El REMAPEO del registro sigue corriendo aunque hoy dé identidad: la pieza nueva se escribe
         # al final de su capa y las piezas se leen en orden de dibujo, así que no se renumera nada
         # (medido: 0 de 2760). Es la red por si el orden volviera a depender de la posición.
         mapas = {t: PM.mapa_insercion(len(antes[t]), len(antes[t])) for t in talles}
         reg2, cambios, avisos = PM.remapear_registro(reg, mapas)
         if reg and cambios:
-            json.dump(reg2, open(_ruta_datos("registro_producto.json", pid), "w", encoding="utf-8"),
-                      ensure_ascii=False)
+            # 🔴 BUG ARREGLADO 2026-09-22: se escribía `registro_producto.json`, un archivo que ya
+            # nadie lee (el registro vive en la base): el remapeo se perdía.
+            _guardar_registro(pid, reg2)
         try:
             _regenerar_piezas_index(pid)
         except Exception as e:
@@ -5283,7 +5742,9 @@ def plantilla_pieza_agregar():
         # diciendo el número viejo hasta que se rehaga el alta.
         try:
             _res = _cargar("resumen_plantilla.json", pid) or {}
-            if _res.get("piezas") is not None:
+            # 🔴 `piezas` es la LISTA de nombres (la arma el alta), no un número: el `int()` de
+            # antes reventaba siempre. Las piezas nuevas entran sin nombre: la lista no cambia.
+            if isinstance(_res.get("piezas"), int):
                 _res["piezas"] = int(_res["piezas"]) + agregadas
                 json.dump(_res, open(_ruta_datos("resumen_plantilla.json", pid), "w", encoding="utf-8"),
                           ensure_ascii=False)
@@ -5295,6 +5756,7 @@ def plantilla_pieza_agregar():
                         "piezas_remapeadas": cambios, "avisos": (avisos_dup + avisos)[:10],
                         "sin_nombre": True})
     except Exception as e:
+        _relanzar_calculo(e)
         traceback.print_exc()
         return jsonify({"error": f"no se pudo guardar la pieza: {e}"}), 422
 
@@ -5475,6 +5937,7 @@ def plantilla_grupo_pieza():
     try:
         _pl, _det, _mesa, guia, asign, _reg = _guia_y_asignaciones(pid)
     except Exception as e:
+        _relanzar_calculo(e)
         return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
     cfg = _emparejado_cfg(pid)
     antes = MP.nombres_normalizados(asign)          # {idx: nombre} ANTES de tocar nada
@@ -5521,9 +5984,6 @@ def plantilla_grupo_pieza():
         else:
             cfg["manual"].pop(t, None)
 
-    # El renombre arrastra las configs que cuelgan del nombre (etiqueta/telas/mapeo).
-    _migrar_nombres_pieza(pid, ren)
-
     # Correspondencia confirmada A MANO en los otros talles (lo que manda sobre la heurística).
     nombre_final = despues.get(int(cuerpo.get("guia_idx"))) if not eliminar else None
     for t, idx in (cuerpo.get("piezas") or {}).items():
@@ -5537,6 +5997,12 @@ def plantilla_grupo_pieza():
         if not d:
             cfg["manual"].pop(t, None)
 
+    # 🔴 EL CÁLCULO ANTES DE TOCAR NADA (2026-09-22): si lo hace el navegador, la ruta se llama de
+    # nuevo entera; mudar los nombres antes haría el cambio dos veces.
+    if asign:
+        _alta_manual(pid, _pl, asign, _mesa, guia, cfg)
+    # El renombre arrastra las configs que cuelgan del nombre (etiqueta/telas/mapeo).
+    _migrar_nombres_pieza(pid, ren)
     return _guardar_y_repropagar(pid, cfg, asign=asign)
 
 
@@ -5561,7 +6027,7 @@ def plantilla_variantes():
                         "asignacion_piezas": {}, "asignacion_piezas_aplicada": {}, "variantes_piezas": [],
                         "origen": "con_diseno"})
     try:
-        info = VM.analizar(pl)
+        info = _calcular("analizar_variantes", lambda: VM.analizar(pl), **_id_plantilla(_get_active_producto_id()))
     except Exception as e:
         return jsonify({"error": f"no se pudo leer el molde: {e}"}), 422
     info["sugerencia_nombres"] = VM.curva_sugerida(info["sugerencia"])
@@ -5646,28 +6112,42 @@ def plantilla_variantes_piezas():
             if _inf.get("bbox_mu"):
                 por_bbox.setdefault(_k(_inf["bbox_mu"]), _nom)
 
-    # Siempre se parte desde el ORIGINAL: re-asignar tiene que dar el mismo resultado que la
-    # primera vez (partir una versión ya partida acumularía capas viejas).
-    OA.reset_versiones(pl)
+    # 🔴 LO HACE EL NAVEGADOR (2026-09-22): parte el ORIGINAL en capas por variante, lee las
+    # piezas de la variante de referencia, les pone los nombres que ya tenían (por su bbox) y arma
+    # el registro; manda el archivo nuevo (`/api/calculos`). Acá se guarda. El cálculo va ANTES de
+    # borrar las versiones: si falta, la ruta se vuelve a llamar y no se perdió nada.
+    _cfg_emp = _emparejado_cfg(pid)
+    _pbb = [[list(k), v] for k, v in por_bbox.items()]
+
+    def _separar_local():
+        OA.reset_versiones(pl)
+        _ruta, _mesa, _capa, _orden = VM.separar_por_piezas(pl, asign)
+        _doc = MP._abrir(_ruta)
+        try:
+            _ref = max(_orden, key=lambda t: len(extraer_piezas_mesa(_doc, _mesa, t)))
+            _prf = extraer_piezas_mesa(_doc, _mesa, _ref)
+        finally:
+            _doc.close()
+        _an = [{"idx": i, "nombre": por_bbox.get(_k(p["bbox_mu"]), f"Pieza {i + 1}")} for i, p in enumerate(_prf)]
+        return {"__destino__": _ruta, "mesa": _mesa, "capa_origen": _capa, "orden": _orden, "ref": _ref,
+                "alta": MP.alta_plantilla_manual(_ruta, _an, _mesa, _ref, emparejado=_cfg_emp)}
     try:
-        ruta, mesa, capa_origen, orden = VM.separar_por_piezas(pl, asign)
+        _rs = _calcular("separar_y_alta", _separar_local, **_id_plantilla(pid, original=True),
+                        asignaciones={str(k): v for k, v in asign.items()}, por_bbox=_pbb, emparejado=_cfg_emp)
     except Exception as e:
+        _relanzar_calculo(e)
         return jsonify({"error": str(e)}), 422
+    mesa, capa_origen, orden = _rs.get("mesa"), _rs.get("capa_origen"), _rs.get("orden") or []
+    if not _rs.get("__destino__"):
+        # Siempre se parte desde el ORIGINAL: re-asignar tiene que dar el mismo resultado que la
+        # primera vez (partir una versión ya partida acumularía capas viejas).
+        OA.reset_versiones(pl)
+        _version_plantilla_desde(pid, _rs.get("__archivo__"))
 
     resumen = {"variantes": orden, "mesa": mesa, "capa_origen": capa_origen}
     try:
-        doc = MP._abrir(ruta)
-        try:
-            ref = max(orden, key=lambda t: len(extraer_piezas_mesa(doc, mesa, t)))
-            piezas_ref = extraer_piezas_mesa(doc, mesa, ref)
-        finally:
-            doc.close()
-        # Nombres PROVISORIOS estables si la pieza todavía no tiene nombre: el registro tiene que
-        # existir igual para que el molde se pueda seguir configurando; el editor de nombrado
-        # (paso siguiente del flujo) los reemplaza.
-        asign_nombres = [{"idx": i, "nombre": por_bbox.get(_k(p["bbox_mu"]), f"Pieza {i + 1}")}
-                         for i, p in enumerate(piezas_ref)]
-        alta = MP.alta_plantilla_manual(ruta, asign_nombres, mesa, ref, emparejado=_emparejado_cfg(pid))
+        ref = _rs.get("ref")
+        alta = _rs.get("alta") or {}
         if not alta.get("registro"):
             raise ValueError("; ".join(alta.get("problemas") or []) or "no se registró ninguna pieza")
         _guardar_registro(pid, alta["registro"])
@@ -5713,14 +6193,24 @@ def plantilla_variantes_nombrar():
     pl = _ruta_entrada("plantilla.ai", pid, original=True)
     if not os.path.exists(pl):
         return jsonify({"error": "primero subí el molde"}), 409
+    # 🔴 LO HACE EL NAVEGADOR (2026-09-22): renombra las capas en la versión vigente, arma el
+    # registro sobre el archivo nuevo y lo manda (`/api/calculos`); acá pasa a ser la versión
+    # siguiente. Sin «El servidor no calcula», como siempre.
+    def _renombrar_local():
+        _r, _n = VM.renombrar_capas(pl, nombres)
+        return {"n": _n, "__destino__": _r, "alta": MP.alta_plantilla(_ruta_entrada("plantilla.ai", pid))}
     try:
-        ruta, n = VM.renombrar_capas(pl, nombres)
+        _rr = _calcular("renombrar_y_alta", _renombrar_local, **_id_plantilla(pid), mapa=nombres)
+        n = _rr.get("n") or 0
+        if not _rr.get("__destino__"):
+            _version_plantilla_desde(pid, _rr.get("__archivo__"))
     except Exception as e:
+        _relanzar_calculo(e)
         return jsonify({"error": str(e)}), 422
     # el registro se rehace leyendo la versión nueva (ahí las capas ya se llaman como corresponde)
     resumen = {"renombradas": n}
     try:
-        alta = MP.alta_plantilla(_ruta_entrada("plantilla.ai", pid))
+        alta = _rr.get("alta") or {}
         if alta.get("registro"):
             _guardar_registro(pid, alta["registro"])
         resumen.update({"talles": alta.get("talles") or [], "piezas": alta.get("piezas") or [],
@@ -6064,12 +6554,12 @@ def arte_contexto_producto(pid):
     fu = _fuentes_para(pid, _reempl_de_request(pid=pid))
     catalogo = [{**info, "propia": os.path.dirname(ruta) not in (FUENTES, os.path.realpath(FUENTES))}
                 for ruta, info in MP.catalogo_fuentes(fu).items()]
-    _pl = _ruta_entrada("plantilla.ai", pid=pid, original=True)
-    _st = os.stat(_pl) if os.path.exists(_pl) else None
+    # la VIGENTE (con las variantes nombradas, las piezas agregadas…): es la que usa el motor
+    _pl = _ruta_entrada("plantilla.ai", pid=pid)
     return jsonify({"registro": reg, "fijo": fijo, "alcance": sorted(_alcance_variables(prod, reg)),
                     "variantes": pv, "orden_var": _orden_var(reg), "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
                     "plantilla_es_b": _es_camino_b(pid),
-                    "plantilla_sello": ([_st.st_size, int(_st.st_mtime)] if _st else None)})
+                    "plantilla_sello": _sello_archivo(_pl)})
 
 
 @app.post("/api/productos/<pid>/editables_cfg")
@@ -6094,7 +6584,8 @@ def arte_archivo_producto(pid):
     """El arte VIGENTE de un diseño (con las ediciones), para que el navegador lo dibuje y arme las
     piezas él (etapas 2-4, camino A)."""
     sub = _diseno_sub(request.args.get("diseno"))
-    ruta = _ruta_entrada("arte.ai", pid, sub=sub)
+    # `?original=1`: el que subió el usuario, sin ediciones (para saber qué capas agregó después)
+    ruta = _ruta_entrada("arte.ai", pid, sub=sub, original=request.args.get("original") == "1")
     if not os.path.exists(ruta):
         return jsonify({"error": "no hay arte cargado"}), 404
     return send_from_directory(os.path.dirname(ruta), os.path.basename(ruta), max_age=0)
@@ -6196,6 +6687,7 @@ def _urls_mesas(det, arte, diseno):
 
 
 @app.get("/api/arte/mesa_img")
+@_no_con_solo('el arte lo dibuja tu computadora: recargá la página')
 def arte_mesa_img():
     """UNA mesa del arte, para el visor. Ver `_urls_mesas`.
 
@@ -6265,7 +6757,8 @@ def arte_deteccion():
         return jsonify({"error": "primero subí el arte"}), 409
     if not reg:
         return jsonify({"error": "primero registrá las piezas del molde"}), 409
-    det = _urls_mesas(_deteccion_cache(arte, reg), arte, request.args.get("diseno"))
+    det = _urls_mesas(_deteccion_cache(arte, reg, _get_active_producto_id(), request.args.get("diseno") or "principal"),
+                      arte, request.args.get("diseno"))
     det["modo"] = "separado"
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == _get_active_producto_id()), None)
@@ -6275,8 +6768,10 @@ def arte_deteccion():
     variante = str(request.args.get("variante") or "").strip()
     base, pv = _mapeo_estructura(sub=sub)
     det["mapeo"] = _mapeo_efectivo(base, pv, variante)
+    _pid_d, _dis_d = _get_active_producto_id(), request.args.get("diseno") or "principal"
     if not det["mapeo"] and variante not in pv:
-        det["mapeo"] = MP.mapeo_por_nombre(arte, reg)
+        det["mapeo"] = _arte_calc("arte_mapeo_nombre", _pid_d, _dis_d, lambda: MP.mapeo_por_nombre(arte, reg),
+                                  registro=reg)
     if variante:
         _pzv = _piezas_de_variable(prod, variante, reg)
         if _pzv:
@@ -6285,8 +6780,11 @@ def arte_deteccion():
     # que el placeholder/editor muestren el diseño del TALLE que se ve (no el default del 1er
     # rango — bug "primero aparece el 6XL"). {} si el arte no usa rótulos #.
     try:
-        det["mapeo_talles"] = MP.mapeo_variantes_arte(arte, reg, _orden_var(reg)) or {}
-    except Exception:
+        _ov = _orden_var(reg)
+        det["mapeo_talles"] = _arte_calc("arte_mapeo_variantes", _pid_d, _dis_d,
+                                         lambda: MP.mapeo_variantes_arte(arte, reg, _ov), registro=reg, orden=_ov) or {}
+    except Exception as e:
+        _relanzar_calculo(e)
         det["mapeo_talles"] = {}
     # Mapeo FIJO guardado en el molde (configurado una vez, se reusa para todos
     # los diseños de este molde). El front lo aplica si el archivo no tiene mapeo.
@@ -6312,8 +6810,18 @@ def arte_mapeo():
     # configuración. El catálogo se vuelve a leer —ya bajo candado— recién para guardar.
     cat = _cargar_catalogo()
     prod = next((p for p in cat["productos"] if p["id"] == _get_active_producto_id()), None)
-    _scope = _piezas_de_variable(prod, variante, reg) if variante else None
-    val = MP.validar_arte_separado(arte, reg, _fuentes_para(_get_active_producto_id(), _reempl_de_request()), mapeo, _orden_var(reg), piezas_scope=_scope)
+    # 🔴 LA VALIDACIÓN LLEGA HECHA (2026-09-22, «el servidor sólo sostiene el sistema y la base»):
+    # el navegador la arma con `arte/mapeo.js validarArteSeparado` (worker `arte_validar`), la misma
+    # traducción que usa el paquete del arte. Acá sólo se comprueba la forma y se guarda. El cálculo
+    # en Python queda únicamente con «El servidor no calcula» APAGADO (respaldo del taller).
+    val = cuerpo.get("validacion")
+    if isinstance(val, dict) and isinstance(val.get("checks"), list):
+        val = dict(val)
+    elif _solo_navegador():
+        return jsonify({"error": "la validación del arte la hace tu computadora y no llegó: recargá la página"}), 409
+    else:
+        _scope = _piezas_de_variable(prod, variante, reg) if variante else None
+        val = MP.validar_arte_separado(arte, reg, _fuentes_para(_get_active_producto_id(), _reempl_de_request()), mapeo, _orden_var(reg), piezas_scope=_scope)
     val["archivo"] = (_cargar("validacion_arte.json", sub=sub) or {}).get("archivo", "arte.ai")
     json.dump(val, open(_ruta_datos("validacion_arte.json", sub=sub), "w", encoding="utf-8"), ensure_ascii=False)
     json.dump(val.get("personalizacion", {}), open(_ruta_datos("registro_personalizacion.json", sub=sub), "w", encoding="utf-8"))
@@ -6339,6 +6847,8 @@ def arte_mapeo():
     val["campos_personalizacion"] = sorted({c for m in val.get("personalizacion", {}).values() for c in m})
     # Pre-warm en background: armar las piezas base de cada variable al talle guía con SU mapeo
     # efectivo → el visor del Arte las tiene instantáneas (no espera el 1er armado). Best-effort.
+    # 🔴 Sólo con «El servidor no calcula» APAGADO: si no, las previas las arma el navegador
+    # (`previasCaminoA`) y esto era el servidor dibujando para nadie en cada arrastre.
     try:
         _pw_pid = _get_active_producto_id()
         _pw_dis = cuerpo.get("diseno")
@@ -6352,7 +6862,8 @@ def arte_mapeo():
                         "por_variable": ({_vcl: _mapeo_efectivo(base, pv, _vcl)} if _vcl else {})}
                 try: _piezas_base(_pw_pid, _pw_dis, _vcl, _pw_guia, _arg, prod, reg, prioridad="bg", cat=cat)
                 except Exception: pass
-        _en_hilo(_prewarm)
+        if not _solo_navegador():
+            _en_hilo(_prewarm)
     except Exception:
         pass
     return jsonify(val)
@@ -6480,7 +6991,10 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
         _vd = f"despl{_PDv._V_CONTORNOS}.{_PDv._V_PAGINAS}"
     except Exception:
         _vd = "despl0.0"
-    return ["v16", _es_camino_b(pid), _vd,
+    # v18 (2026-09-22): la cruz de proceso lleva halo blanco.
+    # v17 (2026-09-22): la personalización hereda el trazo vigente y el camino B anota el borde de
+    # glifo del nombre/número → las piezas dibujadas antes salían sin ese borde.
+    return ["v18", _es_camino_b(pid), _vd,
             _mt(_ruta_entrada("plantilla.ai", pid)), _mt(_ruta_entrada("arte.ai", pid, sub=sub)),
             # ⚠️ Los reemplazos son DEL PEDIDO (2026-08-21): si la clave siguiera firmando los del
             # molde, cambiar de fuente en el pedido serviría el render cacheado con la anterior.
@@ -6673,6 +7187,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
 
 
 @app.post("/api/arte/preview_piezas")
+@_no_con_solo('las piezas del Arte las arma tu computadora: recargá la página')
 def arte_preview_piezas():
     """PREVIEW REAL per-pieza (CACHEADO): sirve el render del motor por pieza desde `_piezas_base`.
     La 1ª vez por config arma y guarda; las siguientes son instantáneas. Body: {pid?, diseno,
@@ -6928,6 +7443,7 @@ def _deteccion_talle_worker(args):
             pass
 
 @app.post("/api/arte/asignar_todo")
+@_no_con_solo('las piezas del Arte las arma tu computadora: recargá la página')
 def arte_asignar_todo():
     """Genera EN PARALELO (ProcessPool) el render de TODOS los talles de una variable → caché
     en disco. Devuelve un job_id; el progreso se consulta en /api/arte/asignar_estado. Después
@@ -7234,7 +7750,7 @@ def _cfg_con_diseno(cat=None):
         # «El servidor no calcula»: todo lo pesado en el navegador o nada (PLAN_NAVEGADOR, etapa 6).
         # Vive en la raíz del catálogo (`navegador_solo`) porque no es sólo del camino B; se muestra
         # acá porque esta es la pantalla de «cómo se preparan los moldes».
-        "navegador_solo": bool((cat if cat is not None else _cargar_catalogo()).get("navegador_solo")),
+        "navegador_solo": _solo_navegador(),
         "navegador_solo_forzado": (str(os.environ.get("TIZADA_SOLO_NAVEGADOR") or "").strip() in ("0", "1")),
     }
 
@@ -7793,7 +8309,47 @@ def _clamp_tf(v):
             "rot": float(v.get("rot", 0.0) or 0.0), "scale": sc, "sx": sx, "sy": sy}
 
 
+@app.get("/api/productos/<pid>/editables_datos")
+def editables_datos_producto(pid):
+    """Los DATOS de los editables de un diseño para que el navegador arme la lista del editor
+    (`motor/arte/editablesVista.js`, 2026-09-22 «el servidor sólo sostiene el sistema y la base»).
+    Es la parte liviana de `GET /api/productos/editables`: el mapeo, el registro, la config de la
+    variable (transforms y colores ya saneados), qué capas agregó el usuario y los objetos
+    agregados. Recorrer el arte y dibujar cada objeto lo hace la computadora de quien mira."""
+    diseno = request.args.get("diseno") or "principal"
+    sub = _diseno_sub(diseno)
+    variante = str(request.args.get("variante") or "*")
+    prod = next((p for p in _cargar_catalogo()["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde inexistente"}), 404
+    reg = _cargar("registro_producto.json", pid) or {}
+    mp = (_cargar("mapeo_arte.json", pid, sub=sub) or {}).get("mapeo", {})
+    _eds = ((prod.get("editables") or {}).get(_slugify_diseno(diseno)) or {})
+    cfg = _eds.get(variante) or _eds.get("*") or {}
+    capas = {}
+    for nombre, entry in (cfg or {}).items():
+        entry = entry or {}
+        capas[nombre] = {
+            "transforms": _tf_de_capa(entry), "color": entry.get("color"),
+            "color_c": _clamp_color(entry.get("color")),
+            "objetos": {str(oid): {"color": (so or {}).get("color"), "color_c": _clamp_color((so or {}).get("color"))}
+                        for oid, so in ((entry.get("objetos") or {}).items())},
+        }
+    man = _oa_cargar(pid, sub)
+    agregados = []
+    for o in (man.get("objetos") or []):
+        _tf = (o.get("transforms") or {}).get(variante) or (o.get("transforms") or {}).get("*") or {}
+        agregados.append({"id": o.get("id"), "nombre": o.get("nombre") or o.get("id"), "archivo": o.get("archivo"),
+                          "pieza": o.get("pieza") or "", "w_cm": o.get("w_cm"), "h_cm": o.get("h_cm"),
+                          "transforms": _tf})
+    return jsonify({"mapeo": {k: int(v) for k, v in mp.items() if v}, "registro": reg,
+                    "talles": _talles_editables(pid, reg), "capas": capas,
+                    "inyectadas": sorted({i.get("capa") for i in (man.get("inyectadas") or []) if i.get("capa")}),
+                    "agregados": agregados, "sep": _EDIT_SEP})
+
+
 @app.get("/api/productos/editables")
+@_no_con_solo('los editables los lee tu computadora: recargá la página')
 def get_editables():
     pid = request.args.get("pid") or _get_active_producto_id()
     diseno = request.args.get("diseno") or "principal"
@@ -8122,8 +8678,12 @@ def _oa_cargar(pid, sub):
 
 
 def _oa_guardar(pid, sub, data):
-    with open(_oa_manifest_path(pid, sub), "w", encoding="utf-8") as f:
+    # .tmp + os.replace: `open("w")` trunca ANTES de escribir, y un corte en el medio dejaba el
+    # registro de objetos vacío (regla: escrituras atómicas siempre)
+    ruta = _oa_manifest_path(pid, sub)
+    with open(ruta + ".tmp", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
+    os.replace(ruta + ".tmp", ruta)
 
 
 def _objetos_agregados_motor(pid, sub):
@@ -8136,8 +8696,61 @@ def _objetos_agregados_motor(pid, sub):
     return {"dir": OA.carpeta(DATOS, pid, sub), "objetos": objs}
 
 
+def _arte_version_nueva(pid, sub, archivo_subido, version_base):
+    """Guarda el arte EDITADO EN EL NAVEGADOR como la versión siguiente (`arte.v<N+1>.ai`) y mueve
+    el puntero — el original del usuario no se toca (ver `objetos_agregados.py`). `version_base` =
+    la versión sobre la que editó el navegador: si mientras tanto otro guardó una más nueva, se
+    rechaza (409) en vez de pisarla. Sólo se comprueba que sea un PDF: no se abre ni se calcula."""
+    base = _ruta_entrada("arte.ai", pid, sub=sub, original=True)
+    if not os.path.exists(base):
+        raise FileNotFoundError("ese diseño no tiene arte")
+    n = OA._ver_actual(base)
+    if version_base is not None and str(version_base).strip() != "" and int(version_base) != n:
+        raise RuntimeError("el diseño cambió mientras tanto (lo editó otra pantalla): recargá y volvé a intentarlo")
+    destino = OA._ver_path(base, n + 1)
+    tmp = destino + ".subiendo"
+    archivo_subido.save(tmp)
+    with open(tmp, "rb") as fh:
+        ok = fh.read(5) == b"%PDF-"
+    if not ok:
+        os.remove(tmp)
+        raise ValueError("el arte editado no llegó bien (no es un PDF)")
+    os.replace(tmp, destino)
+    OA.fijar_version(base, n + 1)
+    return destino
+
+
 @app.post("/api/productos/objeto_agregar")
 def objeto_agregar():
+    # 🔴 NORMALIZADO EN EL NAVEGADOR (2026-09-22, «el servidor sólo sostiene el sistema y la base»):
+    # llega el PDF de una página y su medida (`motor/arte/editarDiseno.js`); acá sólo se guarda.
+    _pdf = request.files.get("pdf")
+    if _pdf is not None and request.form.get("normalizado") == "1":
+        pid = request.form.get("pid") or _get_active_producto_id()
+        sub = _diseno_sub(request.form.get("diseno"))
+        datos = _pdf.read()
+        if not datos.startswith(b"%PDF-"):
+            return jsonify({"error": "el objeto no llegó bien (no es un PDF)"}), 422
+        try:
+            w_cm = float(request.form.get("w_cm") or 0)
+            h_cm = float(request.form.get("h_cm") or 0)
+        except ValueError:
+            return jsonify({"error": "medida inválida"}), 422
+        data = _oa_cargar(pid, sub)
+        oid = "oa_%d" % (1 + max([int(o["id"].split("_")[-1]) for o in data["objetos"] if o.get("id", "").startswith("oa_")] + [0]))
+        carp = OA.carpeta(DATOS, pid, sub)
+        _dst = os.path.join(carp, oid + ".pdf")
+        with open(_dst + ".tmp", "wb") as g:
+            g.write(datos)
+        os.replace(_dst + ".tmp", _dst)
+        obj = {"id": oid, "nombre": (request.form.get("nombre") or "").strip() or "Objeto", "archivo": oid + ".pdf",
+               "w_cm": round(w_cm, 2), "h_cm": round(h_cm, 2),
+               "tipo": "imagen" if request.form.get("tipo") == "imagen" else "vector"}
+        data["objetos"].append(obj)
+        _oa_guardar(pid, sub, data)
+        return jsonify({"ok": True, "objeto": {**obj, "svg": ""}})
+    if _solo_navegador():
+        return jsonify({"error": "el objeto lo prepara tu computadora y no llegó: recargá la página"}), 409
     f = request.files.get("archivo")
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
@@ -8173,15 +8786,8 @@ def objetos_agregados_listar():
     sub = _diseno_sub(request.args.get("diseno"))
     data = _oa_cargar(pid, sub)
     carp = OA.carpeta(DATOS, pid, sub)
-    salida = []
-    for o in data.get("objetos", []):
-        svg = ""
-        try:
-            with open(os.path.join(carp, o["archivo"]), "rb") as fh:
-                svg = OA.preview_svg(fh.read())
-        except Exception:
-            pass
-        salida.append({**o, "svg": svg})
+    # sin la vista (SVG): la dibuja el navegador con el PDF de cada objeto (2026-09-22)
+    salida = [{**o, "svg": ""} for o in data.get("objetos", [])]
     return jsonify({"ok": True, "objetos": salida})
 
 
@@ -8220,6 +8826,37 @@ def objeto_agregado_colocar(oid):
     Body: {pid, diseno, pieza, fx, fy} — `fx/fy` = punto clickeado en fracciones de la PIEZA
     (0..1, y hacia abajo), que se traduce a la posición equivalente dentro de cada mesa.
     """
+    # 🔴 EL ARTE LO EDITÓ EL NAVEGADOR (2026-09-22): llega el arte nuevo (`arte`), la capa y las
+    # mesas; acá se guarda como versión nueva y se anota en el registro de objetos.
+    _nuevo = request.files.get("arte")
+    if _nuevo is not None:
+        pid = request.form.get("pid") or _get_active_producto_id()
+        sub = _diseno_sub(request.form.get("diseno"))
+        data = _oa_cargar(pid, sub)
+        obj = next((o for o in data["objetos"] if o["id"] == oid), None)
+        if not obj:
+            return jsonify({"error": "no existe"}), 404
+        capa = str(request.form.get("capa") or "").strip()
+        if not MP._es_capa_editable(capa):          # «editable» en cualquier parte del nombre
+            return jsonify({"error": "capa inválida"}), 422
+        try:
+            mesas_ok = [int(x) for x in json.loads(request.form.get("mesas") or "[]")]
+            _arte_version_nueva(pid, sub, _nuevo, request.form.get("version_base"))
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 409
+        except (ValueError, FileNotFoundError) as e:
+            return jsonify({"error": str(e)}), 422
+        data.setdefault("inyectadas", []).append(
+            {"capa": capa, "nombre": obj.get("nombre"), "pieza": str(request.form.get("pieza") or ""), "mesas": mesas_ok})
+        data["objetos"] = [o for o in data["objetos"] if o["id"] != oid]
+        _oa_guardar(pid, sub, data)
+        try:
+            os.remove(os.path.join(OA.carpeta(DATOS, pid, sub), obj["archivo"]))
+        except OSError:
+            pass
+        return jsonify({"ok": True, "capas": [{"mesa": m, "capa": capa} for m in mesas_ok], "nombre": obj.get("nombre")})
+    if _solo_navegador():
+        return jsonify({"error": "el diseño lo edita tu computadora y no llegó: recargá la página"}), 409
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("pid") or _get_active_producto_id()
     diseno = cuerpo.get("diseno") or "principal"
@@ -8318,6 +8955,31 @@ def editable_quitar():
 
     Sólo se pueden quitar las capas que agregó el usuario (registro `inyectadas`): las que trae el
     .ai original NO se tocan. Body: {pid, diseno, capa}."""
+    # 🔴 EL ARTE LO EDITÓ EL NAVEGADOR (2026-09-22): llega el arte sin la capa; acá se guarda.
+    _nuevo = request.files.get("arte")
+    if _nuevo is not None:
+        pid = request.form.get("pid") or _get_active_producto_id()
+        sub = _diseno_sub(request.form.get("diseno"))
+        capa = str(request.form.get("capa") or "").strip()
+        data = _oa_cargar(pid, sub)
+        # sólo lo que agregó el usuario: lo dice el registro de objetos o, para las capas colocadas
+        # antes de que existiera, la comparación con el original que hizo el navegador
+        _registradas = {i.get("capa") for i in (data.get("inyectadas") or [])}
+        if capa not in _registradas and request.form.get("agregada_segun_original") != "1":
+            return jsonify({"error": "esa capa vino con el arte original: no se puede quitar desde acá"}), 409
+        if not MP._es_capa_editable(capa):          # «editable» en cualquier parte del nombre
+            return jsonify({"error": "capa inválida"}), 422
+        try:
+            _arte_version_nueva(pid, sub, _nuevo, request.form.get("version_base"))
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 409
+        except (ValueError, FileNotFoundError) as e:
+            return jsonify({"error": str(e)}), 422
+        data["inyectadas"] = [i for i in (data.get("inyectadas") or []) if i.get("capa") != capa]
+        _oa_guardar(pid, sub, data)
+        return jsonify({"ok": True, "capa": capa, "bloques": int(request.form.get("borrados") or 0)})
+    if _solo_navegador():
+        return jsonify({"error": "el diseño lo edita tu computadora y no llegó: recargá la página"}), 409
     cuerpo = request.get_json(force=True) or {}
     pid = cuerpo.get("pid") or _get_active_producto_id()
     sub = _diseno_sub(cuerpo.get("diseno"))
@@ -8379,12 +9041,15 @@ def objeto_agregado_duplicar(oid):
     nuevo = {**obj, "id": nid, "archivo": nid + ".pdf", "nombre": nombre, "pieza": ""}
     data["objetos"].append(nuevo)
     _oa_guardar(pid, sub, data)
+    # la vista (SVG) de la copia la dibuja el navegador (2026-09-22); sólo sin «El servidor no
+    # calcula» se arma acá
     svg = ""
-    try:
-        with open(os.path.join(carp, nuevo["archivo"]), "rb") as fh:
-            svg = OA.preview_svg(fh.read())
-    except Exception:
-        pass
+    if not _solo_navegador():
+        try:
+            with open(os.path.join(carp, nuevo["archivo"]), "rb") as fh:
+                svg = OA.preview_svg(fh.read())
+        except Exception:
+            pass
     return jsonify({"ok": True, "objeto": {**nuevo, "svg": svg}})
 
 
@@ -8442,7 +9107,72 @@ def arte_perfil():
     arte = _ruta_entrada("arte.ai", sub=sub)
     if not os.path.exists(arte):
         return jsonify({"error": "no hay arte"}), 409
-    return jsonify(_perfil_info(arte))
+    # el perfil que TRAE el arte lo lee el navegador (`arte/perfil.js`, 2026-09-22) y queda en la
+    # memoria del archivo; acá sólo se compara con el predeterminado
+    try:
+        _det = _arte_calc("arte_perfil", _get_active_producto_id(), request.args.get("diseno") or "principal",
+                          lambda: _detectar_perfil_incrustado(arte), memo="perfil")
+    except Exception as e:
+        _relanzar_calculo(e)
+        _det = None
+    return jsonify(_perfil_info(arte, det=_det))
+
+
+def _fuente_analizada_por_navegador():
+    """Lo que el navegador leyó de la tipografía (`motor/arte/fuentesSubir.js`): `{interno,
+    sin_contorno, choca_con}` o None si no vino (navegador viejo)."""
+    interno = (request.form.get("interno") or "").strip()
+    if not interno:
+        return None
+    def _j(k, d):
+        try:
+            return json.loads(request.form.get(k) or "null") or d
+        except Exception:
+            return d
+    return {"interno": interno, "sin_contorno": _j("sin_contorno", []), "choca_con": _j("choca_con", None)}
+
+
+def _guardar_fuente_subida(f, carpeta, an):
+    """Guarda la tipografía TAL CUAL llegó (el análisis lo hizo el navegador): .tmp + os.replace,
+    y se anota su nombre interno para que el catálogo no la tenga que abrir."""
+    os.makedirs(carpeta, exist_ok=True)
+    destino = os.path.join(carpeta, "subida_" + os.path.basename(f.filename or "fuente"))
+    if not destino.lower().endswith((".ttf", ".otf")):
+        raise ValueError("la tipografía tiene que ser .ttf u .otf")
+    tmp = destino + ".tmp"
+    f.save(tmp)
+    os.replace(tmp, destino)
+    MP.registrar_fuente(destino, an["interno"])
+    res = {"ok": True, "interno": an["interno"], "sin_contorno": an.get("sin_contorno") or [],
+           "choca_con": an.get("choca_con")}
+    _ch = an.get("choca_con")
+    if _ch:
+        res["aviso"] = (f"Ya había una tipografía con este mismo nombre interno («{_ch.get('interno')}», "
+                        f"archivo {_ch.get('archivo')}). El sistema no puede distinguirlas: va a usar "
+                        f"siempre una sola. Borrá la que no uses.")
+    return destino, res
+
+
+@app.post("/api/arte/validacion")
+def guardar_validacion_arte():
+    """Guarda la validación de un arte que ARMÓ EL NAVEGADOR (p. ej. después de sumar una
+    tipografía, `revalidarArte`). El servidor no la calcula: sólo comprueba la forma y la guarda."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    sub = _diseno_sub(cuerpo.get("diseno"))
+    val = cuerpo.get("validacion")
+    if not isinstance(val, dict) or not isinstance(val.get("checks"), list):
+        return jsonify({"error": "falta la validación"}), 400
+    if not os.path.exists(_ruta_entrada("arte.ai", pid, sub=sub)):
+        return jsonify({"error": "ese diseño no tiene arte"}), 409
+    prev = _cargar("validacion_arte.json", pid, sub=sub) or {}
+    val = dict(val)
+    val["archivo"] = prev.get("archivo", "arte.ai")
+    _ruta = _ruta_datos("validacion_arte.json", pid, sub=sub)
+    with open(_ruta + ".tmp", "w", encoding="utf-8") as fh:
+        json.dump(val, fh, ensure_ascii=False)
+    os.replace(_ruta + ".tmp", _ruta)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/fuente")
@@ -8450,6 +9180,18 @@ def subir_fuente():
     f = request.files.get("archivo")
     if not f:
         return jsonify({"error": "falta el archivo"}), 400
+    # 🔴 LO ANALIZÓ EL NAVEGADOR (2026-09-22): el servidor sólo guarda. La revalidación del arte
+    # también la hace el navegador después (`revalidarArte` → `/api/arte/validacion`).
+    _an = _fuente_analizada_por_navegador()
+    if _an is not None:
+        try:
+            _dst, res = _guardar_fuente_subida(f, FUENTES, _an)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 422
+        res["catalogo"] = list(MP.catalogo_fuentes(FUENTES).values())
+        return jsonify(res)
+    if _solo_navegador():
+        return jsonify({"error": "la tipografía la analiza tu computadora y no llegó el análisis: recargá la página"}), 409
     # El nombre lo elige el CLIENTE: se le saca cualquier carpeta antes de pegarlo a la ruta.
     # Hoy el prefijo «subida_» ya neutralizaba un `../`, pero por accidente, no por decisión.
     tmp = os.path.join(ENTRADA, "subida_" + os.path.basename(f.filename or "fuente"))
@@ -9434,136 +10176,6 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     return out
 
 
-@app.post("/api/generar")
-def generar():
-    cuerpo = request.get_json(force=True)
-    prendas = cuerpo.get("prendas", [])
-    if not prendas:
-        return jsonify({"error": "el pedido no tiene prendas"}), 400
-    # El molde a generar: el del body (multi-molde) o, si no viene, el activo.
-    pid = cuerpo.get("producto_id") or _get_active_producto_id()
-    reg = _cargar("registro_producto.json", pid)
-    # Personalización FRESCA del arte (incluye trazo/borde + color exacto).
-    try:
-        # CAMINO B: los placeholders están en el molde (no hay arte).
-        pers = MP.extraer_personalizacion(
-            _ruta_entrada("plantilla.ai" if _es_camino_b(pid) else "arte.ai", pid)) or {}
-    except Exception:
-        pers = _cargar("registro_personalizacion.json", pid) or {}
-    val = _cargar("validacion_arte.json", pid)
-    _cb1 = _es_camino_b(pid)
-    if _cb1:
-        val = {"aprobado": True, "modo": "con_diseno"}     # el diseño ya viene adentro del molde
-    if not reg or not val or not val.get("aprobado"):
-        return jsonify({"error": "falta plantilla registrada o arte aprobado"}), 409
-
-    cat = _cargar_catalogo()
-    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
-    # muestra interna (no es el pedido): sin el filtro de columnas obligatorias
-    translated_prendas = _traducir_prendas(prendas, prod, cat, reg=reg, exigir_obligatorias=False)
-
-    mapeo = None
-    if val.get("modo") == "separado":
-        # REGLA mapeo-por-variable: se pasa la estructura completa; el motor resuelve el
-        # mapeo de cada prenda por su `variante_clave` (base para filas sin variable).
-        _b, _pv = _mapeo_estructura(pid)
-        mapeo = ({"mapeo": _b, "por_variable": _pv} if (_b or _pv) else None)
-    cfg_nesting, rotaciones, telas_cfg, asignacion = _config_produccion(pid)
-    # Override pieza→tela desde el PEDIDO (selector de tela en el Arte). {pieza_nombre: tela_nombre}.
-    _asig_ped = cuerpo.get("asignacion") or {}
-    if isinstance(_asig_ped, dict) and _asig_ped:
-        asignacion = {str(p): str(t) for p, t in _asig_ped.items() if t}
-    tid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
-    salida = os.path.join(TRABAJOS, tid)
-    _nuevo_trabajo(tid, producto_id=pid, producto_nombre=(prod or {}).get("nombre", ""))
-
-    def correr():
-        try:
-            _tocar_trabajo(tid, estado="generando")
-            def prog(fase, a, b):
-                _cancelado(tid)          # el único punto donde se puede parar sin dejar nada a medias
-                _tocar_trabajo(tid, progreso=f"{fase}: {a}" + (f"/{b}" if b else ""))
-            res = MP.generar_pedido(_ruta_entrada("plantilla.ai", pid),
-                                    (None if _cb1 else _ruta_entrada("arte.ai", pid)),
-                                    reg, pers, translated_prendas, _fuentes_para(pid, _reempl_de_request()), salida, progreso=prog,
-                                    mapeo_arte=mapeo, config_nesting=cfg_nesting,
-                                     rotaciones=rotaciones, asignacion_tela=asignacion,
-                                     telas_cfg=telas_cfg, borde_corte=_borde_de(prod, cat),
-                                     etiqueta=_etiqueta_de(prod, cat),
-                                     editables_cfg=_editables_cfg(prod, "principal", (cuerpo.get("editables") or {}).get("principal")),
-                                     editables_tamano=_editables_tamano(prod),
-                                     editables_color=_editables_color(prod, "principal"),
-                                     editables_marca=_editables_marca(prod, "principal"),
-                                     editables_sin_marca=_editables_sin_marca(prod, "principal"),
-                                     referencia=(prod or {}).get("referencia_medida") or "alto",
-                                     objetos_agregados=_objetos_agregados_motor(pid, _diseno_sub("principal")))
-            res["id"] = tid
-            res["producto_id"] = pid
-            res["producto_nombre"] = (prod or {}).get("nombre", "")
-            try:
-                _icc, _icc_nom, _icc_n = _icc_para_salida([_ruta_entrada("arte.ai", pid)], cat)
-                if _icc:
-                    _esp = "RGB" if _icc_n == 3 else "CMYK"   # respeta el espacio del perfil
-                    for h in res.get("hojas", []):
-                        _p = os.path.join(salida, h["archivo"])
-                        # Convertir SOLO si hay contenido en OTRO modo que el del perfil;
-                        # si ya está todo en ese modo, los valores quedan EXACTOS.
-                        _mixto = _pdf_tiene_rgb(_p) if _esp == "CMYK" else _pdf_tiene_cmyk(_p)
-                        if _mixto:
-                            _unificar_modo_gs(_p, _esp)
-                        _embeber_perfil_pdf(_p, _icc, _icc_nom, _icc_n)
-                    res["perfil_icc"] = _icc_nom
-            except Exception as _e:
-                print("  [!]  perfil ICC en salida:", _e)
-            try:   # aplanar cada hoja para el RIP (ver generar_multi) — avisando hoja por hoja
-                from aplanar_rip import aplanar_para_rip
-                _hs = res.get("hojas", [])
-                for _i, h in enumerate(_hs):
-                    try:
-                        prog("rip", f"{_i + 1}/{len(_hs)}", None)
-                    except Exception:
-                        pass
-                    _tr = time.time()
-                    # 🔴 HOJA POR HOJA Y AVISANDO. Una hoja que no se pudo preparar para el RIP ya
-                    # no tira abajo a las demás, y el pedido lo DICE (antes quedaba sólo en la
-                    # consola del servidor y la hoja salía sin aplanar sin que nadie se enterara).
-                    try:
-                        aplanar_para_rip(os.path.join(salida, h["archivo"]))
-                    except Exception as _eh:
-                        print(f"  [!] aplanar RIP {h['archivo']}: {_eh}", flush=True)
-                        res.setdefault("avisos", []).append(
-                            f"La hoja «{h.get('tela') or h['archivo']}» no se pudo preparar para el RIP "
-                            f"({_eh}). Volvé a generar el pedido; si se repite, avisá.")
-                        continue
-                    print(f"  [tiempos] preparar {h['archivo']} para el RIP: "
-                          f"{time.time() - _tr:.0f}s ({h.get('paginas')} páginas)", flush=True)
-            except Exception as _ea:
-                print("  [!] aplanar RIP:", _ea)
-            # 🔴 ESTE GUARDADO ES LO ÚLTIMO Y NO PUEDE TIRAR ABAJO EL PEDIDO. Todas las etapas
-            # de arriba (RIP, perfil, verificación, ficha) están protegidas; ésta no lo estaba, así
-            # que un disco lleno —justo cuando `trabajos/` acaba de llenarlo— o una clave que falte
-            # marcaba «error» una tizada YA COMPLETA Y RIPEADA en disco (auditoría 2026-09-14).
-            # `pedido.json` es el testigo del pedido, no el producto.
-            try:
-                with open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8") as _fp:
-                    json.dump({"prendas": prendas,
-                               "resultado": {k: v for k, v in res.items() if k != "hojas"} |
-                                            {"hojas": res.get("hojas") or []}}, _fp, ensure_ascii=False)
-            except Exception as _e_pj:
-                print(f"  [!] no se pudo guardar pedido.json ({type(_e_pj).__name__}: {_e_pj}); "
-                      f"la tizada está completa igual", flush=True)
-            _tocar_trabajo(tid, resultado=res, estado="listo")
-            _predibujar_recortes_fondo(tid, res.get("hojas") or [])
-        except _TrabajoCancelado:
-            _marcar_cancelado(tid, salida)
-        except Exception as e:
-            _tocar_trabajo(tid, estado="error", error=f"{e}")
-            traceback.print_exc()
-
-    _en_hilo(correr)
-    return jsonify({"id": tid})
-
-
 # Tope de moldes guía de la ficha. Cada uno pasa por el motor (render de sus piezas), así que un
 # pedido con muchas combinaciones molde × diseño × variable haría una ficha eterna. Si se recorta,
 # se avisa (nunca en silencio).
@@ -9608,8 +10220,12 @@ def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None
     if not _m and not _sm:
         return []
     try:
-        objs = MP.extraer_editables(arte) or []
-    except Exception:
+        # los editables SIN miniatura (la geometría): el dibujo del objeto para la ficha lo arma
+        # el navegador desde el arte (2026-09-22, `generar.js` → `arte_objeto_pdf`)
+        objs = _arte_calc("arte_editables", pid, diseno, lambda: MP.extraer_editables(arte, con_thumb=False),
+                          memo="editables") or []
+    except Exception as e:
+        _relanzar_calculo(e)
         return []
 
     def _cm(v):
@@ -9664,6 +10280,8 @@ def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None
         # imprime, así que alguien tiene que decidir cómo se hace.
         item = {"nombre": nom, "proceso": (info.get("nombre") or mk or ""),
                 "pieza": o.get("pieza") or "",
+                # dónde está en el arte: el navegador aísla el objeto de ahí para dibujarlo
+                "mesa": o.get("mesa"), "capa": o.get("capa"), "bbox_mu": o.get("bbox_mu"),
                 # sin marca: en la tela no queda NADA en su lugar (el objeto igual no se sublima)
                 "sin_marca": _sinm,
                 "w_cm": _cm(o.get("w_cm")), "h_cm": _cm(o.get("h_cm")),
@@ -9682,13 +10300,16 @@ def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None
     try:
         if reg:
             _orden = _orden_var(reg)
-            for _pz, _vm in (MP.mapeo_variantes_arte(arte, reg, _orden) or {}).items():
+            _mv = _arte_calc("arte_mapeo_variantes", pid, diseno,
+                             lambda: MP.mapeo_variantes_arte(arte, reg, _orden), registro=reg, orden=_orden)
+            for _pz, _vm in (_mv or {}).items():
                 for _v, _ms in (_vm or {}).items():
                     _mesa_talles.setdefault(int(_ms), set()).add(str(_v))
             # los talles de cada mesa, en el orden real del molde (para poder decir «XS a L»)
             _pos = {str(t): i for i, t in enumerate(_orden)}
             _mesa_talles = {m: sorted(ts, key=lambda t: _pos.get(t, 999)) for m, ts in _mesa_talles.items()}
-    except Exception:
+    except Exception as e:
+        _relanzar_calculo(e)
         _mesa_talles = {}
 
     def _tramo(talles):
@@ -10181,7 +10802,9 @@ def _plan_del_pedido(cuerpo):
                 # VARIABLE de cada fila (el suyo si lo tiene; si no la base/auto por nombre).
                 _b0, _pv0 = _mapeo_estructura(pid, sub=sub)
                 if not _b0 and not _pv0:
-                    _b0 = MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}
+                    _b0 = _arte_calc("arte_mapeo_nombre", pid, dslug,
+                                     lambda: MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg),
+                                     registro=reg) or {}
                 # Solo importan las piezas que REALMENTE se generan (las de las VARIABLES de estas
                 # filas), NO todo el molde. Una pieza sin diseño que no esté en ninguna variable
                 # (ej. los Vivos, si la variable no los usa) NO se avisa.
@@ -10214,8 +10837,13 @@ def _plan_del_pedido(cuerpo):
             # CAMINO B: los placeholders viven en el MOLDE (no hay arte del que leerlos).
             _artp = _ruta_entrada("plantilla.ai" if _cb else "arte.ai", pid, sub=(None if _cb else sub))
             try:
-                pers = MP.extraer_personalizacion(_artp)
-            except Exception:
+                # camino B: los placeholders del desplegado (JSON); camino A: del arte, leídos por
+                # el navegador si no están en la memoria del archivo
+                pers = (MP.extraer_personalizacion(_artp) if _cb else
+                        _arte_calc("arte_personalizacion", pid, dslug, lambda: MP.extraer_personalizacion(_artp),
+                                   memo="personalizacion_v2"))
+            except Exception as e:
+                _relanzar_calculo(e)
                 pers = _cargar("registro_personalizacion.json", pid, sub=sub) or {}
             mapeo = None
             if val.get("modo") == "separado":
@@ -10223,7 +10851,9 @@ def _plan_del_pedido(cuerpo):
                 # por su `variante_clave`). Sin nada guardado → auto por nombre como base.
                 _b, _pv = _mapeo_estructura(pid, sub=sub)
                 if not _b and not _pv:
-                    _b = {k: int(v) for k, v in (MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg) or {}).items() if v}
+                    _b = {k: int(v) for k, v in (_arte_calc("arte_mapeo_nombre", pid, dslug,
+                                                            lambda: MP.mapeo_por_nombre(_ruta_entrada("arte.ai", pid, sub=sub), reg),
+                                                            registro=reg) or {}).items() if v}
                 mapeo = ({"mapeo": _b, "por_variable": _pv} if (_b or _pv) else None)
             # ── FICHA: el molde guía de ESTE diseño ──────────────────────────────────────────
             # Se anota acá (y no arriba con la 1ª fila) porque recién ahora `dslug` es el diseño
@@ -10361,6 +10991,9 @@ def _plan_para_navegador(plan):
             # camino A: el arte separado y su configuración (el navegador baja el arte por
             # `/arte_archivo?diseno=` y los objetos agregados por `/objeto_agregado/<id>`)
             "mapeo_arte": md.get("mapeo_arte"),
+            # arte CLÁSICO: el diseño sobre la misma mesa del molde, sin mapeo (el navegador lo
+            # limpia con las capas y la moldería del molde, `obrero.worker.js` → `contexto_a`)
+            "clasico": md.get("arte") is not None and not md.get("mapeo_arte"),
             "editables_cfg": md.get("editables_cfg"), "editables_tamano": md.get("editables_tamano"),
             "editables_color": md.get("editables_color"), "editables_marca": md.get("editables_marca"),
             "editables_sin_marca": md.get("editables_sin_marca"),
@@ -10372,18 +11005,59 @@ def _plan_para_navegador(plan):
                        "moldes": [plan["molds_data"].index(m) for m in g["moldes"]]})
     guias = []
     for g in plan["_guias_ficha"]:
-        guias.append({k: v for k, v in g.items() if k not in ("_combos_vistos", "reempl")})
-    _icc, _icc_nom, _icc_n = _icc_para_salida([], plan["cat"], forzado=plan.get("perfil_forzado"))
+        _g = {k: v for k, v in g.items() if k not in ("_combos_vistos", "reempl")}
+        # 🔴 LO QUE NO SE SUBLIMA (TPU/Bordado/DTF y los «sin marca») TAMBIÉN EN LA FICHA DEL
+        # NAVEGADOR (2026-09-22). La ficha armada en la PC mandaba `procesos: []` y esa sección
+        # desaparecía: el taller no se enteraba de qué había que aplicar aparte. Sale de la MISMA
+        # función que usa el servidor (`_procesos_ficha`; lee los editables memorizados del arte).
+        _procs = []
+        try:
+            _md = next((m for m in plan["molds_data"] if m.get("pid") == g.get("pid")
+                        and m.get("diseno") == g.get("diseno")), None)
+            if _md and _md.get("arte"):
+                _prod = next((p for p in (plan["cat"].get("productos") or []) if p.get("id") == g.get("pid")), None)
+                _procs = _procesos_ficha(g.get("pid"), _prod, g.get("diseno"), g.get("clave"), _md["arte"],
+                                         (_prod or {}).get("variante_guia"), _md.get("registro"),
+                                         marcas=_md.get("editables_marca"), sin_marca=_md.get("editables_sin_marca"))
+                _procs = [{k: v for k, v in p.items() if k != "_alt"} for p in (_procs or [])]
+        except Exception as e:
+            _relanzar_calculo(e)
+            print(f"[plan] procesos de la ficha: {e}")
+            _procs = []
+        _g["procesos"] = _procs
+        guias.append(_g)
+    # 🔴 EL PERFIL DE COLOR DE LA HOJA (2026-09-22): el que TRAE el arte, como hacía la tizada del
+    # servidor (`_icc_para_salida(arts)`); la del navegador salía siempre con el predeterminado.
+    # Lo que trae cada arte lo lee el navegador (`arte/perfil.js`) y queda en su memoria; acá se
+    # elige el archivo del perfil y el navegador lo pide por nombre (`perfil_salida?forzado=`).
+    _forzado = plan.get("perfil_forzado")
+    if not _forzado:
+        for _md in plan["molds_data"]:
+            if not _md.get("arte"):
+                continue
+            try:
+                _dp = _arte_calc("arte_perfil", _md.get("pid"), _md.get("diseno") or "principal",
+                                 lambda _a=_md["arte"]: _detectar_perfil_incrustado(_a), memo="perfil")
+            except Exception as e:
+                _relanzar_calculo(e)
+                _dp = None
+            if _dp and _dp.get("tiene") and _dp.get("nombre"):
+                _pf = next((p for p in _listar_perfiles() if p["nombre"] == _dp["nombre"]), None)
+                if _pf:
+                    _forzado = _pf["archivo"]
+                    break
+    _icc, _icc_nom, _icc_n = _icc_para_salida([], plan["cat"], forzado=_forzado)
     return {
         "moldes": moldes, "grupos": grupos, "nombres": plan["nombres"],
         "cfg_nesting": plan["cfg_nesting"], "telas_cfg": plan["telas_cfg"],
         "avisos": plan["avisos"], "avisos_pedido": plan["avisos_pedido"],
         "guias": guias, "planilla_ficha": plan.get("planilla_ficha"), "prendas": plan["prendas"],
         "default_diseno": plan["default_diseno"],
-        "perfil": ({"nombre": _icc_nom, "n": _icc_n, "bytes": len(_icc)} if _icc else None),
+        "perfil": ({"nombre": _icc_nom, "n": _icc_n, "bytes": len(_icc), "archivo": _forzado} if _icc else None),
         "todo_camino_b": all(m["camino_b"] for m in moldes),
         # el navegador puede generar TODO el pedido: cada molde es del camino B, o del A con su arte
-        "todo_navegador": all(m["camino_b"] or bool(m.get("mapeo_arte")) for m in moldes),
+        # (separado o clásico: desde 2026-09-22 el clásico también se arma en el navegador)
+        "todo_navegador": all(m["camino_b"] or bool(m.get("mapeo_arte")) or m.get("clasico") for m in moldes),
     }
 
 
@@ -10466,26 +11140,43 @@ def paquete_pedido():
         _tocar_trabajo(tid, estado="generando", progreso="guardando lo que preparó el navegador")
         for nom, f in archivos.items():
             f.save(os.path.join(salida, nom))
-        for h in res["hojas"]:
-            with fitz.open(os.path.join(salida, h["archivo"])) as d:
-                if d.page_count != int(h.get("paginas") or len(h.get("alturas_cm") or []) or 1):
-                    raise ValueError(f"la hoja {h['archivo']} trae {d.page_count} páginas y el resultado dice {h.get('paginas')}")
+        # 🔴 LO REVISÓ EL NAVEGADOR (2026-09-22): páginas, ficha y compatibilidad con el RIP vienen
+        # en el resultado (`rip`); acá sólo se comprueba que cada archivo sea un PDF. Un navegador
+        # viejo (sin `rip`) se revisa como antes.
+        _rev_nav = isinstance(res.get("rip"), dict) and isinstance(res["rip"].get("hojas"), list)
+        for nom in archivos:
+            if nom.lower().endswith(".pdf"):
+                with open(os.path.join(salida, nom), "rb") as _fh:
+                    if _fh.read(5) != b"%PDF-":
+                        raise ValueError(f"{nom} no llegó bien (no es un PDF)")
+        if not _rev_nav:
+            for h in res["hojas"]:
+                with fitz.open(os.path.join(salida, h["archivo"])) as d:
+                    if d.page_count != int(h.get("paginas") or len(h.get("alturas_cm") or []) or 1):
+                        raise ValueError(f"la hoja {h['archivo']} trae {d.page_count} páginas y el resultado dice {h.get('paginas')}")
         res = dict(res)
         res["id"] = tid
         res["moldes"] = nombres
         res["navegador"] = True
         if "FICHA_TECNICA.pdf" in archivos:
             res["ficha"] = "FICHA_TECNICA.pdf"
-            with fitz.open(os.path.join(salida, "FICHA_TECNICA.pdf")) as d:
-                res["ficha_paginas"] = d.page_count
-        # la verificación para el RIP es la misma de siempre (no dibuja: es leer la estructura)
+            if not (_rev_nav and res.get("ficha_paginas")):
+                with fitz.open(os.path.join(salida, "FICHA_TECNICA.pdf")) as d:
+                    res["ficha_paginas"] = d.page_count
+        # la verificación para el RIP: la hizo el navegador (`rip/verificar.js`, las mismas
+        # comprobaciones); sin eso, la de siempre (no dibuja: es leer la estructura)
         try:
-            from verificar_rip_compatible import verificar as _verif_rip
             _fallas = []
-            for h in res["hojas"]:
-                _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]), balance=False, dibujar=False)
-                if not _okr:
-                    _fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
+            if _rev_nav:
+                for _h in res["rip"]["hojas"]:
+                    if not _h.get("ok"):
+                        _fallas.extend(f"{_h.get('archivo')}: {x}" for x in (_h.get("fallas") or []))
+            else:
+                from verificar_rip_compatible import verificar as _verif_rip
+                for h in res["hojas"]:
+                    _okr, _fr = _verif_rip(os.path.join(salida, h["archivo"]), balance=False, dibujar=False)
+                    if not _okr:
+                        _fallas.extend(f"{h['archivo']}: {x}" for x in _fr)
             res["rip_compatible"] = not _fallas
             if _fallas:
                 res["avisos_pedido"] = list(res.get("avisos_pedido") or []) + [
@@ -10493,10 +11184,12 @@ def paquete_pedido():
         except Exception as _er:
             print("  [rip] no se pudo verificar la compatibilidad:", _er)
         try:
-            with open(os.path.join(salida, "pedido.json"), "w", encoding="utf-8") as _fp:
+            _pj = os.path.join(salida, "pedido.json")
+            with open(_pj + ".tmp", "w", encoding="utf-8") as _fp:
                 json.dump({"prendas": prendas, "moldes": nombres,
                            "resultado": {k: v for k, v in res.items() if k != "hojas"} | {"hojas": res.get("hojas") or []}},
                           _fp, ensure_ascii=False)
+            os.replace(_pj + ".tmp", _pj)
         except Exception as _e_pj:
             print(f"  [!] no se pudo guardar pedido.json ({_e_pj})", flush=True)
         _tocar_trabajo(tid, resultado=res, estado="listo", progreso="")
@@ -10510,6 +11203,7 @@ def paquete_pedido():
 
 
 @app.post("/api/generar_multi")
+@_no_con_solo('la tizada la genera tu computadora: recargá la página (si el problema sigue, avisá qué pedido era)')
 def generar_multi():
     """Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA.
     Body: {molds: [pid, ...], prendas: [...]}."""
@@ -10944,6 +11638,7 @@ def _reempl_de_request(dslug=None, pid=None):
 
 
 @app.get("/api/pedido/fuentes_estado")
+@_no_con_solo('las tipografías las revisa tu computadora: recargá la página')
 def fuentes_estado():
     """Fuentes que pide el arte del diseño vs las que el sistema puede resolver (catálogo +
     las de este pedido + reemplazos).
@@ -11084,6 +11779,17 @@ def fuente_resolver():
     if f:
         destino = (request.form.get("destino") or "pedido").strip()
         carpeta = FUENTES if destino == "sistema" else os.path.join(DATOS, "productos", pid, "fuentes")
+        # 🔴 LO ANALIZÓ EL NAVEGADOR (2026-09-22): nombre, glifos, choque y qué reemplazos soltar
+        # (`alias_quitados`) los calcula `motor/arte/fuentesSubir.js`; acá sólo se guarda.
+        _an = _fuente_analizada_por_navegador()
+        if _an is not None:
+            try:
+                _dst, res = _guardar_fuente_subida(f, carpeta, _an)
+            except ValueError as e:
+                return jsonify({"ok": False, "error": str(e)}), 422
+            return jsonify({"ok": True, "destino": destino, "interno": res.get("interno"), "alias_quitados": []})
+        if _solo_navegador():
+            return jsonify({"error": "la tipografía la analiza tu computadora y no llegó el análisis: recargá la página"}), 409
         os.makedirs(carpeta, exist_ok=True)
         tmp = os.path.join(carpeta, "subida_" + os.path.basename(f.filename))
         f.save(tmp)
@@ -11480,7 +12186,8 @@ def limpiar_efimeros():
 _CAMPOS_CONFIG_MOLDE = ("grupos", "variantes", "conjuntos", "variante_guia", "etiqueta",
                         "borde_corte", "telas_cfg", "telas_asignadas", "referencia_medida",
                         "editables_config", "mapeo_columnas", "planilla_template_id",
-                        "terminologia", "nesting_preset_id", "grupo_tizada", "modelos")
+                        "terminologia", "nesting_preset_id", "grupo_tizada", "modelos",
+                        "acomodo_illustrator")
 
 # QUÉ ENTRA AL APLICAR UNA CONFIGURACIÓN GUARDADA. La regla la puso el usuario (2026-09-08): «los
 # ajustes que quiero que se guarden son los de la ETIQUETA; los nombres de las piezas es obligatorio
@@ -11497,7 +12204,7 @@ _PARTES_CONFIG = {
     "planilla": ("planilla_template_id", "mapeo_columnas", "terminologia"),
     "guia": ("variante_guia",),
     "produccion": ("borde_corte", "referencia_medida", "editables_config",
-                   "nesting_preset_id", "grupo_tizada", "modelos"),
+                   "nesting_preset_id", "grupo_tizada", "modelos", "acomodo_illustrator"),
 }
 _CAMPOS_SIEMPRE = ("etiqueta",)
 _SHA1_CACHE = {}
@@ -11582,13 +12289,36 @@ def _config_es_mia(cfg):
     return (cfg.get("creado_por") or None) == (_uid_actual() or None)
 
 
+# 🔴 «EL MISMO MOLDE» NO EXIGE IGUALDAD EXACTA (2026-09-22, «JUGADOR PR» y «GOLERA PR»): los dos
+# moldes coinciden en 140 de 141 piezas; GOLERA trae en el talle XS una tira (24 × 5 cm) que en
+# JUGADOR no está. Con la huella exacta eran «parecidos» y —desde que sólo se aplica lo del mismo
+# molde (511)— no se podía aplicar. Desde este parecido cuentan como el mismo molde.
+_PARECIDO_MISMO_MOLDE = 0.95
+
+
 def _parecido_huella(a, b):
-    """Cuánto se parecen dos moldes por sus piezas: 0..1 (cuántas comparten sobre el total)."""
-    _a = {tuple(x) for x in (a or [])}
-    _b = {tuple(x) for x in (b or [])}
+    """Cuánto se parecen dos moldes por sus piezas: 0..1 (cuántas comparten sobre el total).
+
+    🔴 CON TOLERANCIA, NO POR IGUALDAD DEL REDONDEO (2026-09-22). La huella redondea cada medida a
+    medio centímetro, y una medida justo en el borde se va para un lado u otro: el cuello del XS
+    midió 24,2 cm en «GOLERA PR» y 24,3 en «JUGADOR PR» (1 mm) → 24,0 y 24,5 → «pieza distinta».
+    Ahora dos piezas son la misma si son del mismo talle y mesa y difieren ≤ 0,5 cm en ancho y alto."""
+    _a = [tuple(x) for x in (a or [])]
+    _b = [tuple(x) for x in (b or [])]
     if not _a or not _b:
         return 0.0
-    return len(_a & _b) / float(len(_a | _b))
+    libres = {}
+    for x in _b:
+        libres.setdefault((x[0], x[1]), []).append(x)
+    iguales = 0
+    for x in _a:
+        cands = libres.get((x[0], x[1])) or []
+        for k, y in enumerate(cands):
+            if abs(float(x[2]) - float(y[2])) <= 0.5 and abs(float(x[3]) - float(y[3])) <= 0.5:
+                iguales += 1
+                cands.pop(k)
+                break
+    return iguales / float(len(_a) + len(_b) - iguales)
 
 
 def _idx_por_nombre(reg):
@@ -11673,7 +12403,10 @@ def _config_es_de_este_molde(cfg, pid):
     if _sha and cfg.get("sha1") == _sha:
         return True
     _h, _pz = _huella_molde(_cargar("registro_producto.json", pid) or {})
-    return bool(_h) and cfg.get("huella") == _h
+    if bool(_h) and cfg.get("huella") == _h:
+        return True
+    _hp = ((cfg.get("datos") or {}).get("huella_piezas")) or []
+    return bool(_pz) and _parecido_huella(_hp, _pz) >= _PARECIDO_MISMO_MOLDE
 
 
 @app.get("/api/molde/config/lista")
@@ -11711,6 +12444,10 @@ def molde_config_lista():
             # LO QUE PEDÍA EL USUARIO: el mismo molde con otro diseño adentro. El archivo cambia,
             # las piezas no, así que el nombrado y la etiqueta sirven tal cual.
             estado, detalle = "mismo_molde", "el mismo molde, con otro diseño adentro"
+        elif _datos.get("huella_piezas") and _parecido_huella(_datos["huella_piezas"], _pz_mio) >= _PARECIDO_MISMO_MOLDE:
+            _p = _parecido_huella(_datos["huella_piezas"], _pz_mio)
+            estado, detalle = "mismo_molde", (f"el mismo molde: coinciden {round(_p * 100)} de cada 100 piezas"
+                                              " (alguna pieza de más o de menos en un talle)")
         elif _datos.get("huella_piezas"):
             _p = _parecido_huella(_datos["huella_piezas"], _pz_mio)
             if _p >= 0.6:
@@ -11925,6 +12662,7 @@ def molde_config_borrar(cid):
 
 
 @app.get("/api/pedido/fuente_chars")
+@_no_con_solo('las tipografías las revisa tu computadora: recargá la página')
 def fuente_chars():
     """Caracteres que SOPORTA la tipografía de personalización del diseño (la que estampa
     nombre/número). La planilla los usa para pintar en ROJO lo que la fuente no tiene.
@@ -12002,6 +12740,7 @@ def descargar(tid, archivo):
 
 
 @app.get("/api/trabajos/<tid>/pagina_img/<archivo>")
+@_no_con_solo('la ficha la dibuja tu computadora: recargá la página')
 def pagina_img(tid, archivo):
     """Una página de un PDF del trabajo como PNG (para MOSTRARLO en el visor con el look del sistema:
     así el scroll es el de la app, no el del visor de PDF del navegador). `pi`=página, `z`=zoom."""
@@ -12389,6 +13128,13 @@ def _talles_editables(pid, reg):
 
 def _precalentar_editables(pid, sub):
     """Deja leídos los editables de un arte en segundo plano (al entrar al paso Arte)."""
+    # 🔴 NO CON EL ARTE EN EL NAVEGADOR (2026-09-23). El editor de editables lo arma la PC de quien
+    # mira (`motor/arte/editablesVista.js`), así que esta lectura del servidor no la usa nadie: era
+    # trabajo pesado de más en el pool del visor. En el publicado (con «El servidor no calcula»
+    # apagado) un arte de 16 MB y 352 mesas mató a sus procesos tres veces seguidas
+    # («[editables] el pool del visor no pudo (BrokenProcessPool …)», journal del usuario).
+    if _solo_navegador() or str(os.environ.get("TIZADA_NAVEGADOR_ARTE") or "1") != "0":
+        return
     if not pid:
         return
     arte = _ruta_entrada("arte.ai", pid, sub=sub)
@@ -12471,6 +13217,7 @@ def _predibujar_mesas(tid, hojas, prog=None, w=None, etiqueta="mesas"):
 
 
 @app.get("/api/trabajos/<tid>/mesa_img/<archivo>")
+@_no_con_solo('las mesas las dibuja tu computadora: recargá la página')
 def mesa_img(tid, archivo):
     """UNA mesa como imagen LIVIANA, para la grilla del paso Tizada.
 
@@ -12546,6 +13293,7 @@ def _pdf_de_una_pagina(src, pi):
 
 
 @app.get("/api/trabajos/<tid>/mesa/<archivo>")
+@_no_con_solo('la mesa suelta la arma tu computadora: recargá la página')
 def descargar_mesa(tid, archivo):
     """Descarga UNA mesa (la página `pi` de la hoja) como PDF PROPIO, con el NOMBRE que se ve en la
     tizada. Así cada mesa baja SEPARADA aunque varias sean páginas del mismo PDF (misma tela). La
@@ -12875,6 +13623,9 @@ def get_productos():
             "variante_guia": p.get("variante_guia"),
             # Dimensión de referencia del diseño: 'alto' o 'ancho'.
             "referencia_medida": p.get("referencia_medida") or "alto",
+            # Cómo se acomodan las mesas de trabajo al crear en Illustrator, si el usuario las
+            # acomodó a mano (`/api/productos/acomodo_illustrator`): por variable.
+            "acomodo_illustrator": p.get("acomodo_illustrator") or {},
             # Arquitectura Modelos/Variables (genérica). `variantes` = los TIPOS de
             # pieza y sus valores (Frente→[Manga pegada, Ranglan…]); `modelos` = los
             # modelos del molde, cada uno con sus Variables (combinaciones). El TALLE
@@ -13402,6 +14153,47 @@ def set_referencia_medida():
     return jsonify({"ok": True, "referencia_medida": ref})
 
 
+@app.post("/api/productos/acomodo_illustrator")
+def set_acomodo_illustrator():
+    """Guarda cómo acomodó el usuario A MANO las mesas de trabajo del talle guía para «Crear en
+    Illustrator» (pedido del usuario 2026-09-23: «acomodar 1 para que todas sigan esa; opcional»).
+    Va por VARIABLE (`clave`; `_molde` = sin variable): `{ref: [x, y, w, h]}` en puntos, medida
+    real, «y» hacia abajo; `ref` = la pieza del visor que ocupa esa mesa. `acomodo: null` lo borra
+    (vuelve el acomodo automático). Los demás talles copian las separaciones del guía en el
+    navegador (`motor/molde/illustrator.js copiarSeparaciones`): acá sólo se valida y se guarda."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no          # molde de otro usuario
+    clave = str(cuerpo.get("clave") or "_molde")[:200]
+    crudo = cuerpo.get("acomodo")
+    limpio = None
+    if crudo is not None:
+        if not isinstance(crudo, dict) or len(crudo) > 5000:
+            return jsonify({"error": "acomodo inválido"}), 400
+        limpio = {}
+        for ref, caja in crudo.items():
+            try:
+                x, y, w, h = (float(v) for v in caja)
+            except Exception:
+                return jsonify({"error": "acomodo inválido"}), 400
+            if not all(v == v and abs(v) < 1e7 for v in (x, y, w, h)) or w <= 0 or h <= 0:   # sin NaN ni infinitos
+                return jsonify({"error": "acomodo inválido"}), 400
+            limpio[str(ref)[:300]] = [round(x, 2), round(y, 2), round(w, 2), round(h, 2)]
+    cat = _cargar_catalogo_para_editar()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if not prod:
+        return jsonify({"error": "Producto no encontrado"}), 404
+    todos = dict(prod.get("acomodo_illustrator") or {})
+    if limpio:
+        todos[clave] = limpio
+    else:
+        todos.pop(clave, None)
+    prod["acomodo_illustrator"] = todos
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "acomodo_illustrator": todos})
+
+
 _RE_PZ_NUM = re.compile(r"\s+(\d+)\s*$")
 
 
@@ -13788,6 +14580,157 @@ def desplegado_archivo_producto(pid, archivo):
     return send_from_directory(carpeta, archivo, max_age=0)
 
 
+def _mesas_desplegadas(pl):
+    """Las mesas desplegadas de un molde con el diseño adentro, con el SELLO con que el navegador
+    las guarda en su caché. La usan `/motor_b` y `/api/moldes/para_bajar`: si cada una armara el
+    sello a su manera, la descarga de fondo guardaría las mesas bajo una clave que el motor nunca
+    pide (y las bajaría dos veces)."""
+    import piezas_con_diseno as _PD
+    mesas = []
+    m = 1
+    while True:
+        d = _PD._leer_desplegado(pl, m)
+        if d is None:
+            break
+        # 🔴 EL SELLO INCLUYE LAS PÁGINAS (2026-09-22): el navegador guarda `m{n}.pdf/json` en su caché
+        # por este sello, y el del archivo del molde NO cambia al rehacer las páginas (la etiqueta
+        # que trae el diseño): se seguían usando las páginas viejas. Con la fecha del PDF, cambian.
+        _selm = list(d.get("sello") or [])
+        try:
+            if d.get("pdf") and os.path.exists(d["pdf"]):
+                _selm.append(int(os.stat(d["pdf"]).st_mtime_ns // 1000000))
+        except OSError:
+            pass
+        _fj = os.path.join(os.path.dirname(d["pdf"]), f"m{m}.json") if d.get("pdf") else None
+        mesas.append({"mesa": m, "sello": _selm, "orden": list(d.get("orden") or []),
+                      "paginas": d.get("pdf") is not None,
+                      "bytes": (os.path.getsize(d["pdf"]) if d.get("pdf") and os.path.exists(d["pdf"]) else 0),
+                      "bytes_json": (os.path.getsize(_fj) if _fj and os.path.exists(_fj) else 0)})
+        m += 1
+    return mesas
+
+
+@app.get("/api/illustrator/extension.zip")
+def illustrator_extension_zip():
+    """La extensión de TIZADA PRO para Illustrator (`extension_illustrator/`), con sus instaladores,
+    para bajarla desde la Plantilla del molde (botón «Abrir en Illustrator» cuando no la encuentra).
+    Se arma en el momento con lo que hay en disco: así viaja siempre la misma versión que el
+    código, sin un ZIP guardado que se pueda quedar viejo. Son unos pocos KB: nada pesado."""
+    import io
+    import zipfile
+    from flask import Response
+    base = os.path.join(AQUI, "extension_illustrator")
+    if not os.path.isdir(base):
+        return jsonify({"error": "este servidor no tiene la extensión de Illustrator"}), 404
+    # sólo lo que sirve para instalar a mano (Mac, o Windows sin el .exe): la extensión, los dos
+    # instaladores y el LEEME — no el código del instalador ni sus intermedios
+    _va = lambda rel: rel.startswith("com.tizadapro.illustrator/") or rel in (
+        "INSTALAR-WINDOWS.bat", "INSTALAR-MAC.command", "LEEME.txt")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for raiz, _dirs, archivos in os.walk(base):
+            for a in sorted(archivos):
+                ruta = os.path.join(raiz, a)
+                rel = os.path.relpath(ruta, base).replace(os.sep, "/")
+                if not _va(rel):
+                    continue
+                zi = zipfile.ZipInfo("TIZADA-PRO-Illustrator/" + rel, date_time=time.localtime(os.path.getmtime(ruta))[:6])
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                # el instalador de Mac tiene que quedar EJECUTABLE al descomprimir
+                zi.external_attr = ((0o755 if a.endswith(".command") else 0o644) | 0o100000) << 16
+                with open(ruta, "rb") as fh:
+                    z.writestr(zi, fh.read())
+    _v = _illustrator_version()[1]
+    _nom = f"USER-PRO-Illustrator-Mac-{_v}.zip" if _v else "USER-PRO-Illustrator-Mac.zip"
+    return Response(buf.getvalue(), mimetype="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{_nom}"',
+                             "Cache-Control": "no-store"})
+
+
+def _illustrator_version():
+    """La versión de la extensión de Illustrator que tiene ESTE servidor (la del manifiesto; la sube
+    sola `extension_illustrator/construir.py` en cada cambio) y su instalador
+    (`Instalar-USER-PRO-Illustrator-<versión>.exe`)."""
+    base = os.path.join(AQUI, "extension_illustrator")
+    v = None
+    try:
+        m = re.search(r'ExtensionBundleVersion="([^"]+)"',
+                      open(os.path.join(base, "com.tizadapro.illustrator", "CSXS", "manifest.xml"), encoding="utf-8").read())
+        v = m.group(1) if m else None
+    except OSError:
+        pass
+    exe = f"Instalar-USER-PRO-Illustrator-{v}.exe" if v else None
+    if not exe or not os.path.exists(os.path.join(base, exe)):
+        exe = None
+    return base, v, exe
+
+
+@app.get("/api/illustrator/version")
+def illustrator_version():
+    """Qué versión de la extensión corresponde a este sistema: la pantalla la compara con la que
+    tiene instalada el Illustrator de esa PC y avisa si hay que actualizar."""
+    _b, v, exe = _illustrator_version()
+    return jsonify({"version": v, "instalador": exe})
+
+
+@app.get("/api/illustrator/instalador")
+def illustrator_instalador():
+    """El INSTALADOR de Windows de la extensión (`Instalar-USER-PRO-Illustrator-<versión>.exe`, lo
+    arma `extension_illustrator/construir.py`). Es el que se le pasa a cualquier persona: doble
+    clic, «Instalar», listo. El nombre lleva la versión."""
+    base, _v, exe = _illustrator_version()
+    if not exe:
+        return jsonify({"error": "este servidor no tiene el instalador de Illustrator"}), 404
+    return send_from_directory(base, exe, as_attachment=True, download_name=exe, max_age=0)
+
+
+@app.get("/api/moldes/para_bajar")
+def moldes_para_bajar():
+    """TODOS los moldes que este usuario puede usar, con lo que el navegador tiene que tener
+    guardado para trabajarlos sin esperar (pedido del usuario 2026-09-23: «que baje todos los
+    moldes»). El servidor sólo lista (tamaño + fecha de cada archivo, nada se abre); la PC los baja
+    de fondo (`motor/bajarMoldes.js`) y los guarda por versión: la próxima vez baja sólo lo que
+    cambió.
+
+    - Camino A (molde pelado): el archivo VIGENTE del molde (con las variantes nombradas, las
+      piezas agregadas), el mismo que abre el motor (`descargar_plantilla?cual=vigente`).
+    - Camino B (el diseño adentro): las MESAS DESPLEGADAS (`m{n}.pdf` + `m{n}.json`), que es lo
+      que usa el motor; el archivo original no se baja (nadie en la PC lo abre para trabajar).
+
+    Devuelve el sello y no la clave armada: la clave la arma el navegador con las mismas funciones
+    que el motor (`cache.js` → `claveDe`)."""
+    import piezas_con_diseno as _PD
+    try:
+        _u = _usuario_actual()
+    except Exception:
+        _u = None
+    moldes = []
+    for p in _cargar_catalogo().get("productos", []):
+        if not _puede_ver_molde(p, _u):
+            continue
+        pid = p["id"]
+        # sin `_ruta_entrada` para mirar si existe: ésa hace makedirs y esto es un GET
+        if not os.path.exists(os.path.join(ENTRADA, pid, "plantilla.ai")):
+            continue
+        try:
+            orig = _ruta_entrada("plantilla.ai", pid=pid, original=True)
+            if _PD.es_camino_b(orig):
+                archivos = [{"tipo": "mesa", "mesa": md["mesa"], "sello": md["sello"],
+                             "bytes": md["bytes"], "bytes_json": md["bytes_json"]}
+                            for md in _mesas_desplegadas(orig) if md["paginas"]]
+                moldes.append({"id": pid, "nombre": p.get("nombre"), "camino_b": True,
+                               "archivos": archivos})
+            else:
+                _sp = _sello_archivo(_ruta_entrada("plantilla.ai", pid))
+                if _sp:
+                    moldes.append({"id": pid, "nombre": p.get("nombre"), "camino_b": False,
+                                   "archivos": [{"tipo": "plantilla", "sello": _sp, "bytes": _sp[0]}]})
+        except Exception as e:
+            # un molde roto no puede dejar sin descarga a los demás
+            print(f"[para_bajar] {pid}: {e}")
+    return jsonify({"moldes": moldes})
+
+
 @app.get("/api/productos/<pid>/motor_b")
 def motor_b_producto(pid):
     """TODO lo que el navegador necesita para armar las piezas de un molde con diseño (PLAN_NAVEGADOR,
@@ -13814,9 +14757,10 @@ def motor_b_producto(pid):
             if not os.path.exists(arte):
                 continue
             base, pv = _mapeo_estructura(pid, sub=sub)
-            st = os.stat(arte)
             disenos.append({"id": d["id"], "nombre": d.get("nombre") or d["id"], "sub": sub,
-                            "sello": [st.st_size, int(st.st_mtime)],
+                            "sello": _sello_archivo(arte),
+                            # sobre qué versión edita el navegador («Editar diseño»)
+                            "version": OA._ver_actual(_ruta_entrada("arte.ai", pid, sub=sub, original=True)),
                             "mapeo": {"mapeo": base, "por_variable": pv},
                             "validacion": _cargar("validacion_arte.json", pid, sub=sub) or {},
                             "pers": _cargar("registro_personalizacion.json", pid, sub=sub) or {},
@@ -13824,10 +14768,13 @@ def motor_b_producto(pid):
                             "editables_marca": _editables_marca(prod, d["id"]),
                             "editables_sin_marca": _editables_sin_marca(prod, d["id"]),
                             "objetos": (_oa_cargar(pid, sub) or {}).get("objetos") or []})
-        st = os.stat(pl)
+        # 🔴 el sello de la VIGENTE (2026-09-22): el navegador arma las piezas con ese archivo
+        # (`?cual=vigente`). Antes bajaba el ORIGINAL y, con las variantes renombradas o una pieza
+        # agregada, el registro no coincidía con las capas del archivo que abría.
+        _sp = _sello_archivo(_ruta_entrada("plantilla.ai", pid))
         return jsonify({
             "camino_b": False, "camino_a": True,
-            "plantilla": {"sello": [st.st_size, int(st.st_mtime)], "bytes": st.st_size},
+            "plantilla": {"sello": _sp, "bytes": (_sp or [0])[0]},
             "registro": _cargar("registro_producto.json", pid) or {},
             "borde": _borde_de(prod, cat), "etiqueta": _etiqueta_de(prod, cat),
             "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
@@ -13837,16 +14784,7 @@ def motor_b_producto(pid):
             "orden_var": _orden_var(_cargar("registro_producto.json", pid) or {}),
             "columnas": prod.get("columnas") or [],
         })
-    mesas = []
-    m = 1
-    while True:
-        d = _PD._leer_desplegado(pl, m)
-        if d is None:
-            break
-        mesas.append({"mesa": m, "sello": list(d.get("sello") or []), "orden": list(d.get("orden") or []),
-                      "paginas": d.get("pdf") is not None,
-                      "bytes": (os.path.getsize(d["pdf"]) if d.get("pdf") and os.path.exists(d["pdf"]) else 0)})
-        m += 1
+    mesas = _mesas_desplegadas(pl)
     fu = _fuentes_para(pid, _reempl_de_request(pid=pid))
     catalogo = []
     for ruta, info in MP.catalogo_fuentes(fu).items():
@@ -13926,6 +14864,11 @@ def descargar_plantilla_producto(pid):
     ruta_plantilla = os.path.join(pdir, "plantilla.ai")
     if not os.path.exists(ruta_plantilla):
         return jsonify({"error": "El producto no tiene una plantilla base subida"}), 404
+    # `?cual=vigente`: la versión que usa el sistema (con las variantes nombradas, las piezas
+    # agregadas…), para el motor del navegador. Sin eso, el archivo que subió el usuario.
+    if request.args.get("cual") == "vigente":
+        vig = _ruta_entrada("plantilla.ai", pid)
+        return send_from_directory(os.path.dirname(vig), os.path.basename(vig), max_age=0)
     return send_from_directory(pdir, "plantilla.ai", as_attachment=True, download_name="plantilla.ai")
 
 
@@ -14280,8 +15223,7 @@ def set_config_con_diseno():
             return jsonify({"error": "esa planilla no existe"}), 404
         _prev["planilla_template_id"] = str(_pt)
 
-    if "navegador_solo" in cuerpo:
-        cat["navegador_solo"] = bool(cuerpo.get("navegador_solo"))
+    # «El servidor no calcula» ya no se puede apagar (`_solo_navegador`): no se guarda nada
     _prev.pop("navegador_solo", None); _prev.pop("navegador_solo_forzado", None)
     cat["config_con_diseno"] = _prev
     _guardar_catalogo(cat)
@@ -14535,7 +15477,7 @@ if __name__ == "__main__":
     # cacheado en disco, el primer cálculo tarda varios segundos — mejor hacerlo ya.
     def _precalentar_nido():
         try:
-            if os.path.exists(_ruta_entrada("plantilla.ai")):
+            if os.path.exists(_ruta_entrada("plantilla.ai")) and not _solo_navegador():
                 _nido_obtener()
         except Exception:
             pass

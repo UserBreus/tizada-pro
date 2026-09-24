@@ -71,7 +71,10 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
  * Con `caminoA`, `archivo` es el archivo a SUBIR (para un DXF: el PDF ya convertido, con el DXF
  * original adentro del paquete) y `resumen.dxf` el resumen de la conversión.
  */
-export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false } = {}) {
+// `manual` = las familias de la etiqueta fijadas a mano (`etiqueta_archivo.json`.manual). 🔴 Al
+// RETOMAR o al cambiar el interruptor de la etiqueta hay que pasarlas: sin esto las páginas se
+// rehacían con la decisión automática y lo que el usuario había elegido se perdía.
+export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, manual = {} } = {}) {
   let pool = null
   let cerrado = false
   const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
@@ -87,7 +90,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     if (esDxf) {
       // el DXF se convierte a PDF en UN hilo; el PDF resultante es lo que se sube (con el DXF adentro)
       onA && onA({ texto: 'Convirtiendo el DXF en tu computadora…' })
-      const uno = crearPool(1, () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }))
+      const uno = crearPool(1, () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'convertir DXF')
       try {
         const r = await uno.enviar('dxf_convertir', { bytes: bytes.slice() })
         dxf = r.resumen
@@ -101,7 +104,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
     const caminoA = esDxf || soloSiTraeDiseno
     // el camino A lee el molde en UN hilo (el alta es secuencial); el B abre el archivo en todos
-    pool = crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }))
+    pool = crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'preparar molde')
     const info = await abrirEnPool(pool, bytes)
     if (caminoA) {
       let esA = esDxf
@@ -128,7 +131,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     const pA = await pool.enviar('paquete', { archivo: null, desplegado: A, fase: 'contornos', sha1, motor: MOTOR })
     const paginas = (async () => {
       try {
-        const B = await faseB(pool, A, { avisar: (_e, hecho, total, texto) => onB && onB({ texto, hecho, total }) })
+        const B = await faseB(pool, A, { manual: manual || {}, avisar: (_e, hecho, total, texto) => onB && onB({ texto, hecho, total }) })
         onB && onB({ texto: 'Armando el paquete de las páginas…', hecho: 1, total: 1 })
         const pdfs = [...B.mesas.values()].map((x) => x.pdf.buffer)
         const pB = await pool.enviar('paquete', { archivo: null, desplegado: B, fase: 'paginas', sha1, motor: MOTOR }, pdfs)

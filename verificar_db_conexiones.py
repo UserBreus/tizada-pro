@@ -120,6 +120,43 @@ if _fin:
     ok(_fin[1] == 0, f"tras cortar por techo quedaron {_fin[1]} transacción/es abierta/s")
     print(f"  y al cortar no queda nada abierto: {_fin[1]} fantasma/s")
 
+# ── 6. 🔴 LEER NO DEJA UNA TRANSACCIÓN VIVA EN LAS CONEXIONES QUE QUEDAN EN EL POOL ──────────
+# Lo que se vio en el servidor publicado (2026-09-22): sesiones dormidas con una transacción abierta
+# de horas, todas con un SELECT. Con `autocommit=False` el primer SELECT abre la transacción; como
+# la lectura no confirmaba, la conexión volvía al pool del driver con ella abierta. Las pruebas de
+# arriba NO lo veían: `_sesiones()` toma del pool justo esa conexión (el driver la resetea antes de
+# usarla) y la fantasma desaparece antes de medirla. Acá se dejan VARIAS conexiones en el pool a la
+# vez (4 lecturas simultáneas) y se mide con una conexión aparte, sólo las de ESTE proceso.
+import contextlib as _cl                                                       # noqa: E402
+import threading as _th                                                        # noqa: E402
+_barrera = _th.Barrier(4)
+
+
+def _leer_a_la_vez():
+    try:
+        with db.cursor(commit=False) as cur:          # el camino de `filas()` / `valor()`
+            cur.execute("SELECT TOP 1 name FROM sys.tables")
+            cur.fetchall()
+            _barrera.wait(timeout=20)                 # las 4 conexiones abiertas al mismo tiempo
+    except Exception as e:
+        FALLOS.append(f"lectura simultánea: {type(e).__name__}: {e}")
+
+
+_hs = [_th.Thread(target=_leer_a_la_vez) for _ in range(4)]
+for _h in _hs:
+    _h.start()
+for _h in _hs:
+    _h.join()
+try:
+    with _cl.closing(db.conectar(autocommit=True)) as _cm:
+        _n = _cm.execute(
+            "SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE host_process_id = ? AND session_id <> @@SPID "
+            "AND status = 'sleeping' AND open_transaction_count > 0", os.getpid()).fetchone()[0]
+    ok(_n == 0, f"tras 4 lecturas quedaron {_n} conexión/es de este proceso dormidas CON transacción abierta")
+    print(f"  lecturas en paralelo: {_n} conexión/es dormida/s con transacción (tiene que ser 0)")
+except Exception as e:
+    print("  (sin permiso para ver las sesiones:", str(e)[:80], ")")
+
 print()
 if FALLOS:
     print("✗ FALLA:")

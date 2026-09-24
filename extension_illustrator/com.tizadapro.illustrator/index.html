@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>USER PRO</title>
+  <style>
+    /* El panel de USER PRO en Illustrator. Lo usa gente que no sabe de computadoras: letra grande,
+       pocas cosas, y el TUTORIAL de cómo conectarlo con USER PRO adentro, un paso por pantalla. */
+    :root { --fondo: #232323; --texto: #f2f2f2; --suave: #b0b0b0; --ok: #34d399; --mal: #f87171; --borde: #3c3c3c;
+            --cian: #00d5ff; --rojo: #ff4d6d; --caja: #2c2c2c; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--fondo); color: var(--texto); font: 16px/1.5 -apple-system, "Segoe UI", Arial, sans-serif; }
+    .vista { display: none; flex-direction: column; min-height: 100%; padding: 14px; }
+    .vista.activa { display: flex; }
+    .marca { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .marca img { width: 40px; height: 40px; }
+    .marca b { font-size: 20px; letter-spacing: .02em; }
+    .marca b span { color: var(--cian); }
+    /* la VERSIÓN que se está viendo, siempre arriba (pedido del usuario 2026-09-23) */
+    .ver { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--texto); background: #3a3a3a;
+           border: 1px solid #4a4a4a; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+    .estado { display: flex; align-items: center; gap: 12px; padding: 14px; border: 2px solid var(--borde); border-radius: 12px;
+              font-size: 19px; font-weight: 800; }
+    .punto { width: 18px; height: 18px; border-radius: 50%; background: var(--suave); flex-shrink: 0; }
+    .ok .punto { background: var(--ok); box-shadow: 0 0 10px rgba(52, 211, 153, .7); }
+    .espera .punto { background: #fbbf24; }
+    .mal .punto { background: var(--mal); }
+    .ok { border-color: rgba(52, 211, 153, .55); } .espera { border-color: rgba(251, 191, 36, .55); }
+    .mal { border-color: rgba(248, 113, 113, .55); }
+    .sub { font-size: 15px; font-weight: 400; color: var(--suave); display: block; margin-top: 2px; }
+    p { margin: 12px 0; }
+    .suave { color: var(--suave); }
+    button { font: inherit; cursor: pointer; }
+    .grande { width: 100%; padding: 14px; border: 0; border-radius: 12px; background: var(--cian); color: #000;
+              font-size: 18px; font-weight: 800; }
+    .gris { background: #3a3a3a; color: var(--texto); }
+    ul.log { list-style: none; margin: 16px 0 0; padding: 0; max-height: 140px; overflow-y: auto; }
+    ul.log li { padding: 5px 0; border-bottom: 1px solid var(--borde); color: var(--suave); font-size: 13px; }
+    ul.log li b { color: var(--texto); font-weight: 600; }
+    /* tutorial */
+    .contador { font-size: 14px; color: var(--suave); margin-bottom: 4px; }
+    .barra { height: 6px; background: #3a3a3a; border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+    .barra div { height: 100%; background: var(--cian); transition: width .25s; }
+    .paso h2 { font-size: 22px; line-height: 1.25; margin: 0 0 8px; }
+    .paso p { font-size: 17px; }
+    .paso b.rojo { color: var(--rojo); }
+    .paso figure { margin: 10px 0 0; background: var(--caja); border: 1px solid var(--borde); border-radius: 12px; padding: 8px; }
+    .paso figure svg { display: block; width: 100%; height: auto; }
+    .ojo { background: rgba(255, 214, 10, .12); border: 2px solid rgba(255, 214, 10, .6); border-radius: 12px; padding: 10px 12px; font-size: 16px; }
+    .espacio { flex: 1; min-height: 10px; }
+    .nav { display: flex; gap: 10px; margin-top: 14px; }
+    .nav button { flex: 1; padding: 14px 10px; border: 0; border-radius: 12px; font-size: 18px; font-weight: 800; }
+    .nav .sig { background: var(--cian); color: #000; flex: 1.6; }
+    .nav .ant { background: #3a3a3a; color: var(--texto); }
+    .salir { background: none; border: 0; color: var(--suave); text-decoration: underline; font-size: 14px; margin-top: 10px; align-self: center; }
+  </style>
+</head>
+<body>
+
+  <!-- ── INICIO: el estado de la conexión ── -->
+  <div id="inicio" class="vista">
+    <div class="marca"><img src="./img/isotipo.png" alt=""><b><span>USER</span> PRO</b><span class="ver version"></span></div>
+    <div id="estado" class="estado"><span class="punto"></span><span><span id="texto">Conectando…</span><span id="textoSub" class="sub"></span></span></div>
+    <p class="suave">Cuando en USER PRO toques <b>«Crear en Illustrator»</b>, la plantilla del molde se arma acá sola.</p>
+    <button id="verTutorial" class="grande" type="button">Cómo conectar con USER PRO</button>
+    <ul id="log" class="log"></ul>
+  </div>
+
+  <!-- ── TUTORIAL: un paso por pantalla ── -->
+  <div id="tutorial" class="vista">
+    <div class="marca"><img src="./img/isotipo.png" alt=""><b><span>USER</span> PRO</b><span class="ver version"></span></div>
+    <div class="contador" id="contador"></div>
+    <div class="barra"><div id="barra"></div></div>
+    <div class="paso" id="paso"></div>
+    <div class="espacio"></div>
+    <div class="nav">
+      <button id="ant" class="ant" type="button">Atrás</button>
+      <button id="sig" class="sig" type="button">Siguiente</button>
+    </div>
+    <button id="cerrarTutorial" class="salir" type="button">Salir del tutorial</button>
+  </div>
+
+  <script src="./js/puente.js"></script>
+  <script>
+    (function () {
+      var P = window.tizadaPuente
+      var $ = function (id) { return document.getElementById(id) }
+      // 'ok' = USER PRO habló con Illustrator hace un momento · 'espera' = lista, esperando a USER PRO
+      // · 'mal' = el puente no está escuchando
+      var estadoActual = 'mal'
+
+      // ════════════════ EL TUTORIAL: cómo conectar Illustrator con USER PRO ════════════════
+      // Lo que se marca en ROJO en cada dibujo es lo que hay que tocar.
+      var ROJO = '#ff4d6d'
+      var PASOS = [
+        { t: 'Este cuadrito conecta Illustrator con USER PRO',
+          h: '<p>Mientras Illustrator esté abierto, USER PRO le puede mandar la <b>plantilla del molde</b> y aparece acá armada sola.</p>' +
+             '<p>Illustrator queda <b>listo solo</b> cada vez que lo abrís. La conexión con USER PRO se hace <b>una vez</b>, desde USER PRO, con el botón <b>«Conectar con Illustrator»</b>: lo ves en los pasos que siguen.</p>' +
+             '<p>Para avanzar, hacé clic en el botón celeste <b>«Siguiente»</b> (con el botón izquierdo del mouse).</p>',
+          svg: '<svg viewBox="0 0 400 170"><rect x="10" y="30" width="150" height="110" rx="12" fill="#111" stroke="#00d5ff" stroke-width="3"/>' +
+               '<image href="img/isotipo.png" x="55" y="45" width="60" height="60"/><text x="85" y="128" font-size="17" text-anchor="middle" fill="#fff" font-weight="700">USER PRO</text>' +
+               '<path d="M172,85 L228,85" stroke="#34d399" stroke-width="6"/><path d="M228,85 L214,74 M228,85 L214,96" stroke="#34d399" stroke-width="6" stroke-linecap="round"/>' +
+               '<rect x="240" y="30" width="150" height="110" rx="12" fill="#330000" stroke="#ff9a00" stroke-width="3"/>' +
+               '<text x="315" y="100" font-size="44" text-anchor="middle" fill="#ff9a00" font-weight="800">Ai</text></svg>' },
+
+        { t: 'Fijate que diga «Lista para USER PRO»', vivo: true,
+          h: '<p>Este es el estado de <b>esta</b> computadora, ahora:</p><div id="vivo"></div>' +
+             '<p id="vivoAyuda"></p>' },
+
+        { t: 'Abrí USER PRO en el navegador',
+          h: '<p>En <b>esta misma computadora</b>, abrí USER PRO en el navegador (Chrome) como siempre y entrá con tu usuario.</p>' +
+             '<div class="ojo">Tiene que ser la <b>misma</b> computadora donde está Illustrator. Desde otra no se conecta.</div>' },
+
+        { t: 'Andá a la plantilla del molde',
+          h: '<p>En USER PRO: <b>Configuración</b> → <b>Moldería</b> → elegí el <b>molde</b> → <b>Plantilla</b>.</p>',
+          svg: '<svg viewBox="0 0 400 170"><rect width="400" height="170" rx="8" fill="#0b0e11"/><rect width="96" height="170" rx="8" fill="#14181d"/>' +
+               '<image href="img/isotipo.png" x="10" y="10" width="26" height="26"/>' +
+               '<rect x="10" y="52" width="76" height="12" rx="6" fill="#2a3038"/><rect x="10" y="74" width="66" height="12" rx="6" fill="#2a3038"/>' +
+               '<rect x="6" y="96" width="84" height="22" rx="6" fill="#1f3a44"/><text x="48" y="112" font-size="12" text-anchor="middle" fill="#fff">Configuración</text>' +
+               '<rect x="2" y="92" width="92" height="30" rx="8" fill="none" stroke="' + ROJO + '" stroke-width="3"/>' +
+               '<text x="116" y="34" font-size="15" fill="#9aa4b0">Moldería › Molde ›</text><text x="116" y="62" font-size="22" fill="#fff" font-weight="700">Plantilla</text>' +
+               '<rect x="110" y="40" width="112" height="32" rx="8" fill="none" stroke="' + ROJO + '" stroke-width="3"/></svg>' },
+
+        { t: 'Hacé clic en «Conectar con Illustrator»',
+          h: '<p>En la plantilla hay un recuadro que dice <b>«Illustrator sin conectar»</b>. Hacé clic en el botón <b class="rojo">«Conectar con Illustrator»</b>.</p>' +
+             '<p class="suave">Esto se hace una sola vez: después USER PRO lo encuentra solo cada vez que abrís Illustrator.</p>',
+          svg: '<svg viewBox="0 0 400 170"><rect width="400" height="170" rx="8" fill="#0b0e11"/>' +
+               '<rect x="14" y="10" width="372" height="150" rx="10" fill="none" stroke="#3a414b" stroke-width="2"/>' +
+               '<circle cx="34" cy="34" r="7" fill="#6b7684"/><text x="50" y="40" font-size="15" fill="#fff" font-weight="700">Illustrator sin conectar</text>' +
+               '<circle cx="364" cy="34" r="11" fill="none" stroke="#6b7684" stroke-width="2"/><text x="364" y="39" font-size="13" text-anchor="middle" fill="#9aa4b0">?</text>' +
+               '<rect x="26" y="56" width="348" height="44" rx="8" fill="#1b2128" stroke="#4b5561" stroke-width="2"/><text x="200" y="85" font-size="17" text-anchor="middle" fill="#fff" font-weight="700">Conectar con Illustrator</text>' +
+               '<rect x="26" y="112" width="348" height="34" rx="8" fill="none" stroke="#3a414b" stroke-width="2"/><text x="200" y="134" font-size="13" text-anchor="middle" fill="#c9d1da">Descargar guía .ai</text>' +
+               '<rect x="18" y="48" width="364" height="60" rx="12" fill="none" stroke="' + ROJO + '" stroke-width="4"/></svg>' },
+
+        { t: 'La primera vez: «Permitir»',
+          h: '<p>La primera vez, el navegador pide permiso para conectarse con <b>esta misma computadora</b>. Hacé clic en <b class="rojo">«Permitir»</b>.</p>' +
+             '<p class="suave">Las palabras del cartelito pueden cambiar un poco. Lo importante es «Permitir».</p>',
+          svg: '<svg viewBox="0 0 400 170"><rect width="400" height="30" fill="#e8ecf1"/><rect x="36" y="6" width="330" height="18" rx="9" fill="#fff"/>' +
+               '<rect x="16" y="38" width="300" height="122" rx="10" fill="#fff" stroke="#c9d0d8" stroke-width="2"/>' +
+               '<text x="32" y="66" font-size="15" fill="#111" font-weight="700">USER PRO quiere:</text>' +
+               '<text x="32" y="90" font-size="13" fill="#3d4450">Acceder a otras apps y servicios</text><text x="32" y="108" font-size="13" fill="#3d4450">de este dispositivo</text>' +
+               '<rect x="128" y="120" width="84" height="28" rx="14" fill="#fff" stroke="#9aa3ad"/><text x="170" y="139" font-size="13" text-anchor="middle" fill="#0a5bb5">Bloquear</text>' +
+               '<rect x="220" y="120" width="84" height="28" rx="14" fill="#0a5bb5"/><text x="262" y="139" font-size="13" text-anchor="middle" fill="#fff">Permitir</text>' +
+               '<rect x="212" y="113" width="100" height="42" rx="18" fill="none" stroke="' + ROJO + '" stroke-width="4"/></svg>' },
+
+        { t: 'Hacé clic en «Crear en Illustrator»',
+          h: '<p>Ahora el recuadro de USER PRO dice <b>«Illustrator conectado»</b> con un punto <b>verde</b>, y el botón cambió a <b class="rojo">«Crear en Illustrator»</b>. Y acá, en este cuadrito de Illustrator, dice <b>«Conectado con USER PRO»</b>.</p>' +
+             '<p>Hacé clic <b>una vez</b>: en vez de descargar un archivo, la plantilla se arma directo acá, en Illustrator.</p>',
+          svg: '<svg viewBox="0 0 400 170"><rect width="400" height="170" rx="8" fill="#0b0e11"/>' +
+               '<rect x="14" y="10" width="372" height="150" rx="10" fill="#0f1f1a" stroke="#34d399" stroke-width="2"/>' +
+               '<circle cx="34" cy="34" r="7" fill="#34d399"/><text x="50" y="40" font-size="15" fill="#fff" font-weight="700">Illustrator conectado</text>' +
+               '<rect x="26" y="56" width="348" height="44" rx="8" fill="#00d5ff"/><text x="200" y="85" font-size="17" text-anchor="middle" fill="#000" font-weight="700">Crear en Illustrator</text>' +
+               '<rect x="26" y="112" width="348" height="34" rx="8" fill="none" stroke="#3a414b" stroke-width="2"/><text x="200" y="134" font-size="13" text-anchor="middle" fill="#c9d1da">Descargar guía .ai</text>' +
+               '<rect x="18" y="48" width="364" height="60" rx="12" fill="none" stroke="' + ROJO + '" stroke-width="4"/></svg>' },
+
+        { t: 'Listo: mirá Illustrator',
+          h: '<p>En USER PRO aparece un cartel <b>«Creando en Illustrator»</b>: no toques nada hasta que se vaya.</p>' +
+             '<p>Acá vas a ver <b>un rectángulo rojo clarito por cada pieza</b>, acomodados como están en el molde, con el <b>nombre</b> arriba a la izquierda y el contorno de la pieza como <b>guía</b> (líneas celestes que no se imprimen).</p>' +
+             '<p>El archivo queda <b>guardado solo</b> con el nombre del molde y la variable, en <b>Documentos › USER PRO › Plantillas</b>.</p>',
+          svg: '<svg viewBox="0 0 400 160"><rect width="400" height="160" fill="#535353"/>' +
+               '<rect x="16" y="16" width="112" height="128" fill="#e6e6e6"/><path d="M36,36 L56,28 Q72,38 88,28 L108,36 L108,134 L36,134 Z" fill="none" stroke="#4aa8ff" stroke-width="1.5"/><text x="21" y="30" font-size="11" fill="#111">Frente</text>' +
+               '<rect x="144" y="16" width="112" height="128" fill="#e6e6e6"/><path d="M164,36 L184,30 Q200,34 216,30 L236,36 L236,134 L164,134 Z" fill="none" stroke="#4aa8ff" stroke-width="1.5"/><text x="149" y="30" font-size="11" fill="#111">Espalda</text>' +
+               '<rect x="272" y="36" width="112" height="88" fill="#e6e6e6"/><path d="M288,114 L302,50 L354,50 L368,114 Z" fill="none" stroke="#4aa8ff" stroke-width="1.5"/><text x="277" y="50" font-size="11" fill="#111">Manga</text></svg>' },
+
+        { t: 'Dibujá en la capa «diseño»',
+          h: '<p>En el panel de <b>Capas</b> ya queda elegida <b>«diseño»</b>: dibujá ahí.</p>' +
+             '<p><b>«guias»</b> tiene un candado: son las líneas de ayuda, no se tocan.</p>',
+          svg: '<svg viewBox="0 0 400 200"><rect x="40" y="6" width="250" height="188" rx="6" fill="#323232"/>' +
+               '<g font-size="14" fill="#e8e8e8">' +
+               '<rect x="46" y="12" width="238" height="28" fill="#3c3c3c"/><rect x="54" y="20" width="11" height="11" fill="#34d399"/><text x="74" y="31">guias</text>' +
+               '<rect x="258" y="20" width="12" height="9" rx="1" fill="#e8e8e8"/><path d="M260,20 v-4 a4,4 0 0 1 8,0 v4" fill="none" stroke="#e8e8e8" stroke-width="2"/>' +
+               '<rect x="46" y="44" width="238" height="28" fill="#3c3c3c"/><rect x="54" y="52" width="11" height="11" fill="#be78ff"/><text x="74" y="63">Número</text>' +
+               '<rect x="46" y="76" width="238" height="28" fill="#3c3c3c"/><rect x="54" y="84" width="11" height="11" fill="#be78ff"/><text x="74" y="95">Nombre</text>' +
+               '<rect x="46" y="108" width="238" height="28" fill="#3c3c3c"/><rect x="54" y="116" width="11" height="11" fill="#ffaa3c"/><text x="74" y="127">Editable logo</text>' +
+               '<rect x="46" y="156" width="238" height="30" fill="#4a6a8a"/><rect x="54" y="165" width="11" height="11" fill="#808080"/><text x="74" y="176" font-weight="700">diseño</text></g>' +
+               '<rect x="42" y="151" width="246" height="40" rx="6" fill="none" stroke="' + ROJO + '" stroke-width="4"/>' +
+               '<text x="300" y="177" font-size="16" fill="' + ROJO + '" font-weight="700">acá</text><text x="296" y="31" font-size="13" fill="#bbb">no tocar</text></svg>' },
+
+        { t: 'Si dice «No encontré Illustrator»',
+          h: '<p>Probá de a una cosa:</p>' +
+             '<p>1. ¿Illustrator está <b>abierto</b> y terminó de abrir?</p>' +
+             '<p>2. ¿Este cuadrito dice <b>«Conectado»</b> en verde? Si no: cerrá Illustrator y abrilo de nuevo.</p>' +
+             '<p>3. ¿USER PRO está abierto en <b>esta misma</b> computadora?</p>' +
+             '<p>4. ¿Tocaste «Bloquear» sin querer? En el navegador, hacé clic en el <b>dibujito de la izquierda de la dirección</b> y cambiá el permiso a <b>«Permitir»</b>.</p>' },
+
+        { t: 'Para volver a ver este cuadrito',
+          h: '<p>Si lo cerrás, se abre desde el menú de arriba de Illustrator: <b>Ventana</b> → <b>Extensiones</b> → <b class="rojo">USER PRO</b>.</p>' +
+             '<p>Ahí está siempre este tutorial, con el botón <b>«Cómo conectar con USER PRO»</b>.</p>',
+          svg: '<svg viewBox="0 0 400 160"><rect width="400" height="28" fill="#2b2b2b"/>' +
+               '<g font-size="14" fill="#e8e8e8"><text x="10" y="19">Archivo</text><text x="76" y="19">Edición</text><text x="140" y="19">Objeto</text></g>' +
+               '<rect x="198" y="3" width="70" height="22" fill="#4a6a8a"/><text x="233" y="19" font-size="14" fill="#fff" text-anchor="middle">Ventana</text>' +
+               '<rect x="198" y="28" width="130" height="92" fill="#383838"/><text x="208" y="50" font-size="13" fill="#bdbdbd">Capas</text>' +
+               '<rect x="198" y="60" width="130" height="26" fill="#4a6a8a"/><text x="208" y="78" font-size="13" fill="#fff">Extensiones ▸</text>' +
+               '<text x="208" y="108" font-size="13" fill="#bdbdbd">Color</text>' +
+               '<rect x="328" y="60" width="70" height="28" fill="#383838"/><text x="363" y="79" font-size="12" fill="#fff" font-weight="700" text-anchor="middle">USER PRO</text>' +
+               '<rect x="324" y="56" width="76" height="36" rx="6" fill="none" stroke="' + ROJO + '" stroke-width="3"/></svg>' }
+      ]
+      var n = 0
+
+      function pintarVivo() {
+        var v = $('vivo'), a = $('vivoAyuda')
+        if (!v) return
+        v.innerHTML = ''
+        var d = document.createElement('div')
+        d.className = 'estado ' + estadoActual
+        d.innerHTML = '<span class="punto"></span><span></span>'
+        d.lastChild.textContent = estadoActual === 'ok' ? 'Conectado con USER PRO' : estadoActual === 'espera' ? 'Lista para USER PRO' : 'No está lista'
+        v.appendChild(d)
+        a.innerHTML = estadoActual === 'ok'
+          ? 'Punto <b>verde</b>: ya está conectado con USER PRO. Tocá «Siguiente».'
+          : estadoActual === 'espera'
+            ? 'Punto <b>amarillo</b> y dice «Lista para USER PRO»: está todo bien. Illustrator está esperando a USER PRO; en los pasos que siguen lo conectás. Queda lista sola cada vez que abrís Illustrator, aunque hayas apagado la computadora. Tocá «Siguiente».'
+            : 'Si en unos segundos no dice «Lista para USER PRO»: <b>cerrá Illustrator y abrilo de nuevo</b>, y volvé a este paso.'
+      }
+
+      function mostrarPaso() {
+        var p = PASOS[n]
+        $('contador').textContent = 'Paso ' + (n + 1) + ' de ' + PASOS.length
+        $('barra').style.width = Math.round(100 * (n + 1) / PASOS.length) + '%'
+        $('paso').innerHTML = '<h2>' + p.t + '</h2>' + p.h + (p.svg ? '<figure>' + p.svg + '</figure>' : '')
+        if (p.vivo) pintarVivo()
+        $('ant').style.visibility = n === 0 ? 'hidden' : 'visible'
+        $('sig').textContent = n === PASOS.length - 1 ? 'Terminar' : 'Siguiente'
+        window.scrollTo(0, 0)
+      }
+      function vista(cual) {
+        $('inicio').className = 'vista' + (cual === 'inicio' ? ' activa' : '')
+        $('tutorial').className = 'vista' + (cual === 'tutorial' ? ' activa' : '')
+      }
+      function abrirTutorial() { n = 0; mostrarPaso(); vista('tutorial') }
+      function cerrarTutorial() {
+        try { localStorage.setItem('userpro_tutorial_visto', '1') } catch (e) { /* nada */ }
+        vista('inicio')
+      }
+      Array.prototype.forEach.call(document.querySelectorAll('.version'), function (el) { el.textContent = 'Versión ' + P.VERSION })
+      $('verTutorial').addEventListener('click', abrirTutorial)
+      $('cerrarTutorial').addEventListener('click', cerrarTutorial)
+      $('ant').addEventListener('click', function () { if (n > 0) { n--; mostrarPaso() } })
+      $('sig').addEventListener('click', function () { if (n < PASOS.length - 1) { n++; mostrarPaso() } else cerrarTutorial() })
+
+      // la PRIMERA vez que se abre el panel (lo abre solo el puente después de instalar), el tutorial
+      var visto = false
+      try { visto = !!localStorage.getItem('userpro_tutorial_visto') } catch (e) { /* nada */ }
+      if (visto) vista('inicio'); else abrirTutorial()
+
+      // ════════════════ EL ESTADO: lo que diga el puente ════════════════
+      function hora(t) { var d = new Date(t); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) }
+      function pintar(d, cual, msg, sub) {
+        estadoActual = cual
+        $('estado').className = 'estado ' + cual
+        $('texto').textContent = msg
+        $('textoSub').textContent = sub || ''
+        var log = $('log')
+        log.innerHTML = ''
+        ;((d && d.log) || []).forEach(function (e) {
+          var li = document.createElement('li')
+          var b = document.createElement('b'); b.textContent = hora(e.t) + ' '
+          li.appendChild(b); li.appendChild(document.createTextNode(e.texto))
+          log.appendChild(li)
+        })
+        if (PASOS[n] && PASOS[n].vivo && $('tutorial').className.indexOf('activa') >= 0) pintarVivo()
+      }
+      // se le pregunta por la red, igual que USER PRO (con el `http` de Node: desde el panel no hay
+      // reglas de origen del navegador de por medio)
+      var http = require('http')
+      function preguntar(alTerminar) {
+        var req = http.get({ host: '127.0.0.1', port: P.PUERTO, path: '/estado', timeout: 2000 }, function (res) {
+          var txt = ''
+          res.on('data', function (b) { txt += b })
+          res.on('end', function () { var d = null; try { d = JSON.parse(txt) } catch (e) { d = null } alTerminar(d) })
+        })
+        req.on('timeout', function () { req.destroy() })
+        req.on('error', function () { alTerminar(undefined) })
+      }
+      function revisar() {
+        preguntar(function (d) {
+          if (d && d.app === 'TIZADA PRO') {
+            // USER PRO pregunta cada 5 s mientras la plantilla de un molde está abierta: si habló
+            // hace poco, está conectado; si no, Illustrator está listo esperándolo
+            var c = d.contacto
+            if (c && (d.ahora - c.t) < 12000) return pintar(d, 'ok', 'Conectado con USER PRO', c.origen.replace(/^https?:\/\//, ''))
+            return pintar(d, 'espera', 'Lista para USER PRO', 'Se conecta cuando en USER PRO abrís la plantilla de un molde')
+          }
+          if (d !== undefined) return pintar(null, 'mal', 'No está lista', 'Otro programa usa el puerto ' + P.PUERTO)
+          // nadie escucha: el puente invisible no arrancó, lo levanta el panel
+          P.iniciar(function (e) {
+            if (e.escuchando) revisar()
+            else pintar(null, 'mal', 'No está lista', e.error === 'ocupado' ? 'Otro programa usa el puerto ' + P.PUERTO : 'Cerrá Illustrator y abrilo de nuevo')
+          })
+        })
+      }
+      revisar()
+      setInterval(revisar, 3000)
+    })()
+  </script>
+</body>
+</html>

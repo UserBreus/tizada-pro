@@ -36,6 +36,7 @@ export const MARCAS_PROCESO = {
 export const CRUZ_MM = 30.0          // 3 cm de punta a punta
 export const CRUZ_TRAZO_MM = 1.6
 export const CRUZ_LETRA_MM = 7.0
+export const CRUZ_HALO_MM = 1.2        // halo blanco para que resalte sobre cualquier diseño (ver motor_pedido.py)
 
 /** `_ops_cruz_proceso`: la cruz de 3 cm + la letra del proceso, en negro puro. */
 const esMarca = (m) => Object.prototype.hasOwnProperty.call(MARCAS_PROCESO, String(m || '').toLowerCase())
@@ -45,17 +46,25 @@ export function opsCruzProceso(cx, cy, marca, fuente = null) {
   if (!info) return ''
   const r = (CRUZ_MM * MM) / 2.0
   const w = CRUZ_TRAZO_MM * MM
-  const ops = ['q', '0 0 0 1 K', `${pyFixed(w, 3)} w`, '0 J',
-    `${pyFixed(cx - r, 3)} ${pyFixed(cy, 3)} m ${pyFixed(cx + r, 3)} ${pyFixed(cy, 3)} l S`,
-    `${pyFixed(cx, 3)} ${pyFixed(cy - r, 3)} m ${pyFixed(cx, 3)} ${pyFixed(cy + r, 3)} l S`]
+  const hw = w + 2.0 * CRUZ_HALO_MM * MM
+  const lh = `${pyFixed(cx - r, 3)} ${pyFixed(cy, 3)} m ${pyFixed(cx + r, 3)} ${pyFixed(cy, 3)} l S`
+  const lv = `${pyFixed(cx, 3)} ${pyFixed(cy - r, 3)} m ${pyFixed(cx, 3)} ${pyFixed(cy + r, 3)} l S`
+  const ops = ['q', '0 0 0 0 K', `${pyFixed(hw, 3)} w`, '1 J', lh, lv,     // el halo blanco, debajo
+    '0 0 0 1 K', `${pyFixed(w, 3)} w`, '0 J', lh, lv]
   if (fuente) {
     try {
       const size = fuente.sizeParaAlto(CRUZ_LETRA_MM * MM)
       let an = 0.0
       try { an = fuente.anchoTexto(info.letra, size) } catch { an = CRUZ_LETRA_MM * MM * 0.7 }
       const qx = cx + r / 2.0, qy = cy + r / 2.0
+      const pl = fuente.opsTexto(info.letra, size, qx - an / 2.0, qy - (CRUZ_LETRA_MM * MM) / 2.0)
+      ops.push('0 0 0 0 K')                                   // halo blanco de la letra
+      ops.push(`${pyFixed(2.0 * CRUZ_HALO_MM * MM, 3)} w`)
+      ops.push('1 j')
+      ops.push(pl)
+      ops.push('S')
       ops.push('0 0 0 1 k')
-      ops.push(fuente.opsTexto(info.letra, size, qx - an / 2.0, qy - (CRUZ_LETRA_MM * MM) / 2.0))
+      ops.push(pl)
       ops.push('f')
     } catch { /* como el Python: la cruz sale sin letra */ }
   }
@@ -353,7 +362,7 @@ export function rectPagina(doc, pagina) {
 }
 
 /** `_bbox_xobject`: `{bbox, matrix}` de un Form XObject de la página, por nombre (`/Fm0`). */
-function resolutorXObjects(pageObj) {
+export function resolutorXObjects(pageObj) {
   return (nombre) => {
     try {
       const res = pageObj.get('Resources')

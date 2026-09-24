@@ -46,6 +46,7 @@ import { CM, geometriaPagina, contornoDeDrawing, itemVisor, emparejarPorSolape }
 export const MM = 2.83465                          // puntos por mm (molde_real.MM)
 export const MARGEN_MESA_CM = 2.0                  // margen sugerido por lado (motor_pedido)
 import { CAPAS_SISTEMA } from '../nombres.js'
+import { analizarVariantes } from './herramientas.js'
 export { CAPAS_SISTEMA }
 
 // Las opciones de `get_text("dict")` de PyMuPDF (`TEXTFLAGS_DICT` = 199): ligaduras, espacios,
@@ -931,6 +932,11 @@ export function prepararCaminoA(molde, { nombresDxf = null, indices = null, empa
     try { deteccion.porTalle.set(t, detectarPiezas(molde, t)) } catch { /* ese talle no da piezas */ }
   }
   try { deteccion.todas = detectarPiezasTodas(molde) } catch { deteccion.todas = null }
+  // el FORMATO (anidado/extendido) viaja con la detección: sin él el servidor leía el molde
+  // entero para averiguarlo (`VM.analizar`, 2026-09-22)
+  if (deteccion.todas) {
+    try { deteccion.todas.formato = analizarVariantes(molde).formato || 'extendido' } catch { deteccion.todas.formato = 'extendido' }
+  }
   const dxfMan = dxf ? { ...dxf } : null
   const lista = nombresDxf || (dxf && dxf.nombres) || []
   const conNombre = lista.filter((n) => pyStrip(String(n)))

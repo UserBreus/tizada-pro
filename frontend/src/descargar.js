@@ -42,14 +42,17 @@ function esCancelacion(e) {
   return e && (e.name === 'AbortError' || e.code === 20)
 }
 
-/** Descarga de siempre: un `<a download>` efímero. Es el respaldo cuando no hay API. */
-function descargaClasica(url, nombre) {
+/** Descarga de siempre: un `<a download>` efímero. Es el respaldo cuando no hay API.
+ *  `url` también puede ser una función que ARMA el archivo acá (devuelve un Blob). */
+async function descargaClasica(url, nombre) {
+  const blob = typeof url === 'function' ? await url() : null
   const a = document.createElement('a')
-  a.href = url
+  a.href = blob ? URL.createObjectURL(blob) : url
   a.download = nombre
   document.body.appendChild(a)
   a.click()
   a.remove()
+  if (blob) setTimeout(() => URL.revokeObjectURL(a.href), 60000)
 }
 
 // (el viejo `traer()` que devolvía el blob entero se fue con el streaming: ver `bajarA`)
@@ -150,9 +153,12 @@ async function bajarA(url, handle, nombre) {
  * `url` = ruta de la app (ya con prefijo, ver base.js) o un `blob:`; `nombre` = nombre sugerido.
  * Devuelve true si se guardó, false si se canceló o se cayó al respaldo.
  */
+// `url`: la dirección del archivo, o una FUNCIÓN que lo arma en esta computadora y devuelve un Blob
+// (la mesa suelta, 2026-09-22): se llama DESPUÉS de elegir dónde guardarlo, así el diálogo se abre
+// dentro del click del usuario.
 export async function descargarArchivo(url, nombre, { avisar } = {}) {
   if (!puedeElegirDonde()) {
-    descargaClasica(url, nombre)
+    try { await descargaClasica(url, nombre) } catch (e) { if (avisar) avisar(`No se pudo guardar «${nombre}»: ${e.message || e}`) }
     return false
   }
   let handle
@@ -162,11 +168,13 @@ export async function descargarArchivo(url, nombre, { avisar } = {}) {
     handle = await window.showSaveFilePicker({ suggestedName: nombre, types: tipoDe(nombre) })
   } catch (e) {
     if (esCancelacion(e)) return false           // canceló: no se guarda nada, en ningún lado
-    descargaClasica(url, nombre)                 // la API existe pero falló: respaldo
+    try { await descargaClasica(url, nombre) } catch { /* respaldo que tampoco pudo */ }   // la API existe pero falló
     return false
   }
   try {
-    if (url.startsWith('blob:')) {
+    if (typeof url === 'function') {
+      await escribir(handle, await url())         // armado acá: ya está entero en memoria
+    } else if (url.startsWith('blob:')) {
       // ya está entero en memoria (el CSV de la planilla, la guía .ai): no hay nada que medir
       await escribir(handle, await (await fetch(url)).blob())
     } else {
@@ -199,7 +207,7 @@ export async function descargarVarios(items, { avisar, progreso } = {}) {
   if (!items || !items.length) return 0
   if (!puedeElegirCarpeta()) {
     for (const it of items) {
-      descargaClasica(it.url, it.nombre)
+      try { await descargaClasica(it.url, it.nombre) } catch (e) { if (avisar) avisar(`No se pudo guardar «${it.nombre}»: ${e.message || e}`) }
       await new Promise((r) => setTimeout(r, 500))
     }
     return items.length
@@ -210,7 +218,7 @@ export async function descargarVarios(items, { avisar, progreso } = {}) {
   } catch (e) {
     if (esCancelacion(e)) return -1
     for (const it of items) {
-      descargaClasica(it.url, it.nombre)
+      try { await descargaClasica(it.url, it.nombre) } catch { /* sigue con el próximo */ }
       await new Promise((r) => setTimeout(r, 500))
     }
     return items.length
@@ -222,7 +230,8 @@ export async function descargarVarios(items, { avisar, progreso } = {}) {
     try {
       if (progreso) progreso(i + 1, items.length, it.nombre)
       const fh = await carpeta.getFileHandle(it.nombre, { create: true })
-      await bajarA(it.url, fh, it.nombre)
+      if (typeof it.url === 'function') await escribir(fh, await it.url())
+      else await bajarA(it.url, fh, it.nombre)
       hechos++
     } catch (e) {
       fallas.push(`${it.nombre}: ${e.message || e}`)
