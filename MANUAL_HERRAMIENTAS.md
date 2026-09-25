@@ -562,9 +562,8 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
   La **posición** se cambia arrastrando su letra, como cualquier columna.
 - 🔴 **Oculta = no se aplica** (vale 1). El valor cargado no se borra: vuelve a valer al mostrarla.
 - **Sin tope** (decisión del usuario): 250 son 250 prendas. Al lado de los botones se ve
-  **«N fila(s) → M prendas»** cuando difieren — ése es el número que le importa al taller.
-- **El botón** para prenderla está **arriba de la planilla** (grande, dice «Mostrar columna de
-  cantidad»), no abajo con los otros.
+  dos píldoras, **«N filas»** y **«M prendas»** (la segunda sólo cuando difieren) — ése es el número que le importa al taller.
+- **El control** para prenderla es el interruptor **«Columna cantidad»** de la barra de arriba de la planilla (App.jsx ~15590; corregido 2026-09-25, antes decía «Mostrar columna de cantidad», MAPA 574).
 - **Dónde vive:** `_con_cantidad` (servidor) garantiza la columna en las dos puntas y
   `_traducir_prendas` es quien **repite** la prenda. Contrato: `verificar_cantidad.py`.
 
@@ -916,8 +915,9 @@ Funciona **como una planilla de Excel** (`planilla-tabla`).
   2. **Fill handle**: con el cuadradito de la esquina se copia hacia abajo o al costado arrastrando.
      En números hace **secuencia** (1, 2, 3…); en talle y diseño **copia** el mismo valor.
   3. Columnas con opciones = desplegables **escribibles** (`ComboCell`).
-  4. **Variable por fila**: la celda de variable abre un picker con **preview de las piezas** de
-     cada variable → define **qué piezas se generan** en esa fila.
+  4. **Variable por fila**: ya **no hay columna de variable** (App.jsx ~11459): el **Diseño** de la
+     fila define la variable (y el arte) que se genera. El modal «Elegí la variable» sigue en el
+     código pero nada lo abre (corregido 2026-09-25 al armar el tutorial del arte, MAPA 574).
   5. **Diseño por fila**: la columna «Diseño» elige cuál de los diseños del pedido lleva la fila.
      Sólo ofrece los diseños que **existen en el talle de esa fila**: si un diseño no tiene ese
      talle en ninguno de los moldes del pedido, no aparece en la lista de esa fila (las demás filas
