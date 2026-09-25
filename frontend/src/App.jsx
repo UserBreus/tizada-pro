@@ -11069,7 +11069,11 @@ export default function App() {
   // el nombre del archivo lleva la VERSIÓN (la del servidor; se pide al abrir la Plantilla, así el
   // «Guardar como» se abre en el mismo clic)
   const [_verIllu, setVerIllu] = useState(null);
-  useEffect(() => { versionDelServidor(rutaApi).then(d => setVerIllu((d && d.version) || null)); }, []);
+  // ¿ESTE servidor tiene el instalador? El publicado NO (decisión del usuario 2026-09-24: la
+  // extensión no viaja con la publicación, «se le pasa a cada usuario manual»): ahí no se ofrece
+  // bajarla (daría error) y se dice que lo pidan.
+  const [_hayInstIllu, setHayInstIllu] = useState(false);
+  useEffect(() => { versionDelServidor(rutaApi).then(d => { setVerIllu((d && d.version) || null); setHayInstIllu(!!(d && d.instalador)); }); }, []);
   const bajarExtensionIllustrator = () => descargarArchivo(
     rutaApi(_esMac ? '/api/illustrator/extension.zip' : '/api/illustrator/instalador'),
     _esMac ? `USER-PRO-Illustrator-Mac${_verIllu ? '-' + _verIllu : ''}.zip`
@@ -14269,7 +14273,9 @@ export default function App() {
         <Modal open={illustratorFalta} onClose={() => setIllustratorFalta(false)} centrado maxWidth={520}
           titulo="No encontré Illustrator" subtitulo="Hace falta Illustrator abierto en esta computadora, con la extensión de USER PRO">
           <ol style={{ margin: '0 0 14px', paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-            <li>Si esta computadora todavía no la tiene: tocá <b>Bajar el instalador</b>, abrilo con doble clic y tocá <b>Instalar</b>{_esMac ? ' (en Mac: descomprimí el ZIP y abrí INSTALAR-MAC.command)' : ''}.</li>
+            {_hayInstIllu
+              ? <li>Si esta computadora todavía no la tiene: tocá <b>Bajar el instalador</b>, abrilo con doble clic y tocá <b>Instalar</b>{_esMac ? ' (en Mac: descomprimí el ZIP y abrí INSTALAR-MAC.command)' : ''}.</li>
+              : <li>Si esta computadora todavía no la tiene: pedile el instalador de la extensión (<b>Instalar-USER-PRO-Illustrator</b>) a quien administra TIZADA, abrilo con doble clic y tocá <b>Instalar</b>.</li>}
             <li>Abrí Illustrator (si estaba abierto, cerralo y volvelo a abrir después de instalar).</li>
             <li>Tocá <b>Conectar con Illustrator</b> otra vez. Si el navegador pide permiso, tocá <b>Permitir</b>: es esta misma computadora.</li>
           </ol>
@@ -14278,9 +14284,11 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button type="button" className="btn ghost" onClick={() => setIllustratorFalta(false)}>Cerrar</button>
-            <button type="button" className="btn" onClick={bajarExtensionIllustrator}>
-              <Icon name="download" style={{ width: 13, height: 13, marginRight: 6 }} />Bajar el instalador
-            </button>
+            {_hayInstIllu && (
+              <button type="button" className="btn" onClick={bajarExtensionIllustrator}>
+                <Icon name="download" style={{ width: 13, height: 13, marginRight: 6 }} />Bajar el instalador
+              </button>
+            )}
           </div>
         </Modal>
 
@@ -19890,11 +19898,13 @@ export default function App() {
                               <PlantillaIllustrator onCrear={() => abrirEnIllustrator()} onDescargar={descargarPdfGuia}
                                 textoDescargar={verVariante ? 'Descargar guía .ai (solo esta variable)' : 'Descargar guía .ai (molde completo)'}
                                 ocupado={!!armandoIllustrator} onNoEncontrado={() => setIllustratorFalta(true)}
-                                versionNueva={_verIllu} onBajar={bajarExtensionIllustrator}
+                                versionNueva={_hayInstIllu ? _verIllu : null} onBajar={bajarExtensionIllustrator}
                                 ayuda={<Ayuda ancho={320}>
                                   Con Illustrator conectado, <b>Crear en Illustrator</b> arma la plantilla directo allá, sin descargar nada: <b>una mesa de trabajo por pieza</b> con el nombre que lee el sistema{configMedida === 'talle' ? ' (una por cada talle elegido, cada talle en su bloque)' : ''}, a la <b>escala</b> elegida, las <b>capas</b> (diseño, Editable, Nombre, Número…, guias) y el <b>contorno</b> de cada pieza en «guias».{verVariante ? ' Solo las piezas de esta variable.' : ''}
                                   <br /><br />Para conectar: Illustrator abierto en <b>esta</b> computadora, con la extensión de USER PRO (se instala una sola vez). Tocá <b>Conectar con Illustrator</b> y, la primera vez, <b>Permitir</b> en el navegador. Después se conecta sola cada vez que abrís Illustrator. El tutorial está en Illustrator: <b>Ventana › Extensiones › USER PRO</b>.
-                                  <br /><button type="button" className="btn ghost" style={{ marginTop: 8, padding: '5px 10px', fontSize: 11.5 }} onClick={bajarExtensionIllustrator}>Bajar el instalador</button>
+                                  {_hayInstIllu
+                                    ? <><br /><button type="button" className="btn ghost" style={{ marginTop: 8, padding: '5px 10px', fontSize: 11.5 }} onClick={bajarExtensionIllustrator}>Bajar el instalador</button></>
+                                    : <><br />El instalador se lo pedís a quien administra TIZADA.</>}
                                 </Ayuda>} />
                             </div>
                           )}

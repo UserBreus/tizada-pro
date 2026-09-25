@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>TIZADA PRO — La base de datos y cómo conectar otro sistema</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --cian: #00b8d4; --cian-claro: #e0f7fb; --magenta: #d6007e; --magenta-claro: #fde6f2;
+    --amarillo: #f5b800; --amarillo-claro: #fff6d6; --verde: #10a36b; --verde-claro: #e3f6ee;
+    --rojo: #e0443a; --rojo-claro: #fdeceb; --tinta: #16202a; --gris: #5b6875; --gris-claro: #eef1f4;
+    --borde: #dde3e9;
+  }
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  @page portada { margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; color: var(--tinta); font-size: 10pt; line-height: 1.55; margin: 0; }
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+  p { margin: 0 0 8pt; }
+  code, .mono { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.8pt; }
+  code { background: var(--gris-claro); padding: 1px 4px; border-radius: 4px; }
+  td code { font-size: 8pt; }
+  b { font-weight: 700; }
+  .ti { vertical-align: -2px; }
+
+  /* ── portada ── */
+  .portada { page: portada; height: 297mm; width: 210mm; position: relative; overflow: hidden;
+    background: radial-gradient(circle at 85% 12%, rgba(0,184,212,0.55), transparent 42%),
+                radial-gradient(circle at 10% 90%, rgba(214,0,126,0.45), transparent 45%),
+                radial-gradient(circle at 70% 80%, rgba(245,184,0,0.35), transparent 40%),
+                linear-gradient(160deg, #0b1118 0%, #111b26 60%, #0b1118 100%);
+    color: #fff; padding: 30mm 22mm; break-after: page; }
+  .portada .logo { width: 30mm; filter: drop-shadow(0 0 18px rgba(0,184,212,0.7)); }
+  .portada .marca { font-size: 13pt; letter-spacing: 0.3em; font-weight: 700; margin-top: 8mm; opacity: 0.85; }
+  .portada .marca span { color: #3fe3ff; }
+  .portada h1 { font-size: 34pt; font-weight: 800; margin-top: 42mm; max-width: 150mm; }
+  .portada h1 em { font-style: normal; color: #3fe3ff; text-shadow: 0 0 22px rgba(63,227,255,0.45); }
+  .portada .sub { font-size: 13pt; margin-top: 8mm; max-width: 140mm; color: #c9d6e2; }
+  .portada .chips { margin-top: 14mm; display: flex; gap: 8px; flex-wrap: wrap; }
+  .portada .chip { border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 5px 13px; font-size: 9.5pt; color: #e6eef5; }
+  .portada .pie { position: absolute; bottom: 20mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between; font-size: 9pt; color: #9fb0c0; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 5mm; }
+
+  /* ── secciones ── */
+  section { break-before: page; }
+  .seccion-titulo { display: flex; align-items: center; gap: 12px; margin-bottom: 12pt; }
+  .num { min-width: 36px; padding: 0 5px; width: auto; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15pt; color: #fff; background: linear-gradient(135deg, var(--cian), #0088a3); flex-shrink: 0; }
+  .num.m { background: linear-gradient(135deg, var(--magenta), #a3005f); }
+  .num.a { background: linear-gradient(135deg, var(--amarillo), #d99400); }
+  .num.v { background: linear-gradient(135deg, var(--verde), #0a7a50); }
+  h2 { font-size: 20pt; font-weight: 800; }
+  .kicker { font-size: 8.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gris); font-weight: 700; }
+  h3 { font-size: 13pt; font-weight: 700; margin: 14pt 0 6pt; display: flex; align-items: center; gap: 7px; }
+  h3 .ti { color: var(--cian); font-size: 15pt; }
+  h4 { font-size: 11pt; font-weight: 700; margin: 10pt 0 4pt; }
+  .lead { font-size: 11.5pt; color: #2d3b48; margin-bottom: 12pt; }
+
+  /* ── cajas ── */
+  .caja { border-radius: 12px; padding: 11pt 13pt; margin: 9pt 0; break-inside: avoid; border: 1px solid var(--borde); }
+  .caja .t { font-weight: 800; display: flex; align-items: center; gap: 7px; margin-bottom: 4pt; }
+  .caja p:last-child { margin-bottom: 0; }
+  .c-info { background: var(--cian-claro); border-color: #a9e7f2; } .c-info .t { color: #007a8f; }
+  .c-ojo { background: var(--amarillo-claro); border-color: #f3dc8a; } .c-ojo .t { color: #9a6d00; }
+  .c-mal { background: var(--rojo-claro); border-color: #f4b9b4; } .c-mal .t { color: #b3261e; }
+  .c-bien { background: var(--verde-claro); border-color: #a6dcc4; } .c-bien .t { color: #0a7a50; }
+  .c-mag { background: var(--magenta-claro); border-color: #f3b2d6; } .c-mag .t { color: #a3005f; }
+
+  .grilla { display: grid; gap: 9pt; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr 1fr 1fr; } .g4 { grid-template-columns: repeat(4, 1fr); }
+  .tarjeta { border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 11pt; break-inside: avoid; background: #fff; }
+  .tarjeta .ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: #fff; margin-bottom: 6pt; }
+  .tarjeta h4 { margin-top: 0; }
+  .tarjeta p { font-size: 9.6pt; color: #394856; margin: 0; }
+  .i-c { background: var(--cian); } .i-m { background: var(--magenta); } .i-a { background: var(--amarillo); } .i-v { background: var(--verde); } .i-g { background: #52606d; }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.2pt; margin: 6pt 0 10pt; break-inside: auto; }
+  th { background: var(--tinta); color: #fff; text-align: left; font-weight: 600; padding: 6pt 7pt; }
+  th:first-child { border-top-left-radius: 8px; } th:last-child { border-top-right-radius: 8px; }
+  td { padding: 5.5pt 7pt; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  tr { break-inside: avoid; }
+  tr:nth-child(even) td { background: #f7f9fb; }
+  .si { color: var(--verde); font-weight: 700; } .no { color: var(--rojo); font-weight: 700; } .medio { color: #b58300; font-weight: 700; }
+  .pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .p-obl { background: var(--rojo-claro); color: #b3261e; } .p-opc { background: var(--gris-claro); color: var(--gris); }
+
+  pre.json { background: #0f1720; color: #d7e3ee; border-radius: 12px; padding: 11pt 13pt; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.3pt; line-height: 1.5; white-space: pre-wrap; break-inside: avoid; margin: 8pt 0; }
+  pre.json .k { color: #7fdcff; } pre.json .s { color: #ffd479; } pre.json .c { color: #7d8e9e; font-style: italic; } pre.json .n { color: #ff8fc8; }
+
+  .mermaid { display: flex; justify-content: center; margin: 8pt 0 10pt; break-inside: avoid; }
+  .mermaid svg { max-height: 118mm; height: auto; }
+  .figura.baja .mermaid svg { max-height: 88mm; }
+  .figura.baja2 .mermaid svg { max-height: 58mm; }
+  .figura.alta .mermaid svg { max-height: 175mm; }
+  .figura { border: 1px solid var(--borde); border-radius: 14px; padding: 8pt; background: linear-gradient(180deg, #fbfdfe, #f3f7fa); break-inside: avoid; margin: 8pt 0; }
+  .figura .pie-fig { font-size: 8.6pt; color: var(--gris); text-align: center; margin-top: 2pt; }
+
+  .pasos { counter-reset: paso; }
+  .paso { display: flex; gap: 11px; margin: 8pt 0; break-inside: avoid; }
+  .paso .b { width: 26px; height: 26px; border-radius: 50%; background: var(--cian); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10pt; }
+  .paso .b.m { background: var(--magenta); } .paso .b.a { background: var(--amarillo); } .paso .b.v { background: var(--verde); }
+  .paso .x { flex: 1; }
+  .paso .x b.tit { display: block; font-size: 10.8pt; }
+
+  .etapas { display: flex; align-items: stretch; gap: 5px; margin: 6pt 0 12pt; break-inside: avoid; }
+  .etapas .et { flex: 1; border: 1.5px solid; border-radius: 10px; padding: 7pt 8pt; font-size: 8.8pt; line-height: 1.35; text-align: center; min-height: 52pt; display: flex; flex-direction: column; justify-content: center; }
+  .etapas .et b { display: block; font-size: 9.6pt; margin-bottom: 2pt; }
+  .etapas .ti { color: var(--gris); font-size: 14px; align-self: center; }
+  .indice { columns: 2; column-gap: 16pt; margin-top: 8pt; }
+  .indice div { break-inside: avoid; padding: 5pt 0; border-bottom: 1px dashed var(--borde); display: flex; gap: 9px; align-items: baseline; }
+  .indice .n { font-weight: 800; color: var(--cian); width: 26px; }
+
+  .arbol { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.6pt; background: #f7f9fb; border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 12pt; white-space: pre; line-height: 1.6; break-inside: avoid; }
+  .arbol .d { color: #007a8f; font-weight: 600; } .arbol .f { color: #a3005f; } .arbol .c { color: var(--gris); font-family: 'Inter', sans-serif; font-style: italic; }
+  .chico { font-size: 8.8pt; color: var(--gris); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ PORTADA ═══════════════════════════ -->
+<div class="portada">
+  <img class="logo" src="logo.svg" alt="">
+  <div class="marca"><span>USER</span> PRO · TIZADA PRO</div>
+  <h1>La base de datos y cómo <em>conectar otro sistema</em></h1>
+  <div class="sub">Cómo guarda TIZADA PRO la información, cómo se une cada parte, y cómo otro sistema puede mandar un pedido ya armado —diseños, moldes, telas y planilla— para que nadie tenga que cargarlo a mano.</div>
+  <div class="chips">
+    <span class="chip"><i class="ti ti-database"></i> Base MSSQL</span>
+    <span class="chip"><i class="ti ti-folders"></i> Archivos</span>
+    <span class="chip"><i class="ti ti-plug-connected"></i> Integración</span>
+    <span class="chip"><i class="ti ti-clipboard-list"></i> Pedido automático</span>
+  </div>
+  <div class="pie"><span>Documento técnico explicado para cualquier persona</span><span>Sistema 1.0.44 · 24 de septiembre de 2026</span></div>
+</div>
+
+<!-- ═══════════════════════════ ÍNDICE Y RESUMEN ═══════════════════════════ -->
+<section style="break-before: auto;">
+  <div class="kicker">Antes de empezar</div>
+  <h2 style="margin: 4pt 0 10pt;">Qué vas a encontrar acá</h2>
+  <p class="lead">Este documento tiene dos partes. La primera explica <b>cómo está hecha la base de TIZADA PRO hoy</b>: qué se guarda, dónde, y cómo se une cada cosa. La segunda es una <b>propuesta</b> para que otro sistema mande los pedidos armados y el operario sólo tenga que revisar, cargar el arte y generar la tizada.</p>
+
+  <div class="indice">
+    <div><span class="n">1</span>Resumen en una página</div>
+    <div><span class="n">2</span>Los tres lugares donde vive la información</div>
+    <div><span class="n">3</span>Las tablas de la base y sus uniones</div>
+    <div><span class="n">4</span>El «catálogo»: la ficha completa de cada molde</div>
+    <div><span class="n">5</span>Los archivos: moldes, artes y tizadas</div>
+    <div><span class="n">6</span>Telas, planillas y usuarios</div>
+    <div><span class="n">7</span>Cómo se arma hoy un pedido</div>
+    <div><span class="n">8</span>El pedido que llega desde otro sistema</div>
+    <div><span class="n">9</span>Qué manda el otro sistema, paso por paso</div>
+    <div><span class="n">10</span>Cómo se enlaza cada dato</div>
+    <div><span class="n">10b</span>Lo que TIZADA publica de cada molde</div>
+    <div><span class="n">11</span>Cómo lo manda: la conexión</div>
+    <div><span class="n">12</span>Cómo construirlo en TIZADA PRO</div>
+    <div><span class="n">13</span>Lista de control para el otro sistema</div>
+    <div><span class="n">14</span>Palabras que se usan</div>
+  </div>
+
+</section>
+<section>
+  <div class="seccion-titulo"><div class="num">1</div><div><div class="kicker">Resumen</div><h2>En una página</h2></div></div>
+  <div class="grilla g2">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-database"></i></div><h4>La base (MSSQL)</h4><p>Guarda los usuarios y sus permisos, la ficha de cada molde (el «catálogo»), las piezas de cada molde con sus medidas por talle, y el estado de cada tizada que se está armando.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-folders"></i></div><h4>Los archivos</h4><p>Los moldes y los artes (.ai / .pdf) y las tizadas terminadas quedan como archivos en el servidor. La base guarda qué son y a quién pertenecen.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-device-desktop"></i></div><h4>La computadora de cada persona</h4><p>Hace el trabajo pesado: abrir moldes, dibujar y armar la tizada. El servidor sólo valida y guarda.</p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-plug-connected"></i></div><h4>La propuesta</h4><p>Que el otro sistema mande por una conexión segura el pedido ya armado: diseños, moldes, telas y planilla. TIZADA lo valida con las mismas reglas de la pantalla y lo deja listo para el operario.</p></div>
+  </div>
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-alert-triangle"></i> Lo más importante</div>
+    <p>Hoy <b>no existe</b> ninguna forma de que un pedido llegue armado desde afuera: todo lo que el operario carga vive en la pantalla hasta que genera la tizada, y los pedidos no se guardan en la base. La segunda parte de este documento explica <b>qué hay que construir</b> y <b>cómo tiene que mandarlo</b> el otro sistema.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 2. LOS TRES LUGARES ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num">2</div><div><div class="kicker">Parte 1 · Cómo está hecha</div><h2>Los tres lugares donde vive la información</h2></div></div>
+  <p class="lead">TIZADA PRO no guarda todo en un solo lugar. Cada tipo de dato vive donde mejor funciona: lo que se busca y se relaciona, en la base; los archivos grandes de dibujo, en el disco; y el cálculo pesado, en la computadora de quien trabaja.</p>
+  <div class="figura baja">
+<pre class="mermaid">
+flowchart LR
+  subgraph PC["🖥️ Computadora de la persona"]
+    N["Navegador<br/>(la pantalla de TIZADA)"]
+    M["Motor de dibujo<br/>abre moldes, arma la tizada"]
+  end
+  subgraph SRV["🗄️ Servidor de TIZADA"]
+    API["Programa del servidor<br/>valida y guarda"]
+    subgraph BD["Base MSSQL"]
+      T["Tablas<br/>usuarios · moldes · piezas · talles"]
+      C["Documento «catálogo»<br/>la ficha completa de cada molde"]
+    end
+    D["Disco<br/>moldes · artes · tizadas"]
+  end
+  W["🧵 Sistema de telas<br/>(user.com.uy)"]
+  N <--> API
+  N --- M
+  API <--> T
+  API <--> C
+  API <--> D
+  API -- "lista de telas" --> W
+</pre>
+    <div class="pie-fig">Cómo se reparte la información entre la computadora, el servidor y el sistema de telas.</div>
+  </div>
+  <div class="grilla g3">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-table"></i></div><h4>Tablas</h4><p>Datos ordenados en filas y columnas que se unen entre sí: un molde tiene piezas, cada pieza tiene medidas por talle.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-file-text"></i></div><h4>Documento «catálogo»</h4><p>Una ficha grande (formato JSON) guardada <b>dentro</b> de la base, con toda la configuración de cada molde. Se copia a las tablas cada vez que se guarda.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-file-vector"></i></div><h4>Archivos</h4><p>Los .ai y .pdf de moldes y artes, y los PDF de las tizadas. Siempre el vector original: nunca se rasteriza.</p></div>
+  </div>
+  <div class="caja c-info"><div class="t"><i class="ti ti-info-circle"></i> ¿Por qué un «documento» dentro de la base?</div>
+    <p>La ficha de un molde tiene muchísimas opciones (etiqueta, borde de corte, telas por pieza, grupos, variables, acomodo…) y cambia seguido. Guardarla como un documento completo permite agregar opciones nuevas sin cambiar las tablas. Para que nadie pise el cambio de otro, cada guardado lleva un <b>número de versión</b>: si otro guardó antes, TIZADA junta los dos cambios en vez de borrar uno.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 3. TABLAS ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num">3</div><div><div class="kicker">Parte 1 · Cómo está hecha</div><h2>Las tablas de la base y sus uniones</h2></div></div>
+  <p class="lead">La base se llama <code>TizadaPro</code> y tiene 28 tablas. Se crean solas al arrancar el servidor desde el archivo <code>db/schema.sql</code>. Las uniones (las «flechas» de los dibujos) dicen qué fila pertenece a cuál: por ejemplo, cada pieza pertenece a un molde.</p>
+
+  <h3><i class="ti ti-users"></i> Usuarios, roles y permisos</h3>
+  <div class="figura">
+<pre class="mermaid">
+erDiagram
+  USUARIO ||--o{ USUARIO_ROL : "tiene"
+  ROL ||--o{ USUARIO_ROL : "se le da a"
+  ROL ||--o{ ROL_PERMISO : "incluye"
+  PERMISO ||--o{ ROL_PERMISO : "está en"
+  USUARIO { int id PK
+    texto usuario "con el que entra"
+    texto nombre
+    binario password_hash "nunca en texto"
+    bit activo }
+  ROL { int id PK
+    texto clave "admin · operario · disenador" }
+  PERMISO { int id PK
+    texto clave "pedido.crear · molde.editar …" }
+</pre>
+    <div class="pie-fig">Una persona tiene uno o más roles; cada rol trae un conjunto de permisos.</div>
+  </div>
+
+  <h3><i class="ti ti-shirt"></i> Moldes, talles, piezas, diseños y variables</h3>
+  <div class="figura">
+<pre class="mermaid">
+erDiagram
+  PRODUCTO ||--o{ TALLE : "tiene"
+  PRODUCTO ||--o{ PIEZA : "tiene"
+  PIEZA ||--o{ PIEZA_TALLE : "mide en cada"
+  TALLE ||--o{ PIEZA_TALLE : ""
+  PRODUCTO ||--o{ DISENO : "tiene"
+  PRODUCTO ||--o{ VARIABLE : "tiene"
+  VARIABLE ||--o{ VARIABLE_PIEZA : "lleva"
+  PIEZA ||--o{ VARIABLE_PIEZA : ""
+  PRODUCTO { int id PK
+    texto nombre
+    texto legacy_id "prod_20260717_…"
+    texto variante_guia "talle guía" }
+  TALLE { int id PK
+    int producto_id FK
+    texto nombre "S · M · 2XL" }
+  PIEZA { int id PK
+    int producto_id FK
+    int id_en_molde "1..N dentro del molde"
+    texto nombre "Frente 2"
+    texto nombre_generico "Frente" }
+  PIEZA_TALLE { int pieza_id FK
+    int talle_id FK
+    decimal ancho_cm
+    decimal alto_cm }
+  DISENO { int id PK
+    int producto_id FK
+    texto nombre "JUGADOR" }
+  VARIABLE { int id PK
+    int producto_id FK
+    texto clave "v_jl31t5b"
+    texto label "Manga corta" }
+</pre>
+    <div class="pie-fig">El corazón: un <b>producto</b> es un molde; tiene talles y piezas, y cada pieza tiene su medida en cada talle.</div>
+  </div>
+</section>
+
+<section>
+  <h3 style="margin-top: 0;"><i class="ti ti-list-details"></i> Cada tabla, en palabras simples</h3>
+  <table>
+    <tr><th style="width: 22%">Tabla</th><th>Qué guarda</th><th style="width: 16%">¿Se usa hoy?</th></tr>
+    <tr><td><code>usuario</code></td><td>Cada persona que entra: usuario, nombre, contraseña cifrada, si está activa.</td><td class="si">Sí</td></tr>
+    <tr><td><code>rol</code> · <code>permiso</code></td><td>Los roles (admin, operario, diseñador) y las 18 acciones permitidas (crear pedido, editar molde…).</td><td class="si">Sí</td></tr>
+    <tr><td><code>usuario_rol</code> · <code>rol_permiso</code></td><td>Las uniones: qué roles tiene cada persona y qué permisos trae cada rol.</td><td class="si">Sí</td></tr>
+    <tr><td><code>producto</code></td><td>Cada <b>molde</b>: nombre, su código viejo (<code>prod_…</code>), talle guía, quién lo creó, si está activo.</td><td class="si">Sí</td></tr>
+    <tr><td><code>talle</code></td><td>Los talles de cada molde (S, M, L, 2XL…).</td><td class="si">Sí</td></tr>
+    <tr><td><code>pieza</code></td><td>Cada pieza del molde, con un <b>número propio que nunca se reusa</b>. El nombre es un dato, no la identidad.</td><td class="si">Sí</td></tr>
+    <tr><td><code>pieza_talle</code></td><td>La medida y ubicación de cada pieza en cada talle.</td><td class="si">Sí</td></tr>
+    <tr><td><code>diseno</code></td><td>Los diseños de cada molde (JUGADOR, GOLERO…).</td><td class="medio">Se escribe, no se lee</td></tr>
+    <tr><td><code>variable</code></td><td>Las variables del molde: qué piezas lleva cada versión (manga corta, cuello V…).</td><td class="medio">Se escribe, no se lee</td></tr>
+    <tr><td><code>variable_pieza</code></td><td>Qué piezas entran en cada variable.</td><td class="no">Queda vacía (ver pág. siguiente)</td></tr>
+    <tr><td><code>trabajo</code></td><td>El estado de cada tizada que se está armando: progreso, errores, resultado.</td><td class="si">Sí</td></tr>
+    <tr><td><code>config</code></td><td>Documentos completos: el <b>catálogo</b> y un contador de cambios.</td><td class="si">Sí</td></tr>
+    <tr><td><code>reserva</code></td><td>«Esto lo está editando fulano»: quién tiene abierto un molde o una planilla.</td><td class="si">Sí</td></tr>
+    <tr><td><code>config_molde</code></td><td>Configuraciones guardadas de un molde (nombres de piezas, etiqueta) para volver a usarlas.</td><td class="si">Sí</td></tr>
+    <tr><td><code>pedido</code> · <code>pedido_fila</code></td><td>Pensadas para guardar pedidos y las filas de la planilla.</td><td class="no">No se usan</td></tr>
+    <tr><td><code>tela</code> · <code>grupo_tela</code> · <code>pieza_tela</code>…</td><td>Pensadas para las telas. Las telas hoy vienen del sistema externo y viven en el catálogo.</td><td class="no">No se usan</td></tr>
+    <tr><td><code>mapeo_arte</code> · <code>editable</code> · <code>junta</code> · <code>fuente</code></td><td>Pensadas para qué mesa del arte va en qué pieza, los objetos editables, las piezas que van juntas y las tipografías. Hoy esa información está en el catálogo y en archivos.</td><td class="no">No se usan</td></tr>
+  </table>
+</section>
+
+<section>
+  <h3 style="margin-top: 0;"><i class="ti ti-link"></i> Cómo se identifica cada cosa</h3>
+  <div class="grilla g2">
+    <div class="caja c-bien" style="margin: 0;"><div class="t"><i class="ti ti-circle-check"></i> Regla de oro: por número, no por nombre</div>
+      <p>Cada pieza tiene un número que nunca cambia ni se reusa. El nombre («Frente 2») se puede repetir o cambiar: sirve para mostrar y agrupar, nunca para identificar.</p></div>
+    <div class="caja c-info" style="margin: 0;"><div class="t"><i class="ti ti-id-badge-2"></i> Los códigos que se ven</div>
+      <p>Molde: <code>prod_20260717_122028_ab12</code> · Variable: <code>v_jl31t5b</code> · Diseño: su nombre en minúsculas y sin espacios (<code>jugador</code>, <code>dise-o-1</code>).</p></div>
+  </div>
+
+  <h3><i class="ti ti-refresh"></i> Cómo se llenan las tablas</h3>
+  <div class="pasos">
+    <div class="paso"><div class="b">1</div><div class="x"><b class="tit">Alguien guarda algo de un molde</b>Por ejemplo, nombra una pieza o arma una variable. El cambio se guarda en el documento «catálogo», con su número de versión.</div></div>
+    <div class="paso"><div class="b">2</div><div class="x"><b class="tit">En la misma operación se copia a las tablas</b>El molde, sus talles, sus variables y sus diseños se actualizan en las tablas. Si algo falla, no se guarda nada (todo o nada).</div></div>
+    <div class="paso"><div class="b">3</div><div class="x"><b class="tit">Las piezas y sus medidas se vuelven a escribir</b>Cuando cambia el registro de piezas, se rehacen <code>pieza</code> y <code>pieza_talle</code> del molde y se sube un contador que avisa a las pantallas que refresquen.</div></div>
+  </div>
+
+  <div class="caja c-mal"><div class="t"><i class="ti ti-bug"></i> Tres detalles que se encontraron al preparar este documento</div>
+    <p><b>1.</b> <code>variable_pieza</code> queda vacía en todos los moldes actuales: la copia busca la pieza por su código viejo, que ya no existe. Hay que buscarla por su número dentro del molde.<br>
+    <b>2.</b> En <code>diseno</code> no se guarda el nombre corto de la carpeta (<code>jugador</code>) ni dónde está el arte.<br>
+    <b>3.</b> Los talles se guardan en orden alfabético («10, 12, 2XL, M…»), no en el orden del molde.</p>
+    <p class="chico">Hoy no afectan a nadie porque ninguna pantalla lee esas tablas, pero <b>hay que corregirlos antes de conectar otro sistema</b> (es el primer paso del plan, sección 12).</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 4. CATÁLOGO ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num m">4</div><div><div class="kicker">Parte 1 · Cómo está hecha</div><h2>El «catálogo»: la ficha completa de cada molde</h2></div></div>
+  <p class="lead">Es un único documento guardado en la tabla <code>config</code>. Adentro están todos los moldes con su configuración, las planillas, las telas y otros ajustes generales.</p>
+  <div class="grilla g3">
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-shirt"></i></div><h4>productos</h4><p>Cada molde con todo lo suyo (ver ejemplo abajo).</p></div>
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-table"></i></div><h4>plantillas_planillas</h4><p>Las planillas: qué columnas tiene cada una.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-adjustments"></i></div><h4>reglas_planilla</h4><p>Reglas de columnas: talle, manga corta/larga…</p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-texture"></i></div><h4>telas · grupos_telas</h4><p>Copia de las telas del sistema externo y cuáles se pueden combinar.</p></div>
+    <div class="tarjeta"><div class="ico i-g"><i class="ti ti-layout-grid"></i></div><h4>nesting_presets</h4><p>Cómo se acomodan las piezas en la tela (separación, giro, alto máximo).</p></div>
+    <div class="tarjeta"><div class="ico i-g"><i class="ti ti-school"></i></div><h4>tutoriales</h4><p>Las ayudas grabadas paso a paso.</p></div>
+  </div>
+  <h4>Un molde, resumido</h4>
+<pre class="json">{
+  <span class="k">"id"</span>: <span class="s">"prod_20260717_122028_ab12"</span>,          <span class="c">// el código del molde</span>
+  <span class="k">"nombre"</span>: <span class="s">"Camiseta fútbol"</span>,
+  <span class="k">"variante_guia"</span>: <span class="s">"M"</span>,                          <span class="c">// talle guía</span>
+  <span class="k">"variantes"</span>: [{                                  <span class="c">// las VARIABLES (qué piezas lleva cada versión)</span>
+    <span class="k">"clave"</span>: <span class="s">"v_jl31t5b"</span>, <span class="k">"label"</span>: <span class="s">"Manga corta cuello redondo"</span>,
+    <span class="k">"valores"</span>: [{ <span class="k">"label"</span>: <span class="s">"Frente 2"</span>, <span class="k">"pieza_id"</span>: <span class="n">13</span> }, …]
+  }],
+  <span class="k">"disenos"</span>: [{ <span class="k">"id"</span>: <span class="s">"jugador"</span>, <span class="k">"nombre"</span>: <span class="s">"JUGADOR"</span> }],
+  <span class="k">"telas_cfg"</span>: {                                    <span class="c">// qué telas puede usar cada pieza</span>
+    <span class="k">"todas"</span>: [<span class="s">"44"</span>, <span class="s">"77"</span>], <span class="k">"por_pieza"</span>: { <span class="k">"Cuello"</span>: [<span class="s">"77"</span>] }, <span class="k">"max_var"</span>: { <span class="k">"v_jl31t5b"</span>: <span class="n">2</span> }
+  },
+  <span class="k">"planilla_template_id"</span>: <span class="s">"plan_default"</span>,             <span class="c">// qué planilla usa</span>
+  <span class="k">"mapeo_columnas"</span>: { <span class="k">"talle"</span>: <span class="s">"talle"</span>, <span class="k">"nombre"</span>: <span class="s">"nombre"</span>, <span class="k">"numero"</span>: <span class="s">"numero"</span> },
+  <span class="k">"borde_corte"</span>: { … }, <span class="k">"etiqueta"</span>: { … }, <span class="k">"referencia_medida"</span>: <span class="s">"alto"</span>,
+  <span class="k">"creado_por"</span>: <span class="n">1</span>, <span class="k">"propio"</span>: <span class="n">false</span>
+}</pre>
+  <div class="caja c-info"><div class="t"><i class="ti ti-shield-lock"></i> Nadie pisa el cambio de otro</div>
+    <p>Cada vez que se guarda el catálogo se compara su número de versión. Si otra persona (u otro servidor) guardó en el medio, TIZADA vuelve a leer lo último, aplica encima sólo lo que cambió esta persona y reintenta. Si ni así puede, avisa y no borra nada.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 5. ARCHIVOS ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num a">5</div><div><div class="kicker">Parte 1 · Cómo está hecha</div><h2>Los archivos: moldes, artes y tizadas</h2></div></div>
+  <p class="lead">Los dibujos son archivos grandes y se guardan en el disco del servidor, en carpetas por molde. La base sabe cuáles son; los archivos tienen el dibujo.</p>
+<div class="arbol"><span class="d">entrada/</span>
+  <span class="d">prod_20260717_122028_ab12/</span>          <span class="c">← un molde</span>
+    <span class="f">plantilla.ai</span>                        <span class="c">← el molde (con versiones: plantilla.v2.ai…)</span>
+    <span class="f">arte.ai</span>                             <span class="c">← el arte principal</span>
+    <span class="d">disenos/</span>
+      <span class="d">jugador/</span>  <span class="f">arte.ai</span>                <span class="c">← el arte del diseño JUGADOR</span>
+      <span class="d">golero/</span>   <span class="f">arte.ai</span>
+<span class="d">datos/productos/</span>
+  <span class="d">prod_20260717_122028_ab12/</span>
+    <span class="f">piezas.json</span>                         <span class="c">← el número de cada pieza (nunca se reusa)</span>
+    <span class="d">disenos/jugador/</span>
+      <span class="f">mapeo_arte.json</span>                   <span class="c">← qué mesa del arte va en qué pieza, por variable</span>
+      <span class="f">validacion_arte.json</span>              <span class="c">← el arte se revisó y está bien</span>
+<span class="d">trabajos/</span>
+  <span class="d">&lt;id de la tizada&gt;/</span>                    <span class="c">← los PDF de la tizada y la ficha técnica</span>
+<span class="d">catalogo_fuentes/</span>                       <span class="c">← las tipografías (.ttf / .otf)</span></div>
+  <div class="grilla g2" style="margin-top: 10pt;">
+    <div class="caja c-bien" style="margin: 0;"><div class="t"><i class="ti ti-vector-bezier"></i> Siempre el vector original</div><p>El archivo del usuario nunca se modifica ni se convierte en imagen: lo que se ve en el arte es exactamente lo que sale estampado.</p></div>
+    <div class="caja c-info" style="margin: 0;"><div class="t"><i class="ti ti-history"></i> Versiones</div><p>Cuando se edita un molde o un arte se guarda una versión nueva (<code>arte.v2.ai</code>) y un marcador dice cuál es la vigente.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 6. TELAS / PLANILLAS / USUARIOS ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">6</div><div><div class="kicker">Parte 1 · Cómo está hecha</div><h2>Telas, planillas y usuarios</h2></div></div>
+
+  <h3><i class="ti ti-texture"></i> Telas: vienen del sistema de telas</h3>
+  <p>Las telas <b>no se crean en TIZADA</b>: se leen del sistema de telas de USER (<code>user.com.uy/api/external/telas</code>) con una clave privada guardada en el servidor. De cada tela se toma su <b>id</b>, su descripción, su código, moneda y precio; el ancho útil se calcula de la descripción («Bandera 1,60» → 160 cm menos un margen) y se puede corregir a mano.</p>
+  <div class="grilla g3">
+    <div class="tarjeta"><h4>1 · Lista general</h4><p>Todas las telas del sistema externo, con su ancho.</p></div>
+    <div class="tarjeta"><h4>2 · Por molde</h4><p>Qué telas puede usar el molde, y cuáles cada pieza (<code>telas_cfg</code>).</p></div>
+    <div class="tarjeta"><h4>3 · Por pedido</h4><p>Qué tela lleva cada pieza de cada diseño en este pedido.</p></div>
+  </div>
+
+  <h3><i class="ti ti-table"></i> Planillas: las columnas del pedido</h3>
+  <p>Cada molde usa una <b>planilla</b> (una plantilla de columnas). Cada columna tiene un <b>rol</b> que le dice a TIZADA qué significa:</p>
+  <table>
+    <tr><th style="width: 18%">Rol</th><th>Qué hace</th><th style="width: 30%">Ejemplo de valor</th></tr>
+    <tr><td><b>talle</b></td><td>Qué talle es la prenda. Obligatorio.</td><td><code>M</code>, <code>2XL</code>, <code>10</code></td></tr>
+    <tr><td><b>nombre</b></td><td>El nombre que se estampa.</td><td><code>PÉREZ</code></td></tr>
+    <tr><td><b>numero</b></td><td>El número que se estampa.</td><td><code>10</code>, <code>07</code></td></tr>
+    <tr><td><b>diseno</b></td><td>Qué diseño lleva esa fila (cuando el pedido tiene varios).</td><td><code>JUGADOR</code></td></tr>
+    <tr><td><b>manga</b> (opción)</td><td>Elige una opción de pieza del molde.</td><td><code>Corta</code> / <code>Larga</code></td></tr>
+    <tr><td><b>cantidad</b></td><td>Cuántas prendas iguales.</td><td><code>1</code></td></tr>
+    <tr><td>libre</td><td>Otros datos que el taller quiera anotar.</td><td>—</td></tr>
+  </table>
+  <p class="chico">Una columna puede ser texto, lista desplegable (con opciones fijas) u opción; y se puede marcar como obligatoria para fabricar.</p>
+
+  <h3><i class="ti ti-lock"></i> Usuarios y seguridad</h3>
+  <div class="grilla g2">
+    <div class="tarjeta"><h4>Contraseñas</h4><p>Nunca se guardan en texto: se guardan cifradas (PBKDF2, 260.000 vueltas). Después de 8 intentos fallidos hay que esperar un minuto.</p></div>
+    <div class="tarjeta"><h4>Sesión</h4><p>Al entrar se crea una sesión segura que dura 7 días. Cada acción se controla contra los permisos del rol y contra el dueño del molde.</p></div>
+  </div>
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-key"></i> Para otro sistema no hay llave todavía</div><p>Hoy la única forma de usar TIZADA es entrando con usuario y contraseña. No existe una «llave» (clave de API) para que otro sistema se conecte: hay que construirla (sección 11).</p></div>
+</section>
+
+<!-- ═══════════════════════════ 7. PEDIDO HOY ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num">7</div><div><div class="kicker">Parte 1 · Cómo está hecha</div><h2>Cómo se arma hoy un pedido</h2></div></div>
+  <p class="lead">Hoy el operario arma el pedido en la pantalla, paso por paso. Todo lo que carga queda en su pantalla; al servidor sólo le llega al final, cuando genera la tizada.</p>
+  <div class="figura">
+<pre class="mermaid">
+flowchart LR
+  A["<b>1 · Diseño</b><br/>¿Con base o con diseño?<br/>+ nombres de los diseños"] --> B["<b>2 · Moldes</b><br/>qué molde y qué variable<br/>lleva cada diseño"]
+  B --> C["<b>3 · Arte</b><br/>subir el arte de cada<br/>diseño y molde<br/>+ <b>tela de cada pieza</b>"]
+  C --> D["<b>4 · Planilla</b><br/>talle, nombre, número…<br/>una fila por prenda"]
+  D --> E["<b>5 · Tizadas</b><br/>se arman en la computadora<br/>y se guardan en el servidor"]
+  style A fill:#e0f7fb,stroke:#00b8d4
+  style B fill:#e0f7fb,stroke:#00b8d4
+  style C fill:#fde6f2,stroke:#d6007e
+  style D fill:#fff6d6,stroke:#f5b800
+  style E fill:#e3f6ee,stroke:#10a36b
+</pre>
+    <div class="pie-fig">Los pasos del pedido. Las telas se eligen dentro del paso del arte.</div>
+  </div>
+  <table>
+    <tr><th style="width: 20%">Paso</th><th>Qué se carga</th><th style="width: 28%">Qué lo frena</th></tr>
+    <tr><td><b>1 · Diseño</b></td><td>La forma de armar: <b>con base</b> (molde del catálogo + arte aparte) o <b>con diseño</b> (el cliente sube el molde con el diseño adentro). Después, los nombres de los diseños: JUGADOR, GOLERO…</td><td>Al menos un diseño.</td></tr>
+    <tr><td><b>2 · Moldes</b></td><td>Para cada diseño, qué moldes lleva y qué variable de cada molde (manga corta, cuello V…).</td><td>Cada diseño con al menos un molde.</td></tr>
+    <tr><td><b>3 · Arte y telas</b></td><td>El arte (.ai / .pdf) de cada diseño y molde, y la tela de cada pieza.</td><td>Falta arte, o piezas sin tela o sin diseño.</td></tr>
+    <tr><td><b>4 · Planilla</b></td><td>Una fila por prenda con las columnas de la planilla. Se puede pegar un CSV.</td><td>Columnas obligatorias vacías, opciones que el molde no tiene.</td></tr>
+    <tr><td><b>5 · Tizadas</b></td><td>La computadora arma las hojas y el servidor las guarda.</td><td>—</td></tr>
+  </table>
+  <div class="caja c-mal"><div class="t"><i class="ti ti-database-off"></i> Lo que hoy no se guarda</div><p>El pedido <b>no se guarda en la base</b>: las tablas <code>pedido</code> y <code>pedido_fila</code> existen pero están vacías. Los pasos 1 a 3 quedan en la memoria del navegador de esa computadora, y la planilla se pierde si se recarga la página. Por eso hoy no hay forma de que un pedido llegue armado desde otro lado.</p></div>
+</section>
+
+<!-- ═══════════════════════════ 8. PROPUESTA ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num m">8</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>El pedido que llega desde otro sistema</h2></div></div>
+  <p class="lead">La idea: el sistema de ventas (el que ya usa MSSQL) manda el pedido armado. TIZADA lo revisa con las mismas reglas de la pantalla y, si está bien, lo deja en una lista de <b>«Pedidos que llegaron»</b>. El operario lo abre, ve todo cargado, sube el arte y genera la tizada. <b>El otro sistema no manda archivos</b>: ni el molde ni el arte. Sólo dice qué molde de nuestra base usar.</p>
+  <div class="figura">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant V as 🏪 Sistema de ventas
+  participant T as 🗄️ TIZADA PRO (servidor)
+  participant O as 👷 Operario (su computadora)
+  V->>T: Pide la lista de moldes, telas y planillas
+  T-->>V: Moldes con sus piezas y talles, telas, columnas
+  V->>T: Manda el pedido (diseños, moldes, telas, planilla)
+  T->>T: Lo revisa con las reglas de la pantalla
+  alt Está bien
+    T-->>V: ✔ Recibido — número de pedido
+    T->>O: Aparece en «Pedidos que llegaron»
+    O->>T: Lo abre: todo cargado. Sube el arte de cada diseño
+    O->>O: Genera la tizada en su computadora
+    O->>T: Guarda las tizadas
+    T-->>V: (opcional) Aviso: «tizada lista»
+  else Tiene errores
+    T-->>V: ✘ Qué dato está mal y por qué
+  end
+</pre>
+    <div class="pie-fig">El recorrido completo de un pedido que llega desde el sistema de ventas.</div>
+  </div>
+  <div class="grilla g2">
+    <div class="caja c-bien" style="margin: 0;"><div class="t"><i class="ti ti-circle-check"></i> Lo que ya no hace el operario</div><p>Elegir cómo se arma, escribir los diseños, elegir moldes y variables, asignar telas pieza por pieza y cargar la planilla.</p></div>
+    <div class="caja c-ojo" style="margin: 0;"><div class="t"><i class="ti ti-hand-finger"></i> Lo que sigue haciendo</div><p>Revisar, subir el arte de cada diseño y tocar «Generar». La tizada se arma en <b>su</b> computadora: el servidor nunca hace el trabajo pesado.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 9. QUÉ MANDA ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num m">9</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>Qué manda el otro sistema, paso por paso</h2></div></div>
+  <p class="lead">El pedido viaja como un solo mensaje en formato JSON (texto ordenado que cualquier sistema sabe armar). Cada parte llena un paso del asistente.</p>
+
+  <div class="pasos">
+    <div class="paso"><div class="b">1</div><div class="x"><b class="tit">Paso 1 · Cómo se arma — no lo manda el otro sistema</b>Todo pedido que llega se arma con los moldes de <b>nuestra base</b> (el catálogo de TIZADA): TIZADA lo pone solo, no hay que mandar nada para este paso. <b>El otro sistema no manda ningún archivo</b>: ni molde ni arte; el arte lo sube el operario en TIZADA.</div></div>
+    <div class="paso"><div class="b">1b</div><div class="x"><b class="tit">Paso 1.b · Los diseños escritos</b>La lista de diseños con su nombre: JUGADOR, GOLERO, ARQUERO… Cada nombre tiene que ser único dentro del pedido.</div></div>
+    <div class="paso"><div class="b m">2</div><div class="x"><b class="tit">Paso 2 · El molde de cada diseño</b>Para cada diseño, qué molde de nuestra base usa (sólo su código: el molde ya está en TIZADA) y, si el molde tiene varias variables, cuál.</div></div>
+    <div class="paso"><div class="b a">3</div><div class="x"><b class="tit">Paso 3 · Las telas de cada pieza</b>Para cada molde de cada diseño: qué tela lleva cada pieza, por el nombre de la pieza («Frente», «Manga») y el <b>id de la tela del sistema de telas</b>.</div></div>
+    <div class="paso"><div class="b v">4</div><div class="x"><b class="tit">Paso 4 · La planilla</b>Una fila por prenda, con las columnas de la planilla del molde: diseño, talle, nombre, número, opciones y cantidad.</div></div>
+  </div>
+
+  <div style="break-inside: avoid;">
+  <h4>El mensaje completo, de ejemplo</h4>
+<pre class="json">{
+  <span class="k">"referencia"</span>: <span class="s">"OV-2026-00123"</span>,            <span class="c">// el número del pedido en el sistema de ventas (único)</span>
+  <span class="k">"cliente"</span>: <span class="s">"Club Atlético Ejemplo"</span>,
+  <span class="k">"disenos"</span>: [                              <span class="c">// PASO 1.b: los diseños</span>
+    {
+      <span class="k">"nombre"</span>: <span class="s">"JUGADOR"</span>,
+      <span class="k">"moldes"</span>: [                           <span class="c">// PASO 2: sus moldes</span>
+        {
+          <span class="k">"molde"</span>: <span class="s">"prod_20260717_122028_ab12"</span>,               <span class="c">// el molde de TIZADA elegido (sección 10)</span>
+          <span class="k">"variable"</span>: <span class="s">"Manga corta cuello redondo"</span>,
+          <span class="k">"telas"</span>: {                          <span class="c">// PASO 3: tela de cada pieza (id del sistema de telas)</span>
+            <span class="k">"Frente"</span>: <span class="s">"44"</span>, <span class="k">"Espalda"</span>: <span class="s">"44"</span>, <span class="k">"Manga"</span>: <span class="s">"44"</span>, <span class="k">"Cuello"</span>: <span class="s">"77"</span>
+          }
+        },
+        { <span class="k">"molde"</span>: <span class="s">"prod_20260718_091500_c3d4"</span>, <span class="k">"telas"</span>: { <span class="k">"Delantero"</span>: <span class="s">"44"</span>, <span class="k">"Trasero"</span>: <span class="s">"44"</span> } }
+      ]
+    },
+    { <span class="k">"nombre"</span>: <span class="s">"GOLERO"</span>, <span class="k">"moldes"</span>: [ { <span class="k">"molde"</span>: <span class="s">"prod_20260717_122028_ab12"</span>, <span class="k">"variable"</span>: <span class="s">"Manga larga"</span>, <span class="k">"telas"</span>: { … } } ] }
+  ],
+  <span class="k">"planilla"</span>: [                              <span class="c">// PASO 4: una fila por prenda</span>
+    { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"M"</span>, <span class="k">"nombre"</span>: <span class="s">"PÉREZ"</span>, <span class="k">"numero"</span>: <span class="s">"10"</span>, <span class="k">"cantidad"</span>: <span class="n">1</span> },
+    { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"L"</span>, <span class="k">"nombre"</span>: <span class="s">"RODRÍGUEZ"</span>, <span class="k">"numero"</span>: <span class="s">"07"</span>, <span class="k">"cantidad"</span>: <span class="n">1</span> },
+    { <span class="k">"diseno"</span>: <span class="s">"GOLERO"</span>, <span class="k">"talle"</span>: <span class="s">"L"</span>, <span class="k">"nombre"</span>: <span class="s">"GÓMEZ"</span>, <span class="k">"numero"</span>: <span class="s">"1"</span>, <span class="k">"cantidad"</span>: <span class="n">1</span> }
+  ],
+  <span class="k">"aviso_url"</span>: <span class="s">"https://ventas…/tizada-lista"</span>    <span class="c">// opcional: dónde avisar cuando la tizada esté lista</span>
+}</pre>
+  </div>
+</section>
+
+<section>
+  <h3 style="margin-top: 0;"><i class="ti ti-list-check"></i> Cada campo: qué es y cómo tiene que venir</h3>
+  <table>
+    <tr><th style="width: 23%">Campo</th><th style="width: 12%"></th><th>Cómo tiene que venir</th></tr>
+    <tr><td><code>referencia</code></td><td><span class="pill p-obl">obligatorio</span></td><td>El número del pedido en el sistema de ventas. Si se manda otra vez la misma referencia, se <b>actualiza</b> ese pedido (mientras no se haya generado), no se duplica.</td></tr>
+    <tr><td><code>cliente</code></td><td><span class="pill p-opc">opcional</span></td><td>Texto libre para que el operario lo reconozca.</td></tr>
+    <tr><td><code>disenos[].nombre</code></td><td><span class="pill p-obl">obligatorio</span></td><td>Texto, único en el pedido. Es el mismo que después va en la columna «diseño» de la planilla.</td></tr>
+    <tr><td><code>moldes[].molde</code></td><td><span class="pill p-obl">obligatorio</span></td><td>El <b>código del molde de TIZADA</b> (<code>prod_…</code>) que el sistema de ventas eligió al enlazar su artículo (sección 10).</td></tr>
+    <tr><td><code>moldes[].variable</code></td><td><span class="pill p-opc">si hay varias</span></td><td>El nombre de la variable tal como está en TIZADA (o su clave <code>v_…</code>). Si el molde tiene una sola, se puede omitir.</td></tr>
+    <tr><td><code>moldes[].telas</code></td><td><span class="pill p-obl">obligatorio</span></td><td>Pieza → id de tela. El nombre de la pieza es el <b>genérico</b> (sin número: «Manga», no «Manga 2»). Tienen que estar <b>todas</b> las piezas de la variable, y cada tela tiene que estar permitida para esa pieza.</td></tr>
+    <tr><td><code>planilla[]</code></td><td><span class="pill p-obl">obligatorio</span></td><td>Una fila por prenda. Las claves son las <b>columnas de la planilla del molde</b> (se piden a TIZADA). Todo como texto, salvo <code>cantidad</code> (número). Los números con cero adelante van entre comillas: <code>"07"</code>.</td></tr>
+    <tr><td><code>planilla[].diseno</code></td><td><span class="pill p-obl">con varios diseños</span></td><td>Igual a uno de los <code>disenos[].nombre</code>.</td></tr>
+    <tr><td><code>planilla[].talle</code></td><td><span class="pill p-obl">obligatorio</span></td><td>Tal cual lo tiene el molde: <code>M</code>, <code>2XL</code>, <code>10</code>. Si el talle no existe en el molde, la fila se rechaza.</td></tr>
+    <tr><td>opciones (<code>manga</code>…)</td><td><span class="pill p-opc">según planilla</span></td><td>Uno de los valores permitidos de esa columna (<code>Corta</code> / <code>Larga</code>), y el molde tiene que tener esa opción.</td></tr>
+    <tr><td><code>aviso_url</code></td><td><span class="pill p-opc">opcional</span></td><td>Si viene, TIZADA avisa ahí cuando la tizada está lista.</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 10. ENLACE ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num a">10</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>Cómo se enlaza cada dato</h2></div></div>
+  <p class="lead">Para que el pedido llegue bien, los dos sistemas tienen que hablar de las mismas cosas con los mismos códigos. <b>TIZADA publica lo que tiene y el otro sistema elige</b> y guarda el enlace en sus artículos: en TIZADA no se carga nada del otro sistema.</p>
+  <div class="figura baja2">
+<pre class="mermaid">
+flowchart LR
+  subgraph TIZ["🗄️ TIZADA PRO publica cada molde con lo asociado"]
+    b1["Molde<br/>código · nombre · foto"]
+    b2["Variables y piezas"]
+    b3["Telas del molde<br/>y cuáles acepta cada pieza"]
+    b5["Talles del molde"]
+    b4["Planilla del molde<br/>columnas y opciones"]
+  end
+  subgraph VEN["🏪 Sistema de ventas elige y guarda"]
+    a1["Su artículo<br/>+ el molde de TIZADA"]
+    a2["La variable"]
+    a3["La tela de cada pieza"]
+    a5["El talle de cada prenda"]
+    a4["Las columnas del pedido"]
+  end
+  b1 == "elige" ==> a1
+  b2 == "elige" ==> a2
+  b3 == "elige" ==> a3
+  b5 == "elige" ==> a5
+  b4 == "usa" ==> a4
+</pre>
+    <div class="pie-fig">TIZADA muestra lo que tiene; el sistema de ventas elige y guarda el enlace de su lado.</div>
+  </div>
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-alert-triangle"></i> Una regla que no se puede saltear</div><p>Todos los moldes de un pedido usan <b>la misma planilla</b> (las mismas columnas), igual que en la pantalla. Si no, van en pedidos separados.</p></div>
+  <table>
+    <tr><th style="width: 16%">Dato</th><th>Cómo se enlaza</th><th style="width: 30%">De dónde lo saca el otro sistema</th></tr>
+    <tr><td><b>Molde</b></td><td>En el sistema de ventas, cada artículo se enlaza con un molde nuestro <b>eligiéndolo de la lista</b> que publica TIZADA (con su nombre y su foto), y se guarda el <b>código del molde</b> (<code>prod_…</code>). Se hace <b>una sola vez</b> por artículo.</td><td>La lista de moldes que publica TIZADA.</td></tr>
+    <tr><td><b>Variable</b></td><td>Se elige de las variables del molde y se guarda su clave (<code>v_…</code>). También se acepta el nombre.</td><td>Las variables de cada molde que publica TIZADA.</td></tr>
+    <tr><td><b>Pieza</b></td><td>Por su nombre genérico («Frente», «Manga», «Cuello»).</td><td>La lista de piezas de cada variable que da TIZADA, con las telas permitidas.</td></tr>
+    <tr><td><b>Tela</b></td><td>Por el <b>id del sistema de telas</b> (user.com.uy): es el mismo id que ya usa TIZADA. No hay que traducir nada.</td><td>El sistema de telas.</td></tr>
+    <tr><td><b>Talle y columnas</b></td><td>El talle, elegido de los talles del molde. Las columnas, por el id de cada columna de su planilla; el <b>diseño</b>, por su nombre.</td><td>Los talles y la planilla de cada molde que publica TIZADA.</td></tr>
+  </table>
+
+</section>
+<section>
+  <div class="seccion-titulo"><div class="num a">10b</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>Lo que TIZADA publica de cada molde</h2></div></div>
+  <p class="lead">Cada molde se publica con <b>todo lo que tiene asociado</b>: sus talles, sus telas, su planilla y sus variables. Así, en el sistema de ventas, al elegir el molde de un artículo ya quedan a mano los talles para elegir, las telas que se pueden usar y las columnas que hay que llenar.</p>
+  <div class="grilla g3">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-shirt"></i></div><h4>Moldes</h4><p>Código, nombre y <b>foto</b> (miniatura), con todo lo que tiene asociado (las tarjetas de al lado). Sólo los moldes del catálogo listos para usar: no los propios de una persona ni los de un solo pedido.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-puzzle"></i></div><h4>Variables y piezas</h4><p>Cada variable del molde (manga corta, cuello V…) con sus piezas por nombre genérico.</p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-texture"></i></div><h4>Telas del molde</h4><p>Las telas que usa ese molde (id, nombre y ancho), cuáles acepta cada pieza y cuántas distintas admite la variable.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-ruler-2"></i></div><h4>Talles del molde</h4><p>Los talles de ESE molde, en su orden: en el sistema de ventas se elige el talle de esta lista, así nunca llega uno que el molde no tiene.</p></div>
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-table"></i></div><h4>Planilla del molde</h4><p>La planilla asociada al molde con sus columnas: id, nombre, rol, tipo, opciones permitidas y si es obligatoria.</p></div>
+    <div class="tarjeta"><div class="ico i-g"><i class="ti ti-refresh"></i></div><h4>Número de versión</h4><p>Cambia cada vez que se agrega o modifica un molde: así el sistema de ventas sabe cuándo refrescar su lista.</p></div>
+  </div>
+  <div style="break-inside: avoid;">
+  <h4>Ejemplo: un molde con todo lo que tiene asociado</h4>
+<pre class="json"><span class="c">// GET /api/externo/v1/moldes/prod_20260717_122028_ab12</span>
+{ <span class="k">"codigo"</span>: <span class="s">"prod_20260717_122028_ab12"</span>, <span class="k">"nombre"</span>: <span class="s">"Camiseta fútbol"</span>,
+  <span class="k">"foto"</span>: <span class="s">"/api/externo/v1/moldes/prod_20260717_122028_ab12/foto"</span>,
+  <span class="k">"talles"</span>: [<span class="s">"4"</span>, <span class="s">"6"</span>, <span class="s">"8"</span>, <span class="s">"XS"</span>, <span class="s">"S"</span>, <span class="s">"M"</span>, <span class="s">"L"</span>, <span class="s">"XL"</span>, <span class="s">"2XL"</span>],   <span class="c">// para elegir el talle</span>
+  <span class="k">"telas"</span>: [                                              <span class="c">// las telas que usa ESTE molde</span>
+    { <span class="k">"id"</span>: <span class="s">"44"</span>, <span class="k">"nombre"</span>: <span class="s">"Dryfit 1,60"</span>, <span class="k">"ancho_cm"</span>: <span class="n">157</span> },
+    { <span class="k">"id"</span>: <span class="s">"77"</span>, <span class="k">"nombre"</span>: <span class="s">"RIB"</span>, <span class="k">"ancho_cm"</span>: <span class="n">120</span> } ],
+  <span class="k">"planilla"</span>: {                                           <span class="c">// la planilla asociada</span>
+    <span class="k">"id"</span>: <span class="s">"plan_default"</span>, <span class="k">"nombre"</span>: <span class="s">"Estándar"</span>,
+    <span class="k">"columnas"</span>: [
+      { <span class="k">"id"</span>: <span class="s">"talle"</span>, <span class="k">"nombre"</span>: <span class="s">"Talle"</span>, <span class="k">"rol"</span>: <span class="s">"talle"</span>, <span class="k">"obligatoria"</span>: <span class="n">true</span> },
+      { <span class="k">"id"</span>: <span class="s">"nombre"</span>, <span class="k">"nombre"</span>: <span class="s">"Nombre"</span>, <span class="k">"rol"</span>: <span class="s">"nombre"</span> },
+      { <span class="k">"id"</span>: <span class="s">"numero"</span>, <span class="k">"nombre"</span>: <span class="s">"Número"</span>, <span class="k">"rol"</span>: <span class="s">"numero"</span> },
+      { <span class="k">"id"</span>: <span class="s">"manga"</span>, <span class="k">"nombre"</span>: <span class="s">"Manga"</span>, <span class="k">"rol"</span>: <span class="s">"manga"</span>, <span class="k">"opciones"</span>: [<span class="s">"Corta"</span>, <span class="s">"Larga"</span>] },
+      { <span class="k">"id"</span>: <span class="s">"cantidad"</span>, <span class="k">"nombre"</span>: <span class="s">"Cantidad"</span>, <span class="k">"rol"</span>: <span class="s">"cantidad"</span> } ] },
+  <span class="k">"variables"</span>: [                                          <span class="c">// versiones del molde</span>
+    { <span class="k">"clave"</span>: <span class="s">"v_jl31t5b"</span>, <span class="k">"nombre"</span>: <span class="s">"Manga corta cuello redondo"</span>, <span class="k">"telas_distintas_max"</span>: <span class="n">2</span>,
+      <span class="k">"piezas"</span>: [ { <span class="k">"pieza"</span>: <span class="s">"Frente"</span>, <span class="k">"telas"</span>: [<span class="s">"44"</span>, <span class="s">"77"</span>] },   <span class="c">// telas que acepta</span>
+                  { <span class="k">"pieza"</span>: <span class="s">"Cuello"</span>, <span class="k">"telas"</span>: [<span class="s">"77"</span>] }, … ] } ],
+  <span class="k">"version"</span>: <span class="n">1540</span> }</pre>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 11. CONEXIÓN ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">11</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>Cómo lo manda: la conexión</h2></div></div>
+  <p class="lead">Se recomienda una <b>conexión web segura (API)</b>: el sistema de ventas le habla a TIZADA por internet, con una <b>llave privada</b>, y TIZADA contesta en el momento si el pedido está bien o qué le falta.</p>
+
+  <h3><i class="ti ti-key"></i> La llave</h3>
+  <p>Se crea en TIZADA (Configuración › Integraciones) una llave para el sistema de ventas. El sistema de ventas la manda en cada pedido, en el encabezado <code>X-Api-Key</code>. Siempre por <code>https</code>. La llave se guarda cifrada y se puede anular en cualquier momento.</p>
+
+  <h3><i class="ti ti-route"></i> Las direcciones (a construir)</h3>
+  <table>
+    <tr><th style="width: 45%">Dirección</th><th>Para qué</th></tr>
+    <tr><td><code>GET /api/externo/v1/moldes</code></td><td>Lista de moldes para elegir: código, nombre, foto, talles, variables, planilla y número de versión.</td></tr>
+    <tr><td><code>GET /api/externo/v1/moldes/{código}/foto</code></td><td>La miniatura del molde, para mostrarla al elegir.</td></tr>
+    <tr><td><code>GET /api/externo/v1/moldes/{código}</code></td><td>Un molde en detalle: cada variable con sus piezas y las telas que acepta cada pieza.</td></tr>
+    <tr><td><code>GET /api/externo/v1/planillas/{id}</code></td><td>Las columnas de una planilla: id, nombre, rol, tipo, opciones y si es obligatoria.</td></tr>
+    <tr><td><code>GET /api/externo/v1/telas</code></td><td>Las telas con su ancho (las mismas del sistema de telas).</td></tr>
+    <tr><td><code>POST /api/externo/v1/pedidos</code></td><td><b>Manda el pedido.</b> Contesta «recibido» con el número de pedido de TIZADA, o la lista de errores.</td></tr>
+    <tr><td><code>GET /api/externo/v1/pedidos/{referencia}</code></td><td>En qué estado está: pendiente, arte cargado, tizada lista, cancelado.</td></tr>
+    <tr><td><code>DELETE /api/externo/v1/pedidos/{referencia}</code></td><td>Cancela un pedido que todavía no se generó.</td></tr>
+  </table>
+
+  <div class="grilla g2">
+  <div><h4 style="margin-top: 0;">Si está bien</h4>
+<pre class="json"><span class="c">// 201 Recibido</span>
+{ <span class="k">"pedido"</span>: <span class="n">1532</span>, <span class="k">"referencia"</span>: <span class="s">"OV-2026-00123"</span>, <span class="k">"estado"</span>: <span class="s">"pendiente_arte"</span>,
+  <span class="k">"falta"</span>: [<span class="s">"Arte de JUGADOR · Camiseta fútbol"</span>] }</pre></div>
+  <div><h4 style="margin-top: 0;">Si tiene errores</h4>
+<pre class="json"><span class="c">// 422 No se pudo recibir: nada se guardó</span>
+{ <span class="k">"errores"</span>: [
+  { <span class="k">"campo"</span>: <span class="s">"disenos[0].moldes[0].telas"</span>, <span class="k">"mensaje"</span>: <span class="s">"Falta la tela de la pieza «Puño»"</span> },
+  { <span class="k">"campo"</span>: <span class="s">"planilla[4].talle"</span>, <span class="k">"mensaje"</span>: <span class="s">"El molde «Camiseta fútbol» no tiene el talle «5XL»"</span> }
+] }</pre></div>
+  </div>
+
+</section>
+
+<!-- ═══════════════════════════ 12. CONSTRUIRLO ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num">12</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>Cómo construirlo en TIZADA PRO</h2></div></div>
+  <p class="lead">Se construye en etapas. Cada una funciona sola y se puede probar antes de seguir.</p>
+  <div class="etapas">
+    <div class="et" style="background:#fdeceb;border-color:#e0443a"><b>Etapa 0</b>Corregir la copia a las tablas</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="background:#e0f7fb;border-color:#00b8d4"><b>Etapa 1</b>Guardar el pedido y el código del molde</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="background:#e0f7fb;border-color:#00b8d4"><b>Etapa 2</b>La API con llave</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="background:#fde6f2;border-color:#d6007e"><b>Etapa 3</b>«Pedidos que llegaron»</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="background:#e3f6ee;border-color:#10a36b"><b>Etapa 4</b>Llaves, historial y avisos</div>
+  </div>
+  <div class="grilla g2">
+    <div class="tarjeta"><div class="ico i-g"><i class="ti ti-tool"></i></div><h4>Etapa 0 · Arreglar lo que falta</h4><p>Que <code>variable_pieza</code> busque la pieza por su número dentro del molde y se rehaga después de guardar las piezas; que <code>diseno</code> guarde su nombre corto y la ruta del arte; que los talles se guarden en el orden del molde.</p></div>
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-database-plus"></i></div><h4>Etapa 1 · Guardar el pedido</h4><p>Usar las tablas <code>pedido</code> y <code>pedido_fila</code> (hoy vacías) y agregar: diseños del pedido, moldes de cada diseño y tela de cada pieza, y de qué sistema vino cada pedido.</p></div>
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-api"></i></div><h4>Etapa 2 · La API</h4><p>Las direcciones de la sección 11, protegidas con la llave. La revisión usa las <b>mismas reglas</b> que la pantalla (telas obligatorias, opciones del molde, columnas obligatorias, talles), así nunca entra algo que la pantalla rechazaría.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-inbox"></i></div><h4>Etapa 3 · Para el operario</h4><p>En Pedido, una lista «Pedidos que llegaron» con su estado. Al abrir uno, el asistente se llena solo: diseños, moldes, variables, telas y planilla. Queda sólo subir el arte de cada diseño.</p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-settings"></i></div><h4>Etapa 4 · Administrar</h4><p>Crear y anular llaves, ver qué pedidos llegaron y cuáles se rechazaron (con el motivo), y el aviso «tizada lista» al sistema de ventas.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-test-pipe"></i></div><h4>Cómo se comprueba</h4><p>Un pedido de prueba con dos diseños y dos moldes contra una base de prueba: se revisa que se rechacen los errores, que el asistente se llene igual que cargado a mano, y que la tizada salga idéntica.</p></div>
+  </div>
+
+  <div style="break-inside: avoid;">
+  <h4>Las tablas nuevas del pedido</h4>
+  <div class="figura alta">
+<pre class="mermaid">
+erDiagram
+  INTEGRACION ||--o{ PEDIDO : "manda"
+  PEDIDO ||--o{ PEDIDO_DISENO : "tiene"
+  PEDIDO_DISENO ||--o{ PEDIDO_MOLDE : "lleva"
+  PEDIDO_MOLDE ||--o{ PEDIDO_TELA : "tela por pieza"
+  PEDIDO ||--o{ PEDIDO_FILA : "planilla"
+  PRODUCTO ||--o{ PEDIDO_MOLDE : ""
+  INTEGRACION { int id PK
+    texto nombre "Sistema de ventas"
+    binario llave_cifrada
+    texto aviso_url }
+  PEDIDO { int id PK
+    texto referencia "OV-2026-00123"
+    texto estado "pendiente · listo · generado"
+    texto cliente }
+  PEDIDO_DISENO { int id PK
+    texto nombre "JUGADOR" }
+  PEDIDO_MOLDE { int id PK
+    int producto_id FK
+    texto variable
+    texto arte "pendiente · cargado" }
+  PEDIDO_TELA { int pedido_molde_id FK
+    texto pieza "Frente"
+    texto tela_id "44" }
+  PEDIDO_FILA { int id PK
+    texto diseno
+    texto talle
+    texto campos "nombre, número, opciones" }
+</pre>
+    <div class="pie-fig">Cómo quedaría guardado un pedido que llega desde afuera.</div>
+  </div>
+  </div>
+  <div class="caja c-info"><div class="t"><i class="ti ti-database-export"></i> Otra forma posible: por la base</div><p>El sistema de ventas podría escribir el pedido en una <b>tabla de entrada</b> de la misma base MSSQL. Es más simple, pero no se entera en el momento de los errores y ata los dos sistemas a las tablas. <b>Se recomienda la API.</b></p></div>
+</section>
+
+<!-- ═══════════════════════════ 13. CHECKLIST ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">13</div><div><div class="kicker">Parte 2 · La propuesta</div><h2>Lista de control para el otro sistema</h2></div></div>
+  <p class="lead">Lo que tiene que tener listo quien programe el sistema de ventas para que los pedidos entren a la primera.</p>
+  <div class="pasos">
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">Guardar la llave de TIZADA en un lugar seguro</b>Nunca dentro del código ni en una pantalla. Mandarla en el encabezado <code>X-Api-Key</code>, siempre por https.</div></div>
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">Enlazar cada artículo con su molde de TIZADA</b>Mostrar la lista que publica TIZADA (<code>/moldes</code>, con foto), elegir el molde de cada artículo y guardar su código. Cuando cambie el número de versión, refrescar la lista y revisar los enlaces.</div></div>
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">Usar los nombres de piezas, talles y variables que da TIZADA</b>Leerlos de la API (se pueden guardar y refrescar una vez por día), nunca escribirlos a mano.</div></div>
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">Mandar la tela de todas las piezas</b>Con el id del sistema de telas, y sólo telas permitidas para esa pieza.</div></div>
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">Una fila de planilla por prenda</b>Con las columnas de la planilla del molde. Todos los moldes del pedido con la misma planilla. Talles exactos. Números como texto.</div></div>
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">Leer la respuesta</b>Si vuelve un error, mostrar el mensaje a quien cargó el pedido: dice qué dato está mal. Mandar de nuevo con la misma referencia lo corrige.</div></div>
+    <div class="paso"><div class="b v">✓</div><div class="x"><b class="tit">No mandar archivos</b>Ni moldes ni artes: sólo el código del molde de nuestra base. El arte lo sube el operario en TIZADA.</div></div>
+  </div>
+  <div class="caja c-mag"><div class="t"><i class="ti ti-bulb"></i> Resumen para quien decide</div>
+    <p>Con esto, el pedido se carga <b>una sola vez</b>, en el sistema de ventas. TIZADA lo recibe revisado con sus propias reglas, el operario sólo revisa, carga el arte de cada diseño y genera. Menos errores de tipeo, y el pedido llega igual a como se vendió.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 14. GLOSARIO ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num a">14</div><div><div class="kicker">Para no perderse</div><h2>Palabras que se usan</h2></div></div>
+  <table>
+    <tr><th style="width: 22%">Palabra</th><th>Qué quiere decir</th></tr>
+    <tr><td><b>Molde</b> (producto)</td><td>El archivo con las piezas de una prenda en todos sus talles.</td></tr>
+    <tr><td><b>Pieza</b></td><td>Cada parte de la prenda: frente, espalda, manga, cuello…</td></tr>
+    <tr><td><b>Talle guía</b></td><td>El talle que se usa de referencia para acomodar y medir.</td></tr>
+    <tr><td><b>Variable</b></td><td>Una versión del molde con ciertas piezas: manga corta o larga, cuello redondo o en V.</td></tr>
+    <tr><td><b>Diseño</b></td><td>Un arte con nombre (JUGADOR, GOLERO) que se estampa sobre los moldes.</td></tr>
+    <tr><td><b>Arte</b></td><td>El archivo .ai o .pdf con el diseño, una mesa de trabajo por pieza.</td></tr>
+    <tr><td><b>Planilla</b></td><td>La tabla del pedido: una fila por prenda con talle, nombre, número…</td></tr>
+    <tr><td><b>Tizada</b></td><td>El PDF final con todas las piezas acomodadas sobre la tela, listo para imprimir.</td></tr>
+    <tr><td><b>Catálogo</b></td><td>El documento de la base con la configuración completa de todos los moldes.</td></tr>
+    <tr><td><b>MSSQL</b></td><td>El programa de base de datos (Microsoft SQL Server) donde se guarda la información.</td></tr>
+    <tr><td><b>JSON</b></td><td>Una forma de escribir datos ordenados como texto, que cualquier sistema entiende.</td></tr>
+    <tr><td><b>API</b></td><td>Una «puerta» para que un sistema le hable a otro por internet, con reglas claras.</td></tr>
+    <tr><td><b>Llave (clave de API)</b></td><td>La contraseña que usa un sistema (no una persona) para entrar por la API.</td></tr>
+    <tr><td><b>Tabla / fila / columna</b></td><td>Como una hoja de cálculo: cada tabla guarda un tipo de cosa, cada fila es una, cada columna un dato.</td></tr>
+    <tr><td><b>Unión (clave foránea)</b></td><td>El dato que dice a qué pertenece una fila: por ejemplo, de qué molde es una pieza.</td></tr>
+  </table>
+  <p class="chico" style="margin-top: 14pt;">Documento generado a partir del código del sistema (versión 1.0.44) y de la base en funcionamiento, el 24 de septiembre de 2026. Las secciones 8 a 13 son una propuesta: describen lo que hay que construir.</p>
+</section>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true, securityLevel: 'loose',
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'Inter, Segoe UI, sans-serif', fontSize: '13px',
+      primaryColor: '#e0f7fb', primaryBorderColor: '#00b8d4', primaryTextColor: '#16202a',
+      secondaryColor: '#fde6f2', tertiaryColor: '#f7f9fb', lineColor: '#5b6875',
+      clusterBkg: '#f7fafc', clusterBorder: '#c9d3dc',
+      actorBkg: '#e0f7fb', actorBorder: '#00b8d4', noteBkgColor: '#fff6d6', noteBorderColor: '#f5b800',
+      attributeBackgroundColorOdd: '#ffffff', attributeBackgroundColorEven: '#f3f7fa'
+    },
+    er: { useMaxWidth: true }, flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }, sequence: { useMaxWidth: true }
+  });
+</script>
+</body>
+</html>
