@@ -604,10 +604,24 @@ export function anidarContorno(piezas, cfg) {
   }
   let estrategias = cfg.estrategias ?? ['bl', 'bandas']
   if (piezas.length > 12) estrategias = ['bl']
+  // 🔴 GIRAR NO SIEMPRE ACORTA (MAPA 579). El acomodo es codicioso: pone cada pieza donde menos
+  // alarga AHORA, y con giros de costado (90°, libre) eso puede dejar la mesa más larga que sin
+  // girar (medido: 5 dorsos + 5 mangas en 180 cm, 226,8 cm girando contra 208,4 sin girar). Así
+  // que, si alguna pieza puede ir de costado, se prueba TAMBIÉN sólo con 0° y 180° y gana la más
+  // corta. Nunca da peor que antes: la variante con todos los ángulos se sigue probando.
+  const variantes = [null]
+  if (piezas.some((p) => p._candidatos_angulo.some((c) => c.ang % 180 !== 0))) variantes.push(new Set([0, 180]))
+  // LOS DOS MODOS DEL ATAJO DE PIEZAS IGUALES COMPITEN (MAPA 579). «Libre» (el de siempre) arma
+  // filas prolijas de iguales y rinde en pedidos grandes; «acotado» no deja que el atajo alargue la
+  // mesa y rinde en mesas chicas (el reporte: 5 mangas en fila bajo un hueco vacío, 263 → 208 cm).
+  // Medido: ninguno gana siempre, así que se prueban los dos y gana la mesa más corta. El acotado es
+  // ~2× más lento: arriba de 200 piezas (donde medido siempre perdió) no se prueba.
+  const modos = [{ acotado: false, repuestoTodos: true }]
+  if (piezas.length <= 200) modos.push({ acotado: true, repuestoTodos: true })
   let mejor = null
-  for (const orden of ordenes) {
+  for (const soloAng of variantes) for (const modo of modos) for (const orden of ordenes) {
     for (const est of estrategias) {
-      const { colocaciones, area } = anidarEstrategia(piezas, cfg, est, orden, prep)
+      const { colocaciones, area } = anidarEstrategia(piezas, cfg, est, orden, prep, soloAng, modo)
       let consumo = 0
       for (const h of colocaciones) {
         if (!h.length) continue
@@ -621,15 +635,56 @@ export function anidarContorno(piezas, cfg) {
   return { colocaciones: mejor.colocaciones, area: mejor.area, consumo: mejor.consumo }
 }
 
+/**
+ * COPIA (MAPA 581): con `cfg.por_fila`, cada FILA de la planilla (`pieza._fila`) se acomoda SOLA y
+ * sale en su(s) propia(s) mesa(s); las mesas van en el orden de las filas. Devuelve lo mismo que
+ * `anidarContorno` + `mesas`: una entrada por mesa, `{fila (1…), copias}` (la cantidad de la fila,
+ * que ya no multiplica prendas: es un dato para el sistema que imprime). Sin `por_fila`, `mesas`
+ * es null y todo es lo de siempre. Mismo algoritmo que `anidar_por_fila` de Python.
+ */
+export function anidarPorFila(piezas, cfg) {
+  if (!cfg || !cfg.por_fila) return { ...anidarContorno(piezas, cfg), mesas: null }
+  const grupos = new Map()
+  for (const p of piezas) {
+    const k = Number.isInteger(p._fila) ? p._fila : -1
+    if (!grupos.has(k)) grupos.set(k, [])
+    grupos.get(k).push(p)
+  }
+  const colocaciones = [], mesas = []
+  let area = 0, consumo = 0
+  for (const k of [...grupos.keys()].sort((a, b) => a - b)) {
+    const g = grupos.get(k)
+    const r = anidarContorno(g, cfg)
+    for (const h of r.colocaciones) {
+      if (!h.length) continue
+      colocaciones.push(h)
+      mesas.push({ fila: k >= 0 ? k + 1 : null, copias: Math.max(1, Math.trunc(Number(g[0]._copias) || 1)) })
+    }
+    area += r.area
+    consumo += r.consumo || 0
+  }
+  return { colocaciones, area, consumo, mesas }
+}
+
 function bboxGirado(p, ang) {
   const th = ang * (Math.PI / 180)                      // math.radians
   return [Math.abs(p.w * Math.cos(th)) + Math.abs(p.h * Math.sin(th)),
           Math.abs(p.w * Math.sin(th)) + Math.abs(p.h * Math.cos(th))]
 }
 
-/** `_anidar_estrategia(piezas, cfg, estrategia, orden, prep)` → `{colocaciones, area}`. */
-export function anidarEstrategia(piezas, cfg, estrategia, orden, prep) {
+/** `_anidar_estrategia(piezas, cfg, estrategia, orden, prep, soloAng)` → `{colocaciones, area}`.
+ * `soloAng` (Set o null): sólo esos ángulos (si a una pieza no le queda ninguno, los suyos). */
+export function anidarEstrategia(piezas, cfg, estrategia, orden, prep, soloAng = null, modo = {}) {
   const { cellPt, anchoC, altoC, paso } = prep
+  // `modo.acotado`: el atajo de piezas iguales no puede alargar la mesa. `modo.repuestoTodos`: la
+  // repetida que no entró al lado de su anterior prueba TODOS los ángulos (no sólo el de ésa).
+  const acotado = !!modo.acotado, repuestoTodos = !!modo.repuestoTodos
+  const candsDe = (p) => {
+    const c = p._candidatos_angulo
+    if (!soloAng) return c
+    const f = c.filter((k) => soloAng.has(k.ang))
+    return f.length ? f : c
+  }
   const hojasG = [], hojasSky = [], colocaciones = []
   const nuevaHoja = () => {
     hojasG.push(hojaNueva(altoC, anchoC)); hojasSky.push(0); colocaciones.push([])
@@ -665,7 +720,7 @@ export function anidarEstrategia(piezas, cfg, estrategia, orden, prep) {
 
   for (const i of orden) {
     const p = piezas[i]
-    const candidatosPorAngulo = p._candidatos_angulo
+    const candidatosPorAngulo = candsDe(p)
     if (!candidatosPorAngulo.length) throw new Error(`La pieza ${p.etiqueta} no entra en la hoja con ninguna rotación permitida.`)
     let colocada = false
     const u = bloques ? (ultimo.get(p._geo_key) ?? null) : null
@@ -677,7 +732,10 @@ export function anidarEstrategia(piezas, cfg, estrategia, orden, prep) {
         const xx = xEnFila(G, yy, mt, desde)
         if (xx >= 0) { pos = [yy, xx]; break }
       }
-      if (pos && cabe(G, pos[0], pos[1], mt)) {
+      // 🔴 MODO ACOTADO (MAPA 579): «al lado de la última igual» abría una fila NUEVA abajo aunque
+      // arriba quedara un hueco donde entraba (5 mangas en fila bajo un hueco: +54 cm en una mesa de
+      // 2 m). Acotado, sólo se acepta si la pieza queda dentro de lo ya usado (`sky`).
+      if (pos && (!acotado || pos[0] + mt.h <= hojasSky[u.h]) && cabe(G, pos[0], pos[1], mt)) {   // ver `modo`
         colocar(u.h, p, u.ang, pos[0], pos[1], u.mrCol, mt)
         colocada = true
         DEBUG.bloque++
@@ -687,8 +745,10 @@ export function anidarEstrategia(piezas, cfg, estrategia, orden, prep) {
     else DEBUG.sin_ultimo++
     if (colocada) continue
     DEBUG.fft++
+    // Los ángulos a probar. Una repetida que no entró al lado de su anterior: con `repuestoTodos`,
+    // TODOS (sólo el de la anterior dejaba 20 cm de más con giro de 90°, MAPA 579); si no, el suyo.
     let fases
-    if (u) {
+    if (u && !repuestoTodos) {
       const mismo = candidatosPorAngulo.filter((c) => c.ang === u.ang)
       fases = [mismo.length ? mismo : candidatosPorAngulo]
     } else if (p.rotacion === 'libre' && candidatosPorAngulo.length > 8) {

@@ -717,7 +717,8 @@ const TAREAS = {
     }
     avance(0.02, 'Acomodando las piezas en la tela')
     const _t = { t0: performance.now() }
-    const { colocaciones, area } = N.anidarContorno(piezas, cfg)
+    // COPIA (MAPA 581): con `cfg.por_fila`, una mesa por fila y `mesas` = {fila, copias} de cada una
+    const { colocaciones, area, mesas: mesasFila } = N.anidarPorFila(piezas, cfg)
     _t.acomodar = performance.now()
     avance(0.40, 'Armando la hoja')
     const origenes = {}
@@ -745,7 +746,7 @@ const TAREAS = {
     try { rip = (await import('./rip/verificar.js')).verificarRip(mupdf, pdf) }
     catch (e) { rip = { ok: false, fallas: [`no se pudo revisar la hoja: ${(e && e.message) || e}`] } }
     const _s = (a, b) => Math.round((b - a) / 100) / 10
-    const r = { pdf, consumoCm: hoja.consumoCm, alturasCm: hoja.alturasCm, area, validaciones, rip,
+    const r = { pdf, consumoCm: hoja.consumoCm, alturasCm: hoja.alturasCm, area, validaciones, rip, mesas: mesasFila,
                 piezas: colocaciones.reduce((n, h) => n + h.length, 0),
                 // cuánto tardó cada etapa de ESTA hoja, en segundos (queda en el pedido guardado)
                 tiempos: { acomodar: _s(_t.t0, _t.acomodar), armar: _s(_t.acomodar, _t.armar), rip: _s(_t.armar, _t.rip),

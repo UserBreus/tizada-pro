@@ -74,7 +74,13 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
 // `manual` = las familias de la etiqueta fijadas a mano (`etiqueta_archivo.json`.manual). 🔴 Al
 // RETOMAR o al cambiar el interruptor de la etiqueta hay que pasarlas: sin esto las páginas se
 // rehacían con la decisión automática y lo que el usuario había elegido se perdía.
-export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, manual = {} } = {}) {
+// `soloBase`: Configuración › Moldería sólo acepta moldes LIMPIOS. Se mira igual si el archivo trae
+// el diseño adentro y, si lo trae, NO se sube: se corta con `MOLDE_CON_DISENO` (regla del usuario
+// 2026-09-28, MAPA 576). Antes se subía como camino B y quedaba en el stock un molde «con diseño»
+// que el pedido abría con «Piezas y etiqueta» aunque se hubiera elegido «Cargar base».
+// (Las subidas del PEDIDO —Mis artículos, molde con diseño incluido— siguen aceptándolo.)
+export const MOLDE_CON_DISENO = 'Ese molde viene con diseño incluido. Quitá la máscara de recorte y el diseño y subí tu molde limpio.'
+export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {} } = {}) {
   let pool = null
   let cerrado = false
   const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
@@ -102,7 +108,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
       }
     }
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
-    const caminoA = esDxf || soloSiTraeDiseno
+    const caminoA = esDxf || soloSiTraeDiseno || soloBase
     // el camino A lee el molde en UN hilo (el alta es secuencial); el B abre el archivo en todos
     pool = crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'preparar molde')
     const info = await abrirEnPool(pool, bytes)
@@ -111,6 +117,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
       if (!esA) {
         onA && onA({ texto: 'Mirando si trae el diseño adentro…' })
         esA = !(await pareceConDiseno(pool)).si
+        if (!esA && soloBase) { const e = new Error(MOLDE_CON_DISENO); e.conDiseno = true; throw e }
       }
       if (esA) {
         onA && onA({ texto: 'Detectando las piezas y los talles…' })
@@ -149,7 +156,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     }
   } catch (e) {
     cerrar()
-    if (e && e.capacidad) throw e
+    if (e && (e.capacidad || e.conDiseno)) throw e   // el aviso del molde con diseño va tal cual
     throw new Error(mensajeDeError(e))
   }
 }

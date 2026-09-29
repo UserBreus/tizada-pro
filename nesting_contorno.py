@@ -283,20 +283,70 @@ def anidar_contorno(piezas, cfg):
     if len(piezas) > 12:
         estrategias = ["bl"]
         
+    # 🔴 GIRAR NO SIEMPRE ACORTA (MAPA 579): el acomodo es codicioso y con giros de costado puede
+    # dejar la mesa más larga que sin girar. Si alguna pieza puede ir de costado, se prueba TAMBIÉN
+    # sólo con 0° y 180° y gana la más corta (la variante con todos los ángulos se sigue probando).
+    variantes = [None]
+    if any(c[0] % 180 != 0 for p in piezas for c in p["_candidatos_angulo"]):
+        variantes.append({0, 180})
+    # LOS DOS MODOS DEL ATAJO DE PIEZAS IGUALES COMPITEN (MAPA 579): «libre» (filas prolijas, rinde
+    # en pedidos grandes) y «acotado» (el atajo no alarga la mesa, rinde en mesas chicas). Ninguno
+    # gana siempre: gana la mesa más corta. Arriba de 200 piezas el acotado no se prueba.
+    modos = [{"acotado": False, "repuesto_todos": True}]
+    if len(piezas) <= 200:
+        modos.append({"acotado": True, "repuesto_todos": True})
     mejor = None
-    for orden in ordenes:
+    for solo_ang in variantes:
+     for modo in modos:
+      for orden in ordenes:
         for est in estrategias:
-            coloc, area = _anidar_estrategia(piezas, cfg, est, orden, prep)
+            coloc, area = _anidar_estrategia(piezas, cfg, est, orden, prep, solo_ang, modo)
             consumo = sum(max(c["cy"] + c["bh"] / 2 for c in h) for h in coloc if h)
             if mejor is None or consumo < mejor[0]:
                 mejor = (consumo, coloc, area)
     return mejor[1], mejor[2]
 
 
-def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
+def anidar_por_fila(piezas, cfg):
+    """COPIA (MAPA 581): con `cfg['por_fila']`, cada FILA de la planilla (`pieza['_fila']`) se
+    acomoda SOLA y sale en su(s) propia(s) mesa(s), en el orden de las filas. Devuelve
+    `(colocaciones, area, mesas)`; `mesas` = una entrada por mesa `{fila (1…), copias}` (la cantidad
+    de la fila como DATO, ya no multiplica prendas). Sin `por_fila`: `mesas` = None y lo de siempre.
+    Mismo algoritmo que `anidarPorFila` del navegador."""
+    if not (cfg or {}).get("por_fila"):
+        coloc, area = anidar_contorno(piezas, cfg)
+        return coloc, area, None
+    grupos = {}
+    for p in piezas:
+        k = p.get("_fila")
+        k = k if isinstance(k, int) else -1
+        grupos.setdefault(k, []).append(p)
+    colocaciones, mesas, area = [], [], 0.0
+    for k in sorted(grupos):
+        g = grupos[k]
+        coloc, a = anidar_contorno(g, cfg)
+        for h in coloc:
+            if not h:
+                continue
+            colocaciones.append(h)
+            try:
+                _c = max(1, int(float(g[0].get("_copias") or 1)))
+            except (TypeError, ValueError):
+                _c = 1
+            mesas.append({"fila": (k + 1) if k >= 0 else None, "copias": _c})
+        area += a
+    return colocaciones, area, mesas
+
+
+def _anidar_estrategia(piezas, cfg, estrategia, orden, prep, solo_ang=None, modo=None):
     """Coloca las piezas en el `orden` dado con la `estrategia`. Devuelve
-    (hojas, area_piezas_cm2). hoja = [colocacion, ...]."""
+    (hojas, area_piezas_cm2). hoja = [colocacion, ...]. `solo_ang`: sólo esos ángulos (si a una
+    pieza no le queda ninguno, los suyos)."""
     cell_pt, ancho_c, alto_c, esp_c, paso = prep
+    # `acotado`: el atajo de piezas iguales no puede alargar la mesa. `repuesto_todos`: la repetida
+    # que no entró al lado de su anterior prueba TODOS los ángulos (no sólo el de ésa). MAPA 579.
+    _acotado = bool((modo or {}).get("acotado"))
+    _repuesto_todos = bool((modo or {}).get("repuesto_todos"))
 
     hojas_G, hojas_sky, colocaciones = [], [], []
 
@@ -346,6 +396,8 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
     for i in orden:
         p = piezas[i]
         candidatos_por_angulo = p["_candidatos_angulo"]
+        if solo_ang is not None:
+            candidatos_por_angulo = [c for c in candidatos_por_angulo if c[0] in solo_ang] or candidatos_por_angulo
         if not candidatos_por_angulo:
             raise ValueError(f"La pieza {p['etiqueta']} no entra en la hoja con ninguna rotación permitida.")
 
@@ -364,7 +416,10 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
                     _pos.append((yy, xx))
                     break
             for yy, xx in _pos:
-                if _cabe(G, yy, xx, mr_test_u):
+                # 🔴 MODO ACOTADO (MAPA 579): «al lado de la última igual» abría una fila NUEVA abajo
+                # aunque arriba quedara un hueco donde entraba (+54 cm en una mesa de 2 m). Acotado,
+                # sólo dentro de lo ya usado; si no, búsqueda completa.
+                if (not _acotado or yy + hh <= hojas_sky[h_u]) and _cabe(G, yy, xx, mr_test_u):
                     dy, dx = (hh - mr_col_u.shape[0]) // 2, (ww - mr_col_u.shape[1]) // 2
                     G[yy + dy:yy + dy + mr_col_u.shape[0], xx + dx:xx + dx + mr_col_u.shape[1]] |= mr_col_u
                     hojas_sky[h_u] = max(hojas_sky[h_u], yy + hh)
@@ -394,7 +449,9 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep):
         #    múltiplos de 90°, después ±2 pasos alrededor del mejor (8 FFT en vez de 24, misma
         #    calidad en la práctica: los ángulos vecinos casi no cambian la altura resultante);
         #  · el resto: todos sus candidatos.
-        if _u:
+        # (una repetida que no entró al lado de su anterior: con `repuesto_todos` prueba TODOS los
+        #  ángulos — sólo el de la anterior dejaba 20 cm de más con giro de 90°, MAPA 579)
+        if _u and not _repuesto_todos:
             _fases = [[c for c in candidatos_por_angulo if c[0] == _u[1]] or candidatos_por_angulo]
         elif p.get("rotacion") == "libre" and len(candidatos_por_angulo) > 8:
             _grueso = [c for c in candidatos_por_angulo if c[0] % 90 == 0] or candidatos_por_angulo[:4]

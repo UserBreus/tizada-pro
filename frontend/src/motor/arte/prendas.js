@@ -24,16 +24,19 @@ export function partesDeLibre(prenda, piezasNombres) {
     let opciones = (tg.opciones || []).map((o) => String(o).trim().toLowerCase()).filter(Boolean)
     if (opcion && !opciones.includes(opcion)) opciones = opciones.concat([opcion])
     if (!clave || !opcion) continue
-    norm.push([clave, opcion.split(/\s+/), opciones.filter((o) => o !== opcion).map((o) => o.split(/\s+/))])
+    // varias elegidas (Repo, «Corta + Larga», MAPA 580); sin `elegidas`, una sola
+    let elegidas = (tg.elegidas || []).map((o) => String(o).trim().toLowerCase()).filter(Boolean)
+    if (!elegidas.length) elegidas = [opcion]
+    norm.push([clave, elegidas.map((o) => o.split(/\s+/)), opciones.filter((o) => !elegidas.includes(o)).map((o) => o.split(/\s+/))])
   }
   if (!norm.length) return piezasNombres.slice()
   let out = []
   for (const p of piezasNombres) {
     const tset = new Set(tokensPieza(p))
     let incluir = true
-    for (const [clave, sel, otras] of norm) {
+    for (const [clave, sels, otras] of norm) {
       if (!tset.has(clave)) continue
-      if (sel.every((t) => tset.has(t))) continue
+      if (sels.some((sel) => sel.every((t) => tset.has(t)))) continue
       if (otras.some((o) => o.every((t) => tset.has(t)))) { incluir = false; break }
     }
     if (incluir) out.push(p)
@@ -72,6 +75,13 @@ export function piezasDe(prenda, registro) {
     }
     permit = new Set(prenda.variante_idx.map((i) => idxANombre[Number(i)]).filter(Boolean))
   }
-  if (!permit || !permit.size) return base
-  return base.filter((p) => permit.has(p))
+  const conVar = (!permit || !permit.size) ? base : base.filter((p) => permit.has(p))
+  // PIEZAS A IMPRIMIR (MAPA 577): las apagadas en el paso Arte no se generan. Por nombre GENÉRICO
+  // en minúscula, igual que `piezas_de` del motor Python (y que las telas).
+  const fuera = new Set(prenda.piezas_fuera || [])
+  const sinFuera = !fuera.size ? conVar
+    : conVar.filter((p) => !fuera.has(String(p).replace(/\s+\d+\s*$/, '').trim().toLowerCase()))
+  // REPO (reposición, MAPA 578): la fila pide SÓLO estas piezas (nombre EXACTO). Sin lista = todas.
+  const solo = new Set(prenda.piezas_solo || [])
+  return solo.size ? sinFuera.filter((p) => solo.has(p)) : sinFuera
 }

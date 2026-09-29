@@ -152,7 +152,8 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       for (const toggles of combos) {
         // `_molde_guia_ficha`: la guía muestra el diseño como se ve desde el inicio, «NOMBRE» y «00»
         // (regla del usuario 2026-09-16); los nombres y números de cada prenda están en la tabla
-        const pr = { ...(md.prendas[0] || {}), talle, toggles, nombre: 'NOMBRE', numero: '00', personalizacion: { nombre: 'NOMBRE', numero: '00', talle } }
+        // `piezas_solo: null`: la guía muestra la prenda entera aunque la 1ª fila sea de reposición (MAPA 578)
+        const pr = { ...(md.prendas[0] || {}), piezas_solo: null, talle, toggles, nombre: 'NOMBRE', numero: '00', personalizacion: { nombre: 'NOMBRE', numero: '00', talle } }
         for (const pieza of piezasDe(pr, registro)) {
           if ((solo.size && !solo.has(pieza)) || vistas.has(pieza)) continue
           const info = (registro[pieza] || {})[talle]
@@ -293,6 +294,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
         const tela = (md.asignacion_tela && md.asignacion_tela[pieza]) || (PIEZAS_RIB.has(pieza) ? 'RIB' : 'Principal')
         items.push([tela, { w: r.w, h: r.h, base: { id: r.baseId }, estampado: r.estampado, pieza, talle: t,
                                  variante: pr.variante_clave || null, etiqueta: String(nro).padStart(2, '0'),
+                                 _fila: Number.isInteger(pr._fila) ? pr._fila : null, _copias: pr._copias || 1,   // COPIA (MAPA 581)
                                  rotacion: rot, borde_cm: 0, _molde: md.pid, _mesa: null }])
         totalPiezas++
         }
@@ -349,6 +351,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
           const tela = (md.asignacion_tela && md.asignacion_tela[pieza]) || (PIEZAS_RIB.has(pieza) ? 'RIB' : 'Principal')
           items.push([tela, { w: r.w, h: r.h, base: bases.get(bk), estampado: r.estampado, pieza, talle: t,
                                    variante: pr.variante_clave || null, etiqueta: String(nro).padStart(2, '0'),
+                                 _fila: Number.isInteger(pr._fila) ? pr._fila : null, _copias: pr._copias || 1,   // COPIA (MAPA 581)
                                    rotacion: rot, borde_cm: 0, _molde: md.pid, _mesa: mesa }])
           totalPiezas++
         }
@@ -411,6 +414,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       hojas.push({ tela, archivo, paginas: r.alturasCm.length, consumo_cm: pyRound(Number(r.consumoCm), 1),
                    alturas_cm: r.alturasCm, ancho_cm: pyRound(Number(cfg.ancho_cm), 1),
                    aprovechamiento: denom > 0 ? pyRound(100 * r.area / denom, 1) : 0.0, previews: [],
+                   ...(r.mesas ? { mesas: r.mesas } : {}),   // COPIA: {fila, copias} de cada mesa (MAPA 581)
                    grupo: grupo.nombre, moldes: grupo.nombres })
       validaciones.push(...r.validaciones)
       _rip.push({ archivo, ok: !!(r.rip && r.rip.ok), fallas: (r.rip && r.rip.fallas) || [] })

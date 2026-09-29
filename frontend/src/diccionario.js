@@ -748,9 +748,9 @@ export const DICCIONARIO = {
                mide: (E) => E.pedido.nFilas, unidad: 'fila' },
   },
   'planilla-cantidad': {
-    nombre: 'Columna cantidad',
+    nombre: 'Cantidad',
     que: 'Enciende la columna Cantidad: una fila con cantidad 5 sale 5 veces en la tizada, con el mismo talle, nombre y número. Oculta, cada fila vale 1.',
-    como: 'Tocá «Columna cantidad».',
+    como: 'Tocá «Cantidad».',
   },
   'planilla-lote': {
     nombre: 'Cargar por lote',
@@ -1272,8 +1272,63 @@ export const DICCIONARIO = {
   },
   'telas-actualizar': {
     nombre: 'Actualizar telas',
-    que: 'Vuelve a traer la lista de telas desde el sistema de stock.',
+    que: 'Hace ahora lo mismo que la actualización de las 00 hs: trae las telas nuevas del sistema de stock y da de baja las que ya no vienen (no se borran ni pierden su mesa: sólo no se pueden usar).',
     como: 'Tocá «Actualizar».',
+  },
+  'molderia-marcado-con-diseno': {
+    nombre: 'Molde con diseño incluido',
+    que: 'Este molde del stock se subió con el diseño adentro (máscaras de recorte con dibujo), por eso en el pedido se abre como molde con diseño en vez de pedir el arte. Moldería sólo acepta moldes limpios.',
+    como: 'Quitá la máscara de recorte y el diseño en Illustrator y tocá «Re-subir Plantilla» con el molde limpio.',
+  },
+  'planilla-copia': {
+    nombre: 'Copia',
+    que: 'Con la columna Cantidad a la vista: cada fila sale en su propia mesa y la cantidad NO repite la prenda, queda como cuántas copias imprimir de esa mesa (se ve en el resultado y en el nombre del archivo). Apagado, la cantidad repite la prenda y todo se acomoda junto.',
+    como: 'Prendelo si cada fila es una mesa que se imprime varias veces.',
+  },
+  'planilla-repo': {
+    nombre: 'Repo (reposición)',
+    que: 'Prendido, cada fila puede hacer sólo algunas piezas: aparece la columna «Piezas» y se eligen tocándolas en el dibujo del talle de la fila. Una fila sin piezas elegidas hace todas las del paso anterior. Apagado, todas las filas hacen todas sus piezas.',
+    como: 'Prendelo y tocá «Todas» en la fila que es una reposición.',
+  },
+  'planilla-repo-piezas': {
+    nombre: 'Piezas de la fila',
+    que: 'Qué piezas hace esta fila: «Todas» o cuántas elegiste. Hace falta el talle de la fila.',
+    como: 'Tocalo para abrir el dibujo de su talle y elegir las piezas.',
+  },
+  'planilla-repo-modal': {
+    nombre: 'Elegir las piezas de la fila',
+    que: 'El molde de la fila en su talle. Las piezas tocadas se ponen rosas y son las únicas que se hacen. Las apagadas en «Piezas a imprimir» no se pueden elegir. Sin ninguna elegida, la fila hace todas.',
+    como: 'Tocá las piezas (en el dibujo o en los nombres de abajo) y «Listo». Con las flechas pasás a otra fila.',
+  },
+  'arte-panel-modo': {
+    nombre: 'Diseño o Piezas a imprimir',
+    que: 'Dos íconos al costado del panel de la derecha. «Diseño» muestra los diseños del arte (lo de siempre). «Piezas» muestra las piezas para prender o apagar las que no van en la tizada. El número rosa dice cuántas hay apagadas.',
+    como: 'Tocá «Piezas» para elegir qué se imprime; «Diseño» para volver.',
+  },
+  'arte-piezas-imprimir': {
+    nombre: 'Piezas a imprimir',
+    que: 'La lista de piezas de esta prenda. Una pieza apagada no sale en la tizada, no se ve en el visor y no pide tela. Se apaga en todos los talles.',
+    como: 'Tocá una pieza (en la lista o en el molde) para apagarla o prenderla.',
+  },
+  'arte-piezas-todas': {
+    nombre: 'Activar todas',
+    que: 'Vuelve a prender todas las piezas de esta prenda.',
+    como: 'Tocalo para que se impriman todas.',
+  },
+  'arte-piezas-ninguna': {
+    nombre: 'Desactivar todas',
+    que: 'Apaga todas las piezas de esta prenda. Sirve para después prender sólo las que van. Con todas apagadas no se puede pasar a la planilla.',
+    como: 'Tocalo y después prendé las que sí se imprimen.',
+  },
+  'telas-sin-medida': {
+    nombre: 'Telas sin medida',
+    que: 'Telas que el sistema de stock trae sin decir su ancho. Se ven acá, aparte, pero no se pueden usar en moldes ni pedidos. Escribiéndoles la mesa de trabajo a mano pasan a la lista de arriba y ya se usan.',
+    como: 'Escribí la mesa (cm) de la tela que quieras usar.',
+  },
+  'telas-sync': {
+    nombre: 'Actualización diaria',
+    que: 'Todos los días a las 00 hs el sistema trae solo las telas del stock. Acá ves cuándo fue la última, qué telas entraron y cuáles se dieron de baja. Si falló (sin internet), vuelve a probar cada 5 minutos.',
+    como: 'Revisá qué cambió en la última actualización.',
   },
   'telas-margen': {
     nombre: 'Margen de la mesa',

@@ -2598,6 +2598,24 @@ def _guard_permiso(clave):
     return None
 
 
+# UNA CONEXIÓN DE LECTURA POR PEDIDO (MAPA 582): va ANTES de la guardia (que ya lee la base para
+# saber quién sos). Se cierra en `teardown_request`, que Flask corre SIEMPRE, con o sin error.
+@app.before_request
+def _abrir_lectura_compartida():
+    try:
+        db.abrir_compartida()
+    except Exception:
+        pass
+
+
+@app.teardown_request
+def _cerrar_lectura_compartida(_exc=None):
+    try:
+        db.cerrar_compartida()
+    except Exception:
+        pass
+
+
 @app.before_request
 def _guardia_moldes():
     """SEGURIDAD en dos capas, para TODA la API:
@@ -3036,12 +3054,32 @@ def _favicon():
 _REG_DB_CACHE = {}   # pid -> (rev, registro): caché de lectura, validada contra registro_rev
 
 
+def _rev_registro(pid):
+    """`registro_rev` de un molde (None si no está en la base).
+
+    🔴 UNA CONEXIÓN POR PEDIDO DE LA PANTALLA, NO DOS POR MOLDE (2026-09-28, MAPA 582). Cada consulta
+    abre una conexión nueva (el reciclado de pyodbc está APAGADO a propósito, MAPA 549) y conectar
+    cuesta ~0,4 s. `GET /api/productos` preguntaba la revisión 2 veces por molde: con 3 moldes, 2,5 s
+    de conexiones, y la pantalla lo vuelve a pedir después de CADA toque (p. ej. los botones «de qué
+    columna toma el talle», reporte del usuario). En un GET (que no escribe el registro) se leen TODAS
+    las revisiones de una vez y se reusan en ese mismo pedido; en cualquier otro método —donde el
+    registro puede cambiar a mitad del pedido— se sigue preguntando fresco."""
+    if has_request_context() and request.method == "GET":
+        _m = getattr(g, "_revs_memo", None)
+        if _m is None:
+            _m = {str(r["legacy_id"]): r["registro_rev"]
+                  for r in db.filas("SELECT legacy_id, registro_rev FROM producto")}
+            g._revs_memo = _m
+        return _m.get(str(pid))
+    return db.registro_rev(pid)
+
+
 def _reg_rev(pid):
     """Revisión del registro en la base — la señal de versión para TODAS las claves de caché
     (reemplaza al mtime del JSON: sin espejo no hay archivo que mirar). -1 si la base no
     responde: invalida siempre, y el error real lo da la lectura."""
     try:
-        return db.registro_rev(pid) or 0
+        return _rev_registro(pid) or 0
     except Exception:
         return -1
 
@@ -3053,7 +3091,7 @@ def _cargar(nombre, pid=None, sub=None):
     # validada por `registro_rev` (1 query barata); la escritura la invalida además localmente.
     if nombre == "registro_producto.json" and sub is None:
         _pid = pid or _get_active_producto_id()
-        rev = db.registro_rev(_pid)          # si la base está caída, esto LEVANTA — a propósito
+        rev = _rev_registro(_pid)            # si la base está caída, esto LEVANTA — a propósito
         if rev is None:
             return None                      # el molde no existe en la base → sin registro
         hit = _REG_DB_CACHE.get(_pid)
@@ -3516,9 +3554,17 @@ def _escribir_deteccion_paquete(pid, destino, det):
         os.replace(tmpf, fp)
 
 
+# Configuración › Moldería sólo acepta moldes LIMPIOS (regla del usuario 2026-09-28, MAPA 576): un
+# archivo con máscaras de recorte y el diseño adentro quedaba en el stock como camino B y el pedido
+# lo abría con «Piezas y etiqueta» aunque se eligiera «Cargar base». Mismo texto que
+# `MOLDE_CON_DISENO` (frontend/src/motor/prepararMolde.js).
+_MOLDE_CON_DISENO_AVISO = ("Ese molde viene con diseño incluido. Quitá la máscara de recorte y el diseño "
+                           "y subí tu molde limpio.")
+
+
 def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                            _corresp_nueva, _con_diseno, _motivo_b, _t_subida, paquete=None,
-                           sabe_sin_diseno=False):
+                           sabe_sin_diseno=False, solo_base=False):
     """LO CARO de subir un molde: leerlo, detectar las piezas y dejarlo en su lugar.
 
     🔴 Corre FUERA del hilo que atiende la llamada web. Medido el 2026-09-10 con el molde real del
@@ -3531,10 +3577,21 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     """
     nombre = (_ARCH or "").lower()      # el nombre del archivo, que acá sólo sirve para ver si es DXF
     _det_paq = None                       # detección del navegador (camino A): se escribe al final
+    # EL TIEMPO DE CADA PASO (2026-09-29, MAPA 583): el registro decía sólo el total («subida de
+    # GOLERA PR.ai: 33.5s») y no había forma de saber en qué se iban los segundos. Ahora cada paso
+    # queda anotado en la misma línea.
+    _pasos, _t_paso = [], [_t_subida]
+
+    def _paso(nombre_paso):
+        _ahora = time.time()
+        _pasos.append(f"{nombre_paso} {_ahora - _t_paso[0]:.1f}")
+        _t_paso[0] = _ahora
+    _paso("recibir y esperar lugar")
     if paquete:
         # El navegador ya lo preparó entero: acá sólo se valida y se guarda (ver arriba).
         try:
             _fase_paq, alta = _paquete_molde_aplicar(tmp, paquete, fases=("completo", "contornos", "alta_a"))
+            _paso("guardar el paquete del navegador")
         except Exception as e:
             _descartar_tmp(tmp)
             return None, (f"no se pudo guardar el molde: {e}", 422)
@@ -3595,6 +3652,10 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         except Exception as e:
             print(f"[subir_plantilla] no se pudo mirar si trae diseño adentro: {e}")
             _motivo_b = ""
+        if _con_diseno and solo_base:
+            # Moldería: el molde con el diseño adentro NO entra (el de antes queda intacto)
+            _descartar_tmp(tmp)
+            return None, (_MOLDE_CON_DISENO_AVISO, 422)
         try:
             if _con_diseno:
                 # Alta EXACTA: los talles son capas de la misma mesa, así que la correspondencia
@@ -3654,6 +3715,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     # Todo lo de arriba se hizo sobre el temporal. Si llegamos hasta acá, el archivo sirve.
     # ⚠️ En Windows `os.replace` falla con WinError 5 si algún proceso tiene el PDF abierto, así
     # que primero se cierran los documentos que dejó el procesado (§10.b del mapa).
+    _paso("leer / validar")
     try:
         MP.cerrar_abiertos()
     except Exception:
@@ -3663,6 +3725,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     except Exception as e:
         _descartar_tmp(tmp)
         return None, (f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}", 422)
+    _paso("reemplazar el archivo")
     _en_hilo(lambda: _sha1_registrar(destino))    # para no volver a subirlo (ver `_sha1_buscar`)
     # ── LA MARCA DEL CAMINO, CON EL ARCHIVO YA EN SU LUGAR ──────────────────────────────────────
     # Va DESPUÉS del `os.replace` a propósito: si se marcara el temporal y la subida fallara,
@@ -3693,6 +3756,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     # o quedaría vigente una versión que ya no corresponde a este archivo. Va DESPUÉS del
     # reemplazo: si la subida falla, el molde viejo y sus versiones quedan intactos.
     OA.reset_versiones(destino)
+    _paso("marcas y versiones")
     # Correspondencia EXACTA pieza↔talle del DXF (Piece Name + Size): la usan el nido y el registro
     # para NO adivinar el emparejado entre talles. Va acá, con el molde ya reemplazado.
     if _corresp_nueva:
@@ -3740,6 +3804,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         print(f"[subir_plantilla] no se pudieron resetear las variables: {e}")
     finally:
         _soltar_edicion_catalogo()
+    _paso("catálogo")
     try:
         db.borrar_piezas_molde(_pid_reset)   # la base también arranca de cero
     except Exception as e:
@@ -3752,6 +3817,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                   "registro quedan como estaban.", molde=_pid_reset, error=str(e)[:300])
         return None, (f"no se pudo preparar la base para el molde nuevo: {e}", 500)
     _guardar_registro(_pid_reset, alta["registro"], reset=True)
+    _paso("piezas en la base")
     # EL TALLE DE GUÍA, PUESTO (2026-09-07). Un molde subido (o RE-subido) quedaba sin
     # `variante_guia` en el catálogo: la pantalla mostraba como guía la que eligió la detección,
     # que no está guardada en ningún lado — elegir en el selector ESA misma no cambiaba nada y
@@ -3765,6 +3831,7 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     # estaban en la mano). Se guarda para que nombrar piezas y ubicar la etiqueta abran al
     # instante en vez de releer el archivo, que es lo que cuesta 52 s por talle.
     _visor_guardar(_pid_reset, alta.get("visor"))
+    _paso("talle guía y visor")
     resumen = {"archivo": _ARCH, "mesas": alta["mesas"], "piezas": alta["piezas"],
                "talles": alta["talles"],
                "completitud": f"{len(alta['completos'])}/{len(alta['talles'])} talles completos",
@@ -3807,8 +3874,9 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         # También va por `_en_hilo`, por lo mismo que la precarga de arriba: el desplegado abre
         # el molde y, sin cerrarlo, lo deja trabado justo cuando el usuario puede re-subirlo.
         _en_hilo(lambda: _prewarm_desplegado(destino, list(alta.get("talles") or []), alta))
+    _paso("resto")
     print(f"  [tiempos] subida de {_ARCH}: {time.time() - _t_subida:.1f}s"
-          + (f" ({_motivo_b})" if _con_diseno else ""), flush=True)
+          + (f" ({_motivo_b})" if _con_diseno else "") + " · pasos (s): " + " · ".join(_pasos), flush=True)
     MON.anotar("navegador" if paquete else "servidor", "molde", f"{_ARCH} · {'con' if _con_diseno else 'sin'} diseño"
                + (" (lo preparó el navegador; el servidor guardó)" if paquete else " (lo leyó el servidor)"), time.time() - _t_subida)
     return resumen, None
@@ -3830,6 +3898,10 @@ def subir_plantilla():
     # «0» = el navegador YA miró el archivo y no trae el diseño adentro: no se vuelve a adivinar
     # (eran 12 s leyendo dos mesas). Sin el campo (pantallas viejas, scripts), se adivina como antes.
     _SABE_SIN = str(request.form.get("con_diseno") or "") == "0"
+    # «solo_base=1» = viene de Configuración › Moldería, que no acepta moldes con el diseño adentro.
+    _SOLO_BASE = str(request.form.get("solo_base") or "") == "1"
+    if _SOLO_BASE and _PIDE_B:
+        return jsonify({"error": _MOLDE_CON_DISENO_AVISO}), 422
     destino = _ruta_entrada("plantilla.ai", pid=_PID, original=True)
     _pq = request.files.get("paquete")        # el molde ya preparado por el navegador (PLAN_NAVEGADOR)
     _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
@@ -3893,6 +3965,20 @@ def subir_plantilla():
     _tocar_trabajo(tid, progreso="leyendo el archivo")
 
     def _correr_alta():
+        # las LECTURAS de este trabajo van por una sola conexión (MAPA 582/583); se cierra al final
+        try:
+            db.abrir_compartida()
+        except Exception:
+            pass
+        try:
+            _correr_alta_de_verdad()
+        finally:
+            try:
+                db.cerrar_compartida()
+            except Exception:
+                pass
+
+    def _correr_alta_de_verdad():
         # Cupo: varias altas a la vez se pelean por la CPU y terminan TODAS más tarde. Se atienden
         # de a `_ALTAS_A_LA_VEZ` y al resto se le dice que está esperando lugar. El molde que trae
         # su paquete del navegador no calcula nada y va por su propio cupo (`_SEM_PAQUETE`).
@@ -3906,7 +3992,8 @@ def subir_plantilla():
                 _tocar_trabajo(tid, estado="generando", progreso="leyendo el archivo")
                 res, err = _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                                                   _corresp_nueva, _con_diseno, _motivo_b, _t_subida,
-                                                  paquete=_paquete, sabe_sin_diseno=_SABE_SIN)
+                                                  paquete=_paquete, sabe_sin_diseno=_SABE_SIN,
+                                                  solo_base=_SOLO_BASE)
             finally:
                 sem.release()
             if err:
@@ -6309,6 +6396,12 @@ def _toggles_disponibles(prod, cat, reg=None):
              "*": MP.opciones_soportadas(todas, tg["clave"], tg["opciones"])}
         for _cl, _nombres in por_var.items():
             d[_cl] = MP.opciones_soportadas(_nombres, tg["clave"], tg["opciones"])
+        # Los NOMBRES de las piezas que mencionan la clave, por alcance (MAPA 580): con sólo la
+        # cuenta, la planilla no puede descontar las apagadas en «Piezas a imprimir» (que se
+        # apagan por genérico). Son pocas (las mangas), no todo el molde.
+        _cl0 = str(tg["clave"]).strip().lower()
+        _con = lambda ns: [n for n in (ns or []) if _cl0 in set(MP.tokens_pieza(n))]
+        d["piezas"] = {"*": _con(todas), **{_cl: _con(_ns) for _cl, _ns in por_var.items()}}
         # La clave se guarda en MINÚSCULA: es la palabra que se busca en el nombre de la pieza y
         # ahí ya se compara sin mayúsculas — que el índice dependa de cómo se escribió la regla
         # («Manga» vs «manga») es una fuente de bugs silenciosos para quien lo consuma.
@@ -6341,6 +6434,27 @@ def _opcion_sin_piezas(sop, opcion):
     if not sop or not sop.get("__clave__") or _toggle_no_distingue(sop):
         return False
     return int(sop.get(str(opcion or "").strip().lower(), 0)) == 0
+
+
+def _gen_pieza(s):
+    """Nombre GENÉRICO de una pieza, en minúscula («Cuello 12» → «cuello»): la clave de las telas y
+    de las piezas a imprimir, que se eligen por genérico en el paso Arte."""
+    return re.sub(r"\s+\d+\s*$", "", str(s or "")).strip().lower()
+
+
+def _sin_fuera(piezas, pr):
+    """`piezas` sin las que el operario apagó en «Piezas a imprimir» (`pr['piezas_fuera']`)."""
+    _f = set((pr or {}).get("piezas_fuera") or [])
+    return [p for p in (piezas or []) if _gen_pieza(p) not in _f] if _f else list(piezas or [])
+
+
+def _de_la_fila(piezas, pr):
+    """Las piezas que ESTA fila hace de verdad: sin las apagadas (`_sin_fuera`) y, si es una fila de
+    reposición («Repo» en la planilla, MAPA 578), sólo las que eligió (`piezas_solo`, nombre exacto).
+    La guía de la ficha usa `_sin_fuera` a secas: muestra la prenda entera aunque haya repos."""
+    _l = _sin_fuera(piezas, pr)
+    _s = set((pr or {}).get("piezas_solo") or [])
+    return [p for p in _l if p in _s] if _s else _l
 
 
 def _validar_pedido(pid, nombre_molde, prod, cat, translated, asig, reg):
@@ -6383,6 +6497,7 @@ def _validar_pedido(pid, nombre_molde, prod, cat, translated, asig, reg):
             _piezas_fila = pr.get("variante_piezas")
             if not _piezas_fila:
                 _piezas_fila = MP.partes_de_libre(pr, sorted(reg.keys()))
+            _piezas_fila = _de_la_fila(_piezas_fila, pr)    # una pieza que no se hace no pide tela
             for _p in (_piezas_fila or []):
                 if not _a.get(str(_p)):
                     _sin_tela.add(str(_p))
@@ -9371,8 +9486,17 @@ def set_config():
 # `medida_cm − margen`, salvo que esa tela tenga un valor a mano en `telas_ancho`.
 # `_config_produccion` lee cat["telas"] → la generación anda aun sin red. La api-key vive en
 # config_externo.json (NO versionado) o en la env EXTERNAL_API_KEY. Los GRUPOS combinables siguen.
-_TELAS_MEM = {"ts": 0.0, "data": None}     # cache en memoria del fetch (evita pegarle a la API en cada request)
-_TELAS_TTL = 300                            # segundos
+# 🗓 LAS TELAS SE ACTUALIZAN UNA VEZ POR DÍA, a las 00 hs (pedido del usuario 2026-09-28: «1 vez al día
+# a las 00 hs debe actualizar las telas solo: trae lo de la api, quita lo que no está y trae lo
+# nuevo; lo que quites no se borra, sólo no se puede usar; el tamaño de la mesa no se debe borrar»),
+# más el botón «↻ Actualizar telas del sistema», que hace EXACTAMENTE lo mismo. Antes cada pantalla
+# volvía a consultar la API cada 5 minutos y una tela que el stock sacaba desaparecía del catálogo
+# en el acto (y con ella su nombre en los moldes que la tenían). Ahora:
+#   · la tela que ya no viene queda en `cat["telas"]` con `activa: False` y la fecha de `baja`;
+#   · la que vuelve a aparecer se reactiva sola, con su mesa de siempre;
+#   · la mesa puesta a mano (`cat["telas_ancho"]`) NO se toca nunca en una actualización;
+#   · el resultado de la última pasada queda en `cat["telas_sync"]` (lo muestra Config › Telas).
+_TELAS_CHEQUEO_S = 300                      # cada cuánto mira el vigilante si ya toca (y reintenta si falló)
 _UA_TELAS = "TIZADAPRO/1.0"                 # Cloudflare bloquea el UA por defecto de Python (ver _UA_PUB)
 _TELAS_MARGEN_CM = 3.0                      # margen por defecto de la mesa (el usuario lo cambia en Config › Telas)
 _TELAS_MEDIDA_DEFAULT = 180.0               # ancho de tela cuando el sistema de stock no lo informa
@@ -9511,42 +9635,149 @@ def _telas_merge(cat, telas_api):
         if med is None:
             med = _ancho_de_descripcion(t.get("nombre"))
         ov = anchos.get(str(t["id"]))
+        # 📏 SIN MEDIDA = NO SE USA (regla del usuario 2026-09-28: «las telas que vienen de la api
+        # sin medidas, que se queden aparte y no se puedan utilizar, pero que se vean en ajustes de
+        # telas, separado»). Antes se les inventaba 180 cm − margen y la tizada nesteaba sobre un
+        # ancho que nadie había dicho. Con una mesa puesta A MANO sí tiene medida y se puede usar.
+        sin_medida = med is None and ov is None
         if ov is not None:
             ancho, manual = float(ov), True
+        elif med is not None:
+            ancho, manual = max(1.0, float(med) - margen), False
         else:
-            ancho, manual = max(1.0, float(med if med is not None else _TELAS_MEDIDA_DEFAULT) - margen), False
-        out.append({**t, "medida_cm": med, "ancho_cm": ancho, "manual": manual})
+            ancho, manual = None, False
+        out.append({**t, "medida_cm": med, "ancho_cm": ancho, "manual": manual, "sin_medida": sin_medida,
+                    # USABLE = se puede elegir en moldes, grupos y pedidos: activa y con medida.
+                    "usable": bool(t.get("activa", True)) and not sin_medida})
     return out
 
 
+def _telas_sincronizar(cat, telas_api, origen):
+    """Aplica una lectura de la API sobre `cat["telas"]` (puro sobre `cat`, sin red).
+    · la que viene de la API → activa (nombre, código, precio y medida al día);
+    · la que estaba y ya no viene → se QUEDA con `activa: False` y la fecha de `baja` (no se borra:
+      moldes y pedidos viejos la siguen nombrando, sólo no se puede elegir);
+    · la mesa a mano (`telas_ancho`) no se toca: `_telas_merge` la vuelve a aplicar tal cual.
+    Devuelve el resumen que queda en `cat["telas_sync"]`."""
+    ahora = time.strftime("%Y-%m-%d %H:%M")
+    previas = {str(t.get("id")): t for t in (cat.get("telas") or [])}
+    en_api = {str(t.get("id")) for t in telas_api}
+    lista, nuevas, reactivadas, bajas = [], [], [], []
+    for t in telas_api:
+        prev = previas.get(str(t.get("id")))
+        reg = {k: v for k, v in t.items()}
+        reg["activa"] = True
+        reg["alta"] = (prev or {}).get("alta") or ahora
+        if prev is None:
+            nuevas.append(t.get("nombre") or str(t.get("id")))
+        elif prev.get("activa") is False:
+            reactivadas.append(t.get("nombre") or str(t.get("id")))
+        lista.append(reg)
+    for tid, prev in previas.items():
+        if tid in en_api:
+            continue
+        reg = {k: v for k, v in prev.items() if k not in ("ancho_cm", "manual")}
+        if prev.get("activa", True):                  # recién dada de baja
+            bajas.append(prev.get("nombre") or tid)
+            reg["baja"] = ahora
+        reg["activa"] = False
+        lista.append(reg)
+    cat["telas"] = _telas_merge(cat, lista)
+    sin_med = [t.get("nombre") or str(t.get("id")) for t in cat["telas"] if t.get("activa", True) and t.get("sin_medida")]
+    cat["telas_sync"] = {"fecha": time.strftime("%Y-%m-%d"), "cuando": ahora, "ok": True, "origen": origen,
+                         "activas": len(en_api), "nuevas": nuevas, "reactivadas": reactivadas, "bajas": bajas,
+                         "sin_medida": sin_med}
+    return cat["telas_sync"]
+
+
+def _telas_actualizar(origen="manual"):
+    """Consulta la API y sincroniza el catálogo. Devuelve (resumen, error). La consulta HTTP va
+    AFUERA del candado (puede tardar hasta su timeout) y el guardado adentro, sobre el catálogo
+    recién leído: tocar sólo `telas`/`telas_sync` no pisa nada que se haya configurado mientras."""
+    telas_api, err = _fetch_telas_externas()
+    with _seccion_edicion():
+        cat = _cargar_catalogo()
+        if telas_api is None:
+            prev = dict(cat.get("telas_sync") or {})
+            prev.update({"ok": False, "error": str(err), "intento": time.strftime("%Y-%m-%d %H:%M"), "origen_intento": origen})
+            cat["telas_sync"] = prev
+            _guardar_catalogo(cat)
+            return None, err
+        res = _telas_sincronizar(cat, telas_api, origen)
+        _guardar_catalogo(cat)
+    if res["nuevas"] or res["bajas"] or res["reactivadas"]:
+        print(f"[telas] {origen}: {res['activas']} activas · {len(res['nuevas'])} nuevas · "
+              f"{len(res['bajas'])} dadas de baja · {len(res['reactivadas'])} reactivadas")
+    return res, None
+
+
+def _arrancar_telas_diarias():
+    """El vigilante de las 00 hs. Toca actualizar si la última pasada BUENA no es de hoy: a las 00 hs
+    en punto (duerme justo hasta ahí), apenas arranca el servidor si estuvo apagado a esa hora, y cada
+    5 minutos si falló (sin internet, API caída) hasta que salga. Nunca más de una buena por día."""
+    def _toca():
+        sync = (_cargar_catalogo().get("telas_sync") or {})
+        return not (sync.get("ok") and sync.get("fecha") == time.strftime("%Y-%m-%d"))
+
+    def _vigilar():
+        time.sleep(30)                               # que el servidor termine de arrancar primero
+        try:
+            _telas_efectivas(_cargar_catalogo())     # recalcula con las reglas vigentes lo guardado (sin red)
+        except Exception as e:
+            print("[telas] recálculo al arrancar:", e)
+        while True:
+            try:
+                if _toca():
+                    _, err = _telas_actualizar("automatica")
+                    if err:
+                        print(f"[telas] la actualización diaria falló, reintento en 5 min: {err}")
+            except Exception as e:
+                print("[telas] actualización diaria:", e)
+            lt = time.localtime()
+            hasta_medianoche = (24 * 3600) - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec) + 2
+            time.sleep(max(5, min(_TELAS_CHEQUEO_S, hasta_medianoche)))
+    threading.Thread(target=_vigilar, daemon=True, name="telas-diarias").start()
+
+
+def _telas_de_baja_pedidas(cat, cuerpo):
+    """Nombres de telas que NO SE PUEDEN USAR (dadas de baja o sin medida) y el pedido pide (en
+    `tela_base` o `asignaciones`, que viajan por nombre). Si hay otra usable con el mismo nombre, no cuenta."""
+    telas = cat.get("telas") or []
+    _usable = lambda t: t.get("usable", t.get("activa", True) and not t.get("sin_medida"))
+    activas = {str(t.get("nombre") or "").strip() for t in telas if _usable(t)}
+    baja = {str(t.get("nombre") or "").strip() for t in telas if not _usable(t)} - activas
+    if not baja:
+        return []
+    pedidas = set()
+
+    def _juntar(v):
+        if isinstance(v, dict):
+            for x in v.values():
+                _juntar(x)
+        elif isinstance(v, str):
+            pedidas.add(v.strip())
+    _juntar(cuerpo.get("tela_base") or {})
+    _juntar(cuerpo.get("asignaciones") or {})
+    return sorted(pedidas & baja)
+
+
 def _telas_efectivas(cat, forzar=False):
-    """Telas para usar = API + ancho local. Cache en memoria (TTL) + persistencia en cat['telas'] para
-    que la generación (lee cat['telas']) y la UI anden aun sin red / sin re-fetch."""
-    now = time.time()
-    if forzar or _TELAS_MEM["data"] is None or (now - _TELAS_MEM["ts"] > _TELAS_TTL):
-        telas_api, _err = _fetch_telas_externas()
-        if telas_api is not None:
-            _TELAS_MEM["data"] = telas_api
-            _TELAS_MEM["ts"] = now
-    telas_api = _TELAS_MEM["data"]
-    if telas_api is None:                       # sin red y sin cache → lo último persistido en cat['telas']
-        return list(cat.get("telas") or [])
-    merged = _telas_merge(cat, telas_api)
-    if merged != (cat.get("telas") or []):      # persistir sólo si cambió
-        cat["telas"] = merged
-        # Persistencia MÍNIMA y bajo candado: se recarga el catálogo fresco y se toca SÓLO
-        # `telas`. Guardar el `cat` que trajo el llamador pisaría cualquier cambio de
-        # configuración hecho mientras tanto — este `cat` se leyó ANTES de la consulta HTTP a la
-        # API de telas, que puede tardar (y hasta agotar su timeout). Por eso tampoco se toma el
-        # candado durante esa consulta: la sección crítica es sólo el guardado. Ver 171.A.
-        # `_seccion_edicion` y no `with _LOCK_CAT_EDICION` pelado: el candado se cuenta por hilo,
-        # y una toma que no se cuenta se le escapa a `_soltar_edicion_catalogo` — el día que
-        # alguien lo llame desde acá adentro, el `with` reventaría al soltar algo que ya no tiene.
+    """Las telas del catálogo (activas y dadas de baja, con su mesa). YA NO consulta la API en cada
+    pedido: eso lo hacen la pasada de las 00 hs y el botón. Sólo si todavía no hay NINGUNA (primera vez
+    en una instalación nueva) la trae en el acto, para que la pantalla no arranque vacía."""
+    if forzar or not (cat.get("telas") or []):
+        res, _err = _telas_actualizar("manual" if forzar else "primera")
+        if res is not None:
+            return list(_cargar_catalogo().get("telas") or [])
+    # Telas guardadas antes de la regla «sin medida no se usa» (2026-09-28): se recalculan UNA vez
+    # acá, sin ir a la API, para no esperar a la pasada de las 00 hs.
+    if any("usable" not in t for t in (cat.get("telas") or [])):
         with _seccion_edicion():
             _cat = _cargar_catalogo()
-            _cat["telas"] = merged
+            _cat["telas"] = _telas_merge(_cat, _cat.get("telas") or [])
             _guardar_catalogo(_cat)
-    return merged
+        return list(_cat["telas"])
+    return list(cat.get("telas") or [])
 
 
 @app.get("/api/telas")
@@ -9555,24 +9786,24 @@ def get_telas():
     if _g:
         return _g
     cat = _cargar_catalogo()
-    return jsonify({"telas": _telas_efectivas(cat), "grupos": cat.get("grupos_telas", []),
-                    "margen_cm": _telas_margen(cat)})
+    telas = _telas_efectivas(cat)
+    return jsonify({"telas": telas, "grupos": cat.get("grupos_telas", []),
+                    "margen_cm": _telas_margen(cat), "sync": _cargar_catalogo().get("telas_sync") or {}})
 
 
 @app.post("/api/telas/refrescar")
 def refrescar_telas():
-    """Fuerza re-consulta a la API externa (botón «Actualizar telas del sistema»)."""
+    """Botón «↻ Actualizar telas del sistema»: la MISMA pasada que la de las 00 hs (trae las nuevas,
+    da de baja las que ya no vienen sin borrarlas y conserva la mesa de cada una)."""
     _g = _guard_sesion_telas()
     if _g:
         return _g
-    cat = _cargar_catalogo()
-    telas_api, err = _fetch_telas_externas()
-    if telas_api is None:
+    res, err = _telas_actualizar("manual")
+    if res is None:
         return jsonify({"error": f"No se pudo consultar la API de telas: {err}"}), 502
-    _TELAS_MEM["data"] = telas_api
-    _TELAS_MEM["ts"] = time.time()
-    return jsonify({"telas": _telas_efectivas(cat, forzar=False), "grupos": cat.get("grupos_telas", []),
-                    "count": len(telas_api), "margen_cm": _telas_margen(cat)})
+    cat = _cargar_catalogo()
+    return jsonify({"telas": cat.get("telas") or [], "grupos": cat.get("grupos_telas", []),
+                    "count": res["activas"], "margen_cm": _telas_margen(cat), "sync": res})
 
 
 @app.post("/api/telas/ancho")
@@ -9914,7 +10145,7 @@ def _norm_campo(s):
 
 
 def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None,
-                      exigir_obligatorias=True):
+                      exigir_obligatorias=True, copia=False):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
     (talle/nombre/numero/manga + personalización por columna), según el template y
     el mapeo de columnas del molde. `default_diseno` = diseño de la fila cuando no
@@ -10070,7 +10301,7 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     out = []
     _faltantes = {}       # etiqueta de la columna -> cuántas filas la tienen vacía
     _descartadas = 0
-    for pr in prendas:
+    for _ifila, pr in enumerate(prendas):
         # Una fila a la que le falte alguna obligatoria NO se fabrica. Antes se rellenaba el talle
         # con «M» y las filas a medio llenar salían impresas: no falla, sale de más.
         _faltan = [c for c in _oblig
@@ -10100,7 +10331,12 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             if not val and opcion and exigir_obligatorias:   # las muestras internas no se avisan
                 _lbl = ti.get("label") or ti.get("clave") or "opción"
                 _TP.toggles[_lbl] = _TP.toggles.get(_lbl, 0) + 1   # vacío → primera opción
-            if opcion:
+            # «Corta + Larga» (Repo, MAPA 580): la fila pide VARIAS opciones del toggle a la vez.
+            _partes = [x.strip() for x in str(opcion).split("+") if x.strip()]
+            if len(_partes) > 1:
+                toggles.append({"clave": ti["clave"], "opcion": _partes[0], "elegidas": _partes,
+                                "opciones": ti["opciones"]})
+            elif opcion:
                 toggles.append({"clave": ti["clave"], "opcion": opcion, "opciones": ti["opciones"]})
         _tv = pr.get(talle_col, "")
         if not str(_tv or "").strip() and _hay_fallback:
@@ -10135,6 +10371,13 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             translated_pr["_grupo"] = variantes_grupo[_vcl]   # grupo → acota la posición de etiqueta
         if _vcl and variantes_juntas.get(_vcl):
             translated_pr["juntas_piezas"] = variantes_juntas[_vcl]   # vínculos "van juntas" → atómicos frente al toggle
+        # REPO (reposición, MAPA 578): la fila trae `__repo = {pid: [pieza exacta…]}` elegido tocando
+        # las piezas en la planilla. Acá se queda con lo de ESTE molde; las copias de «cantidad»
+        # (más abajo) lo heredan. Vacío o ausente = la fila hace todas sus piezas.
+        _rp = pr.get("__repo") if isinstance(pr.get("__repo"), dict) else {}
+        _sol = _rp.get(str(_pid)) if _pid is not None else None
+        if isinstance(_sol, list) and _sol:
+            translated_pr["piezas_solo"] = sorted({str(x) for x in _sol if str(x or "").strip()})
         persona = {}
         for c in cols_template:
             if c.get("role") in ("diseno", "cantidad"):
@@ -10164,6 +10407,17 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
         # ve prendas de verdad, sin enterarse de que salieron de una sola fila.
         _n = _cantidad_de_fila(pr, cantidad_col)
         translated_pr["_cantidad"] = _n
+        # De qué FILA de la planilla sale (el número que ve la persona: `__nfila`, si no, el orden).
+        try:
+            translated_pr["_fila"] = int(pr.get("__nfila")) - 1
+        except (TypeError, ValueError):
+            translated_pr["_fila"] = _ifila
+        if copia:
+            # COPIA (MAPA 581): la cantidad NO multiplica la prenda — es un DATO (cuántas copias de
+            # la mesa de esta fila se imprimen), que viaja con la mesa para el sistema que imprime.
+            translated_pr["_copias"] = _n
+            out.append(translated_pr)
+            continue
         out.append(translated_pr)
         for _ in range(_n - 1):
             out.append(copy.deepcopy(translated_pr))   # copia PROFUNDA: comparten listas si no
@@ -10478,6 +10732,8 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
     _combos = (var or {}).get("combos") or []
     if _combos:
         prendas = [{**prendas[0], "toggles": list(_c)} for _c in _combos]
+    if (var or {}).get("fuera"):                      # piezas a imprimir (MAPA 577)
+        prendas = [{**_p, "piezas_fuera": list(var["fuera"])} for _p in prendas]
     try:
         pers = MP.extraer_personalizacion(pl if _cbf else arte)   # camino B: los «00»/«NOMBRE» viven en el molde
     except Exception:
@@ -10632,6 +10888,10 @@ def _plan_del_pedido(cuerpo):
     # `_guias_pedidas` = (pid, diseño TAL COMO LO PIDIÓ LA FILA), antes del fallback de arte: es lo
     # que hay que mirar para saber si un molde ya cubrió ese diseño (ver el completado de más abajo).
     _guias_ficha, _guias_vistas, _guias_pedidas = [], set(), set()
+    _baja_tela = _telas_de_baja_pedidas(cat, cuerpo)
+    if _baja_tela:
+        raise _PlanInvalido(jsonify({"error": f"La tela «{_baja_tela[0]}» no se puede usar (se dio de baja en el sistema de "
+                                              f"stock o no tiene medida): elegí otra en el paso Arte › Asignar telas."}), 409)
     for pid in pids:
         reg = _cargar("registro_producto.json", pid)
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
@@ -10681,7 +10941,69 @@ def _plan_del_pedido(cuerpo):
         # cuya `__variante` es de otro molde del mismo espacio (ver `_traducir_prendas`).
         _vpd = {str(_sl): (_m or {}).get(pid) for _sl, _m in (cuerpo.get("vars_por_diseno") or {}).items()
                 if isinstance(_m, dict)}
-        translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd)
+        translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd,
+                                       copia=bool(cuerpo.get("cantidad_copia")))
+        # ── PIEZAS A IMPRIMIR (MAPA 577) ─────────────────────────────────────────────────────────
+        # El paso Arte deja apagar piezas por (diseño, molde): `piezas_fuera = {pid: {slug: [gen]}}`.
+        # Se SELLA en cada fila (por el slug de SU diseño) y de ahí la respetan los dos motores
+        # (`piezas_de` / `piezasDe`), la traba de telas, el aviso de «sin diseño» y la ficha.
+        _fuera_pid = (cuerpo.get("piezas_fuera") or {}).get(pid) or {}
+        if isinstance(_fuera_pid, dict) and _fuera_pid:
+            for _prf in translated:
+                _fl = _fuera_pid.get(_prf.get("_diseno") or "principal") or []
+                _fs = sorted({_gen_pieza(x) for x in _fl if str(x or "").strip()})
+                if _fs:
+                    _prf["piezas_fuera"] = _fs
+        # ── LA MANGA QUE EXISTE (MAPA 580) ──────────────────────────────────────────────────────
+        # Si la opción de un toggle de la fila no tiene piezas en ESTA prenda (la variable no la
+        # trae, o están apagadas en «Piezas a imprimir») y otra opción sí, la fila hace la que
+        # existe — lo mismo que ya elige la planilla. Sin esto, «Corta» con las cortas apagadas
+        # sacaba la prenda sin mangas, en silencio.
+        _cambiadas = 0
+        for _prt in translated:
+            _tgs = _prt.get("toggles") or []
+            if not _tgs:
+                continue
+            # las piezas que la fila hace: sin las apagadas y, si es Repo, sólo las elegidas
+            _nms = _de_la_fila(_prt.get("variante_piezas") or sorted(reg.keys()), _prt)
+            for _tg in _tgs:
+                _ops = [str(o) for o in (_tg.get("opciones") or [])]
+                _sop = MP.opciones_soportadas(_nms, _tg.get("clave"), _ops)
+                if not _sop.get("__clave__"):
+                    continue
+                if _prt.get("piezas_solo"):
+                    # REPO: la manga sale de las piezas elegidas (las dos → las dos, como la planilla)
+                    _hay = [o for o in _ops if int(_sop.get(o.strip().lower(), 0)) > 0]
+                    if len(_hay) >= 2:
+                        if [str(x).lower() for x in (_tg.get("elegidas") or [])] != [x.lower() for x in _hay]:
+                            _tg["elegidas"], _tg["opcion"] = _hay, _hay[0]
+                            _cambiadas += 1
+                        continue
+                if _tg.get("elegidas"):
+                    # varias elegidas: se quedan las que existen (si queda una sola, es la de siempre)
+                    _vale = [o for o in _tg["elegidas"] if int(_sop.get(str(o).strip().lower(), 0)) > 0]
+                    if _vale and len(_vale) < len(_tg["elegidas"]):
+                        _tg["elegidas"], _tg["opcion"] = _vale, _vale[0]
+                        _cambiadas += 1
+                    if _vale:
+                        continue
+                    _tg.pop("elegidas", None)
+                _ya = str(_tg.get("opcion") or "").strip().lower()
+                if int(_sop.get(_ya, 0)) > 0:
+                    continue
+                _hay = [o for o in _ops if int(_sop.get(o.strip().lower(), 0)) > 0]
+                if _hay:
+                    _tg["opcion"] = _hay[0]
+                    if str(_tg.get("clave") or "").strip().lower() == "manga":
+                        _prt["manga"] = _hay[0].strip().lower()
+                    _cambiadas += 1
+        if _cambiadas:
+            avisos_pedido.append(f"«{nombre}»: {_cambiadas} fila(s) pedían una opción que esta prenda no tiene "
+                                 f"(o está apagada en «Piezas a imprimir»): salieron con la que sí tiene.")
+        # REPO: se dice en el resultado cuántas prendas salen sólo con algunas piezas (MAPA 578).
+        _n_repo = sum(1 for _t in translated if _t.get("piezas_solo"))
+        if _n_repo:
+            avisos_pedido.append(f"«{nombre}»: {_n_repo} prenda(s) de reposición — salen sólo las piezas elegidas en la planilla.")
         # Las filas sin algún dato obligatorio no se fabrican; lo pregunta la PANTALLA antes de
         # armar (misma regla, `filasIncompletas`), así que acá no se repite.
         _obl = getattr(_TP, "obligatorias", []) or []
@@ -10743,6 +11065,22 @@ def _plan_del_pedido(cuerpo):
         # ── TRABA ANTES DE FABRICAR ──────────────────────────────────────────────────────────
         # Una tizada mal sale igual de bien impresa que una bien: los dos errores de acá abajo NO
         # fallan, producen algo que PARECE correcto. Por eso se frena antes y se dice qué fila.
+        _nada = [_t for _t in translated if (_t.get("piezas_fuera") or _t.get("piezas_solo"))
+                 and not _de_la_fila(MP.partes_de_libre(_t, sorted(reg.keys())) if not _t.get("variante_piezas")
+                                     else _t.get("variante_piezas"), _t)]
+        _repo_vacias = [_t for _t in _nada if _t.get("piezas_solo")]
+        if _repo_vacias:
+            raise _PlanInvalido(jsonify({
+                "error": f"«{nombre}»: hay {len(_repo_vacias)} fila(s) de reposición (Repo) cuyas piezas elegidas no "
+                         f"se hacen (están apagadas en «Piezas a imprimir» o no son de su variable/manga). "
+                         f"Elegí otras en «Piezas» de la planilla.",
+                "detalle": sorted({f"Talle {_t.get('talle')}: {', '.join(_t.get('piezas_solo') or [])}" for _t in _repo_vacias})[:20]}), 422)
+        _todas_fuera = sorted({str(_t.get("_diseno") or "principal") for _t in _nada})
+        if _todas_fuera:
+            raise _PlanInvalido(jsonify({
+                "error": f"«{nombre}»: apagaste TODAS sus piezas en «Piezas a imprimir» (paso Arte), así que "
+                         f"no saldría nada. Prendé al menos una o sacá el molde del diseño.",
+                "detalle": _todas_fuera}), 422)
         _err = _validar_pedido(pid, nombre, prod, cat, translated, _asig_de, reg)
         if _err:
             raise _PlanInvalido(jsonify({"error": _err[0], "detalle": _err[1]}), 422)
@@ -10825,6 +11163,7 @@ def _plan_del_pedido(cuerpo):
                         _usa = {_idx2nom[int(_i)] for _i in _vi if int(_i) in _idx2nom}
                     else:
                         _usa = set(reg.keys())
+                    _usa = set(_de_la_fila(_usa, _pr))         # las apagadas / no pedidas no salen: no avisan
                     _eff = _mapeo_efectivo(_b0, _pv0, _pr.get("variante_clave"))
                     _faltan_set |= (_usa - set(_eff.keys()))
                 _faltan = sorted(_faltan_set)
@@ -10888,7 +11227,10 @@ def _plan_del_pedido(cuerpo):
                 _guias_vistas.add(_kg)
                 _guias_pedidas.add((pid, _dslug_pedido))
                 _guias_ficha.append({"pid": pid, "molde": nombre, "diseno": dslug, "diseno_nombre": dnom,
-                                     "clave": _vc or None, "piezas": _prg.get("variante_piezas"),
+                                     "clave": _vc or None,
+                                     "piezas": (_sin_fuera(_prg.get("variante_piezas"), _prg) or None)
+                                     if _prg.get("variante_piezas") else None,
+                                     "fuera": _prg.get("piezas_fuera") or [],
                                      "asig": _asig_d, "telas": _telas,
                                      # QUÉ PIEZAS lleva de verdad: una entrada por combinación de
                                      # toggles usada en el pedido (manga corta / manga larga / …).
@@ -10954,7 +11296,9 @@ def _plan_del_pedido(cuerpo):
                               "así que no entró en la tizada. Si tenía que salir, cargale su columna de talle."))
     # Nesting y telas: del primer molde (espaciado/margen son a nivel de hoja; el
     # giro y la tela de cada pieza ya van por-molde).
-    cfg_nesting = molds_data[0]["_cfg_n"]
+    cfg_nesting = dict(molds_data[0]["_cfg_n"] or {})   # copia: no tocar la config del molde
+    if cuerpo.get("cantidad_copia"):
+        cfg_nesting["por_fila"] = True                   # COPIA: una mesa por fila (MAPA 581)
     telas_cfg = molds_data[0]["_telas"]
     # Agrupar por GRUPO DE TIZADA (config en Reglas de Nesting): mismo grupo =
     # comparten mesa; sin grupo o grupos distintos = tizadas separadas.
@@ -15486,6 +15830,7 @@ if __name__ == "__main__":
     # días, un efímero de un pedido que nadie terminó no lo juntaba nadie.
     _en_hilo(_barrer_efimeros)
     _arrancar_barrido_efimeros()
+    _arrancar_telas_diarias()      # las telas del sistema de stock, una vez por día a las 00 hs
     # ⚡ DUAL-STACK IPv4 + IPv6 — CRÍTICO para la velocidad. En Windows "localhost" resuelve a
     # ::1 (IPv6) ANTES que a 127.0.0.1: si el server solo escucha IPv4, CADA request a
     # http://localhost paga ~2s de retry (con ~40 requests al asignar variantes = >1 minuto de

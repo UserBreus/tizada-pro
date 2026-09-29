@@ -76,6 +76,7 @@ PEDIDO (todos los días)        ┐  diseño → moldes → arte → planilla �
 - **Dónde:** dentro del molde → ajuste **Moldería** → zona de subida (`molde-subir`) o
   **Re-subir Plantilla**. También hay una guía in-app: **«¿Cómo exportar el molde desde tu
   programa?»** (`AyudaExportMolde`: Illustrator, Corel, Optitex/Gerber…).
+- 🚫 **Sólo moldes LIMPIOS:** si el archivo trae máscaras de recorte con el diseño adentro, no se sube y avisa «Ese molde viene con diseño incluido. Quitá la máscara de recorte y el diseño y subí tu molde limpio.» (el molde con diseño se carga en el pedido). Un molde que ya había entrado así muestra un cartel ámbar: re-subirlo limpio. MAPA 576.
 - **Formatos:** `.ai` · `.pdf` (Corel/Affinity) · `.dxf` (AAMA/Optitex, **BETA**). El **ARTE** en
   cambio sólo acepta `.ai`/`.pdf`.
 - **Pasos:** elegir el archivo → esperar el procesado → el visor muestra las piezas numeradas.
@@ -509,6 +510,8 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 - **Guarda:** `GET /api/reglas_planilla` · `POST /api/reglas_planilla/guardar` · `/eliminar`.
 
 ### 4.4 **Telas**
+- 🗓 **Se actualizan solas todos los días a las 00 hs** (y con «↻ Actualizar telas del sistema» cuando quieras: hace lo mismo). Trae las nuevas del sistema de stock; las que ya no vienen quedan **dadas de baja**: no se borran ni pierden su mesa, pero no se pueden elegir en ningún lado (vuelven solas si el stock las vuelve a informar). Arriba de la lista se ve cuándo fue la última y qué cambió. Si falla (sin internet) reintenta cada 5 minutos. MAPA 575.
+- 📏 **Telas sin medida:** si el sistema de stock no dice el ancho de una tela, queda **aparte** («Sin medida · no se pueden usar») y no aparece en moldes ni pedidos. Escribiéndole la mesa de trabajo a mano pasa a la lista normal y ya se usa.
 - Las telas **vienen del sistema de stock** (API externa) — acá **no se crean ni se borran**.
 - **Pasos:** ver el chip de **conexión** (`telas-conexion`) → **↻ Actualizar telas del sistema**
   (`telas-actualizar`) → **Margen de la mesa** (`telas-margen`, 3 cm si no se toca): la **MESA DE
@@ -563,7 +566,11 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 - 🔴 **Oculta = no se aplica** (vale 1). El valor cargado no se borra: vuelve a valer al mostrarla.
 - **Sin tope** (decisión del usuario): 250 son 250 prendas. Al lado de los botones se ve
   dos píldoras, **«N filas»** y **«M prendas»** (la segunda sólo cuando difieren) — ése es el número que le importa al taller.
-- **El control** para prenderla es el interruptor **«Columna cantidad»** de la barra de arriba de la planilla (App.jsx ~15590; corregido 2026-09-25, antes decía «Mostrar columna de cantidad», MAPA 574).
+- **El control** para prenderla es el botón **«Cantidad»** de la barra de arriba de la planilla (ícono de copias apiladas + la palabra; prendido se tiñe de cian; el «?» de al lado explica para qué es). Desde 2026-09-28 es el componente `InterruptorIcono`, igual que «Repo» (MAPA 578).
+- 🖨️ **Copia** (botón al lado de «Cantidad», sólo con la columna a la vista): cada fila sale en **su
+  propia mesa** y la cantidad **no repite** la prenda — queda como **cuántas copias imprimir** de esa
+  mesa: se ve en el resultado («Fila 3 · ×5 copias») y en el nombre del archivo que se descarga
+  («… - Fila 3 - x5»). Sin Copia, lo de siempre. MAPA 581.
 - **Dónde vive:** `_con_cantidad` (servidor) garantiza la columna en las dos puntas y
   `_traducir_prendas` es quien **repite** la prenda. Contrato: `verificar_cantidad.py`.
 
@@ -863,6 +870,18 @@ propio); el ✓ verde marca las que ya tienen arte.
 - **LEY: el arte se ve igual que la tizada.** Lo que muestra el visor **es** el render del motor
   cacheado — no se re-dibuja en JS (el re-dibujo quedó sólo como placeholder mientras carga).
 
+### 5.3.b **Piezas a imprimir** — sacar piezas de la tizada
+
+- **Dónde:** paso **Arte**, los dos íconos a la derecha del panel de Diseños: **Diseño** (el de
+  siempre) y **Piezas**. El número rosa sobre «Piezas» dice cuántas hay apagadas.
+- **Pasos:** tocá **Piezas** → tocá una pieza en la lista (interruptor) o en el molde para
+  apagarla/prenderla. **Activar todas** / **Desactivar todas** para las de la prenda que estás
+  viendo. Se apaga por nombre, en **todos los talles**.
+- **Qué pasa:** la apagada **no sale en la tizada**, no se ve en el visor (fuera del modo Piezas), no
+  pide tela ni diseño y no va en la ficha. Es del pedido: «Nuevo pedido» la vuelve a prender.
+- **Límites:** con **todas** apagadas no se pasa a la planilla. En un molde con diseño incluido
+  (camino B) primero hay que nombrar todas las piezas. MAPA 577.
+
 ### 5.4 **Editar diseño** (objetos editables) — botón magenta en el paso Arte
 
 Sirve para **mover, rotar, escalar, espejar y recolorear** lo que el arte trae en capas
@@ -944,6 +963,27 @@ Funciona **como una planilla de Excel** (`planilla-tabla`).
 - **Trampa grande:** el Arte edita `disenoActivo`, pero la tizada usa el diseño **de la columna de
   cada fila**. Si divergen —o la fila usa un diseño **sin arte**— hay **fallback silencioso** y la
   tizada no usa lo que mapeaste. Síntoma: «mapeé pero salió en otro / en un solo talle».
+
+### 5.5.b **Repo** (reposición) — que una fila haga sólo algunas piezas
+
+- **Dónde:** paso **Planilla**, botón **Repo** en la barra (al lado de «Cantidad»; el «?» de al lado explica).
+- **Pasos:** prendé **Repo** → aparece la columna **Piezas** → en la fila (con talle cargado) tocá
+  **Todas** → se abre el dibujo de sus piezas en ese talle → tocá las que se hacen (se ponen rosas;
+  también por los nombres de abajo) → **Listo**. Con las flechas pasás a la fila anterior/siguiente.
+- **Reglas:** sin ninguna elegida, la fila hace **todas** las piezas del paso anterior. Las apagadas en
+  «Piezas a imprimir» no se pueden elegir. Se elige la pieza exacta (una sola manga, por ejemplo).
+  Con Repo apagado, todas las filas hacen todas sus piezas. La ficha suma la columna «Repo».
+  MAPA 578.
+
+### 5.5.c **Manga (y todo botón de opciones)** — sólo lo que la prenda tiene
+
+- La columna **Manga** ofrece sólo las opciones que la prenda de esa fila tiene de verdad (según
+  su variable y lo apagado en «Piezas a imprimir»). Si una no existe, la fila **elige sola** la que
+  sí; una fila sin mangas muestra «— sin manga»; si ninguna fila tiene mangas, la columna **no se
+  muestra**.
+- Con **Repo** prendido, la manga de la fila sale de las piezas elegidas en **Piezas**: sólo largas →
+  sólo «Larga»; sólo cortas → sólo «Corta»; **las dos → aparece y queda puesta «Corta + Larga»**.
+  Sin piezas elegidas (o sin Repo), las opciones de siempre. MAPA 580.
 
 ### 5.6 Enviar y resultados
 

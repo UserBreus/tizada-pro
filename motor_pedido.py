@@ -14,7 +14,7 @@ from molde_real import (extraer_contorno_mesa, extraer_piezas_mesa,
                         recolorar_capa, capa_admite_color,
                         objetos_de_capa, aislar_objeto, aislar_capa_objetos,
                         geometrias_base, sanear_oc, _nombres_oc, MM)
-from nesting_contorno import anidar_contorno, componer_pdf_contorno
+from nesting_contorno import anidar_contorno, anidar_por_fila, componer_pdf_contorno
 
 # ── CACHÉ DE EXTRACCIÓN POR TALLE ────────────────────────────────────────────────────────────
 # `extraer_piezas_mesa` cuesta ~0,35 s por talle: con 30 talles, CADA guardado de un nombre
@@ -138,7 +138,7 @@ def partes_de_libre(prenda, piezas_nombres):
             toggles = [{"clave": "manga", "opcion": mval, "opciones": ["corta", "larga"]}]
         else:
             return list(piezas_nombres)
-    norm = []   # (clave, [tokens opción elegida], [[tokens] de las OTRAS opciones])
+    norm = []   # (clave, [[tokens] de las opciones ELEGIDAS], [[tokens] de las OTRAS opciones])
     for tg in toggles:
         clave = str(tg.get("clave", "")).strip().lower()
         opcion = str(tg.get("opcion", "")).strip().lower()
@@ -147,20 +147,23 @@ def partes_de_libre(prenda, piezas_nombres):
             opciones = opciones + [opcion]
         if not clave or not opcion:
             continue
-        sel = opcion.split()
-        otras = [o.split() for o in opciones if o != opcion]
-        norm.append((clave, sel, otras))
+        # VARIAS ELEGIDAS (Repo, «Corta + Larga», MAPA 580): una reposición puede pedir las dos
+        # mangas. Sin `elegidas`, la de siempre: una sola opción.
+        elegidas = [str(o).strip().lower() for o in (tg.get("elegidas") or []) if str(o).strip()] or [opcion]
+        sels = [o.split() for o in elegidas]
+        otras = [o.split() for o in opciones if o not in elegidas]
+        norm.append((clave, sels, otras))
     if not norm:
         return list(piezas_nombres)
     out = []
     for p in piezas_nombres:
         tset = set(tokens_pieza(p))
         incluir = True
-        for clave, sel, otras in norm:
+        for clave, sels, otras in norm:
             if clave not in tset:
                 continue                                   # esta clave no la afecta
-            if all(t in tset for t in sel):
-                continue                                   # tiene la opción elegida → entra
+            if any(all(t in tset for t in sel) for sel in sels):
+                continue                                   # tiene una opción elegida → entra
             if any(all(t in tset for t in o) for o in otras):
                 incluir = False; break                     # tiene OTRA opción → afuera
             # else: no menciona ninguna opción → pieza normal → entra
@@ -4199,10 +4202,23 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
             permit = set(_nombres)
         elif prenda.get("variante_idx"):
             permit = {_idx_a_nombre[int(i)] for i in prenda["variante_idx"] if int(i) in _idx_a_nombre}
-        if not permit:
-            # Sin variable, o variable de otro molde (multi-molde) → no se filtra (no dejar vacío).
-            return base
-        return [p for p in base if p in permit]
+        if permit:
+            base = [p for p in base if p in permit]
+        # PIEZAS A IMPRIMIR (MAPA 577): las que el operario apagó en el paso Arte del pedido no se
+        # generan. Vienen por nombre GENÉRICO en minúscula («cuello» apaga «Cuello 12», «Cuello 25»…),
+        # igual que las telas. Va DESPUÉS de la variable y aparte de ella: si se apagaran todas, una
+        # lista de variable vacía se leería como «sin variable = todas» (el servidor igual frena ese
+        # caso antes de llegar acá).
+        _fuera = set(prenda.get("piezas_fuera") or [])
+        if _fuera:
+            import re as _re_f
+            base = [p for p in base if _re_f.sub(r"\s+\d+\s*$", "", str(p)).strip().lower() not in _fuera]
+        # REPO (reposición, MAPA 578): la fila pide SÓLO estas piezas (nombre EXACTO del registro,
+        # elegidas tocándolas en la planilla). Sin lista = todas las de arriba.
+        _solo = set(prenda.get("piezas_solo") or [])
+        if _solo:
+            base = [p for p in base if p in _solo]
+        return base
     def TELA(p):
         if asignacion_tela and asignacion_tela.get(p):
             return asignacion_tela[p]                 # tela elegida por el usuario
@@ -5248,7 +5264,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                     ent["base"] = datos["base"]; ent["estampado"] = datos["estampado"]
             ent.update({"pieza": pieza, "talle": pr["talle"],
                         "variante": (pr.get("variante_clave") if isinstance(pr, dict) else None),   # clave de geometría (dedup de máscaras del nesteo)
-                        "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0})
+                        "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0,
+                        # COPIA (MAPA 581): de qué fila de la planilla es y cuántas copias lleva
+                        "_fila": (pr.get("_fila") if isinstance(pr, dict) else None),
+                        "_copias": (pr.get("_copias", 1) if isinstance(pr, dict) else 1)})
             piezas_por_tela.setdefault(TELA(pieza), []).append(ent)
             hechas += 1
             if progreso:
@@ -5288,7 +5307,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         if telas_cfg and tela in telas_cfg:           # ancho/alto propios de esta tela
             cfg_t.update(telas_cfg[tela])
         slug = (prefijo + "".join(c if c.isalnum() else "_" for c in tela))[:48] or "Tela"
-        coloc, area = anidar_contorno(piezas, cfg_t)
+        coloc, area, _mesas = anidar_por_fila(piezas, cfg_t)   # COPIA: una mesa por fila (MAPA 581)
         _crono["acomodar en la tela"] += time.time() - _t_et; _t_et = time.time()
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
         # 🔴 EL SELLO (2026-09-15): el dibujo de cada mesa entra a la hoja UNA sola vez y cada
@@ -5416,7 +5435,8 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                       "alturas_cm": alturas_cm,   # alto de CADA página (cada página = una mesa física de tela)
                       "ancho_cm": round(float(cfg_t["ancho_cm"]), 1),  # ancho de la tela (la mesa mide ancho x consumo)
                       "aprovechamiento": aprov,
-                      "previews": prevs})
+                      "previews": prevs,
+                      **({"mesas": _mesas} if _mesas else {})})   # COPIA: {fila, copias} por mesa
     telas_spacing = {}
     for h in hojas:
         tela = h["tela"]

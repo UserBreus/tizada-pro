@@ -11,6 +11,7 @@ Conexión por ENV (nunca credenciales en el código):
 """
 import os
 import contextlib
+import threading
 
 import pyodbc
 
@@ -18,8 +19,11 @@ import pyodbc
 # `cursor()` NO cerraba la conexión, la dejaba guardada para reusarla, y como ningún servidor tiene
 # `CPTimeout` configurado en el driver, las guardadas no vencían nunca: el publicado juntó 134
 # sesiones dormidas en 24 minutos de vida (medido por el usuario, sys.dm_exec_sessions). Apagado,
-# `close()` cierra de verdad. Cuesta reconectar en cada operación (milisegundos), que no se nota: el
-# trabajo pesado ya lo hace el navegador. Va en el CÓDIGO (y no en /etc/odbcinst.ini) para que
+# `close()` cierra de verdad. ⚠️ Reconectar NO cuesta «milisegundos» siempre: medido 2026-09-28,
+# 0,02 s con la PC tranquila y 0,43 s con la PC ocupada (preparando un molde pesado), y un pedido
+# de la pantalla abría de 3 a 14 conexiones → segundos por clic. Por eso las LECTURAS de un mismo
+# pedido comparten UNA conexión (`abrir_compartida`, más abajo), que se cierra al terminar.
+# El trabajo pesado ya lo hace el navegador. Va en el CÓDIGO (y no en /etc/odbcinst.ini) para que
 # viaje con el paquete y no dependa de cómo esté configurado cada servidor.
 # ⚠️ Tiene que quedar ANTES de la primera conexión del proceso (el driver lo toma al conectar la
 # primera vez): por eso vive acá, al importar este módulo, que es el único que conecta.
@@ -91,6 +95,60 @@ def conectar(base=DB_NAME, autocommit=False, timeout_consulta=None):
     return cn
 
 
+# ── UNA CONEXIÓN DE LECTURA POR PEDIDO (2026-09-28, MAPA 582) ─────────────────────────────────
+# El servidor llama `abrir_compartida()` al empezar cada pedido web y `cerrar_compartida()` al
+# terminarlo (pase lo que pase). En el medio, TODAS las lecturas de ese hilo (`filas`, `fila`,
+# `valor`: `cursor(commit=False)`) usan la misma conexión, abierta recién en la primera lectura y
+# en autocommit (no hay transacción que quede abierta). Las ESCRITURAS (`cursor()` con commit)
+# siguen abriendo y cerrando la suya: su transacción no se mezcla con nada. Fuera de un pedido
+# (hilos de fondo, procesos del pool) no cambia nada. No es el reciclado de pyodbc: la conexión se
+# cierra SIEMPRE al final del pedido, así que no quedan sesiones dormidas.
+_compartida = threading.local()
+
+
+def abrir_compartida():
+    _compartida.activa = True
+    _compartida.cn = None
+
+
+def cerrar_compartida():
+    cn = getattr(_compartida, "cn", None)
+    _compartida.activa = False
+    _compartida.cn = None
+    if cn is not None:
+        try:
+            cn.close()
+        except Exception:
+            pass
+
+
+@contextlib.contextmanager
+def _cursor_compartido():
+    cn = _compartida.cn
+    if cn is None:
+        cn = conectar(autocommit=True)
+        _compartida.cn = cn
+    cur = None
+    try:
+        cur = cn.cursor()
+        yield cur
+    except Exception:
+        # la conexión pudo quedar rota (la base se reinició, se cortó la red): se descarta y la
+        # próxima lectura de este pedido abre otra. El error original sigue su camino.
+        _compartida.cn = None
+        try:
+            cn.close()
+        except Exception:
+            pass
+        raise
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+
+
 @contextlib.contextmanager
 def cursor(commit=True):
     """Cursor con transacción: commit al salir bien, ROLLBACK si algo falla.
@@ -108,6 +166,11 @@ def cursor(commit=True):
     INDEX espera por el Sch-S de la transacción viva). La lectura ahora va en autocommit: no hay
     transacción que cerrar y no cuesta ninguna ida y vuelta de más.
     """
+    if not commit and getattr(_compartida, "activa", False):
+        # una lectura dentro de un pedido web: la conexión compartida del pedido (ver arriba)
+        with _cursor_compartido() as cur:
+            yield cur
+        return
     cn = conectar(autocommit=not commit)
     try:
         cur = cn.cursor()

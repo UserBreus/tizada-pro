@@ -11,6 +11,7 @@ import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador,
 import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
 import { analizarFuente, adjuntarAnalisis, aliasQuitados, revalidarArte } from './motor/arte/fuentesSubir.js';
 import { mesaSuelta } from './motor/mesaSuelta.js';
+import { tokensPieza } from './motor/arte/prendas.js';
 import { instalarCalculos } from './motor/calculos.js';
 import { enHiloSuelto } from './motor/hiloSuelto.js';
 import { agregarObjeto as agregarObjetoLocal, colocarObjeto, quitarDelDiseno, duplicarObjeto } from './motor/arte/editarDiseno.js';
@@ -336,6 +337,51 @@ function Icon({ name, className = "", style }) {
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="11" cy="11" r="8" />
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    ),
+    // COPIA: una mesa por fila (la hoja con su número de copias).
+    copiaMesa: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3.5" y="3.5" width="12" height="15" rx="1.8" />
+        <path d="M18.5 7.5v11.2a1.8 1.8 0 0 1-1.8 1.8H8.5" />
+        <path d="M6.5 8h6M6.5 11h6M6.5 14h3.5" />
+      </svg>
+    ),
+    // COLUMNA CANTIDAD: la prenda repetida (copias apiladas con el «×»).
+    cantidadCopias: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4.5 15.5V5.8a1.3 1.3 0 0 1 1.3-1.3h9.7" />
+        <rect x="8" y="8" width="12" height="12" rx="2.2" />
+        <path d="m11.8 11.8 4.4 4.4" />
+        <path d="m16.2 11.8-4.4 4.4" />
+      </svg>
+    ),
+    // REPO (reposición): las flechas que vuelven, alrededor de UNA pieza.
+    repoPieza: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19.6 10.2A7.8 7.8 0 0 0 5.6 6.8L4.2 8.4" />
+        <path d="M4.2 4v4.4h4.4" />
+        <path d="M4.4 13.8a7.8 7.8 0 0 0 14 3.4l1.4-1.6" />
+        <path d="M19.8 20v-4.4h-4.4" />
+        <path d="M10 9.4h2.6l1.6 1.4v3.8H10Z" />
+      </svg>
+    ),
+    // DISEÑO (paso Arte): la paleta — el panel de los diseños del arte.
+    paletaDiseno: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.9-.8 1.9-1.8 0-.5-.2-.9-.5-1.3-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z" />
+        <circle cx="7.6" cy="11.2" r="1.1" />
+        <circle cx="10.2" cy="7.3" r="1.1" />
+        <circle cx="14.6" cy="7.4" r="1.1" />
+      </svg>
+    ),
+    // PIEZAS A IMPRIMIR: una pieza de molde (el frente) con el tilde de «va».
+    piezasImprimir: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8.2 3.2 4 5.4 2.8 9.6l2.9 1v9.2h8.1" />
+        <path d="M15.8 3.2 20 5.4l1.2 4.2-2.9 1v2.2" />
+        <path d="M8.2 3.2c.8 1.4 2.1 2.1 3.8 2.1s3-.7 3.8-2.1" />
+        <path d="m15.4 18.3 2 2 3.8-4" />
       </svg>
     ),
     reset: (
@@ -2361,6 +2407,33 @@ function CajaCheck({ estado, onClick, disabled, title }) {
 }
 
 /** Interruptor sí/no (nada de checkbox nativo: la app tiene su propio lenguaje visual). */
+// INTERRUPTOR CON ÍCONO (barra de la planilla: «Cantidad», «Repo»): un botón entero con su ícono y
+// una palabra. Prendido se tiñe del color del control y el ícono se «enciende». La explicación va en
+// el «?» de AL LADO, fuera del botón (pedido del usuario 2026-09-28: «ícono y la palabra, y el ? al
+// lado para que entiendan para qué es»).
+function InterruptorIcono({ on, onToggle, icono, nombre, rgb = '0,216,245', title, ayuda, ancla }) {
+  const c = (a) => `rgba(${rgb},${a})`;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      <button type="button" role="switch" aria-checked={!!on} data-tour={ancla} data-elegida={on ? '1' : '0'} title={title || nombre}
+        onClick={onToggle}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 14px 0 5px', borderRadius: 12, cursor: 'pointer',
+          transition: 'all .2s', color: on ? '#fff' : 'var(--text-secondary)', fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap',
+          border: '1px solid ' + (on ? c(0.6) : 'var(--border-light)'),
+          background: on ? `linear-gradient(135deg, ${c(0.20)}, ${c(0.05)})` : 'rgba(255,255,255,0.025)',
+          boxShadow: on ? `0 0 18px ${c(0.22)}, inset 0 1px 0 ${c(0.18)}` : 'none' }}>
+        <span style={{ width: 28, height: 28, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all .2s',
+          background: on ? `linear-gradient(135deg, ${c(1)}, ${c(0.7)})` : 'rgba(255,255,255,0.06)',
+          color: on ? '#07070a' : 'var(--text-secondary)', boxShadow: on ? `0 0 12px ${c(0.55)}` : 'none' }}>
+          <Icon name={icono} style={{ width: 17, height: 17 }} />
+        </span>
+        {nombre}
+      </button>
+      {ayuda}
+    </div>
+  );
+}
+
 function Switch({ on, onChange, disabled, title }) {
   return (
     // `title` NO es decorativo: es el NOMBRE del control. Sin él, un interruptor es un botón mudo
@@ -3308,6 +3381,14 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
   );
 }
 
+// El nombre por defecto de una mesa del resultado (el mismo en la vista y en «Descargar todo»).
+// COPIA (MAPA 581): lleva la fila y las copias — el nombre del archivo es lo que ve el sistema que
+// imprime («Mesa 3 - Principal - Fila 3 - x5»).
+function nombreMesaDef(gi, tela, mf) {
+  return 'Mesa ' + (gi + 1) + (tela ? ' - ' + tela : '')
+    + (mf ? (mf.fila ? ' - Fila ' + mf.fila : '') + ' - x' + mf.copias : '');
+}
+
 function MesasInfinito({ mesas, job, avisar }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
   // Nombres editados: PERSISTEN ligados a ESTE pedido (clave = id del trabajo). Un pedido NUEVO
@@ -3406,7 +3487,8 @@ function MesasInfinito({ mesas, job, avisar }) {
               const w = (anchoCm / 100) * PXM, h = (altoCm / 100) * PXM;
               const key = hoja.archivo + '::' + pi;     // ESTABLE por trabajo → el nombre persiste a esta mesa
               const tela = hoja.tela || '';
-              const nombreDef = 'Mesa ' + (gidx + 1) + (tela ? ' - ' + tela : '');   // secuencial + guión + tela
+              const _mf = (hoja.mesas && hoja.mesas[pi]) || null;     // COPIA: {fila, copias} de esta mesa
+              const nombreDef = nombreMesaDef(gidx, tela, _mf);
               const nombre = nombres[key] != null ? nombres[key] : nombreDef;
               return (
                 <div key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
@@ -3457,9 +3539,17 @@ function MesasInfinito({ mesas, job, avisar }) {
                           </div>
                         )}
                       </div>
-                  {/* ABAJO: tamaño ancho × alto */}
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
+                  {/* ABAJO: tamaño ancho × alto (y, con Copia, de qué fila es y cuántas copias van) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
                     {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
+                    {_mf && (
+                      <span title="Copia: esta mesa es de una sola fila; se imprime esta cantidad de veces"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
+                          background: 'rgba(250,204,21,0.14)', border: '1px solid rgba(250,204,21,0.55)', color: '#fde68a' }}>
+                        <Icon name="copiaMesa" style={{ width: 12, height: 12 }} />
+                        {_mf.fila ? `Fila ${_mf.fila} · ` : ''}×{_mf.copias} {_mf.copias === 1 ? 'copia' : 'copias'}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -3515,7 +3605,8 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
 }
 
 function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
-                                  nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando }) {
+                                  nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando,
+                                  piezasFuera, onPiezaFuera, onPiezasFueraTodas, piezasBloqueo }) {
   // RECUADRO DE SELECCIÓN (modo nombrar, camino B): arrastrar sobre el fondo elige todas las
   // piezas que abarca — el mismo gesto que Moldería. En coords de pantalla; se traduce a piezas
   // por el `data-idx` de cada <g> al soltar. Con Shift, el arrastre sigue siendo pan.
@@ -3526,6 +3617,18 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
   // Aplicar un cambio de mapeo hecho por el usuario (arrastrar/tocar/quitar): si hay auto-guardado
   // (onMapeoChange) persiste solo; si no, solo actualiza el estado local (comportamiento viejo).
   const aplicarMapeo = onMapeoChange || setMapeoValores;
+  // ── PIEZAS A IMPRIMIR (MAPA 577) ─────────────────────────────────────────────────────────────
+  // Al costado del panel de la derecha, dos íconos: «Diseño» (lo de siempre) y «Piezas a imprimir»
+  // (prender/apagar piezas). Una pieza apagada NO sale en la tizada y NO se ve en el visor; en el
+  // modo piezas se ven todas (las apagadas, fantasma) para poder volver a prenderlas. Se apaga por
+  // nombre GENÉRICO («Cuello» apaga todos sus talles), igual que las telas. Sin `onPiezaFuera`
+  // (el mapeador del operario) no hay íconos y todo queda como antes.
+  const [modoPanel, setModoPanel] = React.useState('diseno');
+  const [hoverGen, setHoverGen] = React.useState(null);
+  const _genK = (n) => (n || '').replace(/\s+\d+\s*$/, '').trim();
+  const _fuera = (nombre) => !!(piezasFuera && piezasFuera.has(_genK(nombre).toLowerCase()));
+  const _conPiezas = !!onPiezaFuera;
+  const piezasModo = _conPiezas && modoPanel === 'piezas' && !piezasBloqueo && !telaModo && !nombrarModo && !etqPickModo;
   const segCacheArte = React.useRef(new Map());   // cache de _segmentoEdge (path+pos → baseline) para no re-medir en cada render
   // Visor con PAN + ZOOM (arrastrar + rueda), como el de Configuración: espacio infinito donde se
   // navega libremente. `artVB` = viewBox actual {x,y,w,h}; null = ajustado a la vista (fit).
@@ -3585,8 +3688,107 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
   // Piezas SIN diseño asignado (van en ROJO; no se debe avanzar si hay alguna).
   // VARIABLE-FIRST: si hay variable (vf), se cuentan SOLO sus piezas, no las del molde entero.
   const _piezasVar = vf ? new Set((canvasLayout?.layout || []).filter(p => vf.show.has(p.idx)).map(p => (etqNombres?.[p.idx] || p.name || '').trim()).filter(Boolean)) : null;
-  const _sinDiseno = (mapeoData?.piezas || []).filter(p => !mapeoValores[p] && (!_piezasVar || _piezasVar.has(p)));
+  const _sinDiseno = (mapeoData?.piezas || []).filter(p => !mapeoValores[p] && (!_piezasVar || _piezasVar.has(p)) && !_fuera(p));
   const _conDiseno = mapeoData?.mesas?.length > 0;
+  // Las piezas (genéricas) de lo que se está viendo, en el orden del molde, con cuántas hay de cada una.
+  const _gensVista = (() => {
+    if (!_conPiezas) return [];
+    const m = new Map();
+    (canvasLayout?.layout || []).filter(p => (etqNombres?.[p.idx] || p.name)).filter(p => !vf || vf.show.has(p.idx))
+      .forEach(p => { const g = _genK(etqNombres?.[p.idx] || p.name); if (g) m.set(g, (m.get(g) || 0) + 1); });
+    return [...m.entries()].map(([gen, n]) => ({ gen, n, off: !!(piezasFuera && piezasFuera.has(gen.toLowerCase())) }));
+  })();
+  const _nOff = _gensVista.filter(x => x.off).length;
+  const _nOn = _gensVista.length - _nOff;
+  const _switchPz = (on) => (
+    <span style={{ width: 30, height: 17, borderRadius: 999, flexShrink: 0, position: 'relative', transition: 'background .18s',
+      background: on ? 'var(--accent)' : 'rgba(255,255,255,0.14)', boxShadow: on ? '0 0 10px rgba(0,216,245,0.35)' : 'none' }}>
+      <span style={{ position: 'absolute', top: 2, left: 2, width: 13, height: 13, borderRadius: '50%', background: on ? '#001018' : 'rgba(255,255,255,0.75)',
+        transform: on ? 'translateX(13px)' : 'none', transition: 'transform .18s' }} />
+    </span>
+  );
+  const panelPiezasJSX = !_conPiezas ? null : (
+    <div data-tour="arte-piezas-imprimir" style={{ width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Piezas a imprimir</div>
+        <Ayuda ancho={290}>
+          Tocá una pieza (acá o en el molde) para <b>apagarla</b>: no sale en la tizada ni se ve en el visor. Se apaga
+          en todos los talles. Volvé a tocarla para prenderla. Una pieza apagada no pide tela.
+        </Ayuda>
+      </div>
+      <div style={{ padding: '10px 12px', borderRadius: 11, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+          <b style={{ fontSize: 20, color: '#fff', marginRight: 4 }}>{_nOn}</b>de {_gensVista.length} se imprimen
+        </div>
+        <div style={{ height: 5, borderRadius: 999, background: 'rgba(255,255,255,0.08)', marginTop: 7, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${_gensVista.length ? (100 * _nOn / _gensVista.length) : 0}%`, background: 'linear-gradient(90deg, var(--accent), var(--cmyk-magenta))', transition: 'width .25s' }} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button type="button" className="btn ghost" data-tour="arte-piezas-todas" disabled={!_nOff}
+          style={{ flex: 1, padding: '6px 8px', fontSize: 11.5, opacity: _nOff ? 1 : 0.45 }}
+          onClick={() => onPiezasFueraTodas && onPiezasFueraTodas(_gensVista.map(x => x.gen), false)}>
+          <Icon name="check" style={{ width: 12, height: 12, marginRight: 4 }} /> Activar todas
+        </button>
+        <button type="button" className="btn ghost" data-tour="arte-piezas-ninguna" disabled={!_nOn}
+          style={{ flex: 1, padding: '6px 8px', fontSize: 11.5, opacity: _nOn ? 1 : 0.45 }}
+          onClick={() => onPiezasFueraTodas && onPiezasFueraTodas(_gensVista.map(x => x.gen), true)}>
+          <Icon name="eyeOff" style={{ width: 12, height: 12, marginRight: 4 }} /> Desactivar todas
+        </button>
+      </div>
+      {_gensVista.length > 0 && _nOn === 0 && (
+        <div style={{ fontSize: 11.5, lineHeight: 1.4, padding: '8px 10px', borderRadius: 10, color: '#ffd28a',
+          background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.40)' }}>
+          Ninguna pieza se imprime: esta prenda no saldría en la tizada. Prendé al menos una.
+        </div>
+      )}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5, paddingRight: 3 }}>
+        {!_gensVista.length && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 10 }}>Preparando las piezas…</div>}
+        {_gensVista.map(({ gen, n, off }) => (
+          <button key={gen} type="button" data-pieza-imprimir={gen}
+            onClick={() => onPiezaFuera(gen)}
+            onMouseEnter={() => setHoverGen(gen)} onMouseLeave={() => setHoverGen(null)}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 10, cursor: 'pointer',
+              border: '1px solid ' + (hoverGen === gen ? 'var(--accent)' : off ? 'rgba(255,255,255,0.06)' : 'rgba(0,216,245,0.28)'),
+              background: off ? 'rgba(255,255,255,0.015)' : 'rgba(0,216,245,0.06)', color: '#fff', transition: 'all .15s' }}>
+            {_switchPz(!off)}
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              opacity: off ? 0.45 : 1, textDecoration: off ? 'line-through' : 'none' }} title={gen}>{gen}</span>
+            {n > 1 && <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>×{n}</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  // Los dos íconos a la DERECHA del panel: Diseño (por defecto) | Piezas a imprimir.
+  const railPanelJSX = (!_conPiezas || telaModo) ? null : (
+    <div data-tour="arte-panel-modo" data-opciones="1" style={{ width: 46, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[['diseno', 'paletaDiseno', 'Diseño', 'Los diseños del arte'], ['piezas', 'piezasImprimir', 'Piezas', 'Piezas a imprimir: apagá las que no van en la tizada']].map(([k, ic, txt, tip]) => {
+        const bloq = k === 'piezas' && !!piezasBloqueo;
+        const on = !bloq && (k === 'piezas' ? piezasModo : !piezasModo);
+        return (
+          <button key={k} type="button" data-elegida={on ? '1' : '0'} disabled={bloq}
+            title={bloq ? piezasBloqueo : tip}
+            onClick={() => { setModoPanel(k); setHoverGen(null); }}
+            style={{ position: 'relative', width: 46, height: 52, borderRadius: 12, cursor: bloq ? 'not-allowed' : 'pointer', opacity: bloq ? 0.4 : 1,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: 0,
+              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+              background: on ? 'rgba(0,216,245,0.14)' : 'rgba(255,255,255,0.02)',
+              color: on ? 'var(--accent)' : 'var(--text-secondary)',
+              boxShadow: on ? '0 0 16px rgba(0,216,245,0.25)' : 'none', transition: 'all .18s' }}>
+            <Icon name={ic} style={{ width: 19, height: 19 }} />
+            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: 0.2 }}>{txt}</span>
+            {k === 'piezas' && _nOff > 0 && (
+              <span title={`${_nOff} pieza${_nOff === 1 ? '' : 's'} apagada${_nOff === 1 ? '' : 's'}`}
+                style={{ position: 'absolute', top: -6, right: -6, minWidth: 17, height: 17, padding: '0 4px', borderRadius: 999,
+                  background: 'var(--cmyk-magenta)', color: '#fff', fontSize: 10, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 0 0 2px var(--bg-primary)' }}>{_nOff}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
   return (
     <div className="animate-fade" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 9, marginBottom: 9, borderBottom: '1px solid var(--border-light)', gap: 12 }}>
@@ -3596,13 +3798,19 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
           {titulo || <div style={{ fontSize: 14, fontWeight: 700 }}>Mapear diseño</div>}
           <span title="Arrastrá cada diseño (panel derecho) sobre su pieza del molde. Al Guardar, el mapeo queda fijo en el molde: los próximos diseños con el mismo orden de mesas se aplican solos."
             style={{ cursor: 'help', color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, fontStyle: 'italic', border: '1px solid var(--border-light)', borderRadius: '50%', width: 17, height: 17, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>i</span>
-          {_conDiseno && _sinDiseno.length > 0 && (
+          {piezasModo && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, border: '1px solid rgba(0,216,245,0.45)',
+              background: 'rgba(0,216,245,0.10)', color: 'var(--accent)', fontSize: 12, fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              <Icon name="piezasImprimir" style={{ width: 13, height: 13 }} /> Tocá una pieza para sacarla o volverla a la tizada
+            </span>
+          )}
+          {!piezasModo && _conDiseno && _sinDiseno.length > 0 && (
             <button type="button" onClick={() => setSelectedPiezaMapeo(_sinDiseno[0])} title={'Sin diseño: ' + _sinDiseno.join(', ')}
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, cursor: 'pointer', border: '1px solid #ff4d4d', background: 'rgba(255,77,77,0.12)', color: '#ff7a7a', fontSize: 12, fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4d' }} /> {_sinDiseno.length} pieza{_sinDiseno.length === 1 ? '' : 's'} sin diseño
             </button>
           )}
-          {_conDiseno && _sinDiseno.length === 0 && (
+          {!piezasModo && _conDiseno && _sinDiseno.length === 0 && (
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--success)', flexShrink: 0 }}>
               <Icon name="check" style={{ width: 13, height: 13, strokeWidth: 3 }} /> Todas con diseño
             </span>
@@ -3647,6 +3855,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
             const piezas = canvasLayout.layout
               .filter(p => (etqNombres[p.idx] || p.name))
               .filter(p => !vf || vf.show.has(p.idx))
+              .filter(p => piezasModo || !_fuera(etqNombres[p.idx] || p.name))   // apagada = no se ve (MAPA 577)
               .map(p => { const o = vf ? (vf.pos.get(p.idx) || { dx: 0, dy: 0 }) : { dx: 0, dy: 0 }; return { ...p, nombre: etqNombres[p.idx] || p.name, _dx: o.dx, _dy: o.dy, px: p.px + o.dx, py: p.py + o.dy }; });
             // ORDEN DE APILADO = el panel de capas (la capa de arriba, adelante): se pinta al
             // revés porque en SVG tapa lo último dibujado. Los CARTELES se siguen ubicando con
@@ -3733,6 +3942,8 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                   const mappedMesa = mapeoData?.mesas?.find(m => m.mesa === parseInt(mappedMesaIdx));
                   // MODO TELA: pintar la pieza con el color de su tela + resaltar si está seleccionada.
                   const _genN = _gen(pzName);
+                  const _off = piezasModo && _fuera(pzName);            // piezas a imprimir: apagada
+                  const _hov = piezasModo && hoverGen === _genN;
                   const telaCol = telaModo && telaColorPieza ? telaColorPieza(_genN) : null;
                   const telaSeld = telaModo && telaSelSet && telaSelSet.has(_genN);
                   // Colocación del diseño en la pieza (escala al alto, centrado al ancho) — la MISMA
@@ -3756,7 +3967,13 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                          a encontrar (el SVG no tiene texto ni controles). Ver `pieza:` en localizar.js */
                       data-pieza={pzName || _genN || ('pieza ' + p.idx)}
                       data-idx={p.idx}
-                      style={{ cursor: 'pointer' }} onClick={(e) => {
+                      data-fuera={_off ? '1' : undefined}
+                      opacity={_off ? 0.3 : 1}
+                      onMouseEnter={piezasModo ? () => setHoverGen(_genN) : undefined}
+                      onMouseLeave={piezasModo ? () => setHoverGen(null) : undefined}
+                      style={{ cursor: 'pointer', filter: _off ? 'grayscale(1)' : undefined, transition: 'opacity .18s' }} onClick={(e) => {
+                        // PIEZAS A IMPRIMIR: tocar prende/apaga la pieza (todas las de su genérico).
+                        if (piezasModo) { e.stopPropagation(); onPiezaFuera(_genN); return; }
                         // UBICAR LA ETIQUETA (camino B, desde el pedido): el punto que se tocó se
                         // «apoya» en el contorno más cercano. Se calcula en coordenadas del SVG y
                         // restando el traslado de la pieza (en «ver variante» están reacomodadas).
@@ -3825,7 +4042,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                           </g>
                         );
                       })}
-                      <path d={p.path_svg} vectorEffect="non-scaling-stroke" style={telaModo ? { fill: telaCol ? telaCol + '4d' : 'rgba(255,255,255,0.03)', stroke: telaSeld ? 'var(--accent)' : (telaCol || 'rgba(255,255,255,0.35)'), strokeWidth: telaSeld ? 4 : 1.6, strokeDasharray: 'none' } : { fill: pv ? 'none' : (isSelected ? 'rgba(0,243,255,0.14)' : mappedMesaIdx ? 'rgba(16,185,129,0.05)' : 'rgba(255,77,77,0.14)'), stroke: isSelected ? 'var(--accent)' : mappedMesaIdx ? 'var(--success)' : '#ff4d4d', strokeWidth: isSelected ? (pv ? 1.6 : 3) : (mappedMesaIdx ? (pv ? 0 : 1.5) : (pv ? 1.2 : 2.4)), strokeDasharray: (isSelected && pv) ? '6 4' : ((mappedMesaIdx || isSelected || pv) ? 'none' : '7 5') }} />
+                      <path d={p.path_svg} vectorEffect="non-scaling-stroke" style={piezasModo ? { fill: _off ? 'rgba(255,255,255,0.02)' : (pv ? 'none' : 'rgba(0,216,245,0.06)'), stroke: _hov ? 'var(--accent)' : (_off ? 'rgba(255,255,255,0.5)' : 'rgba(0,216,245,0.6)'), strokeWidth: _hov ? 3.2 : 1.5, strokeDasharray: _off ? '6 5' : 'none' } : telaModo ? { fill: telaCol ? telaCol + '4d' : 'rgba(255,255,255,0.03)', stroke: telaSeld ? 'var(--accent)' : (telaCol || 'rgba(255,255,255,0.35)'), strokeWidth: telaSeld ? 4 : 1.6, strokeDasharray: 'none' } : { fill: pv ? 'none' : (isSelected ? 'rgba(0,243,255,0.14)' : mappedMesaIdx ? 'rgba(16,185,129,0.05)' : 'rgba(255,77,77,0.14)'), stroke: isSelected ? 'var(--accent)' : mappedMesaIdx ? 'var(--success)' : '#ff4d4d', strokeWidth: isSelected ? (pv ? 1.6 : 3) : (mappedMesaIdx ? (pv ? 0 : 1.5) : (pv ? 1.2 : 2.4)), strokeDasharray: (isSelected && pv) ? '6 4' : ((mappedMesaIdx || isSelected || pv) ? 'none' : '7 5') }} />
                       {/* ETIQUETA (talle · nombre · nº) en la posición configurada — indica dónde y qué dice
                           la etiqueta de corte que llevará la pieza en la tizada. */}
                       {!pv && !telaModo && etiquetaConfig?.activo && (() => {
@@ -3889,6 +4106,15 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                     </g>
                   );
                 })}
+                {piezasModo && piezas.filter(p => _fuera(p.nombre)).map(p => {
+                  const r = Math.max(4, Math.min(p.pw, p.ph) * 0.13), cx = p.px + p.pw / 2, cy = p.py + p.ph / 2, d = r * 0.7071;
+                  return (
+                    <g key={'off' + p.idx} pointerEvents="none">
+                      <circle cx={cx} cy={cy} r={r} fill="rgba(0,0,0,0.6)" stroke="#ff6b8a" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                      <line x1={cx - d} y1={cy + d} x2={cx + d} y2={cy - d} stroke="#ff6b8a" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                    </g>
+                  );
+                })}
                 {labels.map((l) => {
                   const pzName = l.nombre;
                   // En modo NOMBRAR (camino B) el cartel sigue a la selección de nombrar y no
@@ -3896,12 +4122,14 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                   const isSelected = nombrarModo ? !!(selNombrarB && selNombrarB.has(l.p.idx)) : selectedPiezaMapeo === pzName;
                   const mesa = mapeoValores[pzName];
                   const lcx = l.r.x + l.r.w / 2, lcy = l.r.y + l.r.h / 2;
-                  const col = isSelected ? 'var(--accent)' : nombrarModo ? 'rgba(255,255,255,0.45)' : mesa ? 'var(--success)' : '#ff4d4d';
+                  const _offL = piezasModo && _fuera(pzName);
+                  const col = piezasModo ? (_offL ? 'rgba(255,255,255,0.35)' : 'var(--accent)')
+                    : isSelected ? 'var(--accent)' : nombrarModo ? 'rgba(255,255,255,0.45)' : mesa ? 'var(--success)' : '#ff4d4d';
                   return (
-                    <g key={'lbl' + l.p.idx} style={{ cursor: 'pointer' }} onClick={(e) => { if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_gen(pzName)); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
+                    <g key={'lbl' + l.p.idx} style={{ cursor: 'pointer' }} onClick={(e) => { if (piezasModo) { e.stopPropagation(); onPiezaFuera(_gen(pzName)); } else if (telaModo) { e.stopPropagation(); onTelaClick && onTelaClick(_gen(pzName)); } else setSelectedPiezaMapeo(pzName); }} onDragOver={(e) => e.preventDefault()} onDrop={drop(pzName)}>
                       <line x1={l.ax} y1={l.ay} x2={lcx} y2={lcy} stroke={col} strokeWidth={1} strokeDasharray="3 2" />
-                      <rect x={l.r.x} y={l.r.y} width={l.r.w} height={l.r.h} rx={4} fill="rgba(0,0,0,0.9)" stroke={isSelected ? 'var(--accent)' : mesa ? 'var(--success)' : 'rgba(255,255,255,0.3)'} strokeWidth={isSelected ? 1.6 : 1} />
-                      <text x={lcx} y={lcy + 3.2} textAnchor="middle" style={{ fill: '#fff', fontSize: 9.5, fontWeight: 600, fontFamily: 'sans-serif', pointerEvents: 'none' }}>{pzName}{mesa ? ` · M${mesa}` : ''}</text>
+                      <rect x={l.r.x} y={l.r.y} width={l.r.w} height={l.r.h} rx={4} fill="rgba(0,0,0,0.9)" stroke={piezasModo ? col : isSelected ? 'var(--accent)' : mesa ? 'var(--success)' : 'rgba(255,255,255,0.3)'} strokeWidth={isSelected ? 1.6 : 1} />
+                      <text x={lcx} y={lcy + 3.2} textAnchor="middle" style={{ fill: _offL ? 'rgba(255,255,255,0.45)' : '#fff', textDecoration: _offL ? 'line-through' : 'none', fontSize: 9.5, fontWeight: 600, fontFamily: 'sans-serif', pointerEvents: 'none' }}>{pzName}{(!piezasModo && mesa) ? ` · M${mesa}` : ''}</text>
                     </g>
                   );
                 })}
@@ -3914,7 +4142,7 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
         {/* `panelFijo` (camino B: nombrar las piezas) MANDA sobre todo: en un molde que trae
             el diseno adentro no hay diseno que cargar, y el panel de «Diseños · Sin diseño»
             estaría pidiendo un arte que no existe. */}
-        {telaModo ? panelTela : panelFijo ? panelFijo : (
+        {telaModo ? panelTela : piezasModo ? panelPiezasJSX : panelFijo ? panelFijo : (
         <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)' }}>Diseños</div>
@@ -4011,6 +4239,8 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
           )}
         </div>
         )}
+        {/* Los íconos Diseño | Piezas van a la DERECHA del panel (pedido del usuario 2026-09-28). */}
+        {railPanelJSX}
       </div>
     </div>
   );
@@ -5678,6 +5908,13 @@ export default function App() {
   const [estado, setEstado] = useState(null);
   const [productosCat, setProductosCat] = useState({ activo: 'prod_default', productos: [] });
   const [filas, setFilas] = useState([]);
+  // Columnas de botón (manga, sisa…) que NO aplican a ninguna fila del pedido: la prenda no tiene esa
+  // parte, o todas sus piezas están apagadas, o el molde no distingue las opciones. No se muestran
+  // (MAPA 580). Lo calcula un efecto de más abajo (necesita la disponibilidad de cada fila).
+  const [togglesSinUso, setTogglesSinUso] = useState(() => new Set());
+  // Las columnas de BOTÓN con su opción por defecto (la que se ve presionada en una celda vacía).
+  // `generarMulti` (declarada antes) la lee por acá para mandar lo que se VE: ver más abajo.
+  const botonesDefaultRef = useRef([]);
   const [csvImport, setCsvImport] = useState(null);   // { filas:[{valores, issues:[{colId,label,raw,opciones}]}] } al importar CSV con valores inválidos
   const [csvFix, setCsvFix] = useState({});           // `${i}:${colId}` -> valor elegido para la celda inválida
   const [csvOmit, setCsvOmit] = useState({});         // i -> true si esa fila no se carga
@@ -5755,6 +5992,13 @@ export default function App() {
   // Antes la clave era sólo el molde, así que dos diseños del MISMO molde compartían la tela:
   // cambiabas una y se cambiaba la otra sin avisar, y las dos salían cortadas en la misma tela.
   const [telaPorPieza, setTelaPorPieza] = useState(_wiz.telaPorPieza || {});
+  // PIEZAS A IMPRIMIR (MAPA 577): las que el operario apagó en el paso Arte, por (diseño, molde) y
+  // por nombre GENÉRICO — la misma clave que las telas. `{ "<disenoId>|<pid>": ["Cuello", …] }`.
+  // Es del PEDIDO: «Nuevo pedido» la deja en cero.
+  const [piezasFuera, setPiezasFuera] = useState(_wiz.piezasFuera || {});
+  // `piezasTodasFuera` se calcula más abajo (necesita los ítems del Arte); la traba de «A la planilla»
+  // (declarada antes) lo lee por acá.
+  const piezasTodasFueraRef = useRef([]);
   // Wizard del Pedido: paso actual + índice del molde en el paso de diseños.
   const [pedidoPaso, setPedidoPaso] = useState(_wiz.pedidoPaso || 'diseno'); // diseno | moldes | arte | planilla | generar | resultados
   // La pantalla de resultados ocupa lo que haya hasta el borde de la ventana: así los botones de
@@ -5766,6 +6010,18 @@ export default function App() {
   // COLUMNA CANTIDAD: la prende el operario con un botón (salvo que la config diga «siempre»).
   // Es del PEDIDO, no del molde: un pedido nuevo arranca sin ella. Ver `colCantidad`/`cantidadVisible`.
   const [cantidadOn, setCantidadOn] = useState(!!_wiz.cantidadOn);
+  // REPO (reposición, MAPA 578): con el interruptor prendido, cada fila puede pedir SÓLO algunas
+  // piezas, elegidas tocándolas en el dibujo de su talle. Lo elegido viaja EN la fila
+  // (`fila.__repo = {pid: [pieza exacta…]}`: las filas no tienen id y el objeto se mueve con ella al
+  // reordenar). Sin nada elegido, la fila hace todas las piezas del paso anterior.
+  const [repoOn, setRepoOn] = useState(!!_wiz.repoOn);
+  // COPIA (MAPA 581): con la columna Cantidad a la vista, «Copia» hace UNA MESA POR FILA y la cantidad
+  // deja de multiplicar la prenda: queda como dato (copias de esa mesa) para el sistema que imprime.
+  const [cantidadCopia, setCantidadCopia] = useState(!!_wiz.cantidadCopia);
+  const copiaActivaRef = useRef(false);   // = columna Cantidad a la vista Y Copia prendido (se asigna más abajo)
+  const [repoPick, setRepoPick] = useState(null);      // índice de la fila abierta en «Piezas»
+  const [repoDet, setRepoDet] = useState({});          // `${pid}|${talle}|${variable}` → detección
+  const [repoHover, setRepoHover] = useState(null);
   // Múltiples DISEÑOS por pedido: cada diseño (nombre) tiene su arte por molde.
   // Los diseños se ESCRIBEN (ninguno hardcodeado). disenoMoldes = qué moldes van en cada diseño.
   const [disenosPedido, setDisenosPedido] = useState(_wiz.disenosPedido || []); // [{id(slug), nombre}]
@@ -6926,8 +7182,14 @@ export default function App() {
       const r = await fetch('/api/telas/refrescar', { method: 'POST' });
       const d = await _jsonTelas(r);
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      setTelasReg({ telas: d.telas || [], grupos: d.grupos || [], margen_cm: d.margen_cm });
-      showMsg(`Telas actualizadas ✓ (${d.count ?? (d.telas || []).length})`);
+      setTelasReg({ telas: d.telas || [], grupos: d.grupos || [], margen_cm: d.margen_cm, sync: d.sync });
+      const _s = d.sync || {};
+      const _cambios = [
+        (_s.nuevas || []).length ? `${_s.nuevas.length} nueva${_s.nuevas.length > 1 ? 's' : ''}` : '',
+        (_s.reactivadas || []).length ? `${_s.reactivadas.length} volvió${_s.reactivadas.length > 1 ? 'ieron' : ''}` : '',
+        (_s.bajas || []).length ? `${_s.bajas.length} dada${_s.bajas.length > 1 ? 's' : ''} de baja` : '',
+      ].filter(Boolean);
+      showMsg(`Telas actualizadas ✓ · ${d.count ?? '?'} activas${_cambios.length ? ' · ' + _cambios.join(' · ') : ' · sin cambios'}`);
     } catch (e) { showError('No se pudo actualizar las telas del sistema: ' + (e.message || e)); }
     finally { setTelasRefrescando(false); }
   };
@@ -7044,8 +7306,14 @@ export default function App() {
     // sale igual: el nombre/número se sublima con la predeterminada. Así que en vez de frenar, se
     // muestra el cartel una vez y el usuario decide — «Seguir de todos modos» pasa `forzarFuente`.
     if (!forzarFuente && fuentesFaltantesItems.length) { setFuenteAvanzar(true); return; }
-    if (telasIncompletas) {   // OBLIGATORIO: cada pieza tiene que tener una tela elegida
-      showError(`Faltan ${telasFaltantesTotal} pieza(s) sin tela. Asignales una tela en «Asignar telas» antes de seguir.`);
+    // OBLIGATORIO: cada pieza tiene que tener una tela elegida, y ninguna prenda puede quedar con
+    // TODAS sus piezas apagadas («Piezas a imprimir», MAPA 577: no saldría nada). Un solo aviso.
+    const _trabaArte = telasIncompletas
+      ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela. Asignales una tela en «Asignar telas» antes de seguir.`
+      : ((piezasTodasFueraRef.current || []).length
+        ? 'Hay prendas con TODAS sus piezas apagadas en «Piezas a imprimir»: no saldría nada. Prendé al menos una pieza.' : '');
+    if (_trabaArte) {
+      showError(_trabaArte);
       return;
     }
     if (bloqueaPorSinDiseno()) return;   // alguna pieza del molde activo sin diseño → no avanza, la marca en rojo
@@ -7666,15 +7934,18 @@ export default function App() {
       ? (grande ? 'Procesando el molde… los archivos grandes o DXF pueden tardar unos segundos.' : 'Procesando el molde…')
       : 'Subiendo y procesando el archivo…');
     await pintarYa();   // el cartel ANTES del trabajo pesado (ver `pintarYa`)
-    // El molde que trae el diseño adentro se prepara EN ESTA COMPUTADORA también desde acá
-    // (Configuración → Moldería): antes esta vía mandaba el archivo pelado y el servidor tardaba
-    // minutos. `null` = molde sin diseño o DXF → lo lee el servidor como siempre.
+    // El molde se prepara EN ESTA COMPUTADORA y desde Moldería sólo entra LIMPIO: si trae el diseño
+    // adentro se corta acá con el aviso (`base: true`, MAPA 576). `null` = esta computadora no
+    // prepara moldes → lo lee el servidor, que con `solo_base=1` hace el mismo control.
     let preparado = null;
     const _pidMolde = pidCfg || productosCat.activo;
     try {
       if (type === 'plantilla') {
-        preparado = await _prepararDosTiempos(file, file.name || 'molde', (x) => setProcesando(x.nota || 'Preparando el molde en tu computadora…'), { detectar: true });
-        formData.append('con_diseno', preparado && !preparado.caminoA ? '1' : '0');
+        preparado = await _prepararDosTiempos(file, file.name || 'molde', (x) => setProcesando(x.nota || 'Preparando el molde en tu computadora…'), { base: true });
+        // Sin `preparado` (esta computadora no prepara moldes) NO se manda `con_diseno`: el
+        // servidor mira el archivo y, con `solo_base`, lo rechaza si trae el diseño adentro.
+        if (preparado) formData.append('con_diseno', preparado.caminoA ? '0' : '1');
+        formData.append('solo_base', '1');
         if (preparado) formData.append('paquete', new Blob([preparado.zipA], { type: 'application/zip' }), 'paquete.zip');
         // un DXF ya convertido acá: se sube el PDF (el DXF original va adentro del paquete); y si
         // el servidor ya tiene el archivo (mismo sha1), no viaja
@@ -9625,9 +9896,22 @@ export default function App() {
       // usuario 2026-08-31). La lista la pasa QUIEN LLAMA (`filasQueSalen()`), que se declara más
       // abajo: usarla acá sería leerla antes de tiempo.
       const _filasUtiles = filasUtiles || filas;
+      // LO QUE SE VE ES LO QUE SE MANDA (2026-09-28): una celda de botón vacía se ve con su opción
+      // por defecto PRESIONADA (`_valorBoton`), así que viaja con esa opción. Antes viajaba vacía y
+      // el servidor avisaba «filas sin elegir manga» sobre algo que en pantalla sí estaba elegido.
+      const _copia = !!copiaActivaRef.current;   // COPIA sólo con la columna Cantidad a la vista
+      const _filasVis = _filasUtiles.map(f => {
+        let g = f;
+        // COPIA: el número de la fila EN LA PLANILLA (el que ve la persona) → «Fila 3» en la mesa
+        if (_copia) { g = { ...f, __nfila: filas.indexOf(f) + 1 }; }
+        (botonesDefaultRef.current || []).forEach(({ id, def }) => {
+          if (def && !String(g[id] ?? '').trim()) { if (g === f) g = { ...f }; g[id] = def; }
+        });
+        return g;
+      });
       const _filasQ = cantidadVisible || !colCantidad
-        ? _filasUtiles
-        : _filasUtiles.map(f => { const g = { ...f }; delete g[colCantidad.id]; return g; });
+        ? _filasVis
+        : _filasVis.map(f => { const g = { ...f }; delete g[colCantidad.id]; return g; });
       const prendasFinal = (hayVariablesPlanilla ? _filasQ.map(f => {
         const cl = varianteDeDiseno(_disCol ? (f[_disCol.id] || '') : '');
         const claveOk = cl && (!f.__variante || !variablesDisponibles.some(v => v.clave === f.__variante && ids.includes(v.moldeId)));
@@ -9635,7 +9919,8 @@ export default function App() {
       }) : _filasQ);
       // TELAS del pedido: tela base por molde + overrides por pieza (id → nombre para el motor).
       const _telaNom = {}; (telasReg.telas || []).forEach(t => { _telaNom[t.id] = t.nombre; });
-      const tela_base = {}, asignaciones = {};
+      // `piezas_fuera` = PIEZAS A IMPRIMIR: `{pid: {slug: [genérico]}}`, por diseño como las telas (MAPA 577).
+      const tela_base = {}, asignaciones = {}, piezas_fuera = {};
       ids.forEach(pid => {
         const b = telaBaseMolde[pid]; if (b && _telaNom[b]) tela_base[pid] = _telaNom[b];
       });
@@ -9648,6 +9933,8 @@ export default function App() {
           const ov = _telasDe(d.id, pid); const o = {};
           Object.entries(ov).forEach(([pz, tid]) => { if (tid && _telaNom[tid]) o[pz] = _telaNom[tid]; });
           if (Object.keys(o).length) { asignaciones[pid] = asignaciones[pid] || {}; asignaciones[pid][slug] = o; }
+          const _pf = piezasFuera[`${d.id}|${pid}`] || [];   // misma clave que `_claveTelaDis`
+          if (_pf.length) { piezas_fuera[pid] = piezas_fuera[pid] || {}; piezas_fuera[pid][slug] = _pf; }
         });
       });
       // LA VARIABLE DE CADA ESPACIO, MOLDE POR MOLDE: `{slug_del_espacio: {pid: clave}}`. En la
@@ -9670,8 +9957,18 @@ export default function App() {
       });
       // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
       // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
-      const planilla = { columnas: (cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })), filas: _filasQ };
-      const _cuerpo = { molds: ids, moldes_por_diseno, prendas: prendasFinal, default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
+      // REPO en la ficha: una columna más con lo que lleva cada fila (sólo si hay alguna de reposición).
+      const _hayRepo = repoOn && _filasQ.some(f => f.__repo && Object.keys(f.__repo).length);
+      const _nomMolde = (pid) => ((productosCat.productos || []).find(p => p.id === pid) || {}).nombre || pid;
+      const planilla = {
+        columnas: [...(cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })),
+                   ...(_hayRepo ? [{ id: '__repo_txt', label: 'Repo' }] : [])],
+        filas: !_hayRepo ? _filasQ : _filasQ.map(f => ({ ...f, __repo_txt: (f.__repo && Object.keys(f.__repo).length)
+          ? Object.entries(f.__repo).map(([pid, l]) => `${_nomMolde(pid)}: ${(l || []).join(', ')}`).join(' · ') : 'Todas' })),
+      };
+      const _cuerpo = { piezas_fuera, cantidad_copia: _copia, molds: ids, moldes_por_diseno,
+        // Repo apagado: lo elegido no viaja (todas las filas hacen todas sus piezas)
+        prendas: repoOn ? prendasFinal : prendasFinal.map(({ __repo, ...f }) => f), default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
       // 🔴 LA TIZADA SE GENERA EN ESTA COMPUTADORA (PLAN_NAVEGADOR, etapa 4): el servidor revisa
       // el pedido, esta máquina arma las piezas, las acomoda, escribe la hoja y la ficha, y manda
       // el paquete; el servidor lo guarda como un trabajo más. Si el pedido trae un molde que no es
@@ -9743,16 +10040,42 @@ export default function App() {
     try {
       localStorage.setItem('tizada_wizard', JSON.stringify({
         pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
-        telaBaseMolde, telaPorPieza, cantidadOn,
+        telaBaseMolde, telaPorPieza, cantidadOn, repoOn, cantidadCopia,
         // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
         // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
-        moldesEfimeros, marcasPedido, sinMarcaPedido,
+        moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera,
       }));
     } catch { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, moldesEfimeros]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, repoOn, cantidadCopia, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
+  // TELAS DADAS DE BAJA (actualización de las 00 hs o el botón de Config › Telas): no se borran del
+  // catálogo, pero ya no se pueden usar. Si el pedido en curso tenía piezas en una de ellas, esas
+  // piezas quedan SIN tela (y el paso Arte pide elegir otra), con un aviso que dice cuál fue.
+  useEffect(() => {
+    const baja = new Set((telasReg.telas || []).filter(t => t.usable === false || t.activa === false).map(t => String(t.id)));
+    if (!baja.size) return;
+    let quitadas = 0; const nombres = new Set();
+    const limpio = {};
+    Object.entries(telaPorPieza || {}).forEach(([k, m]) => {
+      if (!m || typeof m !== 'object') { limpio[k] = m; return; }
+      const mm = {};
+      Object.entries(m).forEach(([pz, tid]) => {
+        if (tid != null && baja.has(String(tid))) {
+          quitadas++;
+          nombres.add(((telasReg.telas || []).find(t => String(t.id) === String(tid)) || {}).nombre || String(tid));
+        } else mm[pz] = tid;
+      });
+      limpio[k] = mm;
+    });
+    if (quitadas) {
+      setTelaPorPieza(limpio);
+      showError(`${[...nombres].map(n => '«' + n + '»').join(', ')} ya no se puede usar (dada de baja o sin medida): `
+        + `${quitadas} pieza${quitadas > 1 ? 's quedaron' : ' quedó'} sin tela. Elegí otra en Asignar telas.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [telasReg.telas]);
   // Estado de la conexión con la API del sistema al abrir Config › Telas.
   useEffect(() => { if (adminSubView === 'telas') fetchTelaConexion(); }, [adminSubView]);
 
@@ -11296,10 +11619,12 @@ export default function App() {
 
   const colActiva = (c) => (c.role === 'cantidad')
     ? cantidadVisible
+    : togglesSinUso.has(c.id) ? false
     : (!columnasActivasPlanilla || !COLS_MAPEABLES.includes(c.role) || columnasActivasPlanilla.has(c.id));
 
 
   const cantidadVisible = !!colCantidad && (cantidadSiempre || cantidadOn);
+  copiaActivaRef.current = !!(cantidadVisible && cantidadCopia);   // lo lee `generarMulti` (declarada antes)
 
   // ── COLUMNAS OBLIGATORIAS: qué filas NO se van a fabricar ─────────────────────────────────
   // Mismo criterio que el servidor (`_traducir_prendas`): se exigen las columnas marcadas
@@ -11328,7 +11653,9 @@ export default function App() {
   const _faltaEnFila = React.useCallback((f) => {
     const talleCols = columnasObligatorias.filter(c => c.role === 'talle');
     const otras = columnasObligatorias.filter(c => c.role !== 'talle');
-    const faltan = otras.filter(c => !String(f?.[c.id] ?? '').trim());
+    // una columna de BOTÓN nunca «falta»: vacía se ve (y se manda) con su opción por defecto
+    const faltan = otras.filter(c => !String(f?.[c.id] ?? '').trim()
+      && !(botonesDefaultRef.current || []).some(b => b.id === c.id && b.def));
     // del grupo de talle: sólo se reclama si NINGUNA tiene valor
     if (talleCols.length && !talleCols.some(c => String(f?.[c.id] ?? '').trim())) {
       faltan.push(talleCols.length === 1 ? talleCols[0]
@@ -11458,6 +11785,51 @@ export default function App() {
   // TODAS las piezas). La variable de cada fila sale de su DISEÑO (como antes el molde) —
   // NO hay columna de variable: el Diseño de la fila define la variable a generar.
   const _clavesVar = variablesPlanilla.map(v => v.clave).join('|');
+  // ── REPO: de qué diseño, qué moldes, qué variable y qué talle es cada fila ────────────────────
+  const _disDeFila = (fila) => {
+    const dc = cols.find(c => c.role === 'diseno');
+    const nom = dc ? String((fila || {})[dc.id] || '') : '';
+    return disenosPedido.find(x => x.nombre === nom) || disenosPedido[0] || null;
+  };
+  const _moldesDeFila = (fila) => { const d = _disDeFila(fila); return d ? (disenoMoldes[d.id] || []) : []; };
+  // La variable con la que ESTE molde hace la fila: la de la fila si es de este molde; si no, la que
+  // el diseño eligió para este molde en el paso 1 (igual que `vars_por_diseno` en el servidor).
+  const _varDeFilaMolde = (fila, did, pid) => {
+    const v0 = fila && fila.__variante ? varByClave(fila.__variante) : null;
+    if (v0 && v0.moldeId === pid) return v0.clave;
+    return (disenoVars[did] || []).find(c => varByClave(c)?.moldeId === pid) || null;
+  };
+  const _talleDeFilaMolde = (fila, pid) => String((fila || {})[colDeMolde(pid)] || '').trim();
+  const _repoDe = (fila, pid) => (((fila || {}).__repo || {})[pid]) || [];
+  const guardarRepo = (i, pid, lista) => setFilas(prev => prev.map((f, j) => {
+    if (j !== i) return f;
+    const r = { ...(f.__repo || {}) };
+    if (lista && lista.length) r[pid] = lista; else delete r[pid];
+    const nf = { ...f };
+    if (Object.keys(r).length) nf.__repo = r; else delete nf.__repo;
+    return nf;
+  }));
+  // Las piezas de (molde, talle, variable) para el dibujo: la MISMA detección que usa el Arte
+  // (`/api/plantilla/deteccion` con `?variante=`, ya acotada a la variable), una vez por combinación.
+  const _repoPidiendo = useRef(new Set());
+  useEffect(() => {
+    if (!repoOn || repoPick === null) return;
+    const fila = filas[repoPick]; if (!fila) return;
+    const d = _disDeFila(fila); if (!d) return;
+    _moldesDeFila(fila).forEach(pid => {
+      const t = _talleDeFilaMolde(fila, pid); if (!t) return;
+      const cl = _varDeFilaMolde(fila, d.id, pid);
+      const k = `${pid}|${t}|${cl || ''}`;
+      if (repoDet[k] || _repoPidiendo.current.has(k)) return;
+      _repoPidiendo.current.add(k);
+      fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}&talle_ref=${encodeURIComponent(t)}${cl ? `&variante=${encodeURIComponent(cl)}` : ''}`)
+        .then(async r => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'no se pudo leer el molde'); return j; })
+        .then(j => setRepoDet(m => ({ ...m, [k]: j })))
+        .catch(e => setRepoDet(m => ({ ...m, [k]: { error: e.message } })))
+        .finally(() => _repoPidiendo.current.delete(k));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoOn, repoPick, filas, disenoMoldes, disenoVars, disenosPedido]);
   const varianteDeDiseno = (dNombre) => {
     const d = disenosPedido.find(x => x.nombre === dNombre) || disenosPedido[0];
     const claves = disenoVars[d?.id] || [];
@@ -11514,6 +11886,24 @@ export default function App() {
   const _claveTelaDis = (did, pid) => `${did}|${pid}`;
   // Lectura con COMPATIBILIDAD: los pedidos a medio armar tienen la clave vieja (sólo el molde).
   const _telasDe = (did, pid) => telaPorPieza[_claveTelaDis(did, pid)] || telaPorPieza[pid] || {};
+  // Piezas apagadas de (diseño, molde), en minúscula para comparar.
+  const _fueraDe = (did, pid) => new Set((piezasFuera[_claveTelaDis(did, pid)] || []).map(g => String(g).toLowerCase()));
+  const togglePiezaFuera = (did, pid, gen) => setPiezasFuera(prev => {
+    const k = _claveTelaDis(did, pid), low = String(gen).toLowerCase(), cur = prev[k] || [];
+    const nx = cur.some(x => String(x).toLowerCase() === low) ? cur.filter(x => String(x).toLowerCase() !== low) : [...cur, gen];
+    const out = { ...prev };
+    if (nx.length) out[k] = nx; else delete out[k];
+    return out;
+  });
+  // Activar / desactivar todas: sólo las que se están viendo (las de otra variable del mismo molde quedan como estaban).
+  const piezasFueraTodas = (did, pid, gens, apagar) => setPiezasFuera(prev => {
+    const k = _claveTelaDis(did, pid);
+    const m = new Map((prev[k] || []).map(x => [String(x).toLowerCase(), x]));
+    (gens || []).forEach(g => { if (apagar) m.set(String(g).toLowerCase(), g); else m.delete(String(g).toLowerCase()); });
+    const out = { ...prev };
+    if (m.size) out[k] = [...m.values()]; else delete out[k];
+    return out;
+  });
   // El motor agrupa las filas por el SLUG DEL NOMBRE del diseño (`_slugify_diseno` del server):
   // la asignación tiene que viajar con esa misma clave o no le llega a las filas de ese diseño.
   const _slugDiseno = (s) => {
@@ -11555,9 +11945,18 @@ export default function App() {
   const telasFaltantesDet = (disenosPedido || []).flatMap(d =>
     (itemsArteDe(d.id) || []).map(it => {
       const map = _telasDe(d.id, it.moldeId);
+      const fu = _fueraDe(d.id, it.moldeId);
       const pzs = piezasPorItem[_claveItemTela(d.id, it.moldeId, it.clave)] || [];
-      return { did: d.id, it, n: pzs.filter(g => !map[g]).length };
+      return { did: d.id, it, n: pzs.filter(g => !fu.has(String(g).toLowerCase()) && !map[g]).length };
     }).filter(x => x.n > 0));
+  // PRENDAS CON TODAS SUS PIEZAS APAGADAS («Piezas a imprimir»): no saldría nada → no se avanza.
+  const piezasTodasFuera = (disenosPedido || []).flatMap(d =>
+    (itemsArteDe(d.id) || []).map(it => {
+      const fu = _fueraDe(d.id, it.moldeId);
+      const pzs = piezasPorItem[_claveItemTela(d.id, it.moldeId, it.clave)] || [];
+      return { did: d.id, it, todas: pzs.length > 0 && fu.size > 0 && pzs.every(g => fu.has(String(g).toLowerCase())) };
+    }).filter(x => x.todas));
+  piezasTodasFueraRef.current = piezasTodasFuera;
   const telasFaltantesTotal = telasFaltantesDet.reduce((n, x) => n + x.n, 0);
   const telasIncompletas = telasFaltantesTotal > 0;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
@@ -12199,7 +12598,8 @@ export default function App() {
     // VARIABLE-FIRST: solo importan las piezas de la variable que se está viendo (no el molde entero).
     const _vf = verVariante ? varianteFiltro(verVariante) : null;
     const _pv = _vf ? new Set((canvasLayout?.layout || []).filter(p => _vf.show.has(p.idx)).map(p => (etqNombres?.[p.idx] || p.name || '').trim()).filter(Boolean)) : null;
-    const faltan = (mapeoData?.piezas || []).filter(p => !mapeoValores[p] && (!_pv || _pv.has(p)));
+    const _fu = _fueraDe(disenoActivo, _arteMoldeAct);   // una pieza apagada no se imprime: no pide diseño
+    const faltan = (mapeoData?.piezas || []).filter(p => !mapeoValores[p] && (!_pv || _pv.has(p)) && !_fu.has(_genTelaP(p).toLowerCase()));
     if (faltan.length) {
       setSelectedPiezaMapeo(faltan[0]);            // ir a la pieza que falta (queda resaltada)
       showError(`Faltan ${faltan.length} pieza(s) sin diseño: ${faltan.slice(0, 4).join(', ')}${faltan.length > 4 ? '…' : ''}. Asigná su diseño (arrastralo a la pieza en ROJO) para continuar.`);
@@ -12307,11 +12707,11 @@ export default function App() {
     setAsignDiseno(''); setNuevoDisenoNombre('');
     // 2) TELAS del pedido (esto era lo que quedaba pegado: `telaBaseMolde`/`telaPorPieza` no se
     //    limpiaban y además se guardan en el navegador, así que volvían hasta recargando)
-    setTelaBaseMolde({}); setTelaPorPieza({}); setPiezasPorItem({});
+    setTelaBaseMolde({}); setTelaPorPieza({}); setPiezasPorItem({}); setPiezasFuera({});
     setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
     setTelaBuscarAsig(''); setTelaModoVer(false); setTelaAviso('');
     // 3) arte y visor
-    setArteCargado({}); setArteIdx(0); setCantidadOn(false);
+    setArteCargado({}); setArteIdx(0); setCantidadOn(false); setRepoOn(false); setCantidadCopia(false); setRepoPick(null); setRepoDet({});
     setFuentesReempl({}); setFuentesPorArte({});   // la fuente elegida era de ESE pedido: uno nuevo arranca sin ella
     // …y LO QUE NO SE SUBLIMA también era de ESE pedido: el nuevo arranca con todo sublimándose
     // (es la regla que pidió el usuario; ver `marcasPedido`).
@@ -12763,15 +13163,18 @@ export default function App() {
   // (`prepPaginas` la muestra abajo a la izquierda). Devuelve `{zipA, clave, prep}` o null si el
   // servidor todavía prepara los moldes él. Si esta computadora no puede, tira el motivo: el molde NO
   // se manda para que lo haga el servidor.
-  // `detectar`: para las pantallas que aceptan cualquier molde (.ai/.pdf/.dxf, con o sin diseño):
-  // un DXF va directo al servidor; un .ai/.pdf se mira acá y, si es un molde pelado, devuelve null
-  // (lo lee el servidor). Ninguna vía deja un molde CON diseño para que lo prepare el servidor.
-  const _prepararDosTiempos = async (archivo, nombre, fase, { detectar = false } = {}) => {
+  // `detectar`: para las pantallas del PEDIDO que aceptan cualquier molde (.ai/.pdf/.dxf, con o sin
+  // diseño — Mis artículos): un DXF va directo; un .ai/.pdf se mira acá y va por el camino que toque.
+  // `base`: Configuración › Moldería, que sólo acepta moldes LIMPIOS: si el archivo trae máscaras de
+  // recorte con el diseño adentro NO se sube y tira el aviso `MOLDE_CON_DISENO` (regla del usuario
+  // 2026-09-28, MAPA 576). Ninguna vía deja un molde CON diseño para que lo prepare el servidor.
+  const _prepararDosTiempos = async (archivo, nombre, fase, { detectar = false, base = false } = {}) => {
     if (!(await navegadorPreparaMoldes())) return null;
     const clave = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     fase({ fase: 'preparando', nota: 'Abriendo el archivo en tu computadora…' });
     const prep = await prepararEnDosTiempos(archivo, {
       soloSiTraeDiseno: detectar,
+      soloBase: base,
       onA: (a) => fase({ fase: 'preparando', nota: a.texto }),
       onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
         pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
@@ -12935,17 +13338,33 @@ export default function App() {
                              mapeo_columnas: { talle: colId, talle_elegido: true } })
     });
   }));
+  // El botón se marca AL TOQUE (MAPA 582): antes quedaba igual hasta que volvía la lista entera de
+  // moldes del servidor (segundos) y parecía que no andaba. Se marca en la pantalla, se guarda por
+  // detrás, y si el guardado falla se vuelve a la lista del servidor y se avisa.
+  const _marcarColumnaTalle = (ids, colId) => setProductosCat(prev => ({
+    ...prev,
+    productos: (prev.productos || []).map(p => ids.includes(p.id)
+      ? { ...p, mapeo_columnas: { ...(p.mapeo_columnas || {}), talle: colId, talle_elegido: true } } : p),
+  }));
   // UN molde, un toque, desde su propia tarjeta.
   const ponerColumnaTalle = async (pid, colId) => {
-    try { await _guardarColumnaTalle([pid], colId); await fetchProductos(); }
-    catch (err) { showError(err.message); }
+    _marcarColumnaTalle([pid], colId);
+    try {
+      const rs = await _guardarColumnaTalle([pid], colId);
+      if (rs.some(r => !r.ok)) throw new Error('No se pudo guardar de qué columna toma el talle');
+    } catch (err) { showError(err.message); }
+    fetchProductos();
   };
   // …y el atajo en lote, para poner varios de una (los que están tildados).
   const ponerColumnaTalleB = async (colId) => {
     const ids = [...moldesBSel];
     if (!ids.length) return;
-    try { await _guardarColumnaTalle(ids, colId); await fetchProductos(); }
-    catch (err) { showError(err.message); }
+    _marcarColumnaTalle(ids, colId);
+    try {
+      const rs = await _guardarColumnaTalle(ids, colId);
+      if (rs.some(r => !r.ok)) throw new Error('No se pudo guardar de qué columna toma el talle');
+    } catch (err) { showError(err.message); }
+    fetchProductos();
   };
   // Del espacio de carga al de nombrar: los moldes entran al pedido con su diseño y se sigue en
   // el paso de siempre, que es donde vive el visor.
@@ -13300,26 +13719,84 @@ export default function App() {
   // El motor arma la prenda por el NOMBRE de las piezas: elegir «Larga» cuando las piezas dicen
   // «Manga Corta …» las saca a TODAS y la prenda sale SIN MANGAS, sin avisar. `toggles_piezas`
   // (GET /api/productos) dice, por molde y por variable, cuántas piezas menciona cada opción.
+  // 2026-09-28 (MAPA 580): se miran TODOS los moldes de la fila (su diseño; cada uno con SU
+  // variable) y se DESCUENTAN las piezas apagadas en «Piezas a imprimir» — con las cortas apagadas,
+  // la fila sólo puede hacer «Larga». `null` = el toggle no aplica a esta fila (ninguna de sus
+  // prendas tiene esa parte, o están todas apagadas).
   const _soporteToggle = (c, fila) => {
     if (!_colEsBoton(c)) return null;
-    const prod = (productosCat.productos || []).find(p => p.id === moldeDeVariante(fila));
-    const tp = prod?.toggles_piezas || {};
-    const ent = Object.values(tp).find(t => t && t.col === c.id)
-      || tp[String(c.clave || (c.label || '')).trim().toLowerCase()];
-    if (!ent) return null;
-    const sop = (fila?.__variante && ent[fila.__variante]) || ent['*'];
-    if (!sop || !sop.__clave__) return null;    // esta variable no lleva esa parte → el toggle no aplica
-    const cuenta = (o) => parseInt(sop[String(o).trim().toLowerCase()], 10) || 0;
-    const noDistingue = (ent.opciones || []).every(o => cuenta(o) === 0);
-    return { sop, cuenta, noDistingue, prod };
+    const d = _disDeFila(fila);
+    const pids = _moldesDeFila(fila).length ? _moldesDeFila(fila) : [moldeDeVariante(fila)].filter(Boolean);
+    const opsCol = _opcionesBoton(c).map(o => String(o).trim().toLowerCase());
+    const vivas = {}, total = {}, noms = [];
+    let clave = 0, porRepo = false;
+    pids.forEach(pid => {
+      const prod = (productosCat.productos || []).find(p => p.id === pid);
+      const tp = prod?.toggles_piezas || {};
+      const ent = Object.values(tp).find(t => t && t.col === c.id)
+        || tp[String(c.clave || (c.label || '')).trim().toLowerCase()];
+      if (!ent) return;
+      const cl = d ? _varDeFilaMolde(fila, d.id, pid) : fila?.__variante;
+      const sop = (cl && ent[cl]) || ent['*'];
+      if (!sop || !sop.__clave__) return;       // esta variable no lleva esa parte
+      let lista = ent.piezas ? ((cl && ent.piezas[cl]) || ent.piezas['*']) : null;
+      // REPO: si la fila eligió piezas, la manga sale de ESAS (sólo largas → sólo «Larga»; las dos
+      // → «Corta + Larga»). Pedido del usuario 2026-09-28.
+      const _sel = repoOn ? _repoDe(fila, pid) : [];
+      if (lista && _sel.length) { const ss = new Set(_sel); lista = lista.filter(n => ss.has(n)); porRepo = true; }
+      const fu = d ? _fueraDe(d.id, pid) : new Set();
+      opsCol.forEach(o => { total[o] = (total[o] || 0) + (parseInt(sop[o], 10) || 0); });
+      if (lista) {
+        // con los nombres: las apagadas (por genérico) no cuentan
+        const vivos = lista.filter(n => !fu.has(String(n).replace(/\s+\d+\s*$/, '').trim().toLowerCase()));
+        clave += vivos.length;
+        vivos.forEach(n => {
+          const t = new Set(tokensPieza(n));
+          opsCol.forEach(o => { if (o.split(/\s+/).every(x => t.has(x))) vivas[o] = (vivas[o] || 0) + 1; });
+        });
+      } else {                                   // servidor viejo (sin nombres): la cuenta cruda
+        clave += parseInt(sop.__clave__, 10) || 0;
+        opsCol.forEach(o => { vivas[o] = (vivas[o] || 0) + (parseInt(sop[o], 10) || 0); });
+      }
+      noms.push(prod?.nombre || pid);
+    });
+    if (!clave) return null;
+    const cuenta = (o) => vivas[String(o).trim().toLowerCase()] || 0;
+    const cuentaTotal = (o) => total[String(o).trim().toLowerCase()] || 0;
+    const noDistingue = opsCol.every(o => cuenta(o) === 0);
+    return { cuenta, cuentaTotal, noDistingue, porRepo, prod: { nombre: noms.join(' + ') } };
   };
+  // Las opciones que ESTA fila puede hacer (en el orden de la columna). `null` = el toggle no aplica.
+  const _opcionesDisponibles = (c, fila) => {
+    const s = _soporteToggle(c, fila);
+    if (!s || s.noDistingue) return null;
+    return _opcionesBoton(c).filter(o => s.cuenta(o) > 0);
+  };
+  // «Corta + Larga» (MAPA 580): con REPO prendido, si la fila puede hacer 2 o más opciones, aparece
+  // una más que las junta — una reposición puede pedir las dos mangas. Sin Repo, las de siempre.
+  const _partesOpcion = (v) => String(v ?? '').split('+').map(x => x.trim()).filter(Boolean);
+  const _opcionCombinada = (c, fila) => {
+    if (!repoOn) return null;
+    const s = _soporteToggle(c, fila);
+    if (!s || !s.porRepo) return null;          // sólo si en «Piezas» se eligieron mangas de los dos tipos
+    const disp = _opcionesDisponibles(c, fila);
+    return disp && disp.length >= 2 ? disp.join(' + ') : null;
+  };
+  const _mismaOpcion = (a, b) => _partesOpcion(a).map(x => x.toLowerCase()).join('+') === _partesOpcion(b).map(x => x.toLowerCase()).join('+');
   // Motivo por el que NO se puede elegir esa opción en esa fila (null = se puede).
-  const _motivoOpcion = (c, fila, o) => {
+  const _motivoOpcion = (c, fila, o, _parte = false) => {
+    const _ps = _partesOpcion(o);
+    if (_ps.length > 1) { for (const x of _ps) { const m = _motivoOpcion(c, fila, x, true); if (m) return m; } return null; }
+    // con las dos mangas elegidas en «Piezas» (Repo), una sola dejaría afuera la otra (no aplica a
+    // las partes del propio combinado: `_parte`)
+    const _cmb = _parte ? null : _opcionCombinada(c, fila);
+    if (_cmb) return `En «Piezas» elegiste las dos: va «${_cmb}».`;
     const s = _soporteToggle(c, fila);
     if (!s) return null;
     const nom = s.prod?.nombre || 'el molde';
     const que = `${(c.label || c.id)} ${o}`.toLowerCase();
     if (s.noDistingue) return `El molde «${nom}» no distingue ${(c.label || c.id).toLowerCase()}: sus piezas se usan igual con cualquier opción.`;
+    if (s.cuenta(o) === 0 && s.cuentaTotal(o) > 0) return `«${que}» está apagada en «Piezas a imprimir» (paso Arte).`;
     if (s.cuenta(o) === 0) return `El molde «${nom}» no contiene ${que}.`;
     return null;
   };
@@ -13327,11 +13804,51 @@ export default function App() {
   // no tiene piezas. Que no distinga no traba — lo que sale es correcto igual (ver `_validar_pedido`).
   const _opcionRompe = (c, fila, v) => {
     const s = _soporteToggle(c, fila);
-    return !!s && !s.noDistingue && s.cuenta(v || _botonDefault(c)) === 0;
+    // «Corta + Larga»: rompe si ALGUNA de las elegidas no tiene piezas
+    return !!s && !s.noDistingue && _partesOpcion(v || _botonDefault(c)).some(x => s.cuenta(x) === 0);
   };
   const _botonDefault = (c) => _opcionesBoton(c)[0] || '';
+  botonesDefaultRef.current = (cols || []).filter(c => _colEsBoton(c)).map(c => ({ id: c.id, def: _botonDefault(c) }));
   // El valor a MOSTRAR en una columna de botón: nunca vacío — siempre hay una opción presionada.
   const _valorBoton = (c, v) => (String(v ?? '').trim() ? v : _botonDefault(c));
+  // ── LA OPCIÓN QUE EXISTE, SOLA (MAPA 580) ────────────────────────────────────────────────────
+  // Pedido del usuario: «si no hay mangas cortas pero sí larga, en esa fila se activa la que exista;
+  // si no hay ninguna de las dos, la columna no se muestra». Una fila cuya opción no existe (o está
+  // apagada) pasa a la primera que sí; una columna que no aplica a NINGUNA fila se oculta.
+  useEffect(() => {
+    if (pedidoPaso !== 'planilla' || !filas.length) return;
+    const tcols = (cols || []).filter(c => _colEsBoton(c));
+    if (!tcols.length) return;
+    let cambio = false;
+    const sinUso = new Set();
+    const nuevas = filas.map(f => {
+      let g = f;
+      tcols.forEach(c => {
+        const disp = _opcionesDisponibles(c, f);
+        if (!disp || !disp.length) return;
+        const _cmb = _opcionCombinada(c, f);
+        if (_cmb) {                                  // las dos mangas elegidas en «Piezas»: va la combinada
+          if (!_mismaOpcion(f[c.id], _cmb)) { if (g === f) g = { ...f }; g[c.id] = _cmb; cambio = true; }
+          return;
+        }
+        const partes = _partesOpcion(_valorBoton(c, f[c.id])).map(x => x.toLowerCase());
+        const vale = partes.filter(x => disp.some(o => String(o).trim().toLowerCase() === x));
+        // una sola: tiene que existir; varias («Corta + Larga»): sólo con Repo, y todas tienen que existir
+        const ok = partes.length > 1 ? false : vale.length === 1;   // combinado sólo con las dos elegidas (arriba)
+        if (!ok) {
+          const orig = disp.filter(o => vale.includes(String(o).trim().toLowerCase()));
+          if (g === f) g = { ...f };
+          g[c.id] = orig[0] || disp[0];
+          cambio = true;
+        }
+      });
+      return g;
+    });
+    tcols.forEach(c => { if (filas.every(f => !(_opcionesDisponibles(c, f) || []).length)) sinUso.add(c.id); });
+    if (cambio) setFilas(nuevas);
+    setTogglesSinUso(prev => (prev.size === sinUso.size && [...sinUso].every(x => prev.has(x))) ? prev : sinUso);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoPaso, filas, cols, piezasFuera, productosCat, disenoMoldes, disenoVars, disenosPedido, repoOn]);
   // Fila nueva: las celdas en blanco, salvo las de BOTÓN, que arrancan con su opción por defecto
   // (una columna de botón nunca queda sin elegir).
   // ── ANCHO INTELIGENTE DE CADA COLUMNA ────────────────────────────────────────────────────
@@ -13373,7 +13890,9 @@ export default function App() {
       // 3) las opciones de un botón/desplegable tienen que entrar aunque nadie las haya elegido
       if (tipo === 'toggle') {
         const opts = _opcionesBoton(c) || [];
-        const suma = opts.reduce((n, o) => n + _medirTexto(String(o), '600 12px sans-serif') + 18, 0);
+        // con Repo puede aparecer «Corta + Larga» al lado: el ancho lo tiene que contar (si no, se corta)
+        const conComb = repoOn && opts.length >= 2 ? [...opts, opts.join(' + ')] : opts;
+        const suma = conComb.reduce((n, o) => n + _medirTexto(String(o), '600 12px sans-serif') + 18, 0);
         if (suma > ancho) ancho = suma;
       }
       // 4) PISO: una numérica arranca fina —5 dígitos— y el resto con su ancho predeterminado,
@@ -13383,7 +13902,7 @@ export default function App() {
     });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cols, filas, columnasActivasPlanilla, cantidadVisible, reglasPlanilla]);
+  }, [cols, filas, columnasActivasPlanilla, cantidadVisible, reglasPlanilla, repoOn]);
 
   // ── REORDENAR FILAS (arrastrando desde la columna «#») ───────────────────────────────────
   // `filasSel`  = filas elegidas desde el número (Set de índices).
@@ -13758,7 +14277,10 @@ export default function App() {
         const opts = _opcionesDeCol(c, f);
         if (!opts || !opts.length) return;   // columna libre → no valida
         const v = String(f[c.id] ?? '').trim();
-        if (v !== '' && !opts.some(o => _normV(o) === _normV(v))) bad.push({ i, label: c.label || c.id, v });
+        // «Corta + Larga» (Repo): vale si CADA parte es una opción de la columna
+        const _ps = _colEsBoton(c) ? _partesOpcion(v) : [v];
+        const _enOpts = (x) => opts.some(o => _normV(o) === _normV(x));
+        if (v !== '' && !(_ps.length > 1 ? (repoOn && _ps.every(_enOpts)) : _enOpts(v))) bad.push({ i, label: c.label || c.id, v });
         // El valor está entre las opciones, pero el MOLDE de esa fila no tiene piezas para él →
         // la prenda saldría sin esa parte. Es el mismo corte que hace el server antes de generar.
         else if (_colEsBoton(c) && _opcionRompe(c, f, v)) bad.push({ i, label: c.label || c.id, v: v || _botonDefault(c) });
@@ -13911,6 +14433,12 @@ export default function App() {
                 // POR VARIABLE: «faltan 3 piezas» sin decir dónde obligaba a buscarlas a mano
                 faltan: telasFaltantesDet.map(x => `${_arteLbl(x.did, x.it)}: ${x.n} pieza(s) sin tela — asignalas en «Asignar telas».`),
                 ok: telasIncompletas ? [] : ['Todas las piezas tienen su tela'] });
+      // Sólo aparece si hay una prenda con TODAS sus piezas apagadas (si no, no hay nada que pedir).
+      if (piezasTodasFuera.length) {
+        it.push({ id: 'piezasImp', label: 'las piezas a imprimir', corto: 'Piezas a imprimir', hecho: false,
+                  faltan: piezasTodasFuera.map(x => `${_arteLbl(x.did, x.it)}: apagaste todas sus piezas — prendé al menos una en «Piezas a imprimir».`),
+                  ok: [] });
+      }
       // ⚠️ `aviso: true` — ES EL ÚNICO REQUISITO QUE NO TRABA (regla del usuario 2026-08-21): sin la
       // tipografía la tizada igual sale, sublimada con la predeterminada. Queda AMARILLO y deja
       // avanzar, pero al tocar «A la planilla» aparece el cartel con «Seguir de todos modos».
@@ -15635,26 +16163,34 @@ export default function App() {
                     {/* — vista: la columna Cantidad — */}
                     {colCantidad && !cantidadSiempre && (<>
                       <span style={{ width: 1, height: 24, background: 'var(--border-light)', flexShrink: 0 }} />
-                      <div data-tour="planilla-cantidad" onClick={() => setCantidadOn(v => !v)}
+                      {/* el botón ENTERO es el interruptor (un solo onClick: con el Switch adentro
+                          atendiendo también, el toque se disparaba dos veces — 2026-08-26) */}
+                      <InterruptorIcono ancla="planilla-cantidad" on={cantidadOn} onToggle={() => setCantidadOn(v => !v)}
+                        icono="cantidadCopias" nombre="Cantidad" rgb="0,216,245"
                         title={cantidadOn ? 'Sacar la columna: cada fila vuelve a ser UNA prenda'
                                           : 'Mostrar la columna: una fila puede valer varias prendas iguales'}
-                        style={{ display: 'flex', alignItems: 'center', gap: 9, height: 36, padding: '0 12px 0 8px', borderRadius: 9, cursor: 'pointer',
-                          border: '1px solid ' + (cantidadOn ? 'rgba(0,216,245,0.5)' : 'transparent'),
-                          background: cantidadOn ? 'rgba(0,216,245,0.10)' : 'transparent' }}>
-                        {/* el `onClick` lo maneja la fila entera: si el Switch también lo
-                            atendiera, tocarlo dispararía DOS veces el toggle y volvería a como
-                            estaba — se veía como «el botón anda sólo en las letras» (2026-08-26) */}
-                        <span style={{ pointerEvents: 'none', display: 'flex' }}>
-                          <Switch on={cantidadOn} onChange={() => {}} />
-                        </span>
-                        <span style={{ fontSize: 12.5, fontWeight: 700, color: cantidadOn ? 'var(--accent)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                          Columna cantidad
-                        </span>
-                        <span onClick={(e) => e.stopPropagation()} style={{ display: 'flex' }}>
-                          <Ayuda ancho={320}>Repite la misma prenda sin cargarla de nuevo: <i>M · pepe · 12</i> con cantidad <b>5</b> son <b>5 remeras iguales</b>. Si cada prenda lleva un nombre distinto, usá <b>Cargar por lote</b>.</Ayuda>
-                        </span>
-                      </div>
+                        ayuda={<Ayuda ancho={320}>Repite la misma prenda sin cargarla de nuevo: <i>M · pepe · 12</i> con cantidad <b>5</b> son <b>5 remeras iguales</b>. Si cada prenda lleva un nombre distinto, usá <b>Cargar por lote</b>.</Ayuda>} />
                     </>)}
+
+                    {/* — COPIA (MAPA 581): sólo con la columna Cantidad a la vista — */}
+                    {cantidadVisible && (
+                      <InterruptorIcono ancla="planilla-copia" on={cantidadCopia} onToggle={() => setCantidadCopia(v => !v)}
+                        icono="copiaMesa" nombre="Copia" rgb="250,204,21"
+                        title={cantidadCopia ? 'Apagar Copia: la cantidad vuelve a repetir la prenda en la tizada'
+                                             : 'Copia: una mesa por fila; la cantidad es cuántas copias se imprimen'}
+                        ayuda={<Ayuda ancho={330}>Con <b>Copia</b>, cada fila sale en <b>su propia mesa</b> y la <b>cantidad</b> no repite la
+                          prenda: queda anotada en esa mesa como <b>cuántas copias imprimir</b> (se ve en el resultado y en el nombre del
+                          archivo). Sin Copia, la cantidad repite la prenda y todo se acomoda junto, como siempre.</Ayuda>} />
+                    )}
+
+                    {/* — REPO (reposición): elegir tocando qué piezas hace cada fila (MAPA 578) — */}
+                    <span style={{ width: 1, height: 24, background: 'var(--border-light)', flexShrink: 0 }} />
+                    <InterruptorIcono ancla="planilla-repo" on={repoOn} onToggle={() => { setRepoOn(v => !v); setRepoPick(null); }}
+                      icono="repoPieza" nombre="Repo" rgb="255,0,170"
+                      title={repoOn ? 'Apagar Repo: todas las filas hacen todas sus piezas' : 'Repo: elegir qué piezas hace cada fila'}
+                      ayuda={<Ayuda ancho={320}>Reposición: cada fila puede hacer <b>sólo algunas piezas</b>. Con Repo prendido aparece la columna
+                        <b> Piezas</b>: tocala, y en el dibujo de ese talle tocá las piezas que van. Si no elegís ninguna, la fila hace
+                        <b> todas</b> las del paso anterior.</Ayuda>} />
 
                     {/* — cuánto hay — */}
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
@@ -15686,6 +16222,7 @@ export default function App() {
                       <colgroup>
                         <col style={{ width: 44 }} />
                         {cols.map(c => colActiva(c) ? <col key={c.id} style={{ width: ANCHO_COL[c.id] }} /> : null)}
+                        {repoOn && <col style={{ width: 130 }} />}
                         <col style={{ width: 40 }} />
                       </colgroup>
                       <thead>
@@ -15705,6 +16242,10 @@ export default function App() {
                               </th>
                             );
                           })}
+                          {repoOn && (
+                            <th title="Repo: qué piezas hace cada fila" style={{ padding: '11px 12px', borderBottom: '1px solid var(--border-light)', borderLeft: '1px solid rgba(255,255,255,0.04)', textAlign: 'left',
+                              fontSize: 11, color: 'var(--cmyk-magenta)', fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>Piezas</th>
+                          )}
                           <th style={{ width: 40, padding: 8, borderBottom: '1px solid var(--border-light)' }}></th>
                         </tr>
                       </thead>
@@ -15793,6 +16334,10 @@ export default function App() {
                                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{dispVal}</span>
                                   <span style={{ color: 'var(--cmyk-cyan)', fontSize: 10, marginLeft: 4, flexShrink: 0 }}>▾</span>
                                 </>);
+                              } else if (esBoton && _soporteToggle(c, fila) === null) {
+                                // Esta fila no tiene esa parte (o está apagada) pero otras sí: no hay nada que elegir.
+                                contenido = <span title={`Esta prenda no lleva ${(c.label || c.id).toLowerCase()} (o está apagada en «Piezas a imprimir»)`}
+                                  style={{ padding: '0 10px', color: 'var(--text-muted)', fontSize: 12 }}>— sin {(c.label || c.id).toLowerCase()}</span>;
                               } else if (esBoton) {
                                 // ES UN BOTÓN: las opciones van SIEMPRE a la vista y se eligen con UN clic.
                                 // Antes había que hacer doble clic para que aparecieran, porque la celda seguía
@@ -15800,10 +16345,11 @@ export default function App() {
                                 // nada que editar. `tabIndex={-1}` + `preventDefault` en el mousedown: el clic
                                 // NO le roba el foco a la celda, así el teclado (flechas, Supr, copiar) sigue
                                 // funcionando igual que en cualquier otra columna.
-                                contenido = toggleOpts.map(o => {
+                                const _comb = _opcionCombinada(c, fila);
+                                contenido = [...toggleOpts, ...(_comb ? [_comb] : [])].map(o => {
                                   // SIEMPRE hay una presionada: sin valor cargado manda la opción
                                   // por defecto (la primera), que es la que el motor va a usar.
-                                  const on = _valorBoton(c, cellValue) === o;
+                                  const on = _mismaOpcion(_valorBoton(c, cellValue), o);
                                   // El molde puede NO tener esa opción: se muestra apagada y al
                                   // tocarla dice por qué, en vez de dejar armar una prenda que
                                   // saldría sin esa parte (ver `_motivoOpcion`).
@@ -15939,6 +16485,26 @@ export default function App() {
                                 </td>
                               );
                             })}
+                            {repoOn && (() => {
+                              // REPO: «Todas» o cuántas eligió; sin talle no hay dibujo que mostrar.
+                              const _ms = _moldesDeFila(fila);
+                              const _conTalle = _ms.some(pid => _talleDeFilaMolde(fila, pid));
+                              const _n = _ms.reduce((n, pid) => n + _repoDe(fila, pid).length, 0);
+                              return (
+                                <td style={{ padding: '0 8px', borderLeft: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <button type="button" data-tour="planilla-repo-piezas" disabled={!_conTalle}
+                                    onClick={() => setRepoPick(i)}
+                                    title={_conTalle ? 'Elegir qué piezas hace esta fila' : 'Cargá el talle de la fila para elegir sus piezas'}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700,
+                                      cursor: _conTalle ? 'pointer' : 'not-allowed', opacity: _conTalle ? 1 : 0.4, whiteSpace: 'nowrap',
+                                      border: '1px solid ' + (_n ? 'rgba(236,72,153,0.6)' : 'var(--border-light)'),
+                                      background: _n ? 'rgba(236,72,153,0.14)' : 'rgba(255,255,255,0.03)', color: _n ? '#ff9ccf' : 'var(--text-secondary)' }}>
+                                    <Icon name="piezasImprimir" style={{ width: 13, height: 13 }} />
+                                    {_n ? `${_n} pieza${_n === 1 ? '' : 's'}` : 'Todas'}
+                                  </button>
+                                </td>
+                              );
+                            })()}
                             <td style={{ padding: 0, textAlign: 'center' }}>
                               <button 
                                 className="quitar" 
@@ -16044,6 +16610,131 @@ export default function App() {
               </Modal>
 
               {/* Picker de VARIABLE por fila: tarjetas con preview de las piezas de cada variable */}
+              {/* REPO (MAPA 578): las piezas de la fila, en su talle, para tocar las que van. */}
+              <Modal open={repoOn && repoPick !== null && !!filas[repoPick]} onClose={() => { setRepoPick(null); setRepoHover(null); }}
+                titulo="Piezas de la fila"
+                subtitulo={(() => {
+                  const f = filas[repoPick]; if (!f) return '';
+                  const d = _disDeFila(f);
+                  const ts = [...new Set(_moldesDeFila(f).map(pid => _talleDeFilaMolde(f, pid)).filter(Boolean))];
+                  return `Fila ${String(repoPick + 1).padStart(2, '0')} · Talle ${ts.join(' / ') || '—'}${d ? ` · ${d.nombre}` : ''}`;
+                })()}
+                maxWidth={920}>
+                {(() => {
+                  const f = filas[repoPick]; if (!f) return null;
+                  const d = _disDeFila(f);
+                  const ms = _moldesDeFila(f);
+                  const irA = (paso) => {
+                    // la fila anterior/siguiente QUE TENGA TALLE (sin talle no hay qué dibujar)
+                    for (let j = repoPick + paso; j >= 0 && j < filas.length; j += paso) {
+                      if (_moldesDeFila(filas[j]).some(pid => _talleDeFilaMolde(filas[j], pid))) { setRepoPick(j); setRepoHover(null); return; }
+                    }
+                  };
+                  return (
+                    <div data-tour="planilla-repo-modal" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                          Tocá las piezas que hace esta fila. <b>Si no elegís ninguna, hace todas.</b>
+                        </span>
+                        <button type="button" className="btn ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => irA(-1)}>← Fila anterior</button>
+                        <button type="button" className="btn ghost" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => irA(1)}>Fila siguiente →</button>
+                      </div>
+                      {!ms.length && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Esta fila no tiene moldes (revisá su diseño).</div>}
+                      {ms.map(pid => {
+                        const t = _talleDeFilaMolde(f, pid);
+                        const cl = d ? _varDeFilaMolde(f, d.id, pid) : null;
+                        const det = repoDet[`${pid}|${t}|${cl || ''}`];
+                        const nomM = ((productosCat.productos || []).find(p => p.id === pid) || {}).nombre || pid;
+                        const elegidas = new Set(_repoDe(f, pid));
+                        const fu = d ? _fueraDe(d.id, pid) : new Set();
+                        const _nom = (p) => (det?.nombres_existentes || {})[String(p.idx)] || (det?.nombres_existentes || {})[p.idx] || p.name || '';
+                        const pcs = (det?.piezas || []).filter(p => _nom(p));
+                        const toca = (nm) => {
+                          const nx = new Set(elegidas);
+                          if (nx.has(nm)) nx.delete(nm); else nx.add(nm);
+                          guardarRepo(repoPick, pid, [...nx]);
+                        };
+                        let vb = '0 0 100 100';
+                        if (pcs.length) {
+                          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+                          pcs.forEach(p => { x0 = Math.min(x0, p.px); y0 = Math.min(y0, p.py); x1 = Math.max(x1, p.px + p.pw); y1 = Math.max(y1, p.py + p.ph); });
+                          const pad = Math.max(6, (x1 - x0) * 0.03);
+                          vb = `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`;
+                        }
+                        return (
+                          <div key={pid} style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, background: 'rgba(0,0,0,0.2)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                              <span style={{ fontSize: 13.5, fontWeight: 800 }}>{nomM}</span>
+                              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Talle {t || '—'}</span>
+                              <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: elegidas.size ? '#ff9ccf' : 'var(--text-secondary)' }}>
+                                {elegidas.size ? `${elegidas.size} de ${pcs.length} elegidas` : 'Todas las piezas'}
+                              </span>
+                              {elegidas.size > 0 && (
+                                <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11.5 }} onClick={() => guardarRepo(repoPick, pid, [])}>
+                                  Limpiar (= todas)
+                                </button>
+                              )}
+                            </div>
+                            {!t ? (
+                              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 12 }}>La fila no tiene talle para este molde.</div>
+                            ) : det?.error ? (
+                              <div style={{ fontSize: 12.5, color: 'var(--error)', padding: 12 }}>No se pudo leer el molde: {det.error}</div>
+                            ) : !det ? (
+                              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 12 }}>Cargando las piezas del talle {t}…</div>
+                            ) : !pcs.length ? (
+                              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: 12 }}>Este molde no tiene piezas en el talle {t}.</div>
+                            ) : (
+                              <>
+                                <svg viewBox={vb} preserveAspectRatio="xMidYMid meet" style={{ width: '100%', height: 300, display: 'block', background: '#0c0c0e', borderRadius: 10 }}>
+                                  {pcs.map(p => {
+                                    const nm = _nom(p);
+                                    const off = fu.has(nm.replace(/\s+\d+\s*$/, '').trim().toLowerCase());
+                                    const on = elegidas.has(nm);
+                                    const hov = repoHover === `${pid}|${nm}`;
+                                    return (
+                                      <g key={p.idx} style={{ cursor: off ? 'not-allowed' : 'pointer' }}
+                                        onClick={() => { if (!off) toca(nm); }}
+                                        onMouseEnter={() => setRepoHover(`${pid}|${nm}`)} onMouseLeave={() => setRepoHover(null)}>
+                                        <title>{off ? `${nm} — apagada en «Piezas a imprimir»` : nm}</title>
+                                        <path d={p.path_svg} vectorEffect="non-scaling-stroke"
+                                          style={{ fill: off ? 'rgba(255,255,255,0.02)' : on ? 'rgba(236,72,153,0.30)' : (hov ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.035)'),
+                                            stroke: off ? 'rgba(255,255,255,0.25)' : on ? '#ff5fb0' : (hov ? 'var(--accent)' : 'rgba(255,255,255,0.45)'),
+                                            strokeWidth: on || hov ? 2.6 : 1.3, strokeDasharray: off ? '5 4' : 'none', transition: 'fill .15s' }} />
+                                      </g>
+                                    );
+                                  })}
+                                </svg>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                                  {pcs.map(p => {
+                                    const nm = _nom(p);
+                                    const off = fu.has(nm.replace(/\s+\d+\s*$/, '').trim().toLowerCase());
+                                    const on = elegidas.has(nm);
+                                    return (
+                                      <button key={p.idx} type="button" disabled={off} onClick={() => toca(nm)}
+                                        onMouseEnter={() => setRepoHover(`${pid}|${nm}`)} onMouseLeave={() => setRepoHover(null)}
+                                        title={off ? 'Apagada en «Piezas a imprimir» (paso Arte)' : ''}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700,
+                                          cursor: off ? 'not-allowed' : 'pointer', opacity: off ? 0.4 : 1, textDecoration: off ? 'line-through' : 'none',
+                                          border: '1px solid ' + (on ? 'rgba(236,72,153,0.7)' : 'var(--border-light)'),
+                                          background: on ? 'rgba(236,72,153,0.16)' : 'rgba(255,255,255,0.03)', color: on ? '#ff9ccf' : 'var(--text-secondary)' }}>
+                                        {on && <Icon name="check" style={{ width: 11, height: 11, strokeWidth: 3 }} />}{nm}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button type="button" className="btn primary" onClick={() => { setRepoPick(null); setRepoHover(null); }}>Listo</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </Modal>
+
               <Modal open={varPickerRow !== null} onClose={() => setVarPickerRow(null)}
                 titulo="Elegí la variable"
                 subtitulo={varPickerRow !== null ? `Prenda ${(varPickerRow + 1).toString().padStart(2, '0')} · define qué piezas se generan` : ''}
@@ -16129,13 +16820,15 @@ export default function App() {
                 })();
                 // Sin nada configurado en el molde → TODO el registro (así el Arte nunca queda sin telas).
                 const _hayCfgTelas = _telasMoldeIds.length > 0;
+                const _telasActivas = (telasReg.telas || []).filter(t => t.usable !== false && t.activa !== false);   // ni las de baja ni las sin medida
                 const _telasMol = _hayCfgTelas
-                  ? (telasReg.telas || []).filter(t => _idsDisp.includes(String(t.id)))
-                  : (telasReg.telas || []);
+                  ? _telasActivas.filter(t => _idsDisp.includes(String(t.id)))
+                  : _telasActivas;
                 // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
                 // `piezasArteGen` = las piezas que se VEN en el visor (misma fuente que se toca/pinta),
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
-                const _todasGen = piezasArteGen;
+                const _fueraAct = _fueraDe(disenoActivo, _id);      // piezas a imprimir (MAPA 577)
+                const _todasGen = piezasArteGen.filter(g => !_fueraAct.has(String(g).toLowerCase()));
                 const _telaDeGen = (gen) => _telasDe(disenoActivo, _id)[gen] || null;                        // null si no se asignó
                 // El modo tela del visor no puede depender de la lista YA filtrada por la selección:
                 // si la intersección queda vacía se apagaba solo (y con ella el pintado y el panel).
@@ -16680,6 +17373,10 @@ export default function App() {
                         onPiezaNombrarClick={togglePiezaNombrarB}
                         onRubberNombrar={rubberNombrarB}
                         aviso={telaAviso}
+                        piezasFuera={_fueraAct}
+                        onPiezaFuera={(gen) => togglePiezaFuera(disenoActivo, _id, gen)}
+                        onPiezasFueraTodas={(gens, apagar) => piezasFueraTodas(disenoActivo, _id, gens, apagar)}
+                        piezasBloqueo={_esB && _sinNombreB.length ? 'Primero nombrá todas las piezas (panel «Piezas y etiqueta»)' : null}
                         panelIzquierdo={estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -16752,7 +17449,7 @@ export default function App() {
                     centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
                     siguiente={<BtnSiguiente texto="A la planilla" ancla="arte-siguiente" onClick={() => irAPlanillaDesdeArte()}
-                      disabled={!(todasArteCargadas && !telasIncompletas)}
+                      disabled={!(todasArteCargadas && !telasIncompletas && !piezasTodasFuera.length)}
                       title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela` : '')} />} />
                 </div>
                 );
@@ -17684,7 +18381,7 @@ export default function App() {
                               for (const h of hojas.filter(x => x.tela === tl)) {
                                 const pvs = Array.from({ length: h.paginas || (h.previews && h.previews.length) || 1 }, () => null);
                                 for (let pi = 0; pi < pvs.length; pi++) {
-                                  const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : ('Mesa ' + (gi + 1) + (tl ? ' - ' + tl : ''));
+                                  const nombre = nombres[h.archivo + '::' + pi] != null ? nombres[h.archivo + '::' + pi] : nombreMesaDef(gi, tl, (h.mesas && h.mesas[pi]) || null);
                                   gi++;
                                   items.push({ url: mesaSuelta({ tid: j.resultado.id, archivo: h.archivo, pi, rutaApi }), nombre: sanit(nombre) + '.pdf' });
                                 }
@@ -18539,6 +19236,10 @@ export default function App() {
                                         <span style={{ width: 13, height: 13, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
                                         <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
                                         <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{t.ancho_cm}cm</span>
+                                        {(t.activa === false || t.sin_medida) && (
+                                          <span title={t.activa === false ? 'El sistema de stock ya no la trae: no se puede usar en los pedidos' : 'El sistema de stock no dice su ancho: no se puede usar hasta ponerle la mesa a mano en Configuración › Telas'}
+                                            style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(239,68,68,0.15)', color: 'var(--error)', flexShrink: 0 }}>{t.activa === false ? 'dada de baja' : 'sin medida'}</span>
+                                        )}
                                         {/* Dónde está disponible */}
                                         {enTodas
                                           ? <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'rgba(16,185,129,0.15)', color: 'var(--success)', flexShrink: 0 }}>todas las piezas</span>
@@ -18599,7 +19300,8 @@ export default function App() {
                               maxWidth={860}>
                               {(() => {
                                 const q = telaCfgModalBuscar.trim().toLowerCase();
-                                const lista = q ? T.filter(t => (t.nombre || '').toLowerCase().includes(q)) : T;
+                                const _act = T.filter(t => t.usable !== false && t.activa !== false);   // ni dadas de baja ni sin medida
+                                const lista = q ? _act.filter(t => (t.nombre || '').toLowerCase().includes(q)) : _act;
                                 return (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                                     <input autoFocus data-tour="telas-modal-buscar" placeholder="Buscar tela…" value={telaCfgModalBuscar} onChange={e => setTelaCfgModalBuscar(e.target.value)}
@@ -19052,6 +19754,27 @@ export default function App() {
                           {/* Botones de Carga (la explicación de qué hace este panel vive en el «?»).
                               `_soloHerramienta` (camino B desde el pedido): re-subir el molde es del
                               taller — el cliente sube su archivo en el pedido, no acá. */}
+                          {/* MOLDE DEL STOCK QUE ENTRÓ CON DISEÑO (MAPA 576): hasta 2026-09-28 Moldería
+                              aceptaba un archivo con el diseño adentro y lo dejaba como camino B; el
+                              pedido lo abría con «Piezas y etiqueta» aunque se eligiera «Cargar base».
+                              Ahora Moldería lo rechaza; los que ya entraron se arreglan re-subiendo el
+                              molde limpio. */}
+                          {!_soloHerramienta && (() => {
+                            const _pm = (productosCat.productos || []).find(x => x.id === pidCfg) || {};
+                            if (_pm.origen !== 'con_diseno' || _pm.efimero) return null;
+                            return (
+                              <div data-tour="molderia-marcado-con-diseno" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10,
+                                background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.40)', fontSize: 12, lineHeight: 1.4 }}>
+                                <span style={{ flex: 1 }}>Este molde vino con <b>diseño incluido</b>. Re-subilo limpio.</span>
+                                <Ayuda ancho={300}>
+                                  El archivo trae máscaras de recorte con el diseño adentro, por eso en el pedido se abre con
+                                  «Piezas y etiqueta» en vez de pedir el arte. Quitá la máscara de recorte y el diseño en
+                                  Illustrator y tocá <b>Re-subir Plantilla</b> con el molde limpio. Las variables y el nombre de
+                                  las piezas se vuelven a hacer (son de la lectura anterior).
+                                </Ayuda>
+                              </div>
+                            );
+                          })()}
                           <div style={{ display: _soloHerramienta ? 'none' : 'flex', alignItems: 'center', gap: 8 }}>
                             <button className="btn ghost" onClick={() => fileInputPlantillaRef.current.click()} style={{ fontSize: 11.5, flex: 1 }}>
                               <Icon name="upload" style={{ width: 12, height: 12, marginRight: 6 }} /> Re-subir Plantilla
@@ -22780,15 +23503,44 @@ export default function App() {
 
                   {(() => {
                     const f = telaFiltroCfg.trim().toLowerCase();
-                    const Tf = f ? T.filter(t => (t.nombre || '').toLowerCase().includes(f)) : T;
+                    // SIN MEDIDA van APARTE (regla 2026-09-28): se ven, pero no se usan hasta tener mesa.
+                    const _sinMed = (t) => !!t.sin_medida && t.activa !== false;
+                    const _coinc = (t) => !f || (t.nombre || '').toLowerCase().includes(f);
+                    const Tf = T.filter(t => !_sinMed(t) && _coinc(t));
+                    const Tsm = T.filter(t => _sinMed(t) && _coinc(t));
                     const setAnchoLocal = (id, val) => setTelasReg(prev => ({ ...prev, telas: (prev.telas || []).map(t => String(t.id) === String(id) ? { ...t, ancho_cm: val } : t) }));
                     return (
                       <>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
                           <button className="btn ghost" data-tour="telas-actualizar" onClick={refrescarTelas} disabled={telasRefrescando} style={{ fontSize: 12.5 }}>{telasRefrescando ? 'Actualizando…' : '↻ Actualizar telas del sistema'}</button>
-                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T.length} tela{T.length === 1 ? '' : 's'}</span>
+                          {(() => {
+                            const nSm = T.filter(t => t.sin_medida && t.activa !== false).length;
+                            const nBaja = T.filter(t => t.activa === false).length, nAct = T.length - nBaja - nSm;
+                            return <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{nAct} para usar{nSm ? ` · ${nSm} sin medida` : ''}{nBaja ? ` · ${nBaja} dada${nBaja === 1 ? '' : 's'} de baja` : ''}</span>;
+                          })()}
                           <input placeholder="Buscar tela…" value={telaFiltroCfg} onChange={e => setTelaFiltroCfg(e.target.value)} style={{ ...inS, flex: 1, minWidth: 180, maxWidth: 300 }} />
                         </div>
+                        {/* LA ACTUALIZACIÓN DIARIA (2026-09-28): a las 00 hs el sistema trae las telas del
+                            stock solo; lo mismo hace el botón. Acá se ve cuándo fue la última y qué cambió. */}
+                        {(() => {
+                          const sy = telasReg.sync || {};
+                          const fh = (x) => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})/.exec(x || ''); return m ? `${m[3]}/${m[2]} ${m[4]}` : (x || ''); };
+                          const lista = (a) => (a || []).slice(0, 4).join(', ') + ((a || []).length > 4 ? ` y ${(a || []).length - 4} más` : '');
+                          return (
+                            <div data-tour="telas-sync" style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12, padding: '9px 12px', borderRadius: 10,
+                              border: '1px solid ' + (sy.ok === false ? 'rgba(239,68,68,0.35)' : 'var(--border-light)'), background: 'rgba(255,255,255,0.02)', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                              <span>
+                                <b style={{ color: '#fff' }}>Se actualizan solas todos los días a las 00 hs.</b>{' '}
+                                {sy.cuando ? <>Última: {fh(sy.cuando)} ({sy.origen === 'automatica' ? 'automática' : 'con el botón'}).</> : 'Todavía no se actualizaron.'}
+                              </span>
+                              {sy.ok === false && <span style={{ color: 'var(--error)' }}>El último intento ({fh(sy.intento)}) falló: {sy.error}. Se vuelve a probar cada 5 minutos.</span>}
+                              {(sy.nuevas || []).length > 0 && <span style={{ color: 'var(--success)' }}>Nuevas: {lista(sy.nuevas)}</span>}
+                              {(sy.reactivadas || []).length > 0 && <span style={{ color: 'var(--success)' }}>Volvieron: {lista(sy.reactivadas)}</span>}
+                              {(sy.bajas || []).length > 0 && <span style={{ color: 'var(--error)' }}>Dadas de baja: {lista(sy.bajas)} — no se borran, pero ya no se pueden usar. Su mesa queda guardada.</span>}
+                              {(sy.sin_medida || []).length > 0 && <span style={{ color: 'var(--warning, #e0a020)' }}>Sin medida (no se usan hasta ponerles la mesa): {lista(sy.sin_medida)}</span>}
+                            </div>
+                          );
+                        })()}
                         {/* LA MESA ES LA TELA MENOS UN MARGEN (2026-09-11, regla del usuario): «que la
                             mesa tenga siempre 3 cm menos que el ancho de la tela, a no ser que le cambien
                             a mano el valor a alguna tela; esos 3 cm deben ser configurables». */}
@@ -22815,14 +23567,20 @@ export default function App() {
                           <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                             {Tf.length === 0 && <div style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)' }}>{T.length ? 'Ninguna tela coincide con la búsqueda.' : 'No hay telas. Tocá «Actualizar telas del sistema».'}</div>}
                             {Tf.map(t => (
-                              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)', opacity: t.activa === false ? 0.55 : 1 }}>
                                 <span style={{ width: 14, height: 14, borderRadius: 4, background: colorDeTela(t.id), flexShrink: 0 }} />
                                 <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 7, overflow: 'hidden' }}>
-                                  <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
+                                  <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: t.activa === false ? 'line-through' : 'none' }} title={t.nombre}>{t.nombre}</span>
                                   {t.codigo ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>#{t.codigo}</span> : null}
+                                  {t.activa === false && (
+                                    <span title="El sistema de stock ya no la trae. No se borra ni pierde su mesa: vuelve sola si el stock la vuelve a informar."
+                                      style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 7px', borderRadius: 999, background: 'rgba(239,68,68,0.15)', color: 'var(--error)', flexShrink: 0 }}>
+                                      dada de baja{t.baja ? ` · ${t.baja.slice(8, 10)}/${t.baja.slice(5, 7)}` : ''}
+                                    </span>
+                                  )}
                                 </span>
                                 {/* Medida del sistema (dato, no editable) */}
-                                <span style={{ width: 96, textAlign: 'right', flexShrink: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>{t.medida_cm != null ? `${t.medida_cm} cm` : '—'}</span>
+                                <span style={{ width: 96, textAlign: 'right', flexShrink: 0, fontSize: 12.5, color: t.medida_cm != null ? 'var(--text-muted)' : 'var(--warning, #e0a020)' }}>{t.medida_cm != null ? `${t.medida_cm} cm` : 'sin medida'}</span>
                                 {/* MESA DE TRABAJO (la que usa la tizada): automática = medida − margen; a mano manda */}
                                 <span style={{ width: 214, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
                                   <input type="number" min="1" value={t.ancho_cm ?? ''} placeholder="mesa"
@@ -22845,6 +23603,38 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* TELAS SIN MEDIDA: el sistema de stock no dice su ancho → aparte y sin usar.
+                            Poniéndole la mesa a mano pasa a la lista de arriba y se puede usar. */}
+                        {Tsm.length > 0 && (
+                          <div data-tour="telas-sin-medida" style={{ marginTop: 18 }}>
+                            <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px', color: 'var(--warning, #e0a020)' }}>Sin medida · no se pueden usar ({Tsm.length})</h3>
+                            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px', maxWidth: 660, lineHeight: 1.5 }}>
+                              El sistema de stock no informa el ancho de estas telas, así que no aparecen en los moldes ni en los pedidos. Si le escribís la <b>mesa de trabajo</b> a mano, pasa a la lista de arriba y ya se puede usar.
+                            </p>
+                            <div style={{ border: '1px solid rgba(224,160,32,0.35)', borderRadius: 10, overflow: 'hidden' }}>
+                              {Tsm.map(t => (
+                                <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                  <span style={{ width: 14, height: 14, borderRadius: 4, background: 'rgba(224,160,32,0.35)', flexShrink: 0 }} />
+                                  <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 7, overflow: 'hidden' }}>
+                                    <span style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.nombre}>{t.nombre}</span>
+                                    {t.codigo ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)', flexShrink: 0 }}>#{t.codigo}</span> : null}
+                                  </span>
+                                  <span style={{ width: 96, textAlign: 'right', flexShrink: 0, fontSize: 12.5, color: 'var(--warning, #e0a020)' }}>sin medida</span>
+                                  <span style={{ width: 214, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                    <input type="number" min="1" defaultValue="" placeholder="mesa"
+                                      onBlur={e => { if (String(e.target.value).trim()) guardarTelaAncho(t.id, e.target.value).then(fetchTelas); }}
+                                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                                      title="Escribí la mesa de trabajo (cm) para poder usar esta tela"
+                                      style={{ ...inS, width: 84, textAlign: 'right' }} />
+                                    <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 20 }}>cm</span>
+                                    <span style={{ width: 64 }} />
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <h3 style={{ fontSize: 14, fontWeight: 700, margin: '26px 0 6px' }}>Grupos combinables</h3>
                         <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 12, maxWidth: 660 }}>Tocá las telas que se pueden combinar entre sí. En el pedido, una pieza podrá cambiar su tela por otra del mismo grupo (si está asignada al molde). Usá el buscador de arriba para filtrar la lista.</p>
                         {G.map((g, gi) => (
@@ -22855,7 +23645,7 @@ export default function App() {
                             </div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 160, overflowY: 'auto' }}>
                               {T.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Actualizá las telas primero.</span>}
-                              {Tf.map(t => {
+                              {Tf.filter(t => (t.activa !== false && t.usable !== false) || (g.telas || []).map(String).includes(String(t.id))).map(t => {
                                 const on = (g.telas || []).map(String).includes(String(t.id));
                                 return <button key={t.id} onClick={() => { const gs = [...G]; const s = new Set((g.telas || []).map(String)); on ? s.delete(String(t.id)) : s.add(String(t.id)); gs[gi] = { ...gs[gi], telas: [...s] }; setG(gs); }} style={{ padding: '4px 11px', borderRadius: 999, border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>{t.nombre || '(sin nombre)'}</button>;
                               })}
