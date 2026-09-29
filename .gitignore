@@ -73,3 +73,7 @@ extension_illustrator/build/
 
 # respaldos de lo publicado (llevan la clave de actualizacion y la api-key: NUNCA a git)
 respaldos_publicado/
+
+# repaso del cerebro: es de cada copia de trabajo (cerebro/cerebro.py)
+cerebro/.repaso.json
+cerebro/.repaso.json.tmp

@@ -20,9 +20,12 @@ Uso:
   py cerebro/cerebro.py diff               qué toca lo cambiado desde el último commit
   py cerebro/cerebro.py tocar <archivo>…   qué neuronas viven en esos archivos
   py cerebro/cerebro.py neurona <id>       todo lo que sabe una neurona
+  py cerebro/cerebro.py repasado           «revisé lo cambiado y el cerebro no necesita nada nuevo»
   py cerebro/cerebro.py hook               (lo llama Claude Code después de cada Edit/Write)
   py cerebro/cerebro.py inicio             (lo llama Claude Code al empezar la sesión)
+  py cerebro/cerebro.py al_terminar        (lo llama Claude Code al terminar cada respuesta)
 """
+import hashlib
 import fnmatch
 import json
 import os
@@ -32,6 +35,9 @@ import sys
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NEURONAS = os.path.join(RAIZ, "cerebro", "neuronas.json")
+# Qué cambios de código ya se repasaron contra el cerebro: {archivo: huella de su diff}. Es de ESTA
+# copia de trabajo (no va a git): cada PC lleva su propio repaso.
+REPASO = os.path.join(RAIZ, "cerebro", ".repaso.json")
 
 try:                                   # la consola de Windows no es UTF-8 por defecto
     sys.stdout.reconfigure(encoding="utf-8")
@@ -250,6 +256,64 @@ def neurona(nid):
         print(f"Memoria: {n['memoria']}")
 
 
+_CODIGO = (".py", ".js", ".jsx", ".mjs", ".css", ".html", ".bat", ".vbs", ".ps1", ".sh")
+
+
+def _huellas():
+    """{archivo de CÓDIGO cambiado desde el último commit: huella de su cambio}. Sin los .md ni el
+    propio cerebro: la documentación no es algo que el cerebro tenga que aprender."""
+    out = {}
+    for f, frag in _cambios_git().items():
+        if f.startswith("cerebro/") or f.startswith(".claude/") or not f.endswith(_CODIGO):
+            continue
+        out[f] = hashlib.sha1(frag.encode("utf-8", "replace")).hexdigest()
+    return out
+
+
+def repasado(silencioso=False):
+    """Anota que lo cambiado hasta ahora ya se repasó contra el cerebro."""
+    h = _huellas()
+    tmp = REPASO + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(h, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, REPASO)
+    if not silencioso:
+        print(f"Repaso anotado: {len(h)} archivo(s) de código cambiados quedan como revisados.")
+
+
+def al_terminar():
+    """Stop: la MEMORIA OBLIGATORIA. Si se cambió código que el cerebro todavía no repasó, frena el
+    cierre de la respuesta y pide actualizarlo. Así el cerebro crece con cada cosa que se construye
+    sin que nadie tenga que pedirlo, en esta sesión o en un chat nuevo. Frena UNA vez por cierre
+    (`stop_hook_active`): si ya frenó, no insiste — nunca un bucle."""
+    try:
+        datos = json.load(sys.stdin)
+    except Exception:
+        datos = {}
+    if datos.get("stop_hook_active"):
+        return
+    actuales = _huellas()
+    try:
+        with open(REPASO, encoding="utf-8") as fh:
+            vistos = json.load(fh)
+    except Exception:
+        vistos = {}
+    pendientes = sorted(f for f, h in actuales.items() if vistos.get(f) != h)
+    if not pendientes:
+        return
+    cambios = _cambios_git()
+    falta_mapa = "MAPA_DEL_SISTEMA.md" not in cambios
+    motivo = ("CEREBRO: cambiaste código que el cerebro todavía no aprendió → " + ", ".join(pendientes[:12])
+              + (" …" if len(pendientes) > 12 else "") + ". Antes de terminar, SIN PREGUNTAR: actualizá "
+              "cerebro/neuronas.json (función nueva → neurona nueva con anclas/reglas/conexiones; regla "
+              "nueva → `reglas`; falla arreglada → `cicatrices`; renombre → `anclas`). Guardar ese archivo "
+              "lo deja repasado. Si este cambio de verdad no le agrega nada al cerebro, corré "
+              "`py cerebro/cerebro.py repasado`.")
+    if falta_mapa:
+        motivo += " Tampoco está anotado en MAPA_DEL_SISTEMA.md (changelog) ni, si corresponde, en la memoria."
+    print(json.dumps({"decision": "block", "reason": motivo}, ensure_ascii=True))
+
+
 def hook():
     """PostToolUse (Edit|Write): el REFLEJO. Lee lo que Claude acaba de tocar y le devuelve las
     reglas de las neuronas activadas; si un ancla desapareció, lo dice fuerte. Sin nada que decir,
@@ -261,6 +325,9 @@ def hook():
     ti = datos.get("tool_input") or {}
     ruta = ti.get("file_path") or (datos.get("tool_response") or {}).get("filePath") or ""
     rel = _rel(ruta)
+    if rel == "cerebro/neuronas.json":
+        repasado(silencioso=True)       # tocar el cerebro = lo cambiado quedó repasado
+        return
     # el propio cerebro y los .md (MAPA, manual) nombran TODO: avisar ahí sería ruido en cada anotación
     if not rel or rel.startswith("..") or rel.startswith("cerebro/") or rel.endswith(".md"):
         return
@@ -323,5 +390,9 @@ if __name__ == "__main__":
         hook()
     elif cmd == "inicio":
         inicio()
+    elif cmd == "repasado":
+        repasado()
+    elif cmd == "al_terminar":
+        al_terminar()
     else:
         print(__doc__)

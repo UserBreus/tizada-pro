@@ -40,6 +40,9 @@ pasaron), sus contratos y sus CONEXIONES con otras partes. `cerebro/cerebro.py` 
 - `py cerebro/cerebro.py revisar` = ¿están vivas todas? · `neurona <id>` = todo lo que sabe una.
 - **Mantenerlo en la misma tanda:** función nueva → neurona nueva; regla nueva → `reglas`; falla
   arreglada → `cicatrices`; renombre a propósito → actualizar sus `anclas`.
+- **Es OBLIGATORIO y SIN PREGUNTAR:** al terminar cada respuesta un control (hook Stop) revisa si se
+  cambió código que el cerebro no aprendió y FRENA el cierre hasta actualizar `cerebro/neuronas.json`
+  (guardarlo lo deja repasado). Si de verdad no hay nada nuevo que aprender: `py cerebro/cerebro.py repasado`.
 
 ## 2. REGLAS DURAS (no negociables)
 
