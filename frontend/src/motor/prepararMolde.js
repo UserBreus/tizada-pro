@@ -80,7 +80,10 @@ const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart
 // que el pedido abría con «Piezas y etiqueta» aunque se hubiera elegido «Cargar base».
 // (Las subidas del PEDIDO —Mis artículos, molde con diseño incluido— siguen aceptándolo.)
 export const MOLDE_CON_DISENO = 'Ese molde viene con diseño incluido. Quitá la máscara de recorte y el diseño y subí tu molde limpio.'
-export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {} } = {}) {
+// `enPc` (MAPA 585): el molde con diseño del PEDIDO no se guarda en el servidor. Se devuelve además
+// la CÁSCARA (lo que sube en lugar del archivo) y `paginas` resuelve `{zip, pdfs, rev}`: el ZIP sin
+// páginas para el servidor y las páginas (PDF por mesa) para guardar en ESTA PC.
+export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {}, enPc = false } = {}) {
   let pool = null
   let cerrado = false
   const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
@@ -136,10 +139,21 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     })
     onA && onA({ texto: 'Listo para guardar…' })
     const pA = await pool.enviar('paquete', { archivo: null, desplegado: A, fase: 'contornos', sha1, motor: MOTOR })
+    // los bytes del archivo ya están abiertos en cada hilo: acá se TRANSFIEREN (sin copia) al que arma la cáscara
+    const cascara = enPc ? await pool.enviar('cascara', { bytes }, [bytes.buffer]) : null
     const paginas = (async () => {
       try {
         const B = await faseB(pool, A, { manual: manual || {}, avisar: (_e, hecho, total, texto) => onB && onB({ texto, hecho, total }) })
         onB && onB({ texto: 'Armando el paquete de las páginas…', hecho: 1, total: 1 })
+        if (enPc) {
+          // las páginas se QUEDAN acá (no se transfieren ni viajan): al hilo va el desplegado sin ellas
+          const rev = Date.now()
+          const pdfs = new Map([...B.mesas].map(([m, x]) => [m, x.pdf]))
+          const bytesPdf = Object.fromEntries([...B.mesas].map(([m, x]) => [m, x.pdf ? x.pdf.length : 0]))
+          const sinPdf = { ...B, mesas: new Map([...B.mesas].map(([m, x]) => [m, { ...x, pdf: null }])) }
+          const pB = await pool.enviar('paquete', { archivo: null, desplegado: sinPdf, fase: 'paginas', sha1, motor: MOTOR, enPc: true, rev, bytesPdf })
+          return { zip: pB.zip, pdfs, rev, sha1 }
+        }
         const pdfs = [...B.mesas.values()].map((x) => x.pdf.buffer)
         const pB = await pool.enviar('paquete', { archivo: null, desplegado: B, fase: 'paginas', sha1, motor: MOTOR }, pdfs)
         return pB.zip
@@ -151,7 +165,7 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
     })()
     paginas.catch(() => {})            // el que llama se engancha después: que no quede «sin atender»
     return {
-      zipA: pA.zip, sha1, paginas, cancelar: cerrar,
+      zipA: pA.zip, sha1, paginas, cancelar: cerrar, enPc: !!enPc, cascara,
       resumen: { mesas: A.alta.mesas, talles: A.alta.talles, piezas: A.alta.registro.size },
     }
   } catch (e) {

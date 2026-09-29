@@ -863,15 +863,30 @@ export const DICCIONARIO = {
     que: 'El diseño trae textos con el talle. Los que se repiten igual en casi todas las piezas son la etiqueta de corte que puso el diseñador: se ocultan, y la tizada pone la del sistema, así la prenda no sale con dos. Los que están en una sola pieza (la talla tejida, por ejemplo) son parte del diseño y se dejan. Cada renglón es una familia de textos (misma fuente y tamaño) con un casillero: si el sistema se equivocó, lo cambiás vos y las piezas se rehacen.',
     como: 'Mirá cada renglón: marcado = se oculta, sin marcar = se deja. Cambiá el casillero si hace falta.',
   },
-  'pieza-b-sugerida': {
-    nombre: 'Ya configuraste este molde',
-    que: 'Aviso de que hay una configuración tuya guardada que le calza a este molde: dice cuál es, cuántos nombres trae y en cuántas piezas está marcada la etiqueta. Aparece también cuando el archivo es otro pero el molde es el mismo con otro diseño adentro, porque el molde se reconoce por sus piezas.',
-    como: 'Mirá el aviso de la configuración guardada.',
+  'cfg-lote-aviso': {
+    nombre: 'Configuraciones guardadas del pedido',
+    que: 'En la cabecera del pedido, a la vista en todos los pasos: cuántos de los moldes con diseño que cargaste tienen una configuración tuya guardada que les calza.',
+    como: 'Tocá «Aplicar» para elegir a cuáles aplicarla.',
   },
-  'pieza-b-sugerida-aplicar': {
-    nombre: 'Aplicar la configuración guardada',
-    que: 'Pone de una los nombres de las piezas y dónde va la etiqueta en cada una, tal como los habías dejado. No se aplica sola nunca: entra recién cuando tocás este botón. Si el molde todavía se está leyendo, queda esperando y entra sola en cuanto termina. Después conviene abrir «Nombrar piezas» y mirar si quedó bien.',
-    como: 'Aplicá la configuración guardada.',
+  'cfg-lote-abrir': {
+    nombre: 'Aplicar',
+    que: 'Abre la ventana para aplicar las configuraciones guardadas a uno, a varios o a todos los moldes del pedido de una vez.',
+    como: 'Abrí la ventana de configuraciones guardadas.',
+  },
+  'telas-copiar-modo': {
+    nombre: 'Cómo copiar las telas',
+    que: '«Por pieza»: cada pieza del otro molde que se llama igual toma la tela de acá (la rápida). «Todo el molde»: elegís una de las telas de este molde y va a TODAS las piezas del otro, sin importar cuáles son.',
+    como: 'Elegí una de las dos formas.',
+  },
+  'cfg-lote-lista': {
+    nombre: 'Moldes del pedido',
+    que: 'Cada molde con diseño del pedido: si tiene una configuración que le calza viene tildado (si hay varias, elegís cuál); los que no tienen, o todavía se están leyendo, se ven apagados. Siempre van los nombres y la etiqueta; lo demás (grupos y variables, telas…) sólo si lo tildás abajo.',
+    como: 'Tildá o destildá los moldes. «Todos» y «Ninguno» marcan de una.',
+  },
+  'cfg-lote-aplicar': {
+    nombre: 'Aplicar a los elegidos',
+    que: 'Aplica la configuración elegida a cada molde tildado, uno tras otro, y al final dice molde por molde cómo quedó (o por qué no entró).',
+    como: 'Tocá el botón de aplicar, abajo a la derecha.',
   },
   'pieza-b-configuracion': {
     nombre: 'Guardar configuración',

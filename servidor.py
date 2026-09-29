@@ -2758,6 +2758,23 @@ _CALCULOS_LOCK = threading.Lock()
 _CALCULOS_TOPE = 400
 
 
+def _en_pc(pid):
+    """El molde con diseño que vive en la PC que lo cargó (MAPA 585): `{sha1, bytes, desde}` o None.
+    En el servidor hay sólo una CÁSCARA (el PDF sin dibujo) y el JSON de cada mesa; el archivo
+    real y sus páginas por talle están en el navegador de esa PC."""
+    try:
+        with open(os.path.join(ENTRADA, str(pid), "molde.en_pc.json"), encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) and d.get("sha1") else None
+    except Exception:
+        return None
+
+
+_MSJ_EN_PC = ("Este molde con diseño se preparó en la computadora que lo cargó y queda sólo ahí "
+              "(no se guarda en el servidor). Si estás en otra computadora o se borraron los datos "
+              "del navegador, volvé a cargar el archivo: la configuración guardada se reaplica sola.")
+
+
 def _sello_archivo(ruta):
     """El sello de un archivo que el navegador guarda en su caché: `[tamaño, fecha en µs]`.
 
@@ -2776,6 +2793,10 @@ def _sello_archivo(ruta):
 def _id_plantilla(pid, original=False):
     """La identidad del archivo del molde para un cálculo: el mismo archivo = el mismo sello."""
     ruta = _ruta_entrada("plantilla.ai", pid, original=original)
+    _pc = _en_pc(pid)
+    if _pc:
+        # el archivo REAL está en la PC que lo cargó, guardado con este sello (ver `prepararMolde.js`)
+        return {"molde": pid, "archivo": "original" if original else "vigente", "sello": ["pc", _pc["sha1"]]}
     return {"molde": pid, "archivo": "original" if original else "vigente", "sello": _sello_archivo(ruta)}
 
 
@@ -2939,11 +2960,25 @@ def _version_plantilla_desde(pid, nombre_tmp):
     return destino
 
 
+def _resp_calcular(cuerpo):
+    """El pedido de un cálculo al navegador. Es trabajo normal, no una falla: a la pantalla que lo
+    sabe resolver (manda `X-Calculos: 200`, `motor/calculos.js`) se le contesta 200 marcado con
+    `X-Calcular: 1` — con 428 la consola del navegador lo pintaba en rojo como error en cada
+    pantalla (MAPA 591). Cualquier otro cliente sigue recibiendo 428, que es lo que entiende.
+    `no-store`: la misma URL se vuelve a pedir enseguida con el resultado y no puede salir de caché."""
+    r = jsonify(cuerpo)
+    r.headers["Cache-Control"] = "no-store"
+    if request.headers.get("X-Calculos") == "200":
+        r.headers["X-Calcular"] = "1"
+        return r, 200
+    return r, 428
+
+
 @app.errorhandler(_FaltaCalculo)
 def _pedir_calculo(e):
-    """Una ruta necesita un cálculo que hace el navegador: se lo pide (428) y el navegador
-    vuelve a llamar con el resultado (`motor/calculos.js`)."""
-    return jsonify({"calcular": e.pedido}), 428
+    """Una ruta necesita un cálculo que hace el navegador: se lo pide (428, o 200 marcado — ver
+    `_resp_calcular`) y el navegador vuelve a llamar con el resultado (`motor/calculos.js`)."""
+    return _resp_calcular({"calcular": e.pedido})
 
 
 @app.errorhandler(Exception)
@@ -3344,7 +3379,7 @@ _PAQUETE_VERSION = 1
 _PAQUETE_TOPE_BYTES = 4 * 1024 ** 3
 
 
-def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
+def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos"), en_pc=None):
     """Valida el paquete y deja su desplegado al lado de `archivo`. Devuelve `(fase, alta)`.
     Levanta `ValueError` con un mensaje para la pantalla si el paquete no sirve.
 
@@ -3421,7 +3456,9 @@ def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
             if (man.get("v_contornos") != PD._V_CONTORNOS or man.get("v_paginas") != PD._V_PAGINAS
                     or man.get("v_etq") != PD._V_ETQ):
                 raise ValueError("el molde se preparó con otra versión del sistema: recargá la página y volvé a cargarlo")
-            if str(man.get("sha1") or "") != _sha1_archivo(archivo):
+            # EN LA PC (MAPA 585): `archivo` es la cáscara; el paquete se arma sobre el archivo REAL,
+            # cuyo SHA-1 declaró la PC al subir. Las mesas y los talles igual se comparan con la cáscara.
+            if str(man.get("sha1") or "") != (str(en_pc.get("sha1")) if en_pc else _sha1_archivo(archivo)):
                 raise ValueError("el paquete no corresponde a este archivo")
             doc = fitz.open(archivo)
             try:
@@ -3477,9 +3514,16 @@ def _paquete_molde_aplicar(archivo, ruta_zip, fases=("completo", "contornos")):
                         actual = None
                     if actual is not None and actual.get("talles") != j.get("talles"):
                         raise ValueError(f"las piezas de la mesa {mesa} no coinciden con las del molde guardado")
+                if bool(j.get("paginas_en_pc")) != bool(en_pc):
+                    raise ValueError(f"la mesa {mesa} del paquete no dice dónde están sus páginas")
                 j["sello"] = sello
                 with open(os.path.join(armado, f"m{mesa}.json"), "w", encoding="utf-8") as fh:
                     json.dump(j, fh)
+                if en_pc:
+                    # las páginas quedan en la PC que cargó el molde: el paquete NO las trae
+                    if f"desplegado/m{mesa}.pdf" in nombres:
+                        raise ValueError("este molde se guarda en la PC: el paquete no tiene que traer páginas")
+                    continue
                 nombre_pdf = f"desplegado/m{mesa}.pdf"
                 if nombre_pdf not in nombres:
                     raise ValueError(f"al paquete le falta {nombre_pdf}")
@@ -3564,7 +3608,7 @@ _MOLDE_CON_DISENO_AVISO = ("Ese molde viene con diseño incluido. Quitá la más
 
 def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                            _corresp_nueva, _con_diseno, _motivo_b, _t_subida, paquete=None,
-                           sabe_sin_diseno=False, solo_base=False):
+                           sabe_sin_diseno=False, solo_base=False, en_pc=None):
     """LO CARO de subir un molde: leerlo, detectar las piezas y dejarlo en su lugar.
 
     🔴 Corre FUERA del hilo que atiende la llamada web. Medido el 2026-09-10 con el molde real del
@@ -3590,7 +3634,8 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
     if paquete:
         # El navegador ya lo preparó entero: acá sólo se valida y se guarda (ver arriba).
         try:
-            _fase_paq, alta = _paquete_molde_aplicar(tmp, paquete, fases=("completo", "contornos", "alta_a"))
+            _fase_paq, alta = _paquete_molde_aplicar(tmp, paquete, fases=("completo", "contornos", "alta_a"),
+                                                     en_pc=en_pc)
             _paso("guardar el paquete del navegador")
         except Exception as e:
             _descartar_tmp(tmp)
@@ -3726,7 +3771,20 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         _descartar_tmp(tmp)
         return None, (f"no se pudo reemplazar el molde (¿está abierto en otro programa?): {e}", 422)
     _paso("reemplazar el archivo")
-    _en_hilo(lambda: _sha1_registrar(destino))    # para no volver a subirlo (ver `_sha1_buscar`)
+    # EN LA PC (MAPA 585): la marca con el SHA-1 del archivo REAL; y si este molde se vuelve a subir
+    # normal (con el archivo), la marca se va. La cáscara no se registra para «no volver a subir».
+    try:
+        _marca_pc = os.path.join(os.path.dirname(destino), "molde.en_pc.json")
+        if en_pc:
+            with open(_marca_pc + ".tmp", "w", encoding="utf-8") as _fh:
+                json.dump({"sha1": en_pc["sha1"], "bytes": en_pc.get("bytes"), "desde": time.time()}, _fh)
+            os.replace(_marca_pc + ".tmp", _marca_pc)
+        elif os.path.exists(_marca_pc):
+            os.remove(_marca_pc)
+    except Exception as e:
+        print(f"[subir_plantilla] no se pudo anotar si el molde vive en la PC: {e}")
+    if not en_pc:
+        _en_hilo(lambda: _sha1_registrar(destino))    # para no volver a subirlo (ver `_sha1_buscar`)
     # ── LA MARCA DEL CAMINO, CON EL ARCHIVO YA EN SU LUGAR ──────────────────────────────────────
     # Va DESPUÉS del `os.replace` a propósito: si se marcara el temporal y la subida fallara,
     # quedaría marcado el molde VIEJO, que es de otro camino. Y se BORRA cuando el archivo nuevo
@@ -3902,6 +3960,18 @@ def subir_plantilla():
     _SOLO_BASE = str(request.form.get("solo_base") or "") == "1"
     if _SOLO_BASE and _PIDE_B:
         return jsonify({"error": _MOLDE_CON_DISENO_AVISO}), 422
+    # EN LA PC (MAPA 585): el molde con diseño del pedido llega como CÁSCARA + paquete; el archivo
+    # real queda en la PC. Sólo para el camino B, con paquete y con el SHA-1 del archivo real.
+    _EN_PC = None
+    if str(request.form.get("archivo_en_pc") or "") == "1":
+        _sha_r = str(request.form.get("sha1_real") or "").strip().lower()
+        if not (_PIDE_B and request.files.get("paquete") is not None and re.fullmatch(r"[0-9a-f]{40}", _sha_r)):
+            return jsonify({"error": "falta el molde preparado por esta computadora (volvé a cargarlo)"}), 400
+        try:
+            _bytes_r = int(request.form.get("bytes_real") or 0)
+        except ValueError:
+            _bytes_r = 0
+        _EN_PC = {"sha1": _sha_r, "bytes": _bytes_r}
     destino = _ruta_entrada("plantilla.ai", pid=_PID, original=True)
     _pq = request.files.get("paquete")        # el molde ya preparado por el navegador (PLAN_NAVEGADOR)
     _t_subida = time.time()          # cronómetro de la subida entera (se imprime al responder)
@@ -3993,7 +4063,7 @@ def subir_plantilla():
                 res, err = _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
                                                   _corresp_nueva, _con_diseno, _motivo_b, _t_subida,
                                                   paquete=_paquete, sabe_sin_diseno=_SABE_SIN,
-                                                  solo_base=_SOLO_BASE)
+                                                  solo_base=_SOLO_BASE, en_pc=_EN_PC)
             finally:
                 sem.release()
             if err:
@@ -4025,8 +4095,9 @@ def subir_paginas_plantilla():
         return jsonify({"error": "el molde ya no está (¿se borró o se volvió a subir?)"}), 409
     ruta_zip = os.path.join(os.path.dirname(path), "paginas.subiendo." + uuid.uuid4().hex[:8] + ".zip")
     pq.save(ruta_zip)
+    _pc = _en_pc(pid)
     try:
-        _fase, alta = _paquete_molde_aplicar(path, ruta_zip, fases=("paginas",))
+        _fase, alta = _paquete_molde_aplicar(path, ruta_zip, fases=("paginas",), en_pc=_pc)
     except Exception as e:
         return jsonify({"error": f"no se pudieron guardar las páginas del molde: {e}"}), 422
     finally:
@@ -4047,7 +4118,15 @@ def subir_paginas_plantilla():
         print(f"[camino B] no se pudo sacar la marca de páginas pendientes de {pid}: {e}")
     finally:
         _soltar_edicion_catalogo()
-    if alta:
+    # La copia de reserva por SHA-1 (`datos/desplegado_cache`) NO va para un molde del pedido: el molde
+    # con diseño no se guarda más allá de su pedido (decisión del usuario, MAPA 585) — y con el molde
+    # en la PC no hay páginas acá que copiar.
+    _efim = False
+    try:
+        _efim = bool(next((x for x in _cargar_catalogo().get("productos", []) if x.get("id") == pid), {}).get("efimero"))
+    except Exception:
+        pass
+    if alta and not _pc and not _efim:
         _en_hilo(lambda: _cache_desplegado_guardar(path, alta))
     try:
         _r = _cargar("resumen_plantilla.json", pid) or {}
@@ -5062,7 +5141,7 @@ def plantilla_pdf_guia():
             g._juntar = None
         if _faltan:
             # lo armado con huecos se descarta: el navegador hace todos y la vuelve a pedir
-            return jsonify({"calcular": _faltan[0], "calculos": _faltan, "reenviar": "post"}), 428
+            return _resp_calcular({"calcular": _faltan[0], "calculos": _faltan, "reenviar": "post"})
         return jsonify({"capas_data": _cd, "titulo": titulo, "config": config, "rango": rango, "limpio": limpio,
                         "referencia": referencia})
     if _solo_navegador():
@@ -10914,15 +10993,20 @@ def _plan_del_pedido(cuerpo):
         _asig_cfg = asig                                  # la del molde (config), como base
         _gen = lambda s: re.sub(r"\s+\d+\s*$", "", str(s)).strip().lower()
 
+        # LA TELA PRINCIPAL de cada (molde, diseño) (MAPA 587): `tela_principal = {pid: {slug: tela}}`.
+        # Es la de TODAS las piezas salvo las excepciones (`asignaciones`); gana sobre `tela_base`.
+        _pri_all = (cuerpo.get("tela_principal") or {}).get(pid) or {}
+
         def _asig_de(dslug):
             """Asignación pieza→tela para UN diseño de este molde."""
             _ovr = (_ovr_all.get(dslug) or {}) if _por_dis else _ovr_all
-            if not (_base or _ovr):
+            _b = (_pri_all.get(dslug) if isinstance(_pri_all, dict) else None) or _base
+            if not (_b or _ovr):
                 return _asig_cfg
             _a = {}
-            if _base:
+            if _b:
                 for _p in reg.keys():
-                    _a[str(_p)] = str(_base)
+                    _a[str(_p)] = str(_b)
             # Los overrides vienen por nombre GENÉRICO ("Cuello") → se aplican a TODAS las piezas
             # de ese genérico ("Cuello 25", "Cuello 12", …).
             for _p, _t in (_ovr.items() if isinstance(_ovr, dict) else []):
@@ -11202,7 +11286,9 @@ def _plan_del_pedido(cuerpo):
             # una sola guía mentiría sobre la mitad del pedido.
             # La asignación de telas se calcula ACÁ, no en `correr()`: `_asig_de` es una clausura
             # sobre el molde del ciclo y para cuando corre el hilo ya apunta al último molde.
-            _asig_d = _asig_de(dslug)
+            # 🔴 la TELA es del diseño del PEDIDO (`_dslug_pedido`), no del arte que se usó en su lugar:
+            # sin arte propio `dslug` cae a otro diseño y las telas elegidas se perdían (MAPA 587)
+            _asig_d = _asig_de(_dslug_pedido)
             for _prg in subset:
                 _vc = str(_prg.get("variante_clave") or "")
                 _kg = (pid, dslug, _vc)
@@ -11252,7 +11338,7 @@ def _plan_del_pedido(cuerpo):
                 # del pedido entero: dos moldes con la misma fuente pueden reemplazarla distinto.
                 "fuentes": _fuentes_para(pid, _reempl_de_request(dslug, pid)),
                 "registro": reg, "pers": pers, "prendas": subset,
-                "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(dslug),
+                "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(_dslug_pedido),   # del diseño del PEDIDO (ver arriba)
                 "borde_corte": _borde_de(prod, cat),
                 "etiqueta": _etiqueta_de(prod, cat),
                 "editables_cfg": _editables_cfg(prod, dslug, (_ed_override.get(dslug) if isinstance(_ed_override, dict) else None)),
@@ -12558,6 +12644,13 @@ def _sha1_molde(path):
     """sha1 del archivo, memorizado por (tamaño, fecha): identifica al ARCHIVO, que es lo que
     comparten dos subidas del mismo molde en pedidos distintos. Son 123 MB: sin memoria, cada
     listado los volvería a leer."""
+    try:
+        import piezas_con_diseno as _PDs
+        _pc = _PDs.en_pc(path)
+        if _pc:
+            return _pc["sha1"]        # en el servidor hay una cáscara: el que vale es el del archivo real
+    except Exception:
+        pass
     try:
         st = os.stat(path)
     except OSError:
@@ -13944,6 +14037,8 @@ def get_productos():
             # las páginas por talle las está terminando (o las dejó a medias) un NAVEGADOR: la marca
             # del desplegado es la fuente de verdad (PLAN_NAVEGADOR, «dos tiempos»)
             "paginas_navegador": bool(has_plantilla and _pags_nav(pid) is not None),
+            # el molde con diseño vive en la PC que lo cargó (MAPA 585): SHA-1 del archivo real
+            "en_pc_sha1": ((_en_pc(pid) or {}).get("sha1") if has_plantilla else None),
             # Segundos desde el último latido de la pestaña que prepara las páginas (None = nada pendiente).
             "paginas_navegador_hace": _pags_nav(pid) if has_plantilla else None,
             "planilla_template_id": tid or "plan_default",
@@ -14919,6 +15014,8 @@ def desplegado_archivo_producto(pid, archivo):
     if not _re.match(r"^(m[1-9][0-9]{0,3}\.(pdf|json)|etiqueta_archivo\.json)$", archivo or ""):
         return jsonify({"error": "no es un archivo del desplegado"}), 400
     carpeta = os.path.join(ENTRADA, pid, "desplegado")
+    if archivo.endswith(".pdf") and _en_pc(pid):
+        return jsonify({"error": _MSJ_EN_PC, "en_pc": True}), 409
     if not os.path.exists(os.path.join(carpeta, archivo)):
         return jsonify({"error": "el molde no tiene esa mesa desplegada"}), 404
     return send_from_directory(carpeta, archivo, max_age=0)
@@ -14936,6 +15033,17 @@ def _mesas_desplegadas(pl):
         d = _PD._leer_desplegado(pl, m)
         if d is None:
             break
+        if d.get("en_pc"):
+            # EN LA PC (MAPA 585): el sello lo sabe la PC de antemano (SHA-1 del archivo real + la
+            # vuelta de páginas que armó): ahí guardó los PDF antes de subir el JSON.
+            _pc = _PD.en_pc(pl) or {}
+            _fjp = os.path.join(_PD._carpeta_desplegado(pl), f"m{m}.json")
+            mesas.append({"mesa": m, "sello": ["pc", _pc.get("sha1"), d.get("rev_pc")],
+                          "orden": list(d.get("orden") or []), "paginas": True, "en_pc": True,
+                          "bytes": int(d.get("bytes_pdf") or 0),
+                          "bytes_json": (os.path.getsize(_fjp) if os.path.exists(_fjp) else 0)})
+            m += 1
+            continue
         # 🔴 EL SELLO INCLUYE LAS PÁGINAS (2026-09-22): el navegador guarda `m{n}.pdf/json` en su caché
         # por este sello, y el del archivo del molde NO cambia al rehacer las páginas (la etiqueta
         # que trae el diseño): se seguían usando las páginas viejas. Con la fecha del PDF, cambian.
@@ -15056,6 +15164,8 @@ def moldes_para_bajar():
         # sin `_ruta_entrada` para mirar si existe: ésa hace makedirs y esto es un GET
         if not os.path.exists(os.path.join(ENTRADA, pid, "plantilla.ai")):
             continue
+        if _en_pc(pid):
+            continue          # vive en la PC que lo cargó: no hay nada que bajar (MAPA 585)
         try:
             orig = _ruta_entrada("plantilla.ai", pid=pid, original=True)
             if _PD.es_camino_b(orig):
@@ -15134,8 +15244,10 @@ def motor_b_producto(pid):
     for ruta, info in MP.catalogo_fuentes(fu).items():
         catalogo.append({**info, "propia": os.path.dirname(ruta) != os.path.realpath(FUENTES)
                                           and os.path.dirname(ruta) != FUENTES})
+    _pcb = _en_pc(pid)
     return jsonify({
         "camino_b": True,
+        "en_pc": bool(_pcb), "en_pc_sha1": (_pcb or {}).get("sha1"),   # el molde vive en la PC (MAPA 585)
         "paginas_pendientes": _PD.paginas_pendientes_navegador(pl),
         "mesas": mesas,
         "registro": _cargar("registro_producto.json", pid) or {},
@@ -15208,6 +15320,9 @@ def descargar_plantilla_producto(pid):
     ruta_plantilla = os.path.join(pdir, "plantilla.ai")
     if not os.path.exists(ruta_plantilla):
         return jsonify({"error": "El producto no tiene una plantilla base subida"}), 404
+    if _en_pc(pid):
+        # acá hay sólo la cáscara: bajarla como si fuera el molde daría un archivo sin dibujo
+        return jsonify({"error": _MSJ_EN_PC, "en_pc": True}), 409
     # `?cual=vigente`: la versión que usa el sistema (con las variantes nombradas, las piezas
     # agregadas…), para el motor del navegador. Sin eso, el archivo que subió el usuario.
     if request.args.get("cual") == "vigente":

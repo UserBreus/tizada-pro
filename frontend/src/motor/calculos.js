@@ -35,7 +35,8 @@ function pool() {
 async function bytesPlantilla(args, rutaApi) {
   // la MISMA clave que el motor y la descarga de fondo (`bajarMoldes.js`): el molde que ya está
   // guardado en esta PC no se vuelve a bajar para un cálculo
-  const cual = args.archivo !== 'original' ? 'vigente' : 'original'
+  // un molde con diseño EN LA PC (sello `pc,…`, MAPA 585) se guarda una sola vez, como «original»
+  const cual = (args.sello && args.sello[0] === 'pc') ? 'original' : (args.archivo !== 'original' ? 'vigente' : 'original')
   return traerConCache(claveDe.plantilla(args.molde, args.sello, cual), rutaApi(urlDe.plantilla(args.molde, cual)))
 }
 
@@ -151,16 +152,31 @@ function conCalculos(input, init, reenviar, calculos) {
  * pasaba («el servidor pidió demasiados cálculos seguidos»). Lo que corta ahora es que NO AVANCE:
  * el mismo cálculo pedido otra vez después de entregado (3 veces) es un bucle, no trabajo.
  */
+// «SÉ HACER LOS CÁLCULOS» (MAPA 591): a nuestro servidor se le avisa con `X-Calculos: 200` y el
+// pedido de cálculo llega como 200 marcado (`X-Calcular: 1`) en vez de 428 — el 428 salía en ROJO en
+// la consola en cada pantalla, como si algo fallara. Sólo a la MISMA origen: a otro host (el puente
+// de Illustrator, un CDN) una cabecera propia dispara un preflight de CORS y rompería el pedido.
+function _avisarQueCalcula(input, init) {
+  if (typeof input !== 'string' && !(input instanceof URL)) return init
+  try {
+    if (new URL(String(input), window.location.href).origin !== window.location.origin) return init
+  } catch { return init }
+  const headers = new Headers((init && init.headers) || {})
+  headers.set('X-Calculos', '200')
+  return { ...(init || {}), headers }
+}
+
 export function instalarCalculos(rutaApi = (x) => x) {
   if (typeof window === 'undefined' || _fetch) return
   _fetch = window.fetch.bind(window)
-  window.fetch = async (input, init) => {
+  window.fetch = async (input, init0) => {
+    const init = _avisarQueCalcula(input, init0)
     const veces = new Map()            // clave → cuántas veces la pidió el servidor
     const adentro = new Map()          // clave → {clave, resultado_json} que viajan en la petición
     let init2 = init
     for (;;) {
       const r = await _fetch(input, init2)
-      if (r.status !== 428) return r
+      if (r.status !== 428 && r.headers.get('X-Calcular') !== '1') return r
       let d = null
       try { d = await r.clone().json() } catch { d = null }
       if (!d || !d.calcular) return r

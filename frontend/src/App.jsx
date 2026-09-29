@@ -6,6 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
+import { guardarCache, leerCache, claveDe, soltarMoldesEnPc, soltarPaginasEnPc } from './motor/cache.js';   // el molde con diseño en la PC (MAPA 585)
 import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
 import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
@@ -5992,6 +5993,10 @@ export default function App() {
   // Antes la clave era sólo el molde, así que dos diseños del MISMO molde compartían la tela:
   // cambiabas una y se cambiaba la otra sin avisar, y las dos salían cortadas en la misma tela.
   const [telaPorPieza, setTelaPorPieza] = useState(_wiz.telaPorPieza || {});
+  // LA TELA PRINCIPAL de cada (diseño, molde) (MAPA 587, pedido del usuario 2026-09-29): «si cambio
+  // la tela general, las piezas que tienen otra tela se mantienen». `telaPorPieza` pasa a guardar
+  // sólo las EXCEPCIONES; el resto de las piezas SIGUE a la principal. `{ "<disenoId>|<pid>": telaId }`.
+  const [telaPrincipalPed, setTelaPrincipalPed] = useState(_wiz.telaPrincipalPed || {});
   // PIEZAS A IMPRIMIR (MAPA 577): las que el operario apagó en el paso Arte, por (diseño, molde) y
   // por nombre GENÉRICO — la misma clave que las telas. `{ "<disenoId>|<pid>": ["Cuello", …] }`.
   // Es del PEDIDO: «Nuevo pedido» la deja en cero.
@@ -6182,6 +6187,9 @@ export default function App() {
   };
   const cargarFuentesEstado = async (reemplOverride) => {
     const pid = pidCfg || productosCat.activo; if (!pid) return;
+    // `prod_default` es el activo DE ARRANQUE (antes de que llegue la lista), no un molde: pedir sus
+    // datos daba un 404 rojo en la consola cada vez que se abría el programa (MAPA 591).
+    if (pid === 'prod_default' && !(productosCat.productos || []).some(p => p.id === pid)) return;
     try {
       // en ESTA computadora (`motor/arte/fuentesEstado.js`): el servidor sólo entrega los datos
       const d = await fuentesEstadoLocal({ pid, diseno: disenoActivo || 'principal', reemplazos: _reemplDe(disenoActivo, pid, reemplOverride), rutaApi });
@@ -6256,6 +6264,16 @@ export default function App() {
   // nuevo — como si no hubiera pasado nada. Se guarda el id, no un simple «ya está»: si mañana
   // guardás OTRA receta que le calce, esa sí se ofrece.
   const cfgAplicada = useRef({});   // { pid: id de la receta ya aplicada }
+  // APLICAR A VARIOS DE UNA (MAPA 586, pedido del usuario 2026-09-29): «en vez de 1 por molde, que
+  // detecte todos los moldes y diga a cuáles se les puede aplicar una configuración guardada; en un
+  // espacio propio elegís aplicar a uno, a algunos o a todos, sin navegar entre moldes».
+  const [cfgCandidatas, setCfgCandidatas] = useState({});   // { pid: [recetas que le calzan] }
+  const [cfgLeyendo, setCfgLeyendo] = useState({});         // { pid: true } mientras el molde se lee
+  const [cfgLoteOpen, setCfgLoteOpen] = useState(false);
+  const [cfgLoteSel, setCfgLoteSel] = useState({});         // { pid: id de la receta elegida }
+  const [cfgLotePartes, setCfgLotePartes] = useState([]);   // además de nombres + etiqueta
+  const [cfgLoteHaciendo, setCfgLoteHaciendo] = useState('');
+  const [cfgLoteRes, setCfgLoteRes] = useState(null);       // [{pid, nombre, ok, texto}]
   const [, setCatalogoGrupos] = useState([]);
   // Panel inline de selección de pieza en la barra lateral:
   // null = oculto · 'grupos' = lista de grupos · <nombre de grupo> = sus piezas
@@ -7112,11 +7130,29 @@ export default function App() {
     const t = setInterval(latir, 15000);
     return () => clearInterval(t);
   }, [pidsPreparando]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 🔴 LA LISTA DE MOLDES NO PUEDE VOLVER PARA ATRÁS (MAPA 589, «tarda en marcar el talle»): se pide
+  // en ráfagas (cada toque, cada subida, el latido) y las respuestas llegaban en cualquier orden y
+  // pisaban lo último. Tocando «Talle» en dos moldes seguidos, la recarga del primero salía del
+  // servidor ANTES de que se guardara el segundo y le devolvía el botón viejo hasta la próxima
+  // recarga: parecía que el toque tardaba segundos. Ahora (1) una respuesta más vieja que la ya
+  // aplicada se descarta y (2) lo marcado en pantalla que todavía se está guardando (`_talleLocal`)
+  // se respeta hasta que llega una lista pedida DESPUÉS de guardarlo.
+  const _prodSeq = useRef({ pedido: 0, aplicado: 0 });
+  const _talleLocal = useRef({});      // pid → { col, hasta }: `hasta` = la 1ª recarga que ya lo trae
   const fetchProductos = async () => {
     try {
+      const seq = ++_prodSeq.current.pedido;
       const res = await fetch('/api/productos');
       if (!res.ok) return;               // sin sesión (401) → NO pisar el catálogo con {error}
-      const data = await res.json();
+      let data = await res.json();
+      if (seq < _prodSeq.current.aplicado) return;       // llegó tarde: ya hay una más nueva
+      _prodSeq.current.aplicado = seq;
+      const loc = _talleLocal.current;
+      Object.keys(loc).forEach(pid => { if (seq >= loc[pid].hasta) delete loc[pid]; });
+      if (Object.keys(loc).length && Array.isArray(data.productos)) {
+        data = { ...data, productos: data.productos.map(p => loc[p.id]
+          ? { ...p, mapeo_columnas: { ...(p.mapeo_columnas || {}), talle: loc[p.id].col, talle_elegido: true } } : p) };
+      }
       setProductosCat(data);
     } catch (e) {
       console.error("Error al obtener catálogo", e);
@@ -9920,7 +9956,8 @@ export default function App() {
       // TELAS del pedido: tela base por molde + overrides por pieza (id → nombre para el motor).
       const _telaNom = {}; (telasReg.telas || []).forEach(t => { _telaNom[t.id] = t.nombre; });
       // `piezas_fuera` = PIEZAS A IMPRIMIR: `{pid: {slug: [genérico]}}`, por diseño como las telas (MAPA 577).
-      const tela_base = {}, asignaciones = {}, piezas_fuera = {};
+      // `tela_principal` = la tela de TODAS las piezas de (molde, diseño) que no son excepción (MAPA 587)
+      const tela_base = {}, asignaciones = {}, piezas_fuera = {}, tela_principal = {};
       ids.forEach(pid => {
         const b = telaBaseMolde[pid]; if (b && _telaNom[b]) tela_base[pid] = _telaNom[b];
       });
@@ -9933,6 +9970,8 @@ export default function App() {
           const ov = _telasDe(d.id, pid); const o = {};
           Object.entries(ov).forEach(([pz, tid]) => { if (tid && _telaNom[tid]) o[pz] = _telaNom[tid]; });
           if (Object.keys(o).length) { asignaciones[pid] = asignaciones[pid] || {}; asignaciones[pid][slug] = o; }
+          const _tp = telaPrincipalPed[`${d.id}|${pid}`];     // misma clave que `_claveTelaDis`
+          if (_tp && _telaNom[_tp]) { tela_principal[pid] = tela_principal[pid] || {}; tela_principal[pid][slug] = _telaNom[_tp]; }
           const _pf = piezasFuera[`${d.id}|${pid}`] || [];   // misma clave que `_claveTelaDis`
           if (_pf.length) { piezas_fuera[pid] = piezas_fuera[pid] || {}; piezas_fuera[pid][slug] = _pf; }
         });
@@ -9966,7 +10005,7 @@ export default function App() {
         filas: !_hayRepo ? _filasQ : _filasQ.map(f => ({ ...f, __repo_txt: (f.__repo && Object.keys(f.__repo).length)
           ? Object.entries(f.__repo).map(([pid, l]) => `${_nomMolde(pid)}: ${(l || []).join(', ')}`).join(' · ') : 'Todas' })),
       };
-      const _cuerpo = { piezas_fuera, cantidad_copia: _copia, molds: ids, moldes_por_diseno,
+      const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, molds: ids, moldes_por_diseno,
         // Repo apagado: lo elegido no viaja (todas las filas hacen todas sus piezas)
         prendas: repoOn ? prendasFinal : prendasFinal.map(({ __repo, ...f }) => f), default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
       // 🔴 LA TIZADA SE GENERA EN ESTA COMPUTADORA (PLAN_NAVEGADOR, etapa 4): el servidor revisa
@@ -10040,13 +10079,13 @@ export default function App() {
     try {
       localStorage.setItem('tizada_wizard', JSON.stringify({
         pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
-        telaBaseMolde, telaPorPieza, cantidadOn, repoOn, cantidadCopia,
+        telaBaseMolde, telaPorPieza, telaPrincipalPed, cantidadOn, repoOn, cantidadCopia,
         // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
         // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
         moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera,
       }));
     } catch { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, fuentesReempl, cantidadOn, repoOn, cantidadCopia, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, telaPrincipalPed, fuentesReempl, cantidadOn, repoOn, cantidadCopia, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
@@ -10069,7 +10108,16 @@ export default function App() {
       });
       limpio[k] = mm;
     });
+    // la PRINCIPAL de baja también se va: sus piezas quedan sin tela y el Arte lo pide (MAPA 587)
+    const _pri = {};
+    Object.entries(telaPrincipalPed || {}).forEach(([k, tid]) => {
+      if (tid != null && baja.has(String(tid))) {
+        quitadas++;
+        nombres.add(((telasReg.telas || []).find(t => String(t.id) === String(tid)) || {}).nombre || String(tid));
+      } else _pri[k] = tid;
+    });
     if (quitadas) {
+      setTelaPrincipalPed(_pri);
       setTelaPorPieza(limpio);
       showError(`${[...nombres].map(n => '«' + n + '»').join(', ')} ya no se puede usar (dada de baja o sin medida): `
         + `${quitadas} pieza${quitadas > 1 ? 's quedaron' : ' quedó'} sin tela. Elegí otra en Asignar telas.`);
@@ -10125,7 +10173,12 @@ export default function App() {
   useEffect(() => {
     if (!_puedeBajar || !productosCat.productos.length) return undefined;
     // un respiro: `fetchProductos` se llama en ráfagas (después de guardar, de subir…)
-    const t = setTimeout(() => { bajarTodosLosMoldes(rutaApi); }, 3000);
+    const t = setTimeout(() => {
+      bajarTodosLosMoldes(rutaApi);
+      // lo guardado en esta PC de moldes con diseño que ya no existen (terminó el pedido, «Nuevo pedido»)
+      // (pide la lista ÉL, después de mirar lo guardado: con la de la pantalla borraba moldes recién creados, MAPA 590)
+      soltarMoldesEnPc(rutaApi).catch(() => {});
+    }, 3000);
     return () => clearTimeout(t);
   }, [_puedeBajar, productosCat.productos]);
   useEffect(() => {
@@ -11535,6 +11588,20 @@ export default function App() {
   const colorDeDiseno = (did) => DISENO_COLORS[Math.max(0, disenosPedido.findIndex(d => d.id === did)) % DISENO_COLORS.length];
   // Unión de moldes de las variables elegidas (el molde queda por detrás de la variable).
   const moldesUnion = [...new Set(Object.values(disenoMoldes).flat())];
+  // ── LOS PASOS DEL PEDIDO SEGÚN EL RECORRIDO (MAPA 588, corrección del usuario 2026-09-29) ─────
+  // «Cargar base» y «Molde con diseño» NO tienen los mismos pasos ni se llaman igual: el molde con
+  // diseño no pasa por «Moldes» (los moldes se cargan en el paso 1) y su paso 3 no es «Arte» (no hay
+  // arte que ver: se trabajan las PIEZAS — nombrarlas, telas, etiqueta, cuáles se imprimen) sino «Piezas». Las herramientas son las
+  // mismas; cambian los nombres y qué pasos existen. Es molde con diseño si se eligió ese camino o
+  // si TODOS los moldes del pedido lo son.
+  const _flujoB = vistaDiseno === 'con_diseno' || (moldesUnion.length > 0
+    && moldesUnion.every(mid => ((productosCat.productos || []).find(p => p.id === mid) || {}).origen === 'con_diseno'));
+  const pasosPedido = _flujoB
+    ? [{ k: 'diseno', label: 'Diseño' }, { k: 'arte', label: 'Piezas' },
+       { k: 'planilla', label: 'Planilla' }, { k: 'resultados', label: 'Tizadas' }]
+    : [{ k: 'diseno', label: 'Diseño' }, { k: 'moldes', label: 'Moldes' }, { k: 'arte', label: 'Arte' },
+       { k: 'planilla', label: 'Planilla' }, { k: 'resultados', label: 'Tizadas' }];
+  const _nomPaso = (k) => (pasosPedido.find(x => x.k === k) || {}).label || '';
   // ── LOS TALLES DEL PEDIDO (de TODOS los moldes, no de uno) ────────────────────────────────
   // 🔴 La planilla ofrecía `estado.talles`, que son los del molde ACTIVO del servidor: con dos
   // moldes cargados faltaba la mitad de los talles y no se podía cargar la prenda (reporte del
@@ -11886,6 +11953,8 @@ export default function App() {
   const _claveTelaDis = (did, pid) => `${did}|${pid}`;
   // Lectura con COMPATIBILIDAD: los pedidos a medio armar tienen la clave vieja (sólo el molde).
   const _telasDe = (did, pid) => telaPorPieza[_claveTelaDis(did, pid)] || telaPorPieza[pid] || {};
+  // la tela principal (la de todas las piezas que no son excepción), o null (MAPA 587)
+  const _principalDe = (did, pid) => telaPrincipalPed[_claveTelaDis(did, pid)] || null;
   // Piezas apagadas de (diseño, molde), en minúscula para comparar.
   const _fueraDe = (did, pid) => new Set((piezasFuera[_claveTelaDis(did, pid)] || []).map(g => String(g).toLowerCase()));
   const togglePiezaFuera = (did, pid, gen) => setPiezasFuera(prev => {
@@ -11945,9 +12014,10 @@ export default function App() {
   const telasFaltantesDet = (disenosPedido || []).flatMap(d =>
     (itemsArteDe(d.id) || []).map(it => {
       const map = _telasDe(d.id, it.moldeId);
+      const pri = _principalDe(d.id, it.moldeId);        // la que tienen todas las que no son excepción
       const fu = _fueraDe(d.id, it.moldeId);
       const pzs = piezasPorItem[_claveItemTela(d.id, it.moldeId, it.clave)] || [];
-      return { did: d.id, it, n: pzs.filter(g => !fu.has(String(g).toLowerCase()) && !map[g]).length };
+      return { did: d.id, it, n: pzs.filter(g => !fu.has(String(g).toLowerCase()) && !(map[g] || pri)).length };
     }).filter(x => x.n > 0));
   // PRENDAS CON TODAS SUS PIEZAS APAGADAS («Piezas a imprimir»): no saldría nada → no se avanza.
   const piezasTodasFuera = (disenosPedido || []).flatMap(d =>
@@ -12707,7 +12777,7 @@ export default function App() {
     setAsignDiseno(''); setNuevoDisenoNombre('');
     // 2) TELAS del pedido (esto era lo que quedaba pegado: `telaBaseMolde`/`telaPorPieza` no se
     //    limpiaban y además se guardan en el navegador, así que volvían hasta recargando)
-    setTelaBaseMolde({}); setTelaPorPieza({}); setPiezasPorItem({}); setPiezasFuera({});
+    setTelaBaseMolde({}); setTelaPorPieza({}); setTelaPrincipalPed({}); setPiezasPorItem({}); setPiezasFuera({});
     setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
     setTelaBuscarAsig(''); setTelaModoVer(false); setTelaAviso('');
     // 3) arte y visor
@@ -12978,6 +13048,89 @@ export default function App() {
       showMsg(`«${c.nombre}» aplicada: ${d.piezas_nombradas} nombre(s) y etiqueta en ${d.etiqueta_posiciones} pieza(s) ✓`);
     } catch (e) { setCfgEsperando(''); showError(e.message); } finally { if (!_esperando) setCfgBusy(false); }
   };
+  // Los moldes con diseño de ESTE pedido (los míos) y cuáles tienen una configuración que les calza.
+  const _moldesCfgLote = () => (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno' && !p.de_otro);
+  const _conCfgLote = () => _moldesCfgLote().filter(p => (cfgCandidatas[p.id] || []).length);
+  const abrirCfgLote = () => {
+    // de entrada, tildados TODOS los que tienen una, con la mejor receta de cada uno
+    const sel = {};
+    _conCfgLote().forEach(p => { sel[p.id] = cfgCandidatas[p.id][0].id; });
+    setCfgLoteSel(sel); setCfgLoteRes(null); setCfgLoteHaciendo(''); setCfgLoteOpen(true);
+  };
+  // Aplica a los elegidos, UNO TRAS OTRO (cada uno escribe su molde), y recién al final refresca la
+  // pantalla una sola vez. Desde acá va lo mismo que desde el aviso: nombres + etiqueta, más lo que
+  // se tilde abajo (grupos y variables, telas…).
+  const aplicarCfgLote = async () => {
+    const elegidos = Object.entries(cfgLoteSel).filter(([, id]) => id);
+    if (!elegidos.length) return;
+    setCfgBusy(true);
+    const res = [];
+    const hechos = [];
+    try {
+      for (let k = 0; k < elegidos.length; k++) {
+        const [pid, cid] = elegidos[k];
+        const p = (productosCat.productos || []).find(x => x.id === pid) || {};
+        const c = (cfgCandidatas[pid] || []).find(x => x.id === cid);
+        if (!c) continue;
+        setCfgLoteHaciendo(`Aplicando ${k + 1} de ${elegidos.length}: «${p.nombre || pid}»…`);
+        try {
+          const r = await fetch('/api/molde/config/aplicar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pid, id: cid, partes: cfgLotePartes })
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            res.push({ pid, nombre: p.nombre, ok: false,
+              texto: d.preparando ? 'todavía se está leyendo el molde: probá en un momento' : (d.error || 'no se pudo aplicar') });
+            continue;
+          }
+          hechos.push(pid);
+          cfgAplicada.current[pid] = cid;
+          res.push({ pid, nombre: p.nombre, ok: true,
+            texto: `«${c.nombre}»: ${d.piezas_nombradas} nombre(s) y etiqueta en ${d.etiqueta_posiciones} pieza(s)`
+              + ((d.piezas_perdidas || []).length ? ` · no tiene: ${d.piezas_perdidas.join(', ')}` : '') });
+        } catch (e) {
+          res.push({ pid, nombre: p.nombre, ok: false, texto: e.message });
+        }
+      }
+      // la pantalla, UNA vez: los nombres del visor salen de la detección (se tira la de esos moldes)
+      Object.keys(_talleDetCache.current).forEach(k => { if (hechos.some(pid => String(k).startsWith(pid + '|'))) delete _talleDetCache.current[k]; });
+      setCfgSugeridas(prev => { const n = { ...prev }; hechos.forEach(pid => { n[pid] = null; }); return n; });
+      setCfgCandidatas(prev => { const n = { ...prev }; hechos.forEach(pid => { n[pid] = []; }); return n; });
+      await fetchProductos();
+      if (etqPid && hechos.includes(etqPid)) await refrescarVisorMolde(etqPid);   // el que está a la vista
+      setMoldeReload(v => v + 1);
+    } finally {
+      setCfgLoteHaciendo(''); setCfgLoteRes(res); setCfgBusy(false);
+    }
+    const ok = res.filter(x => x.ok).length;
+    if (ok) showMsg(`Configuración aplicada en ${ok} molde${ok === 1 ? '' : 's'} ✓`);
+  };
+  // El aviso ÚNICO del pedido (va en el paso Diseño y en el panel del molde): «N moldes tienen una
+  // configuración guardada» → abre la ventana. Nada se aplica solo.
+  const avisoCfgLote = () => {
+    const n = _conCfgLote().length;
+    if (!n) return null;
+    // un chip en la cabecera: ícono con brillo, el número, y «Aplicar» (MAPA 587)
+    return (
+      <div data-tour="cfg-lote-aviso"
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 6px 5px 6px', borderRadius: 999, flexShrink: 0,
+          background: 'linear-gradient(135deg, rgba(16,185,129,0.18), rgba(0,216,245,0.08))', border: '1px solid rgba(16,185,129,0.55)',
+          boxShadow: '0 0 20px rgba(16,185,129,0.18)' }}>
+        <span style={{ width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          background: 'linear-gradient(135deg, #10b981, #0ea5a4)', color: '#04140e', boxShadow: '0 0 12px rgba(16,185,129,0.6)' }}>
+          <Icon name="check" style={{ width: 15, height: 15, strokeWidth: 3 }} />
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
+          <b style={{ color: '#6ee7b7' }}>{n}</b> molde{n === 1 ? '' : 's'} con configuración guardada
+        </span>
+        <button type="button" className="btn primary" data-tour="cfg-lote-abrir" disabled={cfgBusy}
+          style={{ padding: '6px 14px', fontSize: 12, borderRadius: 999 }} onClick={abrirCfgLote}>
+          Aplicar
+        </button>
+      </div>
+    );
+  };
   const cancelarEsperaCfg = () => {
     if (cfgEspera.current) cfgEspera.current.cancelado = true;
     setCfgEsperando(''); setCfgBusy(false);
@@ -13009,12 +13162,17 @@ export default function App() {
         const r = await fetch(`/api/molde/config/lista?pid=${encodeURIComponent(pid)}`);
         const d = await r.json();
         if (!vivo) return;
+        setCfgLeyendo(prev => ({ ...prev, [pid]: !!d.preparando }));
         if (d.preparando && intento < 40) { reloj = setTimeout(() => mirar(intento + 1), 6000); return; }
         const _sirve = c => c.id !== cfgAplicada.current[pid];
         const cand = (d.configs || []).filter(_sirve).find(c => c.estado === 'igual')
           || (d.configs || []).filter(_sirve).find(c => c.estado === 'mismo_molde');
         setCfgSugeridas(prev => ({ ...prev, [pid]: (cand && !cfgSugDescartada.current[pid]) ? cand : null }));
-      } catch { if (vivo) setCfgSugeridas(prev => ({ ...prev, [pid]: null })); }
+        // para aplicar a varios: TODAS las que le calzan (primero las del mismo archivo)
+        const calzan = (d.configs || []).filter(_sirve).filter(c => c.estado === 'igual' || c.estado === 'mismo_molde')
+          .sort((a, b) => (a.estado === 'igual' ? 0 : 1) - (b.estado === 'igual' ? 0 : 1));
+        setCfgCandidatas(prev => ({ ...prev, [pid]: calzan }));
+      } catch { if (vivo) { setCfgSugeridas(prev => ({ ...prev, [pid]: null })); setCfgCandidatas(prev => ({ ...prev, [pid]: [] })); } }
     };
     mirar(0);
     return () => { vivo = false; if (reloj) clearTimeout(reloj); };
@@ -13168,13 +13326,16 @@ export default function App() {
   // `base`: Configuración › Moldería, que sólo acepta moldes LIMPIOS: si el archivo trae máscaras de
   // recorte con el diseño adentro NO se sube y tira el aviso `MOLDE_CON_DISENO` (regla del usuario
   // 2026-09-28, MAPA 576). Ninguna vía deja un molde CON diseño para que lo prepare el servidor.
-  const _prepararDosTiempos = async (archivo, nombre, fase, { detectar = false, base = false } = {}) => {
+  // `enPc` (MAPA 585): el molde con diseño del PEDIDO no se guarda en el servidor — se prepara igual,
+  // pero sube una CÁSCARA y las páginas quedan en esta PC (ver `_adjuntarMoldeEnPc`, `_seguirPaginas`).
+  const _prepararDosTiempos = async (archivo, nombre, fase, { detectar = false, base = false, enPc = false } = {}) => {
     if (!(await navegadorPreparaMoldes())) return null;
     const clave = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     fase({ fase: 'preparando', nota: 'Abriendo el archivo en tu computadora…' });
     const prep = await prepararEnDosTiempos(archivo, {
       soloSiTraeDiseno: detectar,
       soloBase: base,
+      enPc,
       onA: (a) => fase({ fase: 'preparando', nota: a.texto }),
       onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
         pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
@@ -13187,12 +13348,33 @@ export default function App() {
     }
     setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid: null, fase: 'preparando', texto: 'Separando los talles…', pct: 0 } }));
     fase({ fase: 'subiendo', pct: 0, nota: '' });
-    return { zipA: prep.zipA, clave, prep, sha1: prep.sha1 };
+    return { zipA: prep.zipA, clave, prep, sha1: prep.sha1, enPc: !!prep.enPc, cascara: prep.cascara || null };
+  };
+  // EL MOLDE CON DISEÑO QUE VIVE EN ESTA PC (MAPA 585, decisión del usuario 2026-09-29): el archivo
+  // real se guarda ACÁ (memoria local del navegador: sobrevive a recargar y a cerrar la pestaña) y al
+  // servidor va la CÁSCARA (el mismo PDF sin dibujo, ~KB) con el SHA-1 del real. Nada pesado viaja.
+  const _adjuntarMoldeEnPc = async (fd, preparado, archivoReal, pid) => {
+    await guardarCache(claveDe.plantilla(pid, ['pc', preparado.sha1], 'original'), archivoReal);
+    fd.append('archivo', new Blob([preparado.cascara], { type: 'application/pdf' }), 'plantilla.ai');
+    fd.append('archivo_en_pc', '1');
+    fd.append('sha1_real', preparado.sha1);
+    fd.append('bytes_real', String((archivoReal && archivoReal.size) || 0));
   };
   // Cuando la fase A ya se guardó (hay `pid`): esperar la fase B y subirla.
   const _seguirPaginas = (clave, pid, prep) => {
     setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], pid } }) : p);
-    prep.paginas.then(async (zipB) => {
+    prep.paginas.then(async (res) => {
+      let zipB = res;
+      if (res && res.pdfs) {
+        // EN LA PC: las páginas se guardan ACÁ, con el sello que el servidor va a decir
+        // (`pc,<sha1>,<vuelta>`), ANTES de subir su índice — así nadie las pide antes de tiempo.
+        setPrepPaginas(p => ({ ...p, [clave]: { ...(p[clave] || {}), fase: 'subiendo', texto: 'Guardando las páginas en esta PC…', pct: 0 } }));
+        for (const [m, pdf] of res.pdfs) {
+          if (pdf) await guardarCache(claveDe.mesaPdf(pid, m, ['pc', res.sha1, res.rev]), pdf);
+        }
+        await soltarPaginasEnPc(pid, res.rev);      // las de una vuelta anterior (etiqueta rehecha) sobran
+        zipB = res.zip;
+      }
       setPrepPaginas(p => ({ ...p, [clave]: { ...(p[clave] || {}), fase: 'subiendo', texto: 'Guardando las páginas…', pct: 0 } }));
       await subirPaginas(rutaApi, pid, zipB, (pct) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], pct } }) : p));
       setPrepPaginas(p => { const n = { ...p }; delete n[clave]; return n; });
@@ -13226,10 +13408,19 @@ export default function App() {
     setPrepPaginas(p => ({ ...p, [clave]: { nombre, pid, fase: 'preparando', texto: 'Bajando el archivo del molde…', pct: 0 } }));
     try {
       if (manual === null) manual = await manualEtiquetaDe(pid);
-      const r = await fetch(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`);
-      if (!r.ok) throw new Error('No se pudo bajar el archivo del molde');
-      const archivo = new File([await r.blob()], 'plantilla.ai');
-      const prep = await prepararEnDosTiempos(archivo, { manual,
+      // EN LA PC (MAPA 585): el archivo real está guardado en ESTA computadora, no en el servidor
+      const _shaPc = ((productosCat.productos || []).find(x => x.id === pid) || {}).en_pc_sha1;
+      let archivo;
+      if (_shaPc) {
+        const b = await leerCache(claveDe.plantilla(pid, ['pc', _shaPc], 'original'));
+        if (!b) throw new Error('Este molde con diseño se cargó en otra computadora (o se borraron los datos del navegador): volvé a cargar el archivo.');
+        archivo = new File([b], 'plantilla.ai');
+      } else {
+        const r = await fetch(`/api/productos/${encodeURIComponent(pid)}/descargar_plantilla`);
+        if (!r.ok) throw new Error('No se pudo bajar el archivo del molde');
+        archivo = new File([await r.blob()], 'plantilla.ai');
+      }
+      const prep = await prepararEnDosTiempos(archivo, { manual, enPc: !!_shaPc,
         onA: (a) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: a.texto } }) : p),
         onB: (b) => setPrepPaginas(p => p[clave] ? ({ ...p, [clave]: { ...p[clave], texto: b.texto,
           pct: b.total ? Math.round(100 * b.hecho / b.total) : p[clave].pct } }) : p),
@@ -13257,7 +13448,7 @@ export default function App() {
       const reloj = setInterval(() => setSubirBFase(x => x ? { ...x, seg: Math.round((Date.now() - t0) / 1000) } : x), 1000);
       try {
         // Se prepara ANTES de crear el molde: si esta computadora no puede, no queda uno vacío.
-        preparado = await _prepararDosTiempos(f, nombre, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));
+        preparado = await _prepararDosTiempos(f, nombre, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })), { enPc: true });
         const paquete = preparado && preparado.zipA;
         const r = await fetch('/api/productos/crear', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -13273,7 +13464,8 @@ export default function App() {
         // viaja ya preparado; el servidor sólo lo guarda. Si esta computadora no puede, se avisa y
         // NO se manda a que lo haga el servidor («quien no tenga la potencia no podrá enviar»).
         const fd = new FormData();
-        await adjuntarArchivo(fd, (preparado && preparado.archivo) || f, preparado && preparado.sha1, rutaApi);   // un DXF viaja ya convertido; nada viaja dos veces
+        if (preparado && preparado.enPc && preparado.cascara) await _adjuntarMoldeEnPc(fd, preparado, f, d.id);   // el molde queda en esta PC (MAPA 585)
+        else await adjuntarArchivo(fd, (preparado && preparado.archivo) || f, preparado && preparado.sha1, rutaApi);   // un DXF viaja ya convertido; nada viaja dos veces
         fd.append('pid', d.id);
         // el servidor no tiene que adivinar el camino (12 s menos); un DXF va por el camino A
         fd.append('con_diseno', preparado && preparado.caminoA ? '0' : '1');
@@ -13346,25 +13538,32 @@ export default function App() {
     productos: (prev.productos || []).map(p => ids.includes(p.id)
       ? { ...p, mapeo_columnas: { ...(p.mapeo_columnas || {}), talle: colId, talle_elegido: true } } : p),
   }));
-  // UN molde, un toque, desde su propia tarjeta.
-  const ponerColumnaTalle = async (pid, colId) => {
-    _marcarColumnaTalle([pid], colId);
+  // Marca + guarda + recarga, sin que una recarga vieja lo desmarque (ver `_talleLocal`, MAPA 589):
+  // mientras se guarda, lo marcado manda; guardado, manda la PRIMERA lista pedida después; si el
+  // guardado falla, se suelta y la recarga muestra lo que de verdad quedó.
+  const _ponerTalleEn = async (ids, colId) => {
+    const marcas = ids.map(id => { const m = { col: colId, hasta: Infinity }; _talleLocal.current[id] = m; return [id, m]; });
+    _marcarColumnaTalle(ids, colId);
+    let ok = false;
     try {
-      const rs = await _guardarColumnaTalle([pid], colId);
+      const rs = await _guardarColumnaTalle(ids, colId);
       if (rs.some(r => !r.ok)) throw new Error('No se pudo guardar de qué columna toma el talle');
+      ok = true;
     } catch (err) { showError(err.message); }
+    // sólo si nadie lo volvió a tocar mientras tanto (otro toque dejó SU marca)
+    marcas.forEach(([id, m]) => {
+      if (_talleLocal.current[id] !== m) return;
+      if (ok) m.hasta = _prodSeq.current.pedido + 1; else delete _talleLocal.current[id];
+    });
     fetchProductos();
   };
+  // UN molde, un toque, desde su propia tarjeta.
+  const ponerColumnaTalle = (pid, colId) => _ponerTalleEn([pid], colId);
   // …y el atajo en lote, para poner varios de una (los que están tildados).
   const ponerColumnaTalleB = async (colId) => {
     const ids = [...moldesBSel];
     if (!ids.length) return;
-    _marcarColumnaTalle(ids, colId);
-    try {
-      const rs = await _guardarColumnaTalle(ids, colId);
-      if (rs.some(r => !r.ok)) throw new Error('No se pudo guardar de qué columna toma el talle');
-    } catch (err) { showError(err.message); }
-    fetchProductos();
+    await _ponerTalleEn(ids, colId);
   };
   // Del espacio de carga al de nombrar: los moldes entran al pedido con su diseño y se sigue en
   // el paso de siempre, que es donde vive el visor.
@@ -13487,7 +13686,7 @@ export default function App() {
     let pid = null;
     let preparado = null;
     try {
-      preparado = await _prepararDosTiempos(subirMoldeFile, nombre, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })));   // ver `subirMoldesConDiseno`
+      preparado = await _prepararDosTiempos(subirMoldeFile, nombre, (x) => setSubirBFase(y => ({ ...(y || {}), ...x })), { enPc: true });   // ver `subirMoldesConDiseno`
       const paquete = preparado && preparado.zipA;
       const r = await fetch('/api/productos/crear', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -13498,7 +13697,8 @@ export default function App() {
       pid = d.id;
       setMoldesEfimeros(m => ({ ...m, [pid]: { nombre, creado: Date.now(), subiendo: true } }));   // ver `subirMoldesConDiseno`
       const fd = new FormData();
-      fd.append('archivo', (preparado && preparado.archivo) || subirMoldeFile);   // un DXF viaja ya convertido
+      if (preparado && preparado.enPc && preparado.cascara) await _adjuntarMoldeEnPc(fd, preparado, subirMoldeFile, pid);   // el molde queda en esta PC (MAPA 585)
+      else await adjuntarArchivo(fd, (preparado && preparado.archivo) || subirMoldeFile, preparado && preparado.sha1, rutaApi);   // un DXF viaja ya convertido; si el servidor ya lo tiene, no viaja
       fd.append('pid', pid);
       // el servidor no tiene que adivinar el camino (12 s menos); un DXF va por el camino A
       fd.append('con_diseno', preparado && preparado.caminoA ? '0' : '1');
@@ -13796,7 +13996,7 @@ export default function App() {
     const nom = s.prod?.nombre || 'el molde';
     const que = `${(c.label || c.id)} ${o}`.toLowerCase();
     if (s.noDistingue) return `El molde «${nom}» no distingue ${(c.label || c.id).toLowerCase()}: sus piezas se usan igual con cualquier opción.`;
-    if (s.cuenta(o) === 0 && s.cuentaTotal(o) > 0) return `«${que}» está apagada en «Piezas a imprimir» (paso Arte).`;
+    if (s.cuenta(o) === 0 && s.cuentaTotal(o) > 0) return `«${que}» está apagada en «Piezas a imprimir» (paso ${_nomPaso('arte')}).`;
     if (s.cuenta(o) === 0) return `El molde «${nom}» no contiene ${que}.`;
     return null;
   };
@@ -14223,7 +14423,8 @@ export default function App() {
     // `sesionLista`: sin sesión la API contesta 401 y este fetch salía al montar (con el paso
     // 'planilla' restaurado del wizard) → 401 rojo en la consola apenas abría el programa.
     if (pedidoPaso !== 'planilla' || !sesionLista) return;
-    const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
+    const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo])
+      .filter(id => id && (id !== 'prod_default' || (productosCat.productos || []).some(p => p.id === id)));   // el activo de arranque no es un molde (MAPA 591)
     if (!ids.length) { setFuenteChars(null); return; }
     let cancelado = false;
     (async () => {
@@ -15129,6 +15330,91 @@ export default function App() {
           })()}
         </Modal>
 
+        {/* APLICAR CONFIGURACIONES GUARDADAS A VARIOS MOLDES (MAPA 586) */}
+        <Modal open={cfgLoteOpen} onClose={() => { if (!cfgLoteHaciendo) setCfgLoteOpen(false); }}
+          titulo="Aplicar configuraciones guardadas"
+          subtitulo="Elegí a qué moldes del pedido aplicarles la configuración que ya guardaste" maxWidth={680}>
+          {(() => {
+            const moldes = _moldesCfgLote();
+            const conCfg = moldes.filter(p => (cfgCandidatas[p.id] || []).length);
+            const nSel = Object.values(cfgLoteSel).filter(Boolean).length;
+            return (
+              <div data-tour="cfg-lote-lista" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                    {conCfg.length} de {moldes.length} molde(s) tienen una configuración que les calza.
+                  </span>
+                  <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} disabled={!!cfgLoteHaciendo}
+                    onClick={() => { const s = {}; conCfg.forEach(p => { s[p.id] = cfgLoteSel[p.id] || cfgCandidatas[p.id][0].id; }); setCfgLoteSel(s); }}>Todos</button>
+                  <button type="button" className="btn ghost" style={{ padding: '5px 10px', fontSize: 11.5 }} disabled={!!cfgLoteHaciendo}
+                    onClick={() => setCfgLoteSel({})}>Ninguno</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {moldes.map(p => {
+                    const cands = cfgCandidatas[p.id] || [];
+                    const leyendo = !!cfgLeyendo[p.id];
+                    const on = !!cfgLoteSel[p.id];
+                    const r = (cfgLoteRes || []).find(x => x.pid === p.id);
+                    return (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12,
+                        opacity: cands.length ? 1 : 0.55,
+                        border: '1px solid ' + (on ? 'rgba(16,185,129,0.5)' : 'var(--border-light)'),
+                        background: on ? 'rgba(16,185,129,0.07)' : 'rgba(255,255,255,0.02)' }}>
+                        <input type="checkbox" checked={on} disabled={!cands.length || !!cfgLoteHaciendo} style={{ width: 16, height: 16 }}
+                          onChange={(e) => setCfgLoteSel(prev => ({ ...prev, [p.id]: e.target.checked ? (prev[p.id] || cands[0].id) : null }))} />
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</span>
+                          {r ? (
+                            <span style={{ fontSize: 11.5, color: r.ok ? 'var(--success)' : 'var(--error)' }}>{r.ok ? '✓ ' : '✗ '}{r.texto}</span>
+                          ) : leyendo ? (
+                            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Leyendo el molde… (se ofrece apenas termine)</span>
+                          ) : !cands.length ? (
+                            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>No tiene ninguna configuración guardada que le calce</span>
+                          ) : cands.length === 1 ? (
+                            <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                              «{cands[0].nombre}» · {cands[0].estado === 'igual' ? 'mismo archivo' : 'mismo molde, otro diseño'} · {cands[0].piezas} nombre(s), etiqueta en {cands[0].etiqueta_posiciones}
+                            </span>
+                          ) : (
+                            <select value={cfgLoteSel[p.id] || cands[0].id} disabled={!!cfgLoteHaciendo}
+                              onChange={(e) => setCfgLoteSel(prev => ({ ...prev, [p.id]: e.target.value }))}
+                              style={{ fontSize: 12, padding: '4px 6px', borderRadius: 7, maxWidth: 420 }}>
+                              {cands.map(c => (
+                                <option key={c.id} value={c.id}>
+                                  «{c.nombre}» · {c.estado === 'igual' ? 'mismo archivo' : 'mismo molde'} · {c.piezas} nombre(s)
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Van siempre los <b>nombres</b> y la <b>etiqueta</b>. Además:</span>
+                  {CFG_PARTES.map(([k, t]) => (
+                    <label key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={cfgLotePartes.includes(k)} disabled={!!cfgLoteHaciendo}
+                        onChange={(e) => setCfgLotePartes(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+                {cfgLoteHaciendo && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{cfgLoteHaciendo}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                  <button type="button" className="btn ghost" disabled={!!cfgLoteHaciendo} onClick={() => setCfgLoteOpen(false)}>
+                    {cfgLoteRes ? 'Cerrar' : 'Cancelar'}
+                  </button>
+                  <button type="button" className="btn primary" data-tour="cfg-lote-aplicar" disabled={!nSel || !!cfgLoteHaciendo || cfgBusy}
+                    onClick={aplicarCfgLote}>
+                    Aplicar a {nSel} molde{nSel === 1 ? '' : 's'}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </Modal>
+
           {fuenteModal && (
         <Modal open={fuenteModal} onClose={() => setFuenteModal(false)} titulo="Fuentes" maxWidth={560}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
@@ -15402,30 +15688,85 @@ export default function App() {
             reciben nada y quedan marcadas como faltantes, que es lo que corresponde. */}
         <Modal open={!!telaCopiar} onClose={() => setTelaCopiar(null)} titulo="Copiar estas telas a…" maxWidth={560}>
           {telaCopiar && (() => {
-            const origen = _telasDe(telaCopiar.did, telaCopiar.mid);
+            // LO QUE TIENE ESTE MOLDE, pieza por pieza: la excepción o la principal (MAPA 587)
+            const _exc = _telasDe(telaCopiar.did, telaCopiar.mid);
+            const _pri = _principalDe(telaCopiar.did, telaCopiar.mid);
+            const _pzs = [...new Set([...(telaCopiar.piezas || []), ...Object.keys(_exc)])];
+            const origen = {};
+            _pzs.forEach(g => { const t = _exc[g] || _pri; if (t) origen[g] = t; });
             const nOrigen = Object.keys(origen).length;
+            // las telas que usa este molde (para «todo el molde en una tela»)
+            const telasOrigen = [...new Set(Object.values(origen).map(String))];
+            const modo = telaCopiar.modo || 'pieza';
+            const telaTodo = telaCopiar.tela && telasOrigen.includes(String(telaCopiar.tela)) ? telaCopiar.tela : telasOrigen[0];
             const destinos = tareasArte.filter(t => !(t.did === telaCopiar.did && t.mid === telaCopiar.mid));
             const todos = destinos.length > 0 && destinos.every(t => telaCopiar.destinos.has(t.did + '|' + t.mid));
             const marcar = (k) => setTelaCopiar(c => { const n = new Set(c.destinos); if (n.has(k)) n.delete(k); else n.add(k); return { ...c, destinos: n }; });
             const aplicar = () => {
               const elegidos = destinos.filter(t => telaCopiar.destinos.has(t.did + '|' + t.mid));
               if (!elegidos.length) return;
-              setTelaPorPieza(m => {
-                const n = { ...m };
-                elegidos.forEach(t => {
-                  const k = _claveTelaDis(t.did, t.mid);
-                  n[k] = { ...(n[k] || {}), ...origen };
+              if (modo === 'todo') {
+                // TODO EL MOLDE EN UNA TELA: esa tela pasa a ser la principal y no quedan excepciones
+                if (!telaTodo) return;
+                setTelaPrincipalPed(p => { const n = { ...p }; elegidos.forEach(t => { n[_claveTelaDis(t.did, t.mid)] = telaTodo; }); return n; });
+                setTelaPorPieza(m => { const n = { ...m }; elegidos.forEach(t => { n[_claveTelaDis(t.did, t.mid)] = {}; }); return n; });
+              } else {
+                // POR PIEZA (la de siempre): cada pieza que allá se llama igual toma la tela de acá
+                setTelaPorPieza(m => {
+                  const n = { ...m };
+                  elegidos.forEach(t => {
+                    const k = _claveTelaDis(t.did, t.mid);
+                    n[k] = { ...(n[k] || {}), ...origen };
+                  });
+                  return n;
                 });
-                return n;
-              });
+              }
               setTelaCopiar(null);
               showMsg(`Telas copiadas a ${elegidos.length} ${elegidos.length === 1 ? 'molde' : 'moldes'} ✓`);
             };
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                  Se copia la asignación de <b>«{_nomMolde(telaCopiar.mid)}»</b> en <b>«{_nomDiseno(telaCopiar.did)}»</b> ({nOrigen} pieza{nOrigen === 1 ? '' : 's'} con tela) a los moldes que marques. <b>Pisa</b> lo que esos moldes tuvieran asignado en esas piezas.
+                {/* LAS DOS FORMAS (MAPA 587, pedido del usuario 2026-09-29) */}
+                <div data-tour="telas-copiar-modo" data-opciones="1" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[['pieza', 'Por pieza', 'Cada pieza que allá se llama igual toma la tela de acá (la rápida).'],
+                    ['todo', 'Todo el molde', 'Una de las telas de acá va a TODAS las piezas del otro molde, sin importar cuáles son.']].map(([k, t, d]) => {
+                    const on = modo === k;
+                    return (
+                      <button key={k} type="button" data-elegida={on ? '1' : '0'} onClick={() => setTelaCopiar(c => ({ ...c, modo: k }))}
+                        style={{ textAlign: 'left', padding: '10px 12px', borderRadius: 12, cursor: 'pointer',
+                          border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                          background: on ? 'rgba(0,243,255,0.08)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 3 }}>{t}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.4 }}>{d}</div>
+                      </button>
+                    );
+                  })}
                 </div>
+                {modo === 'todo' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>¿Qué tela va a todo el molde?</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {telasOrigen.map(tid => {
+                        const on = String(tid) === String(telaTodo);
+                        const tobj = (telasReg.telas || []).find(x => String(x.id) === String(tid));
+                        return (
+                          <button key={tid} type="button" onClick={() => setTelaCopiar(c => ({ ...c, tela: tid }))}
+                            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                              border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                              background: on ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.03)', color: '#fff' }}>
+                            <span style={{ width: 14, height: 14, borderRadius: 4, background: colorDeTela(tid) }} />
+                            {(tobj && tobj.nombre) || 'Tela'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Reemplaza TODO lo que esos moldes tuvieran asignado.</span>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                    Se copia la asignación de <b>«{_nomMolde(telaCopiar.mid)}»</b> en <b>«{_nomDiseno(telaCopiar.did)}»</b> ({nOrigen} pieza{nOrigen === 1 ? '' : 's'} con tela) a los moldes que marques. <b>Pisa</b> lo que esos moldes tuvieran asignado en esas piezas; las que allá se llamen distinto no reciben nada.
+                  </div>
+                )}
                 {destinos.length === 0 ? (
                   <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Este pedido tiene un solo molde: no hay a dónde copiar.</div>
                 ) : (<>
@@ -15437,7 +15778,7 @@ export default function App() {
                     {destinos.map(t => {
                       const k = t.did + '|' + t.mid;
                       const on = telaCopiar.destinos.has(k);
-                      const yaTiene = Object.keys(_telasDe(t.did, t.mid)).length;
+                      const yaTiene = Object.keys(_telasDe(t.did, t.mid)).length + (_principalDe(t.did, t.mid) ? 1 : 0);
                       return (
                         <div key={k} onClick={() => marcar(k)}
                           style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 11px', borderRadius: 9, cursor: 'pointer',
@@ -15467,7 +15808,7 @@ export default function App() {
         {/* QUÉ FALTA EN ESTE PASO — el detalle de la barrita de abajo (pedido del usuario
             2026-08-21: «al presionar debe abrir un modal mostrándole más a detalle lo que le falta
             dentro de ese paso»). Sale de `pasoItems`, la misma lista que pinta la barrita. */}
-        <Modal open={progresoOpen} onClose={() => setProgresoOpen(false)} titulo={`Paso ${({ diseno: 1, moldes: 2, arte: 3, planilla: 4, resultados: 5 })[pedidoPaso] || ''} · ${({ diseno: 'Diseño', moldes: 'Moldes', arte: 'Arte', planilla: 'Planilla', resultados: 'Tizadas' })[pedidoPaso] || ''} — qué falta`} maxWidth={560}>
+        <Modal open={progresoOpen} onClose={() => setProgresoOpen(false)} titulo={`Paso ${(pasosPedido.findIndex(x => x.k === pedidoPaso) + 1) || ''} · ${_nomPaso(pedidoPaso)} — qué falta`} maxWidth={560}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {(() => {
               const hechos = pasoItems.filter(i => i.hecho).length;
@@ -15514,16 +15855,16 @@ export default function App() {
           <div className="panel animate-fade pedido-unido" style={['diseno', 'moldes', 'arte', 'planilla'].includes(pedidoPaso) ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } : {}}>
             {/* Título + pasos en UNA fila */}
             {(() => {
-              const pasos = [
-                { k: 'diseno', label: 'Diseño' }, { k: 'moldes', label: 'Moldes' },
-                { k: 'arte', label: 'Arte' },
-                { k: 'planilla', label: 'Planilla' }, { k: 'resultados', label: 'Tizadas' },
-              ];
+              // En la pantalla «¿Cómo vas a armar este trabajo?» todavía no se sabe el recorrido, y los
+              // pasos dependen de él (MAPA 588): ahí no va la cabecera, sólo la pregunta y las dos
+              // tarjetas (pedido del usuario 2026-09-29).
+              if (pedidoPaso === 'diseno' && !mapeandoOperario && !vistaDiseno) return null;
+              const pasos = pasosPedido;          // según el recorrido (ver `pasosPedido`)
               const idx = pasos.findIndex(p => p.k === pedidoPaso);
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 24, margin: '0 0 14px', flexWrap: 'wrap', rowGap: 10, flexShrink: 0 }}>
                   <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0, whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>Panel de Pedidos</h2>
-                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 8, flex: 1 }}>
                   {pasos.map((p, i) => {
                     const done = i < idx, cur = i === idx;
                     return (
@@ -15539,6 +15880,10 @@ export default function App() {
                     );
                   })}
                   </div>
+                  {/* CONFIGURACIONES GUARDADAS: en la cabecera del pedido, en el paso donde se trabaja el
+                      molde — «Piezas» (el «Arte» del molde con diseño). Corrección del usuario
+                      2026-09-29 (MAPA 588). */}
+                  {pedidoPaso === 'arte' && avisoCfgLote()}
                 </div>
               );
             })()}
@@ -16098,7 +16443,7 @@ export default function App() {
                         <span style={{ fontSize: 17, lineHeight: 1.1 }}>⚠</span>
                         <div style={{ fontSize: 12, lineHeight: 1.45 }}>
                           <b style={{ color: 'var(--warning, #e0a020)' }}>Los caracteres marcados no están en la tipografía del diseño.</b>
-                          <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>Se estampan con la tipografía predeterminada, al mismo tamaño: la prenda sale igual y el nombre completo. Si no los querés así, sacalos del texto o cambiá la tipografía en el paso Arte.</div>
+                          <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>Se estampan con la tipografía predeterminada, al mismo tamaño: la prenda sale igual y el nombre completo. Si no los querés así, sacalos del texto o cambiá la tipografía en el paso {_nomPaso('arte')}.</div>
                           <div style={{ marginTop: 5, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                             <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Con la predeterminada:</span>
                             {faltantesFuente.map((ch, k) => (
@@ -16545,7 +16890,7 @@ export default function App() {
                         : _ningunaCompleta ? `Ninguna fila está completa: falta ${_faltaEnTodas}. Cargá al menos una.` : '';
                   return (
                     <BarraPaso
-                      volver={<BtnVolver texto="Arte" ancla="planilla-volver-arte" onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }} />}
+                      volver={<BtnVolver texto={_nomPaso('arte')} ancla="planilla-volver-arte" onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }} />}
                       acciones={<button className="btn ghost" style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={reiniciarPedido} title="Empezar de 0">↺ Nuevo pedido</button>}
                       centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
@@ -16712,7 +17057,7 @@ export default function App() {
                                     return (
                                       <button key={p.idx} type="button" disabled={off} onClick={() => toca(nm)}
                                         onMouseEnter={() => setRepoHover(`${pid}|${nm}`)} onMouseLeave={() => setRepoHover(null)}
-                                        title={off ? 'Apagada en «Piezas a imprimir» (paso Arte)' : ''}
+                                        title={off ? `Apagada en «Piezas a imprimir» (paso ${_nomPaso('arte')})` : ''}
                                         style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700,
                                           cursor: off ? 'not-allowed' : 'pointer', opacity: off ? 0.4 : 1, textDecoration: off ? 'line-through' : 'none',
                                           border: '1px solid ' + (on ? 'rgba(236,72,153,0.7)' : 'var(--border-light)'),
@@ -16829,29 +17174,53 @@ export default function App() {
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
                 const _fueraAct = _fueraDe(disenoActivo, _id);      // piezas a imprimir (MAPA 577)
                 const _todasGen = piezasArteGen.filter(g => !_fueraAct.has(String(g).toLowerCase()));
-                const _telaDeGen = (gen) => _telasDe(disenoActivo, _id)[gen] || null;                        // null si no se asignó
                 // El modo tela del visor no puede depender de la lista YA filtrada por la selección:
                 // si la intersección queda vacía se apagaba solo (y con ella el pintado y el panel).
                 const _telaActiva = telaModoVer && (telasReg.telas || []).length > 0;
+                // PRINCIPAL + EXCEPCIONES (MAPA 587): `_telasMap` son las excepciones; las demás piezas
+                // llevan la principal. Un pedido armado antes (todas las piezas con su tela y sin
+                // principal guardada) se lee igual: ahí la principal es la más usada.
                 const _telasMap = _telasDe(disenoActivo, _id);
-                const _sinTela = _todasGen.filter(g => !_telasMap[g]);                                     // piezas AÚN sin tela
+                const _priExp = _principalDe(disenoActivo, _id);
+                const _telaDeGen = (gen) => _telasMap[gen] || _priExp || null;                  // null si no tiene
+                const _sinTela = _todasGen.filter(g => !_telaDeGen(g));                            // piezas AÚN sin tela
+                const _legado = !_priExp && _todasGen.length > 0 && _todasGen.every(g => _telasMap[g]);
+                // la más usada (sólo para los pedidos armados antes de guardar la principal)
+                const _masUsada = () => {
+                  const c = {};
+                  _todasGen.forEach(g => { const t = _telaDeGen(g); if (t) c[t] = (c[t] || 0) + 1; });
+                  return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+                };
                 // TOPE DE TELAS A LA VEZ (configurado por variable): cuántas telas DISTINTAS puede
                 // combinar esta prenda. No limita cuántas hay disponibles: limita cuántas se usan.
                 const _topeVar = parseInt((_tcfg.max_var || {})[varClaveActual], 10) || 0;
-                // Asigna `telaId` a las piezas seleccionadas, o a TODAS si no hay selección (no hay base).
-                const aplicarTela = (telaId) => {
+                // `destino` 'todas' = cambiar la PRINCIPAL; 'seleccion' = excepción para esas piezas.
+                // 🔴 (MAPA 587, pedido del usuario 2026-09-29): cambiar la principal cambia SÓLO las
+                // piezas que la seguían; las que tienen otra tela (excepciones) se quedan como están.
+                const aplicarTela = (telaId, destino = (telaSelPiezas.length ? 'seleccion' : 'todas'), piezasSel = telaSelPiezas) => {
                   if (!telaId) return;
-                  const objetivo = telaSelPiezas.length ? telaSelPiezas : _todasGen;
-                  if (!objetivo.length) {
+                  if (!_todasGen.length) {
                     // Pasa cuando la prenda todavía se está armando (o falta el arte): sin piezas a
                     // la vista no hay a qué asignarle la tela. Antes no hacía NADA y parecía roto.
                     avisarEnVisor('Todavía no se ven las piezas de esta prenda — cargá el arte o esperá a que termine de armarse');
                     return;
                   }
-                  const mm = { ..._telasDe(disenoActivo, _id) };
-                  objetivo.forEach(g => { mm[g] = telaId; });
+                  const mm = { ..._telasMap };
+                  let pri = _priExp;
+                  if (destino === 'todas') {
+                    // la principal de antes (la guardada, o la más usada en un pedido viejo): sus
+                    // piezas pasan a la nueva; las de la tela nueva dejan de ser excepción
+                    const vieja = _priExp || (_legado ? _masUsada() : null);
+                    Object.keys(mm).forEach(g => {
+                      if ((vieja && String(mm[g]) === String(vieja)) || String(mm[g]) === String(telaId)) delete mm[g];
+                    });
+                    pri = telaId;
+                  } else {
+                    if (!piezasSel.length) return;
+                    piezasSel.forEach(g => { if (pri && String(telaId) === String(pri)) delete mm[g]; else mm[g] = telaId; });
+                  }
                   // Cuántas telas distintas quedarían en la prenda con este cambio.
-                  const distintas = new Set(_todasGen.map(g => mm[g]).filter(Boolean));
+                  const distintas = new Set(_todasGen.map(g => mm[g] || pri).filter(Boolean));
                   if (_topeVar > 0 && distintas.size > _topeVar) {
                     avisarEnVisor(`Esta prenda puede combinar hasta ${_topeVar} tela${_topeVar > 1 ? 's' : ''} a la vez`);
                     return;
@@ -16859,6 +17228,7 @@ export default function App() {
                   // La escritura va SIEMPRE a la clave nueva (diseño + molde): tocar la tela en un
                   // diseño no puede cambiársela a otro que use el mismo molde.
                   setTelaPorPieza(m => ({ ...m, [_claveTelaDis(disenoActivo, _id)]: mm }));
+                  if (pri !== _priExp) setTelaPrincipalPed(p => ({ ...p, [_claveTelaDis(disenoActivo, _id)]: pri }));
                   setTelaSelPiezas([]); setTelaElegida(null);
                   // VOLVER A «Telas asignadas»: si el panel se queda en la pantalla de asignar
                   // (que está en blanco), no se ve NADA de lo que se acaba de hacer y parece que
@@ -16872,16 +17242,23 @@ export default function App() {
                 //   1) esta prenda va en TAL tela  →  2) salvo estas piezas, que van en tal otra.
                 // La tela PRINCIPAL es la más usada en las piezas; el resto son EXCEPCIONES.
                 const _conteoTela = {};
-                _todasGen.forEach(g => { const t = _telasMap[g]; if (t) _conteoTela[t] = (_conteoTela[t] || 0) + 1; });
-                const _telaPrincipal = Object.entries(_conteoTela).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+                _todasGen.forEach(g => { const t = _telaDeGen(g); if (t) _conteoTela[t] = (_conteoTela[t] || 0) + 1; });
+                // la PRINCIPAL: la guardada; en un pedido armado antes de 587, la más usada
+                const _telaPrincipal = _priExp || (_legado ? (Object.entries(_conteoTela).sort((a, b) => b[1] - a[1])[0]?.[0] || null) : null);
                 const _telaObj = (id) => (telasReg.telas || []).find(t => String(t.id) === String(id));
                 const _excepciones = Object.entries(_conteoTela)
                   .filter(([id]) => String(id) !== String(_telaPrincipal))
-                  .map(([id, n]) => ({ id, n, piezas: _todasGen.filter(g => String(_telasMap[g]) === String(id)) }));
-                // lo que el modal necesita para funcionar (ver `telaPickerRef`)
+                  .map(([id, n]) => ({ id, n, piezas: _todasGen.filter(g => String(_telaDeGen(g)) === String(id)) }));
+                // lo que el modal necesita para funcionar (ver `telaPickerRef`): la ventana dice si es
+                // la principal o una excepción, y con QUÉ piezas (no se lee el estado, que puede ser viejo)
                 telaPickerRef.current = {
                   lista: _telasMol,
-                  aplicar: (id) => { if (telaPicker?.destino === 'seleccion') { setTelaSelPiezas(telaPicker.piezas); } aplicarTela(id); setTelaAsignMode(false); },
+                  aplicar: (id) => {
+                    const _sel = telaPicker?.destino === 'seleccion';
+                    if (_sel) setTelaSelPiezas(telaPicker.piezas);
+                    aplicarTela(id, _sel ? 'seleccion' : 'todas', _sel ? telaPicker.piezas : []);
+                    setTelaAsignMode(false);
+                  },
                 };
                 const _abrirPicker = (destino) => { setTelaPickerQ(''); setTelaPicker({ destino, piezas: destino === 'seleccion' ? [...telaSelPiezas] : [] }); };
                 // ── CAMINO B: PANEL DE NOMBRAR LAS PIEZAS ─────────────────────────────────────
@@ -16982,34 +17359,6 @@ export default function App() {
                     {/* ESTE MOLDE YA LO CONFIGURASTE. El aviso va ACÁ —donde se está trabajando el
                         molde— y no sólo en Moldería (pedido del usuario 2026-09-09). Desde acá se
                         aplica de una, o se abre la lista para elegir otra. Nunca se aplica sola. */}
-                    {cfgSugeridas[_id] && (
-                      <div data-tour="pieza-b-sugerida"
-                        style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 11px', borderRadius: 12,
-                          background: 'rgba(16,185,129,0.10)', border: '1px solid rgba(16,185,129,0.40)' }}>
-                        <span style={{ fontSize: 12, lineHeight: 1.45 }}>
-                          <b style={{ color: 'var(--success)' }}>Ya configuraste este molde</b> como
-                          {' '}<b>«{cfgSugeridas[_id].nombre}»</b>
-                          {cfgSugeridas[_id].estado === 'mismo_molde' ? ' (con otro diseño adentro)' : ''}:
-                          {' '}{cfgSugeridas[_id].piezas} nombre(s) y etiqueta en {cfgSugeridas[_id].etiqueta_posiciones} pieza(s).
-                        </span>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <button type="button" className="btn primary" data-tour="pieza-b-sugerida-aplicar"
-                            disabled={cfgBusy} style={{ flex: 1, minWidth: 96, padding: '7px 10px', fontSize: 12, borderRadius: 9 }}
-                            onClick={() => { setCfgPid(_id); aplicarCfgMolde(cfgSugeridas[_id], _id, 0, []); }}>   {/* desde el aviso: sólo nombres + etiqueta; lo demás se tilda en la ventana (regla 2026-09-21) */}
-                            Aplicar
-                          </button>
-                          <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
-                            title="Ver todas las configuraciones guardadas y elegir otra"
-                            onClick={() => { setCfgPid(_id); setCfgModalOpen(true); setCfgInforme(null); cargarCfgGuardadas(_id, true); }}>
-                            Elegir otra
-                          </button>
-                          <button type="button" className="btn ghost" style={{ padding: '7px 10px', fontSize: 11.5, borderRadius: 9 }}
-                            onClick={() => { cfgSugDescartada.current[_id] = true; setCfgSugeridas(prev => ({ ...prev, [_id]: null })); }}>
-                            Ahora no
-                          </button>
-                        </div>
-                      </div>
-                    )}
                     {/* SÓLO LOS BOTONES (pedido del usuario 2026-09-09: «quitá todo el texto que
                         está en el espacio de ver y corregir nombre y ubicar etiqueta; ahí estará
                         sólo el botón, más nada»). Lo que hay que hacer se lee en el COLOR: en
@@ -17157,7 +17506,15 @@ export default function App() {
                                 <span style={{ display: 'block', fontSize: 10.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.piezas.join(' · ')}</span>
                               </span>
                               <button title="Volver estas piezas a la tela principal"
-                                onClick={() => { if (!_telaPrincipal) return; const mm = { ..._telasMap }; e.piezas.forEach(g => { mm[g] = _telaPrincipal; }); setTelaPorPieza(m => ({ ...m, [_claveTelaDis(disenoActivo, _id)]: mm })); }}
+                                onClick={() => {
+                                  // dejan de ser excepción: vuelven a SEGUIR a la principal (MAPA 587)
+                                  if (!_telaPrincipal) return;
+                                  const mm = { ..._telasMap };
+                                  e.piezas.forEach(g => { delete mm[g]; });
+                                  Object.keys(mm).forEach(g => { if (String(mm[g]) === String(_telaPrincipal)) delete mm[g]; });
+                                  setTelaPorPieza(m => ({ ...m, [_claveTelaDis(disenoActivo, _id)]: mm }));
+                                  if (!_priExp) setTelaPrincipalPed(p => ({ ...p, [_claveTelaDis(disenoActivo, _id)]: _telaPrincipal }));
+                                }}
                                 style={{ border: 'none', background: 'transparent', color: '#f87171', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
                             </div>
                           ))}
@@ -17187,8 +17544,8 @@ export default function App() {
                     </div>
 
                     {/* 3) NO REPETIR EL TRABAJO: copiar a los otros moldes del pedido */}
-                    {Object.keys(_telasMap).length > 0 && tareasArte.length > 1 && (
-                      <button type="button" onClick={() => setTelaCopiar({ did: disenoActivo, mid: _id, destinos: new Set() })}
+                    {(Object.keys(_telasMap).length > 0 || !!_priExp) && tareasArte.length > 1 && (
+                      <button type="button" onClick={() => setTelaCopiar({ did: disenoActivo, mid: _id, destinos: new Set(), modo: 'pieza', tela: _telaPrincipal || null, piezas: [..._todasGen] })}
                         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '11px', borderRadius: 12, cursor: 'pointer',
                                  border: '1px solid var(--border-light-hover)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-primary)', fontSize: 12.5, fontWeight: 700 }}>
                         ⧉ Usar estas telas en otros moldes
@@ -17428,7 +17785,11 @@ export default function App() {
                           se cargan para un pedido y no quedan guardados.
                         </span>
                         <button className="btn primary" style={{ padding: '8px 16px', fontSize: 12.5 }}
-                          onClick={() => setPedidoPaso('moldes')}>Elegir el molde</button>
+                          onClick={() => {
+                            // el molde con diseño no tiene paso «Moldes» (MAPA 588): se vuelve a cargarlo
+                            if (_flujoB) { setVistaDiseno('con_diseno'); setPedidoPaso('diseno'); }
+                            else setPedidoPaso('moldes');
+                          }}>{_flujoB ? 'Cargar el molde' : 'Elegir el molde'}</button>
                       </div>
                     ) : (
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>Cargando el molde…</div>

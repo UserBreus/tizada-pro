@@ -94,9 +94,34 @@ const TAREAS = {
     const pdf = M.armarPdfMesa(mupdf, doc, mesa, contenidos)
     return { valor: pdf, transfer: [pdf.buffer] }
   },
-  async paquete({ archivo, desplegado, motor, fase, sha1 }) {
+  /**
+   * LA CÁSCARA del molde abierto (MAPA 585): el mismo PDF SIN dibujo — mismas mesas, medidas y capas
+   * de talle (lo que el servidor pregunta), sin contenido. Es lo que va al servidor en lugar del
+   * molde con diseño, que queda en la PC. Recibe los bytes del archivo (transferidos, sin copia) y
+   * arma sobre un documento aparte: el molde abierto de este hilo sigue intacto.
+   */
+  async cascara({ bytes }) {
     await cargar()
-    const r = M.armarPaqueteMolde(archivo, desplegado, { motor, fase, sha1 })
+    const d = mupdf.Document.openDocument(bytes, 'application/pdf')
+    try {
+      const pdf = d.asPDF()
+      const vacio = pdf.addStream('', {})
+      for (let i = 0; i < pdf.countPages(); i++) {
+        const po = pdf.findPage(i)
+        po.put('Contents', vacio)
+        for (const k of ['Resources', 'PieceInfo', 'Metadata', 'Thumb', 'Annots', 'LastModified']) { try { po.delete(k) } catch { /* no estaba */ } }
+      }
+      const cat = pdf.getTrailer().get('Root')
+      for (const k of ['Metadata', 'PieceInfo', 'AcroForm', 'Names', 'Outlines']) { try { cat.delete(k) } catch { /* no estaba */ } }
+      const buf = pdf.saveToBuffer('garbage=4,compress=yes').asUint8Array().slice()
+      return { valor: buf, transfer: [buf.buffer] }
+    } finally {
+      try { d.destroy() } catch { /* nada */ }
+    }
+  },
+  async paquete({ archivo, desplegado, motor, fase, sha1, enPc = false, rev = null, bytesPdf = null }) {
+    await cargar()
+    const r = M.armarPaqueteMolde(archivo, desplegado, { motor, fase, sha1, enPc, rev, bytesPdf })
     const { zip } = r
     sha1 = r.sha1
     return { valor: { zip, sha1 }, transfer: [zip.buffer] }

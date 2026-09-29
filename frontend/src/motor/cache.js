@@ -142,7 +142,12 @@ function _bajar(clave, url) {
   const soltar = () => { if (_enVuelo.get(clave) === p) _enVuelo.delete(clave) }
   const p = (async () => {
     const r = await fetch(url)
-    if (!r.ok) throw new Error(`no se pudo bajar ${url} (${r.status})`)
+    if (!r.ok) {
+      // el servidor dice POR QUÉ (p. ej. un molde con diseño que vive en otra PC, MAPA 585)
+      let motivo = ''
+      try { motivo = ((await r.json()) || {}).error || '' } catch { /* no era JSON */ }
+      throw new Error(motivo || `no se pudo bajar ${url} (${r.status})`)
+    }
     const blob = await r.blob()
     bytesBajados(blob.size)
     guardarBlob(clave, blob).then(soltar, soltar)
@@ -167,6 +172,43 @@ export async function bajarAlCache(clave, url) {
   if (await tieneCache(clave)) return false
   await _bajar(clave, url)
   return true
+}
+
+// ── EL MOLDE CON DISEÑO QUE VIVE EN LA PC (MAPA 585) ────────────────────────────────────────────
+// El archivo real y sus páginas se guardan acá con un sello `pc,<sha1>[,<vuelta>]` (el servidor tiene
+// sólo la cáscara). Sobreviven a recargar la página o cerrar la pestaña; se sueltan cuando el molde
+// ya no existe (terminó el pedido, «Nuevo pedido», se venció).
+const _pidEnPc = (k) => {
+  const m = /^plantilla-[a-z]+\|([^|]+)\|pc,/.exec(k) || /^([^|]+)\|m\d+\.(?:pdf|json)\|pc,/.exec(k)
+  return m ? m[1] : null
+}
+/** Borra lo guardado de moldes con diseño en la PC que el servidor ya no tiene.
+ *  🔴 EL ORDEN ES LA GARANTÍA (MAPA 590): primero se miran las claves y DESPUÉS se pide la lista al
+ *  servidor. Antes recibía la lista que tenía la pantalla, que podía ser de ANTES de crear el molde:
+ *  se subía un molde, sus páginas se guardaban acá y 3 s después esta limpieza —con la lista vieja—
+ *  las borraba por «muertas» (pasó: 12:16:57 lista sin el molde, 12:16:58 creado, 12:17:00 borrado;
+ *  la tizada falló con «se cargó en otra computadora»). Una clave leída acá ya estaba guardada, así
+ *  que su molde ya estaba creado: la lista pedida después lo trae. Si la lista no llega, no se borra
+ *  nada (es limpieza, puede esperar). */
+export async function soltarMoldesEnPc(rutaApi = (u) => u) {
+  const claves = (await clavesCache()).filter((k) => _pidEnPc(k))
+  if (!claves.length) return 0
+  let vivos
+  try {
+    const r = await fetch(rutaApi('/api/productos'))
+    if (!r.ok) return 0
+    const d = await r.json()
+    if (!Array.isArray(d.productos)) return 0
+    vivos = new Set(d.productos.map((p) => p.id))
+  } catch { return 0 }
+  const muertas = claves.filter((k) => !vivos.has(_pidEnPc(k)))
+  await borrarCache(muertas)
+  return muertas.length
+}
+/** Las páginas de una vuelta ANTERIOR de ese molde (al rehacerlas, las viejas sobran). */
+export async function soltarPaginasEnPc(pid, revVigente) {
+  const viejas = (await clavesCache()).filter((k) => k.startsWith(`${pid}|m`) && k.includes('|pc,') && !k.endsWith(`,${revVigente}`))
+  await borrarCache(viejas)
 }
 
 /** Texto → base64 (para `data:image/svg+xml;base64,`), sin reventar con textos largos. */

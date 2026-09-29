@@ -1079,6 +1079,27 @@ def parece_molde_con_diseno(doc, mesas_a_mirar=2):
 # rápido la primera vez que se usa. Se borra con el molde (vive en su carpeta de `entrada/`) y
 # cuando se re-sube uno del camino A encima.
 DESPLEGADO = "desplegado"
+
+# ── EL MOLDE CON DISEÑO QUE VIVE EN LA PC (2026-09-29, MAPA 585) ────────────────────────────────
+# Decisión del usuario: el molde con el diseño adentro que se carga para UN pedido no se guarda en
+# el servidor — sirve para la tizada de ese momento, en la PC que lo cargó. El servidor recibe una
+# CÁSCARA (el mismo PDF sin dibujo: mismas mesas, medidas y capas de talle, ~KB) como
+# `plantilla.ai`, así todo lo que pregunta «¿hay molde? ¿cuántas mesas? ¿qué talles?» sigue igual;
+# y las páginas por talle quedan en la PC (el `m{n}.json` dice `paginas_en_pc`, sin `m{n}.pdf`).
+# Esta marca, al lado del archivo, dice que es así y guarda el SHA-1 del archivo REAL (el que
+# identifica al molde para la configuración guardada).
+EN_PC = "molde.en_pc.json"
+
+
+def en_pc(path_molde):
+    """`{"sha1", "bytes", "desde"}` si el molde con diseño vive en la PC que lo cargó; si no, None."""
+    try:
+        import json
+        with open(os.path.join(os.path.dirname(os.path.abspath(path_molde)), EN_PC), encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) and d.get("sha1") else None
+    except Exception:
+        return None
 _CONT_CACHE = {}          # {(carpeta, mesa): índice ya leído}  — no releer el JSON en cada pieza
 # Versión de la REGLA DE CONTORNOS. Un `m{mesa}.json` con otra versión tiene contornos viejos:
 # se rehacen (5 s por mesa, en paralelo) y sus páginas por talle se conservan (no dependen de
@@ -1132,7 +1153,7 @@ def _leer_desplegado(path_molde, mesa):
     # 🔴 Una entrada SIN páginas no vale como caché: se guardó mientras el hilo de fondo las
     # armaba y, como el sello del archivo no cambia, el servidor seguía diciendo «preparando»
     # para siempre (2026-09-04: el chequeo de tipografía re-preguntaba cada 7 s sin fin).
-    if hit is not None and hit["sello"] == sello and hit.get("pdf") is not None:
+    if hit is not None and hit["sello"] == sello and (hit.get("pdf") is not None or hit.get("en_pc")):
         return hit
     fj = os.path.join(carpeta, f"m{mesa}.json")
     fp = os.path.join(carpeta, f"m{mesa}.pdf")
@@ -1156,8 +1177,12 @@ def _leer_desplegado(path_molde, mesa):
                 pass
     # `pdf` sólo si las páginas por talle YA están (el JSON lo dice): el alta escribe primero los
     # contornos y las páginas llegan después, en segundo plano — ver `desplegar_mesa`.
+    # PÁGINAS EN LA PC (MAPA 585): el JSON dice que las páginas existen pero viven en la
+    # computadora que cargó el molde; acá no hay PDF, y la mesa igual está lista.
+    _pc = bool(d.get("paginas") and d.get("paginas_en_pc"))
     hit = {"sello": sello, "orden": list(d.get("orden") or []), "contornos": conts,
-           "pdf": fp if (d.get("paginas") and os.path.exists(fp)) else None}
+           "pdf": fp if (d.get("paginas") and not _pc and os.path.exists(fp)) else None,
+           "en_pc": _pc, "rev_pc": d.get("rev_pc"), "bytes_pdf": d.get("bytes_pdf")}
     _CONT_CACHE[clave] = hit
     return hit
 
@@ -2543,11 +2568,16 @@ def paginas_vigentes(path_molde, talles=None):
 def desplegar_molde(path_molde, talles, avisar=None, procesos=None, contornos=True, paginas=True):
     """Despliega TODAS las mesas y devuelve `{mesa: {talle: [contornos]}}`.
 
+    🔴 Con el molde EN LA PC (MAPA 585) el `plantilla.ai` del servidor es una cáscara sin dibujo:
+    desplegarla pisaría el desplegado bueno con páginas VACÍAS. No se hace nada.
+
     Con `procesos` > 1 va una mesa por proceso (ProcessPool: PyMuPDF/pikepdf no son thread-safe).
     Si los procesos no terminan, se reintenta en procesos nuevos y después FALLA con
     `ProcesoNoTermino` (nunca se arma en este proceso: ver `_repartir`). `avisar(hecho, total,
     texto)` recibe el avance mesa a mesa.
     `contornos` / `paginas`: las dos etapas de `desplegar_mesa` (el servidor las separa)."""
+    if en_pc(path_molde):
+        return {}
     _d = fitz.open(path_molde)
     n = _d.page_count
     _d.close()
@@ -2776,7 +2806,7 @@ def desplegado_listo(path_molde):
         return False
     for mesa in range(1, n + 1):
         d = _leer_desplegado(path_molde, mesa)
-        if d is None or d["pdf"] is None:
+        if d is None or (d["pdf"] is None and not d.get("en_pc")):
             return False
     return True
 
@@ -2805,7 +2835,7 @@ def personalizacion_con_diseno(path_molde, armar=True, procesos=None):
     pers = {}
     for mesa in range(1, n + 1):
         d = _leer_desplegado(path_molde, mesa)
-        if d is None or d["pdf"] is None:
+        if d is None or (d["pdf"] is None and not d.get("en_pc")):   # con las páginas en la PC, el JSON alcanza
             continue
         try:
             with open(os.path.join(_carpeta_desplegado(path_molde), f"m{mesa}.json"), encoding="utf-8") as fh:
@@ -2858,6 +2888,8 @@ def personalizacion_guardar(path_molde, pers):
 def ruta_desplegada(path_molde, mesa, talle, armar=True):
     """`(ruta_pdf, índice_de_página)` de la mesa con sólo ese talle, o None si el talle no está.
     Si la mesa no está desplegada (molde viejo, archivo cambiado) y `armar`, la despliega ahora."""
+    if en_pc(path_molde):
+        return None           # las páginas viven en la PC que cargó el molde: acá no hay (MAPA 585)
     d = _leer_desplegado(path_molde, mesa)
     if (d is None or d["pdf"] is None) and armar:
         # Por PROCESOS y con el candado del molde (ver `desplegar_molde`): armar acá, en el hilo

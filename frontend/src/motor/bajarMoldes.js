@@ -145,7 +145,10 @@ async function _pasada(rutaApi) {
   // de la lista (los de otro usuario que haya usado esta misma PC no se tocan).
   try {
     const quiero = new Set(moldes.flatMap((x) => x.arch.map((a) => a.clave)))
-    const viejas = (await clavesCache()).filter((k) => !quiero.has(k) && moldes.some((x) => esDelMolde(k, x.m.id)))
+    // 🔴 nunca lo de un molde con diseño que vive en ESTA PC (`|pc,` en la clave): no se baja del
+    // servidor, así que no hay «versión nueva» que lo reemplace — borrarlo es perderlo. Lo suelta
+    // sólo `soltarMoldesEnPc`/`soltarPaginasEnPc` (MAPA 590).
+    const viejas = (await clavesCache()).filter((k) => !k.includes('|pc,') && !quiero.has(k) && moldes.some((x) => esDelMolde(k, x.m.id)))
     await borrarCache(viejas)
   } catch { /* nada: es limpieza */ }
 

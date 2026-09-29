@@ -61,25 +61,25 @@ ok(APP.includes('const pasoItems = (() => {'), 'la barra se calcula en cada dibu
 ok(!APP.includes('const pasoItems = React.useMemo') && !APP.includes('const pasoItems = useMemo'),
    '…y no vuelve a ser un memo (con una lista de dependencias que se queda corta)');
 
-console.log('\n5) 🔴 El aviso de «ya configuraste este molde» sale DONDE se trabaja el molde');
-// Pedido del usuario 2026-09-09: el aviso vivía sólo en Moldería y el panel del pedido apenas
-// decía «hay una» en un botón. Tiene que salir acá, y desde acá elegirse.
-ok(APP.includes('data-tour="pieza-b-sugerida"'), 'el cartel está en el panel del visor del pedido');
-ok(APP.includes('data-tour="pieza-b-sugerida-aplicar"'), 'y se aplica desde ahí');
-ok(/pieza-b-sugerida[\s\S]{0,1800}Elegir otra/.test(APP), 'y se puede elegir OTRA de las guardadas');
-// 🔴 POR MOLDE: el panel del pedido y Moldería miran moldes DISTINTOS. Con una sola sugerencia,
-// la del pedido mostraba la del molde abierto en Configuración (o ninguna).
-ok(APP.includes('const [cfgSugeridas, setCfgSugeridas]'), 'la sugerencia se guarda POR MOLDE');
-ok(APP.includes('cfgSugeridas[_id]') && APP.includes('cfgSugeridas[pidCfg]'),
-   'cada pantalla mira la de SU molde');
-ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id/.test(APP),
-   'y aplicar recibe el molde por argumento (no por estado, que React no tiene actualizado)');
-// CAMBIÓ (regla del usuario 2026-09-21): desde el aviso entran SÓLO los nombres y la etiqueta
-// (`[]`); grupos, variables, telas y planilla van únicamente si se tildan en la ventana. Antes
-// entraba lo que traía la receta (`null`) sin que nadie lo eligiera en ese momento.
-ok(/aplicarCfgMolde\(cfgSugeridas\[_id\], _id, 0, \[\]\)/.test(APP)
-   && /aplicarCfgMolde\(cfgSugeridas\[pidCfg\], pidCfg, 0, \[\]\)/.test(APP),
-   'y desde el aviso entran SÓLO los nombres y la etiqueta (lo demás se tilda en la ventana)');
+console.log('\n5) 🔴 Las configuraciones guardadas: UN aviso para todo el pedido y una ventana para aplicar a varios');
+// Pedido del usuario 2026-09-09: el aviso tenía que salir donde se trabaja el molde, no sólo en
+// Moldería. CAMBIÓ 2026-09-29 (MAPA 586, pedido del usuario): «en vez de 1 por molde, que detecte
+// todos los moldes y diga a cuáles se les puede aplicar; en un espacio propio elegís aplicar a uno,
+// a algunos o a todos, sin navegar entre moldes». El aviso es UNO (en el paso Diseño y en el panel
+// del molde) y abre la ventana del lote.
+ok(APP.includes('data-tour="cfg-lote-aviso"') && APP.includes('data-tour="cfg-lote-abrir"'), 'hay un aviso único que abre la ventana');
+// 2026-09-29 (MAPA 587): el aviso va en la CABECERA del pedido, y sólo en el paso de los moldes
+// (pedido del usuario: «esto debe aparecer en el paso del molde»).
+ok(/Panel de Pedidos[\s\S]{0,4000}pedidoPaso === 'arte' && avisoCfgLote\(\)/.test(APP), 'y sale en la cabecera, en el paso Arte / Piezas');
+ok(APP.includes('data-tour="cfg-lote-lista"') && APP.includes('data-tour="cfg-lote-aplicar"'), 'la ventana lista los moldes y aplica a los elegidos');
+ok(/cfgLoteSel\[p\.id\] \|\| cands\[0\]\.id/.test(APP) && /<select value=\{cfgLoteSel\[p\.id\]/.test(APP), 'con varias guardadas que calzan, se elige cuál (OTRA de las guardadas)');
+// 🔴 POR MOLDE: cada molde se busca y se aplica con SU id — nunca el «activo» del estado.
+ok(APP.includes('const [cfgSugeridas, setCfgSugeridas]') && APP.includes('const [cfgCandidatas, setCfgCandidatas]'), 'la sugerencia se guarda POR MOLDE');
+ok(APP.includes('cfgSugeridas[pidCfg]'), 'Moldería sigue mirando la de SU molde');
+ok(/body: JSON\.stringify\(\{ pid, id: cid, partes: cfgLotePartes \}\)/.test(APP), 'el lote manda cada molde por su id');
+// (regla del usuario 2026-09-21): desde el aviso entran SÓLO los nombres y la etiqueta; lo demás va si se tilda.
+ok(APP.includes('const [cfgLotePartes, setCfgLotePartes] = useState([])'), 'en el lote, por defecto sólo nombres y etiqueta (lo demás se tilda)');
+ok(/aplicarCfgMolde\(cfgSugeridas\[pidCfg\], pidCfg, 0, \[\]\)/.test(APP), 'y desde el aviso de Moldería también');
 
 console.log('\n6) Aplicada una vez, el cartel NO vuelve; y una receta se puede EDITAR');
 // 🔴 Aplicar recarga el molde (`moldeReload`) y eso vuelve a disparar la búsqueda: sin recordar

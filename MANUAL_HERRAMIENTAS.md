@@ -645,6 +645,12 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 
 ### 4.9c **Guardar / usar la configuración de un molde** (etiqueta + nombres, para reusar)
 
+- ✅ **Aplicar a varios de una (MAPA 586):** cuando cargás moldes con diseño en el pedido, un solo
+  aviso dice cuántos tienen una configuración guardada → **Aplicar…** abre una ventana con TODOS los
+  moldes del pedido: tildás a cuáles (uno, algunos o todos; si hay varias guardadas para uno, elegís
+  cuál) y se aplica de una vez, sin ir molde por molde. Van los nombres y la etiqueta; lo demás
+  (grupos y variables, telas…) sólo si lo tildás. Al final dice molde por molde cómo quedó.
+
 - **Dónde:** desde el PEDIDO, en el panel del visor (donde están los talles y las herramientas):
   botón **«Guardar configuración»** (`pieza-b-configuracion`), al lado de «Nombrar piezas» y
   «Ubicar etiqueta». También desde el molde abierto → ajuste **Moldería** → tarjeta
@@ -763,6 +769,11 @@ para cualquier diseño.
 
 ### 5.2.b Subir un **molde que YA TRAE EL DISEÑO ADENTRO** (camino B)
 
+- 🏠 **Queda en tu PC (MAPA 585):** el archivo y sus páginas por talle se guardan en la memoria del
+  navegador de ESTA computadora (sobreviven a recargar y a cerrar la pestaña) y al servidor va sólo lo
+  liviano (una «cáscara» sin dibujo + la lista de piezas). La tizada de ese pedido se arma en esta PC.
+  Desde otra computadora hay que volver a cargar el archivo (la configuración guardada se reaplica).
+
 La otra forma de cargar: archivos con el diseño estampado en cada pieza. No llevan arte aparte
 ni mapeo.
 
@@ -869,6 +880,16 @@ propio); el ✓ verde marca las que ya tienen arte.
   **todos** los artes del pedido, no sólo en el que estás mirando.
 - **LEY: el arte se ve igual que la tizada.** Lo que muestra el visor **es** el render del motor
   cacheado — no se re-dibuja en JS (el re-dibujo quedó sólo como placeholder mientras carga).
+
+### 5.3.a **Telas de la prenda** — principal + excepciones (MAPA 587)
+
+- **La tela de esta prenda** es la PRINCIPAL: la llevan todas las piezas salvo las que le diste otra.
+  Cambiarla cambia SÓLO esas piezas; las que están en otra tela (excepciones) se quedan como están.
+- **+ Otra tela para algunas piezas**: tocás las piezas en el visor y elegís la tela → pasan a ser
+  excepción. La ✕ de una excepción la vuelve a la principal.
+- **⧉ Usar estas telas en otros moldes**, dos formas: **Por pieza** (cada pieza que allá se llama
+  igual toma la tela de acá) o **Todo el molde** (elegís una de las telas de este molde y va a todas
+  las piezas del otro).
 
 ### 5.3.b **Piezas a imprimir** — sacar piezas de la tizada
 
