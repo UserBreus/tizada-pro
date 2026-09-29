@@ -27,6 +27,20 @@ el changelog con los pendientes.
 - Al terminar una investigación, escribí también **lo que salió mal y por qué** (diagnósticos errados,
   trampas de herramientas). Vale tanto como lo que salió bien: evita repetir el error.
 
+## 1.b EL CEREBRO (`cerebro/`) — no perder ni romper lo que ya existe
+
+`cerebro/neuronas.json` = una NEURONA por cada parte del sistema que ya funciona: qué hace, sus
+ANCLAS (nombres que tienen que seguir en el código), sus REGLAS, sus CICATRICES (fallas que ya
+pasaron), sus contratos y sus CONEXIONES con otras partes. `cerebro/cerebro.py` la usa:
+
+- **Reflejo automático** (hook en `.claude/settings.json`): después de cada Edit/Write avisa qué
+  partes se tocaron, sus reglas y cicatrices, y si la edición hizo DESAPARECER un ancla (= se perdió
+  una función). Si aparece «⚠ DAÑO» y no fue a propósito: revertir.
+- **Antes de decir «listo»:** `py cerebro/cerebro.py diff` (partes tocadas + vecinas + contratos).
+- `py cerebro/cerebro.py revisar` = ¿están vivas todas? · `neurona <id>` = todo lo que sabe una.
+- **Mantenerlo en la misma tanda:** función nueva → neurona nueva; regla nueva → `reglas`; falla
+  arreglada → `cicatrices`; renombre a propósito → actualizar sus `anclas`.
+
 ## 2. REGLAS DURAS (no negociables)
 
 - **CUANDO SE PIDE ALGO, VA COMPLETO Y COHERENTE EN TODO EL SISTEMA.** No alcanza con el lugar
