@@ -5267,7 +5267,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                         "etiqueta": f"{nro:02d}", "rotacion": ROTA(pieza), "borde_cm": 0,
                         # COPIA (MAPA 581): de qué fila de la planilla es y cuántas copias lleva
                         "_fila": (pr.get("_fila") if isinstance(pr, dict) else None),
-                        "_copias": (pr.get("_copias", 1) if isinstance(pr, dict) else 1)})
+                        "_copias": (pr.get("_copias", 1) if isinstance(pr, dict) else 1),
+                        # TALLES POR MESA (MAPA 593): el grupo de talles de esta prenda (None = con el resto)
+                        "_grupo_mesa": (pr.get("_grupo_mesa") if isinstance(pr, dict) else None)})
             piezas_por_tela.setdefault(TELA(pieza), []).append(ent)
             hechas += 1
             if progreso:
@@ -5307,7 +5309,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
         if telas_cfg and tela in telas_cfg:           # ancho/alto propios de esta tela
             cfg_t.update(telas_cfg[tela])
         slug = (prefijo + "".join(c if c.isalnum() else "_" for c in tela))[:48] or "Tela"
-        coloc, area, _mesas = anidar_por_fila(piezas, cfg_t)   # COPIA: una mesa por fila (MAPA 581)
+        coloc, area, _mesas = anidar_por_fila(piezas, cfg_t)   # COPIA / TALLES POR MESA (MAPA 581, 593)
         _crono["acomodar en la tela"] += time.time() - _t_et; _t_et = time.time()
         path = os.path.join(salida, f"HOJA_{slug}.pdf")
         # 🔴 EL SELLO (2026-09-15): el dibujo de cada mesa entra a la hoja UNA sola vez y cada
@@ -5436,7 +5438,7 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                       "ancho_cm": round(float(cfg_t["ancho_cm"]), 1),  # ancho de la tela (la mesa mide ancho x consumo)
                       "aprovechamiento": aprov,
                       "previews": prevs,
-                      **({"mesas": _mesas} if _mesas else {})})   # COPIA: {fila, copias} por mesa
+                      **({"mesas": _mesas} if _mesas else {})})   # COPIA {fila, copias} / TALLES {grupo, talles} por mesa
     telas_spacing = {}
     for h in hojas:
         tela = h["tela"]

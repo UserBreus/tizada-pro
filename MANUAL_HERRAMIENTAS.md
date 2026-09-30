@@ -571,6 +571,16 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
   propia mesa** y la cantidad **no repite** la prenda — queda como **cuántas copias imprimir** de esa
   mesa: se ve en el resultado («Fila 3 · ×5 copias») y en el nombre del archivo que se descarga
   («… - Fila 3 - x5»). Sin Copia, lo de siempre. MAPA 581.
+- 🗂️ **Mesas** (talles por mesa, botón violeta de la barra de la planilla, al lado de «Repo»): elegir
+  **qué talles van en la misma mesa**. Abre la ventana «Talles por mesa»: arriba **«Sin mesa»** (los
+  talles sueltos, salen juntos), abajo las **mesas como tarjetas** y **«+ Nueva mesa»**. Se usa en
+  dos toques: **1. tocar uno o varios talles** (quedan marcados en violeta; «Marcar todos» ayuda) y
+  **2. tocar la mesa** adonde van (o «Nueva mesa»). También se pueden **arrastrar**. Tocar «Sin mesa»
+  con talles marcados los devuelve; la ✕ de una mesa la quita. Atajos **«Un talle por mesa»** y
+  **«Todos juntos»**. Se aplica con **«Listo»** (cerrar sin «Listo» no cambia nada). Cada mesa del
+  resultado muestra «Talles S · M» y el archivo baja como «… - Talles S-M». Opcional: sin usarlo,
+  todos juntos como siempre. Con **Copia** prendido no se usa. La tela sigue separando hojas y una
+  mesa larga se parte como siempre. MAPA 593.
 - **Dónde vive:** `_con_cantidad` (servidor) garantiza la columna en las dos puntas y
   `_traducir_prendas` es quien **repite** la prenda. Contrato: `verificar_cantidad.py`.
 

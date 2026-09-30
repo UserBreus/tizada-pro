@@ -295,6 +295,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
         items.push([tela, { w: r.w, h: r.h, base: { id: r.baseId }, estampado: r.estampado, pieza, talle: t,
                                  variante: pr.variante_clave || null, etiqueta: String(nro).padStart(2, '0'),
                                  _fila: Number.isInteger(pr._fila) ? pr._fila : null, _copias: pr._copias || 1,   // COPIA (MAPA 581)
+                                 _grupo_mesa: Number.isInteger(pr._grupo_mesa) ? pr._grupo_mesa : null,   // TALLES POR MESA (MAPA 593)
                                  rotacion: rot, borde_cm: 0, _molde: md.pid, _mesa: null }])
         totalPiezas++
         }
@@ -352,6 +353,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
           items.push([tela, { w: r.w, h: r.h, base: bases.get(bk), estampado: r.estampado, pieza, talle: t,
                                    variante: pr.variante_clave || null, etiqueta: String(nro).padStart(2, '0'),
                                  _fila: Number.isInteger(pr._fila) ? pr._fila : null, _copias: pr._copias || 1,   // COPIA (MAPA 581)
+                                 _grupo_mesa: Number.isInteger(pr._grupo_mesa) ? pr._grupo_mesa : null,   // TALLES POR MESA (MAPA 593)
                                    rotacion: rot, borde_cm: 0, _molde: md.pid, _mesa: mesa }])
           totalPiezas++
         }
@@ -414,7 +416,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       hojas.push({ tela, archivo, paginas: r.alturasCm.length, consumo_cm: pyRound(Number(r.consumoCm), 1),
                    alturas_cm: r.alturasCm, ancho_cm: pyRound(Number(cfg.ancho_cm), 1),
                    aprovechamiento: denom > 0 ? pyRound(100 * r.area / denom, 1) : 0.0, previews: [],
-                   ...(r.mesas ? { mesas: r.mesas } : {}),   // COPIA: {fila, copias} de cada mesa (MAPA 581)
+                   ...(r.mesas ? { mesas: r.mesas } : {}),   // COPIA {fila, copias} / TALLES POR MESA {grupo, talles} de cada mesa (MAPA 581, 593)
                    grupo: grupo.nombre, moldes: grupo.nombres })
       validaciones.push(...r.validaciones)
       _rip.push({ archivo, ok: !!(r.rip && r.rip.ok), fallas: (r.rip && r.rip.fallas) || [] })

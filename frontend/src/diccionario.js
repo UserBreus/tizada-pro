@@ -297,9 +297,9 @@ export const DICCIONARIO = {
     como: 'Tocá la columna de talle que le corresponde a este molde.',
   },
   'cargar-b-siguiente': {
-    nombre: 'Nombrar las piezas',
-    que: 'Pasa al visor para decir qué es cada pieza de los moldes que cargaste. Se habilita cuando todos tienen su diseño.',
-    como: 'Tocá para pasar a nombrar las piezas.',
+    nombre: 'A las piezas',
+    que: 'Pasa al paso «Piezas»: ahí decís qué es cada pieza de los moldes que cargaste, dónde va la etiqueta y la tela. Se habilita cuando todos tienen su diseño (y, con dos columnas de talle, de cuál toma cada uno).',
+    como: 'Tocá «A las piezas».',
   },
   'cargar-b-volver': {
     nombre: 'Volver',
@@ -1299,6 +1299,41 @@ export const DICCIONARIO = {
     nombre: 'Copia',
     que: 'Con la columna Cantidad a la vista: cada fila sale en su propia mesa y la cantidad NO repite la prenda, queda como cuántas copias imprimir de esa mesa (se ve en el resultado y en el nombre del archivo). Apagado, la cantidad repite la prenda y todo se acomoda junto.',
     como: 'Prendelo si cada fila es una mesa que se imprime varias veces.',
+  },
+  'planilla-talles-mesa': {
+    nombre: 'Talles por mesa',
+    que: 'Elegí qué talles van en la misma mesa: un talle por mesa o varios juntos (S y M en una, L y XL en otra). Los talles que no pongas en ninguna mesa van juntos. Sin usarlo, todos los talles se acomodan juntos, como siempre.',
+    como: 'Tocá «Mesas» y armá los grupos de talles.',
+  },
+  'talles-mesa-uno': {
+    nombre: 'Un talle por mesa',
+    que: 'Pone cada talle en su propia mesa, en el orden de los talles.',
+    como: 'Tocalo si cada talle va en una mesa aparte.',
+  },
+  'talles-mesa-juntos': {
+    nombre: 'Todos juntos',
+    que: 'Saca todos los talles de sus mesas: vuelven a acomodarse juntos, como siempre.',
+    como: 'Tocalo para volver a la forma de siempre.',
+  },
+  'talles-mesa-sin': {
+    nombre: 'Talles sin mesa',
+    que: 'Los talles que todavía no están en ninguna mesa: salen juntos, como siempre. Con talles marcados, tocarla los devuelve acá.',
+    como: 'Tocá los talles que querés agrupar para marcarlos.',
+  },
+  'talles-mesa-grupo': {
+    nombre: 'Mesa',
+    que: 'Una mesa con sus talles. Con talles marcados, tocarla los pone en esta mesa; también se pueden arrastrar. La ✕ la quita y sus talles vuelven a «Sin mesa».',
+    como: 'Tocá la mesa adonde van los talles marcados.',
+  },
+  'talles-mesa-nueva': {
+    nombre: 'Nueva mesa',
+    que: 'Crea una mesa nueva con los talles marcados (o con los que arrastres hasta acá).',
+    como: 'Marcá talles y tocá «Nueva mesa».',
+  },
+  'talles-mesa-listo': {
+    nombre: 'Listo',
+    que: 'Guarda cómo quedaron las mesas para este pedido. Cerrar sin «Listo» no cambia nada.',
+    como: 'Tocá «Listo» para aplicar los grupos.',
   },
   'planilla-repo': {
     nombre: 'Repo (reposición)',

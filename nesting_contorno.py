@@ -311,29 +311,48 @@ def anidar_por_fila(piezas, cfg):
     """COPIA (MAPA 581): con `cfg['por_fila']`, cada FILA de la planilla (`pieza['_fila']`) se
     acomoda SOLA y sale en su(s) propia(s) mesa(s), en el orden de las filas. Devuelve
     `(colocaciones, area, mesas)`; `mesas` = una entrada por mesa `{fila (1…), copias}` (la cantidad
-    de la fila como DATO, ya no multiplica prendas). Sin `por_fila`: `mesas` = None y lo de siempre.
+    de la fila como DATO, ya no multiplica prendas).
+    TALLES POR MESA (MAPA 593): con `cfg['por_talles_mesa']`, cada GRUPO de talles que eligió la
+    persona (`pieza['_grupo_mesa']` = 1, 2, …) se acomoda SOLO y sale en su(s) propia(s) mesa(s), en
+    el orden de los grupos; los talles que no están en ningún grupo van juntos al final, como siempre.
+    `mesas` = `{grupo (1… o None = el resto), talles: [...]}`. Copia manda sobre los grupos (cada
+    fila ya es su mesa). Sin ninguna de las dos: `mesas` = None y lo de siempre.
     Mismo algoritmo que `anidarPorFila` del navegador."""
-    if not (cfg or {}).get("por_fila"):
+    cfg = cfg or {}
+    por_fila = bool(cfg.get("por_fila"))
+    por_talles = (not por_fila) and bool(cfg.get("por_talles_mesa"))
+    if not por_fila and not por_talles:
         coloc, area = anidar_contorno(piezas, cfg)
         return coloc, area, None
+    _RESTO = 10 ** 9                      # los talles sin grupo: juntos y AL FINAL
     grupos = {}
     for p in piezas:
-        k = p.get("_fila")
-        k = k if isinstance(k, int) else -1
+        if por_fila:
+            k = p.get("_fila")
+            k = k if isinstance(k, int) else -1
+        else:
+            k = p.get("_grupo_mesa")
+            k = k if isinstance(k, int) and not isinstance(k, bool) and k >= 1 else _RESTO
         grupos.setdefault(k, []).append(p)
     colocaciones, mesas, area = [], [], 0.0
     for k in sorted(grupos):
         g = grupos[k]
         coloc, a = anidar_contorno(g, cfg)
+        if por_talles:
+            # los talles de la mesa, en el orden en que llegan las piezas (el de la planilla)
+            _tl = list(dict.fromkeys(str(x.get("talle")) for x in g if x.get("talle") not in (None, "")))
         for h in coloc:
             if not h:
                 continue
             colocaciones.append(h)
-            try:
-                _c = max(1, int(float(g[0].get("_copias") or 1)))
-            except (TypeError, ValueError):
-                _c = 1
-            mesas.append({"fila": (k + 1) if k >= 0 else None, "copias": _c})
+            if por_fila:
+                try:
+                    _c = max(1, int(float(g[0].get("_copias") or 1)))
+                except (TypeError, ValueError):
+                    _c = 1
+                mesas.append({"fila": (k + 1) if k >= 0 else None, "copias": _c})
+            else:
+                mesas.append({"grupo": k if k != _RESTO else None, "talles": list(_tl)})
         area += a
     return colocaciones, area, mesas
 

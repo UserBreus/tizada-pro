@@ -50,7 +50,8 @@ const ir = APP.slice(APP.indexOf('const irANombrarB'), APP.indexOf('const irANom
 ok(ir.includes("setPedidoPaso('arte')"), 'el botón lleva al paso Arte');
 ok(!ir.includes('abrirNombrarB('),
    'y NO abre solo la herramienta de nombrar (se entra con su botón)');
-ok(APP.includes('texto="Al arte"'), 'el botón dice a dónde lleva de verdad');
+// 2026-09-29: el paso se llama «Piezas» en el molde con diseño (MAPA 588) → el botón «A las piezas»
+ok(/texto=\{_nomPaso\('arte'\) === 'Piezas' \? 'A las piezas' : 'Al arte'\} ancla="cargar-b-siguiente"/.test(APP), 'el botón dice a dónde lleva de verdad (A las piezas)');
 
 console.log('\n4) 🔴 La barra NO puede quedar desactualizada');
 // Nombrabas todas las piezas y el paso seguía en rojo hasta cambiar de pantalla: la barra era un

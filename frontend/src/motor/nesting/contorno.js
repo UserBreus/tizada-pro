@@ -639,14 +639,23 @@ export function anidarContorno(piezas, cfg) {
  * COPIA (MAPA 581): con `cfg.por_fila`, cada FILA de la planilla (`pieza._fila`) se acomoda SOLA y
  * sale en su(s) propia(s) mesa(s); las mesas van en el orden de las filas. Devuelve lo mismo que
  * `anidarContorno` + `mesas`: una entrada por mesa, `{fila (1…), copias}` (la cantidad de la fila,
- * que ya no multiplica prendas: es un dato para el sistema que imprime). Sin `por_fila`, `mesas`
- * es null y todo es lo de siempre. Mismo algoritmo que `anidar_por_fila` de Python.
+ * que ya no multiplica prendas: es un dato para el sistema que imprime).
+ * TALLES POR MESA (MAPA 593): con `cfg.por_talles_mesa`, cada GRUPO de talles (`pieza._grupo_mesa`
+ * = 1, 2, …) se acomoda SOLO y sale en su(s) propia(s) mesa(s); los talles sin grupo van juntos al
+ * final. `mesas` = `{grupo (1… o null = el resto), talles}`. Copia manda sobre los grupos. Sin
+ * ninguna de las dos, `mesas` es null y todo es lo de siempre. Mismo algoritmo que
+ * `anidar_por_fila` de Python.
  */
 export function anidarPorFila(piezas, cfg) {
-  if (!cfg || !cfg.por_fila) return { ...anidarContorno(piezas, cfg), mesas: null }
+  const porFila = !!(cfg && cfg.por_fila)
+  const porTalles = !porFila && !!(cfg && cfg.por_talles_mesa)
+  if (!porFila && !porTalles) return { ...anidarContorno(piezas, cfg), mesas: null }
+  const RESTO = 1e9                                   // los talles sin grupo: juntos y AL FINAL
   const grupos = new Map()
   for (const p of piezas) {
-    const k = Number.isInteger(p._fila) ? p._fila : -1
+    let k
+    if (porFila) k = Number.isInteger(p._fila) ? p._fila : -1
+    else k = Number.isInteger(p._grupo_mesa) && p._grupo_mesa >= 1 ? p._grupo_mesa : RESTO
     if (!grupos.has(k)) grupos.set(k, [])
     grupos.get(k).push(p)
   }
@@ -655,10 +664,13 @@ export function anidarPorFila(piezas, cfg) {
   for (const k of [...grupos.keys()].sort((a, b) => a - b)) {
     const g = grupos.get(k)
     const r = anidarContorno(g, cfg)
+    // los talles de la mesa, en el orden en que llegan las piezas (el de la planilla)
+    const tl = porTalles ? [...new Set(g.filter((x) => x.talle != null && x.talle !== '').map((x) => String(x.talle)))] : null
     for (const h of r.colocaciones) {
       if (!h.length) continue
       colocaciones.push(h)
-      mesas.push({ fila: k >= 0 ? k + 1 : null, copias: Math.max(1, Math.trunc(Number(g[0]._copias) || 1)) })
+      if (porFila) mesas.push({ fila: k >= 0 ? k + 1 : null, copias: Math.max(1, Math.trunc(Number(g[0]._copias) || 1)) })
+      else mesas.push({ grupo: k !== RESTO ? k : null, talles: [...tl] })
     }
     area += r.area
     consumo += r.consumo || 0

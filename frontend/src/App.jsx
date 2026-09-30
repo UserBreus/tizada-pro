@@ -348,6 +348,15 @@ function Icon({ name, className = "", style }) {
         <path d="M6.5 8h6M6.5 11h6M6.5 14h3.5" />
       </svg>
     ),
+    // TALLES POR MESA: dos mesas, cada una con su etiqueta de talle.
+    tallesMesa: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.5" y="5" width="8.5" height="14" rx="1.6" />
+        <rect x="13" y="5" width="8.5" height="14" rx="1.6" />
+        <path d="M5 9.5h3.5M15.5 9.5h3.5" />
+        <path d="M5 13h2M15.5 13h2M15.5 16h2.5" />
+      </svg>
+    ),
     // COLUMNA CANTIDAD: la prenda repetida (copias apiladas con el «×»).
     cantidadCopias: (
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -3385,9 +3394,12 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
 // El nombre por defecto de una mesa del resultado (el mismo en la vista y en «Descargar todo»).
 // COPIA (MAPA 581): lleva la fila y las copias — el nombre del archivo es lo que ve el sistema que
 // imprime («Mesa 3 - Principal - Fila 3 - x5»).
+// TALLES POR MESA (MAPA 593): lleva los talles de esa mesa («Mesa 2 - Principal - Talles S-M»).
 function nombreMesaDef(gi, tela, mf) {
-  return 'Mesa ' + (gi + 1) + (tela ? ' - ' + tela : '')
-    + (mf ? (mf.fila ? ' - Fila ' + mf.fila : '') + ' - x' + mf.copias : '');
+  let suf = '';
+  if (mf && mf.copias != null) suf = (mf.fila ? ' - Fila ' + mf.fila : '') + ' - x' + mf.copias;
+  else if (mf && Array.isArray(mf.talles) && mf.talles.length) suf = ' - Talles ' + mf.talles.join('-');
+  return 'Mesa ' + (gi + 1) + (tela ? ' - ' + tela : '') + suf;
 }
 
 function MesasInfinito({ mesas, job, avisar }) {
@@ -3543,7 +3555,15 @@ function MesasInfinito({ mesas, job, avisar }) {
                   {/* ABAJO: tamaño ancho × alto (y, con Copia, de qué fila es y cuántas copias van) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, fontWeight: 700, color: 'var(--accent)', whiteSpace: 'nowrap' }}>
                     {(anchoCm / 100).toFixed(2)} × {(altoCm / 100).toFixed(2)} m
-                    {_mf && (
+                    {_mf && Array.isArray(_mf.talles) && _mf.copias == null && (
+                      <span title={_mf.grupo ? 'Talles por mesa: esta mesa lleva sólo estos talles' : 'Talles por mesa: los talles que no pusiste en ningún grupo, juntos'}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
+                          background: 'rgba(167,139,250,0.14)', border: '1px solid rgba(167,139,250,0.55)', color: '#ddd6fe' }}>
+                        <Icon name="tallesMesa" style={{ width: 12, height: 12 }} />
+                        {_mf.talles.length === 1 ? 'Talle ' : 'Talles '}{_mf.talles.join(' · ')}
+                      </span>
+                    )}
+                    {_mf && _mf.copias != null && (
                       <span title="Copia: esta mesa es de una sola fila; se imprime esta cantidad de veces"
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999,
                           background: 'rgba(250,204,21,0.14)', border: '1px solid rgba(250,204,21,0.55)', color: '#fde68a' }}>
@@ -6024,6 +6044,14 @@ export default function App() {
   // deja de multiplicar la prenda: queda como dato (copias de esa mesa) para el sistema que imprime.
   const [cantidadCopia, setCantidadCopia] = useState(!!_wiz.cantidadCopia);
   const copiaActivaRef = useRef(false);   // = columna Cantidad a la vista Y Copia prendido (se asigna más abajo)
+  // TALLES POR MESA (MAPA 593): `{talle: grupo}` — qué talles comparten mesa («S» y «M» en la 1,
+  // «L» en la 2…). Vacío = como siempre: todos los talles juntos. Un talle que no está en ningún
+  // grupo va con el resto. Es del PEDIDO (se guarda con el wizard y «Nuevo pedido» lo vacía).
+  const [tallesMesa, setTallesMesa] = useState(() => (_wiz.tallesMesa && typeof _wiz.tallesMesa === 'object' && !Array.isArray(_wiz.tallesMesa)) ? _wiz.tallesMesa : {});
+  const [tmOpen, setTmOpen] = useState(false);
+  const [tmDraft, setTmDraft] = useState({});
+  const [tmSel, setTmSel] = useState([]);          // talles tocados en la ventana (se mueven juntos)
+  const [tmSobre, setTmSobre] = useState(null);    // dónde se está por soltar lo arrastrado
   const [repoPick, setRepoPick] = useState(null);      // índice de la fila abierta en «Piezas»
   const [repoDet, setRepoDet] = useState({});          // `${pid}|${talle}|${variable}` → detección
   const [repoHover, setRepoHover] = useState(null);
@@ -10005,7 +10033,9 @@ export default function App() {
         filas: !_hayRepo ? _filasQ : _filasQ.map(f => ({ ...f, __repo_txt: (f.__repo && Object.keys(f.__repo).length)
           ? Object.entries(f.__repo).map(([pid, l]) => `${_nomMolde(pid)}: ${(l || []).join(', ')}`).join(' · ') : 'Todas' })),
       };
-      const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, molds: ids, moldes_por_diseno,
+      // TALLES POR MESA (MAPA 593): con Copia no viaja (cada fila ya es su mesa)
+      const _tallesMesa = (!_copia && tallesMesa && Object.keys(tallesMesa).length) ? tallesMesa : undefined;
+      const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, talles_mesa: _tallesMesa, molds: ids, moldes_por_diseno,
         // Repo apagado: lo elegido no viaja (todas las filas hacen todas sus piezas)
         prendas: repoOn ? prendasFinal : prendasFinal.map(({ __repo, ...f }) => f), default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
       // 🔴 LA TIZADA SE GENERA EN ESTA COMPUTADORA (PLAN_NAVEGADOR, etapa 4): el servidor revisa
@@ -10079,13 +10109,13 @@ export default function App() {
     try {
       localStorage.setItem('tizada_wizard', JSON.stringify({
         pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, fuentesReempl,
-        telaBaseMolde, telaPorPieza, telaPrincipalPed, cantidadOn, repoOn, cantidadCopia,
+        telaBaseMolde, telaPorPieza, telaPrincipalPed, cantidadOn, repoOn, cantidadCopia, tallesMesa,
         // Los moldes con el diseno adentro de ESTE pedido: si no sobreviven a un F5 nadie sabria
         // cuales borrar al terminar, y quedarian >100 MB por pedido en el servidor.
         moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera,
       }));
     } catch { /* localStorage lleno o no disponible */ }
-  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, telaPrincipalPed, fuentesReempl, cantidadOn, repoOn, cantidadCopia, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
+  }, [pedidoPaso, moldesSeleccionados, arteIdx, arteCargado, telaActiva, trabajosMulti, disenosPedido, disenoActivo, disenoMoldes, disenoVars, telaBaseMolde, telaPorPieza, telaPrincipalPed, fuentesReempl, cantidadOn, repoOn, cantidadCopia, tallesMesa, moldesEfimeros, marcasPedido, sinMarcaPedido, piezasFuera]);
 
   // Cargar el registro de telas al entrar al paso Arte (para el selector de tela por pieza).
   useEffect(() => { if (pedidoPaso === 'arte') fetchTelas(); }, [pedidoPaso]);
@@ -11647,6 +11677,21 @@ export default function App() {
     });
     return out.length ? out : tallesDelPedido;
   };
+  // TALLES POR MESA (MAPA 593): los talles que la planilla usa DE VERDAD (en cualquiera de sus
+  // columnas de talle), en el orden de los moldes; sin filas cargadas, todos los del pedido. Es lo
+  // que ofrece la ventana «Talles por mesa»: ofrecer un talle que nadie pidió sería ruido.
+  const tallesEnPlanilla = (() => {
+    const ids = colsTalle.length ? colsTalle.map(c => c.id) : ['talle'];
+    const usados = new Set();
+    (filas || []).forEach(f => ids.forEach(cid => { const v = String((f || {})[cid] ?? '').trim(); if (v) usados.add(v); }));
+    const out = [], vistos = new Set();
+    ids.forEach(cid => tallesDeColumna(cid).forEach(t => {
+      const k = String(t);
+      if ((!usados.size || usados.has(k)) && !vistos.has(k)) { vistos.add(k); out.push(k); }
+    }));
+    usados.forEach(v => { if (!vistos.has(v)) { vistos.add(v); out.push(v); } });
+    return out;
+  })();
   // Los diseños que SIRVEN para una fila: los que tienen al menos un molde que trae el talle que
   // la fila pide EN LA COLUMNA DE ESE MOLDE. Sin esto se podía elegir en la fila un diseño cuyo
   // molde no tiene ese talle, y recién se descubría con la tizada armada.
@@ -12781,7 +12826,7 @@ export default function App() {
     setTelaSelPiezas([]); setTelaElegida(null); setTelaAsignMode(false);
     setTelaBuscarAsig(''); setTelaModoVer(false); setTelaAviso('');
     // 3) arte y visor
-    setArteCargado({}); setArteIdx(0); setCantidadOn(false); setRepoOn(false); setCantidadCopia(false); setRepoPick(null); setRepoDet({});
+    setArteCargado({}); setArteIdx(0); setCantidadOn(false); setRepoOn(false); setCantidadCopia(false); setTallesMesa({}); setTmOpen(false); setRepoPick(null); setRepoDet({});
     setFuentesReempl({}); setFuentesPorArte({});   // la fuente elegida era de ESE pedido: uno nuevo arranca sin ella
     // …y LO QUE NO SE SUBLIMA también era de ESE pedido: el nuevo arranca con todo sublimándose
     // (es la regla que pidió el usuario; ver `marcasPedido`).
@@ -14092,7 +14137,11 @@ export default function App() {
         const opts = _opcionesBoton(c) || [];
         // con Repo puede aparecer «Corta + Larga» al lado: el ancho lo tiene que contar (si no, se corta)
         const conComb = repoOn && opts.length >= 2 ? [...opts, opts.join(' + ')] : opts;
-        const suma = conComb.reduce((n, o) => n + _medirTexto(String(o), '600 12px sans-serif') + 18, 0);
+        // Los botones se reparten el ancho EN PARTES IGUALES (flex: 1): cada uno necesita lo del más
+        // largo. Sumar los textos dejaba «Corta + Larga» cortado («Corta + Larg») en su tercio (visto
+        // al armar el tutorial, 2026-09-29).
+        const maxOpt = conComb.reduce((m, o) => Math.max(m, _medirTexto(String(o), '600 12px sans-serif') + 18), 0);
+        const suma = maxOpt * conComb.length;
         if (suma > ancho) ancho = suma;
       }
       // 4) PISO: una numérica arranca fina —5 dígitos— y el resto con su ancho predeterminado,
@@ -16133,7 +16182,7 @@ export default function App() {
                   centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={_faltaDis ? 'Falta decir a qué diseño va cada molde'
                     : _faltaCol ? 'Falta decir de qué columna toma el talle cada molde' : ''}
-                  siguiente={<BtnSiguiente texto="Al arte" ancla="cargar-b-siguiente"
+                  siguiente={<BtnSiguiente texto={_nomPaso('arte') === 'Piezas' ? 'A las piezas' : 'Al arte'} ancla="cargar-b-siguiente"
                     disabled={!_mios.length || _faltaDis || _faltaCol}
                     onClick={irANombrarB} />} />
               </div>
@@ -16537,6 +16586,15 @@ export default function App() {
                         <b> Piezas</b>: tocala, y en el dibujo de ese talle tocá las piezas que van. Si no elegís ninguna, la fila hace
                         <b> todas</b> las del paso anterior.</Ayuda>} />
 
+                    {/* — TALLES POR MESA (MAPA 593): qué talles comparten mesa; apagado = como siempre — */}
+                    <InterruptorIcono ancla="planilla-talles-mesa" on={Object.keys(tallesMesa).length > 0}
+                      onToggle={() => { setTmDraft({ ...tallesMesa }); setTmSel([]); setTmSobre(null); setTmOpen(true); }}
+                      icono="tallesMesa" nombre="Mesas" rgb="167,139,250"
+                      title={Object.keys(tallesMesa).length ? 'Talles por mesa: cambiar qué talles van juntos' : 'Talles por mesa: elegir qué talles van en cada mesa'}
+                      ayuda={<Ayuda ancho={330}>Elegí <b>qué talles van en la misma mesa</b>: un talle por mesa, o varios juntos
+                        (por ejemplo S y M en una, L y XL en otra). Los talles que no pongas en ningún grupo van juntos. Sin usarlo,
+                        todos los talles se acomodan juntos, como siempre.</Ayuda>} />
+
                     {/* — cuánto hay — */}
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 36, padding: '0 14px', borderRadius: 999,
@@ -16910,7 +16968,7 @@ export default function App() {
               {/* FALTAN DATOS: se decide ANTES de armar la tizada (pedido del usuario
                   2026-08-31). Dos caminos y ninguno silencioso: seguir sin esas filas, o volver a
                   la planilla a completarlas. */}
-              <Modal open={!!faltanDatos} onClose={() => setFaltanDatos(null)} titulo="Faltan datos en la planilla" ancho={520}>
+              <Modal open={!!faltanDatos} onClose={() => setFaltanDatos(null)} titulo="Faltan datos en la planilla" maxWidth={520}>
                 {!!faltanDatos && (() => {
                   const _cols = [...new Set(faltanDatos.flatMap(x => x.faltan))];
                   const _filasOk = filasQueSalen().length;
@@ -17567,7 +17625,9 @@ export default function App() {
                   <div data-tour="arte-diseno-chips" data-opciones="1" style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 10, flexShrink: 0 }}>
                     {disenosPedido.map(d => {
                       const on = d.id === disenoActivo, col = colorDeDiseno(d.id);
-                      const ms = moldesDeDiseno(d.id), done = ms.filter(m => arteCargado[d.id + '|' + m]).length;
+                      // «listo» = tiene su arte (camino A) o, el molde con diseño, todas sus piezas nombradas
+                      // (en B nunca se «carga arte»: con `arteCargado` solo decía 0/1 aunque estuviera listo)
+                      const ms = moldesDeDiseno(d.id), done = ms.filter(m => (_esConDiseno(m) ? (_moldeUsable(m) && _piezasSinNombre(m) === 0) : arteCargado[d.id + '|' + m])).length;
                       const full = ms.length > 0 && done === ms.length;
                       return (
                         <button key={d.id} type="button" onClick={() => { setDisenoActivo(d.id); setArteIdx(0); }}
@@ -17622,7 +17682,9 @@ export default function App() {
                   <div data-tour="arte-variables" data-opciones="1" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexShrink: 0 }}>
                     {itemsDis.map((it, idx) => {
                       const vo = it.clave ? varByClave(it.clave) : null;
-                      const on = idx === arteIdx, loaded = !!arteCargado[disenoActivo + '|' + it.moldeId];
+                      const on = idx === arteIdx, loaded = _esConDiseno(it.moldeId)
+                        ? (_moldeUsable(it.moldeId) && _piezasSinNombre(it.moldeId) === 0)   // molde con diseño: listo = piezas nombradas
+                        : !!arteCargado[disenoActivo + '|' + it.moldeId];
                       return (
                         <button key={it.clave || 'm:' + it.moldeId} type="button" onClick={() => setArteIdx(idx)}
                           data-elegida={on ? '1' : '0'}
@@ -18663,7 +18725,7 @@ export default function App() {
             {/* Paso 5 · Resultados: una mesa por molde + descargar todo (ZIP) */}
             {pedidoPaso === 'resultados' && trabajosMulti.length === 0 && (
               <div className="card animate-fade" style={{ marginTop: 8, padding: 20 }}>
-                <div className="card-title" style={{ margin: 0 }}>5 · Tizadas</div>
+                <div className="card-title" style={{ margin: 0 }}>{(pasosPedido.findIndex(x => x.k === 'resultados') + 1) || 5} · Tizadas</div>
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '14px 0' }}>No hay ninguna tizada en curso.</div>
                 <BarraPaso
                   volver={<BtnVolver texto="Planilla" ancla="resultados-volver-planilla" onClick={() => setPedidoPaso('planilla')} />}
@@ -18683,7 +18745,7 @@ export default function App() {
                          flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, flexShrink: 0 }}>
                   <div className="card-title" style={{ margin: 0 }}>
-                    5 · Tizadas armadas
+                    {(pasosPedido.findIndex(x => x.k === 'resultados') + 1) || 5} · Tizadas armadas
                     {trabajosMulti.some(t => t.estado === 'generando' || t.estado === 'en cola') && <span className="badge warning" style={{ marginLeft: 10 }}>Procesando</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -24458,6 +24520,165 @@ export default function App() {
             Cargar la tipografía
           </button>
         </div>
+      </Modal>
+
+      {/* TALLES POR MESA (MAPA 593): qué talles comparten mesa. Se arma en un BORRADOR y se aplica
+          con «Listo» (cerrar sin «Listo» no cambia nada).
+          CÓMO SE USA (pedido del usuario 2026-09-29: «más intuitivo, más cómodo y fácil»): arriba
+          los talles SIN MESA, abajo las MESAS como tarjetas. Se tocan uno o varios talles (quedan
+          marcados) y se toca la mesa adonde van — o «+ Nueva mesa». También se pueden ARRASTRAR.
+          Tocar la bandeja de arriba los devuelve. Los grupos se renumeran al guardar en el orden
+          de los talles: «Mesa 1» es siempre la del primer talle. */}
+      <Modal open={tmOpen} onClose={() => setTmOpen(false)} maxWidth={860}
+        titulo="Talles por mesa"
+        subtitulo="Tocá los talles y después la mesa donde van. Los que queden sin mesa salen juntos, como siempre.">
+        {(() => {
+          const talles = tallesEnPlanilla;
+          const orden = (a) => talles.filter(t => a.includes(t));
+          const nums = [...new Set(Object.values(tmDraft).map(Number).filter(g => g >= 1))].sort((a, b) => a - b);
+          const nuevaG = (nums.length ? nums[nums.length - 1] : 0) + 1;
+          const sinMesa = talles.filter(t => !tmDraft[t]);
+          const _copia = !!(cantidadVisible && cantidadCopia);
+          // mover los talles marcados (o los que se arrastraron) a la mesa `g` (0 = sin mesa)
+          const mover = (lista, g) => {
+            if (!lista.length) return;
+            setTmDraft(d => { const n = { ...d }; lista.forEach(t => { if (g) n[t] = g; else delete n[t]; }); return n; });
+            setTmSel([]); setTmSobre(null);
+          };
+          const tocarTalle = (t) => setTmSel(sel => sel.includes(t) ? sel.filter(x => x !== t) : [...sel, t]);
+          const quitarMesa = (g) => setTmDraft(d => { const n = {}; Object.entries(d).forEach(([t, x]) => { if (Number(x) !== g) n[t] = x; }); return n; });
+          const guardar = () => {
+            const ord = [], out = {};
+            talles.forEach(t => { const g = tmDraft[t]; if (g && !ord.includes(g)) ord.push(g); });
+            talles.forEach(t => { if (tmDraft[t]) out[t] = ord.indexOf(tmDraft[t]) + 1; });
+            setTallesMesa(out); setTmOpen(false); setTmSel([]);
+          };
+          // arrastrar: si el talle arrastrado está marcado, viajan TODOS los marcados
+          const alArrastrar = (e, t) => {
+            const lista = tmSel.includes(t) ? orden(tmSel) : [t];
+            e.dataTransfer.setData('text/plain', JSON.stringify(lista));
+            e.dataTransfer.effectAllowed = 'move';
+          };
+          const soltable = (clave, g) => ({
+            onDragOver: (e) => { e.preventDefault(); if (tmSobre !== clave) setTmSobre(clave); },
+            onDragLeave: () => setTmSobre(s2 => (s2 === clave ? null : s2)),
+            onDrop: (e) => { e.preventDefault(); let l = []; try { l = JSON.parse(e.dataTransfer.getData('text/plain') || '[]'); } catch { l = []; } mover(l, g); },
+          });
+          const hayMarcados = tmSel.length > 0;
+          const chip = (t) => {
+            const on = tmSel.includes(t);
+            return (
+              <button key={t} type="button" draggable onDragStart={(e) => alArrastrar(e, t)}
+                onClick={(e) => { e.stopPropagation(); tocarTalle(t); }}
+                title={on ? `Desmarcar ${t}` : `Marcar ${t} (después tocá la mesa adonde va)`}
+                style={{ minWidth: 44, height: 34, padding: '0 12px', borderRadius: 9, cursor: 'grab', fontSize: 13.5, fontWeight: 800,
+                  whiteSpace: 'nowrap', transition: 'all .12s',
+                  border: '1.5px solid ' + (on ? '#a78bfa' : 'var(--border-light)'),
+                  background: on ? 'linear-gradient(135deg, rgba(167,139,250,0.45), rgba(167,139,250,0.18))' : 'rgba(255,255,255,0.05)',
+                  color: on ? '#fff' : 'var(--text-secondary)', boxShadow: on ? '0 0 12px rgba(167,139,250,0.45)' : 'none',
+                  transform: on ? 'translateY(-1px)' : 'none' }}>{t}</button>
+            );
+          };
+          const tarjeta = (activo, sobre) => ({
+            display: 'flex', flexDirection: 'column', gap: 9, padding: '11px 12px', borderRadius: 13, minHeight: 104,
+            cursor: hayMarcados ? 'pointer' : 'default', transition: 'all .15s',
+            border: '1.5px ' + (sobre ? 'solid #a78bfa' : (hayMarcados ? 'dashed rgba(167,139,250,0.7)' : 'solid ' + (activo ? 'rgba(167,139,250,0.45)' : 'var(--border-light)'))),
+            background: sobre ? 'rgba(167,139,250,0.20)' : (activo ? 'rgba(167,139,250,0.07)' : 'rgba(255,255,255,0.02)'),
+          });
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {_copia && (
+                <div style={{ fontSize: 12, color: '#fde68a', padding: '8px 11px', borderRadius: 9, border: '1px solid rgba(250,204,21,0.45)', background: 'rgba(250,204,21,0.08)' }}>
+                  Con <b>Copia</b> prendido cada fila ya sale en su propia mesa: esto se usa recién cuando apagues Copia.
+                </div>
+              )}
+              {!talles.length ? (
+                <div style={{ fontSize: 12.5, color: 'var(--warning, #f5b942)' }}>Todavía no hay talles en el pedido.</div>
+              ) : (<>
+                {/* atajos */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button type="button" className="btn ghost" data-tour="talles-mesa-uno"
+                    onClick={() => { const n = {}; talles.forEach((t, i) => { n[t] = i + 1; }); setTmDraft(n); setTmSel([]); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 7, height: 34, padding: '0 13px', fontSize: 12.5, fontWeight: 700, borderRadius: 9 }}>
+                    <Icon name="tallesMesa" style={{ width: 14, height: 14 }} /> Un talle por mesa
+                  </button>
+                  <button type="button" className="btn ghost" data-tour="talles-mesa-juntos" onClick={() => { setTmDraft({}); setTmSel([]); }}
+                    style={{ height: 34, padding: '0 13px', fontSize: 12.5, fontWeight: 700, borderRadius: 9 }}>
+                    Todos juntos
+                  </button>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: hayMarcados ? '#ddd6fe' : 'var(--text-muted)' }}>
+                    {hayMarcados ? `${tmSel.length} marcado${tmSel.length === 1 ? '' : 's'} · tocá la mesa adonde van` : '1. Tocá talles  ·  2. Tocá una mesa'}
+                  </span>
+                </div>
+
+                {/* SIN MESA: la bandeja de arriba (tocarla con talles marcados los devuelve) */}
+                <div data-tour="talles-mesa-sin" {...soltable('sin', 0)}
+                  onClick={() => { const l = orden(tmSel).filter(t => tmDraft[t]); if (l.length) mover(l, 0); }}
+                  style={{ ...tarjeta(false, tmSobre === 'sin'), minHeight: 0, cursor: hayMarcados && tmSel.some(t => tmDraft[t]) ? 'pointer' : 'default',
+                    borderStyle: tmSobre === 'sin' ? 'solid' : (hayMarcados && tmSel.some(t => tmDraft[t]) ? 'dashed' : 'solid') }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                      Sin mesa · salen juntos
+                    </span>
+                    {sinMesa.length > 1 && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setTmSel(sel => sel.length === sinMesa.length && sinMesa.every(t => sel.includes(t)) ? [] : [...sinMesa]); }}
+                        style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+                        {sinMesa.every(t => tmSel.includes(t)) ? 'Desmarcar todos' : 'Marcar todos'}
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                    {sinMesa.length ? sinMesa.map(chip)
+                      : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Todos los talles tienen mesa.</span>}
+                  </div>
+                </div>
+
+                {/* LAS MESAS */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10, maxHeight: '46vh', overflowY: 'auto', paddingRight: 2 }}>
+                  {nums.map((g, i) => {
+                    const ts = talles.filter(t => Number(tmDraft[t]) === g);
+                    const clave = 'm' + g;
+                    return (
+                      <div key={g} data-tour="talles-mesa-grupo" {...soltable(clave, g)}
+                        onClick={() => { if (hayMarcados) mover(orden(tmSel), g); }}
+                        style={tarjeta(true, tmSobre === clave)}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <Icon name="tallesMesa" style={{ width: 15, height: 15, color: '#a78bfa' }} />
+                          <span style={{ fontSize: 13, fontWeight: 800, color: '#ddd6fe' }}>Mesa {i + 1}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ts.length} talle{ts.length === 1 ? '' : 's'}</span>
+                          <button type="button" title={`Quitar la mesa ${i + 1} (sus talles vuelven a «Sin mesa»)`}
+                            onClick={(e) => { e.stopPropagation(); quitarMesa(g); }}
+                            style={{ marginLeft: 'auto', width: 24, height: 24, borderRadius: 7, border: '1px solid var(--border-light)', background: 'transparent',
+                              color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>✕</button>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>{ts.map(chip)}</div>
+                        {hayMarcados && <span style={{ fontSize: 11, color: '#c4b5fd', marginTop: 'auto' }}>Tocá acá para ponerlos en esta mesa</span>}
+                      </div>
+                    );
+                  })}
+                  {/* + NUEVA MESA: con talles marcados los lleva a una mesa nueva */}
+                  <div data-tour="talles-mesa-nueva" {...soltable('nueva', nuevaG)}
+                    onClick={() => { if (hayMarcados) mover(orden(tmSel), nuevaG); }}
+                    style={{ ...tarjeta(false, tmSobre === 'nueva'), alignItems: 'center', justifyContent: 'center', borderStyle: tmSobre === 'nueva' ? 'solid' : 'dashed',
+                      opacity: hayMarcados || tmSobre === 'nueva' ? 1 : 0.6 }}>
+                    <span style={{ fontSize: 24, lineHeight: 1, color: '#a78bfa' }}>+</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 800, color: hayMarcados ? '#ddd6fe' : 'var(--text-secondary)' }}>Nueva mesa</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+                      {hayMarcados ? `Con ${orden(tmSel).join(' · ')}` : 'Marcá talles y tocá acá'}
+                    </span>
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  También se pueden arrastrar. Cada tela sigue en su hoja; una mesa muy larga se parte en varias como siempre.
+                </span>
+              </>)}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="btn ghost" onClick={() => setTmOpen(false)} style={{ padding: '8px 14px', fontSize: 12.5 }}>Cancelar</button>
+                <button type="button" className="btn primary" data-tour="talles-mesa-listo" onClick={guardar} style={{ padding: '8px 16px', fontSize: 12.5 }}>Listo</button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* CARGAR POR LOTE: cuántas prendas de cada talle → una fila por prenda. */}

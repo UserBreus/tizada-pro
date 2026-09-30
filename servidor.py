@@ -2772,7 +2772,7 @@ def _en_pc(pid):
 
 _MSJ_EN_PC = ("Este molde con diseño se preparó en la computadora que lo cargó y queda sólo ahí "
               "(no se guarda en el servidor). Si estás en otra computadora o se borraron los datos "
-              "del navegador, volvé a cargar el archivo: la configuración guardada se reaplica sola.")
+              "del navegador, volvé a cargar el archivo y aplicale la configuración guardada con «Aplicar».")
 
 
 def _sello_archivo(ruta):
@@ -10223,6 +10223,30 @@ def _norm_campo(s):
     return MP._norm_nombre(s)
 
 
+def _norm_talle_mesa(t):
+    """El talle como clave de TALLES POR MESA: sin espacios de los costados y sin mayúsculas (la
+    pantalla y la planilla pueden escribir «xl» o « XL»)."""
+    return str(t if t is not None else "").strip().lower()
+
+
+def _talles_mesa_del_cuerpo(cuerpo):
+    """TALLES POR MESA (MAPA 593): `{talle: grupo}` que eligió la persona en la planilla («M» y «L»
+    en la mesa 1, «XL» en la 2…). Se limpia acá: grupos enteros ≥ 1, talles no vacíos. Vacío = como
+    siempre (todos los talles juntos)."""
+    crudo = (cuerpo or {}).get("talles_mesa")
+    out = {}
+    if isinstance(crudo, dict):
+        for t, g in crudo.items():
+            k = _norm_talle_mesa(t)
+            try:
+                g = int(g)
+            except (TypeError, ValueError):
+                continue
+            if k and g >= 1:
+                out[k] = g
+    return out
+
+
 def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, var_por_diseno=None,
                       exigir_obligatorias=True, copia=False):
     """Traduce las filas crudas de la planilla a las prendas que entiende el motor
@@ -10913,6 +10937,7 @@ def _plan_del_pedido(cuerpo):
     planilla_ficha = cuerpo.get("planilla") or None              # {columnas, filas} para la FICHA TÉCNICA
     perfil_forzado = cuerpo.get("perfil_forzado")  # archivo ICC para unificar perfiles distintos (o None)
     _ed_override = cuerpo.get("editables") or {}  # ajuste por pedido de objetos editables: {diseno_slug: {nombre: {talle: tf}}}
+    _talles_mesa = _talles_mesa_del_cuerpo(cuerpo)  # TALLES POR MESA: {talle: grupo} (MAPA 593); vacío = como siempre
     # Los reemplazos de fuente son DEL PEDIDO y viajan en el cuerpo: se leen ACÁ (el hilo que
     # genera no tiene `request`, igual que las fuentes de la entrada 246).
     _reempl = _reempl_de_request()
@@ -11027,6 +11052,14 @@ def _plan_del_pedido(cuerpo):
                 if isinstance(_m, dict)}
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd,
                                        copia=bool(cuerpo.get("cantidad_copia")))
+        # ── TALLES POR MESA (MAPA 593) ──────────────────────────────────────────────────────────
+        # Cada prenda lleva el GRUPO de su talle (el de la columna de ESTE molde, ya resuelto en
+        # `talle`): los dos motores acomodan cada grupo en su(s) propia(s) mesa(s). Un talle que no
+        # está en ningún grupo queda `None` y va con el resto, como siempre. Con Copia no aplica:
+        # cada fila ya es su mesa.
+        if _talles_mesa and not cuerpo.get("cantidad_copia"):
+            for _pr in translated:
+                _pr["_grupo_mesa"] = _talles_mesa.get(_norm_talle_mesa(_pr.get("talle")))
         # ── PIEZAS A IMPRIMIR (MAPA 577) ─────────────────────────────────────────────────────────
         # El paso Arte deja apagar piezas por (diseño, molde): `piezas_fuera = {pid: {slug: [gen]}}`.
         # Se SELLA en cada fila (por el slug de SU diseño) y de ahí la respetan los dos motores
@@ -11385,6 +11418,8 @@ def _plan_del_pedido(cuerpo):
     cfg_nesting = dict(molds_data[0]["_cfg_n"] or {})   # copia: no tocar la config del molde
     if cuerpo.get("cantidad_copia"):
         cfg_nesting["por_fila"] = True                   # COPIA: una mesa por fila (MAPA 581)
+    elif _talles_mesa:
+        cfg_nesting["por_talles_mesa"] = True            # TALLES POR MESA: una mesa por grupo (MAPA 593)
     telas_cfg = molds_data[0]["_telas"]
     # Agrupar por GRUPO DE TIZADA (config en Reglas de Nesting): mismo grupo =
     # comparten mesa; sin grupo o grupos distintos = tizadas separadas.

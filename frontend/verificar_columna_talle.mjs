@@ -72,7 +72,7 @@ ok(/const _faltaCol = colsTalle\.length > 1|_colsTalle\.length > 1\s*\n?\s*&& _m
 ok(/Falta decir de qué columna toma el talle cada molde/.test(APP),
    'la barra de abajo lo dice con todas las letras');
 ok(/disabled=\{!_mios\.length \|\| _faltaDis \|\| _faltaCol\}/.test(APP),
-   '🔴 y «Al arte» queda apagado hasta que estén todos');
+   '🔴 y «A las piezas» queda apagado hasta que estén todos');
 
 console.log('\n6) El sistema NO adivina: lo pone el cliente');
 // Pedido explícito del usuario. Una heurística por nombre de archivo o por los talles convertiría
