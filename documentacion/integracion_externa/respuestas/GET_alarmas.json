@@ -1,0 +1,481 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "alarmas": [
+   {
+    "codigo": "paquete-ilegible",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Volver a armar el .zip.",
+    "que_significa": "El paquete no es un .zip válido o está dañado."
+   },
+   {
+    "codigo": "paquete-muy-grande",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Hasta 600 MB y 400 archivos.",
+    "que_significa": "El paquete supera el tamaño o la cantidad de archivos permitidos."
+   },
+   {
+    "codigo": "paquete-sin-pedido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Agregar pedido.json.",
+    "que_significa": "El paquete no trae `pedido.json` en la raíz."
+   },
+   {
+    "codigo": "pedido-json-invalido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Revisar comas, comillas y que esté en UTF-8.",
+    "que_significa": "`pedido.json` no es un JSON válido."
+   },
+   {
+    "codigo": "formato-desconocido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar \"tizadapro.pedido/1\".",
+    "que_significa": "El campo `formato` no es el que este sistema entiende."
+   },
+   {
+    "codigo": "campo-falta",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Ver el campo indicado en `donde`.",
+    "que_significa": "Falta un campo obligatorio."
+   },
+   {
+    "codigo": "campo-tipo",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Ver el campo indicado.",
+    "que_significa": "Un campo vino con un tipo que no corresponde (texto, lista, objeto…)."
+   },
+   {
+    "codigo": "referencia-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Cambiar la referencia.",
+    "que_significa": "La referencia sólo puede tener letras, números, punto, guion y guion bajo (hasta 64)."
+   },
+   {
+    "codigo": "referencia-en-proceso",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Esperar a que termine o cancelarlo.",
+    "que_significa": "Ya hay un pedido con esa referencia que se está procesando."
+   },
+   {
+    "codigo": "referencia-ya-generada",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar con `reemplazar: true` o con otra referencia.",
+    "que_significa": "Ese pedido ya se generó. No se pisa una tizada hecha."
+   },
+   {
+    "codigo": "archivo-falta",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Agregar el archivo o corregir la ruta.",
+    "que_significa": "El pedido nombra un archivo que no vino en el paquete."
+   },
+   {
+    "codigo": "archivo-ruta-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar rutas relativas simples (artes/jugador.ai).",
+    "que_significa": "Una ruta de archivo sale de la carpeta del paquete."
+   },
+   {
+    "codigo": "arte-formato",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Guardar el arte en uno de esos formatos.",
+    "que_significa": "El arte tiene que ser .ai (con PDF compatible) o .pdf."
+   },
+   {
+    "codigo": "tipografia-formato",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar el archivo de la fuente en uno de esos formatos.",
+    "que_significa": "La tipografía tiene que ser .ttf u .otf."
+   },
+   {
+    "codigo": "disenos-vacio",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar al menos un diseño con su molde.",
+    "que_significa": "El pedido no trae ningún diseño."
+   },
+   {
+    "codigo": "diseno-repetido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "El nombre de cada diseño es único dentro del pedido.",
+    "que_significa": "Dos diseños tienen el mismo nombre."
+   },
+   {
+    "codigo": "diseno-sin-moldes",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Cada diseño lleva al menos un molde.",
+    "que_significa": "Un diseño no dice qué molde usa."
+   },
+   {
+    "codigo": "molde-desconocido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Elegirlo de la lista que publica /moldes.",
+    "que_significa": "El código de molde no existe en TIZADA PRO."
+   },
+   {
+    "codigo": "molde-no-disponible",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar un molde del catálogo marcado `listo`.",
+    "que_significa": "El molde existe pero no está listo para pedidos externos (es propio de un usuario, temporal, trae el diseño adentro o no tiene sus piezas nombradas)."
+   },
+   {
+    "codigo": "molde-repetido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Una variable por prenda en cada diseño.",
+    "que_significa": "El mismo molde aparece dos veces en un diseño (dos variables de la misma prenda)."
+   },
+   {
+    "codigo": "variable-ambigua",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Mandar la `variable` por su clave (`v_…`) o agregar `molde`.",
+    "que_significa": "Ese nombre de variable existe en más de una prenda y el pedido no dice cuál."
+   },
+   {
+    "codigo": "arte-falta",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Indicar `arte` en el diseño o en el molde.",
+    "que_significa": "Un molde de un diseño no tiene arte (ni propio ni el del diseño)."
+   },
+   {
+    "codigo": "variable-falta",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Indicar `variable` (nombre o clave).",
+    "que_significa": "El molde tiene varias variables y el pedido no dice cuál."
+   },
+   {
+    "codigo": "variable-desconocida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar una de las que publica /variables.",
+    "que_significa": "La variable indicada no existe (o no en ese molde)."
+   },
+   {
+    "codigo": "planillas-distintas",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Todos los moldes de un pedido comparten la misma planilla; si no, van en pedidos separados.",
+    "que_significa": "Los moldes del pedido usan planillas distintas."
+   },
+   {
+    "codigo": "sin-columna-diseno",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Un diseño por pedido, o usar una planilla con columna «Diseño».",
+    "que_significa": "El pedido trae más de un diseño para un molde y su planilla no tiene columna de diseño."
+   },
+   {
+    "codigo": "tela-falta",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Indicar `tela` (el id del sistema de telas).",
+    "que_significa": "Un molde no dice en qué tela se corta."
+   },
+   {
+    "codigo": "tela-desconocida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar un id de los que publica /telas.",
+    "que_significa": "El id de tela no existe en el registro de telas."
+   },
+   {
+    "codigo": "tela-no-usable",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Elegir otra tela.",
+    "que_significa": "La tela está dada de baja o no tiene medida."
+   },
+   {
+    "codigo": "tela-no-permitida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar una de las telas que publica el molde.",
+    "que_significa": "El molde no admite esa tela (o no para esa pieza)."
+   },
+   {
+    "codigo": "pieza-desconocida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar el nombre genérico de la pieza, sin número («Manga», no «Manga 2»).",
+    "que_significa": "Se nombró una pieza que el molde no tiene."
+   },
+   {
+    "codigo": "pieza-sin-tela",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Indicar la tela principal o la de esas piezas.",
+    "que_significa": "Hay piezas que quedarían sin tela."
+   },
+   {
+    "codigo": "todas-las-piezas-apagadas",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Dejar al menos una pieza prendida.",
+    "que_significa": "Se apagaron todas las piezas de un molde: no saldría nada."
+   },
+   {
+    "codigo": "editable-proceso-invalido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar: sublimado, tpu, bordado, dtf.",
+    "que_significa": "El proceso de un objeto editable no es válido."
+   },
+   {
+    "codigo": "editable-desconocido",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "El nombre es el de la capa sin la palabra «Editable» («Editable escudo» → escudo).",
+    "que_significa": "El pedido nombra un objeto editable que el arte no tiene."
+   },
+   {
+    "codigo": "editable-sin-declarar",
+    "etapa": "arte",
+    "frena": false,
+    "que_hacer": "Declararlo en `editables` si lleva otro proceso.",
+    "que_significa": "El arte trae un objeto editable que el pedido no menciona: sale sublimado."
+   },
+   {
+    "codigo": "planilla-vacia",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Una fila por prenda.",
+    "que_significa": "La planilla no trae filas."
+   },
+   {
+    "codigo": "columna-desconocida",
+    "etapa": "datos",
+    "frena": false,
+    "que_hacer": "Usar los ids de columna que publica el molde.",
+    "que_significa": "La fila trae una columna que la planilla del molde no tiene: se ignora."
+   },
+   {
+    "codigo": "columna-obligatoria-vacia",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Completar la columna indicada.",
+    "que_significa": "A una fila le falta un dato obligatorio para fabricar."
+   },
+   {
+    "codigo": "fila-diseno-desconocido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "El valor tiene que ser el `nombre` de uno de los diseños.",
+    "que_significa": "Una fila pide un diseño que el pedido no trae."
+   },
+   {
+    "codigo": "talle-inexistente",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar los talles que publica el molde, tal cual.",
+    "que_significa": "Una fila pide un talle que el molde no tiene."
+   },
+   {
+    "codigo": "opcion-inexistente",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Usar una de las opciones publicadas.",
+    "que_significa": "Una fila trae un valor que no está entre las opciones de esa columna."
+   },
+   {
+    "codigo": "opcion-sin-piezas",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Elegir una opción que el molde sí tenga.",
+    "que_significa": "Una fila pide una opción (p. ej. manga larga) que el molde no tiene."
+   },
+   {
+    "codigo": "cantidad-invalida",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Corregir la cantidad.",
+    "que_significa": "La cantidad tiene que ser un número entero de 1 en adelante."
+   },
+   {
+    "codigo": "mesas-invalido",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Ver `mesas` en el formato.",
+    "que_significa": "La forma de repartir las mesas no se entiende o nombra un talle que no existe."
+   },
+   {
+    "codigo": "pedido-rechazado-por-reglas",
+    "etapa": "datos",
+    "frena": true,
+    "que_hacer": "Leer el mensaje: dice qué fila o qué pieza.",
+    "que_significa": "Las reglas del pedido (las mismas de la pantalla) lo rechazaron."
+   },
+   {
+    "codigo": "aviso-url-no-permitida",
+    "etapa": "datos",
+    "frena": false,
+    "que_hacer": "Configurarla en Integraciones.",
+    "que_significa": "La dirección de aviso del pedido no es del mismo sitio que la configurada: se usa la configurada."
+   },
+   {
+    "codigo": "arte-ilegible",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Volver a guardarlo.",
+    "que_significa": "El arte no se pudo abrir (dañado, o un .ai guardado sin «Crear archivo compatible con PDF»)."
+   },
+   {
+    "codigo": "arte-sin-mesas-de-pieza",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Armar el arte desde la base que da TIZADA PRO para ese molde.",
+    "que_significa": "El arte no trae una mesa por pieza con su nombre en la capa de guías (es otro tipo de archivo)."
+   },
+   {
+    "codigo": "arte-pieza-sin-mesa",
+    "etapa": "arte",
+    "frena": false,
+    "que_hacer": "Agregar la mesa de esas piezas con su nombre en la capa «guias».",
+    "que_significa": "Hay piezas del molde que el arte no cubre. Si alguna de ellas se fabrica en este pedido, frena como `piezas-en-blanco`."
+   },
+   {
+    "codigo": "arte-mesa-vacia",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Revisar esa mesa del arte.",
+    "que_significa": "Una mesa asignada a una pieza no tiene diseño."
+   },
+   {
+    "codigo": "arte-texto-vivo",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Illustrator: Texto → Crear contornos · Corel: Objeto → Convertir en curvas.",
+    "que_significa": "El diseño trae texto sin convertir a curvas."
+   },
+   {
+    "codigo": "arte-variante-sin-cubrir",
+    "etapa": "arte",
+    "frena": false,
+    "que_hacer": "Agregar la mesa de ese talle o una mesa sin #.",
+    "que_significa": "Con mesas por talle (#talle/#rango), algún talle queda sin diseño en una pieza."
+   },
+   {
+    "codigo": "arte-campo-sin-capa",
+    "etapa": "arte",
+    "frena": false,
+    "que_hacer": "Agregar la capa «Nombre» / «Número» al arte.",
+    "que_significa": "La planilla trae nombre o número y el arte no tiene esa capa: no se estampa."
+   },
+   {
+    "codigo": "arte-observado",
+    "etapa": "arte",
+    "frena": false,
+    "que_hacer": "Leer el mensaje.",
+    "que_significa": "La revisión del arte dejó una observación."
+   },
+   {
+    "codigo": "tipografia-falta",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Mandarla en `tipografias`, o pedir `si_falta_tipografia: \"predeterminada\"`.",
+    "que_significa": "El nombre o el número usa una tipografía que no está en el catálogo ni vino en el paquete."
+   },
+   {
+    "codigo": "tipografia-reemplazada",
+    "etapa": "arte",
+    "frena": false,
+    "que_hacer": "—",
+    "que_significa": "Faltaba una tipografía y se usó la predeterminada, como pidió el pedido."
+   },
+   {
+    "codigo": "tipografia-invalida",
+    "etapa": "arte",
+    "frena": true,
+    "que_hacer": "Mandar otro archivo de esa fuente.",
+    "que_significa": "Un archivo de tipografía no se pudo leer."
+   },
+   {
+    "codigo": "texto-se-achica",
+    "etapa": "tizada",
+    "frena": false,
+    "que_hacer": "Acortar el texto o cambiar el margen en el molde.",
+    "que_significa": "Un nombre o número no entra en la pieza y sale más chico."
+   },
+   {
+    "codigo": "texto-ilegible",
+    "etapa": "tizada",
+    "frena": false,
+    "que_hacer": "Acortar el texto.",
+    "que_significa": "Un nombre o número sale tan chico que puede no leerse."
+   },
+   {
+    "codigo": "piezas-en-blanco",
+    "etapa": "tizada",
+    "frena": true,
+    "que_hacer": "Agregar su mesa al arte, apagarlas en `piezas_apagadas`, o pedir `si_piezas_en_blanco: \"seguir\"`.",
+    "que_significa": "Hay piezas de las que se fabrican que el arte no cubre: saldrían en blanco."
+   },
+   {
+    "codigo": "aviso-del-pedido",
+    "etapa": "tizada",
+    "frena": false,
+    "que_hacer": "Leer el mensaje.",
+    "que_significa": "El plan del pedido dejó un aviso."
+   },
+   {
+    "codigo": "caracter-imposible",
+    "etapa": "tizada",
+    "frena": true,
+    "que_hacer": "Sacar ese carácter.",
+    "que_significa": "Un carácter del texto no se puede estampar con ninguna tipografía."
+   },
+   {
+    "codigo": "pieza-no-entra",
+    "etapa": "tizada",
+    "frena": true,
+    "que_hacer": "Usar una tela más ancha.",
+    "que_significa": "Una pieza no entra en el ancho de la tela con ninguna rotación."
+   },
+   {
+    "codigo": "tizada-fallo",
+    "etapa": "tizada",
+    "frena": true,
+    "que_hacer": "Leer el mensaje; si es una falla del sistema, se puede reintentar.",
+    "que_significa": "La tizada no se pudo armar."
+   },
+   {
+    "codigo": "drive-sin-configurar",
+    "etapa": "tizada",
+    "frena": false,
+    "que_hacer": "Configurar Drive en Integraciones y reintentar la subida.",
+    "que_significa": "Google Drive no está configurado: los PDF quedaron guardados en el servidor."
+   },
+   {
+    "codigo": "drive-fallo",
+    "etapa": "tizada",
+    "frena": false,
+    "que_hacer": "Revisar la cuenta de servicio y la carpeta; reintentar.",
+    "que_significa": "No se pudo subir a Google Drive: los PDF quedaron guardados en el servidor."
+   }
+  ],
+  "etapas": {
+   "arte": "al leer el arte y las tipografías (segundos después)",
+   "datos": "al recibir el paquete, sin abrir archivos: se contesta en el acto",
+   "tizada": "al armar la tizada y guardar los PDF"
+  }
+ }
+}

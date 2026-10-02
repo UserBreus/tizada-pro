@@ -52,7 +52,8 @@ export { CAPAS_SISTEMA }
 // Las opciones de `get_text("dict")` de PyMuPDF (`TEXTFLAGS_DICT` = 199): ligaduras, espacios,
 // imágenes, recorte al MediaBox y CID para los glifos sin unicode. Con otro juego de opciones
 // MuPDF parte las líneas distinto y la etiqueta no se leería igual.
-const OPCIONES_TEXTO = 'preserve-ligatures,preserve-whitespace,preserve-images,mediabox-clip,use-cid-for-unknown-unicode'
+// (sin `preserve-images`: MuPDF dibujaría cada degradado como imagen — ver `arte/texto.js OPCIONES_STEXT`)
+const OPCIONES_TEXTO = 'preserve-ligatures,preserve-whitespace,mediabox-clip,use-cid-for-unknown-unicode'
 
 const ancho = (r) => Math.max(0, r[2] - r[0])
 const alto = (r) => Math.max(0, r[3] - r[1])
@@ -210,10 +211,11 @@ export function conSoloLaCapa(molde, talle, fn) {
   }
 }
 
-/** `_orden_capas_archivo`: los textos no vacíos de la interfaz de capas, repetidos incluidos. */
+/** `_orden_capas_archivo`: los textos no vacíos de la interfaz de capas, UNA vez cada nombre
+ *  (CorelDRAW repite cada capa en cada página: ver el Python). */
 export function ordenCapasArchivo(molde) {
   try {
-    return capasUI(molde.doc).map((c) => c.text).filter((t) => t)
+    return [...new Set(capasUI(molde.doc).map((c) => c.text).filter((t) => t))]
   } catch {
     return []
   }

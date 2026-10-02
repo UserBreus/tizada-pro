@@ -15,6 +15,8 @@
 // No se traducen (no los usa el alta y no se pueden leer igual desde mupdf.js): el color convertido
 // a RGB, `lineCap`/`lineJoin`/`dashes`. Quedan fuera de la comparación a propósito.
 
+import { devolver } from './prestado.js'
+
 const f = Math.fround
 
 function transformar(x, y, m) {
@@ -257,7 +259,7 @@ export function dibujosDePagina(mupdf, page, { ligero = false } = {}) {
     },
     clipText() { dev.pathrect = dev.pathrect; scissor(); dev.depth += 1 },
     clipStrokeText() { scissor(); dev.depth += 1 },
-    clipImageMask() { scissor(); dev.depth += 1 },
+    clipImageMask(image) { devolver(image); scissor(); dev.depth += 1 },
     popClip() {
       if (!dev.scissors.length) return
       dev.scissors.pop()
@@ -274,9 +276,10 @@ export function dibujosDePagina(mupdf, page, { ligero = false } = {}) {
     fillText() { dev.seqno += 1 },
     strokeText() { dev.seqno += 1 },
     ignoreText() { dev.seqno += 1 },
-    fillShade() { dev.seqno += 1 },
-    fillImage() { dev.seqno += 1 },
-    fillImageMask() { dev.seqno += 1 },
+    // (`devolver`: el sombreado y la imagen son PRESTADOS — ver `pdf/prestado.js`)
+    fillShade(shade) { devolver(shade); dev.seqno += 1 },
+    fillImage(image) { devolver(image); dev.seqno += 1 },
+    fillImageMask(image) { devolver(image); dev.seqno += 1 },
   })
   page.run(device, mupdf.Matrix.identity)
   device.close()

@@ -1,0 +1,4 @@
+# salidas de las pruebas (se regeneran al correr los .ps1)
+*.pdf
+*.cdr
+contorno.svg

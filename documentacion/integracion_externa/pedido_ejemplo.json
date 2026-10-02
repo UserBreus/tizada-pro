@@ -1,0 +1,70 @@
+{
+  "formato": "tizadapro.pedido/1",
+  "referencia": "OV-2026-00123",
+  "pedido_externo": {
+    "id": 48211,
+    "numero": "OV-2026-00123",
+    "sucursal": "Montevideo",
+    "vendedor": "mgarcia",
+    "entrega": "2026-10-20"
+  },
+  "cliente": "Club Atlético Ejemplo",
+  "aviso_url": "https://ventas.ejemplo.com.uy/tizada/aviso",
+  "opciones": {
+    "si_falta_tipografia": "rechazar",
+    "si_texto_no_entra": "achicar",
+    "si_piezas_en_blanco": "rechazar",
+    "carpeta": "2026-10/OV-2026-00123"
+  },
+  "mesas": {
+    "modo": "normal"
+  },
+  "disenos": [
+    {
+      "nombre": "JUGADOR",
+      "tipografias": ["tipografias/Anton-Regular.ttf"],
+      "moldes": [
+        {
+          "variable": "v_bu8p7gy",
+          "arte": "artes/jugador_camiseta.ai",
+          "tela": "232",
+          "telas_por_pieza": {
+            "Cuello": "486"
+          },
+          "piezas_apagadas": [],
+          "editables": {
+            "escudo": "sublimado",
+            "logo": "tpu"
+          }
+        }
+      ]
+    },
+    {
+      "nombre": "GOLERO",
+      "arte": "artes/golero_camiseta.ai",
+      "tipografia_por_campo": {
+        "numero": "Anton Regular"
+      },
+      "moldes": [
+        {
+          "variable": "v_t1mhcmu",
+          "tela": "492",
+          "telas_por_pieza": {
+            "Cuello": "486",
+            "Tapa costura": "486"
+          },
+          "editables": {
+            "escudo": { "proceso": "bordado", "cruz": true },
+            "logo": "dtf"
+          }
+        }
+      ]
+    }
+  ],
+  "planilla": [
+    { "diseno": "JUGADOR", "talle": "M",   "nombre": "PÉREZ",     "numero": "10", "manga": "Corta", "cantidad": 1 },
+    { "diseno": "JUGADOR", "talle": "L",   "nombre": "RODRÍGUEZ", "numero": "07", "manga": "Corta", "cantidad": 2 },
+    { "diseno": "JUGADOR", "talle": "2XL", "nombre": "DA SILVA",  "numero": "23", "manga": "Larga", "cantidad": 1 },
+    { "diseno": "GOLERO",  "talle": "L",   "nombre": "GÓMEZ",     "numero": "1",  "manga": "Larga", "cantidad": 1 }
+  ]
+}

@@ -1,0 +1,296 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "actualizado": "2026-10-02T14:58:56",
+  "alarmas": [
+   {
+    "codigo": "arte-pieza-sin-mesa",
+    "donde": {
+     "diseno": "JUGADOR",
+     "molde": "prod_20260820_095558_38bc"
+    },
+    "etapa": "arte",
+    "frena": false,
+    "mensaje": "«JUGADOR» en «Camiseta de futbol»: Mapeo de arte a piezas — faltan asignar (sin nombre en la guía): Manga corta izquierda 1, Manga larga izquierda, Tapa costura"
+   },
+   {
+    "codigo": "arte-campo-sin-capa",
+    "donde": {
+     "diseno": "JUGADOR",
+     "molde": "prod_20260820_095558_38bc"
+    },
+    "etapa": "arte",
+    "frena": false,
+    "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «nombre» y el arte no tiene esa capa"
+   },
+   {
+    "codigo": "arte-campo-sin-capa",
+    "donde": {
+     "diseno": "JUGADOR",
+     "molde": "prod_20260820_095558_38bc"
+    },
+    "etapa": "arte",
+    "frena": false,
+    "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «numero» y el arte no tiene esa capa"
+   },
+   {
+    "codigo": "arte-pieza-sin-mesa",
+    "donde": {
+     "diseno": "GOLERO",
+     "molde": "prod_20260820_095558_38bc"
+    },
+    "etapa": "arte",
+    "frena": false,
+    "mensaje": "«GOLERO» en «Camiseta de futbol»: Mapeo de arte a piezas — faltan asignar (sin nombre en la guía): Dorso 2, Tapa costura"
+   },
+   {
+    "codigo": "arte-campo-sin-capa",
+    "donde": {
+     "diseno": "GOLERO",
+     "molde": "prod_20260820_095558_38bc"
+    },
+    "etapa": "arte",
+    "frena": false,
+    "mensaje": "«GOLERO» en «Camiseta de futbol»: la planilla trae «numero» y el arte no tiene esa capa"
+   },
+   {
+    "codigo": "piezas-en-blanco",
+    "etapa": "tizada",
+    "frena": false,
+    "mensaje": "«Camiseta de futbol» · diseño «JUGADOR»: 2 pieza(s) sin diseño saldrán en blanco (Manga corta izquierda 1, Manga larga izquierda)."
+   },
+   {
+    "codigo": "piezas-en-blanco",
+    "etapa": "tizada",
+    "frena": false,
+    "mensaje": "«Camiseta de futbol» · diseño «GOLERO»: 2 pieza(s) sin diseño saldrán en blanco (Dorso 2, Tapa costura)."
+   },
+   {
+    "codigo": "aviso-del-pedido",
+    "etapa": "tizada",
+    "frena": false,
+    "mensaje": "La hoja tiene algo que un RIP podría rechazar: HOJA_g0_Rib_New__1_40_.pdf: ExtGState /GS1 con SMask"
+   },
+   {
+    "codigo": "drive-sin-configurar",
+    "etapa": "tizada",
+    "frena": false,
+    "mensaje": "Google Drive no está configurado: los PDF quedaron guardados en el servidor."
+   }
+  ],
+  "estado": "listo",
+  "etapa": "terminado",
+  "pedido_externo": {
+   "entrega": "2026-10-20",
+   "id": 48211,
+   "numero": "OV-2026-00123",
+   "sucursal": "Montevideo",
+   "vendedor": "mgarcia"
+  },
+  "recibido": "2026-10-02T14:58:36",
+  "referencia": "EJEMPLO-CODIGO-1",
+  "resultado": {
+   "alarmas": [
+    {
+     "codigo": "arte-pieza-sin-mesa",
+     "donde": {
+      "diseno": "JUGADOR",
+      "molde": "prod_20260820_095558_38bc"
+     },
+     "etapa": "arte",
+     "frena": false,
+     "mensaje": "«JUGADOR» en «Camiseta de futbol»: Mapeo de arte a piezas — faltan asignar (sin nombre en la guía): Manga corta izquierda 1, Manga larga izquierda, Tapa costura"
+    },
+    {
+     "codigo": "arte-campo-sin-capa",
+     "donde": {
+      "diseno": "JUGADOR",
+      "molde": "prod_20260820_095558_38bc"
+     },
+     "etapa": "arte",
+     "frena": false,
+     "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «nombre» y el arte no tiene esa capa"
+    },
+    {
+     "codigo": "arte-campo-sin-capa",
+     "donde": {
+      "diseno": "JUGADOR",
+      "molde": "prod_20260820_095558_38bc"
+     },
+     "etapa": "arte",
+     "frena": false,
+     "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «numero» y el arte no tiene esa capa"
+    },
+    {
+     "codigo": "arte-pieza-sin-mesa",
+     "donde": {
+      "diseno": "GOLERO",
+      "molde": "prod_20260820_095558_38bc"
+     },
+     "etapa": "arte",
+     "frena": false,
+     "mensaje": "«GOLERO» en «Camiseta de futbol»: Mapeo de arte a piezas — faltan asignar (sin nombre en la guía): Dorso 2, Tapa costura"
+    },
+    {
+     "codigo": "arte-campo-sin-capa",
+     "donde": {
+      "diseno": "GOLERO",
+      "molde": "prod_20260820_095558_38bc"
+     },
+     "etapa": "arte",
+     "frena": false,
+     "mensaje": "«GOLERO» en «Camiseta de futbol»: la planilla trae «numero» y el arte no tiene esa capa"
+    },
+    {
+     "codigo": "piezas-en-blanco",
+     "etapa": "tizada",
+     "frena": false,
+     "mensaje": "«Camiseta de futbol» · diseño «JUGADOR»: 2 pieza(s) sin diseño saldrán en blanco (Manga corta izquierda 1, Manga larga izquierda)."
+    },
+    {
+     "codigo": "piezas-en-blanco",
+     "etapa": "tizada",
+     "frena": false,
+     "mensaje": "«Camiseta de futbol» · diseño «GOLERO»: 2 pieza(s) sin diseño saldrán en blanco (Dorso 2, Tapa costura)."
+    },
+    {
+     "codigo": "aviso-del-pedido",
+     "etapa": "tizada",
+     "frena": false,
+     "mensaje": "La hoja tiene algo que un RIP podría rechazar: HOJA_g0_Rib_New__1_40_.pdf: ExtGState /GS1 con SMask"
+    },
+    {
+     "codigo": "drive-sin-configurar",
+     "etapa": "tizada",
+     "frena": false,
+     "mensaje": "Google Drive no está configurado: los PDF quedaron guardados en el servidor."
+    }
+   ],
+   "archivos": [
+    {
+     "ancho_cm": 137,
+     "aprovechamiento": 60.9,
+     "bytes": 998568,
+     "consumo_cm": 21.5,
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__HOJA_g0_Rib_New__1_40_.pdf",
+     "largo_cm": [
+      21.5
+     ],
+     "mesas": 1,
+     "moldes": [
+      "Camiseta de futbol"
+     ],
+     "nombre": "EJEMPLO-CODIGO-1__HOJA_g0_Rib_New__1_40_.pdf",
+     "sha256": "7570297697e23e247c4081ac0e04647f0fd2208497d8255ca970fe8f8cf15ebc",
+     "tela": "Rib New (1,40)",
+     "tipo": "tizada"
+    },
+    {
+     "ancho_cm": 180,
+     "aprovechamiento": 73.7,
+     "bytes": 1127490,
+     "consumo_cm": 357.5,
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__HOJA_g0_Jacquard_Charr%C3%BAa__1_83_.pdf",
+     "largo_cm": [
+      357.5
+     ],
+     "mesas": 1,
+     "moldes": [
+      "Camiseta de futbol"
+     ],
+     "nombre": "EJEMPLO-CODIGO-1__HOJA_g0_Jacquard_Charrúa__1_83_.pdf",
+     "sha256": "db64f1cb35f49d4febe799d01c2215811c9e46448d185e590e74367712c012bd",
+     "tela": "Jacquard Charrúa (1,83)",
+     "tipo": "tizada"
+    },
+    {
+     "ancho_cm": 157,
+     "aprovechamiento": 57.5,
+     "bytes": 519402,
+     "consumo_cm": 152.6,
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__HOJA_g0_Dry_Basquet_1_60.pdf",
+     "largo_cm": [
+      152.6
+     ],
+     "mesas": 1,
+     "moldes": [
+      "Camiseta de futbol"
+     ],
+     "nombre": "EJEMPLO-CODIGO-1__HOJA_g0_Dry_Basquet_1_60.pdf",
+     "sha256": "ef0128d20ba8956d348faa1427659edc9c39db04840a740b83a8460d5e278609",
+     "tela": "Dry Basquet 1,60",
+     "tipo": "tizada"
+    },
+    {
+     "bytes": 1690159,
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__FICHA_TECNICA.pdf",
+     "nombre": "EJEMPLO-CODIGO-1__FICHA_TECNICA.pdf",
+     "sha256": "602bbeb20d6a71955475f9c0f366dd2594d3a3ea7a65f73045de3902ca1808b0",
+     "tipo": "ficha"
+    }
+   ],
+   "cliente": "Club Atlético Ejemplo",
+   "destino": {
+    "tipo": "local"
+   },
+   "disenos": [
+    {
+     "moldes": [
+      {
+       "molde": "prod_20260820_095558_38bc",
+       "no_sublimado": {
+        "logo": "tpu"
+       },
+       "nombre": "Camiseta de futbol",
+       "tela": "Jacquard Charrúa (1,83)",
+       "tela_id": "232",
+       "variable": "v_bu8p7gy",
+       "variable_nombre": "Cuello redondo"
+      }
+     ],
+     "nombre": "JUGADOR"
+    },
+    {
+     "moldes": [
+      {
+       "molde": "prod_20260820_095558_38bc",
+       "no_sublimado": {
+        "escudo": "bordado",
+        "logo": "dtf"
+       },
+       "nombre": "Camiseta de futbol",
+       "tela": "Dry Basquet 1,60",
+       "tela_id": "492",
+       "variable": "v_t1mhcmu",
+       "variable_nombre": "cuello V"
+      }
+     ],
+     "nombre": "GOLERO"
+    }
+   ],
+   "estado": "listo",
+   "formato": "tizadapro.resultado/1",
+   "generado": "2026-10-02T14:58:56",
+   "pedido_externo": {
+    "entrega": "2026-10-20",
+    "id": 48211,
+    "numero": "OV-2026-00123",
+    "sucursal": "Montevideo",
+    "vendedor": "mgarcia"
+   },
+   "referencia": "EJEMPLO-CODIGO-1",
+   "resumen": {
+    "perfil_color": "Coated FOGRA39 (ISO 12647-2:2004)",
+    "piezas": 26,
+    "prendas": 4,
+    "telas": [
+     "Dry Basquet 1,60",
+     "Jacquard Charrúa (1,83)",
+     "Rib New (1,40)"
+    ]
+   },
+   "segundos": 19.1,
+   "tizada_id": "20261002-145855-a771"
+  }
+ }
+}

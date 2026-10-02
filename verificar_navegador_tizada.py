@@ -52,6 +52,11 @@ _falso.guardar_catalogo = lambda cat, version_esperada=None: (_DOCS.__setitem__(
 _REG = {}
 _falso.registro_rev = lambda pid: (1 if pid in _REG else None)
 _falso.leer_registro = lambda pid: _REG.get(pid)
+# `_rev_registro` en un GET lee TODAS las revisiones con UNA consulta (MAPA 582): sin esto el doble
+# devolvía None, `motor_b_producto` rompía con «'NoneType' object is not iterable» y el contrato
+# daba «no se puede generar en esta computadora» (visto el 2026-09-30).
+_falso.filas = lambda sql, *a, **k: ([{"legacy_id": p, "registro_rev": 1} for p in _REG]
+                                     if "registro_rev" in str(sql) else [])
 sys.modules["db"] = _falso
 sys.modules["api_usuarios"] = types.ModuleType("api_usuarios")
 

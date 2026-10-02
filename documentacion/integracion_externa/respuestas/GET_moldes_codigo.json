@@ -1,0 +1,184 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "molde": {
+   "codigo": "prod_20260820_095558_38bc",
+   "foto": "/api/externo/v1/moldes/prod_20260820_095558_38bc/foto",
+   "listo": true,
+   "nombre": "Camiseta de futbol",
+   "opciones_de_pieza": {
+    "manga": {
+     "columna": "manga",
+     "distingue": true,
+     "opciones": [
+      "Corta",
+      "Larga"
+     ],
+     "tiene": {
+      "*": [
+       "Corta",
+       "Larga"
+      ],
+      "v_bu8p7gy": [
+       "Corta",
+       "Larga"
+      ],
+      "v_t1mhcmu": [
+       "Corta",
+       "Larga"
+      ]
+     }
+    }
+   },
+   "piezas": [
+    "Cuello",
+    "Dorso",
+    "Frente",
+    "Manga corta derecha",
+    "Manga corta izquierda",
+    "Manga larga derecha",
+    "Manga larga izquierda",
+    "Tapa costura"
+   ],
+   "planilla": {
+    "columna_talle": "talle",
+    "columnas": [
+     {
+      "id": "cantidad",
+      "obligatoria": false,
+      "rol": "cantidad",
+      "titulo": "Cantidad"
+     },
+     {
+      "id": "talle",
+      "lee_este_molde": true,
+      "obligatoria": true,
+      "rol": "talle",
+      "titulo": "Talle"
+     },
+     {
+      "id": "talle_short",
+      "lee_este_molde": false,
+      "obligatoria": true,
+      "rol": "talle",
+      "titulo": "Talle short"
+     },
+     {
+      "id": "nombre",
+      "obligatoria": false,
+      "rol": "nombre",
+      "titulo": "Nombre"
+     },
+     {
+      "id": "numero",
+      "obligatoria": false,
+      "rol": "numero",
+      "titulo": "Número"
+     },
+     {
+      "id": "manga",
+      "obligatoria": false,
+      "opciones": [
+       "Corta",
+       "Larga"
+      ],
+      "rol": "manga",
+      "titulo": "Manga"
+     },
+     {
+      "id": "dise_o",
+      "obligatoria": true,
+      "opciones": "los nombres de los diseños del pedido",
+      "rol": "diseno",
+      "titulo": "Diseño"
+     }
+    ],
+    "id": "plan_default",
+    "nombre": "Planilla Estándar"
+   },
+   "talles": [
+    "0",
+    "1",
+    "2",
+    "4",
+    "6",
+    "8",
+    "10",
+    "12",
+    "14",
+    "16",
+    "XSfem",
+    "Sfem",
+    "…"
+   ],
+   "telas": {
+    "por_pieza": {},
+    "todas": [
+     {
+      "ancho_mesa_cm": 165.0,
+      "id": "56",
+      "nombre": "Delta (1,68 m)",
+      "usable": false
+     },
+     {
+      "ancho_mesa_cm": 157.0,
+      "id": "485",
+      "nombre": "Deportiva Parisien 1,60",
+      "usable": true
+     },
+     {
+      "ancho_mesa_cm": 157.0,
+      "id": "492",
+      "nombre": "Dry Basquet 1,60",
+      "usable": true
+     },
+     {
+      "…": "más telas"
+     }
+    ]
+   },
+   "variables": [
+    {
+     "clave": "v_bu8p7gy",
+     "nombre": "Cuello redondo",
+     "piezas": [
+      "Cuello",
+      "Dorso",
+      "Frente",
+      "Manga corta derecha",
+      "Manga corta izquierda",
+      "Manga larga derecha",
+      "Manga larga izquierda"
+     ],
+     "piezas_exactas": [
+      "Cuello 9",
+      "Dorso 2",
+      "Frente 2",
+      "…"
+     ]
+    },
+    {
+     "clave": "v_t1mhcmu",
+     "nombre": "cuello V",
+     "piezas": [
+      "Cuello",
+      "Dorso",
+      "Frente",
+      "Manga corta derecha",
+      "Manga corta izquierda",
+      "Manga larga derecha",
+      "Manga larga izquierda",
+      "Tapa costura"
+     ],
+     "piezas_exactas": [
+      "Cuello",
+      "Dorso 2",
+      "Frente 1",
+      "…"
+     ]
+    }
+   ]
+  },
+  "version": 1951
+ }
+}

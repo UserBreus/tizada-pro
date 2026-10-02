@@ -304,7 +304,14 @@ def comparar(path, extras=()):
             alta_paq.pop("_dxf", None)
             alta_paq.pop("_dxf_bytes", None)
             d += diferencias(_normal(py["alta"]), _normal(alta_paq), "paquete.alta")
-            esperado = {"auto": py["detectar"], "todas": py["todas"]}
+            # `todas` viaja con `formato` (anidado/extendido): lo agrega el navegador y, si un paquete
+            # viejo no lo trae, el servidor (`_paquete_molde_aplicar`). El contrato no lo esperaba
+            # desde que se agregó (MAPA 529-571) y daba «claves distintas ['formato']».
+            _todas = py["todas"]
+            if "error" not in _todas:
+                import variantes_molde as VM
+                _todas = dict(_todas, formato=VM.analizar(copia).get("formato") or "extendido")
+            esperado = {"auto": py["detectar"], "todas": _todas}
             for t, v in py["por_talle"].items():
                 esperado[t] = v
             esperado = {k: v for k, v in esperado.items() if "error" not in v}

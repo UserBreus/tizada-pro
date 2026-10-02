@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tizadapro/esquemas/pedido.schema.json",
+  "title": "TIZADA PRO — pedido.json (tizadapro.pedido/1)",
+  "description": "El archivo pedido.json que va en la raíz del paquete .zip. Este esquema revisa la FORMA; que los valores existan (variables, telas, talles, opciones) lo revisa TIZADA con POST /pedidos/validar.",
+  "type": "object",
+  "required": ["formato", "referencia", "disenos", "planilla"],
+  "additionalProperties": false,
+  "properties": {
+    "formato": { "const": "tizadapro.pedido/1" },
+    "referencia": {
+      "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "El número del pedido en el otro sistema. Único. Carpeta en Drive y prefijo de cada archivo."
+    },
+    "pedido_externo": { "type": "object", "description": "Libre. Vuelve TAL CUAL en el resultado." },
+    "cliente": { "type": "string" },
+    "aviso_url": { "type": "string", "format": "uri", "description": "Sólo vale si es del mismo sitio que la configurada en Integraciones." },
+    "reemplazar": { "type": "boolean", "description": "true para rehacer un pedido ya listo con la misma referencia." },
+    "opciones": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "si_falta_tipografia": { "enum": ["rechazar", "predeterminada"] },
+        "si_texto_no_entra": { "enum": ["achicar", "rechazar"] },
+        "si_piezas_en_blanco": { "enum": ["rechazar", "seguir"] },
+        "perfil_color": { "type": "string", "description": "Nombre del perfil .icc a forzar." },
+        "carpeta": { "type": "string", "description": "Subcarpeta de Drive (puede tener niveles: 2026-10/OV-123)." }
+      }
+    },
+    "mesas": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "modo": { "enum": ["normal", "una_por_fila", "por_talles"] },
+        "grupos": { "type": "array", "items": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "description": "Sólo con modo por_talles: los talles de cada grupo comparten mesa." }
+      }
+    },
+    "disenos": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["nombre", "moldes"], "additionalProperties": false,
+        "properties": {
+          "nombre": { "type": "string", "minLength": 1, "description": "JUGADOR, GOLERO… Único. Es el valor de la columna diseno de la planilla." },
+          "arte": { "$ref": "#/$defs/rutaArte", "description": "Arte para todas las variables de este diseño que no traigan el suyo." },
+          "tipografias": { "type": "array", "items": { "$ref": "#/$defs/rutaFuente" } },
+          "tipografia_por_campo": { "type": "object", "additionalProperties": { "type": "string" },
+                                    "description": "{\"numero\": \"Anton Regular\"}: forzar una tipografía del catálogo para un campo." },
+          "moldes": {
+            "type": "array", "minItems": 1,
+            "description": "Las VARIABLES elegidas para el diseño (una por prenda).",
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["tela"],
+              "anyOf": [ { "required": ["variable"] }, { "required": ["molde"] } ],
+              "properties": {
+                "variable": { "type": "string", "description": "Clave v_… (de GET /variables) o el nombre de la variable." },
+                "molde": { "type": "string", "description": "Opcional: código prod_… (sólo si la variable va por un nombre que está en varias prendas)." },
+                "arte": { "$ref": "#/$defs/rutaArte" },
+                "tela": { "type": "string", "description": "id de la tela principal (GET /telas)." },
+                "telas_por_pieza": { "type": "object", "additionalProperties": { "type": "string" },
+                                     "description": "{\"Cuello\": \"486\"}: pieza (nombre genérico) → id de tela." },
+                "piezas_apagadas": { "type": "array", "items": { "type": "string" } },
+                "editables": {
+                  "type": "object",
+                  "description": "Objeto editable del arte (capa «Editable X» → X) → cómo se aplica.",
+                  "additionalProperties": {
+                    "oneOf": [
+                      { "enum": ["sublimado", "tpu", "bordado", "dtf"] },
+                      { "type": "object", "required": ["proceso"], "additionalProperties": false,
+                        "properties": { "proceso": { "enum": ["sublimado", "tpu", "bordado", "dtf"] }, "cruz": { "type": "boolean" } } }
+                    ]
+                  }
+                },
+                "tipografias": { "type": "array", "items": { "$ref": "#/$defs/rutaFuente" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "planilla": {
+      "type": "array", "minItems": 1,
+      "description": "Una fila por prenda. Las claves son los ids de columna de la planilla de la prenda (GET /moldes/{codigo} → planilla.columnas) + «diseno».",
+      "items": {
+        "type": "object",
+        "properties": {
+          "diseno": { "type": "string" },
+          "cantidad": { "type": ["integer", "string"] }
+        },
+        "additionalProperties": { "type": ["string", "number"] }
+      }
+    }
+  },
+  "$defs": {
+    "rutaArte": { "type": "string", "pattern": "(?i)\\.(ai|pdf)$", "description": "Ruta dentro del .zip." },
+    "rutaFuente": { "type": "string", "pattern": "(?i)\\.(ttf|otf)$", "description": "Ruta dentro del .zip." }
+  }
+}

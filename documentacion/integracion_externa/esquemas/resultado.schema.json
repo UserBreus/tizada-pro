@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tizadapro/esquemas/resultado.schema.json",
+  "title": "TIZADA PRO — estado del pedido (GET /pedidos/{ref} y cuerpo del aviso)",
+  "type": "object",
+  "required": ["referencia", "estado"],
+  "properties": {
+    "referencia": { "type": "string" },
+    "estado": { "enum": ["en_cola", "procesando", "listo", "rechazado", "error", "cancelado"] },
+    "etapa": { "type": ["string", "null"], "description": "Texto para mostrar. Si trae «(NN %)», es el avance." },
+    "recibido": { "type": ["string", "null"] },
+    "actualizado": { "type": ["string", "null"] },
+    "pedido_externo": { "description": "El del pedido, tal cual." },
+    "alarmas": { "type": "array", "items": { "$ref": "#/$defs/alarma" } },
+    "resultado": { "$ref": "#/$defs/resultado", "description": "Sólo cuando estado = listo." }
+  },
+  "$defs": {
+    "alarma": {
+      "type": "object", "required": ["codigo", "frena"],
+      "properties": {
+        "codigo": { "type": "string", "description": "Ver GET /alarmas." },
+        "frena": { "type": "boolean" },
+        "etapa": { "enum": ["datos", "arte", "tizada"] },
+        "mensaje": { "type": "string" },
+        "donde": { "type": "object", "properties": { "campo": { "type": "string" }, "fila": { "type": "integer" } } }
+      }
+    },
+    "archivo": {
+      "type": "object", "required": ["tipo", "nombre", "bytes", "sha256", "descarga"],
+      "properties": {
+        "tipo": { "enum": ["tizada", "ficha"] },
+        "nombre": { "type": "string" },
+        "bytes": { "type": "integer" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "descarga": { "type": "string", "description": "Ruta de la API para bajarlo de TIZADA (GET, con la llave)." },
+        "drive_id": { "type": "string" }, "enlace": { "type": "string" }, "carpeta_id": { "type": "string" },
+        "tela": { "type": ["string", "null"] }, "mesas": { "type": ["integer", "null"] },
+        "ancho_cm": { "type": ["number", "null"] }, "largo_cm": { "type": ["array", "null"], "items": { "type": "number" } },
+        "consumo_cm": { "type": ["number", "null"] }, "aprovechamiento": { "type": ["number", "null"] },
+        "moldes": { "type": ["array", "null"], "items": { "type": "string" } }
+      }
+    },
+    "resultado": {
+      "type": "object", "required": ["formato", "referencia", "estado", "archivos", "destino"],
+      "properties": {
+        "formato": { "const": "tizadapro.resultado/1" },
+        "referencia": { "type": "string" },
+        "pedido_externo": {},
+        "cliente": { "type": ["string", "null"] },
+        "estado": { "const": "listo" },
+        "generado": { "type": "string" },
+        "segundos": { "type": ["number", "null"] },
+        "tizada_id": {},
+        "destino": {
+          "type": "object", "required": ["tipo"],
+          "properties": {
+            "tipo": { "enum": ["drive", "local"] },
+            "carpeta_id": { "type": "string" }, "carpeta_enlace": { "type": "string" }, "carpeta_nombre": { "type": "string" },
+            "carpeta_fichas_id": { "type": "string" }, "carpeta_fichas_enlace": { "type": "string" }
+          }
+        },
+        "archivos": { "type": "array", "items": { "$ref": "#/$defs/archivo" } },
+        "resumen": { "type": "object" },
+        "disenos": {
+          "type": "array",
+          "items": { "type": "object", "properties": {
+            "nombre": { "type": "string" },
+            "moldes": { "type": "array", "items": { "type": "object", "properties": {
+              "variable": { "type": ["string", "null"] }, "variable_nombre": { "type": ["string", "null"] },
+              "molde": { "type": "string" }, "nombre": { "type": "string" },
+              "tela": { "type": ["string", "null"] }, "tela_id": { "type": ["string", "null"] },
+              "no_sublimado": { "type": "object", "additionalProperties": { "type": "string" } } } } } } }
+        },
+        "alarmas": { "type": "array", "items": { "$ref": "#/$defs/alarma" } }
+      }
+    }
+  }
+}

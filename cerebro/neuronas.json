@@ -1,6 +1,12 @@
 {
   "_que_es": "El CEREBRO de TIZADA PRO. Cada NEURONA es una parte del sistema que ya funciona: dónde vive (anclas = nombres que tienen que seguir existiendo en el código), qué reglas no se pueden romper, qué falló antes (cicatrices) y con qué otras partes está conectada (sinapsis). `py cerebro/cerebro.py` la usa para avisar ANTES de romper algo. Se mantiene a mano: una función nueva = una neurona nueva; una regla nueva = una línea en `reglas`; una falla arreglada = una línea en `cicatrices`.",
-  "compartidos": ["frontend/src/App.jsx", "servidor.py", "MAPA_DEL_SISTEMA.md", "MANUAL_HERRAMIENTAS.md", "frontend/src/diccionario.js"],
+  "compartidos": [
+    "frontend/src/App.jsx",
+    "servidor.py",
+    "MAPA_DEL_SISTEMA.md",
+    "MANUAL_HERRAMIENTAS.md",
+    "frontend/src/diccionario.js"
+  ],
   "leyes": [
     "El arte se ve igual que la tizada (vectorial, pixel-idéntico).",
     "SIEMPRE el vector original: nunca rasterizar ni tocar el archivo del usuario.",
@@ -16,16 +22,47 @@
       "id": "molde-en-pc",
       "nombre": "Molde con diseño vive en la PC (cáscara)",
       "que": "El molde con diseño del pedido no se guarda en el servidor: sube una cáscara (PDF sin dibujo) + SHA-1; el archivo real y las páginas por talle quedan en IndexedDB con sello `pc,<sha1>,<rev>`.",
-      "archivos": ["frontend/src/motor/prepararMolde.js", "frontend/src/motor/paquete/armar.js", "piezas_con_diseno.py"],
-      "anclas": [
-        ["servidor.py", "def _en_pc("],
-        ["servidor.py", "_MSJ_EN_PC"],
-        ["frontend/src/App.jsx", "_adjuntarMoldeEnPc"],
-        ["frontend/src/motor/cache.js", "export async function soltarMoldesEnPc"],
-        ["frontend/src/motor/cache.js", "export async function soltarPaginasEnPc"],
-        ["piezas_con_diseno.py", "EN_PC"]
+      "archivos": [
+        "frontend/src/motor/prepararMolde.js",
+        "frontend/src/motor/paquete/armar.js",
+        "piezas_con_diseno.py"
       ],
-      "palabras": ["en_pc", "enPc", "cascara", "cáscara", "|pc,", "soltarMoldesEnPc", "soltarPaginasEnPc", "molde.en_pc.json"],
+      "anclas": [
+        [
+          "servidor.py",
+          "def _en_pc("
+        ],
+        [
+          "servidor.py",
+          "_MSJ_EN_PC"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_adjuntarMoldeEnPc"
+        ],
+        [
+          "frontend/src/motor/cache.js",
+          "export async function soltarMoldesEnPc"
+        ],
+        [
+          "frontend/src/motor/cache.js",
+          "export async function soltarPaginasEnPc"
+        ],
+        [
+          "piezas_con_diseno.py",
+          "EN_PC"
+        ]
+      ],
+      "palabras": [
+        "en_pc",
+        "enPc",
+        "cascara",
+        "cáscara",
+        "|pc,",
+        "soltarMoldesEnPc",
+        "soltarPaginasEnPc",
+        "molde.en_pc.json"
+      ],
       "reglas": [
         "Nunca desplegar/rehacer páginas en el servidor sobre la cáscara (no hay dibujo): 409 con _MSJ_EN_PC.",
         "Las claves `|pc,` de IndexedDB SÓLO las borran soltarMoldesEnPc / soltarPaginasEnPc; ninguna otra limpieza.",
@@ -37,31 +74,68 @@
         "MAPA 585: recargar la página NO pierde el molde (IndexedDB persiste); no contradecir esto al usuario."
       ],
       "contratos": [],
-      "mapa": [584, 585, 590],
+      "mapa": [
+        584,
+        585,
+        590
+      ],
       "memoria": "molde-con-diseno-no-se-guarda.md",
-      "conexiones": ["moldes-en-la-pc", "camino-b", "generar-navegador", "lista-moldes"]
+      "conexiones": [
+        "moldes-en-la-pc",
+        "camino-b",
+        "generar-navegador",
+        "lista-moldes"
+      ]
     },
     {
       "id": "moldes-en-la-pc",
       "nombre": "Todos los moldes en la PC (descarga de fondo)",
       "que": "Al entrar se bajan de fondo los moldes a IndexedDB por versión; `claveDe` es la ÚNICA fuente de claves.",
-      "archivos": ["frontend/src/motor/bajarMoldes.js", "frontend/src/motor/cache.js"],
-      "anclas": [
-        ["frontend/src/motor/bajarMoldes.js", "bajarTodosLosMoldes"],
-        ["servidor.py", "/api/moldes/para_bajar"],
-        ["frontend/src/motor/cache.js", "claveDe"]
+      "archivos": [
+        "frontend/src/motor/bajarMoldes.js",
+        "frontend/src/motor/cache.js"
       ],
-      "palabras": ["para_bajar", "bajarTodosLosMoldes", "claveDe", "guardarCache", "leerCache", "borrarCache"],
+      "anclas": [
+        [
+          "frontend/src/motor/bajarMoldes.js",
+          "bajarTodosLosMoldes"
+        ],
+        [
+          "servidor.py",
+          "/api/moldes/para_bajar"
+        ],
+        [
+          "frontend/src/motor/cache.js",
+          "claveDe"
+        ]
+      ],
+      "palabras": [
+        "para_bajar",
+        "bajarTodosLosMoldes",
+        "claveDe",
+        "guardarCache",
+        "leerCache",
+        "borrarCache"
+      ],
       "reglas": [
         "Las claves se arman SÓLO con claveDe (cache.js); una clave armada a mano no la encuentra el motor.",
         "La limpieza de versiones viejas nunca toca claves `|pc,`.",
         "guardarCache arma el Blob ANTES de cualquier await (el que llama transfiere el buffer)."
       ],
-      "cicatrices": ["MAPA 529: sello _sello_archivo en µs; un sello distinto entre servidor y PC = se baja dos veces o no se encuentra."],
+      "cicatrices": [
+        "MAPA 529: sello _sello_archivo en µs; un sello distinto entre servidor y PC = se baja dos veces o no se encuentra."
+      ],
       "contratos": [],
-      "mapa": [529, 590],
+      "mapa": [
+        529,
+        590
+      ],
       "memoria": "moldes-en-la-pc.md",
-      "conexiones": ["molde-en-pc", "generar-navegador", "vista-mesas"]
+      "conexiones": [
+        "molde-en-pc",
+        "generar-navegador",
+        "vista-mesas"
+      ]
     },
     {
       "id": "lista-moldes",
@@ -69,11 +143,26 @@
       "que": "productosCat se recarga en ráfagas; las respuestas viejas se descartan y lo marcado en pantalla que se está guardando se sostiene.",
       "archivos": [],
       "anclas": [
-        ["frontend/src/App.jsx", "_prodSeq"],
-        ["frontend/src/App.jsx", "_talleLocal"],
-        ["frontend/src/App.jsx", "const fetchProductos"]
+        [
+          "frontend/src/App.jsx",
+          "_prodSeq"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_talleLocal"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const fetchProductos"
+        ]
       ],
-      "palabras": ["fetchProductos", "setProductosCat", "_prodSeq", "_talleLocal", "productosCat"],
+      "palabras": [
+        "fetchProductos",
+        "setProductosCat",
+        "_prodSeq",
+        "_talleLocal",
+        "productosCat"
+      ],
       "reglas": [
         "Una respuesta de /api/productos más vieja que la ya aplicada se descarta (_prodSeq).",
         "Todo marcado optimista sobre productosCat necesita sostenerse hasta una lista pedida DESPUÉS del guardado (patrón _talleLocal).",
@@ -84,9 +173,16 @@
         "MAPA 591: 404 de prod_default/motor_b al abrir el programa."
       ],
       "contratos": [],
-      "mapa": [582, 589, 591],
+      "mapa": [
+        582,
+        589,
+        591
+      ],
       "memoria": "columna-talle-por-molde.md",
-      "conexiones": ["columna-talle", "molde-en-pc"]
+      "conexiones": [
+        "columna-talle",
+        "molde-en-pc"
+      ]
     },
     {
       "id": "columna-talle",
@@ -94,52 +190,133 @@
       "que": "Con «Talle» y «Talle short» en la misma planilla, cada molde elige de qué columna toma el talle (talle_elegido = lo decidió alguien).",
       "archivos": [],
       "anclas": [
-        ["frontend/src/App.jsx", "function SelectorColumnaTalle"],
-        ["frontend/src/App.jsx", "ponerColumnaTalle"],
-        ["servidor.py", "/api/productos/config_mapeo"]
+        [
+          "frontend/src/App.jsx",
+          "function SelectorColumnaTalle"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "ponerColumnaTalle"
+        ],
+        [
+          "servidor.py",
+          "/api/productos/config_mapeo"
+        ]
       ],
-      "palabras": ["SelectorColumnaTalle", "ponerColumnaTalle", "talle_elegido", "config_mapeo", "colDeMolde"],
-      "reglas": ["config_mapeo hace MERGE del mapeo, nunca lo pisa entero.", "Sin talle_elegido no se puede distinguir «eligió Talle» de «nadie tocó»."],
-      "cicatrices": ["MAPA 582: el botón tardaba 2-7 s por conexiones a la base; 589: se desmarcaba por recargas."],
-      "contratos": ["frontend/verificar_columna_talle.mjs", "verificar_talle_por_molde.py"],
-      "mapa": [582, 589],
+      "palabras": [
+        "SelectorColumnaTalle",
+        "ponerColumnaTalle",
+        "talle_elegido",
+        "config_mapeo",
+        "colDeMolde"
+      ],
+      "reglas": [
+        "config_mapeo hace MERGE del mapeo, nunca lo pisa entero.",
+        "Sin talle_elegido no se puede distinguir «eligió Talle» de «nadie tocó»."
+      ],
+      "cicatrices": [
+        "MAPA 582: el botón tardaba 2-7 s por conexiones a la base; 589: se desmarcaba por recargas."
+      ],
+      "contratos": [
+        "frontend/verificar_columna_talle.mjs",
+        "verificar_talle_por_molde.py"
+      ],
+      "mapa": [
+        582,
+        589
+      ],
       "memoria": "columna-talle-por-molde.md",
-      "conexiones": ["lista-moldes", "planilla"]
+      "conexiones": [
+        "lista-moldes",
+        "planilla"
+      ]
     },
     {
       "id": "calculos-navegador",
       "nombre": "El servidor no calcula: se lo pide al navegador",
       "que": "Una ruta que necesita un cálculo pesado lo pide ({calcular}); el gancho de fetch (calculos.js) lo hace en la PC y repite el pedido.",
-      "archivos": ["frontend/src/motor/calculos.js"],
-      "anclas": [
-        ["servidor.py", "def _resp_calcular"],
-        ["servidor.py", "@app.errorhandler(_FaltaCalculo)"],
-        ["frontend/src/motor/calculos.js", "_avisarQueCalcula"],
-        ["frontend/src/motor/calculos.js", "export function instalarCalculos"]
+      "archivos": [
+        "frontend/src/motor/calculos.js"
       ],
-      "palabras": ["_FaltaCalculo", "_calcular(", "_resp_calcular", "X-Calcular", "X-Calculos", "instalarCalculos", "calcular"],
+      "anclas": [
+        [
+          "servidor.py",
+          "def _resp_calcular"
+        ],
+        [
+          "servidor.py",
+          "@app.errorhandler(_FaltaCalculo)"
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "_avisarQueCalcula"
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "export function instalarCalculos"
+        ]
+      ],
+      "palabras": [
+        "_FaltaCalculo",
+        "_calcular(",
+        "_resp_calcular",
+        "X-Calcular",
+        "X-Calculos",
+        "instalarCalculos",
+        "calcular"
+      ],
       "reglas": [
         "Con `X-Calculos: 200` se contesta 200 + `X-Calcular: 1` + no-store; sin la cabecera, 428 (otros clientes).",
         "La cabecera X-Calculos SÓLO a la misma origen (a otro host dispara preflight de CORS: rompe el puente de Illustrator).",
         "Sin tope de vueltas: lo que corta es que el mismo cálculo se pida 3 veces (bucle)."
       ],
-      "cicatrices": ["MAPA 551: tope de 25 vueltas cortaba guías con muchos talles.", "MAPA 591: 428 rojos en la consola."],
+      "cicatrices": [
+        "MAPA 551: tope de 25 vueltas cortaba guías con muchos talles.",
+        "MAPA 591: 428 rojos en la consola."
+      ],
       "contratos": [],
-      "mapa": [528, 551, 591],
+      "mapa": [
+        528,
+        551,
+        591
+      ],
       "memoria": "servidor-calcula-pendiente.md",
-      "conexiones": ["illustrator", "generar-navegador"]
+      "conexiones": [
+        "illustrator",
+        "generar-navegador"
+      ]
     },
     {
       "id": "pasos-pedido",
       "nombre": "Pasos del pedido según el recorrido",
       "que": "Base: Diseño → Moldes → Arte → Planilla → Tizadas. Molde con diseño: Diseño → Piezas → Planilla → Tizadas. La elección «¿Cómo vas a armar este trabajo?» no muestra pasos.",
-      "archivos": ["frontend/verificar_pasos_pedido.mjs"],
-      "anclas": [
-        ["frontend/src/App.jsx", "const pasosPedido"],
-        ["frontend/src/App.jsx", "const _nomPaso"],
-        ["frontend/src/App.jsx", "const _flujoB"]
+      "archivos": [
+        "frontend/verificar_pasos_pedido.mjs"
       ],
-      "palabras": ["pasosPedido", "_nomPaso", "_flujoB", "pedidoPaso", "setPedidoPaso", "BarraPaso", "BtnVolver", "BtnSiguiente"],
+      "anclas": [
+        [
+          "frontend/src/App.jsx",
+          "const pasosPedido"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _nomPaso"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _flujoB"
+        ]
+      ],
+      "palabras": [
+        "pasosPedido",
+        "_nomPaso",
+        "_flujoB",
+        "pedidoPaso",
+        "setPedidoPaso",
+        "BarraPaso",
+        "BtnVolver",
+        "BtnSiguiente"
+      ],
       "reglas": [
         "Todo texto que nombre un paso usa _nomPaso(k); el paso `arte` se llama «Piezas» en el molde con diseño (NO «Nombre de molde»).",
         "El molde con diseño nunca manda al paso «Moldes» (no existe en su recorrido).",
@@ -150,10 +327,18 @@
         "MAPA 587-588: el chip salía en Diseño; el paso se llamó «Nombre de molde» y el usuario lo corrigió.",
         "MAPA 594: «Al arte →», «5 · Tizadas» fijo y chips «0/1» en B se veían incoherentes con el recorrido."
       ],
-      "contratos": ["frontend/verificar_pasos_pedido.mjs"],
-      "mapa": [587, 588],
+      "contratos": [
+        "frontend/verificar_pasos_pedido.mjs"
+      ],
+      "mapa": [
+        587,
+        588
+      ],
       "memoria": "molde-con-diseno.md",
-      "conexiones": ["cfg-guardada", "camino-b"]
+      "conexiones": [
+        "cfg-guardada",
+        "camino-b"
+      ]
     },
     {
       "id": "cfg-guardada",
@@ -161,17 +346,44 @@
       "que": "Etiqueta pieza por pieza y nombrado se guardan con un nombre; se aplican a uno, varios o todos los moldes del pedido desde el chip de la cabecera.",
       "archivos": [],
       "anclas": [
-        ["frontend/src/App.jsx", "avisoCfgLote"],
-        ["servidor.py", "/api/molde/config/aplicar"],
-        ["servidor.py", "/api/molde/config/lista"]
+        [
+          "frontend/src/App.jsx",
+          "avisoCfgLote"
+        ],
+        [
+          "servidor.py",
+          "/api/molde/config/aplicar"
+        ],
+        [
+          "servidor.py",
+          "/api/molde/config/lista"
+        ]
       ],
-      "palabras": ["avisoCfgLote", "cfg-lote", "config/aplicar", "config/lista", "configuración guardada"],
-      "reglas": ["Sólo se ofrecen configuraciones del MISMO molde (calzan por piezas).", "Aplicar no pisa lo marcado a mano."],
+      "palabras": [
+        "avisoCfgLote",
+        "cfg-lote",
+        "config/aplicar",
+        "config/lista",
+        "configuración guardada"
+      ],
+      "reglas": [
+        "Sólo se ofrecen configuraciones del MISMO molde (calzan por piezas).",
+        "Aplicar no pisa lo marcado a mano."
+      ],
       "cicatrices": [],
-      "contratos": ["verificar_config_guardada.py", "frontend/verificar_pasos_pedido.mjs"],
-      "mapa": [586, 587],
+      "contratos": [
+        "verificar_config_guardada.py",
+        "frontend/verificar_pasos_pedido.mjs"
+      ],
+      "mapa": [
+        586,
+        587
+      ],
       "memoria": "config-molde-guardada.md",
-      "conexiones": ["pasos-pedido", "camino-b"]
+      "conexiones": [
+        "pasos-pedido",
+        "camino-b"
+      ]
     },
     {
       "id": "telas",
@@ -179,39 +391,88 @@
       "que": "Las telas vienen de la API del WMS (00 hs + botón; las que no vienen quedan de baja). En el pedido: tela PRINCIPAL por prenda + EXCEPCIONES por pieza.",
       "archivos": [],
       "anclas": [
-        ["servidor.py", "def _telas_actualizar"],
-        ["frontend/src/App.jsx", "telaPrincipalPed"],
-        ["servidor.py", "tela_principal"]
+        [
+          "servidor.py",
+          "def _telas_actualizar"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "telaPrincipalPed"
+        ],
+        [
+          "servidor.py",
+          "tela_principal"
+        ]
       ],
-      "palabras": ["telaPrincipalPed", "telaPorPieza", "_principalDe", "tela_principal", "_asig_de", "_telas_actualizar", "telasFaltantesDet", "aplicarTela"],
+      "palabras": [
+        "telaPrincipalPed",
+        "telaPorPieza",
+        "_principalDe",
+        "tela_principal",
+        "_asig_de",
+        "_telas_actualizar",
+        "telasFaltantesDet",
+        "aplicarTela"
+      ],
       "reglas": [
         "config_externo.json (api-key) NUNCA a git ni a la pantalla.",
         "Cambiar la principal no pisa excepciones.",
         "_asig_de va con el slug del diseño del PEDIDO, no el del arte de reemplazo.",
         "Una tela de baja no se borra ni pierde su mesa."
       ],
-      "cicatrices": ["MAPA 587: _asig_de(dslug) con el slug del arte de reemplazo perdía las telas elegidas."],
-      "contratos": ["verificar_telas_margen.py"],
-      "mapa": [575, 587],
+      "cicatrices": [
+        "MAPA 587: _asig_de(dslug) con el slug del arte de reemplazo perdía las telas elegidas."
+      ],
+      "contratos": [
+        "verificar_telas_margen.py"
+      ],
+      "mapa": [
+        575,
+        587
+      ],
       "memoria": "telas-registro-grupos-pedido.md",
-      "conexiones": ["plan-pedido", "planilla"]
+      "conexiones": [
+        "plan-pedido",
+        "planilla"
+      ]
     },
     {
       "id": "piezas-fuera",
       "nombre": "Piezas a imprimir (apagar piezas)",
       "que": "En el paso Arte/Piezas se apagan piezas por genérico; la apagada no sale en la tizada ni en el visor.",
-      "archivos": ["frontend/src/motor/arte/prendas.js"],
-      "anclas": [
-        ["servidor.py", "def _sin_fuera"],
-        ["frontend/src/App.jsx", "piezasFuera"]
+      "archivos": [
+        "frontend/src/motor/arte/prendas.js"
       ],
-      "palabras": ["piezasFuera", "piezas_fuera", "_sin_fuera", "piezasTodasFuera"],
-      "reglas": ["Todo lo que recorra piezas (motor, previews, ficha, conteos) pasa por _sin_fuera / piezasDe con piezas_fuera."],
+      "anclas": [
+        [
+          "servidor.py",
+          "def _sin_fuera"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "piezasFuera"
+        ]
+      ],
+      "palabras": [
+        "piezasFuera",
+        "piezas_fuera",
+        "_sin_fuera",
+        "piezasTodasFuera"
+      ],
+      "reglas": [
+        "Todo lo que recorra piezas (motor, previews, ficha, conteos) pasa por _sin_fuera / piezasDe con piezas_fuera."
+      ],
       "cicatrices": [],
       "contratos": [],
-      "mapa": [577],
+      "mapa": [
+        577
+      ],
       "memoria": "piezas-a-imprimir.md",
-      "conexiones": ["repo", "plan-pedido", "generar-navegador"]
+      "conexiones": [
+        "repo",
+        "plan-pedido",
+        "generar-navegador"
+      ]
     },
     {
       "id": "repo",
@@ -219,16 +480,35 @@
       "que": "Cada fila elige tocando qué piezas hace; vacío = todas. __repo → piezas_solo.",
       "archivos": [],
       "anclas": [
-        ["servidor.py", "__repo"],
-        ["frontend/src/App.jsx", "__repo"]
+        [
+          "servidor.py",
+          "__repo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "__repo"
+        ]
       ],
-      "palabras": ["__repo", "piezas_solo", "repoOn", "planilla-repo"],
-      "reglas": ["La guía de la ficha NO se achica por el repo (piezas_solo: null en la guía)."],
+      "palabras": [
+        "__repo",
+        "piezas_solo",
+        "repoOn",
+        "planilla-repo"
+      ],
+      "reglas": [
+        "La guía de la ficha NO se achica por el repo (piezas_solo: null en la guía)."
+      ],
       "cicatrices": [],
       "contratos": [],
-      "mapa": [578],
+      "mapa": [
+        578
+      ],
       "memoria": "repo-reposicion.md",
-      "conexiones": ["planilla", "manga-toggle", "piezas-fuera"]
+      "conexiones": [
+        "planilla",
+        "manga-toggle",
+        "piezas-fuera"
+      ]
     },
     {
       "id": "manga-toggle",
@@ -236,20 +516,43 @@
       "que": "La planilla elige sola la opción que la prenda tiene, oculta la columna si no aplica; con Repo ofrece «Corta + Larga» sólo si las piezas elegidas traen las dos.",
       "archivos": [],
       "anclas": [
-        ["servidor.py", "def _toggles_disponibles"],
-        ["servidor.py", "Corta + Larga"]
+        [
+          "servidor.py",
+          "def _toggles_disponibles"
+        ],
+        [
+          "servidor.py",
+          "Corta + Larga"
+        ]
       ],
-      "palabras": ["_toggles_disponibles", "Corta + Larga", "manga", "toggle", "elegidas"],
+      "palabras": [
+        "_toggles_disponibles",
+        "Corta + Larga",
+        "manga",
+        "toggle",
+        "elegidas"
+      ],
       "reglas": [
         "Nunca trabar la generación por una manga que se puede elegir sola.",
         "«Hay filas sin elegir manga» no es un aviso si el default es visible.",
         "Las opciones de una columna de botones se reparten el ancho en partes iguales: el ancho de la columna = la opción más larga × cantidad (no la suma)."
       ],
-      "cicatrices": ["MAPA 580: el aviso de manga salía con manga corta elegida.", "MAPA 595: «Corta + Larga» se veía cortado porque el ancho sumaba los textos."],
-      "contratos": ["verificar_traba_pedido.py"],
-      "mapa": [580],
+      "cicatrices": [
+        "MAPA 580: el aviso de manga salía con manga corta elegida.",
+        "MAPA 595: «Corta + Larga» se veía cortado porque el ancho sumaba los textos."
+      ],
+      "contratos": [
+        "verificar_traba_pedido.py"
+      ],
+      "mapa": [
+        580
+      ],
       "memoria": "toggle-de-pieza-generalizado.md",
-      "conexiones": ["repo", "planilla", "plan-pedido"]
+      "conexiones": [
+        "repo",
+        "planilla",
+        "plan-pedido"
+      ]
     },
     {
       "id": "copia",
@@ -257,58 +560,138 @@
       "que": "Con la columna Cantidad, «Copia» arma una mesa por fila y la cantidad queda como copias (metadato).",
       "archivos": [],
       "anclas": [
-        ["nesting_contorno.py", "def anidar_por_fila"],
-        ["frontend/src/motor/nesting/contorno.js", "anidarPorFila"]
+        [
+          "nesting_contorno.py",
+          "def anidar_por_fila"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "anidarPorFila"
+        ]
       ],
-      "palabras": ["anidarPorFila", "anidar_por_fila", "_copias", "copiaActivaRef", "hoja.mesas", "copia"],
-      "reglas": ["Paridad de motores: anidar_por_fila (py) == anidarPorFila (js)."],
+      "palabras": [
+        "anidarPorFila",
+        "anidar_por_fila",
+        "_copias",
+        "copiaActivaRef",
+        "hoja.mesas",
+        "copia"
+      ],
+      "reglas": [
+        "Paridad de motores: anidar_por_fila (py) == anidarPorFila (js)."
+      ],
       "cicatrices": [],
-      "contratos": ["verificar_cantidad.py"],
-      "mapa": [581],
+      "contratos": [
+        "verificar_cantidad.py"
+      ],
+      "mapa": [
+        581
+      ],
       "memoria": "copia-mesa-por-fila.md",
-      "conexiones": ["nesting", "planilla", "talles-mesa"]
+      "conexiones": [
+        "nesting",
+        "planilla",
+        "talles-mesa"
+      ]
     },
     {
       "id": "nesting",
       "nombre": "Nesting por contorno (dos motores IDÉNTICOS)",
       "que": "nesting_contorno.py y nesting/contorno.js tienen que dar las mismas colocaciones; compiten modo libre y acotado y gana el menor consumo.",
-      "archivos": ["nesting_contorno.py", "frontend/src/motor/nesting/contorno.js"],
-      "anclas": [
-        ["nesting_contorno.py", "def _anidar_estrategia"],
-        ["frontend/src/motor/nesting/contorno.js", "function anidarEstrategia"]
+      "archivos": [
+        "nesting_contorno.py",
+        "frontend/src/motor/nesting/contorno.js"
       ],
-      "palabras": ["_anidar_estrategia", "anidarEstrategia", "anidar_contorno", "anidarContorno", "solo_ang", "soloAng", "acotado", "repuesto_todos"],
+      "anclas": [
+        [
+          "nesting_contorno.py",
+          "def _anidar_estrategia"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "function anidarEstrategia"
+        ]
+      ],
+      "palabras": [
+        "_anidar_estrategia",
+        "anidarEstrategia",
+        "anidar_contorno",
+        "anidarContorno",
+        "solo_ang",
+        "soloAng",
+        "acotado",
+        "repuesto_todos"
+      ],
       "reglas": [
         "Todo cambio va en LOS DOS motores y se mide la paridad (mismas colocaciones).",
         "Medir mesa chica Y pedido grande antes de dar un arreglo por bueno."
       ],
-      "cicatrices": ["MAPA 579: la primera versión (sólo acotado) arreglaba la mesa chica y empeoraba los pedidos grandes (25,74 → 27,53 m)."],
+      "cicatrices": [
+        "MAPA 579: la primera versión (sólo acotado) arreglaba la mesa chica y empeoraba los pedidos grandes (25,74 → 27,53 m)."
+      ],
       "contratos": [],
-      "mapa": [158, 579],
+      "mapa": [
+        158,
+        579
+      ],
       "memoria": "nesting-aprovechamiento.md",
-      "conexiones": ["copia", "generar-navegador"]
+      "conexiones": [
+        "copia",
+        "generar-navegador"
+      ]
     },
     {
       "id": "base-datos",
       "nombre": "MSSQL: una conexión de lectura por pedido web",
       "que": "Las lecturas de un pedido web comparten UNA conexión autocommit (abierta en la primera lectura, cerrada en teardown); las escrituras tienen la suya.",
-      "archivos": ["db.py"],
-      "anclas": [
-        ["db.py", "def abrir_compartida"],
-        ["servidor.py", "_abrir_lectura_compartida"],
-        ["servidor.py", "def _rev_registro"]
+      "archivos": [
+        "db.py"
       ],
-      "palabras": ["abrir_compartida", "cerrar_compartida", "_cursor_compartido", "_rev_registro", "pyodbc", "db."],
+      "anclas": [
+        [
+          "db.py",
+          "def abrir_compartida"
+        ],
+        [
+          "servidor.py",
+          "_abrir_lectura_compartida"
+        ],
+        [
+          "servidor.py",
+          "def _rev_registro"
+        ]
+      ],
+      "palabras": [
+        "abrir_compartida",
+        "cerrar_compartida",
+        "_cursor_compartido",
+        "_rev_registro",
+        "pyodbc",
+        "db."
+      ],
       "reglas": [
         "Un test NUNCA toca MSSQL (TIZADA_DATOS no aísla la base: reemplazar el módulo db).",
         "Reciclado de pyodbc apagado a propósito (MAPA 549): no prenderlo para «acelerar».",
         "Para MODIFICAR el catálogo: _cargar_catalogo_para_editar(), nunca _cargar_catalogo()."
       ],
-      "cicatrices": ["MAPA 582: cada GET /api/productos abría 14 conexiones (0,43 s c/u con la PC ocupada)."],
-      "contratos": ["verificar_db_conexiones.py", "verificar_db_transacciones.py", "verificar_catalogo_candado.py", "verificar_memo_request.py"],
-      "mapa": [386, 549, 582],
+      "cicatrices": [
+        "MAPA 582: cada GET /api/productos abría 14 conexiones (0,43 s c/u con la PC ocupada)."
+      ],
+      "contratos": [
+        "verificar_db_conexiones.py",
+        "verificar_db_transacciones.py",
+        "verificar_catalogo_candado.py",
+        "verificar_memo_request.py"
+      ],
+      "mapa": [
+        386,
+        549,
+        582
+      ],
       "memoria": "test-no-toca-mssql.md",
-      "conexiones": ["lista-moldes"]
+      "conexiones": [
+        "lista-moldes"
+      ]
     },
     {
       "id": "molderia-limpia",
@@ -316,34 +699,75 @@
       "que": "Configuración › Moldería rechaza un molde con máscara de recorte + diseño (aviso MOLDE_CON_DISENO). El pedido acepta cualquier molde.",
       "archivos": [],
       "anclas": [
-        ["frontend/src/motor/prepararMolde.js", "MOLDE_CON_DISENO"],
-        ["frontend/src/App.jsx", "MOLDE_CON_DISENO"]
+        [
+          "frontend/src/motor/prepararMolde.js",
+          "MOLDE_CON_DISENO"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "MOLDE_CON_DISENO"
+        ]
       ],
-      "palabras": ["MOLDE_CON_DISENO", "soloBase", "solo_base", "conDiseno"],
-      "reglas": ["La regla vale SÓLO en Configuración; en el pedido la carga sigue como está."],
+      "palabras": [
+        "MOLDE_CON_DISENO",
+        "soloBase",
+        "solo_base",
+        "conDiseno"
+      ],
+      "reglas": [
+        "La regla vale SÓLO en Configuración; en el pedido la carga sigue como está."
+      ],
       "cicatrices": [],
       "contratos": [],
-      "mapa": [576],
+      "mapa": [
+        576
+      ],
       "memoria": "molderia-solo-moldes-limpios.md",
-      "conexiones": ["camino-a", "camino-b"]
+      "conexiones": [
+        "camino-a",
+        "camino-b"
+      ]
     },
     {
       "id": "camino-b",
       "nombre": "Camino B: molde con el diseño adentro",
       "que": "El cliente sube el molde con el diseño ya adentro; se nombran piezas y etiqueta (herramientas de Configuración sin entrar a Configuración).",
-      "archivos": ["piezas_con_diseno.py", "frontend/src/motor/molde/desplegar.js", "frontend/src/motor/molde/desplegar_paralelo.js"],
-      "anclas": [
-        ["piezas_con_diseno.py", "def canonizar_orden"],
-        ["frontend/src/App.jsx", "const subirMoldesConDiseno"],
-        ["frontend/src/App.jsx", "const abrirNombrarB"]
+      "archivos": [
+        "piezas_con_diseno.py",
+        "frontend/src/motor/molde/desplegar.js",
+        "frontend/src/motor/molde/desplegar_paralelo.js"
       ],
-      "palabras": ["con_diseno", "camino_b", "desdePedidoB", "canonizar_orden", "subirMoldesConDiseno", "efimero", "desplegado"],
+      "anclas": [
+        [
+          "piezas_con_diseno.py",
+          "def canonizar_orden"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const subirMoldesConDiseno"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const abrirNombrarB"
+        ]
+      ],
+      "palabras": [
+        "con_diseno",
+        "camino_b",
+        "desdePedidoB",
+        "canonizar_orden",
+        "subirMoldesConDiseno",
+        "efimero",
+        "desplegado"
+      ],
       "reglas": [
         "La pieza i es la misma en todos los talles por canonizar_orden (el orden del dibujo puede cruzar piezas).",
         "Del archivo del molde sólo se toma el TALLE; nombres de capa/objeto se ignoran.",
         "Los efímeros se anotan como del pedido ANTES de subir (el barrido de huérfanos se los llevaba)."
       ],
-      "cicatrices": ["MAPA 2026-09-16: el barrido de huérfanos borró un molde a mitad del alta."],
+      "cicatrices": [
+        "MAPA 2026-09-16: el barrido de huérfanos borró un molde a mitad del alta."
+      ],
       "contratos": [
         "verificar_molde_con_diseno.py",
         "verificar_tizada_con_diseno.py",
@@ -351,9 +775,17 @@
         "verificar_nombrar_con_diseno.py",
         "verificar_efimero.py"
       ],
-      "mapa": [400, 491],
+      "mapa": [
+        400,
+        491
+      ],
       "memoria": "molde-con-diseno.md",
-      "conexiones": ["molde-en-pc", "pasos-pedido", "efimeros", "etiqueta"]
+      "conexiones": [
+        "molde-en-pc",
+        "pasos-pedido",
+        "efimeros",
+        "etiqueta"
+      ]
     },
     {
       "id": "camino-a",
@@ -367,33 +799,91 @@
         "importar_dxf.py"
       ],
       "anclas": [
-        ["frontend/src/motor/molde/caminoA.js", "export"],
-        ["frontend/src/motor/arte/preparar.js", "zipSync"]
+        [
+          "frontend/src/motor/molde/caminoA.js",
+          "export"
+        ],
+        [
+          "frontend/src/motor/arte/preparar.js",
+          "zipSync"
+        ]
       ],
-      "palabras": ["caminoA", "arteCargado", "mapeo", "asegurarMoldeA"],
-      "reglas": ["El mapeo del arte se maneja POR VARIABLE.", "El nombre de la capa «guías» manda para colocar cada diseño."],
+      "palabras": [
+        "caminoA",
+        "arteCargado",
+        "mapeo",
+        "asegurarMoldeA"
+      ],
+      "reglas": [
+        "El mapeo del arte se maneja POR VARIABLE.",
+        "El nombre de la capa «guías» manda para colocar cada diseño."
+      ],
       "cicatrices": [],
-      "contratos": ["verificar_navegador_camino_a.py", "verificar_navegador_arte.py", "verificar_navegador_tizada_a.py"],
-      "mapa": [492, 495],
+      "contratos": [
+        "verificar_navegador_camino_a.py",
+        "verificar_navegador_arte.py",
+        "verificar_navegador_tizada_a.py"
+      ],
+      "mapa": [
+        492,
+        495
+      ],
       "memoria": "camino-a-navegador.md",
-      "conexiones": ["generar-navegador", "molderia-limpia"]
+      "conexiones": [
+        "generar-navegador",
+        "molderia-limpia"
+      ]
     },
     {
       "id": "plan-pedido",
       "nombre": "Plan del pedido (el servidor valida y traduce)",
       "que": "POST /api/pedido/plan → _plan_del_pedido: traba antes de fabricar, prendas, telas, giros, tipografías, mesas.",
-      "archivos": ["motor_pedido.py"],
-      "anclas": [
-        ["servidor.py", "def _plan_del_pedido"],
-        ["servidor.py", "def _traducir_prendas"]
+      "archivos": [
+        "motor_pedido.py"
       ],
-      "palabras": ["_plan_del_pedido", "_traducir_prendas", "pedido/plan", "generar_multi", "_de_la_fila", "_gen_pieza"],
-      "reglas": ["La traba frena si una fila pide una opción que el molde no tiene.", "Columnas obligatorias por PLANILLA."],
-      "cicatrices": [],
-      "contratos": ["verificar_traba_pedido.py", "verificar_columnas_obligatorias.py", "verificar_pedido_por_diseno.py", "verificar_marca_por_pedido.py"],
-      "mapa": [491],
+      "anclas": [
+        [
+          "servidor.py",
+          "def _plan_del_pedido"
+        ],
+        [
+          "servidor.py",
+          "def _traducir_prendas"
+        ]
+      ],
+      "palabras": [
+        "_plan_del_pedido",
+        "_traducir_prendas",
+        "pedido/plan",
+        "generar_multi",
+        "_de_la_fila",
+        "_gen_pieza"
+      ],
+      "reglas": [
+        "La traba frena si una fila pide una opción que el molde no tiene.",
+        "Columnas obligatorias por PLANILLA."
+      ],
+      "cicatrices": [
+        "2026-10-02: `_grupo_de` (en `_plan_del_pedido`) hacía `return g` en vez de `return gr`: devolvía el `g` de Flask y el nombre del grupo de tizada (`grupos_tizada[].nombre`) nunca llegaba a `_gnombre`; siempre salía el rótulo de la columna de talle. Visto al relevar el cuerpo del pedido para la integración externa."
+      ],
+      "contratos": [
+        "verificar_traba_pedido.py",
+        "verificar_columnas_obligatorias.py",
+        "verificar_pedido_por_diseno.py",
+        "verificar_marca_por_pedido.py"
+      ],
+      "mapa": [
+        491
+      ],
       "memoria": "traba-antes-de-fabricar.md",
-      "conexiones": ["generar-navegador", "telas", "piezas-fuera", "repo", "manga-toggle", "planilla"]
+      "conexiones": [
+        "generar-navegador",
+        "telas",
+        "piezas-fuera",
+        "repo",
+        "manga-toggle",
+        "planilla"
+      ]
     },
     {
       "id": "generar-navegador",
@@ -408,37 +898,101 @@
         "frontend/src/motor/ficha/**"
       ],
       "anclas": [
-        ["frontend/src/motor/pedido/generar.js", "/api/paquetes/pedido"],
-        ["frontend/src/App.jsx", "generarPedidoEnNavegador"]
+        [
+          "frontend/src/motor/pedido/generar.js",
+          "/api/paquetes/pedido"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "generarPedidoEnNavegador"
+        ]
       ],
-      "palabras": ["generarPedidoEnNavegador", "paquetes/pedido", "obrero", "enviar(", "hoja", "ficha"],
+      "palabras": [
+        "generarPedidoEnNavegador",
+        "paquetes/pedido",
+        "obrero",
+        "enviar(",
+        "hoja",
+        "ficha"
+      ],
       "reglas": [
         "La tizada NUNCA detrás de un lock/cola general.",
         "Sin plan B en el servidor: si el navegador no puede, se avisa; no se genera en serie en el proceso web.",
         "El preview no puede matar la tizada (best-effort)."
       ],
-      "cicatrices": ["MAPA 169: una cola general dejó «Armando la tizada» clavada.", "Tiempos de referencia 4 moldes con diseño: 28-87 s (18-22/09)."],
-      "contratos": ["verificar_navegador_tizada.py", "verificar_paquete_pedido.py", "verificar_sin_plan_b_en_el_servidor.py"],
-      "mapa": [169, 460, 491, 518],
+      "cicatrices": [
+        "MAPA 169: una cola general dejó «Armando la tizada» clavada.",
+        "Tiempos de referencia 4 moldes con diseño: 28-87 s (18-22/09)."
+      ],
+      "contratos": [
+        "verificar_navegador_tizada.py",
+        "verificar_paquete_pedido.py",
+        "verificar_sin_plan_b_en_el_servidor.py"
+      ],
+      "mapa": [
+        169,
+        460,
+        491,
+        518
+      ],
       "memoria": "pesado-en-el-navegador.md",
-      "conexiones": ["nesting", "vista-mesas", "plan-pedido", "molde-en-pc", "calculos-navegador"]
+      "conexiones": [
+        "nesting",
+        "vista-mesas",
+        "plan-pedido",
+        "molde-en-pc",
+        "calculos-navegador"
+      ]
     },
     {
       "id": "vista-mesas",
       "nombre": "Vista de las mesas (paso Tizadas) en el navegador",
       "que": "La foto de cada mesa se dibuja en la PC (vista/dibujar.js + useVistaLocal) desde la misma lista de dibujo; queda en IndexedDB.",
-      "archivos": ["frontend/src/motor/vista/**", "frontend/src/motor/vista.worker.js"],
-      "anclas": [
-        ["frontend/src/motor/vista/dibujar.js", "dibujarMesa"],
-        ["frontend/src/App.jsx", "function useVistaLocal"]
+      "archivos": [
+        "frontend/src/motor/vista/**",
+        "frontend/src/motor/vista.worker.js"
       ],
-      "palabras": ["useVistaLocal", "dibujarMesa", "MesasInfinito", "calidadFoto", "abrirVista"],
-      "reglas": ["Pixel-idéntico al archivo (misma lista de dibujo, mismo recorte).", "«Dibujando la mesa…» mientras carga: un blanco parece «no se ve»."],
-      "cicatrices": ["MAPA 433: «las mesas tardan o no se ven» era el pool del desplegado abandonado, no la PC.", "MAPA 468: recortes en serie de 4-17 s."],
-      "contratos": ["verificar_navegador_vista.py", "verificar_visor_rapido.py", "verificar_visor_display_list.py"],
-      "mapa": [433, 468, 484, 503],
+      "anclas": [
+        [
+          "frontend/src/motor/vista/dibujar.js",
+          "dibujarMesa"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function useVistaLocal"
+        ]
+      ],
+      "palabras": [
+        "useVistaLocal",
+        "dibujarMesa",
+        "MesasInfinito",
+        "calidadFoto",
+        "abrirVista"
+      ],
+      "reglas": [
+        "Pixel-idéntico al archivo (misma lista de dibujo, mismo recorte).",
+        "«Dibujando la mesa…» mientras carga: un blanco parece «no se ve»."
+      ],
+      "cicatrices": [
+        "MAPA 433: «las mesas tardan o no se ven» era el pool del desplegado abandonado, no la PC.",
+        "MAPA 468: recortes en serie de 4-17 s."
+      ],
+      "contratos": [
+        "verificar_navegador_vista.py",
+        "verificar_visor_rapido.py",
+        "verificar_visor_display_list.py"
+      ],
+      "mapa": [
+        433,
+        468,
+        484,
+        503
+      ],
       "memoria": "pool-desplegado-no-se-abandona.md",
-      "conexiones": ["generar-navegador", "moldes-en-la-pc"]
+      "conexiones": [
+        "generar-navegador",
+        "moldes-en-la-pc"
+      ]
     },
     {
       "id": "efimeros",
@@ -446,20 +1000,43 @@
       "que": "Los moldes de un pedido se borran al terminar/«Nuevo pedido»; el barrido horario junta los huérfanos (latido dice cuáles están abiertos).",
       "archivos": [],
       "anclas": [
-        ["servidor.py", "def _barrer_efimeros"],
-        ["frontend/src/App.jsx", "__tizadaEfimerosAbiertos"],
-        ["frontend/src/App.jsx", "const reiniciarPedido"]
+        [
+          "servidor.py",
+          "def _barrer_efimeros"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "__tizadaEfimerosAbiertos"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const reiniciarPedido"
+        ]
       ],
-      "palabras": ["efimero", "limpiar_efimeros", "_barrer_efimeros", "reiniciarPedido", "moldesEfimeros"],
+      "palabras": [
+        "efimero",
+        "limpiar_efimeros",
+        "_barrer_efimeros",
+        "reiniciarPedido",
+        "moldesEfimeros"
+      ],
       "reglas": [
         "NUNCA borrar un molde con creado_por; los de prueba se crean SIN sesión y se borran sólo por su id.",
         "«Nuevo pedido» deja todo en CERO (telas, diseños, planilla, cachés, localStorage)."
       ],
-      "cicatrices": ["Se borraron 3 moldes del usuario confundiéndolos con moldes de prueba (irrecuperable)."],
-      "contratos": ["verificar_efimero.py", "verificar_trabajos_se_borran.py"],
+      "cicatrices": [
+        "Se borraron 3 moldes del usuario confundiéndolos con moldes de prueba (irrecuperable)."
+      ],
+      "contratos": [
+        "verificar_efimero.py",
+        "verificar_trabajos_se_borran.py"
+      ],
       "mapa": [],
       "memoria": "pedido-sin-arrastre.md",
-      "conexiones": ["camino-b", "molde-en-pc"]
+      "conexiones": [
+        "camino-b",
+        "molde-en-pc"
+      ]
     },
     {
       "id": "etiqueta",
@@ -467,15 +1044,33 @@
       "que": "La etiqueta se apoya en el contorno (posición relativa t 0..1 para caer igual en todos los talles); por PIEZA.",
       "archivos": [],
       "anclas": [
-        ["frontend/src/App.jsx", "function _snapAContorno"]
+        [
+          "frontend/src/App.jsx",
+          "function _snapAContorno"
+        ]
       ],
-      "palabras": ["_snapAContorno", "etiqueta", "cargarEtiqueta"],
-      "reglas": ["`t` es posición RELATIVA en el contorno, nunca largo de arco.", "Baseline protegida: no romper."],
+      "palabras": [
+        "_snapAContorno",
+        "etiqueta",
+        "cargarEtiqueta"
+      ],
+      "reglas": [
+        "`t` es posición RELATIVA en el contorno, nunca largo de arco.",
+        "Baseline protegida: no romper."
+      ],
       "cicatrices": [],
-      "contratos": ["verificar_etiqueta_posicion.py", "verificar_etiqueta_tamano.py", "verificar_etiqueta_nombre.py", "verificar_etiqueta_del_archivo.py"],
+      "contratos": [
+        "verificar_etiqueta_posicion.py",
+        "verificar_etiqueta_tamano.py",
+        "verificar_etiqueta_nombre.py",
+        "verificar_etiqueta_del_archivo.py"
+      ],
       "mapa": [],
       "memoria": "etiqueta-baseline-no-romper.md",
-      "conexiones": ["camino-b", "cfg-guardada"]
+      "conexiones": [
+        "camino-b",
+        "cfg-guardada"
+      ]
     },
     {
       "id": "planilla",
@@ -483,52 +1078,115 @@
       "que": "Planilla tipo Excel con columnas por rol (talle, nombre, número, manga, diseño, cantidad), Repo, Copia.",
       "archivos": [],
       "anclas": [
-        ["frontend/src/App.jsx", "columnasActivasPlanilla"]
+        [
+          "frontend/src/App.jsx",
+          "columnasActivasPlanilla"
+        ]
       ],
-      "palabras": ["filas", "setFilas", "columnasActivasPlanilla", "planilla", "fila"],
-      "reglas": ["Columnas obligatorias se configuran POR PLANILLA.", "Nada de alert/confirm nativos."],
+      "palabras": [
+        "filas",
+        "setFilas",
+        "columnasActivasPlanilla",
+        "planilla",
+        "fila"
+      ],
+      "reglas": [
+        "Columnas obligatorias se configuran POR PLANILLA.",
+        "Nada de alert/confirm nativos."
+      ],
       "cicatrices": [
         "«Faltan datos en la planilla» salía de 640 porque se le pasaba `ancho={520}` a `Modal`, que sólo lee `maxWidth` (MAPA 596). A `Modal` el ancho va SIEMPRE por `maxWidth`."
       ],
-      "contratos": ["verificar_columnas_obligatorias.py", "verificar_campos_por_molde.py"],
+      "contratos": [
+        "verificar_columnas_obligatorias.py",
+        "verificar_campos_por_molde.py"
+      ],
       "mapa": [],
       "memoria": "planilla-estilo-sheets.md",
-      "conexiones": ["columna-talle", "repo", "copia", "manga-toggle", "plan-pedido", "talles-mesa"]
+      "conexiones": [
+        "columna-talle",
+        "repo",
+        "copia",
+        "manga-toggle",
+        "plan-pedido",
+        "talles-mesa"
+      ]
     },
     {
       "id": "illustrator",
       "nombre": "Abrir en Illustrator (extensión + puente local)",
       "que": "Extensión CEP + puente 127.0.0.1:47850 arma mesas/capas/guías sin descargar; sólo en el taller.",
-      "archivos": ["extension_illustrator/**", "frontend/src/motor/molde/illustrator.js"],
-      "anclas": [
-        ["frontend/src/motor/molde/illustrator.js", "47850"]
+      "archivos": [
+        "extension_illustrator/**",
+        "frontend/src/motor/molde/illustrator.js"
       ],
-      "palabras": ["47850", "illustrator", "puente"],
-      "reglas": ["Nunca mandar cabeceras propias al puente (CORS).", "El publicado no ofrece bajar la extensión."],
+      "anclas": [
+        [
+          "frontend/src/motor/molde/illustrator.js",
+          "47850"
+        ]
+      ],
+      "palabras": [
+        "47850",
+        "illustrator",
+        "puente"
+      ],
+      "reglas": [
+        "Nunca mandar cabeceras propias al puente (CORS).",
+        "El publicado no ofrece bajar la extensión."
+      ],
       "cicatrices": [],
       "contratos": [],
-      "mapa": [530, 572],
+      "mapa": [
+        530,
+        572
+      ],
       "memoria": "extension-illustrator.md",
-      "conexiones": ["calculos-navegador"]
+      "conexiones": [
+        "calculos-navegador"
+      ]
     },
     {
       "id": "publicacion",
       "nombre": "Publicación en el servidor (paquete + hora programada)",
       "que": "El taller arma el ZIP al tocar Publicar y lo sube; el publicado lo guarda en _actualizacion/pendiente.zip y lo aplica a la hora. Respaldos en respaldos_publicado/.",
-      "archivos": ["actualizaciones.py", "actualizador.py", "empaquetar.py", "instalar_servidor.py"],
-      "anclas": [
-        ["actualizaciones.py", "def vigilar"],
-        ["servidor.py", "/api/publicacion/publicar"]
+      "archivos": [
+        "actualizaciones.py",
+        "actualizador.py",
+        "empaquetar.py",
+        "instalar_servidor.py"
       ],
-      "palabras": ["publicacion", "actualizacion", "pendiente.zip", "respaldos_publicado", "VERSION"],
+      "anclas": [
+        [
+          "actualizaciones.py",
+          "def vigilar"
+        ],
+        [
+          "servidor.py",
+          "/api/publicacion/publicar"
+        ]
+      ],
+      "palabras": [
+        "publicacion",
+        "actualizacion",
+        "pendiente.zip",
+        "respaldos_publicado",
+        "VERSION"
+      ],
       "reglas": [
         "El paquete NUNCA lleva datos/ ni entrada/.",
         "No tocar el archivo VERSION: el número lo pone el usuario.",
         "Lo programado ya viajó: cambios locales posteriores no lo modifican."
       ],
       "cicatrices": [],
-      "contratos": ["verificar_publicacion_y_procesos.py", "verificar_actualizacion_carrera.py", "verificar_paquete_linux.py"],
-      "mapa": [546],
+      "contratos": [
+        "verificar_publicacion_y_procesos.py",
+        "verificar_actualizacion_carrera.py",
+        "verificar_paquete_linux.py"
+      ],
+      "mapa": [
+        546
+      ],
       "memoria": "respaldos-publicado.md",
       "conexiones": []
     },
@@ -536,33 +1194,101 @@
       "id": "vector-original",
       "nombre": "LEY: vector original, colores exactos, RIP",
       "que": "Nunca rasterizar ni tocar el archivo del usuario; la hoja se aplana para el RIP sin re-cuantizar; mesas largas con /UserUnit.",
-      "archivos": ["aplanar_rip.py", "hoja_pike.py", "frontend/src/motor/rip/**", "frontend/src/motor/hoja/**"],
-      "anclas": [
-        ["aplanar_rip.py", "def aplanar"],
-        ["frontend/src/motor/hoja/componer.js", "UserUnit"]
+      "archivos": [
+        "aplanar_rip.py",
+        "hoja_pike.py",
+        "frontend/src/motor/rip/**",
+        "frontend/src/motor/hoja/**"
       ],
-      "palabras": ["rasteriz", "get_pixmap", "Ghostscript", "UserUnit", "cmyk", "aplanar"],
+      "anclas": [
+        [
+          "aplanar_rip.py",
+          "def aplanar"
+        ],
+        [
+          "frontend/src/motor/hoja/componer.js",
+          "UserUnit"
+        ],
+        [
+          "aplanar_rip.py",
+          "def _gs_transparencia"
+        ],
+        [
+          "aplanar_rip.py",
+          "forms_vivos"
+        ],
+        [
+          "frontend/src/motor/rip/aplanar.js",
+          "function gsTransparencia"
+        ],
+        [
+          "frontend/src/motor/rip/aplanar.js",
+          "formsVivos"
+        ]
+      ],
+      "palabras": [
+        "rasteriz",
+        "get_pixmap",
+        "Ghostscript",
+        "UserUnit",
+        "cmyk",
+        "aplanar",
+        "SMask",
+        "transparencia"
+      ],
       "reglas": [
         "El único píxel admitido es una imagen que ya venga incrustada en el archivo.",
         "Si algo va lento: hacer MENOS trabajo, nunca bajar la calidad.",
-        "El render no prueba nada: PyMuPDF ignora clipPath de SVG; calibrar el instrumento."
+        "El render no prueba nada: PyMuPDF ignora clipPath de SVG; calibrar el instrumento.",
+        "Aplanado: un Form con /Group que se pinta con transparencia vigente (SMask, ca/CA < 1, BM no Normal) NO se des-anida; y no se borran los «opacos por defecto» de un ExtGState de un diccionario con transparencia real (son los que la apagan). Gemelos aplanar_rip._flatten ↔ rip/aplanar.js flatten."
       ],
-      "cicatrices": ["«Me cambió el color»: Illustrator muestra enteros pero guarda 0.996."],
-      "contratos": ["verificar_navegador_aplanar.py", "verificar_rip_compatible.py", "verificar_mesa_larga.py"],
-      "mapa": [167],
+      "cicatrices": [
+        "«Me cambió el color»: Illustrator muestra enteros pero guarda 0.996.",
+        "2026-10-02 (MAPA 613): «SHORT BASKET ENTERO NEGRO»: la máscara de opacidad (foto en gris sobre un grupo Pantone 2212 C) salía como Pantone liso en la tizada: al inlinear el grupo, su /GS0 gs con SMask /None apagaba la máscara. El arte se veía bien."
+      ],
+      "contratos": [
+        "verificar_navegador_aplanar.py",
+        "verificar_rip_compatible.py",
+        "verificar_mesa_larga.py"
+      ],
+      "mapa": [
+        167,
+        613
+      ],
       "memoria": "vector-original-siempre.md",
-      "conexiones": ["generar-navegador", "vista-mesas"]
+      "conexiones": [
+        "generar-navegador",
+        "vista-mesas"
+      ]
     },
     {
       "id": "ui-reglas",
       "nombre": "Reglas de pantalla (tutoriales, diccionario, carteles, TDZ)",
       "que": "Cada ancla data-tour tiene su entrada en diccionario.js; los carteles de «cargando» bloquean; el contador de «usado antes de declarar» no sube.",
-      "archivos": ["frontend/src/diccionario.js", "frontend/verificar_diccionario.mjs", "frontend/verificar_tdz.mjs", "frontend/verificar_estilo_ui.mjs"],
-      "anclas": [
-        ["frontend/verificar_tdz.mjs", "TOPE_APP"],
-        ["frontend/src/App.jsx", "pintarYa"]
+      "archivos": [
+        "frontend/src/diccionario.js",
+        "frontend/verificar_diccionario.mjs",
+        "frontend/verificar_tdz.mjs",
+        "frontend/verificar_estilo_ui.mjs"
       ],
-      "palabras": ["data-tour", "ancla=", "diccionario", "pintarYa", "alert(", "confirm("],
+      "anclas": [
+        [
+          "frontend/verificar_tdz.mjs",
+          "TOPE_APP"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "pintarYa"
+        ]
+      ],
+      "palabras": [
+        "data-tour",
+        "ancla=",
+        "diccionario",
+        "pintarYa",
+        "alert(",
+        "confirm("
+      ],
       "reglas": [
         "Nunca subir TOPE_APP del contador TDZ: usar refs / mover código.",
         "Nada de alert/confirm nativos: modales y avisos propios.",
@@ -570,9 +1296,19 @@
         "Tutoriales: NADA automático, sólo lo grabado.",
         "Editores en modal aparte, nunca inline en la lista."
       ],
-      "cicatrices": ["Anclas pasadas como argumento de función = «texto muerto» en el diccionario: usar data-tour literal."],
-      "contratos": ["frontend/verificar_diccionario.mjs", "frontend/verificar_tdz.mjs", "frontend/verificar_estilo_ui.mjs", "verificar_tutorial_ventana.py"],
-      "mapa": [372, 373],
+      "cicatrices": [
+        "Anclas pasadas como argumento de función = «texto muerto» en el diccionario: usar data-tour literal."
+      ],
+      "contratos": [
+        "frontend/verificar_diccionario.mjs",
+        "frontend/verificar_tdz.mjs",
+        "frontend/verificar_estilo_ui.mjs",
+        "verificar_tutorial_ventana.py"
+      ],
+      "mapa": [
+        372,
+        373
+      ],
       "memoria": "botones-texto-corto.md",
       "conexiones": []
     },
@@ -580,14 +1316,28 @@
       "id": "descargas",
       "nombre": "Descargas: el usuario elige dónde guardar",
       "que": "Toda descarga abre «Guardar como» (File System Access API); la cancelación no es error.",
-      "archivos": ["frontend/src/descargar.js", "frontend/verificar_descarga_elegir_carpeta.mjs"],
-      "anclas": [
-        ["frontend/src/descargar.js", "AbortError"]
+      "archivos": [
+        "frontend/src/descargar.js",
+        "frontend/verificar_descarga_elegir_carpeta.mjs"
       ],
-      "palabras": ["descargar", "showSaveFilePicker", "AbortError"],
-      "reglas": ["Reconocer la cancelación (AbortError) sin mostrar error."],
+      "anclas": [
+        [
+          "frontend/src/descargar.js",
+          "AbortError"
+        ]
+      ],
+      "palabras": [
+        "descargar",
+        "showSaveFilePicker",
+        "AbortError"
+      ],
+      "reglas": [
+        "Reconocer la cancelación (AbortError) sin mostrar error."
+      ],
       "cicatrices": [],
-      "contratos": ["frontend/verificar_descarga_elegir_carpeta.mjs"],
+      "contratos": [
+        "frontend/verificar_descarga_elegir_carpeta.mjs"
+      ],
       "mapa": [],
       "memoria": "descargas-guardar-como.md",
       "conexiones": []
@@ -598,9 +1348,19 @@
       "que": "Toda escritura a disco va a .tmp + os.replace; secretos nunca a git.",
       "archivos": [],
       "anclas": [
-        ["servidor.py", "os.replace"]
+        [
+          "servidor.py",
+          "os.replace"
+        ]
       ],
-      "palabras": ["open(", "\"w\"", "os.replace", "secret", "config_externo", "api-key"],
+      "palabras": [
+        "open(",
+        "\"w\"",
+        "os.replace",
+        "secret",
+        "config_externo",
+        "api-key"
+      ],
       "reglas": [
         "open(\"w\") trunca antes de fallar: siempre .tmp + os.replace.",
         "Nunca a git: config_externo.json, secret.txt, datos/publicacion.json, respaldos_publicado/, config_publicado.env.",
@@ -618,14 +1378,40 @@
       "que": "En la planilla se eligen grupos de talles; cada grupo se acomoda solo en su(s) propia(s) mesa(s); los talles sin grupo van juntos al final. Opcional: vacío = como siempre.",
       "archivos": [],
       "anclas": [
-        ["servidor.py", "def _talles_mesa_del_cuerpo"],
-        ["servidor.py", "por_talles_mesa"],
-        ["nesting_contorno.py", "por_talles_mesa"],
-        ["frontend/src/motor/nesting/contorno.js", "por_talles_mesa"],
-        ["frontend/src/App.jsx", "planilla-talles-mesa"],
-        ["frontend/src/App.jsx", "const tallesEnPlanilla"]
+        [
+          "servidor.py",
+          "def _talles_mesa_del_cuerpo"
+        ],
+        [
+          "servidor.py",
+          "por_talles_mesa"
+        ],
+        [
+          "nesting_contorno.py",
+          "por_talles_mesa"
+        ],
+        [
+          "frontend/src/motor/nesting/contorno.js",
+          "por_talles_mesa"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "planilla-talles-mesa"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const tallesEnPlanilla"
+        ]
       ],
-      "palabras": ["tallesMesa", "talles_mesa", "_grupo_mesa", "por_talles_mesa", "tmDraft", "tallesEnPlanilla", "_norm_talle_mesa"],
+      "palabras": [
+        "tallesMesa",
+        "talles_mesa",
+        "_grupo_mesa",
+        "por_talles_mesa",
+        "tmDraft",
+        "tallesEnPlanilla",
+        "_norm_talle_mesa"
+      ],
       "reglas": [
         "Paridad de motores: anidar_por_fila (py) == anidarPorFila (js) también con por_talles_mesa.",
         "Copia manda sobre los grupos (cada fila ya es su mesa); con Copia no viaja talles_mesa.",
@@ -633,11 +1419,945 @@
         "Sin grupos = exactamente lo de siempre.",
         "La ventana se usa en dos toques (marcar talles → tocar mesa) o arrastrando; el usuario pidió que sea intuitiva: no volver a listas de botones por talle."
       ],
-      "cicatrices": ["MAPA 593: la primera ventana (un renglón por talle con botones Mesa 1/2/…) le resultó poco intuitiva al usuario."],
+      "cicatrices": [
+        "MAPA 593: la primera ventana (un renglón por talle con botones Mesa 1/2/…) le resultó poco intuitiva al usuario."
+      ],
       "contratos": [],
-      "mapa": [593],
+      "mapa": [
+        593
+      ],
       "memoria": "talles-por-mesa.md",
-      "conexiones": ["copia", "nesting", "planilla", "columna-talle", "plan-pedido"]
+      "conexiones": [
+        "copia",
+        "nesting",
+        "planilla",
+        "columna-talle",
+        "plan-pedido"
+      ]
+    },
+    {
+      "id": "corel",
+      "nombre": "CorelDRAW: leer sus PDF igual que los de Illustrator",
+      "que": "Corel 2022+ (v24-27) publica PDF con capas POR PÁGINA, borde del texto en modo trazo (Tr 1) y copia invisible (Tr 3); el motor lo entiende en los dos lados. «Crear en CorelDRAW» hecho (MAPA 598, neurona crear-en-corel).",
+      "archivos": [
+        "COREL_REFERENCIA.md",
+        "documentacion/corel/**",
+        "frontend/src/motor/arte/personalizacion.js"
+      ],
+      "anclas": [
+        [
+          "motor_pedido.py",
+          "_TR_RELLENA"
+        ],
+        [
+          "motor_pedido.py",
+          "_tr_de"
+        ],
+        [
+          "motor_pedido.py",
+          "fantasmas"
+        ],
+        [
+          "motor_pedido.py",
+          "dict.fromkeys(c.get(\"text\") for c in doc.layer_ui_configs()"
+        ],
+        [
+          "frontend/src/motor/arte/personalizacion.js",
+          "TR_TRAZA"
+        ],
+        [
+          "frontend/src/motor/arte/personalizacion.js",
+          "claveLinea"
+        ],
+        [
+          "frontend/src/motor/molde/caminoA.js",
+          "[...new Set(capasUI(molde.doc)"
+        ]
+      ],
+      "palabras": [
+        "corel",
+        "coreldraw",
+        "cdr",
+        "powerclip",
+        "Tr",
+        "fantasma"
+      ],
+      "reglas": [
+        "Nunca leer .cdr: el diseñador sube el PDF publicado (libcdr pasa a RGB y rompe el CMYK exacto).",
+        "Toda lista de capas: una vez cada NOMBRE (Corel repite la capa en cada página); prender/apagar siempre por nombre.",
+        "El modo Tr decide relleno (0,2,4,6) vs trazo (1,2,5,6); se guarda/restaura con q/Q.",
+        "Texto invisible: regla de fantasmas (lo leído con todas las capas apagadas se descuenta una vez), NO el alpha: mupdf.js no lo da.",
+        "Con Illustrator la lectura tiene que dar IDÉNTICO: comparar con documentacion/corel/pruebas/foto_lectura.py antes/después.",
+        "No filtrar capas en talles_del_molde: es la clave `orden` del desplegado y el servidor la calcula sobre la cáscara."
+      ],
+      "cicatrices": [
+        "MAPA 597: el borde de Corel (1 Tr) se leía como relleno del color que quedaba antes (cian).",
+        "MAPA 597: el GARCIA invisible (3 Tr) de la capa Nombre entraba al aislar «00»: el número tomaba posición y tamaño del nombre.",
+        "MAPA 597: filtrar la «Capa 1» vacía en talles_del_molde invalidaba el desplegado de un molde de Illustrator ya cargado → revertido."
+      ],
+      "contratos": [
+        "verificar_navegador_arte.py",
+        "verificar_personalizacion_con_diseno.py",
+        "verificar_color_nativo_cid.py",
+        "verificar_navegador_camino_a.py"
+      ],
+      "mapa": [
+        597
+      ],
+      "memoria": "corel.md",
+      "conexiones": [
+        "illustrator",
+        "camino-a",
+        "camino-b",
+        "crear-en-corel"
+      ]
+    },
+    {
+      "id": "crear-en-corel",
+      "nombre": "Crear en CorelDRAW (programa + puente local)",
+      "que": "USER PRO para CorelDRAW (extension_corel/): puente 127.0.0.1:47851 con el mismo protocolo que el de Illustrator; arma una PÁGINA por mesa por COM y guarda .cdr v24.",
+      "archivos": [
+        "extension_corel/**",
+        "frontend/src/motor/molde/corel.js",
+        "extension_corel/puente/FlujoExportar.cs",
+        "extension_corel/puente/Complemento.cs",
+        "extension_corel/complemento/AppUI.xslt",
+        "extension_corel/complemento/BotonTizada.cs"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/molde/corel.js",
+          "47851"
+        ],
+        [
+          "frontend/src/motor/molde/corel.js",
+          "export function planCorel"
+        ],
+        [
+          "frontend/src/motor/molde/illustrator.js",
+          "sinTope"
+        ],
+        [
+          "frontend/src/motor/molde/illustrator.js",
+          "mesa: im"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function PlantillaProgramas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const abrirEnCorel"
+        ],
+        [
+          "servidor.py",
+          "def _corel_version"
+        ],
+        [
+          "extension_corel/puente/Puente.cs",
+          "PUERTO = 47851"
+        ],
+        [
+          "extension_corel/puente/ArmarCorel.cs",
+          "CDR_VERSION_2022 = 24"
+        ],
+        [
+          "extension_corel/puente/ArmarCorel.cs",
+          "CDR_ACOMODO_LIBRE = 1"
+        ],
+        [
+          "frontend/src/motor/molde/corel.js",
+          "cx: (x0 + x1) / 2"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function BotonConector"
+        ],
+        [
+          "extension_corel/puente/ExportarCorel.cs",
+          "public static AnalisisExportar Analizar()"
+        ],
+        [
+          "extension_corel/puente/BotonCorel.cs",
+          "GWLP_HWNDPARENT"
+        ],
+        [
+          "extension_corel/puente/FlujoExportar.cs",
+          "public static ResultadoExportar Correr()"
+        ],
+        [
+          "extension_corel/puente/FlujoExportar.cs",
+          "SaveFileDialog"
+        ],
+        [
+          "extension_corel/puente/Complemento.cs",
+          "public static int InstalarAca()"
+        ],
+        [
+          "extension_corel/puente/Puente.cs",
+          "/exportar-corel"
+        ],
+        [
+          "extension_corel/complemento/AppUI.xslt",
+          "UserPro.Corel.BotonTizada"
+        ],
+        [
+          "extension_corel/complemento/BotonTizada.cs",
+          "public BotonTizada(object app)"
+        ],
+        [
+          "extension_corel/construir.py",
+          "def compilar_boton"
+        ],
+        [
+          "extension_illustrator/construir.py",
+          "def tenir("
+        ]
+      ],
+      "palabras": [
+        "corel",
+        "coreldraw",
+        "47851",
+        "plantillacorel",
+        "abrirencorel",
+        "complemento",
+        "barra de corel",
+        "guardar como",
+        "carpeta"
+      ],
+      "reglas": [
+        "El plan de Corel ES el de Illustrator (planIllustrator) pasado a páginas: no duplicar la lógica de mesas/nombres.",
+        "COM sólo en el hilo STA de HiloCorel, con el filtro de mensajes; nunca desde el hilo del socket.",
+        "Servidor HTTP propio sobre TcpListener (HttpListener pide administrador).",
+        "Nunca mandar cabeceras propias al puente (CORS), igual que Illustrator.",
+        "abrirEnCorel vive DESPUÉS de showMsg (contrato TDZ, tope 301).",
+        "El instalador cierra el puente viejo por PID (sólo el de su carpeta); nunca mass-kill.",
+        "El publicado no tiene el instalador (empaquetar.py es lista blanca): la pantalla lo mira en /api/corel/version.",
+        "Una sola tarjeta (PlantillaProgramas) con los dos programas lado a lado: Illustrator naranja (#FF9A00/#330000), CorelDRAW verde; los instaladores de los dos a la vista.",
+        "Todas las mesas en UN espacio: vista de varias páginas + acomodo libre (Freeform=1) + SetPageOrigin en el CENTRO de cada mesa (y hacia arriba); cada mesa sigue siendo una página (el PDF no cambia). Siempre a tamaño real y en un archivo.",
+        "Botones sin texto cortado: acción y programa en dos renglones, nada de «…». Los instaladores se llaman «Conectores» y tienen su «?».",
+        "«Exportar para TIZADA PRO»: botón en la barra «TIZADA PRO» DENTRO de Corel = control propio WPF (type=wpfhost, TizadaPro.dll, BotonTizada.cs) con el ícono verde y el texto, que llama a POST /exportar-corel. El guid del ítem (712d37ec) NO se cambia: la barra ya quedó en el espacio de trabajo del usuario. Instalarlo pide administrador UNA vez; sin permiso queda el botón flotante. Ajustes de PDF fijos; restaura los del documento; nunca guarda el .cdr.",
+        "Un solo flujo de exportar (FlujoExportar.Correr) para la barra, el botón flotante y el menú del ícono: SIEMPRE pregunta dónde guardar (SaveFileDialog encima de Corel, carpeta del .cdr, nombre sugerido «- para TIZADA.pdf», avisa antes de reemplazar).",
+        "Íconos de instaladores: el isotipo del sistema teñido con el color de SU programa (tenir: Illustrator naranja, Corel verde); los tonos van en la huella."
+      ],
+      "cicatrices": [
+        "PowerShell + COM de Corel: los métodos con parámetros opcionales (SaveAs, Import, AddToPowerClip) fallan si no se pasan todos.",
+        "GetActiveObject('CorelDRAW.Application') da MK_E_UNAVAILABLE con Corel abierto: usar CreateInstance/New-Object.",
+        "El diccionario sólo cuenta `data-tour` LITERALES: un prop `tour` pasado a un componente dio «texto muerto» (se pasa data-tour literal y se esparce con ...resto).",
+        "Probar un conector nuevo con el viejo INSTALADO: el de prueba no arranca (puerto 47851 ocupado) y contesta el instalado; mirar /estado.version antes de sacar conclusiones.",
+        "Probar sobre el documento ACTIVO de Corel sin mirar cuál es: resultó ser del usuario (se leyó y exportó a una carpeta de prueba, sin tocarlo). Mirar doc.Title antes.",
+        "Se descartó un botón de barra por VBA/RunMacro (no carga sin reiniciar, el truco no anda desde 2022); el camino que SÍ anda es un complemento XSLT con un ítem browser que llama al puente.",
+        "Conector 1.3.0: un botón de Corel sin DLL (dropDownDlgBtn) se veía como una flechita sola: Corel sólo da íconos internos (guid://). Se resolvió con un control WPF propio."
+      ],
+      "contratos": [],
+      "mapa": [
+        598
+      ],
+      "memoria": "corel.md",
+      "conexiones": [
+        "illustrator",
+        "corel",
+        "ui-reglas"
+      ]
+    },
+    {
+      "id": "fuentes",
+      "nombre": "Tipografías: catálogo, subida y resolución",
+      "que": "Las tipografías se guardan con su nombre real; subir una que ya existe pregunta (409 → «Reemplazarla» / «Dejar la que está»); se reconocen por nombre interno, PostScript y completo (familias).",
+      "archivos": [
+        "motor_pedido.py",
+        "servidor.py",
+        "frontend/src/motor/texto/fuentes.js",
+        "frontend/src/motor/arte/fuentesSubir.js",
+        "frontend/src/motor/obrero.worker.js"
+      ],
+      "anclas": [
+        [
+          "motor_pedido.py",
+          "def nombres_fuente("
+        ],
+        [
+          "motor_pedido.py",
+          "def identidad_fuente("
+        ],
+        [
+          "motor_pedido.py",
+          "def resolver_fuente("
+        ],
+        [
+          "servidor.py",
+          "def _nombre_fuente("
+        ],
+        [
+          "servidor.py",
+          "def _quitar_prefijo_fuentes("
+        ],
+        [
+          "servidor.py",
+          "class FuenteYaExiste("
+        ],
+        [
+          "servidor.py",
+          "def _fuente_existente("
+        ],
+        [
+          "frontend/src/motor/texto/fuentes.js",
+          "export function nombresFuente"
+        ],
+        [
+          "frontend/src/motor/texto/fuentes.js",
+          "export function resolverFuente"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const preguntarFuenteExiste"
+        ]
+      ],
+      "palabras": [
+        "subida_",
+        "catalogo_fuentes",
+        "tipografía",
+        "tipografia",
+        "fuente",
+        "reemplaza",
+        "FuenteYaExiste",
+        "nombresFuente",
+        "resolverFuente",
+        "resolver_fuente"
+      ],
+      "reglas": [
+        "Se guarda con el nombre del archivo (sin `subida_`); `_nombre_fuente` sólo saca carpetas.",
+        "Nunca pisar una tipografía sin preguntar: mismo archivo (sin mayúsculas) o misma fuente adentro (completo = familia + estilo) → 409 `existe`; sólo con `reemplaza` entra.",
+        "Los estilos de una familia conviven (otro nombre completo).",
+        "Reconocer una fuente es por nombre INTERNO / PostScript / completo, NUNCA por el nombre del archivo.",
+        "Paridad py/js: nombres_fuente == nombresFuente y resolver_fuente == resolverFuente (ps/completo DESPUÉS del interno en cada vuelta).",
+        "La migración de `subida_*` nunca pierde nada: idéntica → se saca la copia; distinta → no se toca."
+      ],
+      "cicatrices": [
+        "MAPA 599: el `interno` de MuPDF se corta en 31 letras: dos estilos de una familia de nombre largo quedaban iguales.",
+        "MAPA 599: el usuario creyó que `subida_` impedía reconocer la fuente; no era eso (se busca por nombre interno). Diseñar en Corel con una fuente que Windows no tiene → Corel la cambia al exportar.",
+        "MAPA 599: `max_age` de un día en el archivo de la fuente dejaba la versión vieja en el navegador al reemplazarla con el mismo nombre."
+      ],
+      "contratos": [
+        "verificar_fuente_ya_existe.py",
+        "verificar_fuentes_pedido.py"
+      ],
+      "mapa": [
+        599
+      ],
+      "memoria": "fuentes-nombre-real.md",
+      "conexiones": [
+        "camino-a",
+        "camino-b",
+        "generar-navegador",
+        "publicacion",
+        "ui-reglas"
+      ]
+    },
+    {
+      "id": "texto-medida",
+      "nombre": "Nombre y número: límite de ancho y misma altura",
+      "que": "Por molde y campo, margen al borde de la pieza: si el texto no entra se achica proporcional apoyado en la línea de abajo. Con otra tipografía, las letras a la altura del arte.",
+      "archivos": [
+        "motor_pedido.py",
+        "frontend/src/motor/pieza/estampar.js",
+        "frontend/src/motor/arte/personalizacion.js",
+        "frontend/src/motor/arte/texto.js",
+        "servidor.py"
+      ],
+      "anclas": [
+        [
+          "motor_pedido.py",
+          "def pers_con_limite("
+        ],
+        [
+          "motor_pedido.py",
+          "def tamano_misma_altura("
+        ],
+        [
+          "motor_pedido.py",
+          "def ancho_disponible("
+        ],
+        [
+          "motor_pedido.py",
+          "def alturas_de_pagina("
+        ],
+        [
+          "frontend/src/motor/pieza/estampar.js",
+          "export function tamanoMismaAltura"
+        ],
+        [
+          "frontend/src/motor/pieza/estampar.js",
+          "export function anchoDisponible"
+        ],
+        [
+          "frontend/src/motor/arte/texto.js",
+          "export function alturasDePagina"
+        ],
+        [
+          "frontend/src/motor/texto/fuentes.js",
+          "abrir.original"
+        ],
+        [
+          "servidor.py",
+          "def _limite_texto_de("
+        ],
+        [
+          "servidor.py",
+          "/api/productos/limite_texto"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const guardarLimiteTexto"
+        ],
+        [
+          "frontend/src/motor/pieza/estampar.js",
+          "export function persConLimite"
+        ],
+        [
+          "motor_pedido.py",
+          "def limite_de_pieza("
+        ],
+        [
+          "frontend/src/motor/pieza/estampar.js",
+          "export function limiteDePieza"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function _filasDePath"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function _margenDePieza"
+        ],
+        [
+          "servidor.py",
+          "def _limite_campo_limpio("
+        ],
+        [
+          "frontend/src/motor/pedido/generar.js",
+          "export async function achiquesEnNavegador"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const cuerpoDelPedido = "
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _UMBRAL_LEGIBLE"
+        ]
+      ],
+      "palabras": [
+        "limite_texto",
+        "limite_cm",
+        "margen_cm",
+        "alto_ref",
+        "tamano_misma_altura",
+        "ancho_disponible",
+        "Nombre y número"
+      ],
+      "reglas": [
+        "El límite viaja ADENTRO de cada placeholder (`limite_cm`, también en `por_talle`): lo pega el servidor (`pers_con_limite`) en motor_b, el plan y generar_pedido.",
+        "Gemelos EXACTOS py/js (mismas cuentas, mismo orden): tamano_misma_altura, _alto_letras, _anillos_contorno, ancho_disponible, alturas_de_pagina.",
+        "Al achicar: proporcional, misma línea base y el grosor del borde por el mismo factor.",
+        "El ancho disponible se mide una vez por base y campo (no por prenda): no frena la tizada.",
+        "La altura del arte se mide con recuadros EXACTOS de MuPDF leídos CRUDOS; nunca el /CapHeight del PDF.",
+        "Los contratos de pieza se corren TAMBIÉN con `--texto` (nombre largo + límite + otra tipografía).",
+        "Sólo se iguala la altura si la tipografía usada NO es la del diseño (la original del catálogo sin reemplazos).",
+        "Toda vista previa del camino A tiene que pasar la personalización por persConLimite(pers, info.limite_texto): la del hilo del arte no trae `limite_cm`.",
+        "La pantalla «Nombre y número»: controles en la columna derecha y el dibujo en el visor GRANDE (nunca un visor adentro de la columna de ajustes).",
+        "El margen es POR PIEZA (nombre genérico) y por campo, con uno para todas: `por_pieza` le gana a `margen_cm`; null = esa pieza sin límite. Gemelos limite_de_pieza ↔ limiteDePieza.",
+        "La pantalla usa el lienzo de Etiqueta (canvasLayout, variante con renderSelVerVariante); las piezas se eligen tocándolas (varias). Líneas con vectorEffect non-scaling-stroke para que se vean y se agarren a cualquier zoom.",
+        "El aviso «se achicará» de la planilla se mide con el MISMO plan y el MISMO estampado que la tizada (achiquesEnNavegador + reporte), nunca estimado aparte. Generar y avisar usan cuerpoDelPedido."
+      ],
+      "cicatrices": [
+        "MAPA 601: el /CapHeight del PDF es el de la fuente que usó Illustrator (Myriad, si la del diseño no estaba instalada), no el de la nombrada.",
+        "MAPA 601: el rawdict de PyMuPDF corrige los recuadros con el ascendente: para la tinta real hay que leer el XML de la página de texto.",
+        "MAPA 601: la vista previa del Arte del camino A no aplicaba el límite (su personalización la lee el hilo del arte, sin `limite_cm`).",
+        "MAPA 601: el ancho disponible cacheado sin el margen en la clave: en la vista previa (base viva en el hilo) el texto se achicaba con el margen anterior.",
+        "MAPA 601: la primera versión del visor se armó sin mirarla y quedó cortada en la columna angosta (queja del usuario).",
+        "MAPA 601: líneas con trazo en unidades del lienzo medían ~4 px a zoom normal: imposibles de agarrar."
+      ],
+      "contratos": [
+        "verificar_navegador_pieza_a.py",
+        "verificar_navegador_pieza.py",
+        "verificar_navegador_arte.py"
+      ],
+      "mapa": [
+        601,
+        602
+      ],
+      "memoria": "nombre-numero-limite.md",
+      "conexiones": [
+        "camino-a",
+        "camino-b",
+        "generar-navegador",
+        "fuentes",
+        "etiqueta",
+        "plan-pedido"
+      ]
+    },
+    {
+      "id": "editables",
+      "nombre": "Objetos editables (capas «Editable …»)",
+      "que": "Cada capa «Editable …» de una mesa es UN objeto (todo lo de adentro se mueve/rota/escala junto). La misma capa en otra mesa es OTRO objeto con su propio ajuste.",
+      "archivos": [
+        "servidor.py",
+        "motor_pedido.py",
+        "frontend/src/motor/pieza/caminoA.js",
+        "frontend/src/motor/arte/editablesVista.js",
+        "frontend/src/App.jsx",
+        "molde_real.py",
+        "frontend/src/motor/arte/editables.js",
+        "frontend/src/motor/molde/capas.js"
+      ],
+      "anclas": [
+        [
+          "servidor.py",
+          "def _tf_de_unidad("
+        ],
+        [
+          "servidor.py",
+          "def _clave_mesa("
+        ],
+        [
+          "servidor.py",
+          "_EDIT_MESA = "
+        ],
+        [
+          "motor_pedido.py",
+          "SEP_MESA = "
+        ],
+        [
+          "frontend/src/motor/pieza/caminoA.js",
+          "export const SEP_MESA"
+        ],
+        [
+          "frontend/src/motor/arte/editablesVista.js",
+          "o.clave = "
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _claveEd = "
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const _nomDeClave = "
+        ],
+        [
+          "motor_pedido.py",
+          "def _rect_sin_limite("
+        ],
+        [
+          "motor_pedido.py",
+          "MEMO_EDITABLES = "
+        ],
+        [
+          "molde_real.py",
+          "recorte = None"
+        ],
+        [
+          "frontend/src/motor/arte/editables.js",
+          "export const rectSinLimite"
+        ],
+        [
+          "frontend/src/motor/arte/editables.js",
+          "const sinLimite = new Set()"
+        ],
+        [
+          "frontend/src/motor/molde/capas.js",
+          "let recorte = null"
+        ]
+      ],
+      "palabras": [
+        "Editable",
+        "editables_cfg",
+        "editorTfs",
+        "_objsUnicos",
+        "clave",
+        "_edit_por_mesa",
+        "editPorMesa",
+        "sin_limite",
+        "rectSinLimite",
+        "recorte",
+        "shading"
+      ],
+      "reglas": [
+        "La capa es el objeto: el agrupado de Illustrator no viaja en el .ai; para separar dos cosas, dos capas «Editable …».",
+        "Un objeto por capa Y POR MESA: el ajuste (transform) se guarda y se lee con la clave «capa<U+001E>mesa»; lo guardado sólo por nombre vale de respaldo talle por talle.",
+        "El color (por figura, «capa<U+001F>obj_id»), las marcas TPU/Bordado/DTF, «Sin marca» y el tamaño por rango son de la CAPA (por nombre).",
+        "En el editor, selección, editorTfs, arrastre, alinear/espejar, medidas y guardado clavean por `o.clave`; marcas por `_nomsSel`.",
+        "Gemelos py/js: motor_pedido (lookup en arte_rect) ↔ pieza/caminoA.js (armarBase); la lista del editor: get_editables ↔ arte/editablesVista.js.",
+        "La caja de un sombreado (`sh`) es la del RECORTE que lo contiene (pila q/Q de TODA la mesa, no por capa): un degradado lineal/radial no tiene límite propio y MuPDF lo mide infinito (±2·10⁹). El `fill-shade` sin límite no se suma a la caja de la capa; sale de sus figuras `shading`. Trillizos: molde_real._analizar_capa ↔ molde/capas.js analizarCapa ↔ arte/editables.js objetosDeCapa; y _extraer_editables_crudo ↔ extraerEditables.",
+        "Si cambia lo que devuelve `extraer_editables`, cambiar el nombre del memo (`MEMO_EDITABLES`, hoy `editables_v2`): va por archivo, no por versión del código, y lo usa también servidor.py."
+      ],
+      "cicatrices": [
+        "2026-10-01: «Editable logo» (letras con degradado lineal recortado, arte CAMISETA NEGRO 2) no salía en el visor: su caja era el rectángulo infinito de MuPDF (151 millones de cm). El escudo, con degradado de malla, sí salía. Arreglado midiendo el sombreado por su recorte (MAPA 604).",
+        "2026-10-01: la misma capa en Frente y Espalda salía UNA vez en el editor (dedup por nombre) y las dos compartían el ajuste (clave = nombre). Arreglado con la clave por mesa (MAPA 603).",
+        "2026-07-22: el ColorPickerModal montado dentro de una pestaña hacía que el color del editable no abriera desde el editor: los modales globales van al final del return de App."
+      ],
+      "contratos": [
+        "verificar_navegador_arte.py"
+      ],
+      "mapa": "MAPA_DEL_SISTEMA.md §10.b y changelog 603, 604",
+      "memoria": "capa-editable-es-el-objeto",
+      "conexiones": [
+        "camino-a",
+        "generar-navegador",
+        "vector-original"
+      ]
+    },
+    {
+      "id": "mupdf-prestado",
+      "nombre": "MuPDF presta sombreados e imágenes: no se liberan",
+      "que": "mupdf.js 1.26.4 entrega a los dispositivos el sombreado/la imagen sin referencia propia pero lo anota para liberar: `devolver` lo desanota para que el recolector no libere memoria ajena.",
+      "archivos": [
+        "frontend/src/motor/pdf/prestado.js",
+        "frontend/src/motor/pdf/dibujos.js",
+        "frontend/src/motor/arte/editables.js",
+        "frontend/src/motor/pieza/caminoA.js"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/pdf/prestado.js",
+          "export function devolver("
+        ],
+        [
+          "frontend/src/motor/pdf/dibujos.js",
+          "fillShade(shade) { devolver(shade)"
+        ],
+        [
+          "frontend/src/motor/arte/editables.js",
+          "devolver(shade)"
+        ],
+        [
+          "frontend/src/motor/pieza/caminoA.js",
+          "fillShade: devolver"
+        ]
+      ],
+      "palabras": [
+        "devolver",
+        "fillShade",
+        "fillImage",
+        "fillImageMask",
+        "clipImageMask",
+        "mupdf.Device"
+      ],
+      "reglas": [
+        "Todo dispositivo propio (`new mupdf.Device({...})`) que DEFINA fillShade, fillImage, fillImageMask o clipImageMask pasa su primer argumento por `devolver` (después de usarlo), aunque no lo use.",
+        "Al actualizar mupdf.js: si esos avisos pasan a hacer `_wasm_keep_…`, sacar `devolver` (dejaría una referencia sin soltar)."
+      ],
+      "cicatrices": [
+        "2026-10-01: «RuntimeError: null function or function signature mismatch» (fz_drop_colorspace / fz_drop_icc_link) al juntar basura después de armar los editables de un arte con 33 degradados ICC: el envoltorio `new Shade(puntero)` sin keep liberaba el sombreado del documento (MAPA 604)."
+      ],
+      "contratos": [
+        "verificar_navegador_arte.py"
+      ],
+      "mapa": "MAPA_DEL_SISTEMA.md changelog 604",
+      "memoria": "degradados-sin-limite",
+      "conexiones": [
+        "editables",
+        "camino-a",
+        "generar-navegador"
+      ]
+    },
+    {
+      "id": "degradados",
+      "nombre": "Degradados: vectoriales en pantalla y sin dibujarlos al leer texto",
+      "que": "MuPDF dibujaba cada degradado (`sh`) como imagen del tamaño de la mesa: al leer el texto (bandera «conservar imágenes») y al escribir el SVG. Ahora el texto se lee sin esa bandera y el SVG lleva linearGradient/radialGradient propios.",
+      "archivos": [
+        "frontend/src/motor/pdf/degradados.js",
+        "frontend/src/motor/pieza/svg.js",
+        "frontend/src/motor/arte/editablesVista.js",
+        "frontend/src/motor/arte/texto.js",
+        "frontend/src/motor/molde/caminoA.js",
+        "motor_pedido.py"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/pdf/degradados.js",
+          "export function marcarDegradados("
+        ],
+        [
+          "frontend/src/motor/pdf/degradados.js",
+          "const ALTO_TIRA = 8"
+        ],
+        [
+          "frontend/src/motor/pieza/svg.js",
+          "marcarDegradados(mupdf, doc, pagina)"
+        ],
+        [
+          "frontend/src/motor/pieza/svg.js",
+          "export function svgDePagina(mupdf, doc, pagina, recorte = null)"
+        ],
+        [
+          "frontend/src/motor/arte/editablesVista.js",
+          "svgDePagina(mupdf, m.doc, 0, [x0, y0, w, h])"
+        ],
+        [
+          "frontend/src/motor/arte/texto.js",
+          "const OPCIONES_STEXT = 'preserve-ligatures,preserve-whitespace,use-cid-for-unknown-unicode'"
+        ],
+        [
+          "frontend/src/motor/molde/caminoA.js",
+          "const OPCIONES_TEXTO = 'preserve-ligatures,preserve-whitespace,mediabox-clip,use-cid-for-unknown-unicode'"
+        ],
+        [
+          "motor_pedido.py",
+          "FLAGS_TEXTO = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES"
+        ]
+      ],
+      "palabras": [
+        "marcarDegradados",
+        "FLAGS_TEXTO",
+        "OPCIONES_STEXT",
+        "preserve-images",
+        "linearGradient",
+        "tzdg_",
+        "svgDePagina"
+      ],
+      "reglas": [
+        "El texto de una mesa se lee SIN «conservar imágenes»: `get_text(\"dict\", flags=FLAGS_TEXTO)` en Python y sin `preserve-images` en el navegador. Con la bandera MuPDF dibuja cada degradado como imagen de mesa entera (8 s por mesa).",
+        "Todo SVG del sistema sale por `pieza/svg.js svgDePagina` (con `recorte` opcional): nadie arma su propio `DocumentWriter('svg')`, porque ahí se cambian los degradados por gradientes vectoriales.",
+        "El marcador del degradado se pinta bajo la MISMA matriz que el `sh`: el `<path>` queda en el espacio del degradado y las `/Coords` van tal cual con gradientUnits=userSpaceOnUse.",
+        "Los colores de las paradas salen de dibujar el sombreado con MuPDF en una tira de 1024×8 y leer la fila del medio (nunca una tira de 1 píxel de alto).",
+        "El documento no queda cambiado: después de dibujar, `deshacer()` siempre. Si el SVG trae más marcadores que `sh` reemplazados, se dibuja por el camino viejo.",
+        "Lo que no se sabe escribir (mallas, tipo 1, con /BBox, radiales raros, patrones) no se toca: lo sigue dibujando MuPDF."
+      ],
+      "cicatrices": [
+        "2026-10-01: cargar «CAMISETA NEGRO 2» (11 y 33 degradados lineales en dos mesas) tardaba ~111 s de lecturas + 21,6 s de dibujar las mesas; quedó en 2,5 s + 0,35 s (MAPA 605).",
+        "2026-10-01: la tira de muestras de 256×1 daba colores corridos (79 donde el real es 90): se vio al comparar contra el dibujo REAL de MuPDF, no contra el SVG viejo."
+      ],
+      "contratos": [
+        "verificar_navegador_arte.py",
+        "verificar_navegador_camino_a.py"
+      ],
+      "mapa": "MAPA_DEL_SISTEMA.md changelog 605",
+      "memoria": "degradados-sin-limite",
+      "conexiones": [
+        "editables",
+        "vector-original",
+        "camino-a",
+        "vista-mesas",
+        "mupdf-prestado"
+      ]
+    },
+    {
+      "id": "integracion-externa",
+      "nombre": "Pedidos que llegan de otro sistema (API + robot + Drive)",
+      "que": "Otro sistema manda un .zip (pedido.json + artes + tipografías) con llave; el servidor revisa los datos y lo encola; el robot (Node, proceso aparte, el mismo motor del navegador) carga cada diseño con su molde y su arte, arma la tizada, guarda los PDF en Google Drive y queda un JSON de resultado con dónde está cada archivo y de qué pedido es.",
+      "archivos": [
+        "integracion_externa.py",
+        "frontend/src/motor/robot/robot.mjs",
+        "servidor.py",
+        "frontend/src/App.jsx",
+        "frontend/src/motor/calculos.js",
+        "empaquetar.py",
+        "verificar_integracion_externa.py",
+        "documentacion/integracion_externa/FORMATO_PEDIDO.md",
+        "documentacion/integracion_externa/pedido_ejemplo.json"
+      ],
+      "anclas": [
+        [
+          "integracion_externa.py",
+          "def revisar_datos("
+        ],
+        [
+          "integracion_externa.py",
+          "def cuerpo_de("
+        ],
+        [
+          "integracion_externa.py",
+          "ALARMAS = {"
+        ],
+        [
+          "integracion_externa.py",
+          "def usuario_de_request("
+        ],
+        [
+          "integracion_externa.py",
+          "def _slug_interno("
+        ],
+        [
+          "integracion_externa.py",
+          "def _limpiar_disenos("
+        ],
+        [
+          "integracion_externa.py",
+          "def arrancar_robot("
+        ],
+        [
+          "integracion_externa.py",
+          "RUTAS_DE_PANTALLA = {"
+        ],
+        [
+          "servidor.py",
+          "app.register_blueprint(IE.bp)"
+        ],
+        [
+          "servidor.py",
+          "IE.usuario_de_request()"
+        ],
+        [
+          "servidor.py",
+          "_API_SIN_MOLDE.update(IE.RUTAS_DE_PANTALLA)"
+        ],
+        [
+          "servidor.py",
+          "IE.arrancar_robot("
+        ],
+        [
+          "servidor.py",
+          "if d.get(\"externo\") and request.args.get(\"externos\") != \"1\":"
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "async function procesar("
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "resolverCalculo(pd, rutaApi)"
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "async function subirADrive("
+        ],
+        [
+          "frontend/src/motor/calculos.js",
+          "const _fetch = _fetchGuardado() || globalThis.fetch"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function PantallaIntegraciones("
+        ],
+        [
+          "empaquetar.py",
+          "\"frontend/src/motor\", \"frontend/node_modules/mupdf\""
+        ],
+        [
+          "integracion_externa.py",
+          "def _credencial_drive("
+        ],
+        [
+          "integracion_externa.py",
+          "def adm_drive_conectar("
+        ],
+        [
+          "integracion_externa.py",
+          "def adm_drive_vuelta("
+        ],
+        [
+          "integracion_externa.py",
+          "def _carpetas_drive("
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "grant_type: 'refresh_token'"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "data-tour=\"integ-drive-conectar\""
+        ],
+        [
+          "integracion_externa.py",
+          "def v1_archivo("
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "const enPalabras = (t) =>"
+        ],
+        [
+          "integracion_externa.py",
+          "def variables_publicas("
+        ],
+        [
+          "integracion_externa.py",
+          "def _molde_de_variable("
+        ],
+        [
+          "integracion_externa.py",
+          "def _silueta("
+        ],
+        [
+          "integracion_externa.py",
+          "def v1_variables("
+        ],
+        [
+          "integracion_externa.py",
+          "def resultado_publico("
+        ]
+      ],
+      "palabras": [
+        "externo",
+        "X-Api-Key",
+        "X-Robot-Token",
+        "robot",
+        "revisar_datos",
+        "cuerpo_de",
+        "ALARMAS",
+        "pedido_externo",
+        "drive",
+        "integracion"
+      ],
+      "reglas": [
+        "El pedido llega como si se cargara a mano: cada DISEÑO con sus MOLDES, y cada molde con su arte, variable, telas y editables. El arte puede ir en el diseño (para todos sus moldes) o en cada molde.",
+        "`cuerpo_de` arma el MISMO cuerpo que `cuerpoDelPedido` de App.jsx: si la pantalla suma una clave al cuerpo, sumarla acá.",
+        "El servidor web no calcula: recibe, revisa los DATOS, encola y arma el JSON. Leer el arte y armar la tizada lo hace el robot (proceso Node aparte) por las rutas de siempre.",
+        "Nada del usuario se pisa: los diseños del pedido van con slug interno `x-<huella>-<nombre>` marcados `externo: <ref>`; se borran SÓLO por esa marca y esa referencia. `GET /api/disenos` no los lista.",
+        "Las tipografías del paquete van a la carpeta del molde («del pedido»), nunca al catálogo del sistema. Las marcas TPU/Bordado/DTF viajan en el cuerpo, nunca al molde.",
+        "Toda alarma sale de `IE.ALARMAS` (código, etapa, frena, qué hacer) y se publica en `/api/externo/v1/alarmas`: alarma nueva = entrada ahí.",
+        "Las piezas sin diseño frenan por las que SE FABRICAN (los `avisos` del plan), no por todas las del molde.",
+        "Una tizada hecha no se pisa: misma referencia en `listo` → `referencia-ya-generada` salvo `reemplazar: true`.",
+        "La llave del otro sistema sólo abre `/api/externo/v1/`; en disco queda sólo su huella. La llave privada de Drive sale sólo hacia el robot.",
+        "Siempre queda una copia local de los PDF (`datos/externo/salida/<ref>/`): si Drive falla el pedido termina listo con aviso.",
+        "El robot atiende los 428 `{calcular}` con `resolverCalculo` (no hay `window` para `instalarCalculos`).",
+        "El paquete del publicado lleva `frontend/src/motor` + mupdf, fflate y opentype.js; el servidor publicado necesita Node.",
+        "Drive: primero la cuenta de una PERSONA (OAuth, refresh_token); una cuenta de servicio no puede guardar en el «Mi unidad» de una cuenta personal (sin espacio propio), sólo en unidades compartidas.",
+        "Dos carpetas: las tizadas (y el resultado.json) en `carpeta_tizadas/<carpeta del pedido>/`, la ficha técnica suelta en `carpeta_fichas`.",
+        "La vuelta de «Conectar con Google» no pide sesión: la valida un `state` de un solo uso (15 min); va en `_API_SIN_SESION`, que se escribe en UNA línea (el contrato de permisos la lee con regex).",
+        "El secreto del cliente y el refresh_token nunca salen hacia la pantalla; sólo hacia el robot (`/api/externo/robot/destino`).",
+        "`GET /api/externo/v1/pedidos/<ref>/archivos/<nombre>` sirve SÓLO nombres que estén en `resultado.archivos`, desde `datos/externo/salida/<ref>/` y con chequeo de realpath: nunca una ruta armada con lo que manda el otro sistema.",
+        "La `etapa` que ve el otro sistema es texto para personas: el `nav|pct|texto` del motor se traduce en el robot (`enPalabras`) antes de mandarlo.",
+        "En TIZADA se eligen VARIABLES, no moldes (pedido variable-first): el otro sistema elige de `GET /variables` y manda `variable` (clave); el `molde` es opcional y se deduce. Una variable por prenda en cada diseño (`molde-repetido`), igual que `vars_por_diseno`.",
+        "Al otro sistema NUNCA se le pide un cálculo (428): si TIZADA no tiene algo calculado (la silueta), se contesta 404 con el motivo (`sin_calcular`).",
+        "Lo que ve el otro sistema (GET /pedidos, aviso) pasa por `resultado_publico`: NUNCA rutas del disco del servidor; cada archivo con su `descarga`. La documentación para el otro sistema vive en documentacion/integracion_externa/ (API.md, openapi.yaml, esquemas, respuestas reales, código) — ruta nueva o campo nuevo = actualizarla."
+      ],
+      "cicatrices": [
+        "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
+        "2026-10-02: `/api/pedido/plan` contestaba 428 al robot (el servidor le pide a quien llama que lea la personalización del arte): hay que atender los cálculos igual que el navegador.",
+        "2026-10-02: la primera versión rechazaba por el check «Mapeo de arte a piezas», que mira TODAS las piezas del molde: un arte sin cuello V frenaba un pedido de cuello redondo.",
+        "2026-10-02: el molde real no admitía la tela del primer ejemplo (`telas_cfg.todas`): la API pelada no lo validaba; `revisar_datos` sí (`tela-no-permitida`).",
+        "2026-10-02: el «sistemita» de prueba externa (`TIZADAPRO PRUEBAEXT`, fuera del repo) se trababa en la prueba: se lo lanzaba con stdout=PIPE sin leerla y al llenarse el búfer el proceso se colgaba (MAPA 608).",
+        "2026-10-02: el otro sistema mostraba «nav|85|Preparando la hoja…»: el robot reenviaba el formato interno del progreso de la pantalla (MAPA 609).",
+        "2026-10-02: el sistemita (y la API) hacían elegir el MOLDE y después un «Modelo»: en TIZADA se elige la VARIABLE directo (variable-first desde 2026-07-07). Corregido por el usuario (MAPA 612).",
+        "2026-10-02: el resultado público mostraba rutas del servidor (`ruta`, `destino.carpeta`, `copia_local`) al otro sistema (MAPA 614)."
+      ],
+      "contratos": [
+        "verificar_integracion_externa.py",
+        "verificar_permisos_rutas.py"
+      ],
+      "mapa": [
+        606,
+        607,
+        608,
+        609,
+        610,
+        611,
+        612,
+        614
+      ],
+      "memoria": "integracion-pedido-externo",
+      "conexiones": [
+        "plan-pedido",
+        "generar-navegador",
+        "calculos-navegador",
+        "camino-a",
+        "fuentes",
+        "telas",
+        "editables",
+        "publicacion",
+        "escrituras"
+      ]
     }
   ]
 }

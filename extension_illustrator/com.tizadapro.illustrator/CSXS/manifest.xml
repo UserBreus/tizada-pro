@@ -8,11 +8,11 @@
     solo, el panel lo levanta.
   CEP y no UXP: en 2026 UXP para Illustrator todavía no está abierto a terceros.
 -->
-<ExtensionManifest Version="9.0" ExtensionBundleId="com.tizadapro.illustrator" ExtensionBundleVersion="1.25.0"
+<ExtensionManifest Version="9.0" ExtensionBundleId="com.tizadapro.illustrator" ExtensionBundleVersion="1.26.0"
   ExtensionBundleName="USER PRO" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="com.tizadapro.illustrator.puente" Version="1.25.0" />
-    <Extension Id="com.tizadapro.illustrator.panel" Version="1.25.0" />
+    <Extension Id="com.tizadapro.illustrator.puente" Version="1.26.0" />
+    <Extension Id="com.tizadapro.illustrator.panel" Version="1.26.0" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>

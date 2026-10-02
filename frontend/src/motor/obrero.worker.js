@@ -386,7 +386,7 @@ const TAREAS = {
    * `idx_mesa`/`pieza_idx`, o el contorno mayor), la base del contexto del arte y el estampado
    * como en el camino B (con `separado`). La base queda ACÁ (`basesA`) y se devuelve su `baseId`.
    */
-  async pieza_a({ molde, arte: claveArte, mesa, talle, pieza, info, persona, nro, variante, grupo, ph, etiqueta, alias, salida }) {
+  async pieza_a({ molde, arte: claveArte, mesa, talle, pieza, info, persona, nro, variante, grupo, ph, etiqueta, alias, salida, reporte = false }) {
     await cargar()
     if (!P || !abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
     const m = moldesA.get(molde)
@@ -421,9 +421,11 @@ const TAREAS = {
     }
     // la personalización va por la mesa del ARTE (separado) o por la del MOLDE (clásico: `clave_pers = str(mesa)`)
     const phMesa = clasico ? ((ph || {})[String(mesa)] || {}) : (base.mesaA ? ((ph || {})[String(base.mesaA)] || {}) : {})
+    const rep = reporte ? [] : null
     const estampado = P.estamparPieza({ base, ph: phMesa, persona, talle, pieza, nro, variante: variante ?? null, grupo: grupo ?? null,
                                         etiqueta, fuente: abridor.abrir, alias: alias || {}, info: info || {},
-                                        separado: !clasico, arteRect: clasico ? null : base.arteRect })
+                                        separado: !clasico, arteRect: clasico ? null : base.arteRect, reporte: rep })
+    if (rep) return { reporte: rep }             // el aviso de la planilla: sólo cuánto se achicó
     const r = { baseId: kb, estampado, W: base.W, H: base.H, B: base.B, Hp: base.Hp, S: base.S, mesaA: base.mesaA,
                 w: base.W + 2 * base.B, h: base.Hp }
     if (salida === 'svg' || salida === 'pdf') {
@@ -482,10 +484,11 @@ const TAREAS = {
   async fuente_analizar({ bytes, catalogo = [], destino = '' }) {
     await cargar()
     const { FuenteCurvas } = await import('./texto/curvas.js')
-    const { normFuente } = await import('./texto/fuentes.js')
+    const { nombresFuente, identidadFuente } = await import('./texto/fuentes.js')
     let interno
     const f = new mupdf.Font('subida', bytes)
     try { interno = f.getName() } finally { try { f.destroy() } catch { /* nada */ } }
+    const { completo, ps } = nombresFuente(bytes)
     const fc = new FuenteCurvas(bytes, null)
     const prueba = 'ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ0123456789#-'
     const sin = []
@@ -494,9 +497,11 @@ const TAREAS = {
       try { const [regs] = fc._glifo(ch); ok = !!(regs && regs.length) } catch { ok = false }
       if (!ok) sin.push(ch)
     }
-    const nuevo = normFuente(interno)
-    const otra = (catalogo || []).find((c) => c.archivo !== destino && normFuente(c.interno || '') === nuevo)
-    return { interno, sin_contorno: sin, choca_con: otra ? { interno: otra.interno, archivo: otra.archivo } : null }
+    // misma fuente adentro (familia + estilo) en la carpeta a la que va: el servidor igual lo
+    // controla y pregunta (`_fuente_existente`); esto queda como dato
+    const nuevo = identidadFuente({ completo, interno })
+    const otra = (catalogo || []).find((c) => c.archivo !== destino && identidadFuente(c) === nuevo)
+    return { interno, completo, ps, sin_contorno: sin, choca_con: otra ? { interno: otra.interno, archivo: otra.archivo } : null }
   },
   /**
    * REVALIDAR EL ARTE después de sumar una tipografía (lo que `/api/fuente` hacía en el servidor):
@@ -622,7 +627,7 @@ const TAREAS = {
     return true
   },
   /** La BASE + el ESTAMPADO de una pieza (los operadores), y si se pide, su SVG o su PDF. */
-  async pieza({ mesa, pagina, cont, borde, etiqueta, ph, persona, talle, pieza, nro, variante, grupo, info, alias, salida }) {
+  async pieza({ mesa, pagina, cont, borde, etiqueta, ph, persona, talle, pieza, nro, variante, grupo, info, alias, salida, reporte = false }) {
     await cargar()
     if (!P || !abridor) throw new Error('primero hay que cargar las tipografías (`fuentes`)')
     const d = mesas.get(mesa)
@@ -631,8 +636,10 @@ const TAREAS = {
     const uu = pageObj.get('UserUnit')
     const S = (uu && uu.isNumber && uu.isNumber()) ? Number(uu.asNumber()) : 1.0
     const base = P.armarBase(cont, S, borde)
+    const rep = reporte ? [] : null
     const estampado = P.estamparPieza({ base, ph, persona, talle, pieza, nro, variante, grupo, etiqueta,
-                                        fuente: abridor.abrir, alias: alias || {}, info: info || {} })
+                                        fuente: abridor.abrir, alias: alias || {}, info: info || {}, reporte: rep })
+    if (rep) return { reporte: rep }             // el aviso de la planilla: sólo cuánto se achicó
     const r = { baseStream: base.baseStream, clip: base.clip, estampado, W: base.W, H: base.H, B: base.B, Hp: base.Hp, S, nom: base.nom,
                 w: base.W + 2 * base.B, h: base.Hp }
     if (salida === 'svg' || salida === 'pdf') {

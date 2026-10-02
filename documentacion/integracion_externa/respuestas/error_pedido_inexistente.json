@@ -1,0 +1,6 @@
+{
+ "http": 404,
+ "cuerpo": {
+  "error": "no hay ningún pedido con esa referencia"
+ }
+}

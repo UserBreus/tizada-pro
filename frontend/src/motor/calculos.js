@@ -20,6 +20,7 @@ let _pool = null
 const abiertos = []                 // claves de moldes abiertos en el hilo, del más viejo al más nuevo
 const enCurso = new Map()           // clave del cálculo → promesa (dos pedidos iguales esperan al primero)
 let _fetch = null
+const _fetchGuardado = () => _fetch
 
 function pool() {
   if (!_pool) {
@@ -56,6 +57,9 @@ async function abrirMolde(args, rutaApi) {
 
 async function dejar(rutaApi, clave, resultadoJson, archivo = null) {
   let r
+  // sin `instalarCalculos` (el robot de integración corre en Node, sin `window`) se usa el fetch
+  // del ambiente: `resolverCalculo` tiene que servir también ahí
+  const _fetch = _fetchGuardado() || globalThis.fetch
   if (archivo) {
     const fd = new FormData()
     fd.append('clave', clave)

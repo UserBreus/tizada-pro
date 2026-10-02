@@ -94,7 +94,7 @@ for n in sorted(raiz_py):
 _dir_f = os.path.join(AQUI, "catalogo_fuentes")
 if os.path.isdir(_dir_f):
     locales = {f for f in os.listdir(_dir_f)
-               if f.startswith("subida_") and f.lower().endswith((".ttf", ".otf"))}
+               if f.lower().endswith((".ttf", ".otf"))}     # todas: desde 2026-10-01 las subidas no llevan rótulo
     en_paq = {os.path.basename(n) for n in NOMBRES if n.startswith("catalogo_fuentes/")}
     faltan = sorted(locales - en_paq)
     if faltan:

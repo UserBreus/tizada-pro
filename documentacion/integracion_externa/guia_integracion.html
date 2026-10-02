@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>TIZADA PRO — Conectar otro sistema</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --cian: #00b8d4; --cian-claro: #e0f7fb; --magenta: #d6007e; --magenta-claro: #fde6f2;
+    --amarillo: #f5b800; --amarillo-claro: #fff6d6; --verde: #10a36b; --verde-claro: #e3f6ee;
+    --rojo: #e0443a; --rojo-claro: #fdeceb; --tinta: #16202a; --gris: #5b6875; --gris-claro: #eef1f4;
+    --borde: #dde3e9;
+  }
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  @page portada { margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; color: var(--tinta); font-size: 10pt; line-height: 1.55; margin: 0; }
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+  p { margin: 0 0 8pt; }
+  code, .mono { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.8pt; }
+  code { background: var(--gris-claro); padding: 1px 4px; border-radius: 4px; }
+  td code { font-size: 8pt; }
+  b { font-weight: 700; }
+  .ti { vertical-align: -2px; }
+
+  /* ── portada ── */
+  .portada { page: portada; height: 297mm; width: 210mm; position: relative; overflow: hidden;
+    background: radial-gradient(circle at 85% 12%, rgba(0,184,212,0.55), transparent 42%),
+                radial-gradient(circle at 10% 90%, rgba(214,0,126,0.45), transparent 45%),
+                radial-gradient(circle at 70% 80%, rgba(245,184,0,0.35), transparent 40%),
+                linear-gradient(160deg, #0b1118 0%, #111b26 60%, #0b1118 100%);
+    color: #fff; padding: 30mm 22mm; break-after: page; }
+  .portada .logo { width: 30mm; filter: drop-shadow(0 0 18px rgba(0,184,212,0.7)); }
+  .portada .marca { font-size: 13pt; letter-spacing: 0.3em; font-weight: 700; margin-top: 8mm; opacity: 0.85; }
+  .portada .marca span { color: #3fe3ff; }
+  .portada h1 { font-size: 34pt; font-weight: 800; margin-top: 42mm; max-width: 150mm; }
+  .portada h1 em { font-style: normal; color: #3fe3ff; text-shadow: 0 0 22px rgba(63,227,255,0.45); }
+  .portada .sub { font-size: 13pt; margin-top: 8mm; max-width: 140mm; color: #c9d6e2; }
+  .portada .chips { margin-top: 14mm; display: flex; gap: 8px; flex-wrap: wrap; }
+  .portada .chip { border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 5px 13px; font-size: 9.5pt; color: #e6eef5; }
+  .portada .pie { position: absolute; bottom: 20mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between; font-size: 9pt; color: #9fb0c0; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 5mm; }
+
+  /* ── secciones ── */
+  section { break-before: page; }
+  .seccion-titulo { display: flex; align-items: center; gap: 12px; margin-bottom: 12pt; }
+  .num { min-width: 36px; padding: 0 5px; width: auto; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15pt; color: #fff; background: linear-gradient(135deg, var(--cian), #0088a3); flex-shrink: 0; }
+  .num.m { background: linear-gradient(135deg, var(--magenta), #a3005f); }
+  .num.a { background: linear-gradient(135deg, var(--amarillo), #d99400); }
+  .num.v { background: linear-gradient(135deg, var(--verde), #0a7a50); }
+  h2 { font-size: 20pt; font-weight: 800; }
+  .kicker { font-size: 8.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gris); font-weight: 700; }
+  h3 { font-size: 13pt; font-weight: 700; margin: 14pt 0 6pt; display: flex; align-items: center; gap: 7px; }
+  h3 .ti { color: var(--cian); font-size: 15pt; }
+  h4 { font-size: 11pt; font-weight: 700; margin: 10pt 0 4pt; }
+  .lead { font-size: 11.5pt; color: #2d3b48; margin-bottom: 12pt; }
+
+  /* ── cajas ── */
+  .caja { border-radius: 12px; padding: 11pt 13pt; margin: 9pt 0; break-inside: avoid; border: 1px solid var(--borde); }
+  .caja .t { font-weight: 800; display: flex; align-items: center; gap: 7px; margin-bottom: 4pt; }
+  .caja p:last-child { margin-bottom: 0; }
+  .c-info { background: var(--cian-claro); border-color: #a9e7f2; } .c-info .t { color: #007a8f; }
+  .c-ojo { background: var(--amarillo-claro); border-color: #f3dc8a; } .c-ojo .t { color: #9a6d00; }
+  .c-mal { background: var(--rojo-claro); border-color: #f4b9b4; } .c-mal .t { color: #b3261e; }
+  .c-bien { background: var(--verde-claro); border-color: #a6dcc4; } .c-bien .t { color: #0a7a50; }
+  .c-mag { background: var(--magenta-claro); border-color: #f3b2d6; } .c-mag .t { color: #a3005f; }
+
+  .grilla { display: grid; gap: 9pt; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr 1fr 1fr; } .g4 { grid-template-columns: repeat(4, 1fr); }
+  .tarjeta { border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 11pt; break-inside: avoid; background: #fff; }
+  .tarjeta .ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: #fff; margin-bottom: 6pt; }
+  .tarjeta h4 { margin-top: 0; }
+  .tarjeta p { font-size: 9.6pt; color: #394856; margin: 0; }
+  .i-c { background: var(--cian); } .i-m { background: var(--magenta); } .i-a { background: var(--amarillo); } .i-v { background: var(--verde); } .i-g { background: #52606d; }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.2pt; margin: 6pt 0 10pt; break-inside: auto; }
+  th { background: var(--tinta); color: #fff; text-align: left; font-weight: 600; padding: 6pt 7pt; }
+  th:first-child { border-top-left-radius: 8px; } th:last-child { border-top-right-radius: 8px; }
+  td { padding: 5.5pt 7pt; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  tr { break-inside: avoid; }
+  tr:nth-child(even) td { background: #f7f9fb; }
+  .si { color: var(--verde); font-weight: 700; } .no { color: var(--rojo); font-weight: 700; } .medio { color: #b58300; font-weight: 700; }
+  .pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .p-obl { background: var(--rojo-claro); color: #b3261e; } .p-opc { background: var(--gris-claro); color: var(--gris); }
+
+  pre.json { background: #0f1720; color: #d7e3ee; border-radius: 12px; padding: 11pt 13pt; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.3pt; line-height: 1.5; white-space: pre-wrap; break-inside: avoid; margin: 8pt 0; }
+  pre.json .k { color: #7fdcff; } pre.json .s { color: #ffd479; } pre.json .c { color: #7d8e9e; font-style: italic; } pre.json .n { color: #ff8fc8; }
+
+  .mermaid { display: flex; justify-content: center; margin: 8pt 0 10pt; break-inside: avoid; }
+  .mermaid svg { max-height: 118mm; height: auto; }
+  .figura.baja .mermaid svg { max-height: 88mm; }
+  .figura.baja2 .mermaid svg { max-height: 58mm; }
+  .figura.alta .mermaid svg { max-height: 175mm; }
+  .figura { border: 1px solid var(--borde); border-radius: 14px; padding: 8pt; background: linear-gradient(180deg, #fbfdfe, #f3f7fa); break-inside: avoid; margin: 8pt 0; }
+  .figura .pie-fig { font-size: 8.6pt; color: var(--gris); text-align: center; margin-top: 2pt; }
+
+  .pasos { counter-reset: paso; }
+  .paso { display: flex; gap: 11px; margin: 8pt 0; break-inside: avoid; }
+  .paso .b { width: 26px; height: 26px; border-radius: 50%; background: var(--cian); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10pt; }
+  .paso .b.m { background: var(--magenta); } .paso .b.a { background: var(--amarillo); } .paso .b.v { background: var(--verde); }
+  .paso .x { flex: 1; }
+  .paso .x b.tit { display: block; font-size: 10.8pt; }
+
+  .etapas { display: flex; align-items: stretch; gap: 5px; margin: 6pt 0 12pt; break-inside: avoid; }
+  .etapas .et { flex: 1; border: 1.5px solid; border-radius: 10px; padding: 7pt 8pt; font-size: 8.8pt; line-height: 1.35; text-align: center; min-height: 52pt; display: flex; flex-direction: column; justify-content: center; }
+  .etapas .et b { display: block; font-size: 9.6pt; margin-bottom: 2pt; }
+  .etapas .ti { color: var(--gris); font-size: 14px; align-self: center; }
+  .indice { columns: 2; column-gap: 16pt; margin-top: 8pt; }
+  .indice div { break-inside: avoid; padding: 5pt 0; border-bottom: 1px dashed var(--borde); display: flex; gap: 9px; align-items: baseline; }
+  .indice .n { font-weight: 800; color: var(--cian); width: 26px; }
+
+  .arbol { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.6pt; background: #f7f9fb; border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 12pt; white-space: pre; line-height: 1.6; break-inside: avoid; }
+  .arbol .d { color: #007a8f; font-weight: 600; } .arbol .f { color: #a3005f; } .arbol .c { color: var(--gris); font-family: 'Inter', sans-serif; font-style: italic; }
+  .chico { font-size: 8.8pt; color: var(--gris); }
+
+  /* secciones con mucho contenido: que entren en su página */
+  section.apretada table { font-size: 8.6pt; margin: 4pt 0 6pt; }
+  section.apretada td { padding: 3.8pt 6pt; }
+  section.apretada th { padding: 4.5pt 6pt; }
+  section.apretada h3 { margin: 8pt 0 4pt; }
+  section.apretada .lead { margin-bottom: 6pt; }
+  section.apretada pre.json { font-size: 7.5pt; padding: 8pt 10pt; margin: 5pt 0; line-height: 1.42; }
+  section.apretada .arbol { font-size: 8pt; padding: 7pt 10pt; line-height: 1.5; }
+  section.apretada .figura.media .mermaid svg { max-height: 84mm; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════ PORTADA ═══════════════════════════ -->
+<div class="portada">
+  <img class="logo" src="../logo.svg" alt="">
+  <div class="marca"><span>USER</span> PRO · TIZADA PRO</div>
+  <h1>Conectar <em>otro sistema</em> con TIZADA PRO</h1>
+  <div class="sub">Guía completa para el programador: cómo se pone en marcha en el servidor, qué archivos manda y recibe el otro sistema, cómo se conecta cada JSON y cómo queda cada archivo de producción asociado a SU venta — sin que nadie toque TIZADA.</div>
+  <div class="chips">
+    <span class="chip"><i class="ti ti-server"></i> Puesta en marcha</span>
+    <span class="chip"><i class="ti ti-file-zip"></i> Qué se manda</span>
+    <span class="chip"><i class="ti ti-file-type-pdf"></i> Qué se recibe</span>
+    <span class="chip"><i class="ti ti-link"></i> Cómo se conectan los JSON</span>
+    <span class="chip"><i class="ti ti-bell-ringing"></i> Aviso firmado</span>
+  </div>
+  <div class="pie"><span>API <b>/api/externo/v1</b> · formato <b>tizadapro.pedido/1</b></span><span>Sistema 1.0.48 · 2 de octubre de 2026</span></div>
+</div>
+
+<!-- ═══════════════════════════ 0 · RESUMEN ═══════════════════════════ -->
+<section style="break-before: auto;">
+  <div class="kicker">Antes de empezar</div>
+  <h2 style="margin: 4pt 0 10pt;">En una página</h2>
+  <p class="lead">El otro sistema (ventas, ERP, tienda) <b>elige del catálogo de TIZADA</b> lo que se puede fabricar, <b>manda un paquete .zip</b> con el pedido y los artes, y <b>recibe los PDF de producción</b> —una tizada por tela y la ficha técnica— con la marca de SU venta. En el medio, un <b>robot</b> de TIZADA hace todo lo que haría una persona.</p>
+
+  <div class="figura baja">
+    <pre class="mermaid">
+flowchart LR
+  A["🛒 OTRO SISTEMA<br/>ventas / ERP"] -- "1 · lee el catálogo<br/>GET /variables, /telas…" --> T
+  A -- "2 · manda el pedido<br/>POST /pedidos (.zip)" --> T
+  T["⚙️ TIZADA PRO<br/>servidor + robot"] -- "3 · guarda los PDF" --> D["☁️ Google Drive<br/>carpeta del pedido"]
+  T -- "4 · avisa: listo<br/>POST a tu URL (firmado)" --> A
+  A -- "5 · baja / abre los PDF" --> D
+  A -. "o los baja de TIZADA<br/>GET …/archivos/{nombre}" .-> T
+    </pre>
+    <div class="pie-fig">Los tres actores. El otro sistema nunca entra a la pantalla de TIZADA: todo es por la API.</div>
+  </div>
+
+  <div class="grilla g3">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-server"></i></div><h4>1 · Puesta en marcha</h4><p>Una sola vez, en el servidor de TIZADA: actualizar, Node, la llave, el aviso y Google Drive. <b>Sección 1.</b></p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-arrows-exchange"></i></div><h4>2 · Qué viaja</h4><p>Lo que manda y lo que recibe el otro sistema, y cómo se conecta cada JSON con el anterior. <b>Secciones 2 a 5.</b></p></div>
+    <div class="tarjeta"><div class="ico i-v"><i class="ti ti-checklist"></i></div><h4>3 · Probar y usar</h4><p>Código listo para usar, lista de control y problemas frecuentes. <b>Secciones 6 a 8.</b></p></div>
+  </div>
+
+  <div class="indice">
+    <div><span class="n">1</span>Puesta en marcha en el servidor de TIZADA</div>
+    <div><span class="n">2</span>El recorrido de un pedido</div>
+    <div><span class="n">3</span>Qué se manda y qué se recibe</div>
+    <div><span class="n">4</span>Cómo se conectan los JSON</div>
+    <div><span class="n">5</span>El pedido, el resultado y el aviso, campo por campo</div>
+    <div><span class="n">6</span>Estados y alarmas</div>
+    <div><span class="n">7</span>Todas las rutas</div>
+    <div><span class="n">8</span>Probarlo, lista de control y problemas frecuentes</div>
+  </div>
+
+  <div class="caja c-info"><div class="t"><i class="ti ti-folder"></i> Los archivos que acompañan esta guía</div>
+    <p>Repositorio privado <b>github.com/UserBreus/tizada-pro-integracion</b>, carpeta <code>integracion/</code>: <code>API.md</code> (la API entera), <code>FORMATO_PEDIDO.md</code>, <code>openapi.yaml</code> (para Postman), <code>esquemas/</code> (JSON Schema), <code>pedido_ejemplo.json</code>, <code>resultado_ejemplo.json</code>, <code>respuestas/</code> (la respuesta REAL de cada ruta) y <code>codigo/</code> (Python y Node listos). El mismo repositorio trae un <b>sistema de ventas de prueba</b> que hace todo esto con pantalla.</p></div>
+</section>
+
+<!-- ═══════════════════════════ 1 · PUESTA EN MARCHA ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num">1</div><div><div class="kicker">Una sola vez · en el servidor de TIZADA</div><h2>Puesta en marcha</h2></div></div>
+  <p class="lead">Lo hace quien administra el servidor de TIZADA PRO. Son siete pasos; al final, una prueba que dice si quedó bien.</p>
+
+  <div class="pasos">
+    <div class="paso"><div class="b">1</div><div class="x"><b class="tit">Actualizar TIZADA PRO a una versión con la integración</b>
+      La integración es del <b>2 de octubre de 2026</b> (versión 1.0.48 o posterior). Si el servidor tiene una copia anterior, primero va la actualización (el ZIP de actualización o <code>ACTUALIZAR-SISTEMA.bat</code> si la copia es de git). Se nota que está: en <b>Configuración</b> aparece la tarjeta <b>«Integraciones»</b>, y <code>GET /api/externo/v1/alarmas</code> contesta.</div></div>
+    <div class="paso"><div class="b">2</div><div class="x"><b class="tit">Instalar Node.js 20 o más nuevo</b>
+      El <b>robot</b> que arma los pedidos que llegan es un programa de Node (<code>frontend/src/motor/robot/robot.mjs</code>) y lo arranca solo el servidor de TIZADA al iniciar. Sin Node, los pedidos se reciben pero quedan en cola. Lo que dice el robot queda en <code>logs/robot.log</code>.</div></div>
+    <div class="paso"><div class="b">3</div><div class="x"><b class="tit">Reiniciar TIZADA y mirar «El robot»</b>
+      <b>Configuración › Integraciones › El robot</b> tiene que decir <i>«Prendido, esperando pedidos»</i> (punto verde). Si dice «No responde», el motivo está ahí mismo (por ejemplo, «no está instalado Node.js»).</div></div>
+    <div class="paso"><div class="b m">4</div><div class="x"><b class="tit">Crear la llave del otro sistema</b>
+      <b>Integraciones › Llaves del otro sistema</b>: escribir para quién es (p. ej. «Sistema de ventas») y tocar <b>«Crear llave»</b>. Se muestra <b>una sola vez</b>: «Copiar» y pasársela al programador del otro sistema por un canal seguro. TIZADA guarda sólo su huella. Para cortar el acceso: <b>«Anular»</b>.</div></div>
+    <div class="paso"><div class="b m">5</div><div class="x"><b class="tit">El aviso al otro sistema (opcional, recomendado)</b>
+      <b>Integraciones › Aviso al otro sistema</b>: la dirección donde el otro sistema recibe el aviso, p. ej. <code>https://ventas.ejemplo.com/tizada/aviso</code> → «Guardar». TIZADA le hace POST cuando cada pedido termina. Sin aviso, el otro sistema pregunta el estado cada pocos segundos.</div></div>
+    <div class="paso"><div class="b a">6</div><div class="x"><b class="tit">Google Drive (para que los PDF queden en Drive)</b>
+      <ol style="margin: 3pt 0 0; padding-left: 16pt;">
+        <li>En <b>Google Cloud</b> (proyecto propio): habilitar la <b>API de Google Drive</b> y crear un <b>ID de cliente OAuth</b> de tipo <b>«Aplicación web»</b>. En «URI de redireccionamiento autorizados» va la dirección de vuelta que <b>muestra la pantalla de Integraciones</b> (termina en <code>/api/integracion/drive/vuelta</code>). Bajar el <b>.json</b> del cliente.</li>
+        <li>En TIZADA: <b>«Cargar archivo de Google»</b> (ese .json) → <b>«Conectar con Google»</b> → aceptar con la cuenta dueña de las carpetas.</li>
+        <li>Pegar el enlace de la <b>carpeta de las tizadas</b> y el de la <b>carpeta de las fichas técnicas</b> → <b>«Guardar las carpetas»</b> → <b>«Probar»</b> (escribe un archivo de prueba en las dos).</li>
+      </ol>
+      <span class="chico">Sin Drive igual funciona: los PDF quedan en el servidor y el otro sistema los baja por la API (<code>descarga</code>).</span></div></div>
+    <div class="paso"><div class="b v">7</div><div class="x"><b class="tit">Que el otro sistema llegue a TIZADA (red)</b>
+      El servidor del otro sistema tiene que poder llamar a <code>https://&lt;servidor-de-TIZADA&gt;/api/externo/v1</code> (puerto abierto / proxy). Y si hay aviso, TIZADA tiene que poder llamar a la dirección del paso 5. En internet, siempre <b>HTTPS</b>: un proxy adelante (IIS, nginx) con el certificado, como explica <code>DESPLIEGUE.md</code> §8. Si TIZADA vive bajo un subcamino (<code>https://…/Tizadapro</code>), la API queda en <code>https://…/Tizadapro/api/externo/v1</code>.</div></div>
+  </div>
+
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-alert-triangle"></i> Google: la app en «Prueba» vence a los 7 días</div>
+    <p>Mientras la app de Google Cloud esté en modo «Prueba» con usuarios externos, el permiso de Drive se corta a los <b>7 días</b> y hay que volver a tocar «Conectar con Google». Para que no venza: <b>publicar la app</b> en Google Cloud (pide una página principal y una política de privacidad públicas) o usar una cuenta de <b>Google Workspace</b> con la app «Interna».</p></div>
+
+  <div class="caja c-bien"><div class="t"><i class="ti ti-circle-check"></i> La prueba de que quedó bien</div>
+    <p>Desde la PC del otro sistema, con la llave: <code>python codigo/enviar_pedido.py una_carpeta_con_pedido --solo-revisar</code> → tiene que decir <b>«Revisión: la aceptaría (200)»</b>. Sin <code>--solo-revisar</code> manda el pedido, espera y baja los PDF comprobando cada sha256.</p></div>
+
+  <h3><i class="ti ti-folders"></i> Dónde guarda TIZADA lo de la integración</h3>
+  <div class="arbol"><span class="d">datos/externo/</span>
+├── <span class="f">config.json</span>          <span class="c">llaves (sólo la huella), aviso, Drive, robot</span>
+├── <span class="d">pedidos/&lt;referencia&gt;/</span>  <span class="c">paquete.zip tal cual llegó, pedido.json, estado.json, resultado.json</span>
+├── <span class="d">salida/&lt;referencia&gt;/</span>   <span class="c">copia de los PDF (siempre, haya Drive o no)</span>
+└── <span class="f">rechazos.json</span>         <span class="c">lo que se rechazó al llegar (se ve en la pantalla)</span></div>
+  <p class="chico">A los <b>30 días</b> de terminado, TIZADA borra el paquete y la <b>copia de los PDF del servidor</b> (quedan el estado y el resultado como historial; Drive no se toca). Desde ahí <code>descarga</code> contesta 404: el otro sistema baja los PDF apenas termina el pedido, o usa Drive.</p>
+</section>
+
+<!-- ═══════════════════════════ 2 · RECORRIDO ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num m">2</div><div><div class="kicker">De la venta a los PDF</div><h2>El recorrido de un pedido</h2></div></div>
+  <div class="figura alta">
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant V as Otro sistema
+  participant T as TIZADA (API)
+  participant R as Robot de TIZADA
+  participant G as Google Drive
+  V->>T: GET /variables · /moldes/{codigo} · /telas · /tipografias
+  T-->>V: el catálogo (guardarlo y refrescarlo cuando cambia version)
+  V->>T: POST /pedidos/validar (JSON o .zip)
+  T-->>V: 200 aceptaría · 422 con alarmas (qué y dónde)
+  V->>T: POST /pedidos (paquete .zip)
+  T-->>V: 202 en_cola · o 422 rechazado
+  R->>T: toma el pedido
+  R->>R: lee el arte, revisa nombres, arma la tizada (procesando · NN %)
+  R->>G: sube los PDF a la carpeta del pedido
+  R->>T: terminado: resultado (archivos, sha256, enlaces)
+  T->>V: AVISO: POST a tu URL con el estado y el resultado (firmado)
+  V->>T: o pregunta: GET /pedidos/{referencia}
+  V->>G: abre / baja los PDF (drive_id, enlace)
+  V->>T: o los baja de TIZADA: GET /pedidos/{ref}/archivos/{nombre}
+    </pre>
+    <div class="pie-fig">Lo que hace el otro sistema está a la izquierda; todo lo demás lo hace TIZADA sola.</div>
+  </div>
+  <div class="etapas">
+    <div class="et" style="border-color: #a9e7f2; background: var(--cian-claro);"><b>en_cola</b>esperando al robot</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #f3dc8a; background: var(--amarillo-claro);"><b>procesando</b>«etapa» dice en qué va (y el %)</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #a6dcc4; background: var(--verde-claro);"><b>listo</b>trae el resultado</div>
+    <div class="et" style="border-color: #f4b9b4; background: var(--rojo-claro);"><b>rechazado · error · cancelado</b>con las alarmas</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 3 · QUÉ VIAJA ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num a">3</div><div><div class="kicker">Los archivos</div><h2>Qué se manda y qué se recibe</h2></div></div>
+  <table>
+    <tr><th>Dirección</th><th>Qué</th><th>Formato</th><th>Ruta</th></tr>
+    <tr><td><b>→ TIZADA</b></td><td>El <b>pedido</b>: <code>pedido.json</code> + los <b>artes</b> + las <b>tipografías</b> que falten</td><td>un <b>.zip</b></td><td><code>POST /pedidos</code></td></tr>
+    <tr><td><b>→ TIZADA</b></td><td>Revisar el pedido antes de mandarlo</td><td>el .zip o sólo el JSON</td><td><code>POST /pedidos/validar</code></td></tr>
+    <tr><td><b>← TIZADA</b></td><td>El <b>catálogo</b>: variables, prendas, talles, columnas de la planilla, telas, tipografías, alarmas</td><td>JSON</td><td><code>GET /variables</code> y otras</td></tr>
+    <tr><td><b>← TIZADA</b></td><td>La <b>silueta</b> de cada variable (para mostrarla)</td><td>JSON con contornos SVG</td><td><code>GET /variables/{clave}/foto</code></td></tr>
+    <tr><td><b>← TIZADA</b></td><td>El <b>estado</b> y el <b>resultado</b></td><td>JSON</td><td><code>GET /pedidos/{ref}</code></td></tr>
+    <tr><td><b>← TIZADA</b></td><td>El <b>aviso</b> cuando termina</td><td>JSON firmado (POST a tu URL)</td><td>webhook</td></tr>
+    <tr><td><b>← TIZADA</b></td><td>Los <b>PDF</b>: una tizada por tela (cada página es una mesa) + la ficha técnica A4</td><td>PDF</td><td><code>GET …/archivos/{nombre}</code> o Drive</td></tr>
+  </table>
+
+  <h3><i class="ti ti-file-zip"></i> El paquete que se manda</h3>
+  <div class="arbol"><span class="f">OV-2026-00123.zip</span>
+├── <span class="f">pedido.json</span>                   <span class="c">los datos (sección 5) — en la raíz</span>
+├── <span class="d">artes/</span><span class="f">jugador_camiseta.ai</span>       <span class="c">.ai (con «compatible con PDF») o .pdf</span>
+├── <span class="d">artes/</span><span class="f">golero_camiseta.ai</span>
+└── <span class="d">tipografias/</span><span class="f">Anton-Regular.ttf</span>  <span class="c">sólo las que TIZADA no tiene (.ttf / .otf)</span></div>
+  <p class="chico">Las rutas de adentro del zip son las que nombra <code>pedido.json</code>. Hasta <b>600 MB</b> y <b>400 archivos</b>. Se manda como archivo de formulario <code>paquete</code> (multipart) o como cuerpo <code>application/zip</code>.</p>
+
+  <h3><i class="ti ti-palette"></i> Cómo tiene que venir el arte</h3>
+  <div class="grilla g2">
+    <div class="tarjeta"><h4>El archivo</h4><p>Una <b>mesa de trabajo por pieza</b>, armado sobre la base que da TIZADA para esa prenda. El dibujo <b>sin texto vivo</b> (convertido a curvas).</p></div>
+    <div class="tarjeta"><h4>Las capas</h4><p><code>diseño</code> (el dibujo) · <code>guias</code> (el nombre de la pieza de cada mesa) · <code>Nombre</code> y <code>Número</code> (lo que cambia en cada prenda) · una capa <code>Editable &lt;objeto&gt;</code> por cada objeto que puede ir aparte (TPU, DTF, bordado).</p></div>
+  </div>
+
+  <h3><i class="ti ti-file-type-pdf"></i> Lo que sale</h3>
+  <p>Por cada pedido: <b>un PDF por tela</b> — <code>OV-2026-00123__HOJA_g0_&lt;tela&gt;.pdf</code>, cada página es una mesa lista para el RIP — y la <b>ficha técnica</b> <code>OV-2026-00123__FICHA_TECNICA.pdf</code> (tabla de talles y qué aplicar dónde). En Drive: las tizadas y <code>OV-2026-00123__resultado.json</code> en la carpeta del pedido, la ficha en la carpeta de fichas.</p>
+</section>
+
+<!-- ═══════════════════════════ 4 · CÓMO SE CONECTAN ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num v">4</div><div><div class="kicker">El mapa de los datos</div><h2>Cómo se conectan los JSON</h2></div></div>
+  <p class="lead">Cada valor del pedido sale de algo que publica TIZADA, y cada cosa del resultado vuelve atada a lo que mandó el otro sistema. Ésta es la cadena:</p>
+  <div class="figura media">
+    <pre class="mermaid">
+flowchart LR
+  V["<b>GET /variables</b><br/>clave v_bu8p7gy"] --> P1["pedido · disenos[].moldes[].<b>variable</b>"]
+  T["<b>GET /telas</b><br/>id 232"] --> P2["pedido · <b>tela</b> · telas_por_pieza"]
+  M["<b>GET /moldes/{molde}</b><br/>talles · piezas · columnas"] --> P4["pedido · <b>planilla[]</b><br/>claves = ids de columna<br/>talle tal cual · piezas_apagadas"]
+  Z["<b>el .zip</b><br/>artes/ · tipografias/"] --> P7["pedido · <b>arte</b> · tipografias<br/>(rutas del zip)"]
+  X["<b>el otro sistema</b><br/>su venta"] --> P6["pedido · <b>referencia</b><br/><b>pedido_externo</b>"]
+  P1 ==> R3["resultado · disenos[]<br/>variable · variable_nombre · tela<br/>no_sublimado"]
+  P2 ==> R3
+  P6 ==> R1["resultado y aviso<br/><b>referencia · pedido_externo</b><br/>TAL CUAL"]
+  P4 ==> R2["resultado · <b>archivos[]</b><br/>nombre · sha256 · <b>descarga</b><br/>drive_id · enlace"]
+  P7 ==> R2
+  R2 --> PDF["📄 los PDF"]
+    </pre>
+    <div class="pie-fig">Flechas finas: «de dónde sale el valor». Flechas gruesas: «vuelve atado a».</div>
+  </div>
+  <table>
+    <tr><th>En el pedido</th><th>Sale de</th><th>Cómo va</th></tr>
+    <tr><td><code>disenos[].moldes[].variable</code></td><td><code>GET /variables</code> → <code>clave</code></td><td>La clave <code>v_…</code>. <b>Una variable por prenda</b> en cada diseño</td></tr>
+    <tr><td><code>…tela</code>, <code>…telas_por_pieza</code> (valores)</td><td><code>GET /telas</code> → <code>id</code> (y las que admite la prenda: <code>telas</code> del molde)</td><td>El <b>id</b>, como texto: <code>"232"</code></td></tr>
+    <tr><td><code>telas_por_pieza</code> (claves), <code>piezas_apagadas</code></td><td><code>GET /moldes/{molde}</code> → <code>piezas</code></td><td>Nombre <b>genérico</b>: «Cuello», no «Cuello 2»</td></tr>
+    <tr><td>Claves de cada fila de <code>planilla[]</code></td><td><code>planilla.columnas[].id</code> del molde</td><td><code>talle</code>, <code>nombre</code>, <code>numero</code>, <code>manga</code>, <code>cantidad</code>…</td></tr>
+    <tr><td>Valor de la columna de talle</td><td><code>talles[]</code> del molde (y <code>planilla.columna_talle</code>)</td><td><b>Tal cual</b>: <code>"M"</code>, <code>"2XL"</code>, <code>"10"</code></td></tr>
+    <tr><td>Valores de columnas con lista (p. ej. manga)</td><td><code>columnas[].opciones</code> y <code>opciones_de_pieza</code></td><td>Una opción, o varias: <code>"Corta + Larga"</code></td></tr>
+    <tr><td><code>planilla[].diseno</code></td><td>el <code>nombre</code> de uno de los <code>disenos[]</code> del mismo pedido</td><td>Obligatoria si hay más de un diseño</td></tr>
+    <tr><td><code>arte</code>, <code>tipografias</code></td><td>las rutas de adentro del <b>.zip</b></td><td><code>"artes/jugador.ai"</code></td></tr>
+    <tr><td><code>editables</code> (claves)</td><td>las capas <code>Editable X</code> del arte</td><td><code>X</code> → <code>sublimado</code> · <code>tpu</code> · <code>dtf</code> · <code>bordado</code></td></tr>
+    <tr><td><code>referencia</code>, <code>pedido_externo</code></td><td>el otro sistema</td><td><b>Vuelven tal cual</b> en el resultado y el aviso</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 5 · CAMPO POR CAMPO ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num">5</div><div><div class="kicker">Ejemplos reales</div><h2>El pedido, el resultado y el aviso</h2></div></div>
+  <h3><i class="ti ti-file-code"></i> pedido.json</h3>
+<pre class="json">{
+  <span class="k">"formato"</span>: <span class="s">"tizadapro.pedido/1"</span>,
+  <span class="k">"referencia"</span>: <span class="s">"OV-2026-00123"</span>,            <span class="c">← única · carpeta en Drive y prefijo de cada PDF</span>
+  <span class="k">"pedido_externo"</span>: { <span class="k">"id"</span>: <span class="n">48211</span>, <span class="k">"sucursal"</span>: <span class="s">"Montevideo"</span> },  <span class="c">← libre: vuelve TAL CUAL</span>
+  <span class="k">"cliente"</span>: <span class="s">"Club Atlético Ejemplo"</span>,
+  <span class="k">"opciones"</span>: { <span class="k">"si_piezas_en_blanco"</span>: <span class="s">"rechazar"</span>, <span class="k">"carpeta"</span>: <span class="s">"2026-10/OV-2026-00123"</span> },
+  <span class="k">"mesas"</span>: { <span class="k">"modo"</span>: <span class="s">"normal"</span> },                 <span class="c">← o "una_por_fila", o "por_talles" + grupos</span>
+  <span class="k">"disenos"</span>: [
+    { <span class="k">"nombre"</span>: <span class="s">"JUGADOR"</span>,
+      <span class="k">"moldes"</span>: [ {                                    <span class="c">← cada entrada = una VARIABLE elegida</span>
+        <span class="k">"variable"</span>: <span class="s">"v_bu8p7gy"</span>,                      <span class="c">← GET /variables (Cuello redondo)</span>
+        <span class="k">"arte"</span>: <span class="s">"artes/jugador_camiseta.ai"</span>,          <span class="c">← ruta dentro del .zip</span>
+        <span class="k">"tela"</span>: <span class="s">"232"</span>, <span class="k">"telas_por_pieza"</span>: { <span class="k">"Cuello"</span>: <span class="s">"486"</span> },   <span class="c">← ids de GET /telas</span>
+        <span class="k">"editables"</span>: { <span class="k">"escudo"</span>: <span class="s">"sublimado"</span>, <span class="k">"logo"</span>: <span class="s">"tpu"</span> } } ] },
+    { <span class="k">"nombre"</span>: <span class="s">"GOLERO"</span>, <span class="k">"arte"</span>: <span class="s">"artes/golero_camiseta.ai"</span>,
+      <span class="k">"moldes"</span>: [ { <span class="k">"variable"</span>: <span class="s">"v_t1mhcmu"</span>, <span class="k">"tela"</span>: <span class="s">"492"</span>,
+        <span class="k">"editables"</span>: { <span class="k">"escudo"</span>: { <span class="k">"proceso"</span>: <span class="s">"bordado"</span>, <span class="k">"cruz"</span>: <span class="n">true</span> } } } ] } ],
+  <span class="k">"planilla"</span>: [                                         <span class="c">← una fila por prenda · claves = ids de columna</span>
+    { <span class="k">"diseno"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"talle"</span>: <span class="s">"M"</span>, <span class="k">"nombre"</span>: <span class="s">"PÉREZ"</span>, <span class="k">"numero"</span>: <span class="s">"10"</span>, <span class="k">"manga"</span>: <span class="s">"Corta"</span>, <span class="k">"cantidad"</span>: <span class="n">1</span> },
+    { <span class="k">"diseno"</span>: <span class="s">"GOLERO"</span>,  <span class="k">"talle"</span>: <span class="s">"L"</span>, <span class="k">"nombre"</span>: <span class="s">"GÓMEZ"</span>, <span class="k">"numero"</span>: <span class="s">"1"</span>,  <span class="k">"manga"</span>: <span class="s">"Larga"</span> } ]
+}</pre>
+
+  <h3><i class="ti ti-file-check"></i> Lo que vuelve: GET /pedidos/{referencia} (y el cuerpo del aviso)</h3>
+<pre class="json">{ <span class="k">"referencia"</span>: <span class="s">"OV-2026-00123"</span>, <span class="k">"estado"</span>: <span class="s">"listo"</span>, <span class="k">"etapa"</span>: <span class="s">"terminado"</span>,
+  <span class="k">"pedido_externo"</span>: { <span class="k">"id"</span>: <span class="n">48211</span>, <span class="k">"sucursal"</span>: <span class="s">"Montevideo"</span> },       <span class="c">← el de la venta, tal cual</span>
+  <span class="k">"resultado"</span>: {
+    <span class="k">"formato"</span>: <span class="s">"tizadapro.resultado/1"</span>, <span class="k">"tizada_id"</span>: <span class="n">912</span>,
+    <span class="k">"destino"</span>: { <span class="k">"tipo"</span>: <span class="s">"drive"</span>, <span class="k">"carpeta_id"</span>: <span class="s">"1mJl5…"</span>, <span class="k">"carpeta_enlace"</span>: <span class="s">"https://drive.google.com/drive/folders/…"</span> },
+    <span class="k">"archivos"</span>: [
+      { <span class="k">"tipo"</span>: <span class="s">"tizada"</span>, <span class="k">"nombre"</span>: <span class="s">"OV-2026-00123__HOJA_g0_Jacquard_Charr_a__1_83_.pdf"</span>,
+        <span class="k">"bytes"</span>: <span class="n">1127490</span>, <span class="k">"sha256"</span>: <span class="s">"9c1e…"</span>,                  <span class="c">← comprobar al bajarlo</span>
+        <span class="k">"descarga"</span>: <span class="s">"/api/externo/v1/pedidos/OV-2026-00123/archivos/…pdf"</span>,
+        <span class="k">"drive_id"</span>: <span class="s">"1AbC…"</span>, <span class="k">"enlace"</span>: <span class="s">"https://drive.google.com/file/d/…/view"</span>,
+        <span class="k">"tela"</span>: <span class="s">"Jacquard Charrúa (1,83)"</span>, <span class="k">"mesas"</span>: <span class="n">1</span>, <span class="k">"consumo_cm"</span>: <span class="n">321</span>, <span class="k">"aprovechamiento"</span>: <span class="n">74.6</span> },
+      { <span class="k">"tipo"</span>: <span class="s">"ficha"</span>, <span class="k">"nombre"</span>: <span class="s">"OV-2026-00123__FICHA_TECNICA.pdf"</span>, <span class="c">…</span> } ],
+    <span class="k">"disenos"</span>: [ { <span class="k">"nombre"</span>: <span class="s">"GOLERO"</span>, <span class="k">"moldes"</span>: [ { <span class="k">"variable"</span>: <span class="s">"v_t1mhcmu"</span>, <span class="k">"variable_nombre"</span>: <span class="s">"cuello V"</span>,
+        <span class="k">"no_sublimado"</span>: { <span class="k">"escudo"</span>: <span class="s">"bordado"</span> } } ] } ],
+    <span class="k">"alarmas"</span>: [ <span class="c">avisos que quedaron (no frenan)</span> ] } }</pre>
+
+  <h3><i class="ti ti-shield-lock"></i> El aviso y su firma</h3>
+  <div class="grilla g2">
+    <div class="tarjeta"><h4>Lo que llega</h4><p><code>POST</code> a la dirección del aviso, con el mismo JSON de arriba y los encabezados <code>X-Tizada-Referencia</code> y <code>X-Tizada-Firma</code>. Se manda cuando el pedido queda <b>listo</b>, <b>rechazado</b> o <b>error</b>. Contestar <b>2xx</b>; si no, reintenta a los 5 s, 30 s y 2 min.</p></div>
+    <div class="tarjeta"><h4>Cómo se comprueba</h4><p><code>firma = HMAC-SHA256(clave = sha256_hex(llave), mensaje = cuerpo crudo)</code> en hexadecimal. Si no coincide, <b>ignorarlo</b>. Código listo: <code>codigo/recibir_aviso.py</code> y <code>firmaValida()</code> en <code>codigo/cliente.mjs</code>.</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 6 · ESTADOS Y ALARMAS ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num m">6</div><div><div class="kicker">Cuando algo no está bien</div><h2>Estados y alarmas</h2></div></div>
+  <table>
+    <tr><th>estado</th><th>Qué significa</th><th>Qué hace el otro sistema</th></tr>
+    <tr><td><code>en_cola</code></td><td>Recibido, esperando al robot</td><td>Esperar</td></tr>
+    <tr><td><code>procesando</code></td><td>Haciéndose; <code>etapa</code> es texto para mostrar, con <code>(NN %)</code> si se sabe el avance</td><td>Mostrar la etapa</td></tr>
+    <tr><td><code>listo</code></td><td>Terminó: viene <code>resultado</code></td><td>Guardar los archivos (sha256, descarga, drive_id, enlace) en la venta</td></tr>
+    <tr><td><code>rechazado</code></td><td>El arte, las tipografías o el plan tienen algo que frena. No salió nada</td><td>Mostrar las alarmas, corregir y mandar de nuevo</td></tr>
+    <tr><td><code>error</code></td><td>Falla del sistema después de 3 intentos</td><td>Avisar a quien administra TIZADA</td></tr>
+    <tr><td><code>cancelado</code></td><td>Lo canceló el otro sistema (<code>DELETE</code>) o una persona</td><td>—</td></tr>
+  </table>
+  <p>Cada alarma: <code>{ codigo, frena, etapa, mensaje, donde: { campo, fila } }</code>. <b>frena: true</b> rechaza; <b>false</b> es un aviso. <code>donde.campo</code> dice exactamente dónde (<code>disenos[1].moldes[0].tela</code>, <code>planilla[2].talle</code>). Son <b>67</b>, con qué significan y qué hacer: <code>GET /alarmas</code> (no pide llave).</p>
+  <div class="etapas">
+    <div class="et" style="border-color: #a9e7f2; background: var(--cian-claro);"><b>datos</b>al recibir, en el acto (lo dice /validar)</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #f3b2d6; background: var(--magenta-claro);"><b>arte</b>al abrir el arte (segundos después)</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #f3dc8a; background: var(--amarillo-claro);"><b>tizada</b>al armarla y guardar los PDF</div>
+  </div>
+  <table>
+    <tr><th>Para no caer en…</th><th>Revisar antes contra…</th></tr>
+    <tr><td><code>variable-desconocida</code> · <code>variable-ambigua</code></td><td><code>GET /variables</code> (mandar la clave <code>v_…</code>)</td></tr>
+    <tr><td><code>molde-repetido</code></td><td>Una variable por prenda en cada diseño</td></tr>
+    <tr><td><code>tela-desconocida</code> · <code>tela-no-usable</code> · <code>tela-no-permitida</code></td><td><code>GET /telas</code> (<code>usable</code>) y las <code>telas</code> del molde</td></tr>
+    <tr><td><code>talle-inexistente</code></td><td><code>talles[]</code> del molde</td></tr>
+    <tr><td><code>opcion-inexistente</code> · <code>opcion-sin-piezas</code></td><td><code>columnas[].opciones</code> · <code>opciones_de_pieza</code></td></tr>
+    <tr><td><code>columna-obligatoria-vacia</code></td><td><code>columnas[].obligatoria</code></td></tr>
+    <tr><td><code>pieza-desconocida</code></td><td><code>piezas[]</code> del molde</td></tr>
+    <tr><td><code>referencia-ya-generada</code></td><td>La misma referencia ya está lista: <code>"reemplazar": true</code> para rehacerla</td></tr>
+    <tr><td><code>piezas-en-blanco</code> · <code>arte-pieza-sin-mesa</code> · <code>editable-desconocido</code> · <code>tipografia-falta</code></td><td>El arte (etapa arte): una mesa por pieza, las capas Editable y las tipografías del paquete</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 7 · RUTAS ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num a">7</div><div><div class="kicker">Referencia rápida</div><h2>Todas las rutas</h2></div></div>
+  <p>Base: <code>https://&lt;servidor-de-TIZADA&gt;/api/externo/v1</code> · encabezado <code>X-Api-Key: tzp_…</code> · todo en UTF-8 · el detalle de cada una en <code>API.md</code> y <code>openapi.yaml</code>.</p>
+  <table>
+    <tr><th>Método y ruta</th><th>Para qué</th><th>Contesta</th></tr>
+    <tr><td><code>GET /variables</code></td><td>Lo que se elige: las variables de cada prenda lista</td><td>200</td></tr>
+    <tr><td><code>GET /variables/{clave}/foto</code></td><td>Silueta vectorial de sus piezas</td><td>200 · 404 (<code>sin_calcular</code>)</td></tr>
+    <tr><td><code>GET /moldes</code> · <code>/moldes/{codigo}</code></td><td>Las prendas · todo lo de una (talles, piezas, planilla, opciones, telas)</td><td>200 · 404</td></tr>
+    <tr><td><code>GET /moldes/{codigo}/foto</code></td><td>Silueta de la prenda entera</td><td>200 · 404</td></tr>
+    <tr><td><code>GET /telas</code> · <code>/tipografias</code></td><td>Telas por id · tipografías que ya tiene</td><td>200</td></tr>
+    <tr><td><code>GET /alarmas</code> · <code>/formato</code></td><td>Catálogo de alarmas · formatos, límites, ejemplos (sin llave)</td><td>200</td></tr>
+    <tr><td><code>POST /pedidos/validar</code></td><td>Revisar sin guardar (JSON o .zip)</td><td>200 · 422</td></tr>
+    <tr><td><code>POST /pedidos</code></td><td>Mandar el pedido (.zip)</td><td>202 · 422 · 415</td></tr>
+    <tr><td><code>GET /pedidos/{ref}</code></td><td>Estado y resultado</td><td>200 · 404</td></tr>
+    <tr><td><code>GET /pedidos/{ref}/archivos/{nombre}</code></td><td>Bajar un PDF (<code>archivos[].descarga</code>)</td><td>200 (PDF) · 404</td></tr>
+    <tr><td><code>DELETE /pedidos/{ref}</code></td><td>Cancelar si todavía no se generó</td><td>200 · 409 · 404</td></tr>
+    <tr><td><i>Aviso (webhook)</i></td><td>TIZADA → POST a tu URL, firmado</td><td>contestar 2xx</td></tr>
+  </table>
+  <div class="caja c-info"><div class="t"><i class="ti ti-key"></i> La llave</div><p>Sin llave o con una anulada: <code>401 {"error": "falta la llave o no es válida (encabezado X-Api-Key)"}</code>. La llave sólo abre <code>/api/externo/v1</code> y firma los avisos: guardarla en el <b>servidor</b> del otro sistema, nunca en un navegador ni en el código de una página.</p></div>
+</section>
+
+<!-- ═══════════════════════════ 8 · PROBAR ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num v">8</div><div><div class="kicker">Para terminar</div><h2>Probarlo, lista de control y problemas frecuentes</h2></div></div>
+  <h3><i class="ti ti-terminal-2"></i> Probarlo en 5 minutos (código del repositorio)</h3>
+<pre class="json"><span class="c"># Python 3.8+, sin instalar nada</span>
+set TIZADA_URL=https://tizada.ejemplo.com
+set TIZADA_LLAVE=tzp_...
+python integracion/codigo/enviar_pedido.py mi_pedido/ --solo-revisar   <span class="c">← sólo revisa</span>
+python integracion/codigo/enviar_pedido.py mi_pedido/                  <span class="c">← manda, espera y baja los PDF (sha256)</span>
+python integracion/codigo/recibir_aviso.py                             <span class="c">← recibe el aviso en :8090/aviso</span>
+
+<span class="c"># Node 18+</span>
+node integracion/codigo/cliente.mjs revisar pedido.json
+node integracion/codigo/cliente.mjs mandar OV-2026-00123.zip
+node integracion/codigo/cliente.mjs estado OV-2026-00123
+node integracion/codigo/cliente.mjs bajar OV-2026-00123</pre>
+  <p>O el <b>sistema de ventas de prueba</b> del mismo repositorio (<code>py app.py</code> con <code>TIZADA_URL</code> y <code>TIZADA_LLAVE</code>): arma pedidos como en TIZADA, los manda, muestra el avance, recibe el aviso y abre los PDF. Es la referencia funcionando.</p>
+
+  <div class="grilla g2">
+    <div class="caja c-bien" style="margin: 0;"><div class="t"><i class="ti ti-list-check"></i> Lista de control</div>
+      <p>☐ TIZADA actualizado, Node instalado, el robot «Prendido».<br>
+      ☐ Llave creada y guardada en el servidor del otro sistema.<br>
+      ☐ El artículo del otro sistema guarda la <b>clave de la variable</b> (<code>v_…</code>).<br>
+      ☐ Telas por <b>id</b>, piezas por nombre <b>genérico</b>, talles <b>tal cual</b>.<br>
+      ☐ <code>referencia</code> única; <code>pedido_externo</code> con lo que identifica la venta.<br>
+      ☐ <code>/pedidos/validar</code> antes de <code>/pedidos</code>.<br>
+      ☐ Del resultado se guarda sha256, descarga, drive_id y enlace.<br>
+      ☐ El aviso se cree sólo con la firma correcta.</p></div>
+    <div class="caja c-ojo" style="margin: 0;"><div class="t"><i class="ti ti-tool"></i> Problemas frecuentes</div>
+      <p><b>401</b>: falta <code>X-Api-Key</code> o la llave fue anulada.<br>
+      <b>Queda en «en_cola»</b>: el robot no corre (Integraciones › El robot · <code>logs/robot.log</code> · ¿Node instalado?).<br>
+      <b>«drive-sin-configurar»</b>: falta conectar Drive; los PDF igual se bajan con <code>descarga</code> (durante 30 días).<br>
+      <b>Drive dejó de subir a la semana</b>: la app de Google sigue en «Prueba» (sección 1).<br>
+      <b>No llega el aviso</b>: TIZADA no llega a esa dirección (red/HTTPS), o la firma no coincide (otra llave).<br>
+      <b>«variable-ambigua»</b>: mandar la clave <code>v_…</code>, no el nombre.<br>
+      <b>Silueta 404 «sin_calcular»</b>: nadie abrió esa prenda en TIZADA todavía; mostrar un ícono.</p></div>
+  </div>
+  <p class="chico" style="margin-top: 14pt;">Documento generado desde el código del sistema (1.0.48) y probado contra un TIZADA PRO real el 2 de octubre de 2026: un pedido de ejemplo hizo el recorrido completo (revisar, mandar, esperar, bajar 3 tizadas y la ficha con su sha256) y la firma del aviso se comprobó en Python y en Node. Reemplaza las secciones 8 a 13 de «La base de datos y cómo conectar otro sistema» (24/09/2026), que eran una propuesta anterior.</p>
+</section>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true, securityLevel: 'loose',
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'Inter, Segoe UI, sans-serif', fontSize: '13px',
+      primaryColor: '#e0f7fb', primaryBorderColor: '#00b8d4', primaryTextColor: '#16202a',
+      secondaryColor: '#fde6f2', tertiaryColor: '#f7f9fb', lineColor: '#5b6875',
+      clusterBkg: '#f7fafc', clusterBorder: '#c9d3dc',
+      actorBkg: '#e0f7fb', actorBorder: '#00b8d4', noteBkgColor: '#fff6d6', noteBorderColor: '#f5b800'
+    },
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }, sequence: { useMaxWidth: true }
+  });
+</script>
+</body>
+</html>

@@ -21,7 +21,7 @@ import { analizarCapa, aislarCapaObjetosDe, aislarObjetoDe, capaAdmiteColor } fr
 import { sanearOc } from '../molde/paginas.js'
 import { normNombre } from '../nombres.js'
 import { base64DeTexto } from '../cache.js'
-import { svgDePdf } from '../pieza/svg.js'
+import { svgDePdf, svgDePagina } from '../pieza/svg.js'
 
 // MEMORIA POR ARTE (en este hilo): el editor se recarga con cada cambio de color o de variable, y
 // recorrer el arte y dibujar los objetos sólo depende del ARCHIVO (su sello) y del color. Es la
@@ -86,20 +86,8 @@ function svgAislado(mupdf, m, capa, bbox, { objId = null, colores = null } = {})
     }
     reescribirPagina(m.doc, m.pageObj, inst)
     const x0 = bbox[0] - 2, y0 = bbox[1] - 2, w = (bbox[2] + 2) - x0, h = (bbox[3] + 2) - y0
-    const page = m.doc.loadPage(0)
-    const buf = new mupdf.Buffer()
-    const wr = new mupdf.DocumentWriter(buf, 'svg', 'text=path')
-    try {
-      const dev = wr.beginPage([0, 0, w, h])
-      page.run(dev, mupdf.Matrix.translate(-x0, -y0))
-      wr.endPage()
-    } finally {
-      wr.close()
-      page.destroy()
-    }
-    const s = buf.asString()
-    buf.destroy()
-    return base64DeTexto(s)
+    // por el escritor de todo el sistema: los degradados salen vectoriales (`pdf/degradados.js`)
+    return base64DeTexto(svgDePagina(mupdf, m.doc, 0, [x0, y0, w, h]))
   } catch {
     return null
   }
@@ -178,7 +166,11 @@ export function editablesParaEditor(mupdf, bytes, datos) {
       o.pieza = mesa2pieza.get(o.mesa) || ''
       o.label = o.nombre; o.obj_id = null
       o.quitable = inyectadas.has(o.capa)
-      o.transforms = entry.transforms || {}
+      // UN objeto por capa y por MESA: su ajuste va con la clave «capa<RS>mesa»; lo guardado antes
+      // sólo con el nombre de la capa vale para los talles que la clave no tenga
+      const sepMesa = datos.sep_mesa || '\x1e'
+      o.clave = o.mesa ? `${o.nombre}${sepMesa}${o.mesa}` : o.nombre
+      o.transforms = { ...(entry.transforms || {}), ...((capasCfg[o.clave] || {}).transforms || {}) }
       o.color = entry.color ?? null
       o.recolorable = admiteColor(o.mesa, o.capa) || obs.some((b) => b.recolorable)
       o.pos = null                                   // ninguna pantalla lo usa
@@ -214,7 +206,7 @@ export function editablesParaEditor(mupdf, bytes, datos) {
     objetos.push({
       nombre: a.nombre || a.id, capa: a.nombre || a.id, pieza: a.pieza || '', mesa: 0, svg, thumb: null,
       w_cm: a.w_cm, h_cm: a.h_cm, mesa_rect: null, bbox_mu: null, pos: null,
-      transforms: a.transforms || {}, agregado: true, oid: a.id, color: null, recolorable: false,
+      transforms: a.transforms || {}, agregado: true, oid: a.id, clave: a.nombre || a.id, color: null, recolorable: false,
     })
   }
   return { objetos, talles, piezas: Object.keys(registro).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)) }

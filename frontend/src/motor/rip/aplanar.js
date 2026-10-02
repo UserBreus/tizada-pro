@@ -85,7 +85,9 @@ function bytesContenido(obj, esPagina) {
 }
 
 // ─── `_merge_res`: los recursos del XObject pasan al contenedor; los que chocan se renombran ──
-function mergeRes(doc, dst, src) {
+// `formsVivos`: los Form que el contenido inlineado SIGUE llamando con `Do` (los que van bajo
+// transparencia, ver `flatten`): ésos sí pasan al contenedor; si no, el `Do` quedaría colgando.
+function mergeRes(doc, dst, src, formsVivos = new Set()) {
   const remap = {}
   for (const kind of RES_KINDS) {
     const s = nulo(src) ? null : src.get(kind)
@@ -93,7 +95,7 @@ function mergeRes(doc, dst, src) {
     let d = dst.get(kind)
     if (nulo(d)) { d = doc.newDictionary(); dst.put(kind, d) }
     for (const [nm, obj] of claves(s)) {
-      if (kind === 'XObject' && esForm(obj)) continue     // los Form ya se inlinearon → NO mergearlos (quedarían huérfanos)
+      if (kind === 'XObject' && esForm(obj) && !formsVivos.has(nm)) continue     // los Form ya se inlinearon → NO mergearlos (quedarían huérfanos)
       const ya = d.get(nm)
       if (!nulo(ya)) {
         if (idDe(ya) === idDe(obj)) continue              // el mismo objeto (o dos directos: pikepdf los ve iguales)
@@ -123,9 +125,47 @@ function remapOps(ops, remap) {
   return out
 }
 
+// ─── `_gs_transparencia` / `_hay_transparencia` ─────────────────────────────────────────────
+/** Lo que un ExtGState cambia de la TRANSPARENCIA vigente: `{clave: activa}`, sólo las claves que
+ *  trae: `m` máscara de opacidad (SMask diccionario = sí, /None = la apaga), `ca`/`CA` opacidad
+ *  < 1, `bm` modo de fusión que no sea Normal/Compatible. */
+function gsTransparencia(gs) {
+  const out = {}
+  if (nulo(gs)) return out
+  try {
+    const sm = gs.get('SMask')
+    if (!nulo(sm)) out.m = sm.isDictionary()
+    for (const k of ['ca', 'CA']) {
+      const v = gs.get(k)
+      if (!nulo(v) && v.isNumber()) out[k] = v.asNumber() < 1
+    }
+    let bm = gs.get('BM')
+    if (!nulo(bm)) {
+      if (bm.isArray()) bm = bm.length ? bm.get(0) : null
+      out.bm = !(esNombre(bm, 'Normal') || esNombre(bm, 'Compatible')) && !nulo(bm)
+    }
+  } catch { /* como el Python: lo que no se puede leer no cuenta */ }
+  return out
+}
+
+/** ¿Algún ExtGState de este diccionario pone transparencia de verdad? */
+function hayTransparencia(eg) {
+  try { return claves(eg).some(([, v]) => Object.values(gsTransparencia(v)).some(Boolean)) } catch { return false }
+}
+
 // ─── `_flatten`: des-anida los Form XObjects del contenedor ──────────────────────────────────
 /** Devuelve las instrucciones ya aplanadas. `hechos` (por objeto) evita aplanar dos veces el mismo
- *  XObject: cada `Do` de la misma pieza reusa sus instrucciones, como en el Python. */
+ *  XObject: cada `Do` de la misma pieza reusa sus instrucciones, como en el Python.
+ *
+ *  🔴 UN GRUPO QUE SE PINTA BAJO TRANSPARENCIA NO SE DES-ANIDA (2026-10-02, «SHORT BASKET ENTERO
+ *  NEGRO»). Illustrator guarda una MÁSCARA DE OPACIDAD como `/GS1 gs` (SMask de luminosidad) +
+ *  `/Fm0 Do`, con `Fm0` un grupo de transparencia: la máscara se aplica al grupo ENTERO y adentro
+ *  arranca apagada (por eso Illustrator pone ahí un `/GS0 gs` con `SMask /None`). Des-anidado, ese
+ *  `/GS0 gs` APAGA la máscara recién puesta y el grupo sale pleno (la textura salía como un Pantone
+ *  liso en la tizada, con el arte bien). Igual con opacidad < 1 o un modo de fusión. Con
+ *  transparencia vigente en el `Do` (pila `q`/`Q` + cada `gs`) el Form queda como está, con su
+ *  `/Group`, y pasa a los recursos del contenedor si a éste lo inlinean. Sin transparencia, la
+ *  salida es la de siempre. Gemelo de `aplanar_rip._flatten`. */
 function flatten(doc, cont, esPagina, hechos) {
   const id = idDe(cont) || null
   if (id !== null && hechos.has(id)) return hechos.get(id)
@@ -137,12 +177,21 @@ function flatten(doc, cont, esPagina, hechos) {
     return ops
   }
   const nuevos = []
+  const egs = res.get('ExtGState')
+  let transp = {}
+  const pila = []                                          // la transparencia vigente (`gsTransparencia`)
   for (const inst of ops) {
+    if (inst.op === 'q') pila.push({ ...transp })
+    else if (inst.op === 'Q') { if (pila.length) transp = pila.pop() }
+    else if (inst.op === 'gs' && inst.args.length && inst.args[0] && inst.args[0].n !== undefined && !nulo(egs)) {
+      Object.assign(transp, gsTransparencia(egs.get(inst.args[0].n)))
+    }
     if (inst.op === 'Do' && inst.args.length && inst.args[0] && inst.args[0].n !== undefined) {
       const xo = xobjs.get(inst.args[0].n)
-      if (esForm(xo)) {
+      if (esForm(xo) && !(!nulo(xo.get('Group')) && Object.values(transp).some(Boolean))) {
         let sub = flatten(doc, xo, false, hechos)
-        const remap = mergeRes(doc, res, xo.get('Resources'))
+        const vivos = new Set(sub.filter((i) => i.op === 'Do' && i.args.length && i.args[0] && i.args[0].n !== undefined).map((i) => i.args[0].n))
+        const remap = mergeRes(doc, res, xo.get('Resources'), vivos)
         sub = remapOps(sub, remap)
         nuevos.push({ op: 'q', args: [] })
         const mtx = xo.get('Matrix')
@@ -247,7 +296,10 @@ function declararEstadoGrafico(doc, page) {
   if (nulo(res)) { res = doc.newDictionary(); page.put('Resources', res) }
   let eg = res.get('ExtGState')
   if (nulo(eg)) { eg = doc.newDictionary(); res.put('ExtGState', eg) }
-  for (const [, v] of claves(eg)) {
+  // 🔴 Con transparencia DE VERDAD en el mismo diccionario, los `SMask /None` / `ca 1` / `BM
+  // /Normal` son los que la APAGAN después: borrarlos la dejaría prendida. Ahí no se toca nada.
+  const limpiar = !hayTransparencia(eg)
+  for (const [, v] of (limpiar ? claves(eg) : [])) {
     if (esNombre(v.get('SMask'), 'None')) v.delete('SMask')
     if (esNombre(v.get('BM'), 'Normal')) v.delete('BM')
     try {

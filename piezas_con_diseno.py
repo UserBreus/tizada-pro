@@ -557,7 +557,14 @@ def _respaldo_por_trazados(doc, mesa, talle, page, cb, U, area_min_cm2, lado_min
 # El molde entero
 # ─────────────────────────────────────────────────────────────────
 def talles_del_molde(doc):
-    """Los talles del molde = las capas (OCG) que el archivo declara, en el orden del archivo."""
+    """Los talles del molde = las capas (OCG) que el archivo declara, en el orden del archivo.
+
+    ⚠️ NO filtrar acá la «Capa 1» vacía (probado y revertido el 2026-09-30, molde de CORELDRAW):
+    esta lista es la CLAVE del desplegado (`orden` de `m{mesa}.json`) y el servidor la calcula sobre
+    la CÁSCARA, que no tiene contenido → no puede saber si una capa está vacía y daría otra lista que
+    la PC. Además cambiarla invalida el desplegado de moldes ya cargados (había uno de Illustrator con
+    «Capa 1» vacía). Una capa sin piezas no llega a la pantalla: el registro sólo guarda (mesa, talle)
+    con piezas."""
     ocgs = doc.get_ocgs() or {}
     orden = []
     try:

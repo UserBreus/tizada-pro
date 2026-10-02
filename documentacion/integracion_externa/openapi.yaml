@@ -1,0 +1,256 @@
+openapi: 3.0.3
+info:
+  title: TIZADA PRO — API para otro sistema
+  version: "1"
+  description: |
+    Pedidos que llegan de otro sistema (ventas, ERP, tienda) y se fabrican solos: el otro sistema elige
+    VARIABLES del catálogo, manda un paquete .zip (pedido.json + artes + tipografías), sigue el estado y
+    recibe el resultado (los PDF, su sha256 y dónde quedaron en Google Drive) asociado a SU pedido.
+    Detalle en API.md y FORMATO_PEDIDO.md.
+servers:
+  - url: https://tizada.ejemplo.com/api/externo/v1
+    description: Servidor de TIZADA PRO
+  - url: http://127.0.0.1:8050/api/externo/v1
+    description: PC de prueba
+security:
+  - llave: []
+components:
+  securitySchemes:
+    llave:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Se crea en TIZADA PRO › Configuración › Integraciones › Crear llave.
+  schemas:
+    Error:
+      type: object
+      properties: { error: { type: string } }
+    Alarma:
+      type: object
+      properties:
+        codigo: { type: string }
+        frena: { type: boolean }
+        etapa: { type: string, enum: [datos, arte, tizada] }
+        mensaje: { type: string }
+        donde: { type: object, properties: { campo: { type: string }, fila: { type: integer } } }
+    Variable:
+      type: object
+      properties:
+        clave: { type: string, example: v_bu8p7gy }
+        nombre: { type: string, example: Cuello redondo }
+        molde: { type: string, example: prod_20260820_095558_38bc }
+        molde_nombre: { type: string, example: Camiseta de futbol }
+        piezas: { type: array, items: { type: string } }
+        n_piezas: { type: integer }
+        planilla: { type: string }
+        foto: { type: string }
+    Silueta:
+      type: object
+      properties:
+        img_w: { type: number }
+        img_h: { type: number }
+        piezas:
+          type: array
+          items:
+            type: object
+            properties:
+              idx: { type: integer }
+              path_svg: { type: string }
+              px: { type: number }
+              py: { type: number }
+              pw: { type: number }
+              ph: { type: number }
+    Tela:
+      type: object
+      properties:
+        id: { type: string }
+        nombre: { type: string }
+        ancho_mesa_cm: { type: number, nullable: true }
+        usable: { type: boolean }
+        de_baja: { type: boolean }
+    RespuestaPedido:
+      type: object
+      properties:
+        referencia: { type: string }
+        aceptado: { type: boolean }
+        estado: { type: string, enum: [en_cola, rechazado] }
+        alarmas: { type: array, items: { $ref: '#/components/schemas/Alarma' } }
+    Revision:
+      type: object
+      properties:
+        referencia: { type: string }
+        aceptaria: { type: boolean }
+        alarmas: { type: array, items: { $ref: '#/components/schemas/Alarma' } }
+        nota: { type: string }
+    Archivo:
+      type: object
+      properties:
+        tipo: { type: string, enum: [tizada, ficha] }
+        nombre: { type: string }
+        bytes: { type: integer }
+        sha256: { type: string }
+        descarga: { type: string, description: Ruta para bajarlo de TIZADA }
+        drive_id: { type: string }
+        enlace: { type: string }
+        carpeta_id: { type: string }
+        tela: { type: string }
+        mesas: { type: integer }
+        ancho_cm: { type: number }
+        largo_cm: { type: array, items: { type: number } }
+        consumo_cm: { type: number }
+        aprovechamiento: { type: number }
+    Estado:
+      type: object
+      description: Respuesta de GET /pedidos/{referencia} y cuerpo del aviso (webhook).
+      properties:
+        referencia: { type: string }
+        estado: { type: string, enum: [en_cola, procesando, listo, rechazado, error, cancelado] }
+        etapa: { type: string, nullable: true }
+        recibido: { type: string }
+        actualizado: { type: string }
+        pedido_externo: { type: object }
+        alarmas: { type: array, items: { $ref: '#/components/schemas/Alarma' } }
+        resultado:
+          type: object
+          description: Sólo con estado listo. Ver esquemas/resultado.schema.json.
+          properties:
+            formato: { type: string, example: tizadapro.resultado/1 }
+            referencia: { type: string }
+            pedido_externo: { type: object }
+            cliente: { type: string }
+            destino:
+              type: object
+              properties:
+                tipo: { type: string, enum: [drive, local] }
+                carpeta_id: { type: string }
+                carpeta_enlace: { type: string }
+            archivos: { type: array, items: { $ref: '#/components/schemas/Archivo' } }
+            disenos: { type: array, items: { type: object } }
+            resumen: { type: object }
+            alarmas: { type: array, items: { $ref: '#/components/schemas/Alarma' } }
+  responses:
+    SinLlave:
+      description: Falta la llave o no es válida
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NoExiste:
+      description: No existe
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+paths:
+  /formato:
+    get:
+      summary: Formatos, procesos de editable, límites y ejemplos
+      security: []
+      responses: { '200': { description: OK } }
+  /alarmas:
+    get:
+      summary: Catálogo completo de alarmas (código, etapa, frena, qué significa, qué hacer)
+      security: []
+      responses: { '200': { description: OK } }
+  /variables:
+    get:
+      summary: Lo que se elige en un pedido — las variables de cada prenda lista
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: string }
+                  variables: { type: array, items: { $ref: '#/components/schemas/Variable' } }
+        '401': { $ref: '#/components/responses/SinLlave' }
+  /variables/{clave}/foto:
+    get:
+      summary: Silueta vectorial de las piezas de una variable
+      parameters: [ { name: clave, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Silueta' } } } }
+        '404': { description: 'No existe, o todavía no está calculada (sin_calcular: true)' }
+  /moldes:
+    get:
+      summary: Todas las prendas, con listo / motivo
+      responses: { '200': { description: OK }, '401': { $ref: '#/components/responses/SinLlave' } }
+  /moldes/{codigo}:
+    get:
+      summary: Todo lo de una prenda (talles, variables, piezas, planilla, opciones, telas)
+      parameters: [ { name: codigo, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/NoExiste' } }
+  /moldes/{codigo}/foto:
+    get:
+      summary: Silueta vectorial de la prenda entera
+      parameters: [ { name: codigo, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Silueta' } } } }
+        '404': { description: 'No existe, o todavía no está calculada (sin_calcular: true)' }
+  /telas:
+    get:
+      summary: Telas (por id)
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { type: object, properties: { telas: { type: array, items: { $ref: '#/components/schemas/Tela' } } } } } }
+  /tipografias:
+    get:
+      summary: Tipografías que TIZADA ya tiene
+      responses: { '200': { description: OK } }
+  /pedidos/validar:
+    post:
+      summary: Revisar un pedido SIN guardarlo (el .zip o sólo el JSON)
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, description: pedido.json (esquemas/pedido.schema.json) } }
+          application/zip: { schema: { type: string, format: binary } }
+      responses:
+        '200': { description: Lo aceptaría, content: { application/json: { schema: { $ref: '#/components/schemas/Revision' } } } }
+        '422': { description: Lo rechazaría (ver alarmas), content: { application/json: { schema: { $ref: '#/components/schemas/Revision' } } } }
+  /pedidos:
+    post:
+      summary: Mandar un pedido (paquete .zip)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { paquete: { type: string, format: binary } }, required: [paquete] }
+          application/zip: { schema: { type: string, format: binary } }
+      responses:
+        '202': { description: En cola, content: { application/json: { schema: { $ref: '#/components/schemas/RespuestaPedido' } } } }
+        '422': { description: Rechazado, content: { application/json: { schema: { $ref: '#/components/schemas/RespuestaPedido' } } } }
+        '415': { description: No vino un .zip }
+        '401': { $ref: '#/components/responses/SinLlave' }
+  /pedidos/{referencia}:
+    get:
+      summary: Estado del pedido (y el resultado cuando está listo)
+      parameters: [ { name: referencia, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Estado' } } } }
+        '404': { $ref: '#/components/responses/NoExiste' }
+    delete:
+      summary: Cancelar (si todavía no se generó)
+      parameters: [ { name: referencia, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: Cancelado }
+        '409': { description: Ya se generó }
+        '404': { $ref: '#/components/responses/NoExiste' }
+  /pedidos/{referencia}/archivos/{nombre}:
+    get:
+      summary: Bajar un PDF del resultado (la ruta de archivos[].descarga)
+      parameters:
+        - { name: referencia, in: path, required: true, schema: { type: string } }
+        - { name: nombre, in: path, required: true, schema: { type: string } }
+        - { name: descargar, in: query, required: false, schema: { type: string, enum: ['1'] } }
+      responses:
+        '200': { description: El PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/NoExiste' }
+webhooks:
+  aviso:
+    post:
+      summary: TIZADA avisa cuando un pedido termina (listo / rechazado / error)
+      description: |
+        POST a la dirección configurada en Integraciones. Encabezados X-Tizada-Referencia y
+        X-Tizada-Firma = HMAC-SHA256(clave = sha256_hex(llave), mensaje = cuerpo) en hexadecimal.
+        Contestar 2xx; si no, reintenta a los 5 s, 30 s y 2 min.
+      requestBody:
+        content: { application/json: { schema: { $ref: '#/components/schemas/Estado' } } }
+      responses: { '200': { description: Recibido } }

@@ -21,20 +21,26 @@ async function json(url, opts) {
  * `{interno, sin_contorno, choca_con}` como campos del formulario. `pid` = el molde (su catálogo);
  * `destino` = 'sistema' | 'pedido'.
  */
-export async function analizarFuente(archivo, { pid, destino = 'sistema', rutaApi }) {
+export async function analizarFuente(archivo, { pid, destino = 'sistema', rutaApi, reemplaza = '' }) {
   const ctx = pid ? await json(rutaApi(`/api/productos/${encodeURIComponent(pid)}/arte_contexto`)).catch(() => null) : null
   const todas = ((ctx || {}).fuentes || {}).catalogo || []
   // choca contra las de la MISMA carpeta a la que va (como `alta_fuente(ruta, carpeta)`)
   const catalogo = todas.filter((c) => (destino === 'pedido' ? c.propia : !c.propia))
   const bytes = new Uint8Array(await archivo.arrayBuffer())
-  const nombre = 'subida_' + String(archivo.name || 'fuente').split(/[\\/]/).pop()
+  // el nombre con el que la guarda el servidor: el del archivo, tal cual (`_nombre_fuente`; desde
+  // 2026-10-01 sin el rótulo «subida_»). Sirve para no avisar que choca consigo misma al reemplazarla.
+  const nombre = String(archivo.name || 'fuente').split(/[\\/]/).pop().trim()
   const r = await enHiloSuelto('fuente_analizar', { bytes, catalogo, destino: nombre }, [bytes.buffer], 'fuente')
-  return { ...r, catalogoAntes: todas, nombreArchivo: nombre }
+  return { ...r, catalogoAntes: todas, nombreArchivo: nombre, reemplaza }
 }
 
 /** Los campos del formulario de subida con lo analizado acá. */
 export function adjuntarAnalisis(fd, an) {
   fd.append('interno', an.interno || '')
+  fd.append('completo', an.completo || '')
+  fd.append('ps', an.ps || '')
+  // el usuario ya contestó «Reemplazarla» a «esa fuente ya existe» (si no, el servidor contesta 409)
+  if (an.reemplaza) fd.append('reemplaza', an.reemplaza)
   fd.append('sin_contorno', JSON.stringify(an.sin_contorno || []))
   fd.append('choca_con', JSON.stringify(an.choca_con || null))
 }
@@ -44,10 +50,11 @@ export function adjuntarAnalisis(fd, an) {
  * (cargar su archivo = volver a ella): los que ahora resuelven, SIN alias, a la nueva.
  */
 export function aliasQuitados(an, reemplazos, destino) {
-  const nueva = { interno: an.interno, archivo: an.nombreArchivo, propia: destino === 'pedido' }
+  const nueva = { interno: an.interno, completo: an.completo || '', ps: an.ps || '', archivo: an.nombreArchivo, propia: destino === 'pedido' }
   // en el orden del catálogo del servidor: las del sistema y después las del molde, cada una al
   // final de su carpeta (el archivo nuevo reemplaza al viejo del mismo nombre)
-  const resto = (an.catalogoAntes || []).filter((c) => !(c.archivo === nueva.archivo && !!c.propia === nueva.propia))
+  // la que se reemplazó (otro nombre de archivo, misma fuente) también sale del catálogo
+  const resto = (an.catalogoAntes || []).filter((c) => !((c.archivo === nueva.archivo || (an.reemplaza && c.archivo === an.reemplaza)) && !!c.propia === nueva.propia))
   const sis = resto.filter((c) => !c.propia), prop = resto.filter((c) => c.propia)
   const cat = nueva.propia ? [...sis, ...prop, nueva] : [...sis, nueva, ...prop]
   return Object.keys(reemplazos || {}).filter((k) => {

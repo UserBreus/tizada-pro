@@ -13,6 +13,11 @@ Arte) y se exige:
   3. el PDF de la pieza DIBUJADO a 100 dpi por PyMuPDF: 0 píxeles distintos fuera de bordes
      (misma regla estructural que `verificar_navegador_vista.py`).
 
+Con `--texto` (2026-10-01) las prendas llevan un NOMBRE LARGO, cada campo tiene LÍMITE DE ANCHO
+(`limite_cm`, margen al borde) y el nombre se estampa con OTRA tipografía (Anton, elegida por
+campo): así se compara también el achicado y la «misma altura» entre los dos motores, y se exige
+que el límite haya achicado el nombre de verdad.
+
 ⚠️ No toca nada del usuario: el molde se COPIA a un temporal y `db` es un doble (nada de MSSQL).
 """
 import glob
@@ -48,6 +53,12 @@ ETIQUETA = {"activo": True, "mostrar": {"talle": True, "pieza": True, "numero": 
             "color": [0.15, 0.15, 0.15, 0.30], "borde_activo": True,
             "borde_color": [0.01, 0.01, 0.01, 0.05], "borde_mm": 1.0}
 FALLOS = []
+TEXTO = "--texto" in sys.argv
+if TEXTO:
+    sys.argv.remove("--texto")
+NOMBRE_LARGO = "GOROSTERRAZUBERRIATEGUI"
+LIMITE = {"nombre": {"margen_cm": 3.0, "por_pieza": {"Dorso": 1.5, "Frente": None}}, "numero": {"margen_cm": 3.0}}   # con margen POR PIEZA
+ALIAS_TEXTO = {"@campo:nombre": "Anton Regular"}
 
 
 def ok(cond, msg):
@@ -105,9 +116,16 @@ def main(orig):
         # huecos, no sirve para armar la muestra)
         comunes = [t for t in talles if all(t in v for v in registro.values())]
         elegidos = [comunes[0], comunes[len(comunes) // 2]] if len(comunes) > 1 else comunes[:1]
-        prendas = [{"talle": t, "nombre": "NOMBRE", "numero": "00",
-                    "personalizacion": {"nombre": "NOMBRE", "numero": "00", "talle": t}} for t in elegidos]
-        fuentes = {"carpetas": [FUENTES], "alias": {}}
+        _nom = NOMBRE_LARGO if TEXTO else "NOMBRE"
+        prendas = [{"talle": t, "nombre": _nom, "numero": "00",
+                    "personalizacion": {"nombre": _nom, "numero": "00", "talle": t}} for t in elegidos]
+        fuentes = {"carpetas": [FUENTES], "alias": dict(ALIAS_TEXTO) if TEXTO else {}}
+        if TEXTO and not pers:
+            print("  (este molde no trae nombre ni número: el modo --texto no tiene qué probar acá)")
+        if TEXTO and pers:
+            pers = MP.pers_con_limite(pers, LIMITE)
+            ok(any(pl.get("limite_cm") == 3.0 for m in pers.values() for pl in m.values()),
+               "el límite quedó adentro de los placeholders (`limite_cm`)")
         salida = os.path.join(tmp, "salida")
         os.makedirs(salida)
         por_tela = MP.generar_pedido(pl, None, registro, pers, prendas, fuentes, salida,
@@ -131,7 +149,23 @@ def main(orig):
                            "py": {"base_stream": b["base_stream"], "clip": b["clip"], "estampado": e["estampado"],
                                   "W": b["W"], "H": b["H"], "B": b["B"], "S": b["S"]}})
         fixture = {"desplegado": os.path.join(carpeta, "desplegado"), "borde": BORDE, "etiqueta": ETIQUETA,
-                   "pers": pers, "catalogo": catalogo, "alias": {}, "piezas": piezas}
+                   "pers": pers, "catalogo": catalogo, "alias": fuentes["alias"], "piezas": piezas}
+        if TEXTO and pers:
+            # 🔴 que el límite ACHIQUE de verdad: el mismo pedido sin límite tiene que dar otro estampado
+            sal2 = os.path.join(tmp, "salida_sin_limite")
+            os.makedirs(sal2)
+            # (ojo: `pl` es la ruta del molde; acá van otros nombres)
+            pers0 = {m: {c: {k: v for k, v in _x.items() if k not in ("limite_cm", "limite_por_pieza")} for c, _x in cs.items()} for m, cs in pers.items()}
+            for cs in pers0.values():
+                for _x in cs.values():
+                    for pt in (_x.get("por_talle") or {}).values():
+                        pt.pop("limite_cm", None)
+                        pt.pop("limite_por_pieza", None)
+            sin = MP.generar_pedido(pl, None, registro, pers0, prendas, fuentes, sal2,
+                                    mapeo_arte=None, solo_piezas=True, borde_corte=BORDE, etiqueta=ETIQUETA)
+            ents0 = [e for lst in sin.values() for e in lst]
+            _cambio = sum(1 for a, b in zip(ents, ents0) if a["estampado"] != b["estampado"] and NOMBRE_LARGO)
+            ok(_cambio > 0, f"🔴 con el límite el nombre largo se achica ({_cambio} de {len(ents)} piezas cambian)")
         fx = os.path.join(tmp, "fixture.json")
         with open(fx, "w", encoding="utf-8") as fh:
             json.dump(fixture, fh, ensure_ascii=False)

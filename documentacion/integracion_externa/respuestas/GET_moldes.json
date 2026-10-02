@@ -1,0 +1,25 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "moldes": [
+   {
+    "codigo": "prod_20260820_095558_38bc",
+    "listo": true,
+    "nombre": "Camiseta de futbol"
+   },
+   {
+    "codigo": "prod_20260916_095236_ef99",
+    "listo": false,
+    "motivo": "trae el diseño adentro del molde (todavía no se admite por esta vía)",
+    "nombre": "Buzo medio cierre"
+   },
+   {
+    "codigo": "prod_20260917_142743_bee2",
+    "listo": false,
+    "motivo": "trae el diseño adentro del molde (todavía no se admite por esta vía)",
+    "nombre": "cosas"
+   }
+  ],
+  "version": 1951
+ }
+}

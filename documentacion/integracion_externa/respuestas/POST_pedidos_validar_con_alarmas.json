@@ -1,0 +1,28 @@
+{
+ "http": 422,
+ "cuerpo": {
+  "aceptaria": false,
+  "alarmas": [
+   {
+    "codigo": "variable-desconocida",
+    "donde": {
+     "campo": "disenos[0].moldes[0].variable"
+    },
+    "etapa": "datos",
+    "frena": true,
+    "mensaje": "«Cuello cuadrado»"
+   },
+   {
+    "codigo": "tela-desconocida",
+    "donde": {
+     "campo": "disenos[1].moldes[0].tela"
+    },
+    "etapa": "datos",
+    "frena": true,
+    "mensaje": "tela «999»"
+   }
+  ],
+  "nota": "sólo se revisaron los DATOS; el arte y las tipografías se revisan al procesar",
+  "referencia": "OV-2026-00123"
+ }
+}

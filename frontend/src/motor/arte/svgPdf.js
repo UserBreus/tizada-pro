@@ -284,7 +284,7 @@ export function svgAPdf(texto) {
   if (!svg || svg.localName !== 'svg' || doc.getElementsByTagName('parsererror').length) throw error('el archivo no es un SVG válido')
   for (const [tag, que] of Object.entries(NO_SOPORTADO)) {
     const hay = [...doc.getElementsByTagName('*')].some((e) => e.localName === tag && !(tag === 'text' && !e.textContent.trim()))
-    if (hay) throw error(`el SVG trae ${que}, que no se puede convertir acá: exportalo como PDF desde Illustrator`)
+    if (hay) throw error(`el SVG trae ${que}, que no se puede convertir acá: exportalo como PDF desde Illustrator o Corel`)
   }
   const vb = numeros(svg.getAttribute('viewBox'))
   let W = largo(svg.getAttribute('width'), null), H = largo(svg.getAttribute('height'), null)

@@ -31,6 +31,29 @@
         "srv_visor.py"
       ],
       "port": 8060
+    },
+    {
+      "name": "tizada-visor-integracion",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "srv_visor.py"
+      ],
+      "port": 8061,
+      "env": {
+        "PORT_VISOR": "8061",
+        "TIZADA_EXTERNO": "C:/Users/user2/Documents/tincho/codigos/TIZADA PRO/.preview_sandbox/externo"
+      }
+    },
+    {
+      "name": "sistemita-ventas",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "C:/Users/user2/Documents/tincho/codigos/TIZADAPRO PRUEBAEXT/app.py"
+      ],
+      "port": 8070,
+      "env": {
+        "PYTHONIOENCODING": "utf-8"
+      }
     }
   ]
 }

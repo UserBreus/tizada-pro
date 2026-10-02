@@ -48,7 +48,8 @@ def _capas_con_dibujo(doc):
 
 def _orden_archivo(doc):
     try:
-        return [c.get("text") for c in doc.layer_ui_configs() if c.get("text")]
+        # Una vez cada nombre: Corel repite cada capa en cada página (ver `_orden_capas_archivo`).
+        return list(dict.fromkeys(c.get("text") for c in doc.layer_ui_configs() if c.get("text")))
     except Exception:
         return []
 

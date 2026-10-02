@@ -13,6 +13,7 @@ import { pyRound } from '../py.js'
 import { sha1Hex } from '../sha1.js'
 import { instrucciones, contenidoCrudo } from '../pdf/contenido.js'
 import { dibujosDePagina } from '../pdf/dibujos.js'
+import { devolver } from '../pdf/prestado.js'
 import { cropboxPyMuPDF } from '../molde/contornos.js'
 import { abrir, nombresOc, normNombre, reprPy, strOperando, floatOperando, transformarRect, rectVacio } from './texto.js'
 import { esCapaEditable, nombreEditable } from '../nombres.js'
@@ -85,6 +86,9 @@ export function objetosDeCapa(page, insts, objetivo) {
   const pilaCtm = [], pilaOc = []
   let ini = null, pts = [], clip = false
   let fill = null
+  // el RECORTE vigente (caja de la intersección de los `W` abiertos; null = sin recorte): es parte
+  // del estado gráfico, `q` lo guarda y `Q` lo devuelve aunque caiga en OTRA capa
+  let recorte = null
   const unidades = []
   const cacheOc = new Map()
   const frameCapas = () => { const s = new Set(); for (const fr of pilaOc) for (const x of fr) s.add(x); return s }
@@ -93,8 +97,8 @@ export function objetosDeCapa(page, insts, objetivo) {
   for (let i = 0; i < insts.length; i++) {
     const it = insts[i]
     const op = it.op
-    if (op === 'q') pilaCtm.push([ctm, ctmInt])
-    else if (op === 'Q') { if (pilaCtm.length) [ctm, ctmInt] = pilaCtm.pop() }
+    if (op === 'q') pilaCtm.push([ctm, ctmInt, recorte])
+    else if (op === 'Q') { if (pilaCtm.length) [ctm, ctmInt, recorte] = pilaCtm.pop() }
     else if (op === 'cm') {
       try { ctm = mmul(it.args.map(floatOperando), ctm); ctmInt = false } catch { /* pass */ }
     } else if (op === 'k') {
@@ -129,6 +133,10 @@ export function objetosDeCapa(page, insts, objetivo) {
         const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
         const esClip = clip || op === 'n'
         const fillOp = FILL_PATH.has(op), strokeOp = STROKE_PATH.has(op)
+        if (clip) {                                         // un `W`: achica el recorte vigente
+          recorte = recorte === null ? bbox : [Math.max(recorte[0], bbox[0]), Math.max(recorte[1], bbox[1]),
+                                               Math.min(recorte[2], bbox[2]), Math.min(recorte[3], bbox[3])]
+        }
         const sig = reprPy(['v', ...pts.map((p) => [pyRound(p[0], 1), pyRound(p[1], 1)])])
         unidades.push({ i, bbox, esClip, capas: frameCapas(), kind: 'vector', fillOp, strokeOp, fill: fillOp ? fill : null, sig })
       }
@@ -143,7 +151,10 @@ export function objetosDeCapa(page, insts, objetivo) {
       unidades.push({ i, bbox: [ctm[4], ctm[5], ctm[4], ctm[5]], esClip: false, capas: frameCapas(), kind: 'texto',
                       fillOp: false, strokeOp: false, fill: null, sig: reprPy(['tx', { int: i }]) })
     } else if (op === 'sh') {
-      unidades.push({ i, bbox: [ctm[4], ctm[5], ctm[4], ctm[5]], esClip: false, capas: frameCapas(), kind: 'shading',
+      // 🔴 un sombreado no tiene trazado: pinta TODO el recorte vigente, y ésa es su caja (un
+      // degradado lineal no tiene límite propio — ver `molde_real._analizar_capa`, 2026-10-01)
+      const conRecorte = recorte !== null && recorte[0] < recorte[2] && recorte[1] < recorte[3]
+      unidades.push({ i, bbox: conRecorte ? recorte : [ctm[4], ctm[5], ctm[4], ctm[5]], esClip: false, capas: frameCapas(), kind: 'shading',
                       fillOp: false, strokeOp: false, fill: null, sig: reprPy(['sh', numDe(pyRound(ctm[4], 1)), numDe(pyRound(ctm[5], 1)), { int: i }]) })
     }
   }
@@ -171,6 +182,9 @@ export function objetosDeCapa(page, insts, objetivo) {
   return objetos
 }
 
+/** `motor_pedido._rect_sin_limite`: ¿es el «rectángulo infinito» de MuPDF (±2·10⁹)? */
+export const rectSinLimite = (r) => [...r].some((v) => Math.abs(Number(v)) >= 1e9)
+
 /** `get_bboxlog(layers=True)`: [(código, rect, capa)] — sólo los que no son trazados (los
  *  trazados ya los cubre `dibujosDePagina`). */
 export function bboxlog(mupdf, page) {
@@ -182,11 +196,14 @@ export function bboxlog(mupdf, page) {
     strokeText(text, stroke, ctm) { add('stroke-text', text.getBounds(stroke, ctm)) },
     ignoreText(text, ctm) { add('ignore-text', text.getBounds(null, ctm)) },
     // `fz_bound_shade(shade, ctm)`: mupdf.js sólo da el límite con la identidad; se transforma
-    // después por la CTM (idéntico salvo por redondeos de float32 con giros — no hay sombreados
-    // en las capas editables de los artes reales)
-    fillShade(shade, ctm) { add('fill-shade', transformarRect(shade.getBounds(), ctm)) },
-    fillImage(image, ctm) { add('fill-image', transformarRect([0, 0, 1, 1], ctm)) },
-    fillImageMask(image, ctm) { add('fill-imgmask', transformarRect([0, 0, 1, 1], ctm)) },
+    // después por la CTM (idéntico salvo por redondeos de float32 con giros). Un degradado lineal
+    // o radial NO tiene límite: da el rectángulo infinito, que se deja TAL CUAL (transformado ya
+    // no se lo reconoce) para que `extraerEditables` lo mida por su recorte.
+    // (`devolver`: el sombreado y la imagen son PRESTADOS — ver `pdf/prestado.js`)
+    fillShade(shade, ctm) { const b = shade.getBounds(); devolver(shade); add('fill-shade', rectSinLimite(b) ? b : transformarRect(b, ctm)) },
+    fillImage(image, ctm) { devolver(image); add('fill-image', transformarRect([0, 0, 1, 1], ctm)) },
+    fillImageMask(image, ctm) { devolver(image); add('fill-imgmask', transformarRect([0, 0, 1, 1], ctm)) },
+    clipImageMask(image) { devolver(image) },
     beginLayer(name) { capa = name || '' },
     endLayer() { capa = '' },
   })
@@ -208,6 +225,7 @@ export function extraerEditables(mupdf, bytes, { estricto = false } = {}) {
       const pg = doc.loadPage(pno)
       try {
         const cajas = new Map()
+        const sinLimite = new Set()                       // capas con un sombreado SIN límite propio
         const sumar = (lay, x0, y0, x1, y1) => {
           if (!lay || !esCapaEditable(lay)) return
           const b = cajas.get(lay)
@@ -221,6 +239,13 @@ export function extraerEditables(mupdf, bytes, { estricto = false } = {}) {
         try {
           for (const [codigo, r, lay] of bboxlog(mupdf, pg)) {
             if (codigo.includes('path')) continue
+            // 🔴 un degradado lineal no tiene límite propio (MuPDF lo mide «infinito» y la capa
+            // quedaba de millones de cm → el objeto no aparecía en el visor): lo que pinta es el
+            // RECORTE que lo contiene, y esa caja la da `objetosDeCapa` más abajo
+            if (codigo.includes('shade') && rectSinLimite(r)) {
+              if (lay && esCapaEditable(lay)) { if (!cajas.has(lay)) cajas.set(lay, null); sinLimite.add(lay) }
+              continue
+            }
             if (!rectVacio(r)) sumar(lay, r[0], r[1], r[2], r[3])
           }
         } catch (e) { if (estricto) throw e }
@@ -233,9 +258,19 @@ export function extraerEditables(mupdf, bytes, { estricto = false } = {}) {
         const aMu = (bp) => [pyRound((bp[0] - cb[0]) * U, 2), pyRound((cb[3] - bp[3]) * U, 2),
                              pyRound((bp[2] - cb[0]) * U, 2), pyRound((cb[3] - bp[1]) * U, 2)]
         const mesaRect = [pyRound(pr[0], 2), pyRound(pr[1], 2), pyRound(prW, 2), pyRound(prH, 2)]
-        for (const [capa, b] of cajas) {
+        for (const [capa, b0] of cajas) {
           let od = []
           try { od = objetosDeCapa(pg, insts, capa) } catch (e) { if (estricto) throw e; od = [] }
+          // la caja de un sombreado sin límite sale de las figuras de la capa (su recorte)
+          let b = b0
+          if (sinLimite.has(capa)) {
+            for (const o of od) {
+              const bm = aMu(o.bbox)
+              if (o.kind !== 'shading' || bm[2] <= bm[0] || bm[3] <= bm[1]) continue
+              b = b === null ? [...bm] : [Math.min(b[0], bm[0]), Math.min(b[1], bm[1]), Math.max(b[2], bm[2]), Math.max(b[3], bm[3])]
+            }
+          }
+          if (b === null) continue                          // sombreado sin recorte: no hay qué medir
           const objetos = od.map((o) => {
             const bm = aMu(o.bbox)
             return { obj_id: o.obj_id, kind: o.kind, bbox_mu: bm, mesa_rect: mesaRect,

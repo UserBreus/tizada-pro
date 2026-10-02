@@ -224,6 +224,9 @@ export function analizarCapa(inst, R, objetivo, xobjInfo = null) {
   let ctm = [1, 0, 0, 1, 0, 0]
   const pilaCtm = [], pilaOc = []
   let ini = null, pts = [], clip = false, fill = null
+  // el RECORTE vigente (caja de la intersección de los `W` abiertos; null = sin recorte): es parte
+  // del estado gráfico, `q` lo guarda y `Q` lo devuelve aunque caiga en OTRA capa
+  let recorte = null
   const unidades = []
   const paintIdxTodos = new Set()
   const frameCapas = () => { const s = new Set(); for (const f of pilaOc) for (const x of f) s.add(x); return s }
@@ -243,9 +246,8 @@ export function analizarCapa(inst, R, objetivo, xobjInfo = null) {
   }
   for (let i = 0; i < inst.length; i++) {
     const it = inst[i], op = it.op
-    if (op === 'q') pilaCtm.push(ctm)
-    else if (op === 'Q') ctm = pilaCtm.length ? pilaCtm.pop() : ctm
-    else if (op === 'cm') {
+    if (op === 'q') pilaCtm.push([ctm, recorte])
+    else if (op === 'Q') { if (pilaCtm.length) [ctm, recorte] = pilaCtm.pop() } else if (op === 'cm') {
       // `_mmul` con menos de 6 números levanta en Python y la CTM queda como estaba
       try { const v = it.args.map(numero); if (v.length < 6) throw new TypeError('cm'); ctm = mmul(v, ctm) } catch { /* nada */ }
     } else if (op === 'k') {
@@ -273,6 +275,10 @@ export function analizarCapa(inst, R, objetivo, xobjInfo = null) {
         const bbox = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
         const esClip = clip || op === 'n'
         const fillOp = FILL_PATH.has(op), strokeOp = STROKE_PATH.has(op)
+        if (clip) {                                         // un `W`: achica el recorte vigente
+          recorte = recorte === null ? bbox : [Math.max(recorte[0], bbox[0]), Math.max(recorte[1], bbox[1]),
+            Math.min(recorte[2], bbox[2]), Math.min(recorte[3], bbox[3])]
+        }
         if (!esClip) paintIdxTodos.add(i)
         const sig = ['v', ...pts.map(([px, py]) => [pyRound(px, 1), pyRound(py, 1)])]
         unidades.push({ i, bbox, esClip, capas: frameCapas(), kind: 'vector', fillOp, strokeOp,
@@ -291,7 +297,10 @@ export function analizarCapa(inst, R, objetivo, xobjInfo = null) {
       paintIdxTodos.add(i)
       unidades.push({ i, bbox, esClip: false, capas: frameCapas(), kind: 'texto', fillOp: false, strokeOp: false, fill: null, sig: ['tx', { int: i }] })
     } else if (op === 'sh') {
-      const bbox = [ctm[4], ctm[5], ctm[4], ctm[5]]
+      // 🔴 un sombreado no tiene trazado: pinta TODO el recorte vigente, y ésa es su caja (un
+      // degradado lineal no tiene límite propio — ver `molde_real._analizar_capa`, 2026-10-01)
+      const bbox = (recorte !== null && recorte[0] < recorte[2] && recorte[1] < recorte[3])
+        ? recorte : [ctm[4], ctm[5], ctm[4], ctm[5]]
       paintIdxTodos.add(i)
       unidades.push({ i, bbox, esClip: false, capas: frameCapas(), kind: 'shading', fillOp: false, strokeOp: false, fill: null, sig: ['sh', pyRound(ctm[4], 1), pyRound(ctm[5], 1), { int: i }] })
     }

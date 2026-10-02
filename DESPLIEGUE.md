@@ -14,13 +14,18 @@ alguien que no conoce el proyecto.
 |---|---|---|---|
 | **Windows** | 10 / Server 2019+ | — | — |
 | **Python** | 3.12+ | el sistema corre en Python | python.org (marcar *Add to PATH*) |
-| **Node.js** | 20+ | compilar la pantalla | nodejs.org |
+| **Node.js** | 20+ | compilar la pantalla **y correr el robot de integración** (los pedidos que llegan de otro sistema) | nodejs.org |
 | **SQL Server** | 2019+ (sirve **Express**, es gratis) | la base | microsoft.com/sql-server |
 | **ODBC Driver for SQL Server** | 17 o 18 | conectar Python con la base | «Microsoft ODBC Driver for SQL Server» |
 | Ghostscript | cualquiera | **opcional** | sólo se usa si el arte trae contenido RGB |
 
 > La pantalla se sirve **compilada**: Node hace falta para *construirla*, no para que el sistema
 > funcione. Si preferís, se compila en otra máquina y se copia la carpeta `frontend/dist`.
+>
+> **Desde el 2026-10-02 hay una excepción:** el **robot de integración**
+> (`frontend/src/motor/robot/robot.mjs`, lo arranca solo el servidor) corre en Node. Sin Node
+> instalado en el servidor, los pedidos que manda otro sistema quedan en cola y la pantalla
+> *Configuración › Integraciones* lo avisa. Su salida queda en `logs/robot.log`.
 
 ---
 

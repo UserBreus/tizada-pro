@@ -306,7 +306,12 @@ export function nombresOc(page, operando) {
 }
 
 // ─── `page.get_text("dict")` ─────────────────────────────────────────────────────────────────
-const OPCIONES_STEXT = 'preserve-ligatures,preserve-whitespace,preserve-images,use-cid-for-unknown-unicode'   // TEXTFLAGS_DICT (el recorte a la página viene activo por defecto)
+// 🔴 SIN `preserve-images` (2026-10-01, MAPA 605): con esa opción MuPDF DIBUJA cada degradado
+// (`sh`) como una imagen del tamaño de la mesa para devolverlo como «bloque de imagen», que acá
+// nadie usa. Con el arte «CAMISETA NEGRO 2» (33 degradados en una mesa) leer el texto de UNA mesa
+// tardaba 8 s, y cargar el arte lo lee 4 veces (mapeo por nombre, por variante, fuentes y
+// detección): más de un minuto. El texto sale idéntico. Gemelo: `motor_pedido.FLAGS_TEXTO`.
+const OPCIONES_STEXT = 'preserve-ligatures,preserve-whitespace,use-cid-for-unknown-unicode'   // TEXTFLAGS_DICT menos las imágenes (el recorte a la página viene activo por defecto)
 const MAX_ASC = 8, MAX_DESC = -2                                        // FZ_MAX_TRUSTWORTHY_ASCENT/DESCENT
 
 function nombreFuenteMuPDF(bf) {
@@ -417,6 +422,29 @@ function nombreFuente(nombre) {
 }
 
 const rgbEntero = (color) => (Math.round(color[0] * 255) << 16) | (Math.round(color[1] * 255) << 8) | Math.round(color[2] * 255)
+
+/**
+ * `alturas_de_pagina` de motor_pedido: las letras (una letra o número) de la página con su altura
+ * REAL — `[[c, x, y, tope]]`, (x, y) el origen y `tope` el borde de arriba del glifo. Recuadros
+ * exactos de MuPDF (`accurate-bboxes`) y CRUDOS (el `walk` no les aplica la corrección de PyMuPDF;
+ * el Python los lee del XML por lo mismo). Ver el porqué allá.
+ */
+export function alturasDePagina(page) {
+  const out = []
+  let st
+  try { st = page.toStructuredText('preserve-whitespace,accurate-bboxes') } catch { return out }
+  try {
+    st.walk({
+      onChar(c, origin, font, size, quad) {
+        if (Array.from(c).length !== 1 || !/^[\p{L}\p{N}]$/u.test(c)) return
+        out.push([c, origin[0], origin[1], Math.min(quad[1], quad[3], quad[5], quad[7])])
+      },
+    })
+  } finally {
+    st.destroy()
+  }
+  return out
+}
 
 /**
  * Los bloques de texto de `page.get_text("dict")` (sólo `type == 0`): [{lines: [{bbox, spans:

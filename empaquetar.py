@@ -21,12 +21,20 @@ SALIDA = os.path.join(AQUI, "dist")
 # 300 MB en la raíz, no se cuela solo).
 INCLUIR_ARCHIVOS = ["*.py", "requirements.txt", "VERSION", "publicado.bat", "iniciar.bat",
                     "INSTALAR.bat", "DIAGNOSTICO.bat", "*.md", "logo.svg"]
-INCLUIR_CARPETAS = ["frontend/dist", "db", "catalogo_fuentes"]
-# OJO con `catalogo_fuentes/subida_*`: estuvo acá (por ser «datos del usuario») y era un
+INCLUIR_CARPETAS = ["frontend/dist", "db", "catalogo_fuentes",
+                    # EL ROBOT DE INTEGRACIÓN (MAPA 606) corre en el servidor, en Node, con el MISMO
+                    # motor del navegador: viajan sus fuentes y las tres librerías que usa (no tienen
+                    # dependencias propias). El servidor publicado necesita Node instalado.
+                    "frontend/src/motor", "frontend/node_modules/mupdf", "frontend/node_modules/fflate",
+                    "frontend/node_modules/opentype.js", "documentacion/integracion_externa"]
+# archivos sueltos fuera de la raíz (`package.json` dice que los .js del motor son módulos)
+INCLUIR_SUELTOS = ["frontend/package.json"]
+# OJO con las tipografías cargadas a mano en `catalogo_fuentes/` (hasta 2026-10-01 se llamaban
+# `subida_*`; ahora llevan su nombre real): estuvieron acá (por ser «datos del usuario») y era un
 # agujero silencioso — las tipografías cargadas a mano en el taller NO llegaban al servidor
 # publicado, así que un diseño que las usa salía estampado con el reemplazo temporal (Anton)
 # SIN que nadie se enterara: el peor error es el que sale bien impreso. Viajan, son pocos KB.
-EXCLUIR = ["empaquetar.py", "migrar_ids.py", "**/__pycache__/**"]
+EXCLUIR = ["empaquetar.py", "migrar_ids.py", "**/__pycache__/**", "frontend/src/motor/pruebas/*"]
 
 # Con `--completo` (primera instalación) el paquete lleva ADEMÁS:
 #  • los perfiles ICC de esta máquina → sin ellos el color del servidor sale distinto;
@@ -219,6 +227,8 @@ def main():
             if os.path.isfile(os.path.join(AQUI, f)) and not _excluido(f) \
                and any(fnmatch.fnmatch(f, p) for p in INCLUIR_ARCHIVOS):
                 z.write(os.path.join(AQUI, f), f); n += 1
+        for suelto in INCLUIR_SUELTOS:
+            z.write(os.path.join(AQUI, *suelto.split("/")), suelto); n += 1
         for carpeta in INCLUIR_CARPETAS:
             raiz = os.path.join(AQUI, *carpeta.split("/"))
             if not os.path.isdir(raiz):

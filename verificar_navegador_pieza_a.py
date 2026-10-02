@@ -16,6 +16,10 @@ a escala). Se arman las mismas piezas de los dos lados con el molde real del cam
   2. el ESTAMPADO: la misma cadena, letra por letra;
   3. el PDF de la pieza DIBUJADO a 100 dpi por PyMuPDF: 0 píxeles distintos fuera de bordes.
 
+Con `--texto` (2026-10-01) las prendas llevan un NOMBRE LARGO, cada campo tiene LÍMITE DE ANCHO
+(`limite_cm`) y el nombre sale con OTRA tipografía (Anton, elegida por campo): se compara también
+el achicado y la «misma altura», y se exige que el límite achique de verdad.
+
 ⚠️ No toca nada del usuario: el molde, sus datos y los artes se COPIAN a un temporal, el objeto
 agregado se fabrica ahí con pikepdf, y `db` es un doble (nada de MSSQL).
 """
@@ -56,6 +60,10 @@ ETIQUETA = {"activo": True, "mostrar": {"talle": True, "pieza": True, "numero": 
             "color": [0.15, 0.15, 0.15, 0.30], "borde_activo": True,
             "borde_color": [0.01, 0.01, 0.01, 0.05], "borde_mm": 1.0}
 FALLOS = []
+TEXTO = "--texto" in sys.argv
+NOMBRE_LARGO = "GOROSTERRAZUBERRIATEGUI"
+LIMITE = {"nombre": {"margen_cm": 3.0, "por_pieza": {"Dorso": 1.5, "Frente": None}}, "numero": {"margen_cm": 3.0}}   # con margen POR PIEZA
+ALIAS_TEXTO = {"@campo:nombre": "Anton Regular"}
 
 
 def ok(cond, msg):
@@ -195,13 +203,21 @@ def main():
         reg = alta["registro"]
         ok(len(reg) >= 30 and not alta["problemas"], f"registro con {len(reg)} piezas (nombrado visual, guía M)")
         vorden = MP.talles_orden_archivo(pl, sorted({t for v in reg.values() for t in v}))
-        fuentes = {"carpetas": [FUENTES], "alias": {}}
+        fuentes = {"carpetas": [FUENTES], "alias": dict(ALIAS_TEXTO) if TEXTO else {}}
         catalogo = [{"ruta": r, **i} for r, i in MP.catalogo_fuentes(fuentes).items()]
         casos = _casos(tmp, pl, reg, artes)
+        if TEXTO:
+            for c in casos:
+                for p in c["prendas"]:
+                    p["nombre"] = NOMBRE_LARGO
+                    p["personalizacion"]["nombre"] = NOMBRE_LARGO
+        _cambian = 0
         fx_casos = []
         entradas = []
         for c in casos:
             pers = MP.extraer_personalizacion(c["arte"])
+            if TEXTO:
+                pers = MP.pers_con_limite(pers, LIMITE)
             salida = os.path.join(tmp, "salida_" + c["nombre"])
             os.makedirs(salida)
             por_tela = MP.generar_pedido(pl, c["arte"], reg, pers, c["prendas"], fuentes, salida,
@@ -212,6 +228,20 @@ def main():
                                          editables_sin_marca=c["editables_sin_marca"],
                                          objetos_agregados=c["objetos_agregados"], marcas_como_cruz=True)
             ents = [e for lst in por_tela.values() for e in lst]
+            if TEXTO:
+                # el mismo pedido SIN límite: el estampado tiene que cambiar (el nombre largo se achicó)
+                _s0 = os.path.join(tmp, "salida0_" + c["nombre"])
+                os.makedirs(_s0)
+                _p0 = {m: {k: {kk: vv for kk, vv in pl_.items() if kk not in ("limite_cm", "limite_por_pieza")} for k, pl_ in cs.items()} for m, cs in pers.items()}
+                _sin = MP.generar_pedido(pl, c["arte"], reg, _p0, c["prendas"], fuentes, _s0,
+                                         mapeo_arte=c["mapeo_arte"], solo_piezas=True, borde_corte=BORDE,
+                                         etiqueta=ETIQUETA, referencia="alto",
+                                         editables_cfg=c["editables_cfg"], editables_tamano=c["editables_tamano"],
+                                         editables_color=c["editables_color"], editables_marca=c["editables_marca"],
+                                         editables_sin_marca=c["editables_sin_marca"],
+                                         objetos_agregados=c["objetos_agregados"], marcas_como_cruz=True)
+                _e0 = [e for lst in _sin.values() for e in lst]
+                _cambian += sum(1 for a, b in zip(ents, _e0) if a["estampado"] != b["estampado"])
             esperadas = sum(len(p["variante_piezas"]) for p in c["prendas"])
             ok(len(ents) == esperadas, f"{c['nombre']}: {len(ents)} piezas estampadas en {len(c['prendas'])} prendas")
             piezas = []
@@ -247,7 +277,9 @@ def main():
         # refwerrf: el escudo de 4 figuras con color por figura (M) y, por eso, también en el talle 8.
         ok(con_e >= 5, f"el motor redibujó editables aparte en {con_e} piezas")
         ok(con_oa >= 2 and con_cruz >= 1, f"objetos agregados en {con_oa} piezas · cruz de proceso en {con_cruz}")
-        fixture = {"borde": BORDE, "etiqueta": ETIQUETA, "catalogo": catalogo, "alias": {}, "casos": fx_casos,
+        if TEXTO:
+            ok(_cambian > 0, f"🔴 con el límite, el nombre largo se achica ({_cambian} piezas cambian)")
+        fixture = {"borde": BORDE, "etiqueta": ETIQUETA, "catalogo": catalogo, "alias": fuentes["alias"], "casos": fx_casos,
                    # para §4 (el hilo de trabajo real con el contexto rearmado)
                    "plantilla": pl, "registro": reg, "orden_var": vorden}
         fx = os.path.join(tmp, "fixture.json")

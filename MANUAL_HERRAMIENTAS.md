@@ -93,6 +93,12 @@ PEDIDO (todos los días)        ┐  diseño → moldes → arte → planilla �
   - Un `.ai` **ES** un PDF; que entre no garantiza que se lea todo: hace falta que el exportador
     conserve las **capas OCG** y el **texto vivo**. Affinity aplana la pila de apariencias → colores
     y bordes salen mal.
+  - **CorelDRAW 2022+** se lee entero (probado con 2026, MAPA 597): *Archivo → Publicar como PDF*,
+    compatibilidad **Acrobat 6.0 o más nuevo** (o PDF/X-4; con las viejas se pierden las capas),
+    color **Nativo/CMYK**, **sin** «Exportar texto como curvas» ni «rellenos complejos como mapas de
+    bits». Corel repite cada capa en cada página, dibuja el borde del nombre como texto en modo
+    trazo y agrega una copia invisible del texto: el sistema lo entiende. Todo el detalle, las
+    diferencias con Illustrator y cómo conectarlo: **`COREL_REFERENCIA.md`**.
   - **Siempre mandar `pid` explícito.** Sin `pid` escribe en el molde **activo**, que no es
     necesariamente el que se está configurando.
   - DXF: no se corre `alta_plantilla` (Optitex no pone etiquetas «Talle-Pieza-#»); los talles vienen
@@ -311,6 +317,31 @@ Dos modos en la misma pantalla; se alterna con **«Mapear diseño al molde» ↔
    (como toda descarga de la app, ver `src/descargar.js`); cancelar no descarga.
 - **Guarda:** `POST /api/productos/referencia_medida` y la config de medida por variante.
   Precedencia en el motor: **exacto > rango > default**; si algo no queda cubierto, avisa.
+4. **Crear la base en tu programa** (tarjeta `PlantillaProgramas`): los dos botones **lado a lado**, cada uno del color de su programa (Illustrator naranja, CorelDRAW verde). La primera vez cada botón **conecta**; después **crea**. Abajo, «Instaladores:» con la descarga de los dos, y la «Descargar guía .ai».
+   - **Crear en Illustrator** (`plantilla-illustrator-conectar` / `-crear`), con la extensión en
+     `127.0.0.1:47850` (MAPA 530). Arma **un lienzo** con una mesa de trabajo por pieza, a la escala
+     elegida, repartido en varios archivos si no entra.
+   - **Crear en CorelDRAW** (MAPA 598; `plantilla-corel-conectar` / `-crear`,
+     instalador `plantilla-bajar-corel`). Usa el programa **USER PRO para CorelDRAW**:
+     - Se instala una vez con `Instalar-USER-PRO-Corel-<v>.exe`, que queda con un ícono junto al
+       reloj y arranca con Windows.
+     - Escucha en `127.0.0.1:47851`.
+     - Pide **CorelDRAW 2022 o más nuevo** (Graphics Suite).
+     - Arma **todas las mesas en un mismo espacio de trabajo**, acomodadas como en el molde (la
+       vista de varias páginas de Corel en acomodo libre). Cada mesa es una página, que es lo que
+       lee el sistema: mismo nombre de mesa, mismas capas en cada página y contorno en `guias`
+       (bloqueada).
+     - Siempre **a tamaño real y en un solo archivo** (una página llega a 45 m).
+     - Guarda un `.cdr` versión 2022 en *Documentos › USER PRO › Plantillas*.
+     - Si Corel está cerrado, lo abre.
+     - Cuando el diseño está listo: botón **«Exportar para TIZADA PRO»** en la barra **TIZADA PRO**
+       DENTRO de Corel (complemento, desde la 1.3.0; al instalar Windows pide administrador una vez
+       y hay que reiniciar Corel; si no aparece: *Ventana › Barras de herramientas › TIZADA PRO*).
+       Desde la 1.4.0 el botón muestra el ícono verde de TIZADA PRO y el texto entero (control
+       propio `TizadaPro.dll`). Sin el permiso, el botón queda pegado abajo a la derecha de la ventana. Revisa el
+       diseño, **pregunta en qué carpeta guardar** (sugiere «<nombre> - para TIZADA.pdf» al lado
+       del .cdr), exporta con todos los ajustes y abre la carpeta; ese PDF se sube como arte. A mano sigue sirviendo *Publicar como PDF* con los ajustes de §2.2.
+     - Todo el detalle está en `COREL_REFERENCIA.md` §7.
 
 **B) Mapeo del arte al molde**
 1. **«Qué va en cada capa del .ai»** (`diseno-capas`) — abre la guía con los nombres de capa que
@@ -610,11 +641,30 @@ Define **campos reutilizables**: cómo se cargan y **qué hacen**.
 - El importador **detecta solo el separador** (`,` `;` tab), así que si Excel lo guarda distinto
   entra igual. En talle/diseño/toggles sólo acepta valores válidos.
 
+### 4.5b **Nombre y número** (ajustes del molde, MAPA 601)
+- **Dónde:** Configuración → Moldería → el molde → **«Nombre y número»** (`ajuste-texto`).
+- **Piezas:** se eligen TOCÁNDOLAS en el visor (una o varias; otra vez la saca; «Ninguna» las suelta), con el
+  selector de variante para ver sólo las de una variable. Sin elegir, el margen vale para todas.
+- **Qué:** por campo (Nombre, Número…) **Con límite / Sin límite** (`texto-limitar`) y **Margen al
+  borde (cm)** (`texto-margen`): los cm libres entre el texto y el borde de la pieza, a cada lado.
+  Si un nombre no entra, se achica **proporcional**, apoyado en su **línea de abajo**; se mide sobre
+  la forma de la pieza en cada talle. Guardar (`texto-guardar`) → `POST /api/productos/limite_texto`.
+- **En la planilla del pedido** (MAPA 602): mientras se mide sale **«Escaneando planilla…»** y **Enviar**
+  queda bloqueado. Si algún nombre/número no entra, la fila se tiñe clarito y AL COSTADO de la tabla (sin
+  columna ni título) dice «El número se achicará 3,4 cm» (rojo + «· puede no leerse» si queda < 60 %), con
+  el detalle al pasar el mouse; arriba, un cartel explica por qué existe el límite, sólo para los campos con alerta.
+- **Además, siempre:** con otra tipografía (elegida en el pedido o porque falta la del diseño) las
+  letras salen a la **misma altura** que en el diseño.
+
 ### 4.6 **Catálogo de Fuentes**
 - **Pasos:** **Subir** (`fuentes-subir`) el `.ttf`/`.otf` → escribir un texto de prueba
   (`fuentes-probar`) para ver cómo queda **en todas las fuentes** sin generar una tizada.
-- **Guarda:** `POST /api/fuente` → `catalogo_fuentes/`. Consultas: `GET /api/fuente/archivo/<n>`,
+- **Guarda:** `POST /api/fuente` → `catalogo_fuentes/` **con el nombre del archivo** (sin
+  `subida_`, desde 2026-10-01). Consultas: `GET /api/fuente/archivo/<n>`,
   `GET /api/fuente/glifos/<n>`, `DELETE /api/fuente/archivo/<n>`.
+- **Si ya existe** (mismo nombre de archivo, o la misma fuente adentro: familia + estilo) pregunta
+  **«Esa fuente ya existe»** → **Reemplazarla** / **Dejar la que está** (también desde el pedido).
+  Los estilos de una familia (Regular, Bold, Black…) **conviven**: no preguntan. MAPA 599.
 - **Por qué importa:** el nombre/número se estampa como **curvas vectoriales** (`FuenteCurvas`), no
   como fuente embebida. En el pedido, `GET /api/pedido/fuente_chars` avisa **qué caracteres NO
   tiene** la fuente elegida.

@@ -18,6 +18,7 @@
 // estampado)`. Las mesas de origen que nombra `base.fuentesXo` (`{origen, pagina, doc}`) son las
 // que la hoja comparte (`hoja/componer.js`, el sello).
 import { instrucciones as parsear, escribir } from '../pdf/contenido.js'
+import { devolver } from '../pdf/prestado.js'
 import { recursosLigeros, sanearOc } from '../molde/paginas.js'
 import { suprimirCapas, aislarCapa, recolorarCapa, aislarObjeto, aislarCapaObjetos,
   limpiarCapasConservandoTalle } from '../molde/capas.js'
@@ -428,7 +429,8 @@ export function tieneContenidoReal(mupdf, doc, pagina) {
     const dev = new mupdf.Device({
       fillPath() { dibujos++ }, strokePath() { dibujos++ },
       fillText() { texto++ }, strokeText() { texto++ }, clipText() { texto++ }, clipStrokeText() { texto++ }, ignoreText() { texto++ },
-      clipPath: nada, clipStrokePath: nada, fillShade: nada, fillImage: nada, fillImageMask: nada, clipImageMask: nada,
+      // (`devolver`: el sombreado y la imagen son PRESTADOS — ver `pdf/prestado.js`)
+      clipPath: nada, clipStrokePath: nada, fillShade: devolver, fillImage: devolver, fillImageMask: devolver, clipImageMask: devolver,
       popClip: nada, beginMask: nada, endMask: nada, beginGroup: nada, endGroup: nada, beginTile() { return 0 }, endTile: nada,
       beginLayer: nada, endLayer: nada, beginStructure: nada, endStructure: nada, beginMetatext: nada, endMetatext: nada,
       renderFlags: nada, setDefaultColorSpaces: nada, close: nada,
@@ -444,6 +446,8 @@ export function tieneContenidoReal(mupdf, doc, pagina) {
 // (`_EDIT_SEP` del servidor): en el editor del Python se ve como una cadena vacía, pero no lo es;
 // y como Python lo cuenta como ESPACIO, `_norm_nombre` lo vuelve un espacio («escudo 11018b89»).
 export const SEP = '\x1f'
+// un objeto por capa Y POR MESA: su ajuste va con la clave «capa<RS>mesa» (`servidor._EDIT_MESA`)
+export const SEP_MESA = '\x1e'
 const ident = (nombre, objId) => (objId ? `${nombre}${SEP}${objId}` : nombre)
 
 /**
@@ -483,7 +487,7 @@ export function contextoCaminoA(mupdf, opciones) {
   const editadosNombres = new Set()
   for (const objs of Object.values(editablesCfg || {})) {
     for (const [nom, porTalle] of Object.entries(objs || {})) {
-      if (porTalle && typeof porTalle === 'object' && Object.values(porTalle).some((t) => !tfIdentidad(t))) editadosNombres.add(normNombre(nom))
+      if (porTalle && typeof porTalle === 'object' && Object.values(porTalle).some((t) => !tfIdentidad(t))) editadosNombres.add(normNombre(String(nom).split(SEP_MESA)[0]))
     }
   }
   const tamano = {}
@@ -710,7 +714,9 @@ export function contextoCaminoA(mupdf, opciones) {
       arteDraw = `q\n${clip}\nW n\n${td}\n${nom} Do\nQ\n`
       const editObj = (editPorMesa.get(mesaA) || []).filter((u) => redibujarValidos.has(normNombre(u.ident)))
       for (const o of editObj) {
-        const tf = ((cfgVar(editablesCfg || {}, variante)[o.ident]) || {})[String(talle)] || {}
+        // el ajuste de ESTE objeto (capa en esta mesa); si no tiene, el viejo de la capa
+        const cv = cfgVar(editablesCfg || {}, variante)
+        const tf = ((cv[`${o.ident}${SEP_MESA}${o.mesa}`]) || {})[String(talle)] || ((cv[o.ident]) || {})[String(talle)] || {}
         const mk = marcaDe(o.ident, variante)
         const sin = sinMarcaDe(o.ident, variante)
         if ((mk || sin) && marcasComoCruz) {

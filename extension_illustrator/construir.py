@@ -65,6 +65,26 @@ def isotipo(alto):
     return im.resize((round(r.width * z), alto), Image.LANCZOS)
 
 
+# 🎨 El ícono de cada INSTALADOR: el isotipo del sistema con los colores de SU programa, para
+# distinguirlos de un vistazo (pedido del usuario 2026-10-01: «el de Corel verde y el de Illustrator
+# naranja»). Las tres capas del isotipo (cian, magenta, amarillo) pasan a tres tonos del color del
+# programa: magenta → oscuro, cian → el color, amarillo → claro (se mapea por luminancia, así cada
+# capa sigue distinguiéndose). Los colores son los de los botones de la web (`COLOR_PROGRAMA`).
+TONOS_ILLUSTRATOR = ((200, 70, 0), (255, 154, 0), (255, 205, 90))
+TONOS_COREL = ((22, 110, 45), (60, 185, 80), (160, 228, 120))
+
+
+def tenir(im, tonos):
+    """El isotipo en tres tonos de un color (oscuro, base, claro); respeta la transparencia."""
+    from PIL import ImageOps
+    oscuro, base, claro = tonos
+    lum = ImageOps.grayscale(im.convert("RGB"))
+    # luminancias del magenta (83), el cian (119) y el amarillo (227) del logo
+    out = ImageOps.colorize(lum, oscuro, claro, mid=base, blackpoint=83, midpoint=119, whitepoint=227).convert("RGBA")
+    out.putalpha(im.split()[3])
+    return out
+
+
 def cuadrado(im, lado, margen=0.06):
     """El isotipo centrado en un cuadrado transparente (para íconos)."""
     m = round(lado * margen)
@@ -113,8 +133,8 @@ def imagenes():
     isologo(220, True).save(os.path.join(OBRA, "isologo_oscuro.png"))
     isologo(220, False).save(os.path.join(img, "isologo_claro.png"))
     isologo(220, True).save(os.path.join(img, "isologo_oscuro.png"))
-    # el ícono del .exe
-    cuadrado(iso, 256, 0.02).save(os.path.join(OBRA, "icono.ico"),
+    # el ícono del .exe: en NARANJA (el de Corel va en verde)
+    cuadrado(tenir(iso, TONOS_ILLUSTRATOR), 256, 0.02).save(os.path.join(OBRA, "icono.ico"),
                                   sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
 
@@ -152,6 +172,8 @@ def huella():
     # en la pantalla: regla del usuario 2026-09-23, «cada vez que actualizamos algo, una versión».
     # Se olvidó una vez (una mesa por pieza, MAPA 538) por ser «sólo de la pantalla».
     rutas.append(os.path.join(RAIZ, "frontend", "src", "motor", "molde", "illustrator.js"))
+    # el color del ícono del instalador también es «algo que se descarga»
+    h.update(repr(TONOS_ILLUSTRATOR).encode())
     for r in sorted(rutas):
         h.update(os.path.relpath(r, AQUI).replace(os.sep, "/").encode())
         b = open(r, "rb").read()

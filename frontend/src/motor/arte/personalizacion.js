@@ -12,7 +12,7 @@
 // por texto se mantienen igual que en Python para los desempates.
 import { pyRound, pyStrip } from '../py.js'
 import { instrucciones, contenidoCrudo } from '../pdf/contenido.js'
-import { abrir, capasUi, configurarCapa, nombresOc, normNombre, textoDict, strOperando, floatOperando } from './texto.js'
+import { abrir, capasUi, configurarCapa, nombresOc, normNombre, textoDict, alturasDePagina, strOperando, floatOperando } from './texto.js'
 
 import { CAPAS_NO_PERS, CAPAS_GRAFICAS, esCapaEditable } from '../nombres.js'
 export { CAPAS_NO_PERS, CAPAS_GRAFICAS, esCapaEditable }
@@ -88,6 +88,14 @@ function colorNombrado(nCs, args) {
   return undefined
 }
 
+// MODO DE PINTADO DEL TEXTO (`Tr`): el borde «detrás del relleno» de CORELDRAW es el mismo texto
+// en modo 1 (sólo trazo). Ver `_TR_RELLENA` en motor_pedido.py. Con Illustrator (siempre 0) nada cambia.
+const TR_RELLENA = new Set([0, 2, 4, 6])
+const TR_TRAZA = new Set([1, 2, 5, 6])
+function trDe(ins, actual) {
+  try { const v = Math.trunc(floatOperando(ins.args[0])); return Number.isFinite(v) ? v : actual } catch { return actual }
+}
+
 /** El estado común de los tres lectores: `q`/`Q`, colores, ancho de trazo, y la pila de capas OC. */
 function recorrerMesa(page) {
   const insts = [...instrucciones(contenidoCrudo(page))]
@@ -104,13 +112,14 @@ export function coloresPersonalizable(doc) {
     const page = doc.loadPage(i)
     try {
       const { insts, nCs, nombresDe } = recorrerMesa(page)
-      let dentro = 0, cur = null, curCsN = null, capa = ''
+      let dentro = 0, cur = null, curCsN = null, capa = '', tr = 0
       const per = new Map()
       const gstack = []
       for (const ins of insts) {
         const op = ins.op
-        if (op === 'q') { gstack.push([cur, curCsN]); continue }
-        if (op === 'Q') { if (gstack.length) [cur, curCsN] = gstack.pop(); continue }
+        if (op === 'q') { gstack.push([cur, curCsN, tr]); continue }
+        if (op === 'Q') { if (gstack.length) [cur, curCsN, tr] = gstack.pop(); continue }
+        if (op === 'Tr') { tr = trDe(ins, tr); continue }
         if (op === 'cs') curCsN = ins.args.length ? nCs(strOperando(ins.args[0])) : null
         else if (op === 'k' || op === 'rg' || op === 'g') cur = colorDevice(op, ins.args)
         else if (op === 'scn' || op === 'sc') { const c = colorNombrado(curCsN, ins.args); if (c !== undefined) cur = c }
@@ -122,7 +131,8 @@ export function coloresPersonalizable(doc) {
           } else if (dentro) dentro += 1
         } else if ((op === 'BDC' || op === 'BMC') && dentro) dentro += 1
         else if (op === 'EMC' && dentro) { dentro -= 1; continue }
-        if (dentro && (op === 'Tj' || op === 'TJ' || op === "'" || op === '"') && cur !== null) {
+        // sólo si el `Tj` RELLENA: el borde de Corel (modo 1) no es el relleno
+        if (dentro && (op === 'Tj' || op === 'TJ' || op === "'" || op === '"') && cur !== null && TR_RELLENA.has(tr)) {
           const k = normNombre(textoDeTj(ins))
           if (k && !per.has(k)) per.set(k, [cur[0], [...cur[1]]])
           if (capa && !per.has(CLAVE_CAPA + capa)) per.set(CLAVE_CAPA + capa, [cur[0], [...cur[1]]])
@@ -144,13 +154,14 @@ export function trazoPersonalizable(doc) {
     const page = doc.loadPage(i)
     try {
       const { insts, nCs, nombresDe } = recorrerMesa(page)
-      let dentro = 0, scol = null, scsN = null, sw = null, ultTxt = '', capa = ''
+      let dentro = 0, scol = null, scsN = null, sw = null, ultTxt = '', capa = '', tr = 0
       const per = new Map()
       const gstack = []
       for (const ins of insts) {
         const op = ins.op
-        if (op === 'q') { gstack.push([scol, scsN, sw]); continue }
-        if (op === 'Q') { if (gstack.length) [scol, scsN, sw] = gstack.pop(); continue }
+        if (op === 'q') { gstack.push([scol, scsN, sw, tr]); continue }
+        if (op === 'Q') { if (gstack.length) [scol, scsN, sw, tr] = gstack.pop(); continue }
+        if (op === 'Tr') { tr = trDe(ins, tr); continue }
         if (op === 'CS') scsN = ins.args.length ? nCs(strOperando(ins.args[0])) : null
         else if (op === 'K' || op === 'RG' || op === 'G') scol = colorDevice(op.toLowerCase(), ins.args)
         else if (op === 'SCN' || op === 'SC') { const c = colorNombrado(scsN, ins.args); if (c !== undefined) scol = c }
@@ -166,6 +177,11 @@ export function trazoPersonalizable(doc) {
         if (dentro && (op === 'Tj' || op === 'TJ' || op === "'" || op === '"')) {
           const t = normNombre(textoDeTj(ins))
           if (t) ultTxt = t
+          // CORELDRAW: el borde es el MISMO texto en modo trazo, no contornos trazados
+          if (TR_TRAZA.has(tr) && scol !== null && sw && sw > 0) {
+            if (t && !per.has(t)) per.set(t, [scol[0], [...scol[1]], pyRound(sw, 3)])
+            if (capa && !per.has(CLAVE_CAPA + capa)) per.set(CLAVE_CAPA + capa, [scol[0], [...scol[1]], pyRound(sw, 3)])
+          }
         }
         if (dentro && (op === 'S' || op === 's' || op === 'B' || op === 'B*' || op === 'b' || op === 'b*') && scol !== null && sw && sw > 0) {
           if (ultTxt && !per.has(ultTxt)) per.set(ultTxt, [scol[0], [...scol[1]], pyRound(sw, 3)])
@@ -191,15 +207,16 @@ export function pasadasPersonalizable(doc) {
     const page = doc.loadPage(i)
     try {
       const { insts, nCs, nombresDe } = recorrerMesa(page)
-      let fcol = null, fcsN = null, scol = null, scsN = null, sw = null
+      let fcol = null, fcsN = null, scol = null, scsN = null, sw = null, tr = 0
       let dentro = 0, capa = '', acum = '', pl = []
       const per = new Map()
       const gstack = []
       const add = (p) => { if (pl.length && mismaPasada(pl[pl.length - 1], p)) return; pl.push(p) }
       for (const ins of insts) {
         const op = ins.op
-        if (op === 'q') { gstack.push([fcol, fcsN, scol, scsN, sw]); continue }
-        if (op === 'Q') { if (gstack.length) [fcol, fcsN, scol, scsN, sw] = gstack.pop(); continue }
+        if (op === 'q') { gstack.push([fcol, fcsN, scol, scsN, sw, tr]); continue }
+        if (op === 'Q') { if (gstack.length) [fcol, fcsN, scol, scsN, sw, tr] = gstack.pop(); continue }
+        if (op === 'Tr') { tr = trDe(ins, tr); continue }
         if (op === 'cs') fcsN = ins.args.length ? nCs(strOperando(ins.args[0])) : null
         else if (op === 'CS') scsN = ins.args.length ? nCs(strOperando(ins.args[0])) : null
         else if (op === 'k' || op === 'rg' || op === 'g') fcol = colorDevice(op, ins.args)
@@ -230,7 +247,9 @@ export function pasadasPersonalizable(doc) {
         if (!dentro) continue
         if (op === 'Tj' || op === 'TJ' || op === "'" || op === '"') {
           acum += textoDeTj(ins) || ''
-          if (fcol !== null) add({ t: 'f', color: [fcol[0], [...fcol[1]]], w: 0.0 })
+          // según el modo `Tr`: el borde de Corel es este texto en modo trazo → pasada «S»
+          if (fcol !== null && TR_RELLENA.has(tr)) add({ t: 'f', color: [fcol[0], [...fcol[1]]], w: 0.0 })
+          if (TR_TRAZA.has(tr) && scol !== null && sw && sw > 0) add({ t: 'S', color: [scol[0], [...scol[1]]], w: pyRound(sw, 3) })
         } else if ((op === 'S' || op === 's') && scol !== null && sw && sw > 0) {
           add({ t: 'S', color: [scol[0], [...scol[1]]], w: pyRound(sw, 3) })
         } else if (op === 'B' || op === 'B*' || op === 'b' || op === 'b*') {
@@ -252,6 +271,9 @@ function matchTexto(dmesa, tn, capa) {
   if (capa) {
     const v = dmesa.get(CLAVE_CAPA + capa)
     if (v !== undefined) return v
+    // LA CAPA MANDA: si hay capas anotadas y la de este campo no está, su capa no tiene eso
+    // (ver `_match_texto` en motor_pedido.py, 2026-09-30)
+    if ([...dmesa.keys()].some((k) => String(k).startsWith(CLAVE_CAPA))) return null
   }
   const txt = [...dmesa].filter(([k]) => !String(k).startsWith(CLAVE_CAPA))
   let v = txt.find(([k]) => k === tn)?.[1]
@@ -272,13 +294,33 @@ export function extraerPersonalizacion(mupdf, bytes, campos = null) {
   if (campos === null) {
     const d = abrir(mupdf, bytes)
     try {
-      campos = capasUi(d).map((c) => c.text).filter((t) => !sys.has(normNombre(t)) && !esCapaEditable(t))
+      // una vez cada capa: Corel la repite en cada página (ver `_orden_capas_archivo`)
+      campos = [...new Set(capasUi(d).map((c) => c.text).filter((t) => t))].filter((t) => !sys.has(normNombre(t)) && !esCapaEditable(t))
     } finally { d.destroy() }
   }
   const nativos = leerConDoc(mupdf, bytes, coloresPersonalizable)
   const trazos = leerConDoc(mupdf, bytes, trazoPersonalizable)
   const pasadas = leerConDoc(mupdf, bytes, pasadasPersonalizable)
   const pers = {}
+
+  // `_alto_de_linea`: la altura de la letra más alta del renglón (fracción del tamaño) y qué letras
+  const altoDeLinea = (alturas, l) => {
+    const s0 = l.spans[0]
+    const size = Number(s0.size) || 1.0
+    const [bx0, , bx1] = l.bbox
+    let alto = 0.0, letras = ''
+    for (const s of l.spans) {
+      const oy = Number(s.origin[1])
+      for (const [c, x, y, tope] of alturas) {
+        if (Math.abs(y - oy) <= 0.05 * size && bx0 - 0.5 <= x && x <= bx1 + 0.5) {
+          alto = Math.max(alto, (y - tope) / size)
+          if (!letras.includes(c)) letras += c
+        }
+      }
+    }
+    return [alto > 0 ? pyRound(alto, 4) : null, Array.from(letras).sort().join('').slice(0, 12)]
+  }
+  const alturasMesa = new Map()        // mesa → letras con su altura real (con la capa aislada)
 
   const registrar = (mesa, campo, l, capa) => {
     const s0 = l.spans[0]
@@ -294,20 +336,46 @@ export function extraerPersonalizacion(mupdf, bytes, campos = null) {
         ancho: pyRound(Math.max(0, bb[2] - bb[0]), 1), color: s0.color,
         colorn: copia(matchTexto(nativos[m], tn, capa)), trazo: copia(matchTexto(trazos[m], tn, capa)),
         pasadas: copia(matchTexto(pasadas[m], tn, capa)),
+        alto: null, alto_ref: '',
         baseline_pts: [], _txt: '', _capa: capa,
       }
     }
     const d = pers[m][campo]
+    const [a, ref] = altoDeLinea(alturasMesa.get(mesa) || [], l)
+    if (a && (d.alto === null || a > d.alto)) d.alto = a
+    d.alto_ref = [...new Set(Array.from(d.alto_ref + ref))].sort().join('').slice(0, 12)
     for (const s of l.spans) {
       if (pyStrip(s.text)) d.baseline_pts.push([pyRound(s.origin[0], 1), pyRound(s.origin[1], 1), pyRound(bb[0], 1), pyRound(bb[2], 1)])
     }
     d._txt += txt
   }
 
-  // 1) Por CAPA: aislar cada capa-campo (mostrarla sola) y leer su texto
+  // 1) Por CAPA: aislar cada capa-campo (mostrarla sola) y leer su texto.
+  // FANTASMAS (arte de CorelDRAW): lo que se lee con TODAS las capas apagadas es la copia invisible
+  // (modo 3) que MuPDF no oculta; al aislar una capa se descuenta una vez cada una. Ver el Python.
+  const claveLinea = (l) => [l.spans.map((s) => s.text).join(''), pyRound(l.spans[0].origin[0], 1), pyRound(l.spans[0].origin[1], 1)].join('|')
   const d0 = abrir(mupdf, bytes)
   let capas
-  try { capas = capasUi(d0).map((c) => [c.text, c.number]) } finally { d0.destroy() }
+  const fantasmas = new Map()
+  try {
+    capas = capasUi(d0).map((c) => [c.text, c.number])
+    for (const c of capasUi(d0)) configurarCapa(d0, c.number, 1)
+    const n0 = d0.countPages()
+    for (let mesa = 1; mesa <= n0; mesa++) {
+      const page = d0.loadPage(mesa - 1)
+      try {
+        for (const b of textoDict(page)) {
+          for (const l of b.lines) {
+            if (l.spans.length && pyStrip(l.spans.map((s) => s.text).join(''))) {
+              if (!fantasmas.has(mesa)) fantasmas.set(mesa, new Map())
+              const f = fantasmas.get(mesa), k = claveLinea(l)
+              f.set(k, (f.get(k) || 0) + 1)
+            }
+          }
+        }
+      } finally { page.destroy() }
+    }
+  } finally { d0.destroy() }
   for (const campo of campos) {
     const cn = normNombre(campo)
     if (!capas.some(([name]) => normNombre(name) === cn)) continue
@@ -318,10 +386,18 @@ export function extraerPersonalizacion(mupdf, bytes, campos = null) {
       const n = d.countPages()
       for (let mesa = 1; mesa <= n; mesa++) {
         const page = d.loadPage(mesa - 1)
+        const fant = new Map(fantasmas.get(mesa) || [])
+        alturasMesa.set(mesa, alturasDePagina(page))     // con ESTA capa sola
         try {
           for (const b of textoDict(page)) {
             for (const l of b.lines) {
-              if (pyStrip(l.spans.map((s) => s.text).join(''))) registrar(mesa, campoCanon, l, cn)
+              if (pyStrip(l.spans.map((s) => s.text).join(''))) {
+                if (fant.size) {
+                  const k = claveLinea(l)
+                  if ((fant.get(k) || 0) > 0) { fant.set(k, fant.get(k) - 1); continue }   // la copia invisible
+                }
+                registrar(mesa, campoCanon, l, cn)
+              }
             }
           }
         } finally { page.destroy() }

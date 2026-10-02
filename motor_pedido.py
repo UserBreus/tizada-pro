@@ -58,6 +58,15 @@ from texto_curvas import FuenteCurvas
 
 CM = 28.3465
 
+# 🔴 LEER EL TEXTO DE UNA MESA SIN «CONSERVAR IMÁGENES» (2026-10-01, MAPA 605). `get_text("dict")`
+# trae por defecto `TEXT_PRESERVE_IMAGES`, y con eso MuPDF DIBUJA cada degradado (`sh`) como una
+# imagen del tamaño de la mesa para devolverlo como «bloque de imagen» — que acá nadie usa (todos
+# los que leen descartan `type != 0`). Con el arte «CAMISETA NEGRO 2» (33 degradados en una mesa
+# de 70 × 76 cm) eran 5 s por mesa y por lectura, y cargar el arte lee el texto varias veces.
+# Sin la bandera el texto sale idéntico (comparado: 236 mesas de los artes y moldes guardados).
+# ⚠️ Gemelo: `OPCIONES_STEXT` (arte/texto.js) y `OPCIONES_TEXTO` (molde/caminoA.js).
+FLAGS_TEXTO = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+
 # ─────────────────────────────────────────────────────────────────
 # CONVENCIÓN DE LA PLANTILLA  (ver CONVENCION_PLANTILLA.md)
 # ─────────────────────────────────────────────────────────────────
@@ -258,6 +267,63 @@ CAPAS_GRAFICAS = CAPAS_NO_PERS - {"personalizable"}
 _FUENTE_INFO = {}
 
 
+def nombres_fuente(datos):
+    """Los nombres que la tipografía declara en su tabla `name`: `{familia, estilo, completo, ps}`.
+
+    🔴 POR QUÉ (2026-10-01, «también se pueden subir familias»): el nombre de MuPDF (`interno`)
+    se CORTA en 31 letras («Adidas WC 2026 fan inspired fon»), así que dos estilos de una familia
+    de nombre largo quedaban iguales. El nombre COMPLETO (familia + estilo, id 4) y el PostScript
+    (id 6) los distinguen: «Superstar M54» ≠ «Superstar M54 Bold». Sin dependencias: se lee la
+    tabla a mano (sfnt: .ttf y .otf). Lo que no se pueda leer queda en ''. Paridad con
+    `nombresFuente` de `frontend/src/motor/texto/fuentes.js`."""
+    import struct
+    out = {"familia": "", "estilo": "", "completo": "", "ps": ""}
+    try:
+        n_tablas = struct.unpack(">H", datos[4:6])[0]
+        tabla = None
+        for i in range(n_tablas):
+            o = 12 + 16 * i
+            if datos[o:o + 4] == b"name":
+                tabla = struct.unpack(">I", datos[o + 8:o + 12])[0]
+                break
+        if tabla is None:
+            return out
+        _fmt, cuenta, base = struct.unpack(">HHH", datos[tabla:tabla + 6])
+        mejor = {}                      # nameID → (prioridad, texto); menor prioridad = mejor
+        for i in range(cuenta):
+            o = tabla + 6 + 12 * i
+            plat, enc, idioma, nid, largo, off = struct.unpack(">HHHHHH", datos[o:o + 12])
+            if nid not in (1, 2, 4, 6, 16, 17):
+                continue
+            crudo = datos[tabla + base + off:tabla + base + off + largo]
+            if plat == 3 and idioma == 0x409:
+                prio, txt = 0, crudo.decode("utf-16-be", "replace")
+            elif plat in (0, 3):
+                prio, txt = 1, crudo.decode("utf-16-be", "replace")
+            elif plat == 1 and enc == 0:
+                prio, txt = 2, crudo.decode("mac_roman", "replace")
+            else:
+                continue
+            txt = txt.replace("\x00", "").strip()
+            if txt and (nid not in mejor or prio < mejor[nid][0]):
+                mejor[nid] = (prio, txt)
+        g = lambda k: mejor.get(k, (0, ""))[1]
+        out["familia"] = g(16) or g(1)
+        out["estilo"] = g(17) or g(2)
+        out["completo"] = g(4) or " ".join(x for x in (out["familia"], out["estilo"]) if x)
+        out["ps"] = g(6)
+    except Exception:
+        pass
+    return out
+
+
+def identidad_fuente(info):
+    """Con qué se decide que dos tipografías son LA MISMA (para preguntar «ya existe»): el nombre
+    completo normalizado (familia + estilo), o el interno si no hay. Los estilos de una familia
+    (Regular, Bold, Italic…) dan identidades distintas y conviven."""
+    return _norm((info or {}).get("completo") or (info or {}).get("interno") or "")
+
+
 def _info_fuente(ruta):
     st = os.stat(ruta)
     k = (os.path.normcase(os.path.abspath(ruta)), st.st_mtime_ns, st.st_size)
@@ -265,8 +331,10 @@ def _info_fuente(ruta):
     if hit is None:
         with open(ruta, "rb") as fh:
             datos = fh.read()
+        _nom = nombres_fuente(datos)
         hit = {"interno": _FUENTE_INTERNO.pop(k, None) or fitz.Font(fontbuffer=datos).name,
-               "hash": hashlib.md5(datos).hexdigest()[:12]}
+               "hash": hashlib.md5(datos).hexdigest()[:12],
+               "completo": _nom["completo"], "ps": _nom["ps"]}
         _FUENTE_INFO[k] = hit
     return hit
 
@@ -302,7 +370,8 @@ def catalogo_fuentes(carpeta):
                 continue
             try:
                 _inf = _info_fuente(ruta)
-                cat[ruta] = {"interno": _inf["interno"], "archivo": os.path.basename(ruta), "hash": _inf["hash"]}
+                cat[ruta] = {"interno": _inf["interno"], "archivo": os.path.basename(ruta), "hash": _inf["hash"],
+                             "completo": _inf.get("completo") or "", "ps": _inf.get("ps") or ""}
             except Exception:
                 pass
     return cat
@@ -332,13 +401,23 @@ def resolver_fuente(nombre_ps, carpeta):
     # una de las dos quedaba INALCANZABLE y la prenda salía estampada con la que nadie eligió.
     # Tres vueltas, de lo más estricto a lo más flojo. El alta ya avisa del choque (`choca_con`);
     # esto hace que, aun con el choque, cada nombre caiga en SU archivo.
+    # 🔴 FAMILIAS (2026-10-01): el `interno` de MuPDF se corta en 31 letras y dos estilos de una
+    # familia de nombre largo quedan iguales; el PostScript (`ps`, el que escribe Illustrator en el
+    # arte) y el nombre completo los separan. Van DESPUÉS del interno en cada vuelta para no
+    # cambiar a qué archivo resolvía lo que ya andaba.
     cat = catalogo_fuentes(carpeta)
     for ruta, info in cat.items():                       # 1) el nombre TAL CUAL
         if (info.get("interno") or "") == nombre_ps:
             return ruta
+    for ruta, info in cat.items():
+        if nombre_ps and nombre_ps in ((info.get("ps") or ""), (info.get("completo") or "")):
+            return ruta
     objetivo = _norm(nombre_ps)
     for ruta, info in cat.items():                       # 2) normalizado, pero exacto
         if _norm(info["interno"]) == objetivo:
+            return ruta
+    for ruta, info in cat.items():
+        if objetivo and objetivo in (_norm(info.get("ps") or ""), _norm(info.get("completo") or "")):
             return ruta
     for ruta, info in cat.items():                       # 3) recién ahora, el parecido
         _n = _norm(info["interno"])
@@ -347,13 +426,15 @@ def resolver_fuente(nombre_ps, carpeta):
     return None
 
 
-def alta_fuente(ruta_subida, carpeta):
+def alta_fuente(ruta_subida, carpeta, nombre=None):
+    """`nombre` = con el que queda en el catálogo (el del archivo que subió el usuario, sin
+    prefijos); sin él, el del temporal."""
     try:
         f = fitz.Font(fontfile=ruta_subida)
         fc = FuenteCurvas(open(ruta_subida, "rb").read())
         prueba = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÑ0123456789#-"
         sin = [ch for ch in prueba if not _tiene_contorno(fc, ch)]
-        destino = os.path.join(carpeta, os.path.basename(ruta_subida))
+        destino = os.path.join(carpeta, os.path.basename(nombre or ruta_subida))
         # 🔴 DOS TIPOGRAFÍAS QUE SE LLAMAN IGUAL SE PISAN. El resolver busca por nombre interno
         # normalizado, así que si la que entra declara el mismo nombre que otra ya cargada, una de
         # las dos queda INALCANZABLE: un molde que la pida va a recibir la otra, y la prenda sale
@@ -395,9 +476,15 @@ def _tiene_contorno(fc, ch):
 # ════════════════ ALTA DE PLANTILLA ════════════════
 def _orden_capas_archivo(doc):
     """Orden de las capas tal como están en el archivo (panel de capas de
-    Illustrator / OCProperties Order del PDF)."""
+    Illustrator / OCProperties Order del PDF), UNA vez cada nombre.
+
+    🔴 CORELDRAW (2026-09-30): Corel tiene capas POR PÁGINA, y al publicar el PDF escribe un OCG
+    por cada capa DE CADA PÁGINA con el mismo nombre («guias» ×N mesas). Illustrator escribe uno
+    solo por capa. Sin sacar los repetidos, la barra de capas/talles y todo lo que ordena por
+    archivo mostraba cada capa N veces. El orden es el de la primera aparición (en Corel todas las
+    páginas repiten el mismo orden). Prender/apagar por NOMBRE ya recorre todos los OCG iguales."""
     try:
-        return [c.get("text") for c in doc.layer_ui_configs() if c.get("text")]
+        return list(dict.fromkeys(c.get("text") for c in doc.layer_ui_configs() if c.get("text")))
     except Exception:
         return []
 
@@ -466,7 +553,7 @@ def _etiqueta_de_mesa(doc_talle, mesa):
     """Lee el texto de una mesa con un solo talle visible y devuelve los
     fragmentos de la primera línea con texto (texto, origen, dir, size, fuente)."""
     frags = []
-    for b in doc_talle[mesa - 1].get_text("dict")["blocks"]:
+    for b in doc_talle[mesa - 1].get_text("dict", flags=FLAGS_TEXTO)["blocks"]:
         if b.get("type") != 0:
             continue
         for l in b["lines"]:
@@ -1974,7 +2061,7 @@ def fuentes_requeridas_arte(path_arte):
                 on = c["text"].strip().lower() in ("diseño", "diseno")
             doc.set_layer_ui_config(c["number"], action=0 if on else 1)
         for i in range(len(doc)):
-            for b in doc[i].get_text("dict")["blocks"]:
+            for b in doc[i].get_text("dict", flags=FLAGS_TEXTO)["blocks"]:
                 if b.get("type") != 0:
                     continue
                 for l in b["lines"]:
@@ -1982,6 +2069,26 @@ def fuentes_requeridas_arte(path_arte):
                         requeridas.setdefault(s["font"].split("+")[-1], set()).add(
                             "personalización" if capa else "etiquetas")
     return {n: sorted(u) for n, u in requeridas.items()}
+
+
+# 🔴 MODO DE PINTADO DEL TEXTO (`Tr`, 2026-09-30, arte hecho en CORELDRAW). Illustrator pinta el
+# texto siempre relleno (`Tr` 0) y el borde lo dibuja aparte, como contornos del glifo TRAZADOS
+# (`S`). Corel no: el «contorno detrás del relleno» lo escribe como el MISMO texto en modo 1
+# (sólo trazo, con el color de trazo `SCN` y el ancho `w`), después un modo 3 (invisible, para
+# poder seleccionar el texto) y recién el relleno en modo 0. Los lectores tomaban cada `Tj` como
+# relleno → el borde de Corel se leía como un relleno del color que hubiera quedado de antes (salió
+# el cian del escudo). `Tr` es estado gráfico: lo guarda `q` y lo restaura `Q`. Modos 4-7 = 0-3
+# más recorte. Con Illustrator (siempre 0) nada cambia.
+_TR_RELLENA = frozenset({0, 2, 4, 6})
+_TR_TRAZA = frozenset({1, 2, 5, 6})
+
+
+def _tr_de(inst, actual):
+    """El modo `Tr` que fija la instrucción, o el vigente si no se puede leer."""
+    try:
+        return int(float(inst.operands[0]))
+    except Exception:
+        return actual
 
 
 PH_NOMBRE = {"NOMBRE", "NOMBRES", "APELLIDO", "NAME"}   # placeholders de nombre
@@ -2028,7 +2135,7 @@ def _colores_personalizable(path_arte):
                 return None
 
         _op_n = {4: "k", 3: "rg", 1: "g"}
-        dentro, cur, cur_cs_n, per, _capa = 0, None, None, {}, ""
+        dentro, cur, cur_cs_n, per, _capa, tr = 0, None, None, {}, "", 0
         _gstack = []   # el color de relleno es ESTADO GRÁFICO: q lo guarda y Q lo restaura.
         for inst in insts:
             op = str(inst.operator)
@@ -2036,10 +2143,12 @@ def _colores_personalizable(path_arte):
             # linealmente (Illustrator dibuja el halo blanco dentro de q..Q y el texto después
             # del Q) → se leía blanco donde el archivo pinta negro (bug del número del frente).
             if op == "q":
-                _gstack.append((cur, cur_cs_n)); continue
+                _gstack.append((cur, cur_cs_n, tr)); continue
             if op == "Q":
-                if _gstack: cur, cur_cs_n = _gstack.pop()
+                if _gstack: cur, cur_cs_n, tr = _gstack.pop()
                 continue
+            if op == "Tr":
+                tr = _tr_de(inst, tr); continue
             # color de relleno actual (puede setearse fuera del OC y heredarse).
             # Soporta tanto k/rg/g (device) como cs+scn/sc (ICCBased/CMYK, lo que
             # exporta Illustrator) — antes solo leía device y perdía el color real.
@@ -2075,7 +2184,8 @@ def _colores_personalizable(path_arte):
             # color de relleno de CADA texto, por contenido (no el de la estrella/escudo,
             # que es un path). Se guarda el del primer Tj de cada texto = su relleno.
             # Y TAMBIÉN por CAPA (ver `_CLAVE_CAPA`): con fuente CID el texto no sirve de clave.
-            if dentro and op in ("Tj", "TJ", "'", '"') and cur is not None:
+            # Sólo si el `Tj` RELLENA (`_TR_RELLENA`): el borde de Corel (modo 1) no es el relleno.
+            if dentro and op in ("Tj", "TJ", "'", '"') and cur is not None and tr in _TR_RELLENA:
                 k = _norm_nombre(_texto_de_tj(inst))
                 if k and k not in per:
                     per[k] = (cur[0], list(cur[1]))
@@ -2142,15 +2252,17 @@ def _trazo_personalizable(path_arte):
                 return None
 
         _op_n = {4: "k", 3: "rg", 1: "g"}
-        dentro, scol, scs_n, sw, per, _ult_txt, _capa = 0, None, None, None, {}, "", ""
+        dentro, scol, scs_n, sw, per, _ult_txt, _capa, tr = 0, None, None, None, {}, "", "", 0
         _gstack = []   # trazo (color+ancho) también es ESTADO GRÁFICO: q guarda / Q restaura
         for inst in insts:
             op = str(inst.operator)
             if op == "q":
-                _gstack.append((scol, scs_n, sw)); continue
+                _gstack.append((scol, scs_n, sw, tr)); continue
             if op == "Q":
-                if _gstack: scol, scs_n, sw = _gstack.pop()
+                if _gstack: scol, scs_n, sw, tr = _gstack.pop()
                 continue
+            if op == "Tr":
+                tr = _tr_de(inst, tr); continue
             if op == "CS":
                 scs_n = _n_de_cs(str(inst.operands[0])) if inst.operands else None
             elif op in ("K", "RG", "G"):       # color de TRAZO device (mayúsculas)
@@ -2189,6 +2301,12 @@ def _trazo_personalizable(path_arte):
                 t = _norm_nombre(_texto_de_tj(inst))
                 if t:
                     _ult_txt = t
+                # CORELDRAW: el borde es el MISMO texto en modo trazo (`_TR_TRAZA`), no contornos.
+                if tr in _TR_TRAZA and scol is not None and sw and sw > 0:
+                    if t and t not in per:
+                        per[t] = (scol[0], list(scol[1]), round(sw, 3))
+                    if _capa:
+                        per.setdefault(_CLAVE_CAPA + _capa, (scol[0], list(scol[1]), round(sw, 3)))
             # el BORDE se dibuja como contornos del glifo TRAZADOS (S/B…) con color de
             # trazo + ancho>0 → se asocia al texto de relleno anterior
             if dentro and op in ("S", "s", "B", "B*", "b", "b*") and scol is not None and sw and sw > 0:
@@ -2246,7 +2364,7 @@ def _pasadas_personalizable(path_arte):
 
         _op_n = {4: "k", 3: "rg", 1: "g"}
         # relleno y trazo son ESTADO GRÁFICO: `q` guarda y `Q` restaura (gotcha ya documentado).
-        fcol, fcs_n, scol, scs_n, sw = None, None, None, None, None
+        fcol, fcs_n, scol, scs_n, sw, tr = None, None, None, None, None, 0
         dentro, per, _acum, _capa = 0, {}, "", ""
         _gstack = []
 
@@ -2262,10 +2380,12 @@ def _pasadas_personalizable(path_arte):
         for inst in insts:
             op = str(inst.operator)
             if op == "q":
-                _gstack.append((fcol, fcs_n, scol, scs_n, sw)); continue
+                _gstack.append((fcol, fcs_n, scol, scs_n, sw, tr)); continue
             if op == "Q":
-                if _gstack: fcol, fcs_n, scol, scs_n, sw = _gstack.pop()
+                if _gstack: fcol, fcs_n, scol, scs_n, sw, tr = _gstack.pop()
                 continue
+            if op == "Tr":
+                tr = _tr_de(inst, tr); continue
             if op == "cs":
                 fcs_n = _n_de_cs(str(inst.operands[0])) if inst.operands else None
             elif op == "CS":
@@ -2335,8 +2455,12 @@ def _pasadas_personalizable(path_arte):
                 _acum += _texto_de_tj(inst) or ""
                 # El relleno vigente en este glifo es una capa de la apariencia. Si cambió respecto
                 # de la pasada anterior, es una capa NUEVA (p.ej. negro original → azul de arriba).
-                if fcol is not None:
+                # Según el modo `Tr` (ver `_TR_RELLENA`): el borde de CORELDRAW es este mismo texto
+                # en modo trazo → pasada «S»; el modo 2 pinta relleno y después trazo, como el PDF.
+                if fcol is not None and tr in _TR_RELLENA:
                     _add({"t": "f", "color": (fcol[0], list(fcol[1])), "w": 0.0})
+                if tr in _TR_TRAZA and scol is not None and sw and sw > 0:
+                    _add({"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
             elif op in ("S", "s") and scol is not None and sw and sw > 0:
                 _add({"t": "S", "color": (scol[0], list(scol[1])), "w": round(sw, 3)})
             elif op in ("B", "B*", "b", "b*"):
@@ -2492,7 +2616,57 @@ def extraer_personalizacion(path_arte, campos=None):
     # «_v2» (2026-09-22): la pila de apariencias ahora hereda el trazo vigente (ver
     # `_pasadas_personalizable`). El memo en disco va por archivo, no por versión del código: sin
     # cambiarle el nombre, un arte ya leído seguía devolviendo el número SIN su borde.
-    return _memo_arte("personalizacion_v2", path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
+    # «_v3» (2026-10-01): los placeholders traen `cap` (altura de la mayúscula de su tipografía).
+    return _memo_arte("personalizacion_v3", path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
+
+
+def alturas_de_pagina(page):
+    """Las letras de la página con su ALTURA REAL (la tinta, no la caja de la fuente):
+    `[(c, x, y, tope)]` con (x, y) el origen (línea base) y `tope` el borde de arriba del glifo.
+
+    🔴 POR QUÉ (2026-10-01, «si elijo otra fuente y es más alta, que quede del mismo alto que la que
+    tenemos»): para estampar con OTRA tipografía a la misma altura hay que saber cuánto miden las
+    letras del diseño TAL COMO SE VEN. La tipografía del diseño muchas veces no está en el
+    catálogo, y el /CapHeight del PDF no sirve: Illustrator anota el de la fuente que usó de
+    verdad (medido: «SuperstarM54» con /CapHeight 674, que es el de Myriad, su reemplazo).
+    Se piden los recuadros EXACTOS a MuPDF (`accurate-bboxes`) y se leen CRUDOS del XML: el
+    `rawdict` de PyMuPDF los «corrige» con el ascendente de la fuente. Gemelo:
+    `alturasDePagina` de `arte/texto.js` (el `walk` de mupdf.js también da el recuadro crudo)."""
+    import re as _re
+    out = []
+    try:
+        tp = page.get_textpage(flags=fitz.TEXT_ACCURATE_BBOXES | fitz.TEXT_PRESERVE_WHITESPACE
+                               | fitz.TEXT_MEDIABOX_CLIP)
+        xml = tp.extractXML()
+    except Exception:
+        return out
+    for m in _re.finditer(r'<char quad="([^"]+)" x="([^"]+)" y="([^"]+)"[^>]*? c="([^"]*)"', xml):
+        c = m.group(4)
+        if len(c) != 1 or not c.isalnum():
+            continue
+        try:
+            q = [float(v) for v in m.group(1).split()]
+            out.append((c, float(m.group(2)), float(m.group(3)), min(q[1], q[3], q[5], q[7])))
+        except (ValueError, IndexError):
+            continue
+    return out
+
+
+def _alto_de_linea(alturas, l):
+    """`(alto, letras)` de un renglón: la altura de su letra más alta sobre la línea base, como
+    fracción del tamaño, y qué letras se midieron (para medir LAS MISMAS en otra tipografía)."""
+    s0 = l["spans"][0]
+    size = float(s0["size"]) or 1.0
+    bx0, _by0, bx1, _by1 = l["bbox"]
+    alto, letras = 0.0, ""
+    for s in l["spans"]:
+        oy = float(s["origin"][1])
+        for c, x, y, tope in alturas:
+            if abs(y - oy) <= 0.05 * size and bx0 - 0.5 <= x <= bx1 + 0.5:
+                alto = max(alto, (y - tope) / size)
+                if c not in letras:
+                    letras += c
+    return (round(alto, 4) if alto > 0 else None), "".join(sorted(letras))[:12]
 
 
 def _extraer_personalizacion_crudo(path_arte, campos=None):
@@ -2545,9 +2719,11 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
                 pass
             # Las capas "Editable …" son OBJETOS editables (mover/rotar/escalar), NO campos de
             # personalización: se excluyen para que no se estampen como texto.
-            campos = [c["text"] for c in _d.layer_ui_configs()
-                      if _norm_nombre(c["text"]) not in _sys and _norm_nombre(c["text"]) not in _talles
-                      and not _es_capa_editable(c["text"])]
+            # Una vez cada capa (`_orden_capas_archivo`): Corel repite la capa en cada página y el
+            # campo se leía N veces (el número juntaba la línea base de todas las mesas dos veces).
+            campos = [n for n in _orden_capas_archivo(_d)
+                      if _norm_nombre(n) not in _sys and _norm_nombre(n) not in _talles
+                      and not _es_capa_editable(n)]
         if _talles and not campos:
             # Camino B sin capa de nombre/número: no hay nada que estampar. Los tres recorridos
             # de abajo sólo sirven para los campos, y sin campos daban {} después de 100 s.
@@ -2575,6 +2751,13 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
             v = dmesa.get(_CLAVE_CAPA + capa)
             if v is not None:
                 return v
+            # 🔴 LA CAPA MANDA (2026-09-30). Si el lector anotó alguna capa en esta mesa y la de ESTE
+            # campo no está, es que su capa no tiene eso (p. ej. el número no lleva borde): caer al
+            # match por texto le pasaba el de OTRO campo por el atajo «un solo texto» (con Corel
+            # todo texto es CID y nunca matchea por contenido → el número heredaba el borde del
+            # nombre). Las claves por texto quedan para los artes sin capas por campo.
+            if any(str(k).startswith(_CLAVE_CAPA) for k in dmesa):
+                return None
         _txt = {k: x for k, x in dmesa.items() if not str(k).startswith(_CLAVE_CAPA)}
         v = _txt.get(tn)
         if v is None:
@@ -2582,6 +2765,8 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
         if v is None and len(_txt) == 1:
             v = next(iter(_txt.values()))
         return v
+
+    _alturas = {}         # mesa → letras con su altura real (ver `alturas_de_pagina`)
 
     def _registrar(mesa, campo, l, capa=""):
         s0 = l["spans"][0]
@@ -2596,7 +2781,14 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
             "ancho": round(bb.width, 1), "color": s0.get("color", 0),
             "colorn": colorn, "trazo": tz,
             "pasadas": _match_texto(pasadas.get(str(mesa)) or {}, tn, capa),   # pila de apariencias
+            # la altura REAL de sus letras (fracción del tamaño) y cuáles se midieron: con otra
+            # tipografía se estampa a esa misma altura (ver `_size_misma_altura`)
+            "alto": None, "alto_ref": "",
             "baseline_pts": [], "_txt": "", "_capa": capa})
+        _a, _ref = _alto_de_linea(_alturas.get(mesa) or [], l)
+        if _a and (d["alto"] is None or _a > d["alto"]):
+            d["alto"] = _a
+        d["alto_ref"] = "".join(sorted(set(d["alto_ref"] + _ref)))[:12]
         # Acumular la LÍNEA BASE de cada glifo/renglón (origin x,y + bordes x0,x1 del bbox del
         # renglón). Si el placeholder viene sobre una CURVA/ARCO, sus glifos trazan la curva; si
         # es un PÁRRAFO de varias líneas, cada renglón trae su ancho → sirve para la ALINEACIÓN.
@@ -2607,8 +2799,32 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
         d["_txt"] += txt   # texto completo (un nombre en curva llega glifo a glifo)
 
     # ── 1) Por CAPA: aislar cada capa-campo (mostrarla sola) y leer su texto ──
+    # 🔴 FANTASMAS (2026-09-30, arte de CORELDRAW). Corel escribe cada texto también en modo 3
+    # (INVISIBLE, para poder seleccionarlo) y MuPDF lo sigue leyendo aunque su capa esté APAGADA: al
+    # aislar «00», el «GARCIA» invisible de la capa Nombre entraba como si fuera del número (el
+    # número tomaba la posición y el tamaño del nombre). Lo que se lee con TODAS las capas apagadas
+    # es fantasma; al aislar una capa se descuenta UNA vez cada fantasma (mismo texto y origen), así
+    # la copia visible de la capa prendida queda. Illustrator no escribe texto invisible → sin
+    # fantasmas, nada cambia. (No se usa el `alpha` del glifo: mupdf.js no lo da y el navegador
+    # tiene que leer lo mismo.) Gemelo: `arte/personalizacion.js`.
+    import collections as _col
+
+    def _clave_linea(l):
+        s0 = l["spans"][0]
+        return ("".join(s["text"] for s in l["spans"]), round(s0["origin"][0], 1), round(s0["origin"][1], 1))
+
+    fantasmas = {}
     with fitz.open(path_arte) as d0:
         capas = [(c["text"], c["number"]) for c in d0.layer_ui_configs()]
+        for c in d0.layer_ui_configs():
+            d0.set_layer_ui_config(c["number"], action=1)
+        for mesa in range(1, len(d0) + 1):
+            for b in d0[mesa - 1].get_text("dict", flags=FLAGS_TEXTO)["blocks"]:
+                if b.get("type") != 0:
+                    continue
+                for l in b["lines"]:
+                    if l["spans"] and "".join(s["text"] for s in l["spans"]).strip():
+                        fantasmas.setdefault(mesa, _col.Counter())[_clave_linea(l)] += 1
     for campo in campos:
         cn = _norm_nombre(campo)
         if not any(_norm_nombre(name) == cn for name, _ in capas):
@@ -2622,11 +2838,18 @@ def _extraer_personalizacion_crudo(path_arte, campos=None):
             for c in d.layer_ui_configs():
                 d.set_layer_ui_config(c["number"], action=0 if _norm_nombre(c["text"]) == cn else 1)
             for mesa in range(1, len(d) + 1):
-                for b in d[mesa - 1].get_text("dict")["blocks"]:
+                _fant = _col.Counter(fantasmas.get(mesa) or {})
+                _alturas[mesa] = alturas_de_pagina(d[mesa - 1])     # con ESTA capa sola
+                for b in d[mesa - 1].get_text("dict", flags=FLAGS_TEXTO)["blocks"]:
                     if b.get("type") != 0:
                         continue
                     for l in b["lines"]:
                         if "".join(s["text"] for s in l["spans"]).strip():
+                            if _fant:
+                                _k = _clave_linea(l)
+                                if _fant[_k] > 0:
+                                    _fant[_k] -= 1           # la copia invisible (ver FANTASMAS)
+                                    continue
                             _registrar(mesa, _campo, l, cn)     # `cn` = la capa, normalizada
 
     # El modo viejo "por texto en la capa Personalizable" (adivinar NOMBRE/00 por
@@ -2742,8 +2965,24 @@ def _nombre_editable(capa):
 def extraer_editables(path_arte, con_thumb=True):
     """Ver `_extraer_editables_crudo`. Memorizado en disco por sello del archivo (`_memo_arte`):
     el motor lo pedía por CADA talle (1,5-4,6 s cada vez sobre un arte de 7 MB)."""
-    return _memo_arte("editables_thumb" if con_thumb else "editables", path_arte,
+    # «_v2» (2026-10-01): la caja de un sombreado es la de su recorte (ver `_rect_sin_limite`). El
+    # memo en disco va por archivo, no por versión del código: sin cambiarle el nombre, un arte ya
+    # leído seguía devolviendo el objeto de 151 millones de cm. ⚠️ `MEMO_EDITABLES` también lo usa
+    # `servidor.py` para lo que calcula el navegador.
+    return _memo_arte("editables_thumb_v2" if con_thumb else MEMO_EDITABLES, path_arte,
                       lambda: _extraer_editables_crudo(path_arte, con_thumb))
+
+
+MEMO_EDITABLES = "editables_v2"
+
+
+def _rect_sin_limite(r):
+    """¿La caja es el «rectángulo infinito» de MuPDF (±2·10⁹)? Es lo que devuelve para un sombreado
+    sin `/BBox` (un degradado lineal o radial). ⚠️ Idéntico en `arte/editables.js rectSinLimite`."""
+    try:
+        return any(abs(float(v)) >= 1e9 for v in r)
+    except Exception:
+        return False
 
 
 def _extraer_editables_crudo(path_arte, con_thumb=True):
@@ -2765,10 +3004,14 @@ def _extraer_editables_crudo(path_arte, con_thumb=True):
     for pno in range(len(doc)):
         pg = doc[pno]
         cajas = {}
+        sin_limite = set()                               # capas con un sombreado SIN límite propio
         def _sumar(lay, x0, y0, x1, y1):
             if not lay or not _es_capa_editable(lay):
                 return
-            b = cajas.setdefault(lay, [x0, y0, x1, y1])
+            b = cajas.get(lay)
+            if b is None:                                # nueva, o anotada sin caja todavía
+                cajas[lay] = [x0, y0, x1, y1]
+                return
             b[0] = min(b[0], x0); b[1] = min(b[1], y0)
             b[2] = max(b[2], x1); b[3] = max(b[3], y1)
 
@@ -2782,6 +3025,16 @@ def _extraer_editables_crudo(path_arte, con_thumb=True):
         try:
             for it in pg.get_bboxlog(layers=True):
                 if len(it) < 3 or "path" in it[0]:      # los paths ya los cubrió get_drawings
+                    continue
+                # 🔴 UN DEGRADADO LINEAL NO TIENE LÍMITE PROPIO: MuPDF lo mide «infinito» (±2·10⁹)
+                # y la capa quedaba de 151 millones de cm → el objeto no aparecía en el visor
+                # (arte «CAMISETA NEGRO 2»: un logo con las letras en degradado, 2026-10-01). Lo
+                # que pinta de verdad es el RECORTE que lo contiene: esa caja la da
+                # `objetos_de_capa` (más abajo); acá sólo se anota la capa.
+                if "shade" in it[0] and _rect_sin_limite(it[1]):
+                    if it[2] and _es_capa_editable(it[2]):
+                        cajas.setdefault(it[2], None)
+                        sin_limite.add(it[2])
                     continue
                 r = fitz.Rect(it[1])
                 if not r.is_empty:
@@ -2806,6 +3059,24 @@ def _extraer_editables_crudo(path_arte, con_thumb=True):
                     round((bp[2]-cb.x0)*_U, 2), round((cb.y1-bp[1])*_U, 2)]
 
         for capa, b in cajas.items():
+            # las figuras de la capa PRIMERO: la caja de un sombreado sin límite sale de ellas
+            _od = []
+            if _pk_pg is not None:
+                try:
+                    _od = objetos_de_capa(_pk_pg, capa)
+                except Exception:
+                    _od = []
+            if capa in sin_limite:
+                for _o in _od:
+                    _bm = _bbox_a_mu(_o["bbox"])
+                    if _o["kind"] != "shading" or _bm[2] <= _bm[0] or _bm[3] <= _bm[1]:
+                        continue
+                    if b is None:
+                        b = list(_bm)
+                    else:
+                        b = [min(b[0], _bm[0]), min(b[1], _bm[1]), max(b[2], _bm[2]), max(b[3], _bm[3])]
+            if b is None:                                    # sombreado sin recorte: no hay qué medir
+                continue
             thumb = _svg = None
             if con_thumb:                                    # SOLO para el visor del front (caro)
                 tgt = _norm_nombre(capa)
@@ -2834,10 +3105,6 @@ def _extraer_editables_crudo(path_arte, con_thumb=True):
             # (el sistema la trata como hasta hoy: whole-layer, compat). Varias → editables sueltos.
             objetos = []
             if _pk_pg is not None:
-                try:
-                    _od = objetos_de_capa(_pk_pg, capa)
-                except Exception:
-                    _od = []
                 _multi = len(_od) >= 2
                 for _o in _od:
                     _bm = _bbox_a_mu(_o["bbox"])
@@ -3199,7 +3466,7 @@ def _dibujar_objetos_agregados(oa, pieza, variante, talle, cont, W, H, B, clip, 
 
 def _texto_mesa(doc, mesa):
     lineas = []
-    for b in doc[mesa - 1].get_text("dict")["blocks"]:
+    for b in doc[mesa - 1].get_text("dict", flags=FLAGS_TEXTO)["blocks"]:
         if b.get("type") != 0:
             continue
         for l in b["lines"]:
@@ -4018,7 +4285,8 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
     texto_diseno = sorted(n for n, usos in requeridas.items() if "etiquetas" in usos)
     checks.append({"nombre": "Diseño sin texto vivo (en curvas)", "ok": not texto_diseno,
                    "detalle": "sin texto vivo" if not texto_diseno else
-                   "convertí a curvas el texto del diseño (Texto → Crear contornos). "
+                   "convertí a curvas el texto del diseño (Illustrator: Texto → Crear contornos · "
+                   "Corel: Objeto → Convertir en curvas). "
                    "Fuentes: " + ", ".join(texto_diseno)})
     ok &= not texto_diseno
 
@@ -4087,12 +4355,169 @@ class _DocPerezoso:
         return getattr(self.real(), nombre)
 
 
+# ════════════════ NOMBRE Y NÚMERO: ALTURA Y ANCHO (2026-10-01) ════════════════
+# Pedido del usuario: «que se limite hasta dónde llega un texto en cada molde y, si supera ese
+# tamaño, se vaya achicando proporcionalmente (…) y si elijo otra fuente y es más alta que la que
+# tenemos, que quede del mismo alto». Gemelos EXACTOS en `frontend/src/motor/pieza/estampar.js`
+# (`tamanoMismaAltura`, `anchoDisponible`): mismas cuentas en el mismo orden (LEY arte = tizada).
+
+def pers_con_limite(pers, limite_texto):
+    """La personalización con el límite de ancho del molde adentro de cada placeholder (también
+    en cada `por_talle`). `limite_texto` = `{campo normalizado: {"margen_cm": x, "por_pieza":
+    {pieza: x | None}}}`: `margen_cm` vale para todas las piezas y `por_pieza` (por nombre
+    GENÉRICO: «Dorso» = todos los dorsos) le gana; None = esa pieza sin límite. Queda como
+    `limite_cm` y `limite_por_pieza` ({genérico normalizado: cm | None}); el estampado elige el de
+    SU pieza (`limite_de_pieza`). Copia: no toca lo que entró."""
+    if not pers or not limite_texto:
+        return pers
+    import copy as _cp
+    out = _cp.deepcopy(pers)
+    for _m, campos in out.items():
+        for campo, pl in (campos or {}).items():
+            cfg = limite_texto.get(clave_campo(campo)) if isinstance(pl, dict) else None
+            if not cfg:
+                continue
+            mg = None
+            try:
+                mg = float(cfg.get("margen_cm"))
+                if mg < 0:
+                    mg = None
+            except (TypeError, ValueError):
+                mg = None
+            pp = {}
+            for k, v in (cfg.get("por_pieza") or {}).items():
+                try:
+                    pp[_norm_generico(k)] = None if v is None else max(0.0, float(v))
+                except (TypeError, ValueError):
+                    continue
+            for x in [pl] + [pt for pt in (pl.get("por_talle") or {}).values() if isinstance(pt, dict)]:
+                if mg is not None:
+                    x["limite_cm"] = mg
+                if pp:
+                    x["limite_por_pieza"] = dict(pp)
+    return out
+
+
+def limite_de_pieza(pl, pieza):
+    """El margen (cm) que rige para ESTA pieza: el suyo (por nombre genérico) o el de todas. None =
+    sin límite. Gemelo: `limiteDePieza` de `pieza/estampar.js`."""
+    pp = pl.get("limite_por_pieza") or {}
+    g = _norm_generico(str(pieza or "").replace(" (corta)", "").replace(" (larga)", ""))
+    if g in pp:
+        return pp[g]
+    return pl.get("limite_cm")
+
+
+def clave_campo(campo):
+    """Cómo se guarda la config de un campo: «Número», «numero», «00» → «numero»."""
+    return _norm_nombre(_CAMPO_ALIAS.get(_norm_nombre(campo), campo))
+
+
+def _alto_letras(fc, letras):
+    """La altura de la letra más alta de `letras` en la tipografía `fc`, como fracción del tamaño
+    (el punto más alto de su contorno). None si no dibuja ninguna."""
+    mejor = 0.0
+    for c in letras or "":
+        try:
+            ops, _ = fc._glifo(c)
+        except Exception:
+            continue
+        for _op, args in ops:
+            for a in (args or ()):
+                if isinstance(a, (tuple, list)) and len(a) == 2 and a[1] / fc.upem > mejor:
+                    mejor = a[1] / fc.upem
+    return mejor or None
+
+
+def tamano_misma_altura(size, pl, fc, fc_original=None):
+    """El tamaño con el que `fc` (otra tipografía que la del diseño) dibuja las letras A LA MISMA
+    ALTURA que se ven en el arte. Primero con lo medido en el arte (`alto` de las letras
+    `alto_ref`, ver `alturas_de_pagina`); si el placeholder es de antes, con la tipografía original
+    del catálogo (`fc_original`): las mismas letras o, sin letras, la mayúscula. Sin datos, igual."""
+    letras = pl.get("alto_ref") or ""
+    alto = pl.get("alto")
+    if alto and letras:
+        a = _alto_letras(fc, letras)
+        if a:
+            return size * alto / a
+    if fc_original is not None:
+        a0 = _alto_letras(fc_original, letras) if letras else None
+        a1 = _alto_letras(fc, letras) if letras else None
+        if a0 and a1:
+            return size * a0 / a1
+        c0, c1 = fc_original.cap_ratio, fc.cap_ratio
+        if c0 and c1:
+            return size * c0 / c1
+    return size
+
+
+def _anillos_contorno(cont, S, x0, y0, B):
+    """El contorno de la pieza como anillos de puntos en coords de PÁGINA (pt, y hacia arriba), con
+    la MISMA transformación que el clip y la etiqueta (`_eops_borde`); cada curva, 8 tramos."""
+    def _P(vx, vy):
+        return (vx * S + B - x0 * S, vy * S + B - y0 * S)
+    anillos, pts, cur, ini = [], [], None, None
+    for s in cont.get("segmentos") or []:
+        op = s[0]
+        if op == "m":
+            if len(pts) >= 3:
+                anillos.append(pts)
+            cur = _P(s[1], s[2]); pts = [cur]; ini = cur
+        elif op == "l":
+            cur = _P(s[1], s[2]); pts.append(cur)
+        elif op == "c":
+            p0 = cur or _P(s[1], s[2]); p1 = _P(s[1], s[2]); p2 = _P(s[3], s[4]); p3 = _P(s[5], s[6])
+            for k in range(1, 9):
+                u = k / 8.0; mu = 1 - u
+                pts.append((mu*mu*mu*p0[0] + 3*mu*mu*u*p1[0] + 3*mu*u*u*p2[0] + u*u*u*p3[0],
+                            mu*mu*mu*p0[1] + 3*mu*mu*u*p1[1] + 3*mu*u*u*p2[1] + u*u*u*p3[1]))
+            cur = p3
+        elif op == "re":
+            if len(pts) >= 3:
+                anillos.append(pts)
+            X, Y, Wd, Ht = s[1], s[2], s[3], s[4]
+            anillos.append([_P(X, Y), _P(X + Wd, Y), _P(X + Wd, Y + Ht), _P(X, Y + Ht)])
+            pts, cur, ini = [], _P(X, Y), _P(X, Y)
+        elif op == "h":
+            cur = ini
+    if len(pts) >= 3:
+        anillos.append(pts)
+    return anillos
+
+
+def ancho_disponible(cont, S, x0, y0, B, cx, ty, alto, margen):
+    """El ancho máximo de un texto CENTRADO en `cx`, apoyado en la línea base `ty` (y hacia arriba)
+    y de `alto` de alto, para que entre en la pieza dejando `margen` (pt) libres a cada lado. Se
+    mide el contorno en tres alturas del texto (abajo, medio, arriba) y manda la más angosta.
+    None si no se puede medir (el texto no está adentro de la pieza)."""
+    anillos = _anillos_contorno(cont, S, x0, y0, B)
+    mejor = None
+    for f in (0.02, 0.5, 0.98):
+        y = ty + alto * f
+        xs = []
+        for r in anillos:
+            n = len(r)
+            for i in range(n):
+                xa, ya = r[i]
+                xb, yb = r[(i + 1) % n]
+                if (ya <= y < yb) or (yb <= y < ya):
+                    xs.append(xa + (y - ya) * (xb - xa) / (yb - ya))
+        izq = [x for x in xs if x <= cx]
+        der = [x for x in xs if x >= cx]
+        if not izq or not der:
+            continue
+        w = 2 * (min(cx - max(izq), min(der) - cx) - margen)
+        mejor = w if mejor is None else min(mejor, w)
+    return None if mejor is None else max(mejor, 0.0)
+
+
 def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, salida,
                    config_nesting=None, progreso=None, mapeo_arte=None, rotaciones=None,
                    asignacion_tela=None, telas_cfg=None, solo_piezas=False, borde_corte=None,
                    etiqueta=None, editables_cfg=None, editables_tamano=None, objetos_agregados=None,
                    editables_color=None, editables_marca=None, editables_sin_marca=None,
-                   marcas_como_cruz=True, referencia="alto", modo_hoja=None, procesos=None):
+                   marcas_como_cruz=True, referencia="alto", modo_hoja=None, procesos=None,
+                   limite_texto=None):
     """Genera el pedido. `mapeo_arte` (opcional) activa el modo ARTE SEPARADO, donde el
     diseño vive en mesas aparte (una por pieza) y se escala/pega sobre el contorno de cada
     pieza del molde en cada talle. Acepta el formato plano {pieza: mesa} (compat) o POR
@@ -4104,6 +4529,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     que Corel y varios RIP importan como escala de grises)."""
     t0 = time.time()
     os.makedirs(salida, exist_ok=True)
+    # el LÍMITE DE ANCHO del molde (por campo) va adentro de cada placeholder (`limite_cm`), igual
+    # que se lo da el servidor al navegador: los dos motores lo leen del mismo lugar
+    pers = pers_con_limite(pers, limite_texto)
     # Borde de corte configurable por molde. El margen de la pieza (B) = el ancho del
     # borde, así el borde visible (mitad externa del trazo recortado) = ancho_mm.
     _bc = borde_corte or {}
@@ -4138,6 +4566,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     _modo_hoja = modo_hoja or ("legacy" if os.environ.get("TIZADA_HOJA_LEGACY") else "pike")
 
     fuentes_cache = {}
+    _rutas_originales = {}       # fuente del diseño → su archivo en el catálogo SIN reemplazos (o None)
     _avisos_fuente = {}          # fuente → caracteres que ya se avisó que presta el respaldo
     def fuente(nombre_ps, sin_alias=False):
         # `sin_alias`: la tipografía que se eligió PARA UN CAMPO se usa tal cual; si además se le
@@ -4170,6 +4599,7 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                         fuentes_cache["__respaldo__"] = None
                 _resp = fuentes_cache["__respaldo__"]
             fuentes_cache[_clave_cache] = FuenteCurvas(open(ruta, "rb").read(), respaldo=_resp)
+            fuentes_cache[_clave_cache]._ruta = ruta      # de qué archivo salió (ver `_es_original`)
         return fuentes_cache[_clave_cache]
 
     piezas_nombres = sorted(registro.keys())
@@ -4306,11 +4736,14 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     # El COLOR sí es por figura: ese IDENT lleva "nombre\x00obj_id" (ver `_colores_de`). Un objeto
     # editado en CUALQUIER variable se saca del diseño base y se redibuja (unión); donde no se editó
     # cae a identidad.
+    # La clave puede ser «capa<RS>mesa» (un objeto por capa y por mesa, ver `servidor._EDIT_MESA`):
+    # para saber QUÉ CAPA se redibuja alcanza con el nombre.
+    SEP_MESA = "\x1e"
     _editados_nombres = set()
     for _objs in (editables_cfg or {}).values():
         for _nom, _portalle in (_objs or {}).items():
             if isinstance(_portalle, dict) and any(not _tf_identidad(t) for t in _portalle.values()):
-                _editados_nombres.add(_norm_nombre(_nom))
+                _editados_nombres.add(_norm_nombre(str(_nom).split(SEP_MESA)[0]))
     # Config de TAMAÑO por molde (general, por nombre de capa). Estructura:
     # {nombre_norm: {variante: {"apaisado":[ancho_cm,alto_cm], "vertical":[ancho_cm,alto_cm]}}}.
     # El objeto se escala PROPORCIONAL para ENTRAR en su caja (según sea más ancho o más alto
@@ -4805,7 +5238,10 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                          if _norm_nombre(u["ident"]) in _redibujar_validos]
             for _o in _edit_obj:
                 # Posición POR VARIABLE: la de esta `variante`, si no la base legacy "*", si no identidad.
-                _tf = (_cfg_var(_ecfg, variante).get(_o["ident"]) or {}).get(talle) or {}
+                # el ajuste de ESTE objeto (capa en esta mesa); si no tiene, el viejo de la capa
+                _cv = _cfg_var(_ecfg, variante)
+                _tf = ((_cv.get(f'{_o["ident"]}{SEP_MESA}{_o["mesa"]}') or {}).get(talle)
+                       or (_cv.get(_o["ident"]) or {}).get(talle) or {})
                 # ¿ESTE OBJETO LLEVA OTRO PROCESO? Entonces no se imprime: va la CRUZ de 3 cm en su
                 # centro (donde el usuario lo dejó) y el objeto no se dibuja. `marcas_como_cruz` es
                 # False en el preview del arte, donde el diseñador tiene que seguir viéndolo.
@@ -5024,6 +5460,39 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                 # `faltantes()` queda para lo que no puede dibujar NADIE: ahí sí se corta, con un
                 # mensaje que se entiende. Y el aviso llega antes: la planilla marca los caracteres
                 # que no son de la tipografía del diseño (`/api/pedido/fuente_chars`).
+                # 🔤 OTRA TIPOGRAFÍA, MISMA ALTURA: si no se estampa con la tipografía del diseño
+                # (reemplazo elegido, por campo, o la predeterminada porque falta), las letras se
+                # llevan a la altura con la que se ven en el arte.
+                _ro = _rutas_originales.get(pl.get("fuente"))
+                if pl.get("fuente") not in _rutas_originales:
+                    _sin = ({**carpeta_fuentes, "alias": {}} if isinstance(carpeta_fuentes, dict) else carpeta_fuentes)
+                    _ro = _rutas_originales[pl.get("fuente")] = (resolver_fuente(pl.get("fuente") or "", _sin) if pl.get("fuente") else None)
+                _ru = getattr(fnom, "_ruta", None)
+                if not (_ro and _ru and os.path.normcase(os.path.abspath(_ro)) == os.path.normcase(os.path.abspath(_ru))):
+                    _fo = None
+                    if _ro:
+                        try:
+                            _fo = fuente(pl["fuente"], sin_alias=True)
+                        except Exception:
+                            _fo = None
+                    size = tamano_misma_altura(size, pl, fnom, _fo)
+                # ✂️ LÍMITE DE ANCHO (por molde y campo, `limite_cm`): si el texto no entra entre los
+                # bordes de la pieza (menos el margen), se achica PROPORCIONAL apoyado en su línea de
+                # abajo. El ancho disponible se mide UNA vez por pieza/talle/campo (no por prenda).
+                _k_lim = 1.0
+                _mg = limite_de_pieza(pl, pieza)       # el de ESTA pieza o el de todas
+                if _mg is not None:
+                    _lk = (campo, round(size, 4), float(_mg))   # el margen ENTRA en la clave
+                    _lc = b.setdefault("_lim", {})
+                    if _lk not in _lc:
+                        _ax, _ay = _T(pl["cx"], pl["baseline_y"])
+                        _lc[_lk] = ancho_disponible(cont, S, x0, y0, B, _ax, _ay, size * fnom.cap_ratio,
+                                                    float(_mg) * CM)
+                    _disp = _lc[_lk]
+                    _aw = fnom.ancho_texto(texto, size)
+                    if _disp and _aw > _disp:
+                        _k_lim = _disp / _aw
+                        size = size * _k_lim
                 _fps = _fnom_nombre or pl.get("fuente") or "?"      # la que de verdad se usa
                 _prest = [c for c in fnom.prestados(texto) if c not in _avisos_fuente.get(_fps, set())]
                 if _prest:
@@ -5062,12 +5531,12 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
                         if _p["t"] == "f":
                             bloques.append(f"q {_vals} {_c[0]}\n{_ops}\nf\nQ\n")
                         else:
-                            _w = _p["w"] * (sp if mapeo_arte else 1.0)   # a la escala del texto
+                            _w = _p["w"] * (sp if mapeo_arte else 1.0) * _k_lim   # a la escala del texto
                             bloques.append(f"q {_vals} {_c[0].upper()}\n{_w:.3f} w 1 j 1 J\n{_ops}\nS\nQ\n")
                     continue
                 _tz = pl.get("trazo")
                 if _tz:                                # el placeholder tenía BORDE → se respeta
-                    _sw = _tz[2] * (sp if mapeo_arte else 1.0)   # ancho a la misma escala que el texto
+                    _sw = _tz[2] * (sp if mapeo_arte else 1.0) * _k_lim   # ancho a la misma escala que el texto
                     _scol = " ".join(f"{v:g}" for v in _tz[1]) + " " + _tz[0].upper()  # color de TRAZO (mayúsculas)
                     # Igual que el diseño: el trazo va DETRÁS y el relleno ENCIMA, así el
                     # borde queda SOLO por fuera (la mitad interna del trazo la tapa el
@@ -5476,7 +5945,7 @@ def generar_pedido_multi(molds, carpeta_fuentes, salida, config_nesting=None,
                             config_nesting=config_nesting, progreso=progreso,
                             mapeo_arte=md.get("mapeo_arte"), rotaciones=md.get("rotaciones"),
                             asignacion_tela=md.get("asignacion_tela"), telas_cfg=telas_cfg,
-                            solo_piezas=True)
+                            solo_piezas=True, limite_texto=md.get("limite_texto"))
         for tela, lst in pt.items():
             acc.setdefault(tela, []).extend(lst)
             total += len(lst)
@@ -5508,7 +5977,8 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                                 editables_color=md.get("editables_color"),
                                 editables_marca=md.get("editables_marca"),
                                 editables_sin_marca=md.get("editables_sin_marca"),
-                                referencia=md.get("referencia") or "alto")
+                                referencia=md.get("referencia") or "alto",
+                                limite_texto=md.get("limite_texto"))
             # De qué MOLDE es cada pieza. Lo necesita el nesteo para no confundir dos piezas que
             # se llaman igual en moldes distintos (ver `nesting_contorno._preparar`): desde que los
             # moldes de la misma columna de talle comparten mesa, en `acc` conviven piezas de

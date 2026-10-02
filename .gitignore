@@ -70,6 +70,7 @@ frontend/public/_lab/
 
 # intermedios del instalador de la extensión de Illustrator (el .exe final SÍ va a git)
 extension_illustrator/build/
+extension_corel/build/
 
 # respaldos de lo publicado (llevan la clave de actualizacion y la api-key: NUNCA a git)
 respaldos_publicado/

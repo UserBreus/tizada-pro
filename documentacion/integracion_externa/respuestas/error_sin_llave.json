@@ -1,0 +1,6 @@
+{
+ "http": 401,
+ "cuerpo": {
+  "error": "falta la llave o no es válida (encabezado X-Api-Key)"
+ }
+}

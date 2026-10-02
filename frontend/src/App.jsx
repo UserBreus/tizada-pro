@@ -21,9 +21,10 @@ import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 
 import { estado as estadoNavegador, medirHilos } from './motor/monitor.js';   // qué está haciendo esta computadora
 import { bajarTodosLosMoldes, escucharDescarga, estadoDescarga, cerrarAvisoDescarga } from './motor/bajarMoldes.js';   // todos los moldes en esta PC
 import { buscarIllustrator, enviarAIllustrator, planIllustrator, repartirEnArchivos, escalaRecomendada, versionDelServidor, LIENZO_M, TOPE_MESAS } from './motor/molde/illustrator.js';   // la plantilla armada en Illustrator
+import { buscarCorel, enviarACorel, planCorel, versionCorelDelServidor } from './motor/molde/corel.js';   // la misma plantilla armada en CorelDRAW (MAPA 598)
 import { evaluarEquipo, compararRequisitos } from './motor/apto.js';   // ¿esta computadora está apta?
 import { localizarMesas, cerrarArtes } from './motor/arte/mesa.js';   // la mesa del arte dibujada acá (camino A)
-import { generarPedidoEnNavegador } from './motor/pedido/generar.js';
+import { generarPedidoEnNavegador, achiquesEnNavegador } from './motor/pedido/generar.js';
 import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
 // PARA DIAGNÓSTICO (Registro del sistema / soporte): el motor del navegador a mano desde la consola.
 // `window.__tizada.generarPedidoEnNavegador(cuerpo, {rutaApi})` genera un pedido acá y lo guarda;
@@ -31,7 +32,7 @@ import { puedeHacer as _puedeHacer } from './motor/capacidad.js';
 // 🔴 LOS CÁLCULOS QUE PIDE EL SERVIDOR (428) SE HACEN ACÁ, para TODAS las pantallas (ver
 // `motor/calculos.js`): el servidor sólo sostiene el sistema y la base (2026-09-22).
 instalarCalculos(rutaApi);
-if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, previasCaminoB, previasCaminoA, prepararEnDosTiempos, prepararArteEnNavegador, abrirVista, precalentarVista, puedeHacer: _puedeHacer, rutaApi };
+if (typeof window !== 'undefined') window.__tizada = { generarPedidoEnNavegador, achiquesEnNavegador, previasCaminoB, previasCaminoA, prepararEnDosTiempos, prepararArteEnNavegador, abrirVista, precalentarVista, puedeHacer: _puedeHacer, rutaApi };
 import { descargarArchivo, descargarBlob, descargarVarios } from './descargar.js';
 import * as DESCARGAS from './descargas.js';
 
@@ -269,6 +270,13 @@ function Icon({ name, className = "", style }) {
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
         <rect x="7.2" y="7.2" width="9.6" height="9.6" rx="1.6" />
         <rect x="2.8" y="2.8" width="18.4" height="18.4" rx="3" strokeDasharray="3 3.2" />
+      </svg>
+    ),
+    // NOMBRE Y NÚMERO: la letra entre dos topes (hasta dónde puede llegar el texto).
+    limiteTexto: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 4.5v15M21 4.5v15" />
+        <path d="m8.4 16.4 3.6-9.2 3.6 9.2M9.8 13h4.4" />
       </svg>
     ),
     // EDITABLE: mover / transformar (las cuatro flechas).
@@ -1551,7 +1559,7 @@ function EditorAcomodoMesas({ mesas, aMano, guardando, error, onGuardar, onAutom
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
           <input type="checkbox" checked={iman} onChange={e => setIman(e.target.checked)} /> Imán
         </label>
-        <Ayuda ancho={300}>Arrastrá cada mesa a donde la quieras. Con <b>Imán</b>, los bordes se alinean solos con los de las otras mesas. Con una mesa elegida, las <b>flechas</b> la mueven de a 1 mm (con <b>Shift</b>, de a 1 cm). Al crear en Illustrator, <b>todos los talles</b> usan estas posiciones y estas separaciones.</Ayuda>
+        <Ayuda ancho={300}>Arrastrá cada mesa a donde la quieras. Con <b>Imán</b>, los bordes se alinean solos con los de las otras mesas. Con una mesa elegida, las <b>flechas</b> la mueven de a 1 mm (con <b>Shift</b>, de a 1 cm). Al crear en Illustrator o en CorelDRAW, <b>todos los talles</b> usan estas posiciones y estas separaciones.</Ayuda>
         <span style={{ flex: 1 }} />
         {seps ? (
           <span>«{seps.m.nombre}» · izq {fmt(seps.r.izq)} · der {fmt(seps.r.der)} · arriba {fmt(seps.r.arr)} · abajo {fmt(seps.r.aba)}</span>
@@ -1603,56 +1611,166 @@ function EditorAcomodoMesas({ mesas, aMano, guardando, error, onGuardar, onAutom
   );
 }
 
-function PlantillaIllustrator({ onCrear, onDescargar, textoDescargar, ocupado, onNoEncontrado, ayuda, versionNueva, onBajar }) {
-  const [con, setCon] = useState(null);                 // null = sin mirar · objeto = conectada · false = no
-  const [vigilar, setVigilar] = useState(() => { try { return !!localStorage.getItem('userpro_illustrator_ok'); } catch { return false; } });
+// CREAR LA BASE EN EL PROGRAMA DEL DISEÑADOR (pedido del usuario 2026-09-30: «un botón al lado del
+// otro, el de Illustrator del color de Illustrator y el de Corel del color de Corel», y que se vea la
+// descarga de los dos). UNA tarjeta con los dos programas lado a lado; cada botón conecta la primera
+// vez y después crea. Illustrator: extensión en 127.0.0.1:47850 (MAPA 530). CorelDRAW: el programa
+// USER PRO para CorelDRAW en 127.0.0.1:47851 (MAPA 598).
+// Cada uno se vigila cada 5 s sólo después de haberse conectado una vez en este navegador (no se le
+// pregunta a una PC que nunca lo tuvo).
+function usarConexion(buscar, claveLs) {
+  const [con, setCon] = useState(null);                 // null = sin mirar · objeto = conectado · false = no
+  const [vigilar, setVigilar] = useState(() => { try { return !!localStorage.getItem(claveLs); } catch { return false; } });
   const [buscando, setBuscando] = useState(false);
   useEffect(() => {
     if (!vigilar) return undefined;
     let vivo = true;
-    const mirar = async () => { const d = await buscarIllustrator(1500); if (vivo) setCon(d || false); };
+    const mirar = async () => { const d = await buscar(1500); if (vivo) setCon(d || false); };
     mirar();
     const t = setInterval(mirar, 5000);
     return () => { vivo = false; clearInterval(t); };
   }, [vigilar]);
-  const conectar = async () => {
+  const conectar = async (onNoEncontrado) => {
     setBuscando(true);
-    const d = await buscarIllustrator();
+    const d = await buscar();
     setBuscando(false);
     setCon(d || false);
-    if (d) { try { localStorage.setItem('userpro_illustrator_ok', '1'); } catch { /* nada */ } setVigilar(true); }
+    if (d) { try { localStorage.setItem(claveLs, '1'); } catch { /* nada */ } setVigilar(true); }
     else onNoEncontrado();
   };
-  const ok = !!con;
+  return { con, buscando, conectar };
+}
+
+// Los colores de cada programa (los de su marca): Illustrator naranja sobre marrón muy oscuro,
+// CorelDRAW verde sobre verde muy oscuro.
+const COLOR_PROGRAMA = {
+  illustrator: { fondo: '#2a0600', fondoOn: '#3d0d02', acento: '#FF9A00', tinta: '#2a0600', sigla: 'Ai' },
+  corel: { fondo: '#0a2011', fondoOn: '#113019', acento: '#4cc764', tinta: '#06170b', sigla: 'Cdr' },
+};
+
+// 🔴 NADA CORTADO (pedido del usuario 2026-09-30: «modernos y legible todo su texto, que no quede
+// nada cortado, así tengas que achicar»): la acción y el programa van en DOS renglones («Crear en» /
+// «Illustrator») y el estado en su propio renglón; todo puede partirse en renglones, nunca «…».
+// El `data-tour` va LITERAL en quien lo usa (el control del diccionario sólo cuenta los literales).
+function BotonPrograma({ programa, accion, nombre, estado, listo, deshabilitado, onClick, ...resto }) {
+  const c = COLOR_PROGRAMA[programa];
+  const [sobre, setSobre] = useState(false);
+  const vivo = sobre && !deshabilitado;
   return (
-    <div style={{ marginTop: 11, padding: 10, borderRadius: 10, border: '1px solid ' + (ok ? 'rgba(52,211,153,0.45)' : 'var(--border-light)'), background: ok ? 'rgba(52,211,153,0.06)' : 'transparent' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: ok ? '#34d399' : 'var(--text-muted)', boxShadow: ok ? '0 0 8px rgba(52,211,153,0.8)' : 'none' }} />
-        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>
-          {ok ? 'Illustrator conectado' : 'Illustrator sin conectar'}
-          {ok && con.version ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · extensión {con.version}</span> : null}
+    <button type="button" {...resto} onClick={onClick} disabled={deshabilitado}
+      onMouseEnter={() => setSobre(true)} onMouseLeave={() => setSobre(false)}
+      style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 7, padding: '9px 9px 8px',
+        borderRadius: 12, border: `1px solid ${listo ? c.acento + 'cc' : c.acento + '55'}`,
+        background: `linear-gradient(160deg, ${vivo ? c.fondoOn : c.fondo} 0%, #0d0d10 130%)`,
+        boxShadow: vivo ? `0 6px 18px ${c.acento}33` : '0 1px 0 rgba(255,255,255,0.03) inset',
+        transform: vivo ? 'translateY(-1px)' : 'none', color: '#fff', cursor: deshabilitado ? 'not-allowed' : 'pointer',
+        opacity: deshabilitado ? 0.55 : 1, textAlign: 'left', transition: 'var(--transition-smooth)' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <span style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 7, background: c.acento, color: c.tinta, display: 'flex',
+          alignItems: 'center', justifyContent: 'center', fontSize: 10.5, fontWeight: 900, letterSpacing: '-.02em' }}>{c.sigla}</span>
+        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.15 }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.7)', overflowWrap: 'anywhere' }}>{accion}</span>
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: c.acento, overflowWrap: 'anywhere' }}>{nombre}</span>
         </span>
+      </span>
+      <span style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 10, fontWeight: 600, lineHeight: 1.3,
+        color: listo ? '#e6e6e6' : 'rgba(255,255,255,0.6)', overflowWrap: 'anywhere' }}>
+        <span style={{ width: 6, height: 6, marginTop: 3.5, borderRadius: '50%', flexShrink: 0, background: listo ? '#34d399' : 'rgba(255,255,255,0.35)',
+          boxShadow: listo ? '0 0 6px rgba(52,211,153,0.9)' : 'none' }} />
+        {estado}
+      </span>
+    </button>
+  );
+}
+
+// Un CONECTOR para bajar (pedido del usuario: «a los instaladores ponele conectores»): la misma
+// forma y color que el botón de su programa, en chico.
+function BotonConector({ programa, nombre, onClick, ...resto }) {
+  const c = COLOR_PROGRAMA[programa];
+  const [sobre, setSobre] = useState(false);
+  return (
+    <button type="button" {...resto} onClick={onClick} onMouseEnter={() => setSobre(true)} onMouseLeave={() => setSobre(false)}
+      style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px', borderRadius: 9,
+        border: `1px solid ${c.acento}${sobre ? 'aa' : '55'}`, background: sobre ? c.fondo : 'transparent', color: '#fff',
+        cursor: 'pointer', textAlign: 'left', transition: 'var(--transition-smooth)' }}>
+      <Icon name="download" style={{ width: 13, height: 13, flexShrink: 0, color: c.acento }} />
+      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.15 }}>
+        <span style={{ fontSize: 9.5, fontWeight: 600, color: 'rgba(255,255,255,0.65)' }}>Conector</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: c.acento, overflowWrap: 'anywhere' }}>{nombre}</span>
+      </span>
+    </button>
+  );
+}
+
+function PlantillaProgramas({ ocupado, onDescargar, textoDescargar, ayuda, illu, corel }) {
+  const ci = usarConexion(buscarIllustrator, 'userpro_illustrator_ok');
+  const cc = usarConexion(buscarCorel, 'userpro_corel_ok');
+  const okI = !!ci.con;
+  const okC = !!cc.con;
+  // el programa de Corel está pero en esta PC no hay CorelDRAW 2022 o más nuevo: no se ofrece crear
+  const sinCorel = okC && (!cc.con.corel || Number(cc.con.corel_version) < 24);
+  const versionVieja = (con, nueva) => !!(con && nueva && con.version && con.version !== nueva);
+  // «CorelDRAW 2026 (27)» → «2026» (el estado tiene que entrar entero en el botón)
+  const anioCorel = okC && cc.con.corel ? ((String(cc.con.corel).match(/\d{4}(\/\d{4})?/) || [])[0] || '') : '';
+  const aviso = { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '7px 9px', borderRadius: 8,
+    background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.45)', fontSize: 11.5 };
+  const chico = { padding: '4px 9px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 5 };
+  return (
+    <div style={{ marginTop: 11, padding: 10, borderRadius: 10, border: '1px solid var(--border-light)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700, flex: 1 }}>Crear la base en tu programa</span>
         {ayuda}
       </div>
-      {/* la extensión de esa PC es de otra versión que la del sistema: se dice cuál tiene y cuál hay */}
-      {ok && versionNueva && con.version && con.version !== versionNueva && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '7px 9px', borderRadius: 8,
-          background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.45)', fontSize: 11.5 }}>
-          <span style={{ flex: 1 }}>Hay una versión nueva de la extensión: tenés la <b>{con.version}</b>, la nueva es la <b>{versionNueva}</b>.</span>
-          <button type="button" className="btn ghost" style={{ padding: '4px 9px', fontSize: 11 }} onClick={onBajar}>Bajar</button>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {okI ? (
+          <BotonPrograma programa="illustrator" data-tour="plantilla-illustrator-crear" accion="Crear en" nombre="Illustrator" listo
+            estado={`Conectado${ci.con.version ? ` · ${ci.con.version}` : ''}`}
+            deshabilitado={ocupado} onClick={illu.onCrear} />
+        ) : (
+          <BotonPrograma programa="illustrator" data-tour="plantilla-illustrator-conectar" accion="Conectar" nombre="Illustrator"
+            estado={ci.buscando ? 'Buscando…' : 'Sin conectar'} deshabilitado={ci.buscando}
+            onClick={() => ci.conectar(illu.onNoEncontrado)} />
+        )}
+        {okC ? (
+          <BotonPrograma programa="corel" data-tour="plantilla-corel-crear" accion="Crear en" nombre="CorelDRAW" listo={!sinCorel}
+            estado={sinCorel ? 'Falta Corel 2022 o más nuevo' : `Conectado${anioCorel ? ` · ${anioCorel}` : ''}`}
+            deshabilitado={ocupado || sinCorel} onClick={corel.onCrear} />
+        ) : (
+          <BotonPrograma programa="corel" data-tour="plantilla-corel-conectar" accion="Conectar" nombre="CorelDRAW"
+            estado={cc.buscando ? 'Buscando…' : 'Sin conectar'} deshabilitado={cc.buscando}
+            onClick={() => cc.conectar(corel.onNoEncontrado)} />
+        )}
+      </div>
+      {/* lo instalado en esa PC es de otra versión que la del sistema: se dice cuál tiene y cuál hay */}
+      {versionVieja(ci.con, illu.versionNueva) && (
+        <div style={aviso}>
+          <span style={{ flex: 1 }}>Hay un conector nuevo de Illustrator: tenés el <b>{ci.con.version}</b>, el nuevo es el <b>{illu.versionNueva}</b>.</span>
+          <button type="button" className="btn ghost" style={chico} onClick={illu.onBajar}>Bajar</button>
         </div>
       )}
-      {ok ? (
-        <button type="button" className="btn primary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-          onClick={onCrear} disabled={ocupado}>
-          <Icon name="productos" style={{ width: 14, height: 14 }} />
-          Crear en Illustrator
-        </button>
+      {versionVieja(cc.con, corel.versionNueva) && (
+        <div style={aviso}>
+          <span style={{ flex: 1 }}>Hay un conector nuevo de CorelDRAW: tenés el <b>{cc.con.version}</b>, el nuevo es el <b>{corel.versionNueva}</b>.</span>
+          <button type="button" className="btn ghost" style={chico} onClick={corel.onBajar}>Bajar</button>
+        </div>
+      )}
+      {/* LOS CONECTORES para bajar, a la vista, con su «?» (qué se baja y para qué sirve) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', flex: 1 }}>Conectores · se instalan una vez</span>
+        <Ayuda ancho={320}>
+          <b>Qué son:</b> programas chicos que se instalan <b>una sola vez</b> en cada computadora donde se diseña. Unen TIZADA PRO con tu programa de diseño para que <b>Crear en…</b> arme la base directo allá, sin descargar archivos.
+          <br /><br /><b>Conector Illustrator</b> (<i>Instalar-USER-PRO-Illustrator</i>): le agrega a Illustrator la extensión de USER PRO. Funciona con Illustrator abierto; el tutorial queda en Illustrator, en <b>Ventana › Extensiones › USER PRO</b>. En Mac se baja un ZIP con su instalador.
+          <br /><br /><b>Conector CorelDRAW</b> (<i>Instalar-USER-PRO-Corel</i>): instala el programa USER PRO para CorelDRAW, que queda con un <b>ícono junto al reloj</b> y arranca solo con la computadora. Necesita <b>CorelDRAW 2022 o más nuevo</b> (sólo Windows). Si Corel está cerrado, se abre solo al crear. Además pone <b>dentro de Corel</b> la barra <b>TIZADA PRO</b> con el botón <b>Exportar para TIZADA PRO</b>, que te pregunta en qué carpeta guardar y deja el PDF para subir con todos los ajustes correctos. Para poner esa barra, Windows pide <b>permiso de administrador una vez</b>; después hay que <b>cerrar y volver a abrir CorelDRAW</b>. Si no das el permiso, el botón aparece igual, pegado abajo a la derecha de la ventana de Corel.
+          <br /><br /><b>Cómo se instala:</b> abrilo con doble clic y tocá <b>Instalar</b>. No pide permisos de administrador y no toca tus archivos. Se quita desde <b>Aplicaciones instaladas</b> de Windows.
+        </Ayuda>
+      </div>
+      {illu.hayInstalador || corel.hayInstalador ? (
+        <div style={{ display: 'flex', gap: 8 }}>
+          {illu.hayInstalador && <BotonConector programa="illustrator" data-tour="plantilla-bajar-illustrator" nombre="Illustrator" onClick={illu.onBajar} />}
+          {corel.hayInstalador && <BotonConector programa="corel" data-tour="plantilla-bajar-corel" nombre="CorelDRAW" onClick={corel.onBajar} />}
+        </div>
       ) : (
-        <button type="button" className="btn" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-          onClick={conectar} disabled={buscando}>
-          {buscando ? 'Buscando Illustrator…' : 'Conectar con Illustrator'}
-        </button>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Los conectores se los pedís a quien administra TIZADA.</div>
       )}
       <button type="button" className="btn ghost" style={{ width: '100%', marginTop: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={onDescargar}>
         <Icon name="download" style={{ width: 12, height: 12 }} />
@@ -1660,6 +1778,75 @@ function PlantillaIllustrator({ onCrear, onDescargar, textoDescargar, ocupado, o
       </button>
     </div>
   );
+}
+
+// ════════════════ NOMBRE Y NÚMERO: EL VISOR DEL LÍMITE (MAPA 601) ════════════════
+// El límite es del MOLDE y POR PIEZA (pedidos del usuario 2026-10-01: «los bordes laterales
+// movidos hacia adentro, hasta donde debería llegar; para nombre y número diferentes» y «elegir
+// la pieza tocándola en el visor, varias a la vez, y por variable, como las etiquetas»). El visor
+// grande dibuja las piezas del molde (el mismo lienzo que Etiqueta: `canvasLayout`, zoom y paneo)
+// y en cada una sus bordes laterales corridos hacia adentro el margen de cada campo. Es la misma
+// cuenta del motor (`ancho_disponible`): a la altura del texto, de borde a borde, menos el margen.
+const _COLOR_CAMPO = { nombre: '#00d8f5', numero: '#ffb020' };
+// OBJETOS EDITABLES: uno por capa Y POR MESA. La clave del ajuste es «capa<RS>mesa» (la misma capa
+// en el Frente y en la Espalda son dos objetos); el color y la marca de proceso siguen siendo de la
+// CAPA → `_nomDeClave` vuelve de la clave al nombre de la capa.
+const _SEP_MESA_ED = '\u001e';
+const _claveEd = (o) => (o.clave || (o.mesa && !o.agregado && !o._agregado ? `${o.nombre}${_SEP_MESA_ED}${o.mesa}` : o.nombre));
+const _nomDeClave = (k) => String(k || '').split(_SEP_MESA_ED)[0];
+const _colorCampo = (clave, i) => _COLOR_CAMPO[clave] || ['#00d8f5', '#ffb020', '#b388ff', '#7ee787'][i % 4];
+
+/**
+ * Los bordes laterales de una pieza del lienzo (su `path_svg`: M/L x y, C …, h/v de los
+ * rectángulos, Z) en `filas` alturas: `[[y, izquierda, derecha]]`, en unidades del lienzo (y abajo).
+ */
+function _filasDePath(d, filas = 120) {
+  const tk = String(d || '').trim().split(/[\s,]+/);
+  const anillos = [];
+  let pts = [], cx = 0, cy = 0, sx = 0, sy = 0, i = 0;
+  const num = () => Number(tk[i++]);
+  while (i < tk.length) {
+    const c = tk[i++];
+    if (c === 'M') { if (pts.length >= 3) anillos.push(pts); cx = num(); cy = num(); pts = [[cx, cy]]; sx = cx; sy = cy; }
+    else if (c === 'L') { cx = num(); cy = num(); pts.push([cx, cy]); }
+    else if (c === 'C') {
+      const x1 = num(), y1 = num(), x2 = num(), y2 = num(), x3 = num(), y3 = num();
+      for (let k = 1; k <= 8; k++) {
+        const u = k / 8, mu = 1 - u;
+        pts.push([mu * mu * mu * cx + 3 * mu * mu * u * x1 + 3 * mu * u * u * x2 + u * u * u * x3,
+                  mu * mu * mu * cy + 3 * mu * mu * u * y1 + 3 * mu * u * u * y2 + u * u * u * y3]);
+      }
+      cx = x3; cy = y3;
+    }
+    else if (c === 'h') { cx += num(); pts.push([cx, cy]); }
+    else if (c === 'v') { cy += num(); pts.push([cx, cy]); }
+    else if (c === 'Z' || c === 'z') { cx = sx; cy = sy; }
+  }
+  if (pts.length >= 3) anillos.push(pts);
+  const ys = anillos.flat().map(q => q[1]);
+  if (!ys.length) return [];
+  const minY = Math.min(...ys), maxY = Math.max(...ys), out = [];
+  for (let k = 0; k <= filas; k++) {
+    const y = minY + (maxY - minY) * (0.004 + 0.992 * k / filas);
+    const xs = [];
+    for (const r of anillos) {
+      const n = r.length;
+      for (let q = 0; q < n; q++) {
+        const [xa, ya] = r[q], [xb, yb] = r[(q + 1) % n];
+        if ((ya <= y && y < yb) || (yb <= y && y < ya)) xs.push(xa + (y - ya) * (xb - xa) / (yb - ya));
+      }
+    }
+    if (xs.length >= 2) out.push([y, Math.min(...xs), Math.max(...xs)]);
+  }
+  return out;
+}
+
+/** El margen (cm) de una pieza para un campo: el suyo (`por_pieza`, por genérico) o el de todas; null = sin límite. */
+function _margenDePieza(cfg, gen) {
+  const pp = (cfg && cfg.por_pieza) || {};
+  const k = Object.keys(pp).find(x => x.toLowerCase() === String(gen).toLowerCase());
+  if (k !== undefined) return pp[k];
+  return cfg && cfg.margen_cm !== undefined ? cfg.margen_cm : null;
 }
 
 function AyudaExportMolde({ term }) {
@@ -1675,7 +1862,7 @@ function AyudaExportMolde({ term }) {
       <Ayuda ancho={330}>El sistema necesita 3 cosas del molde: las <b>piezas como vectores</b>, cada <b>{V}</b> por separado, y (si podés) el <b>nombre de cada pieza</b>. Si el molde <b>trae los nombres</b>, se aplican <b>solos</b> (no hay que reescribirlos); si no, los ponés una vez en el visor. Elegí tu programa:</Ayuda>
 
       <div style={secc}>
-        <div style={h}>🅰️ Illustrator (.ai) — recomendado hoy</div>
+        <div style={h}>🅰️ Illustrator (.ai)</div>
         <ul style={{ margin: 0, paddingLeft: 16 }}>
           <li style={li}>Guardá como <b>.ai con compatibilidad PDF activada</b> (Illustrator lo hace por defecto).</li>
           <li style={li}>Cada <b>{V}</b> en su <b>propia capa</b>, con el nombre exacto del {V} (M, 3XL, 16…).</li>
@@ -1685,11 +1872,14 @@ function AyudaExportMolde({ term }) {
       </div>
 
       <div style={secc}>
-        <div style={h}>🅲 CorelDRAW u otro → PDF</div>
+        {/* Probado con CorelDRAW 2026 el 2026-09-30 (MAPA 597, COREL_REFERENCIA.md): capas, texto,
+            CMYK exacto y PowerClip llegan bien con estos ajustes. */}
+        <div style={h}>🅲 CorelDRAW (2022 o más nuevo) → PDF</div>
         <ul style={{ margin: 0, paddingLeft: 16 }}>
-          <li style={li}>Exportá/Publicá como <b>PDF</b> (Archivo → Publicar como PDF).</li>
-          <li style={li}>Que <b>NO rasterice</b>: dejá las piezas como <b>curvas/vectores</b> (sin “convertir a mapa de bits”).</li>
-          <li style={li}>Cada <b>{V}</b> en una <b>capa</b> del documento (Corel exporta las capas al PDF).</li>
+          <li style={li}>Archivo → <b>Publicar como PDF</b>. Compatibilidad <b>Acrobat 6.0 o más nuevo</b> (o PDF/X-4): con las más viejas se pierden las <b>capas</b>.</li>
+          <li style={li}>Color <b>Nativo</b> o <b>CMYK</b>, y <b>sin</b> “Exportar texto como curvas” (los nombres de pieza tienen que llegar como texto).</li>
+          <li style={li}>Que <b>NO rasterice</b>: piezas en <b>curvas</b> y sin “Representar rellenos complejos como mapas de bits”.</li>
+          <li style={li}>Cada <b>{V}</b> en su <b>capa</b> (el nombre exacto: M, 3XL, 16…). La «Capa 1» vacía se puede dejar.</li>
           <li style={li}>Nombres de pieza como <b>texto</b> en una capa <b>guías</b> (opcional, pero mapea el arte solo).</li>
           <li style={li}>Subilo acá como <b>.pdf</b>. El sistema lo lee igual que un .ai.</li>
         </ul>
@@ -5234,6 +5424,306 @@ function PantallaMonitor({ volver }) {
   );
 }
 
+// ══ INTEGRACIONES (MAPA 606): los pedidos que llegan de OTRO SISTEMA y se hacen solos ══════════
+// La pantalla no arma nada: muestra y configura. Las llaves del otro sistema, dónde se guardan los
+// PDF (Google Drive), si el robot está vivo y qué pasó con cada pedido que llegó — con sus alarmas.
+const _ESTADO_PEDIDO_EXT = {
+  en_cola: ['En cola', 'var(--accent)'], procesando: ['Haciéndose', 'var(--accent)'],
+  listo: ['Listo', 'var(--success, #2ecc71)'], rechazado: ['Rechazado', 'var(--error, #e0503a)'],
+  error: ['Falló', 'var(--error, #e0503a)'], cancelado: ['Cancelado', 'var(--text-muted)'],
+};
+
+function PantallaIntegraciones({ volver }) {
+  const [d, setD] = useState(null);
+  const [falla, setFalla] = useState('');
+  const [nombreLlave, setNombreLlave] = useState('');
+  const [llaveNueva, setLlaveNueva] = useState('');           // se muestra UNA sola vez
+  const [carpeta, setCarpeta] = useState(null);                // null = todavía no se tocó
+  const [aviso, setAviso] = useState(null);
+  const [abierto, setAbierto] = useState(null);                // el pedido que se está mirando
+  const [nota, setNota] = useState('');
+  const archivoRef = useRef(null);
+
+  const cargar = React.useCallback(async () => {
+    try {
+      const r = await fetch('/api/integracion/estado');
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'no se pudo leer');
+      setD(j); setFalla('');
+    } catch (e) { setFalla(String(e.message || e)); }
+  }, []);
+  useEffect(() => { cargar(); const t = setInterval(cargar, 5000); return () => clearInterval(t); }, [cargar]);
+
+  const mandar = async (ruta, cuerpo) => {
+    const r = await fetch(ruta, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo || {}) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { setNota(j.error || 'No se pudo.'); return null; }
+    setNota(''); await cargar();
+    return j;
+  };
+  const abrir = async (ref) => {
+    const r = await fetch(`/api/integracion/pedidos/${encodeURIComponent(ref)}`);
+    if (r.ok) setAbierto(await r.json());
+  };
+  const cuando = (t) => (t ? String(t).replace('T', ' ') : '');
+  const caja = { padding: 16, marginBottom: 14 };
+  const titulo = { margin: '0 0 10px', fontSize: 14.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 };
+  const campo = { flex: 1, minWidth: 220, padding: '8px 10px', borderRadius: 8, fontSize: 12.5,
+    border: '1px solid var(--border-light)', background: 'var(--bg-primary)', color: 'var(--text-primary)' };
+  const chico = { padding: '6px 12px', fontSize: 12 };
+  const robot = (d && d.robot) || {};
+  const drive = (d && d.drive) || {};
+  const est = (abierto && abierto.estado) || {};
+  const res = (abierto && abierto.resultado) || null;
+
+  return (
+    <div className="animate-fade">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button className="btn ghost" data-tour="integ-volver" onClick={volver}
+          style={{ padding: '8px 12px', fontSize: 12.5 }}>⬅ Configuración</button>
+        <h2 style={{ margin: 0 }}>Integraciones</h2>
+        <Ayuda ancho={360}>Otro sistema (ventas) puede mandar un pedido armado —cada diseño con su molde
+          y su arte, las telas, las tipografías, lo que no se sublima y la planilla— y TIZADA PRO lo hace
+          <b> solo</b>: carga todo como si lo hiciera una persona, arma la tizada, guarda los PDF en Google
+          Drive y deja un archivo con dónde quedó cada cosa. Lo que cargan las personas no se toca.</Ayuda>
+        <a className="btn ghost" data-tour="integ-formato" href={rutaApi('/api/externo/v1/formato')} target="_blank" rel="noreferrer"
+          style={{ ...chico, marginLeft: 'auto', textDecoration: 'none' }}>Formato del archivo</a>
+        <a className="btn ghost" data-tour="integ-alarmas" href={rutaApi('/api/externo/v1/alarmas')} target="_blank" rel="noreferrer"
+          style={{ ...chico, textDecoration: 'none' }}>Lista de alarmas</a>
+      </div>
+      {falla && <div className="card" style={{ ...caja, border: '1px solid var(--error, #e0503a)', fontSize: 13 }}>No se pudo leer el estado: {falla}</div>}
+      {nota && <div className="card" style={{ ...caja, border: '1px solid var(--warning, #e0a020)', fontSize: 13 }}>{nota}</div>}
+
+      {/* EL ROBOT */}
+      <div className="card" style={caja}>
+        <h3 style={titulo}>El robot
+          <Ayuda ancho={320}>Es el programa que hace los pedidos sin que nadie toque nada. Corre en el servidor,
+            aparte del sistema, y arma un pedido por vez. Si está pausado, los pedidos siguen entrando y quedan en cola.</Ayuda>
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 99, background: !robot.activo ? 'var(--text-muted)' : robot.vivo ? 'var(--success, #2ecc71)' : 'var(--error, #e0503a)' }} />
+          <span style={{ color: 'var(--text-secondary)' }}>
+            {!robot.activo ? 'Pausado: los pedidos quedan en cola.'
+              : robot.vivo ? (robot.que === 'trabajando' ? `Haciendo el pedido ${robot.referencia || ''}` : 'Prendido, esperando pedidos.')
+                : `No responde${robot.motivo ? ' — ' + robot.motivo : robot.hace_s != null ? ` (última señal hace ${robot.hace_s} s)` : ' (todavía no arrancó)'}.`}
+          </span>
+          <button className="btn ghost" data-tour="integ-robot" style={{ ...chico, marginLeft: 'auto' }}
+            onClick={() => mandar('/api/integracion/config', { robot_activo: !robot.activo })}>
+            {robot.activo ? 'Pausar' : 'Reanudar'}</button>
+        </div>
+      </div>
+
+      {/* LAS LLAVES */}
+      <div className="card" style={caja}>
+        <h3 style={titulo}>Llaves del otro sistema
+          <Ayuda ancho={330}>La llave es la contraseña con la que el otro sistema entra a mandar pedidos. Se muestra
+            <b> una sola vez</b>, al crearla: copiala y pasásela a quien programa el otro sistema. Si se pierde o se
+            filtra, anulala y creá otra.</Ayuda>
+        </h3>
+        {llaveNueva && (
+          <div style={{ padding: 12, borderRadius: 9, marginBottom: 12, border: '1px solid var(--accent)', background: 'rgba(0,216,245,0.08)' }}>
+            <div style={{ fontSize: 12.5, marginBottom: 6, color: 'var(--text-secondary)' }}>Llave nueva. <b>No se vuelve a mostrar</b>:</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <code style={{ fontSize: 12.5, wordBreak: 'break-all', flex: 1 }}>{llaveNueva}</code>
+              <button className="btn primary" data-tour="integ-llave-copiar" style={chico}
+                onClick={() => { navigator.clipboard?.writeText(llaveNueva); setNota('Llave copiada.'); }}>Copiar</button>
+              <button className="btn ghost" data-tour="integ-llave-listo" style={chico} onClick={() => setLlaveNueva('')}>Ya la guardé</button>
+            </div>
+          </div>
+        )}
+        {((d && d.llaves) || []).map((ll) => (
+          <div key={ll.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '7px 0', fontSize: 12.5,
+            borderTop: '1px solid var(--border-light)', opacity: ll.activa ? 1 : 0.5 }}>
+            <b style={{ minWidth: 160 }}>{ll.nombre}</b>
+            <code style={{ color: 'var(--text-muted)' }}>{ll.pista}</code>
+            <span style={{ color: 'var(--text-muted)' }}>{cuando(ll.creada)}</span>
+            {ll.activa
+              ? <button className="btn danger-ghost" data-tour="integ-llave-anular" style={{ ...chico, marginLeft: 'auto' }}
+                  onClick={() => mandar('/api/integracion/llaves/revocar', { id: ll.id })}>Anular</button>
+              : <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>anulada</span>}
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          <input data-tour="integ-llave-nombre" value={nombreLlave} onChange={(e) => setNombreLlave(e.target.value)}
+            placeholder="Para quién es (p. ej. Sistema de ventas)" style={campo} />
+          <button className="btn primary" data-tour="integ-llave-crear" style={chico} disabled={!nombreLlave.trim()}
+            onClick={async () => { const j = await mandar('/api/integracion/llaves/crear', { nombre: nombreLlave }); if (j && j.llave) { setLlaveNueva(j.llave); setNombreLlave(''); } }}>
+            Crear llave</button>
+        </div>
+      </div>
+
+      {/* GOOGLE DRIVE — se conecta CON LA CUENTA de quien es dueño de las carpetas (OAuth): los archivos
+          quedan a su nombre y en su espacio. Una cuenta de servicio no puede guardar en el «Mi unidad» de una
+          cuenta personal (Google no le da espacio propio), por eso queda sólo como alternativa. */}
+      <div className="card" style={caja}>
+        <h3 style={titulo}>Google Drive
+          <Ayuda ancho={400}>Dónde se guardan los PDF. Las <b>tizadas</b> van a la carpeta de pedidos, dentro de una
+            carpeta por pedido, y la <b>ficha técnica</b> a la carpeta de fichas. Para conectarlo: (1) cargá el archivo
+            del <b>ID de cliente</b> que se baja de Google Cloud, (2) tocá «Conectar con Google» y aceptá con la cuenta
+            dueña de las carpetas, (3) pegá el enlace de las dos carpetas. Sin Drive, los PDF igual quedan guardados en
+            el servidor y el pedido avisa.</Ayuda>
+        </h3>
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.6 }}>
+          Cuenta: {drive.conectada ? <b>{drive.conectada}</b>
+            : drive.cuenta ? <b>{drive.cuenta}</b>
+              : drive.cliente ? <i>falta tocar «Conectar con Google»</i> : <i>sin conectar</i>}
+          {drive.prueba && <span style={{ marginLeft: 12, color: drive.prueba.ok ? 'var(--success, #2ecc71)' : 'var(--error, #e0503a)' }}>
+            {drive.prueba.ok ? '✓ ' : '✗ '}{drive.prueba.detalle}</span>}
+          {!drive.conectada && drive.vuelta && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+            Dirección de vuelta para registrar en Google: <code>{drive.vuelta}</code></div>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+          <input ref={archivoRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+            onChange={async (e) => {
+              const f = e.target.files && e.target.files[0]; e.target.value = '';
+              if (!f) return;
+              const fd = new FormData(); fd.append('archivo', f);
+              const r = await fetch('/api/integracion/drive_cuenta', { method: 'POST', body: fd });
+              const j = await r.json().catch(() => ({}));
+              setNota(r.ok ? '' : (j.error || 'No se pudo cargar.')); cargar();
+            }} />
+          <button className="btn ghost" data-tour="integ-drive-cuenta" style={chico} onClick={() => archivoRef.current && archivoRef.current.click()}>Cargar archivo de Google</button>
+          <button className="btn primary" data-tour="integ-drive-conectar" style={chico} disabled={!drive.cliente}
+            onClick={async () => {
+              const j = await mandar('/api/integracion/drive/conectar', {
+                vuelta: window.location.origin + rutaApi('/api/integracion/drive/vuelta'), volver: window.location.href });
+              if (j && j.url) window.location.href = j.url;
+            }}>{drive.conectada ? 'Volver a conectar' : 'Conectar con Google'}</button>
+          {drive.conectada && <button className="btn danger-ghost" data-tour="integ-drive-desconectar" style={chico}
+            onClick={() => mandar('/api/integracion/drive/desconectar')}>Desconectar</button>}
+          <button className="btn ghost" data-tour="integ-drive-probar" style={{ ...chico, marginLeft: 'auto' }}
+            disabled={!(drive.conectada || drive.cuenta) || !drive.carpeta_tizadas}
+            onClick={() => mandar('/api/integracion/config', { drive_activo: true, probar_drive: true })}>Probar</button>
+          <button className={drive.activo ? 'btn success' : 'btn ghost'} data-tour="integ-drive-activo" style={chico}
+            onClick={() => mandar('/api/integracion/config', { drive_activo: !drive.activo })}>{drive.activo ? 'Prendido' : 'Apagado'}</button>
+        </div>
+        {/* (las dos con su ancla escrita: el diccionario no ve las que se arman) */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 210 }}>Carpeta de las tizadas (pedidos)</span>
+          <input data-tour="integ-drive-carpeta" value={(carpeta && carpeta.tizadas) ?? drive.carpeta_tizadas ?? ''}
+            onChange={(e) => setCarpeta({ ...(carpeta || {}), tizadas: e.target.value })}
+            placeholder="Enlace de la carpeta de Drive" style={campo} />
+          {drive.carpeta_tizadas && <a href={'https://drive.google.com/drive/folders/' + drive.carpeta_tizadas} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>abrir</a>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 210 }}>Carpeta de las fichas técnicas</span>
+          <input data-tour="integ-drive-carpeta-fichas" value={(carpeta && carpeta.fichas) ?? drive.carpeta_fichas ?? ''}
+            onChange={(e) => setCarpeta({ ...(carpeta || {}), fichas: e.target.value })}
+            placeholder="Enlace de la carpeta de Drive" style={campo} />
+          {drive.carpeta_fichas && <a href={'https://drive.google.com/drive/folders/' + drive.carpeta_fichas} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>abrir</a>}
+        </div>
+        {carpeta && <div style={{ marginTop: 8 }}>
+          <button className="btn ghost" data-tour="integ-drive-guardar" style={chico}
+            onClick={async () => {
+              const c = {};
+              if (carpeta.tizadas !== undefined) c.drive_carpeta_tizadas = carpeta.tizadas;
+              if (carpeta.fichas !== undefined) c.drive_carpeta_fichas = carpeta.fichas;
+              if (await mandar('/api/integracion/config', c)) setCarpeta(null);
+            }}>Guardar las carpetas</button></div>}
+      </div>
+
+      {/* EL AVISO */}
+      <div className="card" style={caja}>
+        <h3 style={titulo}>Aviso al otro sistema
+          <Ayuda ancho={340}>Si ponés una dirección, cuando un pedido termina (listo, rechazado o con falla) TIZADA PRO
+            se lo avisa solo al otro sistema, con el archivo de resultado adentro. Si la dejás vacía, el otro sistema
+            tiene que preguntar por el estado de cada pedido.</Ayuda>
+        </h3>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input data-tour="integ-aviso" value={aviso ?? (d && d.aviso_url) ?? ''} onChange={(e) => setAviso(e.target.value)}
+            placeholder="https://… (opcional)" style={campo} />
+          <button className="btn ghost" data-tour="integ-aviso-guardar" style={chico} disabled={aviso === null}
+            onClick={async () => { if (await mandar('/api/integracion/config', { aviso_url: aviso })) setAviso(null); }}>Guardar</button>
+        </div>
+      </div>
+
+      {/* LOS PEDIDOS */}
+      <div className="card" style={caja}>
+        <h3 style={titulo}>Pedidos que llegaron
+          <Ayuda ancho={320}>Cada pedido que mandó el otro sistema, con su estado. Tocá uno para ver sus alarmas y
+            dónde quedaron sus archivos.</Ayuda>
+        </h3>
+        {!((d && d.pedidos) || []).length && <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Todavía no llegó ninguno.</div>}
+        {((d && d.pedidos) || []).map((p) => {
+          const [rot, col] = _ESTADO_PEDIDO_EXT[p.estado] || [p.estado, 'var(--text-muted)'];
+          return (
+            <div key={p.referencia} data-tour="integ-pedido" onClick={() => abrir(p.referencia)}
+              style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0', fontSize: 12.5, cursor: 'pointer',
+                borderTop: '1px solid var(--border-light)' }}>
+              <b style={{ minWidth: 150 }}>{p.referencia}</b>
+              <span style={{ minWidth: 86, fontWeight: 700, color: col }}>{rot}</span>
+              <span style={{ flex: 1, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {p.cliente ? p.cliente + ' · ' : ''}{p.etapa}</span>
+              {p.frenan > 0 && <span style={{ color: 'var(--error, #e0503a)' }}>{p.frenan} que frena{p.frenan === 1 ? '' : 'n'}</span>}
+              {p.alarmas - p.frenan > 0 && <span style={{ color: 'var(--warning, #e0a020)' }}>{p.alarmas - p.frenan} aviso{p.alarmas - p.frenan === 1 ? '' : 's'}</span>}
+              <span style={{ color: 'var(--text-muted)' }}>{cuando(p.recibido)}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* LO QUE NI ENTRÓ */}
+      {((d && d.rechazos) || []).length > 0 && (
+        <div className="card" style={caja}>
+          <h3 style={titulo}>Rechazados al llegar
+            <Ayuda ancho={320}>Paquetes que no pasaron la primera revisión (un molde que no existe, un talle que el
+              molde no tiene, una tela dada de baja…). No entraron: el otro sistema recibió estas mismas alarmas.</Ayuda>
+          </h3>
+          {d.rechazos.slice(0, 15).map((r, i) => (
+            <div key={i} style={{ padding: '7px 0', fontSize: 12.5, borderTop: '1px solid var(--border-light)' }}>
+              <b>{r.referencia || '(sin referencia)'}</b> <span style={{ color: 'var(--text-muted)' }}>{cuando(r.cuando)}</span>
+              {(r.alarmas || []).slice(0, 4).map((a, k) => (
+                <div key={k} style={{ color: 'var(--text-secondary)', marginTop: 3 }}>
+                  <code style={{ color: 'var(--error, #e0503a)' }}>{a.codigo}</code> {a.mensaje}</div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Modal open={!!abierto} onClose={() => setAbierto(null)} titulo={est.referencia ? `Pedido ${est.referencia}` : 'Pedido'}
+        subtitulo={(_ESTADO_PEDIDO_EXT[est.estado] || [est.estado])[0] + (est.etapa ? ' · ' + est.etapa : '')} maxWidth={760}>
+        {abierto && (
+          <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+            <div style={{ color: 'var(--text-secondary)', marginBottom: 10 }}>
+              Llegó {cuando(est.recibido)}{est.integracion ? ` desde «${est.integracion}»` : ''}{est.cliente ? ` · ${est.cliente}` : ''}
+              {est.aviso ? ` · aviso: ${est.aviso.resultado}` : ''}
+            </div>
+            {(est.alarmas || []).length > 0 && <div style={{ fontWeight: 700, marginBottom: 4 }}>Alarmas</div>}
+            {(est.alarmas || []).map((a, i) => (
+              <div key={i} style={{ padding: '5px 0', borderTop: '1px solid var(--border-light)' }}>
+                <code style={{ color: a.frena ? 'var(--error, #e0503a)' : 'var(--warning, #e0a020)' }}>{a.frena ? 'FRENA' : 'aviso'} · {a.codigo}</code>
+                <div style={{ color: 'var(--text-secondary)' }}>{a.mensaje}</div>
+              </div>
+            ))}
+            {res && <>
+              <div style={{ fontWeight: 700, margin: '12px 0 4px' }}>Archivos {res.destino && res.destino.tipo === 'drive'
+                ? <a href={res.destino.carpeta_enlace} target="_blank" rel="noreferrer" style={{ fontWeight: 400, marginLeft: 8 }}>abrir la carpeta de Drive</a>
+                : <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>guardados en el servidor</span>}</div>
+              {(res.archivos || []).map((a, i) => (
+                <div key={i} style={{ padding: '5px 0', borderTop: '1px solid var(--border-light)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {a.enlace ? <a href={a.enlace} target="_blank" rel="noreferrer">{a.nombre}</a> : <span>{a.nombre}</span>}
+                  <span style={{ color: 'var(--text-muted)' }}>{a.tipo === 'tizada' ? `${a.tela} · ${a.mesas} mesa${a.mesas === 1 ? '' : 's'} · ${a.consumo_cm} cm` : 'ficha técnica'}</span>
+                </div>
+              ))}
+            </>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+              <button className="btn ghost" data-tour="integ-copiar-json" style={chico}
+                onClick={() => { navigator.clipboard?.writeText(JSON.stringify(res || est, null, 1)); setNota('Copiado.'); }}>Copiar el resultado</button>
+              {['rechazado', 'error', 'cancelado', 'listo'].includes(est.estado) && (
+                <button className="btn ghost" data-tour="integ-reintentar" style={chico}
+                  onClick={async () => { if (await mandar(`/api/integracion/pedidos/${encodeURIComponent(est.referencia)}/reintentar`)) setAbierto(null); }}>Volver a hacerlo</button>)}
+              {['en_cola', 'procesando', 'rechazado', 'error'].includes(est.estado) && (
+                <button className="btn danger-ghost" data-tour="integ-cancelar" style={chico}
+                  onClick={async () => { if (await mandar(`/api/integracion/pedidos/${encodeURIComponent(est.referencia)}/cancelar`)) setAbierto(null); }}>Cancelar el pedido</button>)}
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
 function PantallaRegistro({ volver }) {
   const [eventos, setEventos] = useState([]);
   const [resumen, setResumen] = useState(null);
@@ -6401,6 +6891,8 @@ export default function App() {
   const fileInputMoldeBRef = useRef(null);
   const [guiaCapasOpen, setGuiaCapasOpen] = useState(false);   // modal "qué va en cada capa del .ai"
   const [bordeConfig, setBordeConfig] = useState({ activo: true, ancho_mm: 2.0, color: [0.75, 0.68, 0.67, 0.9], alineacion: 'fuera' });  // borde de corte del molde
+  // límite de ancho del nombre/número del molde: {limite: {campo: {margen_cm}}, campos: [{clave, nombre}]}
+  const [limiteTexto, setLimiteTexto] = useState(null);
   const [etiquetaConfig, setEtiquetaConfig] = useState(null);  // etiqueta de identificación del molde
   // ── Objetos editables (capa "Editable …" del diseño) ──
   const [editableData, setEditableData] = useState(null);      // {objetos, talles, piezas} del diseño activo
@@ -6761,6 +7253,12 @@ export default function App() {
   // y que además se resetea cuando la sesión se cae. Con varios artículos con el MISMO nombre,
   // eso terminaba guardando el nombrado de piezas en el molde equivocado.
   const pidCfg = molderiaAbierta || modoMiMolde || productosCat.activo || '';
+  // «Nombre y número» (MAPA 601): las piezas elegidas (por nombre GENÉRICO: «Dorso» = todos los
+  // dorsos, como la etiqueta) y el campo que se está tocando; lo comparten el visor y la columna
+  const [ltSel, setLtSel] = useState(() => new Set());
+  const [ltCampo, setLtCampo] = useState('nombre');
+  const ltArrastre = useRef(null);          // {campo, gen, idx} mientras se arrastra una línea
+  const ltArrastro = useRef(false);         // para que soltar la línea no cuente como clic en la pieza
   // 🔴 «SÓLO LA HERRAMIENTA»: el molde con diseño se nombra y se etiqueta con LAS MISMAS
   // pantallas de Configuración, pero abiertas desde el pedido — y ahí el cliente NO tiene que
   // ver ni tocar los ajustes del taller (regla del usuario 2026-09-04). Con esto quedan fuera:
@@ -7408,6 +7906,17 @@ export default function App() {
       setPedidoPaso('planilla');
     }
   };
+  // «ESA FUENTE YA EXISTE» (pedido del usuario 2026-10-01): al subir una tipografía con el mismo
+  // nombre de archivo, o que adentro es la misma fuente (familia + estilo), el servidor no la pisa
+  // y contesta 409; acá se pregunta. Los estilos de una familia (Regular, Bold…) no chocan.
+  const preguntarFuenteExiste = (existe, archivo, reemplazar) => abrirConfirmar({
+    titulo: 'Esa fuente ya existe',
+    texto: `Ya está cargada «${existe.completo || existe.interno}» (archivo ${existe.archivo}). ` +
+      `¿Querés reemplazarla por la que estás subiendo (${archivo?.name || 'la nueva'}) o dejar la que está?`,
+    ok: 'Reemplazarla',
+    cancelar: 'Dejar la que está',
+    onOk: reemplazar,
+  });
   const resolverFuente = async (accion, datos) => {
     const pid = pidCfg || productosCat.activo;
     setFuenteSubiendo(true);
@@ -7416,7 +7925,7 @@ export default function App() {
       let _an = null;
       if (accion === 'subir') {
         // la tipografía se lee EN ESTA COMPUTADORA (nombre, glifos, choque); el servidor sólo la guarda
-        _an = await analizarFuente(datos.archivo, { pid, destino: datos.destino, rutaApi });
+        _an = await analizarFuente(datos.archivo, { pid, destino: datos.destino, rutaApi, reemplaza: datos.reemplaza || '' });
         const fd = new FormData();
         fd.append('archivo', datos.archivo);
         fd.append('destino', datos.destino);
@@ -7428,6 +7937,10 @@ export default function App() {
           body: JSON.stringify({ pid, faltante: datos.faltante, usar: datos.usar, original: datos.original || '' }) });
       }
       const d = await r.json();
+      if (accion === 'subir' && r.status === 409 && d.existe) {
+        preguntarFuenteExiste(d.existe, datos.archivo, () => resolverFuente('subir', { ...datos, reemplaza: d.existe.archivo }));
+        return;
+      }
       if (!r.ok) { showError(d.error || 'No se pudo resolver la fuente'); return; }
       // El reemplazo NO lo guarda el server: vive en ESTE pedido, y es de ESTE molde en ESTE
       // diseño. Se arma el mapa nuevo entero primero (el estado de React no lo tiene en este
@@ -7981,7 +8494,9 @@ export default function App() {
     finally { setPzNuevaCargando(false); }
   };
 
-  const handleUploadFile = async (type, file) => {
+  // `opciones.reemplaza` = el archivo de la tipografía que el usuario eligió REEMPLAZAR al contestar
+  // «esa fuente ya existe» (ver `preguntarFuenteExiste`)
+  const handleUploadFile = async (type, file, opciones = {}) => {
     if (!file) return;
     const formData = new FormData();
     formData.append('archivo', file);
@@ -8019,7 +8534,7 @@ export default function App() {
       if (type === 'fuente') {
         // la tipografía se lee EN ESTA COMPUTADORA; el servidor sólo la guarda (y la revalidación
         // del arte también se hace acá, después)
-        adjuntarAnalisis(formData, await analizarFuente(file, { pid: _pidMolde, destino: 'sistema', rutaApi }));
+        adjuntarAnalisis(formData, await analizarFuente(file, { pid: _pidMolde, destino: 'sistema', rutaApi, reemplaza: opciones.reemplaza || '' }));
       }
       if (type === 'arte') {
         // EL ARTE TAMBIÉN SE ANALIZA ACÁ (camino A): mesas, personalización, mapeo y validación
@@ -8048,6 +8563,11 @@ export default function App() {
       });
       let data;
       try { data = JSON.parse(res.text || '{}'); } catch { data = {}; }
+      if (type === 'fuente' && res.status === 409 && data.existe) {
+        // ya hay una igual: no se pisa sin preguntar
+        preguntarFuenteExiste(data.existe, file, () => handleUploadFile('fuente', file, { reemplaza: data.existe.archivo }));
+        return;
+      }
       if (!res.ok) throw new Error(data.error || "Error al procesar archivo");
       if (type === 'plantilla') data = await esperarMoldeLeido(data, (p) => setProcesando(p));
       if (preparado && !preparado.caminoA) { _seguirPaginas(preparado.clave, _pidMolde, preparado.prep); }
@@ -9932,6 +10452,103 @@ export default function App() {
   // hay moldes.)
 
 
+  // EL PEDIDO QUE VIAJA AL SERVIDOR (moldes, filas traducibles, telas, variables, reemplazos…). Una
+  // sola función: la tizada y el aviso de «se achicará» de la planilla (MAPA 601) mandan LO MISMO.
+  const cuerpoDelPedido = (ids, filasUtiles = null) => {
+    const _edoverride = (editableData?.objetos?.length && editableDiseno) ? { [editableDiseno]: { [verVariante || '*']: editorTfs } } : undefined;   // ajuste por pedido de editables POR VARIABLE
+    // A prueba de balas: recalcular la VARIABLE correcta de cada fila JUSTO acá (de su
+    // diseño → su molde), sin depender del efecto que rellena __variante. Solo se pisa si
+    // la variable guardada no es del molde de esa fila (evita mandar una variable de otro molde).
+    const _disCol = cols.find(c => c.role === 'diseno');
+    // 🔴 COLUMNA OCULTA = NO SE APLICA: se saca el valor antes de mandarlo, así el servidor no
+    // puede multiplicar por algo que el operario no está viendo.
+    // 🔴 SÓLO LAS FILAS QUE SE FABRICAN. Una fila ignorada (vacía o sin un dato obligatorio) no
+    // va ni a la tizada ni a la FICHA TÉCNICA: la ficha es la hoja con la que el taller controla
+    // lo que salió, así que listar filas que no se imprimieron la vuelve mentirosa (pedido del
+    // usuario 2026-08-31). La lista la pasa QUIEN LLAMA (`filasQueSalen()`), que se declara más
+    // abajo: usarla acá sería leerla antes de tiempo.
+    const _filasUtiles = filasUtiles || filas;
+    // LO QUE SE VE ES LO QUE SE MANDA (2026-09-28): una celda de botón vacía se ve con su opción
+    // por defecto PRESIONADA (`_valorBoton`), así que viaja con esa opción. Antes viajaba vacía y
+    // el servidor avisaba «filas sin elegir manga» sobre algo que en pantalla sí estaba elegido.
+    const _copia = !!copiaActivaRef.current;   // COPIA sólo con la columna Cantidad a la vista
+    const _filasVis = _filasUtiles.map(f => {
+      let g = f;
+      // COPIA: el número de la fila EN LA PLANILLA (el que ve la persona) → «Fila 3» en la mesa
+      if (_copia) { g = { ...f, __nfila: filas.indexOf(f) + 1 }; }
+      (botonesDefaultRef.current || []).forEach(({ id, def }) => {
+        if (def && !String(g[id] ?? '').trim()) { if (g === f) g = { ...f }; g[id] = def; }
+      });
+      return g;
+    });
+    const _filasQ = cantidadVisible || !colCantidad
+      ? _filasVis
+      : _filasVis.map(f => { const g = { ...f }; delete g[colCantidad.id]; return g; });
+    const prendasFinal = (hayVariablesPlanilla ? _filasQ.map(f => {
+      const cl = varianteDeDiseno(_disCol ? (f[_disCol.id] || '') : '');
+      const claveOk = cl && (!f.__variante || !variablesDisponibles.some(v => v.clave === f.__variante && ids.includes(v.moldeId)));
+      return claveOk ? { ...f, __variante: cl } : f;
+    }) : _filasQ);
+    // TELAS del pedido: tela base por molde + overrides por pieza (id → nombre para el motor).
+    const _telaNom = {}; (telasReg.telas || []).forEach(t => { _telaNom[t.id] = t.nombre; });
+    // `piezas_fuera` = PIEZAS A IMPRIMIR: `{pid: {slug: [genérico]}}`, por diseño como las telas (MAPA 577).
+    // `tela_principal` = la tela de TODAS las piezas de (molde, diseño) que no son excepción (MAPA 587)
+    const tela_base = {}, asignaciones = {}, piezas_fuera = {}, tela_principal = {};
+    ids.forEach(pid => {
+      const b = telaBaseMolde[pid]; if (b && _telaNom[b]) tela_base[pid] = _telaNom[b];
+    });
+    // `asignaciones` = { pid: { <slug del diseño>: { pieza: tela } } }. Va POR DISEÑO: dos
+    // diseños del mismo molde pueden ir en telas distintas, y el motor arma sus filas por el
+    // SLUG DEL NOMBRE del diseño — por eso la clave se convierte acá, no se manda el id.
+    (disenosPedido || []).forEach(d => {
+      const slug = _slugDiseno(d.nombre);
+      ids.forEach(pid => {
+        const ov = _telasDe(d.id, pid); const o = {};
+        Object.entries(ov).forEach(([pz, tid]) => { if (tid && _telaNom[tid]) o[pz] = _telaNom[tid]; });
+        if (Object.keys(o).length) { asignaciones[pid] = asignaciones[pid] || {}; asignaciones[pid][slug] = o; }
+        const _tp = telaPrincipalPed[`${d.id}|${pid}`];     // misma clave que `_claveTelaDis`
+        if (_tp && _telaNom[_tp]) { tela_principal[pid] = tela_principal[pid] || {}; tela_principal[pid][slug] = _telaNom[_tp]; }
+        const _pf = piezasFuera[`${d.id}|${pid}`] || [];   // misma clave que `_claveTelaDis`
+        if (_pf.length) { piezas_fuera[pid] = piezas_fuera[pid] || {}; piezas_fuera[pid][slug] = _pf; }
+      });
+    });
+    // LA VARIABLE DE CADA ESPACIO, MOLDE POR MOLDE: `{slug_del_espacio: {pid: clave}}`. En la
+    // fila entra UNA sola `__variante`, así que si el espacio usa dos moldes, para el segundo la
+    // fila llegaba sin variable y el motor generaba TODAS sus piezas. Con esto el server le
+    // devuelve a cada molde la variable que ese espacio eligió en el paso 1.
+    // …y QUÉ MOLDE VA EN QUÉ DISEÑO: `{slug: [pid]}`. El servidor no lo puede adivinar y sin
+    // esto generaba cada molde para las filas de TODOS los diseños (el pedido salía con el doble
+    // de tizadas y el mismo molde repetido en la ficha — reporte del usuario 2026-09-08).
+    const vars_por_diseno = {}, moldes_por_diseno = {};
+    (disenosPedido || []).forEach(d => {
+      const slug = _slugDiseno(d.nombre), m = {};
+      (disenoVars[d.id] || []).forEach(cl => {
+        const v = varByClave(cl);
+        if (v?.moldeId && !m[v.moldeId]) m[v.moldeId] = cl;   // la 1ª elegida para ese molde
+      });
+      if (Object.keys(m).length) vars_por_diseno[slug] = m;
+      const lst = (disenoMoldes[d.id] || []).filter(pid => ids.includes(pid));
+      if (lst.length) moldes_por_diseno[slug] = lst;
+    });
+    // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
+    // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
+    // REPO en la ficha: una columna más con lo que lleva cada fila (sólo si hay alguna de reposición).
+    const _hayRepo = repoOn && _filasQ.some(f => f.__repo && Object.keys(f.__repo).length);
+    const _nomMolde = (pid) => ((productosCat.productos || []).find(p => p.id === pid) || {}).nombre || pid;
+    const planilla = {
+      columnas: [...(cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })),
+                 ...(_hayRepo ? [{ id: '__repo_txt', label: 'Repo' }] : [])],
+      filas: !_hayRepo ? _filasQ : _filasQ.map(f => ({ ...f, __repo_txt: (f.__repo && Object.keys(f.__repo).length)
+        ? Object.entries(f.__repo).map(([pid, l]) => `${_nomMolde(pid)}: ${(l || []).join(', ')}`).join(' · ') : 'Todas' })),
+    };
+    // TALLES POR MESA (MAPA 593): con Copia no viaja (cada fila ya es su mesa)
+    const _tallesMesa = (!_copia && tallesMesa && Object.keys(tallesMesa).length) ? tallesMesa : undefined;
+    const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, talles_mesa: _tallesMesa, molds: ids, moldes_por_diseno,
+      // Repo apagado: lo elegido no viaja (todas las filas hacen todas sus piezas)
+      prendas: repoOn ? prendasFinal : prendasFinal.map(({ __repo, ...f }) => f), default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
+    return _cuerpo;
+  };
+
   const generarMulti = async (filasUtiles = null) => {
     const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
     if (!ids.length) { showError('Elegí al menos un molde.'); return; }
@@ -9947,97 +10564,7 @@ export default function App() {
     setTrabajosMulti([{ productoId: ids.join(','), nombre: ids.map(id => moldeById(id)?.nombre).join(' + '), jobId: null, estado: 'en cola', resultado: null, error: null, progreso: '' }]);
     setPedidoPaso('resultados');   // navegar al paso 5 SOLO cuando el trabajo ya arrancó (evita pantalla en negro)
     try {
-      const _edoverride = (editableData?.objetos?.length && editableDiseno) ? { [editableDiseno]: { [verVariante || '*']: editorTfs } } : undefined;   // ajuste por pedido de editables POR VARIABLE
-      // A prueba de balas: recalcular la VARIABLE correcta de cada fila JUSTO acá (de su
-      // diseño → su molde), sin depender del efecto que rellena __variante. Solo se pisa si
-      // la variable guardada no es del molde de esa fila (evita mandar una variable de otro molde).
-      const _disCol = cols.find(c => c.role === 'diseno');
-      // 🔴 COLUMNA OCULTA = NO SE APLICA: se saca el valor antes de mandarlo, así el servidor no
-      // puede multiplicar por algo que el operario no está viendo.
-      // 🔴 SÓLO LAS FILAS QUE SE FABRICAN. Una fila ignorada (vacía o sin un dato obligatorio) no
-      // va ni a la tizada ni a la FICHA TÉCNICA: la ficha es la hoja con la que el taller controla
-      // lo que salió, así que listar filas que no se imprimieron la vuelve mentirosa (pedido del
-      // usuario 2026-08-31). La lista la pasa QUIEN LLAMA (`filasQueSalen()`), que se declara más
-      // abajo: usarla acá sería leerla antes de tiempo.
-      const _filasUtiles = filasUtiles || filas;
-      // LO QUE SE VE ES LO QUE SE MANDA (2026-09-28): una celda de botón vacía se ve con su opción
-      // por defecto PRESIONADA (`_valorBoton`), así que viaja con esa opción. Antes viajaba vacía y
-      // el servidor avisaba «filas sin elegir manga» sobre algo que en pantalla sí estaba elegido.
-      const _copia = !!copiaActivaRef.current;   // COPIA sólo con la columna Cantidad a la vista
-      const _filasVis = _filasUtiles.map(f => {
-        let g = f;
-        // COPIA: el número de la fila EN LA PLANILLA (el que ve la persona) → «Fila 3» en la mesa
-        if (_copia) { g = { ...f, __nfila: filas.indexOf(f) + 1 }; }
-        (botonesDefaultRef.current || []).forEach(({ id, def }) => {
-          if (def && !String(g[id] ?? '').trim()) { if (g === f) g = { ...f }; g[id] = def; }
-        });
-        return g;
-      });
-      const _filasQ = cantidadVisible || !colCantidad
-        ? _filasVis
-        : _filasVis.map(f => { const g = { ...f }; delete g[colCantidad.id]; return g; });
-      const prendasFinal = (hayVariablesPlanilla ? _filasQ.map(f => {
-        const cl = varianteDeDiseno(_disCol ? (f[_disCol.id] || '') : '');
-        const claveOk = cl && (!f.__variante || !variablesDisponibles.some(v => v.clave === f.__variante && ids.includes(v.moldeId)));
-        return claveOk ? { ...f, __variante: cl } : f;
-      }) : _filasQ);
-      // TELAS del pedido: tela base por molde + overrides por pieza (id → nombre para el motor).
-      const _telaNom = {}; (telasReg.telas || []).forEach(t => { _telaNom[t.id] = t.nombre; });
-      // `piezas_fuera` = PIEZAS A IMPRIMIR: `{pid: {slug: [genérico]}}`, por diseño como las telas (MAPA 577).
-      // `tela_principal` = la tela de TODAS las piezas de (molde, diseño) que no son excepción (MAPA 587)
-      const tela_base = {}, asignaciones = {}, piezas_fuera = {}, tela_principal = {};
-      ids.forEach(pid => {
-        const b = telaBaseMolde[pid]; if (b && _telaNom[b]) tela_base[pid] = _telaNom[b];
-      });
-      // `asignaciones` = { pid: { <slug del diseño>: { pieza: tela } } }. Va POR DISEÑO: dos
-      // diseños del mismo molde pueden ir en telas distintas, y el motor arma sus filas por el
-      // SLUG DEL NOMBRE del diseño — por eso la clave se convierte acá, no se manda el id.
-      (disenosPedido || []).forEach(d => {
-        const slug = _slugDiseno(d.nombre);
-        ids.forEach(pid => {
-          const ov = _telasDe(d.id, pid); const o = {};
-          Object.entries(ov).forEach(([pz, tid]) => { if (tid && _telaNom[tid]) o[pz] = _telaNom[tid]; });
-          if (Object.keys(o).length) { asignaciones[pid] = asignaciones[pid] || {}; asignaciones[pid][slug] = o; }
-          const _tp = telaPrincipalPed[`${d.id}|${pid}`];     // misma clave que `_claveTelaDis`
-          if (_tp && _telaNom[_tp]) { tela_principal[pid] = tela_principal[pid] || {}; tela_principal[pid][slug] = _telaNom[_tp]; }
-          const _pf = piezasFuera[`${d.id}|${pid}`] || [];   // misma clave que `_claveTelaDis`
-          if (_pf.length) { piezas_fuera[pid] = piezas_fuera[pid] || {}; piezas_fuera[pid][slug] = _pf; }
-        });
-      });
-      // LA VARIABLE DE CADA ESPACIO, MOLDE POR MOLDE: `{slug_del_espacio: {pid: clave}}`. En la
-      // fila entra UNA sola `__variante`, así que si el espacio usa dos moldes, para el segundo la
-      // fila llegaba sin variable y el motor generaba TODAS sus piezas. Con esto el server le
-      // devuelve a cada molde la variable que ese espacio eligió en el paso 1.
-      // …y QUÉ MOLDE VA EN QUÉ DISEÑO: `{slug: [pid]}`. El servidor no lo puede adivinar y sin
-      // esto generaba cada molde para las filas de TODOS los diseños (el pedido salía con el doble
-      // de tizadas y el mismo molde repetido en la ficha — reporte del usuario 2026-09-08).
-      const vars_por_diseno = {}, moldes_por_diseno = {};
-      (disenosPedido || []).forEach(d => {
-        const slug = _slugDiseno(d.nombre), m = {};
-        (disenoVars[d.id] || []).forEach(cl => {
-          const v = varByClave(cl);
-          if (v?.moldeId && !m[v.moldeId]) m[v.moldeId] = cl;   // la 1ª elegida para ese molde
-        });
-        if (Object.keys(m).length) vars_por_diseno[slug] = m;
-        const lst = (disenoMoldes[d.id] || []).filter(pid => ids.includes(pid));
-        if (lst.length) moldes_por_diseno[slug] = lst;
-      });
-      // Planilla EXACTA para la ficha técnica: SOLO las columnas que se ven en el paso planilla
-      // (respeta el ocultado por molde, `colActiva`) — si una columna está oculta ahí, no va en la ficha.
-      // REPO en la ficha: una columna más con lo que lleva cada fila (sólo si hay alguna de reposición).
-      const _hayRepo = repoOn && _filasQ.some(f => f.__repo && Object.keys(f.__repo).length);
-      const _nomMolde = (pid) => ((productosCat.productos || []).find(p => p.id === pid) || {}).nombre || pid;
-      const planilla = {
-        columnas: [...(cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })),
-                   ...(_hayRepo ? [{ id: '__repo_txt', label: 'Repo' }] : [])],
-        filas: !_hayRepo ? _filasQ : _filasQ.map(f => ({ ...f, __repo_txt: (f.__repo && Object.keys(f.__repo).length)
-          ? Object.entries(f.__repo).map(([pid, l]) => `${_nomMolde(pid)}: ${(l || []).join(', ')}`).join(' · ') : 'Todas' })),
-      };
-      // TALLES POR MESA (MAPA 593): con Copia no viaja (cada fila ya es su mesa)
-      const _tallesMesa = (!_copia && tallesMesa && Object.keys(tallesMesa).length) ? tallesMesa : undefined;
-      const _cuerpo = { piezas_fuera, tela_principal, cantidad_copia: _copia, talles_mesa: _tallesMesa, molds: ids, moldes_por_diseno,
-        // Repo apagado: lo elegido no viaja (todas las filas hacen todas sus piezas)
-        prendas: repoOn ? prendasFinal : prendasFinal.map(({ __repo, ...f }) => f), default_diseno: disenoActivo || disenosPedido[0]?.id || 'principal', perfil_forzado: perfilForzado || undefined, editables: _edoverride, marcas_pedido: marcasPedido, sin_marca_pedido: sinMarcaPedido, tela_base, asignaciones, planilla, vars_por_diseno, fuentes_reemplazo: _reemplActivo(pidCfg || productosCat.activo), fuentes_reemplazo_por: fuentesReempl };
+      const _cuerpo = cuerpoDelPedido(ids, filasUtiles);
       // 🔴 LA TIZADA SE GENERA EN ESTA COMPUTADORA (PLAN_NAVEGADOR, etapa 4): el servidor revisa
       // el pedido, esta máquina arma las piezas, las acomoda, escribe la hoja y la ficha, y manda
       // el paquete; el servidor lo guarda como un trabajo más. Si el pedido trae un molde que no es
@@ -11053,6 +11580,13 @@ export default function App() {
   // la pieza elegida (`etqPiezaSel` + `etqPzTocada`), que por definición es de a UNA. Si tuviera
   // estado propio, el panel y el visor mostrarían cosas distintas.
   const capasSelModo = (empModo && empTodas) ? 'multi' : (tabAjustesMolde === 'etiqueta' ? 'etiqueta' : null);
+  // «Nombre y número»: los bordes laterales de cada pieza del lienzo, una vez por lienzo
+  const ltFilas = useMemo(() => {
+    const m = new Map();
+    if (tabAjustesMolde !== 'texto' || !canvasLayout) return m;
+    for (const p of canvasLayout.layout || []) m.set(p.idx, _filasDePath(p.path_svg));
+    return m;
+  }, [tabAjustesMolde, canvasLayout]);
   const pzEstaSel = (p) => (capasSelModo === 'etiqueta'
     ? (!!etqPiezaSel && nombreGenerico((p.name || '').trim()) === etqPiezaSel)
     : selNombrar.has(p.idx));
@@ -11245,6 +11779,7 @@ export default function App() {
   // sólo dibuja: una mesa por pieza con el nombre que lee el motor, las capas y los contornos. Si no
   // la encuentra, AVISA (ventana con cómo instalarla) y nada más: no decide nada por su cuenta.
   const [armandoIllustrator, setArmandoIllustrator] = useState(null);   // texto del cartel, o null
+  const [armandoEn, setArmandoEn] = useState('Illustrator');            // en qué programa (el mismo cartel sirve para CorelDRAW)
   const [illustratorFalta, setIllustratorFalta] = useState(false);
   // QUÉ TALLES y A QUÉ ESCALA (pedido del usuario 2026-09-23: «talle por talle se podrán elegir
   // algunos o todos los talles, o uno solo, y crearlo a escala: todo en un solo archivo de
@@ -11419,6 +11954,7 @@ export default function App() {
       // (el aviso sale por el mismo cartel de error de abajo: una llamada más a `showMsg` acá la
       // contaría el control de TDZ, que tiene el tope congelado)
       if (_tallesSel && !_tallesSel.length) throw new Error(`elegí al menos un ${(term?.variante || 'talle').toLowerCase()}.`);
+      setArmandoEn('Illustrator');
       setArmandoIllustrator('Buscando Illustrator en esta computadora…');
       await pintarYa();
       const ext = await buscarIllustrator();
@@ -11792,6 +12328,44 @@ export default function App() {
    *  columnas obligatorias quedan afuera —de la tizada Y de la ficha técnica—. */
   const filasQueSalen = React.useCallback(() => filas.filter(f => !filaVacia(f) && !_faltaEnFila(f).length),
   [filas, columnasObligatorias, cols, columnasActivasPlanilla, _faltaEnFila]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // «SE ACHICARÁ» (MAPA 601): por fila y por campo, cuánto se achica el texto para entrar en el límite
+  // de la pieza, medido con el mismo plan y el mismo estampado que la tizada. Se recalcula con un
+  // respiro cuando cambia la planilla; si no se puede calcular (falta algo), no avisa nada.
+  const [achiques, setAchiques] = useState({});
+  const [escaneando, setEscaneando] = useState(false);   // midiendo: «Escaneando planilla…» y Enviar frenado
+  // ALERTAS AL COSTADO (pedido del usuario 2026-10-01: «que no sea una columna, que se note que es una
+  // alerta, al lado de cada fila, sin marca de columna ni título»): van fuera del marco de la tabla, y
+  // para quedar a la altura de su fila se mide cada `tr` (offsetTop/offsetHeight: no los mueve el
+  // zoom del panel ni el `translateY` del arrastre de filas)
+  const plTablaRef = useRef(null);
+  const [plAltos, setPlAltos] = useState([]);
+  useEffect(() => {
+    const t = plTablaRef.current;
+    if (!t) return;
+    const hs = [...t.querySelectorAll('tbody > tr[data-fila]')].map(r => [r.offsetTop, r.offsetHeight]);
+    if (JSON.stringify(hs) !== JSON.stringify(plAltos)) setPlAltos(hs);
+  });
+  const _firmaAchique = pedidoPaso === 'planilla' ? JSON.stringify([filas, moldesSeleccionados, fuentesReempl, disenoVars]) : '';
+  useEffect(() => {
+    if (pedidoPaso !== 'planilla' || !sesionLista) { setEscaneando(false); return; }
+    let cortado = false;
+    // 🔴 ENVIAR SE FRENA MIENTRAS SE MIDE (pedido del usuario 2026-10-01: «que no deje pasar a enviar
+    // hasta que no esté la alerta»): se marca ya, apenas cambia la planilla, no al terminar la espera
+    setEscaneando(true);
+    const tm = setTimeout(async () => {
+      try {
+        const ids = (moldesSeleccionados.length ? moldesSeleccionados : [productosCat.activo]).filter(Boolean);
+        const salen = filasQueSalen();
+        if (!ids.length || !salen.length) { setAchiques({}); return; }
+        // `__nfila`: que cada prenda vuelva con el número de SU fila en la planilla
+        const cuerpo = cuerpoDelPedido(ids, salen.map(f => ({ ...f, __nfila: filas.indexOf(f) + 1 })));
+        const r = await achiquesEnNavegador({ ...cuerpo, cantidad_copia: false }, { rutaApi, cortado: () => cortado });
+        if (!cortado) setAchiques(r || {});
+      } catch { if (!cortado) setAchiques({}); }
+      finally { if (!cortado) setEscaneando(false); }
+    }, 300);
+    return () => { cortado = true; clearTimeout(tm); };
+  }, [_firmaAchique, sesionLista]);
   /** Cuántas prendas sale una fila. 🔴 Si la columna NO está a la vista vale 1: lo que no se ve no
    *  puede multiplicar la tizada (decisión del usuario 2026-08-26). El valor cargado NO se borra:
    *  vuelve a valer en cuanto la columna se muestre otra vez. */
@@ -12386,17 +12960,17 @@ export default function App() {
       {
         // Los OBJETOS AGREGADOS ya vienen en `d.objetos` con la MISMA forma que los del arte.
         // Sólo se marcan para las acciones de la barra.
-        d.objetos = (d.objetos || []).map(o => (o.agregado ? _objAgregadoAEditable(o, '') : o));
+        d.objetos = (d.objetos || []).map(o => (o.agregado ? _objAgregadoAEditable(o, '') : o)).map(o => ({ ...o, clave: _claveEd(o) }));
         setEditableData(d); setEditableDiseno(diseno || 'principal');
         // Al reabrir el MISMO contexto (mismo molde+diseño+variable) con ediciones en memoria, NO pisar:
         // el usuario debe seguir viendo lo que editó. Solo se recarga la base al cambiar de contexto.
         const ctxKey = `${pid}|${diseno || 'principal'}|${variante || '*'}`;
         const keep = ctxKey === editorCtx.current && Object.keys(editorTfsRef.current || {}).length > 0;
         if (!keep) {
-          setEditableSel(d.objetos?.[0]?.nombre ? [d.objetos[0].nombre] : []);   // SIEMPRE array (ver arriba)
+          setEditableSel(d.objetos?.[0]?.clave ? [d.objetos[0].clave] : []);   // SIEMPRE array (ver arriba)
           const _t0 = d.talles?.[Math.floor((d.talles.length - 1) / 2)] || d.talles?.[0] || null; setEditableTalle(_t0); setEditableVarsSel(_t0 ? [_t0] : []);
           // arranca desde la BASE guardada por diseño (los ajustes del pedido se hacen encima)
-          const base = Object.fromEntries((d.objetos || []).map(o => [o.nombre, { ...(o.transforms || {}) }]));
+          const base = Object.fromEntries((d.objetos || []).map(o => [o.clave, { ...(o.transforms || {}) }]));
           setEditorTfs(base); histReset(base);
         }
         editorCtx.current = ctxKey;
@@ -12554,7 +13128,7 @@ export default function App() {
       if (!o._agregado && (!o.mesa_rect || !o.bbox_mu)) return [];
       // Transform del talle en vista; si ese talle no tiene el suyo se usa cualquiera guardado
       // (mismo criterio que el motor) → el objeto se ve donde se puso, no en la posición base.
-      const _tfs = editorTfs[o.nombre] || {};
+      const _tfs = editorTfs[_claveEd(o)] || {};
       const tf = _tfs[T] || Object.values(_tfs).find(Boolean) || { dx: 0, dy: 0, rot: 0, scale: 1 };
       return canvasLayout.layout
         .filter(q => nombreGenerico(etqNombres[q.idx] || q.name || '') === _og)
@@ -12942,6 +13516,76 @@ export default function App() {
     setErrorInformativo(txt);
     setMensajeInformativo('');
     setTimeout(() => setErrorInformativo(prev => prev === txt ? '' : prev), 7000);
+  };
+
+  // NOMBRE Y NÚMERO DEL MOLDE (2026-10-01): hasta dónde puede llegar cada campo. Vive DESPUÉS de
+  // `showError` (contrato TDZ).
+  const cargarLimiteTexto = async () => {
+    const pid = pidCfg; if (!pid) return;
+    try {
+      const r = await fetch(`/api/productos/limite_texto?pid=${encodeURIComponent(pid)}`);
+      if (r.ok) setLimiteTexto(await r.json());
+    } catch { /* si la lectura falla, queda lo que había */ }
+  };
+  const guardarLimiteTexto = async (limite) => {
+    const pid = pidCfg; if (!pid) return;
+    try {
+      const r = await fetch('/api/productos/limite_texto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid, limite }) });
+      const d = await leerJson(r);
+      if (!r.ok) { showError(d.error || 'No se pudo guardar'); return; }
+      setLimiteTexto(d);
+      // cambia cómo se estampa el nombre/número (LEY arte = tizada): los previews cacheados quedaron viejos
+      _pvCache.current = {}; setPreviewPiezas({});
+      showMsg('Nombre y número guardados ✓');
+    } catch { showError('No se pudo guardar'); }
+  };
+
+  // ── CREAR EN CORELDRAW (MAPA 598) ──────────────────────────────────────────────────────────
+  // El mismo plan que «Crear en Illustrator» (mismas mesas, nombres, capas, contorno y fondo),
+  // pasado a UNA PÁGINA POR MESA (`motor/molde/corel.js → planCorel`). En Corel no hay tope de
+  // lienzo: siempre UN archivo y a tamaño real (el % y el reparto en varios archivos son de
+  // Illustrator). Vive acá abajo por el contrato TDZ: usa `showMsg`/`showError`.
+  const [corelFalta, setCorelFalta] = useState(false);
+  const [_verCorel, setVerCorel] = useState(null);
+  const [_hayInstCorel, setHayInstCorel] = useState(false);   // el publicado no tiene el instalador
+  useEffect(() => { versionCorelDelServidor(rutaApi).then(d => { setVerCorel((d && d.version) || null); setHayInstCorel(!!(d && d.instalador)); }); }, []);
+  const bajarInstaladorCorel = () => descargarArchivo(rutaApi('/api/corel/instalador'),
+    `Instalar-USER-PRO-Corel${_verCorel ? '-' + _verCorel : ''}.exe`, { avisar: showError });
+  const abrirEnCorel = async () => {
+    if (_illustratorRef.current) return;             // ya hay una en curso (de Illustrator o de Corel)
+    const _tallesSel = _tallesSelIllu();
+    _illustratorRef.current = true;
+    try {
+      if (_tallesSel && !_tallesSel.length) throw new Error(`elegí al menos un ${(term?.variante || 'talle').toLowerCase()}.`);
+      setArmandoEn('CorelDRAW');
+      setArmandoIllustrator('Buscando CorelDRAW en esta computadora…');
+      await pintarYa();
+      const ext = await buscarCorel();
+      if (!ext) { setCorelFalta(true); return; }
+      if (!ext.corel || Number(ext.corel_version) < 24) throw new Error('el programa de USER PRO está, pero en esta computadora no hay CorelDRAW 2022 o más nuevo.');
+      setArmandoIllustrator('Calculando las mesas y las guías…');
+      const d = await _datosIllu(_clavesIllu(_tallesSel));
+      const _var = verVariante ? (variantesEdit || []).find(t => t.clave === verVariante) : null;
+      const talles = configMedida === 'rango' && rangosIllu.length
+        ? rangosIllu.map(rg => `${rg.talles[0]}-${rg.talles[rg.talles.length - 1]}`)
+        : (_tallesSel && _tallesSel.length < tallesMolde.length ? _tallesSel : null);
+      // el ARCHIVO se llama como el molde y la variable (igual que en Illustrator), .cdr
+      const nombre = [d.titulo || 'Molde', _var && _var.label, talles && talles.length ? talles.join(' ') : null].filter(Boolean).join(' - ');
+      const { plan, avisos, nMesas } = planCorel(d.capas_data, { ..._optsIllu(d), archivo: nombre });
+      setArmandoIllustrator(`Armando ${nMesas} mesa${nMesas === 1 ? '' : 's'} en CorelDRAW, una por página… Si Corel estaba cerrado, primero se abre.`);
+      await pintarYa();
+      const r = await enviarACorel(plan);
+      const extra = [...avisos];
+      if (_hayInstCorel && _verCorel && ext.version !== _verCorel) extra.push(`Hay una versión nueva del programa de Corel (tenés la ${ext.version}, la nueva es la ${_verCorel}): bajala desde el «?» de «CorelDRAW conectado» y volvé a instalar.`);
+      if (r.textosFallidos) extra.push(`${r.textosFallidos} mesa${r.textosFallidos === 1 ? '' : 's'} quedó sin su nombre escrito: Corel no lo aceptó.`);
+      const _guardado = r.archivo ? ` Guardado como «${r.archivo}» en Documentos › USER PRO › Plantillas (abre desde CorelDRAW 2022).` : '';
+      showMsg(`Listo en CorelDRAW: ${r.mesas} mesa${r.mesas === 1 ? '' : 's'} de trabajo, una por página.` + _guardado + (extra.length ? ' ' + extra.join(' ') : ''));
+    } catch (e) {
+      showError('No se pudo armar en CorelDRAW: ' + (e.message || e));
+    } finally {
+      setArmandoIllustrator(null);
+      _illustratorRef.current = false;
+    }
   };
 
   // (Vive acá abajo y no junto a `guardarTelaAncho` por el contrato TDZ: usa `showMsg`.)
@@ -14499,6 +15143,39 @@ export default function App() {
     return () => { cancelado = true; };
   }, [pedidoPaso, moldesSeleccionados.join(','), productosCat.activo, sesionLista, fuenteCharsTick]);
 
+  // «SE ACHICARÁ» (MAPA 601): qué le pasa al texto de cada celda. Por debajo de `_UMBRAL_LEGIBLE` del
+  // tamaño del diseño se marca en rojo («puede no leerse»); si no, en ámbar (sale más chico, se lee).
+  const _UMBRAL_LEGIBLE = 0.6;
+  const _sinTildeA = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const _campoDeCol = (c) => (c.role === 'nombre' ? 'nombre' : c.role === 'numero' ? 'numero' : _sinTildeA(c.label || c.id));
+  const achiqueDe = (i, c) => (achiques[i] || {})[_campoDeCol(c)] || null;
+  const _resumenAchiques = (() => {
+    let filasN = 0, malas = 0;
+    const porCampo = {};                     // {campo: {filas, malas}} en el orden en que aparecen
+    Object.values(achiques || {}).forEach(cs => {
+      const vs = Object.values(cs || {});
+      if (vs.length) filasN++;
+      if (vs.some(x => x.k < _UMBRAL_LEGIBLE)) malas++;
+      Object.entries(cs || {}).forEach(([campo, x]) => {
+        const e = porCampo[campo] || (porCampo[campo] = { filas: 0, malas: 0 });
+        e.filas++;
+        if (x.k < _UMBRAL_LEGIBLE) e.malas++;
+      });
+    });
+    return { filasN, malas, porCampo };
+  })();
+  const _cmTxt = (v) => Math.max(0.1, v).toFixed(1).replace('.', ',');
+  const _nombreCampoA = (campo) => (campo === 'nombre' ? 'Nombre' : campo === 'numero' ? 'Número' : campo.charAt(0).toUpperCase() + campo.slice(1));
+  const _elCampoA = (campo) => (campo === 'nombre' ? 'El nombre' : campo === 'numero' ? 'El número' : `«${_nombreCampoA(campo)}»`);
+  // por qué existe el límite, con las palabras de cada campo (letras / dígitos / caracteres)
+  const _porQueLimite = (campo) => {
+    const el = campo === 'nombre' ? 'un nombre' : campo === 'numero' ? 'un número' : `«${_nombreCampoA(campo)}»`;
+    const que = campo === 'nombre' ? 'demasiadas letras' : campo === 'numero' ? 'demasiados dígitos' : 'demasiados caracteres';
+    const lo = campo === 'nombre' ? 'el nombre' : campo === 'numero' ? 'el número' : `«${_nombreCampoA(campo)}»`;
+    return `Si ${el} tiene ${que}, podría salirse del molde y quedar cortado. Por eso ${lo} tiene un límite de ancho: así se ve correcto y completo. Cuando lo supera, se achica proporcionalmente para entrar.`;
+  };
+  const _textoAchique = (x, valor) => `«${valor}» no entra en ${x.pieza} (talle ${x.talle}${x.molde ? ' · ' + x.molde : ''}) y sale ${_cmTxt(x.alto0_cm - x.alto_cm)} cm más chico: la letra queda de ${_cmTxt(x.alto_cm)} cm en vez de ${_cmTxt(x.alto0_cm)} cm.` +
+    (x.k < _UMBRAL_LEGIBLE ? ' Puede no leerse bien: probá un texto más corto o cambiá el margen en «Nombre y número» del molde.' : '');
   // ¿La fuente NO tiene este caracter? (los espacios nunca se marcan)
   const faltaEnFuente = (ch) => !!fuenteChars && fuenteChars.size > 0 && String(ch).trim() !== '' && !fuenteChars.has(ch);
   // Texto TAL CUAL se ve/estampa en esa columna (el nombre se muestra en mayúsculas)
@@ -15033,14 +15710,14 @@ export default function App() {
 
         {/* ARMANDO EN ILLUSTRATOR: un cartel de punta a punta que no deja tocar nada (ver `abrirEnIllustrator`). */}
         {armandoIllustrator && createPortal(
-          <div role="alert" aria-busy="true" data-cargando="Se está armando la plantilla en Illustrator."
+          <div role="alert" aria-busy="true" data-cargando={`Se está armando la plantilla en ${armandoEn}.`}
             onPointerDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onKeyDownCapture={(e) => { e.preventDefault(); e.stopPropagation(); }} tabIndex={-1} autoFocus
             style={{ position: 'fixed', inset: 0, zIndex: 10060, background: 'rgba(2,6,12,0.84)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'wait' }}>
             <div style={{ background: '#141416', border: '1px solid var(--border-light)', borderRadius: 14, padding: '26px 36px', textAlign: 'center', minWidth: 340, maxWidth: 460 }}>
               <div style={{ width: 40, height: 40, margin: '0 auto 14px', border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'ldspin 0.8s linear infinite' }} />
-              <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 6 }}>Creando en Illustrator</div>
+              <div style={{ fontSize: 15.5, fontWeight: 700, marginBottom: 6 }}>Creando en {armandoEn}</div>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{armandoIllustrator}</div>
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 14 }}>Esperá a que termine: mientras tanto la pantalla queda bloqueada.</div>
               <style>{`@keyframes ldspin{to{transform:rotate(360deg)}}`}</style>
@@ -15048,6 +15725,27 @@ export default function App() {
           </div>,
           document.body
         )}
+        <Modal open={corelFalta} onClose={() => setCorelFalta(false)} centrado maxWidth={520}
+          titulo="No encontré CorelDRAW" subtitulo="Hace falta el programa USER PRO para CorelDRAW en esta computadora">
+          <ol style={{ margin: '0 0 14px', paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+            {_hayInstCorel
+              ? <li>Si esta computadora todavía no lo tiene: tocá <b>Bajar el instalador</b>, abrilo con doble clic y tocá <b>Instalar</b>.</li>
+              : <li>Si esta computadora todavía no lo tiene: pedile el instalador (<b>Instalar-USER-PRO-Corel</b>) a quien administra TIZADA, abrilo con doble clic y tocá <b>Instalar</b>.</li>}
+            <li>Fijate que esté el ícono de <b>USER PRO</b> junto al reloj de Windows (arranca solo con la computadora). Si no está, volvé a abrir el instalador y tocá <b>Reinstalar</b>.</li>
+            <li>Tocá <b>Conectar con CorelDRAW</b> otra vez. Si el navegador pide permiso, tocá <b>Permitir</b>: es esta misma computadora.</li>
+          </ol>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+            Hace falta <b>CorelDRAW Graphics Suite 2022</b> o más nuevo. No hace falta tenerlo abierto: se abre solo al crear.
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button type="button" className="btn ghost" onClick={() => setCorelFalta(false)}>Cerrar</button>
+            {_hayInstCorel && (
+              <button type="button" className="btn" onClick={bajarInstaladorCorel}>
+                <Icon name="download" style={{ width: 13, height: 13, marginRight: 6 }} />Bajar el instalador
+              </button>
+            )}
+          </div>
+        </Modal>
         <Modal open={illustratorFalta} onClose={() => setIllustratorFalta(false)} centrado maxWidth={520}
           titulo="No encontré Illustrator" subtitulo="Hace falta Illustrator abierto en esta computadora, con la extensión de USER PRO">
           <ol style={{ margin: '0 0 14px', paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
@@ -16503,6 +17201,44 @@ export default function App() {
                       </div>
                     )}
                   </div>
+                  {/* ESCANEANDO: mientras se mide la planilla (Enviar queda frenado hasta que termina) */}
+                  {escaneando && filas.length > 0 && (
+                    <div data-tour="planilla-escaneando" style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 13px', borderRadius: 10, marginBottom: 8,
+                      background: 'rgba(0,216,245,0.07)', border: '1px solid rgba(0,216,245,0.35)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                      <span style={{ width: 14, height: 14, border: '2px solid rgba(0,216,245,0.25)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'perfilSpin 0.8s linear infinite', flexShrink: 0 }} />
+                      <b style={{ color: 'var(--accent)' }}>Escaneando planilla…</b> revisando si algún nombre o número no entra en su pieza.
+                    </div>
+                  )}
+                  {/* «SE ACHICARÁ» (MAPA 601): textos que no entran en el límite de su pieza y salen más chicos */}
+                  {!escaneando && _resumenAchiques.filasN > 0 && (() => {
+                    const _colA = _resumenAchiques.malas ? 'var(--danger, #ef4444)' : 'var(--warning, #e0a020)';
+                    return (
+                      <div style={{ display: 'flex', gap: 13, alignItems: 'flex-start', padding: '12px 15px', borderRadius: 12, marginBottom: 10,
+                        background: _resumenAchiques.malas ? 'linear-gradient(90deg, rgba(239,68,68,0.13), rgba(239,68,68,0.04))' : 'linear-gradient(90deg, rgba(224,160,32,0.14), rgba(224,160,32,0.04))',
+                        border: '1px solid ' + (_resumenAchiques.malas ? 'rgba(239,68,68,0.45)' : 'rgba(224,160,32,0.45)'), borderLeft: '4px solid ' + _colA }}>
+                        <span style={{ flexShrink: 0, width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: _colA, color: _resumenAchiques.malas ? '#fff' : '#1a1200', fontSize: 16, fontWeight: 900 }}>↓</span>
+                        <div style={{ fontSize: 12.5, lineHeight: 1.5, minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, fontSize: 13.5, color: _colA, marginBottom: 6 }}>
+                            {_resumenAchiques.filasN === 1 ? 'Una fila tiene un texto que se va a achicar' : `${_resumenAchiques.filasN} filas tienen textos que se van a achicar`}
+                          </div>
+                          {Object.entries(_resumenAchiques.porCampo).map(([campo, e]) => (
+                            <div key={campo} style={{ display: 'flex', gap: 9, alignItems: 'baseline', marginBottom: 5 }}>
+                              <span style={{ flexShrink: 0, padding: '0 9px', borderRadius: 999, fontSize: 11, fontWeight: 800, lineHeight: '19px',
+                                background: e.malas ? 'var(--danger, #ef4444)' : 'var(--warning, #e0a020)', color: e.malas ? '#fff' : '#1a1200' }}>
+                                {_nombreCampoA(campo)} · {e.filas} {e.filas === 1 ? 'fila' : 'filas'}
+                              </span>
+                              <span style={{ color: 'var(--text-secondary)' }}>{_porQueLimite(campo)}</span>
+                            </div>
+                          ))}
+                          <div style={{ color: 'var(--text-muted)', fontSize: 11.5, marginTop: 2 }}>
+                            Al lado de cada fila marcada ves cuánto se achica (pasá el mouse para ver en qué pieza y qué alto le queda).
+                            {_resumenAchiques.malas ? <> En <b style={{ color: 'var(--danger, #ef4444)' }}>rojo</b>, los que quedan tan chicos que pueden no leerse: conviene acortarlos.</> : null}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
 
                   {/* ══ BARRA DE HERRAMIENTAS ══════════════════════════════════════════════════
@@ -16614,9 +17350,10 @@ export default function App() {
                   
                   {/* el marco envuelve la tabla y NADA MÁS: `max-content` + tope del 100% (si la
                       planilla es más ancha que la pantalla, scrollea como siempre) */}
-                  <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.18)', boxShadow: '0 4px 18px rgba(0,0,0,0.25)', width: 'max-content', maxWidth: '100%',
-                                marginLeft: 'auto', marginRight: 'auto' }}>
-                    <table className="planilla-tbl" data-tour="planilla-tabla" style={{ width: 'max-content', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.18)', boxShadow: '0 4px 18px rgba(0,0,0,0.25)', width: 'max-content',
+                                flex: '0 1 auto', minWidth: 0 }}>
+                    <table ref={plTablaRef} className="planilla-tbl" data-tour="planilla-tabla" style={{ width: 'max-content', borderCollapse: 'separate', borderSpacing: 0, margin: 0, userSelect: (plFill || plSelDrag) ? 'none' : 'auto' }}>
                       {/* ANCHOS: los fija el contenido (ver `ANCHO_COL`). La tabla mide EXACTO lo que
                           suman sus columnas (`width: max-content`): donde terminan, termina la
                           planilla, y a la derecha se ve el fondo del panel. Antes había una columna
@@ -16657,6 +17394,10 @@ export default function App() {
                           const _sel = filasSel.has(i);
                           const _arrastrando = !!dragFilas && dragFilas.sel.includes(i);
                           const _dy = desplazoFila(i);
+                          // fila con alerta: teñida CLARITO del color de su alerta (no tapa lo que se escribe)
+                          const _alF = Object.values(achiques[i] || {});
+                          const _tinte = !_alF.length ? undefined
+                            : _alF.some(x => x.k < _UMBRAL_LEGIBLE) ? 'rgba(239,68,68,0.09)' : 'rgba(224,160,32,0.09)';
                           return (
                           <tr key={i} data-fila="1"
                             style={{ borderBottom: '1px solid var(--border-light)',
@@ -16667,7 +17408,7 @@ export default function App() {
                             transition: soltandoFilas ? 'none' : (dragFilas ? 'transform .16s cubic-bezier(.2,.8,.2,1)' : undefined),
                             position: _arrastrando ? 'relative' : undefined,
                             zIndex: _arrastrando ? 2 : undefined,
-                            background: _arrastrando ? 'rgba(0,216,245,0.16)' : (_sel ? 'rgba(0,216,245,0.07)' : undefined),
+                            background: _arrastrando ? 'rgba(0,216,245,0.16)' : (_sel ? 'rgba(0,216,245,0.07)' : _tinte),
                             boxShadow: _arrastrando ? '0 8px 22px rgba(0,0,0,0.45)' : undefined }}>
                             <td data-numfila="1"
                               onMouseDown={(e) => empezarDragFilas(i, e)}
@@ -16923,6 +17664,40 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
+                  {/* ALERTAS (MAPA 602): fuera de la tabla, a la altura de su fila, sin columna ni título.
+                      Mientras se vuelve a escanear quedan las anteriores, apagadas. */}
+                  {_resumenAchiques.filasN > 0 && (
+                    <div data-tour="planilla-alertas" style={{ flex: '0 0 auto', opacity: escaneando ? 0.45 : 1, transition: 'opacity .15s' }}>
+                      {(() => {
+                        let y = 0;
+                        return filas.map((fila, i) => {
+                          const cs = Object.entries(achiques[i] || {});
+                          const pos = plAltos[i];
+                          if (!cs.length || !pos) return null;
+                          const top = 1 + pos[0];                 // 1 = el borde del marco
+                          const mt = Math.max(0, top - y);
+                          y = top + pos[1];
+                          return (
+                            <div key={i} style={{ marginTop: mt, height: pos[1], display: 'flex', flexWrap: 'nowrap', gap: 6, alignItems: 'center' }}>
+                              {cs.map(([campo, x]) => {
+                                const _mal = x.k < _UMBRAL_LEGIBLE;
+                                const _cc = cols.find(cc => _campoDeCol(cc) === campo);
+                                const _val = _cc ? _textoCol(_cc, fila[_cc.id]) : '';
+                                return (
+                                  <span key={campo} data-tour="planilla-achique" title={_textoAchique(x, _val)}
+                                    style={{ whiteSpace: 'nowrap', padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, lineHeight: '18px',
+                                             color: _mal ? '#fff' : '#1a1200', background: _mal ? 'var(--danger, #ef4444)' : 'var(--warning, #e0a020)' }}>
+                                    {_elCampoA(campo)} se achicará {_cmTxt(x.alto0_cm - x.alto_cm)} cm{_mal ? ' · puede no leerse' : ''}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+                  </div>
                 </div>
                 </div>
                 {/* Barra inferior fija (igual que en los otros pasos) */}
@@ -16940,12 +17715,13 @@ export default function App() {
                   const _salen = filasQueSalen().length;
                   const _ningunaCompleta = filas.length > 0 && _salen === 0;
                   const bloq = !filas.length || invalidos.length > 0 || !moldesSeleccionados.length
-                    || sinArte.length > 0 || _ningunaCompleta;
+                    || sinArte.length > 0 || _ningunaCompleta || escaneando;
                   const _faltaEnTodas = [...new Set((_incompletas.length ? _incompletas : filas.map((f, i) => ({ i, faltan: _faltaEnFila(f).map(c => c.label || c.id) }))).flatMap(x => x.faltan))].join(', ');
                   const motivo = invalidos.length ? `Corregí los valores que no están entre las opciones (${cols_inv.join(', ')})`
                     : sinArte.length ? `Falta cargar el arte de: ${sinArte.map(x => _arteLbl(x.did, x)).join(' · ')} (paso Arte)`
                       : !filas.length ? 'Agregá al menos una fila'
-                        : _ningunaCompleta ? `Ninguna fila está completa: falta ${_faltaEnTodas}. Cargá al menos una.` : '';
+                        : _ningunaCompleta ? `Ninguna fila está completa: falta ${_faltaEnTodas}. Cargá al menos una.`
+                          : escaneando ? 'Escaneando la planilla (nombres y números que no entran): un momento…' : '';
                   return (
                     <BarraPaso
                       volver={<BtnVolver texto={_nomPaso('arte')} ancla="planilla-volver-arte" onClick={() => { setArteIdx(0); setPedidoPaso('arte'); }} />}
@@ -17711,7 +18487,9 @@ export default function App() {
                       garantiza que se lea TODO; depende de que el exportador conserve las capas OCG y
                       el texto VIVO, y de que su forma de aplanar la apariencia sea la que el parser
                       entiende (Affinity: capas OK y texto OK, pero la PILA sale vacía → colores/bordes
-                      mal). Ver MAPA changelog 2026-07-16. */}
+                      mal). Ver MAPA changelog 2026-07-16. CorelDRAW 2022+ SÍ se lee entero desde el
+                      2026-09-30: capas repetidas por página, borde en modo trazo y texto invisible
+                      (MAPA 597, COREL_REFERENCIA.md). */}
                   <input type="file" ref={fileInputArteRef} accept=".ai,.pdf" onChange={(e) => cargarDisenoWizard(e.target.files[0])} hidden />
                   {/* La navegación de arriba YA es por variable → el visor muestra solo sus piezas (vfArte). */}
                   {_moldeListo ? (
@@ -17945,13 +18723,24 @@ export default function App() {
                 // quedan disponibles para colocarlos. El lienzo igual solo dibuja los que tienen
                 // pieza (el render corta con `piezaDe`).
                 const _objsEd = (ed.objetos || []).filter(o => o._agregado || (piezaDe(o.pieza) && (!_hayMt || _mesasActT.has(o.mesa))));
-                // IDENTIDAD = LA CAPA: el backend devuelve UN ítem por capa "Editable …" y `o.nombre`
-                // es el nombre de la capa. Todo lo que la capa tenga adentro se mueve/rota/escala
+                // IDENTIDAD = LA CAPA EN SU MESA (`o.clave` = «capa<RS>mesa»): la misma capa en dos
+                // mesas son DOS objetos (2026-10-01). Todo lo que la capa tenga adentro se mueve/rota/escala
                 // JUNTO (el agrupado de Illustrator no viaja en el .ai → la capa es la unidad, §10.b).
-                // Por eso esta dedup, `editableSel`, `editorTfs` y el guardado clavean por `o.nombre`.
+                // Por eso esta dedup, `editableSel`, `editorTfs` y el guardado clavean por `o.clave`.
                 // Las figuras de adentro llegan en `o.partes` y SOLO se usan para el COLOR (cada una
                 // guarda con su IDENT "capa␟obj_id", que arma el backend — nunca reconstruirlo acá).
-                const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.nombre === o.nombre) === i);
+                const _objsUnicos = _objsEd.filter((o, i) => _objsEd.findIndex(x => x.clave === o.clave) === i);
+                // la misma capa en otra mesa → en la lista se dice en qué pieza está cada una
+                const _nomRepetido = new Set(_objsUnicos.map(o => o.nombre).filter((n, i, a) => a.indexOf(n) !== i));
+                // Al cambiar de talle la mesa puede ser otra (arte por rango): lo elegido sigue
+                // elegido en la mesa de ESE talle (misma capa), en vez de quedar invisible.
+                const _selFuera = editableSel.filter(k => !_objsUnicos.some(o => o.clave === k));
+                if (_selFuera.length) {
+                  const _re = [...new Set(editableSel.map(k => (_objsUnicos.some(o => o.clave === k) ? k
+                    : (_objsUnicos.find(o => o.nombre === _nomDeClave(k)) || {}).clave)).filter(Boolean))];
+                  if (_re.join('|') !== editableSel.join('|')) queueMicrotask(() => setEditableSel(_re));
+                }
+                const _nomsSel = [...new Set(editableSel.map(_nomDeClave))];   // color y marcas: por CAPA
                 // Pan/zoom del visor del editor: rueda = zoom (al cursor); CLICK DERECHO arrastrado = mover el espacio.
                 const _edFullVB = () => { const s = (_vfEd && _vfEd.vb) ? _vfEd.vb : `0 0 ${canvasLayout.width} ${canvasLayout.height}`; const n = s.split(/\s+/).map(Number); return { x: n[0], y: n[1], w: n[2], h: n[3] }; };
                 const _edVBnow = edVB || _edFullVB();
@@ -17966,7 +18755,7 @@ export default function App() {
                 // fuera del rango 2XL–6XL y no se actualizaban.)
                 const tallesDeObjeto = (nm) => {
                   if (edSoloTalle) return [T].filter(Boolean);
-                  const o = _objsUnicos.find(x => x.nombre === nm);
+                  const o = _objsUnicos.find(x => x.clave === nm);
                   const pz = o && o.pieza;
                   if (!pz || !talles.length) return _rangoTalles;
                   const mT = String(_mesaDeEd(pz, T) ?? '');
@@ -18027,11 +18816,11 @@ export default function App() {
                   // si no, pasa a ser la selección (Ctrl/Shift lo SUMA en vez de reemplazar).
                   // Ctrl/Shift SUMA, pero solo si es de la MISMA pieza (si no, arranca selección nueva).
                   const _add = (e.ctrlKey || e.metaKey || e.shiftKey) && _mismaPieza(o);
-                  const _selNow = editableSel.includes(o.nombre) ? editableSel : (_add ? [...editableSel, o.nombre] : [o.nombre]);
+                  const _selNow = editableSel.includes(o.clave) ? editableSel : (_add ? [...editableSel, o.clave] : [o.clave]);
                   setEditableSel(_selNow);
                   const svg = editorSvgRef.current; const ictm = (svg && svg.getScreenCTM()) ? svg.getScreenCTM().inverse() : null;
                   const m = _cToVB(e.clientX, e.clientY, ictm);
-                  const tf = curTfOf(o.nombre, T); const vo = _voDe(p); const c = centerOf(o, p, tf);
+                  const tf = curTfOf(o.clave, T); const vo = _voDe(p); const c = centerOf(o, p, tf);
                   const { imgW, imgH } = _imgDim(o, p);   // el mover se mide en fracción del DISEÑO
                   // PIVOTE = centro del objeto YA con el acomodo de la variante (vo). Sin esto el
                   // giro/escala se hacían alrededor de un punto corrido → "al reves"/pesado.
@@ -18040,12 +18829,12 @@ export default function App() {
                   // (pueden estar en piezas distintas → el mismo desplazamiento en pantalla se convierte
                   // a la fracción que le corresponde a cada uno).
                   const _grupo = _selNow.map(nm => {
-                    const oo = _objsUnicos.find(x => x.nombre === nm); if (!oo) return null;
+                    const oo = _objsUnicos.find(x => x.clave === nm); if (!oo) return null;
                     const pp = piezaDe(oo.pieza); if (!pp) return null;
                     const dd = _imgDim(oo, pp);
                     return { nm, imgW: dd.imgW, imgH: dd.imgH, tf0: curTfOf(nm, T) };
                   }).filter(Boolean);
-                  editorDrag.current = { tipo, nm: o.nombre, p, imgW, imgH, ictm, start: m, tf0: tf, grupo: _grupo, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, sx0: _SX(tf), sy0: _SY(tf), ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
+                  editorDrag.current = { tipo, nm: o.clave, p, imgW, imgH, ictm, start: m, tf0: tf, grupo: _grupo, cx, cy, dist0: Math.hypot(m.x - cx, m.y - cy) || 1, scale0: tf.scale, sx0: _SX(tf), sy0: _SY(tf), ang0: Math.atan2(m.y - cy, m.x - cx) * 180 / Math.PI, rot0: tf.rot };
                 };
                 // Click en el FONDO del visor = deseleccionar. Los objetos cortan la propagación al
                 // arrancar su arrastre (`start`), así que todo mousedown que llega acá es espacio vacío.
@@ -18084,9 +18873,9 @@ export default function App() {
                 // pantalla y los otros rangos SE PERDÍAN al guardar.
                 const guardarTodo = async () => {
                   if (!_mid) { showError('No pude determinar el molde — reabrí el editor.'); return false; }
-                  // Todos los objetos del diseño (de cualquier rango), por nombre.
+                  // Todos los objetos del diseño (de cualquier rango), por CLAVE (capa en su mesa).
                   const porNombre = new Map();
-                  (ed.objetos || []).forEach(o => { if (!porNombre.has(o.nombre)) porNombre.set(o.nombre, o); });
+                  (ed.objetos || []).forEach(o => { if (!porNombre.has(o.clave)) porNombre.set(o.clave, o); });
                   // Por objeto: agrupar los talles que comparten el MISMO transform (1 request por grupo).
                   const envios = [];
                   Object.entries(editorTfs || {}).forEach(([nombre, porTalle]) => {
@@ -18103,7 +18892,7 @@ export default function App() {
                   });
                   if (!envios.length) {   // nada tocado: al menos persistir el alcance en vista
                     const ts0 = (scopeTalles() || []).filter(Boolean);
-                    _objsUnicos.forEach(o => envios.push({ o, tf: curTfOf(o.nombre, T), talles: ts0.length ? ts0 : [T].filter(Boolean) }));
+                    _objsUnicos.forEach(o => envios.push({ o, tf: curTfOf(o.clave, T), talles: ts0.length ? ts0 : [T].filter(Boolean) }));
                   }
                   try {
                     for (const e of envios) {
@@ -18111,7 +18900,7 @@ export default function App() {
                       if (e.o._agregado) {   // objeto AGREGADO: su transform va al manifiesto (+ su pieza)
                         await fetch(`/api/productos/objeto_agregado/${e.o._oid}/transform`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, talles: e.talles, transform: e.tf, variante: verVariante || '*', pieza: e.o.pieza }) });
                       } else {
-                        await fetch('/api/productos/editables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre: e.o.nombre, talles: e.talles, transform: e.tf, variante: verVariante || '*' }) });   // POR VARIABLE
+                        await fetch('/api/productos/editables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: _mid, diseno: editableDiseno, nombre: e.o.clave, talles: e.talles, transform: e.tf, variante: verVariante || '*' }) });   // POR VARIABLE
                       }
                     }
                     const _nT = new Set(envios.flatMap(e => e.talles)).size;
@@ -18125,7 +18914,7 @@ export default function App() {
                 // canvas y convierte el desplazamiento a la fracción de diseño de CADA objeto.
                 const _alinear = (eje) => {
                   const objs = editableSel.map(nm => {
-                    const o = _objsUnicos.find(x => x.nombre === nm); if (!o) return null;
+                    const o = _objsUnicos.find(x => x.clave === nm); if (!o) return null;
                     const p = piezaDe(o.pieza); if (!p) return null;
                     const tf = curTfOf(nm, T);
                     return { nm, c: centerOf(o, p, tf), d: _imgDim(o, p), tf };
@@ -18156,7 +18945,7 @@ export default function App() {
                 // ROTAR y ESPEJAR: funcionan sobre TODOS los objetos seleccionados a la vez.
                 // La selección MÚLTIPLE nunca cruza piezas: espejar/alinear/mover en grupo solo tiene
                 // sentido entre objetos de la MISMA pieza (cada pieza tiene su propio espacio).
-                const _piezaDeSel = () => { const p0 = _objsUnicos.find(x => x.nombre === editableSel[0]); return p0 ? p0.pieza : null; };
+                const _piezaDeSel = () => { const p0 = _objsUnicos.find(x => x.clave === editableSel[0]); return p0 ? p0.pieza : null; };
                 const _mismaPieza = (o) => !editableSel.length || _piezaDeSel() === o.pieza;
                 const _rotarSel = (deg) => aplicarTf(editableSel, (nm, cur) => ({ rot: Math.round(((cur.rot || 0) + deg) % 360) }));
                 // ESPEJAR = reflejar la SELECCIÓN COMPLETA como una unidad (igual que Illustrator): no
@@ -18165,7 +18954,7 @@ export default function App() {
                 // solo objeto el bbox es el suyo → se refleja en el lugar, sin moverse.
                 const _espejarSel = (eje) => {
                   const objs = editableSel.map(nm => {
-                    const o = _objsUnicos.find(x => x.nombre === nm); if (!o) return null;
+                    const o = _objsUnicos.find(x => x.clave === nm); if (!o) return null;
                     const p = piezaDe(o.pieza); if (!p) return null;
                     const tf = curTfOf(nm, T);
                     return { nm, c: centerOf(o, p, tf), d: _imgDim(o, p), tf };
@@ -18187,7 +18976,7 @@ export default function App() {
                 // rotar/escalar) en el alcance elegido. Es deshacible (queda en el historial).
                 const volverPrincipal = () => {
                   const next = { ...editorTfs };
-                  _objsUnicos.forEach(o => { const m = { ...(next[o.nombre] || {}) }; scopeTalles().forEach(t => { m[t] = { dx: 0, dy: 0, rot: 0, scale: 1 }; }); next[o.nombre] = m; });
+                  _objsUnicos.forEach(o => { const m = { ...(next[o.clave] || {}) }; scopeTalles().forEach(t => { m[t] = { dx: 0, dy: 0, rot: 0, scale: 1 }; }); next[o.clave] = m; });
                   setEditorTfs(next); histCommit(next);
                 };
                 const _h = editorHist.current; const _canUndo = _h.idx > 0; const _canRedo = _h.idx < _h.stack.length - 1;
@@ -18224,11 +19013,11 @@ export default function App() {
                                        color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>No se sublima</span>
                         {MARCAS_PROC.map(mp => {
                           const _n = editableSel.length;
-                          const _on = _n > 0 && editableSel.every(nm => marcaDe(nm) === mp.k);
+                          const _on = _n > 0 && _nomsSel.every(nm => marcaDe(nm) === mp.k);
                           return (
                             <button key={mp.k} type="button" data-tour={'edit-marca-' + mp.k}
                               disabled={!_n}
-                              onClick={() => asignarMarca(_mid, disenoActivo, editableSel, mp.k)}
+                              onClick={() => asignarMarca(_mid, disenoActivo, _nomsSel, mp.k)}
                               title={!_n ? 'Elegí primero uno o varios objetos'
                                 : _on ? `Sacar «${mp.t}»: el objeto vuelve a sublimarse`
                                       : `Asignar ${mp.t}: el objeto no se imprime y en su lugar va la cruz de 3 cm`}
@@ -18244,13 +19033,13 @@ export default function App() {
                         })}
                         {(() => {
                           const _hay = editableSel.length > 0;
-                          const _off = _hay && editableSel.every(nm => sinMarcaDe(nm));
+                          const _off = _hay && _nomsSel.every(nm => sinMarcaDe(nm));
                           return (
                             <>
                               <span style={{ width: 1, height: 20, background: 'var(--border-light)', margin: '0 2px' }} />
                               <button type="button" data-tour="edit-marca-visible"
                                 disabled={!_hay}
-                                onClick={() => alternarMarcaVisible(_mid, disenoActivo, editableSel)}
+                                onClick={() => alternarMarcaVisible(_mid, disenoActivo, _nomsSel)}
                                 title={!_hay ? 'Elegí primero uno o varios objetos'
                                   : _off ? 'Volver a como estaba (se imprime, o deja su cruz)'
                                          : 'Que en la tizada no quede NADA en su lugar'}
@@ -18287,21 +19076,24 @@ export default function App() {
                       {/* lista de objetos */}
                       <div data-tour="edit-objetos" style={{ width: 150, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
                         {_objsUnicos.map(o => (
-                          <button key={o.nombre} type="button" title="Click = seleccionar · Ctrl/Shift+click = sumar (solo objetos de la MISMA pieza)"
+                          <button key={o.clave} type="button" title="Click = seleccionar · Ctrl/Shift+click = sumar (solo objetos de la MISMA pieza)"
                             onClick={(e) => {
                               const add = e.ctrlKey || e.metaKey || e.shiftKey;
                               setColorParte(null);                      // otro objeto → volver a su 1ª figura
-                              if (!add) { setEditableSel([o.nombre]); return; }
-                              if (editableSel.includes(o.nombre)) { setEditableSel(editableSel.filter(n => n !== o.nombre)); return; }
+                              if (!add) { setEditableSel([o.clave]); return; }
+                              if (editableSel.includes(o.clave)) { setEditableSel(editableSel.filter(n => n !== o.clave)); return; }
                               if (!_mismaPieza(o)) { showError('Solo podés seleccionar objetos de la MISMA pieza.'); return; }
-                              setEditableSel([...editableSel, o.nombre]);
+                              setEditableSel([...editableSel, o.clave]);
                             }}
-                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.nombre) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.nombre) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', border: '1px solid ' + (editableSel.includes(o.clave) ? 'var(--accent)' : 'var(--border-light)'), background: editableSel.includes(o.clave) ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.02)', color: '#fff' }}>
                             <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}><img alt="" src={o.thumb ? `data:image/png;base64,${o.thumb}` : (o.svg ? `data:image/svg+xml;base64,${o.svg}` : '')} style={{ maxWidth: '100%', maxHeight: '100%' }} /></span>
                             <span style={{ minWidth: 0, flex: 1 }}>
                               <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, textTransform: 'capitalize', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label || o.nombre}</span>
                               {o._agregado && <span style={{ display: 'block', fontSize: 9.5, color: o.pieza ? 'var(--text-muted)' : 'var(--warning, #f5a524)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {o.pieza ? `en ${o.pieza}` : 'sin pieza'}
+                              </span>}
+                              {!o._agregado && _nomRepetido.has(o.nombre) && <span style={{ display: 'block', fontSize: 9.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {o.pieza ? `en ${o.pieza}` : `mesa ${o.mesa}`}
                               </span>}
                             </span>
                             {o._agregado && <span onClick={(e) => { e.stopPropagation(); borrarObjetoAgregado(o._oid); }} title="Borrar este objeto"
@@ -18315,7 +19107,7 @@ export default function App() {
                           // propia es SACARLO del arte — el resto (mover/rotar/escalar) es igual que
                           // cualquier editable, y de la pieza no se lo puede "quitar" sin borrar la capa.
                           const _iny = editableSel.length === 1
-                            ? _objsUnicos.find(o => o.nombre === editableSel[0] && o.quitable) : null;
+                            ? _objsUnicos.find(o => o.clave === editableSel[0] && o.quitable) : null;
                           if (_iny) return (
                             <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
                               <button type="button" title="Saca este objeto del diseño (borra su capa del arte)"
@@ -18326,7 +19118,7 @@ export default function App() {
                               </button>
                             </div>
                           );
-                          const _sel = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0] && o._agregado) : null;
+                          const _sel = editableSel.length === 1 ? _objsUnicos.find(o => o.clave === editableSel[0] && o._agregado) : null;
                           if (!_sel) return null;
                           const _bs = { flex: 1, padding: '6px 6px', borderRadius: 8, cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
                             border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.03)', color: 'var(--text-secondary)' };
@@ -18379,9 +19171,9 @@ export default function App() {
                             const p = piezaDe(o.pieza);
                             if (!p || (!o._agregado && (!o.mesa_rect || !o.bbox_mu))) return null;
                             const vo = _voDe(p);
-                            const tf = curTfOf(o.nombre, T); const c = centerOf(o, p, tf); const sel = editableSel.includes(o.nombre); const solo = sel && editableSel.length === 1;
+                            const tf = curTfOf(o.clave, T); const c = centerOf(o, p, tf); const sel = editableSel.includes(o.clave); const solo = sel && editableSel.length === 1;
                             return (
-                              <g key={o.nombre} transform={(vo.dx || vo.dy) ? `translate(${vo.dx} ${vo.dy})` : undefined}>
+                              <g key={o.clave} transform={(vo.dx || vo.dy) ? `translate(${vo.dx} ${vo.dy})` : undefined}>
                                 <g clipPath={`url(#edclip-${p.idx})`}>
                                   <g transform={`rotate(${tf.rot} ${c.cx} ${c.cy})` + ((c.sgx < 0 || c.sgy < 0) ? ` translate(${c.cx} ${c.cy}) scale(${c.sgx} ${c.sgy}) translate(${-c.cx} ${-c.cy})` : '')}>
                                     <image href={o.svg ? `data:image/svg+xml;base64,${o.svg}` : `data:image/png;base64,${o.thumb}`} x={c.cx - c.w / 2} y={c.cy - c.h / 2} width={c.w} height={c.h} preserveAspectRatio="none" onMouseDown={(e) => start(e, 'move', o, p)} style={{ cursor: 'move' }} />
@@ -18464,11 +19256,11 @@ export default function App() {
                         proporción (como Illustrator). Con el enlace ON escala proporcional; OFF deja
                         ancho y alto libres (sx/sy independientes → el motor deforma igual). */}
                     {(() => {
-                      const _o = editableSel.length === 1 ? _objsUnicos.find(o => o.nombre === editableSel[0]) : null;
+                      const _o = editableSel.length === 1 ? _objsUnicos.find(o => o.clave === editableSel[0]) : null;
                       if (!_o || !(_o.w_cm > 0) || !(_o.h_cm > 0)) return null;
-                      const _tf = curTfOf(_o.nombre, T);
+                      const _tf = curTfOf(_o.clave, T);
                       const _wCm = _o.w_cm * _SX(_tf), _hCm = _o.h_cm * _SY(_tf);
-                      const _aplicar = (patch) => { setTfScoped(_o.nombre, patch); setTimeout(() => histCommit(editorTfsRef.current), 0); };
+                      const _aplicar = (patch) => { setTfScoped(_o.clave, patch); setTimeout(() => histCommit(editorTfsRef.current), 0); };
                       const _setW = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.w_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sx: f }); };
                       const _setH = (v) => { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; const f = Math.max(0.1, Math.min(8, n / _o.h_cm)); _aplicar(edLink ? { scale: f, sx: f, sy: f } : { sy: f }); };
                       const _inp = { width: 74, padding: '5px 7px', borderRadius: 7, background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 12.5, fontWeight: 700, textAlign: 'right', outline: 'none' };
@@ -18479,11 +19271,11 @@ export default function App() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1 }}>
                           <label style={_lbl}><span style={{ width: 20 }}>An.</span>
-                            <input key={`w|${_o.nombre}|${T}|${_wCm.toFixed(2)}`} defaultValue={_wCm.toFixed(2)}
+                            <input key={`w|${_o.clave}|${T}|${_wCm.toFixed(2)}`} defaultValue={_wCm.toFixed(2)}
                               onBlur={(e) => _setW(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
                           </label>
                           <label style={_lbl}><span style={{ width: 20 }}>Al.</span>
-                            <input key={`h|${_o.nombre}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
+                            <input key={`h|${_o.clave}|${T}|${_hCm.toFixed(2)}`} defaultValue={_hCm.toFixed(2)}
                               onBlur={(e) => _setH(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} style={_inp} /> cm
                           </label>
                           </div>
@@ -18509,7 +19301,7 @@ export default function App() {
                         forma. Sólo para 1 seleccionado. Los objetos no recoloreables (XObject/imagen)
                         muestran el control deshabilitado con una nota (§10.b). ── */}
                     {editableSel.length === 1 && (() => {
-                      const _o = _objsUnicos.find(o => o.nombre === editableSel[0]);
+                      const _o = _objsUnicos.find(o => o.clave === editableSel[0]);
                       if (!_o) return null;
                       // FIGURAS de adentro: el objeto se transforma entero, pero se pinta figura por
                       // figura. Con una sola figura (o un objeto agregado) se pinta el objeto entero.
@@ -19061,6 +19853,19 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* INTEGRACIONES (MAPA 606): los pedidos que manda OTRO sistema y se hacen solos. */}
+                  <div className="crm-config-card cyan" data-tour="cfg-integraciones" onClick={() => setAdminSubView('integraciones')}>
+                    <div>
+                      <div className="crm-icon-container">
+                        <Icon name="distribucion" style={{ width: 18, height: 18 }} />
+                      </div>
+                      <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Integraciones</h3>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
+                        Pedidos que manda otro sistema y se hacen solos: llaves, Google Drive, el robot y cada pedido que llegó con sus alarmas.
+                      </p>
+                    </div>
+                  </div>
+
                   {/* 🔴 EL REGISTRO (2026-09-01): que las fallas se puedan VER desde la pantalla,
                       con su motivo, sin entrar al servidor. */}
                   <div className="crm-config-card yellow" data-tour="cfg-registro" onClick={() => setAdminSubView('registro')}>
@@ -19439,6 +20244,7 @@ export default function App() {
                               { id: 'nestingsel', icon: 'nestingPiezas', label: 'Nesting', desc: 'Qué acomodo (separación/giro) usa este molde', disabled: false },
                               { id: 'telas', icon: 'telaRollo', label: 'Telas asignadas', desc: 'Qué telas del registro están disponibles para este molde', disabled: false },
                               { id: 'borde', icon: 'bordeCorte', label: 'Borde de corte', desc: 'Si lleva borde, el color y el tamaño (mm)', disabled: false },
+                              { id: 'texto', icon: 'limiteTexto', label: 'Nombre y número', desc: 'Hasta dónde llegan: margen al borde de la pieza (cm)', disabled: false },
                               { id: 'diseno', icon: 'plantilla', label: 'Plantilla', desc: 'Medidas de cada pieza y carga del diseño', disabled: false },
                               { id: 'editable', icon: 'editable', label: 'Editable', desc: 'Mover, rotar y escalar los objetos de la capa «Editable» del diseño', disabled: false },
                               { id: 'terminologia', icon: 'nombres', label: 'Nombres', desc: `Cómo se llaman ${term.variante.toLowerCase()} y ${term.molde.toLowerCase()}`, disabled: false },
@@ -19449,7 +20255,7 @@ export default function App() {
                                 data-tour={'ajuste-' + item.id}
                                 className="setting-nav-btn"
                                 disabled={item.disabled}
-                                onClick={() => { setTabAjustesMolde(item.id); if (item.id === 'diseno') setMapeandoDiseno(false); if (item.id === 'borde') cargarBorde(); if (item.id === 'etiqueta') { cargarEtiqueta(); cargarBorde(); } if (item.id === 'editable') cargarEditConfig(); }}
+                                onClick={() => { setTabAjustesMolde(item.id); if (item.id === 'diseno') setMapeandoDiseno(false); if (item.id === 'borde') cargarBorde(); if (item.id === 'texto') cargarLimiteTexto(); if (item.id === 'etiqueta') { cargarEtiqueta(); cargarBorde(); } if (item.id === 'editable') cargarEditConfig(); }}
                               >
                                 <span className="setting-nav-icon"><Icon name={item.icon} /></span>
                                 <span className="setting-nav-text">
@@ -19856,6 +20662,105 @@ export default function App() {
                               </>
                             )}
                             <button className="btn primary" data-tour="borde-guardar" onClick={() => guardarBorde()} style={{ marginTop: 4, alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar borde</button>
+                          </div>
+                        );
+                      })()}
+
+                      {tabAjustesMolde === 'texto' && (() => {
+                        // NOMBRE Y NÚMERO (MAPA 601): acá los CONTROLES; las piezas se eligen en el visor
+                        const lt = limiteTexto || { limite: {}, campos: [] };
+                        const lim = lt.limite || {};
+                        const sel = [...ltSel];
+                        const inp = { width: 78, padding: '6px 8px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, outline: 'none', textAlign: 'center' };
+                        // el valor que se edita: el de las piezas elegidas (o el de todas, sin elegir)
+                        const valorDe = (clave) => {
+                          const cfg = lim[clave] || {};
+                          if (!sel.length) return { on: cfg.margen_cm !== undefined && cfg.margen_cm !== null, cm: cfg.margen_cm, mezcla: false };
+                          const vs = sel.map(g => _margenDePieza(cfg, g));
+                          const distintos = new Set(vs.map(v => (v === null || v === undefined ? 'no' : v)));
+                          const v0 = vs[0];
+                          return { on: v0 !== null && v0 !== undefined, cm: v0, mezcla: distintos.size > 1 };
+                        };
+                        const poner = (clave, cm) => setLimiteTexto(prev => {
+                          const l = { ...((prev || {}).limite || {}) };
+                          const c = { ...(l[clave] || {}) };
+                          if (!sel.length) {
+                            if (cm === null) delete c.margen_cm; else c.margen_cm = cm;
+                          } else {
+                            const pp = { ...(c.por_pieza || {}) };
+                            // «sin límite» en una pieza: si hay uno para todas hace falta decirlo (null);
+                            // si no, alcanza con que la pieza no tenga el suyo
+                            for (const g of sel) {
+                              const k = Object.keys(pp).find(x => x.toLowerCase() === g.toLowerCase()) || g;
+                              if (cm === null && (c.margen_cm === undefined || c.margen_cm === null)) delete pp[k]; else pp[k] = cm;
+                            }
+                            c.por_pieza = pp;
+                          }
+                          l[clave] = c;
+                          return { ...(prev || {}), limite: l };
+                        });
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                              <span>Hasta dónde puede llegar el nombre y el número en cada pieza: sus bordes, corridos hacia adentro.</span>
+                              <Ayuda ancho={340}>
+                                <b>Tocá las piezas en el visor</b> para elegirlas (una o varias; otra vez la saca). El margen que pongas vale para <b>esas piezas</b>, en todos sus talles; sin elegir ninguna, vale para <b>todas</b> las que no tengan el suyo.
+                                <br /><br />Cada línea es el borde de la pieza corrido hacia adentro: el texto <b>nunca pasa</b> de ahí; si un nombre largo no entra, se <b>achica proporcional</b>, apoyado en su <b>línea de abajo</b>. Las líneas se <b>arrastran</b>.
+                                <br /><br />Con <b>otra tipografía</b> (elegida en el pedido o porque falta la del diseño) las letras salen a la <b>misma altura</b> que en el diseño.
+                              </Ayuda>
+                            </div>
+                            {renderSelVerVariante()}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>{sel.length ? `${sel.length} pieza${sel.length > 1 ? 's' : ''} elegida${sel.length > 1 ? 's' : ''}` : 'Todas las piezas'}</span>
+                                {sel.length > 0 && <button className="btn ghost" data-tour="texto-ninguna" style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: 11.5 }} onClick={() => setLtSel(new Set())}>Ninguna</button>}
+                              </div>
+                              {sel.length > 0 ? (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                  {sel.map(g => (
+                                    <button key={g} type="button" onClick={() => setLtSel(prev => { const n = new Set(prev); n.delete(g); return n; })}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, border: '1px solid var(--accent)', background: 'rgba(0,243,255,0.1)', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                      {g} <span style={{ opacity: 0.7 }}>✕</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>Tocá una o varias piezas en el visor para darles su propio margen. Sin elegir, lo que pongas abajo vale para todas.</div>
+                              )}
+                            </div>
+                            {lt.campos.map((c, ci) => {
+                              const v = valorDe(c.clave);
+                              const activo = ltCampo === c.clave;
+                              const col = _colorCampo(c.clave, ci);
+                              return (
+                                <div key={c.clave} data-tour="texto-campo" onClick={() => setLtCampo(c.clave)}
+                                  style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '11px 12px', borderRadius: 10, cursor: 'pointer',
+                                           border: '1px solid ' + (activo ? col : 'var(--border-light)'), background: activo ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.02)' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <span style={{ width: 14, height: 3, borderRadius: 2, background: col, flexShrink: 0 }} />
+                                    <span style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{c.nombre}</span>
+                                    <button type="button" data-tour="texto-limitar" onClick={(e) => { e.stopPropagation(); setLtCampo(c.clave); poner(c.clave, v.on ? null : (v.cm ?? 2)); }}
+                                      style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 0, color: v.on ? 'var(--accent)' : 'var(--text-muted)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, padding: 0 }}>
+                                      {v.mezcla ? 'Distintos' : (v.on ? 'Con límite' : 'Sin límite')}
+                                      <span style={{ width: 38, height: 22, borderRadius: 999, background: v.on ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'all .2s', flexShrink: 0 }}>
+                                        <span style={{ position: 'absolute', top: 2.5, left: v.on ? 18 : 2.5, width: 17, height: 17, borderRadius: '50%', background: '#fff', transition: 'all .2s' }} />
+                                      </span>
+                                    </button>
+                                  </div>
+                                  {v.on && (
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-secondary)' }} onClick={(e) => e.stopPropagation()}>
+                                      Margen al borde
+                                      <input type="number" min="0" max="100" step="0.1" value={v.mezcla ? '' : (v.cm ?? '')} placeholder={v.mezcla ? 'varios' : ''} data-tour="texto-margen"
+                                        onFocus={() => setLtCampo(c.clave)}
+                                        onChange={(e) => poner(c.clave, Math.max(0, parseFloat(e.target.value) || 0))} style={inp} />
+                                      cm
+                                    </label>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <button className="btn primary" data-tour="texto-guardar" onClick={() => guardarLimiteTexto(lim)}
+                              style={{ alignSelf: 'flex-start', padding: '9px 18px' }}>Guardar</button>
                           </div>
                         );
                       })()}
@@ -21037,20 +21942,21 @@ export default function App() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
                                   <button type="button" className="btn ghost" style={{ padding: '4px 10px', fontSize: 11.5 }}
                                     disabled={!!armandoIllustrator} onClick={abrirAcomodoMesas}>Acomodar mesas</button>
-                                  <Ayuda ancho={300}><b>Opcional.</b> Acomodás a mano las mesas de trabajo del {(term?.variante || 'talle').toLowerCase()} guía y, al crear en Illustrator, <b>todos los {(term?.variante || 'talle').toLowerCase()}s</b> siguen ese acomodo: mismo orden y la <b>misma separación</b> entre mesas. Se guarda con el molde{verVariante ? ' (para esta variable)' : ''}. Si no lo usás, se acomodan solas como en el visor.</Ayuda>
+                                  <Ayuda ancho={300}><b>Opcional.</b> Acomodás a mano las mesas de trabajo del {(term?.variante || 'talle').toLowerCase()} guía y, al crear en Illustrator o en CorelDRAW, <b>todos los {(term?.variante || 'talle').toLowerCase()}s</b> siguen ese acomodo: mismo orden y la <b>misma separación</b> entre mesas. Se guarda con el molde{verVariante ? ' (para esta variable)' : ''}. Si no lo usás, se acomodan solas como en el visor.</Ayuda>
                                   <span style={{ fontSize: 11, color: _acomodoGuardado ? 'var(--accent)' : 'var(--text-muted)' }}>{_acomodoGuardado ? 'Acomodadas a mano' : 'Acomodo automático'}</span>
                                 </div>
                               </div>
-                              <PlantillaIllustrator onCrear={() => abrirEnIllustrator()} onDescargar={descargarPdfGuia}
+                              <PlantillaProgramas ocupado={!!armandoIllustrator} onDescargar={descargarPdfGuia}
                                 textoDescargar={verVariante ? 'Descargar guía .ai (solo esta variable)' : 'Descargar guía .ai (molde completo)'}
-                                ocupado={!!armandoIllustrator} onNoEncontrado={() => setIllustratorFalta(true)}
-                                versionNueva={_hayInstIllu ? _verIllu : null} onBajar={bajarExtensionIllustrator}
-                                ayuda={<Ayuda ancho={320}>
-                                  Con Illustrator conectado, <b>Crear en Illustrator</b> arma la plantilla directo allá, sin descargar nada: <b>una mesa de trabajo por pieza</b> con el nombre que lee el sistema{configMedida === 'talle' ? ' (una por cada talle elegido, cada talle en su bloque)' : ''}, a la <b>escala</b> elegida, las <b>capas</b> (diseño, Editable, Nombre, Número…, guias) y el <b>contorno</b> de cada pieza en «guias».{verVariante ? ' Solo las piezas de esta variable.' : ''}
-                                  <br /><br />Para conectar: Illustrator abierto en <b>esta</b> computadora, con la extensión de USER PRO (se instala una sola vez). Tocá <b>Conectar con Illustrator</b> y, la primera vez, <b>Permitir</b> en el navegador. Después se conecta sola cada vez que abrís Illustrator. El tutorial está en Illustrator: <b>Ventana › Extensiones › USER PRO</b>.
-                                  {_hayInstIllu
-                                    ? <><br /><button type="button" className="btn ghost" style={{ marginTop: 8, padding: '5px 10px', fontSize: 11.5 }} onClick={bajarExtensionIllustrator}>Bajar el instalador</button></>
-                                    : <><br />El instalador se lo pedís a quien administra TIZADA.</>}
+                                illu={{ onCrear: () => abrirEnIllustrator(), onNoEncontrado: () => setIllustratorFalta(true),
+                                  versionNueva: _hayInstIllu ? _verIllu : null, onBajar: bajarExtensionIllustrator, hayInstalador: _hayInstIllu }}
+                                corel={{ onCrear: () => abrirEnCorel(), onNoEncontrado: () => setCorelFalta(true),
+                                  versionNueva: _hayInstCorel ? _verCorel : null, onBajar: bajarInstaladorCorel, hayInstalador: _hayInstCorel }}
+                                ayuda={<Ayuda ancho={340}>
+                                  Arma la base directo en el programa del diseñador, sin descargar nada: el nombre de cada mesa que lee el sistema{configMedida === 'talle' ? ' (una por cada talle elegido)' : ''}, las <b>capas</b> (diseño, Editable, Nombre, Número…, guias) y el <b>contorno</b> de cada pieza en «guias».{verVariante ? ' Solo las piezas de esta variable.' : ''}
+                                  <br /><br /><b>Illustrator</b> (naranja): <b>una mesa de trabajo por pieza</b> en un lienzo, a la <b>escala</b> elegida. Necesita Illustrator abierto con la extensión de USER PRO; el tutorial está en Illustrator: <b>Ventana › Extensiones › USER PRO</b>.
+                                  <br /><br /><b>CorelDRAW</b> (verde): <b>todas las mesas en un mismo espacio de trabajo</b>, acomodadas como en el molde (la vista de varias páginas de Corel: cada mesa es una página, que es lo que lee el sistema), siempre a <b>tamaño real</b> y en <b>un solo archivo</b> .cdr que abre desde CorelDRAW 2022. Necesita CorelDRAW 2022 o más nuevo y el programa USER PRO para CorelDRAW (queda con un ícono junto al reloj). Si Corel está cerrado, se abre solo. Cuando el diseño esté listo, tocá <b>Exportar para TIZADA PRO</b> en la barra <b>TIZADA PRO</b> de Corel (si no la ves: <i>Ventana › Barras de herramientas › TIZADA PRO</i>; sin la barra, el botón está abajo a la derecha de la ventana): te pregunta en qué carpeta guardar y deja el PDF con todos los ajustes que necesita el sistema. Ése es el que subís como arte.
+                                  <br /><br />La primera vez tocá el botón del programa para <b>conectar</b> y, si el navegador pregunta, <b>Permitir</b>: es esta misma computadora. Los <b>instaladores</b> están abajo de los botones (se instalan una sola vez).
                                 </Ayuda>} />
                             </div>
                           )}
@@ -21116,7 +22022,7 @@ export default function App() {
                               return (
                                 <div>
                                   <Capa nombre="diseño" color="#a78bfa" tipo="Se imprime">
-                                    El arte que <b>se imprime</b>: gráficos, fondo y colores. El texto del diseño va en <b>curvas</b> (Texto → Crear contornos). El color sale tal cual viene, en CMYK exacto.
+                                    El arte que <b>se imprime</b>: gráficos, fondo y colores. El texto del diseño va en <b>curvas</b> (Illustrator: Texto → Crear contornos · Corel: Objeto → Convertir en curvas). El color sale tal cual viene, en CMYK exacto.
                                   </Capa>
                                   <Capa nombre="guias" color="#34d399" tipo="No se imprime">
                                     El <b>nombre de cada pieza</b> como texto, uno por mesa. No se imprime: el sistema lo usa para colocar cada diseño en su pieza solo. Los nombres exactos están en «Nombres de las piezas».
@@ -21668,7 +22574,7 @@ export default function App() {
                     <div className="card" style={{ display: 'flex', flexDirection: 'column', padding: 20, height: 620, overflow: 'hidden', order: 1, position: 'sticky', top: 24 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid var(--border-light)', paddingBottom: 10 }}>
                         <div style={{ fontSize: 14, fontWeight: 700 }}>
-                          {tabAjustesMolde === 'planilla' ? 'Planilla · mapeo de columnas' : 'Visor del Molde Vectorial'}
+                          {tabAjustesMolde === 'planilla' ? 'Planilla · mapeo de columnas' : tabAjustesMolde === 'texto' ? `Nombre y número · ${ltSel.size ? [...ltSel].join(', ') : 'tocá las piezas'}` : 'Visor del Molde Vectorial'}
                         </div>
                         {etqData && tabAjustesMolde !== 'planilla' && (
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -22049,6 +22955,96 @@ export default function App() {
                                 );
                               })}
                             </svg>
+                            );
+                          })() : tabAjustesMolde === 'texto' ? (() => {
+                            /* Visor de NOMBRE Y NÚMERO (MAPA 601): las piezas del molde; tocarlas las elige
+                               (varias; otra vez la saca) y en cada una se ven sus bordes corridos hacia adentro */
+                            const lt = limiteTexto || { limite: {}, campos: [] };
+                            const lim = lt.limite || {};
+                            const vf = verVariante ? varianteFiltro(verVariante) : null;
+                            const nombrePc = (p) => p.name || etqNombres[p.idx] || ('Pieza ' + (p.idx + 1));
+                            const vbW = vf && vf.vb ? Number(vf.vb.split(' ')[2]) : canvasLayout.width;
+                            const vbH = vf && vf.vb ? Number(vf.vb.split(' ')[3]) : canvasLayout.height;
+                            const unidadesPorCm = (p) => (p.w_cm ? p.pw / p.w_cm : (p.h_cm ? p.ph / p.h_cm : 1));
+                            const ponerMargen = (campo, gens, cm) => setLimiteTexto(prev => {
+                              const l = { ...((prev || {}).limite || {}) };
+                              const c = { ...(l[campo] || {}) };
+                              const pp = { ...(c.por_pieza || {}) };
+                              for (const g of gens) pp[g] = cm;
+                              l[campo] = { ...c, por_pieza: pp };
+                              return { ...(prev || {}), limite: l };
+                            });
+                            const puntoSvg = (e) => {
+                              const s = visorSvgRef.current; if (!s) return null;
+                              const pt = s.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+                              const m = s.getScreenCTM(); return m ? pt.matrixTransform(m.inverse()) : null;
+                            };
+                            const mover = (e) => {
+                              const a = ltArrastre.current; if (!a) return;
+                              const q = puntoSvg(e); if (!q) return;
+                              const p = canvasLayout.layout.find(x => x.idx === a.idx); const filas = ltFilas.get(a.idx) || [];
+                              if (!p || !filas.length) return;
+                              const o = (vf && vf.pos.get(p.idx)) || { dx: 0, dy: 0 };
+                              const x = q.x - o.dx, y = q.y - o.dy;
+                              const f = filas.reduce((u, v) => (Math.abs(v[0] - y) < Math.abs(u[0] - y) ? v : u), filas[0]);
+                              const mg = x < (f[1] + f[2]) / 2 ? x - f[1] : f[2] - x;
+                              const cm = Math.round(Math.max(0, Math.min(100, mg / unidadesPorCm(p))) * 10) / 10;
+                              ltArrastro.current = true;
+                              ponerMargen(a.campo, ltSel.has(a.gen) ? [...ltSel] : [a.gen], cm);
+                            };
+                            return (
+                              <svg ref={visorSvgRef} viewBox={vf && vf.vb ? vf.vb : `0 0 ${canvasLayout.width} ${canvasLayout.height}`}
+                                width={vbW * visorView.k} height={vbH * visorView.k}
+                                data-tour="texto-visor"
+                                onPointerMove={mover}
+                                onPointerUp={() => { ltArrastre.current = null; setTimeout(() => { ltArrastro.current = false; }, 0); }}
+                                onPointerLeave={() => { ltArrastre.current = null; ltArrastro.current = false; }}
+                                style={{ display: 'block', userSelect: 'none', overflow: 'visible' }}>
+                                {canvasLayout.dibujo.map((p) => {
+                                  if (p.talle && tallesOcultos.has(p.talle)) return null;
+                                  if (vf && !vf.show.has(p.idx)) return null;
+                                  const name = nombrePc(p);
+                                  const gen = nombreGenerico(name);
+                                  const sel = ltSel.has(gen);
+                                  const vo = vf ? (vf.pos.get(p.idx) || { dx: 0, dy: 0 }) : null;
+                                  const filas = ltFilas.get(p.idx) || [];
+                                  const upc = unidadesPorCm(p);
+                                  return (
+                                    <g key={p.idx} data-piece={p.idx} transform={vo ? `translate(${vo.dx} ${vo.dy})` : undefined}>
+                                      <path d={p.path_svg} vectorEffect="non-scaling-stroke" style={{ cursor: 'pointer', fill: sel ? 'rgba(0,243,255,0.16)' : 'rgba(255,255,255,0.04)',
+                                        stroke: sel ? 'var(--accent)' : 'rgba(255,255,255,0.45)', strokeWidth: sel ? 2 : 1 }}
+                                        onClick={() => {
+                                          if (ltArrastro.current) return;          // era el final de un arrastre, no un clic
+                                          setLtSel(prev => { const n = new Set(prev); if (n.has(gen)) n.delete(gen); else n.add(gen); return n; });
+                                        }} />
+                                      {lt.campos.map((c, ci) => {
+                                        const mg = _margenDePieza(lim[c.clave], gen);
+                                        if (mg === null || mg === undefined || !filas.length) return null;
+                                        const m = mg * upc;
+                                        const ok = filas.filter(f => f[1] + m < f[2] - m);
+                                        if (!ok.length) return null;
+                                        const izq = ok.map(f => `${(f[1] + m).toFixed(2)},${f[0].toFixed(2)}`).join(' ');
+                                        const der = ok.map(f => `${(f[2] - m).toFixed(2)},${f[0].toFixed(2)}`).join(' ');
+                                        const col = _colorCampo(c.clave, ci);
+                                        const activo = c.clave === ltCampo;
+                                        return (
+                                          <g key={c.clave} opacity={activo ? 1 : 0.6}>
+                                            {[izq, der].map((pl, k) => (
+                                              <g key={k} style={{ cursor: 'ew-resize' }}
+                                                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setLtCampo(c.clave); ltArrastre.current = { campo: c.clave, gen, idx: p.idx }; }}>
+                                                {/* grosor FIJO en pantalla (no cambia con el zoom): se ve y se agarra igual de cerca que de lejos */}
+                                                <polyline points={pl} fill="none" stroke={col} strokeWidth={activo ? 2.6 : 1.6} vectorEffect="non-scaling-stroke"
+                                                  strokeDasharray={activo ? null : '6 4'} strokeLinejoin="round" />
+                                                <polyline points={pl} fill="none" stroke="transparent" strokeWidth={16} vectorEffect="non-scaling-stroke" style={{ pointerEvents: 'stroke' }} />
+                                              </g>
+                                            ))}
+                                          </g>
+                                        );
+                                      })}
+                                    </g>
+                                  );
+                                })}
+                              </svg>
                             );
                           })() : tabAjustesMolde === 'etiqueta' && etiquetaConfig ? (() => {
                             /* Visor de ETIQUETA: las etiquetas sobre cada pieza + click en el contorno para ubicar */
@@ -24092,6 +25088,7 @@ export default function App() {
             {/* Perfil de color (ICC) */}
             {adminSubView === 'publicacion' && <PantallaPublicacion volver={() => setAdminSubView('dashboard')} />}
             {adminSubView === 'registro' && <PantallaRegistro volver={() => setAdminSubView('dashboard')} />}
+            {adminSubView === 'integraciones' && <PantallaIntegraciones volver={() => setAdminSubView('dashboard')} />}
             {adminSubView === 'monitor' && <PantallaMonitor volver={() => setAdminSubView('dashboard')} />}
 
             {adminSubView === 'perfil' && (
@@ -24463,11 +25460,12 @@ export default function App() {
           </div>
         </div>
       )}
-      <Modal open={!!confirmar} onClose={() => setConfirmar(null)} centrado maxWidth={460}
+      <Modal open={!!confirmar} onClose={() => { const f = confirmar?.onCancelar; setConfirmar(null); if (f) f(); }} centrado maxWidth={460}
         titulo={confirmar?.titulo || 'Confirmar'}>
         <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>{confirmar?.texto}</div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
-          <button className="btn ghost" onClick={() => setConfirmar(null)}>Cancelar</button>
+          {/* `cancelar`/`onCancelar`: cuando la otra opción también es una decisión («Dejar la que está») */}
+          <button className="btn ghost" onClick={() => { const f = confirmar?.onCancelar; setConfirmar(null); if (f) f(); }}>{confirmar?.cancelar || 'Cancelar'}</button>
           <button className={`btn ${confirmar?.peligro ? 'danger' : 'primary'}`}
             style={confirmar?.peligro ? { background: 'var(--danger, #ef4444)', borderColor: 'var(--danger, #ef4444)', color: '#fff' } : null}
             onClick={() => { const f = confirmar?.onOk; setConfirmar(null); if (f) f(); }}>

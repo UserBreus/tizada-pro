@@ -525,6 +525,10 @@ def _analizar_capa(page, objetivo):
     pila_ctm, pila_oc = [], []
     ini = None; pts = []; clip = False
     fill = None
+    # el RECORTE vigente (caja de la intersección de los `W` abiertos; None = sin recorte). Es
+    # parte del estado gráfico: `q` lo guarda y `Q` lo devuelve, aunque el `Q` caiga en OTRA capa
+    # (Illustrator abre un recorte en «Editable escudo» y lo cierra al empezar «Editable logo»).
+    recorte = None
     unidades = []            # dicts: i, bbox, es_clip, capas, kind, fill_op, stroke_op, fill, sig
     paint_idx_todos = set()
 
@@ -537,9 +541,9 @@ def _analizar_capa(page, objetivo):
     for i, it in enumerate(instrucciones):
         op = str(it.operator)
         if op == "q":
-            pila_ctm.append(ctm)
+            pila_ctm.append((ctm, recorte))
         elif op == "Q":
-            ctm = pila_ctm.pop() if pila_ctm else ctm
+            ctm, recorte = pila_ctm.pop() if pila_ctm else (ctm, recorte)
         elif op == "cm":
             try:
                 ctm = _mmul(tuple(float(v) for v in it.operands), ctm)
@@ -590,6 +594,10 @@ def _analizar_capa(page, objetivo):
                 es_clip = clip or op == "n"
                 fill_op = op in _FILL_PATH
                 stroke_op = op in _STROKE_PATH
+                if clip:                                  # un `W`: achica el recorte vigente
+                    recorte = bbox if recorte is None else (
+                        max(recorte[0], bbox[0]), max(recorte[1], bbox[1]),
+                        min(recorte[2], bbox[2]), min(recorte[3], bbox[3]))
                 if not es_clip:
                     paint_idx_todos.add(i)
                 # FIRMA de geometría = puntos de construcción redondeados: dos ops que pintan el
@@ -619,7 +627,14 @@ def _analizar_capa(page, objetivo):
             unidades.append({"i": i, "bbox": bbox, "es_clip": False, "capas": _frame_capas(),
                              "kind": "texto", "fill_op": False, "stroke_op": False, "fill": None, "sig": sig})
         elif op == "sh":
-            bbox = (ctm[4], ctm[5], ctm[4], ctm[5])
+            # 🔴 UN SOMBREADO NO TIENE TRAZADO: pinta TODO el recorte vigente. Su caja es la de ese
+            # recorte (un degradado lineal no tiene límite propio: MuPDF lo mide «infinito» y el
+            # objeto daba 151 millones de cm → no aparecía en el visor — arte «CAMISETA NEGRO 2»,
+            # un logo con las letras en degradado, 2026-10-01). Sin recorte queda el punto de antes.
+            if recorte is not None and recorte[0] < recorte[2] and recorte[1] < recorte[3]:
+                bbox = recorte
+            else:
+                bbox = (ctm[4], ctm[5], ctm[4], ctm[5])
             paint_idx_todos.add(i)
             sig = ("sh", round(ctm[4], 1), round(ctm[5], 1), i)
             unidades.append({"i": i, "bbox": bbox, "es_clip": False, "capas": _frame_capas(),

@@ -1,0 +1,9 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "aceptaria": true,
+  "alarmas": [],
+  "nota": "sólo se revisaron los DATOS; el arte y las tipografías se revisan al procesar",
+  "referencia": "OV-2026-00123"
+ }
+}

@@ -12,6 +12,7 @@ import { traerConCache, base64DeTexto, claveDe, urlDe } from '../cache.js'
 import { piezasDe } from './prendas.js'
 export { asegurarFuentes }
 import { pyRound } from '../py.js'
+import { persConLimite } from '../pieza/estampar.js'
 
 const CM = 28.3465
 const motores = new Map()          // pid → {info, pool, mesasAbiertas:Set, fuentesListas:bool}
@@ -30,7 +31,7 @@ export async function motorDe(pid, rutaApi, { reemplazos = null } = {}) {
   if (!info.camino_b && !info.camino_a) return null
   const firma = JSON.stringify([(info.mesas || []).map((m) => m.sello), info.plantilla && info.plantilla.sello,
     (info.disenos || []).map((d) => [d.id, d.sello, d.mapeo, d.editables_cfg, d.editables_color, d.editables_marca, d.editables_sin_marca, d.objetos]),
-    Object.keys(info.registro).length, info.borde, info.etiqueta, info.fuentes, info.editables_tamano])
+    Object.keys(info.registro).length, info.borde, info.etiqueta, info.fuentes, info.editables_tamano, info.limite_texto])
   let m = motores.get(pid)
   if (m && m.firma !== firma) { try { m.pool.cerrar() } catch { /* nada */ } motores.delete(pid); m = null }
   if (!m) {
@@ -313,7 +314,11 @@ export async function previasCaminoA({ pid, diseno = null, variante, talle, ruta
     const persona = prenda.personalizacion || { nombre: prenda.nombre || '', numero: prenda.numero || '' }
     const r = await m.pool.enviar('pieza_a', {
       molde: pid, arte: clave, mesa: info.mesa, talle: t, pieza, info, persona, nro,
-      variante: prenda.variante_clave || null, grupo: prenda._grupo || null, ph: pers || {}, etiqueta, alias: fuentes.alias, salida: 'svg',
+      // 🔴 el límite de ancho del molde (MAPA 601): la personalización de este camino la lee el hilo
+      // del arte, así que no trae el `limite_cm` que pega el servidor — sin esto el visor mostraba
+      // el nombre sin achicar y la tizada achicado (LEY arte = tizada)
+      variante: prenda.variante_clave || null, grupo: prenda._grupo || null, ph: persConLimite(pers || {}, m.info.limite_texto),
+      etiqueta, alias: fuentes.alias, salida: 'svg',
     })
     piezas[pieza] = { svg: base64DeTexto(r.svg), w_cm: pyRound(r.w / CM, 2), h_cm: pyRound(r.h / CM, 2) }
     hechas++

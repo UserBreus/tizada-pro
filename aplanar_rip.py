@@ -32,7 +32,9 @@ _OPKIND = {"Do": "/XObject", "gs": "/ExtGState", "cs": "/ColorSpace", "CS": "/Co
            "BDC": "/Properties", "DP": "/Properties"}
 
 
-def _merge_res(dst_res, src_res):
+def _merge_res(dst_res, src_res, forms_vivos=()):
+    """`forms_vivos`: los Form que el contenido inlineado SIGUE llamando con `Do` (los que van bajo
+    transparencia, ver `_flatten`): ésos sí pasan al contenedor; si no, el `Do` quedaría colgando."""
     remap = {}
     for kind in _RES_KINDS:
         s = src_res.get(kind)
@@ -43,7 +45,7 @@ def _merge_res(dst_res, src_res):
             d = pikepdf.Dictionary(); dst_res[kind] = d
         for nm, obj in s.items():
             nm = str(nm)
-            if kind == "/XObject" and obj.get("/Subtype") == Name("/Form"):
+            if kind == "/XObject" and obj.get("/Subtype") == Name("/Form") and nm not in forms_vivos:
                 continue   # los Form ya se inlinearon → NO mergearlos (quedarían huérfanos)
             if nm in d:
                 try:
@@ -87,6 +89,37 @@ def _remap_ops(ops, remap):
     return out
 
 
+def _gs_transparencia(gs):
+    """Lo que un ExtGState cambia de la TRANSPARENCIA vigente: {clave: activa}. Sólo las claves que
+    trae (lo que no nombra queda como estaba): `m` máscara de opacidad (SMask diccionario = sí,
+    /None = la apaga), `ca`/`CA` opacidad < 1, `bm` modo de fusión que no sea Normal/Compatible."""
+    out = {}
+    if gs is None:
+        return out
+    try:
+        if "/SMask" in gs:
+            out["m"] = isinstance(gs["/SMask"], pikepdf.Dictionary)
+        for k, c in (("/ca", "ca"), ("/CA", "CA")):
+            if k in gs:
+                out[c] = float(gs[k]) < 1
+        if "/BM" in gs:
+            bm = gs["/BM"]
+            if isinstance(bm, pikepdf.Array):
+                bm = bm[0] if len(bm) else Name("/Normal")
+            out["bm"] = str(bm) not in ("/Normal", "/Compatible")
+    except Exception:
+        pass
+    return out
+
+
+def _hay_transparencia(eg):
+    """¿Algún ExtGState de este diccionario pone transparencia de verdad?"""
+    try:
+        return any(any(_gs_transparencia(v).values()) for _, v in (eg or {}).items())
+    except Exception:
+        return False
+
+
 def _flatten(pdf, container, es_pagina=False, _hechos=None):
     """Des-anida los XObject de Form: su contenido pasa al stream que los usaba. Devuelve las
     instrucciones ya aplanadas del contenedor (la página las recibe en memoria y
@@ -100,6 +133,19 @@ def _flatten(pdf, container, es_pagina=False, _hechos=None):
     Ahora cada XObject se parsea UNA vez y sus instrucciones se reusan tal cual: aplanar un
     objeto ya aplanado da lo mismo, pero cuesta. Los XObjects no se reescriben: al terminar
     quedan huérfanos y `_procesar_contenido` los saca de los recursos.
+
+    🔴 UN GRUPO QUE SE PINTA BAJO TRANSPARENCIA NO SE DES-ANIDA (2026-10-02, «SHORT BASKET
+    ENTERO NEGRO»). Illustrator guarda una MÁSCARA DE OPACIDAD como `/GS1 gs` (SMask de
+    luminosidad) + `/Fm0 Do`, con `Fm0` un grupo de transparencia. El PDF aplica la máscara al
+    grupo ENTERO, y adentro del grupo la máscara arranca apagada — por eso Illustrator pone ahí un
+    `/GS0 gs` con `SMask /None`. Des-anidado, ese `/GS0 gs` APAGA la máscara que se acababa de
+    poner y el grupo sale pleno: la textura del arte salía como un Pantone liso en la tizada (el
+    arte se veía bien → rompía «el arte se ve igual que la tizada»). Lo mismo con una opacidad
+    < 1 o un modo de fusión sobre el grupo. Con transparencia vigente en el `Do` (se sigue con
+    la pila `q`/`Q` y cada `gs`), el Form queda como está, con su `/Group`, y pasa a los recursos
+    del contenedor si a éste lo inlinean (`_merge_res(forms_vivos)`). La hoja lleva entonces
+    transparencia viva (como un PDF/X-4 de Illustrator): `verificar_rip_compatible` lo avisa.
+    Sin transparencia la salida es la de siempre, byte a byte.
     """
     if _hechos is None:
         _hechos = {}
@@ -125,14 +171,27 @@ def _flatten(pdf, container, es_pagina=False, _hechos=None):
         return ops
     new_ops = []
     _num = lambda v: pikepdf.Object.parse(f"{float(v):.6f}".encode("ascii"))
+    egs = res.get("/ExtGState")
+    transp, pila = {}, []                 # la transparencia vigente (ver `_gs_transparencia`)
     for inst in ops:
         operands = inst.operands
-        if str(inst.operator) == "Do" and len(operands) and isinstance(operands[0], pikepdf.Name):
+        op = str(inst.operator)
+        if op == "q":
+            pila.append(dict(transp))
+        elif op == "Q":
+            if pila:
+                transp = pila.pop()
+        elif op == "gs" and len(operands) and isinstance(operands[0], pikepdf.Name) and egs is not None:
+            g = str(operands[0])
+            transp.update(_gs_transparencia(egs.get(g) if g in egs else None))
+        if op == "Do" and len(operands) and isinstance(operands[0], pikepdf.Name):
             nm = str(operands[0])
             xo = xobjs.get(nm) if nm in xobjs else None
-            if xo is not None and xo.get("/Subtype") == Name("/Form"):
+            if xo is not None and xo.get("/Subtype") == Name("/Form") and not ("/Group" in xo and any(transp.values())):
                 sub = _flatten(pdf, xo, es_pagina=False, _hechos=_hechos)
-                remap = _merge_res(res, xo.get("/Resources", pikepdf.Dictionary()))
+                vivos = {str(i.operands[0]) for i in sub
+                         if str(i.operator) == "Do" and len(i.operands) and isinstance(i.operands[0], pikepdf.Name)}
+                remap = _merge_res(res, xo.get("/Resources", pikepdf.Dictionary()), vivos)
                 sub = _remap_ops(sub, remap)
                 new_ops.append(_instr([], "q"))
                 mtx = xo.get("/Matrix")
@@ -267,7 +326,12 @@ def _declarar_estado_grafico(pdf, page):
     res = page.Resources
     if "/ExtGState" not in res:
         res.ExtGState = pikepdf.Dictionary()
-    for k, v in list(res.ExtGState.items()):
+    # 🔴 Con transparencia DE VERDAD en el mismo diccionario (máscara de opacidad, opacidad < 1,
+    # fusión), los `SMask /None` / `ca 1` / `BM /Normal` son los que la APAGAN después: borrarlos
+    # la dejaría prendida sobre lo que sigue. Ahí no se toca nada (la transparencia está y el
+    # preflight la va a ver igual). Ver `_flatten`.
+    _limpiar = not _hay_transparencia(res.ExtGState)
+    for k, v in (list(res.ExtGState.items()) if _limpiar else []):
         if v.get("/SMask") == Name("/None"):
             del v["/SMask"]
         if v.get("/BM") == Name("/Normal"):

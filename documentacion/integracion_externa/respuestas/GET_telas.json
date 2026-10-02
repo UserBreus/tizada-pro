@@ -1,0 +1,38 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "telas": [
+   {
+    "ancho_mesa_cm": null,
+    "de_baja": false,
+    "id": "564",
+    "nombre": "Adis Deportivo new",
+    "usable": false
+   },
+   {
+    "ancho_mesa_cm": 157.0,
+    "de_baja": false,
+    "id": "44",
+    "nombre": "Bandera (1,60)",
+    "usable": true
+   },
+   {
+    "ancho_mesa_cm": 147.0,
+    "de_baja": false,
+    "id": "218",
+    "nombre": "Bandera Confeccionada (1,50x0,85)",
+    "usable": true
+   },
+   {
+    "ancho_mesa_cm": 157.0,
+    "de_baja": false,
+    "id": "496",
+    "nombre": "Bandera mesh (1,60)",
+    "usable": true
+   },
+   {
+    "…": "34 telas más"
+   }
+  ]
+ }
+}

@@ -507,7 +507,7 @@ export function validarArteSeparado(mupdf, bytes, registro, fuentes, mapeo, vari
     const textoDiseno = ordenarPy(Object.entries(requeridas).filter(([, u]) => u.includes('etiquetas')).map(([n]) => n))
     checks.push({ nombre: 'Diseño sin texto vivo (en curvas)', ok: !textoDiseno.length,
                   detalle: !textoDiseno.length ? 'sin texto vivo'
-                    : 'convertí a curvas el texto del diseño (Texto → Crear contornos). Fuentes: ' + textoDiseno.join(', ') })
+                    : 'convertí a curvas el texto del diseño (Illustrator: Texto → Crear contornos · Corel: Objeto → Convertir en curvas). Fuentes: ' + textoDiseno.join(', ') })
     ok = ok && !textoDiseno.length
 
     const pers = extraerPersonalizacion(mupdf, bytes)

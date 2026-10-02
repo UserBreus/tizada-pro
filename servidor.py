@@ -176,6 +176,12 @@ try:
     # (`srv_visor.py`) también importa este módulo: escribía en la base REAL sin que nada lo frene.
 except Exception as _e:   # sin base, el resto del sistema tiene que seguir andando
     print(f"[usuarios] API deshabilitada (¿base MSSQL sin levantar?): {_e}")
+# ── PEDIDOS QUE LLEGAN DE OTRO SISTEMA (MAPA 606): `/api/externo/…` + la pantalla Integraciones.
+# El módulo usa las reglas de ESTE (por eso se le pasa el módulo entero) y no calcula nada: lo
+# pesado lo hace el robot (`robot/robot.mjs`), que entra por las rutas de siempre.
+import integracion_externa as IE          # noqa: E402
+IE.iniciar(sys.modules[__name__])
+app.register_blueprint(IE.bp)
 # ── TRABAJOS DE TIZADA (en memoria, no en la base) ────────────────────────────────────────────
 # Cada generación es un `trabajo`: la pantalla lo sondea con `GET /api/trabajo/<id>` hasta que
 # queda `listo`. Vive en memoria a propósito (los PDFs están en `trabajos/<id>/` y la pantalla los
@@ -2202,6 +2208,14 @@ def _soltar_edicion_catalogo():
 def _usuario_actual():
     """Usuario logueado, o None si no hay sesión/base. Nunca revienta: si la API de usuarios no
     está disponible, el sistema sigue funcionando en modo de un solo usuario (como antes)."""
+    # El ROBOT de integración (y el otro sistema, dentro de `/api/externo/v1/`) no tienen sesión:
+    # se identifican con su llave y entran como un usuario propio (MAPA 606).
+    try:
+        _ext = IE.usuario_de_request()
+        if _ext is not None:
+            return _ext
+    except Exception:
+        pass
     try:
         from api_usuarios import usuario_actual
         return usuario_actual()
@@ -2482,7 +2496,10 @@ def _en_hilo(fn):
 
 # Rutas de API que funcionan SIN sesión: el login mismo, la salud (monitoreo/instalador) y la
 # actualización taller→publicado (protegida por su propio token X-Token-Act, no por sesión).
-_API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/")
+# `/api/externo/` (otro sistema y robot) lleva SU guarda: llave `X-Api-Key` o `X-Robot-Token`
+# (`integracion_externa._puerta`), no la sesión de una persona.
+# (y la vuelta de «Conectar con Google», que la valida su `state` y no la cookie)
+_API_SIN_SESION = ("/api/auth/", "/api/salud", "/api/actualizacion/", "/api/externo/", "/api/integracion/drive/vuelta")
 
 # POSTs que reciben un molde pero NO lo modifican: rendes y generación de tizada. No pueden pedir
 # `molde.editar` — un Operario (sólo `molde.ver` + los de pedido) tiene que poder generar y ver el
@@ -2551,6 +2568,8 @@ _API_SIN_MOLDE = {
     # sirve a sus propios pedidos; ver `_calcular`)
     "/api/calculos": "dueño",
 }
+# la pantalla Configuración › Integraciones (llaves, Drive, pedidos que llegaron)
+_API_SIN_MOLDE.update(IE.RUTAS_DE_PANTALLA)
 
 # PREFIJO de sub-ruta donde se publica la app (nginx hace `proxy_pass` y lo QUITA). Si alguien entra
 # al servidor SIN pasar por nginx (localhost:8050 o la IP, típico al abrirlo en la propia máquina),
@@ -7195,6 +7214,7 @@ def _piezas_base_clave(pid, sub, prod, mapeo, edit_cfg, edit_tam, variante, tall
             _sha1_corto(reempl or {}), _sha1_corto(_firma_fuentes()),
             _reg_rev(pid),   # versión del registro EN LA BASE (antes: mtime del espejo)
             _sha1_corto(mapeo or {}), _sha1_corto(_borde_de(prod, cat)),
+            _sha1_corto(_limite_texto_de(prod)),        # límite de ancho del nombre/número (2026-10-01)
             _sha1_corto(_etiqueta_de(prod, cat)), _sha1_corto(edit_cfg or {}),
             _sha1_corto(edit_tam or {}), _sha1_corto(_oa_cargar(pid, sub) or {}),
             _sha1_corto(edit_color or {}),
@@ -7320,7 +7340,7 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
         _t_pv = time.time()
         try:
             ppt = MP.generar_pedido(pl, (None if _cb else arte), reg, _pers, prendas,
-                                    _fuentes_para(pid, _reempl), tmp,
+                                    _fuentes_para(pid, _reempl), tmp, limite_texto=_limite_texto_de(prod),
                                     mapeo_arte=(None if _cb else (mapeo or None)), solo_piezas=True,
                                     borde_corte=_borde_de(prod, cat), etiqueta=_etiqueta_de(prod, cat),
                                     editables_cfg=edit_cfg, editables_tamano=edit_tam,
@@ -7793,6 +7813,10 @@ def listar_disenos():
         prod = next((p for p in cat["productos"] if p["id"] == pid), None)
         lst = [{"id": "principal", "nombre": "Principal"}]
         for d in ((prod or {}).get("disenos") or []):
+            # los diseños que cargó un pedido EXTERNO (`externo` = su referencia) son de ese pedido:
+            # no se mezclan con los que carga la persona (MAPA 606)
+            if d.get("externo") and request.args.get("externos") != "1":
+                continue
             lst.append({"id": d["id"], "nombre": d["nombre"]})
         por_molde[pid] = lst
         for d in lst:
@@ -7895,6 +7919,112 @@ def set_borde_corte():
     prod["borde_corte"] = bc
     _guardar_catalogo(cat)
     return jsonify(bc)
+
+
+# ── Límite de ancho del nombre/número, por molde y por campo (2026-10-01) ──────────────────
+# Pedido del usuario: «que se limite hasta dónde llega un texto en cada molde y, si supera ese
+# tamaño, se vaya achicando proporcionalmente». Se guarda `prod["limite_texto"] = {campo
+# normalizado: {"margen_cm": x}}` = cuántos cm quedan libres entre el texto y el borde de la
+# pieza, a cada lado. Sin entrada = sin límite (como siempre). El motor lo lee de cada placeholder
+# (`limite_cm`, ver `MP.pers_con_limite`); el ancho disponible lo mide sobre el contorno de la pieza
+# una vez por pieza/talle (no frena la tizada).
+def _limite_texto_de(prod):
+    """El límite que rige para ESTE molde. ÚNICO lugar donde se decide (preview, ficha, motor)."""
+    out = {}
+    for k, v in ((prod or {}).get("limite_texto") or {}).items():
+        e = _limite_campo_limpio(v)
+        if e:
+            out[MP.clave_campo(k)] = e
+    return out
+
+
+def _limite_campo_limpio(v):
+    """`{margen_cm?, por_pieza?}` válido o None. `margen_cm` = todas las piezas; `por_pieza` =
+    {nombre genérico de la pieza: cm, o None = esa pieza sin límite} (le gana a todas)."""
+    if not isinstance(v, dict):
+        return None
+    e = {}
+    try:
+        mg = v.get("margen_cm")
+        if mg is not None and mg != "":
+            mg = float(mg)
+            if 0 <= mg <= 100:
+                e["margen_cm"] = round(mg, 2)
+    except (TypeError, ValueError):
+        pass
+    pp = {}
+    for pz, x in (v.get("por_pieza") or {}).items():
+        pz = str(pz or "").strip()
+        if not pz:
+            continue
+        if x is None:
+            pp[pz] = None
+            continue
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= x <= 100:
+            pp[pz] = round(x, 2)
+    if pp:
+        e["por_pieza"] = pp
+    return e or None
+
+
+def _campos_de_molde(pid, prod):
+    """Los campos de personalización del molde para la pantalla: Nombre y Número siempre, más los
+    que traigan sus diseños (Palabra…) y lo que ya esté guardado."""
+    import piezas_con_diseno as _PD
+    vistos = collections.OrderedDict()
+    try:
+        if _es_camino_b(pid):
+            _pl = _ruta_entrada("plantilla.ai", pid)
+            fuentes = [_PD.personalizacion_guardada(_pl, armar=False)]
+        else:
+            fuentes = []
+            for d in ([{"id": "principal"}] + list((prod or {}).get("disenos") or [])):
+                fuentes.append(_cargar("registro_personalizacion.json", pid, sub=_diseno_sub(d["id"])) or {})
+        for pers in fuentes:
+            for campos in (pers or {}).values():
+                for campo in (campos or {}):
+                    vistos.setdefault(MP.clave_campo(campo), campo)
+    except Exception as e:
+        print(f"[limite_texto] campos de {pid}: {e}")
+    for k in _limite_texto_de(prod):
+        vistos.setdefault(k, k)
+    # el límite es del MOLDE (no de un diseño): nombre y número se pueden configurar siempre,
+    # aunque todavía ningún diseño los traiga
+    for k, n in (("nombre", "Nombre"), ("numero", "Número")):
+        vistos.setdefault(k, n)
+    return [{"clave": k, "nombre": str(n)} for k, n in vistos.items()]
+
+
+@app.get("/api/productos/limite_texto")
+def get_limite_texto():
+    pid = request.args.get("pid") or _get_active_producto_id()
+    _cat = _cargar_catalogo()
+    prod = next((p for p in _cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    return jsonify({"limite": _limite_texto_de(prod), "campos": _campos_de_molde(pid, prod)})
+
+
+@app.post("/api/productos/limite_texto")
+def set_limite_texto():
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("pid") or _get_active_producto_id()
+    cat = _cargar_catalogo_para_editar()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    if prod is None:
+        return jsonify({"error": "molde no encontrado"}), 404
+    nuevo = {}
+    for k, v in (cuerpo.get("limite") or {}).items():
+        e = _limite_campo_limpio(v)
+        if e:
+            nuevo[MP.clave_campo(k)] = e
+    prod["limite_texto"] = nuevo
+    _guardar_catalogo(cat)
+    return jsonify({"limite": _limite_texto_de(prod), "campos": _campos_de_molde(pid, prod)})
 
 
 # ── Etiqueta de identificación por molde ────────────────────────────────────
@@ -8246,6 +8376,27 @@ def _pos_en_pieza(mesa_rect, bbox_mu, pieza_bbox, referencia="alto"):
 _EDIT_SEP = ""
 
 
+# 🔴 UN OBJETO POR CAPA Y POR MESA (pedido del usuario 2026-10-01: «toma toda esa capa como un
+# objeto solo; si está en otra mesa, agrupa los objetos de esa otra mesa»). La misma capa «Editable
+# Escudo» en el Frente (mesa 1) y en la Espalda (mesa 2) son DOS objetos, cada uno con su ajuste
+# (mover/rotar/escalar). Ese ajuste se guarda con la CLAVE «capa<RS>mesa»; lo guardado antes sólo
+# con el nombre de la capa sigue valiendo para los talles que la clave no tenga (no se pierde nada).
+# El color, la marca de proceso y el tamaño por rango siguen siendo de la CAPA (por nombre).
+_EDIT_MESA = "\x1e"
+
+
+def _clave_mesa(nombre, mesa):
+    return f"{nombre}{_EDIT_MESA}{mesa}" if mesa else str(nombre)
+
+
+def _tf_de_unidad(cfg, nombre, mesa):
+    """Ajuste del objeto (capa, mesa): por talle, el de su clave y si no, el viejo de la capa."""
+    tf = _tf_de_capa((cfg or {}).get(nombre))
+    if mesa:
+        tf.update(_tf_de_capa((cfg or {}).get(_clave_mesa(nombre, mesa))))
+    return tf
+
+
 def _ident_obj(nombre, obj_id):
     return f"{nombre}{_EDIT_SEP}{obj_id}" if obj_id else nombre
 
@@ -8539,7 +8690,7 @@ def editables_datos_producto(pid):
     return jsonify({"mapeo": {k: int(v) for k, v in mp.items() if v}, "registro": reg,
                     "talles": _talles_editables(pid, reg), "capas": capas,
                     "inyectadas": sorted({i.get("capa") for i in (man.get("inyectadas") or []) if i.get("capa")}),
-                    "agregados": agregados, "sep": _EDIT_SEP})
+                    "agregados": agregados, "sep": _EDIT_SEP, "sep_mesa": _EDIT_MESA})
 
 
 @app.get("/api/productos/editables")
@@ -8595,7 +8746,8 @@ def get_editables():
         o["pieza"] = pieza
         o["label"] = o["nombre"]; o["obj_id"] = None
         o["quitable"] = o.get("capa") in _inyectadas
-        o["transforms"] = _tf_de_capa(_entry)
+        o["clave"] = _clave_mesa(o["nombre"], o.get("mesa"))       # UN objeto por capa y mesa
+        o["transforms"] = _tf_de_unidad(cfg, o["nombre"], o.get("mesa"))
         o["color"] = _entry.get("color")
         o["recolorable"] = bool(_recol.get(o.get("capa"), False)) or any(b.get("recolorable") for b in _obs)
         o["pos"] = _pos_en_pieza(o.get("mesa_rect"), o.get("bbox_mu"), pb,
@@ -8656,7 +8808,7 @@ def get_editables():
             # talle que está mostrando (el editor con la suya, el visor del Arte con `mappedMesa`,
             # el motor con `arte_rect(_mesa_a)`). Mandar una mesa fija era la causa del corrimiento.
             "mesa_rect": None, "bbox_mu": None, "pos": None,
-            "transforms": _tf, "agregado": True, "oid": _o["id"],
+            "transforms": _tf, "agregado": True, "oid": _o["id"], "clave": _o.get("nombre") or _o["id"],
             # los agregados se componen como XObject (Do) → el color vive adentro, no recoloreable (§10.b)
             "color": None, "recolorable": False,
         })
@@ -9314,7 +9466,7 @@ def arte_perfil():
 
 def _fuente_analizada_por_navegador():
     """Lo que el navegador leyó de la tipografía (`motor/arte/fuentesSubir.js`): `{interno,
-    sin_contorno, choca_con}` o None si no vino (navegador viejo)."""
+    completo, ps, sin_contorno, choca_con}` o None si no vino (navegador viejo)."""
     interno = (request.form.get("interno") or "").strip()
     if not interno:
         return None
@@ -9323,27 +9475,146 @@ def _fuente_analizada_por_navegador():
             return json.loads(request.form.get(k) or "null") or d
         except Exception:
             return d
-    return {"interno": interno, "sin_contorno": _j("sin_contorno", []), "choca_con": _j("choca_con", None)}
+    return {"interno": interno, "completo": (request.form.get("completo") or "").strip(),
+            "ps": (request.form.get("ps") or "").strip(),
+            "sin_contorno": _j("sin_contorno", []), "choca_con": _j("choca_con", None)}
+
+
+class FuenteYaExiste(Exception):
+    """La tipografía que se sube ya está en esa carpeta (mismo archivo o la misma fuente adentro).
+    Se contesta 409 con `existe` y la pantalla pregunta «¿reemplazarla o dejar la que está?»."""
+    def __init__(self, existe):
+        super().__init__("ya existe")
+        self.existe = existe
+
+
+def _fuente_existente(carpeta, nombre, an):
+    """La tipografía de `carpeta` que la nueva PISARÍA, o None.
+
+    Pedido del usuario (2026-10-01): «si se llama igual a otra, que diga esa fuente ya existe:
+    ¿reemplazarla o dejar la misma?; obvio que también se pueden subir familias». Choca:
+      · el mismo NOMBRE DE ARCHIVO (sin distinguir mayúsculas: Windows no las distingue), o
+      · la misma fuente adentro: mismo nombre completo = familia + estilo (`identidad_fuente`).
+    Los estilos de una familia (Regular, Bold, Italic…) tienen otro nombre completo: no chocan."""
+    cat = MP.catalogo_fuentes(carpeta)
+    for _r, info in cat.items():
+        if info["archivo"].lower() == nombre.lower():
+            return info
+    ident = MP.identidad_fuente(an)
+    if ident:
+        for _r, info in cat.items():
+            if MP.identidad_fuente(info) == ident:
+                return info
+    return None
+
+
+def _ya_existe_sin_navegador(tmp, carpeta, nombre):
+    """Camino viejo (el servidor lee la tipografía): el mismo control de «ya existe». Devuelve la
+    respuesta 409 (y borra el temporal) o None si se puede seguir. `reemplaza` saca la vieja."""
+    try:
+        with open(tmp, "rb") as fh:
+            an = MP.nombres_fuente(fh.read())
+    except OSError:
+        an = {}
+    existe = _fuente_existente(carpeta, nombre, an)
+    reemplaza = (request.form.get("reemplaza") or "").strip()
+    if existe and existe["archivo"] != reemplaza:
+        _descartar_tmp(tmp)
+        return _respuesta_ya_existe(FuenteYaExiste(existe))
+    if existe and existe["archivo"].lower() != nombre.lower():
+        try:
+            os.remove(os.path.join(carpeta, os.path.basename(existe["archivo"])))
+        except OSError:
+            pass
+    return None
+
+
+def _respuesta_ya_existe(e):
+    ex = e.existe or {}
+    return jsonify({"ok": False, "existe": {"archivo": ex.get("archivo"), "interno": ex.get("interno"),
+                                            "completo": ex.get("completo") or ex.get("interno")},
+                    "error": f"Ya existe la tipografía «{ex.get('completo') or ex.get('interno')}» "
+                             f"(archivo {ex.get('archivo')})."}), 409
+
+
+def _nombre_fuente(nombre):
+    """El nombre con el que se GUARDA una tipografía subida: el del archivo, tal cual.
+
+    🔴 SIN PREFIJO (pedido del usuario 2026-10-01: «si yo subo una fuente es esa fuente»). Antes se
+    guardaba como `subida_<nombre>` y así aparecía en las listas. Reconocer la fuente nunca
+    dependió de esto (se busca por el nombre INTERNO, `resolver_fuente`); el prefijo era sólo un
+    rótulo. Se saca cualquier carpeta que traiga el nombre (`../`): eso sí es a propósito."""
+    base = os.path.basename(str(nombre or "").replace("\\", "/")).strip()
+    if base.lower().startswith(_PREFIJO_VIEJO_FUENTE):
+        base = base[len(_PREFIJO_VIEJO_FUENTE):]
+    if not base or base.startswith(".") or not base.lower().endswith((".ttf", ".otf")):
+        raise ValueError("la tipografía tiene que ser un archivo .ttf u .otf")
+    return base
+
+
+# el rótulo que llevaban las tipografías subidas hasta 2026-10-01 (ver `_quitar_prefijo_fuentes`)
+_PREFIJO_VIEJO_FUENTE = "subida_"
+
+
+def _quitar_prefijo_fuentes():
+    """Las tipografías que se subieron antes como `subida_<nombre>` pasan a llamarse `<nombre>`.
+
+    Corre al arrancar (en el taller y en el publicado, que recibe las del taller ya renombradas).
+    Nunca pierde nada: si ya hay un archivo con el nombre real IDÉNTICO byte a byte, el `subida_`
+    era una copia y se saca; si hay otro DISTINTO con ese nombre, no se toca ninguno (las dos
+    siguen en el catálogo y se avisa en la consola). Busca por nombre interno, así que ningún
+    arte deja de reconocerse por esto."""
+    import glob
+    carpetas = [FUENTES] + glob.glob(os.path.join(DATOS, "productos", "*", "fuentes"))
+    for carpeta in carpetas:
+        try:
+            nombres = os.listdir(carpeta)
+        except OSError:
+            continue
+        for viejo in nombres:
+            if not viejo.lower().startswith(_PREFIJO_VIEJO_FUENTE) or not viejo.lower().endswith((".ttf", ".otf")):
+                continue
+            real = viejo[len(_PREFIJO_VIEJO_FUENTE):]
+            a, b = os.path.join(carpeta, viejo), os.path.join(carpeta, real)
+            try:
+                if not os.path.exists(b):
+                    os.replace(a, b)
+                    print(f"  [fuentes] {viejo} → {real}")
+                elif open(a, "rb").read() == open(b, "rb").read():
+                    os.remove(a)                   # copia exacta de la que ya está con su nombre
+                    print(f"  [fuentes] {viejo}: ya estaba como {real} (idéntica)")
+                else:
+                    print(f"  [fuentes] {viejo} NO se renombró: ya hay otra distinta llamada {real}")
+            except OSError as e:
+                print(f"  [fuentes] {viejo} no se pudo renombrar: {e}")
 
 
 def _guardar_fuente_subida(f, carpeta, an):
     """Guarda la tipografía TAL CUAL llegó (el análisis lo hizo el navegador): .tmp + os.replace,
-    y se anota su nombre interno para que el catálogo no la tenga que abrir."""
+    y se anota su nombre interno para que el catálogo no la tenga que abrir.
+
+    Si ya hay una igual (`_fuente_existente`) NO se pisa sin preguntar: `FuenteYaExiste` → 409. Con
+    `reemplaza=<archivo>` (el usuario tocó «Reemplazarla») entra la nueva y, si la vieja tenía otro
+    nombre de archivo, la vieja se saca: quedan las dos sería «la misma fuente dos veces»."""
     os.makedirs(carpeta, exist_ok=True)
-    destino = os.path.join(carpeta, "subida_" + os.path.basename(f.filename or "fuente"))
-    if not destino.lower().endswith((".ttf", ".otf")):
-        raise ValueError("la tipografía tiene que ser .ttf u .otf")
+    nombre = _nombre_fuente(f.filename)
+    destino = os.path.join(carpeta, nombre)
+    existe = _fuente_existente(carpeta, nombre, an)
+    reemplaza = (request.form.get("reemplaza") or "").strip()
+    if existe and existe["archivo"] != reemplaza:
+        raise FuenteYaExiste(existe)
     tmp = destino + ".tmp"
     f.save(tmp)
     os.replace(tmp, destino)
     MP.registrar_fuente(destino, an["interno"])
-    res = {"ok": True, "interno": an["interno"], "sin_contorno": an.get("sin_contorno") or [],
-           "choca_con": an.get("choca_con")}
-    _ch = an.get("choca_con")
-    if _ch:
-        res["aviso"] = (f"Ya había una tipografía con este mismo nombre interno («{_ch.get('interno')}», "
-                        f"archivo {_ch.get('archivo')}). El sistema no puede distinguirlas: va a usar "
-                        f"siempre una sola. Borrá la que no uses.")
+    if existe and existe["archivo"].lower() != nombre.lower():
+        _vieja = os.path.join(carpeta, os.path.basename(existe["archivo"]))
+        try:
+            os.remove(_vieja)
+        except OSError:
+            pass
+    res = {"ok": True, "interno": an["interno"], "archivo": nombre, "reemplazo": bool(existe),
+           "sin_contorno": an.get("sin_contorno") or []}
     return destino, res
 
 
@@ -9380,17 +9651,25 @@ def subir_fuente():
     if _an is not None:
         try:
             _dst, res = _guardar_fuente_subida(f, FUENTES, _an)
+        except FuenteYaExiste as e:
+            return _respuesta_ya_existe(e)
         except ValueError as e:
             return jsonify({"ok": False, "error": str(e)}), 422
         res["catalogo"] = list(MP.catalogo_fuentes(FUENTES).values())
         return jsonify(res)
     if _solo_navegador():
         return jsonify({"error": "la tipografía la analiza tu computadora y no llegó el análisis: recargá la página"}), 409
-    # El nombre lo elige el CLIENTE: se le saca cualquier carpeta antes de pegarlo a la ruta.
-    # Hoy el prefijo «subida_» ya neutralizaba un `../`, pero por accidente, no por decisión.
-    tmp = os.path.join(ENTRADA, "subida_" + os.path.basename(f.filename or "fuente"))
+    # El nombre lo elige el CLIENTE: `_nombre_fuente` le saca cualquier carpeta (`../`).
+    try:
+        _nom = _nombre_fuente(f.filename)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 422
+    tmp = os.path.join(ENTRADA, ".fuente_subiendo_" + _nom)
     f.save(tmp)
-    res = MP.alta_fuente(tmp, FUENTES)
+    _r = _ya_existe_sin_navegador(tmp, FUENTES, _nom)
+    if _r is not None:
+        return _r
+    res = MP.alta_fuente(tmp, FUENTES, nombre=_nom)
     if not res["ok"]:
         return jsonify(res), 422
     # si había un arte validado con fuentes faltantes, revalidar (según el modo)
@@ -9435,8 +9714,12 @@ def fuente_archivo(nombre):
         ruta = os.path.realpath(os.path.join(_dir_propia, base))
     if os.path.dirname(ruta) not in (os.path.realpath(FUENTES), _dir_propia) or not os.path.exists(ruta):
         return jsonify({"error": "no existe"}), 404
+    # 🔴 SIEMPRE PREGUNTA SI CAMBIÓ (max_age=0 + ETag → 304 sin bajar nada si es la misma). Antes
+    # se guardaba un día «porque mismo nombre = misma fuente», y no es así: subir otra versión de
+    # la tipografía con el mismo nombre (ahora que se guarda con su nombre real, lo normal) dejaba
+    # al navegador dibujando con la vieja hasta el día siguiente.
     return send_file(ruta, mimetype="font/ttf" if base.lower().endswith(".ttf") else "font/otf",
-                     max_age=86400)   # el archivo no cambia (mismo nombre = misma fuente)
+                     max_age=0)
 
 
 # Juegos de caracteres de REFERENCIA: lo que una fuente debería tener para este sistema
@@ -10580,7 +10863,7 @@ def _procesos_ficha(pid, prod, diseno, variante, arte, talle_guia=None, reg=None
         # los editables SIN miniatura (la geometría): el dibujo del objeto para la ficha lo arma
         # el navegador desde el arte (2026-09-22, `generar.js` → `arte_objeto_pdf`)
         objs = _arte_calc("arte_editables", pid, diseno, lambda: MP.extraer_editables(arte, con_thumb=False),
-                          memo="editables") or []
+                          memo=MP.MEMO_EDITABLES) or []
     except Exception as e:
         _relanzar_calculo(e)
         return []
@@ -10846,7 +11129,7 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
     piezas = []
     try:
         ppt = MP.generar_pedido(pl, arte, reg, pers, prendas, _cf, tmp,
-                                mapeo_arte=mapeo, solo_piezas=True,
+                                mapeo_arte=mapeo, solo_piezas=True, limite_texto=_limite_texto_de(prod),
                                 asignacion_tela=(var or {}).get("asig"),
                                 telas_cfg=(var or {}).get("telas"),
                                 borde_corte=_borde_de(prod),
@@ -10977,7 +11260,7 @@ def _plan_del_pedido(cuerpo):
     def _grupo_de(_pid):
         for gr in grupos_cfg:
             if _pid in (gr.get("moldes") or []):
-                return g
+                return gr          # (decía `return g`: devolvía el `g` de Flask y el nombre del grupo nunca se usaba)
         return None
     molds_data, nombres, avisos = [], [], []
     # DOS canales de aviso, porque el front los muestra distinto y con títulos distintos:
@@ -11370,7 +11653,10 @@ def _plan_del_pedido(cuerpo):
                 # carpetas + reemplazos de ESTE molde en ESTE diseño (arte=tizada). Es por par, no
                 # del pedido entero: dos moldes con la misma fuente pueden reemplazarla distinto.
                 "fuentes": _fuentes_para(pid, _reempl_de_request(dslug, pid)),
-                "registro": reg, "pers": pers, "prendas": subset,
+                # el límite de ancho del molde va ADENTRO de cada placeholder (`limite_cm`): así
+                # lo lee igual el motor del navegador; `limite_texto` es para el del servidor
+                "registro": reg, "pers": MP.pers_con_limite(pers, _limite_texto_de(prod)), "prendas": subset,
+                "limite_texto": _limite_texto_de(prod),
                 "mapeo_arte": mapeo, "rotaciones": rot, "asignacion_tela": _asig_de(_dslug_pedido),   # del diseño del PEDIDO (ver arriba)
                 "borde_corte": _borde_de(prod, cat),
                 "etiqueta": _etiqueta_de(prod, cat),
@@ -11448,6 +11734,7 @@ def _plan_para_navegador(plan):
             "camino_b": md.get("arte") is None,
             "prendas": json.loads(json.dumps(md.get("prendas") or [], default=str, ensure_ascii=False)),
             "pers": md.get("pers") or {},
+            "limite_texto": md.get("limite_texto") or {},     # el límite del molde (el aviso «se achicará», MAPA 601)
             "asignacion_tela": md.get("asignacion_tela") or {}, "rotaciones": md.get("rotaciones") or {},
             "borde_corte": md.get("borde_corte"), "etiqueta": md.get("etiqueta"),
             "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
@@ -12250,15 +12537,25 @@ def fuente_resolver():
         if _an is not None:
             try:
                 _dst, res = _guardar_fuente_subida(f, carpeta, _an)
+            except FuenteYaExiste as e:
+                return _respuesta_ya_existe(e)
             except ValueError as e:
                 return jsonify({"ok": False, "error": str(e)}), 422
             return jsonify({"ok": True, "destino": destino, "interno": res.get("interno"), "alias_quitados": []})
         if _solo_navegador():
             return jsonify({"error": "la tipografía la analiza tu computadora y no llegó el análisis: recargá la página"}), 409
         os.makedirs(carpeta, exist_ok=True)
-        tmp = os.path.join(carpeta, "subida_" + os.path.basename(f.filename))
+        try:
+            _nom = _nombre_fuente(f.filename)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 422
+        tmp = os.path.join(carpeta, ".fuente_subiendo_" + _nom)
         f.save(tmp)
-        res = MP.alta_fuente(tmp, carpeta)
+        _r = _ya_existe_sin_navegador(tmp, carpeta, _nom)
+        if _r is not None:
+            return _r
+        res = MP.alta_fuente(tmp, carpeta, nombre=_nom)
+        tmp = os.path.join(carpeta, _nom)           # donde quedó (para los reemplazos a soltar)
         if not res.get("ok"):
             _descartar_tmp(tmp)
             return jsonify(res), 422
@@ -15171,6 +15468,44 @@ def illustrator_instalador():
     return send_from_directory(base, exe, as_attachment=True, download_name=exe, max_age=0)
 
 
+def _corel_version():
+    """El programa USER PRO para CorelDRAW que tiene ESTE servidor (MAPA 598): la versión la lleva
+    el nombre del instalador (`Instalar-USER-PRO-Corel-<versión>.exe`, lo arma y lo numera solo
+    `extension_corel/construir.py`). Sin el .exe (p. ej. el publicado, igual que la extensión de
+    Illustrator) → (base, None, None)."""
+    base = os.path.join(AQUI, "extension_corel")
+    exes = []
+    try:
+        for a in os.listdir(base):
+            m = re.fullmatch(r"Instalar-USER-PRO-Corel-(\d+)\.(\d+)\.(\d+)\.exe", a)
+            if m:
+                exes.append((tuple(int(x) for x in m.groups()), a))
+    except OSError:
+        pass
+    if not exes:
+        return base, None, None
+    ver, exe = max(exes)
+    return base, ".".join(str(x) for x in ver), exe
+
+
+@app.get("/api/corel/version")
+def corel_version():
+    """Qué versión del programa de Corel corresponde a este sistema: la pantalla la compara con la
+    del puente de esa PC y avisa si hay que actualizar."""
+    _b, v, exe = _corel_version()
+    return jsonify({"version": v, "instalador": exe})
+
+
+@app.get("/api/corel/instalador")
+def corel_instalador():
+    """El INSTALADOR de USER PRO para CorelDRAW (Windows): doble clic, «Instalar», listo. Deja el
+    puente corriendo y arrancando solo con la PC."""
+    base, _v, exe = _corel_version()
+    if not exe:
+        return jsonify({"error": "este servidor no tiene el instalador de CorelDRAW"}), 404
+    return send_from_directory(base, exe, as_attachment=True, download_name=exe, max_age=0)
+
+
 @app.get("/api/moldes/para_bajar")
 def moldes_para_bajar():
     """TODOS los moldes que este usuario puede usar, con lo que el navegador tiene que tener
@@ -15252,7 +15587,8 @@ def motor_b_producto(pid):
                             "version": OA._ver_actual(_ruta_entrada("arte.ai", pid, sub=sub, original=True)),
                             "mapeo": {"mapeo": base, "por_variable": pv},
                             "validacion": _cargar("validacion_arte.json", pid, sub=sub) or {},
-                            "pers": _cargar("registro_personalizacion.json", pid, sub=sub) or {},
+                            "pers": MP.pers_con_limite(_cargar("registro_personalizacion.json", pid, sub=sub) or {},
+                                                       _limite_texto_de(prod)),
                             "editables_cfg": _editables_cfg(prod, d["id"]), "editables_color": _editables_color(prod, d["id"]),
                             "editables_marca": _editables_marca(prod, d["id"]),
                             "editables_sin_marca": _editables_sin_marca(prod, d["id"]),
@@ -15266,6 +15602,7 @@ def motor_b_producto(pid):
             "plantilla": {"sello": _sp, "bytes": (_sp or [0])[0]},
             "registro": _cargar("registro_producto.json", pid) or {},
             "borde": _borde_de(prod, cat), "etiqueta": _etiqueta_de(prod, cat),
+            "limite_texto": _limite_texto_de(prod),
             "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
             "variante_guia": prod.get("variante_guia"), "variantes": prod.get("variantes") or [],
             "referencia_medida": prod.get("referencia_medida") or "alto",
@@ -15286,7 +15623,8 @@ def motor_b_producto(pid):
         "paginas_pendientes": _PD.paginas_pendientes_navegador(pl),
         "mesas": mesas,
         "registro": _cargar("registro_producto.json", pid) or {},
-        "pers": _PD.personalizacion_guardada(pl, armar=False),
+        "pers": MP.pers_con_limite(_PD.personalizacion_guardada(pl, armar=False), _limite_texto_de(prod)),
+        "limite_texto": _limite_texto_de(prod),
         "borde": _borde_de(prod, cat),
         "etiqueta": _etiqueta_de(prod, cat),
         "fuentes": {"catalogo": catalogo, "alias": fu.get("alias") or {}},
@@ -15960,6 +16298,9 @@ if __name__ == "__main__":
     _atado = _atar_hijos_a_este_proceso()
     # La base se pone al día ACÁ y no al importar el módulo: los workers del pool lo re-importan.
     _poner_base_al_dia_al_arrancar()
+    # las tipografías subidas antes con el rótulo `subida_` pasan a su nombre real
+    if not es_reload:
+        _quitar_prefijo_fuentes()
     if not es_reload:
         _liberar_puerto(port)
         print("\n  USER · Motor de Sublimación")
@@ -15988,6 +16329,14 @@ if __name__ == "__main__":
     # localhost 2.08s/req → 0.02s/req. (El reloader se pierde con make_server → TIZADA_RELOAD=1
     # para volver a app.run con auto-reload en desarrollo, escuchando solo IPv4.)
     _PUERTO[0] = port
+    # EL ROBOT DE INTEGRACIÓN (MAPA 606): el proceso aparte que hace solo los pedidos que llegan
+    # de otro sistema. Le habla a ESTE servidor por su puerto, como una computadora más.
+    try:
+        _tls = PUBLICADO and os.environ.get("TIZADA_TLS_CERT") and os.environ.get("TIZADA_TLS_KEY")
+        IE.arrancar_robot(os.environ.get("TIZADA_ROBOT_URL") or f"{'https' if _tls else 'http'}://127.0.0.1:{port}",
+                          {"NODE_EXTRA_CA_CERTS": os.environ["TIZADA_TLS_CERT"]} if _tls else None)
+    except Exception as _e_robot:
+        print(f"[externo] no se pudo arrancar el robot de integración: {_e_robot}", flush=True)
     if PUBLICADO:
         # Si una actualización quedó a mitad de camino (corte de luz), dejar constancia; y poner a
         # vigilar la hora de la que esté programada.

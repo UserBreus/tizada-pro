@@ -599,7 +599,7 @@ export const DICCIONARIO = {
   },
   'modal:como armar el .ai': {
     nombre: 'Cómo armar el .ai',
-    que: 'La guía de qué va en cada capa del archivo de Illustrator: el diseño, las guías y una capa por cada texto que se personaliza.',
+    que: 'La guía de qué va en cada capa del archivo de Illustrator o de CorelDRAW: el diseño, las guías y una capa por cada texto que se personaliza.',
     como: 'Mirá qué capa lleva cada cosa; el nombre de cada una se copia de acá.',
     ventana: { contenido: 'Una ficha por capa, con su nombre copiable',
                botones: [], cuando: 'al preparar el .ai, desde Configuración', paso: 'config' },
@@ -838,6 +838,36 @@ export const DICCIONARIO = {
     que: 'Sube o reemplaza el archivo del molde (.ai, .pdf o .dxf). Si lo volvés a subir, los nombres de pieza que ya pusiste se transfieren solos.',
     como: 'Subí el archivo del molde.',
   },
+  'plantilla-corel-conectar': {
+    nombre: 'Conectar con CorelDRAW',
+    que: 'Busca el programa USER PRO para CorelDRAW en esta computadora. La primera vez el navegador pide permiso: es esta misma computadora.',
+    como: 'Tocá el botón verde de CorelDRAW.',
+  },
+  'plantilla-corel-crear': {
+    nombre: 'Crear en CorelDRAW',
+    que: 'Arma la plantilla en Corel: todas las mesas en un mismo espacio de trabajo, acomodadas como en el molde (cada una es una página, con su nombre, las capas y el contorno), a tamaño real y en un solo archivo .cdr que abre desde CorelDRAW 2022.',
+    como: 'Tocá el botón verde de CorelDRAW cuando ya dice Crear en.',
+  },
+  'plantilla-illustrator-conectar': {
+    nombre: 'Conectar Illustrator',
+    que: 'Busca Illustrator con la extensión de USER PRO en esta computadora. La primera vez el navegador pide permiso: es esta misma computadora.',
+    como: 'Tocá el botón naranja de Illustrator.',
+  },
+  'plantilla-illustrator-crear': {
+    nombre: 'Crear en Illustrator',
+    que: 'Arma la plantilla en Illustrator: una mesa de trabajo por pieza con su nombre, las capas y el contorno, a la escala elegida.',
+    como: 'Tocá el botón naranja de Illustrator cuando ya dice Crear en.',
+  },
+  'plantilla-bajar-illustrator': {
+    nombre: 'Conector de Illustrator',
+    que: 'Baja el conector de Illustrator (el instalador de la extensión de USER PRO). Se instala una sola vez en cada computadora.',
+    como: 'Tocá el conector naranja de Illustrator.',
+  },
+  'plantilla-bajar-corel': {
+    nombre: 'Conector de CorelDRAW',
+    que: 'Baja el conector de CorelDRAW (el programa USER PRO para CorelDRAW, 2022 o más nuevo). Se instala una sola vez en cada computadora y queda con un ícono junto al reloj.',
+    como: 'Tocá el conector verde de CorelDRAW.',
+  },
   'molde-como-exportar': {
     nombre: 'Cómo exportar el molde',
     que: 'La guía para el diseñador: cómo tiene que salir el archivo desde Illustrator, Corel u Optitex.',
@@ -1029,6 +1059,128 @@ export const DICCIONARIO = {
     como: 'Tocá «⬅ Configuración».',
   },
 
+  // ══ INTEGRACIONES (Configuración): los pedidos que manda otro sistema (MAPA 606) ═══════════════
+  'cfg-integraciones': {
+    nombre: 'Integraciones',
+    que: 'Los pedidos que manda otro sistema y se hacen solos: las llaves con las que entra, dónde se guardan los PDF (Google Drive), si el robot está andando y qué pasó con cada pedido que llegó.',
+    como: 'Entrá a «Integraciones».',
+  },
+  'integ-volver': {
+    nombre: 'Volver a Configuración',
+    que: 'Sale de Integraciones y vuelve al panel de Configuración.',
+    como: 'Tocá «⬅ Configuración».',
+  },
+  'integ-formato': {
+    nombre: 'Formato del archivo',
+    que: 'Abre la descripción del archivo que tiene que mandar el otro sistema, con un ejemplo completo. Es lo que hay que pasarle a quien programa el otro sistema.',
+    como: 'Tocá «Formato del archivo».',
+  },
+  'integ-alarmas': {
+    nombre: 'Lista de alarmas',
+    que: 'Abre todas las alarmas que puede dar un pedido que llega de afuera: qué significa cada una, si frena el pedido o sólo avisa, y qué hacer.',
+    como: 'Tocá «Lista de alarmas».',
+  },
+  'integ-robot': {
+    nombre: 'Pausar o reanudar el robot',
+    que: 'El robot es el programa que hace los pedidos sin que nadie toque nada. Pausado, los pedidos siguen entrando y quedan en cola hasta que lo reanudes.',
+    como: 'Tocá «Pausar» o «Reanudar».',
+  },
+  'integ-llave-nombre': {
+    nombre: 'Para quién es la llave',
+    que: 'Un nombre para reconocer la llave después (por ejemplo «Sistema de ventas»). No es la llave: es su rótulo.',
+    como: 'Escribí para quién es la llave.',
+  },
+  'integ-llave-crear': {
+    nombre: 'Crear llave',
+    que: 'Crea una llave nueva para que otro sistema pueda mandar pedidos. Se muestra una sola vez: después sólo queda guardada su huella.',
+    como: 'Tocá «Crear llave».',
+  },
+  'integ-llave-copiar': {
+    nombre: 'Copiar la llave',
+    que: 'Copia la llave recién creada para pegarla en el otro sistema. Es la única vez que se puede copiar.',
+    como: 'Tocá «Copiar».',
+  },
+  'integ-llave-listo': {
+    nombre: 'Ya la guardé',
+    que: 'Saca la llave de la pantalla. Hacelo recién cuando la tengas guardada: no se vuelve a mostrar.',
+    como: 'Tocá «Ya la guardé».',
+  },
+  'integ-llave-anular': {
+    nombre: 'Anular la llave',
+    que: 'Deja de aceptar esa llave: el sistema que la usa ya no puede mandar pedidos. Sirve si se perdió o la vio quien no debía.',
+    como: 'Tocá «Anular».',
+  },
+  'integ-drive-carpeta': {
+    nombre: 'Carpeta de las tizadas',
+    que: 'La carpeta de Google Drive donde van las tizadas. Adentro se crea una carpeta por pedido, con sus PDF y el archivo de resultado. Se puede pegar el enlace entero de la carpeta.',
+    como: 'Pegá el enlace de la carpeta de las tizadas.',
+  },
+  'integ-drive-carpeta-fichas': {
+    nombre: 'Carpeta de las fichas técnicas',
+    que: 'La carpeta de Google Drive donde van las fichas técnicas. Cada ficha lleva adelante el número del pedido.',
+    como: 'Pegá el enlace de la carpeta de las fichas técnicas.',
+  },
+  'integ-drive-guardar': {
+    nombre: 'Guardar las carpetas',
+    que: 'Guarda las carpetas de Drive que pegaste.',
+    como: 'Tocá «Guardar las carpetas».',
+  },
+  'integ-drive-cuenta': {
+    nombre: 'Cargar el archivo de Google',
+    que: 'Carga el archivo .json que se baja de Google Cloud: el «ID de cliente» (para conectar con una cuenta de Google) o, si se usa una unidad compartida, la llave de una cuenta de servicio. Se guarda en el servidor y no se vuelve a mostrar.',
+    como: 'Tocá «Cargar archivo de Google» y elegí el .json.',
+  },
+  'integ-drive-conectar': {
+    nombre: 'Conectar con Google',
+    que: 'Abre Google para que la cuenta dueña de las carpetas deje que TIZADA PRO guarde ahí. Se hace una sola vez: después sube solo, sin pedir nada.',
+    como: 'Tocá «Conectar con Google» y aceptá con la cuenta dueña de las carpetas.',
+  },
+  'integ-drive-desconectar': {
+    nombre: 'Desconectar la cuenta',
+    que: 'Olvida el permiso de la cuenta de Google: no se suben más PDF a Drive hasta volver a conectar.',
+    como: 'Tocá «Desconectar».',
+  },
+  'integ-drive-probar': {
+    nombre: 'Probar Drive',
+    que: 'El robot escribe un archivo de prueba en la carpeta y dice si pudo. Así se sabe que la cuenta y la carpeta están bien antes de que llegue un pedido.',
+    como: 'Tocá «Probar».',
+  },
+  'integ-drive-activo': {
+    nombre: 'Drive prendido o apagado',
+    que: 'Prendido, los PDF de cada pedido se suben a Drive. Apagado, quedan sólo guardados en el servidor.',
+    como: 'Tocá para prender o apagar Drive.',
+  },
+  'integ-aviso': {
+    nombre: 'Dirección de aviso',
+    que: 'La dirección del otro sistema a la que se le avisa cuando un pedido termina, con el resultado adentro. Vacía, el otro sistema tiene que preguntar.',
+    como: 'Escribí la dirección de aviso.',
+  },
+  'integ-aviso-guardar': {
+    nombre: 'Guardar la dirección de aviso',
+    que: 'Guarda la dirección a la que se avisa cuando un pedido termina.',
+    como: 'Tocá «Guardar».',
+  },
+  'integ-pedido': {
+    nombre: 'Un pedido que llegó',
+    que: 'Un pedido que mandó el otro sistema, con su estado: en cola, haciéndose, listo, rechazado o con falla.',
+    como: 'Tocá el pedido para ver sus alarmas y sus archivos.',
+  },
+  'integ-copiar-json': {
+    nombre: 'Copiar el resultado',
+    que: 'Copia el resultado del pedido tal como lo recibe el otro sistema: qué archivos salieron, dónde quedaron y a qué pedido pertenecen.',
+    como: 'Tocá «Copiar el resultado».',
+  },
+  'integ-reintentar': {
+    nombre: 'Volver a hacerlo',
+    que: 'Pone el pedido otra vez en cola para que el robot lo haga de nuevo, con el mismo paquete que llegó.',
+    como: 'Tocá «Volver a hacerlo».',
+  },
+  'integ-cancelar': {
+    nombre: 'Cancelar el pedido',
+    que: 'Saca el pedido de la cola y borra los diseños que había cargado. Un pedido ya generado no se cancela.',
+    como: 'Tocá «Cancelar el pedido».',
+  },
+
   'ajuste-volver': {
     nombre: 'Volver',
     que: 'Sale de los ajustes del molde y vuelve a la lista.',
@@ -1075,6 +1227,11 @@ export const DICCIONARIO = {
     nombre: 'Borde de corte',
     que: 'Si las piezas llevan borde de corte, de qué color y de qué tamaño (en mm).',
     como: 'Entrá a «Borde de corte».',
+  },
+  'ajuste-texto': {
+    nombre: 'Nombre y número',
+    que: 'Hasta dónde puede llegar cada texto (nombre, número…): el margen que queda libre contra el borde de la pieza. Si un nombre largo no entra, se achica proporcional.',
+    como: 'Entrá a «Nombre y número».',
   },
   'ajuste-diseno': {
     nombre: 'Plantilla',
@@ -1276,6 +1433,51 @@ export const DICCIONARIO = {
   'borde-guardar': {
     nombre: 'Guardar el borde',
     que: 'Guarda el borde de corte de este molde.',
+    como: 'Tocá «Guardar».',
+  },
+  'texto-limitar': {
+    nombre: 'Con límite / sin límite',
+    que: 'Si ese campo (nombre, número…) tiene un límite de ancho. Sin límite sale al tamaño del diseño, como siempre.',
+    como: 'Tocá el interruptor del campo.',
+  },
+  'texto-margen': {
+    nombre: 'Margen al borde',
+    que: 'Cuántos cm quedan libres entre el texto y el borde de la pieza, a cada lado. Si el texto no entra, se achica proporcional, apoyado en su línea de abajo.',
+    como: 'Escribí los cm.',
+  },
+  'texto-campo': {
+    nombre: 'Qué campo ver',
+    que: 'Elige qué texto mostrar en el visor (nombre, número…).',
+    como: 'Tocá el campo.',
+  },
+  'texto-visor': {
+    nombre: 'Visor del límite',
+    que: 'Las piezas del molde: tocalas para elegirlas (una o varias). En cada una, sus bordes corridos hacia adentro: hasta ahí llega el nombre (celeste) y el número (naranja). Las líneas se arrastran.',
+    como: 'Arrastrá una de las líneas.',
+  },
+  'texto-ninguna': {
+    nombre: 'Ninguna',
+    que: 'Suelta las piezas elegidas: lo que pongas vuelve a valer para todas.',
+    como: 'Tocá «Ninguna».',
+  },
+  'planilla-escaneando': {
+    nombre: 'Escaneando planilla',
+    que: 'Se está revisando si algún nombre o número no entra en su pieza. Mientras tanto no se puede enviar.',
+    como: 'Esperá un momento.',
+  },
+  'planilla-alertas': {
+    nombre: 'Alertas',
+    que: 'Al lado de cada fila que tiene un nombre o número que no entra en su pieza: dice cuántos cm más chica sale la letra. La fila queda marcada con el color de la alerta.',
+    como: 'Mirá al costado de la fila marcada.',
+  },
+  'planilla-achique': {
+    nombre: 'Sale más chico',
+    que: 'Ese nombre o número no entra en el límite de su pieza: sale tantos cm más chico. En rojo, puede no leerse.',
+    como: 'Pasá el mouse para ver en qué pieza y qué alto le queda a la letra.',
+  },
+  'texto-guardar': {
+    nombre: 'Guardar nombre y número',
+    que: 'Guarda el límite de cada campo de este molde.',
     como: 'Tocá «Guardar».',
   },
 

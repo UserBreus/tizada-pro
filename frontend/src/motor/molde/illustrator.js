@@ -161,7 +161,7 @@ function dSvg(subs) {
  * y los bloques se acomodan en grilla sin mezclarse.
  * → `{plan, avisos}`.
  */
-export function planIllustrator(capasData, { config = 'default', rango = [], titulo = 'Molde', capas = null, editables = null, archivo = null, referencia = 'alto', posiciones = null, talleVisor = null, escala = 1, soloMedir = false, acomodoGuia = null, soloGuia = false } = {}) {
+export function planIllustrator(capasData, { config = 'default', rango = [], titulo = 'Molde', capas = null, editables = null, archivo = null, referencia = 'alto', posiciones = null, talleVisor = null, escala = 1, soloMedir = false, acomodoGuia = null, soloGuia = false, sinTope = false } = {}) {
   if (!capasData || !capasData.length) throw new Error('no se detectaron piezas en la plantilla')
   const avisos = []
   const esc = Number(escala) > 0 ? Number(escala) : 1
@@ -249,7 +249,8 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
   // por talle y por rango cada bloque lleva su TÍTULO y su RECUADRO (default no: es uno solo)
   const conBloques = porTalle || (config === 'rango' && rango && rango.length > 0)
   const tit = conBloques ? TITULO_TALLE : 0           // lugar para el título de cada talle
-  const tope = TOPE_LIENZO / s
+  // `sinTope` (CorelDRAW, `corel.js`): cada mesa es una PÁGINA, no hay lienzo común que llenar
+  const tope = sinTope ? Infinity : TOPE_LIENZO / s
   // 🔴 El acomodo del molde se mide SIN tope: antes, si a tamaño real pasaba el lienzo, se caía
   // directo a «en filas» —un talle por fila— y 31 talles quedaban en una columna de 38 m (la
   // escala recomendada daba 10 % cuando la grilla entraba mucho más grande). Las filas sólo si el
@@ -295,10 +296,10 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
     const entra = Math.max(W0, H0) <= TOPE_LIENZO     // entra en el ESPACIO
     return { cabe: entra && nTotal <= TOPE_MESAS, entra, W: W0, H: H0, nMesas: nTotal }
   }
-  if (Math.max(W0, H0) > TOPE_LIENZO) {
+  if (!sinTope && Math.max(W0, H0) > TOPE_LIENZO) {
     throw new Error(`las mesas no entran en el lienzo de Illustrator (227"). ${porTalle ? 'Elegí menos talles o una escala más chica' : 'Elegí una VARIABLE para armar solo sus piezas, o una escala más chica'}.`)
   }
-  if (nTotal > TOPE_MESAS) {
+  if (!sinTope && nTotal > TOPE_MESAS) {
     throw new Error('son más de 1000 mesas y Illustrator no admite más en un archivo. Elegí menos talles o una variable.')
   }
   const mesas = acomodo.mesas.map((m) => ({ ...m, x: m.x * s, y: m.y * s + dyCartel, w: m.w * s, h: m.h * s }))
@@ -310,14 +311,16 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
   const textos = []
   const fondos = []
   const svg = []
-  for (const m of mesas) {
+  for (let im = 0; im < mesas.length; im++) {
+    const m = mesas[im]
     const mx = m.x + m.w / 2, my = m.y + m.h / 2
     for (const it of m.items) {
       // canvas (y hacia arriba, centro de la caja en ccx/ccy) → lienzo (y hacia abajo, centro en la mesa)
       const T = (cx, cy) => [mx + (cx - it.ccx) * s, my - (cy - it.ccy) * s]
       const subs = subcaminos(it.segs, T)
       if (!subs.length) continue
-      caminos.push({ capa: iGuias, sub: subs, ancho: 1, color: [0, 0, 0, 100] })
+      // `mesa`: de qué mesa es (Corel arma una PÁGINA por mesa; la extensión de Illustrator lo ignora)
+      caminos.push({ capa: iGuias, sub: subs, ancho: 1, color: [0, 0, 0, 100], mesa: im })
       // un <path> por sub-camino: así cada uno entra a Illustrator como un trazado suelto que se
       // puede volver GUÍA (un trazado compuesto no puede)
       for (const sp of subs) svg.push(`<path d="${dSvg([sp])}"/>`)
@@ -327,10 +330,10 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
     // (a escala el mínimo baja con ella: un texto de 8 pt no entra en una mesa de 1:10)
     const tam = Math.max(Math.max(3, 8 * s), Math.min(28, Math.min(m.w, m.h) / 12))
     const pad = Math.max(4 * s, tam * 0.5)
-    textos.push({ capa: iGuias, t: m.nombre, x: m.x + pad, y: m.y + pad + tam * 0.8, tam })
+    textos.push({ capa: iGuias, t: m.nombre, x: m.x + pad, y: m.y + pad + tam * 0.8, tam, mesa: im })
     // el fondo de la mesa, ROJO CLARITO (pedido del usuario 2026-09-23; antes gris 0/0/0/10), en
     // «diseño» (la capa de abajo de todo). CMYK 0/25/15/0.
-    fondos.push({ capa: 0, rect: [m.x, m.y, m.x + m.w, m.y + m.h], color: [0, 25, 15, 0] })
+    fondos.push({ capa: 0, rect: [m.x, m.y, m.x + m.w, m.y + m.h], color: [0, 25, 15, 0], mesa: im })
   }
   // 🔴 CADA TALLE SE DISTINGUE (pedido del usuario 2026-09-23: «cuando es talle por talle o rango
   // debe haber algo que diferencie cada talle y no esté todo amontonado»): su TÍTULO grande

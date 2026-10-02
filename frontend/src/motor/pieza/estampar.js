@@ -10,7 +10,7 @@
 import { pyFixed, pyG, pyRound } from '../py.js'
 import { normNombre, normGenerico } from '../nombres.js'
 export { normNombre, normGenerico }
-import { MM } from './base.js'
+import { MM, CM } from './base.js'
 
 // ─── nombres ─────────────────────────────────────────────────────────────────────────────────
 const RE_ETQ = /\s+\d+\s*$/
@@ -28,6 +28,145 @@ export function fuenteDeCampo(campo, fuenteOriginal, alias) {
   const elegida = (alias || {})[claveFuenteCampo(campo)]
   if (elegida) return [elegida, true]
   return [fuenteOriginal, false]
+}
+
+// ─── nombre y número: altura y ancho (2026-10-01) ────────────────────────────────────────────
+// Gemelos EXACTOS de `motor_pedido`: `_alto_letras`, `tamano_misma_altura`, `_anillos_contorno` y
+// `ancho_disponible` (mismas cuentas, mismo orden: LEY arte = tizada).
+
+/** `_alto_letras`: la letra más alta de `letras` en `fc`, como fracción del tamaño (o null). */
+export function altoLetras(fc, letras) {
+  let mejor = 0.0
+  for (const c of Array.from(letras || '')) {
+    let ops
+    try { [ops] = fc._glifo(c) } catch { continue }
+    for (const [, args] of ops) {
+      for (const a of (args || [])) {
+        if (Array.isArray(a) && a.length === 2 && a[1] / fc.upem > mejor) mejor = a[1] / fc.upem
+      }
+    }
+  }
+  return mejor || null
+}
+
+/** `tamano_misma_altura`: el tamaño para que otra tipografía dibuje las letras a la altura del arte. */
+export function tamanoMismaAltura(size, pl, fc, fcOriginal = null) {
+  const letras = pl.alto_ref || ''
+  const alto = pl.alto
+  if (alto && letras) {
+    const a = altoLetras(fc, letras)
+    if (a) return size * alto / a
+  }
+  if (fcOriginal) {
+    const a0 = letras ? altoLetras(fcOriginal, letras) : null
+    const a1 = letras ? altoLetras(fc, letras) : null
+    if (a0 && a1) return size * a0 / a1
+    const c0 = fcOriginal.capRatio, c1 = fc.capRatio
+    if (c0 && c1) return size * c0 / c1
+  }
+  return size
+}
+
+/**
+ * `pers_con_limite` de motor_pedido: la personalización con el límite de ancho de cada campo
+ * adentro de cada placeholder (`limite_cm`, también en `por_talle`). `limite` = `{campo
+ * normalizado: {margen_cm}}`. Con `reemplazar`, un campo SIN entrada pierde el `limite_cm` que
+ * tuviera (la pantalla de «Nombre y número» muestra lo que se está editando, no lo guardado).
+ */
+export function persConLimite(pers, limite, { reemplazar = false } = {}) {
+  if (!pers || (!limite && !reemplazar)) return pers
+  const out = JSON.parse(JSON.stringify(pers))
+  for (const campos of Object.values(out)) {
+    for (const [campo, pl] of Object.entries(campos || {})) {
+      if (!pl || typeof pl !== 'object') continue
+      const cfg = (limite || {})[claveCampo(campo)]
+      if (!cfg && !reemplazar) continue
+      let mg = cfg && cfg.margen_cm !== undefined && cfg.margen_cm !== null ? Number(cfg.margen_cm) : NaN
+      if (!(Number.isFinite(mg) && mg >= 0)) mg = null
+      const pp = {}
+      for (const [k, v] of Object.entries((cfg && cfg.por_pieza) || {})) {
+        if (v === null) pp[normGenerico(k)] = null
+        else if (Number.isFinite(Number(v))) pp[normGenerico(k)] = Math.max(0, Number(v))
+      }
+      const ponerle = (x) => {
+        if (reemplazar) { delete x.limite_cm; delete x.limite_por_pieza }
+        if (mg !== null) x.limite_cm = mg
+        if (Object.keys(pp).length) x.limite_por_pieza = { ...pp }
+      }
+      ponerle(pl)
+      for (const pt of Object.values(pl.por_talle || {})) if (pt && typeof pt === 'object') ponerle(pt)
+    }
+  }
+  return out
+}
+
+/** `limite_de_pieza`: el margen (cm) de ESTA pieza (el suyo por nombre genérico, o el de todas); null = sin límite. */
+export function limiteDePieza(pl, pieza) {
+  const pp = pl.limite_por_pieza || {}
+  const g = normGenerico(String(pieza || '').replace(' (corta)', '').replace(' (larga)', ''))
+  if (Object.prototype.hasOwnProperty.call(pp, g)) return pp[g]
+  return pl.limite_cm ?? null
+}
+
+/** `clave_campo`: cómo se guarda la config de un campo («Número», «00» → «numero»). */
+export function claveCampo(campo) {
+  const n = normNombre(campo)
+  return normNombre(CAMPO_ALIAS[n] || campo)
+}
+
+/** `_anillos_contorno`: el contorno como anillos de puntos en coords de página (curva = 8 tramos). */
+export function anillosContorno(cont, S, x0, y0, B) {
+  const P = (vx, vy) => [vx * S + B - x0 * S, vy * S + B - y0 * S]
+  const anillos = []
+  let pts = [], cur = null, ini = null
+  for (const s of cont.segmentos || []) {
+    const op = s[0]
+    if (op === 'm') {
+      if (pts.length >= 3) anillos.push(pts)
+      cur = P(s[1], s[2]); pts = [cur]; ini = cur
+    } else if (op === 'l') { cur = P(s[1], s[2]); pts.push(cur) }
+    else if (op === 'c') {
+      const p0 = cur || P(s[1], s[2]), p1 = P(s[1], s[2]), p2 = P(s[3], s[4]), p3 = P(s[5], s[6])
+      for (let k = 1; k <= 8; k++) {
+        const u = k / 8.0, mu = 1 - u
+        pts.push([mu * mu * mu * p0[0] + 3 * mu * mu * u * p1[0] + 3 * mu * u * u * p2[0] + u * u * u * p3[0],
+                  mu * mu * mu * p0[1] + 3 * mu * mu * u * p1[1] + 3 * mu * u * u * p2[1] + u * u * u * p3[1]])
+      }
+      cur = p3
+    } else if (op === 're') {
+      if (pts.length >= 3) anillos.push(pts)
+      const [X, Y, Wd, Ht] = s.slice(1, 5)
+      anillos.push([P(X, Y), P(X + Wd, Y), P(X + Wd, Y + Ht), P(X, Y + Ht)])
+      pts = []; cur = P(X, Y); ini = P(X, Y)
+    } else if (op === 'h') {
+      cur = ini
+    }
+  }
+  if (pts.length >= 3) anillos.push(pts)
+  return anillos
+}
+
+/** `ancho_disponible`: el ancho máximo de un texto centrado en `cx`, apoyado en `ty`, de `alto`. */
+export function anchoDisponible(cont, S, x0, y0, B, cx, ty, alto, margen) {
+  const anillos = anillosContorno(cont, S, x0, y0, B)
+  let mejor = null
+  for (const f of [0.02, 0.5, 0.98]) {
+    const y = ty + alto * f
+    const xs = []
+    for (const r of anillos) {
+      const n = r.length
+      for (let i = 0; i < n; i++) {
+        const [xa, ya] = r[i]
+        const [xb, yb] = r[(i + 1) % n]
+        if ((ya <= y && y < yb) || (yb <= y && y < ya)) xs.push(xa + (y - ya) * (xb - xa) / (yb - ya))
+      }
+    }
+    const izq = xs.filter((x) => x <= cx), der = xs.filter((x) => x >= cx)
+    if (!izq.length || !der.length) continue
+    const w = 2 * (Math.min(cx - Math.max(...izq), Math.min(...der) - cx) - margen)
+    mejor = mejor === null ? w : Math.min(mejor, w)
+  }
+  return mejor === null ? null : Math.max(mejor, 0.0)
 }
 
 /** `_color_op`: el color del placeholder en su espacio nativo (k/rg/g), o sRGB→CMYK. */
@@ -305,7 +444,7 @@ const colorCmyk = (vals, op) => vals.slice(0, 4).map((v) => pyG(Number(v))).join
  */
 export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante = null, grupo = null,
                                 etiqueta = null, fuente, alias = {}, info = {}, avisos = null,
-                                separado = false, arteRect = null }) {
+                                separado = false, arteRect = null, reporte = null }) {
   const { clip, cont, x0, y0, x0m, y0m, Hp, S, B, bcActivo, W, H } = base
   const bloques = []
   const personaN = {}
@@ -338,7 +477,7 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
       } catch {
         continue                        // tipografía no disponible → no se estampa ESE campo
       }
-      const size = separado ? pl.size * sp : pl.size
+      let size = separado ? pl.size * sp : pl.size
       // ¿el placeholder ORIGINAL va sobre una CURVA o tiene VARIAS LÍNEAS? Sus glifos trazan la
       // línea base: con arco (y varía) o salto de línea se reproduce fiel; si no, texto plano.
       const bp = pl.baseline_pts || []
@@ -354,6 +493,37 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
         }
         fiel = curva || multi
       }
+      // OTRA TIPOGRAFÍA, MISMA ALTURA (ver `tamano_misma_altura`): si no es la del diseño
+      if (typeof fuente.original === 'function') {
+        const eo = fuente.original(pl.fuente)
+        if (!(eo && fnom._entrada && eo === fnom._entrada)) {
+          let fo = null
+          if (eo) { try { fo = fuente(pl.fuente, { sinAlias: true }) } catch { fo = null } }
+          size = tamanoMismaAltura(size, pl, fnom, fo)
+        }
+      }
+      // LÍMITE DE ANCHO (por molde y campo, `limite_cm`): se achica proporcional apoyado en la
+      // línea de abajo; el ancho disponible se mide una vez por base y campo
+      let kLim = 1.0
+      const mgPieza = limiteDePieza(pl, pieza)      // el de ESTA pieza o el de todas
+      if (mgPieza !== undefined && mgPieza !== null) {
+        // 🔴 el MARGEN entra en la clave: la base queda guardada en el hilo entre vistas previas, y
+        // sin él, cambiar el margen seguía usando el ancho medido con el anterior
+        const lk = campo + '|' + pyRound(size, 4) + '|' + Number(mgPieza)
+        if (!base._lim) base._lim = new Map()
+        if (!base._lim.has(lk)) {
+          const [ax, ay] = T(pl.cx, pl.baseline_y)
+          base._lim.set(lk, anchoDisponible(cont, S, x0, y0, B, ax, ay, size * fnom.capRatio, Number(mgPieza) * CM))
+        }
+        const disp = base._lim.get(lk)
+        const aw = fnom.anchoTexto(texto, size)
+        if (disp && aw > disp) {
+          kLim = disp / aw
+          size = size * kLim
+        }
+      }
+      // AVISO DE LA PLANILLA (MAPA 601): cuánto se achicó este texto y qué alto le quedó a la letra
+      if (reporte) reporte.push({ campo, k: kLim, alto_cm: (size * fnom.capRatio) / CM, alto0_cm: ((size / kLim) * fnom.capRatio) / CM })
       const fps = fnomNombre || pl.fuente || '?'
       if (avisos) {
         const prest = fnom.prestados(texto).filter((c) => !(avisos[fps] || new Set()).has(c))
@@ -388,7 +558,7 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
           const vals = c[1].map((v) => pyG(Number(v))).join(' ')
           if (p.t === 'f') bloques.push(`q ${vals} ${c[0]}\n${ops}\nf\nQ\n`)
           else {
-            const w = Number(p.w) * (separado ? sp : 1.0)          // a la escala del texto
+            const w = Number(p.w) * (separado ? sp : 1.0) * kLim   // a la escala del texto
             bloques.push(`q ${vals} ${String(c[0]).toUpperCase()}\n${pyFixed(w, 3)} w 1 j 1 J\n${ops}\nS\nQ\n`)
           }
         }
@@ -396,7 +566,7 @@ export function estamparPieza({ base, ph, persona, talle, pieza, nro, variante =
       }
       const tz = pl.trazo
       if (tz) {
-        const sw = Number(tz[2]) * (separado ? sp : 1.0)
+        const sw = Number(tz[2]) * (separado ? sp : 1.0) * kLim
         const scol = tz[1].map((v) => pyG(Number(v))).join(' ') + ' ' + String(tz[0]).toUpperCase()
         bloques.push(`q ${scol}\n${pyFixed(sw, 3)} w 1 j 1 J\n${ops}\nS\nQ\n`)
         bloques.push(`q ${colorOp(pl)}\n${ops}\nf\nQ\n`)

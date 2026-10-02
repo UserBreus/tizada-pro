@@ -1,0 +1,26 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "nota": "si el arte usa una que no está acá, mandar el archivo en `tipografias`",
+  "tipografias": [
+   "Adidas WC 2026 fan inspired fon",
+   "Anton Regular",
+   "Arial Black",
+   "Arial Bold",
+   "Bebas Neue Regular",
+   "Black Ops One Regular",
+   "Bungee Regular",
+   "CR Font 2025 Regular",
+   "Club America 2021-2022 Regular",
+   "Graduate Regular",
+   "Hawken Personal Use Only Regula",
+   "Impact Regular",
+   "MoreggiTFont4 Camiseta",
+   "MoreggiTFont4? Camiseta?",
+   "MoreggiTFont4? Short",
+   "Russo One Regular",
+   "Superstar M54 Regular",
+   "Superstar US1 Regular"
+  ]
+ }
+}

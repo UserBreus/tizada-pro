@@ -1,0 +1,46 @@
+{
+ "http": 200,
+ "cuerpo": {
+  "nota": "en TIZADA PRO se elige la VARIABLE; el molde va de la mano (campo `molde`). Dos variables de distinta `planilla` no se combinan en un pedido.",
+  "variables": [
+   {
+    "clave": "v_bu8p7gy",
+    "foto": "/api/externo/v1/variables/v_bu8p7gy/foto",
+    "molde": "prod_20260820_095558_38bc",
+    "molde_nombre": "Camiseta de futbol",
+    "n_piezas": 7,
+    "nombre": "Cuello redondo",
+    "piezas": [
+     "Cuello",
+     "Dorso",
+     "Frente",
+     "Manga corta derecha",
+     "Manga corta izquierda",
+     "Manga larga derecha",
+     "Manga larga izquierda"
+    ],
+    "planilla": "plan_default"
+   },
+   {
+    "clave": "v_t1mhcmu",
+    "foto": "/api/externo/v1/variables/v_t1mhcmu/foto",
+    "molde": "prod_20260820_095558_38bc",
+    "molde_nombre": "Camiseta de futbol",
+    "n_piezas": 8,
+    "nombre": "cuello V",
+    "piezas": [
+     "Cuello",
+     "Dorso",
+     "Frente",
+     "Manga corta derecha",
+     "Manga corta izquierda",
+     "Manga larga derecha",
+     "Manga larga izquierda",
+     "Tapa costura"
+    ],
+    "planilla": "plan_default"
+   }
+  ],
+  "version": 1951
+ }
+}

@@ -497,4 +497,128 @@ async function copiarMesa(desde, hasta, rutaApi, pid, mesa) {
   hasta.mesasAbiertas.add(clave)
 }
 
+/**
+ * EL AVISO DE LA PLANILLA (MAPA 601, pedido del usuario 2026-10-01: «que el sistema avise si las
+ * letras tendrán un cambio y si será legible; en la fila, que marque que se achicará el número o el
+ * nombre, y cuánto»). Con el MISMO plan que la tizada (`/api/pedido/plan`: filas traducidas por
+ * molde, talle y variable, con el límite de cada pieza adentro de la personalización) y el MISMO
+ * estampado (el hilo con `reporte`), se mide cuánto se achica cada texto en cada pieza. No arma
+ * hojas ni dibuja: sólo cuenta. Devuelve `{fila: {campo: {k, alto_cm, alto0_cm, pieza, talle,
+ * molde}}}` con lo PEOR de cada fila (sólo lo que se achica), o null si no se puede calcular acá.
+ * `cortado()` corta a mitad de camino (la planilla cambió).
+ */
+// lo ya medido, para que el aviso salga al instante cuando cambia una sola fila (la clave lleva todo
+// lo que cambia el resultado: personalización y límite del molde, reemplazos, pieza, talle, texto)
+const _memoAchique = new Map()
+const _firmaTxt = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) } return (h >>> 0).toString(36) + ':' + s.length }
+
+export async function achiquesEnNavegador(cuerpo, { rutaApi, cortado = () => false } = {}) {
+  if (!(await navegadorGeneraTizada(rutaApi))) return null
+  let plan
+  try {
+    plan = await json(rutaApi('/api/pedido/plan'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) })
+  } catch { return null }                         // la planilla todavía no se puede fabricar: sin aviso
+  if (!plan.todo_camino_b && !plan.todo_navegador) return null
+  const out = {}
+  const anotar = (pr, md, pieza, rep) => {
+    const f = Number.isInteger(pr._fila) ? pr._fila : null
+    if (f === null) return
+    for (const x of rep || []) {
+      if (!(x.k < 0.995)) continue
+      const c = String(x.campo).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      const prev = (out[f] || {})[c]
+      if (!prev || x.k < prev.k) {
+        out[f] = out[f] || {}
+        out[f][c] = { k: x.k, alto_cm: x.alto_cm, alto0_cm: x.alto0_cm, pieza, talle: pr.talle, molde: md.nombre }
+      }
+    }
+  }
+  for (const md of plan.moldes) {
+    // sin límite en el molde no hay nada que achicar
+    if (!md.limite_texto || !Object.keys(md.limite_texto).length) continue
+    const m = await motorDe(md.pid, rutaApi)
+    if (!m || cortado()) continue
+    const { registro } = m.info
+    const vistos = new Set()                      // la misma fila repetida por Cantidad se mide una vez
+    const firmaMd = _firmaTxt(JSON.stringify([md.pid, md.diseno, md.pers, md.limite_texto, md.fuentes.alias, md.mapeo_arte,
+      md.borde_corte, md.editables_cfg, md.editables_tamano, md.referencia, m.firma]))
+    // el molde y sus tipografías se preparan SÓLO si hay algo que no esté medido
+    let listo = null
+    const preparar = async () => {
+      if (listo) return listo
+      await m.pool.enviar('fuentes', await bajarFuentes(md.fuentes, md.pid, rutaApi))
+      m.fuentesListas = true
+      if (m.info.camino_a) {
+        await asegurarMoldeA(m, rutaApi, md.pid, (m.info.plantilla || {}).sello)
+        const { clave } = await asegurarContextoA(m, rutaApi, md.diseno, {
+          mapeoArte: md.mapeo_arte || null, editablesCfg: md.editables_cfg, editablesTamano: md.editables_tamano,
+          editablesColor: md.editables_color, editablesMarca: md.editables_marca, editablesSinMarca: md.editables_sin_marca,
+          marcasComoCruz: true, borde: md.borde_corte, referencia: md.referencia,
+        })
+        listo = { clave }
+      } else listo = {}
+      return listo
+    }
+    const medido = (pr, pieza, persona) => {
+      const k = `${firmaMd}|${pieza}|${pr.talle}|${pr.variante_clave || ''}|${pr._grupo || ''}|${JSON.stringify(persona)}`
+      return { k, rep: _memoAchique.get(k) }
+    }
+    const guardar = (k, rep) => { if (_memoAchique.size > 20000) _memoAchique.clear(); _memoAchique.set(k, rep || []) }
+    if (m.info.camino_a) {
+      for (const pr of md.prendas) {
+        for (const pieza of piezasDe(pr, registro)) {
+          if (cortado()) return null
+          const kv = `${pr._fila}|${pieza}`
+          if (vistos.has(kv)) continue
+          vistos.add(kv)
+          const info = (registro[pieza] || {})[pr.talle]
+          if (!info) continue
+          const persona = pr.personalizacion || { nombre: pr.nombre || '', numero: pr.numero || '' }
+          const mm = medido(pr, pieza, persona)
+          if (mm.rep) { anotar(pr, md, pieza, mm.rep); continue }
+          const { clave } = await preparar()
+          const r = await m.pool.enviar('pieza_a', {
+            molde: md.pid, arte: clave, mesa: info.mesa, talle: pr.talle, pieza, info, persona, nro: 1,
+            variante: pr.variante_clave || null, grupo: pr._grupo || null, ph: md.pers || {}, etiqueta: md.etiqueta,
+            alias: md.fuentes.alias, reporte: true,
+          })
+          guardar(mm.k, r.reporte)
+          anotar(pr, md, pieza, r.reporte)
+        }
+      }
+    } else {
+      if (m.info.paginas_pendientes) continue
+      for (const pr of md.prendas) {
+        for (const pieza of piezasDe(pr, registro)) {
+          if (cortado()) return null
+          const kv = `${pr._fila}|${pieza}`
+          if (vistos.has(kv)) continue
+          vistos.add(kv)
+          const info = (registro[pieza] || {})[pr.talle]
+          if (!info) continue
+          const persona0 = pr.personalizacion || { nombre: pr.nombre || '', numero: pr.numero || '' }
+          const mm = medido(pr, pieza, persona0)
+          if (mm.rep) { anotar(pr, md, pieza, mm.rep); continue }
+          await preparar()
+          const mesa = info.mesa
+          const claveMesa = `${md.pid}|${mesa}`
+          await asegurarMesaAbierta(m, rutaApi, mesa, claveMesa)
+          const idx = await indiceDeMesa(m, rutaApi, mesa)
+          const cont = (idx.talles[pr.talle] || [])[info.idx_mesa ?? info.pieza_idx]
+          if (!cont) continue
+          const persona = pr.personalizacion || { nombre: pr.nombre || '', numero: pr.numero || '' }
+          const r = await m.pool.enviar('pieza', {
+            mesa: claveMesa, pagina: (idx.orden || []).indexOf(pr.talle), cont, borde: md.borde_corte, etiqueta: md.etiqueta,
+            ph: (md.pers || {})[String(mesa)] || {}, persona, talle: pr.talle, pieza, nro: 1, variante: pr.variante_clave || null,
+            grupo: pr._grupo || null, info, alias: md.fuentes.alias, reporte: true,
+          })
+          guardar(mm.k, r.reporte)
+          anotar(pr, md, pieza, r.reporte)
+        }
+      }
+    }
+  }
+  return out
+}
+
 export { cerrarMotores }
