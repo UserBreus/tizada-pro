@@ -29,6 +29,14 @@ INCLUIR_CARPETAS = ["frontend/dist", "db", "catalogo_fuentes",
                     "frontend/node_modules/opentype.js", "documentacion/integracion_externa"]
 # archivos sueltos fuera de la raíz (`package.json` dice que los .js del motor son módulos)
 INCLUIR_SUELTOS = ["frontend/package.json"]
+# LOS CONECTORES (MAPA 619): viajan para que el OTRO SISTEMA los baje por su API
+# (`/api/externo/v1/conectores`). La pantalla del publicado NO los ofrece (MAPA 572: «se le pasa a
+# cada usuario manual»; ver `servidor.illustrator_extension_zip`). Los .exe llevan la versión en el
+# nombre: se buscan con un patrón (`construir.py` deja sólo el último). La extensión de Illustrator
+# va entera (son KB): de ahí sale la versión (manifiesto) y el ZIP para Mac.
+INCLUIR_PATRONES = ["extension_illustrator/Instalar-USER-PRO-Illustrator-*.exe", "extension_corel/Instalar-USER-PRO-Corel-*.exe",
+                    "extension_illustrator/INSTALAR-WINDOWS.bat", "extension_illustrator/INSTALAR-MAC.command",
+                    "extension_illustrator/LEEME.txt", "extension_illustrator/com.tizadapro.illustrator/**"]
 # OJO con las tipografías cargadas a mano en `catalogo_fuentes/` (hasta 2026-10-01 se llamaban
 # `subida_*`; ahora llevan su nombre real): estuvieron acá (por ser «datos del usuario») y era un
 # agujero silencioso — las tipografías cargadas a mano en el taller NO llegaban al servidor
@@ -229,6 +237,12 @@ def main():
                 z.write(os.path.join(AQUI, f), f); n += 1
         for suelto in INCLUIR_SUELTOS:
             z.write(os.path.join(AQUI, *suelto.split("/")), suelto); n += 1
+        import glob as _glob
+        for patron in INCLUIR_PATRONES:
+            for ruta in sorted(_glob.glob(os.path.join(AQUI, *patron.split("/")), recursive=True)):
+                rel = os.path.relpath(ruta, AQUI).replace("\\", "/")
+                if os.path.isfile(ruta) and not _excluido(rel):
+                    z.write(ruta, rel); n += 1
         for carpeta in INCLUIR_CARPETAS:
             raiz = os.path.join(AQUI, *carpeta.split("/"))
             if not os.path.isdir(raiz):

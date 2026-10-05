@@ -1,155 +1,180 @@
 {
-  "referencia": "OV-2026-00123",
-  "estado": "listo",
-  "etapa": "terminado",
-  "recibido": "2026-10-02T11:10:20",
-  "actualizado": "2026-10-02T11:10:43",
-  "pedido_externo": {
-    "id": 48211,
-    "numero": "OV-2026-00123",
-    "sucursal": "Montevideo",
-    "vendedor": "mgarcia",
-    "entrega": "2026-10-20"
-  },
-  "alarmas": [
-    {
-      "codigo": "texto-se-achica",
-      "frena": false,
-      "etapa": "tizada",
-      "mensaje": "fila 2: el nombre no entra en Dorso 2 (talle L) y sale de 6.1 cm en vez de 7.0 cm",
-      "donde": {
-        "fila": 2
-      }
-    }
-  ],
-  "resultado": {
-    "formato": "tizadapro.resultado/1",
-    "referencia": "OV-2026-00123",
-    "pedido_externo": {
-      "id": 48211,
-      "numero": "OV-2026-00123",
-      "sucursal": "Montevideo",
-      "vendedor": "mgarcia",
-      "entrega": "2026-10-20"
-    },
-    "cliente": "Club Atlético Ejemplo",
-    "estado": "listo",
-    "generado": "2026-10-02T11:10:43",
-    "segundos": 21.4,
-    "tizada_id": "20261002-111043-b56e",
-    "destino": {
-      "tipo": "drive",
-      "carpeta_id": "1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
-      "carpeta_enlace": "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
-      "carpeta_nombre": "2026-10/OV-2026-00123"
-    },
-    "archivos": [
-      {
-        "tipo": "tizada",
-        "nombre": "OV-2026-00123__HOJA_g0_Jacquard_Charr_a__1_83_.pdf",
-        "bytes": 1355655,
-        "sha256": "9a8f68718a4768d60f2b5b4602a370f1e4be2d0adb24746a97f173167a912552",
-        "tela": "Jacquard Charrúa (1,83)",
-        "mesas": 2,
-        "ancho_cm": 180,
-        "largo_cm": [
-          497.4,
-          238.3
-        ],
-        "consumo_cm": 735.7,
-        "aprovechamiento": 68.8,
-        "moldes": [
-          "Camiseta de futbol"
-        ],
-        "drive_id": "1ZyXwVuTsRqPoNmLkJiHgFeDcBa987654",
-        "enlace": "https://drive.google.com/file/d/1ZyXwVuTsRqPoNmLkJiHgFeDcBa987654/view",
-        "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__HOJA_g0_Jacquard_Charr_a__1_83_.pdf"
-      },
-      {
-        "tipo": "tizada",
-        "nombre": "OV-2026-00123__HOJA_g0_Rib_New__1_40_.pdf",
-        "bytes": 557566,
-        "sha256": "d2c3e7a39f1bc70aa6e59d6f497268b7e8ac6a35c97f1da2d71195575b10c00d",
-        "tela": "Rib New (1,40)",
-        "mesas": 1,
-        "ancho_cm": 137,
-        "largo_cm": [
-          61.2
-        ],
-        "consumo_cm": 61.2,
-        "aprovechamiento": 67.9,
-        "moldes": [
-          "Camiseta de futbol"
-        ],
-        "drive_id": "1QwErTyUiOpAsDfGhJkLzXcVbNm123456",
-        "enlace": "https://drive.google.com/file/d/1QwErTyUiOpAsDfGhJkLzXcVbNm123456/view",
-        "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__HOJA_g0_Rib_New__1_40_.pdf"
-      },
-      {
-        "tipo": "ficha",
-        "nombre": "OV-2026-00123__FICHA_TECNICA.pdf",
-        "bytes": 882369,
-        "sha256": "1d701e8bf0a4a371741cc2599451aee1c7d2079444b1c15383af76fe6f04df72",
-        "drive_id": "1MnBvCxZlKjHgFdSaPoIuYtReWq456789",
-        "enlace": "https://drive.google.com/file/d/1MnBvCxZlKjHgFdSaPoIuYtReWq456789/view",
-        "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__FICHA_TECNICA.pdf"
-      }
-    ],
-    "resumen": {
-      "prendas": 4,
-      "piezas": 30,
-      "telas": [
-        "Dry Basquet 1,60",
-        "Jacquard Charrúa (1,83)",
-        "Rib New (1,40)"
-      ],
-      "perfil_color": "Coated FOGRA39 (ISO 12647-2:2004)"
-    },
-    "disenos": [
-      {
-        "nombre": "JUGADOR",
-        "moldes": [
-          {
-            "molde": "prod_20260820_095558_38bc",
-            "nombre": "Camiseta de futbol",
-            "variable": "v_bu8p7gy",
-            "variable_nombre": "Cuello redondo",
-            "tela": "Jacquard Charrúa (1,83)",
-            "tela_id": "232",
-            "no_sublimado": {
-              "logo": "tpu"
-            }
-          }
-        ]
-      },
-      {
-        "nombre": "GOLERO",
-        "moldes": [
-          {
-            "molde": "prod_20260820_095558_38bc",
-            "nombre": "Camiseta de futbol",
-            "variable": "v_t1mhcmu",
-            "variable_nombre": "cuello V",
-            "tela": "Dry Basquet 1,60",
-            "tela_id": "492",
-            "no_sublimado": {
-              "escudo": "bordado",
-              "logo": "dtf"
-            }
-          }
-        ]
-      }
-    ],
-    "alarmas": [
-      {
-        "codigo": "texto-se-achica",
-        "frena": false,
-        "etapa": "tizada",
-        "mensaje": "fila 2: el nombre no entra en Dorso 2 (talle L) y sale de 6.1 cm en vez de 7.0 cm",
-        "donde": {
-          "fila": 2
-        }
-      }
-    ]
+ "referencia": "OV-2026-00123",
+ "estado": "listo",
+ "etapa": "terminado",
+ "recibido": "2026-10-02T11:10:20",
+ "actualizado": "2026-10-02T11:10:43",
+ "pedido_externo": {
+  "id": 48211,
+  "numero": "OV-2026-00123",
+  "sucursal": "Montevideo",
+  "vendedor": "mgarcia",
+  "entrega": "2026-10-20"
+ },
+ "alarmas": [
+  {
+   "codigo": "texto-se-achica",
+   "frena": false,
+   "etapa": "tizada",
+   "mensaje": "fila 2: el nombre no entra en Dorso 2 (talle L) y sale de 6.1 cm en vez de 7.0 cm",
+   "donde": {
+    "fila": 2
+   }
   }
+ ],
+ "resultado": {
+  "formato": "tizadapro.resultado/1",
+  "referencia": "OV-2026-00123",
+  "pedido_externo": {
+   "id": 48211,
+   "numero": "OV-2026-00123",
+   "sucursal": "Montevideo",
+   "vendedor": "mgarcia",
+   "entrega": "2026-10-20"
+  },
+  "cliente": "Club Atlético Ejemplo",
+  "estado": "listo",
+  "generado": "2026-10-02T11:10:43",
+  "segundos": 21.4,
+  "tizada_id": "20261002-111043-b56e",
+  "destino": {
+   "tipo": "drive",
+   "carpeta_id": "1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+   "carpeta_enlace": "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+   "carpeta_nombre": "2026-10/OV-2026-00123"
+  },
+  "archivos": [
+   {
+    "tipo": "tizada",
+    "nombre": "OV-2026-00123__Mesa 1 - Jacquard Charrúa (1,83).pdf",
+    "bytes": 1355655,
+    "sha256": "9a8f68718a4768d60f2b5b4602a370f1e4be2d0adb24746a97f173167a912552",
+    "tela": "Jacquard Charrúa (1,83)",
+    "mesas": 1,
+    "ancho_cm": 180,
+    "largo_cm": [
+     497.4
+    ],
+    "consumo_cm": 497.4,
+    "aprovechamiento": 68.8,
+    "moldes": [
+     "Camiseta de futbol"
+    ],
+    "drive_id": "1ZyXwVuTsRqPoNmLkJiHgFeDcBa987654",
+    "enlace": "https://drive.google.com/file/d/1ZyXwVuTsRqPoNmLkJiHgFeDcBa987654/view",
+    "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__Mesa%201%20-%20Jacquard%20Charr%C3%BAa%20%281%2C83%29.pdf",
+    "mesa": 1,
+    "mesas_de_la_tela": 2
+   },
+   {
+    "tipo": "tizada",
+    "nombre": "OV-2026-00123__Mesa 2 - Jacquard Charrúa (1,83).pdf",
+    "bytes": 677827,
+    "sha256": "255219a761371f79a64742bda0d2eb4e1f073a2064b5b2f06d8674a81786f8a9",
+    "tela": "Jacquard Charrúa (1,83)",
+    "mesas": 1,
+    "ancho_cm": 180,
+    "largo_cm": [
+     238.3
+    ],
+    "consumo_cm": 238.3,
+    "aprovechamiento": 68.8,
+    "moldes": [
+     "Camiseta de futbol"
+    ],
+    "drive_id": "456789aBcDeFgHiJkLmNoPqRsTuVwXyZ1",
+    "enlace": "https://drive.google.com/file/d/456789aBcDeFgHiJkLmNoPqRsTuVwXyZ1/view",
+    "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__Mesa%202%20-%20Jacquard%20Charr%C3%BAa%20%281%2C83%29.pdf",
+    "mesa": 2,
+    "mesas_de_la_tela": 2
+   },
+   {
+    "tipo": "tizada",
+    "nombre": "OV-2026-00123__Mesa 1 - Rib New (1,40).pdf",
+    "bytes": 557566,
+    "sha256": "d2c3e7a39f1bc70aa6e59d6f497268b7e8ac6a35c97f1da2d71195575b10c00d",
+    "tela": "Rib New (1,40)",
+    "mesas": 1,
+    "ancho_cm": 137,
+    "largo_cm": [
+     61.2
+    ],
+    "consumo_cm": 61.2,
+    "aprovechamiento": 67.9,
+    "moldes": [
+     "Camiseta de futbol"
+    ],
+    "drive_id": "1QwErTyUiOpAsDfGhJkLzXcVbNm123456",
+    "enlace": "https://drive.google.com/file/d/1QwErTyUiOpAsDfGhJkLzXcVbNm123456/view",
+    "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__Mesa%201%20-%20Rib%20New%20%281%2C40%29.pdf",
+    "mesa": 1,
+    "mesas_de_la_tela": 1
+   },
+   {
+    "tipo": "ficha",
+    "nombre": "OV-2026-00123__FICHA_TECNICA.pdf",
+    "bytes": 882369,
+    "sha256": "1d701e8bf0a4a371741cc2599451aee1c7d2079444b1c15383af76fe6f04df72",
+    "drive_id": "1MnBvCxZlKjHgFdSaPoIuYtReWq456789",
+    "enlace": "https://drive.google.com/file/d/1MnBvCxZlKjHgFdSaPoIuYtReWq456789/view",
+    "descarga": "/api/externo/v1/pedidos/OV-2026-00123/archivos/OV-2026-00123__FICHA_TECNICA.pdf"
+   }
+  ],
+  "resumen": {
+   "prendas": 4,
+   "piezas": 30,
+   "telas": [
+    "Dry Basquet 1,60",
+    "Jacquard Charrúa (1,83)",
+    "Rib New (1,40)"
+   ],
+   "perfil_color": "Coated FOGRA39 (ISO 12647-2:2004)"
+  },
+  "disenos": [
+   {
+    "nombre": "JUGADOR",
+    "moldes": [
+     {
+      "molde": "prod_20260820_095558_38bc",
+      "nombre": "Camiseta de futbol",
+      "variable": "v_bu8p7gy",
+      "variable_nombre": "Cuello redondo",
+      "tela": "Jacquard Charrúa (1,83)",
+      "tela_id": "232",
+      "no_sublimado": {
+       "logo": "tpu"
+      }
+     }
+    ]
+   },
+   {
+    "nombre": "GOLERO",
+    "moldes": [
+     {
+      "molde": "prod_20260820_095558_38bc",
+      "nombre": "Camiseta de futbol",
+      "variable": "v_t1mhcmu",
+      "variable_nombre": "cuello V",
+      "tela": "Dry Basquet 1,60",
+      "tela_id": "492",
+      "no_sublimado": {
+       "escudo": "bordado",
+       "logo": "dtf"
+      }
+     }
+    ]
+   }
+  ],
+  "alarmas": [
+   {
+    "codigo": "texto-se-achica",
+    "frena": false,
+    "etapa": "tizada",
+    "mensaje": "fila 2: el nombre no entra en Dorso 2 (talle L) y sale de 6.1 cm en vez de 7.0 cm",
+    "donde": {
+     "fila": 2
+    }
+   }
+  ]
+ }
 }

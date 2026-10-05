@@ -3,6 +3,11 @@
 Todo lo que hace falta para que un sistema externo (ventas, ERP, tienda online) le mande pedidos a
 TIZADA PRO y reciba los archivos de producción **asociados a SU pedido**, sin que nadie toque TIZADA.
 
+🧵 **¿No sabés nada de ropa? Empezá acá:** [`TIZADA_PRO_Explicado_para_programadores.pdf`](TIZADA_PRO_Explicado_para_programadores.pdf)
+(8 páginas): qué es un molde, una variable, una tizada o una mesa en palabras de programador, el recorrido
+completo, qué viaja en cada ruta, las plantillas y los conectores, el resultado (un PDF por mesa) y las alarmas.
+Se arma desde [`explicado_para_programadores.html`](explicado_para_programadores.html).
+
 📘 **La guía visual en PDF:** [`TIZADA_PRO_Conectar_otro_sistema.pdf`](TIZADA_PRO_Conectar_otro_sistema.pdf) (11 páginas, con
 la puesta en marcha en el servidor de TIZADA y los diagramas de cómo se conectan los JSON).
 
@@ -14,7 +19,9 @@ la puesta en marcha en el servidor de TIZADA y los diagramas de cómo se conecta
 | otro sistema → TIZADA | Revisar un pedido antes de mandarlo | el mismo .zip o sólo el JSON (`POST /pedidos/validar`) |
 | TIZADA → otro sistema | Qué se puede pedir: **variables**, prendas, talles, columnas de la planilla, telas, tipografías, alarmas | JSON (`GET`) |
 | TIZADA → otro sistema | El **estado** y el **resultado**: cada PDF con su sha256, su enlace de Drive y la venta (`pedido_externo`) tal cual se mandó | JSON (`GET /pedidos/{ref}`) o **aviso** firmado (webhook) |
-| TIZADA → otro sistema | Los **PDF**: una tizada por tela (cada página es una mesa) + la **ficha técnica** | PDF (`GET …/archivos/{nombre}` o Google Drive) |
+| TIZADA → otro sistema | Los **PDF**: un archivo por **mesa** («Mesa 1 - Bandera», «Mesa 2 - Bandera»…) + la **ficha técnica** | PDF (`GET …/archivos/{nombre}` o Google Drive) |
+| otro sistema → TIZADA | Pedir la **plantilla** (la base para el diseñador) de unos diseños, cada uno con sus variables | JSON (`POST /plantillas`) |
+| TIZADA → otro sistema | Por diseño: el archivo para crear la base en **Illustrator**, el de **CorelDRAW** y la **guía .ai**; y los **instaladores de los conectores** | `GET /plantillas/{ref}` + `…/archivos/{nombre}` · `GET /conectores` |
 
 ## Por dónde empezar (10 minutos)
 

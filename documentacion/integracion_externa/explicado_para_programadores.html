@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>TIZADA PRO explicado para programadores</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+  :root {
+    --cian: #00b8d4; --cian-claro: #e0f7fb; --magenta: #d6007e; --magenta-claro: #fde6f2;
+    --amarillo: #f5b800; --amarillo-claro: #fff6d6; --verde: #10a36b; --verde-claro: #e3f6ee;
+    --rojo: #e0443a; --rojo-claro: #fdeceb; --tinta: #16202a; --gris: #5b6875; --gris-claro: #eef1f4;
+    --borde: #dde3e9;
+  }
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  @page portada { margin: 0; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; color: var(--tinta); font-size: 10pt; line-height: 1.55; margin: 0; }
+  h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+  p { margin: 0 0 8pt; }
+  code, .mono { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.8pt; }
+  code { background: var(--gris-claro); padding: 1px 4px; border-radius: 4px; }
+  td code { font-size: 8pt; }
+  b { font-weight: 700; }
+  .ti { vertical-align: -2px; }
+
+  /* ── portada ── */
+  .portada { page: portada; height: 297mm; width: 210mm; position: relative; overflow: hidden;
+    background: radial-gradient(circle at 85% 12%, rgba(0,184,212,0.55), transparent 42%),
+                radial-gradient(circle at 10% 90%, rgba(214,0,126,0.45), transparent 45%),
+                radial-gradient(circle at 70% 80%, rgba(245,184,0,0.35), transparent 40%),
+                linear-gradient(160deg, #0b1118 0%, #111b26 60%, #0b1118 100%);
+    color: #fff; padding: 30mm 22mm; break-after: page; }
+  .portada .logo { width: 30mm; filter: drop-shadow(0 0 18px rgba(0,184,212,0.7)); }
+  .portada .marca { font-size: 13pt; letter-spacing: 0.3em; font-weight: 700; margin-top: 8mm; opacity: 0.85; }
+  .portada .marca span { color: #3fe3ff; }
+  .portada h1 { font-size: 34pt; font-weight: 800; margin-top: 42mm; max-width: 150mm; }
+  .portada h1 em { font-style: normal; color: #3fe3ff; text-shadow: 0 0 22px rgba(63,227,255,0.45); }
+  .portada .sub { font-size: 13pt; margin-top: 8mm; max-width: 140mm; color: #c9d6e2; }
+  .portada .chips { margin-top: 14mm; display: flex; gap: 8px; flex-wrap: wrap; }
+  .portada .chip { border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 5px 13px; font-size: 9.5pt; color: #e6eef5; }
+  .portada .pie { position: absolute; bottom: 20mm; left: 22mm; right: 22mm; display: flex; justify-content: space-between; font-size: 9pt; color: #9fb0c0; border-top: 1px solid rgba(255,255,255,0.18); padding-top: 5mm; }
+
+  /* ── secciones ── */
+  section { break-before: page; }
+  .seccion-titulo { display: flex; align-items: center; gap: 12px; margin-bottom: 12pt; }
+  .num { min-width: 36px; padding: 0 5px; width: auto; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15pt; color: #fff; background: linear-gradient(135deg, var(--cian), #0088a3); flex-shrink: 0; }
+  .num.m { background: linear-gradient(135deg, var(--magenta), #a3005f); }
+  .num.a { background: linear-gradient(135deg, var(--amarillo), #d99400); }
+  .num.v { background: linear-gradient(135deg, var(--verde), #0a7a50); }
+  h2 { font-size: 20pt; font-weight: 800; }
+  .kicker { font-size: 8.5pt; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gris); font-weight: 700; }
+  h3 { font-size: 13pt; font-weight: 700; margin: 14pt 0 6pt; display: flex; align-items: center; gap: 7px; }
+  h3 .ti { color: var(--cian); font-size: 15pt; }
+  h4 { font-size: 11pt; font-weight: 700; margin: 10pt 0 4pt; }
+  .lead { font-size: 11.5pt; color: #2d3b48; margin-bottom: 12pt; }
+
+  /* ── cajas ── */
+  .caja { border-radius: 12px; padding: 11pt 13pt; margin: 9pt 0; break-inside: avoid; border: 1px solid var(--borde); }
+  .caja .t { font-weight: 800; display: flex; align-items: center; gap: 7px; margin-bottom: 4pt; }
+  .caja p:last-child { margin-bottom: 0; }
+  .c-info { background: var(--cian-claro); border-color: #a9e7f2; } .c-info .t { color: #007a8f; }
+  .c-ojo { background: var(--amarillo-claro); border-color: #f3dc8a; } .c-ojo .t { color: #9a6d00; }
+  .c-mal { background: var(--rojo-claro); border-color: #f4b9b4; } .c-mal .t { color: #b3261e; }
+  .c-bien { background: var(--verde-claro); border-color: #a6dcc4; } .c-bien .t { color: #0a7a50; }
+  .c-mag { background: var(--magenta-claro); border-color: #f3b2d6; } .c-mag .t { color: #a3005f; }
+
+  .grilla { display: grid; gap: 9pt; }
+  .g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr 1fr 1fr; } .g4 { grid-template-columns: repeat(4, 1fr); }
+  .tarjeta { border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 11pt; break-inside: avoid; background: #fff; }
+  .tarjeta .ico { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: #fff; margin-bottom: 6pt; }
+  .tarjeta h4 { margin-top: 0; }
+  .tarjeta p { font-size: 9.6pt; color: #394856; margin: 0; }
+  .i-c { background: var(--cian); } .i-m { background: var(--magenta); } .i-a { background: var(--amarillo); } .i-v { background: var(--verde); } .i-g { background: #52606d; }
+
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 9.2pt; margin: 6pt 0 10pt; break-inside: auto; }
+  th { background: var(--tinta); color: #fff; text-align: left; font-weight: 600; padding: 6pt 7pt; }
+  th:first-child { border-top-left-radius: 8px; } th:last-child { border-top-right-radius: 8px; }
+  td { padding: 5.5pt 7pt; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  tr { break-inside: avoid; }
+  tr:nth-child(even) td { background: #f7f9fb; }
+  .si { color: var(--verde); font-weight: 700; } .no { color: var(--rojo); font-weight: 700; } .medio { color: #b58300; font-weight: 700; }
+  .pill { display: inline-block; font-size: 8pt; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .p-obl { background: var(--rojo-claro); color: #b3261e; } .p-opc { background: var(--gris-claro); color: var(--gris); }
+
+  pre.json { background: #0f1720; color: #d7e3ee; border-radius: 12px; padding: 11pt 13pt; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.3pt; line-height: 1.5; white-space: pre-wrap; break-inside: avoid; margin: 8pt 0; }
+  pre.json .k { color: #7fdcff; } pre.json .s { color: #ffd479; } pre.json .c { color: #7d8e9e; font-style: italic; } pre.json .n { color: #ff8fc8; }
+
+  .mermaid { display: flex; justify-content: center; margin: 8pt 0 10pt; break-inside: avoid; }
+  .mermaid svg { max-height: 118mm; height: auto; }
+  .figura.baja .mermaid svg { max-height: 88mm; }
+  .figura.baja2 .mermaid svg { max-height: 58mm; }
+  .figura.alta .mermaid svg { max-height: 175mm; }
+  .figura { border: 1px solid var(--borde); border-radius: 14px; padding: 8pt; background: linear-gradient(180deg, #fbfdfe, #f3f7fa); break-inside: avoid; margin: 8pt 0; }
+  .figura .pie-fig { font-size: 8.6pt; color: var(--gris); text-align: center; margin-top: 2pt; }
+
+  .pasos { counter-reset: paso; }
+  .paso { display: flex; gap: 11px; margin: 8pt 0; break-inside: avoid; }
+  .paso .b { width: 26px; height: 26px; border-radius: 50%; background: var(--cian); color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10pt; }
+  .paso .b.m { background: var(--magenta); } .paso .b.a { background: var(--amarillo); } .paso .b.v { background: var(--verde); }
+  .paso .x { flex: 1; }
+  .paso .x b.tit { display: block; font-size: 10.8pt; }
+
+  .etapas { display: flex; align-items: stretch; gap: 5px; margin: 6pt 0 12pt; break-inside: avoid; }
+  .etapas .et { flex: 1; border: 1.5px solid; border-radius: 10px; padding: 7pt 8pt; font-size: 8.8pt; line-height: 1.35; text-align: center; min-height: 52pt; display: flex; flex-direction: column; justify-content: center; }
+  .etapas .et b { display: block; font-size: 9.6pt; margin-bottom: 2pt; }
+  .etapas .ti { color: var(--gris); font-size: 14px; align-self: center; }
+  .indice { columns: 2; column-gap: 16pt; margin-top: 8pt; }
+  .indice div { break-inside: avoid; padding: 5pt 0; border-bottom: 1px dashed var(--borde); display: flex; gap: 9px; align-items: baseline; }
+  .indice .n { font-weight: 800; color: var(--cian); width: 26px; }
+
+  .arbol { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 8.6pt; background: #f7f9fb; border: 1px solid var(--borde); border-radius: 12px; padding: 10pt 12pt; white-space: pre; line-height: 1.6; break-inside: avoid; }
+  .arbol .d { color: #007a8f; font-weight: 600; } .arbol .f { color: #a3005f; } .arbol .c { color: var(--gris); font-family: 'Inter', sans-serif; font-style: italic; }
+  .chico { font-size: 8.8pt; color: var(--gris); }
+
+  /* secciones con mucho contenido: que entren en su página */
+  section.apretada table { font-size: 8.6pt; margin: 4pt 0 6pt; }
+  section.apretada td { padding: 3.8pt 6pt; }
+  section.apretada th { padding: 4.5pt 6pt; }
+  section.apretada h3 { margin: 8pt 0 4pt; }
+  section.apretada .lead { margin-bottom: 6pt; }
+  section.apretada pre.json { font-size: 7.5pt; padding: 8pt 10pt; margin: 5pt 0; line-height: 1.42; }
+  section.apretada .arbol { font-size: 8pt; padding: 7pt 10pt; line-height: 1.5; }
+  section.apretada .figura.media .mermaid svg { max-height: 84mm; }
+</style>
+</head>
+<body>
+<style>
+  /* lo propio de esta guía (el resto del estilo es el de `guia_integracion.html`) */
+  .dibujo { display: flex; justify-content: center; margin: 6pt 0; }
+  .dibujo svg { max-width: 100%; height: auto; }
+  section.apretada table.glos { font-size: 8.1pt; } section.apretada .glos td { padding: 2.6pt 5pt; line-height: 1.3; }
+  .glos td:first-child { font-weight: 700; white-space: nowrap; }
+  .glos td:nth-child(3) code { white-space: nowrap; }
+  .flujo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8pt; margin: 8pt 0; }
+  .flujo .f { border: 1.5px solid var(--borde); border-radius: 12px; padding: 9pt 10pt; background: #fff; break-inside: avoid; position: relative; }
+  .flujo .f .n { position: absolute; top: -9pt; left: 9pt; background: var(--tinta); color: #fff; font-weight: 800; font-size: 9pt; border-radius: 999px; padding: 1px 8px; }
+  .flujo .f b { display: block; font-size: 10.4pt; margin: 3pt 0 2pt; }
+  .flujo .f p { font-size: 9pt; color: #394856; margin: 0; }
+  .flujo .f code { font-size: 7.8pt; }
+  .flujo .quien { font-size: 7.6pt; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .q-ext { color: #a3005f; } .q-tiz { color: #007a8f; } .q-dis { color: #9a6d00; }
+  .equiv { display: grid; grid-template-columns: 1fr 22px 1fr; gap: 6pt; align-items: center; margin: 4pt 0; break-inside: avoid; }
+  .equiv .l { border-radius: 10px; padding: 7pt 9pt; font-size: 9.4pt; }
+  .equiv .l.t { background: var(--magenta-claro); } .equiv .l.p { background: var(--cian-claro); }
+  .equiv .flecha { text-align: center; color: var(--gris); font-weight: 800; }
+</style>
+
+<!-- ═══════════════════════════ PORTADA ═══════════════════════════ -->
+<div class="portada">
+  <img class="logo" src="../logo.svg" alt="">
+  <div class="marca"><span>USER</span> PRO · TIZADA PRO</div>
+  <h1>TIZADA PRO <em>explicado</em> para programadores</h1>
+  <div class="sub">Qué es cada cosa del taller (molde, variable, arte, tela, tizada, mesa…) en palabras de programador, qué viaja entre su sistema y TIZADA PRO, para qué sirve y cómo funciona de punta a punta. No hace falta saber nada de camisetas.</div>
+  <div class="chips">
+    <span class="chip">El taller en 1 minuto</span>
+    <span class="chip">Diccionario taller → API</span>
+    <span class="chip">El recorrido completo</span>
+    <span class="chip">Plantillas y conectores</span>
+    <span class="chip">Un archivo por mesa</span>
+  </div>
+  <div class="pie"><span>API <b>/api/externo/v1</b> · todo con la llave <b>X-Api-Key</b></span><span>Sistema 1.0.48 · 5 de octubre de 2026</span></div>
+</div>
+
+<!-- ═══════════════════════════ 1 · EL TALLER ═══════════════════════════ -->
+<section style="break-before: auto;">
+  <div class="seccion-titulo"><div class="num">1</div><div><div class="kicker">Lo mínimo</div><h2>El taller en 1 minuto</h2></div></div>
+  <p class="lead">El taller hace ropa deportiva <b>sublimada</b>: el diseño se imprime en papel, el papel se apoya sobre la tela blanca con calor y la tinta pasa a la tela. Después se cortan las piezas y se cosen. TIZADA PRO prepara lo que se imprime.</p>
+
+  <div class="dibujo">
+    <svg viewBox="0 0 720 210" width="720" xmlns="http://www.w3.org/2000/svg" font-family="Inter, sans-serif">
+      <!-- la camiseta -->
+      <g transform="translate(20,20)">
+        <path d="M40 10 L70 0 Q90 18 110 0 L140 10 L170 45 L145 62 L135 50 L135 160 L45 160 L45 50 L35 62 L10 45 Z" fill="#e0f7fb" stroke="#007a8f" stroke-width="2"/>
+        <text x="90" y="185" text-anchor="middle" font-size="12" font-weight="700" fill="#16202a">Una camiseta…</text>
+      </g>
+      <text x="215" y="100" font-size="26" fill="#5b6875">→</text>
+      <!-- las piezas -->
+      <g transform="translate(250,15)">
+        <rect x="0" y="0" width="80" height="110" rx="8" fill="#fde6f2" stroke="#a3005f" stroke-width="2"/><text x="40" y="60" text-anchor="middle" font-size="11" font-weight="700">Frente</text>
+        <rect x="90" y="0" width="80" height="110" rx="8" fill="#fde6f2" stroke="#a3005f" stroke-width="2"/><text x="130" y="60" text-anchor="middle" font-size="11" font-weight="700">Dorso</text>
+        <rect x="0" y="120" width="55" height="45" rx="8" fill="#fff6d6" stroke="#9a6d00" stroke-width="2"/><text x="27" y="147" text-anchor="middle" font-size="10" font-weight="700">Manga</text>
+        <rect x="62" y="120" width="55" height="45" rx="8" fill="#fff6d6" stroke="#9a6d00" stroke-width="2"/><text x="89" y="147" text-anchor="middle" font-size="10" font-weight="700">Manga</text>
+        <rect x="124" y="130" width="46" height="25" rx="8" fill="#e3f6ee" stroke="#0a7a50" stroke-width="2"/><text x="147" y="147" text-anchor="middle" font-size="10" font-weight="700">Cuello</text>
+        <text x="85" y="190" text-anchor="middle" font-size="12" font-weight="700" fill="#16202a">…son PIEZAS (el MOLDE)</text>
+      </g>
+      <text x="440" y="100" font-size="26" fill="#5b6875">→</text>
+      <!-- la tela con las piezas acomodadas -->
+      <g transform="translate(475,10)">
+        <rect x="0" y="0" width="225" height="165" fill="#f7f9fb" stroke="#16202a" stroke-width="2"/>
+        <rect x="8" y="8" width="60" height="80" rx="5" fill="#fde6f2" stroke="#a3005f"/>
+        <rect x="72" y="8" width="60" height="80" rx="5" fill="#fde6f2" stroke="#a3005f"/>
+        <rect x="136" y="8" width="40" height="34" rx="5" fill="#fff6d6" stroke="#9a6d00"/>
+        <rect x="180" y="8" width="40" height="34" rx="5" fill="#fff6d6" stroke="#9a6d00"/>
+        <rect x="136" y="48" width="84" height="18" rx="5" fill="#e3f6ee" stroke="#0a7a50"/>
+        <rect x="8" y="94" width="60" height="64" rx="5" fill="#fde6f2" stroke="#a3005f"/>
+        <rect x="72" y="94" width="60" height="64" rx="5" fill="#fde6f2" stroke="#a3005f"/>
+        <rect x="136" y="72" width="40" height="34" rx="5" fill="#fff6d6" stroke="#9a6d00"/>
+        <line x1="0" y1="91" x2="225" y2="91" stroke="#e0443a" stroke-width="2" stroke-dasharray="6 4"/>
+        <text x="112" y="190" text-anchor="middle" font-size="12" font-weight="700" fill="#16202a">…acomodadas en la TELA = TIZADA</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="grilla g2">
+    <div class="caja c-info"><div class="t">Para un programador</div>
+      <p>Armar la <b>tizada</b> es un problema de <b>empaquetado</b> (bin packing / nesting): meter todas las piezas de todas las prendas del pedido en un rollo de ancho fijo, gastando el menor largo posible. Cada tramo que se imprime de una vez es una <b>mesa</b> (la línea roja del dibujo separa dos mesas).</p></div>
+    <div class="caja c-mag"><div class="t">Lo que hace su sistema y lo que hace TIZADA</div>
+      <p><b>Ustedes</b> venden y juntan los datos (qué prenda, qué diseño, talles, nombres). <b>TIZADA</b> arma la base para el diseñador, lee el diseño, arma la tizada y devuelve los PDF listos para imprimir. Ustedes nunca calculan nada de ropa.</p></div>
+  </div>
+
+  <h3>El camino de una venta</h3>
+  <div class="etapas">
+    <div class="et" style="border-color:#a3005f"><b>1 · Venta</b>su sistema</div>
+    <div class="et" style="border-color:#9a6d00"><b>2 · Diseño</b>el diseñador, sobre la plantilla</div>
+    <div class="et" style="border-color:#a3005f"><b>3 · Pedido</b>su sistema lo manda</div>
+    <div class="et" style="border-color:#007a8f"><b>4 · Tizada</b>TIZADA la arma sola</div>
+    <div class="et" style="border-color:#0a7a50"><b>5 · Archivos</b>PDF por mesa + ficha</div>
+    <div class="et" style="border-color:#5b6875"><b>6 · Taller</b>imprime, corta, cose</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 2 · DICCIONARIO ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">2</div><div><div class="kicker">Lo más importante de esta guía</div><h2>Diccionario: del taller a la API</h2></div></div>
+  <p class="lead">Cada palabra del taller, qué es, cómo se llama en la API y a qué se parece en programación.</p>
+  <table class="glos">
+    <tr><th>En el taller</th><th>Qué es</th><th>En la API</th><th>Pensalo como…</th></tr>
+    <tr><td>Molde</td><td>Todas las piezas recortables de UNA prenda (camiseta, short), en todos sus talles.</td><td><code>molde</code> (código <code>prod_…</code>)</td><td>Una clase / el producto base</td></tr>
+    <tr><td>Pieza</td><td>Cada recorte: Frente, Dorso, Manga, Cuello…</td><td><code>piezas</code></td><td>Un componente del producto</td></tr>
+    <tr><td>Talle</td><td>El tamaño: XS, S, M, L, XL… Cada talle tiene sus piezas a su medida.</td><td>columna <code>talle</code> de la planilla</td><td>Un parámetro de tamaño</td></tr>
+    <tr><td>Variable</td><td>Una combinación de piezas de un molde: «Cuello redondo» o «Cuello V» usan frentes y cuellos distintos. <b>Es lo que siempre se elige.</b></td><td><code>variable</code> (clave <code>v_…</code>)</td><td>Un SKU / una configuración del producto</td></tr>
+    <tr><td>Diseño</td><td>La gráfica que va estampada: «JUGADOR», «GOLERO». Un pedido puede tener varios.</td><td><code>disenos[].nombre</code></td><td>Un tema / skin</td></tr>
+    <tr><td>Arte</td><td>El archivo del diseño (.ai de Illustrator o .pdf), dibujado sobre la plantilla.</td><td><code>arte</code> (archivo en el .zip)</td><td>Un asset gráfico</td></tr>
+    <tr><td>Mesa de trabajo (del arte)</td><td>Un rectángulo del archivo de diseño, uno por pieza. Su nombre («Frente») le dice a TIZADA de qué pieza es ese dibujo.</td><td>la capa <code>guias</code> del arte</td><td>Una clave que asocia dibujo ↔ pieza</td></tr>
+    <tr><td>Plantilla (base)</td><td>Un archivo vacío para el diseñador: las mesas ya creadas con su nombre, las capas y el contorno de cada pieza.</td><td><code>POST /plantillas</code></td><td>Un scaffold / boilerplate</td></tr>
+    <tr><td>Capas</td><td>Las del arte: <b>diseño</b> (el dibujo), <b>Editable …</b> (logos que se pueden mover), <b>Nombre</b> y <b>Número</b> (dónde va el texto de cada jugador), <b>guias</b> (nombres y contornos).</td><td>—</td><td>Las capas de un PSD</td></tr>
+    <tr><td>Nombre y número</td><td>El texto que cambia en cada prenda: «PÉREZ 10». TIZADA lo estampa con la tipografía del diseño.</td><td>columnas de la planilla</td><td>Datos variables de una plantilla de mail</td></tr>
+    <tr><td>Planilla</td><td>Una fila por prenda: talle, nombre, número, cantidad…</td><td><code>planilla[]</code></td><td>Las líneas del pedido</td></tr>
+    <tr><td>Tela</td><td>El material, en rollos de un ancho fijo (1,60 m, 1,83 m…).</td><td><code>tela</code> (id de <code>/telas</code>)</td><td>El contenedor donde se empaqueta</td></tr>
+    <tr><td>Tizada</td><td>Todas las piezas del pedido acomodadas en el ancho de la tela, con su diseño ya puesto.</td><td>los PDF del resultado</td><td>El resultado de un bin packing</td></tr>
+    <tr><td>Mesa (de la tizada)</td><td>Un tramo de tela que se imprime de una vez. Un pedido grande tiene varias mesas.</td><td><b>un PDF por mesa</b></td><td>Una página / un lote de impresión</td></tr>
+    <tr><td>Ficha técnica</td><td>Un PDF A4 para quien cose: la tabla de talles y qué va en cada prenda.</td><td>archivo tipo <code>ficha</code></td><td>El informe del pedido</td></tr>
+    <tr><td>TPU · Bordado · DTF</td><td>Partes que NO se imprimen con el resto (se pegan o se bordan aparte): en su lugar va una cruz de referencia.</td><td><code>editables</code> + proceso</td><td>Un flag «no renderizar acá»</td></tr>
+    <tr><td>RIP</td><td>El programa de la impresora. Recibe los PDF de la tizada tal cual.</td><td>—</td><td>El driver de la impresora</td></tr>
+    <tr><td>Conector</td><td>Un programa chico que se instala una vez en la PC del diseñador y une TIZADA con Illustrator o CorelDRAW.</td><td><code>GET /conectores</code></td><td>Un plugin / agente local</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 3 · EL RECORRIDO ═══════════════════════════ -->
+<section>
+  <div class="seccion-titulo"><div class="num a">3</div><div><div class="kicker">Cómo funciona</div><h2>El recorrido completo</h2></div></div>
+  <p class="lead">Seis pasos. Los marcados <span class="q-ext"><b>SU SISTEMA</b></span> los programan ustedes; los de <span class="q-tiz"><b>TIZADA</b></span> pasan solos; el <span class="q-dis"><b>DISEÑADOR</b></span> es una persona.</p>
+  <div class="flujo">
+    <div class="f"><span class="n">1</span><div class="quien q-ext">Su sistema</div><b>Leer el catálogo</b><p>Qué se puede fabricar: <code>GET /variables</code> (con su foto), <code>GET /telas</code>, <code>GET /moldes/{código}</code> (talles y columnas de la planilla), <code>GET /tipografias</code>.</p></div>
+    <div class="f"><span class="n">2</span><div class="quien q-ext">Su sistema</div><b>Pedir la plantilla</b><p><code>POST /plantillas</code> con los diseños y sus variables. TIZADA la arma en segundos: <code>GET /plantillas/{ref}</code> trae los archivos para bajar.</p></div>
+    <div class="f"><span class="n">3</span><div class="quien q-dis">Diseñador</div><b>Dibujar el arte</b><p>Abre la base en Illustrator o CorelDRAW (con el conector, se arma sola) y dibuja encima. Guarda el .ai (con «compatible con PDF») o un PDF.</p></div>
+    <div class="f"><span class="n">4</span><div class="quien q-ext">Su sistema</div><b>Mandar el pedido</b><p>Un .zip con <code>pedido.json</code> + el arte (+ tipografías si faltan). Primero <code>POST /pedidos/validar</code> (dice qué falta), después <code>POST /pedidos</code>.</p></div>
+    <div class="f"><span class="n">5</span><div class="quien q-tiz">TIZADA</div><b>Fabricar</b><p>Un robot lee el arte, arma la tizada, estampa nombres y números y guarda los PDF (en Google Drive si está conectado). Tarda segundos o pocos minutos.</p></div>
+    <div class="f"><span class="n">6</span><div class="quien q-ext">Su sistema</div><b>Recibir</b><p>Un aviso firmado a su dirección (webhook) o preguntando <code>GET /pedidos/{ref}</code>. Trae cada archivo con su <code>sha256</code>, su descarga y el dato de SU venta tal cual lo mandaron.</p></div>
+  </div>
+
+  <div class="caja c-ojo"><div class="t">La regla de oro</div>
+    <p>En TIZADA <b>se elige la VARIABLE</b>, no el molde: su pantalla muestra las variables de <code>GET /variables</code> («Cuello redondo», «Cuello V»…) y manda su <code>clave</code>. El molde va detrás, como dato. Dos variables de la misma prenda no van en el mismo diseño de un pedido.</p></div>
+  <div class="caja c-info"><div class="t">¿Hay que pedir la plantilla siempre?</div>
+    <p>No. El paso 2 es para cuando el diseñador NO tiene la base de esa prenda. Si ya diseña sobre una base de TIZADA, se salta. Lo que SÍ tiene que tener todo arte es una mesa por pieza con el nombre de la pieza en la capa «guias» — eso es justamente lo que trae la plantilla.</p></div>
+</section>
+
+<!-- ═══════════════════════════ 4 · QUÉ VIAJA ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num v">4</div><div><div class="kicker">Para programar</div><h2>Qué viaja en cada sentido</h2></div></div>
+  <p class="lead">Base: <code>https://&lt;servidor de TIZADA&gt;/api/externo/v1</code>. Todo lleva el encabezado <code>X-Api-Key</code> (la llave la crea quien administra TIZADA en <i>Configuración › Integraciones</i>).</p>
+  <table>
+    <tr><th>Ruta</th><th>Manda su sistema</th><th>Devuelve TIZADA</th><th>Para qué</th></tr>
+    <tr><td><code>GET /variables</code></td><td>—</td><td>lista de variables (clave, nombre, molde, piezas, foto)</td><td>Que el vendedor elija la prenda</td></tr>
+    <tr><td><code>GET /moldes/{código}</code></td><td>—</td><td>talles, columnas de la planilla, opciones, telas permitidas</td><td>Armar la planilla y validar antes</td></tr>
+    <tr><td><code>GET /telas</code> · <code>/tipografias</code></td><td>—</td><td>telas (id, ancho) · fuentes que ya tiene</td><td>Elegir tela · saber si mandar la fuente</td></tr>
+    <tr><td><code>GET /conectores</code></td><td>—</td><td>los instaladores (Illustrator Win/Mac, CorelDRAW)</td><td>Botón «Instalar conector»</td></tr>
+    <tr><td><code>POST /plantillas</code></td><td>JSON: diseños con sus variables, talles, escala</td><td><code>202</code> en cola · <code>422</code> con alarmas</td><td>Pedir la base del diseñador</td></tr>
+    <tr><td><code>GET /plantillas/{ref}</code></td><td>—</td><td>estado + por diseño: Illustrator.json, CorelDRAW.json, guía .ai</td><td>Bajar la base</td></tr>
+    <tr><td><code>POST /pedidos/validar</code></td><td>el .zip o sólo el JSON</td><td>si lo aceptaría + alarmas</td><td>Avisar al vendedor qué corregir</td></tr>
+    <tr><td><code>POST /pedidos</code></td><td>.zip: <code>pedido.json</code> + artes + tipografías</td><td><code>202</code> en cola · <code>422</code> con alarmas</td><td>Mandar a fabricar</td></tr>
+    <tr><td><code>GET /pedidos/{ref}</code></td><td>—</td><td>estado, etapa en palabras, alarmas, resultado</td><td>Mostrar «en qué va»</td></tr>
+    <tr><td><code>GET …/archivos/{nombre}</code></td><td>—</td><td>el PDF (o el archivo de la plantilla)</td><td>Bajar lo fabricado</td></tr>
+    <tr><td>aviso (webhook)</td><td>su dirección contesta <code>2xx</code></td><td>el estado final, firmado (<code>X-Tizada-Firma</code>)</td><td>Enterarse sin preguntar</td></tr>
+  </table>
+  <div class="caja c-bien"><div class="t">Cómo queda asociado a SU venta</div>
+    <p>Lo que manden en <code>referencia</code> y en <code>pedido_externo</code> vuelve <b>tal cual</b> en el resultado y en el aviso, y cada archivo lleva la referencia adelante en su nombre (<code>OV-123__Mesa 1 - Bandera (1,60).pdf</code>). Con eso saben de qué venta es cada archivo sin guardar nada de TIZADA.</p></div>
+  <p class="chico">El detalle campo por campo está en <code>API.md</code>, <code>FORMATO_PEDIDO.md</code> y <code>openapi.yaml</code> (para Postman/Insomnia). Cada respuesta real, en <code>respuestas/</code>.</p>
+</section>
+
+<!-- ═══════════════════════════ 5 · PLANTILLAS ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num">5</div><div><div class="kicker">La base para el diseñador</div><h2>Plantillas y conectores</h2></div></div>
+  <p class="lead">El diseñador necesita saber <b>dónde</b> dibujar: una mesa por pieza, del tamaño justo, con su nombre. La plantilla se la da hecha. Sale <b>un archivo por diseño</b>, con todas sus prendas adentro (cada una en su bloque con su nombre arriba).</p>
+  <pre class="json"><span class="c">// POST /api/externo/v1/plantillas</span>
+{ <span class="k">"referencia"</span>: <span class="s">"PL-0001"</span>,
+  <span class="k">"disenos"</span>: [ { <span class="k">"nombre"</span>: <span class="s">"JUGADOR"</span>, <span class="k">"variables"</span>: [<span class="s">"v_redondo"</span>] },
+               { <span class="k">"nombre"</span>: <span class="s">"GOLERO"</span>,  <span class="k">"variables"</span>: [<span class="s">"v_cuellov"</span>] } ],
+  <span class="k">"talles"</span>: { <span class="k">"modo"</span>: <span class="s">"todos"</span> },   <span class="c">// todos · rango (con "rangos") · por_talle (con "talles")</span>
+  <span class="k">"escala"</span>: <span class="n">100</span> }                <span class="c">// tamaño en Illustrator: 100 = real … 10</span></pre>
+  <table>
+    <tr><th>Archivo (por diseño)</th><th>Qué es</th><th>Cómo se usa</th></tr>
+    <tr><td><code>JUGADOR - Illustrator.json</code></td><td>Las instrucciones para que el conector arme la base en Illustrator: mesas, capas, contornos.</td><td>Desde el navegador de la PC del diseñador: <code>POST http://127.0.0.1:47850/plantilla</code> con el archivo tal cual.</td></tr>
+    <tr><td><code>JUGADOR - CorelDRAW.json</code></td><td>Lo mismo para CorelDRAW (una página por mesa, tamaño real).</td><td><code>POST http://127.0.0.1:47851/plantilla</code>. Si Corel está cerrado, se abre.</td></tr>
+    <tr><td><code>guia_JUGADOR.ai</code></td><td>Una guía que abre cualquier Illustrator, sin conector.</td><td>Bajarla y abrirla.</td></tr>
+  </table>
+  <pre class="json"><span class="c">// En la página de SU sistema (navegador del diseñador): mandar la base a Illustrator</span>
+<span class="k">const</span> estado = <span class="k">await</span> fetch(<span class="s">'http://127.0.0.1:47850/estado'</span>).catch(() =&gt; <span class="k">null</span>)   <span class="c">// ¿está el conector?</span>
+<span class="k">if</span> (!estado) mostrarBotonInstalar()                                                   <span class="c">// GET /conectores</span>
+<span class="k">const</span> base = <span class="k">await</span> (<span class="k">await</span> fetch(<span class="s">'/su-servidor/plantilla/JUGADOR - Illustrator.json'</span>)).text()
+<span class="k">const</span> r = <span class="k">await</span> fetch(<span class="s">'http://127.0.0.1:47850/plantilla'</span>, { method: <span class="s">'POST'</span>,
+  headers: { <span class="s">'Content-Type'</span>: <span class="s">'application/json'</span> }, body: base })
+<span class="c">// → {"ok": true, "mesas": 7, "archivo": "JUGADOR.ai"}  (queda en Documentos › USER PRO › Plantillas)</span></pre>
+  <div class="grilla g2">
+    <div class="caja c-info"><div class="t">El conector escucha sólo en esa PC</div>
+      <p>Por eso el <code>POST</code> lo hace la página de su sistema, en el navegador del diseñador (no su servidor). Acepta pedidos de cualquier página; la primera vez Chrome puede preguntar «permitir»: es la misma computadora.</p></div>
+    <div class="caja c-ojo"><div class="t">Avisos que pueden venir</div>
+      <p><code>plantilla-mesas-chocan</code>: dos piezas distintas con el mismo nombre en un archivo (al subir el arte se usaría la primera) → pedir esas variables en diseños separados. <code>plantilla-aviso</code>: por ejemplo, una guía .ai que no entra en Illustrator (los otros archivos salen igual).</p></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 6 · EL RESULTADO ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">6</div><div><div class="kicker">Lo que se recibe</div><h2>Un archivo por mesa</h2></div></div>
+  <p class="lead">Cuando el pedido está <code>listo</code>, el resultado trae <b>un PDF por mesa</b> (igual que «Descargar todo» de TIZADA) y la <b>ficha técnica</b>. Cada PDF de mesa es una página lista para mandar a la impresora.</p>
+  <div class="dibujo">
+    <svg viewBox="0 0 720 150" width="720" xmlns="http://www.w3.org/2000/svg" font-family="Inter, sans-serif">
+      <g font-size="11" font-weight="700">
+        <rect x="10" y="10" width="150" height="100" rx="8" fill="#fde6f2" stroke="#a3005f" stroke-width="2"/><text x="85" y="55" text-anchor="middle">Mesa 1 - Bandera</text><text x="85" y="72" text-anchor="middle" font-weight="400" font-size="10">4,96 m de tela</text>
+        <rect x="175" y="10" width="150" height="100" rx="8" fill="#fde6f2" stroke="#a3005f" stroke-width="2"/><text x="250" y="55" text-anchor="middle">Mesa 2 - Bandera</text><text x="250" y="72" text-anchor="middle" font-weight="400" font-size="10">4,99 m de tela</text>
+        <rect x="340" y="10" width="150" height="100" rx="8" fill="#fde6f2" stroke="#a3005f" stroke-width="2"/><text x="415" y="55" text-anchor="middle">Mesa 3 - Bandera</text><text x="415" y="72" text-anchor="middle" font-weight="400" font-size="10">4,62 m de tela</text>
+        <rect x="505" y="10" width="95" height="100" rx="8" fill="#e0f7fb" stroke="#007a8f" stroke-width="2"/><text x="552" y="55" text-anchor="middle">Mesa 1 - Rib</text><text x="552" y="72" text-anchor="middle" font-weight="400" font-size="10">1,72 m</text>
+        <rect x="615" y="10" width="95" height="100" rx="8" fill="#eef1f4" stroke="#5b6875" stroke-width="2"/><text x="662" y="55" text-anchor="middle">Ficha técnica</text><text x="662" y="72" text-anchor="middle" font-weight="400" font-size="10">A4</text>
+      </g>
+      <text x="360" y="138" text-anchor="middle" font-size="11" fill="#5b6875">Un pedido con 2 telas: «Bandera» necesitó 3 mesas, «Rib» 1. Llegan 5 archivos. La numeración vuelve a 1 en cada tela.</text>
+    </svg>
+  </div>
+  <table>
+    <tr><th>Campo del archivo</th><th>Qué quiere decir</th></tr>
+    <tr><td><code>tipo</code></td><td><code>tizada</code> (una mesa) o <code>ficha</code> (la ficha técnica)</td></tr>
+    <tr><td><code>nombre</code> · <code>descarga</code> · <code>sha256</code></td><td>El archivo, la ruta para bajarlo de TIZADA y su huella (para comprobar que llegó entero)</td></tr>
+    <tr><td><code>tela</code> · <code>ancho_cm</code></td><td>En qué tela se imprime y el ancho útil de esa tela</td></tr>
+    <tr><td><code>mesa</code> · <code>mesas_de_la_tela</code></td><td>Qué mesa es y cuántas tiene esa tela («Mesa 2 de 3»)</td></tr>
+    <tr><td><code>largo_cm</code> · <code>consumo_cm</code></td><td>Cuánta tela usa ESTA mesa (en centímetros)</td></tr>
+    <tr><td><code>aprovechamiento</code></td><td>Qué porcentaje de la tela se usa en piezas (de la tela entera, no de la mesa)</td></tr>
+    <tr><td><code>fila</code> · <code>copias</code> · <code>talles</code></td><td>Si el pedido pidió «una mesa por fila» o «talles por mesa»: de qué fila es y cuántas veces se imprime, o qué talles lleva</td></tr>
+    <tr><td><code>drive_id</code> · <code>enlace</code></td><td>Si Google Drive está conectado: dónde quedó guardado</td></tr>
+  </table>
+  <div class="caja c-mal"><div class="t">Importante</div>
+    <p>La copia en el servidor de TIZADA se borra a los <b>30 días</b> de terminado el pedido. Bajar los PDF apenas está <code>listo</code> (o usar los de Google Drive).</p></div>
+</section>
+
+<!-- ═══════════════════════════ 7 · ERRORES ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num a">7</div><div><div class="kicker">Cuando algo no está bien</div><h2>Las alarmas, en criollo</h2></div></div>
+  <p class="lead">TIZADA nunca falla en silencio: cada problema vuelve como una <b>alarma</b> con su código, si frena o es sólo un aviso, y dónde está. El catálogo completo: <code>GET /alarmas</code> (sin llave).</p>
+  <table>
+    <tr><th>Código</th><th>Qué pasó (en criollo)</th><th>Qué hacer</th></tr>
+    <tr><td><code>variable-desconocida</code></td><td>La prenda elegida no existe en TIZADA.</td><td>Elegirla de <code>GET /variables</code>.</td></tr>
+    <tr><td><code>talle-inexistente</code></td><td>Una fila pide un talle que esa prenda no tiene.</td><td>Usar los talles de <code>GET /moldes/{código}</code>.</td></tr>
+    <tr><td><code>tela-no-permitida</code></td><td>Esa prenda no se corta en esa tela.</td><td>Elegir una de las telas del molde.</td></tr>
+    <tr><td><code>arte-sin-mesas-de-pieza</code></td><td>El archivo del diseño no trae una mesa por pieza con su nombre (no se armó sobre la plantilla).</td><td>Pedir la plantilla (§5) y dibujar encima.</td></tr>
+    <tr><td><code>arte-texto-vivo</code></td><td>El diseño tiene textos sin convertir a curvas.</td><td>Illustrator: Texto › Crear contornos.</td></tr>
+    <tr><td><code>tipografia-falta</code></td><td>El nombre/número usa una letra que TIZADA no tiene.</td><td>Mandar el .ttf/.otf en el paquete.</td></tr>
+    <tr><td><code>piezas-en-blanco</code></td><td>Hay piezas que se fabrican y el diseño no cubre: saldrían blancas.</td><td>Agregarlas al arte, o pedir <code>si_piezas_en_blanco: "seguir"</code>.</td></tr>
+    <tr><td><code>texto-se-achica</code></td><td>Un nombre muy largo no entra y sale más chico (aviso).</td><td>Avisarle al vendedor.</td></tr>
+    <tr><td><code>talles-invalidos</code></td><td>(plantilla) El modo de talles o un rango no se entiende.</td><td>Ver <code>talles</code> en §5.</td></tr>
+  </table>
+  <div class="caja c-info"><div class="t">Para probar sin miedo</div>
+    <p><code>POST /pedidos/validar</code> revisa el pedido SIN guardarlo: úsenlo cada vez que el vendedor cambia algo, y muestren las alarmas antes de mandar. Hay un <b>sistema de ventas de prueba</b> (en el repositorio de integración) que hace todo este recorrido con pantalla, para copiar.</p></div>
+
+  <h3>Dónde está cada cosa</h3>
+  <table>
+    <tr><th>Archivo</th><th>Qué tiene</th></tr>
+    <tr><td><code>TIZADA_PRO_Explicado_para_programadores.pdf</code></td><td>Esta guía</td></tr>
+    <tr><td><code>TIZADA_PRO_Conectar_otro_sistema.pdf</code></td><td>La guía técnica completa (puesta en marcha en el servidor, firma del aviso, Drive)</td></tr>
+    <tr><td><code>API.md</code> · <code>openapi.yaml</code></td><td>Cada ruta con lo que manda y lo que vuelve · la API para Postman / generar un cliente</td></tr>
+    <tr><td><code>FORMATO_PEDIDO.md</code> · <code>pedido_ejemplo.json</code></td><td>El pedido campo por campo · un pedido completo</td></tr>
+    <tr><td><code>resultado_ejemplo.json</code> · <code>esquemas/</code> · <code>respuestas/</code></td><td>Lo que vuelve · JSON Schema · la respuesta real de cada ruta</td></tr>
+    <tr><td><code>codigo/</code></td><td>Código listo: mandar un pedido, recibir el aviso (Python y Node)</td></tr>
+  </table>
+</section>
+</body>
+</html>

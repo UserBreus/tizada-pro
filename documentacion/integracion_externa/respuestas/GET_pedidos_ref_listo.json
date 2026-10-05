@@ -172,7 +172,7 @@
      "aprovechamiento": 60.9,
      "bytes": 998568,
      "consumo_cm": 21.5,
-     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__HOJA_g0_Rib_New__1_40_.pdf",
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__Mesa%201%20-%20Rib%20New%20%281%2C40%29.pdf",
      "largo_cm": [
       21.5
      ],
@@ -180,17 +180,19 @@
      "moldes": [
       "Camiseta de futbol"
      ],
-     "nombre": "EJEMPLO-CODIGO-1__HOJA_g0_Rib_New__1_40_.pdf",
+     "nombre": "EJEMPLO-CODIGO-1__Mesa 1 - Rib New (1,40).pdf",
      "sha256": "7570297697e23e247c4081ac0e04647f0fd2208497d8255ca970fe8f8cf15ebc",
      "tela": "Rib New (1,40)",
-     "tipo": "tizada"
+     "tipo": "tizada",
+     "mesa": 1,
+     "mesas_de_la_tela": 1
     },
     {
      "ancho_cm": 180,
      "aprovechamiento": 73.7,
      "bytes": 1127490,
      "consumo_cm": 357.5,
-     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__HOJA_g0_Jacquard_Charr%C3%BAa__1_83_.pdf",
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__Mesa%201%20-%20Jacquard%20Charr%C3%BAa%20%281%2C83%29.pdf",
      "largo_cm": [
       357.5
      ],
@@ -198,17 +200,19 @@
      "moldes": [
       "Camiseta de futbol"
      ],
-     "nombre": "EJEMPLO-CODIGO-1__HOJA_g0_Jacquard_Charrúa__1_83_.pdf",
+     "nombre": "EJEMPLO-CODIGO-1__Mesa 1 - Jacquard Charrúa (1,83).pdf",
      "sha256": "db64f1cb35f49d4febe799d01c2215811c9e46448d185e590e74367712c012bd",
      "tela": "Jacquard Charrúa (1,83)",
-     "tipo": "tizada"
+     "tipo": "tizada",
+     "mesa": 1,
+     "mesas_de_la_tela": 1
     },
     {
      "ancho_cm": 157,
      "aprovechamiento": 57.5,
      "bytes": 519402,
      "consumo_cm": 152.6,
-     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__HOJA_g0_Dry_Basquet_1_60.pdf",
+     "descarga": "/api/externo/v1/pedidos/EJEMPLO-CODIGO-1/archivos/EJEMPLO-CODIGO-1__Mesa%201%20-%20Dry%20Basquet%201%2C60.pdf",
      "largo_cm": [
       152.6
      ],
@@ -216,10 +220,12 @@
      "moldes": [
       "Camiseta de futbol"
      ],
-     "nombre": "EJEMPLO-CODIGO-1__HOJA_g0_Dry_Basquet_1_60.pdf",
+     "nombre": "EJEMPLO-CODIGO-1__Mesa 1 - Dry Basquet 1,60.pdf",
      "sha256": "ef0128d20ba8956d348faa1427659edc9c39db04840a740b83a8460d5e278609",
      "tela": "Dry Basquet 1,60",
-     "tipo": "tizada"
+     "tipo": "tizada",
+     "mesa": 1,
+     "mesas_de_la_tela": 1
     },
     {
      "bytes": 1690159,

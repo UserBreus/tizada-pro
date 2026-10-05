@@ -277,7 +277,8 @@ async function guardarArchivos(ref, carpetaNombre, archivos) {
     const tmp = path.join(dir, a.nombre + '.tmp')
     fs.writeFileSync(tmp, a.bytes)
     fs.renameSync(tmp, path.join(dir, a.nombre))
-    salida.push({ tipo: a.tipo, origen: a.origen, nombre: a.nombre, bytes: a.bytes.length, sha256: sha256(a.bytes), ruta: path.join(dir, a.nombre) })
+    salida.push({ tipo: a.tipo, origen: a.origen, nombre: a.nombre, bytes: a.bytes.length, sha256: sha256(a.bytes), ruta: path.join(dir, a.nombre),
+      ...(a.pagina !== undefined ? { pagina: a.pagina, mesa: a.mesa, mesas_tela: a.mesas_tela } : {}) })
   }
   destino.carpeta = dir
   if (drive) {
@@ -368,7 +369,22 @@ async function procesar(ref, normal) {
   // 4 · los PDF, a Drive (y siempre una copia en el servidor)
   await avance('guardando los PDF')
   const archivos = []
+  // 🔴 UNA MESA = UN ARCHIVO (MAPA 620, pedido del usuario: «cada mesa es un archivo, así como hace
+  // al descargar»): cada página de la hoja de una tela sale como su propio PDF, con el MISMO nombre
+  // que le pone «Descargar todo» de TIZADA («Mesa 1 - Bandera»…) y la misma copia de la página
+  // (`pdf/mesaPorArchivo.js`). La ficha técnica va entera, como siempre.
+  const MZ = await import('../pdf/mesaPorArchivo.js')
+  const hojas = (r.resultado && r.resultado.hojas) || []
+  const deHoja = new Set(hojas.map((h) => h.archivo))
+  for (const mz of MZ.mesasEnOrden(hojas)) {
+    const src = (r.archivos || {})[mz.hoja.archivo]
+    if (!src) continue
+    const pdf = MZ.paginaComoPdf(m.mupdf, new Uint8Array(src), mz.pi)
+    archivos.push({ tipo: 'tizada', origen: mz.hoja.archivo, pagina: mz.pi, mesa: mz.numero, mesas_tela: mz.deLaTela,
+      nombre: `${ref}__${MZ.nombreArchivoSeguro(mz.nombre)}.pdf`, bytes: Buffer.from(pdf), mime: 'application/pdf' })
+  }
   for (const [nombre, bytes] of Object.entries(r.archivos || {})) {
+    if (deHoja.has(nombre)) continue
     archivos.push({ tipo: /^FICHA/i.test(nombre) ? 'ficha' : 'tizada', origen: nombre, nombre: `${ref}__${nombre}`, bytes: Buffer.from(bytes), mime: 'application/pdf' })
   }
   const g = await guardarArchivos(ref, opciones.carpeta || ref, archivos)
@@ -389,9 +405,79 @@ async function procesar(ref, normal) {
   log(ref, '· listo en', ((Date.now() - t0) / 1000).toFixed(1), 's ·', g.destino.tipo, g.driveError ? '(Drive falló: ' + g.driveError + ')' : '')
 }
 
+// ══ LA PLANTILLA QUE PIDE EL OTRO SISTEMA (MAPA 619) ═══════════════════════════════════════════
+// La base para el diseñador de unos diseños (cada uno con sus variables), con el MISMO cálculo de
+// la ventana «Crear plantilla» de TIZADA (`molde/plantillaPedido.js`). Por diseño deja tres cosas
+// para bajar: lo que se le manda al conector de Illustrator (uno o más archivos), lo de CorelDRAW y
+// la guía .ai. No toca ningún molde: sólo lee la detección y la geometría por las rutas de siempre.
+const nombreSeguro = (t) => String(t).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'plantilla'
+async function procesarPlantilla(ref, normal) {
+  const P = await import('../molde/plantillaPedido.js')
+  const H = await import('../molde/herramientas.js')
+  const dets = {}
+  for (const dis of normal.disenos) {
+    for (const it of dis.vars) {
+      if (!dets[it.pid]) dets[it.pid] = await api(`/api/plantilla/deteccion?pid=${encodeURIComponent(it.pid)}`)
+    }
+  }
+  const cache = new Map()
+  const traer = (qs) => { if (!cache.has(qs)) cache.set(qs, api('/api/plantilla/pdf_guia?' + qs)); return cache.get(qs) }
+  const listaRangos = normal.config === 'rango' ? (normal.rangos || []) : []
+  const mp = P.motorPlantilla({ dets, config: normal.config, tallesSel: normal.talles_sel || null, listaRangos, capas: normal.capas, traer })
+  const talles = []
+  for (const d of Object.values(dets)) for (const x of (d.talles_reales && d.talles_reales.length ? d.talles_reales : d.talles || [])) if (!talles.includes(x)) talles.push(x)
+  const tEtq = P.etiquetaTalles({ config: normal.config, rangos: listaRangos, tallesSel: normal.talles_sel || null, talles })
+  const archivos = [], avisos = []
+  const subir = async (nombre, bytes, extra) => {
+    const r = await fetch(rutaApi(`/api/externo/robot/plantilla/${encodeURIComponent(ref)}/archivo?nombre=${encodeURIComponent(nombre)}`),
+      { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes })
+    if (!r.ok) throw new Error(`no se pudo guardar «${nombre}» (${r.status})`)
+    archivos.push({ nombre, ...extra })
+  }
+  const choques = await mp.choquesDe(normal.disenos)
+  for (const dis of normal.disenos) {
+    log(ref, '· plantilla', dis.nombre)
+    // ILLUSTRATOR: uno por diseño si entra a la escala pedida; si no, los que hagan falta
+    const il = await mp.planesIllustrator(dis, normal.escala, tEtq)
+    for (const a of il.avisos) if (!avisos.includes(a)) avisos.push(a)
+    for (let i = 0; i < il.planes.length; i++) {
+      const parte = il.planes.length > 1 ? `${i + 1} de ${il.planes.length}` : null
+      await subir(nombreSeguro(`${dis.nombre} - Illustrator${parte ? ' ' + parte : ''}`) + '.json',
+        Buffer.from(JSON.stringify(il.planes[i])), { diseno: dis.nombre, tipo: 'illustrator', ...(parte ? { parte } : {}) })
+    }
+    // CORELDRAW: siempre a tamaño real, uno por diseño
+    const co = await mp.planCorel(dis, tEtq)
+    for (const a of co.avisos) if (!avisos.includes(a)) avisos.push(a)
+    if (co.plan) await subir(nombreSeguro(`${dis.nombre} - CorelDRAW`) + '.json', Buffer.from(JSON.stringify(co.plan)), { diseno: dis.nombre, tipo: 'corel' })
+    // LA GUÍA .ai (una por diseño, y por rango)
+    // (una guía que no entra en Illustrator no tumba la plantilla: queda como aviso)
+    const gs = await mp.guiasDe(dis, async (capas_data, opciones) => H.aiGuiaMedidas(capas_data, opciones))
+    for (const t of gs.fallas) if (!avisos.includes(t)) avisos.push(t)
+    for (const gu of gs.archivos) {
+      await subir(nombreSeguro(gu.nombre.replace(/\.ai$/i, '')) + '.ai', Buffer.from(gu.bytes), { diseno: dis.nombre, tipo: 'guia' })
+    }
+  }
+  await apiJson(`/api/externo/robot/plantilla/${encodeURIComponent(ref)}/terminar`, { archivos, avisos, choques })
+  log(ref, '· plantilla lista:', archivos.length, 'archivos')
+}
+
 async function vuelta() {
   const t = await apiJson('/api/externo/robot/tomar', {})
   if (t.tarea === 'probar_drive') { await probarDrive(); return true }
+  if (t.tarea === 'plantilla') {
+    const ref = t.referencia
+    log(ref, 'plantilla tomada')
+    try {
+      await procesarPlantilla(ref, t.normal)
+    } catch (e) {
+      // un dato que no sirve (409/422/400 del servidor) no se arregla reintentando
+      const rechazo = e && (e.status === 400 || e.status === 409 || e.status === 422)
+      log(ref, 'LA PLANTILLA FALLÓ:', e.message)
+      if (!rechazo) console.error(e)
+      await apiJson(`/api/externo/robot/plantilla/${encodeURIComponent(ref)}/fallo`, { rechazo, motivo: String((e && e.message) || e).slice(0, 300) }).catch(() => {})
+    }
+    return true
+  }
   if (t.tarea !== 'pedido') return false
   const ref = t.referencia
   log(ref, 'tomado')

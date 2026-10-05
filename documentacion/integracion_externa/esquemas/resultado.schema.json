@@ -37,7 +37,12 @@
         "tela": { "type": ["string", "null"] }, "mesas": { "type": ["integer", "null"] },
         "ancho_cm": { "type": ["number", "null"] }, "largo_cm": { "type": ["array", "null"], "items": { "type": "number" } },
         "consumo_cm": { "type": ["number", "null"] }, "aprovechamiento": { "type": ["number", "null"] },
-        "moldes": { "type": ["array", "null"], "items": { "type": "string" } }
+        "moldes": { "type": ["array", "null"], "items": { "type": "string" } },
+        "mesa": { "type": ["integer", "null"], "description": "Número de esta mesa dentro de su tela (un archivo = una mesa)." },
+        "mesas_de_la_tela": { "type": ["integer", "null"] },
+        "fila": { "type": ["integer", "string", "null"], "description": "Una mesa por fila: la fila de la planilla." },
+        "copias": { "type": ["integer", "null"], "description": "Una mesa por fila: cuántas veces se imprime esta mesa." },
+        "talles": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Talles por mesa: los talles de esta mesa." }
       }
     },
     "resultado": {

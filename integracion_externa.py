@@ -291,6 +291,13 @@ ALARMAS = {
     # ── salida ──
     "drive-sin-configurar":    ("tizada", False, "Google Drive no está configurado: los PDF quedaron guardados en el servidor.", "Configurar Drive en Integraciones y reintentar la subida."),
     "drive-fallo":             ("tizada", False, "No se pudo subir a Google Drive: los PDF quedaron guardados en el servidor.", "Revisar la cuenta de servicio y la carpeta; reintentar."),
+    # ── plantillas (la base para el diseñador, MAPA 619) ──
+    "plantilla-sin-variables": ("datos", True,  "Un diseño de la plantilla no trae variables.", "Mandar al menos una variable por diseño."),
+    "talles-invalidos":        ("datos", True,  "El modo de talles no se entiende o nombra un talle que ninguna variable tiene.", "Usar `todos`, `rango` (con `rangos`) o `por_talle` (con `talles`) y los talles que publica cada molde."),
+    "escala-invalida":         ("datos", True,  "La escala de Illustrator tiene que ser 100, 90, 80… o 10.", "Mandar uno de esos números (100 = tamaño real)."),
+    "plantilla-mesas-chocan":  ("plantilla", False, "En el archivo de un diseño hay dos piezas distintas con el mismo nombre de mesa: al subir el arte se usaría la primera para las dos.", "Si llevan diseños distintos, pedir esas variables en diseños separados."),
+    "plantilla-aviso":         ("plantilla", False, "Aviso al armar la plantilla.", "Leer el mensaje."),
+    "plantilla-fallo":         ("plantilla", True,  "La plantilla no se pudo armar.", "Leer el mensaje; si es una falla del sistema, volver a pedirla."),
 }
 
 
@@ -946,7 +953,8 @@ def v1_alarmas():
                                 for k, v in ALARMAS.items()],
                     "etapas": {"datos": "al recibir el paquete, sin abrir archivos: se contesta en el acto",
                                "arte": "al leer el arte y las tipografías (segundos después)",
-                               "tizada": "al armar la tizada y guardar los PDF"}})
+                               "tizada": "al armar la tizada y guardar los PDF",
+                               "plantilla": "al armar la plantilla (la base para el diseñador): la arma el robot"}})
 
 
 @bp.get("/api/externo/v1/moldes")
@@ -1341,6 +1349,11 @@ def robot_tomar():
             c.pop("probar_drive", None)
             _cfg_guardar(c)
             return jsonify({"tarea": "probar_drive"})
+        # las PLANTILLAS primero (MAPA 619): se arman en segundos y un pedido puede llevar minutos
+        tp = _tomar_plantilla()
+        if tp:
+            _latido("trabajando", tp["referencia"])
+            return jsonify(tp)
         ahora = time.time()
         cola = []
         for e in _pedidos():
@@ -1599,7 +1612,25 @@ def robot_terminar(ref):
         for a in (d.get("archivos") or []):
             h = hojas.get(a.get("origen")) or {}
             item = {"tipo": a.get("tipo"), "nombre": a.get("nombre"), "bytes": a.get("bytes"), "sha256": a.get("sha256")}
-            if a.get("tipo") == "tizada":
+            if a.get("tipo") == "tizada" and a.get("pagina") is not None:
+                # 🔴 UNA MESA = UN ARCHIVO (MAPA 620): los MISMOS campos de antes (así no se le rompe
+                # nada al otro sistema), ahora de ESTA mesa: `mesas` = 1, `largo_cm` = [su largo],
+                # `consumo_cm` = su largo; `aprovechamiento` sigue siendo el de la tela entera.
+                # Nuevos: `mesa` (su número dentro de la tela) y `mesas_de_la_tela`; y, si la hoja
+                # los dice, la `fila` y las `copias` (Copia) o los `talles` (Talles por mesa).
+                pi = int(a.get("pagina") or 0)
+                alt = h.get("alturas_cm") or []
+                largo = alt[pi] if pi < len(alt) else h.get("consumo_cm")
+                ms = h.get("mesas") or []
+                mf = ms[pi] if pi < len(ms) else None
+                item.update({"tela": h.get("tela"), "mesa": a.get("mesa"), "mesas_de_la_tela": a.get("mesas_tela"), "mesas": 1,
+                             "ancho_cm": h.get("ancho_cm"), "largo_cm": [largo] if largo is not None else None, "consumo_cm": largo,
+                             "aprovechamiento": h.get("aprovechamiento"), "moldes": h.get("moldes")})
+                if isinstance(mf, dict):
+                    for k in ("fila", "copias", "talles"):
+                        if mf.get(k) is not None:
+                            item[k] = mf[k]
+            elif a.get("tipo") == "tizada":
                 item.update({"tela": h.get("tela"), "mesas": h.get("paginas"), "ancho_cm": h.get("ancho_cm"),
                              "largo_cm": h.get("alturas_cm"), "consumo_cm": h.get("consumo_cm"),
                              "aprovechamiento": h.get("aprovechamiento"), "moldes": h.get("moldes")})
@@ -1705,6 +1736,460 @@ def _avisar(ref):
                 _escribir_json(os.path.join(_dir_pedido(ref), "estado.json"), e2)
 
     threading.Thread(target=_mandar, daemon=True, name=f"aviso-{ref}").start()
+
+
+# ══ PLANTILLAS Y CONECTORES PARA EL OTRO SISTEMA (MAPA 619) ════════════════════════════════════
+# Pedido del usuario (2026-10-05): «desde el sistema externo deben de poder usar el botón de
+# plantilla para descargar la extensión y crear las bases en Corel o Illustrator… a ellos no les
+# viaja la visual de TIZADA, pero podrán tener los archivos a descargar y lo necesario para crear
+# en Illustrator o Corel el archivo base».
+#   · CONECTORES: los instaladores de Illustrator (Windows y Mac) y de CorelDRAW, para bajar.
+#   · PLANTILLAS: el otro sistema pide la base de unos diseños (cada uno con sus variables) y, como
+#     un pedido, la arma el ROBOT con el mismo cálculo de la ventana «Crear plantilla» de TIZADA
+#     (`motor/molde/plantillaPedido.js`). Quedan, por diseño, tres archivos para bajar:
+#       - «<diseño> - Illustrator.json»: lo que se le manda al conector de Illustrator (POST a
+#         http://127.0.0.1:47850/plantilla desde la computadora del diseñador) y arma la base allá;
+#       - «<diseño> - CorelDRAW.json»: lo mismo para CorelDRAW (POST a http://127.0.0.1:47851/plantilla);
+#       - «guia_<diseño>.ai»: la guía, que se abre en cualquier Illustrator sin conector.
+# Nada de esto toca un molde ni un diseño: la plantilla sólo LEE.
+MODOS_TALLES = ("todos", "rango", "por_talle")
+CONFIG_DE_MODO = {"todos": "default", "rango": "rango", "por_talle": "talle"}
+ESCALAS = (100, 90, 80, 70, 60, 50, 40, 30, 20, 10)
+CONECTOR_LOCAL = {"illustrator": "http://127.0.0.1:47850/plantilla", "corel": "http://127.0.0.1:47851/plantilla"}
+
+
+def _dir_plantilla(ref):
+    return os.path.join(_raiz(), "plantillas", ref)
+
+
+def leer_plantilla(ref):
+    return _leer_json(os.path.join(_dir_plantilla(ref), "estado.json"), None)
+
+
+def _guardar_plantilla(ref, est):
+    est["actualizado"] = _ahora()
+    _escribir_json(os.path.join(_dir_plantilla(ref), "estado.json"), est)
+
+
+def _plantillas():
+    base = os.path.join(_raiz(), "plantillas")
+    try:
+        refs = [r for r in os.listdir(base) if os.path.isdir(os.path.join(base, r))]
+    except OSError:
+        refs = []
+    return [e for e in (leer_plantilla(r) for r in refs) if e]
+
+
+def _capas_arte(pids, cat):
+    """Las capas del arte que la base trae vacías, EN ORDEN: «diseño» y una por cada columna de
+    nombre/número de la planilla de esos moldes (lo mismo que `capasArteNombres` de la pantalla)."""
+    out, vistos = ["diseño"], {"diseño", "guias", "molde"}
+    reglas = cat.get("reglas_planilla") or []
+    prods = {p["id"]: p for p in cat.get("productos", [])}
+    for pid in pids:
+        tpl = _plantilla_de(prods.get(pid), cat) or {}
+        for c in tpl.get("columnas") or []:
+            reg = next((r for r in reglas if r.get("id") == c.get("reglaId")), None) \
+                or next((r for r in reglas if r.get("comportamiento") == (c.get("role") or "none")), None)
+            comp = (reg or {}).get("comportamiento") or c.get("role")
+            if comp not in ("nombre", "numero"):
+                continue
+            nom = str((reg or {}).get("nombre") or c.get("label") or "").strip()
+            if nom and nom.lower() not in vistos:
+                vistos.add(nom.lower())
+                out.append(nom)
+    return out
+
+
+def revisar_plantilla(body):
+    """Revisa el pedido de plantilla SIN abrir nada. → (alarmas, normal|None). `normal` es lo que
+    usa el robot: cada diseño con sus variables ya resueltas (molde, variable del catálogo, acomodo)."""
+    A = []
+    if not isinstance(body, dict):
+        return [alarma("pedido-json-invalido")], None
+    ref = str(body.get("referencia") or "").strip()
+    if not ref:
+        A.append(alarma("campo-falta", campo="referencia"))
+    elif not _RX_REF.match(ref):
+        A.append(alarma("referencia-invalida", campo="referencia"))
+    cat = S._cargar_catalogo()
+    prods = {p["id"]: p for p in cat.get("productos", [])}
+    disenos = body.get("disenos")
+    if not isinstance(disenos, list) or not disenos:
+        A.append(alarma("disenos-vacio", campo="disenos"))
+        disenos = []
+    norm_d, nombres, pids = [], set(), []
+    for i, d in enumerate(disenos):
+        donde = f"disenos[{i}]"
+        if not isinstance(d, dict):
+            A.append(alarma("campo-tipo", "cada diseño es un objeto {nombre, variables}", campo=donde))
+            continue
+        nom = str(d.get("nombre") or "").strip()
+        if not nom:
+            A.append(alarma("campo-falta", campo=donde + ".nombre"))
+            continue
+        if _norm(nom) in nombres:
+            A.append(alarma("diseno-repetido", f"«{nom}»", campo=donde + ".nombre"))
+            continue
+        nombres.add(_norm(nom))
+        vs = d.get("variables")
+        if not isinstance(vs, list) or not vs:
+            A.append(alarma("plantilla-sin-variables", f"«{nom}»", campo=donde + ".variables"))
+            continue
+        vars_ = []
+        for j, v in enumerate(vs):
+            dv = f"{donde}.variables[{j}]"
+            q = v.get("variable") if isinstance(v, dict) else v
+            mol = v.get("molde") if isinstance(v, dict) else None
+            q = str(q or "").strip()
+            if not q:
+                A.append(alarma("campo-falta", campo=dv))
+                continue
+            if mol:
+                prod = prods.get(str(mol))
+                var = next((x for x in ((prod or {}).get("variantes") or []) if x.get("clave") == q or _norm(x.get("label")) == _norm(q)), None)
+                pid = prod["id"] if prod and var else None
+                amb = []
+            else:
+                pid, amb = _molde_de_variable(q, prods)
+                var = next((x for x in ((prods.get(pid) or {}).get("variantes") or []) if x.get("clave") == q or _norm(x.get("label")) == _norm(q)), None) if pid else None
+            if amb:
+                A.append(alarma("variable-ambigua", f"«{q}» está en: " + ", ".join(amb), campo=dv))
+                continue
+            if not pid or not var:
+                A.append(alarma("variable-desconocida", f"«{q}»", campo=dv))
+                continue
+            prod = prods[pid]
+            try:
+                reg = S._cargar("registro_producto.json", pid) or {}
+            except Exception:
+                reg = {}
+            listo, motivo = _molde_listo(prod, reg)
+            if not listo:
+                A.append(alarma("molde-no-disponible", f"«{prod.get('nombre') or pid}»: {motivo}", campo=dv))
+                continue
+            key = f"{nom}|{pid}|{var.get('clave')}"
+            if any(x["key"] == key for x in vars_):
+                continue                                     # la misma variable dos veces: una
+            vars_.append({"key": key, "pid": pid, "clave": var.get("clave"), "label": var.get("label") or var.get("clave"),
+                          "molde": prod.get("nombre") or pid, "variable": var, "acomodo": prod.get("acomodo_illustrator") or {},
+                          "talles": S._talles_de_registro(reg, pid)})
+            if pid not in pids:
+                pids.append(pid)
+        if vars_:
+            norm_d.append({"nombre": nom, "vars": vars_})
+    # cómo se adapta a los talles (los tres modos de la ventana)
+    t = body.get("talles") if isinstance(body.get("talles"), dict) else {}
+    modo = str(t.get("modo") or "todos").strip().lower()
+    todos = {str(x).lower(): x for d in norm_d for it in d["vars"] for x in it["talles"]}
+    talles_sel, rangos = None, []
+    if modo not in MODOS_TALLES:
+        A.append(alarma("talles-invalidos", f"modo «{modo}»: usar " + ", ".join(MODOS_TALLES), campo="talles.modo"))
+    elif modo == "por_talle" and t.get("talles") is not None:
+        lst = t.get("talles") if isinstance(t.get("talles"), list) else []
+        talles_sel = []
+        for x in lst:
+            real = todos.get(str(x).strip().lower())
+            if real is None:
+                A.append(alarma("talles-invalidos", f"el talle «{x}» no es de ninguna variable pedida", campo="talles.talles"))
+            elif real not in talles_sel:
+                talles_sel.append(real)
+        if not lst:
+            A.append(alarma("talles-invalidos", "`talles` vacío: mandar al menos uno, o no mandarlo (= todos)", campo="talles.talles"))
+    elif modo == "rango":
+        for k, rg in enumerate(t.get("rangos") or []):
+            lst = (rg or {}).get("talles") if isinstance(rg, dict) else rg
+            reales = []
+            for x in (lst if isinstance(lst, list) else []):
+                real = todos.get(str(x).strip().lower())
+                if real is None:
+                    A.append(alarma("talles-invalidos", f"el talle «{x}» no es de ninguna variable pedida", campo=f"talles.rangos[{k}]"))
+                elif real not in reales:
+                    reales.append(real)
+            if not reales:
+                continue
+            guia = (rg or {}).get("guia") if isinstance(rg, dict) else None
+            guia = todos.get(str(guia or "").strip().lower())
+            rangos.append({"talles": reales, "guia": guia if guia in reales else reales[0]})
+        if not rangos:
+            A.append(alarma("talles-invalidos", "«rango» necesita `rangos`: [{\"talles\": [\"XS\", \"M\"], \"guia\": \"S\"}]", campo="talles.rangos"))
+    try:
+        escala = int(body.get("escala") or 100)
+    except Exception:
+        escala = 0
+    if escala not in ESCALAS:
+        A.append(alarma("escala-invalida", campo="escala"))
+    if _frenan(A) or not norm_d:
+        if not _frenan(A):
+            A.append(alarma("disenos-vacio", campo="disenos"))
+        return A, None
+    # el orden de los talles en un rango: el del primer molde que los tiene (como la pantalla)
+    orden = []
+    for d in norm_d:
+        for it in d["vars"]:
+            for x in it["talles"]:
+                if x not in orden:
+                    orden.append(x)
+    for rg in rangos:
+        rg["talles"] = [x for x in orden if x in rg["talles"]]
+    if talles_sel:
+        talles_sel = [x for x in orden if x in talles_sel]
+    return A, {"referencia": ref, "disenos": norm_d, "config": CONFIG_DE_MODO[modo], "talles_sel": talles_sel,
+               "rangos": rangos, "escala": escala, "capas": _capas_arte(pids, cat)}
+
+
+def _archivo_plantilla_publico(ref, a):
+    return {**a, "descarga": f"/api/externo/v1/plantillas/{ref}/archivos/{urllib.parse.quote(str(a.get('nombre') or ''))}"}
+
+
+def plantilla_publica(ref):
+    est = leer_plantilla(ref)
+    if not est:
+        return None
+    out = {k: est.get(k) for k in ("referencia", "estado", "etapa", "recibido", "actualizado", "alarmas")}
+    if est.get("estado") == "listo":
+        out["archivos"] = [_archivo_plantilla_publico(ref, a) for a in (est.get("archivos") or [])]
+        out["como_usar"] = {
+            "illustrator": "Con el conector de Illustrator instalado e Illustrator abierto, desde la computadora del diseñador: "
+                           "POST del contenido del archivo «… - Illustrator.json» (tal cual, Content-Type: application/json) a "
+                           + CONECTOR_LOCAL["illustrator"] + ". Arma las mesas, capas y contornos y guarda el .ai en "
+                           "Documentos › USER PRO › Plantillas. Si hay varios archivos de Illustrator para un diseño, se manda cada uno.",
+            "corel": "Con el conector de CorelDRAW instalado (CorelDRAW 2022 o más nuevo): POST del contenido de «… - CorelDRAW.json» a "
+                     + CONECTOR_LOCAL["corel"] + ". Si CorelDRAW está cerrado, se abre solo.",
+            "guia": "«guia_….ai» se abre en cualquier Illustrator, sin conector.",
+            "conectores": "Los instaladores, en /api/externo/v1/conectores. Para saber si el conector está: GET "
+                          "http://127.0.0.1:47850/estado (Illustrator) o http://127.0.0.1:47851/estado (CorelDRAW) desde esa computadora.",
+        }
+    return out
+
+
+@bp.post("/api/externo/v1/plantillas")
+def v1_plantilla_pedir():
+    """Pide la base (Illustrator, CorelDRAW y guía .ai) de unos diseños: contesta en el acto si los
+    datos sirven y la arma el robot (segundos). El resultado se consulta en GET /plantillas/<ref>."""
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        body = None
+    with _LOCK:
+        al, normal = revisar_plantilla(body)
+        ref = normal["referencia"] if normal else (str((body or {}).get("referencia") or "") or None if isinstance(body, dict) else None)
+        if normal is None:
+            return jsonify({"referencia": ref, "aceptado": False, "estado": "rechazado", "alarmas": al}), 422
+        previo = leer_plantilla(ref)
+        if previo and previo.get("estado") in ("en_cola", "procesando"):
+            al.append(alarma("referencia-en-proceso", campo="referencia"))
+            return jsonify({"referencia": ref, "aceptado": False, "estado": "rechazado", "alarmas": al}), 409
+        carpeta = _dir_plantilla(ref)
+        shutil.rmtree(os.path.join(carpeta, "salida"), ignore_errors=True)      # una plantilla se rehace entera
+        _escribir_json(os.path.join(carpeta, "normal.json"), normal)
+        ll = getattr(g, "_llave", None) or {}
+        _guardar_plantilla(ref, {"referencia": ref, "estado": "en_cola", "etapa": "esperando al robot", "recibido": _ahora(),
+                                 "intentos": 0, "alarmas": al, "llave": ll.get("id"), "integracion": ll.get("nombre")})
+    return jsonify({"referencia": ref, "aceptado": True, "estado": "en_cola", "alarmas": al}), 202
+
+
+@bp.get("/api/externo/v1/plantillas/<ref>")
+def v1_plantilla_estado(ref):
+    if not _RX_REF.match(ref):
+        return jsonify({"error": "referencia inválida"}), 400
+    e = plantilla_publica(ref)
+    return (jsonify(e), 200) if e else (jsonify({"error": "no hay ninguna plantilla con esa referencia"}), 404)
+
+
+def _tipo_mime(nombre):
+    n = nombre.lower()
+    return "application/json" if n.endswith(".json") else ("application/postscript" if n.endswith(".ai") else "application/octet-stream")
+
+
+@bp.get("/api/externo/v1/plantillas/<ref>/archivos/<nombre>")
+def v1_plantilla_archivo(ref, nombre):
+    """Un archivo de la plantilla. Sólo los que nombra su estado, y sólo de SU carpeta."""
+    if not _RX_REF.match(ref):
+        return jsonify({"error": "referencia inválida"}), 400
+    est = leer_plantilla(ref) or {}
+    a = next((x for x in est.get("archivos") or [] if x.get("nombre") == nombre), None)
+    base = os.path.realpath(os.path.join(_dir_plantilla(ref), "salida"))
+    ruta = os.path.realpath(os.path.join(base, nombre)) if a else ""
+    if not a or not ruta.startswith(base + os.sep) or not os.path.isfile(ruta):
+        return jsonify({"error": "ese archivo no es de esta plantilla o ya no está en el servidor"}), 404
+    return send_file(ruta, mimetype=_tipo_mime(nombre), as_attachment=request.args.get("descargar") == "1", download_name=nombre)
+
+
+# ── los conectores (los instaladores) ─────────────────────────────────────────────────────────
+def _conectores():
+    """{clave: (ruta, nombre de archivo, versión, para qué)} de los instaladores que tiene ESTE
+    servidor. Salen de los mismos lugares que la pantalla del taller (`_illustrator_version`,
+    `_corel_version`); en el publicado viajan en el paquete pero la pantalla no los ofrece
+    (decisión del 2026-09-24: «se le pasa a cada usuario manual»): sólo los da esta API."""
+    out = {}
+    try:
+        base, v, exe = S._illustrator_version()
+        if exe:
+            out["illustrator"] = (os.path.join(base, exe), exe, v, "Windows")
+        if v and os.path.isdir(os.path.join(base, "com.tizadapro.illustrator")):
+            out["illustrator-mac"] = (None, f"USER-PRO-Illustrator-Mac-{v}.zip", v, "Mac")
+    except Exception:
+        pass
+    try:
+        base, v, exe = S._corel_version()
+        if exe:
+            out["corel"] = (os.path.join(base, exe), exe, v, "Windows")
+    except Exception:
+        pass
+    return out
+
+
+@bp.get("/api/externo/v1/conectores")
+def v1_conectores():
+    c = _conectores()
+    prog = {"illustrator": "Illustrator", "illustrator-mac": "Illustrator", "corel": "CorelDRAW"}
+    return jsonify({"conectores": [{"clave": k, "programa": prog[k], "sistema": x[3], "version": x[2], "archivo": x[1],
+                                    "descarga": f"/api/externo/v1/conectores/{k}"} for k, x in c.items()],
+                    "nota": "Se instalan UNA vez en la computadora donde se diseña (doble clic, «Instalar»). "
+                            "CorelDRAW necesita la versión 2022 o más nueva (sólo Windows). Para saber si ya está: "
+                            "GET http://127.0.0.1:47850/estado (Illustrator) o http://127.0.0.1:47851/estado (CorelDRAW) desde esa computadora."})
+
+
+@bp.get("/api/externo/v1/conectores/<clave>")
+def v1_conector(clave):
+    c = _conectores().get(clave)
+    if not c:
+        return jsonify({"error": "este servidor no tiene ese conector"}), 404
+    ruta, nombre, _v, _s = c
+    if ruta:
+        return send_file(ruta, as_attachment=True, download_name=nombre, max_age=0)
+    # Mac: la extensión con su instalador, armada en el momento (la misma que arma el taller)
+    from flask import Response
+    datos, nom = S._zip_extension_illustrator()
+    if datos is None:
+        return jsonify({"error": "este servidor no tiene ese conector"}), 404
+    return Response(datos, mimetype="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{nom}"', "Cache-Control": "no-store"})
+
+
+# ── el robot y las plantillas ─────────────────────────────────────────────────────────────────
+def _tomar_plantilla():
+    """La plantilla más vieja en cola (o una que quedó a medias), para el robot. None si no hay."""
+    ahora = time.time()
+    cola = []
+    for e in _plantillas():
+        if e.get("estado") == "en_cola":
+            cola.append(e)
+        elif e.get("estado") == "procesando":
+            try:
+                visto = time.mktime(time.strptime(e.get("actualizado"), "%Y-%m-%dT%H:%M:%S"))
+            except Exception:
+                visto = 0
+            if ahora - visto > ESPERA_ROBOT_S:
+                cola.append(e)
+    cola.sort(key=lambda e: e.get("recibido") or "")
+    for est in cola:
+        ref = est["referencia"]
+        if int(est.get("intentos") or 0) >= 3:
+            est["estado"], est["etapa"] = "error", "se intentó 3 veces y no se pudo armar"
+            _guardar_plantilla(ref, est)
+            continue
+        normal = _leer_json(os.path.join(_dir_plantilla(ref), "normal.json"), None)
+        if not normal:
+            est["estado"], est["etapa"] = "error", "el pedido guardado no se puede leer"
+            _guardar_plantilla(ref, est)
+            continue
+        est["estado"], est["etapa"] = "procesando", "armando la plantilla"
+        est["intentos"] = int(est.get("intentos") or 0) + 1
+        _guardar_plantilla(ref, est)
+        return {"tarea": "plantilla", "referencia": ref, "normal": normal}
+    return None
+
+
+_RX_NOMBRE_ARCHIVO = re.compile(r"^[^\\/:*?\"<>|\x00-\x1f]{1,180}\.(json|ai)$")
+
+
+@bp.post("/api/externo/robot/plantilla/<ref>/archivo")
+def robot_plantilla_archivo(ref):
+    """El robot deja UN archivo de la plantilla (cuerpo crudo) en su carpeta de salida."""
+    nombre = str(request.args.get("nombre") or "")
+    if not _RX_REF.match(ref) or not _RX_NOMBRE_ARCHIVO.match(nombre) or nombre.strip() != nombre:
+        return jsonify({"error": "nombre inválido"}), 400
+    est = leer_plantilla(ref)
+    if not est or est.get("estado") != "procesando":
+        return jsonify({"error": "esa plantilla no se está armando"}), 409
+    base = os.path.join(_dir_plantilla(ref), "salida")
+    os.makedirs(base, exist_ok=True)
+    ruta = os.path.join(base, nombre)
+    with open(ruta + ".tmp", "wb") as fh:
+        fh.write(request.get_data())
+    os.replace(ruta + ".tmp", ruta)
+    return jsonify({"ok": True, "bytes": os.path.getsize(ruta)})
+
+
+@bp.post("/api/externo/robot/plantilla/<ref>/terminar")
+def robot_plantilla_terminar(ref):
+    """Quedó armada: se anotan los archivos (sólo los que están en su carpeta) y los avisos."""
+    d = request.get_json(force=True) or {}
+    with _LOCK:
+        est = leer_plantilla(ref)
+        if not est:
+            return jsonify({"error": "no existe"}), 404
+        base = os.path.join(_dir_plantilla(ref), "salida")
+        archivos = []
+        for a in d.get("archivos") or []:
+            nom = str(a.get("nombre") or "")
+            ruta = os.path.join(base, nom)
+            if not _RX_NOMBRE_ARCHIVO.match(nom) or not os.path.isfile(ruta):
+                continue
+            with open(ruta, "rb") as fh:
+                sha = hashlib.sha256(fh.read()).hexdigest()
+            archivos.append({"diseno": str(a.get("diseno") or ""), "tipo": a.get("tipo") if a.get("tipo") in ("illustrator", "corel", "guia") else "otro",
+                             "nombre": nom, "bytes": os.path.getsize(ruta), "sha256": sha,
+                             **({"parte": a["parte"]} if a.get("parte") else {})})
+        A = [x for x in est.get("alarmas", []) if x.get("etapa") == "datos"]
+        for c in d.get("choques") or []:
+            A.append(alarma("plantilla-mesas-chocan", f"En «{c.get('diseno')}», la mesa «{c.get('mesa')}»: "
+                            + " · ".join(str(x) for x in (c.get("piezas") or [])) + ".", diseno=c.get("diseno")))
+        for t in d.get("avisos") or []:
+            A.append(alarma("plantilla-aviso", str(t)[:400]))
+        est.update({"estado": "listo", "etapa": "terminado", "archivos": archivos, "alarmas": A, "terminado": _ahora()})
+        _guardar_plantilla(ref, est)
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/externo/robot/plantilla/<ref>/fallo")
+def robot_plantilla_fallo(ref):
+    """No se pudo: `rechazo` = por algo de lo pedido (no se reintenta); si no, vuelve a la cola."""
+    d = request.get_json(force=True) or {}
+    with _LOCK:
+        est = leer_plantilla(ref)
+        if not est:
+            return jsonify({"error": "no existe"}), 404
+        motivo = str(d.get("motivo") or "falla del sistema")[:300]
+        if d.get("rechazo") or int(est.get("intentos") or 0) >= 3:
+            est["estado"], est["etapa"] = ("rechazado" if d.get("rechazo") else "error"), motivo
+            est["alarmas"] = est.get("alarmas", []) + [alarma("plantilla-fallo", motivo)]
+        else:
+            est["estado"], est["etapa"] = "en_cola", "se va a reintentar: " + motivo[:200]
+        _guardar_plantilla(ref, est)
+    return jsonify({"ok": True, "estado": est["estado"]})
+
+
+def _purgar_plantillas(dias):
+    """Las plantillas terminadas hace más de `dias`: se borran sus archivos (queda el estado)."""
+    n = 0
+    for est in _plantillas():
+        if est.get("estado") not in ("listo", "rechazado", "error") or est.get("purgado"):
+            continue
+        try:
+            visto = time.mktime(time.strptime(est.get("actualizado"), "%Y-%m-%dT%H:%M:%S"))
+        except Exception:
+            continue
+        if time.time() - visto < dias * 86400:
+            continue
+        shutil.rmtree(os.path.join(_dir_plantilla(est["referencia"]), "salida"), ignore_errors=True)
+        est["purgado"] = _ahora()
+        est["archivos"] = []
+        _escribir_json(os.path.join(_dir_plantilla(est["referencia"]), "estado.json"), est)
+        n += 1
+    return n
 
 
 # ══ /api/integracion — la pantalla Configuración › Integraciones ═══════════════════════════════
@@ -2016,6 +2501,10 @@ def purgar(forzar=False):
         est["purgado"] = _ahora()
         _escribir_json(os.path.join(_dir_pedido(ref), "estado.json"), est)      # sin tocar `actualizado`
         n += 1
+    try:
+        n += _purgar_plantillas(dias)
+    except Exception as e:
+        print(f"[externo] la limpieza de plantillas viejas falló: {e}", flush=True)
     return n
 
 

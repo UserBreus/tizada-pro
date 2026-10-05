@@ -522,27 +522,11 @@ const TAREAS = {
    * raíz, así que se copia aparte. Una hoja de una sola página sale TAL CUAL. PDF 1.6 como la hoja.
    */
   async pagina_pdf({ bytes, pi = 0 }) {
+    // una mesa = un archivo: lo mismo que recibe el otro sistema (`pdf/mesaPorArchivo.js`, MAPA 620)
     await cargar()
-    const src = new mupdf.PDFDocument(bytes)
-    try {
-      const n = src.countPages()
-      if (n <= 1) { const u = bytes.slice(); return { valor: u, transfer: [u.buffer] } }
-      const p = pi >= 0 && pi < n ? pi : 0
-      const dst = new mupdf.PDFDocument()
-      try {
-        dst.graftPage(0, src, p)
-        const ois = src.getTrailer().get('Root').get('OutputIntents')
-        if (ois && !ois.isNull()) dst.getTrailer().get('Root').put('OutputIntents', dst.graftObject(ois))
-        try { dst.setMetaData('info:Creator', 'TIZADA PRO'); dst.setMetaData('info:Producer', 'TIZADA PRO') } catch { /* sin metadatos */ }
-        const out = dst.saveToBuffer('garbage,compress').asUint8Array().slice()
-        if (out[0] === 37 && out[1] === 80 && out[2] === 68 && out[3] === 70 && out[4] === 45) { out[5] = 49; out[6] = 46; out[7] = 54 }
-        return { valor: out, transfer: [out.buffer] }
-      } finally {
-        try { dst.destroy() } catch { /* nada */ }
-      }
-    } finally {
-      try { src.destroy() } catch { /* nada */ }
-    }
+    const { paginaComoPdf } = await import('./pdf/mesaPorArchivo.js')
+    const u = paginaComoPdf(mupdf, bytes, pi)
+    return { valor: u, transfer: [u.buffer] }
   },
   // ── «EDITAR DISEÑO» (`arte/editarArte.js`): lo que hacía `objetos_agregados.py` en el servidor ──
   /** Un objeto subido → PDF de una página + su medida + su vista (SVG, texto). */

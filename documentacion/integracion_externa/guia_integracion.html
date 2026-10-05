@@ -148,7 +148,7 @@
 <section style="break-before: auto;">
   <div class="kicker">Antes de empezar</div>
   <h2 style="margin: 4pt 0 10pt;">En una página</h2>
-  <p class="lead">El otro sistema (ventas, ERP, tienda) <b>elige del catálogo de TIZADA</b> lo que se puede fabricar, <b>manda un paquete .zip</b> con el pedido y los artes, y <b>recibe los PDF de producción</b> —una tizada por tela y la ficha técnica— con la marca de SU venta. En el medio, un <b>robot</b> de TIZADA hace todo lo que haría una persona.</p>
+  <p class="lead">El otro sistema (ventas, ERP, tienda) <b>elige del catálogo de TIZADA</b> lo que se puede fabricar, <b>manda un paquete .zip</b> con el pedido y los artes, y <b>recibe los PDF de producción</b> —un archivo por mesa y la ficha técnica— con la marca de SU venta. En el medio, un <b>robot</b> de TIZADA hace todo lo que haría una persona.</p>
 
   <div class="figura baja">
     <pre class="mermaid">
@@ -273,7 +273,7 @@ sequenceDiagram
     <tr><td><b>← TIZADA</b></td><td>La <b>silueta</b> de cada variable (para mostrarla)</td><td>JSON con contornos SVG</td><td><code>GET /variables/{clave}/foto</code></td></tr>
     <tr><td><b>← TIZADA</b></td><td>El <b>estado</b> y el <b>resultado</b></td><td>JSON</td><td><code>GET /pedidos/{ref}</code></td></tr>
     <tr><td><b>← TIZADA</b></td><td>El <b>aviso</b> cuando termina</td><td>JSON firmado (POST a tu URL)</td><td>webhook</td></tr>
-    <tr><td><b>← TIZADA</b></td><td>Los <b>PDF</b>: una tizada por tela (cada página es una mesa) + la ficha técnica A4</td><td>PDF</td><td><code>GET …/archivos/{nombre}</code> o Drive</td></tr>
+    <tr><td><b>← TIZADA</b></td><td>Los <b>PDF</b>: un archivo por mesa («Mesa 1 - Bandera»…) + la ficha técnica A4</td><td>PDF</td><td><code>GET …/archivos/{nombre}</code> o Drive</td></tr>
   </table>
 
   <h3><i class="ti ti-file-zip"></i> El paquete que se manda</h3>
@@ -291,7 +291,7 @@ sequenceDiagram
   </div>
 
   <h3><i class="ti ti-file-type-pdf"></i> Lo que sale</h3>
-  <p>Por cada pedido: <b>un PDF por tela</b> — <code>OV-2026-00123__HOJA_g0_&lt;tela&gt;.pdf</code>, cada página es una mesa lista para el RIP — y la <b>ficha técnica</b> <code>OV-2026-00123__FICHA_TECNICA.pdf</code> (tabla de talles y qué aplicar dónde). En Drive: las tizadas y <code>OV-2026-00123__resultado.json</code> en la carpeta del pedido, la ficha en la carpeta de fichas.</p>
+  <p>Por cada pedido: <b>un PDF por mesa</b> — <code>OV-2026-00123__Mesa 1 - Bandera (1,60).pdf</code>, una página lista para el RIP, como «Descargar todo» de TIZADA — y la <b>ficha técnica</b> <code>OV-2026-00123__FICHA_TECNICA.pdf</code> (tabla de talles y qué aplicar dónde). En Drive: las tizadas y <code>OV-2026-00123__resultado.json</code> en la carpeta del pedido, la ficha en la carpeta de fichas.</p>
 </section>
 
 <!-- ═══════════════════════════ 4 · CÓMO SE CONECTAN ═══════════════════════════ -->

@@ -1632,7 +1632,7 @@
         "Nunca mandar cabeceras propias al puente (CORS), igual que Illustrator.",
         "abrirEnCorel vive DESPUÉS de showMsg (contrato TDZ, tope 301).",
         "El instalador cierra el puente viejo por PID (sólo el de su carpeta); nunca mass-kill.",
-        "El publicado no tiene el instalador (empaquetar.py es lista blanca): la pantalla lo mira en /api/corel/version.",
+        "El publicado LLEVA los instaladores (empaquetar.py INCLUIR_PATRONES) pero la pantalla no los ofrece: /api/corel/version y /api/illustrator/version devuelven instalador null con PUBLICADO; sólo los entrega la API del otro sistema (/api/externo/v1/conectores, MAPA 619).",
         "Una sola tarjeta (PlantillaProgramas) con los dos programas lado a lado: Illustrator naranja (#FF9A00/#330000), CorelDRAW verde; los instaladores de los dos a la vista.",
         "Todas las mesas en UN espacio: vista de varias páginas + acomodo libre (Freeform=1) + SetPageOrigin en el CENTRO de cada mesa (y hacia arriba); cada mesa sigue siendo una página (el PDF no cambia). Siempre a tamaño real y en un archivo.",
         "Botones sin texto cortado: acción y programa en dos renglones, nada de «…». Los instaladores se llaman «Conectores» y tienen su «?».",
@@ -2285,6 +2285,26 @@
         [
           "integracion_externa.py",
           "def resultado_publico("
+        ],
+        [
+          "integracion_externa.py",
+          "def revisar_plantilla"
+        ],
+        [
+          "integracion_externa.py",
+          "@bp.get(\"/api/externo/v1/conectores\")"
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "async function procesarPlantilla"
+        ],
+        [
+          "frontend/src/motor/pdf/mesaPorArchivo.js",
+          "export function paginaComoPdf"
+        ],
+        [
+          "frontend/src/motor/pdf/mesaPorArchivo.js",
+          "export function mesasEnOrden"
         ]
       ],
       "palabras": [
@@ -2320,7 +2340,10 @@
         "La `etapa` que ve el otro sistema es texto para personas: el `nav|pct|texto` del motor se traduce en el robot (`enPalabras`) antes de mandarlo.",
         "En TIZADA se eligen VARIABLES, no moldes (pedido variable-first): el otro sistema elige de `GET /variables` y manda `variable` (clave); el `molde` es opcional y se deduce. Una variable por prenda en cada diseño (`molde-repetido`), igual que `vars_por_diseno`.",
         "Al otro sistema NUNCA se le pide un cálculo (428): si TIZADA no tiene algo calculado (la silueta), se contesta 404 con el motivo (`sin_calcular`).",
-        "Lo que ve el otro sistema (GET /pedidos, aviso) pasa por `resultado_publico`: NUNCA rutas del disco del servidor; cada archivo con su `descarga`. La documentación para el otro sistema vive en documentacion/integracion_externa/ (API.md, openapi.yaml, esquemas, respuestas reales, código) — ruta nueva o campo nuevo = actualizarla."
+        "Lo que ve el otro sistema (GET /pedidos, aviso) pasa por `resultado_publico`: NUNCA rutas del disco del servidor; cada archivo con su `descarga`. La documentación para el otro sistema vive en documentacion/integracion_externa/ (API.md, openapi.yaml, esquemas, respuestas reales, código) — ruta nueva o campo nuevo = actualizarla.",
+        "Plantillas por la API (MAPA 619): POST /plantillas revisa datos y encola; el robot la arma con motorPlantilla (la toma antes que los pedidos) y sube por diseño «… - Illustrator.json», «… - CorelDRAW.json» y la guía .ai; el otro sistema los baja y manda los .json al conector local (127.0.0.1:47850/47851). Los conectores se bajan de GET /conectores (en el publicado sólo por la API).",
+        "UNA MESA = UN ARCHIVO (MAPA 620): el robot manda cada página de la hoja como su PDF, con el nombre y la copia de «Descargar todo» (pdf/mesaPorArchivo.js, el mismo que usa la pantalla); el resultado conserva los campos de antes (mesas=1, largo_cm=[su largo]) y suma mesa/mesas_de_la_tela/fila/copias/talles.",
+        "La documentación para programadores que no saben de ropa es `TIZADA_PRO_Explicado_para_programadores.pdf` (desde `explicado_para_programadores.html`, MAPA 621): el diccionario taller → API → analogía. Ruta, campo o alarma nueva que cambie el recorrido = actualizar ese HTML y regenerar los DOS PDF con Chrome sin ventana (rutas literales; mirar la hora del PDF)."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -2344,7 +2367,9 @@
         610,
         611,
         612,
-        614
+        614,
+        619,
+        620
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [
@@ -2357,6 +2382,112 @@
         "editables",
         "publicacion",
         "escrituras"
+      ]
+    },
+    {
+      "id": "plantilla-pedido",
+      "nombre": "Crear plantilla desde el paso Arte del pedido",
+      "que": "Botón «Crear plantilla» en el paso Arte → modal con lo de la pestaña Plantilla (modo, talles, rangos, escala, guía .ai, Illustrator, CorelDRAW) para los diseños del pedido: UN ARCHIVO POR DISEÑO con un bloque por variable; no escribe nada en el molde.",
+      "archivos": [
+        "frontend/src/App.jsx",
+        "frontend/src/motor/molde/corel.js",
+        "frontend/src/motor/molde/illustrator.js",
+        "frontend/src/motor/molde/plantillaPedido.js",
+        "frontend/src/motor/molde/plantillaVariable.js"
+      ],
+      "anclas": [
+        [
+          "frontend/src/App.jsx",
+          "function CrearPlantillaModal"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "data-tour=\"arte-crear-plantilla\""
+        ],
+        [
+          "frontend/src/motor/molde/plantillaVariable.js",
+          "export function nombresDeVariable"
+        ],
+        [
+          "frontend/src/motor/molde/plantillaVariable.js",
+          "export function posicionesDelVisor"
+        ],
+        [
+          "frontend/src/motor/molde/plantillaVariable.js",
+          "export function paramsPlantilla"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "disenosPlantillaPedido"
+        ],
+        [
+          "frontend/src/motor/molde/illustrator.js",
+          "export function empacarSecciones"
+        ],
+        [
+          "frontend/src/motor/molde/illustrator.js",
+          "export function unirPlanes"
+        ],
+        [
+          "frontend/src/motor/molde/corel.js",
+          "export function corelDesdePlan"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function PasoPlantilla"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function ProgramasPlantillaPedido"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "function Casilla"
+        ],
+        [
+          "frontend/src/motor/molde/plantillaPedido.js",
+          "export function motorPlantilla"
+        ]
+      ],
+      "palabras": [
+        "CrearPlantillaModal",
+        "plantillaPedido",
+        "plantillaVariable",
+        "nombresDeVariante",
+        "varianteFiltro",
+        "_optsIllu",
+        "_claveDatosIllu"
+      ],
+      "reglas": [
+        "Gemelos: plantillaVariable.js (nombresDeVariable, posicionesDelVisor, paramsPlantilla) ↔ App.jsx (nombresDeVariante, canvasLayout+varianteFiltro+_optsIllu, _claveDatosIllu/descargarPdfGuia): un cambio en cómo el visor ubica piezas o resuelve una variable va en los dos.",
+        "Excepto lo de molde: el modal no cambia la referencia, no acomoda mesas ni descarga la base; usa lo guardado (referencia de pdf_guia, acomodo_illustrator del catálogo).",
+        "Fuera del modal: moldes con diseño adentro (camino B) y moldes sin base.",
+        "General, no del diseño elegido: lista las variables de TODOS los diseños del pedido en su orden, todas elegidas al abrir; la misma variable en dos diseños es una tarjeta que nombra sus diseños.",
+        "Un archivo por DISEÑO (MAPA 618): cada variable se arma con planIllustrator (su acomodo, sus talles, repartida si sola no entra) y empacarSecciones + unirPlanes las juntan en filas dentro del lienzo, cada una con su título fuera de toda mesa; Corel = corelDesdePlan del plan unido; guía .ai = piezas juntas (la misma pieza del mismo molde una vez).",
+        "Mesas que chocan: el mismo nombre de mesa para piezas distintas de variables distintas en un archivo → el arte usaría la primera para las dos; se avisa antes de crear (choquesDe), no se bloquea.",
+        "La ventana son TRES PASOS numerados (diseños · cómo se adapta · crear) y en el paso 3 una tarjeta por programa con todo lo suyo (el tamaño sólo en Illustrator); ProgramasPlantillaPedido se monta sólo con la ventana abierta (usarConexion vigila cada 5 s).",
+        "El cálculo vive en motor/molde/plantillaPedido.js (motorPlantilla) y lo usan la ventana Y el robot de la API (MAPA 619): un cambio ahí cambia los dos; guiasDe devuelve {archivos, fallas} (una guía que no entra no tumba nada)."
+      ],
+      "cicatrices": [
+        "2026-10-05: arrancaba con sólo la variable del diseño que se estaba viendo; el usuario lo quiere general (MAPA 617, ajuste).",
+        "2026-10-05: en «Por rango» sin talles marcados se avisaba pero se dejaba crear; ahora bloquea (sinRango)."
+      ],
+      "contratos": [
+        "frontend/verificar_diccionario.mjs",
+        "frontend/verificar_tdz.mjs"
+      ],
+      "mapa": [
+        617,
+        618,
+        619
+      ],
+      "memoria": "plantilla-desde-arte.md",
+      "conexiones": [
+        "illustrator",
+        "crear-en-corel",
+        "camino-a",
+        "descargas",
+        "ui-reglas"
       ]
     }
   ]

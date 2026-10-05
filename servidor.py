@@ -15399,13 +15399,29 @@ def illustrator_extension_zip():
     """La extensión de TIZADA PRO para Illustrator (`extension_illustrator/`), con sus instaladores,
     para bajarla desde la Plantilla del molde (botón «Abrir en Illustrator» cuando no la encuentra).
     Se arma en el momento con lo que hay en disco: así viaja siempre la misma versión que el
-    código, sin un ZIP guardado que se pueda quedar viejo. Son unos pocos KB: nada pesado."""
+    código, sin un ZIP guardado que se pueda quedar viejo. Son unos pocos KB: nada pesado.
+    🔴 En el PUBLICADO la pantalla no ofrece los conectores (decisión del usuario 2026-09-24, MAPA
+    572: «se le pasa a cada usuario manual»): viajan en el paquete SÓLO para la API del otro sistema
+    (`/api/externo/v1/conectores`, MAPA 619), que usa `_zip_extension_illustrator` directo."""
+    from flask import Response
+    if PUBLICADO:
+        return jsonify({"error": "este servidor no tiene la extensión de Illustrator"}), 404
+    datos, _nom = _zip_extension_illustrator()
+    if datos is None:
+        return jsonify({"error": "este servidor no tiene la extensión de Illustrator"}), 404
+    return Response(datos, mimetype="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{_nom}"',
+                             "Cache-Control": "no-store"})
+
+
+def _zip_extension_illustrator():
+    """(bytes del ZIP de la extensión para instalar a mano —Mac, o Windows sin el .exe—, nombre) o
+    (None, None) si este servidor no la tiene."""
     import io
     import zipfile
-    from flask import Response
     base = os.path.join(AQUI, "extension_illustrator")
     if not os.path.isdir(base):
-        return jsonify({"error": "este servidor no tiene la extensión de Illustrator"}), 404
+        return None, None
     # sólo lo que sirve para instalar a mano (Mac, o Windows sin el .exe): la extensión, los dos
     # instaladores y el LEEME — no el código del instalador ni sus intermedios
     _va = lambda rel: rel.startswith("com.tizadapro.illustrator/") or rel in (
@@ -15426,9 +15442,7 @@ def illustrator_extension_zip():
                     z.writestr(zi, fh.read())
     _v = _illustrator_version()[1]
     _nom = f"USER-PRO-Illustrator-Mac-{_v}.zip" if _v else "USER-PRO-Illustrator-Mac.zip"
-    return Response(buf.getvalue(), mimetype="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{_nom}"',
-                             "Cache-Control": "no-store"})
+    return buf.getvalue(), _nom
 
 
 def _illustrator_version():
@@ -15454,7 +15468,8 @@ def illustrator_version():
     """Qué versión de la extensión corresponde a este sistema: la pantalla la compara con la que
     tiene instalada el Illustrator de esa PC y avisa si hay que actualizar."""
     _b, v, exe = _illustrator_version()
-    return jsonify({"version": v, "instalador": exe})
+    # en el publicado la pantalla no ofrece el instalador (ver `illustrator_extension_zip`)
+    return jsonify({"version": v, "instalador": None if PUBLICADO else exe})
 
 
 @app.get("/api/illustrator/instalador")
@@ -15463,7 +15478,7 @@ def illustrator_instalador():
     arma `extension_illustrator/construir.py`). Es el que se le pasa a cualquier persona: doble
     clic, «Instalar», listo. El nombre lleva la versión."""
     base, _v, exe = _illustrator_version()
-    if not exe:
+    if not exe or PUBLICADO:                     # el publicado no lo ofrece en pantalla (MAPA 572/619)
         return jsonify({"error": "este servidor no tiene el instalador de Illustrator"}), 404
     return send_from_directory(base, exe, as_attachment=True, download_name=exe, max_age=0)
 
@@ -15493,7 +15508,8 @@ def corel_version():
     """Qué versión del programa de Corel corresponde a este sistema: la pantalla la compara con la
     del puente de esa PC y avisa si hay que actualizar."""
     _b, v, exe = _corel_version()
-    return jsonify({"version": v, "instalador": exe})
+    # en el publicado la pantalla no ofrece el instalador (ver `illustrator_extension_zip`)
+    return jsonify({"version": v, "instalador": None if PUBLICADO else exe})
 
 
 @app.get("/api/corel/instalador")
@@ -15501,7 +15517,7 @@ def corel_instalador():
     """El INSTALADOR de USER PRO para CorelDRAW (Windows): doble clic, «Instalar», listo. Deja el
     puente corriendo y arrancando solo con la PC."""
     base, _v, exe = _corel_version()
-    if not exe:
+    if not exe or PUBLICADO:                     # el publicado no lo ofrece en pantalla (MAPA 572/619)
         return jsonify({"error": "este servidor no tiene el instalador de CorelDRAW"}), 404
     return send_from_directory(base, exe, as_attachment=True, download_name=exe, max_age=0)
 

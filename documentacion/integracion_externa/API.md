@@ -186,23 +186,26 @@ pedido traiga `"reemplazar": true`.
 
 ### El resultado — lo que se RECIBE
 
-Viene en `resultado` cuando `estado` es `listo` (ejemplo real: [`resultado_ejemplo.json`](resultado_ejemplo.json),
+Viene en `resultado` cuando `estado` es `listo` (ejemplo: [`resultado_ejemplo.json`](resultado_ejemplo.json),
 esquema: [`esquemas/resultado.schema.json`](esquemas/resultado.schema.json)):
 
 - `referencia`, `pedido_externo`, `cliente`: lo que mandó el otro sistema, **tal cual** → así se sabe
   de qué venta son los archivos.
 - `archivos[]`: cada PDF — `tipo` (`tizada` o `ficha`), `nombre`, `bytes`, `sha256`, **`descarga`**
-  (la ruta para bajarlo de TIZADA), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Las
-  tizadas traen `tela`, `mesas`, `ancho_cm`, `largo_cm` (uno por mesa), `consumo_cm`,
-  `aprovechamiento`, `moldes`.
+  (la ruta para bajarlo de TIZADA), y si se subió a Drive `drive_id`, `enlace`, `carpeta_id`. Cada
+  tizada es UNA MESA y trae `tela`, `mesa` (su número dentro de la tela), `mesas_de_la_tela`, `mesas`
+  (= 1), `ancho_cm`, `largo_cm` (`[su largo]`), `consumo_cm` (su largo), `aprovechamiento` (el de la
+  tela entera), `moldes` y, si corresponde, `fila` y `copias` (una mesa por fila) o `talles` (talles por mesa).
 - `destino`: `tipo` = `drive` (con `carpeta_id`, `carpeta_enlace`, `carpeta_fichas_id`…) o `local`
   (Drive no conectado o caído: los PDF quedaron en TIZADA y se bajan con `descarga`).
 - `disenos[]`: por diseño y variable — `variable`, `variable_nombre`, la prenda, la tela y
   `no_sublimado` (qué objeto va en TPU/DTF/bordado).
 - `resumen`, `alarmas` (avisos que quedaron), `tizada_id`, `generado`, `segundos`.
 
-Hay **un PDF por tela** (cada página es una mesa) y la **ficha técnica** (PDF A4). Los nombres llevan
-la referencia adelante: `OV-2026-00123__HOJA_g0_<tela>.pdf`, `OV-2026-00123__FICHA_TECNICA.pdf`.
+Hay **un PDF por mesa** (igual que «Descargar todo» de TIZADA: cada mesa es un archivo de una página,
+lista para el RIP) y la **ficha técnica** (PDF A4). Los nombres llevan la referencia adelante y el
+nombre de la mesa: `OV-2026-00123__Mesa 1 - Bandera (1,60).pdf`, `OV-2026-00123__Mesa 2 - Bandera (1,60).pdf`,
+`OV-2026-00123__FICHA_TECNICA.pdf`. La numeración vuelve a 1 en cada tela.
 
 ### `GET /pedidos/{referencia}/archivos/{nombre}` — bajar un PDF
 
@@ -245,6 +248,95 @@ valida = hmac.compare_digest(esperada, request.headers["X-Tizada-Firma"])
 
 Contestar **`2xx`**. Si no, reintenta a los 5 s, 30 s y 2 min. Código listo para usar:
 [`codigo/recibir_aviso.py`](codigo/recibir_aviso.py) y [`codigo/cliente.mjs`](codigo/cliente.mjs).
+
+---
+
+## 6.b Plantillas: la base para el diseñador (Illustrator, CorelDRAW y guía .ai)
+
+Para que el diseñador arme el arte, TIZADA entrega **archivos**: la pantalla es de ustedes. Un
+**archivo por diseño**, con todas sus prendas (variables), cada una en su bloque con su nombre arriba.
+
+### `GET /conectores` y `GET /conectores/{clave}` — los instaladores
+
+Los conectores se instalan **una vez** en la computadora donde se diseña (doble clic, «Instalar»).
+Unen esa computadora con Illustrator o CorelDRAW para que la base se arme allá sola.
+
+```json
+{"conectores": [
+  {"clave": "illustrator",     "programa": "Illustrator", "sistema": "Windows", "version": "1.26.0", "archivo": "Instalar-USER-PRO-Illustrator-1.26.0.exe", "descarga": "/api/externo/v1/conectores/illustrator"},
+  {"clave": "illustrator-mac", "programa": "Illustrator", "sistema": "Mac",     "version": "1.26.0", "archivo": "USER-PRO-Illustrator-Mac-1.26.0.zip",      "descarga": "/api/externo/v1/conectores/illustrator-mac"},
+  {"clave": "corel",           "programa": "CorelDRAW",   "sistema": "Windows", "version": "1.4.0",  "archivo": "Instalar-USER-PRO-Corel-1.4.0.exe",        "descarga": "/api/externo/v1/conectores/corel"}]}
+```
+
+CorelDRAW necesita la versión **2022 o más nueva**. Para saber si el conector ya está en esa
+computadora, desde su navegador: `GET http://127.0.0.1:47850/estado` (Illustrator) o
+`GET http://127.0.0.1:47851/estado` (CorelDRAW): contesta si está, y si no, no hay conexión.
+
+### `POST /plantillas` — pedir la base (JSON)
+
+```json
+{
+  "referencia": "PL-0001",
+  "disenos": [
+    {"nombre": "JUGADOR", "variables": ["v_redondo", "v_cuellov"]},
+    {"nombre": "GOLERO",  "variables": [{"variable": "v_redondo", "molde": "prod_..."}]}
+  ],
+  "talles": {"modo": "todos"},
+  "escala": 100
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `referencia` | La de ustedes (letras, números, `.`, `-`, `_`; hasta 64). Pedirla de nuevo con la misma la rehace. |
+| `disenos[].nombre` | Nombre del diseño: sale UN archivo por diseño, con ese nombre. |
+| `disenos[].variables` | Las prendas, como en `GET /variables` (clave o nombre; con `molde` si el nombre está en varias). |
+| `talles.modo` | `todos` = un diseño para todos los talles · `rango` = uno por grupo de talles · `por_talle` = cada talle a su medida real. |
+| `talles.rangos` | (`rango`) `[{"talles": ["XS","S","M"], "guia": "S"}]` — la guía es el talle con el que se calcula la medida. |
+| `talles.talles` | (`por_talle`) los talles que van; sin este campo, todos. |
+| `escala` | Tamaño en **Illustrator**: 100 (real), 90 … 10. CorelDRAW es siempre a tamaño real. |
+
+Contesta en el acto `202` (en cola) o `422` con alarmas (`variable-desconocida`, `talles-invalidos`,
+`escala-invalida`, `plantilla-sin-variables`…). La arma el robot en segundos.
+
+### `GET /plantillas/{referencia}` — el estado y los archivos
+
+```json
+{"referencia": "PL-0001", "estado": "listo", "etapa": "terminado", "alarmas": [],
+ "archivos": [
+   {"diseno": "JUGADOR", "tipo": "illustrator", "nombre": "JUGADOR - Illustrator.json", "bytes": 377250, "sha256": "…", "descarga": "/api/externo/v1/plantillas/PL-0001/archivos/JUGADOR%20-%20Illustrator.json"},
+   {"diseno": "JUGADOR", "tipo": "corel",       "nombre": "JUGADOR - CorelDRAW.json",  "bytes": 311548, "sha256": "…", "descarga": "…"},
+   {"diseno": "JUGADOR", "tipo": "guia",        "nombre": "guia_JUGADOR.ai",           "bytes": 47035,  "sha256": "…", "descarga": "…"}],
+ "como_usar": {"illustrator": "…", "corel": "…", "guia": "…", "conectores": "…"}}
+```
+
+Estados: `en_cola` → `procesando` → `listo` (o `rechazado` / `error`). Si un diseño no entra en un
+archivo de Illustrator a esa escala, sale en varios (`"parte": "1 de 2"`). Avisos que pueden venir:
+`plantilla-mesas-chocan` (dos piezas distintas con el mismo nombre de mesa en un archivo: al subir el
+arte se usaría la primera para las dos) y `plantilla-aviso` (por ejemplo, una guía .ai que no entra
+en Illustrator: los otros archivos salen igual).
+
+### `GET /plantillas/{referencia}/archivos/{nombre}` — bajar un archivo (`?descargar=1` para guardarlo)
+
+### Qué hacer con cada archivo
+
+| Tipo | Qué es | Cómo se usa |
+|---|---|---|
+| `illustrator` | Lo que arma la base en Illustrator: una mesa por pieza con su nombre, las capas (diseño, Editable…, Nombre, Número, guias) y el contorno de cada pieza. | Desde la **computadora del diseñador** (su navegador), con el conector instalado e Illustrator abierto: `POST http://127.0.0.1:47850/plantilla` con el contenido del archivo tal cual (`Content-Type: application/json`). Contesta `{"ok": true, "mesas": N, "archivo": "…"}` y guarda el .ai en *Documentos › USER PRO › Plantillas*. |
+| `corel` | Lo mismo para CorelDRAW (una página por mesa, a tamaño real). | `POST http://127.0.0.1:47851/plantilla` con el contenido del archivo. Si CorelDRAW está cerrado, se abre solo. |
+| `guia` | Una guía .ai que se abre en cualquier Illustrator, sin conector. | Bajarla y abrirla. |
+
+El `POST` al conector lo hace **la página del sistema de ustedes** en la computadora del diseñador:
+el conector escucha sólo en esa computadora (`127.0.0.1`) y acepta pedidos de cualquier página.
+Ejemplo (navegador):
+
+```js
+const plan = await (await fetch('/su-servidor/plantilla/PL-0001/JUGADOR - Illustrator.json')).text()
+const r = await fetch('http://127.0.0.1:47850/plantilla', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: plan })
+const d = await r.json()   // {ok: true, mesas: 15, archivo: "JUGADOR.ai"}
+```
+
+Después el diseñador arma el arte sobre esa base y el arte va en el pedido (`POST /pedidos`).
 
 ---
 

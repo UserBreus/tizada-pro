@@ -755,3 +755,102 @@ export function repartirEnArchivos(capasData, opts, porc) {
   if (cur.length) archivos.push(cur)
   return archivos
 }
+
+// ── VARIAS VARIABLES EN UN ARCHIVO: UNO POR DISEÑO (MAPA 618) ─────────────────────────────────
+// Pedido del usuario (2026-10-05, «Crear plantilla» del paso Arte): «por cada diseño podrá mandar a
+// hacer un archivo de Illustrator». Cada variable se arma como siempre (`planIllustrator`, con SU
+// acomodo y sus talles) y acá esos planes se ACOMODAN uno al lado del otro —en filas, sin pasarse
+// del lienzo— y se UNEN en un solo plan, cada uno con su nombre arriba («Cuello redondo · Camiseta
+// de futbol», en «guias», en vector y FUERA de toda mesa: no se confunde con una pieza). Lo que no
+// entra en un archivo pasa al siguiente (se dice cuántos antes de crear).
+// alto de la franja con el nombre de cada variable y separación entre variables (medida real, pt)
+const TITULO_SECCION = 170
+const GAP_SECCION = 260
+
+/**
+ * Dónde va cada sección (= el plan de una variable, o un pedazo si no entraba sola) y en qué
+ * archivo. `medidas` = `[{W, H, nMesas}]` (lo que da `planIllustrator(…, {soloMedir: true})` o el
+ * `ancho`/`alto` del plan ya armado, a la escala); `sinTope` = CorelDRAW: un solo archivo, una
+ * variable debajo de la otra. → `[{secciones: [{i, x, y}], W, H, nMesas}]` (x/y = esquina de la
+ * sección con su franja, en las medidas del archivo).
+ */
+export function empacarSecciones(medidas, { escala = 1, sinTope = false } = {}) {
+  const s = 1 / (Number(escala) > 0 ? Number(escala) : 1)
+  const band = TITULO_SECCION * s, gap = GAP_SECCION * s
+  const tope = sinTope ? Infinity : TOPE_LIENZO
+  const archivos = []
+  let cur = null
+  const nuevo = () => { cur = { secciones: [], W: 0, H: 0, nMesas: 0, x: 0, filaY: 0, filaH: 0 }; archivos.push(cur) }
+  medidas.forEach((m, i) => {
+    const w = m.W, h = m.H + band
+    if (!cur) nuevo()
+    let x = cur.x, y = cur.filaY
+    // a la derecha en la misma fila; si no entra a lo ancho (o es Corel), fila nueva debajo
+    if (cur.secciones.length && (sinTope || x + w > tope)) { x = 0; y = cur.filaY + cur.filaH + gap }
+    // si no entra a lo alto o se pasa de mesas, archivo nuevo
+    if (cur.secciones.length && (y + h > tope || cur.nMesas + (m.nMesas || 0) > (sinTope ? Infinity : TOPE_MESAS))) {
+      nuevo(); x = 0; y = 0
+    }
+    if (y !== cur.filaY) { cur.filaY = y; cur.filaH = 0 }
+    cur.secciones.push({ i, x, y })
+    cur.x = x + w + gap
+    cur.filaH = Math.max(cur.filaH, h)
+    cur.W = Math.max(cur.W, x + w)
+    cur.H = Math.max(cur.H, y + h)
+    cur.nMesas += m.nMesas || 0
+  })
+  return archivos.map(({ secciones, W, H, nMesas }) => ({ secciones, W, H, nMesas }))
+}
+
+/**
+ * Une los planes de varias variables en UN plan (el que dibuja la extensión): `secciones` =
+ * `[{plan, titulo, x, y}]` con la ubicación de `empacarSecciones`. Las capas son las mismas en todos
+ * (salen de las mismas opciones). → el plan unido.
+ */
+export function unirPlanes(secciones, { archivo = 'Plantilla', titulo = 'Plantilla', escala = 1 } = {}) {
+  if (!secciones.length) throw new Error('no hay nada para unir')
+  const esc = Number(escala) > 0 ? Number(escala) : 1
+  const s = 1 / esc
+  const band = TITULO_SECCION * s
+  const capas = secciones[0].plan.capas
+  const iGuias = Math.max(0, capas.findIndex((c) => c.nombre === 'guias'))
+  const mesas = [], caminos = [], textos = [], fondos = []
+  let W = 0, H = 0
+  for (const sec of secciones) {
+    const p = sec.plan
+    const dx = sec.x, dy = sec.y + band, base = mesas.length
+    const r4 = (r) => [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy]
+    for (const m of p.mesas || []) mesas.push({ nombre: m.nombre, rect: r4(m.rect) })
+    for (const k of p.caminos || []) {
+      caminos.push({ ...k, sub: k.sub.map((sp) => ({ c: sp.c, p: sp.p.map((q) => [q[0] + dx, q[1] + dy, q[2] + dx, q[3] + dy, q[4] + dx, q[5] + dy]) })),
+        ...(k.mesa !== undefined ? { mesa: k.mesa + base } : {}) })
+    }
+    for (const t of p.textos || []) textos.push({ ...t, x: t.x + dx, y: t.y + dy, ...(t.mesa !== undefined ? { mesa: t.mesa + base } : {}) })
+    for (const f of p.fondos || []) fondos.push({ ...f, rect: r4(f.rect), ...(f.mesa !== undefined ? { mesa: f.mesa + base } : {}) })
+    // el nombre de la variable arriba de su bloque: en «guias», en vector, fuera de toda mesa
+    if (sec.titulo) textos.push({ capa: iGuias, t: String(sec.titulo), x: dx, y: sec.y + band * 0.62, tam: Math.max(5, band * 0.42), vector: true })
+    W = Math.max(W, dx + (p.ancho || 0))
+    H = Math.max(H, dy + (p.alto || 0))
+  }
+  const aW = Math.ceil(W), aH = Math.ceil(H)
+  return {
+    version: 1,
+    titulo: String(titulo),
+    archivo: String(archivo),
+    escala: esc,
+    ancho: aW, alto: aH,
+    capas,
+    activa: 0,
+    mesas,
+    caminos,
+    textos,
+    fondos,
+    guias: true,
+    // el mismo SVG de contornos que arma `planIllustrator` (con el rectángulo de referencia)
+    svg: caminos.length
+      ? `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="${aW}" height="${aH}" viewBox="0 0 ${aW} ${aH}">` +
+        `<rect id="tizada_ref" x="0" y="0" width="${aW}" height="${aH}" fill="none" stroke="none"/>` +
+        `<g fill="none" stroke="#000000" stroke-width="1">${caminos.map((k) => k.sub.map((sp) => `<path d="${dSvg([sp])}"/>`).join('')).join('')}</g></svg>`
+      : null,
+  }
+}

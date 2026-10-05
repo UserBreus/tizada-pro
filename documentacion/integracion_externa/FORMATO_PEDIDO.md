@@ -242,8 +242,8 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | `disenos[]` | Por diseño y variable: la `variable` (clave) y su `variable_nombre`, la prenda (`molde`, `nombre`), la tela y qué quedó **sin sublimar** (`no_sublimado`) |
 | `alarmas[]` | Los avisos que quedaron |
 
-Hay **un PDF por tela** (cada página es una mesa) más la **ficha técnica**. Los nombres llevan la
-referencia adelante: `OV-2026-00123__HOJA_g0_<tela>.pdf`. El mismo JSON de resultado queda en la
+Hay **un PDF por mesa** (como «Descargar todo» de TIZADA) más la **ficha técnica**. Los nombres llevan la
+referencia adelante y el nombre de la mesa: `OV-2026-00123__Mesa 1 - Bandera (1,60).pdf`. El mismo JSON de resultado queda en la
 carpeta de Drive como `OV-2026-00123__resultado.json`.
 
 ### El aviso (webhook)

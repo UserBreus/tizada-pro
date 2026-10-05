@@ -67,6 +67,16 @@ export async function enviarACorel(plan) {
  */
 export function planCorel(capasData, opts = {}) {
   const { plan: pi, avisos, nMesas } = planIllustrator(capasData, { ...opts, escala: 1, sinTope: true })
+  return { plan: corelDesdePlan(pi), avisos, nMesas }
+}
+
+/**
+ * Un plan de Illustrator (a tamaño real) pasado a PÁGINAS de Corel. Sirve también para el plan
+ * UNIDO de un diseño (varias variables en un archivo, `unirPlanes`, MAPA 618): cada mesa es una
+ * página y su lugar en el espacio de trabajo es el del plan. Lo que está fuera de toda mesa (los
+ * títulos de talle y de variable) no va: en Corel sólo existen las páginas.
+ */
+export function corelDesdePlan(pi) {
   const paginas = pi.mesas.map((m, i) => {
     const [x0, y0, x1, y1] = m.rect
     const f = (pi.fondos || []).find((x) => x.mesa === i)
@@ -98,5 +108,5 @@ export function planCorel(capasData, opts = {}) {
     activa: pi.activa,
     paginas,
   }
-  return { plan, avisos, nMesas }
+  return plan
 }

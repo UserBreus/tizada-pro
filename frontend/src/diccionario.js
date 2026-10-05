@@ -463,6 +463,43 @@ export const DICCIONARIO = {
     // Si el arte de todas las prendas ya está cargado, no hay nada que pedir.
     listo: (E) => E.pedido.artesTotal > 0 && E.pedido.artesCargadas >= E.pedido.artesTotal,
   },
+  // CREAR PLANTILLA desde el paso Arte (MAPA 617): opcional, para quien no tiene la base del arte
+  'arte-crear-plantilla': {
+    nombre: 'Crear plantilla',
+    que: 'Opcional: arma la base para el diseñador (guía .ai, Illustrator o CorelDRAW): un archivo por diseño del pedido, con sus variables.',
+    como: 'Tocá «Crear plantilla» si todavía no tenés la base del arte.',
+  },
+  'plantilla-pedido': {
+    nombre: 'Crear plantilla',
+    que: 'Lo mismo que la Plantilla de Moldería, para las variables del pedido: cómo se adapta el diseño, la escala y en qué programa se arma.',
+    como: 'Elegí las variables, el modo y la escala, y tocá el programa donde la querés.',
+  },
+  'plantilla-pedido-variables': {
+    nombre: 'Diseños y variables de la plantilla',
+    que: 'Los diseños del pedido con sus variables (arrancan todas elegidas): cada diseño sale en un archivo, con un bloque por variable.',
+    como: 'Tocá las variables que querés en cada diseño, o «Todas».',
+    opciones: true,
+  },
+  'plantilla-pedido-choques': {
+    nombre: 'Mesas con el mismo nombre',
+    que: 'Dos variables de un mismo diseño tienen piezas distintas con el mismo nombre de mesa: al subir el arte, el sistema usaría la primera para las dos.',
+    como: 'Dejá una sola de esas variables marcada y creá la otra aparte, si cada una lleva su propio diseño.',
+  },
+  'plantilla-pedido-modo': {
+    nombre: 'Cómo se adapta el diseño',
+    que: 'Un diseño para todos los talles, uno por rango de talles, o uno por talle a su medida real.',
+    como: 'Elegí una de las tres opciones y, si hace falta, los talles o el rango.',
+  },
+  'plantilla-pedido-escala': {
+    nombre: 'Tamaño en Illustrator',
+    que: 'A qué tamaño se crea en Illustrator (100% = real); en verde, el más grande al que entra en un archivo.',
+    como: 'Elegí el porcentaje; si dudás, el verde.',
+  },
+  'plantilla-pedido-guia': {
+    nombre: 'Descargar guía .ai',
+    que: 'Un archivo .ai por diseño, que se abre en cualquier Illustrator sin conector, con las capas y el contorno de cada pieza.',
+    como: 'Tocá «Descargar guía» y elegí dónde guardarla.',
+  },
   'arte-telas': {
     nombre: 'Asignar telas',
     que: 'Hay que decir en qué tela va cada pieza; si falta alguna, el pedido no avanza.',

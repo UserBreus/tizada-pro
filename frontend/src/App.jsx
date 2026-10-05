@@ -12,6 +12,7 @@ import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador,
 import { fuentesEstadoLocal, fuenteCharsLocal } from './motor/arte/fuentesEstado.js';
 import { analizarFuente, adjuntarAnalisis, aliasQuitados, revalidarArte } from './motor/arte/fuentesSubir.js';
 import { mesaSuelta } from './motor/mesaSuelta.js';
+import { nombreMesaDef } from './motor/pdf/mesaPorArchivo.js';   // el nombre de cada mesa (pantalla y otro sistema, MAPA 620)
 import { tokensPieza } from './motor/arte/prendas.js';
 import { instalarCalculos } from './motor/calculos.js';
 import { enHiloSuelto } from './motor/hiloSuelto.js';
@@ -20,8 +21,10 @@ import { prepararArteEnNavegador } from './motor/prepararArte.js';   // el arte 
 import { adjuntarArchivo } from './motor/subida.js';   // el archivo, o su sha1 si el servidor ya lo tiene
 import { estado as estadoNavegador, medirHilos } from './motor/monitor.js';   // qué está haciendo esta computadora
 import { bajarTodosLosMoldes, escucharDescarga, estadoDescarga, cerrarAvisoDescarga } from './motor/bajarMoldes.js';   // todos los moldes en esta PC
-import { buscarIllustrator, enviarAIllustrator, planIllustrator, repartirEnArchivos, escalaRecomendada, versionDelServidor, LIENZO_M, TOPE_MESAS } from './motor/molde/illustrator.js';   // la plantilla armada en Illustrator
+import { buscarIllustrator, enviarAIllustrator, planIllustrator, repartirEnArchivos, escalaRecomendada, versionDelServidor, LIENZO_M, TOPE_MESAS, PORCENTAJES } from './motor/molde/illustrator.js';   // la plantilla armada en Illustrator
 import { buscarCorel, enviarACorel, planCorel, versionCorelDelServidor } from './motor/molde/corel.js';   // la misma plantilla armada en CorelDRAW (MAPA 598)
+import { tallesDeDeteccion } from './motor/molde/plantillaVariable.js';
+import { motorPlantilla, etiquetaTalles } from './motor/molde/plantillaPedido.js';   // el cálculo de «Crear plantilla» (pantalla y robot, MAPA 617-619)
 import { evaluarEquipo, compararRequisitos } from './motor/apto.js';   // ¿esta computadora está apta?
 import { localizarMesas, cerrarArtes } from './motor/arte/mesa.js';   // la mesa del arte dibujada acá (camino A)
 import { generarPedidoEnNavegador, achiquesEnNavegador } from './motor/pedido/generar.js';
@@ -1777,6 +1780,579 @@ function PlantillaProgramas({ ocupado, onDescargar, textoDescargar, ayuda, illu,
         {textoDescargar}
       </button>
     </div>
+  );
+}
+
+// ════════════════ CREAR PLANTILLA DESDE EL PASO ARTE (MAPA 617, 618) ════════════════
+// Pedido del usuario (2026-10-05): «en el espacio de arte debería haber un botón que abra crear las
+// plantillas; opcional, por si no tienen la plantilla: crear la de una sola variante o de todas las
+// seleccionadas, en un modal con todo lo de Plantilla excepto lo de molde, porque ya son los que
+// seleccionamos». Es la pestaña Plantilla de Moldería (modo, talles, rangos, escala, guía .ai,
+// Illustrator y CorelDRAW) para las VARIABLES del pedido. No guarda NADA en el molde: lo que es
+// configuración del molde (dimensión de referencia, acomodar las mesas, descargar la base) sigue en
+// Configuración y acá se USA como está guardado. Los cálculos son los de la pestaña, sobre la
+// detección de cada molde (`motor/molde/plantillaVariable.js`).
+// 🔴 UN ARCHIVO POR DISEÑO (MAPA 618, «por cada diseño podrá mandar a hacer un archivo de
+// Illustrator»): las variables elegidas de un diseño van JUNTAS, cada una en su bloque con su nombre
+// arriba (`empacarSecciones` + `unirPlanes`); en Corel, un .cdr por diseño; en la guía .ai, una por
+// diseño (y por rango). `disenos` = [{did, nombre, variables: [{key, pid, clave, label, molde,
+// variable, acomodo}]}] (la misma variable puede estar en dos diseños: sale en los dos archivos);
+// `cartel(texto, programa)` = el cartel bloqueante de siempre; `ocupadoRef` = el mismo candado de
+// «Crear en Illustrator/Corel» de la pestaña (no se arrancan dos a la vez).
+function CrearPlantillaModal({ open, onClose, disenos, capas, term, ocupadoRef, cartel, procesando, avisar, avisarError,
+  onIllustratorFalta, onCorelFalta, illu, corel }) {
+  const nomT = (term?.variante || 'Talle').toLowerCase();
+  const [elegidas, setElegidas] = useState(() => new Set());
+  const [dets, setDets] = useState({});                   // pid → detección | {error}
+  const [config, setConfig] = useState('default');
+  const [tallesSel, setTallesSel] = useState(null);       // null = todos
+  const [rango, setRango] = useState([]);
+  const [guiaRango, setGuiaRango] = useState(null);
+  const [rangos, setRangos] = useState([]);               // [{talles, guia}]: varios rangos en un archivo
+  const [escala, setEscala] = useState(100);
+  const [reco, setReco] = useState(null);                 // {clave, calculando | error | porc, choques}
+  const [archivosN, setArchivosN] = useState(null);       // {clave, escala, n}: cuántos archivos salen
+  const recoRef = useRef(null);
+  const ultimoRango = useRef(null);
+  const cacheDatos = useRef(new Map());                   // query → promesa de `pdf_guia?datos=1`
+  const todas = disenos.flatMap(dis => dis.variables);
+  // al ABRIR: TODAS las variables de todos los diseños elegidas (no depende del diseño que se esté
+  // viendo) y todo en limpio; se destildan las que no hagan falta
+  useEffect(() => {
+    if (!open) return;
+    setElegidas(new Set(todas.map(it => it.key)));
+    setConfig('default'); setTallesSel(null); setRango([]); setGuiaRango(null); setRangos([]); setEscala(100);
+    cacheDatos.current = new Map(); recoRef.current = null; setReco(null); setArchivosN(null);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sel = todas.filter(it => elegidas.has(it.key));
+  // los diseños con algo elegido, cada uno con SUS variables elegidas: uno = un archivo
+  const disSel = disenos.map(dis => ({ ...dis, vars: dis.variables.filter(it => elegidas.has(it.key)) })).filter(dis => dis.vars.length);
+  // la detección de cada molde elegido (una vez por molde)
+  useEffect(() => {
+    if (!open) return;
+    for (const pid of new Set(sel.map(it => it.pid))) {
+      if (dets[pid]) continue;
+      setDets(d => ({ ...d, [pid]: { cargando: true } }));
+      fetch(`/api/plantilla/deteccion?pid=${encodeURIComponent(pid)}`)
+        .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok || d.error) throw new Error(d.error || 'no se pudo leer el molde'); return d; })
+        .then(d => setDets(x => ({ ...x, [pid]: d })))
+        .catch(e => setDets(x => ({ ...x, [pid]: { error: (e && e.message) || String(e) } })));
+    }
+  }, [open, [...new Set(sel.map(it => it.pid))].join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const listos = sel.length > 0 && sel.every(it => dets[it.pid] && !dets[it.pid].cargando && !dets[it.pid].error);
+  const conError = sel.filter(it => dets[it.pid] && dets[it.pid].error);
+  // los talles de TODOS los moldes elegidos, en orden (los moldes de un pedido suelen compartirlos)
+  const talles = [];
+  for (const it of sel) for (const t of tallesDeDeteccion(dets[it.pid])) if (!talles.includes(t)) talles.push(t);
+  // los rangos que se arman: la lista de «Agregar rango» o, si no hay, el rango elegido
+  const listaRangos = config === 'rango' ? (rangos.length ? rangos : (rango.length ? [{ talles: rango, guia: guiaRango }] : [])) : [];
+
+  // EL CÁLCULO es el de `motor/molde/plantillaPedido.js` (el mismo que usa el robot cuando el otro
+  // sistema pide la plantilla por la API, MAPA 619): acá sólo se le dan los datos de la pantalla.
+  const traer = (qs) => {
+    const c = cacheDatos.current;
+    if (!c.has(qs)) {
+      const p = fetch('/api/plantilla/pdf_guia?' + qs).then(async r => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'No se pudo calcular la plantilla');
+        return d;
+      });
+      p.catch(() => { if (c.get(qs) === p) c.delete(qs); });
+      c.set(qs, p);
+    }
+    return c.get(qs);
+  };
+  const mp = motorPlantilla({ dets, config, tallesSel, listaRangos, capas, traer });
+  const tEtq = () => etiquetaTalles({ config, rangos, tallesSel, talles });
+  const sinTalles = (config === 'talle' && tallesSel && !tallesSel.length);
+  const sinRango = config === 'rango' && !listaRangos.length;     // «Por rango» sin ningún talle marcado
+  const sinAlgo = sel.filter(it => dets[it.pid] && !dets[it.pid].error && !dets[it.pid].cargando && !mp.pedidasDe(it).length);
+
+  // LA ESCALA RECOMENDADA: la más grande a la que CADA diseño entra en un archivo; y cuántos
+  // archivos salen a la escala elegida. Más las mesas que chocan (primero: se ven aunque la escala tarde).
+  const claveReco = (open && listos && !sinTalles && !sinRango) ? JSON.stringify([sel.map(it => it.key), config, tallesSel, rango, guiaRango, rangos]) : null;
+  useEffect(() => {
+    if (!claveReco) { recoRef.current = null; setReco(null); setArchivosN(null); return undefined; }
+    let vivo = true;
+    const t = setTimeout(async () => {
+      try {
+        if (!recoRef.current || recoRef.current.clave !== claveReco) {
+          const choques = await mp.choquesDe(disSel);
+          setReco({ clave: claveReco, calculando: true, choques });
+          const porc = await mp.recomendada(disSel, () => vivo);
+          if (!vivo) return;
+          recoRef.current = { clave: claveReco, porc, choques };
+          setReco(recoRef.current);
+        }
+        const n = await mp.archivosA(disSel, escala);
+        if (vivo) setArchivosN({ clave: claveReco, escala, n });
+      } catch (e) {
+        recoRef.current = null;
+        if (vivo) setReco({ clave: claveReco, error: (e && e.message) || String(e) });
+      }
+    }, 500);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [claveReco, escala]); // eslint-disable-line react-hooks/exhaustive-deps
+  const recoVale = reco && reco.clave === claveReco ? reco : null;
+  const choques = (recoVale && recoVale.choques) || [];
+  const nArchivos = archivosN && archivosN.clave === claveReco && archivosN.escala === escala ? archivosN.n : null;
+
+  const antesDeCrear = () => {
+    if (!sel.length) throw new Error('elegí al menos una variable.');
+    if (!listos) throw new Error(conError.length ? `no se pudo leer ${conError.map(it => `«${it.label}»`).join(', ')}.` : 'todavía se están leyendo los moldes.');
+    if (sinTalles) throw new Error(`elegí al menos un ${nomT}.`);
+    if (sinRango) throw new Error(`marcá los ${nomT}s del rango.`);
+  };
+  const avisoSaltadas = () => (sinAlgo.length ? ` Sin ${nomT}s elegidos para ${sinAlgo.map(it => `«${it.label}»`).join(', ')}: no ${sinAlgo.length === 1 ? 'entró' : 'entraron'}.` : '');
+  const avisoChoques = () => (choques.length ? ' ' + choques.slice(0, 3).map(c => `En «${c.diseno}», la mesa «${c.mesa}» es de piezas distintas (${c.piezas.join(' · ')}): al subir el arte el sistema usa la primera.`).join(' ') : '');
+
+  const crearIllustrator = async () => {
+    if (ocupadoRef.current) return;
+    ocupadoRef.current = true;
+    const porc = Math.min(100, Math.max(10, Math.round(Number(escala) || 100)));
+    try {
+      antesDeCrear();
+      cartel('Buscando Illustrator en esta computadora…', 'Illustrator');
+      await pintarYa();
+      const ext = await buscarIllustrator();
+      if (!ext) { onIllustratorFalta(); return; }
+      const extra = [], guardados = [];
+      let totalMesas = 0, fallidos = 0, nArch = 0;
+      for (let v = 0; v < disSel.length; v++) {
+        const dis = disSel[v];
+        const pre = disSel.length > 1 ? `«${dis.nombre}» (${v + 1} de ${disSel.length}): ` : '';
+        cartel(pre + 'calculando las mesas y las guías…', 'Illustrator');
+        await pintarYa();
+        // UN archivo por diseño si entra; si no, los que hagan falta
+        const { planes, avisos } = await mp.planesIllustrator(dis, porc, tEtq());
+        for (const a of avisos) if (!extra.includes(a)) extra.push(a);
+        for (let i = 0; i < planes.length; i++) {
+          cartel(pre + (planes.length > 1 ? `archivo ${i + 1} de ${planes.length}: ` : '') + `armando ${planes[i].mesas.length} mesa${planes[i].mesas.length === 1 ? '' : 's'} en Illustrator…`, 'Illustrator');
+          const r = await enviarAIllustrator(planes[i]);
+          totalMesas += r.mesas || 0;
+          fallidos += r.textosFallidos || 0;
+          nArch++;
+          if (r.archivo) guardados.push(`«${r.archivo}»`);
+        }
+      }
+      if (illu.versionNueva && ext.version && ext.version !== illu.versionNueva) extra.push(`Hay una versión nueva de la extensión (tenés la ${ext.version}, la nueva es la ${illu.versionNueva}).`);
+      if (fallidos) extra.push(`${fallidos} mesa${fallidos === 1 ? '' : 's'} quedó sin su nombre escrito: Illustrator no lo aceptó.`);
+      const g = guardados.length ? ` Guardado${guardados.length > 1 ? 's' : ''} como ${guardados.join(', ')} en Documentos › USER PRO › Plantillas.` : '';
+      avisar(`Listo en Illustrator: ${totalMesas} mesa${totalMesas === 1 ? '' : 's'} de trabajo en ${nArch} archivo${nArch === 1 ? '' : 's'}.` + g + avisoSaltadas() + avisoChoques() + (extra.length ? ' ' + extra.join(' ') : ''));
+    } catch (e) {
+      avisarError('No se pudo armar en Illustrator: ' + ((e && e.message) || e));
+    } finally {
+      cartel(null);
+      ocupadoRef.current = false;
+    }
+  };
+
+  const crearCorel = async () => {
+    if (ocupadoRef.current) return;
+    ocupadoRef.current = true;
+    try {
+      antesDeCrear();
+      cartel('Buscando CorelDRAW en esta computadora…', 'CorelDRAW');
+      await pintarYa();
+      const ext = await buscarCorel();
+      if (!ext) { onCorelFalta(); return; }
+      if (!ext.corel || Number(ext.corel_version) < 24) throw new Error('el programa de USER PRO está, pero en esta computadora no hay CorelDRAW 2022 o más nuevo.');
+      const extra = [], guardados = [];
+      let totalMesas = 0, fallidos = 0;
+      for (let v = 0; v < disSel.length; v++) {
+        const dis = disSel[v];
+        const pre = disSel.length > 1 ? `«${dis.nombre}» (${v + 1} de ${disSel.length}): ` : '';
+        cartel(pre + 'calculando las mesas y las guías…', 'CorelDRAW');
+        await pintarYa();
+        // en Corel no hay tope de lienzo: a tamaño real, cada variable entera, una debajo de la otra
+        const { plan, avisos } = await mp.planCorel(dis, tEtq());
+        for (const a of avisos) if (!extra.includes(a)) extra.push(a);
+        if (!plan) continue;
+        cartel(pre + `armando ${plan.paginas.length} mesa${plan.paginas.length === 1 ? '' : 's'} en CorelDRAW, una por página… Si Corel estaba cerrado, primero se abre.`, 'CorelDRAW');
+        await pintarYa();
+        const r = await enviarACorel(plan);
+        totalMesas += r.mesas || 0;
+        fallidos += r.textosFallidos || 0;
+        if (r.archivo) guardados.push(`«${r.archivo}»`);
+      }
+      if (corel.versionNueva && ext.version && ext.version !== corel.versionNueva) extra.push(`Hay una versión nueva del programa de Corel (tenés la ${ext.version}, la nueva es la ${corel.versionNueva}).`);
+      if (fallidos) extra.push(`${fallidos} mesa${fallidos === 1 ? '' : 's'} quedó sin su nombre escrito: Corel no lo aceptó.`);
+      const g = guardados.length ? ` Guardado${guardados.length > 1 ? 's' : ''} como ${guardados.join(', ')} en Documentos › USER PRO › Plantillas (abre desde CorelDRAW 2022).` : '';
+      avisar(`Listo en CorelDRAW: ${totalMesas} mesa${totalMesas === 1 ? '' : 's'} de trabajo, una por página.` + g + avisoSaltadas() + avisoChoques() + (extra.length ? ' ' + extra.join(' ') : ''));
+    } catch (e) {
+      avisarError('No se pudo armar en CorelDRAW: ' + ((e && e.message) || e));
+    } finally {
+      cartel(null);
+      ocupadoRef.current = false;
+    }
+  };
+
+  // LA GUÍA .ai, UNA POR DISEÑO (y por rango). Con varias, se elige UNA carpeta y van todas juntas.
+  const descargarGuias = async () => {
+    if (ocupadoRef.current) return;
+    ocupadoRef.current = true;
+    try {
+      antesDeCrear();
+      procesando('Armando la guía .ai…');
+      await pintarYa();
+      const armar = (capas_data, opciones) => enHiloSuelto('guia_archivo', { capas_data, formato: 'ai', opciones }, [], 'guia');
+      const archivos = [], fallas = [];
+      for (const dis of disSel) { const g = await mp.guiasDe(dis, armar); archivos.push(...g.archivos); fallas.push(...g.fallas); }
+      procesando(null);
+      if (archivos.length === 1) await descargarBlob(new Blob([archivos[0].bytes], { type: 'application/postscript' }), archivos[0].nombre, { avisar: avisarError });
+      else if (archivos.length > 1) {
+        const n = await descargarVarios(archivos.map(a => ({ nombre: a.nombre, url: async () => new Blob([a.bytes], { type: 'application/postscript' }) })), { avisar: avisarError });
+        if (n > 0) avisar(`Guardadas ${n} guías .ai.` + avisoSaltadas() + avisoChoques());
+      }
+      // la guía que no entra (una mesa a tamaño real con muchas piezas) se dice; las otras salieron
+      if (fallas.length) avisarError(fallas.join(' ') + (archivos.length ? '' : ' Probá con Illustrator o CorelDRAW: arman una mesa por pieza.'));
+    } catch (e) {
+      avisarError('No se pudo generar la guía .ai: ' + ((e && e.message) || e));
+    } finally {
+      procesando(null);
+      ocupadoRef.current = false;
+    }
+  };
+
+  // ── LA PANTALLA (2026-10-05, «remodelá por completo la ventana: organizá botones, campos y textos
+  // para que sea fácil e intuitivo»): TRES PASOS numerados, en el orden en que se decide —1. qué
+  // diseños, 2. cómo se adapta a los talles, 3. dónde se crea— y en el paso 3 una tarjeta por
+  // programa con TODO lo suyo adentro (el tamaño es sólo de Illustrator: va en su tarjeta). ──
+  const lblRango = (t) => `${t[0]}${t.length > 1 ? '–' + t[t.length - 1] : ''}`;
+  const yaEsta = rango.length > 0 && rangos.some(rg => rg.talles.join('|') === rango.join('|'));
+  const ocupado = !!(ocupadoRef.current);
+  const tocarItem = (k) => setElegidas(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const tocarDiseno = (dis, poner) => setElegidas(s => { const n = new Set(s); for (const it of dis.variables) { if (poner) n.add(it.key); else n.delete(it.key); } return n; });
+  const tocarRango = (t, idx, e) => {
+    const set = new Set(rango);
+    const ancla = ultimoRango.current;
+    if (e.shiftKey && ancla != null) {
+      const a = Math.min(ancla, idx), b = Math.max(ancla, idx), quitar = set.has(t);
+      talles.slice(a, b + 1).forEach(x => (quitar ? set.delete(x) : set.add(x)));
+    } else if (set.has(t)) set.delete(t); else set.add(t);
+    ultimoRango.current = idx;
+    const nuevo = talles.filter(x => set.has(x));
+    setRango(nuevo);
+    if (!nuevo.includes(guiaRango)) setGuiaRango(nuevo[0] || null);
+  };
+  const pastilla = (on) => ({ padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer', userSelect: 'none',
+    border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.14)' : 'rgba(255,255,255,0.02)',
+    color: on ? 'var(--accent)' : 'var(--text-secondary)' });
+  const enlace = { background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--accent)' };
+  const nota = { fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 };
+  const MODOS = [
+    { k: 'default', t: 'Un diseño para todos', d: `El mismo arte sirve para todos los ${nomT}s.` },
+    { k: 'rango', t: 'Por rango', d: `Un arte por grupo de ${nomT}s (ej. XS–M, L–XL).` },
+    { k: 'talle', t: `${term?.variante || 'Talle'} por ${nomT}`, d: `Un arte para cada ${nomT}, a su medida real.` },
+  ];
+  const resumenArchivos = disSel.length
+    ? `${disSel.length === 1 ? 'Se crea 1 archivo' : `Se crean ${disSel.length} archivos`}: ${disSel.map(d => d.nombre).join(' · ')}`
+    : 'Elegí al menos una variable en el paso 1.';
+  const listoParaCrear = !ocupado && sel.length > 0 && listos && !sinTalles && !sinRango;
+
+  return (
+    <Modal open={open} onClose={onClose} maxWidth={880} titulo="Crear plantilla"
+      subtitulo="La base para que el diseñador arme el arte: un archivo por diseño">
+      <div data-tour="plantilla-pedido" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
+        {/* ── PASO 1: QUÉ DISEÑOS Y QUÉ VARIABLES ── */}
+        <PasoPlantilla n={1} titulo="Elegí los diseños y sus variables"
+          extra={<>
+            <button type="button" style={enlace} onClick={() => setElegidas(new Set(todas.map(it => it.key)))}>Todas</button>
+            <span style={{ color: 'var(--border-light)' }}>|</span>
+            <button type="button" style={enlace} onClick={() => setElegidas(new Set())}>Ninguna</button>
+            <Ayuda ancho={320}>Cada <b>diseño</b> sale en <b>su propio archivo</b>, con las variables que dejes marcadas: cada una en su bloque, con su nombre arriba. Después subís ese archivo como arte en cada molde del diseño. Lo que es del molde —si manda el alto o el ancho y el acomodo de las mesas— se usa como está guardado en <b>Configuración › Moldería › Plantilla</b>.</Ayuda>
+          </>}>
+          <div data-tour="plantilla-pedido-variables" data-opciones="1" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 10 }}>
+            {disenos.map(dis => {
+              const nOn = dis.variables.filter(it => elegidas.has(it.key)).length;
+              const todo = nOn === dis.variables.length;
+              return (
+                <div key={dis.did} style={{ borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10,
+                  border: '1px solid ' + (nOn ? 'rgba(0,243,255,0.45)' : 'var(--border-light)'), background: nOn ? 'rgba(0,243,255,0.05)' : 'rgba(255,255,255,0.015)' }}>
+                  <button type="button" onClick={() => tocarDiseno(dis, !todo)} title={todo ? 'Quitar todo el diseño' : 'Marcar todo el diseño'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+                    <Casilla on={todo} medio={nOn > 0 && !todo} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 800, overflowWrap: 'anywhere' }}>{dis.nombre}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: nOn ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {nOn ? '1 archivo' : 'no se crea'}
+                    </span>
+                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {dis.variables.map(it => {
+                      const on = elegidas.has(it.key);
+                      const d = dets[it.pid];
+                      const estado = d && d.cargando ? 'leyendo el molde…' : d && d.error ? 'no se pudo leer el molde'
+                        : d && d.referencia_medida ? `${d.referencia_medida === 'ancho' ? 'manda el ancho' : 'manda el alto'}` : '';
+                      return (
+                        <button key={it.key} type="button" onClick={() => tocarItem(it.key)} data-elegida={on ? '1' : '0'}
+                          style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 9px', borderRadius: 9, cursor: 'pointer', textAlign: 'left', color: 'inherit',
+                            border: '1px solid ' + (on ? 'rgba(0,243,255,0.35)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.08)' : 'transparent' }}>
+                          <Casilla on={on} chica />
+                          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.25 }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: on ? '#fff' : 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{it.label}</span>
+                            <span style={{ fontSize: 10.5, color: d && d.error ? 'var(--danger, #f87171)' : 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                              {it.clave ? it.molde : 'molde entero'}{estado ? ` · ${estado}` : ''}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {!todas.length && <div style={nota}>Este pedido no tiene variables que lleven arte aparte.</div>}
+          {conError.length > 0 && <div style={{ ...nota, color: 'var(--warning)' }}>No se pudo leer {conError.map(it => `«${it.label}»`).join(', ')}: {dets[conError[0].pid].error}</div>}
+          {/* MESAS QUE CHOCAN en un mismo archivo: se dice antes de crear, con qué hacer */}
+          {choques.length > 0 && (
+            <div data-tour="plantilla-pedido-choques" style={{ display: 'flex', gap: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(245,158,11,0.09)', border: '1px solid rgba(245,158,11,0.45)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+              <MarcaPaso aviso />
+              <div>
+                <b style={{ color: '#f5b942' }}>Dos piezas distintas con el mismo nombre de mesa</b>
+                {choques.slice(0, 4).map(c => (
+                  <div key={c.diseno + '|' + c.mesa}>En <b style={{ color: 'var(--text-primary)' }}>{c.diseno}</b>, «{c.mesa}»: {c.piezas.join(' · ')}.</div>
+                ))}
+                {choques.length > 4 && <div>Y {choques.length - 4} más.</div>}
+                <div style={{ marginTop: 4 }}>Al subir el arte se usaría la primera para las dos. Si llevan diseños distintos, marcá una sola y creá la otra aparte.</div>
+              </div>
+            </div>
+          )}
+        </PasoPlantilla>
+
+        {/* ── PASO 2: CÓMO SE ADAPTA A LOS TALLES ── */}
+        <PasoPlantilla n={2} titulo={`¿Cómo se adapta el diseño a los ${nomT}s?`}>
+          <div data-tour="plantilla-pedido-modo" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+            {MODOS.map(m => {
+              const on = config === m.k;
+              return (
+                <button key={m.k} type="button" onClick={() => setConfig(m.k)}
+                  style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px', borderRadius: 11, cursor: 'pointer', textAlign: 'left', color: 'inherit',
+                    border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.10)' : 'rgba(255,255,255,0.015)' }}>
+                  <span style={{ marginTop: 2, width: 15, height: 15, borderRadius: '50%', flexShrink: 0, border: '2px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'),
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {on && <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />}
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: on ? 'var(--accent)' : '#fff' }}>{m.t}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{m.d}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {config !== 'default' && (
+            <div style={{ padding: 12, borderRadius: 11, border: '1px solid var(--border-light)', background: 'rgba(0,0,0,0.18)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {config === 'talle' && (<>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>¿Qué {nomT}s?</span>
+                  <button type="button" style={enlace} onClick={() => setTallesSel(null)}>Todos</button>
+                  <span style={{ color: 'var(--border-light)' }}>|</span>
+                  <button type="button" style={enlace} onClick={() => setTallesSel([])}>Ninguno</button>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {talles.map(t => {
+                    const on = !tallesSel || tallesSel.includes(t);
+                    return <button key={t} type="button" style={pastilla(on)}
+                      onClick={() => { const base = tallesSel || talles; setTallesSel(on ? base.filter(x => x !== t) : talles.filter(x => x === t || base.includes(x))); }}>{t}</button>;
+                  })}
+                </div>
+                {sinTalles
+                  ? <div style={{ ...nota, color: 'var(--warning)' }}>Elegí al menos uno.</div>
+                  : <div style={nota}>Cada {nomT} en su bloque, con sus mesas a medida real (<code>#M Frente</code>). La guía .ai sale del {nomT} guía de cada molde.</div>}
+              </>)}
+              {config === 'rango' && (<>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>1. Marcá los {nomT}s del rango <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(con mayúscula apretada marcás de un {nomT} a otro)</span></div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {talles.map((t, idx) => <button key={t} type="button" style={pastilla(rango.includes(t))} onClick={(e) => tocarRango(t, idx, e)}>{t}</button>)}
+                </div>
+                {rango.length > 0 && (<>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>2. ¿Con qué {nomT} se calcula la medida? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(la guía del rango)</span></div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {rango.map(t => <button key={t} type="button" style={pastilla(guiaRango === t)} onClick={() => setGuiaRango(t)}>{t}</button>)}
+                  </div>
+                </>)}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderTop: '1px dashed var(--border-light)', paddingTop: 10 }}>
+                  <button type="button" className="btn ghost" style={{ padding: '5px 12px', fontSize: 12 }} disabled={!rango.length || yaEsta}
+                    onClick={() => setRangos(l => [...l, { talles: [...rango], guia: guiaRango || rango[0] }])}>+ Agregar otro rango</button>
+                  <Ayuda ancho={300}>Para <b>varios rangos</b> en el mismo archivo: marcá un rango y su guía, tocá <b>Agregar otro rango</b> y repetí. Cada rango sale en su bloque (<code>#XS-M Frente</code>). En la guía .ai sale un archivo por rango. Si un molde no tiene algún {nomT} del rango, usa los que tiene.</Ayuda>
+                  {rangos.map((rg, i) => (
+                    <span key={rg.talles.join('|')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, border: '1px solid var(--accent)', background: 'rgba(0,243,255,0.10)', color: 'var(--accent)' }}>
+                      {lblRango(rg.talles)} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>guía {rg.guia}</span>
+                      <button type="button" title="Quitar este rango" onClick={() => setRangos(l => l.filter((_, j) => j !== i))}
+                        style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}>×</button>
+                    </span>
+                  ))}
+                </div>
+                {!rango.length && !rangos.length && <div style={{ ...nota, color: 'var(--warning)' }}>Marcá al menos un {nomT} para armar el rango.</div>}
+              </>)}
+            </div>
+          )}
+        </PasoPlantilla>
+
+        {/* ── PASO 3: DÓNDE SE CREA (una tarjeta por programa, con todo lo suyo adentro) ── */}
+        <PasoPlantilla n={3} titulo="Creá la plantilla" extra={<span style={{ fontSize: 12, color: disSel.length ? 'var(--text-secondary)' : 'var(--warning)', textAlign: 'right' }}>{resumenArchivos}</span>}>
+          <ProgramasPlantillaPedido
+            listo={listoParaCrear}
+            escala={escala} setEscala={setEscala}
+            recomendada={recoVale && !recoVale.calculando && !recoVale.error ? recoVale.porc : null}
+            textoEscala={!recoVale ? null
+              : recoVale.calculando ? 'Calculando el tamaño recomendado…'
+              : recoVale.error ? `No se pudo calcular el tamaño recomendado: ${recoVale.error}`
+              : recoVale.porc ? `En verde, el más grande al que ${disSel.length > 1 ? 'cada diseño entra' : 'todo entra'} en un archivo.`
+              : 'Ni al 10% entra en un solo archivo: se reparte en varios.'}
+            textoArchivos={nArchivos !== null && recoVale && !recoVale.calculando && !recoVale.error && nArchivos > disSel.length
+              ? `Al ${escala}% salen ${nArchivos} archivos (algún diseño no entra en uno).` : null}
+            nGuias={disSel.length}
+            onIllustrator={crearIllustrator} onCorel={crearCorel} onGuia={descargarGuias}
+            onIllustratorFalta={onIllustratorFalta} onCorelFalta={onCorelFalta} illu={illu} corel={corel} />
+        </PasoPlantilla>
+      </div>
+    </Modal>
+  );
+}
+
+/** Un PASO numerado de «Crear plantilla»: número, título, lo de la derecha y su contenido. */
+function PasoPlantilla({ n, titulo, extra = null, children }) {
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 26 }}>
+        <span style={{ width: 24, height: 24, borderRadius: '50%', flexShrink: 0, background: 'var(--accent)', color: '#001016',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 900 }}>{n}</span>
+        <span style={{ fontSize: 14.5, fontWeight: 800, flex: 1, minWidth: 0 }}>{titulo}</span>
+        {extra && <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 1, minWidth: 0 }}>{extra}</span>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 34 }}>{children}</div>
+    </section>
+  );
+}
+
+/** Casilla de marcar (llena, vacía o a medias) — sólo dibujo: el clic lo maneja quien la contiene. */
+function Casilla({ on, medio = false, chica = false }) {
+  const t = chica ? 15 : 18;
+  return (
+    <span style={{ width: t, height: t, borderRadius: chica ? 4 : 5, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      border: '2px solid ' + (on || medio ? 'var(--accent)' : 'var(--border-light-hover, #555)'), background: on ? 'var(--accent)' : 'transparent' }}>
+      {on && <Icon name="check" style={{ width: t - 6, height: t - 6, color: '#001016', strokeWidth: 3.5 }} />}
+      {!on && medio && <span style={{ width: t - 8, height: 2.5, borderRadius: 2, background: 'var(--accent)' }} />}
+    </span>
+  );
+}
+
+/**
+ * PASO 3 de «Crear plantilla»: una tarjeta por programa. Illustrator lleva su TAMAÑO adentro (la
+ * escala es sólo suya); CorelDRAW siempre a tamaño real; la guía .ai no necesita conector. Cada
+ * botón grande conecta la primera vez y después crea (como `PlantillaProgramas`). Se monta SÓLO con
+ * la ventana abierta: así no se vigila a los programas cada 5 s mientras nadie la usa.
+ */
+function ProgramasPlantillaPedido({ listo, escala, setEscala, recomendada, textoEscala, textoArchivos, nGuias,
+  onIllustrator, onCorel, onGuia, onIllustratorFalta, onCorelFalta, illu, corel }) {
+  const ci = usarConexion(buscarIllustrator, 'userpro_illustrator_ok');
+  const cc = usarConexion(buscarCorel, 'userpro_corel_ok');
+  const okI = !!ci.con, okC = !!cc.con;
+  const sinCorel = okC && (!cc.con.corel || Number(cc.con.corel_version) < 24);
+  const vieja = (con, nueva) => !!(con && nueva && con.version && con.version !== nueva);
+  const [verConectores, setVerConectores] = useState(false);
+  const tarjeta = (acento) => ({ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 12, minWidth: 0,
+    border: `1px solid ${acento}55`, background: `linear-gradient(165deg, ${acento}12 0%, rgba(255,255,255,0.01) 70%)` });
+  const cabeza = (sigla, acento, tinta, nombre, estado, verde) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: acento, color: tinta, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11.5, fontWeight: 900 }}>{sigla}</span>
+      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.2 }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: acento }}>{nombre}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: verde ? '#d6f5e5' : 'var(--text-muted)' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: verde ? '#34d399' : 'rgba(255,255,255,0.3)', boxShadow: verde ? '0 0 6px rgba(52,211,153,0.9)' : 'none' }} />
+          {estado}
+        </span>
+      </span>
+    </div>
+  );
+  // el botón grande de cada tarjeta (el `data-tour` va LITERAL en cada uno: el diccionario sólo cuenta esos)
+  const grande = (acento, tinta, deshabilitado) => ({ marginTop: 'auto', padding: '9px 10px', borderRadius: 9, border: 'none', fontSize: 12.5, fontWeight: 800,
+    cursor: deshabilitado ? 'not-allowed' : 'pointer', background: deshabilitado ? 'rgba(255,255,255,0.08)' : acento, color: deshabilitado ? 'var(--text-muted)' : tinta });
+  const aviso = (txt, onBajar) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, lineHeight: 1.35, color: '#f5d48a' }}>
+      <span style={{ flex: 1 }}>{txt}</span>
+      {onBajar && <button type="button" className="btn ghost" style={{ padding: '2px 8px', fontSize: 10.5 }} onClick={onBajar}>Bajar</button>}
+    </div>
+  );
+  const CI = COLOR_PROGRAMA.illustrator, CC = COLOR_PROGRAMA.corel;
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
+        {/* ILLUSTRATOR: con su tamaño */}
+        <div style={tarjeta(CI.acento)}>
+          {cabeza(CI.sigla, CI.acento, CI.tinta, 'Illustrator', okI ? `Conectado${ci.con.version ? ` · ${ci.con.version}` : ''}` : ci.buscando ? 'Buscando…' : 'Sin conectar', okI)}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)' }}>Tamaño</span>
+              <Ayuda ancho={280}><b>100%</b> = tamaño real. Más chico, todo se achica igual (mesas y distancias) para que entre en un archivo de Illustrator ({String(LIENZO_M).replace('.', ',')} × {String(LIENZO_M).replace('.', ',')} m). El archivo dice a qué escala está.</Ayuda>
+            </div>
+            <div data-tour="plantilla-pedido-escala" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+              {PORCENTAJES.map(n => {
+                const rec = recomendada === n, on = escala === n;
+                return (
+                  <button key={n} type="button" onClick={() => setEscala(n)}
+                    style={{ padding: '4px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
+                      border: '1px solid ' + (on ? CI.acento : rec ? 'rgba(52,211,153,0.75)' : 'var(--border-light)'),
+                      background: on ? CI.acento + '2a' : rec ? 'rgba(52,211,153,0.12)' : 'transparent',
+                      color: on ? CI.acento : rec ? '#34d399' : 'var(--text-muted)' }}>{n}%</button>
+                );
+              })}
+            </div>
+            {textoEscala && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.4 }}>{textoEscala}</div>}
+            {textoArchivos && <div style={{ fontSize: 11, color: '#f5d48a', marginTop: 3, lineHeight: 1.4 }}>{textoArchivos}</div>}
+          </div>
+          {vieja(ci.con, illu.versionNueva) && aviso(`Hay un conector nuevo (tenés el ${ci.con.version}, el nuevo es el ${illu.versionNueva}).`, illu.hayInstalador ? illu.onBajar : null)}
+          {okI
+            ? <button type="button" data-tour="plantilla-illustrator-crear" style={grande(CI.acento, CI.tinta, !listo)} disabled={!listo} onClick={onIllustrator}>Crear en Illustrator</button>
+            : <button type="button" data-tour="plantilla-illustrator-conectar" style={grande(CI.acento, CI.tinta, ci.buscando)} disabled={ci.buscando}
+                onClick={() => ci.conectar(onIllustratorFalta)}>{ci.buscando ? 'Buscando Illustrator…' : 'Conectar Illustrator'}</button>}
+        </div>
+
+        {/* CORELDRAW: siempre a tamaño real */}
+        <div style={tarjeta(CC.acento)}>
+          {cabeza(CC.sigla, CC.acento, CC.tinta, 'CorelDRAW', sinCorel ? 'Falta CorelDRAW 2022 o más nuevo' : okC ? 'Conectado' : cc.buscando ? 'Buscando…' : 'Sin conectar', okC && !sinCorel)}
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            Siempre a <b style={{ color: 'var(--text-secondary)' }}>tamaño real</b>: una página por mesa, todas en un archivo .cdr. Se abre desde CorelDRAW 2022.
+          </div>
+          {vieja(cc.con, corel.versionNueva) && aviso(`Hay un conector nuevo (tenés el ${cc.con.version}, el nuevo es el ${corel.versionNueva}).`, corel.hayInstalador ? corel.onBajar : null)}
+          {okC
+            ? <button type="button" data-tour="plantilla-corel-crear" style={grande(CC.acento, CC.tinta, !listo || sinCorel)} disabled={!listo || sinCorel} onClick={onCorel}>Crear en CorelDRAW</button>
+            : <button type="button" data-tour="plantilla-corel-conectar" style={grande(CC.acento, CC.tinta, cc.buscando)} disabled={cc.buscando}
+                onClick={() => cc.conectar(onCorelFalta)}>{cc.buscando ? 'Buscando CorelDRAW…' : 'Conectar CorelDRAW'}</button>}
+        </div>
+
+        {/* GUÍA .ai: sin conector */}
+        <div style={tarjeta('#9aa4b2')}>
+          {cabeza(<Icon name="download" style={{ width: 15, height: 15 }} />, '#9aa4b2', '#0d0f12', 'Guía .ai', 'No necesita conector', false)}
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+            Un archivo .ai que se abre en cualquier Illustrator, con las capas y el contorno de cada pieza. Lo guardás donde quieras.
+          </div>
+          <button type="button" data-tour="plantilla-pedido-guia" style={grande('#c9d1db', '#0d0f12', !listo)} disabled={!listo} onClick={onGuia}>
+            {nGuias > 1 ? `Descargar ${nGuias} guías` : 'Descargar guía'}
+          </button>
+        </div>
+      </div>
+
+      {/* LOS CONECTORES (se instalan una vez): escondidos, a un toque */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" onClick={() => setVerConectores(v => !v)}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+          {verConectores ? '▾' : '▸'} ¿No tenés los conectores? Se instalan una vez
+        </button>
+        <Ayuda ancho={320}>Programas chicos que se instalan <b>una sola vez</b> en la computadora donde se diseña: unen TIZADA PRO con Illustrator o CorelDRAW para que <b>Crear en…</b> arme la base allá, sin descargar nada. Se abren con doble clic y <b>Instalar</b>. CorelDRAW necesita la versión 2022 o más nueva (sólo Windows).</Ayuda>
+      </div>
+      {verConectores && (
+        illu.hayInstalador || corel.hayInstalador ? (
+          <div style={{ display: 'flex', gap: 8, maxWidth: 480 }}>
+            {illu.hayInstalador && <BotonConector programa="illustrator" data-tour="plantilla-bajar-illustrator" nombre="Illustrator" onClick={illu.onBajar} />}
+            {corel.hayInstalador && <BotonConector programa="corel" data-tour="plantilla-bajar-corel" nombre="CorelDRAW" onClick={corel.onBajar} />}
+          </div>
+        ) : <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Los conectores se los pedís a quien administra TIZADA.</div>
+      )}
+    </>
   );
 }
 
@@ -3585,12 +4161,6 @@ function VisorFicha({ id, archivo, paginas, avisar }) {
 // COPIA (MAPA 581): lleva la fila y las copias — el nombre del archivo es lo que ve el sistema que
 // imprime («Mesa 3 - Principal - Fila 3 - x5»).
 // TALLES POR MESA (MAPA 593): lleva los talles de esa mesa («Mesa 2 - Principal - Talles S-M»).
-function nombreMesaDef(gi, tela, mf) {
-  let suf = '';
-  if (mf && mf.copias != null) suf = (mf.fila ? ' - Fila ' + mf.fila : '') + ' - x' + mf.copias;
-  else if (mf && Array.isArray(mf.talles) && mf.talles.length) suf = ' - Talles ' + mf.talles.join('-');
-  return 'Mesa ' + (gi + 1) + (tela ? ' - ' + tela : '') + suf;
-}
 
 function MesasInfinito({ mesas, job, avisar }) {
   const [view, setView] = useState({ zoom: 1, panX: 0, panY: 0 });
@@ -13588,6 +14158,28 @@ export default function App() {
     }
   };
 
+  // ── CREAR PLANTILLA DESDE EL PASO ARTE (MAPA 617; ver `CrearPlantillaModal`) ──────────────
+  // GENERAL, NO DEL DISEÑO ELEGIDO (pedido del usuario 2026-10-05: «me tiene que salir para elegir
+  // las variables de todos los diseños, independientemente del diseño que tengamos seleccionado») y
+  // UN ARCHIVO POR DISEÑO («por cada diseño podrá mandar a hacer un archivo de Illustrator», MAPA
+  // 618): los diseños del pedido en su orden, cada uno con sus variables que llevan ARTE APARTE
+  // (camino A). La misma variable en dos diseños aparece en los dos (va en los dos archivos). Fuera:
+  // los moldes con el diseño adentro (camino B, no llevan plantilla) y los que no tienen la base.
+  const [plantillaPedido, setPlantillaPedido] = useState(false);
+  const disenosPlantillaPedido = () => (disenosPedido || []).map(d => {
+    const variables = [];
+    for (const it of itemsArteDe(d.id)) {
+      const p = (productosCat.productos || []).find(x => x.id === it.moldeId);
+      if (!p || !p.plantilla || _esConDiseno(it.moldeId)) continue;
+      const key = d.id + '§' + it.moldeId + '|' + (it.clave || '');
+      if (variables.some(v => v.key === key)) continue;
+      const variable = it.clave ? ((p.variantes || []).find(v => v.clave === it.clave) || null) : null;
+      variables.push({ key, pid: it.moldeId, clave: it.clave || null, label: (variable && variable.label) || it.label || p.nombre || 'Molde',
+        molde: p.nombre || 'Molde', variable, acomodo: p.acomodo_illustrator || {} });
+    }
+    return { did: d.id, nombre: d.nombre || d.id, variables };
+  }).filter(d => d.variables.length);
+
   // (Vive acá abajo y no junto a `guardarTelaAncho` por el contrato TDZ: usa `showMsg`.)
   // El MARGEN global (cm): la mesa = tela − margen en todas las telas sin valor a mano. El server
   // recalcula y devuelve la lista entera, así la pantalla muestra las mesas nuevas al instante.
@@ -15725,6 +16317,14 @@ export default function App() {
           </div>,
           document.body
         )}
+        <CrearPlantillaModal open={plantillaPedido} onClose={() => setPlantillaPedido(false)}
+          disenos={plantillaPedido ? disenosPlantillaPedido() : []}
+          capas={capasArteNombres()} term={term} ocupadoRef={_illustratorRef}
+          cartel={(t, programa) => { if (programa) setArmandoEn(programa); setArmandoIllustrator(t); }}
+          procesando={setProcesando} avisar={showMsg} avisarError={showError}
+          onIllustratorFalta={() => setIllustratorFalta(true)} onCorelFalta={() => setCorelFalta(true)}
+          illu={{ versionNueva: _hayInstIllu ? _verIllu : null, onBajar: bajarExtensionIllustrator, hayInstalador: _hayInstIllu }}
+          corel={{ versionNueva: _hayInstCorel ? _verCorel : null, onBajar: bajarInstaladorCorel, hayInstalador: _hayInstCorel }} />
         <Modal open={corelFalta} onClose={() => setCorelFalta(false)} centrado maxWidth={520}
           titulo="No encontré CorelDRAW" subtitulo="Hace falta el programa USER PRO para CorelDRAW en esta computadora">
           <ol style={{ margin: '0 0 14px', paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
@@ -18542,6 +19142,15 @@ export default function App() {
                           {/* CAMINO B: este molde NO lleva arte aparte (ya lo trae adentro). El
                               botón se esconde porque cargarle un arte acá no haría nada: el motor
                               dibuja la pieza con el diseño del propio archivo. */}
+                          {/* OPCIONAL: la plantilla para el diseñador, por si no la tienen (MAPA 617).
+                              Sin el «?» aparte: el modal explica todo adentro. */}
+                          {!_esB && (
+                          <button className="btn ghost" data-tour="arte-crear-plantilla" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
+                            title="Crear la plantilla del arte (guía .ai, Illustrator o CorelDRAW) de las variables de todos los diseños del pedido"
+                            onClick={() => setPlantillaPedido(true)}>
+                            <Icon name="download" style={{ width: 13, height: 13 }} /> Crear plantilla
+                          </button>
+                          )}
                           {!_esB && (
                           <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}

@@ -243,6 +243,73 @@ paths:
       responses:
         '200': { description: El PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NoExiste' }
+  /conectores:
+    get:
+      summary: Los instaladores de los conectores (Illustrator Windows/Mac, CorelDRAW)
+      responses:
+        '200': { description: 'Lista {conectores: [{clave, programa, sistema, version, archivo, descarga}], nota}' }
+        '401': { $ref: '#/components/responses/SinLlave' }
+  /conectores/{clave}:
+    get:
+      summary: Bajar un instalador (illustrator, illustrator-mac, corel)
+      parameters: [ { name: clave, in: path, required: true, schema: { type: string, enum: [illustrator, illustrator-mac, corel] } } ]
+      responses:
+        '200': { description: El instalador (.exe) o el .zip para Mac, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/NoExiste' }
+  /plantillas:
+    post:
+      summary: Pedir la base para el diseñador (un archivo por diseño, con sus variables)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [referencia, disenos]
+              properties:
+                referencia: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' }
+                disenos:
+                  type: array
+                  items:
+                    type: object
+                    required: [nombre, variables]
+                    properties:
+                      nombre: { type: string }
+                      variables:
+                        type: array
+                        items:
+                          oneOf:
+                            - { type: string, description: clave o nombre de la variable }
+                            - { type: object, properties: { variable: { type: string }, molde: { type: string } }, required: [variable] }
+                talles:
+                  type: object
+                  properties:
+                    modo: { type: string, enum: [todos, rango, por_talle], default: todos }
+                    rangos: { type: array, items: { type: object, properties: { talles: { type: array, items: { type: string } }, guia: { type: string } } } }
+                    talles: { type: array, items: { type: string } }
+                escala: { type: integer, enum: [100, 90, 80, 70, 60, 50, 40, 30, 20, 10], default: 100 }
+      responses:
+        '202': { description: En cola (la arma el robot) }
+        '409': { description: Esa referencia se está armando }
+        '422': { description: Rechazada (ver alarmas) }
+        '401': { $ref: '#/components/responses/SinLlave' }
+  /plantillas/{referencia}:
+    get:
+      summary: Estado de la plantilla y sus archivos (con como_usar)
+      parameters: [ { name: referencia, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: 'OK: {referencia, estado, etapa, alarmas, archivos: [{diseno, tipo: illustrator|corel|guia, nombre, bytes, sha256, parte?, descarga}], como_usar}' }
+        '404': { $ref: '#/components/responses/NoExiste' }
+  /plantillas/{referencia}/archivos/{nombre}:
+    get:
+      summary: Bajar un archivo de la plantilla (.json para el conector, o la guía .ai)
+      parameters:
+        - { name: referencia, in: path, required: true, schema: { type: string } }
+        - { name: nombre, in: path, required: true, schema: { type: string } }
+        - { name: descargar, in: query, required: false, schema: { type: string, enum: ['1'] } }
+      responses:
+        '200': { description: El archivo }
+        '404': { $ref: '#/components/responses/NoExiste' }
 webhooks:
   aviso:
     post:
