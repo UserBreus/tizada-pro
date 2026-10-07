@@ -77,19 +77,32 @@ function tizadaArmar(plan) {
 
         // ── los contornos: de una sola vez importando el SVG; si no se puede, punto por punto ──
         var metodo = 'ninguno';
-        if (plan.caminos.length) {
-            var capaGuias = capas[plan.caminos[0].capa];
+        // MOLDE A MEDIDA (MAPA 623): los caminos PUNTEADOS (el margen/dobladillo) van aparte: no están
+        // en el SVG ni se vuelven guía (una guía de Illustrator no se ve punteada)
+        var contornos = [], punteados = [];
+        for (i = 0; i < plan.caminos.length; i++) {
+            if (plan.caminos[i].punteado) punteados.push(plan.caminos[i]); else contornos.push(plan.caminos[i]);
+        }
+        if (contornos.length) {
+            var capaGuias = capas[contornos[0].capa];
             var hechos = [];
             if (plan.svgArchivo && tizadaImportarSvg(plan, capaGuias, L, T, negro, hechos)) {
                 metodo = 'svg';
             } else {
                 hechos = [];
-                for (i = 0; i < plan.caminos.length; i++) tizadaDibujarCamino(plan.caminos[i], capas, X, Y, hechos);
+                for (i = 0; i < contornos.length; i++) tizadaDibujarCamino(contornos[i], capas, X, Y, hechos);
                 metodo = 'puntos';
             }
             // el molde como GUÍAS de Illustrator (no se imprimen, no se seleccionan sin querer)
             if (plan.guias) {
                 for (i = 0; i < hechos.length; i++) { try { hechos[i].guides = true; } catch (eg) { } }
+            }
+        }
+        for (i = 0; i < punteados.length; i++) {
+            var hp = [];
+            tizadaDibujarCamino(punteados[i], capas, X, Y, hp);
+            for (var j = 0; j < hp.length; j++) {
+                try { hp[j].strokeDashes = punteados[i].punteado; hp[j].name = 'dobladillo'; } catch (ed) { }
             }
         }
 

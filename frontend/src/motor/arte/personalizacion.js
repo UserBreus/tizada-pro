@@ -17,7 +17,7 @@ import { abrir, capasUi, configurarCapa, nombresOc, normNombre, textoDict, altur
 import { CAPAS_NO_PERS, CAPAS_GRAFICAS, esCapaEditable } from '../nombres.js'
 export { CAPAS_NO_PERS, CAPAS_GRAFICAS, esCapaEditable }
 export const CLAVE_CAPA = '\x00capa:'
-export const CAMPO_ALIAS = { '00': 'numero', nro: 'numero', num: 'numero', jugador: 'nombre', apellido: 'nombre' }
+export const CAMPO_ALIAS = { '00': 'numero', nro: 'numero', num: 'numero', jugador: 'nombre', apellido: 'nombre', texto: 'nombre' }   // «texto» = el campo Nombre (2026-10-06)
 
 /** `_texto_de_tj`: el texto de un Tj/TJ/'/" tal como lo decodifica pikepdf. */
 export function textoDeTj(ins) {

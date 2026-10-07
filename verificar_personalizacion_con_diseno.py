@@ -54,13 +54,14 @@ print("\n1b · Y ASÍ ES COMO EL ESTAMPADO LO ENCUENTRA")
 # Espejo de `generar_pieza`: `texto = persona[_norm_nombre(campo)]`. Si el campo quedara «00»,
 # esto daría vacío y el número no saldría.
 persona = {"nombre": "GONZALEZ", "numero": "10"}
-for _capa, _esperado in (("nombre", "GONZALEZ"), ("00", "10"), ("Número", "10"), ("NRO", "10")):
+# «Texto» es el mismo campo que «Nombre» (2026-10-06): la capa puede llamarse de las dos maneras
+for _capa, _esperado in (("nombre", "GONZALEZ"), ("Texto", "GONZALEZ"), ("TEXTO", "GONZALEZ"), ("00", "10"), ("Número", "10"), ("NRO", "10")):
     _cn = MP._norm_nombre(_capa)
     _campo = MP._CAMPO_ALIAS.get(_cn, _cn)
     _val = persona.get(MP._norm_nombre(_campo), "")
     ok(_val == _esperado,
        f"🔴 una capa «{_capa}» estamparía «{_val}» y tenía que estampar «{_esperado}»")
-print("    OK    «nombre»→GONZALEZ · «00»→10 · «Número»→10 · «NRO»→10")
+print("    OK    «nombre»/«Texto»→GONZALEZ · «00»→10 · «Número»→10 · «NRO»→10")
 
 # ══ 2. UN TALLE NUNCA ES UN CAMPO ════════════════════════════════════════════════════════════
 print("\n2 · 🔴 LOS TALLES NO SON CAMPOS DE PERSONALIZACIÓN")

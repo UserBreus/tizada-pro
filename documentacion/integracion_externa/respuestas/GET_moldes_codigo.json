@@ -42,6 +42,7 @@
    ],
    "planilla": {
     "columna_talle": "talle",
+    "con_talles": true,
     "columnas": [
      {
       "id": "cantidad",
@@ -67,7 +68,7 @@
       "id": "nombre",
       "obligatoria": false,
       "rol": "nombre",
-      "titulo": "Nombre"
+      "titulo": "Texto"
      },
      {
       "id": "numero",

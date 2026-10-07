@@ -20,8 +20,8 @@ Lo que se prueba:
   3. la clave de agrupación del pedido es la columna (no el grupo de tizada ni el molde);
   4. la vista liviana existe, sale de la HOJA (no del SVG), se guarda y pesa órdenes de magnitud
      menos — y el SVG vectorial sigue ahí para el detalle y el PDF intacto para descargar;
-  5. al acercarse, el RECORTE de lo que se está mirando llega con nitidez suficiente para leer una
-     etiqueta de 3 mm (el dibujo general no alcanza: ahí una letra mide 2 píxeles).
+  5. cada mesa es UNA FOTO a la calidad del pedido (desde 2026-09-18, decisión del usuario: sin los
+     recortes de zoom de la 09-14); el servidor sigue sabiendo recortar si alguien se lo pide.
 
 ⚠️ Sólo LEE el catálogo y, si hay una tizada vieja en `trabajos/`, la dibuja. No escribe datos.
 """
@@ -138,12 +138,19 @@ def main():
     # **lo que se DESCARGA sigue siendo el vector exacto**.
     ok("prev_" not in app.split("MesasInfinito")[-1][:60000],
        "el visor de mesas no depende de las previas en SVG")
-    ok("mesa_img/${encodeURIComponent(hoja.archivo)}?pi=${pIdx}&w=2400" in app,
-       "…y el DETALLE abre la misma hoja, a más resolución")
-    ok("/api/trabajos/${j.resultado.id}/mesa/${h.archivo}" in app,
-       "🔴 y la DESCARGA sigue siendo el PDF vectorial de la mesa, no una imagen")
-    ok("/trabajos/${job.resultado.id}/${hoja.archivo}" in app or "download" in app,
-       "el PDF se sigue descargando tal cual")
+    # (2026-10-06) el «detalle a 2400 px» y la descarga por `/api/trabajos/…/mesa/…` ya no existen:
+    # desde el 09-18 la mesa es UNA foto (el zoom la agranda) y desde el 09-22 la mesa suelta la arma
+    # esta computadora (`mesaSuelta.js` → `pagina_pdf`). Lo que se defiende es lo mismo de siempre.
+    ok("urlVista(hoja.archivo, pi, 'foto', null," in app,
+       "…y la vista es la foto de LA HOJA (la arma esta computadora; sin ella, `mesa_img` del servidor)")
+    ok("mesaSuelta({ tid: job.resultado.id, archivo: hoja.archivo, pi, rutaApi })" in app
+       and "mesaSuelta({ tid: j.resultado.id, archivo: h.archivo, pi, rutaApi })" in app,
+       "🔴 la DESCARGA de una mesa (y la de todas) es la página de la hoja, no una imagen")
+    _ms = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "mesaSuelta.js"), encoding="utf-8").read()
+    _pc = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "pdf", "mesaPorArchivo.js"), encoding="utf-8").read()
+    ok("'pagina_pdf'" in _ms and "export function paginaComoPdf" in _pc and "Pixmap" not in _pc
+       and "toPixmap" not in _pc,
+       "🔴 …copiada como PDF (`paginaComoPdf`): el vector tal cual, sin rasterizar nada")
 
     # MEDIDA EN VIVO, sobre la tizada MÁS PESADA que haya a mano: en una chiquita no hay nada que
     # probar (ahí el SVG ya era liviano y el problema nunca existió).
@@ -182,21 +189,22 @@ def main():
     ok(bool(_ent) and "(0.0, 0.0, 1.0, 1.0)" in _ent.group(1),
        "…y la mesa entera sigue siendo el caso por defecto")
     ok("sufijo" in src_img, "cada recorte se guarda aparte (moverse un poco reusa el anterior)")
-    ok("TILE_CM = 50" in app and "BASE_W = 1200" in app,
-       "la pantalla pide los recortes por una grilla fija de medio metro")
-    # desde 2026-09-16 (changelog 469) se mide en píxeles REALES de la pantalla (`* dpr`)
-    ok("r.width * dpr <= BASE_W * 1.05) continue" in app,
-       "🔴 …y sólo cuando la PANTALLA supera lo que da el dibujo general (no a un zoom inventado)")
-    ok("TOPE_RECORTES" in app, "con un tope de recortes vivos, para no comerse la memoria")
-
-    # la cuenta que importa: cuántos píxeles por cm da un recorte, y cuánto mide ahí una letra de 3 mm
-    TILE_CM, W_TILE = 50, 1600
-    pxcm = W_TILE / TILE_CM
-    print(f"          un recorte de {TILE_CM} cm a {W_TILE} px = {pxcm:.0f} px/cm · una letra de 3 mm mide {pxcm*0.3:.1f} px")
-    ok(pxcm * 0.3 >= 6, f"una etiqueta de 3 mm entra en {pxcm*0.3:.1f} píxeles: se lee")
+    # 🔴 LA PANTALLA (desde 2026-09-18): UNA FOTO POR MESA, UNA SOLA CALIDAD. Los recortes de medio
+    # metro que se pedían al acercarse (09-14) los hizo sacar el usuario: «es una foto, una sola
+    # calidad; si es buena se ve bien completa y si me acerco». El límite de la letra de 3 mm quedó
+    # escrito y elegido en `vista/vista.js` (`FOTO_PXCM`).
+    ok("TILE_CM" not in app and "TOPE_RECORTES" not in app,
+       "la pantalla ya no parte la mesa en recortes de zoom (decisión del usuario 2026-09-18)")
+    ok("const pxcm = calidadFoto(job?.resultado?.hojas || mesas);" in app,
+       "la calidad de la foto es UNA para todo el pedido (con TODAS sus hojas: la misma al generar y al mirar)")
+    _vv = io.open(os.path.join(_AQUI, "frontend", "src", "motor", "vista", "vista.js"), encoding="utf-8").read()
+    _m = re.search(r"export const FOTO_PXCM = (\d+(?:\.\d+)?)", _vv)
+    pxcm = float(_m.group(1)) if _m else 0.0
     BASE_W, MESA_CM = 1200, 180
-    print(f"          (en el dibujo general esa misma letra mide {BASE_W/MESA_CM*0.3:.1f} px: por eso no se leía)")
-    ok(BASE_W / MESA_CM * 0.3 < 3, "…y el dibujo general por sí solo NO alcanzaba (ésa era la queja)")
+    print(f"          la foto: {pxcm:g} px/cm · una letra de 3 mm mide {pxcm*0.3:.1f} px "
+          f"(con el dibujo general de 1200 px medía {BASE_W/MESA_CM*0.3:.1f} px)")
+    ok(pxcm * 0.3 > BASE_W / MESA_CM * 0.3 * 2,
+       "…y la foto da más del doble de detalle que el dibujo general de 1200 px por el que nació la queja")
 
     # y de verdad, sobre una mesa real
     if tid:

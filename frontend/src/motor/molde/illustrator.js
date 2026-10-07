@@ -96,6 +96,31 @@ export async function enviarAIllustrator(plan) {
 
 const f2 = (v) => (Math.round(v * 100) / 100).toString()
 
+/** La caja de unos segmentos (canvas, y hacia arriba): `[x0, y0, x1, y1]` o null. */
+function cajaSegs(segs) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  const pt = (x, y) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y) }
+  for (const s of segs || []) {
+    if (s[0] === 'm' || s[0] === 'l') pt(s[1], s[2])
+    else if (s[0] === 'c') { pt(s[1], s[2]); pt(s[3], s[4]); pt(s[5], s[6]) }
+    else if (s[0] === 're') { pt(s[1], s[2]); pt(s[1] + s[3], s[2] + s[4]) }
+  }
+  return x0 <= x1 && y0 <= y1 ? [x0, y0, x1, y1] : null
+}
+const PT_POR_CM = 72 / 2.54
+
+/** MOLDE A MEDIDA (MAPA 623): el rectángulo del MARGEN (dobladillo) hacia adentro de la pieza, como
+ *  camino PUNTEADO. No va al SVG que se vuelve guía: la extensión lo dibuja aparte, punteado. */
+function caminoDobladillo(segs, dobladillo, T, capa, mesa) {
+  const b = cajaSegs(segs)
+  if (!b || !dobladillo) return null
+  const x0 = b[0] + (dobladillo.izq || 0) * PT_POR_CM, x1 = b[2] - (dobladillo.der || 0) * PT_POR_CM
+  const y0 = b[1] + (dobladillo.abajo || 0) * PT_POR_CM, y1 = b[3] - (dobladillo.arriba || 0) * PT_POR_CM
+  if (!(x1 > x0 && y1 > y0)) return null
+  const sub = subcaminos([['m', x0, y0], ['l', x1, y0], ['l', x1, y1], ['l', x0, y1], ['h']], T)
+  return { capa, sub, ancho: 1, color: [0, 0, 0, 100], mesa, punteado: [9, 6] }
+}
+
 /** Los tramos de `segs` como sub-caminos de Illustrator: `[[x, y, izqX, izqY, derX, derY], …]`. */
 function subcaminos(segs, T) {
   const subs = []
@@ -161,7 +186,9 @@ function dSvg(subs) {
  * y los bloques se acomodan en grilla sin mezclarse.
  * → `{plan, avisos}`.
  */
-export function planIllustrator(capasData, { config = 'default', rango = [], titulo = 'Molde', capas = null, editables = null, archivo = null, referencia = 'alto', posiciones = null, talleVisor = null, escala = 1, soloMedir = false, acomodoGuia = null, soloGuia = false, sinTope = false } = {}) {
+// `dobladillo` (MOLDE A MEDIDA, MAPA 623): `{arriba, abajo, izq, der}` en cm → una línea punteada
+// hacia adentro de cada pieza, en «guias» (no es guía de Illustrator: se ve punteada).
+export function planIllustrator(capasData, { config = 'default', rango = [], titulo = 'Molde', capas = null, editables = null, archivo = null, referencia = 'alto', posiciones = null, talleVisor = null, escala = 1, soloMedir = false, acomodoGuia = null, soloGuia = false, sinTope = false, dobladillo = null } = {}) {
   if (!capasData || !capasData.length) throw new Error('no se detectaron piezas en la plantilla')
   const avisos = []
   const esc = Number(escala) > 0 ? Number(escala) : 1
@@ -321,6 +348,8 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
       if (!subs.length) continue
       // `mesa`: de qué mesa es (Corel arma una PÁGINA por mesa; la extensión de Illustrator lo ignora)
       caminos.push({ capa: iGuias, sub: subs, ancho: 1, color: [0, 0, 0, 100], mesa: im })
+      const dob = dobladillo ? caminoDobladillo(it.segs, dobladillo, T, iGuias, im) : null
+      if (dob) caminos.push(dob)
       // un <path> por sub-camino: así cada uno entra a Illustrator como un trazado suelto que se
       // puede volver GUÍA (un trazado compuesto no puede)
       for (const sp of subs) svg.push(`<path d="${dSvg([sp])}"/>`)
@@ -850,7 +879,7 @@ export function unirPlanes(secciones, { archivo = 'Plantilla', titulo = 'Plantil
     svg: caminos.length
       ? `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="${aW}" height="${aH}" viewBox="0 0 ${aW} ${aH}">` +
         `<rect id="tizada_ref" x="0" y="0" width="${aW}" height="${aH}" fill="none" stroke="none"/>` +
-        `<g fill="none" stroke="#000000" stroke-width="1">${caminos.map((k) => k.sub.map((sp) => `<path d="${dSvg([sp])}"/>`).join('')).join('')}</g></svg>`
+        `<g fill="none" stroke="#000000" stroke-width="1">${caminos.filter((k) => !k.punteado).map((k) => k.sub.map((sp) => `<path d="${dSvg([sp])}"/>`).join('')).join('')}</g></svg>`
       : null,
   }
 }

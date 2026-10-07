@@ -61,6 +61,16 @@ def _seccion(page, y, texto):
 
 
 # ── TABLA DE TALLES (la planilla del pedido tal cual) ─────────────────────────────────────────
+def _titulo_tabla(columnas):
+    """PLANILLA SIN TALLES (MAPA 622): una bandera no tiene talles, así que la tabla no se puede
+    llamar «de talles». Sólo se decide con columnas que dicen su `role` (la pantalla y la API lo
+    mandan); una planilla vieja sin roles queda como siempre. Gemelo de `tituloTabla` (ficha.js)."""
+    cols = columnas or []
+    if any("role" in c for c in cols) and not any(c.get("role") == "talle" for c in cols):
+        return "PLANILLA DEL PEDIDO"
+    return "TABLA DE TALLES"
+
+
 def _dibujar_tabla(page, y, columnas, filas, y_max, fila0=0):
     """Dibuja tantas filas como entren desde `y` hasta `y_max`. Devuelve (y_final, filas_restantes,
     fila0_siguiente). La 1ª columna es «#» con el NÚMERO DE FILA (estilo columna de títulos), para
@@ -149,17 +159,14 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
                 aw, ah = r0.width * esc, r0.height * esc
                 dst = fitz.Rect(card.x0 + (card.width - aw) / 2, card.y0 + (card.height - ah) / 2,
                                 card.x0 + (card.width + aw) / 2, card.y0 + (card.height + ah) / 2)
-                # LA PIEZA VA COMO IMAGEN A 300 DPI DEL TAMAÑO IMPRESO (decisión del usuario
-                # 2026-09-18: «la ficha es una planilla A4 con una visual básica del molde, nítida
-                # para imprimir en A4 y más nada»). Con el vector entero adentro la ficha pesaba
-                # 26 MB y tardaba segundos en mostrarse (cada pieza traía el arte completo); con
-                # la imagen pesa poco y se ve al toque. 300 dpi sobre 4-5 cm de tarjeta: nítida
-                # en papel. El navegador dibuja EXACTAMENTE lo mismo (`ficha/ficha.js` +
-                # `vista/dibujar.js`, contrato `verificar_navegador_ficha.py`).
-                _ancho_px = max(1, int(round(dst.width * 300.0 / 72.0)))
-                _z = _ancho_px / r0.width if r0.width else 1.0
-                _pix = src[0].get_pixmap(matrix=fitz.Matrix(_z, _z), alpha=False)
-                page.insert_image(dst, stream=_pix.tobytes("png"), keep_proportion=True)
+                # LA PIEZA VA EN VECTOR, TAL CUAL EL ARCHIVO (MAPA 524-525, «ya estamos dando el
+                # diseño, usá eso; no dibujes nada»; y la LEY: siempre el vector original). Es lo que
+                # hace el gemelo del navegador (`ficha.js` `pegarPiezaGuia`) desde el 2026-09-22;
+                # este lado había quedado con la imagen de 300 dpi de la 522 y las dos fichas ya no
+                # eran iguales (contrato `verificar_navegador_tizada.py` §4, visto 2026-10-06). El
+                # peso de la mesa repetida en cada tarjeta lo saca el guardado (`garbage=4` junta
+                # los objetos idénticos: la mesa del talle entra una vez).
+                page.show_pdf_page(dst, src, 0, keep_proportion=True)
             except Exception:
                 pass
             finally:
@@ -177,7 +184,8 @@ def _dibujar_piezas(doc, page, y, piezas, y_max, cols=5):
 
 # Los campos salen del nombre de la CAPA del archivo («numero», «numero 2»), que casi nunca trae
 # acentos: la ficha los muestra bien escritos.
-_LABEL_CAMPO = {"nombre": "Nombre", "numero": "Número", "numero 2": "Número 2",
+# «nombre»/«texto» se muestran «Texto» (2026-10-06); gemelo: LABEL_CAMPO de ficha/ficha.js
+_LABEL_CAMPO = {"nombre": "Texto", "texto": "Texto", "numero": "Número", "numero 2": "Número 2",
                 "numero2": "Número 2", "palabra": "Palabra", "apellido": "Apellido"}
 
 
@@ -196,12 +204,13 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
 
     # 1) TABLA (arriba). Puede ocupar más de una página si hay muchas filas (la numeración sigue).
     pg = nueva_pagina()
-    y = _seccion(pg, 78, "TABLA DE TALLES")
+    titulo = _titulo_tabla(columnas)
+    y = _seccion(pg, 78, titulo)
     y += 6
     y, restan, _f0 = _dibujar_tabla(pg, y, columnas, filas, A4_H - MARGEN)
     while restan:
         pg = nueva_pagina()
-        y = _seccion(pg, 78, "TABLA DE TALLES (continuación)")
+        y = _seccion(pg, 78, titulo + " (continuación)")
         y += 6
         y, restan, _f0 = _dibujar_tabla(pg, y, columnas, restan, A4_H - MARGEN, fila0=_f0)
 
@@ -377,6 +386,6 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
         _encabezado(pg, titulo, subtitulo, i + 1, total)
 
     ruta = os.path.join(salida, nombre_archivo)
-    doc.save(ruta, garbage=3, deflate=True)
+    doc.save(ruta, garbage=4, deflate=True)   # 4: la mesa repetida en cada tarjeta de la guía, una vez
     doc.close()
     return ruta

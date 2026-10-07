@@ -58,6 +58,10 @@
                 "telas_por_pieza": { "type": "object", "additionalProperties": { "type": "string" },
                                      "description": "{\"Cuello\": \"486\"}: pieza (nombre genérico) → id de tela." },
                 "piezas_apagadas": { "type": "array", "items": { "type": "string" } },
+                "medida": { "type": "object", "additionalProperties": false, "required": ["ancho_m", "alto_m"],
+                  "description": "Sólo prendas A MEDIDA (`a_medida` en GET /variables): el rectángulo, en metros.",
+                  "properties": { "ancho_m": { "type": "number", "minimum": 0.05, "maximum": 50 },
+                                  "alto_m": { "type": "number", "minimum": 0.05, "maximum": 50 } } },
                 "editables": {
                   "type": "object",
                   "description": "Objeto editable del arte (capa «Editable X» → X) → cómo se aplica.",

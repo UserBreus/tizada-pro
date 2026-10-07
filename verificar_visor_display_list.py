@@ -16,7 +16,8 @@ Lo que se prueba:
      la tizada) y el pool devuelve el mismo archivo.
   3. `descargar_mesa` arma la mesa suelta UNA vez en disco (`descarga_<hoja>_p<n>.pdf`) y la
      segunda vez la sirve de ahí, con el mismo contenido.
-  4. La pantalla pide el recorte en píxeles REALES (`devicePixelRatio`) y con prioridad baja.
+  4. La pantalla muestra UNA FOTO por mesa a una sola calidad (2026-09-18) y el servidor ya no
+     pre-dibuja recortes de zoom que nadie pide (2026-10-06).
 
 ⚠️ Sólo LEE la hoja de un trabajo ya generado (se copia a un temporal). No toca la base.
 """
@@ -40,6 +41,10 @@ os.environ["TIZADA_ENTRADA"] = os.path.join(_TMP, "entrada")
 os.environ["TIZADA_TRABAJOS"] = os.path.join(_TMP, "trabajos")
 os.environ["TIZADA_DB_SERVER"] = r"localhost\NO_EXISTE_ES_UNA_PRUEBA"
 os.environ["TIZADA_PROCESOS_VISOR"] = "1"
+# Lo que se prueba es la REFERENCIA del servidor (dibujo y mesa suelta en Python): con «El servidor
+# no calcula» (prendido siempre desde 2026-09-24) `descargar_mesa` contesta 409 y la prueba se caía
+# con `'tuple' object has no attribute 'get_data'` (2026-10-06).
+os.environ["TIZADA_SOLO_NAVEGADOR"] = "0"
 
 _falso_db = types.ModuleType("db")
 _falso_db.__getattr__ = lambda n: (lambda *a, **k: (_ for _ in ()).throw(
@@ -176,29 +181,31 @@ def main():
         resp2.close()
     ok(os.stat(cache).st_mtime_ns == m1 and cuerpo2 == cuerpo1, "la segunda descarga sale del disco, igual byte a byte")
 
-    # ── 4. LA PANTALLA ─────────────────────────────────────────────────────────────────────
-    print("\n4 · LA PANTALLA PIDE NÍTIDO DE VERDAD")
+    # ── 4. LA PANTALLA: UNA FOTO POR MESA, UNA SOLA CALIDAD ──────────────────────────────────
+    # 🔴 Del 2026-09-16 al 09-18 la pantalla partía la mesa en recortes de medio metro que pedía al
+    # acercarse (en píxeles reales, con prioridad baja). El usuario los hizo sacar: «es una foto, una
+    # sola calidad; si es buena se ve bien completa y si me acerco». Lo que se defiende ahora es eso.
+    print("\n4 · LA PANTALLA: UNA FOTO POR MESA, A LA CALIDAD DEL PEDIDO")
     app = io.open(os.path.join(_AQUI, "frontend", "src", "App.jsx"), encoding="utf-8").read()
-    ok("const necesario = (r.width / nx) * 1.25 * dpr;" in app and "devicePixelRatio" in app,
-       "el ancho del recorte se pide en píxeles reales (devicePixelRatio)")
-    ok('fetchPriority="low"' in app, "los recortes van con prioridad baja: la descarga y la app primero")
+    _mi = app[app.index("function MesasInfinito("):]
+    _mi = _mi[:_mi.index("\n}\n") + 3]
+    ok("const pxcm = calidadFoto(job?.resultado?.hojas || mesas);" in _mi,
+       "la calidad de la foto se fija UNA vez para todo el pedido (`calidadFoto`, con todas las hojas)")
+    ok("urlVista(hoja.archivo, pi, 'foto', null," in _mi,
+       "cada mesa es UNA foto entera (`'foto'`, sin recorte): el zoom la agranda, no la cambia")
+    ok("TILE_CM" not in app and "TOPE_RECORTES" not in app and "BASE_W" not in app,
+       "no quedó nada de los recortes de zoom en la pantalla")
+    ok("Dibujando la mesa…" in _mi, "mientras la foto se dibuja se avisa (un blanco parece «no se ve»)")
 
-    # ── 5. LOS RECORTES YA ESTÁN CUANDO ALGUIEN HACE ZOOM (changelog 469) ─────────────────
-    print("\n5 · 🔴 LOS RECORTES SE DEJAN DIBUJADOS AL TERMINAR EL PEDIDO, CON EL MISMO NOMBRE QUE PIDE LA PANTALLA")
-    ok(S._js4(1 / 32) == 0.0313 and S._js4(0.25) == 0.25 and S._js4(1 / 14) == 0.0714,
-       "la fracción se redondea como `toFixed(4)` de JS (1/32 → 0.0313, mitad para arriba)")
-    recs = S._recortes_de_pagina(180.0, 799.1)
-    ok(len(recs) == 4 * 16 and recs[0] == (0.0, 0.0, 0.25, 0.0625) and recs[-1] == (0.75, 0.9375, 1.0, 1.0),
-       f"una mesa de 180 × 799 cm son 4 × 16 recortes de medio metro ({len(recs)}), en el orden de la pantalla")
-    ok(S._RECORTE_W == (800, 1600) and "TOPE_RECORTES = { 800: 24, 1600: 12 }" in app
-       and "const wpx = necesario <= 800 ? 800 : 1600;" in app,
-       "los dos escalones del servidor (800 y 1600 px) son exactamente los que pide la pantalla")
+    # ── 5. EL SERVIDOR NO PRE-DIBUJA RECORTES QUE NADIE PIDE ────────────────────────────────
+    print("\n5 · 🔴 EL SERVIDOR NO PRE-DIBUJA RECORTES QUE NADIE PIDE")
     srv = io.open(os.path.join(_AQUI, "servidor.py"), encoding="utf-8").read()
-    ok(srv.count('_predibujar_recortes_fondo(tid, res.get("hojas") or [])') == 2,
-       "el pre-dibujado arranca cuando el pedido queda «listo», en `generar` y en `generar_multi`")
-    ok("if len(pendientes) >= 2:" in inspect.getsource(S._predibujar_recortes_fondo),
-       "…de a dos por vez: un recorte pedido por la pantalla no espera la cola entera")
-    ok("r.width * dpr <= BASE_W * 1.05" in app, "el detalle arranca cuando la PANTALLA (en px reales) supera el dibujo general")
+    ok(not hasattr(S, "_predibujar_recortes_fondo") and "_predibujar_recortes_fondo(tid" not in srv,
+       "al terminar el pedido ya no se mandan 128 recortes por mesa al pool del visor (la pantalla no los pide desde el 09-18)")
+    ok(not hasattr(S, "_RECORTE_W") and not hasattr(S, "_recortes_de_pagina"),
+       "…ni quedan sus escalones y cortes")
+    ok(callable(getattr(S, "_predibujar_mesas", None)),
+       "la FOTO de cada mesa (lo que sí se mira) se sigue dejando dibujada con la vista en el servidor")
 
     # ── 6. LA FICHA TÉCNICA: INSTANTÁNEA, CON «NOMBRE» / «00» Y FONDO DETRÁS DEL OBJETO ────
     print("\n6 · 🔴 LA FICHA TÉCNICA")
@@ -207,7 +214,8 @@ def main():
     ok('"archivo": "FICHA_TECNICA.pdf"' in srv and "w=_FICHA_W, etiqueta=\"ficha\"" in srv,
        "…y la ficha se deja dibujada al final del pedido (no al abrir la pestaña)")
     _g = inspect.getsource(S._molde_guia_ficha)
-    ok('"nombre": "NOMBRE", "numero": "00"' in _g and 'fila[_cid] = "NOMBRE"' in _g and ".get(\"muestra\")" not in _g,
+    # la muestra es «TEXTO»/«00» desde 2026-10-06 (el campo Nombre se llama Texto en la pantalla)
+    ok('"nombre": "TEXTO", "numero": "00"' in _g and 'fila[_cid] = "TEXTO"' in _g and ".get(\"muestra\")" not in _g,
        "el molde guía lleva «NOMBRE» y «00» como el paso Arte, nunca el nombre/número de una fila del pedido")
     ok("pers = MP.extraer_personalizacion(pl if _cbf else arte)" in _g,
        "…y con la personalización real del arte (con `pers` vacío la pieza quedaba SIN número)")

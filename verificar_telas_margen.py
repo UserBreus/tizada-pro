@@ -11,7 +11,8 @@ Lo que se prueba, sobre un catálogo DE MENTIRA (nunca el del usuario):
   3. una tela con valor a mano lo usa TAL CUAL, no importa el margen — y queda marcada `manual`;
   4. quitar el valor a mano (None) la devuelve al automático;
   5. cambiar el margen recalcula las telas automáticas y NO toca las puestas a mano;
-  6. sin medida del sistema se parte de 180 y también se resta el margen;
+  6. sin medida del sistema la tela NO se usa: queda aparte, sin mesa y no elegible (regla del
+     usuario 2026-09-28 — antes se le inventaba 180 − margen); con una mesa a mano, sí;
   7. la tizada lee `ancho_cm` de `cat['telas']` (`_config_produccion`): lo que sale de acá es
      lo que nestea — no hay otro camino.
 
@@ -84,10 +85,17 @@ S._telas_aplicar_ancho(cat, "45", 0.2)
 ok(_mesa(cat, 45)["ancho_cm"] == 1.0, "una mesa a mano por debajo de 1 cm tendría que quedar en 1")
 S._telas_aplicar_ancho(cat, "45", None)
 
-# ── 6. sin medida del sistema: 180 − margen ──────────────────────────────────────────────────
+# ── 6. sin medida del sistema: NO SE USA (regla del usuario 2026-09-28) ──────────────────────
 S._telas_aplicar_margen(cat, 3)
-ok(_mesa(cat, 46)["ancho_cm"] == 177.0, f"sin medida tendría que partir de 180 − 3 = 177, dio {_mesa(cat, 46)['ancho_cm']}")
-print(f"  · sin medida del sistema → {_mesa(cat, 46)['ancho_cm']}")
+_sm = _mesa(cat, 46)
+ok(_sm["ancho_cm"] is None and _sm["sin_medida"] and not _sm["usable"],
+   f"sin medida no se le inventa una mesa y no se puede elegir (ancho {_sm['ancho_cm']}, usable {_sm['usable']})")
+S._telas_aplicar_ancho(cat, "46", 170)
+_sm = _mesa(cat, 46)
+ok(_sm["ancho_cm"] == 170.0 and not _sm["sin_medida"] and _sm["usable"],
+   f"con una mesa puesta a mano sí se usa ({_sm['ancho_cm']}, usable {_sm['usable']})")
+S._telas_aplicar_ancho(cat, "46", None)
+print(f"  · sin medida del sistema → aparte, sin mesa (a mano 170 → se usa)")
 
 # ── 7. la tizada lee exactamente esto ────────────────────────────────────────────────────────
 import inspect  # noqa: E402
@@ -106,4 +114,4 @@ if FALLOS:
     for f in FALLOS:
         print("   ·", f)
     sys.exit(1)
-print("OK mesa: tela − margen (3 cm configurable); el valor a mano manda y se puede quitar")
+print("OK mesa: tela − margen (3 cm configurable); el valor a mano manda y se puede quitar; sin medida no se usa")

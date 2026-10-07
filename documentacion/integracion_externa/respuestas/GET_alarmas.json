@@ -356,8 +356,8 @@
     "codigo": "arte-mesa-vacia",
     "etapa": "arte",
     "frena": true,
-    "que_hacer": "Revisar esa mesa del arte.",
-    "que_significa": "Una mesa asignada a una pieza no tiene diseño."
+    "que_hacer": "Revisar esa mesa del arte o escribirle el nombre de la pieza en la capa «guias».",
+    "que_significa": "Una mesa asignada a una pieza SIN nombre en la guía no tiene diseño (las mesas con el nombre de su pieza no se revisan: manda el nombre, sea del color que sea)."
    },
    {
     "codigo": "arte-texto-vivo",
@@ -377,8 +377,8 @@
     "codigo": "arte-campo-sin-capa",
     "etapa": "arte",
     "frena": false,
-    "que_hacer": "Agregar la capa «Nombre» / «Número» al arte.",
-    "que_significa": "La planilla trae nombre o número y el arte no tiene esa capa: no se estampa."
+    "que_hacer": "Agregar la capa «Texto» (o «Nombre») / «Número» al arte.",
+    "que_significa": "La planilla trae texto o número y el arte no tiene esa capa: no se estampa."
    },
    {
     "codigo": "arte-observado",
@@ -392,7 +392,7 @@
     "etapa": "arte",
     "frena": true,
     "que_hacer": "Mandarla en `tipografias`, o pedir `si_falta_tipografia: \"predeterminada\"`.",
-    "que_significa": "El nombre o el número usa una tipografía que no está en el catálogo ni vino en el paquete."
+    "que_significa": "El texto o el número usa una tipografía que no está en el catálogo ni vino en el paquete."
    },
    {
     "codigo": "tipografia-reemplazada",
@@ -413,14 +413,14 @@
     "etapa": "tizada",
     "frena": false,
     "que_hacer": "Acortar el texto o cambiar el margen en el molde.",
-    "que_significa": "Un nombre o número no entra en la pieza y sale más chico."
+    "que_significa": "Un texto o número no entra en la pieza y sale más chico."
    },
    {
     "codigo": "texto-ilegible",
     "etapa": "tizada",
     "frena": false,
     "que_hacer": "Acortar el texto.",
-    "que_significa": "Un nombre o número sale tan chico que puede no leerse."
+    "que_significa": "Un texto o número sale tan chico que puede no leerse."
    },
    {
     "codigo": "piezas-en-blanco",

@@ -134,6 +134,14 @@ const TAREAS = {
     const r = dxfAPdf(mupdf, bytes)
     return { valor: { pdf: r.pdf, resumen: r.resumen, omitidas: r.omitidas || null }, transfer: [r.pdf.buffer] }
   },
+  /** MOLDE A MEDIDA (MAPA 623): el PDF del rectángulo + su resumen (forma DXF: el nombre de la
+   *  pieza viaja en `nombres` y el alta lo pone solo). */
+  async a_medida_pdf({ anchoM, altoM, pieza }) {
+    await cargar()
+    const { pdfMoldeAMedida } = await import('./molde/aMedida.js')
+    const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza })
+    return { valor: { pdf: r.pdf, resumen: r.resumen }, transfer: [r.pdf.buffer] }
+  },
   /**
    * El alta del molde abierto (`abrir`) SIN diseño adentro: registro por etiquetas (o manual con
    * los nombres del DXF), la detección del visor por talle y el lienzo de todas, y el paquete

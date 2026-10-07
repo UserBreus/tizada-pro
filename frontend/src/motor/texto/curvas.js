@@ -290,7 +290,6 @@ export class FuenteCurvas {
     this.upem = this.font.tables.head.unitsPerEm
     this._cache = new Map()
     this._cap = null
-    this._capCalculando = false
     this.respaldo = respaldo
     this.sustituidos = []
     this._nombres = null
@@ -370,27 +369,31 @@ export class FuenteCurvas {
     return null
   }
 
+  // 🔴 PRIMERO LA «H» DIBUJADA (la PROPIA, nunca la prestada), después el `sCapHeight` que declara
+  // la fuente, y si no 0,72 (MAPA 624): hay fuentes que declaran mal su altura de mayúscula
+  // (ClubAmerica 700 con una H de 730) y la letra salía más alta que lo configurado. Gemelo:
+  // `cap_ratio` de `texto_curvas.py`.
   get capRatio() {
     if (this._cap === null) {
-      if (this._capCalculando) return 0.72          // re-entrada (medir la H prestada): lo que Python termina usando
-      this._capCalculando = true
       let r = null
-      try {
-        const os2 = this.font.tables.os2
-        if (!os2) throw new Error('sin OS/2')
-        const cap = os2.sCapHeight
-        if (cap && cap > 0) r = cap / this.upem
-      } catch (e) { /* como el `except: pass` */ }
-      if (!r) {
-        try {                                        // medir la H real (su bbox vertical)
-          const [ops] = this._glifo('H')
+      const gidH = this.cmap.get('H'.codePointAt(0)) ?? null
+      if (gidH !== null) {
+        try {                                        // la H real (su bbox vertical), sin respaldo
+          const ops = this._registros(gidH)
           const ys = []
           for (const [, args] of ops) for (const a of (args || [])) if (Array.isArray(a) && a.length === 2) ys.push(a[1])
-          if (ys.length) r = (Math.max(...ys) - Math.min(...ys)) / this.upem
-        } catch (e) { /* pass */ }
+          if (ys.length && Math.max(...ys) > Math.min(...ys)) r = (Math.max(...ys) - Math.min(...ys)) / this.upem
+        } catch (e) { r = null }
+      }
+      if (!r) {
+        try {
+          const os2 = this.font.tables.os2
+          if (!os2) throw new Error('sin OS/2')
+          const cap = os2.sCapHeight
+          if (cap && cap > 0) r = cap / this.upem
+        } catch (e) { /* como el `except: pass` */ }
       }
       this._cap = r || 0.72
-      this._capCalculando = false
     }
     return this._cap
   }

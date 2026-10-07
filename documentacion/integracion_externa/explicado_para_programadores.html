@@ -235,9 +235,9 @@
     <tr><td>Arte</td><td>El archivo del diseño (.ai de Illustrator o .pdf), dibujado sobre la plantilla.</td><td><code>arte</code> (archivo en el .zip)</td><td>Un asset gráfico</td></tr>
     <tr><td>Mesa de trabajo (del arte)</td><td>Un rectángulo del archivo de diseño, uno por pieza. Su nombre («Frente») le dice a TIZADA de qué pieza es ese dibujo.</td><td>la capa <code>guias</code> del arte</td><td>Una clave que asocia dibujo ↔ pieza</td></tr>
     <tr><td>Plantilla (base)</td><td>Un archivo vacío para el diseñador: las mesas ya creadas con su nombre, las capas y el contorno de cada pieza.</td><td><code>POST /plantillas</code></td><td>Un scaffold / boilerplate</td></tr>
-    <tr><td>Capas</td><td>Las del arte: <b>diseño</b> (el dibujo), <b>Editable …</b> (logos que se pueden mover), <b>Nombre</b> y <b>Número</b> (dónde va el texto de cada jugador), <b>guias</b> (nombres y contornos).</td><td>—</td><td>Las capas de un PSD</td></tr>
-    <tr><td>Nombre y número</td><td>El texto que cambia en cada prenda: «PÉREZ 10». TIZADA lo estampa con la tipografía del diseño.</td><td>columnas de la planilla</td><td>Datos variables de una plantilla de mail</td></tr>
-    <tr><td>Planilla</td><td>Una fila por prenda: talle, nombre, número, cantidad…</td><td><code>planilla[]</code></td><td>Las líneas del pedido</td></tr>
+    <tr><td>Capas</td><td>Las del arte: <b>diseño</b> (el dibujo), <b>Editable …</b> (logos que se pueden mover), <b>Texto</b> (o <b>Nombre</b>) y <b>Número</b> (dónde va el texto de cada jugador), <b>guias</b> (nombres y contornos).</td><td>—</td><td>Las capas de un PSD</td></tr>
+    <tr><td>Texto y número</td><td>El texto que cambia en cada prenda: «PÉREZ 10». TIZADA lo estampa con la tipografía del diseño.</td><td>columnas de la planilla</td><td>Datos variables de una plantilla de mail</td></tr>
+    <tr><td>Planilla</td><td>Una fila por prenda: talle, texto, número, cantidad…</td><td><code>planilla[]</code></td><td>Las líneas del pedido</td></tr>
     <tr><td>Tela</td><td>El material, en rollos de un ancho fijo (1,60 m, 1,83 m…).</td><td><code>tela</code> (id de <code>/telas</code>)</td><td>El contenedor donde se empaqueta</td></tr>
     <tr><td>Tizada</td><td>Todas las piezas del pedido acomodadas en el ancho de la tela, con su diseño ya puesto.</td><td>los PDF del resultado</td><td>El resultado de un bin packing</td></tr>
     <tr><td>Mesa (de la tizada)</td><td>Un tramo de tela que se imprime de una vez. Un pedido grande tiene varias mesas.</td><td><b>un PDF por mesa</b></td><td>Una página / un lote de impresión</td></tr>
@@ -245,6 +245,7 @@
     <tr><td>TPU · Bordado · DTF</td><td>Partes que NO se imprimen con el resto (se pegan o se bordan aparte): en su lugar va una cruz de referencia.</td><td><code>editables</code> + proceso</td><td>Un flag «no renderizar acá»</td></tr>
     <tr><td>RIP</td><td>El programa de la impresora. Recibe los PDF de la tizada tal cual.</td><td>—</td><td>El driver de la impresora</td></tr>
     <tr><td>Conector</td><td>Un programa chico que se instala una vez en la PC del diseñador y une TIZADA con Illustrator o CorelDRAW.</td><td><code>GET /conectores</code></td><td>Un plugin / agente local</td></tr>
+    <tr><td>Molde a medida</td><td>Un rectángulo de una sola pieza (banderas). No tiene talles: el pedido dice ancho y alto en metros. Su margen (dobladillo) sale punteado en la plantilla.</td><td><code>a_medida</code> + <code>medida</code></td><td>Un producto con dimensiones parametrizables</td></tr>
   </table>
 </section>
 
@@ -361,12 +362,12 @@
     <tr><td><code>variable-desconocida</code></td><td>La prenda elegida no existe en TIZADA.</td><td>Elegirla de <code>GET /variables</code>.</td></tr>
     <tr><td><code>talle-inexistente</code></td><td>Una fila pide un talle que esa prenda no tiene.</td><td>Usar los talles de <code>GET /moldes/{código}</code>.</td></tr>
     <tr><td><code>tela-no-permitida</code></td><td>Esa prenda no se corta en esa tela.</td><td>Elegir una de las telas del molde.</td></tr>
+    <tr><td><code>medida-falta</code> · <code>tela-no-entra</code></td><td>Prenda a medida sin su medida, o más grande que el ancho de la tela.</td><td>Mandar <code>medida</code> en metros; elegir una tela más ancha.</td></tr>
     <tr><td><code>arte-sin-mesas-de-pieza</code></td><td>El archivo del diseño no trae una mesa por pieza con su nombre (no se armó sobre la plantilla).</td><td>Pedir la plantilla (§5) y dibujar encima.</td></tr>
     <tr><td><code>arte-texto-vivo</code></td><td>El diseño tiene textos sin convertir a curvas.</td><td>Illustrator: Texto › Crear contornos.</td></tr>
-    <tr><td><code>tipografia-falta</code></td><td>El nombre/número usa una letra que TIZADA no tiene.</td><td>Mandar el .ttf/.otf en el paquete.</td></tr>
+    <tr><td><code>tipografia-falta</code></td><td>El texto/número usa una letra que TIZADA no tiene.</td><td>Mandar el .ttf/.otf en el paquete.</td></tr>
     <tr><td><code>piezas-en-blanco</code></td><td>Hay piezas que se fabrican y el diseño no cubre: saldrían blancas.</td><td>Agregarlas al arte, o pedir <code>si_piezas_en_blanco: "seguir"</code>.</td></tr>
     <tr><td><code>texto-se-achica</code></td><td>Un nombre muy largo no entra y sale más chico (aviso).</td><td>Avisarle al vendedor.</td></tr>
-    <tr><td><code>talles-invalidos</code></td><td>(plantilla) El modo de talles o un rango no se entiende.</td><td>Ver <code>talles</code> en §5.</td></tr>
   </table>
   <div class="caja c-info"><div class="t">Para probar sin miedo</div>
     <p><code>POST /pedidos/validar</code> revisa el pedido SIN guardarlo: úsenlo cada vez que el vendedor cambia algo, y muestren las alarmas antes de mandar. Hay un <b>sistema de ventas de prueba</b> (en el repositorio de integración) que hace todo este recorrido con pantalla, para copiar.</p></div>

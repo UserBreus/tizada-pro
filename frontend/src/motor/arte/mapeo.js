@@ -407,7 +407,8 @@ export function validarArte(mupdf, bytesArte, bytesPlantilla, fuentes) {
       } finally { pg.destroy() }
     }
     checks.push({ nombre: 'Tintas planas en el PDF', ok: true,
-                  detalle: [...tintas].map(([t, n]) => `${t} (${n} mesas)`).join(', ') || 'ninguna (solo proceso)' })
+                  // por NOMBRE, como `sorted` de Python (allá es un set: sin ordenar, cada lado las listaba distinto)
+                  detalle: ordenarPy([...tintas.keys()]).map((t) => `${t} (${tintas.get(t)} mesas)`).join(', ') || 'ninguna (solo proceso)' })
 
     const d2 = abrir(mupdf, bytesArte)
     const planas = []
@@ -432,7 +433,7 @@ export function validarArte(mupdf, bytesArte, bytesPlantilla, fuentes) {
     const pers = extraerPersonalizacion(mupdf, bytesArte)
     const nPers = Object.keys(pers).length
     checks.push({ nombre: 'Placeholders de personalización', ok: nPers > 0,
-                  detalle: nPers ? `${nPers} mesas de espalda` : 'no encontrados (pedido sin nombre/número)' })
+                  detalle: nPers ? `${nPers} mesas de espalda` : 'no encontrados (pedido sin texto/número)' })
 
     return { aprobado: !!ok, checks, tintas: Object.fromEntries(tintas), fuentes_requeridas: requeridas,
              fuentes_faltantes: ordenarPy(faltan.map(([n]) => n)), personalizacion: pers }
@@ -486,12 +487,20 @@ export function validarArteSeparado(mupdf, bytes, registro, fuentes, mapeo, vari
       ok = false
     }
 
+    // 🔴 MANDA EL NOMBRE, NO EL COLOR (regla del usuario 2026-10-07): una mesa cuya guía nombra
+    // una pieza ES la mesa de esa pieza, sea un relleno liso o tenga dibujo. `mesaTieneDiseno`
+    // mide la variación de color y un costadillo todo rosa salía «vacío» (el negro pasaba por
+    // casualidad, por el borde de la miniatura). Sólo se revisan las mesas SIN nombre.
+    // ⚠️ Idéntico en `motor_pedido.validar_arte_separado`.
+    let nombradas
+    try { nombradas = new Set(Object.values(mapeoPorNombre(mupdf, bytes, registro)).map((m) => Math.trunc(Number(m)))) } catch { nombradas = new Set() }
     const vaciasSet = new Set()
     const cacheDiseno = new Map()
     for (const p of piezas) {
       if (!mapeo[p]) continue
       const m = Math.trunc(Number(mapeo[p]))
       if (!(1 <= m && m <= nDoc)) continue
+      if (nombradas.has(m)) continue
       if (!cacheDiseno.has(m)) {
         const pg = doc.loadPage(m - 1)
         try { cacheDiseno.set(m, mesaTieneDiseno(mupdf, pg)) } finally { pg.destroy() }

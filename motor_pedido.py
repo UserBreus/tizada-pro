@@ -2015,7 +2015,9 @@ def validar_arte(path_arte, path_plantilla, carpeta_fuentes):
                 tintas.setdefault(t, 0)
                 tintas[t] += 1
     checks.append({"nombre": "Tintas planas en el PDF", "ok": True,
-                   "detalle": ", ".join(f"{t} ({n} mesas)" for t, n in tintas.items()) or "ninguna (solo proceso)"})
+                   # por NOMBRE: `_separaciones` es un set y su orden cambia de corrida en corrida (el
+                   # navegador las listaba en otro orden, 2026-10-06). Gemelo: `arte/mapeo.js`.
+                   "detalle": ", ".join(f"{t} ({tintas[t]} mesas)" for t in sorted(tintas)) or "ninguna (solo proceso)"})
 
     d2 = _abrir(path_arte)
     for c in d2.layer_ui_configs():
@@ -2039,7 +2041,7 @@ def validar_arte(path_arte, path_plantilla, carpeta_fuentes):
 
     pers = extraer_personalizacion(path_arte)
     checks.append({"nombre": "Placeholders de personalización", "ok": bool(pers),
-                   "detalle": f"{len(pers)} mesas de espalda" if pers else "no encontrados (pedido sin nombre/número)"})
+                   "detalle": f"{len(pers)} mesas de espalda" if pers else "no encontrados (pedido sin texto/número)"})
 
     return {"aprobado": bool(ok), "checks": checks, "tintas": tintas,
             "fuentes_requeridas": requeridas, "fuentes_faltantes": sorted(faltan_f),
@@ -2603,8 +2605,12 @@ def _memo_arte(nombre, path_arte, calc):
 # el estampado caía a sRGB→CMYK y el rojo 0/99,6/100/0,2 salía 0/87/85/7 (2026-09-10).
 # La capa (Nombre, Número…) no depende de la fuente, así que es la clave que manda.
 _CLAVE_CAPA = "\x00capa:"
+# «texto» (2026-10-06, pedido del usuario): la capa del arte puede llamarse Nombre o Texto (en
+# cualquier mayúscula) y es el MISMO campo; en la pantalla se llama «Texto». La clave interna sigue
+# siendo `nombre` (planillas, pedidos y la API la usan). Gemelos: `CAMPO_ALIAS` de
+# `arte/personalizacion.js` y de `pieza/estampar.js`.
 _CAMPO_ALIAS = {"00": "numero", "nro": "numero", "num": "numero",
-                "jugador": "nombre", "apellido": "nombre"}
+                "jugador": "nombre", "apellido": "nombre", "texto": "nombre"}
 
 
 def extraer_personalizacion(path_arte, campos=None):
@@ -2617,7 +2623,14 @@ def extraer_personalizacion(path_arte, campos=None):
     # `_pasadas_personalizable`). El memo en disco va por archivo, no por versión del código: sin
     # cambiarle el nombre, un arte ya leído seguía devolviendo el número SIN su borde.
     # «_v3» (2026-10-01): los placeholders traen `cap` (altura de la mayúscula de su tipografía).
-    return _memo_arte("personalizacion_v3", path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
+    # «_v4» (2026-10-06): una capa «Texto» es el campo nombre (`_CAMPO_ALIAS`).
+    return _memo_arte(MEMO_PERSONALIZACION, path_arte, lambda: _extraer_personalizacion_crudo(path_arte, None))
+
+
+# El nombre del memo en disco de la personalización: lo usan ESTE módulo y `servidor.py` (`_arte_calc`).
+# Va por archivo, no por versión del código: si cambia lo que devuelve, cambia el nombre. Hasta el
+# 2026-10-06 el servidor leía «personalizacion_v2» mientras el motor escribía «_v3» (dos memos).
+MEMO_PERSONALIZACION = "personalizacion_v4"
 
 
 def alturas_de_pagina(page):
@@ -4273,7 +4286,21 @@ def validar_arte_separado(path_arte, registro_molde, carpeta_fuentes, mapeo, var
         checks.append({"nombre": "Mesas de arte válidas", "ok": False, "detalle": "; ".join(fuera)})
         ok = False
 
+    # 🔴 MANDA EL NOMBRE, NO EL COLOR (regla del usuario 2026-10-07). `_mesa_tiene_diseno` mide la
+    # VARIACIÓN de color de una miniatura: un relleno liso (un costadillo todo rosa o todo negro)
+    # da ~0 y salía «mesa vacía» aunque fuera el diseño correcto. Encima pasaba o no por CASUALIDAD:
+    # el borde de la miniatura se mezcla con el blanco del fondo, y con un color oscuro ese borde
+    # sumaba contraste (negro «pasaba», rosa no — medido con «Camiseta Goes 2026 PRUEBA 1/2.ai»).
+    # En la pantalla era sólo un aviso, pero el pedido EXTERNO lo frena (`arte-mesa-vacia`).
+    # Si la guía de la mesa nombra una pieza, ESA es la mesa de la pieza, sea del color que sea:
+    # no se revisa. La revisión queda para las mesas SIN nombre (asignadas a mano / mapeo fijo).
+    # ⚠️ Idéntico en `frontend/src/motor/arte/mapeo.js validarArteSeparado`.
+    try:
+        nombradas = {int(m) for m in mapeo_por_nombre(path_arte, registro_molde).values()}
+    except Exception:
+        nombradas = set()
     vacias = sorted({int(mapeo[p]) for p in piezas if mapeo.get(p) and 1 <= int(mapeo[p]) <= len(doc)
+                     and int(mapeo[p]) not in nombradas
                      and not _mesa_tiene_diseno(doc, int(mapeo[p]))})
     checks.append({"nombre": "Las mesas asignadas tienen diseño", "ok": not vacias,
                    "detalle": "todas con diseño" if not vacias else f"mesas vacías: {vacias}"})
@@ -4374,7 +4401,8 @@ def pers_con_limite(pers, limite_texto):
     out = _cp.deepcopy(pers)
     for _m, campos in out.items():
         for campo, pl in (campos or {}).items():
-            cfg = limite_texto.get(clave_campo(campo)) if isinstance(pl, dict) else None
+            # «*» = el límite de todo campo sin uno propio (el margen del molde a medida, MAPA 624)
+            cfg = (limite_texto.get(clave_campo(campo)) or limite_texto.get("*")) if isinstance(pl, dict) else None
             if not cfg:
                 continue
             mg = None
@@ -5755,7 +5783,8 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
     return _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso, procesos=procesos)
 
 
-def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso=None, prefijo="", procesos=None):
+def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, total, progreso=None, prefijo="", procesos=None,
+                        validar=True):
     """Anida y compone las piezas (ya generadas) por TELA → una hoja por tela.
     Todas las piezas de una misma tela van JUNTAS (sin importar de qué molde son)."""
     cfg = {"ancho_cm": 180, "altura_max_cm": 500, "espaciado_cm": 0.5,
@@ -5908,15 +5937,10 @@ def _nestear_y_componer(piezas_por_tela, config_nesting, telas_cfg, salida, t0, 
                       "aprovechamiento": aprov,
                       "previews": prevs,
                       **({"mesas": _mesas} if _mesas else {})})   # COPIA {fila, copias} / TALLES {grupo, talles} por mesa
-    telas_spacing = {}
-    for h in hojas:
-        tela = h["tela"]
-        cfg_t = dict(cfg)
-        if telas_cfg and tela in telas_cfg:
-            cfg_t.update(telas_cfg[tela])
-        telas_spacing[tela] = float(cfg_t.get("espaciado_cm", 0.5)) * 10.0
     _t_v = time.time()
-    validaciones = validar_salida(salida, hojas, telas_spacing)
+    # `validar=False`: el que llama va a tocar la hoja (aplanado para el RIP, perfil) y la valida
+    # DESPUÉS con `validar_hojas_finales`, sobre lo que de verdad va al RIP (MAPA 624).
+    validaciones = validar_salida(salida, hojas, _espaciados_por_tela(hojas, config_nesting, telas_cfg)) if validar else []
     _crono["validar"] += time.time() - _t_v
     # Queda escrito en la ventana del servidor: cuando un pedido tarda de más, se ve en QUÉ paso
     # se fue el tiempo, en vez de tener que adivinar. (El contador de piezas se imprime en
@@ -5953,7 +5977,7 @@ def generar_pedido_multi(molds, carpeta_fuentes, salida, config_nesting=None,
 
 
 def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
-                          telas_cfg=None, progreso=None, procesos=None):
+                          telas_cfg=None, progreso=None, procesos=None, validar=True):
     """Genera por GRUPOS de tizada. `grupos` = lista de {nombre, moldes}, donde
     `moldes` es una lista de dicts de molde (como en generar_pedido_multi). Los
     moldes de un MISMO grupo se combinan (por tela); grupos distintos NO se mezclan
@@ -5990,7 +6014,7 @@ def generar_pedido_grupos(grupos, carpeta_fuentes, salida, config_nesting=None,
                 acc.setdefault(tela, []).extend(lst)
                 total += len(lst)
         res_g = _nestear_y_componer(acc, config_nesting, telas_cfg, salida, t0, total,
-                                    progreso, prefijo=f"g{gi}_", procesos=procesos)
+                                    progreso, prefijo=f"g{gi}_", procesos=procesos, validar=validar)
         for h in res_g["hojas"]:
             h["grupo"] = grupo.get("nombre", f"Grupo {gi + 1}")
             h["moldes"] = grupo.get("nombres", [])
@@ -6032,6 +6056,27 @@ def _barrer_fuentes(path):
 
 
 # ════════════════ VALIDACIONES DE SALIDA ════════════════
+def _espaciados_por_tela(hojas, config_nesting, telas_cfg):
+    """El espaciado (mm) con que se acomodó cada tela: el del nesting, o el propio de la tela."""
+    base = float((config_nesting or {}).get("espaciado_cm", 0.5))
+    out = {}
+    for h in hojas:
+        tela = h["tela"]
+        esp = base
+        if telas_cfg and tela in telas_cfg and "espaciado_cm" in (telas_cfg[tela] or {}):
+            esp = float(telas_cfg[tela]["espaciado_cm"])
+        out[tela] = esp * 10.0
+    return out
+
+
+def validar_hojas_finales(carpeta, hojas, config_nesting=None, telas_cfg=None):
+    """`validar_salida` sobre las hojas YA aplanadas para el RIP y con su perfil: lo que va a la
+    impresora. Es lo que hace el navegador (`obrero.worker.js` `hoja` → `validarHoja` después de
+    `aplanarParaRip` y del perfil). Antes el servidor validaba la hoja de ANTES del aplanado y en el
+    camino A contaba 2 grupos que el aplanado ya había desarmado (16 streams contra 14, MAPA 624)."""
+    return validar_salida(carpeta, hojas, _espaciados_por_tela(hojas, config_nesting, telas_cfg))
+
+
 def validar_salida(carpeta, hojas, telas_spacing):
     res = []
     for h in hojas:

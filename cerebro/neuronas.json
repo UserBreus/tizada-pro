@@ -254,6 +254,10 @@
         [
           "frontend/src/motor/calculos.js",
           "export function instalarCalculos"
+        ],
+        [
+          "correr_contratos.py",
+          "TIZADA_SOLO_NAVEGADOR=os.environ.get(\"TIZADA_SOLO_NAVEGADOR\", \"0\")"
         ]
       ],
       "palabras": [
@@ -268,17 +272,24 @@
       "reglas": [
         "Con `X-Calculos: 200` se contesta 200 + `X-Calcular: 1` + no-store; sin la cabecera, 428 (otros clientes).",
         "La cabecera X-Calculos SÓLO a la misma origen (a otro host dispara preflight de CORS: rompe el puente de Illustrator).",
-        "Sin tope de vueltas: lo que corta es que el mismo cálculo se pida 3 veces (bucle)."
+        "Sin tope de vueltas: lo que corta es que el mismo cálculo se pida 3 veces (bucle).",
+        "Los contratos prueban la REFERENCIA en Python: `correr_contratos.py` les pasa `TIZADA_SOLO_NAVEGADOR=0` por defecto (MAPA 624); el que prueba el modo prendido lo pone él (`verificar_navegador_solo.py`). Corriendo uno suelto, ponerlo a mano."
       ],
       "cicatrices": [
         "MAPA 551: tope de 25 vueltas cortaba guías con muchos talles.",
-        "MAPA 591: 428 rojos en la consola."
+        "MAPA 591: 428 rojos en la consola.",
+        "2026-10-06 (MAPA 624): la suite tenía ~10 rojos por `_FaltaCalculo`/409 (contratos sin la variable) y 3 contratos que seguían esperando poder apagar «no calcula» o que el servidor leyera un molde pelado: estuvieron rojos desde el 2026-09-24.",
+        "2026-10-06 (MAPA 624): contratos con dobles de `db` sin `filas` (`verificar_config_con_diseno.py`, `verificar_navegador_subida_a.py`), con dobles de firma vieja (`extraer_editables` sin `con_thumb` en `verificar_marcas_proceso.py`) y atados a datos del usuario (`verificar_color_nativo_cid.py`, el arte del GOLERO cambió): se corrigieron sin tocar lo que miden."
       ],
-      "contratos": [],
+      "contratos": [
+        "verificar_navegador_solo.py",
+        "verificar_monitor.py"
+      ],
       "mapa": [
         528,
         551,
-        591
+        591,
+        624
       ],
       "memoria": "servidor-calcula-pendiente.md",
       "conexiones": [
@@ -421,14 +432,16 @@
         "Una tela de baja no se borra ni pierde su mesa."
       ],
       "cicatrices": [
-        "MAPA 587: _asig_de(dslug) con el slug del arte de reemplazo perdía las telas elegidas."
+        "MAPA 587: _asig_de(dslug) con el slug del arte de reemplazo perdía las telas elegidas.",
+        "2026-10-06 (MAPA 624): `verificar_telas_margen.py` seguía esperando 180 − 3 para una tela sin medida (regla vieja); desde el 2026-09-28 sin medida no se usa."
       ],
       "contratos": [
         "verificar_telas_margen.py"
       ],
       "mapa": [
         575,
-        587
+        587,
+        624
       ],
       "memoria": "telas-registro-grupos-pedido.md",
       "conexiones": [
@@ -487,6 +500,10 @@
         [
           "frontend/src/App.jsx",
           "__repo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const repoOn = repoModo"
         ]
       ],
       "palabras": [
@@ -496,12 +513,16 @@
         "planilla-repo"
       ],
       "reglas": [
-        "La guía de la ficha NO se achica por el repo (piezas_solo: null en la guía)."
+        "La guía de la ficha NO se achica por el repo (piezas_solo: null en la guía).",
+        "La columna PIEZAS de Repo es POR PLANILLA: `plantilla.repo` = 'no' | 'boton' (por defecto) | 'siempre' (`col-repo-modo`). En el pedido `repoOn` = lo que dice la planilla o el botón (sólo con 'boton'); con 'no' el servidor ignora `__repo` (MAPA 624)."
       ],
       "cicatrices": [],
-      "contratos": [],
+      "contratos": [
+        "verificar_planilla_cantidad_repo.py"
+      ],
       "mapa": [
-        578
+        578,
+        624
       ],
       "memoria": "repo-reposicion.md",
       "conexiones": [
@@ -672,7 +693,8 @@
       "reglas": [
         "Un test NUNCA toca MSSQL (TIZADA_DATOS no aísla la base: reemplazar el módulo db).",
         "Reciclado de pyodbc apagado a propósito (MAPA 549): no prenderlo para «acelerar».",
-        "Para MODIFICAR el catálogo: _cargar_catalogo_para_editar(), nunca _cargar_catalogo()."
+        "Para MODIFICAR el catálogo: _cargar_catalogo_para_editar(), nunca _cargar_catalogo().",
+        "Un doble de `db` en un contrato que llama un GET tiene que contestar `filas(\"SELECT legacy_id, registro_rev FROM producto\")` (las revisiones se leen todas juntas, MAPA 582); un doble que devuelve None da 422 «'NoneType' object is not iterable»."
       ],
       "cicatrices": [
         "MAPA 582: cada GET /api/productos abría 14 conexiones (0,43 s c/u con la PC ocupada)."
@@ -686,7 +708,8 @@
       "mapa": [
         386,
         549,
-        582
+        582,
+        624
       ],
       "memoria": "test-no-toca-mssql.md",
       "conexiones": [
@@ -806,6 +829,18 @@
         [
           "frontend/src/motor/arte/preparar.js",
           "zipSync"
+        ],
+        [
+          "frontend/src/motor/arte/mapeo.js",
+          "ordenarPy([...tintas.keys()])"
+        ],
+        [
+          "frontend/src/motor/arte/mapeo.js",
+          "if (nombradas.has(m)) continue"
+        ],
+        [
+          "motor_pedido.py",
+          "and int(mapeo[p]) not in nombradas"
         ]
       ],
       "palabras": [
@@ -816,9 +851,13 @@
       ],
       "reglas": [
         "El mapeo del arte se maneja POR VARIABLE.",
-        "El nombre de la capa «guías» manda para colocar cada diseño."
+        "El nombre de la capa «guías» manda para colocar cada diseño.",
+        "«Tintas planas en el PDF» del arte se listan POR NOMBRE en los dos gemelos (`validar_arte` ↔ `arte/mapeo.js`): Python las juntaba en un set y el orden cambiaba por corrida (MAPA 624).",
+        "«Mesa vacía» la decide el NOMBRE, no el color: una mesa cuya guía nombra una pieza no se revisa con `mesaTieneDiseno`/`_mesa_tiene_diseno` (variación de color); sólo las mesas SIN nombre. Igual en los dos gemelos (`validar_arte_separado` ↔ `arte/mapeo.js validarArteSeparado`)."
       ],
-      "cicatrices": [],
+      "cicatrices": [
+        "2026-10-07: un costadillo de relleno liso (rosa) salía «mesas vacías: [7, 8]» y el pedido externo se frenaba con `arte-mesa-vacia`; el negro «pasaba» sólo porque el borde de la miniatura de 0,04 se mezcla con el blanco del fondo y suma contraste. Arreglado: las mesas nombradas en la guía no se miden por color."
+      ],
       "contratos": [
         "verificar_navegador_camino_a.py",
         "verificar_navegador_arte.py",
@@ -826,7 +865,8 @@
       ],
       "mapa": [
         492,
-        495
+        495,
+        624
       ],
       "memoria": "camino-a-navegador.md",
       "conexiones": [
@@ -905,6 +945,18 @@
         [
           "frontend/src/App.jsx",
           "generarPedidoEnNavegador"
+        ],
+        [
+          "motor_pedido.py",
+          "def validar_hojas_finales"
+        ],
+        [
+          "motor_pedido.py",
+          "def _espaciados_por_tela"
+        ],
+        [
+          "servidor.py",
+          "MP.validar_hojas_finales("
         ]
       ],
       "palabras": [
@@ -918,22 +970,26 @@
       "reglas": [
         "La tizada NUNCA detrás de un lock/cola general.",
         "Sin plan B en el servidor: si el navegador no puede, se avisa; no se genera en serie en el proceso web.",
-        "El preview no puede matar la tizada (best-effort)."
+        "El preview no puede matar la tizada (best-effort).",
+        "Las VALIDACIONES de la hoja se hacen sobre la hoja FINAL (aplanada para el RIP y con perfil) en los dos motores: navegador `validarHoja` al final de `hoja`; servidor `MP.validar_hojas_finales` en `generar_multi` (el motor con `validar=False`). Validar antes del aplanado cuenta grupos que ya no existen (MAPA 624)."
       ],
       "cicatrices": [
         "MAPA 169: una cola general dejó «Armando la tizada» clavada.",
-        "Tiempos de referencia 4 moldes con diseño: 28-87 s (18-22/09)."
+        "Tiempos de referencia 4 moldes con diseño: 28-87 s (18-22/09).",
+        "2026-10-06 (MAPA 624): `verificar_navegador_tizada_a.py` estaba rojo: sin `TIZADA_SOLO_NAVEGADOR=0` (FaltaCalculo) y con las validaciones del servidor hechas antes del aplanado (16 streams contra 14)."
       ],
       "contratos": [
         "verificar_navegador_tizada.py",
         "verificar_paquete_pedido.py",
-        "verificar_sin_plan_b_en_el_servidor.py"
+        "verificar_sin_plan_b_en_el_servidor.py",
+        "verificar_navegador_tizada_a.py"
       ],
       "mapa": [
         169,
         460,
         491,
-        518
+        518,
+        624
       ],
       "memoria": "pesado-en-el-navegador.md",
       "conexiones": [
@@ -971,22 +1027,26 @@
       ],
       "reglas": [
         "Pixel-idéntico al archivo (misma lista de dibujo, mismo recorte).",
-        "«Dibujando la mesa…» mientras carga: un blanco parece «no se ve»."
+        "«Dibujando la mesa…» mientras carga: un blanco parece «no se ve».",
+        "UNA FOTO POR MESA a una sola calidad (`calidadFoto`, `FOTO_PXCM`; decisión del usuario 2026-09-18): no hay recortes de zoom ni en la pantalla ni pre-dibujados en el servidor (`_predibujar_recortes_fondo` sacado en la 624). La descarga de una mesa es `mesaSuelta` → `paginaComoPdf` (la página, sin rasterizar)."
       ],
       "cicatrices": [
         "MAPA 433: «las mesas tardan o no se ven» era el pool del desplegado abandonado, no la PC.",
-        "MAPA 468: recortes en serie de 4-17 s."
+        "MAPA 468: recortes en serie de 4-17 s.",
+        "2026-10-06 (MAPA 624): el servidor seguía pre-dibujando 128 recortes por mesa que la pantalla dejó de pedir el 09-18, y dos contratos (`verificar_mesa_por_talle.py`, `verificar_visor_display_list.py`) seguían exigiendo los recortes: estuvieron rojos semanas."
       ],
       "contratos": [
         "verificar_navegador_vista.py",
         "verificar_visor_rapido.py",
-        "verificar_visor_display_list.py"
+        "verificar_visor_display_list.py",
+        "verificar_mesa_por_talle.py"
       ],
       "mapa": [
         433,
         468,
         484,
-        503
+        503,
+        624
       ],
       "memoria": "pool-desplegado-no-se-abandona.md",
       "conexiones": [
@@ -1081,6 +1141,34 @@
         [
           "frontend/src/App.jsx",
           "columnasActivasPlanilla"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "moldeSinTalle"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "col-sin-talles"
+        ],
+        [
+          "servidor.py",
+          "_planilla_sin_talle_choca"
+        ],
+        [
+          "servidor.py",
+          "talles_sin_columna"
+        ],
+        [
+          "ficha_tecnica.py",
+          "_titulo_tabla"
+        ],
+        [
+          "frontend/src/motor/ficha/ficha.js",
+          "tituloTabla"
+        ],
+        [
+          "integracion_externa.py",
+          "_columna_talle_que_lee"
         ]
       ],
       "palabras": [
@@ -1092,16 +1180,26 @@
       ],
       "reglas": [
         "Columnas obligatorias se configuran POR PLANILLA.",
-        "Nada de alert/confirm nativos."
+        "Nada de alert/confirm nativos.",
+        "PLANILLA SIN TALLES (MAPA 622): una planilla puede no tener columna de talle (Config › Planillas › «Con talles / Sin talles»). El molde que no lee talle (sin columna, o con la suya apagada: `mapeo_columnas.talle == ''`) pone a cada fila SU único talle; con varios talles NO se adivina: el plan frena 409 «falta la columna de talle», guardar/asignar la planilla 409, y la API da la alarma `talle-sin-columna`. Gemelos: `_sin_col_talle` (servidor) ↔ `moldeSinTalle`/`_talleDeFilaMolde` (App) ↔ `_columna_talle_que_lee` (API).",
+        "La ficha llama a la tabla «PLANILLA DEL PEDIDO» cuando las columnas traen `role` y ninguna es talle; gemelos `_titulo_tabla` (py) ↔ `tituloTabla` (js). Las columnas de la ficha viajan CON `role` (pantalla y API).",
+        "Un pedido sólo con moldes A MEDIDA es «sin talles» (`planillaSinTalles`) y la columna Talle no se muestra (`columnasActivasPlanilla` no la cuenta para un molde a medida) (MAPA 623).",
+        "CANTIDAD por planilla: `mostrar` = 'no' | 'boton' | 'siempre' (selector `col-cantidad-modo`). Con 'no' la fila es UNA prenda (`_traducir_prendas`), el pedido no la muestra, no hay Copia y la API no la publica (MAPA 624)."
       ],
       "cicatrices": [
-        "«Faltan datos en la planilla» salía de 640 porque se le pasaba `ancho={520}` a `Modal`, que sólo lee `maxWidth` (MAPA 596). A `Modal` el ancho va SIEMPRE por `maxWidth`."
+        "«Faltan datos en la planilla» salía de 640 porque se le pasaba `ancho={520}` a `Modal`, que sólo lee `maxWidth` (MAPA 596). A `Modal` el ancho va SIEMPRE por `maxWidth`.",
+        "2026-10-06 (MAPA 622): sin columna de talle la fila salía con talle vacío y el motor salteaba TODAS sus piezas en silencio (`registro[pieza]['']`); y con la columna Talle apagada en el molde la obligatoria por defecto era la columna «» y se descartaban todas las filas."
       ],
       "contratos": [
         "verificar_columnas_obligatorias.py",
-        "verificar_campos_por_molde.py"
+        "verificar_campos_por_molde.py",
+        "verificar_planilla_sin_talles.py",
+        "verificar_planilla_cantidad_repo.py"
       ],
-      "mapa": [],
+      "mapa": [
+        622,
+        624
+      ],
       "memoria": "planilla-estilo-sheets.md",
       "conexiones": [
         "columna-talle",
@@ -1133,7 +1231,8 @@
       ],
       "reglas": [
         "Nunca mandar cabeceras propias al puente (CORS).",
-        "El publicado no ofrece bajar la extensión."
+        "El publicado no ofrece bajar la extensión.",
+        "MOLDE A MEDIDA (MAPA 623): un camino con `punteado` (el margen/dobladillo) NO va al SVG que se vuelve guía; Illustrator lo dibuja aparte con `strokeDashes` (`tizada.jsx`) y Corel con un estilo de rayas (`ArmarCorel.cs`). Conectores: Illustrator 1.27.0, CorelDRAW 1.5.0."
       ],
       "cicatrices": [],
       "contratos": [],
@@ -1224,6 +1323,14 @@
         [
           "frontend/src/motor/rip/aplanar.js",
           "formsVivos"
+        ],
+        [
+          "ficha_tecnica.py",
+          "page.show_pdf_page(dst, src, 0, keep_proportion=True)"
+        ],
+        [
+          "frontend/src/motor/ficha/ficha.js",
+          "ctx.piezasSueltas"
         ]
       ],
       "palabras": [
@@ -1240,20 +1347,25 @@
         "El único píxel admitido es una imagen que ya venga incrustada en el archivo.",
         "Si algo va lento: hacer MENOS trabajo, nunca bajar la calidad.",
         "El render no prueba nada: PyMuPDF ignora clipPath de SVG; calibrar el instrumento.",
-        "Aplanado: un Form con /Group que se pinta con transparencia vigente (SMask, ca/CA < 1, BM no Normal) NO se des-anida; y no se borran los «opacos por defecto» de un ExtGState de un diccionario con transparencia real (son los que la apagan). Gemelos aplanar_rip._flatten ↔ rip/aplanar.js flatten."
+        "Aplanado: un Form con /Group que se pinta con transparencia vigente (SMask, ca/CA < 1, BM no Normal) NO se des-anida; y no se borran los «opacos por defecto» de un ExtGState de un diccionario con transparencia real (son los que la apagan). Gemelos aplanar_rip._flatten ↔ rip/aplanar.js flatten.",
+        "FICHA TÉCNICA (MAPA 624): cada pieza del molde guía va en VECTOR en los dos gemelos — `ficha_tecnica.py` `show_pdf_page` ↔ `ficha.js` `pegarPiezaGuia` (de `pdf_guia` o del PDF suelto con su graft map). Nunca `get_pixmap`/imagen. El peso de la mesa repetida lo saca el guardado (`garbage=4`)."
       ],
       "cicatrices": [
         "«Me cambió el color»: Illustrator muestra enteros pero guarda 0.996.",
-        "2026-10-02 (MAPA 613): «SHORT BASKET ENTERO NEGRO»: la máscara de opacidad (foto en gris sobre un grupo Pantone 2212 C) salía como Pantone liso en la tizada: al inlinear el grupo, su /GS0 gs con SMask /None apagaba la máscara. El arte se veía bien."
+        "2026-10-02 (MAPA 613): «SHORT BASKET ENTERO NEGRO»: la máscara de opacidad (foto en gris sobre un grupo Pantone 2212 C) salía como Pantone liso en la tizada: al inlinear el grupo, su /GS0 gs con SMask /None apagaba la máscara. El arte se veía bien.",
+        "2026-10-06 (MAPA 624): la ficha del servidor seguía pegando las piezas como imagen de 300 dpi (resto de la 522) y la del navegador en vector (524): las dos fichas ya no eran iguales y nadie lo vio hasta el contrato `verificar_navegador_tizada.py` §4."
       ],
       "contratos": [
         "verificar_navegador_aplanar.py",
         "verificar_rip_compatible.py",
-        "verificar_mesa_larga.py"
+        "verificar_mesa_larga.py",
+        "verificar_navegador_ficha.py",
+        "verificar_navegador_tizada.py"
       ],
       "mapa": [
         167,
-        613
+        613,
+        624
       ],
       "memoria": "vector-original-siempre.md",
       "conexiones": [
@@ -1638,7 +1750,8 @@
         "Botones sin texto cortado: acción y programa en dos renglones, nada de «…». Los instaladores se llaman «Conectores» y tienen su «?».",
         "«Exportar para TIZADA PRO»: botón en la barra «TIZADA PRO» DENTRO de Corel = control propio WPF (type=wpfhost, TizadaPro.dll, BotonTizada.cs) con el ícono verde y el texto, que llama a POST /exportar-corel. El guid del ítem (712d37ec) NO se cambia: la barra ya quedó en el espacio de trabajo del usuario. Instalarlo pide administrador UNA vez; sin permiso queda el botón flotante. Ajustes de PDF fijos; restaura los del documento; nunca guarda el .cdr.",
         "Un solo flujo de exportar (FlujoExportar.Correr) para la barra, el botón flotante y el menú del ícono: SIEMPRE pregunta dónde guardar (SaveFileDialog encima de Corel, carpeta del .cdr, nombre sugerido «- para TIZADA.pdf», avisa antes de reemplazar).",
-        "Íconos de instaladores: el isotipo del sistema teñido con el color de SU programa (tenir: Illustrator naranja, Corel verde); los tonos van en la huella."
+        "Íconos de instaladores: el isotipo del sistema teñido con el color de SU programa (tenir: Illustrator naranja, Corel verde); los tonos van en la huella.",
+        "MOLDE A MEDIDA (MAPA 623): un camino con `punteado` (el margen/dobladillo) NO va al SVG que se vuelve guía; Illustrator lo dibuja aparte con `strokeDashes` (`tizada.jsx`) y Corel con un estilo de rayas (`ArmarCorel.cs`). Conectores: Illustrator 1.27.0, CorelDRAW 1.5.0."
       ],
       "cicatrices": [
         "PowerShell + COM de Corel: los métodos con parámetros opcionales (SaveAs, Import, AddToPowerClip) fallan si no se pasan todos.",
@@ -1845,6 +1958,22 @@
         [
           "frontend/src/App.jsx",
           "const _UMBRAL_LEGIBLE"
+        ],
+        [
+          "texto_curvas.py",
+          "gname = self.cmap.get(ord(\"H\"))"
+        ],
+        [
+          "frontend/src/motor/texto/curvas.js",
+          "const gidH = this.cmap.get('H'.codePointAt(0))"
+        ],
+        [
+          "motor_pedido.py",
+          "MEMO_PERSONALIZACION ="
+        ],
+        [
+          "frontend/src/App.jsx",
+          "const rotuloCampo"
         ]
       ],
       "palabras": [
@@ -1868,7 +1997,11 @@
         "La pantalla «Nombre y número»: controles en la columna derecha y el dibujo en el visor GRANDE (nunca un visor adentro de la columna de ajustes).",
         "El margen es POR PIEZA (nombre genérico) y por campo, con uno para todas: `por_pieza` le gana a `margen_cm`; null = esa pieza sin límite. Gemelos limite_de_pieza ↔ limiteDePieza.",
         "La pantalla usa el lienzo de Etiqueta (canvasLayout, variante con renderSelVerVariante); las piezas se eligen tocándolas (varias). Líneas con vectorEffect non-scaling-stroke para que se vean y se agarren a cualquier zoom.",
-        "El aviso «se achicará» de la planilla se mide con el MISMO plan y el MISMO estampado que la tizada (achiquesEnNavegador + reporte), nunca estimado aparte. Generar y avisar usan cuerpoDelPedido."
+        "El aviso «se achicará» de la planilla se mide con el MISMO plan y el MISMO estampado que la tizada (achiquesEnNavegador + reporte), nunca estimado aparte. Generar y avisar usan cuerpoDelPedido.",
+        "La ALTURA DE MAYÚSCULA (`cap_ratio` ↔ `capRatio`) se mide en la «H» PROPIA dibujada; el `sCapHeight` de la fuente sólo si no hay H; si no, 0,72 (MAPA 624). Hay fuentes que lo declaran mal (ClubAmerica 700 vs 730; Moreggi 658 vs 716).",
+        "`limite_texto` puede traer «*» = el límite de todo campo sin uno propio (hoy sólo lo pone el molde a medida con su dobladillo); `_campos_de_molde` no lo muestra como campo (MAPA 624).",
+        "La capa del arte del campo de texto puede llamarse Nombre o Texto (cualquier mayúscula): alias `texto` → `nombre` en los TRES mapas gemelos (`_CAMPO_ALIAS` de motor_pedido.py, `CAMPO_ALIAS` de arte/personalizacion.js y de pieza/estampar.js). La clave interna sigue siendo `nombre` (MAPA 624).",
+        "En la PANTALLA el campo `nombre` se llama «Texto» (herramienta «Texto y número», ficha, ayudas, chips con `rotuloCampo`, `_campos_de_molde`); la MUESTRA estampada es «TEXTO»/«00» en los dos motores. La clave interna no cambia (MAPA 624)."
       ],
       "cicatrices": [
         "MAPA 601: el /CapHeight del PDF es el de la fuente que usó Illustrator (Myriad, si la del diseño no estaba instalada), no el de la nombrada.",
@@ -1876,16 +2009,22 @@
         "MAPA 601: la vista previa del Arte del camino A no aplicaba el límite (su personalización la lee el hilo del arte, sin `limite_cm`).",
         "MAPA 601: el ancho disponible cacheado sin el margen en la clave: en la vista previa (base viva en el hilo) el texto se achicaba con el margen anterior.",
         "MAPA 601: la primera versión del visor se armó sin mirarla y quedó cortada en la columna angosta (queja del usuario).",
-        "MAPA 601: líneas con trazo en unidades del lienzo medían ~4 px a zoom normal: imposibles de agarrar."
+        "MAPA 601: líneas con trazo en unidades del lienzo medían ~4 px a zoom normal: imposibles de agarrar.",
+        "2026-10-06 (MAPA 624): con 3 mm configurados la etiqueta en ClubAmerica medía 3,13 mm y en las Moreggi 3,26: se le creía al `sCapHeight` declarado. Lo vio `verificar_etiqueta_tamano.py` recién cuando esas fuentes entraron entre las 8 que mide.",
+        "2026-10-06 (MAPA 624): el servidor leía el memo `personalizacion_v2` y el motor escribía `_v3`: el plan podía usar una lectura vieja del arte. Ahora una sola constante `MP.MEMO_PERSONALIZACION`."
       ],
       "contratos": [
         "verificar_navegador_pieza_a.py",
         "verificar_navegador_pieza.py",
-        "verificar_navegador_arte.py"
+        "verificar_navegador_arte.py",
+        "verificar_etiqueta_tamano.py",
+        "verificar_navegador_curvas.py",
+        "verificar_personalizacion_con_diseno.py"
       ],
       "mapa": [
         601,
-        602
+        602,
+        624
       ],
       "memoria": "nombre-numero-limite.md",
       "conexiones": [
@@ -1989,7 +2128,8 @@
         "En el editor, selección, editorTfs, arrastre, alinear/espejar, medidas y guardado clavean por `o.clave`; marcas por `_nomsSel`.",
         "Gemelos py/js: motor_pedido (lookup en arte_rect) ↔ pieza/caminoA.js (armarBase); la lista del editor: get_editables ↔ arte/editablesVista.js.",
         "La caja de un sombreado (`sh`) es la del RECORTE que lo contiene (pila q/Q de TODA la mesa, no por capa): un degradado lineal/radial no tiene límite propio y MuPDF lo mide infinito (±2·10⁹). El `fill-shade` sin límite no se suma a la caja de la capa; sale de sus figuras `shading`. Trillizos: molde_real._analizar_capa ↔ molde/capas.js analizarCapa ↔ arte/editables.js objetosDeCapa; y _extraer_editables_crudo ↔ extraerEditables.",
-        "Si cambia lo que devuelve `extraer_editables`, cambiar el nombre del memo (`MEMO_EDITABLES`, hoy `editables_v2`): va por archivo, no por versión del código, y lo usa también servidor.py."
+        "Si cambia lo que devuelve `extraer_editables`, cambiar el nombre del memo (`MEMO_EDITABLES`, hoy `editables_v2`): va por archivo, no por versión del código, y lo usa también servidor.py.",
+        "Referencia del MAPA: MAPA_DEL_SISTEMA.md §10.b y changelog 603, 604."
       ],
       "cicatrices": [
         "2026-10-01: «Editable logo» (letras con degradado lineal recortado, arte CAMISETA NEGRO 2) no salía en el visor: su caja era el rectángulo infinito de MuPDF (151 millones de cm). El escudo, con degradado de malla, sí salía. Arreglado midiendo el sombreado por su recorte (MAPA 604).",
@@ -1999,7 +2139,10 @@
       "contratos": [
         "verificar_navegador_arte.py"
       ],
-      "mapa": "MAPA_DEL_SISTEMA.md §10.b y changelog 603, 604",
+      "mapa": [
+        603,
+        604
+      ],
       "memoria": "capa-editable-es-el-objeto",
       "conexiones": [
         "camino-a",
@@ -2053,7 +2196,9 @@
       "contratos": [
         "verificar_navegador_arte.py"
       ],
-      "mapa": "MAPA_DEL_SISTEMA.md changelog 604",
+      "mapa": [
+        604
+      ],
       "memoria": "degradados-sin-limite",
       "conexiones": [
         "editables",
@@ -2132,7 +2277,9 @@
         "verificar_navegador_arte.py",
         "verificar_navegador_camino_a.py"
       ],
-      "mapa": "MAPA_DEL_SISTEMA.md changelog 605",
+      "mapa": [
+        605
+      ],
       "memoria": "degradados-sin-limite",
       "conexiones": [
         "editables",
@@ -2343,7 +2490,10 @@
         "Lo que ve el otro sistema (GET /pedidos, aviso) pasa por `resultado_publico`: NUNCA rutas del disco del servidor; cada archivo con su `descarga`. La documentación para el otro sistema vive en documentacion/integracion_externa/ (API.md, openapi.yaml, esquemas, respuestas reales, código) — ruta nueva o campo nuevo = actualizarla.",
         "Plantillas por la API (MAPA 619): POST /plantillas revisa datos y encola; el robot la arma con motorPlantilla (la toma antes que los pedidos) y sube por diseño «… - Illustrator.json», «… - CorelDRAW.json» y la guía .ai; el otro sistema los baja y manda los .json al conector local (127.0.0.1:47850/47851). Los conectores se bajan de GET /conectores (en el publicado sólo por la API).",
         "UNA MESA = UN ARCHIVO (MAPA 620): el robot manda cada página de la hoja como su PDF, con el nombre y la copia de «Descargar todo» (pdf/mesaPorArchivo.js, el mismo que usa la pantalla); el resultado conserva los campos de antes (mesas=1, largo_cm=[su largo]) y suma mesa/mesas_de_la_tela/fila/copias/talles.",
-        "La documentación para programadores que no saben de ropa es `TIZADA_PRO_Explicado_para_programadores.pdf` (desde `explicado_para_programadores.html`, MAPA 621): el diccionario taller → API → analogía. Ruta, campo o alarma nueva que cambie el recorrido = actualizar ese HTML y regenerar los DOS PDF con Chrome sin ventana (rutas literales; mirar la hora del PDF)."
+        "La documentación para programadores que no saben de ropa es `TIZADA_PRO_Explicado_para_programadores.pdf` (desde `explicado_para_programadores.html`, MAPA 621): el diccionario taller → API → analogía. Ruta, campo o alarma nueva que cambie el recorrido = actualizar ese HTML y regenerar los DOS PDF con Chrome sin ventana (rutas literales; mirar la hora del PDF).",
+        "PLANILLA SIN TALLES (MAPA 622): `_columna_talle_que_lee(prod, cols)` decide si el molde lee talle (None = sin columna o apagada). Sin talle la fila no lo trae y vale el único talle del molde; con varios talles → alarma `talle-sin-columna`. `molde_publico` publica `columna_talle: null` + `con_talles`. Las columnas que van a la ficha (`normal.columnas`) llevan su `role`.",
+        "MOLDE A MEDIDA (MAPA 623): el pedido manda `medida: {ancho_m, alto_m}` por molde a medida (`_medida_del_pedido`, alarmas `medida-falta`/`medida-invalida`/`tela-no-entra`) y la plantilla `{variable, medida}`; el robot arma la copia (`armarCopiaAMedida` → `/api/externo/robot/a_medida/<ref>` → `/api/plantilla` → `/listo`) y se borra al terminar.",
+        "La columna del campo nombre se rotula «Texto»; las filas pueden mandarla con el título viejo «Nombre» o con «Texto» (`por_titulo`); la tipografía por campo pasa por `clave_fuente_campo` (alias) (MAPA 624)."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -2353,11 +2503,15 @@
         "2026-10-02: el «sistemita» de prueba externa (`TIZADAPRO PRUEBAEXT`, fuera del repo) se trababa en la prueba: se lo lanzaba con stdout=PIPE sin leerla y al llenarse el búfer el proceso se colgaba (MAPA 608).",
         "2026-10-02: el otro sistema mostraba «nav|85|Preparando la hoja…»: el robot reenviaba el formato interno del progreso de la pantalla (MAPA 609).",
         "2026-10-02: el sistemita (y la API) hacían elegir el MOLDE y después un «Modelo»: en TIZADA se elige la VARIABLE directo (variable-first desde 2026-07-07). Corregido por el usuario (MAPA 612).",
-        "2026-10-02: el resultado público mostraba rutas del servidor (`ruta`, `destino.carpeta`, `copia_local`) al otro sistema (MAPA 614)."
+        "2026-10-02: el resultado público mostraba rutas del servidor (`ruta`, `destino.carpeta`, `copia_local`) al otro sistema (MAPA 614).",
+        "2026-10-06 (MAPA 624): el chequeo «sin silueta calculada → 404» es el modo «no calcula» de verdad; con el corredor apagándolo por defecto daba 200: el contrato lo prende sólo para ese chequeo.",
+        "2026-10-07 (SOL-1031, «Camiseta Goes 2026»): `arte-mesa-vacia` FRENA y salía por un falso positivo de la regla de color con costadillos lisos; en la pantalla el mismo check era sólo aviso, por eso «a mano andaba». Ahora manda el nombre de la guía (ver neurona camino-a)."
       ],
       "contratos": [
         "verificar_integracion_externa.py",
-        "verificar_permisos_rutas.py"
+        "verificar_permisos_rutas.py",
+        "verificar_planilla_sin_talles.py",
+        "verificar_molde_a_medida.py"
       ],
       "mapa": [
         606,
@@ -2369,7 +2523,8 @@
         612,
         614,
         619,
-        620
+        620,
+        622
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [
@@ -2466,7 +2621,8 @@
         "Un archivo por DISEÑO (MAPA 618): cada variable se arma con planIllustrator (su acomodo, sus talles, repartida si sola no entra) y empacarSecciones + unirPlanes las juntan en filas dentro del lienzo, cada una con su título fuera de toda mesa; Corel = corelDesdePlan del plan unido; guía .ai = piezas juntas (la misma pieza del mismo molde una vez).",
         "Mesas que chocan: el mismo nombre de mesa para piezas distintas de variables distintas en un archivo → el arte usaría la primera para las dos; se avisa antes de crear (choquesDe), no se bloquea.",
         "La ventana son TRES PASOS numerados (diseños · cómo se adapta · crear) y en el paso 3 una tarjeta por programa con todo lo suyo (el tamaño sólo en Illustrator); ProgramasPlantillaPedido se monta sólo con la ventana abierta (usarConexion vigila cada 5 s).",
-        "El cálculo vive en motor/molde/plantillaPedido.js (motorPlantilla) y lo usan la ventana Y el robot de la API (MAPA 619): un cambio ahí cambia los dos; guiasDe devuelve {archivos, fallas} (una guía que no entra no tumba nada)."
+        "El cálculo vive en motor/molde/plantillaPedido.js (motorPlantilla) y lo usan la ventana Y el robot de la API (MAPA 619): un cambio ahí cambia los dos; guiasDe devuelve {archivos, fallas} (una guía que no entra no tumba nada).",
+        "MOLDE A MEDIDA (MAPA 623): un camino con `punteado` (el margen/dobladillo) NO va al SVG que se vuelve guía; Illustrator lo dibuja aparte con `strokeDashes` (`tizada.jsx`) y Corel con un estilo de rayas (`ArmarCorel.cs`). Conectores: Illustrator 1.27.0, CorelDRAW 1.5.0."
       ],
       "cicatrices": [
         "2026-10-05: arrancaba con sólo la variable del diseño que se estaba viendo; el usuario lo quiere general (MAPA 617, ajuste).",
@@ -2488,6 +2644,177 @@
         "camino-a",
         "descargas",
         "ui-reglas"
+      ]
+    },
+    {
+      "id": "molde-a-medida",
+      "nombre": "Molde a medida (rectángulo de una pieza, banderas)",
+      "que": "Un molde de UNA pieza rectangular que no se sube: en Config se pone el nombre de la pieza y el margen (dobladillo); en el pedido, paso Arte, la medida en metros. El sistema FABRICA el molde (PDF del rectángulo + alta del camino A) y en el pedido hace una COPIA efímera a la medida. El visor muestra el margen punteado; la tela tiene que poder con la medida.",
+      "archivos": [
+        "frontend/src/motor/molde/aMedida.js",
+        "verificar_molde_a_medida.py",
+        "frontend/src/motor/pruebas/a_medida.mjs"
+      ],
+      "anclas": [
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "pdfMoldeAMedida"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "cabeEnTela"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "talleDeMedida"
+        ],
+        [
+          "frontend/src/motor/dxf/importar.js",
+          "construirPdfPiezas"
+        ],
+        [
+          "frontend/src/motor/prepararMolde.js",
+          "prepararMoldeAMedida"
+        ],
+        [
+          "frontend/src/motor/obrero.worker.js",
+          "a_medida_pdf"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "subirMoldeAMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "TarjetaMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "armarAMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "margenAMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "telasNoEntranDet"
+        ],
+        [
+          "servidor.py",
+          "_a_medida_crear"
+        ],
+        [
+          "servidor.py",
+          "_a_medida_variable"
+        ],
+        [
+          "servidor.py",
+          "_copia_a_medida"
+        ],
+        [
+          "servidor.py",
+          "_cabe_en_tela"
+        ],
+        [
+          "servidor.py",
+          "_talle_de_medida"
+        ],
+        [
+          "integracion_externa.py",
+          "_medida_del_pedido"
+        ],
+        [
+          "integracion_externa.py",
+          "robot_a_medida"
+        ],
+        [
+          "integracion_externa.py",
+          "_borrar_copias_a_medida"
+        ],
+        [
+          "frontend/src/motor/robot/robot.mjs",
+          "armarCopiaAMedida"
+        ],
+        [
+          "frontend/src/motor/molde/illustrator.js",
+          "caminoDobladillo"
+        ],
+        [
+          "extension_illustrator/com.tizadapro.illustrator/jsx/tizada.jsx",
+          "strokeDashes"
+        ],
+        [
+          "extension_corel/puente/ArmarCorel.cs",
+          "Punteado"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "MolderiaSinBase"
+        ],
+        [
+          "servidor.py",
+          "cuerpo.get(\"convertir\")"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "VariablesAMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "MargenAMedida"
+        ],
+        [
+          "servidor.py",
+          "def _dobladillo_max_cm"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "piezaPorDefecto"
+        ]
+      ],
+      "palabras": [
+        "a_medida",
+        "aMedida",
+        "medida",
+        "dobladillo",
+        "bandera"
+      ],
+      "reglas": [
+        "El molde a medida es un molde DE VERDAD (archivo + registro + variable): no se le enseña «la medida» a cada parte del motor; se fabrica el PDF del rectángulo con `construirPdfPiezas` (el del DXF) y entra por el alta de siempre (`/api/plantilla`, `alta_a`) con el nombre de la pieza en `resumen.nombres`.",
+        "El TALLE de un molde a medida se llama como la medida («1,50x0,90»): gemelos `talleDeMedida` ↔ `_talle_de_medida`. Nunca lo trae la fila: `_sin_col_talle` es siempre verdadero para un molde a medida y su talle nunca es obligatorio.",
+        "La variable se crea sola después de cada alta (`_a_medida_variable`) con clave FIJA por molde (`v_`+sha1(pid)[:7]): el mapeo del arte y la etiqueta (`v§pieza`) sobreviven a cambiar la medida. Al cambiar la medida, lo guardado por talle de los editables pasa al talle nuevo (`/api/productos/a_medida`).",
+        "La COPIA del pedido es efímera (`crear {efimero, a_medida_de, ancho_m, alto_m}`), copia toda la config menos `_AM_NO_COPIAR` y reemplaza a la plantilla SÓLO en ese diseño (`disenoVars`/`disenoMoldes`). Las copias no se listan en el catálogo ni en «Mis artículos» ni se publican en la API.",
+        "¿Entra en la tela? Gemelos EXACTOS `cabeEnTela` (js) ↔ `_cabe_en_tela` (py): mesa de la tela y largo máximo menos el margen del nesting a cada lado; pieza + 2× borde de corte; girar 90° sólo con rotación «90»/«libre». La pantalla no ofrece una tela donde no entra y frena el paso; el plan frena 409 (cinturón); la API da `tela-no-entra`.",
+        "El margen (dobladillo) es SÓLO guía: el visor lo dibuja punteado (`margenAMedida`) y la plantilla lo lleva como camino `punteado` FUERA del SVG que se vuelve guía; el motor NO lo dibuja y el arte llega hasta el borde de corte.",
+        "Las copias que hace el robot llevan `externo: <ref>` y se borran al terminar/fallar el pedido o la plantilla y con la limpieza (`_borrar_copias_a_medida`); sólo efímeras, con esa referencia y salidas de una plantilla.",
+        "Un molde del catálogo SIN archivo se puede pasar a medida desde Moldería (`MolderiaSinBase` → `POST /api/productos/a_medida {convertir}`); con `plantilla.ai` ya subido, efímero o camino B → 409: nunca se pisa un molde con piezas (MAPA 624).",
+        "Ajustes de un molde a medida: sin Moldería; «Variables» = nombre de la pieza + medida de muestra; «Margen» = herramienta propia al lado de «Nombre y número». El nombre y el número NUNCA salen del margen: `_limite_texto_de` sube los límites al mayor borde y agrega «*» (gemelos `pers_con_limite` ↔ `persConLimite`) (MAPA 624).",
+        "Elegir «A medida» (Moldería de un molde sin archivo, o «Crear Nuevo Molde») SÓLO GUARDA: no pide nada ahí; la pieza toma el nombre del molde (`piezaPorDefecto`), sin margen, muestra 1 × 1 m. Pieza y muestra se cambian en «Variables», el margen en «Margen» (regla del usuario 2026-10-06, MAPA 624)."
+      ],
+      "cicatrices": [
+        "2026-10-06 (MAPA 623): el doble de la base del entorno aislado no tenía `guardar_registro` y el molde se daba de alta con 0 piezas: se agregó al doble.",
+        "2026-10-06 (MAPA 623): la limpieza de moldes que desaparecen del servidor escribía `disenoVars` con el formato viejo y la app se caía con «No se pudo cargar» (`.map is not a function`).",
+        "2026-10-06: en una pestaña en segundo plano `pintarYa` (requestAnimationFrame) no avanza: un alta probada en una pestaña oculta parece colgada.",
+        "2026-10-06: el usuario se enojó porque Moldería seguía pidiendo pieza, margen y muestra al elegir «A medida» (y el modal de creación también): esos campos van en las herramientas, no en la elección."
+      ],
+      "contratos": [
+        "verificar_molde_a_medida.py",
+        "verificar_planilla_sin_talles.py"
+      ],
+      "mapa": [
+        622,
+        623,
+        624
+      ],
+      "memoria": "molde-a-medida.md",
+      "conexiones": [
+        "planilla",
+        "integracion-externa",
+        "camino-a",
+        "plantilla-pedido",
+        "generar-navegador",
+        "etiqueta"
       ]
     }
   ]

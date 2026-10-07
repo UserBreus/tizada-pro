@@ -41,6 +41,10 @@ _falso.guardar_catalogo = lambda cat, version_esperada=None: (_DOCS.__setitem__(
 _falso.registro_rev = lambda pid: (len(json.dumps(_REG[pid], default=str)) if pid in _REG else None)
 _falso.leer_registro = lambda pid: _REG.get(pid)
 _falso.guardar_registro = lambda pid, piezas, reg, **k: _REG.__setitem__(pid, reg)
+# En un GET las revisiones del registro se leen TODAS de una vez (`_rev_registro`, MAPA 582): sin
+# esto el doble devolvía None y el visor contestaba 422 «'NoneType' object is not iterable» (2026-10-06)
+_falso.filas = lambda sql, *a, **k: ([{"legacy_id": p, "registro_rev": _falso.registro_rev(p)} for p in _REG]
+                                     if "registro_rev" in sql else [])
 _falso.trabajo_crear = lambda legacy_id, **k: _TRAB.__setitem__(legacy_id, {"estado": "en cola"})
 _falso.trabajo_actualizar = lambda legacy_id, **k: (_TRAB.setdefault(legacy_id, {}).update(k), 1)[-1]
 _falso.trabajo_leer = lambda tid: (dict(_TRAB[tid]) if tid in _TRAB else None)

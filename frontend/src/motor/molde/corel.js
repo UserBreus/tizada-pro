@@ -91,7 +91,7 @@ export function corelDesdePlan(pi) {
       cy: (y0 + y1) / 2,
       fondo: f ? { capa: f.capa, color: f.color } : null,
       caminos: (pi.caminos || []).filter((k) => k.mesa === i).map((k) => ({
-        capa: k.capa, ancho: k.ancho, color: k.color,
+        capa: k.capa, ancho: k.ancho, color: k.color, ...(k.punteado ? { punteado: k.punteado } : {}),
         sub: k.sub.map((sp) => ({ c: sp.c, p: sp.p.map((q) => [q[0] - x0, q[1] - y0, q[2] - x0, q[3] - y0, q[4] - x0, q[5] - y0]) })),
       })),
       textos: (pi.textos || []).filter((t) => t.mesa === i).map((t) => ({

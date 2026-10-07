@@ -1,7 +1,7 @@
 # API — Rutas de TIZADA PRO
 
 Backend Flask (`servidor.py`). **Base URL:** `http://localhost:8050` (puerto = env `PORT`, default 8050).
-Total: **173 endpoints**. Generado automáticamente del código.
+Total: **188 endpoints**. Generado automáticamente del código.
 
 > Params: `q=` query string · `form=` multipart/form · `file=` archivo subido · `body{}` = JSON. Los `<...>` en el path son variables de ruta.
 
@@ -19,6 +19,11 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | GET | `/api/estado_general` |  | — |
 | GET | `/api/salud` | Estado del servidor — LO MIRA EL ACTUALIZADOR para decidir si una publicación salió bien (si esto no responde `ok`, vuelve sola a la versión anterior). También  | — |
 | GET | `/favicon.ico` |  | — |
+| GET | `/api/corel/instalador` | El INSTALADOR de USER PRO para CorelDRAW (Windows): doble clic, «Instalar», listo. Deja el puente corriendo y arrancando solo con la PC. | — |
+| GET | `/api/corel/version` | Qué versión del programa de Corel corresponde a este sistema: la pantalla la compara con la del puente de esa PC y avisa si hay que actualizar. | — |
+| GET | `/api/illustrator/extension.zip` | La extensión de TIZADA PRO para Illustrator (`extension_illustrator/`), con sus instaladores, para bajarla desde la Plantilla del molde (botón «Abrir  | — |
+| GET | `/api/illustrator/instalador` | El INSTALADOR de Windows de la extensión (`Instalar-USER-PRO-Illustrator-<versión>.exe`, lo arma `extension_illustrator/construir.py`). Es el que se l | — |
+| GET | `/api/illustrator/version` | Qué versión de la extensión corresponde a este sistema: la pantalla la compara con la que tiene instalada el Illustrator de esa PC y avisa si hay que  | — |
 
 ## Fuentes / Catálogo
 
@@ -40,6 +45,7 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | POST | `/api/paquetes/pedido` | EL PEDIDO QUE GENERÓ EL NAVEGADOR (PLAN_NAVEGADOR.md, etapa 4). Llega como multipart: · `resultado` — el JSON que hoy arma el motor (`hojas`, `validac | form: nombres, pids, prendas, resultado |
 | GET | `/api/pedido/perfil_salida` | El perfil ICC que lleva la hoja (OutputIntent), en bytes, para que el navegador lo incruste. | q: forzado |
 | POST | `/api/pedido/plan` | El PLAN del pedido para que lo genere el navegador (PLAN_NAVEGADOR.md, etapa 4): mismas validaciones y misma traducción que `generar_multi`, sin gener | — |
+| POST | `/api/calculos` | El navegador deja acá el resultado de un cálculo que le pidió una ruta (428): la próxima vez que la ruta lo necesite, lo encuentra. No se calcula ni s | body: calculos · form: clave, resultado_json · file: archivo |
 
 ## Nesting / Grupos de tizada
 
@@ -56,6 +62,8 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | POST | `/api/productos/grupo_tizada` | Grupo de tizada del molde: los moldes con el MISMO grupo comparten mesa de trabajo; grupos distintos se arman en tizadas separadas. | body: grupo_tizada, id, producto_id |
 | POST | `/api/productos/nesting_preset` |  | body: id, nesting_preset_id, producto_id |
 | GET | `/api/navegador/config` | Qué trabajo pesado hace el NAVEGADOR en vez del servidor (PLAN_NAVEGADOR.md, regla 5: cada etapa entra detrás de un interruptor). `molde`: preparar lo | — |
+| GET | `/api/productos/limite_texto` |  | q: pid |
+| POST | `/api/productos/limite_texto` |  | body: limite, pid |
 
 ## Perfiles de color
 
@@ -69,7 +77,6 @@ Total: **173 endpoints**. Generado automáticamente del código.
 
 | Método | Ruta | Descripción | Params |
 |---|---|---|---|
-| POST | `/api/generar` |  | body: asignacion, editables, prendas, producto_id |
 | POST | `/api/generar_multi` | Genera VARIOS moldes en UNA sola tizada: junta las piezas de todos por TELA. Body: {molds: [pid, ...], prendas: [...]}. | body: asignaciones, default_diseno, editables, molds, perfil_forzado, planilla, prendas, productos, tela_base, vars_por_diseno |
 | GET | `/api/trabajo/<tid>` | Cómo va esa tizada. Si el trabajo ya no existe: 404 con `estado: "desconocido"` y el motivo, para que la pantalla corte el sondeo y lo explique. | — |
 | POST | `/api/trabajo/<tid>/cancelar` | Para una tizada que se está armando. Se frena al terminar el paso en curso (nunca a mitad de escribir un PDF) y borra lo que alcanzó a generar. 404 si no existe, 409 si ya terminó. | — |
@@ -92,6 +99,8 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | POST | `/api/publicacion/publicar` | Arma el paquete y lo SUBE. `cuando` = 0 (ya) o marca de tiempo. Es lo que hace el botón. | body: cuando, url, version |
 | GET | `/api/actualizacion/log` | El log del AYUDANTE (`_actualizacion/actualizador_log.txt`): la letra chica de la última instalación — dónde se cortó, con horas. Es lo que hasta ahor | — |
 | GET | `/api/publicacion/registro` | El registro y el log del ayudante DEL SERVIDOR PUBLICADO, para verlos desde el taller. 🔴 Esto es lo que faltaba el 2026-09-01: la actualización falló  | — |
+| GET | `/api/publicacion/respaldos` | Las versiones guardadas a las que se puede VOLVER, de la más nueva a la más vieja. | — |
+| POST | `/api/publicacion/volver` | VUELVE el servidor publicado a una versión guardada: sube ese paquete tal cual se publicó y se instala como cualquier actualización (el servidor igual | body: archivo, cuando |
 
 ## Productos / Moldería
 
@@ -125,6 +134,10 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | GET | `/api/productos/<pid>/objeto_agregado/<oid>` | El archivo de un objeto agregado (PNG/SVG/PDF/AI), para el motor del navegador. | q: diseno |
 | POST | `/api/productos/<pid>/editables_cfg` | `_editables_cfg(prod, diseño, override)`: la config de los editables del catálogo con el AJUSTE del pedido encima (lo que la persona movió sin guardar | body: diseno, editables |
 | GET | `/api/monitor` | QUÉ ESTÁ HACIENDO EL SERVIDOR Y CUÁNTO LE CUESTA (pedido del usuario 2026-09-18): CPU y RAM de la máquina y del proceso, hilos, cupos, los trabajos en | — |
+| GET | `/api/moldes/para_bajar` | TODOS los moldes que este usuario puede usar, con lo que el navegador tiene que tener guardado para trabajarlos sin esperar (pedido del usuario 2026-0 | — |
+| GET | `/api/productos/<pid>/editables_datos` | Los DATOS de los editables de un diseño para que el navegador arme la lista del editor (`motor/arte/editablesVista.js`, 2026-09-22 «el servidor sólo s | q: diseno, variante |
+| POST | `/api/productos/a_medida` | Cambia la configuración de un molde a medida: el margen (plantilla), o la MEDIDA (antes de rehacer su archivo). Al cambiar la medida cambia el nombre  | body: alto_m, ancho_m, id, margen |
+| POST | `/api/productos/acomodo_illustrator` | Guarda cómo acomodó el usuario A MANO las mesas de trabajo del talle guía para «Crear en Illustrator» (pedido del usuario 2026-09-23: «acomodar 1 para | body: acomodo, clave, id |
 
 ## Plantilla (molde)
 
@@ -152,6 +165,7 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | POST | `/api/plantillas_planillas/guardar` |  | body: columnas, id, nombre, role |
 | POST | `/api/plantilla/paginas` | FASE B del molde que prepara el navegador: las páginas por talle, la decisión de la etiqueta y los JSON completos, sobre el molde que ya se guardó en  | file: paquete |
 | POST | `/api/plantilla/paginas/latido` | La pestaña que prepara la FASE B avisa que sigue viva (cada 15 s). Sólo toca la fecha de la marca de pendientes: si no hay marca (ya terminó, o el mol | body: pid |
+| POST | `/api/plantilla/pdf_guia` | PDF imprimible con el molde de guía + el recuadro de medida y el nombre de cada pieza, según el modo elegido en el visor (default / rango / talle). | q: capas, config, datos, editables, formato, guia, limpio, piezas, rango, talle, talles |
 
 ## Variables / Modelos / Grupos
 
@@ -186,6 +200,7 @@ Total: **173 endpoints**. Generado automáticamente del código.
 | GET | `/api/arte/perfil` | Detecta el perfil incrustado del arte recién subido (o de ese diseño) y devuelve el aviso (sin perfil / distinto / ok). | q: diseno |
 | POST | `/api/arte/preview_piezas` | PREVIEW REAL per-pieza (CACHEADO): sirve el render del motor por pieza desde `_piezas_base`. La 1ª vez por config arma y guarda; las siguientes son instantáneas | body: bg, diseno, editables, mapeo, pid, sin_prewarm, talle, variante |
 | GET | `/api/archivos/tengo` | ¿El servidor ya tiene un archivo con este SHA-1? (para no volver a subirlo). | q: sha1 |
+| POST | `/api/arte/validacion` | Guarda la validación de un arte que ARMÓ EL NAVEGADOR (p. ej. después de sumar una tipografía, `revalidarArte`). El servidor no la calcula: sólo compr | body: diseno, pid, validacion |
 
 ## Editables / Objetos agregados
 

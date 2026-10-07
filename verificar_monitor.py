@@ -5,8 +5,9 @@ CONTRATO: EL MONITOR DICE QUÉ HIZO EL SERVIDOR, QUÉ HIZO EL NAVEGADOR Y CUÁNT
 Pedido del usuario (2026-09-18). `GET /api/monitor` (Configuración → Monitor) tiene que traer la
 CPU y la RAM de la máquina y del proceso, los hilos y cupos, los trabajos en curso y los últimos
 trabajos con QUIÉN los hizo. Acá se sube un molde preparado por el navegador (paquete `alta_a`) y
-uno pelado que lee el servidor, y se exige que el monitor los liste con el rótulo correcto y su
-duración. `monitor.py` se prueba también solo (CPU % contra la muestra anterior, RAM en MB).
+uno pelado, y se exige que el monitor liste el primero como «navegador» con su duración y que el
+pelado lo RECHACE el servidor sin leerlo (desde 2026-09-24, MAPA 568, el servidor nunca hace el
+trabajo pesado: «Trabajos pesados en el servidor» tiene que dar siempre 0). `monitor.py` se prueba también solo (CPU % contra la muestra anterior, RAM en MB).
 
 ⚠️ No toca nada del usuario: DATOS a un temporal y `db` es un doble.
 """
@@ -117,14 +118,16 @@ def subir(pid, archivo, nombre, paquete=None, con_diseno="0"):
 e1 = subir("pNav", pdf, "molde_nav.pdf", zip_)
 ok(e1.get("estado") == "listo", f"un molde que llegó preparado se guardó ({e1.get('estado')} {str(e1.get('error') or '')[:80]})")
 e2 = subir("pSrv", pdf, "molde_srv.pdf")
-ok(e2.get("estado") == "listo", f"un molde pelado lo leyó el servidor ({e2.get('estado')} {str(e2.get('error') or '')[:80]})")
+ok(e2.get("estado") == "error" and "computadora" in str(e2.get("error") or ""),
+   f"🔴 un molde pelado NO lo lee el servidor: se rechaza con el motivo ({e2.get('estado')} {str(e2.get('error') or '')[:80]})")
 d = CLI.get("/api/monitor").get_json() or {}
 ok("eventos" in d and "trabajos" in d and "ram_total_mb" in d and "navegador" in d, f"`/api/monitor` trae medidas, trabajos, eventos e interruptores ({sorted(k for k in d if k != 'eventos')[:8]}…)")
 ev = d.get("eventos") or []
 nav = [x for x in ev if x["quien"] == "navegador" and x["que"] == "molde" and "molde_nav" in x["detalle"]]
 srv = [x for x in ev if x["quien"] == "servidor" and x["que"] == "molde" and "molde_srv" in x["detalle"]]
 ok(len(nav) == 1 and nav[0]["seg"] is not None, f"el molde preparado figura como «navegador» con su duración ({nav[0]['seg'] if nav else '?'} s)")
-ok(len(srv) == 1 and srv[0]["seg"] is not None, f"el molde pelado figura como «servidor» con su duración ({srv[0]['seg'] if srv else '?'} s)")
+ok(not srv, f"…y no figura ningún molde hecho por el «servidor» ({len(srv)})")
+ok((d.get("cupo_usado") or 0) == 0, f"«Trabajos pesados en el servidor» = {d.get('cupo_usado')} (tiene que ser 0)")
 ok(ev and ev[0]["t"] >= ev[-1]["t"], "los eventos vienen del más nuevo al más viejo")
 ok(d.get("trabajos") == [], "y no hay trabajos en curso (los dos terminaron)")
 

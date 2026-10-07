@@ -14,7 +14,7 @@ import { MM, CM } from './base.js'
 
 // ─── nombres ─────────────────────────────────────────────────────────────────────────────────
 const RE_ETQ = /\s+\d+\s*$/
-const CAMPO_ALIAS = { '00': 'numero', nro: 'numero', num: 'numero', jugador: 'nombre', apellido: 'nombre' }
+const CAMPO_ALIAS = { '00': 'numero', nro: 'numero', num: 'numero', jugador: 'nombre', apellido: 'nombre', texto: 'nombre' }   // «texto» = el campo Nombre (2026-10-06)
 export const PREFIJO_CAMPO_FUENTE = '@campo:'
 
 /** `clave_fuente_campo`: la clave del reemplazo de UN campo (`@campo:numero`). */
@@ -79,7 +79,8 @@ export function persConLimite(pers, limite, { reemplazar = false } = {}) {
   for (const campos of Object.values(out)) {
     for (const [campo, pl] of Object.entries(campos || {})) {
       if (!pl || typeof pl !== 'object') continue
-      const cfg = (limite || {})[claveCampo(campo)]
+      // «*» = el límite de todo campo sin uno propio (el margen del molde a medida, MAPA 624)
+      const cfg = (limite || {})[claveCampo(campo)] || (limite || {})['*']
       if (!cfg && !reemplazar) continue
       let mg = cfg && cfg.margen_cm !== undefined && cfg.margen_cm !== null ? Number(cfg.margen_cm) : NaN
       if (!(Number.isFinite(mg) && mg >= 0)) mg = null

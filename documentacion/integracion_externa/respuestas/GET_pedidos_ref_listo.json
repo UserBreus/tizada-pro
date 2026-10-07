@@ -21,7 +21,7 @@
     },
     "etapa": "arte",
     "frena": false,
-    "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «nombre» y el arte no tiene esa capa"
+    "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «texto» y el arte no tiene esa capa"
    },
    {
     "codigo": "arte-campo-sin-capa",
@@ -109,7 +109,7 @@
      },
      "etapa": "arte",
      "frena": false,
-     "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «nombre» y el arte no tiene esa capa"
+     "mensaje": "«JUGADOR» en «Camiseta de futbol»: la planilla trae «texto» y el arte no tiene esa capa"
     },
     {
      "codigo": "arte-campo-sin-capa",

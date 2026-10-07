@@ -155,6 +155,10 @@ def revisar(silencioso=False):
         for c in n.get("conexiones", []):
             if c not in _por_id(cer):
                 avisos.append(f"{n['id']}: conexión a una neurona que no existe «{c}»")
+        # `mapa` es una LISTA de números del changelog: escrito como texto se mostraba letra por
+        # letra («MAPA: M, A, P, A…», visto 2026-10-06 en tres neuronas)
+        if "mapa" in n and not (isinstance(n["mapa"], list) and all(isinstance(x, int) for x in n["mapa"])):
+            avisos.append(f"{n['id']}: `mapa` tiene que ser una lista de números (es {n['mapa']!r})")
     if not silencioso:
         total = len(cer["neuronas"])
         print(f"CEREBRO: {total - len(danadas)} de {total} neuronas sanas.")

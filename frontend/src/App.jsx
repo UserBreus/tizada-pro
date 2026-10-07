@@ -5,7 +5,8 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
          esArrastre } from './localizar';
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
-import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas } from './motor/prepararMolde.js';
+import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas, prepararMoldeAMedida } from './motor/prepararMolde.js';
+import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, cabeEnTela, talleDeMedida } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
 import { guardarCache, leerCache, claveDe, soltarMoldesEnPc, soltarPaginasEnPc } from './motor/cache.js';   // el molde con diseño en la PC (MAPA 585)
 import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
@@ -273,6 +274,13 @@ function Icon({ name, className = "", style }) {
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
         <rect x="7.2" y="7.2" width="9.6" height="9.6" rx="1.6" />
         <rect x="2.8" y="2.8" width="18.4" height="18.4" rx="3" strokeDasharray="3 3.2" />
+      </svg>
+    ),
+    // MARGEN (dobladillo) del molde a medida: el borde de corte lleno y, adentro, la línea punteada.
+    dobladillo: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4.5" width="18" height="15" rx="1.6" />
+        <rect x="6.8" y="8.3" width="10.4" height="7.4" rx="0.8" strokeDasharray="2.4 2.4" />
       </svg>
     ),
     // NOMBRE Y NÚMERO: la letra entre dos topes (hasta dónde puede llegar el texto).
@@ -4385,7 +4393,7 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
+function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
                                   nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando,
                                   piezasFuera, onPiezaFuera, onPiezasFueraTodas, piezasBloqueo }) {
   // RECUADRO DE SELECCIÓN (modo nombrar, camino B): arrastrar sobre el fondo elige todas las
@@ -4824,6 +4832,20 @@ function MapeadorArteVisual({ canvasLayout, mapeoData, mapeoValores, setMapeoVal
                         );
                       })}
                       <path d={p.path_svg} vectorEffect="non-scaling-stroke" style={piezasModo ? { fill: _off ? 'rgba(255,255,255,0.02)' : (pv ? 'none' : 'rgba(0,216,245,0.06)'), stroke: _hov ? 'var(--accent)' : (_off ? 'rgba(255,255,255,0.5)' : 'rgba(0,216,245,0.6)'), strokeWidth: _hov ? 3.2 : 1.5, strokeDasharray: _off ? '6 5' : 'none' } : telaModo ? { fill: telaCol ? telaCol + '4d' : 'rgba(255,255,255,0.03)', stroke: telaSeld ? 'var(--accent)' : (telaCol || 'rgba(255,255,255,0.35)'), strokeWidth: telaSeld ? 4 : 1.6, strokeDasharray: 'none' } : { fill: pv ? 'none' : (isSelected ? 'rgba(0,243,255,0.14)' : mappedMesaIdx ? 'rgba(16,185,129,0.05)' : 'rgba(255,77,77,0.14)'), stroke: isSelected ? 'var(--accent)' : mappedMesaIdx ? 'var(--success)' : '#ff4d4d', strokeWidth: isSelected ? (pv ? 1.6 : 3) : (mappedMesaIdx ? (pv ? 0 : 1.5) : (pv ? 1.2 : 2.4)), strokeDasharray: (isSelected && pv) ? '6 4' : ((mappedMesaIdx || isSelected || pv) ? 'none' : '7 5') }} />
+                      {/* MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) como LÍNEA PUNTEADA hacia adentro
+                          del borde de corte. Es sólo una guía de pantalla: el motor no la dibuja y el
+                          diseño llega igual hasta el borde (pedido del usuario 2026-10-06). */}
+                      {margenAMedida && !telaModo && (() => {
+                        const kx = p.w_cm ? p.pw / (p.w_cm * 10) : 1, ky = p.h_cm ? p.ph / (p.h_cm * 10) : 1;
+                        const m = margenAMedida;
+                        const x = ox + m.izq * 10 * kx, y = oy + m.arriba * 10 * ky;
+                        const w = p.pw - (m.izq + m.der) * 10 * kx, h = p.ph - (m.arriba + m.abajo) * 10 * ky;
+                        if (!(w > 0 && h > 0)) return null;
+                        return (<g pointerEvents="none" data-tour="arte-dobladillo">
+                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+                        </g>);
+                      })()}
                       {/* ETIQUETA (talle · nombre · nº) en la posición configurada — indica dónde y qué dice
                           la etiqueta de corte que llevará la pieza en la tizada. */}
                       {!pv && !telaModo && etiquetaConfig?.activo && (() => {
@@ -5250,6 +5272,293 @@ async function esperarMoldeLeido(resp, onProgreso) {
     if (d.estado === 'error') throw new Error(d.error || 'No se pudo procesar el molde');
     if (d.estado === 'cancelado') throw new Error('La lectura del molde se canceló');
   }
+}
+
+// ── MOLDE A MEDIDA (MAPA 623) ─────────────────────────────────────────────────────────────────
+// Un molde de UNA pieza rectangular (banderas). El PDF del rectángulo lo arma ESTA computadora
+// (`motor/molde/aMedida.js`) y entra por el alta de siempre del camino A: el servidor sólo lo guarda
+// y crea la variable (`_a_medida_variable`). Lo usan Configuración (la plantilla y su medida de
+// muestra) y el pedido (la copia a la medida que se escribe en el paso Arte).
+async function subirMoldeAMedida(pid, { anchoM, altoM, pieza }, avisar = () => {}) {
+  const prep = await prepararMoldeAMedida({ anchoM, altoM, pieza, onA: (a) => avisar(a.texto) });
+  if (!prep || !prep.zipA) throw new Error('Esta computadora no pudo armar el molde.');
+  const fd = new FormData();
+  fd.append('pid', pid);
+  fd.append('con_diseno', '0');
+  fd.append('solo_base', '1');
+  fd.append('paquete', new Blob([prep.zipA], { type: 'application/zip' }), 'paquete.zip');
+  await adjuntarArchivo(fd, prep.archivo, prep.sha1, rutaApi);
+  avisar('Guardando el molde…');
+  const r = await fetch('/api/plantilla', { method: 'POST', body: fd });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'No se pudo guardar el molde');
+  return esperarMoldeLeido(j, avisar);
+}
+// El margen en la pantalla son textos (lo que se escribe); al servidor van números por borde.
+const margenAForm = (m) => {
+  const x = m || {};
+  const porBorde = ['arriba', 'abajo', 'izq', 'der'].some(k => x[k] != null && x[k] !== x.todos);
+  const t = (v) => (v == null ? '' : String(v).replace('.', ','));
+  return { porBorde, todos: t(x.todos ?? 0), arriba: t(x.arriba ?? x.todos ?? 0), abajo: t(x.abajo ?? x.todos ?? 0),
+           izq: t(x.izq ?? x.todos ?? 0), der: t(x.der ?? x.todos ?? 0) };
+};
+const margenDeForm = (f) => {
+  const n = (v) => { const x = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(x) && x >= 0 ? x : 0; };
+  return f.porBorde ? { todos: 0, arriba: n(f.arriba), abajo: n(f.abajo), izq: n(f.izq), der: n(f.der) } : { todos: n(f.todos) };
+};
+/** El MARGEN (dobladillo) del molde a medida: uno para todos los bordes, o uno por borde (cm). */
+function CamposMargen({ valor, onChange }) {
+  const f = valor;
+  const campo = (k, rotulo) => (
+    <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, color: 'var(--text-secondary)', flex: 1, minWidth: 70 }}>
+      {rotulo}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input type="text" inputMode="decimal" value={f[k]} onChange={(e) => onChange({ ...f, [k]: e.target.value })}
+          style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13 }} />
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>cm</span>
+      </span>
+    </label>
+  );
+  return (
+    <div data-tour="a-medida-margen" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+          {[{ v: false, t: 'Igual en todos' }, { v: true, t: 'Por borde' }].map(o => (
+            <button key={String(o.v)} type="button" onClick={() => onChange({ ...f, porBorde: o.v })}
+              style={{ height: 26, padding: '0 10px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
+                background: f.porBorde === o.v ? 'var(--accent)' : 'transparent', color: f.porBorde === o.v ? '#001016' : 'var(--text-secondary)' }}>{o.t}</button>
+          ))}
+        </div>
+        <Ayuda ancho={300}>El <b>margen</b> es el dobladillo: la franja del borde hacia adentro que se dobla al coser. En el visor del pedido
+          se ve como una <b>línea punteada</b> (lo de adentro es lo que queda a la vista). La línea no se imprime: el diseño llega igual
+          hasta el borde de corte.</Ayuda>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {f.porBorde
+          ? [campo('arriba', 'Arriba'), campo('abajo', 'Abajo'), campo('izq', 'Izquierda'), campo('der', 'Derecha')]
+          : [campo('todos', 'Todos los bordes')]}
+      </div>
+    </div>
+  );
+}
+/** MOLDE A MEDIDA (MAPA 623) en el paso Arte: la medida de la pieza en METROS. Dice en vivo en qué
+ *  telas del molde entra (regla del usuario: si no entra, esa tela no se puede elegir). `am` = lo que
+ *  publica el servidor del molde (medida, borde de corte y acomodo); `telas` = las del molde. */
+function TarjetaMedida({ am, anchoTxt, altoTxt, onAncho, onAlto, onArmar, telas, ocupado, esCopia, onCancelar }) {
+  const a = leerMetros(anchoTxt), h = leerMetros(altoTxt);
+  const prob = problemaMedida(a, h);
+  const n = (am && am.nesting) || {};
+  const conTela = (telas || []).map(t => ({ t, r: prob ? null : cabeEnTela({ anchoM: a, altoM: h, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
+    largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion }) }));
+  const entra = conTela.filter(x => x.r && x.r.cabe), noEntra = conTela.filter(x => x.r && !x.r.cabe);
+  const sinTelas = !prob && (telas || []).length > 0 && entra.length === 0;
+  const m = margenPorBorde(am && am.margen);
+  const igual = m.arriba === m.abajo && m.abajo === m.izq && m.izq === m.der;
+  const inp = (v, set) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+      <input type="text" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !prob && !sinTelas && !ocupado) onArmar(a, h); }}
+        style={{ width: '100%', padding: '10px 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
+          color: '#fff', fontSize: 18, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' }} />
+      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>m</span>
+    </span>
+  );
+  return (
+    <div className="card" data-tour="arte-medida" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 560 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 800 }}>{esCopia ? 'Cambiar la medida' : 'Medida de la pieza'} · {am && am.pieza}</span>
+        <Ayuda ancho={320}>Este molde es <b>a medida</b>: escribí el <b>ancho</b> y el <b>alto</b> en metros y el sistema arma la pieza de ese
+          tamaño, con la etiqueta, el borde de corte y el acomodo del molde. En el visor, la <b>línea punteada</b> marca el margen
+          (dobladillo): lo de afuera se dobla al coser. El diseño llega igual hasta el borde de corte.</Ayuda>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)', width: 44 }}>Ancho</span>
+        <span data-tour="arte-medida-ancho" style={{ display: 'flex', flex: 1 }}>{inp(anchoTxt, onAncho)}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 18 }}>×</span>
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)', width: 34 }}>Alto</span>
+        <span data-tour="arte-medida-alto" style={{ display: 'flex', flex: 1 }}>{inp(altoTxt, onAlto)}</span>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+        Margen (dobladillo): {igual ? `${String(m.arriba).replace('.', ',')} cm en todos los bordes`
+          : `arriba ${m.arriba} · abajo ${m.abajo} · izquierda ${m.izq} · derecha ${m.der} cm`.replace(/\./g, ',')}
+      </div>
+      {prob && <div style={{ fontSize: 12, color: '#fbbf24' }}>{prob}</div>}
+      {!prob && (telas || []).length > 0 && (
+        <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+          {entra.length > 0 && <div>Entra en: <b style={{ color: '#34d399' }}>{entra.map(x => x.t.nombre).join(', ')}</b></div>}
+          {noEntra.length > 0 && (
+            <div style={{ color: '#fbbf24' }}>No entra en: {noEntra.map(x => x.t.nombre).join(', ')}
+              <span style={{ color: 'var(--text-muted)' }}> — {noEntra[0].r.motivo}</span></div>
+          )}
+        </div>
+      )}
+      {sinTelas && <div style={{ fontSize: 12.5, fontWeight: 700, color: '#f87171' }}>Con esta medida la pieza no entra en ninguna tela de este molde.</div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button className="btn primary" data-tour="arte-medida-armar" disabled={!!prob || sinTelas || ocupado} onClick={() => onArmar(a, h)}
+          style={{ padding: '9px 16px', fontSize: 13, fontWeight: 800 }}>
+          {esCopia ? 'Cambiar a esta medida' : 'Armar a esta medida'}
+        </button>
+        {onCancelar && <button className="btn ghost" onClick={onCancelar} style={{ padding: '9px 14px', fontSize: 12.5 }}>Cancelar</button>}
+      </div>
+    </div>
+  );
+}
+
+/** VARIABLES de un molde A MEDIDA (MAPA 623-624, pedido del usuario): en este tipo de molde la
+ *  herramienta «Variables» muestra sólo lo que hace falta — el nombre de la única pieza y la medida de
+ *  muestra (la que se usa para ubicar la etiqueta y ver el borde; la de verdad se escribe en cada
+ *  pedido). Guardar rehace el archivo del molde en esta computadora (`subirMoldeAMedida`). */
+function VariablesAMedida({ prod, pidCfg, onCambio, avisar, avisarError, procesando }) {
+  const am = (prod && prod.a_medida) || {};
+  const [pieza, setPieza] = React.useState(am.pieza || '');
+  const [ancho, setAncho] = React.useState(metrosTexto(am.ancho_m || 1));
+  const [alto, setAlto] = React.useState(metrosTexto(am.alto_m || 1));
+  const [ocupado, setOcupado] = React.useState(false);
+  React.useEffect(() => { setPieza(am.pieza || ''); setAncho(metrosTexto(am.ancho_m || 1)); setAlto(metrosTexto(am.alto_m || 1)); },
+    [pidCfg, am.pieza]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const aM = leerMetros(ancho), alM = leerMetros(alto);
+  const probMedida = problemaMedida(aM, alM);
+  const piezaOk = pieza.trim();
+  const cambioPieza = !!piezaOk && piezaOk !== (am.pieza || '');
+  const cambioMedida = !probMedida && (Math.abs(aM - (am.ancho_m || 1)) > 1e-9 || Math.abs(alM - (am.alto_m || 1)) > 1e-9);
+  const guardar = async () => {
+    if (probMedida || !piezaOk) return;
+    setOcupado(true);
+    try {
+      procesando('Armando el molde a la medida…');
+      await pintarYa();
+      const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pidCfg, ancho_m: aM, alto_m: alM, ...(cambioPieza ? { pieza: piezaOk } : {}) }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo guardar');
+      await subirMoldeAMedida(pidCfg, { anchoM: aM, altoM: alM, pieza: piezaOk }, (t) => procesando(t));
+      avisar('Molde rehecho ✓');
+      await onCambio(true);
+    } catch (e) { avisarError(e.message); } finally { procesando(null); setOcupado(false); }
+  };
+  const caja = { border: '1px solid var(--border-light)', borderRadius: 10, padding: 10, display: 'flex', flexDirection: 'column', gap: 9 };
+  const titulo = (t) => <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)' }}>{t}</span>;
+  const inputM = (v, set) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+      <input type="text" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)}
+        style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13 }} />
+      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>m</span>
+    </span>
+  );
+  return (
+    <div data-tour="a-medida-panel" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ ...caja, background: 'rgba(0,216,245,0.05)', borderColor: 'rgba(0,216,245,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 700 }}>Molde a medida</span>
+          <Ayuda ancho={300}>Este molde es <b>un rectángulo de una sola pieza</b>: no hay variables que armar. Acá va el nombre de
+            la pieza y una medida de muestra; la medida de verdad se escribe en cada pedido (paso Arte, en metros). El margen
+            (dobladillo) está en su propia herramienta, <b>Margen</b>. Usá una planilla <b>sin talles</b>.</Ayuda>
+        </div>
+      </div>
+      <div style={caja}>
+        {titulo('Nombre de la pieza')}
+        <input data-tour="a-medida-pieza" type="text" value={pieza} placeholder="Ej. Bandera" onChange={(e) => setPieza(e.target.value)}
+          style={{ width: '100%', padding: '6px 8px', borderRadius: 7, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13 }} />
+      </div>
+      <div style={caja}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ flex: 1 }}>{titulo('Medida de muestra')}</span>
+          <Ayuda ancho={280}>Sólo para ver el molde acá (ubicar la etiqueta, mirar el borde). La medida de verdad se escribe en cada pedido.</Ayuda>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {inputM(ancho, setAncho)}<span style={{ color: 'var(--text-muted)' }}>×</span>{inputM(alto, setAlto)}
+        </div>
+        {probMedida && <div style={{ fontSize: 11.5, color: '#fbbf24' }}>{probMedida}</div>}
+      </div>
+      <button className="btn primary" data-tour="a-medida-muestra" disabled={ocupado || !piezaOk || !!probMedida || !(cambioPieza || cambioMedida)} onClick={guardar}
+        style={{ fontSize: 12.5, alignSelf: 'flex-start' }}>Guardar y rehacer</button>
+    </div>
+  );
+}
+
+/** MARGEN de un molde A MEDIDA, su propia herramienta (al lado de «Nombre y número»: el texto no
+ *  puede salir de él, ver `_limite_texto_de` del servidor). Cambiarlo no rehace el archivo: el margen
+ *  es sólo guía (la línea punteada) y el piso del límite del texto. */
+function MargenAMedida({ prod, pidCfg, onCambio, avisar, avisarError }) {
+  const am = (prod && prod.a_medida) || {};
+  const [margen, setMargen] = React.useState(() => margenAForm(am.margen));
+  const [ocupado, setOcupado] = React.useState(false);
+  React.useEffect(() => { setMargen(margenAForm(am.margen)); }, [pidCfg]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const guardarMargen = async () => {
+    setOcupado(true);
+    try {
+      const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pidCfg, margen: margenDeForm(margen) }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo guardar el margen');
+      avisar('Margen guardado ✓');
+      await onCambio(false);
+    } catch (e) { avisarError(e.message); } finally { setOcupado(false); }
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+        Margen del borde hacia adentro (el dobladillo). El <b>texto y el número</b> nunca pasan de esta línea.
+      </div>
+      <CamposMargen valor={margen} onChange={setMargen} />
+      <button className="btn primary" data-tour="a-medida-margen-guardar" disabled={ocupado} onClick={guardarMargen}
+        style={{ fontSize: 12, alignSelf: 'flex-start' }}>Guardar margen</button>
+    </div>
+  );
+}
+
+/** Cómo se MUESTRA un campo estampado: el de la capa «Nombre» o «Texto» se llama «Texto» en la pantalla
+ *  (2026-10-06, pedido del usuario); los demás, con su nombre de capa. La clave interna sigue siendo `nombre`. */
+const rotuloCampo = (campo) => {
+  const n = String(campo || '').trim().toLowerCase();
+  return (n === 'nombre' || n === 'texto' || n === 'jugador' || n === 'apellido') ? 'Texto' : String(campo || '');
+};
+
+/** El nombre de la única pieza de un molde a medida recién elegido: el del molde (sin lo que un nombre
+ *  de pieza no admite). Se cambia después en «Variables». */
+const piezaPorDefecto = (nombre) => (String(nombre || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40).trim() || 'Pieza');
+
+/** Moldería de un molde que TODAVÍA NO TIENE BASE: «Con archivo» (la zona para subirlo, `children`) o
+ *  «A medida». 🔴 Regla del usuario (2026-10-06): elegir «A medida» SÓLO GUARDA — no pide nada acá; el
+ *  molde pasa a medida (pieza con el nombre del molde, sin margen, muestra 1 × 1 m) y se activan sus
+ *  ajustes: el nombre de la pieza y la muestra en «Variables», el margen en «Margen». */
+function MolderiaSinBase({ pidCfg, nombre, permitirMedida, onHecho, avisar, avisarError, procesando, children }) {
+  const [ocupado, setOcupado] = React.useState(false);
+  const pasar = async () => {
+    if (ocupado) return;
+    setOcupado(true);
+    const pieza = piezaPorDefecto(nombre);
+    try {
+      const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pidCfg, convertir: { pieza, margen: { todos: 0 }, ancho_m: 1, alto_m: 1 } }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudo pasar el molde a medida');
+      procesando('Armando el molde a medida…');
+      await pintarYa();
+      await subirMoldeAMedida(pidCfg, { anchoM: 1, altoM: 1, pieza }, (t) => procesando(t));
+      avisar('Molde a medida ✓ — la pieza y la muestra van en «Variables», el margen en «Margen»');
+      await onHecho();
+    } catch (e) { avisarError(e.message); } finally { procesando(null); setOcupado(false); }
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {permitirMedida && (
+        <div data-tour="molde-tipo" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+            <button type="button" style={{ height: 28, padding: '0 12px', borderRadius: 7, border: 'none', cursor: 'default', fontSize: 12, fontWeight: 700,
+              background: 'var(--accent)', color: '#001016' }}>Con archivo</button>
+            <button type="button" data-tour="a-medida-convertir" disabled={ocupado} onClick={pasar}
+              style={{ height: 28, padding: '0 12px', borderRadius: 7, border: 'none', cursor: ocupado ? 'wait' : 'pointer', fontSize: 12, fontWeight: 700,
+                background: 'transparent', color: 'var(--text-secondary)' }}>A medida</button>
+          </div>
+          <Ayuda ancho={300}><b>Con archivo</b>: subís el molde (.ai, .pdf o .dxf) y nombrás sus piezas.<br /><b>A medida</b>: un
+            rectángulo de <b>una sola pieza</b> (banderas). Tocalo y queda guardado así: el nombre de la pieza y la medida de muestra
+            se ponen en <b>Variables</b>, el margen en <b>Margen</b>, y en cada pedido se escribe el ancho y el alto en metros.</Ayuda>
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 
 // ── RESERVAS: «esto lo está editando fulano» ──────────────────────────────────────────────────
@@ -7084,6 +7393,9 @@ export default function App() {
   // `piezasTodasFuera` se calcula más abajo (necesita los ítems del Arte); la traba de «A la planilla»
   // (declarada antes) lo lee por acá.
   const piezasTodasFueraRef = useRef([]);
+  // MOLDE A MEDIDA (MAPA 623): por ref porque se usan antes de donde se calculan/declaran
+  const telasNoEntranRef = useRef([]);
+  const amCrearRef = useRef(null);
   // Wizard del Pedido: paso actual + índice del molde en el paso de diseños.
   const [pedidoPaso, setPedidoPaso] = useState(_wiz.pedidoPaso || 'diseno'); // diseno | moldes | arte | planilla | generar | resultados
   // La pantalla de resultados ocupa lo que haya hasta el borde de la ventana: así los botones de
@@ -7099,7 +7411,7 @@ export default function App() {
   // piezas, elegidas tocándolas en el dibujo de su talle. Lo elegido viaja EN la fila
   // (`fila.__repo = {pid: [pieza exacta…]}`: las filas no tienen id y el objeto se mueve con ella al
   // reordenar). Sin nada elegido, la fila hace todas las piezas del paso anterior.
-  const [repoOn, setRepoOn] = useState(!!_wiz.repoOn);
+  const [repoBoton, setRepoOn] = useState(!!_wiz.repoOn);   // el botón; `repoOn` (abajo) suma lo que dice la planilla
   // COPIA (MAPA 581): con la columna Cantidad a la vista, «Copia» hace UNA MESA POR FILA y la cantidad
   // deja de multiplicar la prenda: queda como dato (copias de esa mesa) para el sistema que imprime.
   const [cantidadCopia, setCantidadCopia] = useState(!!_wiz.cantidadCopia);
@@ -7127,6 +7439,11 @@ export default function App() {
   // Modales y Formularios
   const [creandoProducto, setCreandoProducto] = useState(false);
   const [nuevoProductoNombre, setNuevoProductoNombre] = useState('');
+  // MOLDE A MEDIDA (MAPA 623): qué se crea en «Crear Nuevo Molde» — con archivo, o a medida
+  const [nuevoMoldeTipo, setNuevoMoldeTipo] = useState('archivo');
+  // MOLDE A MEDIDA en el pedido: lo que se está escribiendo por (diseño|molde), y cuál se está cambiando
+  const [amForm, setAmForm] = useState({});
+  const [amCambiar, setAmCambiar] = useState(null);
   // ── CONFIRMAR / PEDIR UN TEXTO, con la UI del sistema ────────────────────────────────────────
   // Reemplazan a `confirm()`/`prompt()` del navegador, que el proyecto prohíbe (CLAUDE.md §4) y
   // que además en un webview pueden estar BLOQUEADOS: el botón no hacía nada y no había forma de
@@ -7856,7 +8173,7 @@ export default function App() {
 
   const _colsProd = activoProdDetalle?.columnas || [
     { id: 'talle', label: 'Talle', role: 'talle' },
-    { id: 'nombre', label: 'Nombre', role: 'nombre' },
+    { id: 'nombre', label: 'Texto', role: 'nombre' },
     { id: 'numero', label: 'Número', role: 'numero' },
     { id: 'manga', label: 'Manga', role: 'manga' }
   ];
@@ -7865,10 +8182,13 @@ export default function App() {
   // las dos puntas vean lo mismo). Su configuración —dónde va y si se muestra siempre o con
   // botón— sale del template de la planilla, que es donde se edita.
   const cols = React.useMemo(() => {
-    const base = _colsProd || [];
-    const yaEsta = base.some(c => c.role === 'cantidad');
     const delTpl = (plantillasPlanillas.find(t => t.id === activoProdDetalle?.planilla_template_id) || {}).columnas || [];
     const cfg = delTpl.find(c => c.role === 'cantidad');
+    // CANTIDAD «NO VA» (2026-10-06, pedido del usuario): la planilla elige si la tiene o no; sin ella
+    // cada fila es UNA prenda (y no hay Copia, que vive de la cantidad)
+    if (cfg && cfg.mostrar === 'no') return (_colsProd || []).filter(c => c.role !== 'cantidad');
+    const base = _colsProd || [];
+    const yaEsta = base.some(c => c.role === 'cantidad');
     if (yaEsta) {
       // la config manda: el molde puede tener una copia vieja de la columna
       return base.map(c => c.role === 'cantidad' ? { ...c, ...(cfg || {}) } : c);
@@ -7879,6 +8199,11 @@ export default function App() {
     if (pos < 0 || pos >= base.length) return [...base, col];
     const out = [...base]; out.splice(pos, 0, col); return out;
   }, [_colsProd, plantillasPlanillas, activoProdDetalle?.planilla_template_id]);
+  // LA COLUMNA «PIEZAS» DE REPO, según la planilla (2026-10-06, pedido del usuario): 'boton' (por
+  // defecto) = la prende el operario con «Repo»; 'siempre' = la planilla la trae puesta; 'no' = esta
+  // planilla no la tiene. `repoOn` es lo que usa todo el pedido.
+  const repoModo = (plantillasPlanillas.find(t => t.id === activoProdDetalle?.planilla_template_id) || {}).repo || 'boton';
+  const repoOn = repoModo === 'siempre' ? true : repoModo === 'no' ? false : repoBoton;
 
   // Terminología configurable del producto activo (cómo se llaman los conceptos
   // de cara al usuario). Solo cambian las etiquetas; el funcionamiento es igual.
@@ -8134,7 +8459,7 @@ export default function App() {
     const activoProd = productosCat.productos.find(p => p.id === productosCat.activo);
     const cols = activoProd?.columnas || [
       { id: 'talle', label: 'Talle', role: 'talle' },
-      { id: 'nombre', label: 'Nombre', role: 'nombre' },
+      { id: 'nombre', label: 'Texto', role: 'nombre' },
       { id: 'numero', label: 'Número', role: 'numero' },
       { id: 'manga', label: 'Manga', role: 'manga' }
     ];
@@ -8442,6 +8767,8 @@ export default function App() {
     // TODAS sus piezas apagadas («Piezas a imprimir», MAPA 577: no saldría nada). Un solo aviso.
     const _trabaArte = telasIncompletas
       ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela. Asignales una tela en «Asignar telas» antes de seguir.`
+      : (telasNoEntranRef.current || []).length
+        ? `La pieza no entra en la tela «${telasNoEntranRef.current[0].tela}»: ${telasNoEntranRef.current[0].motivo} Elegí otra tela.`
       : ((piezasTodasFueraRef.current || []).length
         ? 'Hay prendas con TODAS sus piezas apagadas en «Piezas a imprimir»: no saldría nada. Prendé al menos una pieza.' : '');
     if (_trabaArte) {
@@ -8678,7 +9005,7 @@ export default function App() {
       nombre: 'Nueva Planilla',
       columnas: [
         { id: 'talle', label: 'Talle', role: 'talle' },
-        { id: 'nombre', label: 'Nombre', role: 'nombre' },
+        { id: 'nombre', label: 'Texto', role: 'nombre' },
         { id: 'numero', label: 'Número', role: 'numero' },
         { id: 'manga', label: 'Manga', role: 'manga' }
       ]
@@ -8686,7 +9013,7 @@ export default function App() {
     setNombrePlanillaEditando('Nueva Planilla');
     setColumnasPlanillaEditando([
       { id: 'talle', label: 'Talle', role: 'talle' },
-      { id: 'nombre', label: 'Nombre', role: 'nombre' },
+      { id: 'nombre', label: 'Texto', role: 'nombre' },
       { id: 'numero', label: 'Número', role: 'numero' },
       { id: 'manga', label: 'Manga', role: 'manga' }
     ]);
@@ -8750,10 +9077,8 @@ export default function App() {
       showError("El nombre de la planilla no puede estar vacío");
       return;
     }
-    if (!columnasPlanillaEditando.some(c => c.role === 'talle')) {
-      showError("Debe haber al menos una columna con el rol 'Talle'");
-      return;
-    }
+    // (Ya no se exige la columna Talle: hay planillas SIN TALLES — banderas, moldes a medida —
+    // MAPA 622. El servidor frena si la planilla la usa un molde de varios talles.)
     try {
       const res = await fetch('/api/plantillas_planillas/guardar', {
         method: 'POST',
@@ -8761,7 +9086,8 @@ export default function App() {
         body: JSON.stringify({
           id: planillaEditando.id,
           nombre: nombrePlanillaEditando.trim(),
-          columnas: columnasPlanillaEditando
+          columnas: columnasPlanillaEditando,
+          repo: planillaEditando.repo || 'boton'
         })
       });
       const data = await res.json();
@@ -8870,6 +9196,9 @@ export default function App() {
   const handleCrearProducto = async (e) => {
     e.preventDefault();
     if (!nuevoProductoNombre.trim()) return;
+    // MOLDE A MEDIDA (MAPA 623): otro camino, definido más abajo (usa avisos y recargas que se
+    // declaran después: por ref, para no sumar «usado antes de declarar», ver `verificar_tdz.mjs`)
+    if (nuevoMoldeTipo === 'medida') { if (amCrearRef.current) await amCrearRef.current(); return; }
     try {
       const res = await fetch('/api/productos/crear', {
         method: 'POST',
@@ -8878,7 +9207,7 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      
+
       setNuevoProductoNombre('');
       setCreandoProducto(false);
       await fetchProductos();
@@ -11106,7 +11435,9 @@ export default function App() {
     const _hayRepo = repoOn && _filasQ.some(f => f.__repo && Object.keys(f.__repo).length);
     const _nomMolde = (pid) => ((productosCat.productos || []).find(p => p.id === pid) || {}).nombre || pid;
     const planilla = {
-      columnas: [...(cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id })),
+      // `role` viaja para que la ficha sepa si la planilla tiene talles (MAPA 622: sin talle la
+      // tabla se llama «Planilla del pedido», no «Tabla de talles»)
+      columnas: [...(cols || []).filter(c => colActiva(c)).map(c => ({ id: c.id, label: c.label || c.id, role: c.role || 'none' })),
                  ...(_hayRepo ? [{ id: '__repo_txt', label: 'Repo' }] : [])],
       filas: !_hayRepo ? _filasQ : _filasQ.map(f => ({ ...f, __repo_txt: (f.__repo && Object.keys(f.__repo).length)
         ? Object.entries(f.__repo).map(([pid, l]) => `${_nomMolde(pid)}: ${(l || []).join(', ')}`).join(' · ') : 'Todas' })),
@@ -12448,7 +12779,9 @@ export default function App() {
     }
     return { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas: capasArteNombres(), editables: null,
       referencia: d.referencia || 'alto', posiciones: _posVisor, talleVisor: etqData?.talle_ref || null,
-      acomodoGuia: _acomodoGuardado };
+      acomodoGuia: _acomodoGuardado,
+      // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en la plantilla
+      dobladillo: prodCfg?.a_medida ? margenPorBorde(prodCfg.a_medida.margen) : null };
   };
   // ACOMODAR LAS MESAS A MANO (opcional; ver `EditorAcomodoMesas`): se guarda por VARIABLE en el
   // molde y, si está, manda sobre el acomodo automático — en la recomendación y al crear.
@@ -12765,6 +13098,20 @@ export default function App() {
     const _t = (plantillasPlanillas || []).find(x => x.id === plantillaComun);
     return ((_t && _t.columnas) || cols || []).filter(c => c.role === 'talle');
   }, [plantillasPlanillas, plantillaComun, cols]);
+  // ¿Este molde NO lee talle? Sin columna de talle en la planilla, o con la suya apagada en la
+  // configuración del molde (`mapeo_columnas.talle === ''`). Gemelo de `_sin_col_talle` (servidor).
+  const moldeSinTalle = (mid) => {
+    if (!colsTalle.length) return true;
+    // MOLDE A MEDIDA (MAPA 623): su único talle es la medida; la fila nunca lo trae
+    if ((productosCat.productos.find(p => p.id === mid) || {}).a_medida) return true;
+    const mc = (productosCat.productos.find(p => p.id === mid) || {}).mapeo_columnas;
+    return !!mc && Object.prototype.hasOwnProperty.call(mc, 'talle') && !String(mc.talle || '').trim();
+  };
+  // La planilla del pedido no lleva talle: se esconde lo que sólo existe con talles (lote por
+  // talle, talles por mesa).
+  // (también si todos los moldes del pedido son A MEDIDA: ninguno lee talle, MAPA 623)
+  const planillaSinTalles = colsTalle.length === 0
+    || (moldesUnion.length > 0 && moldesUnion.every(mid => !!(productosCat.productos.find(p => p.id === mid) || {}).a_medida));
   const colDeMolde = (mid) => {
     const c = ((productosCat.productos.find(p => p.id === mid) || {}).mapeo_columnas || {}).talle;
     return (colsTalle.some(x => x.id === c) ? c : (colsTalle[0] || {}).id) || 'talle';
@@ -12819,7 +13166,10 @@ export default function App() {
     if (!molds.length || !molds.some(m => m.mapeo_columnas)) return null;
     const usados = new Set();
     // Sólo valores de texto: en `mapeo_columnas` conviven ids de columna con marcas (`talle_elegido`).
-    molds.forEach(m => Object.values(m.mapeo_columnas || {}).forEach(v => { if (typeof v === 'string' && v) usados.add(v); }));
+    // (un molde A MEDIDA no lee talle — el suyo es la medida, MAPA 623 — así que no prende la columna)
+    molds.forEach(m => Object.entries(m.mapeo_columnas || {}).forEach(([k, v]) => {
+      if (typeof v === 'string' && v && !(m.a_medida && k === 'talle')) usados.add(v);
+    }));
     return usados;
   }, [moldesUnion, productosCat]);
   // Roles que se activan/desactivan por molde (los toggles «usar en este molde»). El resto —Diseño
@@ -12966,6 +13316,11 @@ export default function App() {
     const p = productosCat.productos.find(x => x.id === mid);
     return !!p && !!p.plantilla && (p.piezas_nombradas || 0) > 0;
   };
+  // MOLDE A MEDIDA (MAPA 623): `{pieza, margen, ancho_m, alto_m, borde_mm, nesting, de?}` o null.
+  // Con `de` es la COPIA de este pedido (ya tiene medida); sin `de`, la plantilla del catálogo, que
+  // en el pedido todavía espera que le escriban la medida.
+  const _amDe = (mid) => (productosCat.productos.find(x => x.id === mid) || {}).a_medida || null;
+  const _amSinMedida = (mid) => { const a = _amDe(mid); return !!a && !a.de; };
   // ── CAMINO B: el molde trae el DISEÑO ADENTRO de cada pieza ────────────────────────────────
   // No lleva arte aparte, así que todo lo que hoy pregunta «¿ya cargó el arte?» tiene que
   // preguntar otra cosa: si sus piezas ya tienen nombre. Es un predicado y no un `arteCargado`
@@ -12985,7 +13340,7 @@ export default function App() {
   };
   // ¿Este ítem del paso Arte ya está listo para seguir? Camino A: tiene su arte. Camino B: ya
   // sabemos qué es cada pieza (sin eso no hay etiqueta, ni telas, ni toggles que funcionen).
-  const _itemListo = (did, mid) => _esConDiseno(mid)
+  const _itemListo = (did, mid) => _amSinMedida(mid) ? false : _esConDiseno(mid)
     ? (_moldeUsable(mid) && _piezasSinNombre(mid) === 0)
     : !!arteCargado[did + '|' + mid];
   // 🔴 ACÁ VAN **TODAS** LAS VARIABLES QUE SE PUEDEN USAR, incluidas las de los moldes propios.
@@ -12998,7 +13353,8 @@ export default function App() {
   // Lo único que se saca es el artículo personal de OTRO (que un admin igual VE): es de esa
   // persona, no del taller.
   const _varsVisibles = variablesDisponibles.filter(v => !_moldeDeOtro(v.moldeId));
-  const varsCatalogo = _varsVisibles.filter(v => _moldeUsable(v.moldeId));
+  // (las COPIAS a medida de un pedido no se ofrecen: salen de su plantilla, MAPA 623)
+  const varsCatalogo = _varsVisibles.filter(v => _moldeUsable(v.moldeId) && !(_amDe(v.moldeId) || {}).de);
   // Cuántos MOLDES quedaron afuera por incompletos (no variables: el aviso habla de moldes).
   const moldesIncompletos = [...new Set(_varsVisibles.filter(v => !_moldeUsable(v.moldeId))
     .map(v => v.moldeId))].length;
@@ -13055,7 +13411,13 @@ export default function App() {
     if (v0 && v0.moldeId === pid) return v0.clave;
     return (disenoVars[did] || []).find(c => varByClave(c)?.moldeId === pid) || null;
   };
-  const _talleDeFilaMolde = (fila, pid) => String((fila || {})[colDeMolde(pid)] || '').trim();
+  // PLANILLA SIN TALLES (MAPA 622): el molde no lee talle de ninguna columna (la planilla no la tiene
+  // o el molde la apagó) → la fila va con EL talle del molde, si tiene uno solo. Mismo criterio que
+  // `_traducir_prendas` en el servidor; con varios talles no se adivina (el servidor frena).
+  const _talleDeFilaMolde = (fila, pid) => {
+    if (moldeSinTalle(pid)) { const ts = _tallesDeMolde(pid); return ts.length === 1 ? String(ts[0]) : ''; }
+    return String((fila || {})[colDeMolde(pid)] || '').trim();
+  };
   const _repoDe = (fila, pid) => (((fila || {}).__repo || {})[pid]) || [];
   const guardarRepo = (i, pid, lista) => setFilas(prev => prev.map((f, j) => {
     if (j !== i) return f;
@@ -13218,6 +13580,25 @@ export default function App() {
   piezasTodasFueraRef.current = piezasTodasFuera;
   const telasFaltantesTotal = telasFaltantesDet.reduce((n, x) => n + x.n, 0);
   const telasIncompletas = telasFaltantesTotal > 0;
+  // MOLDE A MEDIDA (MAPA 623): la pieza tiene que ENTRAR en la tela elegida (regla del usuario
+  // 2026-10-06: «si la medida supera el ancho de la tela no se deja elegir ni pasar al siguiente
+  // paso»). Mismo cálculo que el servidor (`_cabe_en_tela`), que frena igual al armar.
+  const _amTelaNoEntra = (am, telaId) => {
+    const t = (telasReg.telas || []).find(x => String(x.id) === String(telaId));
+    if (!t || !am || !am.de) return null;
+    const n = am.nesting || {};
+    const r = cabeEnTela({ anchoM: am.ancho_m, altoM: am.alto_m, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
+      largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion });
+    return r.cabe ? null : { tela: t.nombre, motivo: r.motivo };
+  };
+  const telasNoEntranDet = (disenosPedido || []).flatMap(d => (itemsArteDe(d.id) || []).map(it => {
+    const am = _amDe(it.moldeId);
+    if (!am || !am.de) return null;
+    const ids = [...new Set([_principalDe(d.id, it.moldeId), ...Object.values(_telasDe(d.id, it.moldeId))].filter(Boolean))];
+    for (const id of ids) { const r = _amTelaNoEntra(am, id); if (r) return { did: d.id, it, ...r }; }
+    return null;
+  }).filter(Boolean));
+  telasNoEntranRef.current = telasNoEntranDet;
   // ¿El arte del PEDIDO está cargado para este molde? (lo que importa para generar, NO la
   // validación de la raíz del molde — que puede no existir si el diseño va en disenos/<slug>).
 
@@ -14106,7 +14487,7 @@ export default function App() {
       setLimiteTexto(d);
       // cambia cómo se estampa el nombre/número (LEY arte = tizada): los previews cacheados quedaron viejos
       _pvCache.current = {}; setPreviewPiezas({});
-      showMsg('Nombre y número guardados ✓');
+      showMsg('Texto y número guardados ✓');
     } catch { showError('No se pudo guardar'); }
   };
 
@@ -14175,7 +14556,9 @@ export default function App() {
       if (variables.some(v => v.key === key)) continue;
       const variable = it.clave ? ((p.variantes || []).find(v => v.clave === it.clave) || null) : null;
       variables.push({ key, pid: it.moldeId, clave: it.clave || null, label: (variable && variable.label) || it.label || p.nombre || 'Molde',
-        molde: p.nombre || 'Molde', variable, acomodo: p.acomodo_illustrator || {} });
+        molde: p.nombre || 'Molde', variable, acomodo: p.acomodo_illustrator || {},
+        // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en la plantilla del diseñador
+        dobladillo: p.a_medida ? margenPorBorde(p.a_medida.margen) : null });
     }
     return { did: d.id, nombre: d.nombre || d.id, variables };
   }).filter(d => d.variables.length);
@@ -14510,11 +14893,15 @@ export default function App() {
       Object.entries(prev).forEach(([did, ids]) => { n[did] = (ids || []).filter(id => vivos.has(id)); });
       return n;
     });
+    // 🔴 `disenoVars` es `{diseño: [clave de variable…]}` (una LISTA). Esto lo trataba como el
+    // formato viejo `{diseño: {molde: …}}` y dejaba un objeto donde va la lista: el render siguiente
+    // hacía `.map` sobre él y la app entera se caía con «No se pudo cargar» apenas un molde del
+    // pedido desaparecía del servidor (visto 2026-10-06 con un molde a medida del pedido, MAPA 623).
+    // Se queda cada clave cuya variable sigue en un molde vivo.
+    const _claveViva = (cl) => productosCat.productos.some(p => vivos.has(p.id) && (p.variantes || []).some(v => v.clave === cl));
     setDisenoVars(prev => {
       const n = {};
-      Object.entries(prev).forEach(([did, m]) => {
-        n[did] = Object.fromEntries(Object.entries(m || {}).filter(([mid]) => vivos.has(mid)));
-      });
+      Object.entries(prev || {}).forEach(([did, cls]) => { n[did] = (Array.isArray(cls) ? cls : []).filter(_claveViva); });
       return n;
     });
     setMoldesEfimeros(prev => Object.fromEntries(Object.entries(prev || {}).filter(([id]) => vivos.has(id))));
@@ -14907,6 +15294,88 @@ export default function App() {
     setPendienteNombrarB(null);
     activarEmparejar(true, 'simple');
   }, [pendienteNombrarB, pidCfg, tabAjustesMolde, molderiaAbierta]);
+
+  // ── MOLDE A MEDIDA EN EL PEDIDO (MAPA 623) ───────────────────────────────────────────────────
+  // La primera vez se hace una COPIA del molde del catálogo para este pedido (efímera, como el camino
+  // B: se borra con el pedido), con su archivo armado a la medida, y la copia REEMPLAZA a la plantilla
+  // en este diseño. Las veces siguientes se rehace el archivo de la misma copia: el arte, el mapeo y
+  // la etiqueta quedan (la variable tiene la misma clave).
+  // Crear la PLANILLA del molde a medida desde «Crear Nuevo Molde» (lo llama `handleCrearProducto`)
+  amCrearRef.current = async () => {
+    // SÓLO SE GUARDA (regla del usuario 2026-10-06): la pieza con el nombre del molde, sin margen y la
+    // muestra 1 × 1 m; después se ajusta en «Variables» y «Margen»
+    const _amA = 1, _amH = 1, _amPz = piezaPorDefecto(nuevoProductoNombre);
+    try {
+      const res = await fetch('/api/productos/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: nuevoProductoNombre.trim(),
+          a_medida: { pieza: _amPz, margen: { todos: 0 }, ancho_m: _amA, alto_m: _amH } }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setNuevoProductoNombre('');
+      setCreandoProducto(false);
+      try {
+        setProcesando('Armando el molde a medida…');
+        await pintarYa();
+        await subirMoldeAMedida(data.id, { anchoM: _amA, altoM: _amH, pieza: _amPz }, (t) => setProcesando(t));
+      } finally { setProcesando(null); }
+      setNuevoMoldeTipo('archivo');
+      await fetchProductos();
+      await fetchEstado();
+      invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1);
+      setMolderiaAbierta(data.id);
+      setTabAjustesMolde('menu');
+      showMsg('Molde a medida creado ✓ — la pieza y la muestra van en «Variables», el margen en «Margen»; elegí su planilla (sin talles)');
+    } catch (err) {
+      showError(err.message);
+    }
+  };
+  const armarAMedida = async (did, it, anchoM, altoM) => {
+    const mid = it.moldeId;
+    const p = moldeById(mid) || {};
+    const am = p.a_medida;
+    if (!am) return;
+    const prob = problemaMedida(anchoM, altoM);
+    if (prob) { showError(prob); return; }
+    setProcesando('Armando el molde a la medida…');
+    await pintarYa();
+    try {
+      if (am.de) {
+        const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: mid, ancho_m: anchoM, alto_m: altoM }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'No se pudo cambiar la medida');
+        await subirMoldeAMedida(mid, { anchoM, altoM, pieza: am.pieza }, (t) => setProcesando(t));
+        _talleDetCache.current = {};                 // el dibujo del molde cambió
+        invalidarNido(); setMoldeReload(v => v + 1);
+        await fetchProductos();
+        if (arteCargado[did + '|' + mid]) cargarMapeadorOperario(mid); else cargarMoldeOperario(mid);
+        setAmCambiar(null);
+        showMsg(`Medida cambiada a ${talleDeMedida(anchoM, altoM).replace('x', ' × ')} m ✓`);
+        return;
+      }
+      const nombre = `${p.nombre || 'Molde'} ${talleDeMedida(anchoM, altoM)}`;
+      const r = await fetch('/api/productos/crear', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, efimero: true, planilla_template_id: p.planilla_template_id || plantillaComun || undefined,
+                               a_medida_de: mid, ancho_m: anchoM, alto_m: altoM }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'No se pudo armar el molde a medida');
+      // del pedido YA (ver `subirMoldesConDiseno`): que el barrido de huérfanos no se lo lleve a mitad del alta
+      setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now(), subiendo: true } }));
+      await subirMoldeAMedida(d.id, { anchoM, altoM, pieza: am.pieza }, (t) => setProcesando(t));
+      setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
+      await fetchProductos();
+      const nuevaClave = d.a_medida && d.a_medida.variable;
+      // la copia toma el lugar de la plantilla EN ESTE DISEÑO (los otros diseños siguen con la suya)
+      if (it.clave && nuevaClave) setDisenoVars(prev => ({ ...prev, [did]: (prev[did] || []).map(c => (c === it.clave ? nuevaClave : c)) }));
+      setDisenoMoldes(prev => ({ ...prev, [did]: (prev[did] || []).map(m => (m === mid ? d.id : m)) }));
+      setAmForm(f => { const n = { ...f }; delete n[did + '|' + mid]; return n; });
+      showMsg(`Molde armado a ${talleDeMedida(anchoM, altoM).replace('x', ' × ')} m ✓ — ahora cargá el arte`);
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      setProcesando(null);
+    }
+  };
 
   const irANombrarB = () => {
     const _mios = (productosCat.productos || []).filter(p => p.efimero && p.origen === 'con_diseno' && !p.de_otro);   // los MÍOS: un admin ve los de todos, pero su pedido no abre ni nombra los ajenos
@@ -15757,17 +16226,17 @@ export default function App() {
     return { filasN, malas, porCampo };
   })();
   const _cmTxt = (v) => Math.max(0.1, v).toFixed(1).replace('.', ',');
-  const _nombreCampoA = (campo) => (campo === 'nombre' ? 'Nombre' : campo === 'numero' ? 'Número' : campo.charAt(0).toUpperCase() + campo.slice(1));
-  const _elCampoA = (campo) => (campo === 'nombre' ? 'El nombre' : campo === 'numero' ? 'El número' : `«${_nombreCampoA(campo)}»`);
+  const _nombreCampoA = (campo) => (campo === 'nombre' ? 'Texto' : campo === 'numero' ? 'Número' : campo.charAt(0).toUpperCase() + campo.slice(1));
+  const _elCampoA = (campo) => (campo === 'nombre' ? 'El texto' : campo === 'numero' ? 'El número' : `«${_nombreCampoA(campo)}»`);
   // por qué existe el límite, con las palabras de cada campo (letras / dígitos / caracteres)
   const _porQueLimite = (campo) => {
-    const el = campo === 'nombre' ? 'un nombre' : campo === 'numero' ? 'un número' : `«${_nombreCampoA(campo)}»`;
+    const el = campo === 'nombre' ? 'un texto' : campo === 'numero' ? 'un número' : `«${_nombreCampoA(campo)}»`;
     const que = campo === 'nombre' ? 'demasiadas letras' : campo === 'numero' ? 'demasiados dígitos' : 'demasiados caracteres';
-    const lo = campo === 'nombre' ? 'el nombre' : campo === 'numero' ? 'el número' : `«${_nombreCampoA(campo)}»`;
+    const lo = campo === 'nombre' ? 'el texto' : campo === 'numero' ? 'el número' : `«${_nombreCampoA(campo)}»`;
     return `Si ${el} tiene ${que}, podría salirse del molde y quedar cortado. Por eso ${lo} tiene un límite de ancho: así se ve correcto y completo. Cuando lo supera, se achica proporcionalmente para entrar.`;
   };
   const _textoAchique = (x, valor) => `«${valor}» no entra en ${x.pieza} (talle ${x.talle}${x.molde ? ' · ' + x.molde : ''}) y sale ${_cmTxt(x.alto0_cm - x.alto_cm)} cm más chico: la letra queda de ${_cmTxt(x.alto_cm)} cm en vez de ${_cmTxt(x.alto0_cm)} cm.` +
-    (x.k < _UMBRAL_LEGIBLE ? ' Puede no leerse bien: probá un texto más corto o cambiá el margen en «Nombre y número» del molde.' : '');
+    (x.k < _UMBRAL_LEGIBLE ? ' Puede no leerse bien: probá un texto más corto o cambiá el margen en «Texto y número» del molde.' : '');
   // ¿La fuente NO tiene este caracter? (los espacios nunca se marcan)
   const faltaEnFuente = (ch) => !!fuenteChars && fuenteChars.size > 0 && String(ch).trim() !== '' && !fuenteChars.has(ch);
   // Texto TAL CUAL se ve/estampa en esa columna (el nombre se muestra en mayúsculas)
@@ -15948,10 +16417,17 @@ export default function App() {
                   ok: _itB.filter(x => _moldeUsable(x.moldeId) && _etiquetasSinUbicar(x.moldeId) === 0)
                           .map(x => `${_arteLbl(x.did, x)}: todas las piezas tienen su etiqueta ubicada`) });
       }
-      it.push({ id: 'telas', label: 'la tela de cada pieza', corto: 'Asignar tela', hecho: !telasIncompletas,
+      it.push({ id: 'telas', label: 'la tela de cada pieza', corto: 'Asignar tela', hecho: !telasIncompletas && !telasNoEntranDet.length,
                 // POR VARIABLE: «faltan 3 piezas» sin decir dónde obligaba a buscarlas a mano
-                faltan: telasFaltantesDet.map(x => `${_arteLbl(x.did, x.it)}: ${x.n} pieza(s) sin tela — asignalas en «Asignar telas».`),
-                ok: telasIncompletas ? [] : ['Todas las piezas tienen su tela'] });
+                faltan: [...telasFaltantesDet.map(x => `${_arteLbl(x.did, x.it)}: ${x.n} pieza(s) sin tela — asignalas en «Asignar telas».`),
+                         ...telasNoEntranDet.map(x => `${_arteLbl(x.did, x.it)}: no entra en «${x.tela}» — ${x.motivo}`)],
+                ok: (telasIncompletas || telasNoEntranDet.length) ? [] : ['Todas las piezas tienen su tela'] });
+      // MOLDE A MEDIDA (MAPA 623): una prenda a medida sin medida todavía
+      const _sinMedida = itemsPedido.filter(x => _amSinMedida(x.moldeId));
+      if (_sinMedida.length) {
+        it.push({ id: 'medida', label: 'la medida de la pieza', corto: 'Poner medida', hecho: false,
+                  faltan: _sinMedida.map(x => `${_arteLbl(x.did, x)}: escribí el ancho y el alto en metros.`), ok: [] });
+      }
       // Sólo aparece si hay una prenda con TODAS sus piezas apagadas (si no, no hay nada que pedir).
       if (piezasTodasFuera.length) {
         it.push({ id: 'piezasImp', label: 'las piezas a imprimir', corto: 'Piezas a imprimir', hecho: false,
@@ -16783,7 +17259,7 @@ export default function App() {
               <div style={{ fontSize: 12.5, color: 'var(--warning, #f5a524)', fontWeight: 700, lineHeight: 1.45 }}>
                 No se encontraron las fuentes: {(fuentesEstado.faltantes).join(' · ')}
                 <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-secondary)', marginTop: 4 }}>
-                  Mientras no la reemplaces, el nombre/número se estampa con <b>Anton Regular</b> (temporal). Si la fuente del diseño está en el catálogo o la cargas después, se usa la del diseño.
+                  Mientras no la reemplaces, el texto/número se estampa con <b>Anton Regular</b> (temporal). Si la fuente del diseño está en el catálogo o la cargas después, se usa la del diseño.
                 </div>
               </div>
             )}
@@ -16800,11 +17276,11 @@ export default function App() {
                     const usa = c.elegida || c.por_fuente || c.original || c.fuentes[0] || '—';
                     return (
                       <button key={c.clave} type="button" onClick={() => setFuenteFaltanteSel(c.clave)}
-                        title={`La fuente del diseño en «${c.campo}» es ${c.fuentes.join(', ') || '—'}`}
+                        title={`La fuente del diseño en «${rotuloCampo(c.campo)}» es ${c.fuentes.join(', ') || '—'}`}
                         style={{ padding: '6px 11px', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
                           border: '1px solid ' + (sel ? 'var(--accent)' : 'var(--border-light)'),
                           background: sel ? 'rgba(0,243,255,0.10)' : 'transparent', color: '#fff' }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 800 }}>{c.campo}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 800 }}>{rotuloCampo(c.campo)}</div>
                         <div style={{ fontSize: 10.5, color: c.elegida ? 'var(--accent)' : 'var(--text-muted)' }}>
                           {usa}{c.elegida ? ' (elegida)' : ''}
                         </div>
@@ -17367,7 +17843,7 @@ export default function App() {
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, paddingTop: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ fontSize: 15, fontWeight: 700 }}>Cargá los moldes con el diseño adentro</span>
-                    <Ayuda ancho={340}>Cada archivo tiene que traer <b>una capa por talle</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva nombre y número— una capa <b>«nombre»</b> y otra <b>«00»</b>. Podés cargar varios (camiseta, short…).</Ayuda>
+                    <Ayuda ancho={340}>Cada archivo tiene que traer <b>una capa por talle</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva texto y número— una capa <b>«Texto»</b> (o «Nombre») y otra <b>«00»</b>. Podés cargar varios (camiseta, short…).</Ayuda>
                   </div>
 
                   {/* ZONA DE CARGA — acepta varios archivos de una */}
@@ -17529,7 +18005,7 @@ export default function App() {
 
                 {/* Pestañas: el catálogo compartido vs. lo que subió este usuario */}
                 {(() => {
-                  const nMios = productosCat.productos.filter(p => p.propio && (_moldeUsable(p.id) || p.efimero)).length;
+                  const nMios = productosCat.productos.filter(p => p.propio && !p.a_medida && (_moldeUsable(p.id) || p.efimero)).length;
                   const tabs = [{ k: 'catalogo', n: 'Catálogo', c: varsCatalogo.length }, { k: 'mios', n: 'Mis artículos', c: nMios }];
                   return (
                     <div data-tour="pedido-tabs" style={{ flexShrink: 0, display: 'flex', gap: 6, marginTop: 14, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 10, alignSelf: 'flex-start' }}>
@@ -17578,7 +18054,7 @@ export default function App() {
                     // `|| p.efimero`: el molde con el diseño adentro entra con sus piezas todavía sin
                     // nombrar («Pieza 1»…) y es JUSTAMENTE lo que el cliente va a hacer ahora. Con el
                     // filtro de siempre desaparecía de su propia pestaña apenas se subía.
-                    const mios = productosCat.productos.filter(p => p.propio && (_moldeUsable(p.id) || p.efimero));
+                    const mios = productosCat.productos.filter(p => p.propio && !p.a_medida && (_moldeUsable(p.id) || p.efimero));
                     return (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 11 }}>
                         {mios.map(p => {
@@ -17806,7 +18282,7 @@ export default function App() {
                     <div data-tour="planilla-escaneando" style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 13px', borderRadius: 10, marginBottom: 8,
                       background: 'rgba(0,216,245,0.07)', border: '1px solid rgba(0,216,245,0.35)', fontSize: 12, color: 'var(--text-secondary)' }}>
                       <span style={{ width: 14, height: 14, border: '2px solid rgba(0,216,245,0.25)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'perfilSpin 0.8s linear infinite', flexShrink: 0 }} />
-                      <b style={{ color: 'var(--accent)' }}>Escaneando planilla…</b> revisando si algún nombre o número no entra en su pieza.
+                      <b style={{ color: 'var(--accent)' }}>Escaneando planilla…</b> revisando si algún texto o número no entra en su pieza.
                     </div>
                   )}
                   {/* «SE ACHICARÁ» (MAPA 601): textos que no entran en el límite de su pieza y salen más chicos */}
@@ -17839,7 +18315,9 @@ export default function App() {
                       </div>
                     );
                   })()}
-                  <div className="card-subtitle">Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</div>
+                  <div className="card-subtitle">{planillaSinTalles
+                    ? <>Cada fila es una prenda. Los mismos datos sirven para todas las variables del pedido.</>
+                    : <>Cada fila es una prenda: elegí su <b>variable</b> y su talle. Los mismos datos sirven para todas las variables del pedido.</>}</div>
 
                   {/* ══ BARRA DE HERRAMIENTAS ══════════════════════════════════════════════════
                       Todo lo que se le hace a la planilla, ARRIBA de ella y agrupado por lo que
@@ -17868,12 +18346,15 @@ export default function App() {
                           color: '#fff', fontSize: 13, fontWeight: 800, fontFamily: 'monospace', outline: 'none' }} />
                     </div>
 
+                    {/* el lote es «cuántas de cada TALLE»: sin talles no tiene qué preguntar (MAPA 622) */}
+                    {!planillaSinTalles && (
                     <button className="btn ghost" data-tour="planilla-lote"
                       onClick={() => { setLoteCant({}); setLoteOpen(true); }}
                       title="Cuántas prendas de cada talle. Crea UNA FILA POR PRENDA, lista para ponerle el nombre."
                       style={{ display: 'flex', alignItems: 'center', gap: 7, height: 36, padding: '0 14px', fontSize: 12.5, fontWeight: 600, borderRadius: 9 }}>
                       <Icon name="planilla" style={{ width: 14, height: 14 }} /> Cargar por lote
                     </button>
+                    )}
 
                     <span style={{ width: 1, height: 24, background: 'var(--border-light)', flexShrink: 0 }} />
 
@@ -17913,7 +18394,9 @@ export default function App() {
                           archivo). Sin Copia, la cantidad repite la prenda y todo se acomoda junto, como siempre.</Ayuda>} />
                     )}
 
-                    {/* — REPO (reposición): elegir tocando qué piezas hace cada fila (MAPA 578) — */}
+                    {/* — REPO (reposición): elegir tocando qué piezas hace cada fila (MAPA 578). El botón
+                        sólo si la planilla la deja «con botón»: «siempre» ya la trae, «no» no la tiene — */}
+                    {repoModo === 'boton' && (<>
                     <span style={{ width: 1, height: 24, background: 'var(--border-light)', flexShrink: 0 }} />
                     <InterruptorIcono ancla="planilla-repo" on={repoOn} onToggle={() => { setRepoOn(v => !v); setRepoPick(null); }}
                       icono="repoPieza" nombre="Repo" rgb="255,0,170"
@@ -17921,8 +18404,11 @@ export default function App() {
                       ayuda={<Ayuda ancho={320}>Reposición: cada fila puede hacer <b>sólo algunas piezas</b>. Con Repo prendido aparece la columna
                         <b> Piezas</b>: tocala, y en el dibujo de ese talle tocá las piezas que van. Si no elegís ninguna, la fila hace
                         <b> todas</b> las del paso anterior.</Ayuda>} />
+                    </>)}
 
-                    {/* — TALLES POR MESA (MAPA 593): qué talles comparten mesa; apagado = como siempre — */}
+                    {/* — TALLES POR MESA (MAPA 593): qué talles comparten mesa; apagado = como siempre.
+                        Sin talles en la planilla no hay nada que repartir (MAPA 622). — */}
+                    {!planillaSinTalles && (
                     <InterruptorIcono ancla="planilla-talles-mesa" on={Object.keys(tallesMesa).length > 0}
                       onToggle={() => { setTmDraft({ ...tallesMesa }); setTmSel([]); setTmSobre(null); setTmOpen(true); }}
                       icono="tallesMesa" nombre="Mesas" rgb="167,139,250"
@@ -17930,6 +18416,7 @@ export default function App() {
                       ayuda={<Ayuda ancho={330}>Elegí <b>qué talles van en la misma mesa</b>: un talle por mesa, o varios juntos
                         (por ejemplo S y M en una, L y XL en otra). Los talles que no pongas en ningún grupo van juntos. Sin usarlo,
                         todos los talles se acomodan juntos, como siempre.</Ayuda>} />
+                    )}
 
                     {/* — cuánto hay — */}
                     <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
@@ -18396,7 +18883,7 @@ export default function App() {
                   const f = filas[repoPick]; if (!f) return '';
                   const d = _disDeFila(f);
                   const ts = [...new Set(_moldesDeFila(f).map(pid => _talleDeFilaMolde(f, pid)).filter(Boolean))];
-                  return `Fila ${String(repoPick + 1).padStart(2, '0')} · Talle ${ts.join(' / ') || '—'}${d ? ` · ${d.nombre}` : ''}`;
+                  return `Fila ${String(repoPick + 1).padStart(2, '0')}${planillaSinTalles ? '' : ` · Talle ${ts.join(' / ') || '—'}`}${d ? ` · ${d.nombre}` : ''}`;
                 })()}
                 maxWidth={920}>
                 {(() => {
@@ -18560,6 +19047,11 @@ export default function App() {
                 const _tieneDiseno = !!mapeoData?.mesas?.length;
                 const colAct = colorDeDiseno(disenoActivo);
                 const cargadoActual = !!arteCargado[disenoActivo + '|' + _id];
+                // MOLDE A MEDIDA (MAPA 623): la plantilla pide la medida; la copia del pedido ya la tiene
+                const _amIt = _amDe(_id);
+                const _amKey = disenoActivo + '|' + _id;
+                const _amF = amForm[_amKey] || (_amIt && _amIt.de
+                  ? { ancho: metrosTexto(_amIt.ancho_m), alto: metrosTexto(_amIt.alto_m) } : { ancho: '', alto: '' });
                 // VER VARIANTE en el pedido: las variantes del sistema (las de Variables) CON piezas. Al elegir
                 // una en las tarjetas, el visor muestra SOLO sus piezas acomodadas (mismo acomodo que en Variables).
                 // VARIABLE-FIRST estricto: si hay una variable activa NUNCA se cae a dibujar el molde
@@ -18603,6 +19095,9 @@ export default function App() {
                 const _telasMol = _hayCfgTelas
                   ? _telasActivas.filter(t => _idsDisp.includes(String(t.id)))
                   : _telasActivas;
+                // MOLDE A MEDIDA (MAPA 623): una tela en la que la pieza NO entra no se ofrece
+                const _amNoEntran = (_amDe(_id) || {}).de ? _telasMol.filter(t => _amTelaNoEntra(_amDe(_id), t.id)) : [];
+                const _telasMolOk = _amNoEntran.length ? _telasMol.filter(t => !_amNoEntran.includes(t)) : _telasMol;
                 // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
                 // `piezasArteGen` = las piezas que se VEN en el visor (misma fuente que se toca/pinta),
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
@@ -18633,6 +19128,8 @@ export default function App() {
                 // piezas que la seguían; las que tienen otra tela (excepciones) se quedan como están.
                 const aplicarTela = (telaId, destino = (telaSelPiezas.length ? 'seleccion' : 'todas'), piezasSel = telaSelPiezas) => {
                   if (!telaId) return;
+                  const _noE = _amTelaNoEntra(_amDe(_id), telaId);
+                  if (_noE) { avisarEnVisor(`No entra en «${_noE.tela}»: ${_noE.motivo}`); return; }
                   if (!_todasGen.length) {
                     // Pasa cuando la prenda todavía se está armando (o falta el arte): sin piezas a
                     // la vista no hay a qué asignarle la tela. Antes no hacía NADA y parecía roto.
@@ -18686,7 +19183,7 @@ export default function App() {
                 // lo que el modal necesita para funcionar (ver `telaPickerRef`): la ventana dice si es
                 // la principal o una excepción, y con QUÉ piezas (no se lee el estado, que puede ser viejo)
                 telaPickerRef.current = {
-                  lista: _telasMol,
+                  lista: _telasMolOk,
                   aplicar: (id) => {
                     const _sel = telaPicker?.destino === 'seleccion';
                     if (_sel) setTelaSelPiezas(telaPicker.piezas);
@@ -19058,7 +19555,7 @@ export default function App() {
                   <div data-tour="arte-variables" data-opciones="1" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexShrink: 0 }}>
                     {itemsDis.map((it, idx) => {
                       const vo = it.clave ? varByClave(it.clave) : null;
-                      const on = idx === arteIdx, loaded = _esConDiseno(it.moldeId)
+                      const on = idx === arteIdx, loaded = _amSinMedida(it.moldeId) ? false : _esConDiseno(it.moldeId)
                         ? (_moldeUsable(it.moldeId) && _piezasSinNombre(it.moldeId) === 0)   // molde con diseño: listo = piezas nombradas
                         : !!arteCargado[disenoActivo + '|' + it.moldeId];
                       return (
@@ -19092,10 +19589,21 @@ export default function App() {
                       (MAPA 597, COREL_REFERENCIA.md). */}
                   <input type="file" ref={fileInputArteRef} accept=".ai,.pdf" onChange={(e) => cargarDisenoWizard(e.target.files[0])} hidden />
                   {/* La navegación de arriba YA es por variable → el visor muestra solo sus piezas (vfArte). */}
-                  {_moldeListo ? (
+                  {/* MOLDE A MEDIDA (MAPA 623): sin medida todavía (o cambiándola), la tarjeta de la medida */}
+                  {(_amIt && (!_amIt.de || amCambiar === _amKey)) ? (
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '24px 0 16px' }}>
+                      <TarjetaMedida am={_amIt} anchoTxt={_amF.ancho} altoTxt={_amF.alto} telas={_telasMol}
+                        onAncho={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, ancho: v } }))}
+                        onAlto={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, alto: v } }))}
+                        ocupado={!!procesando} esCopia={!!_amIt.de}
+                        onCancelar={_amIt.de ? () => setAmCambiar(null) : null}
+                        onArmar={(a, h) => armarAMedida(disenoActivo, itActual, a, h)} />
+                    </div>
+                  ) : _moldeListo ? (
                     /* Tarjeta única: cabecera (nombre del molde + cargar) + [ talles | molde | diseños ] */
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex' }}>
                       <MapeadorArteVisual
+                        margenAMedida={_amIt && _amIt.de ? margenPorBorde(_amIt.margen) : null}
                         canvasLayout={canvasLayout}
                         mapeoData={mapeoData}
                         cargando={mapeoCargando}
@@ -19144,8 +19652,14 @@ export default function App() {
                               dibuja la pieza con el diseño del propio archivo. */}
                           {/* OPCIONAL: la plantilla para el diseñador, por si no la tienen (MAPA 617).
                               Sin el «?» aparte: el modal explica todo adentro. */}
+                          {_amIt && _amIt.de && (
+                            <button className="btn ghost" data-tour="arte-medida-cambiar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
+                              title="Cambiar el ancho y el alto de la pieza" onClick={() => setAmCambiar(_amKey)}>
+                              Medida {talleDeMedida(_amIt.ancho_m, _amIt.alto_m).replace('x', ' × ')} m
+                            </button>
+                          )}
                           {!_esB && (
-                          <button className="btn ghost" data-tour="arte-crear-plantilla" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
+                          <button className="btn ghost" data-tour="arte-crear-plantilla"style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
                             title="Crear la plantilla del arte (guía .ai, Illustrator o CorelDRAW) de las variables de todos los diseños del pedido"
                             onClick={() => setPlantillaPedido(true)}>
                             <Icon name="download" style={{ width: 13, height: 13 }} /> Crear plantilla
@@ -19259,8 +19773,9 @@ export default function App() {
                     centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
                     siguiente={<BtnSiguiente texto="A la planilla" ancla="arte-siguiente" onClick={() => irAPlanillaDesdeArte()}
-                      disabled={!(todasArteCargadas && !telasIncompletas && !piezasTodasFuera.length)}
-                      title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela` : '')} />} />
+                      disabled={!(todasArteCargadas && !telasIncompletas && !telasNoEntranDet.length && !piezasTodasFuera.length)}
+                      title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela`
+                        : (telasNoEntranDet.length ? `La pieza no entra en «${telasNoEntranDet[0].tela}»` : ''))} />} />
                 </div>
                 );
               })()}
@@ -20353,7 +20868,7 @@ export default function App() {
                       </div>
                       <h3 style={{ fontSize: 16, fontWeight: 700, marginTop: 12, color: 'var(--text-primary)' }}>Reglas de planilla · Capas</h3>
                       <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.4 }}>
-                        Acá creás los campos que se estampan (nombre, número, palabra, número 2…). Cada campo es una <b>capa</b> que debe tener el diseño — y acá ves cómo deben llamarse.
+                        Acá creás los campos que se estampan (texto, número, palabra, número 2…). Cada campo es una <b>capa</b> que debe tener el diseño — y acá ves cómo deben llamarse.
                       </p>
                     </div>
                   </div>
@@ -20853,11 +21368,21 @@ export default function App() {
                               { id: 'nestingsel', icon: 'nestingPiezas', label: 'Nesting', desc: 'Qué acomodo (separación/giro) usa este molde', disabled: false },
                               { id: 'telas', icon: 'telaRollo', label: 'Telas asignadas', desc: 'Qué telas del registro están disponibles para este molde', disabled: false },
                               { id: 'borde', icon: 'bordeCorte', label: 'Borde de corte', desc: 'Si lleva borde, el color y el tamaño (mm)', disabled: false },
-                              { id: 'texto', icon: 'limiteTexto', label: 'Nombre y número', desc: 'Hasta dónde llegan: margen al borde de la pieza (cm)', disabled: false },
+                              { id: 'texto', icon: 'limiteTexto', label: 'Texto y número', desc: 'Hasta dónde llegan: margen al borde de la pieza (cm)', disabled: false },
+                              // MARGEN (dobladillo): sólo en un molde a medida (se saca abajo en los demás), al lado de
+                              // «Texto y número» porque el texto no puede salir de él
+                              { id: 'margen', icon: 'dobladillo', label: 'Margen', desc: 'El dobladillo: la franja del borde que se dobla (cm)', disabled: false },
                               { id: 'diseno', icon: 'plantilla', label: 'Plantilla', desc: 'Medidas de cada pieza y carga del diseño', disabled: false },
                               { id: 'editable', icon: 'editable', label: 'Editable', desc: 'Mover, rotar y escalar los objetos de la capa «Editable» del diseño', disabled: false },
                               { id: 'terminologia', icon: 'nombres', label: 'Nombres', desc: `Cómo se llaman ${term.variante.toLowerCase()} y ${term.molde.toLowerCase()}`, disabled: false },
-                            ].map(_lock).filter(item => !(modoMiMolde && item.id === 'variables'));
+                            ].map(_lock).filter(item => !(modoMiMolde && item.id === 'variables'))
+                             // MOLDE A MEDIDA (MAPA 623-624, pedido del usuario): no hay archivo ni piezas que
+                             // nombrar → sin Moldería; «Variables» muestra lo de este molde (la pieza y la
+                             // medida de muestra) y el MARGEN es su propia herramienta, al lado de «Nombre y
+                             // número» porque el texto no puede salir de él. Lo demás, igual que siempre.
+                             .filter(item => !(prodCfg?.a_medida && item.id === 'molderia'))
+                             .map(item => (prodCfg?.a_medida && item.id === 'variables') ? { ...item, desc: 'La pieza y la medida de muestra' } : item)
+                             .filter(item => item.id !== 'margen' || !!prodCfg?.a_medida);
                             })().map(item => (
                               <button
                                 key={item.id}
@@ -21311,13 +21836,24 @@ export default function App() {
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                              <span>Hasta dónde puede llegar el nombre y el número en cada pieza: sus bordes, corridos hacia adentro.</span>
+                              <span>Hasta dónde puede llegar el texto y el número en cada pieza: sus bordes, corridos hacia adentro.</span>
                               <Ayuda ancho={340}>
                                 <b>Tocá las piezas en el visor</b> para elegirlas (una o varias; otra vez la saca). El margen que pongas vale para <b>esas piezas</b>, en todos sus talles; sin elegir ninguna, vale para <b>todas</b> las que no tengan el suyo.
-                                <br /><br />Cada línea es el borde de la pieza corrido hacia adentro: el texto <b>nunca pasa</b> de ahí; si un nombre largo no entra, se <b>achica proporcional</b>, apoyado en su <b>línea de abajo</b>. Las líneas se <b>arrastran</b>.
+                                <br /><br />Cada línea es el borde de la pieza corrido hacia adentro: el texto <b>nunca pasa</b> de ahí; si un texto largo no entra, se <b>achica proporcional</b>, apoyado en su <b>línea de abajo</b>. Las líneas se <b>arrastran</b>.
                                 <br /><br />Con <b>otra tipografía</b> (elegida en el pedido o porque falta la del diseño) las letras salen a la <b>misma altura</b> que en el diseño.
                               </Ayuda>
                             </div>
+                            {prodCfg?.a_medida && (() => {
+                              // MOLDE A MEDIDA: el texto nunca sale del margen (dobladillo) — el servidor lo
+                              // aplica como piso a todo campo (`_limite_texto_de`), acá se dice cuánto es
+                              const _mb = margenPorBorde(prodCfg.a_medida.margen);
+                              const _dob = Math.max(_mb.arriba, _mb.abajo, _mb.izq, _mb.der);
+                              return _dob > 0 ? (
+                                <div data-tour="texto-dobladillo" style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--text-secondary)', padding: '8px 10px', borderRadius: 9, border: '1px solid rgba(0,216,245,0.3)', background: 'rgba(0,216,245,0.05)' }}>
+                                  Molde a medida: el texto y el número <b>nunca pasan el margen</b> (dobladillo) — como mínimo {String(_dob).replace('.', ',')} cm del borde, aunque acá se ponga menos.
+                                </div>
+                              ) : null;
+                            })()}
                             {renderSelVerVariante()}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -21686,7 +22222,17 @@ export default function App() {
                         </div>
                       )}
 
-                      {tabAjustesMolde === 'molderia' && (
+                      {/* MOLDE A MEDIDA (MAPA 623-624): sin Moldería — «Variables» = la pieza y la medida de
+                          muestra; «Margen» = su propia herramienta (Moldería queda por si se entra de otro lado) */}
+                      {(tabAjustesMolde === 'variables' || tabAjustesMolde === 'molderia') && prodCfg?.a_medida && (
+                        <VariablesAMedida prod={prodCfg} pidCfg={pidCfg} avisar={showMsg} avisarError={showError} procesando={setProcesando}
+                          onCambio={async (rehecho) => { await fetchProductos(); if (rehecho) { invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1); } }} />
+                      )}
+                      {tabAjustesMolde === 'margen' && prodCfg?.a_medida && (
+                        <MargenAMedida prod={prodCfg} pidCfg={pidCfg} avisar={showMsg} avisarError={showError}
+                          onCambio={async () => { await fetchProductos(); }} />
+                      )}
+                      {tabAjustesMolde === 'molderia' && !prodCfg?.a_medida && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                           {/* Botones de Carga (la explicación de qué hace este panel vive en el «?»).
                               `_soloHerramienta` (camino B desde el pedido): re-subir el molde es del
@@ -21789,7 +22335,7 @@ export default function App() {
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                                   {pzNueva.origen === 'duplicar'
-                                    ? <>Duplicando <b>{nombreDePieza(pzNueva.idx) || `la pieza ${pzNueva.idx + 1}`}</b> — se copian <b>sus vectores en cada talle</b>; el nombre y el número NO se copian.</>
+                                    ? <>Duplicando <b>{nombreDePieza(pzNueva.idx) || `la pieza ${pzNueva.idx + 1}`}</b> — se copian <b>sus vectores en cada talle</b>; el texto y el número NO se copian.</>
                                     : (pzNueva.archivo ? <>Archivo <b>{pzNueva.archivo}</b> · {pzNueva.medidas}</> : <>Elegí el archivo de la pieza…</>)}
                                 </div>
                                 {pzNueva.origen === 'duplicar' && !nombreDePieza(pzNueva.idx) && (
@@ -22348,11 +22894,17 @@ export default function App() {
                           ) : prodCfg?.plantilla ? (
                             <div style={{ color: 'var(--text-muted)', fontSize: 12.5, textAlign: 'center', padding: 28 }}>Cargando el molde…</div>
                           ) : (
-                            <div className="upload-zone" data-tour="molde-subir" onClick={() => fileInputPlantillaRef.current.click()} style={{ padding: '24px 16px' }}>
-                              <Icon name="upload" className="upload-icon" />
-                              <div style={{ fontSize: 12.5, fontWeight: 600 }}>Subí el molde (.ai · .pdf · .dxf)</div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Illustrator, Corel/PDF o DXF (Optitex, Gerber…)</div>
-                            </div>
+                            // SIN BASE TODAVÍA: «Con archivo» (subirlo) o «A medida» (MAPA 623). Sólo en un
+                            // molde del catálogo: «Mis artículos» y el camino B no llevan moldes a medida.
+                            <MolderiaSinBase pidCfg={pidCfg} nombre={prodCfg?.nombre} avisar={showMsg} avisarError={showError} procesando={setProcesando}
+                              permitirMedida={!_soloHerramienta && !modoMiMolde && !prodCfg?.efimero && !prodCfg?.propio}
+                              onHecho={async () => { await fetchProductos(); await fetchEstado(); invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1); setTabAjustesMolde('menu'); }}>
+                              <div className="upload-zone" data-tour="molde-subir" onClick={() => fileInputPlantillaRef.current.click()} style={{ padding: '24px 16px' }}>
+                                <Icon name="upload" className="upload-icon" />
+                                <div style={{ fontSize: 12.5, fontWeight: 600 }}>Subí el molde (.ai · .pdf · .dxf)</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Illustrator, Corel/PDF o DXF (Optitex, Gerber…)</div>
+                              </div>
+                            </MolderiaSinBase>
                           )}
                           {!_soloHerramienta && (<>
                           <button type="button" className="btn ghost" data-tour="molde-como-exportar" style={{ width: '100%', fontSize: 11.5, marginTop: 8 }} onClick={() => setVerAyudaExport(v => !v)}>
@@ -22562,7 +23114,7 @@ export default function App() {
                                 corel={{ onCrear: () => abrirEnCorel(), onNoEncontrado: () => setCorelFalta(true),
                                   versionNueva: _hayInstCorel ? _verCorel : null, onBajar: bajarInstaladorCorel, hayInstalador: _hayInstCorel }}
                                 ayuda={<Ayuda ancho={340}>
-                                  Arma la base directo en el programa del diseñador, sin descargar nada: el nombre de cada mesa que lee el sistema{configMedida === 'talle' ? ' (una por cada talle elegido)' : ''}, las <b>capas</b> (diseño, Editable, Nombre, Número…, guias) y el <b>contorno</b> de cada pieza en «guias».{verVariante ? ' Solo las piezas de esta variable.' : ''}
+                                  Arma la base directo en el programa del diseñador, sin descargar nada: el nombre de cada mesa que lee el sistema{configMedida === 'talle' ? ' (una por cada talle elegido)' : ''}, las <b>capas</b> (diseño, Editable, Texto, Número…, guias) y el <b>contorno</b> de cada pieza en «guias».{verVariante ? ' Solo las piezas de esta variable.' : ''}
                                   <br /><br /><b>Illustrator</b> (naranja): <b>una mesa de trabajo por pieza</b> en un lienzo, a la <b>escala</b> elegida. Necesita Illustrator abierto con la extensión de USER PRO; el tutorial está en Illustrator: <b>Ventana › Extensiones › USER PRO</b>.
                                   <br /><br /><b>CorelDRAW</b> (verde): <b>todas las mesas en un mismo espacio de trabajo</b>, acomodadas como en el molde (la vista de varias páginas de Corel: cada mesa es una página, que es lo que lee el sistema), siempre a <b>tamaño real</b> y en <b>un solo archivo</b> .cdr que abre desde CorelDRAW 2022. Necesita CorelDRAW 2022 o más nuevo y el programa USER PRO para CorelDRAW (queda con un ícono junto al reloj). Si Corel está cerrado, se abre solo. Cuando el diseño esté listo, tocá <b>Exportar para TIZADA PRO</b> en la barra <b>TIZADA PRO</b> de Corel (si no la ves: <i>Ventana › Barras de herramientas › TIZADA PRO</i>; sin la barra, el botón está abajo a la derecha de la ventana): te pregunta en qué carpeta guardar y deja el PDF con todos los ajustes que necesita el sistema. Ése es el que subís como arte.
                                   <br /><br />La primera vez tocá el botón del programa para <b>conectar</b> y, si el navegador pregunta, <b>Permitir</b>: es esta misma computadora. Los <b>instaladores</b> están abajo de los botones (se instalan una sola vez).
@@ -22853,7 +23405,7 @@ export default function App() {
                         </div>
                       )}
 
-                      {tabAjustesMolde === 'variables' && (() => {
+                      {tabAjustesMolde === 'variables' && !prodCfg?.a_medida && (() => {
                         const inp = { width: '100%', padding: '8px 10px', fontSize: 13, borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none' };
                         const renameTipo = (i, label) => setVariantesEdit(prev => prev.map((t, k) => k === i ? { ...t, label } : t));
                         return (
@@ -23183,7 +23735,7 @@ export default function App() {
                     <div className="card" style={{ display: 'flex', flexDirection: 'column', padding: 20, height: 620, overflow: 'hidden', order: 1, position: 'sticky', top: 24 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottom: '1px solid var(--border-light)', paddingBottom: 10 }}>
                         <div style={{ fontSize: 14, fontWeight: 700 }}>
-                          {tabAjustesMolde === 'planilla' ? 'Planilla · mapeo de columnas' : tabAjustesMolde === 'texto' ? `Nombre y número · ${ltSel.size ? [...ltSel].join(', ') : 'tocá las piezas'}` : 'Visor del Molde Vectorial'}
+                          {tabAjustesMolde === 'planilla' ? 'Planilla · mapeo de columnas' : tabAjustesMolde === 'texto' ? `Texto y número · ${ltSel.size ? [...ltSel].join(', ') : 'tocá las piezas'}` : 'Visor del Molde Vectorial'}
                         </div>
                         {etqData && tabAjustesMolde !== 'planilla' && (
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -24569,6 +25121,9 @@ export default function App() {
                           <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                               <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>{plan.nombre}</h3>
+                              {!(plan.columnas || []).some(c => c.role === 'talle') && (
+                                <span className="badge neutral" style={{ fontSize: 9, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Sin talles</span>
+                              )}
                               {esAsociadaAlActivo && (
                                 <span className="badge success" style={{ fontSize: 9, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Activa</span>
                               )}
@@ -24663,6 +25218,70 @@ export default function App() {
                           padding: '2px 4px'
                         }}
                       />
+                      {/* CON / SIN TALLES (MAPA 622): una planilla sin talles no tiene columna de talle
+                          (banderas, moldes a medida); cada fila va con el único talle del molde. */}
+                      {(() => {
+                        const conT = columnasPlanillaEditando.some(c => c.role === 'talle');
+                        const poner = (quiere) => {
+                          if (quiere === conT) return;
+                          setColSeleccionada(null);
+                          if (!quiere) { setColumnasPlanillaEditando(cs => cs.filter(c => c.role !== 'talle')); return; }
+                          setColumnasPlanillaEditando(cs => {
+                            let id = 'talle', n = 2;
+                            while (cs.some(c => c.id === id)) id = `talle_${n++}`;
+                            return [{ id, label: 'Talle', role: 'talle' }, ...cs];
+                          });
+                        };
+                        return (
+                          <div data-tour="col-sin-talles" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ display: 'flex', padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+                              {[{ v: true, t: 'Con talles' }, { v: false, t: 'Sin talles' }].map(o => (
+                                <button key={String(o.v)} type="button" onClick={() => poner(o.v)}
+                                  style={{ height: 28, padding: '0 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                                    background: conT === o.v ? 'var(--accent)' : 'transparent', color: conT === o.v ? '#001016' : 'var(--text-secondary)' }}>
+                                  {o.t}
+                                </button>
+                              ))}
+                            </div>
+                            <Ayuda ancho={320}><b>Con talles</b>: la planilla tiene la columna <b>Talle</b> y cada fila elige el suyo (camisetas, shorts).
+                              <br /><b>Sin talles</b>: no hay columna de talle — para moldes de <b>un solo tamaño</b> (banderas, moldes a medida).
+                              Cada fila sale con el único talle del molde. Un molde con varios talles no puede usar una planilla sin talles.</Ayuda>
+                          </div>
+                        );
+                      })()}
+                      {/* CANTIDAD y PIEZAS (Repo), POR PLANILLA (2026-10-06, pedido del usuario): si la planilla
+                          las tiene o no, y si se ven siempre o cuando el operario toca su botón */}
+                      {(() => {
+                        const OPC = [{ v: 'no', t: 'No va' }, { v: 'boton', t: 'Con botón' }, { v: 'siempre', t: 'Siempre' }];
+                        const selector = (rotulo, valor, poner, ayuda) => (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>{rotulo}</span>
+                            <div style={{ display: 'flex', padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+                              {OPC.map(o => (
+                                <button key={o.v} type="button" onClick={() => poner(o.v)}
+                                  style={{ height: 28, padding: '0 10px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                                    background: valor === o.v ? 'var(--accent)' : 'transparent', color: valor === o.v ? '#001016' : 'var(--text-secondary)' }}>{o.t}</button>
+                              ))}
+                            </div>
+                            {ayuda}
+                          </div>
+                        );
+                        const colC = columnasPlanillaEditando.find(c => c.role === 'cantidad');
+                        const cantModo = colC ? (colC.mostrar || 'boton') : 'boton';
+                        const ponerCant = (v) => setColumnasPlanillaEditando(cs => cs.some(c => c.role === 'cantidad')
+                          ? cs.map(c => c.role === 'cantidad' ? { ...c, mostrar: v } : c)
+                          : [...cs, { id: 'cantidad', label: 'Cantidad', role: 'cantidad', tipo: 'numero', mostrar: v }]);
+                        return (<>
+                          <span data-tour="col-cantidad-modo" style={{ display: 'contents' }}>{selector('Cantidad', cantModo, ponerCant,
+                            <Ayuda ancho={320}>La columna <b>Cantidad</b> repite la fila: <i>M · pepe · 12</i> con <b>5</b> son 5 prendas iguales
+                              (y con ella se puede usar <b>Copia</b>).<br /><b>No va</b>: esta planilla no la tiene, cada fila es una prenda.
+                              <br /><b>Con botón</b>: aparece cuando el operario toca «Cantidad».<br /><b>Siempre</b>: la planilla la trae puesta.</Ayuda>)}</span>
+                          <span data-tour="col-repo-modo" style={{ display: 'contents' }}>{selector('Piezas (Repo)', planillaEditando.repo || 'boton', (v) => setPlanillaEditando(pe => ({ ...pe, repo: v })),
+                            <Ayuda ancho={320}>La columna <b>Piezas</b> de la reposición: cada fila elige qué piezas hace.<br /><b>No va</b>: esta
+                              planilla no la tiene (cada fila hace todas sus piezas).<br /><b>Con botón</b>: aparece cuando el operario toca «Repo».
+                              <br /><b>Siempre</b>: la planilla la trae puesta.</Ayuda>)}</span>
+                        </>);
+                      })()}
                     </div>
                     
                     <div style={{ display: 'flex', gap: 10 }}>
@@ -24698,7 +25317,7 @@ export default function App() {
 
                   {probandoPlanilla ? (
                   <div className="card" style={{ padding: 18, minHeight: 460, display: 'flex' }}>
-                    <PlanillaTester columnas={columnasPlanillaEditando} reglas={reglasPlanilla} onClose={() => setProbandoPlanilla(false)} />
+                    <PlanillaTester columnas={columnasPlanillaEditando.filter(c => !(c.role === 'cantidad' && c.mostrar === 'no'))} reglas={reglasPlanilla} onClose={() => setProbandoPlanilla(false)} />
                   </div>
                   ) : (
                   <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -24710,7 +25329,7 @@ export default function App() {
                     const letter = String.fromCharCode(65 + idx);
                     const reglaActual = reglasPlanilla.find(r => r.id === col.reglaId) || reglasPlanilla.find(r => r.comportamiento === col.role);
                     const tipoLabel = { texto: 'Casilla de texto', desplegable: 'Desplegable', toggle: 'Botón de opciones' };
-                    const compLabel = { talle: `${term.variante} (mapea el molde)`, nombre: 'Nombre (se estampa)', numero: 'Número (se estampa)', manga: 'Toggle de pieza', none: 'Solo dato' };
+                    const compLabel = { talle: `${term.variante} (mapea el molde)`, nombre: 'Texto (se estampa)', numero: 'Número (se estampa)', manga: 'Toggle de pieza', none: 'Solo dato' };
                     return (
                       <div className="settings-drawer" style={{ width: 300, flexShrink: 0, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-light)', borderRadius: 12, padding: 18, position: 'sticky', top: 20 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -24729,11 +25348,12 @@ export default function App() {
                                           border: '1px solid rgba(0,216,245,0.3)', fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
                               <b style={{ color: 'var(--accent)' }}>Columna del sistema.</b> Repite la fila tantas veces
                               como diga el número: <i>M · pepe · 12 · <b>5</b></i> ⇒ la tizada arma <b>5 prendas iguales</b>.
-                              Está en todas las planillas y no se puede borrar.
+                              No se borra: si esta planilla no la lleva, elegí <b>No va</b>.
                             </div>
                             <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 7 }}>¿Cuándo se ve en el pedido?</label>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 4 }}>
-                              {[{ v: 'boton', t: 'Sólo si el operario la pide', d: 'No aparece hasta que toque el botón «Cantidad». Es lo normal.' },
+                              {[{ v: 'no', t: 'No va', d: 'Esta planilla no la tiene: cada fila es una prenda (y no hay Copia).' },
+                                { v: 'boton', t: 'Sólo si el operario la pide', d: 'No aparece hasta que toque el botón «Cantidad». Es lo normal.' },
                                 { v: 'siempre', t: 'Siempre a la vista', d: 'La planilla la trae puesta desde el principio.' }].map(o => {
                                 const on = (col.mostrar || 'boton') === o.v;
                                 return (
@@ -24818,7 +25438,7 @@ export default function App() {
                                 onDragStart={(e) => { e.dataTransfer.setData('colidx', String(idx)); e.dataTransfer.effectAllowed = 'move'; }}
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={(e) => { e.preventDefault(); moverColumnaEditor(parseInt(e.dataTransfer.getData('colidx'), 10), idx); }}
-                                title="Arrastrá para reordenar · clic para configurar" style={{ borderRight: '1px solid var(--border-light)', padding: '6px 8px', textAlign: 'center', position: 'relative', cursor: 'grab', background: activa ? 'rgba(0,216,245,0.10)' : 'transparent', borderBottom: activa ? '2px solid var(--cmyk-cyan)' : 'none' }}>
+                                title={col.role === 'cantidad' && col.mostrar === 'no' ? 'Cantidad: no va en esta planilla (clic para cambiarlo)' : 'Arrastrá para reordenar · clic para configurar'} style={{ borderRight: '1px solid var(--border-light)', padding: '6px 8px', textAlign: 'center', position: 'relative', cursor: 'grab', background: activa ? 'rgba(0,216,245,0.10)' : 'transparent', borderBottom: activa ? '2px solid var(--cmyk-cyan)' : 'none', opacity: col.role === 'cantidad' && col.mostrar === 'no' ? 0.4 : 1 }}>
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                                   <span style={{ fontSize: 13, opacity: activa ? 1 : 0.6 }}>⚙</span>
                                   <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 'bold', color: 'var(--cmyk-cyan)' }}>{letter}</span>
@@ -24977,7 +25597,7 @@ export default function App() {
                     <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                       • Hacé clic en el <b>⚙</b> de cada columna para abrir su barra a la izquierda y elegir <b>qué es</b> (su regla).<br />
                       • Las reglas (casilla / desplegable / botón, y qué hace cada una) se crean en <b>«Reglas de planilla»</b>.<br />
-                      • Necesitás al menos una columna con una regla de tipo <b>{term.variante}</b>: define qué variante del molde usa cada fila. Cada fila = una copia.
+                      • <b>Con talles</b>: una columna con una regla de tipo <b>{term.variante}</b> define qué talle del molde usa cada fila. <b>Sin talles</b> (arriba, al lado del nombre): para moldes de un solo tamaño, como banderas; cada fila usa el único talle del molde. Cada fila = una copia.
                     </p>
                   </div>
                   </div>
@@ -24994,7 +25614,7 @@ export default function App() {
               const comps = [
                 { v: 'talle', label: `${term.variante} — elige la variante del molde` },
                 { v: 'diseno', label: 'Diseño — elige cuál de los diseños del pedido lleva la fila' },
-                { v: 'nombre', label: 'Se estampa como TEXTO (nombre, palabra…) → capa en el diseño' },
+                { v: 'nombre', label: 'Se estampa como TEXTO (la capa «Texto» o «Nombre» del diseño)' },
                 { v: 'numero', label: 'Se estampa como NÚMERO (número, número 2…) → capa en el diseño' },
                 { v: 'manga', label: 'Toggle de pieza (como Manga)' },
                 { v: 'none', label: 'Solo dato (no afecta el molde)' },
@@ -25059,7 +25679,7 @@ export default function App() {
                             {persFields.map(f => chip(f, 'rgba(0,159,227,0.08)'))}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 12 }}>Todavía no hay campos que se estampen. Creá reglas con «Se estampa (Nombre/Número)» y usalas en la planilla.</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 12 }}>Todavía no hay campos que se estampen. Creá reglas con «Se estampa (Texto/Número)» y usalas en la planilla.</div>
                         )}
                         <button className="btn ghost" style={{ fontSize: 11.5 }}
                           onClick={() => { navigator.clipboard?.writeText(todas.join('\n')); showMsg('Capas copiadas ✓'); }}>
@@ -26001,7 +26621,7 @@ export default function App() {
               onChange={(e) => { const f = e.target.files[0]; setSubirMoldeFile(f || null); if (f && !subirMoldeNombre.trim()) setSubirMoldeNombre((f.name || '').replace(/\.(ai|pdf|dxf)$/i, '')); e.target.value = ''; }} />
           </div>
           {subirMoldeConDiseno
-            ? <Ayuda ancho={340}>El archivo tiene que traer <b>una capa por {term.variante.toLowerCase()}</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva nombre y número— una capa <b>«nombre»</b> y otra <b>«00»</b> con los textos de muestra. Al subirlo te vamos a pedir que digas qué es cada pieza.</Ayuda>
+            ? <Ayuda ancho={340}>El archivo tiene que traer <b>una capa por {term.variante.toLowerCase()}</b>, cada pieza dentro de su máscara de recorte, y —si la prenda lleva texto y número— una capa <b>«Texto»</b> (o «Nombre») y otra <b>«00»</b> con los textos de muestra. Al subirlo te vamos a pedir que digas qué es cada pieza.</Ayuda>
             : <Ayuda ancho={330}>Al subirlo se abre su configuración: ahí les ponés nombre a los {term.variante.toLowerCase()}s (si vinieron sin nombre) e indicás qué es cada pieza. Con eso ya se puede usar en el pedido.</Ayuda>}
           {/* ESPERA HONESTA: el archivo puede pesar >100 MB y procesarlo lleva su tiempo. Se dice
               en qué anda y hace cuánto; el porcentaje es el REAL de la subida, y cuando termina
@@ -26291,7 +26911,7 @@ export default function App() {
       {/* CARGAR POR LOTE: cuántas prendas de cada talle → una fila por prenda. */}
       <Modal open={loteOpen} onClose={() => setLoteOpen(false)} maxWidth={760}
         titulo="Cargar por lote"
-        subtitulo="Poné cuántas prendas lleva cada talle. Se crea UNA FILA POR PRENDA, lista para el nombre y el número.">
+        subtitulo="Poné cuántas prendas lleva cada talle. Se crea UNA FILA POR PRENDA, lista para el texto y el número.">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {!loteTalles.length ? (
             <div style={{ fontSize: 12.5, color: 'var(--warning, #f5b942)' }}>
@@ -26432,12 +27052,25 @@ export default function App() {
                 data-tour="molde-nombre"
                 type="text"
                 value={nuevoProductoNombre}
-                placeholder="Ej. Camiseta River, Buzo Capucha…"
-                required 
+                placeholder={nuevoMoldeTipo === 'medida' ? 'Ej. Bandera a medida' : 'Ej. Camiseta River, Buzo Capucha…'}
+                required
                 onChange={(e) => setNuevoProductoNombre(e.target.value)}
               />
             </div>
-            
+            {/* MOLDE A MEDIDA (MAPA 623): un rectángulo de una pieza, sin archivo — la medida va en el pedido */}
+            <div data-tour="molde-tipo" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+              <div style={{ display: 'flex', padding: 3, borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)' }}>
+                {[{ v: 'archivo', t: 'Con archivo' }, { v: 'medida', t: 'A medida' }].map(o => (
+                  <button key={o.v} type="button" onClick={() => setNuevoMoldeTipo(o.v)}
+                    style={{ height: 28, padding: '0 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                      background: nuevoMoldeTipo === o.v ? 'var(--accent)' : 'transparent', color: nuevoMoldeTipo === o.v ? '#001016' : 'var(--text-secondary)' }}>{o.t}</button>
+                ))}
+              </div>
+              <Ayuda ancho={300}><b>Con archivo</b>: subís el molde (.ai, .pdf o .dxf) y nombrás sus piezas.<br /><b>A medida</b>: un
+                rectángulo de <b>una sola pieza</b> (banderas). No se sube nada: el nombre de la pieza y la medida de muestra van en
+                <b>Variables</b>, el margen en <b>Margen</b>, y en cada pedido se escribe el ancho y el alto en metros.</Ayuda>
+            </div>
+
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
               <button type="button" className="btn ghost" onClick={() => setCreandoProducto(false)}>Cancelar</button>
               <button type="submit" className="btn primary" data-tour="molde-crear-ok">Crear Molde</button>

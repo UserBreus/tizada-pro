@@ -41,6 +41,13 @@ _fdb.__getattr__ = lambda n: (lambda *a, **k: (_ for _ in ()).throw(
 _REG = {"Frente": {"M": {"mesa": 1, "pieza_idx": 0}}, "Espalda": {"M": {"mesa": 2, "pieza_idx": 1}}}
 _fdb.leer_registro = lambda pid: dict(_REG)
 _fdb.registro_rev = lambda pid: 1
+# En un GET las revisiones se leen TODAS de una vez (`_rev_registro`, MAPA 582): el doble contesta
+# esa consulta y nada más (cualquier otra sigue siendo «la prueba tocó MSSQL»).
+def _filas(sql, *a, **k):
+    if sql.strip() == "SELECT legacy_id, registro_rev FROM producto":
+        return [{"legacy_id": p, "registro_rev": 1} for p in ("prod_a", "prod_b")]
+    raise AssertionError(f"LA PRUEBA INTENTO TOCAR MSSQL (db.filas: {sql[:60]})")
+_fdb.filas = _filas
 sys.modules["db"] = _fdb
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

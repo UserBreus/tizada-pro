@@ -66,26 +66,34 @@ class FuenteCurvas:
         Hace falta porque el «tamaño de letra» de una fuente es el **em**, que reserva lugar para
         ascendentes y descendentes: pedir 3 mm dibujaba una M de **2,15 mm** en Arial Bold (28 %
         menos). Quien configura una etiqueta en milímetros habla de la ALTURA DE LA LETRA, no del
-        em — así que se convierte con esta proporción. Se usa `sCapHeight` de la tabla OS/2 y, si la
-        fuente no la trae, se mide la «H» de verdad."""
+        em — así que se convierte con esta proporción.
+
+        🔴 PRIMERO LA «H» DIBUJADA, después lo que la fuente DICE (2026-10-06, MAPA 624). Antes era
+        al revés y hay fuentes que declaran mal su `sCapHeight`: ClubAmerica dice 700 y su H mide
+        730; las tres Moreggi dicen 658 y miden 716. Con 3 mm configurados la letra salía de 3,13 y
+        3,26 mm. Sólo cuenta la H PROPIA (no la prestada por el respaldo, que además se escala con
+        esto mismo). Sin H, `sCapHeight`; sin nada, 0,72. Gemelo: `capRatio` de `texto/curvas.js`."""
         if self._cap is None:
             r = None
-            try:
-                cap = getattr(self.tt["OS/2"], "sCapHeight", None)
-                if cap and cap > 0:
-                    r = cap / self.upem
-            except Exception:
-                pass
-            if not r:
-                try:                                   # medir la H real (su bbox vertical)
-                    ops, _ = self._glifo("H")
+            gname = self.cmap.get(ord("H"))
+            if gname is not None:
+                try:                                   # la H real (su bbox vertical), sin respaldo
+                    pen = DecomposingRecordingPen(self.glyphset)
+                    self.glyphset[gname].draw(pen)
                     ys = []
-                    for _op, args in ops:
+                    for _op, args in pen.value:
                         for a in (args or ()):
                             if isinstance(a, (tuple, list)) and len(a) == 2:
                                 ys.append(a[1])
-                    if ys:
+                    if ys and max(ys) > min(ys):
                         r = (max(ys) - min(ys)) / self.upem
+                except Exception:
+                    r = None
+            if not r:
+                try:
+                    cap = getattr(self.tt["OS/2"], "sCapHeight", None)
+                    if cap and cap > 0:
+                        r = cap / self.upem
                 except Exception:
                     pass
             self._cap = r or 0.72                      # típico si la fuente no dice nada

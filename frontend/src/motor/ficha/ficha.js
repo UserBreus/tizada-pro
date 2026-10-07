@@ -44,8 +44,6 @@
 // Devuelve los bytes del PDF (Uint8Array).
 import { pyRound, pyStrip } from '../py.js'
 import { sha1HexBytes } from '../sha1.js'
-import { dibujarMesa } from '../vista/dibujar.js'
-import { prepararReplay, dibujarConReplay, destruirCacheXO } from '../vista/replay.js'
 
 // A4 en puntos (72 dpi). Retrato.
 export const A4_W = 595.28
@@ -481,6 +479,15 @@ function seccion(ctx, pg, y, t) {
 }
 
 // ── TABLA DE TALLES (la planilla del pedido tal cual) ─────────────────────────────────────────
+// PLANILLA SIN TALLES (MAPA 622): sin columna de talle la tabla no es «de talles». Sólo se decide
+// con columnas que traen su `role`; una planilla vieja sin roles queda igual. Gemelo de
+// `_titulo_tabla` (ficha_tecnica.py).
+export function tituloTabla(columnas) {
+  const cols = columnas || []
+  if (cols.some((c) => c && 'role' in c) && !cols.some((c) => c && c.role === 'talle')) return 'PLANILLA DEL PEDIDO'
+  return 'TABLA DE TALLES'
+}
+
 function dibujarTabla(ctx, pg, y, columnas, filas, yMax, fila0 = 0) {
   // Dibuja tantas filas como entren desde `y` hasta `yMax`; devuelve [yFinal, filasRestantes,
   // fila0Siguiente]. La 1ª columna es «#» con el NÚMERO DE FILA; `fila0` continúa la numeración.
@@ -546,8 +553,8 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
       dibujarRect(ctx, pg, card, { color: [0.80, 0.82, 0.84], width: 0.8, fill: [0.985, 0.99, 0.995] })
       let src = null
       try {
-        // la guía llega como IMAGEN hecha en el hilo de la pieza (`generar.js`, 2026-09-22): sólo
-        // se ubica. El PDF por pieza queda para quien lo mande así.
+        // la pieza de la guía trae su medida (`w_pt/h_pt`, `generar.js` `armarGuia`); la que llega en
+        // PDF suelto se mide abriéndolo
         let r0
         if (pz._guia && pz.pagina !== undefined && pz.pagina !== null) {
           r0 = [0, 0, Number(pz.w_pt) || 1, Number(pz.h_pt) || 1]
@@ -565,24 +572,18 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
         const aw = r0w * esc, ah = r0h * esc
         const dst = [card[0] + (cardW - aw) / 2, card[1] + (cardH - ah) / 2,
           card[0] + (cardW + aw) / 2, card[1] + (cardH + ah) / 2]
-        // la pieza como IMAGEN a 300 dpi del tamaño impreso (ver `ficha_tecnica.py`): el mismo
-        // dibujo que hace PyMuPDF (`dibujarMesa` = `get_pixmap`, contrato de la vista)
+        // LA PIEZA TAL CUAL EL ARCHIVO, SIEMPRE (MAPA 524 y la LEY: vector original, nunca
+        // rasterizar). La de la guía, su página de `pdf_guia`; la que llega como PDF suelto (el que
+        // arma el servidor, `ficha_tecnica.py` `show_pdf_page`), su página 0 con un graft map
+        // propio. Hasta el 2026-10-06 esta segunda se pegaba como imagen de 300 dpi (resto de la
+        // 522) y la ficha del navegador ya no era la del servidor. Sin `continue`: el rótulo va igual.
         if (pz._guia && pz.pagina !== undefined && pz.pagina !== null) {
-          // la pieza TAL CUAL el archivo (sin `continue`: el rótulo de abajo va igual)
           pegarPiezaGuia(ctx, pg, dst, pz._guia, pz.pagina)
         } else {
-        const anchoPx = Math.max(1, Math.round((dst[2] - dst[0]) * 300.0 / 72.0))
-        // 🔴 LA MESA SE PREPARA UNA VEZ PARA TODAS SUS PIEZAS (2026-09-22, «la ficha tarda más de
-        // 40 s»): cada pieza trae como XObject la mesa ENTERA del talle (miles de trazos) y MuPDF
-        // la interpretaba completa por cada pieza. Con el repetidor del visor (`replay.js`) la lista
-        // de la mesa se arma una vez (`ctx.cacheXO`) y de cada pieza se dibuja sólo lo que cae en
-        // su recuadro: mismo dispositivo y mismo dibujo. Si la pieza trae algo que el repetidor no
-        // cubre, se dibuja como antes.
-        let dib = null
-        const prep = prepararReplay(ctx.mupdf, src, 0, ctx.cacheXO)
-        if (prep) { try { dib = dibujarConReplay(ctx.mupdf, src, 0, prep, { ancho: anchoPx }) } finally { prep.destroy() } }
-        if (!dib) dib = dibujarMesa(ctx.mupdf, src, 0, { ancho: anchoPx })
-        insertarImagen(ctx, pg, dst, dib.png, true)
+          const mapa = ctx.doc.newGraftMap()
+          try { pegarPiezaGuia(ctx, pg, dst, { doc: src, mapa }, 0) } finally { mapa.destroy() }
+          // cada PDF suelto trae su copia de la mesa del talle: al guardar se juntan (ver abajo)
+          ctx.piezasSueltas = true
         }
       } catch {
         // como el Python: si el PDF de la pieza no se puede leer, la tarjeta queda vacía
@@ -602,7 +603,8 @@ function dibujarPiezas(ctx, pg, y, piezas, yMax, cols = GUIA_COLS) {
 
 // Los campos salen del nombre de la CAPA del archivo («numero», «numero 2»), que casi nunca trae
 // acentos: la ficha los muestra bien escritos.
-const LABEL_CAMPO = { nombre: 'Nombre', numero: 'Número', 'numero 2': 'Número 2',
+// «nombre»/«texto» se muestran «Texto» (2026-10-06); gemelo: `_LABEL_CAMPO` de ficha_tecnica.py
+const LABEL_CAMPO = { nombre: 'Texto', texto: 'Texto', numero: 'Número', 'numero 2': 'Número 2',
   numero2: 'Número 2', palabra: 'Palabra', apellido: 'Apellido' }
 
 /**
@@ -611,7 +613,6 @@ const LABEL_CAMPO = { nombre: 'Nombre', numero: 'Número', 'numero 2': 'Número 
  */
 export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia }) {
   const ctx = crearCtx(mupdf)
-  ctx.cacheXO = new Map()          // listas de las mesas, compartidas entre las piezas de la guía
   ctx.guias = []                   // los PDF de la guía abiertos (y sus graft maps), se cierran al final
   try {
     const columnas = (planilla || {}).columnas || []
@@ -619,13 +620,14 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
 
     // 1) TABLA (arriba). Puede ocupar más de una página si hay muchas filas (la numeración sigue).
     let pg = nuevaPagina(ctx)
-    let y = seccion(ctx, pg, 78, 'TABLA DE TALLES')
+    const titulo = tituloTabla(columnas)
+    let y = seccion(ctx, pg, 78, titulo)
     y += 6
     let restan, f0
     ;[y, restan, f0] = dibujarTabla(ctx, pg, y, columnas, filas, A4_H - MARGEN)
     while (restan.length) {
       pg = nuevaPagina(ctx)
-      y = seccion(ctx, pg, 78, 'TABLA DE TALLES (continuación)')
+      y = seccion(ctx, pg, 78, titulo + ' (continuación)')
       y += 6
       ;[y, restan, f0] = dibujarTabla(ctx, pg, y, columnas, restan, A4_H - MARGEN, f0)
     }
@@ -816,16 +818,17 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
       const page = doc.addPage([0, 0, A4_W, A4_H], 0, res, contenido)
       doc.insertPage(doc.countPages(), page)
     }
-    // `doc.save(garbage=3, deflate=True)`
-    // sin la deduplicación de `garbage=3`: compara objeto por objeto los recursos de la mesa y no
-    // cambia lo que se ve; con `garbage` sólo se quita lo que nadie usa
-    return doc.saveToBuffer('garbage,compress').asUint8Array().slice()
+    // `doc.save(garbage=4, deflate=True)` del servidor. Con la guía (`pdf_guia`) la mesa ya entra
+    // UNA vez por el graft map y alcanza con `garbage` (quitar lo que nadie usa): deduplicar compara
+    // objeto por objeto los recursos de la mesa y no cambia nada. Con piezas en PDF suelto cada una
+    // trae SU copia de la mesa del talle: ahí `garbage=4` las junta en una (si no, la ficha pesa la
+    // mesa tantas veces como piezas).
+    return doc.saveToBuffer(ctx.piezasSueltas ? 'garbage=4,compress' : 'garbage,compress').asUint8Array().slice()
   } finally {
     for (const gd of ctx.guias || []) {
       try { gd.mapa.destroy() } catch { /* nada */ }
       try { gd.doc.destroy() } catch { /* nada */ }
     }
-    destruirCacheXO(ctx.cacheXO)
     cerrarCtx(ctx)
   }
 }

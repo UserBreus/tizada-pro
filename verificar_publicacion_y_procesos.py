@@ -165,7 +165,11 @@ def main():
     ap = leer("aplanar_rip.py")
     ok("aplano acá mismo" not in ap and "_aplanar_en_proceso" in ap,
        "🔴 el aplanado ya no se reintenta ADENTRO del servidor (+620 MB justo cuando algo falló)")
-    ok(srv.count('res.setdefault("avisos", []).append(') >= 2 and "no se pudo preparar para el RIP" in srv,
+    # (2026-10-06) el aplanado vive en UN solo lugar del servidor (`generar_multi`, hoja por hoja): el
+    # `generar` suelto ya no aplana, así que se exige ese bloque y no una cantidad de avisos
+    _ap = srv[srv.index("aplanar_para_rip(os.path.join(salida, h[\"archivo\"]))"):][:900] if         'aplanar_para_rip(os.path.join(salida, h["archivo"]))' in srv else ""
+    ok(_ap and 'res.setdefault("avisos", []).append(' in _ap and "no se pudo preparar para el RIP" in _ap
+       and "continue" in _ap and srv.count("aplanar_para_rip(") == 1,
        "una hoja que no se pudo aplanar lo AVISA en el pedido y no frena a las demás")
 
     print()

@@ -152,17 +152,26 @@ pid = "prod_20260820_095558_38bc"
 real = os.path.join(RAIZ, "entrada", pid, "disenos")
 if os.path.exists(os.path.join(real, "golero", "arte.ai")):
     g = MP.extraer_personalizacion(os.path.join(real, "golero", "arte.ai"))
-    m2 = g.get("2") or {}
+    # 🔴 LA MESA NO SE CLAVA (2026-10-06): el arte es del usuario y lo cambia. El del 2026-10-01 trae
+    # las capas «Nombre» y «Número» VACÍAS (sin texto adentro: nada que estampar, bien leído) y este
+    # contrato quedaba rojo mirando la mesa 2. Se usa la primera mesa que tenga los dos campos; si
+    # ninguna los tiene, lo dice: la propiedad con fuente CID la cubre la sección 1 (arte sintético).
+    _mg = next((k for k in sorted(g, key=lambda x: int(x) if str(x).isdigit() else 0)
+                if all(c in (g.get(k) or {}) for c in ("Nombre", "Número"))), None)
+    m2 = g.get(_mg) or {} if _mg else {}
+    if not _mg:
+        print("    (el arte real del GOLERO no trae texto en sus capas Nombre/Número: se saltea; "
+              "lo cubre la sección 1)")
     # 🔴 NO se clava el valor (mismo motivo que JUGADOR, abajo): el 2026-09-16 el usuario reemplazó
     # el arte del GOLERO y el texto pasó del rojo 0/0,996/1/0,002 a blanco, lo que ponía este
     # contrato en rojo sin nada roto. El rojo EXACTO por capa con fuente CID lo cubre la sección 1
     # (arte sintético). Acá se exige la PROPIEDAD sobre el arte real: los dos campos de la fuente CID
     # traen color NATIVO (antes: None → se calculaba 0/87,3/84,8/7,1) y se escribe tal cual.
-    for campo in ("Nombre", "Número"):
+    for campo in (("Nombre", "Número") if _mg else ()):
         cn = m2.get(campo, {}).get("colorn")
         ok(bool(cn) and cn[0] in ("k", "rg", "g", "sc", "scn") and cn[1] is not None,
-           f"🔴 GOLERO mesa 2 · {campo}: color NATIVO del arte, no calculado (hoy: {cn})")
-    ok(m2 and all(MP._color_op(pl) == " ".join(f"{v:g}" for v in pl["colorn"][1]) + " " + pl["colorn"][0]
+           f"🔴 GOLERO mesa {_mg} · {campo}: color NATIVO del arte, no calculado (hoy: {cn})")
+    ok(not _mg or m2 and all(MP._color_op(pl) == " ".join(f"{v:g}" for v in pl["colorn"][1]) + " " + pl["colorn"][0]
                   for pl in m2.values() if pl.get("colorn")),
        "y lo que se escribe en la tizada es ESE color tal cual, sin calcular nada "
        f"(hoy: {sorted({MP._color_op(pl) for pl in m2.values()})})")

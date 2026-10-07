@@ -33,7 +33,8 @@ namespace UserPro
     // ── el plan ya validado (ver `Plan.Sanear`) ──────────────────────────────────────────────────
     class CapaPlan { public string Nombre; public bool Bloqueada; public int[] Color; }
     class SubCamino { public List<double[]> P = new List<double[]>(); public bool C; }
-    class CaminoPlan { public int Capa; public List<SubCamino> Sub = new List<SubCamino>(); public double Ancho; public double[] Color; }
+    // `Punteado` (MOLDE A MEDIDA, MAPA 623): el margen/dobladillo, una línea de rayas; null = contorno
+    class CaminoPlan { public int Capa; public List<SubCamino> Sub = new List<SubCamino>(); public double Ancho; public double[] Color; public bool Punteado; }
     class TextoPlan { public int Capa; public string T; public double X, Y, Tam; public bool Vector; }
     class FondoPlan { public int Capa; public double[] Color; }
     class PaginaPlan
@@ -137,7 +138,8 @@ namespace UserPro
                     Dictionary<string, object> k = Dic(ko, "un camino");
                     object[] col = Lista(Get(k, "color") ?? new object[] { 0, 0, 0, 100 }, 4, "color");
                     CaminoPlan cp = new CaminoPlan { Capa = (int)Num(Get(k, "capa")), Ancho = Num(Get(k, "ancho") ?? 1),
-                        Color = new double[] { Num(col[0]), Num(col[1]), Num(col[2]), Num(col[3]) } };
+                        Color = new double[] { Num(col[0]), Num(col[1]), Num(col[2]), Num(col[3]) },
+                        Punteado = Get(k, "punteado") != null };
                     foreach (object so in Lista(Get(k, "sub"), 500, "sub-caminos"))
                     {
                         Dictionary<string, object> s = Dic(so, "un sub-camino");
@@ -296,6 +298,7 @@ namespace UserPro
               .Append("\" fill=\"none\" stroke=\"none\"/><g fill=\"none\" stroke=\"#000000\" stroke-width=\"1\">");
             foreach (CaminoPlan k in pg.Caminos)
             {
+                if (k.Punteado) continue;          // el dobladillo va aparte, con rayas (ver `DibujarCamino`)
                 foreach (SubCamino sp in k.Sub)
                 {
                     sb.Append("<path d=\"M").Append(Fmt(sp.P[0][0])).Append(' ').Append(Fmt(sp.P[0][1]));
@@ -384,7 +387,15 @@ namespace UserPro
                     else sub.AppendCurveSegment2(X(b[0]), Y(b[1]), X(a[4]), Y(a[5]), X(b[2]), Y(b[3]), false);
                 }
                 sub.Closed = sp.C;
-                Trazo(capa.CreateCurve(crv), k.Ancho, k.Color);
+                dynamic forma = capa.CreateCurve(crv);
+                Trazo(forma, k.Ancho, k.Color);
+                if (k.Punteado)
+                {
+                    // un estilo de rayas de los que trae Corel (el 1 es la línea llena). Si esta versión
+                    // no lo deja, queda llena: igual se ve dónde termina el margen.
+                    try { forma.Outline.Style = app.OutlineStyles[4]; } catch { }
+                    try { forma.Name = "dobladillo"; } catch { }
+                }
             }
         }
 
@@ -459,16 +470,18 @@ namespace UserPro
                     }
 
                     // ── los contornos: de una vez con el SVG; si no entra, punto por punto ──
-                    if (pg.Caminos.Count > 0)
+                    CaminoPlan c0 = pg.Caminos.Find(delegate (CaminoPlan x) { return !x.Punteado; });
+                    if (c0 != null)
                     {
-                        CaminoPlan c0 = pg.Caminos[0];
                         alguno = true;
                         if (!ImportarSvg(app, doc, capas[c0.Capa], pg, c0.Color, c0.Ancho))
                         {
                             todosSvg = false;
-                            foreach (CaminoPlan k in pg.Caminos) DibujarCamino(app, doc, capas[k.Capa], k, pg.H);
+                            foreach (CaminoPlan k in pg.Caminos) if (!k.Punteado) DibujarCamino(app, doc, capas[k.Capa], k, pg.H);
                         }
                     }
+                    // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo), punteado, siempre punto por punto
+                    foreach (CaminoPlan k in pg.Caminos) if (k.Punteado) DibujarCamino(app, doc, capas[k.Capa], k, pg.H);
 
                     // ── el nombre de la mesa como TEXTO VIVO (lo que lee el motor); el título del talle
                     //    va en curvas. Un texto que Corel no acepta no corta el armado: se cuenta. ──

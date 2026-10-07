@@ -2,11 +2,12 @@
 """
 CONTRATO: CON «EL SERVIDOR NO CALCULA» PRENDIDO, EL SERVIDOR RECHAZA TODO LO PESADO — `py verificar_navegador_solo.py`
 
-PLAN_NAVEGADOR.md, etapa 6 (cierre). El interruptor vive en el catálogo (`navegador_solo`, se
-prende desde Configuración → Molde con diseño → `POST /api/config_con_diseno`) y el entorno
-(`TIZADA_SOLO_NAVEGADOR`) manda si está. Prendido: un molde sin paquete (con o sin diseño), un
-arte sin paquete y una tizada del camino B pedida al servidor contestan 409 con el motivo, y
-ninguna función pesada corre. Apagado: el servidor sigue preparando (red de seguridad).
+PLAN_NAVEGADOR.md, etapa 6 (cierre). 🔴 Desde 2026-09-24 (MAPA 568) está SIEMPRE PRENDIDO: regla
+del usuario, «si la computadora no está apta, que se compre una nueva» — el servidor nunca hace el
+trabajo pesado de respaldo. La pantalla ya no lo puede apagar (ni se guarda nada en el catálogo);
+sólo el entorno (`TIZADA_SOLO_NAVEGADOR=0/1`) lo cambia, y es para los contratos que comparan el
+navegador con la referencia en Python. Un molde sin paquete (con o sin diseño) y un arte sin paquete
+contestan 409 con el motivo, y ninguna función pesada corre.
 
 ⚠️ No toca nada del usuario: DATOS a un temporal y `db` es un doble.
 """
@@ -107,14 +108,19 @@ def subir_molde(con_diseno):
     return r.status_code, d
 
 
-print("\n1 · EL INTERRUPTOR SE GUARDA DESDE LA PANTALLA")
+print("\n1 · 🔴 SIEMPRE PRENDIDO, Y LA PANTALLA NO LO APAGA (MAPA 568)")
 c0 = CLI.get("/api/config_con_diseno").get_json() or {}
-ok(c0.get("navegador_solo") is False and c0.get("navegador_solo_forzado") is False, f"arranca apagado y libre ({c0.get('navegador_solo')}, forzado={c0.get('navegador_solo_forzado')})")
-r = CLI.post("/api/config_con_diseno", json={"navegador_solo": True})
-ok(r.status_code == 200 and (r.get_json() or {}).get("navegador_solo") is True, f"se prende desde `POST /api/config_con_diseno` ({r.status_code})")
-ok(_DOCS["catalogo"].get("navegador_solo") is True, "y queda en el catálogo (`navegador_solo`)")
+ok(c0.get("navegador_solo") is True and c0.get("navegador_solo_forzado") is False,
+   f"arranca PRENDIDO sin que nada lo fuerce ({c0.get('navegador_solo')}, forzado={c0.get('navegador_solo_forzado')})")
+r = CLI.post("/api/config_con_diseno", json={"navegador_solo": False})
+ok(r.status_code == 200 and (r.get_json() or {}).get("navegador_solo") is True,
+   f"🔴 pedir apagarlo desde la pantalla no lo apaga ({r.status_code}: {(r.get_json() or {}).get('navegador_solo')})")
+ok("navegador_solo" not in _DOCS["catalogo"] and "navegador_solo" not in (_DOCS["catalogo"].get("config_con_diseno") or {}),
+   "…y no se guarda nada en el catálogo (un `false` viejo guardado era lo que dejaba al publicado de respaldo)")
+_DOCS["catalogo"]["navegador_solo"] = False            # un catálogo viejo con el interruptor apagado
+ok(S._solo_navegador() is True, "un `navegador_solo: false` viejo en el catálogo ya no se lee")
+_DOCS["catalogo"].pop("navegador_solo", None)
 ok((CLI.get("/api/navegador/config").get_json() or {}).get("solo") is True, "`/api/navegador/config` lo dice (`solo: true`)")
-ok(S._solo_navegador() is True, "`_solo_navegador()` lo lee del catálogo")
 
 print("\n2 · PRENDIDO, NADA PESADO CORRE EN EL SERVIDOR")
 st, d = subir_molde("0")
@@ -138,12 +144,13 @@ os.environ["TIZADA_SOLO_NAVEGADOR"] = "1"
 ok(S._solo_navegador() is True, "`TIZADA_SOLO_NAVEGADOR=1` lo prende")
 os.environ.pop("TIZADA_SOLO_NAVEGADOR", None)
 
-print("\n4 · APAGADO, EL SERVIDOR VUELVE A SER LA RED DE SEGURIDAD")
-r = CLI.post("/api/config_con_diseno", json={"navegador_solo": False})
-ok(r.status_code == 200 and (r.get_json() or {}).get("navegador_solo") is False, "se apaga desde la pantalla")
+print("\n4 · 🔴 NO HAY RED DE SEGURIDAD EN EL SERVIDOR")
+CLI.post("/api/config_con_diseno", json={"navegador_solo": False})
 _LLAMADAS.clear()
 st, d = subir_molde("0")
-ok("alta_plantilla" in _LLAMADAS, f"un molde sin paquete vuelve a prepararlo el servidor ({_LLAMADAS or 'no corrió'})")
+ok((st == 409 or (d.get("estado") == "error" and "computadora" in str(d.get("error")))) and not _LLAMADAS,
+   f"aunque se intente apagar, un molde sin paquete se sigue rechazando y no corre nada pesado "
+   f"(HTTP {st}, {_LLAMADAS or 'nada corrió'})")
 
 shutil.rmtree(_TMP, ignore_errors=True)
 print()
@@ -152,4 +159,4 @@ if FALLOS:
     for f in FALLOS:
         print("   · " + f)
     sys.exit(1)
-print("✅ CONTRATO VERDE — «el servidor no calcula» se prende desde la pantalla y el servidor rechaza lo pesado")
+print("✅ CONTRATO VERDE — «el servidor no calcula» está siempre prendido y el servidor rechaza lo pesado")

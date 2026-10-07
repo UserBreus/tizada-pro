@@ -261,6 +261,10 @@ ALARMAS = {
     "columna-obligatoria-vacia": ("datos", True, "A una fila le falta un dato obligatorio para fabricar.", "Completar la columna indicada."),
     "fila-diseno-desconocido": ("datos", True,  "Una fila pide un diseño que el pedido no trae.", "El valor tiene que ser el `nombre` de uno de los diseños."),
     "talle-inexistente":       ("datos", True,  "Una fila pide un talle que el molde no tiene.", "Usar los talles que publica el molde, tal cual."),
+    "medida-falta":            ("datos", True,  "El molde es A MEDIDA (un rectángulo) y no trae su medida.", "Mandar `medida: {ancho_m, alto_m}` (metros) en ese molde."),
+    "medida-invalida":         ("datos", True,  "La medida tiene que ser metros, de 0,05 a 50.", "Mandar números con punto: `{\"ancho_m\": 1.5, \"alto_m\": 0.9}`."),
+    "tela-no-entra":           ("datos", True,  "La pieza a medida no entra en la tela elegida (su ancho imprimible o el largo máximo de la mesa).", "Elegir una tela más ancha o una medida menor."),
+    "talle-sin-columna":       ("datos", True,"La planilla del molde no tiene columna de talle, pero el molde tiene varios talles: no se sabe de cuál es cada fila.", "Avisar al que administra TIZADA: ese molde necesita una planilla con columna de talle."),
     "opcion-inexistente":      ("datos", True,  "Una fila trae un valor que no está entre las opciones de esa columna.", "Usar una de las opciones publicadas."),
     "opcion-sin-piezas":       ("datos", True,  "Una fila pide una opción (p. ej. manga larga) que el molde no tiene.", "Elegir una opción que el molde sí tenga."),
     "cantidad-invalida":       ("datos", True,  "La cantidad tiene que ser un número entero de 1 en adelante.", "Corregir la cantidad."),
@@ -271,18 +275,18 @@ ALARMAS = {
     "arte-ilegible":           ("arte",  True,  "El arte no se pudo abrir (dañado, o un .ai guardado sin «Crear archivo compatible con PDF»).", "Volver a guardarlo."),
     "arte-sin-mesas-de-pieza": ("arte",  True,  "El arte no trae una mesa por pieza con su nombre en la capa de guías (es otro tipo de archivo).", "Armar el arte desde la base que da TIZADA PRO para ese molde."),
     "arte-pieza-sin-mesa":     ("arte",  False, "Hay piezas del molde que el arte no cubre. Si alguna de ellas se fabrica en este pedido, frena como `piezas-en-blanco`.", "Agregar la mesa de esas piezas con su nombre en la capa «guias»."),
-    "arte-mesa-vacia":         ("arte",  True,  "Una mesa asignada a una pieza no tiene diseño.", "Revisar esa mesa del arte."),
+    "arte-mesa-vacia":         ("arte",  True,  "Una mesa asignada a una pieza SIN nombre en la guía no tiene diseño (las mesas con el nombre de su pieza no se revisan: manda el nombre, sea del color que sea).", "Revisar esa mesa del arte o escribirle el nombre de la pieza en la capa «guias»."),
     "arte-texto-vivo":         ("arte",  True,  "El diseño trae texto sin convertir a curvas.", "Illustrator: Texto → Crear contornos · Corel: Objeto → Convertir en curvas."),
     "arte-variante-sin-cubrir": ("arte", False, "Con mesas por talle (#talle/#rango), algún talle queda sin diseño en una pieza.", "Agregar la mesa de ese talle o una mesa sin #."),
-    "arte-campo-sin-capa":     ("arte",  False, "La planilla trae nombre o número y el arte no tiene esa capa: no se estampa.", "Agregar la capa «Nombre» / «Número» al arte."),
+    "arte-campo-sin-capa":     ("arte",  False, "La planilla trae texto o número y el arte no tiene esa capa: no se estampa.", "Agregar la capa «Texto» (o «Nombre») / «Número» al arte."),
     "arte-observado":          ("arte",  False, "La revisión del arte dejó una observación.", "Leer el mensaje."),
     # ── tipografías ──
-    "tipografia-falta":        ("arte",  True,  "El nombre o el número usa una tipografía que no está en el catálogo ni vino en el paquete.", "Mandarla en `tipografias`, o pedir `si_falta_tipografia: \"predeterminada\"`."),
+    "tipografia-falta":        ("arte",  True,  "El texto o el número usa una tipografía que no está en el catálogo ni vino en el paquete.", "Mandarla en `tipografias`, o pedir `si_falta_tipografia: \"predeterminada\"`."),
     "tipografia-reemplazada":  ("arte",  False, "Faltaba una tipografía y se usó la predeterminada, como pidió el pedido.", "—"),
     "tipografia-invalida":     ("arte",  True,  "Un archivo de tipografía no se pudo leer.", "Mandar otro archivo de esa fuente."),
     # ── tizada ──
-    "texto-se-achica":         ("tizada", False, "Un nombre o número no entra en la pieza y sale más chico.", "Acortar el texto o cambiar el margen en el molde."),
-    "texto-ilegible":          ("tizada", False, "Un nombre o número sale tan chico que puede no leerse.", "Acortar el texto."),
+    "texto-se-achica":         ("tizada", False, "Un texto o número no entra en la pieza y sale más chico.", "Acortar el texto o cambiar el margen en el molde."),
+    "texto-ilegible":          ("tizada", False, "Un texto o número sale tan chico que puede no leerse.", "Acortar el texto."),
     "piezas-en-blanco":        ("tizada", True,  "Hay piezas de las que se fabrican que el arte no cubre: saldrían en blanco.", "Agregar su mesa al arte, apagarlas en `piezas_apagadas`, o pedir `si_piezas_en_blanco: \"seguir\"`."),
     "aviso-del-pedido":        ("tizada", False, "El plan del pedido dejó un aviso.", "Leer el mensaje."),
     "caracter-imposible":      ("tizada", True,  "Un carácter del texto no se puede estampar con ninguna tipografía.", "Sacar ese carácter."),
@@ -357,6 +361,58 @@ def _molde_listo(prod, reg):
     return True, ""
 
 
+def _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A):
+    """La MEDIDA de un molde a medida en el pedido (`medida: {ancho_m, alto_m}`, o los dos campos
+    sueltos): que esté, que sea válida y que la pieza entre en sus telas (regla del usuario
+    2026-10-06). Devuelve `{ancho_m, alto_m}` o None (con la alarma puesta)."""
+    md = m.get("medida") if isinstance(m.get("medida"), dict) else {"ancho_m": m.get("ancho_m"), "alto_m": m.get("alto_m")}
+    if md.get("ancho_m") in (None, "") or md.get("alto_m") in (None, ""):
+        A.append(alarma("medida-falta", f"«{prod.get('nombre')}» en «{nom}»", campo=cm + ".medida"))
+        return None
+    an, al = S._metros(md.get("ancho_m")), S._metros(md.get("alto_m"))
+    if an is None or al is None:
+        A.append(alarma("medida-invalida", f"«{md.get('ancho_m')} × {md.get('alto_m')}» en «{prod.get('nombre')}»", campo=cm + ".medida"))
+        return None
+    pub = S._a_medida_publico(prod, cat) or {}
+    n = pub.get("nesting") or {}
+    por_nombre = {str(t.get("nombre")): t for t in telas.values()}
+    for t in [tela_p] + [por_nombre.get(x) for x in (tpp or {}).values()]:
+        if not t:
+            continue
+        ok, mot = S._cabe_en_tela(an, al, pub.get("borde_mm") or 0, t.get("ancho_cm") or 180, n.get("alto_max_cm") or 500,
+                                  n.get("margen_mm") or 0, n.get("rotacion") or "auto")
+        if not ok:
+            A.append(alarma("tela-no-entra", f"«{prod.get('nombre')}» de {S._talle_de_medida(an, al)} m en «{t.get('nombre')}»: {mot}",
+                            campo=cm + ".tela"))
+            return None
+    return {"ancho_m": an, "alto_m": al}
+
+
+def _a_medida_publico_ext(prod):
+    """Lo que el otro sistema tiene que saber de un molde A MEDIDA (MAPA 623), o None."""
+    am = (prod or {}).get("a_medida")
+    if not isinstance(am, dict) or am.get("de"):
+        return None
+    mg = am.get("margen") or {}
+    t = float(mg.get("todos") or 0)
+    return {"pieza": am.get("pieza"), "pide": "medida: {ancho_m, alto_m} en metros",
+            "margen_cm": {k: float(mg[k]) if mg.get(k) not in (None, "") else t for k in ("arriba", "abajo", "izq", "der")}}
+
+
+def _columna_talle_que_lee(prod, cols):
+    """El id de la columna de la planilla de la que este molde lee el talle, o None si no lee
+    ninguna (PLANILLA SIN TALLES, MAPA 622). Mismo criterio que `_traducir_prendas`: la que el molde
+    mapea; si mapea una que la planilla no tiene, la primera de talle (`_hay_fallback`)."""
+    ct = [c for c in (cols or []) if c.get("role") == "talle"]
+    if not ct:
+        return None
+    mc = (prod or {}).get("mapeo_columnas") or {}
+    quiere = mc.get("talle") if "talle" in mc else "talle"
+    if not quiere:
+        return None                       # el molde la tiene apagada
+    return quiere if quiere in {str(c.get("id")) for c in ct} else str(ct[0].get("id"))
+
+
 def molde_publico(prod, cat, detalle=True):
     """Todo lo que el otro sistema necesita de un molde para armar (y revisar) un pedido."""
     pid = prod["id"]
@@ -374,6 +430,8 @@ def molde_publico(prod, cat, detalle=True):
     mc = prod.get("mapeo_columnas") or {}
     cols = []
     for c in (tpl.get("columnas") or []):
+        if c.get("role") == "cantidad" and c.get("mostrar") == "no":
+            continue                   # esta planilla no tiene Cantidad (2026-10-06): no se publica
         col = {"id": c.get("id"), "titulo": c.get("label"), "rol": c.get("role") or "dato",
                "obligatoria": bool(c.get("obligatoria"))}
         ops = _opciones_de_columna(c, cat)
@@ -412,9 +470,12 @@ def molde_publico(prod, cat, detalle=True):
         "talles": S._talles_de_registro(reg, pid),
         "piezas": sorted({_gen(p) for p in reg.keys()}),
         "variables": variables,
+        # `columna_talle: null` = la planilla NO lleva talle (MAPA 622): las filas van sin talle
         "planilla": {"id": tpl.get("id"), "nombre": tpl.get("nombre"), "columnas": cols,
-                     "columna_talle": mc.get("talle") or "talle"},
+                     "columna_talle": _columna_talle_que_lee(prod, tpl.get("columnas") or []),
+                     "con_talles": _columna_talle_que_lee(prod, tpl.get("columnas") or []) is not None},
         "opciones_de_pieza": opciones,
+        "a_medida": _a_medida_publico_ext(prod),
         "telas": {"todas": [_tela(i) for i in (tcfg.get("todas") or [])],
                   "por_pieza": {k: [_tela(i) for i in v] for k, v in (tcfg.get("por_pieza") or {}).items()}},
         "foto": f"/api/externo/v1/moldes/{pid}/foto",
@@ -631,6 +692,10 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                     marcas[str(obj)] = proc
                     if isinstance(val, dict) and val.get("cruz") is False:
                         sin_marca[str(obj)] = True
+            # MOLDE A MEDIDA (MAPA 623): un rectángulo de una pieza; la medida viene en el pedido
+            medida = None
+            if isinstance(prod.get("a_medida"), dict):
+                medida = _medida_del_pedido(m, prod, cat, tela_p, tpp, telas, cm, nom, A)
             arte = _archivo(m.get("arte"), cm + ".arte", EXT_ARTE, "arte-formato") if m.get("arte") else arte_d
             if not arte and not (m.get("arte") or d.get("arte")):
                 A.append(alarma("arte-falta", f"«{prod.get('nombre')}» en «{nom}»", campo=cm + ".arte"))
@@ -638,6 +703,7 @@ def revisar_datos(pedido, archivos, estado_previo=None):
                                  "variable_nombre": next((str(v.get("label") or vcl) for v in variantes if v["clave"] == vcl), None) if vcl else None,
                                  "tela": (tela_p or {}).get("nombre"), "tela_id": (tela_p or {}).get("id"),
                                  "telas_por_pieza": tpp, "piezas_fuera": fuera, "marcas": marcas,
+                                 **({"medida": medida} if medida else {}),
                                  "sin_marca": sin_marca, "editables_declarados": declarados, "arte": arte,
                                  "tipografias": fuentes_d + [x for x in (_archivo(f, f"{cm}.tipografias[{k}]", EXT_FUENTE, "tipografia-formato")
                                                                          for k, f in enumerate(m.get("tipografias") or [])) if x]})
@@ -652,9 +718,17 @@ def revisar_datos(pedido, archivos, estado_previo=None):
     pid0 = norm_d[0]["moldes"][0]["pid"]
     prod0 = prods[pid0]
     tpl = _plantilla_de(prod0, cat) or {}
-    cols = tpl.get("columnas") or []
+    # una Cantidad «no va» (2026-10-06) es como si la planilla no la tuviera: mandarla da
+    # `columna-desconocida`, igual que cualquier columna que no existe
+    cols = [c for c in (tpl.get("columnas") or []) if not (c.get("role") == "cantidad" and c.get("mostrar") == "no")]
     por_id = {str(c.get("id")): c for c in cols}
     por_titulo = {_norm(c.get("label")): c for c in cols}
+    # «Nombre» ↔ «Texto» (2026-10-06): la columna del campo que se estampa pasó a rotularse «Texto»;
+    # una fila que la manda con el título viejo «Nombre» (o al revés) sigue entrando en esa columna
+    _col_txt = next((c for c in cols if c.get("role") == "nombre"), None)
+    if _col_txt is not None:
+        for _t in ("nombre", "texto"):
+            por_titulo.setdefault(_norm(_t), _col_txt)
     col_dis = next((c for c in cols if c.get("role") == "diseno"), None)
     col_cant = next((c for c in cols if c.get("role") == "cantidad"), None)
     dis_por_nombre = {_norm(d["nombre"]): d for d in norm_d}
@@ -666,7 +740,8 @@ def revisar_datos(pedido, archivos, estado_previo=None):
             p = prods[m["pid"]]
             reg = S._cargar("registro_producto.json", m["pid"]) or {}
             talles_de[m["pid"]] = {str(t).strip().lower(): t for t in S._talles_de_registro(reg, m["pid"])}
-            col_talle_de[m["pid"]] = (p.get("mapeo_columnas") or {}).get("talle") or "talle"
+            # (un molde A MEDIDA nunca lee talle: el suyo es la medida, MAPA 623)
+            col_talle_de[m["pid"]] = None if isinstance(p.get("a_medida"), dict) else _columna_talle_que_lee(p, cols)
     try:
         toggles = S._toggles_de_template(cols, cat)
     except Exception:
@@ -711,6 +786,16 @@ def revisar_datos(pedido, archivos, estado_previo=None):
         algun = False
         for m in d["moldes"]:
             ct = col_talle_de[m["pid"]]
+            if ct is None:
+                # PLANILLA SIN TALLES (MAPA 622): la fila no lleva talle; el molde pone el suyo si
+                # tiene uno solo. Con varios no hay de dónde sacarlo.
+                if len(talles_de[m["pid"]]) <= 1:
+                    algun = True
+                else:
+                    A.append(alarma("talle-sin-columna", f"fila {n}: «{m['molde_nombre']}» tiene "
+                                    f"{len(talles_de[m['pid']])} talles y su planilla no tiene columna de talle",
+                                    fila=n, campo=cf))
+                continue
             tv = fila.get(ct, "")
             if not tv:
                 continue
@@ -720,7 +805,7 @@ def revisar_datos(pedido, archivos, estado_previo=None):
             else:
                 fila[ct] = talles_de[m["pid"]][tv.lower()]
                 algun = True
-        if not algun and not any(a.get("codigo") == "talle-inexistente" and (a.get("donde") or {}).get("fila") == n for a in A):
+        if not algun and not any(a.get("codigo") in ("talle-inexistente", "talle-sin-columna") and (a.get("donde") or {}).get("fila") == n for a in A):
             A.append(alarma("columna-obligatoria-vacia", f"fila {n}: falta el talle", fila=n, campo=cf))
         # las opciones de las columnas con lista
         for c in cols:
@@ -771,7 +856,7 @@ def revisar_datos(pedido, archivos, estado_previo=None):
             A.append(alarma("campo-tipo", f"`opciones.{k}` admite: " + ", ".join(permitidos), campo="opciones." + k))
     normal = {
         "referencia": ref, "disenos": norm_d, "filas": filas_n,
-        "columnas": [{"id": c.get("id"), "label": c.get("label")} for c in cols],
+        "columnas": [{"id": c.get("id"), "label": c.get("label"), "role": c.get("role") or "none"} for c in cols],
         "mesas": {"modo": modo, "talles_mesa": talles_mesa},
         "opciones": {"si_falta_tipografia": opc.get("si_falta_tipografia") or "rechazar",
                      "si_texto_no_entra": opc.get("si_texto_no_entra") or "achicar",
@@ -817,7 +902,7 @@ def cuerpo_de(normal):
                         por_var[m["variable"]] = dict(origen)
             r = {}
             for campo, fuente in (d.get("tipografia_por_campo") or {}).items():
-                r["@campo:" + str(campo).strip().lower()] = str(fuente)
+                r[S.MP.clave_fuente_campo(campo)] = str(fuente)   # con los alias: «texto» = el campo nombre
             r.update(m.get("reemplazos") or {})
             if r:
                 reempl[f"{sl}|{pid}"] = r
@@ -1005,7 +1090,9 @@ def variables_publicas(cat):
                 continue
             out.append({"clave": cl, "nombre": v.get("label") or cl, "molde": prod["id"], "molde_nombre": prod.get("nombre") or prod["id"],
                         "piezas": sorted({_gen(x) for x in pz}), "n_piezas": len(pz), "planilla": prod.get("planilla_template_id"),
-                        "foto": f"/api/externo/v1/variables/{cl}/foto"})
+                        "foto": f"/api/externo/v1/variables/{cl}/foto",
+                        # MOLDE A MEDIDA (MAPA 623): el pedido tiene que traer la medida
+                        **({"a_medida": _a_medida_publico_ext(prod)} if _a_medida_publico_ext(prod) else {})})
     return out
 
 
@@ -1288,6 +1375,28 @@ def _asegurar_disenos(ref, normal):
         S._guardar_catalogo(cat)
 
 
+def _borrar_copias_a_medida(ref):
+    """MOLDE A MEDIDA (MAPA 623): las copias a medida que hizo el robot para `ref` (un pedido o una
+    plantilla) se borran apenas no hacen falta — los PDF ya quedaron guardados. Sólo las efímeras,
+    marcadas con ESTA referencia y que salieron de una plantilla: nunca un molde del catálogo."""
+    _es_copia = lambda p: (p.get("efimero") is True and p.get("externo") == ref
+                           and isinstance(p.get("a_medida"), dict) and p["a_medida"].get("de"))
+    copias = []
+    try:
+        cat = S._cargar_catalogo_para_editar()
+        copias = [p["id"] for p in cat.get("productos", []) if _es_copia(p)]
+        if copias:
+            cat["productos"] = [p for p in cat["productos"] if not _es_copia(p)]
+            S._guardar_catalogo(cat)
+    finally:
+        S._soltar_edicion_catalogo()
+    for _pid in copias:
+        try:
+            S._borrar_archivos_y_base(_pid, efimero=True)
+        except Exception as e:
+            print(f"[externo] no se pudo borrar la copia a medida {_pid}: {e}", flush=True)
+
+
 def _limpiar_disenos(est):
     """Saca del catálogo y del disco los diseños internos de ESTE pedido — sólo los que llevan su
     marca `externo` con esta misma referencia (nunca por nombre, nunca «los que sobran»)."""
@@ -1314,6 +1423,7 @@ def _limpiar_disenos(est):
                         shutil.rmtree(base, ignore_errors=True)
         if cambio:
             S._guardar_catalogo(cat)
+        _borrar_copias_a_medida(ref)
     except Exception as e:
         print(f"[externo] no se pudieron limpiar los diseños de {ref}: {e}", flush=True)
 
@@ -1509,7 +1619,7 @@ def robot_arte(ref):
             for campo, col in (("nombre", mc.get("nombre") or "nombre"), ("numero", mc.get("numero") or "numero")):
                 usa = any(str(f.get(col) or "").strip() for f in normal["filas"] if f.get("__diseno") == dis["nombre"])
                 if usa and campo not in campos:
-                    A.append(alarma("arte-campo-sin-capa", f"{quien}: la planilla trae «{campo}» y el arte no tiene esa capa", **donde))
+                    A.append(alarma("arte-campo-sin-capa", f"{quien}: la planilla trae «{'texto' if campo == 'nombre' else campo}» y el arte no tiene esa capa", **donde))
         mol["marcas_ident"], mol["sin_marca_ident"] = marcas, sin_marca
         _escribir_json(os.path.join(_dir_pedido(ref), "normal.json"), normal)
         est["alarmas"] = [a for a in est.get("alarmas", [])
@@ -1517,6 +1627,54 @@ def robot_arte(ref):
                                   and (a.get("donde") or {}).get("molde") == mol["pid"])] + A
         _guardar_estado(ref, est)
     return jsonify({"alarmas": A, "seguir": not _frenan(A)})
+
+
+@bp.post("/api/externo/robot/a_medida/<ref>")
+def robot_a_medida(ref):
+    """MOLDE A MEDIDA (MAPA 623): el robot pide la COPIA a medida de un molde del catálogo (para un
+    pedido o una plantilla). Con `slug`, la copia toma el lugar de la plantilla en ese diseño del
+    pedido (así `cuerpo_de` y el arte la usan). El archivo lo sube el robot por `/api/plantilla`."""
+    d = request.get_json(force=True) or {}
+    tpl = str(d.get("plantilla") or "").strip()
+    an, al = S._metros(d.get("ancho_m")), S._metros(d.get("alto_m"))
+    if not tpl or an is None or al is None:
+        return jsonify({"error": "falta la plantilla o la medida"}), 400
+    pid, err = S._copia_a_medida(tpl, an, al, externo=ref)
+    if err:
+        return jsonify({"error": err}), 400
+    slug = d.get("slug")
+    if slug:
+        with _LOCK:
+            normal = _leer_json(os.path.join(_dir_pedido(ref), "normal.json"), None)
+            dis = next((x for x in (normal or {}).get("disenos", []) if x.get("slug") == slug), None)
+            mol = next((m for m in (dis or {}).get("moldes", []) if (m.get("plantilla") or m.get("pid")) == tpl), None)
+            if not mol:
+                return jsonify({"error": "ese molde no es de este pedido"}), 400
+            mol["plantilla"] = tpl
+            mol["pid"] = pid
+            mol["variable"] = S._clave_var_a_medida(pid)
+            _escribir_json(os.path.join(_dir_pedido(ref), "normal.json"), normal)
+            _asegurar_disenos(ref, normal)
+    cat = S._cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), {}) or {}
+    am = prod.get("a_medida") or {}
+    return jsonify({"pid": pid, "variable": am.get("variable"), "pieza": am.get("pieza"),
+                    "talle": S._talle_de_medida(an, al), "ancho_m": an, "alto_m": al})
+
+
+@bp.post("/api/externo/robot/a_medida/<ref>/listo")
+def robot_a_medida_listo(ref):
+    """Después de subir el archivo de la copia: su variable (creada por el alta) y el margen."""
+    d = request.get_json(force=True) or {}
+    pid = str(d.get("pid") or "")
+    cat = S._cargar_catalogo()
+    prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+    if not prod or (prod.get("externo") != ref) or not isinstance(prod.get("a_medida"), dict):
+        return jsonify({"error": "esa copia no es de este pedido"}), 400
+    var = next((v for v in (prod.get("variantes") or []) if v.get("clave") == prod["a_medida"].get("variable")), None)
+    if not var:
+        return jsonify({"error": "la copia a medida quedó sin variable (¿falló el alta?)"}), 409
+    return jsonify({"variable": var, "acomodo": prod.get("acomodo_illustrator") or {}})
 
 
 @bp.get("/api/externo/robot/cuerpo/<ref>")
@@ -1665,6 +1823,7 @@ def robot_terminar(ref):
         _guardar_estado(ref, est)
         _latido("esperando")
     _avisar(ref)
+    _borrar_copias_a_medida(ref)          # los PDF ya están: la copia a medida sobra (MAPA 623)
     return jsonify({"ok": True, "resultado": resultado_publico(resultado, ref)})
 
 
@@ -1869,11 +2028,25 @@ def revisar_plantilla(body):
                 A.append(alarma("molde-no-disponible", f"«{prod.get('nombre') or pid}»: {motivo}", campo=dv))
                 continue
             key = f"{nom}|{pid}|{var.get('clave')}"
+            # MOLDE A MEDIDA (MAPA 623): la plantilla se arma a la medida que viene en la variable
+            medida_v = None
+            if isinstance(prod.get("a_medida"), dict):
+                md = v.get("medida") if isinstance(v, dict) and isinstance(v.get("medida"), dict) else (v if isinstance(v, dict) else {})
+                an, al = S._metros(md.get("ancho_m")), S._metros(md.get("alto_m"))
+                if md.get("ancho_m") in (None, "") or md.get("alto_m") in (None, ""):
+                    A.append(alarma("medida-falta", f"«{prod.get('nombre')}» en «{nom}»", campo=dv + ".medida"))
+                    continue
+                if an is None or al is None:
+                    A.append(alarma("medida-invalida", f"«{md.get('ancho_m')} × {md.get('alto_m')}»", campo=dv + ".medida"))
+                    continue
+                medida_v = {"ancho_m": an, "alto_m": al}
+                key += "|" + S._talle_de_medida(an, al)
             if any(x["key"] == key for x in vars_):
                 continue                                     # la misma variable dos veces: una
             vars_.append({"key": key, "pid": pid, "clave": var.get("clave"), "label": var.get("label") or var.get("clave"),
                           "molde": prod.get("nombre") or pid, "variable": var, "acomodo": prod.get("acomodo_illustrator") or {},
-                          "talles": S._talles_de_registro(reg, pid)})
+                          "talles": S._talles_de_registro(reg, pid),
+                          **({"medida": medida_v, "dobladillo": (_a_medida_publico_ext(prod) or {}).get("margen_cm")} if medida_v else {})})
             if pid not in pids:
                 pids.append(pid)
         if vars_:
@@ -2151,6 +2324,7 @@ def robot_plantilla_terminar(ref):
             A.append(alarma("plantilla-aviso", str(t)[:400]))
         est.update({"estado": "listo", "etapa": "terminado", "archivos": archivos, "alarmas": A, "terminado": _ahora()})
         _guardar_plantilla(ref, est)
+    _borrar_copias_a_medida(ref)          # la copia a medida ya no hace falta (MAPA 623)
     return jsonify({"ok": True})
 
 
@@ -2169,6 +2343,7 @@ def robot_plantilla_fallo(ref):
         else:
             est["estado"], est["etapa"] = "en_cola", "se va a reintentar: " + motivo[:200]
         _guardar_plantilla(ref, est)
+    _borrar_copias_a_medida(ref)          # el reintento arma otra copia (MAPA 623)
     return jsonify({"ok": True, "estado": est["estado"]})
 
 

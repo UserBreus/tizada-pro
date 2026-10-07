@@ -83,7 +83,9 @@ export const MOLDE_CON_DISENO = 'Ese molde viene con diseño incluido. Quitá la
 // `enPc` (MAPA 585): el molde con diseño del PEDIDO no se guarda en el servidor. Se devuelve además
 // la CÁSCARA (lo que sube en lugar del archivo) y `paginas` resuelve `{zip, pdfs, rev}`: el ZIP sin
 // páginas para el servidor y las páginas (PDF por mesa) para guardar en ESTA PC.
-export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {}, enPc = false } = {}) {
+// `dxfResumen` (MOLDE A MEDIDA, MAPA 623): el archivo es un PDF que armó esta computadora con el
+// resumen de un DXF (`nombres`, `talles`, `indices`): va por el camino A y el alta nombra la pieza.
+export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, soloSiTraeDiseno = false, soloBase = false, manual = {}, enPc = false, dxfResumen = null } = {}) {
   let pool = null
   let cerrado = false
   const cerrar = () => { if (!cerrado && pool) { cerrado = true; pool.cerrar() } }
@@ -110,13 +112,14 @@ export async function prepararEnDosTiempos(archivo, { onA = null, onB = null, so
         uno.cerrar()
       }
     }
+    if (dxfResumen) dxf = { ...dxfResumen }
     const sha1 = hex(await crypto.subtle.digest('SHA-1', bytes))
-    const caminoA = esDxf || soloSiTraeDiseno || soloBase
+    const caminoA = esDxf || !!dxfResumen || soloSiTraeDiseno || soloBase
     // el camino A lee el molde en UN hilo (el alta es secuencial); el B abre el archivo en todos
     pool = crearPool(caminoA && esDxf ? 1 : hilosRecomendados(), () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'preparar molde')
     const info = await abrirEnPool(pool, bytes)
     if (caminoA) {
-      let esA = esDxf
+      let esA = esDxf || !!dxfResumen
       if (!esA) {
         onA && onA({ texto: 'Mirando si trae el diseño adentro…' })
         esA = !(await pareceConDiseno(pool)).si
@@ -192,4 +195,22 @@ export function subirPaginas(rutaApi, pid, zipB, onPct = null) {
     xhr.onerror = () => reject(new Error('Se cortó la conexión con el servidor al guardar las páginas'))
     xhr.send(fd)
   })
+}
+
+/**
+ * MOLDE A MEDIDA (MAPA 623): arma EN ESTA COMPUTADORA el PDF del rectángulo de `anchoM` × `altoM`
+ * metros con la pieza `pieza`, y lo prepara como cualquier molde del camino A. Devuelve lo mismo que
+ * `prepararEnDosTiempos` (`zipA`, `archivo`, `sha1`, `caminoA: true`, `resumen`).
+ */
+export async function prepararMoldeAMedida({ anchoM, altoM, pieza, onA = null }) {
+  onA && onA({ texto: 'Armando el molde a la medida…' })
+  const uno = crearPool(1, () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'molde a medida')
+  let r
+  try {
+    r = await uno.enviar('a_medida_pdf', { anchoM, altoM, pieza })
+  } finally {
+    uno.cerrar()
+  }
+  const archivo = new File([new Uint8Array(r.pdf)], 'molde_a_medida.pdf', { type: 'application/pdf' })
+  return prepararEnDosTiempos(archivo, { onA, dxfResumen: r.resumen })
 }

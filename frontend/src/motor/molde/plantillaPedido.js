@@ -56,7 +56,8 @@ export function motorPlantilla({ dets, config = 'default', tallesSel = null, lis
     const det = dets[it.pid]
     return { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas, editables: null,
       referencia: d.referencia || 'alto', posiciones: posicionesDelVisor(det, it.variable), talleVisor: det.talle_ref || null,
-      acomodoGuia: (it.acomodo || {})[it.clave || '_molde'] || null }
+      acomodoGuia: (it.acomodo || {})[it.clave || '_molde'] || null,
+      dobladillo: it.dobladillo || null }   // MOLDE A MEDIDA (MAPA 623): el margen punteado
   }
   // el nombre de cada bloque en el archivo del diseño
   const tituloDe = (it) => (it.clave ? `${it.label} · ${it.molde}` : it.molde)

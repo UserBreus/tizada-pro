@@ -52,6 +52,10 @@ _falso.guardar_catalogo = lambda cat, version_esperada=None: (_DOCS.__setitem__(
 _REG = {}
 _falso.registro_rev = lambda pid: (1 if pid in _REG else None)
 _falso.leer_registro = lambda pid: _REG.get(pid)
+# un alta de verdad (molde subido, molde a medida del entorno aislado, MAPA 623) tiene que quedar
+# guardada en el doble: sin esto el molde nuevo aparecía con 0 piezas
+_falso.guardar_registro = lambda pid, piezas, reg: _REG.__setitem__(pid, reg)
+_falso.borrar_piezas_molde = lambda pid: _REG.pop(pid, None)
 # `_rev_registro` en un GET lee TODAS las revisiones con UNA consulta (MAPA 582): sin esto el doble
 # devolvía None, `motor_b_producto` rompía con «'NoneType' object is not iterable» y el contrato
 # daba «no se puede generar en esta computadora» (visto el 2026-09-30).
@@ -190,12 +194,14 @@ def main(orig):
     os.makedirs(salida_py)
     t = time.time()
     res = MP.generar_pedido_grupos(plan["grupos"], S.FUENTES, salida_py, config_nesting=plan["cfg_nesting"],
-                                   telas_cfg=plan["telas_cfg"], progreso=None, procesos=None)
+                                   telas_cfg=plan["telas_cfg"], progreso=None, procesos=None, validar=False)
     from aplanar_rip import aplanar_para_rip
     for h in res["hojas"]:
         aplanar_para_rip(os.path.join(salida_py, h["archivo"]))
         if _icc:
             S._embeber_perfil_pdf(os.path.join(salida_py, h["archivo"]), _icc, _icc_nom, _icc_n)
+    # como `generar_multi`: las validaciones sobre la hoja FINAL (aplanada y con perfil), MAPA 624
+    res["validaciones"] = MP.validar_hojas_finales(salida_py, res["hojas"], plan["cfg_nesting"], plan["telas_cfg"])
     t_py = time.time() - t
     ok(bool(res["hojas"]), f"{len(res['hojas'])} hoja(s) en {t_py:.1f} s: " + ", ".join(f"{h['archivo']} ({h['paginas']} pág, {h['consumo_cm']} cm)" for h in res["hojas"]))
     # la ficha del servidor, con la misma guía que usaría `generar_multi`

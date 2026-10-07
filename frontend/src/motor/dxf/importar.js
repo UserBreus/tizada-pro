@@ -426,6 +426,10 @@ function _parseGenerico(doc) {
 
 // ── construir el PDF a TAMAÑO REAL 1:1 y TAL CUAL VIENE (coords originales del DXF) ──
 const f32 = Math.fround
+// Exportada también para el MOLDE A MEDIDA (`molde/aMedida.js`, MAPA 623): el rectángulo se escribe
+// con el MISMO constructor que el DXF, así sale el mismo PDF (capa por talle, 4 cm de margen) y el
+// alta del camino A lo lee igual.
+export function construirPdfPiezas(mupdf, piezas, ordenTalles, escalaCm) { return _construirPdf(mupdf, piezas, ordenTalles, escalaCm) }
 function _construirPdf(mupdf, piezas, ordenTalles, escalaCm) {
   const S = CM * escalaCm
   const MARG = 4 * CM

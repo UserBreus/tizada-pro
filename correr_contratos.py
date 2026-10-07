@@ -41,8 +41,14 @@ def main():
     # 🔴 UN CONTRATO NO PUEDE COMERSE LA MÁQUINA. `verificar_desplegado` levanta un pool para el
     # alta y, sin tope, son 6 workers de ~1,4 GB: 8,5 GB sólo para correr una prueba (medido
     # 2026-09-15, con el usuario trabajando al lado). Se acota acá, no en cada contrato.
+    # 🔴 LOS CONTRATOS PRUEBAN LA REFERENCIA EN PYTHON. Desde 2026-09-24 «El servidor no calcula»
+    # está SIEMPRE prendido (MAPA 568) y sin esto cada contrato que llama una ruta del servidor
+    # se caía con `_FaltaCalculo` (un 428 para un navegador que acá no existe): 2026-10-06 había
+    # varios rojos por eso y ninguno por lo que medían. El que prueba el modo prendido lo pone él
+    # mismo (`verificar_navegador_solo.py`). El servidor REAL (8050) no se entera: sigue prendido.
     env = dict(os.environ, PYTHONIOENCODING="utf-8",
-               TIZADA_PROCESOS=os.environ.get("TIZADA_PROCESOS", "2"))
+               TIZADA_PROCESOS=os.environ.get("TIZADA_PROCESOS", "2"),
+               TIZADA_SOLO_NAVEGADOR=os.environ.get("TIZADA_SOLO_NAVEGADOR", "0"))
     files = sorted(f for f in os.listdir(AQUI) if f.startswith("verificar_") and f.endswith(".py"))
     # 🔴 LOS PESADOS SE DECLARAN Y SE SACAN DE LA TANDA RÁPIDA. Un contrato de integración sobre
     # el archivo real de 123 MB tarda minutos y no hay forma honesta de acortarlo (no existe un

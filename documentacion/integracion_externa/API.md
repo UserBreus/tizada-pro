@@ -62,6 +62,12 @@ un conjunto de piezas de una prenda. Esta lista trae las variables de las prenda
 
 - Guardar la **`clave`**: es lo que va en el pedido.
 - Dos variables con distinta `planilla` no se combinan en un mismo pedido.
+- **Prenda A MEDIDA** (banderas, banners): trae `a_medida: {pieza, margen_cm: {arriba, abajo, izq, der},
+  pide}`. Es un rectángulo de una sola pieza: el pedido (y la plantilla) tienen que mandar su **medida**
+  en metros (`medida: {"ancho_m": 1.5, "alto_m": 0.9}`), no lleva talle, y TIZADA arma la pieza de ese
+  tamaño. El margen es el dobladillo: en la plantilla del diseñador sale como línea punteada (no se
+  imprime; el diseño llega hasta el borde). Si la pieza no entra en la tela elegida (ancho imprimible o
+  largo máximo de la mesa) la alarma es `tela-no-entra`.
 - `version` cambia cuando cambia el catálogo: conviene guardar y refrescar sólo entonces.
 
 ### `GET /variables/{clave}/foto` — la silueta de sus piezas
@@ -88,7 +94,8 @@ todo lo de una prenda:
 | `variables[]` | `clave`, `nombre`, `piezas` (genéricas) y `piezas_exactas` |
 | `piezas[]` | Nombres genéricos (sin número): para `telas_por_pieza` y `piezas_apagadas` |
 | `planilla.columnas[]` | `id`, `titulo`, `rol` (`cantidad`, `talle`, `nombre`, `numero`, `manga`, `diseno`, `dato`…), `obligatoria`, `opciones` |
-| `planilla.columna_talle` | Qué columna de talle lee esta prenda (puede haber «Talle» y «Talle short») |
+| `planilla.columna_talle` | Qué columna de talle lee esta prenda (puede haber «Talle» y «Talle short»). **`null` = planilla SIN TALLES** (banderas, moldes de un solo tamaño): las filas van sin talle y TIZADA usa el único talle del molde |
+| `planilla.con_talles` | `false` en una planilla sin talles (lo mismo que `columna_talle: null`) |
 | `opciones_de_pieza` | Qué opciones de cada toggle (p. ej. manga) **tiene de verdad**, en general (`*`) y por variable |
 | `telas.todas[]`, `telas.por_pieza{}` | Las telas que admite, en general y por pieza |
 | `foto` | La silueta del molde entero (mismo formato que la de una variable) |
@@ -290,14 +297,14 @@ computadora, desde su navegador: `GET http://127.0.0.1:47850/estado` (Illustrato
 |---|---|
 | `referencia` | La de ustedes (letras, números, `.`, `-`, `_`; hasta 64). Pedirla de nuevo con la misma la rehace. |
 | `disenos[].nombre` | Nombre del diseño: sale UN archivo por diseño, con ese nombre. |
-| `disenos[].variables` | Las prendas, como en `GET /variables` (clave o nombre; con `molde` si el nombre está en varias). |
+| `disenos[].variables` | Las prendas, como en `GET /variables` (clave o nombre; con `molde` si el nombre está en varias). Una prenda **a medida** va como objeto con su medida: `{"variable": "v_…", "medida": {"ancho_m": 1.5, "alto_m": 0.9}}`. |
 | `talles.modo` | `todos` = un diseño para todos los talles · `rango` = uno por grupo de talles · `por_talle` = cada talle a su medida real. |
 | `talles.rangos` | (`rango`) `[{"talles": ["XS","S","M"], "guia": "S"}]` — la guía es el talle con el que se calcula la medida. |
 | `talles.talles` | (`por_talle`) los talles que van; sin este campo, todos. |
 | `escala` | Tamaño en **Illustrator**: 100 (real), 90 … 10. CorelDRAW es siempre a tamaño real. |
 
 Contesta en el acto `202` (en cola) o `422` con alarmas (`variable-desconocida`, `talles-invalidos`,
-`escala-invalida`, `plantilla-sin-variables`…). La arma el robot en segundos.
+`escala-invalida`, `plantilla-sin-variables`, `medida-falta`, `medida-invalida`…). La arma el robot en segundos.
 
 ### `GET /plantillas/{referencia}` — el estado y los archivos
 
@@ -322,7 +329,7 @@ en Illustrator: los otros archivos salen igual).
 
 | Tipo | Qué es | Cómo se usa |
 |---|---|---|
-| `illustrator` | Lo que arma la base en Illustrator: una mesa por pieza con su nombre, las capas (diseño, Editable…, Nombre, Número, guias) y el contorno de cada pieza. | Desde la **computadora del diseñador** (su navegador), con el conector instalado e Illustrator abierto: `POST http://127.0.0.1:47850/plantilla` con el contenido del archivo tal cual (`Content-Type: application/json`). Contesta `{"ok": true, "mesas": N, "archivo": "…"}` y guarda el .ai en *Documentos › USER PRO › Plantillas*. |
+| `illustrator` | Lo que arma la base en Illustrator: una mesa por pieza con su nombre, las capas (diseño, Editable…, Texto, Número, guias) y el contorno de cada pieza. | Desde la **computadora del diseñador** (su navegador), con el conector instalado e Illustrator abierto: `POST http://127.0.0.1:47850/plantilla` con el contenido del archivo tal cual (`Content-Type: application/json`). Contesta `{"ok": true, "mesas": N, "archivo": "…"}` y guarda el .ai en *Documentos › USER PRO › Plantillas*. |
 | `corel` | Lo mismo para CorelDRAW (una página por mesa, a tamaño real). | `POST http://127.0.0.1:47851/plantilla` con el contenido del archivo. Si CorelDRAW está cerrado, se abre solo. |
 | `guia` | Una guía .ai que se abre en cualquier Illustrator, sin conector. | Bajarla y abrirla. |
 

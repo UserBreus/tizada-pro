@@ -120,7 +120,7 @@ Ver `pedido_ejemplo.json`. Todo en UTF-8.
 |---|---|---|
 | `nombre` | obligatorio | Nombre del diseño (JUGADOR, GOLERO…). Único en el pedido. Es el valor que va en la columna «diseño» de la planilla |
 | `arte` | opcional | Ruta, dentro del paquete, del arte **para todos los moldes de este diseño** que no traigan el suyo |
-| `tipografias` | opcional | Rutas de las tipografías (.ttf/.otf) que usa el nombre/número y TIZADA no tiene |
+| `tipografias` | opcional | Rutas de las tipografías (.ttf/.otf) que usa el texto/número y TIZADA no tiene |
 | `tipografia_por_campo` | opcional | Forzar una tipografía del catálogo para un campo: `{"numero": "Anton Regular"}` |
 | `moldes[]` | obligatorio | Los moldes que usa este diseño (uno o varios) |
 
@@ -138,6 +138,7 @@ que existe en más de una prenda. **Una variable por prenda** en cada diseño.
 | `tela` | obligatorio | El **id** de la tela principal (el del sistema de telas). Vale para todas las piezas |
 | `telas_por_pieza` | opcional | Las excepciones: `{"Cuello": "486"}`. La pieza va por su nombre **genérico** (sin número) |
 | `piezas_apagadas` | opcional | Piezas que **no** se hacen en este pedido: `["Tapa costura"]` |
+| `medida` | sólo prendas **a medida** | `{"ancho_m": 1.5, "alto_m": 0.9}` — en metros (de 0,05 a 50). La variable lo dice en `GET /variables` (`a_medida`). La fila de la planilla **no lleva talle** para esa prenda. Sin medida: `medida-falta`; si no entra en la tela: `tela-no-entra` |
 | `editables` | opcional | Qué lleva cada objeto editable del arte. Ver abajo |
 | `tipografias` | opcional | Como en el diseño, pero sólo para este molde |
 
@@ -168,7 +169,7 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 | Clave | Qué es |
 |---|---|
 | `diseno` | El `nombre` de uno de los diseños. Obligatoria si el pedido trae más de uno |
-| la columna de talle | El talle **tal cual lo tiene el molde** (`M`, `2XL`, `10`). Cada molde lee **su** columna de talle (`planilla.columna_talle`) |
+| la columna de talle | El talle **tal cual lo tiene el molde** (`M`, `2XL`, `10`). Cada molde lee **su** columna de talle (`planilla.columna_talle`). Si es `null` la planilla es **sin talles**: la fila no lleva talle |
 | las de rol `nombre` / `numero` | Lo que se estampa |
 | las de opciones (p. ej. `manga`) | Una de sus `opciones`, y el molde tiene que **tener** esa opción (`opciones_de_pieza`). Varias a la vez: `"Corta + Larga"` |
 | la de rol `cantidad` | Entero de 1 en adelante. Vacía = 1 |
@@ -198,9 +199,9 @@ Las claves son los **ids de columna** de la planilla del molde (`GET /moldes/{co
 - **.ai** guardado con «Crear archivo compatible con PDF», o **.pdf** de Illustrator / CorelDRAW.
 - **Una mesa de trabajo por pieza**, armado sobre la base que da TIZADA PRO para ese molde.
 - Capas: `diseño` (el dibujo, **sin texto vivo**: convertido a curvas), `guias` (el nombre de la
-  pieza de cada mesa; `#talle` o `#rango` para mesas por talle), `Nombre` y `Número` (los textos
+  pieza de cada mesa; `#talle` o `#rango` para mesas por talle), `Texto` (también puede llamarse `Nombre`) y `Número` (los textos
   que se reemplazan en cada prenda), y una capa `Editable <nombre>` por cada objeto editable.
-- Una tipografía sólo hace falta mandarla si el nombre/número usa una que TIZADA no tiene
+- Una tipografía sólo hace falta mandarla si el texto/número usa una que TIZADA no tiene
   (`GET /tipografias`).
 
 ---
@@ -281,6 +282,9 @@ lo que publica cada molde:
 | `molde-desconocido`, `molde-no-disponible` | `GET /moldes` → `listo` |
 | `variable-falta`, `variable-desconocida`, `variable-ambigua` | `GET /variables` (mandar la clave `v_…`) |
 | `talle-inexistente` | `talles[]` del molde |
+| `talle-sin-columna` | `planilla.con_talles` (un molde con varios talles no puede ir con una planilla sin talles: lo arregla quien administra TIZADA) |
+| `medida-falta`, `medida-invalida` | `a_medida` de la variable: mandar `medida: {ancho_m, alto_m}` en metros |
+| `tela-no-entra` | `GET /telas` → `ancho_mesa_cm` (la pieza más el borde tiene que entrar en el ancho imprimible) |
 | `opcion-inexistente` | `planilla.columnas[].opciones` |
 | `opcion-sin-piezas` | `opciones_de_pieza.<clave>.tiene` (por variable) |
 | `columna-obligatoria-vacia` | `planilla.columnas[].obligatoria` |

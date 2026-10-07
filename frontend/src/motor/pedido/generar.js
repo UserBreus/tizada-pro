@@ -153,7 +153,7 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
         // `_molde_guia_ficha`: la guía muestra el diseño como se ve desde el inicio, «NOMBRE» y «00»
         // (regla del usuario 2026-09-16); los nombres y números de cada prenda están en la tabla
         // `piezas_solo: null`: la guía muestra la prenda entera aunque la 1ª fila sea de reposición (MAPA 578)
-        const pr = { ...(md.prendas[0] || {}), piezas_solo: null, talle, toggles, nombre: 'NOMBRE', numero: '00', personalizacion: { nombre: 'NOMBRE', numero: '00', talle } }
+        const pr = { ...(md.prendas[0] || {}), piezas_solo: null, talle, toggles, nombre: 'TEXTO', numero: '00', personalizacion: { nombre: 'TEXTO', numero: '00', talle } }   // la muestra: «TEXTO»/«00» (gemelo del servidor)
         for (const pieza of piezasDe(pr, registro)) {
           if ((solo.size && !solo.has(pieza)) || vistas.has(pieza)) continue
           const info = (registro[pieza] || {})[talle]

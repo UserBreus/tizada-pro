@@ -1258,7 +1258,8 @@ def _pagina_desplegada(out, pag, salida):
 # ⚠️ PyMuPDF no sirve para leer el «00» de este archivo: viene con un `/Differences [31 /0]`
 # (código 31 → glifo «0») y `get_text` lo descarta como carácter de control. Decodificar a mano
 # con la codificación de la fuente es lo único que lo ve.
-_PLACEHOLDERS = {"00": "numero", "NOMBRE": "nombre"}
+# «TEXTO» = el mismo campo que «NOMBRE» (2026-10-06): en la pantalla se llama Texto. Gemelo: `PLACEHOLDERS` de molde/talle.js
+_PLACEHOLDERS = {"00": "numero", "NOMBRE": "nombre", "TEXTO": "nombre"}
 _GLIFO_DIGITO = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
                  "six": "6", "seven": "7", "eight": "8", "nine": "9", "space": " "}
 

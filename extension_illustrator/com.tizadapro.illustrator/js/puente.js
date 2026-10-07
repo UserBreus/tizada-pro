@@ -13,7 +13,7 @@
 (function () {
   'use strict'
   var PUERTO = 47850
-  var VERSION = '1.26.0'
+  var VERSION = '1.27.0'
   var TOPE_CUERPO = 80 * 1024 * 1024
   var http = require('http')
   var fs = require('fs')

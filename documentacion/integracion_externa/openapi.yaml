@@ -44,6 +44,13 @@ components:
         n_piezas: { type: integer }
         planilla: { type: string }
         foto: { type: string }
+        a_medida:
+          type: object
+          description: 'Prenda A MEDIDA (rectángulo de una pieza): el pedido y la plantilla mandan `medida` en metros; no lleva talle.'
+          properties:
+            pieza: { type: string, example: Bandera }
+            margen_cm: { type: object, properties: { arriba: { type: number }, abajo: { type: number }, izq: { type: number }, der: { type: number } } }
+            pide: { type: string }
     Silueta:
       type: object
       properties:
@@ -280,7 +287,7 @@ paths:
                         items:
                           oneOf:
                             - { type: string, description: clave o nombre de la variable }
-                            - { type: object, properties: { variable: { type: string }, molde: { type: string } }, required: [variable] }
+                            - { type: object, properties: { variable: { type: string }, molde: { type: string }, medida: { type: object, description: 'sólo prendas a medida', properties: { ancho_m: { type: number }, alto_m: { type: number } } } }, required: [variable] }
                 talles:
                   type: object
                   properties:

@@ -1754,7 +1754,7 @@ def _normalizar_catalogo(cat):
                 "nombre": "Planilla Estándar",
                 "columnas": [
                     {"id": "talle", "label": "Talle", "role": "talle"},
-                    {"id": "nombre", "label": "Nombre", "role": "nombre"},
+                    {"id": "nombre", "label": "Texto", "role": "nombre"},
                     {"id": "numero", "label": "Número", "role": "numero"},
                     {"id": "manga", "label": "Manga", "role": "manga"}
                 ]
@@ -1768,7 +1768,7 @@ def _normalizar_catalogo(cat):
     if "reglas_planilla" not in cat:
         cat["reglas_planilla"] = [
             {"id": "regla_variante", "nombre": "Variante (talle/color/…)", "tipo": "desplegable", "opciones": "", "comportamiento": "talle"},
-            {"id": "regla_nombre", "nombre": "Nombre", "tipo": "texto", "opciones": "", "comportamiento": "nombre"},
+            {"id": "regla_nombre", "nombre": "Texto", "tipo": "texto", "opciones": "", "comportamiento": "nombre"},
             {"id": "regla_numero", "nombre": "Número", "tipo": "texto", "opciones": "", "comportamiento": "numero"},
             {"id": "regla_manga", "nombre": "Manga", "tipo": "toggle", "opciones": "Corta, Larga", "comportamiento": "manga", "clave": "manga"},
             {"id": "regla_texto", "nombre": "Texto libre", "tipo": "texto", "opciones": "", "comportamiento": "none"},
@@ -1824,6 +1824,30 @@ def _normalizar_catalogo(cat):
             print(f"[migración] {len(_mig_dueno)} moldería/s de Configuración pasan a ser del sistema "
                   f"(las ve todo el mundo): {', '.join((p.get('nombre') or p['id']) for p in _mig_dueno)}")
         cat["migracion_dueno_config"] = True      # se marca SIEMPRE, haya encontrado o no
+        tocado = True
+
+    # «NOMBRE» → «TEXTO» (2026-10-06, pedido del usuario: «lo de nombre cambialo por Texto en todo»).
+    # El campo que se estampa se llama Texto en la pantalla; la clave interna sigue siendo `nombre`.
+    # Se renombra SÓLO lo que quedó con el rótulo de fábrica exacto «Nombre»: la regla que estampa el
+    # nombre y las columnas de planilla con ese rol. Un rótulo que el usuario escribió distinto no se
+    # toca. Una sola vez (marca), como `migracion_dueno_config`. La API sigue aceptando el título viejo
+    # «Nombre» en las filas (`integracion_externa`), así el otro sistema no se rompe.
+    if not cat.get("migracion_campo_texto"):
+        _ren = []
+        for r in cat.get("reglas_planilla", []) or []:
+            if r.get("comportamiento") == "nombre" and str(r.get("nombre") or "").strip() == "Nombre":
+                r["nombre"] = "Texto"; _ren.append(f"regla «{r.get('id')}»")
+        for t in cat.get("plantillas_planillas", []) or []:
+            for c in t.get("columnas", []) or []:
+                if c.get("role") == "nombre" and str(c.get("label") or "").strip() == "Nombre":
+                    c["label"] = "Texto"; _ren.append(f"columna de «{t.get('nombre') or t.get('id')}»")
+        for p in cat.get("productos", []) or []:              # la copia de las columnas en cada molde
+            for c in p.get("columnas", []) or []:
+                if c.get("role") == "nombre" and str(c.get("label") or "").strip() == "Nombre":
+                    c["label"] = "Texto"; _ren.append(f"columna del molde «{p.get('nombre') or p.get('id')}»")
+        if _ren:
+            print(f"[migración] «Nombre» → «Texto»: {', '.join(_ren)}")
+        cat["migracion_campo_texto"] = True       # se marca SIEMPRE, haya encontrado o no
         tocado = True
 
     # ── REPARACIÓN: «Mi artículo» SIN DUEÑO ───────────────────────────────────────────────────
@@ -3895,6 +3919,9 @@ def _procesar_molde_subido(_PID, _ARCH, _PIDE_B, tmp, destino, dxf_resumen,
         return None, (f"no se pudo preparar la base para el molde nuevo: {e}", 500)
     _guardar_registro(_pid_reset, alta["registro"], reset=True)
     _paso("piezas en la base")
+    # MOLDE A MEDIDA (MAPA 623): su única variable se crea sola (el alta acaba de borrar las del
+    # archivo anterior y no hay nada que elegir)
+    _a_medida_variable(_pid_reset)
     # EL TALLE DE GUÍA, PUESTO (2026-09-07). Un molde subido (o RE-subido) quedaba sin
     # `variante_guia` en el catálogo: la pantalla mostraba como guía la que eligió la detección,
     # que no está guardada en ningún lado — elegir en el selector ESA misma no cambiaba nada y
@@ -7298,11 +7325,11 @@ def _piezas_base(pid, diseno, variante, talle, mapeo, prod, reg, override=None, 
         # Talle DIRECTO (molds sin columnas caen al fallback de _traducir_prendas) + textos de
         # MUESTRA para que el preview MUESTRE dónde caen nombre/número (el pedido real los
         # reemplaza por prenda). Se setea tanto la clave directa como la columna por rol.
-        fila = {"__variante": variante, "talle": talle, "nombre": "NOMBRE", "numero": "00"}
+        fila = {"__variante": variante, "talle": talle, "nombre": "TEXTO", "numero": "00"}
         for c in (prod.get("columnas") or []):
             _role = c.get("role"); _cid = c.get("id") or c.get("label")
             if _role == "talle": fila[_cid] = talle
-            elif _role == "nombre": fila[_cid] = "NOMBRE"
+            elif _role == "nombre": fila[_cid] = "TEXTO"
             elif _role == "numero": fila[_cid] = "00"
         # TOGGLES: el preview debe cubrir TODAS las piezas de la variable, no solo las de la
         # opción default (una fila con manga "corta" excluye las mangas largas → el visor caía
@@ -7935,7 +7962,28 @@ def _limite_texto_de(prod):
         e = _limite_campo_limpio(v)
         if e:
             out[MP.clave_campo(k)] = e
+    # 🔴 MOLDE A MEDIDA (2026-10-06, regla del usuario): el nombre y el número NO salen del margen
+    # (dobladillo) — lo de afuera se dobla al coser. El margen del texto nunca baja del mayor de los
+    # cuatro bordes; «*» lo aplica a todo campo sin límite propio (también los que traiga el arte).
+    _dob = _dobladillo_max_cm(prod)
+    if _dob > 0:
+        for e in out.values():
+            e["margen_cm"] = max(float(e.get("margen_cm") or 0), _dob)
+            if e.get("por_pieza"):
+                e["por_pieza"] = {pz: (_dob if x is None else max(float(x), _dob)) for pz, x in e["por_pieza"].items()}
+        out.setdefault("*", {"margen_cm": _dob})
     return out
+
+
+def _dobladillo_max_cm(prod):
+    """El mayor de los cuatro bordes del margen (dobladillo) de un molde a medida, en cm; 0 si no es
+    a medida. Un borde sin valor propio vale `todos` (como `margenPorBorde` de `molde/aMedida.js`)."""
+    am = (prod or {}).get("a_medida")
+    if not isinstance(am, dict):
+        return 0.0
+    m = _margen_a_medida(am.get("margen"))
+    t = float(m.get("todos") or 0)
+    return max(float(m.get(k, t)) for k in ("arriba", "abajo", "izq", "der"))
 
 
 def _limite_campo_limpio(v):
@@ -7987,14 +8035,16 @@ def _campos_de_molde(pid, prod):
         for pers in fuentes:
             for campos in (pers or {}).values():
                 for campo in (campos or {}):
-                    vistos.setdefault(MP.clave_campo(campo), campo)
+                    # el campo de la capa «Nombre»/«Texto» se llama «Texto» en la pantalla (2026-10-06)
+                    vistos.setdefault(MP.clave_campo(campo), "Texto" if MP.clave_campo(campo) == "nombre" else campo)
     except Exception as e:
         print(f"[limite_texto] campos de {pid}: {e}")
     for k in _limite_texto_de(prod):
-        vistos.setdefault(k, k)
+        if k != "*":                                  # «*» = el piso del molde a medida, no es un campo
+            vistos.setdefault(k, k)
     # el límite es del MOLDE (no de un diseño): nombre y número se pueden configurar siempre,
     # aunque todavía ningún diseño los traiga
-    for k, n in (("nombre", "Nombre"), ("numero", "Número")):
+    for k, n in (("nombre", "Texto"), ("numero", "Número")):
         vistos.setdefault(k, n)
     return [{"clave": k, "nombre": str(n)} for k, n in vistos.items()]
 
@@ -9988,7 +10038,7 @@ def _telas_merge(cat, telas_api):
     Antes (2026-07-24 → 2026-09-11) el default era la medida pelada y el usuario restaba los
     orillos tela por tela (157 para 160, 147 para 150…). Regla del usuario: «siempre 3 cm menos,
     a no ser que le cambien a mano el valor a alguna tela en específico». Sin medida del sistema
-    se parte de 180 y también se resta el margen (representa a la tela)."""
+    (y sin mesa a mano) la tela NO se usa: `ancho_cm` None, `sin_medida`, `usable` False (ver abajo)."""
     anchos = cat.get("telas_ancho") or {}
     margen = _telas_margen(cat)
     out = []
@@ -10397,6 +10447,7 @@ def _config_produccion(pid=None):
 # digan cosas distintas.
 #   `mostrar`: 'boton'   → el operario la muestra con un botón (por defecto; no molesta a nadie)
 #              'siempre' → la planilla la trae siempre a la vista
+#              'no'      → esta planilla NO la tiene (2026-10-06): cada fila es una prenda
 COL_CANTIDAD = {"id": "cantidad", "label": "Cantidad", "role": "cantidad",
                 "tipo": "numero", "mostrar": "boton"}
 
@@ -10410,7 +10461,7 @@ def _con_cantidad(columnas):
             c.setdefault("id", COL_CANTIDAD["id"])
             c.setdefault("label", COL_CANTIDAD["label"])
             c.setdefault("tipo", "numero")
-            if c.get("mostrar") not in ("boton", "siempre"):
+            if c.get("mostrar") not in ("boton", "siempre", "no"):
                 c["mostrar"] = COL_CANTIDAD["mostrar"]
             return cols
     return cols + [dict(COL_CANTIDAD)]
@@ -10549,6 +10600,7 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     # ficha: `exigir_obligatorias=False`, con filas sin manga) se acumulaban y el aviso del pedido
     # decía «filas sin elegir manga (2)» con UNA fila que sí la traía (2026-09-16).
     _TP.toggles = {}
+    _TP.talles_sin_columna = 0
     mapeo_columnas = {"talle": "talle", "nombre": "nombre", "numero": "numero",
                       "manga": "manga", "manga_corta_val": "corta", "manga_larga_val": "larga"}
     if prod and "mapeo_columnas" in prod:
@@ -10557,6 +10609,10 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
     cols_template = _con_cantidad((_tpl or {}).get("columnas", []))
     # La columna que MULTIPLICA la fila (puede no estar en un template viejo: `_con_cantidad` la pone)
     cantidad_col = next((c for c in cols_template if c.get("role") == "cantidad"), None)
+    if cantidad_col is not None and cantidad_col.get("mostrar") == "no":
+        cantidad_col = None            # la planilla no la tiene: cada fila es UNA prenda (2026-10-06)
+    # PIEZAS (Repo) «no va» en esta planilla: ninguna fila elige piezas, aunque llegue `__repo`
+    _repo_no = (_tpl or {}).get("repo") == "no"
     talle_col = mapeo_columnas.get("talle", "talle")
     nombre_col = mapeo_columnas.get("nombre", "nombre")
     numero_col = mapeo_columnas.get("numero", "numero")
@@ -10675,8 +10731,28 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
             return True                      # molde sin mapeo: la planilla va entera
         return c.get("id") in _usa
 
-    _oblig = [c for c in cols_template if c.get("obligatoria") and _aplica_al_molde(c)]
-    if not _oblig:
+    # 🔴 PLANILLA SIN TALLES (MAPA 622). Una planilla puede no tener columna de talle (banderas,
+    # moldes a medida: «el talle depende de la planilla», regla del usuario 2026-10-06), o el molde
+    # puede tenerla apagada. Entonces la fila no trae talle y cada prenda va con EL talle del molde
+    # —si tiene uno solo—. Sin esto la fila salía con talle vacío y el motor salteaba TODAS sus
+    # piezas sin decir nada (`registro[pieza][""]` no existe). Con un molde de varios talles no hay
+    # de dónde sacarlo: se anota y el plan frena con un mensaje claro (nunca se adivina un talle).
+    # Sin talle = la planilla no tiene columna de talle, o ESTE molde la tiene apagada (Config del
+    # molde › Planilla deja `mapeo_columnas.talle = ''`). Un mapeo que apunta a una columna que ya
+    # no existe NO es «sin talle»: ése sigue con el relleno de siempre (`_hay_fallback`).
+    _sin_col_talle = ((not _cols_talle_tpl) or not str(mapeo_columnas.get("talle") or "").strip()
+                      # MOLDE A MEDIDA (MAPA 623): su único talle ES la medida («1,50x0,90»): la fila
+                      # no lo trae nunca, aunque la planilla tenga columna de talle
+                      or isinstance((prod or {}).get("a_medida"), dict))
+    _talle_unico = None
+    if _sin_col_talle:
+        _reg_t = reg if reg is not None else (_cargar("registro_producto.json", _pid) if _pid else {})
+        _ts = _talles_de_registro(_reg_t or {}, _pid)
+        _talle_unico = _ts[0] if len(_ts) == 1 else None
+        _TP.talles_sin_columna = len(_ts) if len(_ts) > 1 else 0
+    _oblig = [c for c in cols_template if c.get("obligatoria") and _aplica_al_molde(c)
+              and not (_sin_col_talle and c.get("role") == "talle")]   # sin talle no se exige el talle
+    if not _oblig and not _sin_col_talle:
         _oblig = [{"id": talle_col, "label": _lbl_talle}]
     # 🔴 …y NO se exige nada cuando la fila es una MUESTRA INTERNA (el molde guía de la ficha, el
     # preview del arte, el visor): esas filas traen lo mínimo para dibujar y no tienen por qué
@@ -10727,12 +10803,14 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
         _tv = pr.get(talle_col, "")
         if not str(_tv or "").strip() and _hay_fallback:
             _tv = pr.get("talle", "") or pr.get("Talle", "")
+        if not str(_tv or "").strip() and _talle_unico:
+            _tv = _talle_unico            # planilla sin talles: el único talle del molde
         if _talles_molde and str(_tv or "").strip() and str(_tv).strip().lower() not in _talles_molde:
             _ka = str(_tv).strip()
             _talle_ajeno[_ka] = _talle_ajeno.get(_ka, 0) + 1
         translated_pr = {
             "talle": _tv,
-            "nombre": pr.get(nombre_col, "") or pr.get("nombre", "") or pr.get("Nombre", "") or "",
+            "nombre": pr.get(nombre_col, "") or pr.get("nombre", "") or pr.get("Texto", "") or pr.get("Nombre", "") or "",
             "numero": pr.get(numero_col, "") or pr.get("numero", "") or pr.get("Número", "") or pr.get("Numero", "") or "",
             "manga": manga_final,
             "toggles": toggles,
@@ -10760,7 +10838,7 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
         # REPO (reposición, MAPA 578): la fila trae `__repo = {pid: [pieza exacta…]}` elegido tocando
         # las piezas en la planilla. Acá se queda con lo de ESTE molde; las copias de «cantidad»
         # (más abajo) lo heredan. Vacío o ausente = la fila hace todas sus piezas.
-        _rp = pr.get("__repo") if isinstance(pr.get("__repo"), dict) else {}
+        _rp = pr.get("__repo") if isinstance(pr.get("__repo"), dict) and not _repo_no else {}
         _sol = _rp.get(str(_pid)) if _pid is not None else None
         if isinstance(_sol, list) and _sol:
             translated_pr["piezas_solo"] = sorted({str(x) for x in _sol if str(x or "").strip()})
@@ -10781,7 +10859,8 @@ def _traducir_prendas(prendas, prod, cat, default_diseno="principal", reg=None, 
         # llame talle, que tome el texto y le ponga el talle de la columna correspondiente») lleva
         # el talle de la columna de ESTE molde, no el de otra columna rotulada «Talle».
         for _k in list(persona):
-            if _norm_campo(_k) in ("nombre", "numero", "talle"):
+            # `clave_campo` (con los alias): una columna rotulada «Texto» es el campo nombre (2026-10-06)
+            if MP.clave_campo(_k) in ("nombre", "numero", "talle"):
                 del persona[_k]
         persona["nombre"] = translated_pr["nombre"]
         persona["numero"] = translated_pr["numero"]
@@ -11078,11 +11157,11 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
     # Con los MISMOS textos de muestra que el paso Arte («NOMBRE» / «00», ver `_piezas_base`): la
     # personalización viaja por las columnas de ROL de la planilla, así que se setean las dos
     # cosas, la clave directa y la columna por rol (regla del usuario 2026-09-16, ver abajo).
-    fila = {"__variante": variante, "talle": talle, "nombre": "NOMBRE", "numero": "00"}
+    fila = {"__variante": variante, "talle": talle, "nombre": "TEXTO", "numero": "00"}
     for _c in (prod.get("columnas") or []):
         _role = _c.get("role"); _cid = _c.get("id") or _c.get("label")
         if _role == "nombre":
-            fila[_cid] = "NOMBRE"
+            fila[_cid] = "TEXTO"
         elif _role == "numero":
             fila[_cid] = "00"
     # la prenda de muestra del MOLDE GUÍA: no lleva las columnas obligatorias del pedido y no
@@ -11108,7 +11187,7 @@ def _molde_guia_ficha(pid, prod, reg, diseno, var=None, reempl=None,
     # `pers` vacío: el motor igual saca las capas de personalización y la pieza quedaba SIN número.
     # Los nombres y números de cada prenda están en la tabla de arriba.
     _mu = {}
-    prendas = [{**_p, "nombre": "NOMBRE", "numero": "00"} for _p in prendas]
+    prendas = [{**_p, "nombre": "TEXTO", "numero": "00"} for _p in prendas]
     # ── LAS PIEZAS EXACTAS DEL PEDIDO ─────────────────────────────────────────────────────────
     # Los TOGGLES (manga corta/larga, con/sin capucha…) cambian QUÉ PIEZAS lleva la prenda. La
     # muestra salía siempre con la opción por defecto, así que un pedido entero de manga larga
@@ -11326,6 +11405,23 @@ def _plan_del_pedido(cuerpo):
                     _a[str(full)] = str(_t)
             return _a
         gconf = _grupo_de(pid)
+        # MOLDE A MEDIDA (MAPA 623): la pieza tiene que entrar en la tela (regla del usuario
+        # 2026-10-06). La pantalla ya no deja elegir esa tela; esto es el cinturón (API, otro sistema).
+        if isinstance((prod or {}).get("a_medida"), dict):
+            _ids_t = set()
+            if _base:
+                _ids_t.add(str(_base))
+            for _v in (_pri_all.values() if isinstance(_pri_all, dict) else []):
+                if _v:
+                    _ids_t.add(str(_v))
+            for _v in (_ovr_all.values() if isinstance(_ovr_all, dict) else []):
+                for _t in ((_v.values() if isinstance(_v, dict) else [_v]) or []):
+                    if _t:
+                        _ids_t.add(str(_t))
+            _no_entra = _a_medida_telas_que_no_entran(prod, cat, sorted(_ids_t))
+            if _no_entra:
+                raise _PlanInvalido(jsonify({"error": "la pieza no entra en la tela",
+                                             "detalle": f"«{nombre}» en «{_no_entra[0][0]}»: {_no_entra[0][1]} Elegí otra tela."}), 409)
         # Filas traducidas (cada una con su _diseno). Se separan por diseño: cada
         # subgrupo se genera con el ARTE de ese diseño (carpeta del molde para
         # 'principal', o disenos/<slug>/ para los demás).
@@ -11335,6 +11431,15 @@ def _plan_del_pedido(cuerpo):
                 if isinstance(_m, dict)}
         translated = _traducir_prendas(prendas, prod, cat, default_diseno, reg=reg, var_por_diseno=_vpd,
                                        copia=bool(cuerpo.get("cantidad_copia")))
+        # PLANILLA SIN TALLES con un molde de VARIOS talles (MAPA 622): no hay de dónde saber de qué
+        # talle va cada fila. Se frena con el porqué — antes salía sin piezas y sin aviso.
+        _nts = getattr(_TP, "talles_sin_columna", 0) or 0
+        if _nts and any(not str(_t.get("talle") or "").strip() for _t in translated):
+            raise _PlanInvalido(jsonify({
+                "error": "falta la columna de talle",
+                "detalle": f"«{nombre}» tiene {_nts} talles y su planilla no tiene columna de talle: no hay "
+                           f"forma de saber de qué talle va cada fila. Para este molde usá una planilla con "
+                           f"la columna «Talle» (Configuración › Planillas)."}), 409)
         # ── TALLES POR MESA (MAPA 593) ──────────────────────────────────────────────────────────
         # Cada prenda lleva el GRUPO de su talle (el de la columna de ESTE molde, ya resuelto en
         # `talle`): los dos motores acomodan cada grupo en su(s) propia(s) mesa(s). Un talle que no
@@ -11580,7 +11685,7 @@ def _plan_del_pedido(cuerpo):
                 # el navegador si no están en la memoria del archivo
                 pers = (MP.extraer_personalizacion(_artp) if _cb else
                         _arte_calc("arte_personalizacion", pid, dslug, lambda: MP.extraer_personalizacion(_artp),
-                                   memo="personalizacion_v2"))
+                                   memo=MP.MEMO_PERSONALIZACION))
             except Exception as e:
                 _relanzar_calculo(e)
                 pers = _cargar("registro_personalizacion.json", pid, sub=sub) or {}
@@ -11993,7 +12098,7 @@ def generar_multi():
             # en paralelo (13 s → ~3 s en el camino A; ver `hoja_pike.svgs_de_bases`).
             res = MP.generar_pedido_grupos(grupos, FUENTES, salida,
                                            config_nesting=cfg_nesting, telas_cfg=telas_cfg, progreso=prog,
-                                           procesos=_get_render_pool())
+                                           procesos=_get_render_pool(), validar=False)
             _marca("motor")
             res["id"] = tid
             res["moldes"] = nombres
@@ -12072,6 +12177,13 @@ def generar_multi():
             except Exception as _e:
                 print("  [!]  perfil ICC en salida:", _e)
             _marca("perfil")
+            # LAS VALIDACIONES, SOBRE LA HOJA FINAL (aplanada y con perfil): lo que va al RIP, como
+            # el navegador. El motor no valida (`validar=False`) para no parsear la hoja dos veces.
+            try:
+                res["validaciones"] = MP.validar_hojas_finales(salida, res.get("hojas") or [], cfg_nesting, telas_cfg)
+            except Exception as _ev:
+                print("  [!] validaciones de la hoja:", repr(_ev))
+                res["validaciones"] = []
             # COMPATIBILIDAD RIP (2026-09-04): la hoja final se verifica como PDF/X-1a-like (sin
             # capas ni transparencia, un nivel de objetos, fuentes embebidas, CMYK, perfil de
             # salida). Si algo falla, se avisa en pantalla — no se frena la tizada.
@@ -12213,7 +12325,6 @@ def generar_multi():
                 print(f"  [!] no se pudo guardar pedido.json ({type(_e_pj).__name__}: {_e_pj}); "
                       f"la tizada está completa igual", flush=True)
             _tocar_trabajo(tid, resultado=res, estado="listo")
-            _predibujar_recortes_fondo(tid, res.get("hojas") or [])
         except _TrabajoCancelado:
             _marcar_cancelado(tid, salida)
         except Exception as e:
@@ -13729,81 +13840,14 @@ def _dibujar_vista_mesa_en_pool(tid, archivo, pi, w, recorte=None):
     return cache if os.path.exists(cache) else None
 
 
-# ── LOS RECORTES, LISTOS ANTES DE QUE ALGUIEN HAGA ZOOM ──────────────────────────────────────
-# 🔴 POR QUÉ (2026-09-16, el usuario con la captura de un recorte borroso): «ahora aparecen
-# rápido pero si le hago zoom rápido se ve así. Debería verse bien, sea el zoom rápido o lento, e
-# instantáneo». Dibujar a pedido siempre tiene una espera (la primera lectura de la página son
-# segundos). La única forma de que sea instantáneo es que el recorte YA ESTÉ: apenas el pedido
-# queda listo, un hilo manda al pool del visor todos los recortes de todas las mesas, en los dos
-# escalones que pide la pantalla (`_RECORTE_W`, mismos cortes de medio metro que `TILE_CM` en
-# App.jsx). De a dos por vez: si mientras tanto la pantalla pide uno, espera a lo sumo dos
-# recortes (~0,6 s), no la cola entera. Se corta solo si el trabajo se borra (Nuevo pedido).
-# Los nombres tienen que coincidir con los que pide la pantalla: la fracción se redondea a 4
-# decimales como `toFixed(4)` de JS (mitad para arriba), no como el `format` de Python.
-_RECORTE_CM = 50
-_RECORTE_W = (800, 1600)
+# 🔴 YA NO HAY RECORTES DE ZOOM (2026-10-06). Del 2026-09-16 al 09-18 la pantalla pedía la mesa
+# partida en recortes de medio metro (800/1600 px) y el servidor los dejaba dibujados al terminar el
+# pedido (`_predibujar_recortes_fondo`). Desde el 09-18 la mesa es UNA FOTO a una sola calidad
+# (decisión del usuario; `MesasInfinito` + `calidadFoto`) y ningún recorte se pide más: con la vista
+# en el servidor (`TIZADA_NAVEGADOR_VISTA=0`) ese pre-dibujado eran 128 dibujos por mesa que nadie
+# miraba, en el pool del visor. Se sacó; `mesa_img` sigue aceptando `cx0…cy1` (no cuesta nada).
 _A4_PT = 595.276
 _FICHA_W = int(round(_A4_PT * 2))      # la ficha a z=2 (`pagina_img`)
-
-
-def _js4(x):
-    """`x.toFixed(4)` de JavaScript, como float: mitad para ARRIBA sobre el valor exacto."""
-    from decimal import Decimal, ROUND_HALF_UP
-    return float(Decimal(x).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
-
-
-def _recortes_de_pagina(ancho_cm, alto_cm):
-    """Los rectángulos (cx0, cy0, cx1, cy1) en que la pantalla parte una mesa, en su orden."""
-    import math
-    nx = max(1, math.ceil(float(ancho_cm or 180) / _RECORTE_CM))
-    ny = max(1, math.ceil(float(alto_cm or 0) / _RECORTE_CM))
-    return [(_js4(i / nx), _js4(j / ny), _js4((i + 1) / nx), _js4((j + 1) / ny))
-            for j in range(ny) for i in range(nx)]
-
-
-def _predibujar_recortes_fondo(tid, hojas):
-    """Deja dibujados en segundo plano todos los recortes de las mesas de un trabajo.
-
-    🔴 Con la vista en el navegador (etapa 2) NO se hace nada: los recortes los dibuja la
-    computadora de quien mira, y pre-dibujarlos acá era el trabajo más largo del final del pedido
-    (todas las mesas × dos escalones, en el pool del visor)."""
-    if _navegador_dibuja_vista():
-        return
-    hojas = list(hojas or [])
-    if not hojas:
-        return
-
-    def _correr():
-        t0, n, pendientes = time.time(), 0, []
-        try:
-            ex = _get_visor_pool()
-            for h in hojas:
-                for pi in range(int(h.get("paginas") or 1)):
-                    _alts = h.get("alturas_cm") or []
-                    alto = _alts[pi] if pi < len(_alts) and _alts[pi] is not None else h.get("consumo_cm")
-                    for w in _RECORTE_W:
-                        for rec in _recortes_de_pagina(h.get("ancho_cm"), alto):
-                            if not os.path.isdir(os.path.join(TRABAJOS, tid)):
-                                return                     # el trabajo se borró: no hay nada que dibujar
-                            if os.path.exists(_ruta_vista_mesa(tid, h["archivo"], pi, w, rec)):
-                                continue
-                            pendientes.append(ex.submit(_dibujar_una_mesa, (tid, h["archivo"], pi, w, rec)))
-                            if len(pendientes) >= 2:
-                                if pendientes.pop(0).result(timeout=_TOPE_VISOR_S)[2]:
-                                    return                 # la hoja ya no está (o no se puede dibujar)
-                                n += 1
-            for f in pendientes:
-                if not f.result(timeout=_TOPE_VISOR_S)[2]:
-                    n += 1
-            if n:
-                print(f"  [visor] {tid}: {n} recortes pre-dibujados en {time.time() - t0:.0f}s", flush=True)
-        except Exception as e:
-            print(f"  [visor] pre-dibujado de recortes de {tid}: {type(e).__name__}: {e}", flush=True)
-            from concurrent.futures import TimeoutError as _Tope
-            if isinstance(e, _Tope):
-                _descartar_visor_pool()
-
-    threading.Thread(target=_correr, daemon=True, name=f"recortes-{tid}").start()
 
 
 # ── LOS EDITABLES DEL ARTE, LEÍDOS UNA VEZ ───────────────────────────────────────────────────
@@ -14312,7 +14356,7 @@ def get_productos():
         if not cols:
             cols = p.get("columnas", [
                 {"id": "talle", "label": "Talle", "role": "talle"},
-                {"id": "nombre", "label": "Nombre", "role": "nombre"},
+                {"id": "nombre", "label": "Texto", "role": "nombre"},
                 {"id": "numero", "label": "Número", "role": "numero"},
                 {"id": "manga", "label": "Manga", "role": "manga"}
             ])
@@ -14366,6 +14410,9 @@ def get_productos():
             # `efimero` = se subió para UN pedido y no queda guardado (ver MOLDE_CON_DISENO.md).
             "origen": p.get("origen") or "molde",
             "efimero": bool(p.get("efimero")),
+            # MOLDE A MEDIDA (MAPA 623): `{pieza, margen, ancho_m, alto_m, variable[, de]}` — con `de`
+            # es la copia de un pedido; sin `de`, la plantilla del catálogo. None = molde normal.
+            "a_medida": _a_medida_publico(p, cat),
             # las páginas por talle las está terminando (o las dejó a medias) un NAVEGADOR: la marca
             # del desplegado es la fuente de verdad (PLAN_NAVEGADOR, «dos tiempos»)
             "paginas_navegador": bool(has_plantilla and _pags_nav(pid) is not None),
@@ -14485,6 +14532,306 @@ def _activar_en_sesion(pid):
         pass
 
 
+# ════════════════ MOLDE A MEDIDA (MAPA 623) ════════════════
+# Un molde de UNA pieza rectangular (banderas): en Configuración se crea sin archivo —nombre de la
+# pieza + margen/dobladillo— y en el pedido se escribe la medida. El PDF del rectángulo lo arma el
+# NAVEGADOR (`motor/molde/aMedida.js`) y sube por el alta de siempre (camino A); acá sólo se guarda
+# la configuración, se hace la COPIA del pedido y se crea la variable. Plantilla (catálogo):
+# `prod.a_medida = {pieza, margen, ancho_m, alto_m, variable}`; copia del pedido (efímera): lo mismo
+# + `de` (el molde del catálogo del que salió).
+_AM_MIN_M, _AM_MAX_M = 0.05, 50.0
+# Lo que NO se copia de la plantilla a la copia del pedido: identidad, dueño, ciclo de vida, piezas
+# y variables (las suyas salen de su propio archivo) y todo lo que es de los diseños de un pedido.
+_AM_NO_COPIAR = {"id", "nombre", "creado", "creado_por", "alta_por", "propio", "efimero", "efimero_visto",
+                 "variantes", "grupos", "conjuntos", "variante_guia", "disenos", "mapeo_arte", "editables",
+                 "origen", "paginas_navegador", "a_medida", "talles", "piezas_registradas",
+                 "piezas_nombradas", "plantilla"}
+
+
+def _clave_var_a_medida(pid):
+    """La clave de la variable de un molde a medida: fija para cada molde (sale del pid), así no
+    cambia cuando se rehace el archivo con otra medida — el mapeo del arte y la etiqueta están
+    guardados por esa clave. Única entre moldes: la pantalla busca variables por clave en TODOS."""
+    import hashlib
+    return "v_" + hashlib.sha1(str(pid).encode("utf-8")).hexdigest()[:7]
+
+
+def _talle_de_medida(ancho_m, alto_m):
+    """«1,50x0,90»: gemelo de `talleDeMedida` (motor/molde/aMedida.js)."""
+    f = lambda m: f"{round(float(m) * 100) / 100:.2f}".replace(".", ",")
+    return f"{f(ancho_m)}x{f(alto_m)}"
+
+
+def _metros(v):
+    try:
+        x = float(str(v).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return x if _AM_MIN_M <= x <= _AM_MAX_M else None
+
+
+def _margen_a_medida(m):
+    """El margen (dobladillo) en cm: `{todos}` o `{arriba, abajo, izq, der}`, todo ≥ 0."""
+    m = m if isinstance(m, dict) else {}
+    out = {}
+    for k in ("todos", "arriba", "abajo", "izq", "der"):
+        if m.get(k) in (None, ""):
+            continue
+        try:
+            out[k] = max(0.0, min(100.0, float(str(m[k]).replace(",", "."))))
+        except (TypeError, ValueError):
+            pass
+    out.setdefault("todos", 0.0)
+    return out
+
+
+def _a_medida_variable(pid):
+    """La VARIABLE de un molde a medida, creada sola después de cada alta (el alta borra las
+    variables del archivo anterior). Una sola pieza, un solo talle: no hay nada que elegir."""
+    try:
+        cat = _cargar_catalogo_para_editar()
+        prod = next((p for p in cat.get("productos", []) if p.get("id") == pid), None)
+        am = (prod or {}).get("a_medida")
+        if not isinstance(am, dict):
+            return
+        reg = _cargar("registro_producto.json", pid) or {}
+        if not reg:
+            return
+        _, clave2id, _ = _regenerar_piezas_index(pid, reg=reg, guia=prod.get("variante_guia"))
+        nombre = next(iter(reg))
+        talle, info = next(iter((reg[nombre] or {}).items()), (None, {}))
+        clave = am.get("variable") or _clave_var_a_medida(pid)
+        etiqueta = (next((p.get("nombre") for p in cat["productos"] if p.get("id") == am.get("de")), None)
+                    or prod.get("nombre") or nombre)
+        prod["variantes"] = [{"clave": clave, "label": etiqueta,
+                              "valores": [{"id": "1", "label": nombre,
+                                           "pieza_idx": int((info or {}).get("pieza_idx") or 0),
+                                           "talle_origen": talle, "pieza_id": clave2id.get(nombre)}]}]
+        am["variable"] = clave
+        if talle:
+            prod["variante_guia"] = talle
+        _guardar_catalogo(cat)
+    except Exception as e:
+        LOG.error("molde", "No se pudo crear la variable del molde a medida", f"{type(e).__name__}: {e}",
+                  molde=pid, error=str(e)[:300])
+    finally:
+        _soltar_edicion_catalogo()
+
+
+def _a_medida_crear(cuerpo, cat, pid_nuevo):
+    """Lo del molde a medida que va en `crear_producto`. Devuelve `(extra_prod, de_pid, error)`:
+    `extra_prod` se mezcla en el molde nuevo; `de_pid` = plantilla de la que se copia (o None)."""
+    de = str(cuerpo.get("a_medida_de") or "").strip()
+    if de:
+        # LA COPIA DEL PEDIDO: misma configuración que la plantilla, a la medida pedida
+        tpl = next((p for p in cat.get("productos", []) if p.get("id") == de), None)
+        if not tpl or not isinstance(tpl.get("a_medida"), dict) or tpl["a_medida"].get("de"):
+            return None, None, ("Ese molde no es un molde a medida.", 400)
+        if not cuerpo.get("efimero"):
+            return None, None, ("La copia a medida es del pedido (efímera).", 400)
+        an, al = _metros(cuerpo.get("ancho_m")), _metros(cuerpo.get("alto_m"))
+        if an is None or al is None:
+            return None, None, (f"La medida tiene que ir de {_AM_MIN_M} a {_AM_MAX_M:g} metros.", 400)
+        extra = {k: copy.deepcopy(v) for k, v in tpl.items() if k not in _AM_NO_COPIAR}
+        clave = _clave_var_a_medida(pid_nuevo)
+        # la etiqueta guarda posiciones «variable§pieza»: la variable de la copia es otra clave
+        _tcl = (tpl.get("a_medida") or {}).get("variable")
+        _etq = extra.get("etiqueta")
+        if _tcl and isinstance(_etq, dict) and isinstance(_etq.get("posiciones"), dict):
+            _etq["posiciones"] = {(clave + k[len(_tcl):] if str(k).startswith(_tcl + "§") else k): v
+                                  for k, v in _etq["posiciones"].items()}
+        extra["a_medida"] = {"pieza": tpl["a_medida"].get("pieza"),
+                             "margen": copy.deepcopy(tpl["a_medida"].get("margen") or {}),
+                             "ancho_m": an, "alto_m": al, "de": de, "variable": clave}
+        return extra, de, None
+    am = cuerpo.get("a_medida")
+    if not isinstance(am, dict):
+        return {}, None, None
+    pieza = str(am.get("pieza") or "").strip()
+    if not pieza:
+        return None, None, ("Poné el nombre de la pieza (por ejemplo «Bandera»).", 400)
+    if len(pieza) > 40 or re.search(r'[\\/:*?"<>|]', pieza):
+        return None, None, ('El nombre de la pieza no puede llevar / \\ : * ? " < > | ni pasar de 40 letras.', 400)
+    an, al = _metros(am.get("ancho_m", 1)), _metros(am.get("alto_m", 1))
+    if an is None or al is None:
+        return None, None, (f"La medida de muestra tiene que ir de {_AM_MIN_M} a {_AM_MAX_M:g} metros.", 400)
+    return {"a_medida": {"pieza": pieza, "margen": _margen_a_medida(am.get("margen")), "ancho_m": an,
+                         "alto_m": al, "variable": _clave_var_a_medida(pid_nuevo)}}, None, None
+
+
+def _cabe_en_tela(ancho_m, alto_m, borde_mm, ancho_cm, largo_max_cm, margen_nesting_mm=0, rotacion="ninguna"):
+    """¿La pieza a medida entra en la tela? Gemelo EXACTO de `cabeEnTela` (motor/molde/aMedida.js):
+    la mesa de la tela y el largo máximo se achican por el margen del nesting a cada lado; la pieza
+    crece por el borde de corte; girarla 90° sólo si el nesting gira («90» o «libre»).
+    Devuelve `(cabe, motivo)`."""
+    b = 2 * float(borde_mm or 0) / 10
+    w, h = float(ancho_m) * 100 + b, float(alto_m) * 100 + b
+    mg = 2 * float(margen_nesting_mm or 0) / 10
+    util, largo = float(ancho_cm) - mg, float(largo_max_cm) - mg
+    gira = rotacion in ("90", "libre")
+    if (w <= util + 1e-6 and h <= largo + 1e-6) or (gira and h <= util + 1e-6 and w <= largo + 1e-6):
+        return True, None
+    cm = lambda x: f"{round(x * 10) / 10:g}".replace(".", ",")
+    con_b = " con el borde de corte" if b else ""
+    if min(w, h if gira else w) > util + 1e-6:
+        return False, (f"La pieza mide {cm(w)} cm de ancho{con_b} y en esta tela entran {cm(util)} cm"
+                       + (" (ni girándola)" if gira else "") + ".")
+    return False, f"La pieza mide {cm(h)} cm de largo{con_b} y la mesa más larga es de {cm(largo)} cm."
+
+
+def _nesting_de(prod, cat):
+    """El acomodo que usa este molde: `{alto_max_cm, margen_mm, rotacion}` (mismo criterio que
+    `_config_produccion`: el preset del molde o el Estándar)."""
+    _id = (prod or {}).get("nesting_preset_id") or "nesting_default"
+    pr = next((n for n in (cat.get("nesting_presets") or []) if n.get("id") == _id), None) or {}
+    try:
+        alto = min(ALTO_MESA_MAX_CM, float(pr.get("alto_max_cm", 500) or 500))
+    except (TypeError, ValueError):
+        alto = 500.0
+    return {"alto_max_cm": alto, "margen_mm": float(pr.get("margen_mm", 10) or 0),
+            "rotacion": str(pr.get("rotacion") or "auto")}
+
+
+def _a_medida_publico(prod, cat):
+    """Lo que la pantalla necesita de un molde a medida para decidir sola si una tela sirve (con
+    `cabeEnTela`): la medida, el borde de corte y el acomodo de ESTE molde."""
+    am = (prod or {}).get("a_medida")
+    if not isinstance(am, dict):
+        return None
+    b = _borde_de(prod, cat)
+    return {**am, "borde_mm": float(b.get("ancho_mm") or 0) if b.get("activo") else 0.0,
+            "nesting": _nesting_de(prod, cat)}
+
+
+def _a_medida_telas_que_no_entran(prod, cat, ids):
+    """De las telas `ids` (id o nombre), las que NO pueden con la pieza: `[(nombre, motivo)]`."""
+    am = (prod or {}).get("a_medida")
+    if not isinstance(am, dict) or not am.get("de"):
+        return []
+    pub = _a_medida_publico(prod, cat)
+    telas = cat.get("telas") or []
+    out = []
+    for i in ids:
+        t = next((x for x in telas if str(x.get("id")) == str(i) or str(x.get("nombre")) == str(i)), None)
+        if not t:
+            continue
+        ok, mot = _cabe_en_tela(am.get("ancho_m"), am.get("alto_m"), pub["borde_mm"], t.get("ancho_cm", 180) or 180,
+                                pub["nesting"]["alto_max_cm"], pub["nesting"]["margen_mm"], pub["nesting"]["rotacion"])
+        if not ok:
+            out.append((t.get("nombre") or str(i), mot))
+    return out
+
+
+def _copia_a_medida(tpl_pid, ancho_m, alto_m, externo=None):
+    """La COPIA a medida de un molde del catálogo, para un pedido del OTRO SISTEMA (la hace el robot,
+    que no tiene sesión): lo mismo que `crear_producto` con `a_medida_de`, marcada `externo: <ref>`
+    para borrarla con su pedido. El archivo lo sube después el robot por `/api/plantilla`.
+    Devuelve `(pid, error)`."""
+    cat = _cargar_catalogo_para_editar()
+    try:
+        pid = "prod_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
+        extra, de, err = _a_medida_crear({"a_medida_de": tpl_pid, "efimero": True, "ancho_m": ancho_m, "alto_m": alto_m},
+                                          cat, pid)
+        if err:
+            return None, err[0]
+        tpl = next(p for p in cat["productos"] if p.get("id") == de)
+        os.makedirs(os.path.join(DATOS, "productos", pid), exist_ok=True)
+        os.makedirs(os.path.join(ENTRADA, pid), exist_ok=True)
+        _cp_src = os.path.join(DATOS, "productos", de, "config_produccion.json")
+        _cp_dst = os.path.join(DATOS, "productos", pid, "config_produccion.json")
+        if os.path.exists(_cp_src):
+            import shutil as _sh_am
+            _sh_am.copyfile(_cp_src, _cp_dst)
+        else:
+            with open(_cp_dst + ".tmp", "w", encoding="utf-8") as _fh:
+                json.dump(_config_default(), _fh, ensure_ascii=False)
+            os.replace(_cp_dst + ".tmp", _cp_dst)
+        prod = {"id": pid, "nombre": f"{tpl.get('nombre') or 'Molde'} {_talle_de_medida(ancho_m, alto_m)}",
+                "creado": time.time(), "creado_por": None, "alta_por": None, "propio": True,
+                "efimero": True, "efimero_visto": time.time(),
+                "planilla_template_id": tpl.get("planilla_template_id") or "plan_default",
+                "mapeo_columnas": copy.deepcopy(tpl.get("mapeo_columnas") or {})}
+        prod.update(extra)
+        if externo:
+            prod["externo"] = externo
+        cat["productos"].append(prod)
+        _guardar_catalogo(cat)
+        return pid, None
+    finally:
+        _soltar_edicion_catalogo()
+
+
+@app.post("/api/productos/a_medida")
+def guardar_a_medida():
+    """Cambia la configuración de un molde a medida: el margen (plantilla), o la MEDIDA (antes de
+    rehacer su archivo). Al cambiar la medida cambia el nombre del talle («1,50x0,90»): lo guardado
+    por talle (ajuste de los objetos editables) pasa al talle nuevo, para no perderse."""
+    cuerpo = request.get_json(force=True) or {}
+    pid = cuerpo.get("id")
+    _no = _guard_id(cuerpo)
+    if _no: return _no
+    cat = _cargar_catalogo_para_editar()
+    prod = next((p for p in cat["productos"] if p["id"] == pid), None)
+    # CONVERTIR un molde que todavía NO tiene base en uno a medida (2026-10-06, pedido del usuario:
+    # en Moldería, un molde recién creado «con archivo» tiene que poder elegir «A medida» ahí mismo,
+    # sin borrarlo y crearlo de nuevo). Con archivo ya subido no: ese molde tiene sus piezas y su
+    # configuración, y pisarlo con un rectángulo los perdería.
+    if prod and isinstance(cuerpo.get("convertir"), dict) and not isinstance(prod.get("a_medida"), dict):
+        if os.path.exists(_ruta_entrada("plantilla.ai", pid, original=True)) or os.path.exists(_ruta_entrada("plantilla.ai", pid)):
+            return jsonify({"error": "Este molde ya tiene su archivo: no se puede pasar a medida. Creá un molde nuevo «A medida»."}), 409
+        if prod.get("efimero") or prod.get("origen") == "con_diseno":
+            return jsonify({"error": "Este molde no se puede pasar a medida."}), 409
+        _extra, _de, _err = _a_medida_crear({"a_medida": cuerpo["convertir"]}, cat, pid)
+        if _err:
+            return jsonify({"error": _err[0]}), _err[1]
+        prod.update(_extra)
+        _guardar_catalogo(cat)
+        return jsonify({"ok": True, "a_medida": prod["a_medida"]})
+    if not prod or not isinstance(prod.get("a_medida"), dict):
+        return jsonify({"error": "Ese molde no es un molde a medida."}), 404
+    am = prod["a_medida"]
+    if "margen" in cuerpo:
+        am["margen"] = _margen_a_medida(cuerpo.get("margen"))
+    if "pieza" in cuerpo:
+        # EL NOMBRE DE LA PIEZA se cambia desde «Variables» (MAPA 624). Lo que el molde guarda POR
+        # PIEZA (posición de la etiqueta «variable§Pieza», telas por pieza, límite del texto por
+        # pieza…) pasa al nombre nuevo; el archivo lo rehace después la pantalla con ese nombre.
+        _ok, _err = _a_medida_crear({"a_medida": {"pieza": cuerpo.get("pieza")}}, cat, pid)[0], None
+        if _ok is None:
+            return jsonify({"error": 'El nombre de la pieza no puede estar vacío, llevar / \\ : * ? " < > | ni pasar de 40 letras.'}), 400
+        viejo_pz, nuevo_pz = str(am.get("pieza") or ""), _ok["a_medida"]["pieza"]
+        if viejo_pz and nuevo_pz != viejo_pz:
+            def _ren_pieza(o):
+                if isinstance(o, dict):
+                    for k in list(o.keys()):
+                        if isinstance(k, str) and (k == viejo_pz or k.endswith("§" + viejo_pz)):
+                            o[k[:len(k) - len(viejo_pz)] + nuevo_pz] = o.pop(k)
+                    for v in o.values():
+                        _ren_pieza(v)
+                elif isinstance(o, list):
+                    for v in o:
+                        _ren_pieza(v)
+            for _k in ("etiqueta", "telas_cfg", "limite_texto", "borde_corte"):
+                _ren_pieza(prod.get(_k))
+        am["pieza"] = nuevo_pz
+    if "ancho_m" in cuerpo or "alto_m" in cuerpo:
+        an, al = _metros(cuerpo.get("ancho_m")), _metros(cuerpo.get("alto_m"))
+        if an is None or al is None:
+            return jsonify({"error": f"La medida tiene que ir de {_AM_MIN_M} a {_AM_MAX_M:g} metros."}), 400
+        viejo, nuevo = _talle_de_medida(am.get("ancho_m", 1), am.get("alto_m", 1)), _talle_de_medida(an, al)
+        am["ancho_m"], am["alto_m"] = an, al
+        if viejo != nuevo:
+            def _renombrar(o):
+                if isinstance(o, dict):
+                    if isinstance(o.get("transforms"), dict) and viejo in o["transforms"]:
+                        o["transforms"][nuevo] = o["transforms"].pop(viejo)
+                    for v in o.values():
+                        _renombrar(v)
+            _renombrar(prod.get("editables"))
+    _guardar_catalogo(cat)
+    return jsonify({"ok": True, "a_medida": am})
+
+
 @app.post("/api/productos/crear")
 def crear_producto():
     cuerpo = request.get_json(force=True) or {}
@@ -14508,7 +14855,7 @@ def crear_producto():
     # todos. Se llega ahí si la base parpadea justo en el alta: `_guardia_moldes` deja pasar con un
     # usuario de mentira (`_u = True`) y después `_uid_actual()` devuelve None.
     # Sin sistema de usuarios (taller de una persona) sí es legítimo: no hay a quién sellar.
-    if propio and _USUARIOS_ON and not _uid_actual():
+    if propio and _USUARIOS_ON and not _uid_actual() and not (_usuario_actual() or {}).get("robot"):
         return jsonify({"error": "Se perdió tu sesión: volvé a entrar y subilo de nuevo. "
                                  "Un artículo tuyo necesita saber de quién es."}), 401
 
@@ -14567,6 +14914,10 @@ def crear_producto():
                                  f"Ponele otro nombre o entrá a la que ya existe."}), 409
 
     pid = "prod_" + time.strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:4]
+    # MOLDE A MEDIDA (MAPA 623): la plantilla del catálogo o la copia del pedido a una medida
+    _am_extra, _am_de, _am_err = _a_medida_crear(cuerpo, cat, pid)
+    if _am_err:
+        return jsonify({"error": _am_err[0]}), _am_err[1]
 
     os.makedirs(os.path.join(DATOS, "productos", pid), exist_ok=True)
     os.makedirs(os.path.join(ENTRADA, pid), exist_ok=True)
@@ -14606,13 +14957,24 @@ def crear_producto():
             "manga_larga_val": "larga"
         }
     })
+    if _am_extra:
+        cat["productos"][-1].update(_am_extra)
+        if _am_de:
+            # la config de producción (rotación, espaciado) del molde del que sale la copia
+            try:
+                _cp_src = os.path.join(DATOS, "productos", _am_de, "config_produccion.json")
+                if os.path.exists(_cp_src):
+                    import shutil as _sh_am
+                    _sh_am.copyfile(_cp_src, os.path.join(DATOS, "productos", pid, "config_produccion.json"))
+            except Exception as e:
+                print(f"[a_medida] no se pudo copiar la config de producción: {e}")
     cat["activo"] = pid
     _guardar_catalogo(cat)
     # El activo va TAMBIÉN a la sesión: `_get_active_producto_id` mira la sesión ANTES que el
     # global, así que dejarla apuntando al molde anterior mandaba los guardados que no llevan
     # `pid` al molde equivocado.
     _activar_en_sesion(pid)
-    return jsonify({"id": pid, "nombre": nombre})
+    return jsonify({"id": pid, "nombre": nombre, "a_medida": (_am_extra or {}).get("a_medida")})
 
 
 @app.post("/api/productos/activar")
@@ -15324,6 +15686,10 @@ def config_mapeo():
     if not prod:
         return jsonify({"error": "Producto no encontrado"}), 404
         
+    if tid and tid != prod.get("planilla_template_id"):
+        _choca = _planilla_sin_talle_choca(cat, pid, tid)
+        if _choca:
+            return jsonify({"error": _choca}), 409
     if tid:
         prod["planilla_template_id"] = tid
     if mapeo is not None:
@@ -15653,11 +16019,11 @@ def motor_b_producto(pid):
 def _filas_de_muestra(prod, cat, variante, talle):
     """Las filas de MUESTRA de la vista previa del Arte («NOMBRE» / «00» en el talle, más una fila
     por cada opción restante de cada toggle), exactamente como las arma `_piezas_base`."""
-    fila = {"__variante": variante, "talle": talle, "nombre": "NOMBRE", "numero": "00"}
+    fila = {"__variante": variante, "talle": talle, "nombre": "TEXTO", "numero": "00"}
     for c in (prod.get("columnas") or []):
         _role = c.get("role"); _cid = c.get("id") or c.get("label")
         if _role == "talle": fila[_cid] = talle
-        elif _role == "nombre": fila[_cid] = "NOMBRE"
+        elif _role == "nombre": fila[_cid] = "TEXTO"
         elif _role == "numero": fila[_cid] = "00"
     filas = [dict(fila)]
     _tpl = next((t for t in cat.get("plantillas_planillas", []) if t.get("id") == prod.get("planilla_template_id")), None)
@@ -15740,13 +16106,31 @@ def guardar_plantilla_planilla():
     tid = cuerpo.get("id")
     nombre = cuerpo.get("nombre", "").strip()
     columnas = cuerpo.get("columnas", [])
-    
+    # la columna PIEZAS de Repo en esta planilla (2026-10-06): 'boton' (por defecto) | 'siempre' | 'no'
+    repo = cuerpo.get("repo") if cuerpo.get("repo") in ("boton", "siempre", "no") else "boton"
+
     if not nombre:
         return jsonify({"error": "El nombre de la planilla no puede estar vacío"}), 400
-    if not any(c.get("role") == "talle" for c in columnas):
-        return jsonify({"error": "Debe haber al menos una columna con el rol 'Talle'"}), 400
-        
+
     cat = _cargar_catalogo_para_editar()
+    # PLANILLA SIN TALLES (MAPA 622): se puede guardar sin columna de talle (banderas, moldes a
+    # medida). Lo que NO puede pasar es dejar sin talle a un molde que tiene VARIOS: ese molde ya no
+    # podría fabricar ninguna fila. Se dice cuáles son, en vez de guardar y que falle en el pedido.
+    if tid and not any(c.get("role") == "talle" for c in columnas):
+        _varios = []
+        for _p in cat.get("productos", []):
+            if _p.get("planilla_template_id") != tid or _p.get("efimero"):
+                continue
+            _nt = len(_talles_de_registro(_cargar("registro_producto.json", _p.get("id")) or {}))
+            if _nt > 1:
+                _varios.append(f"«{_p.get('nombre') or _p.get('id')}» ({_nt} talles)")
+        if _varios:
+            return jsonify({"error": "Esta planilla la usan moldes con varios talles: " + ", ".join(_varios[:6])
+                                     + (" y otros" if len(_varios) > 6 else "")
+                                     + ". Sin la columna Talle no podrían fabricar ninguna fila. "
+                                       "Creá una planilla nueva sin talles para los moldes que no los usan."}), 409
+    if "plantillas_planillas" not in cat:
+        cat["plantillas_planillas"] = []
     if "plantillas_planillas" not in cat:
         cat["plantillas_planillas"] = []
         
@@ -15756,7 +16140,8 @@ def guardar_plantilla_planilla():
         cat["plantillas_planillas"].append({
             "id": tid,
             "nombre": nombre,
-            "columnas": columnas
+            "columnas": columnas,
+            "repo": repo
         })
     else:
         encontrado = False
@@ -15764,17 +16149,19 @@ def guardar_plantilla_planilla():
             if p["id"] == tid:
                 p["nombre"] = nombre
                 p["columnas"] = columnas
+                p["repo"] = repo
                 encontrado = True
                 break
         if not encontrado:
             cat["plantillas_planillas"].append({
                 "id": tid,
                 "nombre": nombre,
-                "columnas": columnas
+                "columnas": columnas,
+                "repo": repo
             })
-            
+
     _guardar_catalogo(cat)
-    return jsonify({"ok": True, "id": tid, "nombre": nombre, "columnas": columnas})
+    return jsonify({"ok": True, "id": tid, "nombre": nombre, "columnas": columnas, "repo": repo})
 
 
 @app.post("/api/plantillas_planillas/eliminar")
@@ -16232,6 +16619,22 @@ def asignar_grupo_tizada():
     return jsonify({"ok": True})
 
 
+def _planilla_sin_talle_choca(cat, pid, tid):
+    """PLANILLA SIN TALLES (MAPA 622): ¿poner la planilla `tid` al molde `pid` lo deja sin poder
+    fabricar? Pasa cuando la planilla no tiene columna de talle y el molde tiene VARIOS talles: las
+    filas no dirían de cuál son. Devuelve el mensaje para la pantalla, o None si se puede."""
+    tpl = next((t for t in (cat.get("plantillas_planillas") or []) if t.get("id") == tid), None)
+    if not tpl or any(c.get("role") == "talle" for c in (tpl.get("columnas") or [])):
+        return None
+    prod = next((p for p in (cat.get("productos") or []) if p.get("id") == pid), None) or {}
+    nt = len(_talles_de_registro(_cargar("registro_producto.json", pid) or {}))
+    if nt <= 1:
+        return None
+    return (f"«{prod.get('nombre') or pid}» tiene {nt} talles y la planilla «{tpl.get('nombre') or tid}» "
+            f"no tiene columna de talle: no podría fabricar ninguna fila. Elegí una planilla con la "
+            f"columna «Talle».")
+
+
 @app.post("/api/productos/asignar_planilla")
 def asignar_planilla_a_producto():
     cuerpo = request.get_json(force=True) or {}
@@ -16242,7 +16645,10 @@ def asignar_planilla_a_producto():
     prod = next((p for p in cat["productos"] if p["id"] == pid), None)
     if not prod:
         return jsonify({"error": "Producto no encontrado"}), 404
-        
+    _choca = _planilla_sin_talle_choca(cat, pid, tid)
+    if _choca:
+        return jsonify({"error": _choca}), 409
+
     prod["planilla_template_id"] = tid
     _guardar_catalogo(cat)
     return jsonify({"ok": True})

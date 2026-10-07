@@ -8,7 +8,7 @@ TIZADA PRO y reciba los archivos de producción **asociados a SU pedido**, sin q
 completo, qué viaja en cada ruta, las plantillas y los conectores, el resultado (un PDF por mesa) y las alarmas.
 Se arma desde [`explicado_para_programadores.html`](explicado_para_programadores.html).
 
-📘 **La guía visual en PDF:** [`TIZADA_PRO_Conectar_otro_sistema.pdf`](TIZADA_PRO_Conectar_otro_sistema.pdf) (11 páginas, con
+📘 **La guía visual en PDF:** [`TIZADA_PRO_Conectar_otro_sistema.pdf`](TIZADA_PRO_Conectar_otro_sistema.pdf) (12 páginas, con
 la puesta en marcha en el servidor de TIZADA y los diagramas de cómo se conectan los JSON).
 
 ## Qué viaja

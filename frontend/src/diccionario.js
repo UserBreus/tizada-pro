@@ -120,7 +120,7 @@ export const DICCIONARIO = {
   },
   'cfg-columnas': {
     nombre: 'Planillas',
-    que: 'Una planilla es el juego de columnas que se carga al hacer un pedido: talle, nombre, número, color…',
+    que: 'Una planilla es el juego de columnas que se carga al hacer un pedido: talle, texto, número, color…',
     como: 'Entrá a «Planillas».',
   },
   'cfg-reglas': {
@@ -140,7 +140,7 @@ export const DICCIONARIO = {
   },
   'cfg-fuentes': {
     nombre: 'Catálogo de Fuentes',
-    que: 'Acá se cargan las tipografías con las que se estampan los nombres y los números. El sistema las dibuja como curvas: sale igual aunque la máquina no tenga la fuente instalada.',
+    que: 'Acá se cargan las tipografías con las que se estampan los textos y los números. El sistema las dibuja como curvas: sale igual aunque la máquina no tenga la fuente instalada.',
     como: 'Entrá a «Catálogo de Fuentes».',
   },
   'cfg-perfil': {
@@ -423,7 +423,7 @@ export const DICCIONARIO = {
   },
   'cfgb-planilla': {
     nombre: 'Planilla de estos moldes',
-    que: 'Las columnas del Excel (talle, nombre, número…) que se le ponen a todo molde con diseño al subirlo. El cliente no la elige: la deja el taller acá.',
+    que: 'Las columnas del Excel (talle, texto, número…) que se le ponen a todo molde con diseño al subirlo. El cliente no la elige: la deja el taller acá.',
     como: 'Elegí una de las planillas armadas en «Columnas de la planilla». Vale para los moldes que se suban de ahora en más.',
   },
   'cfgb-nesting': {
@@ -464,6 +464,36 @@ export const DICCIONARIO = {
     listo: (E) => E.pedido.artesTotal > 0 && E.pedido.artesCargadas >= E.pedido.artesTotal,
   },
   // CREAR PLANTILLA desde el paso Arte (MAPA 617): opcional, para quien no tiene la base del arte
+  'arte-medida': {
+    nombre: 'Medida de la pieza',
+    que: 'Este molde es a medida: se escribe el ancho y el alto en metros y el sistema arma la pieza de ese tamaño con la etiqueta, el borde y el acomodo del molde. Avisa en qué telas entra.',
+    como: 'Escribí el ancho y el alto en metros.',
+  },
+  'arte-medida-ancho': {
+    nombre: 'Ancho (m)',
+    que: 'El ancho de la pieza, en metros.',
+    como: 'Escribí el ancho, por ejemplo 1,50.',
+  },
+  'arte-medida-alto': {
+    nombre: 'Alto (m)',
+    que: 'El alto de la pieza, en metros.',
+    como: 'Escribí el alto, por ejemplo 0,90.',
+  },
+  'arte-medida-armar': {
+    nombre: 'Armar a esta medida',
+    que: 'Arma el molde de este pedido con esa medida. Si la pieza no entra en ninguna tela del molde, no deja.',
+    como: 'Tocá «Armar a esta medida».',
+  },
+  'arte-medida-cambiar': {
+    nombre: 'Cambiar la medida',
+    que: 'Cambia el ancho y el alto de la pieza. El arte cargado se conserva.',
+    como: 'Tocá la medida para cambiarla.',
+  },
+  'arte-dobladillo': {
+    nombre: 'Línea punteada',
+    que: 'Marca el margen (dobladillo) del molde a medida: lo de afuera se dobla al coser. No se imprime; el diseño llega igual hasta el borde.',
+    como: 'Mirá dónde queda el diseño respecto de la línea.',
+  },
   'arte-crear-plantilla': {
     nombre: 'Crear plantilla',
     que: 'Opcional: arma la base para el diseñador (guía .ai, Illustrator o CorelDRAW): un archivo por diseño del pedido, con sus variables.',
@@ -552,7 +582,7 @@ export const DICCIONARIO = {
   },
   'modal:tipografia no encontrada': {
     nombre: 'Tipografía no encontrada',
-    que: 'Al arte le falta una tipografía: si se sublima así, el nombre y el número salen con otra letra. Muestra qué fuente falta y en qué molde y diseño.',
+    que: 'Al arte le falta una tipografía: si se sublima así, el texto y el número salen con otra letra. Muestra qué fuente falta y en qué molde y diseño.',
     como: 'Cargá la tipografía que falta, o seguí igual si la letra de reemplazo te sirve.',
     ventana: { contenido: 'Las fuentes que faltan, con su molde y su diseño',
                botones: ['Cargar la tipografía', 'Seguir de todos modos'], cuando: 'al pasar de Arte a la planilla', paso: 'arte' },
@@ -587,7 +617,7 @@ export const DICCIONARIO = {
   },
   'modal:cargar por lote': {
     nombre: 'Cargar por lote',
-    que: 'Crea de una todas las filas del pedido: se dice cuántas prendas lleva cada talle y el sistema arma una fila por prenda, lista para ponerle nombre y número.',
+    que: 'Crea de una todas las filas del pedido: se dice cuántas prendas lleva cada talle y el sistema arma una fila por prenda, lista para ponerle texto y número.',
     como: 'Poné la cantidad de cada talle y creá las filas.',
     ventana: { contenido: 'Cada talle con un contador − N +',
                botones: ['Poner todo en 0', 'Cancelar', 'Crear las filas'], cuando: 'al cargar prendas en la planilla', paso: 'planilla' },
@@ -730,7 +760,7 @@ export const DICCIONARIO = {
   'planilla-tabla': {
     nombre: 'Planilla del pedido',
     que: 'Una fila = una prenda. Un clic elige la celda y escribís directo; en Talle y Diseño se abre la lista.',
-    como: 'Cargá el talle, y el nombre y el número si la prenda los lleva.',
+    como: 'Cargá el talle, y el texto y el número si la prenda los lleva.',
   },
   // ── EL ESPACIO DE TRABAJO VISUAL ─────────────────────────────────────────────────────────
   'molde-visor': {
@@ -751,18 +781,18 @@ export const DICCIONARIO = {
     como: 'Elegí el talle de la prenda en esta columna.',
   },
   'col:nombre': {
-    nombre: 'Columna Nombre',
-    que: 'El nombre que va estampado en la prenda. Sale con la tipografía, la curva y el borde del diseño.',
-    como: 'Escribí el nombre de cada prenda en esta columna.',
+    nombre: 'Columna Texto',
+    que: 'El texto que va estampado en la prenda (un nombre, una palabra…). Sale con la tipografía, la curva y el borde del diseño.',
+    como: 'Escribí el texto de cada prenda en esta columna.',
   },
   'col:numero': {
     nombre: 'Columna Número',
-    que: 'El número que va estampado. Igual que el nombre, respeta la letra y el borde del diseño.',
+    que: 'El número que va estampado. Igual que el texto, respeta la letra y el borde del diseño.',
     como: 'Escribí el número de cada prenda en esta columna.',
   },
   'col:cantidad': {
     nombre: 'Columna Cantidad',
-    que: 'Cuántas prendas iguales salen de esa fila. Con 5, esa fila sale 5 veces en la tizada, con el mismo talle, nombre y número.',
+    que: 'Cuántas prendas iguales salen de esa fila. Con 5, esa fila sale 5 veces en la tizada, con el mismo talle, texto y número.',
     como: 'Poné cuántas prendas iguales lleva esa fila.',
   },
   'col:diseno': {
@@ -786,7 +816,7 @@ export const DICCIONARIO = {
   },
   'planilla-cantidad': {
     nombre: 'Cantidad',
-    que: 'Enciende la columna Cantidad: una fila con cantidad 5 sale 5 veces en la tizada, con el mismo talle, nombre y número. Oculta, cada fila vale 1.',
+    que: 'Enciende la columna Cantidad: una fila con cantidad 5 sale 5 veces en la tizada, con el mismo talle, texto y número. Oculta, cada fila vale 1.',
     como: 'Tocá «Cantidad».',
   },
   'planilla-lote': {
@@ -865,6 +895,41 @@ export const DICCIONARIO = {
     que: 'Con este nombre lo va a ver el operario en el pedido.',
     como: 'Escribí el nombre del molde.',
   },
+  'molde-tipo': {
+    nombre: 'Con archivo o a medida',
+    que: 'Con archivo: subís el molde y nombrás sus piezas. A medida: un rectángulo de una sola pieza (banderas); no se sube nada y en cada pedido se escribe el ancho y el alto en metros.',
+    como: 'Elegí «Con archivo» o «A medida».',
+  },
+  'a-medida-pieza': {
+    nombre: 'Nombre de la pieza',
+    que: 'El molde a medida tiene una sola pieza: con este nombre sale en la etiqueta y en la plantilla del diseñador.',
+    como: 'Escribí el nombre de la pieza, por ejemplo «Bandera».',
+  },
+  'a-medida-margen': {
+    nombre: 'Margen (dobladillo)',
+    que: 'La franja del borde hacia adentro que se dobla al coser. En el pedido se ve como una línea punteada; no se imprime.',
+    como: 'Poné los centímetros: uno para todos los bordes o uno por borde.',
+  },
+  'a-medida-panel': {
+    nombre: 'Molde a medida',
+    que: 'Un rectángulo de una sola pieza: no tiene archivo ni piezas que nombrar. La medida se escribe en cada pedido.',
+    como: 'En «Variables» cambiás el nombre de la pieza y la medida de muestra; el margen va en «Margen».',
+  },
+  'a-medida-margen-guardar': {
+    nombre: 'Guardar margen',
+    que: 'Guarda el margen (dobladillo) del molde a medida.',
+    como: 'Tocá «Guardar margen».',
+  },
+  'a-medida-muestra': {
+    nombre: 'Guardar y rehacer',
+    que: 'Guarda el nombre de la pieza y la medida de muestra y rehace el molde de Configuración (para ubicar la etiqueta o mirar el borde). La medida de verdad va en cada pedido.',
+    como: 'Cambiá el nombre de la pieza o la medida y tocá «Guardar y rehacer».',
+  },
+  'a-medida-convertir': {
+    nombre: 'A medida',
+    que: 'Deja este molde (todavía sin archivo) como molde a medida: un rectángulo de una sola pieza. Se guarda en el acto; el nombre de la pieza y la medida de muestra se ponen en «Variables» y el margen en «Margen».',
+    como: 'Tocá «A medida».',
+  },
   'molde-crear-ok': {
     nombre: 'Crear el molde',
     que: 'Confirma la moldería nueva.',
@@ -918,7 +983,7 @@ export const DICCIONARIO = {
   'arte-fuente-campo': {
     nombre: 'Tipografía de cada campo',
     que: 'Cada texto que se personaliza —el nombre, el número, un número 2— puede llevar su propia tipografía, aunque en el diseño vengan con la misma. Primero elegís el campo y después la tipografía de la lista: sólo cambia ese campo. Tocar la original del diseño la devuelve.',
-    como: 'Tocá el campo (Nombre, Número…) y después la tipografía que querés para él.',
+    como: 'Tocá el campo (Texto, Número…) y después la tipografía que querés para él.',
   },
   'arte-fuente-copiar': {
     nombre: 'Usar la tipografía en otros moldes',
@@ -1247,7 +1312,7 @@ export const DICCIONARIO = {
   },
   'ajuste-planilla': {
     nombre: 'Planilla',
-    que: 'Qué columna de la planilla del pedido es el talle, cuál el nombre, cuál el número…',
+    que: 'Qué columna de la planilla del pedido es el talle, cuál el texto, cuál el número…',
     como: 'Entrá a «Planilla».',
   },
   'ajuste-nestingsel': {
@@ -1266,9 +1331,19 @@ export const DICCIONARIO = {
     como: 'Entrá a «Borde de corte».',
   },
   'ajuste-texto': {
-    nombre: 'Nombre y número',
-    que: 'Hasta dónde puede llegar cada texto (nombre, número…): el margen que queda libre contra el borde de la pieza. Si un nombre largo no entra, se achica proporcional.',
-    como: 'Entrá a «Nombre y número».',
+    nombre: 'Texto y número',
+    que: 'Hasta dónde puede llegar cada texto (texto, número…): el margen que queda libre contra el borde de la pieza. Si un texto largo no entra, se achica proporcional.',
+    como: 'Entrá a «Texto y número».',
+  },
+  'ajuste-margen': {
+    nombre: 'Margen',
+    que: 'Sólo en un molde a medida: el dobladillo, la franja del borde hacia adentro que se dobla al coser (igual en todos los bordes o uno por borde). El texto y el número nunca pasan de ahí.',
+    como: 'Entrá a «Margen».',
+  },
+  'texto-dobladillo': {
+    nombre: 'El texto no pasa el margen',
+    que: 'En un molde a medida el texto y el número nunca salen del margen (dobladillo): como mínimo esa distancia al borde, aunque acá se ponga menos.',
+    como: 'Entrá a «Margen» para cambiar cuánto es.',
   },
   'ajuste-diseno': {
     nombre: 'Plantilla',
@@ -1474,7 +1549,7 @@ export const DICCIONARIO = {
   },
   'texto-limitar': {
     nombre: 'Con límite / sin límite',
-    que: 'Si ese campo (nombre, número…) tiene un límite de ancho. Sin límite sale al tamaño del diseño, como siempre.',
+    que: 'Si ese campo (texto, número…) tiene un límite de ancho. Sin límite sale al tamaño del diseño, como siempre.',
     como: 'Tocá el interruptor del campo.',
   },
   'texto-margen': {
@@ -1484,12 +1559,12 @@ export const DICCIONARIO = {
   },
   'texto-campo': {
     nombre: 'Qué campo ver',
-    que: 'Elige qué texto mostrar en el visor (nombre, número…).',
+    que: 'Elige qué campo mostrar en el visor (texto, número…).',
     como: 'Tocá el campo.',
   },
   'texto-visor': {
     nombre: 'Visor del límite',
-    que: 'Las piezas del molde: tocalas para elegirlas (una o varias). En cada una, sus bordes corridos hacia adentro: hasta ahí llega el nombre (celeste) y el número (naranja). Las líneas se arrastran.',
+    que: 'Las piezas del molde: tocalas para elegirlas (una o varias). En cada una, sus bordes corridos hacia adentro: hasta ahí llega el texto (celeste) y el número (naranja). Las líneas se arrastran.',
     como: 'Arrastrá una de las líneas.',
   },
   'texto-ninguna': {
@@ -1499,21 +1574,21 @@ export const DICCIONARIO = {
   },
   'planilla-escaneando': {
     nombre: 'Escaneando planilla',
-    que: 'Se está revisando si algún nombre o número no entra en su pieza. Mientras tanto no se puede enviar.',
+    que: 'Se está revisando si algún texto o número no entra en su pieza. Mientras tanto no se puede enviar.',
     como: 'Esperá un momento.',
   },
   'planilla-alertas': {
     nombre: 'Alertas',
-    que: 'Al lado de cada fila que tiene un nombre o número que no entra en su pieza: dice cuántos cm más chica sale la letra. La fila queda marcada con el color de la alerta.',
+    que: 'Al lado de cada fila que tiene un texto o número que no entra en su pieza: dice cuántos cm más chica sale la letra. La fila queda marcada con el color de la alerta.',
     como: 'Mirá al costado de la fila marcada.',
   },
   'planilla-achique': {
     nombre: 'Sale más chico',
-    que: 'Ese nombre o número no entra en el límite de su pieza: sale tantos cm más chico. En rojo, puede no leerse.',
+    que: 'Ese texto o número no entra en el límite de su pieza: sale tantos cm más chico. En rojo, puede no leerse.',
     como: 'Pasá el mouse para ver en qué pieza y qué alto le queda a la letra.',
   },
   'texto-guardar': {
-    nombre: 'Guardar nombre y número',
+    nombre: 'Guardar texto y número',
     que: 'Guarda el límite de cada campo de este molde.',
     como: 'Tocá «Guardar».',
   },
@@ -1700,8 +1775,23 @@ export const DICCIONARIO = {
   // ══ PLANILLAS Y REGLAS (configuración) ══════════════════════════════════════════════════════
   'col-nueva': {
     nombre: 'Nueva planilla',
-    que: 'Se pueden tener varias: una para camisetas con nombre y número, otra para prendas lisas. Después cada molde elige cuál usa.',
+    que: 'Se pueden tener varias: una para camisetas con texto y número, otra para prendas lisas. Después cada molde elige cuál usa.',
     como: 'Tocá para crear una planilla.',
+  },
+  'col-sin-talles': {
+    nombre: 'Con talles o sin talles',
+    que: 'Una planilla sin talles no tiene columna de talle: sirve para moldes de un solo tamaño, como banderas. Cada fila sale con el único talle del molde.',
+    como: 'Elegí «Con talles» o «Sin talles».',
+  },
+  'col-cantidad-modo': {
+    nombre: 'Columna Cantidad',
+    que: 'Si esta planilla tiene la columna Cantidad (repite la fila: 5 = cinco prendas iguales) y cuándo se ve en el pedido: no va, con el botón «Cantidad» o siempre.',
+    como: 'Elegí «No va», «Con botón» o «Siempre».',
+  },
+  'col-repo-modo': {
+    nombre: 'Columna Piezas (Repo)',
+    que: 'Si esta planilla tiene la columna Piezas de la reposición (cada fila elige qué piezas hace) y cuándo se ve en el pedido: no va, con el botón «Repo» o siempre.',
+    como: 'Elegí «No va», «Con botón» o «Siempre».',
   },
   'col-guardar': {
     nombre: 'Guardar la planilla',
@@ -1737,7 +1827,7 @@ export const DICCIONARIO = {
   // ══ FUENTES ═════════════════════════════════════════════════════════════════════════════════
   'fuentes-subir': {
     nombre: 'Subir fuente',
-    que: 'Carga una tipografía para estampar nombres y números.',
+    que: 'Carga una tipografía para estampar textos y números.',
     como: 'Subí el archivo de la fuente.',
   },
   'fuentes-probar': {

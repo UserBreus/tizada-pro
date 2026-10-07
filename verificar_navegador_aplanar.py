@@ -145,13 +145,16 @@ def _forms(res):
 
 
 def profundidad(res, nivel=0, vistos=None):
+    """Niveles de Form XObjects. Un Form con `/Group` NO cuenta como nivel: es un grupo de
+    transparencia que se pinta con transparencia vigente y el aplanado lo CONSERVA a propósito
+    (MAPA 615: des-anidarlo cambiaba el color; la máscara de opacidad salía plena). Lo de adentro sí."""
     vistos = vistos if vistos is not None else set()
     peor = nivel
     for _, xo in _forms(res):
         if xo.objgen in vistos:
             continue
         vistos.add(xo.objgen)
-        peor = max(peor, profundidad(xo.get("/Resources"), nivel + 1, vistos))
+        peor = max(peor, profundidad(xo.get("/Resources"), nivel + (0 if "/Group" in xo else 1), vistos))
     return peor
 
 
@@ -370,8 +373,10 @@ def comparar_salidas(py, js, total):
                 total_inst += n
                 if d:
                     malos.append(d)
-                if "/Group" in oa or "/Group" in ob:
-                    malos.append(f"{na_}/{nb_}: conserva /Group")
+                # (2026-10-06) un /Group que queda es un grupo de transparencia conservado a propósito
+                # (MAPA 615); lo que no puede pasar es que un motor lo conserve y el otro no
+                if ("/Group" in oa) != ("/Group" in ob):
+                    malos.append(f"{na_}/{nb_}: el /Group queda en uno solo de los dos")
             ok(not malos, malos[0] if malos else f"página {i + 1}: {len(orden_a)} XObjects con el mismo contenido ({total_inst} instrucciones)")
             dif = []
             iguales(pa.obj, pb.obj, f"página {i + 1}", dif, set())

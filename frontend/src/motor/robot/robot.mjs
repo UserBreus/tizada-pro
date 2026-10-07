@@ -97,7 +97,7 @@ async function motor() {
     import('../prepararArte.js'), import('../arte/fuentesSubir.js'), import('../arte/fuentesEstado.js'),
     import('../pedido/generar.js'), import('mupdf'), import('../arte/editables.js'), import('../arte/personalizacion.js'),
   ])
-  M = { ...arte, ...fsub, ...fest, ...gen, mupdf, extraerEditables: ed.extraerEditables, extraerPersonalizacion: pers.extraerPersonalizacion }
+  M = { ...arte, ...fsub, ...fest, ...gen, mupdf, extraerEditables: ed.extraerEditables, extraerPersonalizacion: pers.extraerPersonalizacion, CAMPO_ALIAS: pers.CAMPO_ALIAS }
   return M
 }
 
@@ -247,7 +247,11 @@ async function cargarArte(m, ref, dis, mol) {
     if (!r.ok) throw new Error(d.error || `subir el arte: ${r.status}`)
     // tipografías del nombre/número que no resuelven (ni en el catálogo ni en lo que vino)
     const reempl = {}
-    for (const [campo, fuente] of Object.entries(dis.tipografia_por_campo || {})) reempl['@campo:' + String(campo).trim().toLowerCase()] = String(fuente)
+    // con los alias de capa («texto» = el campo nombre), como `clave_fuente_campo` del servidor
+    for (const [campo, fuente] of Object.entries(dis.tipografia_por_campo || {})) {
+      const c = String(campo).trim().toLowerCase()
+      reempl['@campo:' + ((m.CAMPO_ALIAS || {})[c] || c)] = String(fuente)
+    }
     try {
       const est = await m.fuentesEstadoLocal({ pid: mol.pid, diseno: dis.slug, reemplazos: reempl, rutaApi })
       informe.fuentes_faltan = est.faltantes || []
@@ -256,6 +260,49 @@ async function cargarArte(m, ref, dis, mol) {
     informe.error = String(e.message || e).slice(0, 300)
   }
   return apiJson(`/api/externo/robot/arte/${encodeURIComponent(ref)}`, informe)
+}
+
+// ── MOLDE A MEDIDA (MAPA 623) ───────────────────────────────────────────────────────────────
+// La COPIA a medida de un molde del catálogo: el servidor la da de alta (`/robot/a_medida`), acá se
+// arma su archivo con el MISMO código que la pantalla (`molde/aMedida.js` + el alta del camino A) y
+// se sube por `/api/plantilla`, como cualquier molde. `slug` = el diseño del pedido donde la copia
+// toma el lugar del molde del catálogo (sin `slug`, es para una plantilla).
+async function esperarTrabajo(resp) {
+  if (!resp || !resp.job) return resp
+  for (let espera = 250; ; espera = Math.min(1200, Math.round(espera * 1.5))) {
+    await new Promise((r) => setTimeout(r, espera))
+    const d = await api(`/api/trabajo/${resp.job}`)
+    if (d.estado === 'listo') return d.resultado || {}
+    if (d.estado === 'error') throw new Error(d.error || 'no se pudo leer el molde')
+    if (d.estado === 'cancelado') throw new Error('la lectura del molde se canceló')
+  }
+}
+async function armarCopiaAMedida(m, ref, plantilla, medida, slug = null) {
+  const c = await apiJson(`/api/externo/robot/a_medida/${encodeURIComponent(ref)}`,
+    { plantilla, ancho_m: medida.ancho_m, alto_m: medida.alto_m, slug })
+  const [AM, CA, PQ] = await Promise.all([import('../molde/aMedida.js'), import('../molde/caminoA.js'), import('../paquete/armar.js')])
+  const { pdf, resumen } = AM.pdfMoldeAMedida(m.mupdf, { anchoM: c.ancho_m, altoM: c.alto_m, pieza: c.pieza })
+  const doc = m.mupdf.Document.openDocument(pdf, 'application/pdf')
+  let zip, sha1
+  try {
+    const prep = CA.prepararCaminoA(new CA.MoldeA(m.mupdf, doc), { dxf: resumen, indices: resumen.indices })
+    sha1 = crypto.createHash('sha1').update(pdf).digest('hex')
+    zip = PQ.armarPaqueteCaminoA(null, prep, { motor: 'mupdf.js', sha1 }).zip
+  } finally {
+    try { doc.destroy() } catch { /* nada */ }
+  }
+  const fd = new FormData()
+  fd.append('archivo', new File([pdf], 'molde_a_medida.pdf', { type: 'application/pdf' }))
+  fd.append('pid', c.pid)
+  fd.append('con_diseno', '0')
+  fd.append('solo_base', '1')
+  fd.append('paquete', new Blob([zip], { type: 'application/zip' }), 'paquete.zip')
+  const r = await fetch(rutaApi('/api/plantilla'), { method: 'POST', body: fd })
+  const d = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(d.error || `subir el molde a medida: ${r.status}`)
+  await esperarTrabajo(d)
+  const fin = await apiJson(`/api/externo/robot/a_medida/${encodeURIComponent(ref)}/listo`, { pid: c.pid })
+  return { pid: c.pid, variable: fin.variable, acomodo: fin.acomodo, talle: c.talle }
 }
 
 function clasificarFalla(e) {
@@ -310,6 +357,18 @@ async function procesar(ref, normal) {
   const m = await motor()
   const t0 = Date.now()
   const avance = (etapa) => apiJson(`/api/externo/robot/avance/${encodeURIComponent(ref)}`, { etapa }).catch(() => ({ seguir: true }))
+  // 0 · MOLDE A MEDIDA (MAPA 623): primero la copia a la medida pedida; desde acá el diseño usa la copia
+  for (const dis of normal.disenos) {
+    for (const mol of dis.moldes) {
+      if (!mol.medida) continue
+      await avance(`armando «${mol.molde_nombre}» a ${mol.medida.ancho_m} × ${mol.medida.alto_m} m`)
+      const c = await armarCopiaAMedida(m, ref, mol.plantilla || mol.pid, mol.medida, dis.slug)
+      mol.plantilla = mol.plantilla || mol.pid
+      mol.pid = c.pid
+      mol.variable = c.variable && c.variable.clave
+      log(ref, '· a medida', dis.nombre, '→', mol.molde_nombre, c.talle)
+    }
+  }
   // 1 y 2 · cada diseño, con cada uno de sus moldes: tipografías + arte
   let frena = false
   for (const dis of normal.disenos) {
@@ -414,6 +473,15 @@ const nombreSeguro = (t) => String(t).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_'
 async function procesarPlantilla(ref, normal) {
   const P = await import('../molde/plantillaPedido.js')
   const H = await import('../molde/herramientas.js')
+  // MOLDE A MEDIDA (MAPA 623): la plantilla se arma sobre una copia a la medida pedida
+  for (const dis of normal.disenos) {
+    for (const it of dis.vars) {
+      if (!it.medida) continue
+      const c = await armarCopiaAMedida(await motor(), ref, it.pid, it.medida)
+      Object.assign(it, { pid: c.pid, clave: c.variable.clave, variable: c.variable, acomodo: c.acomodo || {} })
+      log(ref, '· plantilla a medida', dis.nombre, '→', it.molde, c.talle)
+    }
+  }
   const dets = {}
   for (const dis of normal.disenos) {
     for (const it of dis.vars) {

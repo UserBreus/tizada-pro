@@ -569,8 +569,18 @@ def main():
         ok(c == 401, f"/variables pide la llave ({c})")
         # acá TIZADA todavía no calculó la silueta del molde (nadie lo abrió en un navegador): el
         # servidor se la pediría a quien llama, y el otro sistema no puede calcular → 404 con motivo
-        c, f = _http("GET", api + "/variables/v_redondo/foto", llave=llave)
-        c2, f2 = _http("GET", f"{api}/moldes/{PID}/foto", llave=llave)
+        # esto ES el modo «el servidor no calcula» (el de verdad, siempre prendido): el corredor de
+        # contratos lo apaga por defecto para probar la referencia en Python, acá se prende (MAPA 624)
+        _solo0 = os.environ.get("TIZADA_SOLO_NAVEGADOR")
+        os.environ["TIZADA_SOLO_NAVEGADOR"] = "1"
+        try:
+            c, f = _http("GET", api + "/variables/v_redondo/foto", llave=llave)
+            c2, f2 = _http("GET", f"{api}/moldes/{PID}/foto", llave=llave)
+        finally:
+            if _solo0 is None:
+                os.environ.pop("TIZADA_SOLO_NAVEGADOR", None)
+            else:
+                os.environ["TIZADA_SOLO_NAVEGADOR"] = _solo0
         ok(c == 404 and f.get("sin_calcular") and c2 == 404 and f2.get("sin_calcular"),
            f"sin silueta calculada: 404 con el motivo, nunca un pedido de cálculo al otro sistema ({c}/{c2})")
         # con la silueta ya calculada (la de siempre, con `idx` por pieza) la variable trae SÓLO las suyas

@@ -287,7 +287,7 @@ sequenceDiagram
   <h3><i class="ti ti-palette"></i> Cómo tiene que venir el arte</h3>
   <div class="grilla g2">
     <div class="tarjeta"><h4>El archivo</h4><p>Una <b>mesa de trabajo por pieza</b>, armado sobre la base que da TIZADA para esa prenda. El dibujo <b>sin texto vivo</b> (convertido a curvas).</p></div>
-    <div class="tarjeta"><h4>Las capas</h4><p><code>diseño</code> (el dibujo) · <code>guias</code> (el nombre de la pieza de cada mesa) · <code>Nombre</code> y <code>Número</code> (lo que cambia en cada prenda) · una capa <code>Editable &lt;objeto&gt;</code> por cada objeto que puede ir aparte (TPU, DTF, bordado).</p></div>
+    <div class="tarjeta"><h4>Las capas</h4><p><code>diseño</code> (el dibujo) · <code>guias</code> (el nombre de la pieza de cada mesa) · <code>Texto</code> (o <code>Nombre</code>) y <code>Número</code> (lo que cambia en cada prenda) · una capa <code>Editable &lt;objeto&gt;</code> por cada objeto que puede ir aparte (TPU, DTF, bordado).</p></div>
   </div>
 
   <h3><i class="ti ti-file-type-pdf"></i> Lo que sale</h3>
@@ -403,6 +403,7 @@ flowchart LR
     <tr><td><code>variable-desconocida</code> · <code>variable-ambigua</code></td><td><code>GET /variables</code> (mandar la clave <code>v_…</code>)</td></tr>
     <tr><td><code>molde-repetido</code></td><td>Una variable por prenda en cada diseño</td></tr>
     <tr><td><code>tela-desconocida</code> · <code>tela-no-usable</code> · <code>tela-no-permitida</code></td><td><code>GET /telas</code> (<code>usable</code>) y las <code>telas</code> del molde</td></tr>
+    <tr><td><code>medida-falta</code> · <code>medida-invalida</code> · <code>tela-no-entra</code></td><td>Prenda <b>a medida</b> (<code>a_medida</code> en <code>GET /variables</code>): <code>medida: {ancho_m, alto_m}</code> en metros, y que entre en el ancho de la tela</td></tr>
     <tr><td><code>talle-inexistente</code></td><td><code>talles[]</code> del molde</td></tr>
     <tr><td><code>opcion-inexistente</code> · <code>opcion-sin-piezas</code></td><td><code>columnas[].opciones</code> · <code>opciones_de_pieza</code></td></tr>
     <tr><td><code>columna-obligatoria-vacia</code></td><td><code>columnas[].obligatoria</code></td></tr>

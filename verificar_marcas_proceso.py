@@ -26,6 +26,11 @@ _AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _AQUI)
 os.chdir(_AQUI)
 sys.modules.setdefault("api_usuarios", types.ModuleType("api_usuarios"))
+# La ficha lee los editables del arte con `_arte_calc`: con «El servidor no calcula» (prendido
+# siempre desde 2026-09-24) eso es un 428 para el navegador y acá no hay navegador. El contrato
+# prueba la REFERENCIA en Python, como los `verificar_navegador_*` (2026-10-06: se caía con
+# `_FaltaCalculo: arte_editables`).
+os.environ["TIZADA_SOLO_NAVEGADOR"] = "0"
 
 import motor_pedido as MP    # noqa: E402
 # 🔴 El registro de la prueba va a un temporal, y se engancha ANTES de importar `servidor`
@@ -278,7 +283,7 @@ try:
     S._orden_var = lambda reg: _TALLES
     MP.mapeo_variantes_arte = lambda arte, reg, orden: {
         "Frente": {"XS": 1, "S": 1, "M": 2, "L": 2, "XL": 3, "2XL": 3}}
-    MP.extraer_editables = lambda arte: [
+    MP.extraer_editables = lambda arte, **_k: [
         {"nombre": "escudo", "ident": "escudo", "capa": "Editable escudo", "pieza": "Frente",
          "w_cm": w, "h_cm": w, "mesa": m, "svg": None, "thumb": None}
         for m, w in ((1, 6.5), (2, 7.5), (3, 8.5))]
@@ -295,7 +300,7 @@ try:
 
     # …y con UNA SOLA mesa (default / arte por talle) → la medida del TALLE GUÍA
     MP.mapeo_variantes_arte = lambda arte, reg, orden: {}
-    MP.extraer_editables = lambda arte: [
+    MP.extraer_editables = lambda arte, **_k: [
         {"nombre": "escudo", "ident": "escudo", "capa": "Editable escudo", "pieza": "Frente",
          "w_cm": 7.5, "h_cm": 7.5, "mesa": 1, "svg": None, "thumb": None}]
     _r2 = S._procesos_ficha("pid", _prodm, "principal", "v_1", "arte.ai", talle_guia="M", reg=_REG,

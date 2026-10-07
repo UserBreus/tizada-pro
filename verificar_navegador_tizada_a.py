@@ -25,6 +25,10 @@ CONTRATO_LENTO = True
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, AQUI)
+# El servidor es la REFERENCIA: con «El servidor no calcula» (prendido siempre desde 2026-09-24) el
+# plan del camino A pide al navegador lo del arte separado y acá se caía con
+# `_FaltaCalculo: arte_personalizacion` (2026-10-06). Como los demás `verificar_navegador_*`.
+os.environ["TIZADA_SOLO_NAVEGADOR"] = "0"
 import verificar_navegador_tizada as VT       # noqa: E402  (el entorno, los dobles y las comparaciones)
 
 S, MP, fitz = VT.S, VT.MP, VT.fitz
@@ -112,12 +116,14 @@ def main():
     os.makedirs(salida_py)
     t = time.time()
     res = MP.generar_pedido_grupos(plan["grupos"], S.FUENTES, salida_py, config_nesting=plan["cfg_nesting"],
-                                   telas_cfg=plan["telas_cfg"], progreso=None, procesos=None)
+                                   telas_cfg=plan["telas_cfg"], progreso=None, procesos=None, validar=False)
     from aplanar_rip import aplanar_para_rip
     for h in res["hojas"]:
         aplanar_para_rip(os.path.join(salida_py, h["archivo"]))
         if _icc:
             S._embeber_perfil_pdf(os.path.join(salida_py, h["archivo"]), _icc, _icc_nom, _icc_n)
+    # como `generar_multi`: las validaciones sobre la hoja FINAL (aplanada y con perfil), MAPA 624
+    res["validaciones"] = MP.validar_hojas_finales(salida_py, res["hojas"], plan["cfg_nesting"], plan["telas_cfg"])
     t_py = time.time() - t
     ok(bool(res["hojas"]), f"{len(res['hojas'])} hoja(s) en {t_py:.1f} s: " + ", ".join(f"{h['archivo']} ({h['paginas']} pág, {h['consumo_cm']} cm)" for h in res["hojas"]))
     import ficha_tecnica as FT
