@@ -11,6 +11,7 @@
 // en crudas y `x0m/y0m` en coordenadas de dispositivo (`bbox_mu`, y hacia abajo), que es lo que
 // usan los placeholders y las etiquetas.
 import { pyFixed, pyG } from '../py.js'
+import { segmentosTiras } from '../molde/tiras.js'
 
 export const MM = 2.83465            // puntos por mm (molde_real.MM)
 export const CM = 28.3465            // puntos por cm (motor_pedido.CM)
@@ -70,7 +71,9 @@ export function configBorde(borde) {
   let bcAlin = bc.alineacion || 'fuera'
   if (!['fuera', 'centro', 'dentro'].includes(bcAlin)) bcAlin = 'fuera'
   const B = (bcActivo ? bcMm : 2.0) * MM
-  return { bcActivo, bcMm, bcColor, bcAlin, B }
+  // las MARCAS DE TIRAS del molde a medida viajan con el borde (`servidor._borde_de`, MAPA 639)
+  const tiras = (bc.tiras && typeof bc.tiras === 'object') ? bc.tiras : null
+  return { bcActivo, bcMm, bcColor, bcAlin, B, tiras }
 }
 
 /**
@@ -108,10 +111,30 @@ export function bloqueBorde(bc, cont, S, clip, W, H) {
   return { bordeOps, bordePost }
 }
 
-/** `_base_stream`: el orden del borde respecto del dibujo depende de la alineación. */
+/**
+ * `_ops_tiras`: el trazo de las MARCAS DE TIRAS (molde a medida, MAPA 639) sobre la página de la pieza
+ * (`W` × `H` pt = el total: contorno + la reserva del borde). `tiras` = `servidor._tiras_de` (margen en cm).
+ */
+export function opsTiras(tiras, W, H) {
+  if (!tiras || typeof tiras !== 'object') return ''
+  const mg = tiras.margen || {}
+  const m = {}
+  for (const k of ['arriba', 'abajo', 'izq', 'der']) m[k] = (Number(mg[k]) || 0) * CM
+  const segs = segmentosTiras(W, H, m, tiras.lados)
+  if (!segs.length) return ''
+  const col = colorOp((tiras.color || [0, 0, 0, 1]).slice(0, 4), 'K')
+  const w = Math.max(0.1, Number(tiras.grosor_mm) || 1.0) * MM
+  let out = `q\n${pyFixed(w, 3)} w 0 J 0 j ${col}\n`
+  for (const [x1, y1, x2, y2] of segs) out += `${pyFixed(x1, 3)} ${pyFixed(y1, 3)} m ${pyFixed(x2, 3)} ${pyFixed(y2, 3)} l\n`
+  return out + 'S\nQ\n'
+}
+
+/** `_base_stream`: el orden del borde respecto del dibujo depende de la alineación; las marcas de tiras
+ *  (molde a medida) van encima de todo, en la página entera. */
 export function componerBase(bc, cont, S, clip, W, H, arteDraw) {
   const { bordeOps, bordePost } = bloqueBorde(bc, cont, S, clip, W, H)
-  return bc.bcAlin === 'fuera' ? `${bordeOps}${arteDraw}${bordePost}` : `${arteDraw}${bordeOps}${bordePost}`
+  const base = bc.bcAlin === 'fuera' ? `${bordeOps}${arteDraw}${bordePost}` : `${arteDraw}${bordeOps}${bordePost}`
+  return base + opsTiras(bc.tiras, W + 2 * bc.B, H + 2 * bc.B)
 }
 
 // ─── el documento de UNA pieza (para la vista previa y los contratos) ────────────────────────

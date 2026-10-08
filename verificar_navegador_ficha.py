@@ -145,7 +145,18 @@ def main(orig):
                 "opciones": "Manga: corta + larga", "ejemplo": None, "piezas": piezas,
                 "fuentes": [{"campo": "nombre", "fuente": "Anton Regular", "pedida": "ClubAmerica2021-2022", "sustituida": True},
                             {"campo": "numero", "fuente": "Bungee Regular", "pedida": "Bungee Regular", "sustituida": False}],
-                "procesos": [proceso]}
+                "procesos": [proceso],
+                # MOLDE A MEDIDA (MAPA 643): la sección «MEDIDA Y TERMINACIÓN» (filas redactadas por el servidor)
+                "a_medida": {"filas": [
+                    {"etiqueta": "Medida del diseño (guía)", "valor": "300 × 150 cm"},
+                    {"etiqueta": "Total del arte (con el margen)", "valor": "306 × 156 cm"},
+                    {"etiqueta": "Margen (dobladillo)", "valor": "3 cm por lado"},
+                    {"etiqueta": "Borde de corte", "valor": "2 mm, adentro de la medida total"},
+                    {"etiqueta": "Tiras", "valor": "14 marcas en total · grosor 1,5 mm · color C0 M100 Y0 K0"},
+                    {"etiqueta": "Arriba", "valor": "5 marcas contando las 2 puntas, una cada 76,5 cm · marca de 3 cm", "sub": True},
+                    {"etiqueta": "Izquierda", "valor": "1 marca, en el medio (a 78 cm de cada punta) · marca de 3 cm", "sub": True}],
+                    "notas": ["Cada marca va del borde de la pieza hasta la guía del diseño; las de las esquinas, en diagonal.",
+                              "Las distancias se miden sobre el borde, de punta a punta."]}}
         planilla = {"columnas": columnas, "filas": filas}
         titulo, subtitulo = "Ficha técnica", "Buzo medio cierre · 17/09/2026"
 

@@ -526,12 +526,27 @@ function nombreMesaGuia(pieza, talleP, config, rango) {
   return gen
 }
 
+/** La CAJA DEL DISEÑO de una pieza de la guía, en las coordenadas de `segs` (pt, y hacia arriba):
+ *  `[x0, y0, x1, y1]`. La de siempre es `ccx/ccy · wC × hC`; en un MOLDE A MEDIDA (`dobladillo` en cm)
+ *  es el MARGEN: el rectángulo de la pieza corrido hacia adentro (decisión del usuario 2026-10-07: la
+ *  caja punteada de la guía = la línea del margen). Si el margen no deja nada, la caja de siempre. */
+export function cajaGuia(it, dobladillo) {
+  const cc = [it.ccx - it.wC / 2, it.ccy - it.hC / 2, it.ccx + it.wC / 2, it.ccy + it.hC / 2]
+  if (!dobladillo) return cc
+  const b = bboxSegs(it.segs)
+  if (!b) return cc
+  const PTCM = 72 / 2.54
+  const x0 = b[0] + (Number(dobladillo.izq) || 0) * PTCM, x1 = b[2] - (Number(dobladillo.der) || 0) * PTCM
+  const y0 = b[1] + (Number(dobladillo.abajo) || 0) * PTCM, y1 = b[3] - (Number(dobladillo.arriba) || 0) * PTCM
+  return (x1 > x0 && y1 > y0) ? [x0, y0, x1, y1] : cc
+}
+
 /**
  * `pdf_guia_medidas`, sobre la geometría que arma el servidor (`capas_data` de `_guia_capas_data`):
  * una página por talle a tamaño real, el contorno en vector, el recuadro del diseño y el nombre de
  * mesa. → bytes del PDF.
  */
-export function pdfGuiaMedidas(mupdf, capasData, { config = 'default', rango = [], titulo = 'Molde', limpio = false } = {}) {
+export function pdfGuiaMedidas(mupdf, capasData, { config = 'default', rango = [], titulo = 'Molde', limpio = false, dobladillo = null } = {}) {
   if (!capasData || !capasData.length) throw new Error('no se detectaron piezas en la plantilla')
   const MARG = 40, TOP = 90, LBLF = 16, TITF = 22
   const verde = '0.3 0.55 0.34', cyan = '0 0.55 0.7', tinta = '0.1 0.1 0.1'
@@ -567,8 +582,10 @@ export function pdfGuiaMedidas(mupdf, capasData, { config = 'default', rango = [
         }
         s += 'S Q\n'
         if (limpio) continue
-        const [rx0, ry0] = T(it.ccx - it.wC / 2, it.ccy - it.hC / 2)
-        s += `q ${cyan} RG 2 w [14 8] 0 d ${g(rx0)} ${g(ry0)} ${g(it.wC)} ${g(it.hC)} re S Q\n`
+        // la caja del diseño (en un molde a medida, el margen: `cajaGuia`)
+        const _cj = cajaGuia(it, it.dobladillo || dobladillo)
+        const [rx0, ry0] = T(_cj[0], _cj[1])
+        s += `q ${cyan} RG 2 w [14 8] 0 d ${g(rx0)} ${g(ry0)} ${g(_cj[2] - _cj[0])} ${g(_cj[3] - _cj[1])} re S Q\n`
         const nm = it.nombre ? nombreMesaGuia(it.nombre, cd.talle, config, rango) : ''
         if (nm) {
           const [cx, cy] = T(it.ccx, it.ccy)
@@ -625,7 +642,7 @@ export const normNom = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/
  * `ai_guia_medidas`: la guía como .ai nativo (capas REALES en Illustrator), sobre `capas_data`.
  * `capas` = capas del arte a crear vacías; `editables` = capas «Editable …». → bytes (latin-1).
  */
-export function aiGuiaMedidas(capasData, { config = 'default', rango = [], titulo = 'Molde', capas = null, editables = null } = {}) {
+export function aiGuiaMedidas(capasData, { config = 'default', rango = [], titulo = 'Molde', capas = null, editables = null, dobladillo = null } = {}) {
   if (!capasData || !capasData.length) throw new Error('no se detectaron piezas en la plantilla')
   const its = capasData[0].items
   const MARG = 40.0, TOP = 60.0, GAP = 34.0
@@ -651,9 +668,15 @@ export function aiGuiaMedidas(capasData, { config = 'default', rango = [], titul
   const Ti = (i, cx, cy) => [cx + placed[i][0], cy + placed[i][1]]
   const mo = ['0 0 0 1 K', '1.5 w']
   its.forEach((it, i) => { mo.push(aiPath(it.segs, (cx, cy) => Ti(i, cx, cy))); mo.push('S') })
+  // LA CAJA DEL DISEÑO (punteada): dónde va el diseño. 🔴 MOLDE A MEDIDA (2026-10-07, decisión del
+  // usuario): la caja ES EL MARGEN (dobladillo) — el rectángulo de la pieza corrido hacia adentro —, la
+  // misma línea punteada que la herramienta «Margen»; el contorno es la otra guía (tamaño completo). El
+  // arte se sigue imprimiendo hasta el borde de corte (la mesa del diseño no cambia). Por pieza
+  // (`it.dobladillo`: una guía puede juntar moldes) o para todas (`dobladillo`). Gemelo: `cajaGuia` de
+  // `pdfGuiaMedidas` y `cajaDe` del visor «Plantilla» (App.jsx).
   its.forEach((it, i) => {
-    const rx0 = it.ccx - it.wC / 2, ry0 = it.ccy - it.hC / 2
-    const a = Ti(i, rx0, ry0), b = Ti(i, rx0 + it.wC, ry0), c2 = Ti(i, rx0 + it.wC, ry0 + it.hC), d = Ti(i, rx0, ry0 + it.hC)
+    const [x0, y0, x1, y1] = cajaGuia(it, it.dobladillo || dobladillo)
+    const a = Ti(i, x0, y0), b = Ti(i, x1, y0), c2 = Ti(i, x1, y1), d = Ti(i, x0, y1)
     mo.push('0.75 0 0 0 K\n1 w\n[8 6] 0 d')
     mo.push(`${f3(a[0])} ${f3(a[1])} m\n${f3(b[0])} ${f3(b[1])} L\n${f3(c2[0])} ${f3(c2[1])} L\n${f3(d[0])} ${f3(d[1])} L\n${f3(a[0])} ${f3(a[1])} L\nS`)
     mo.push('[] 0 d')

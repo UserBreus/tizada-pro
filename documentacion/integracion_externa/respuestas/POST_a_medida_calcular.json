@@ -1,0 +1,114 @@
+{
+  "molde": "prod_20261006_125159_0de7",
+  "variable": "v_cb7fd79",
+  "pieza": "Bandera",
+  "medida_diseno_cm": {
+    "ancho": 300.0,
+    "alto": 150.0
+  },
+  "total_cm": {
+    "ancho": 306.0,
+    "alto": 156.0
+  },
+  "margen_cm": {
+    "arriba": 3.0,
+    "abajo": 3.0,
+    "izq": 3.0,
+    "der": 3.0
+  },
+  "borde_corte_mm": 2.0,
+  "gira": true,
+  "largo_maximo_cm": 2999.5,
+  "telas": [
+    {
+      "id": "44",
+      "nombre": "Bandera (1,60)",
+      "ancho_mesa_cm": 157,
+      "entra_hasta_cm": 156.7,
+      "entra": true,
+      "motivo": null
+    }
+  ],
+  "entra_en_alguna": true,
+  "tiras": {
+    "lleva": true,
+    "lados": {
+      "arriba": 5,
+      "abajo": 5,
+      "izq": 1,
+      "der": 0
+    },
+    "total_marcas": 11,
+    "grosor_mm": 1.0,
+    "color_cmyk": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "por_lado": [
+      {
+        "lado": "arriba",
+        "marcas": 5,
+        "largo_del_lado_cm": 306.0,
+        "cada_cm": 76.5,
+        "en_el_medio": false,
+        "largo_marca_cm": 3.0
+      },
+      {
+        "lado": "abajo",
+        "marcas": 5,
+        "largo_del_lado_cm": 306.0,
+        "cada_cm": 76.5,
+        "en_el_medio": false,
+        "largo_marca_cm": 3.0
+      },
+      {
+        "lado": "izq",
+        "marcas": 1,
+        "largo_del_lado_cm": 156.0,
+        "cada_cm": null,
+        "en_el_medio": true,
+        "largo_marca_cm": 3.0
+      }
+    ]
+  },
+  "ficha": [
+    {
+      "etiqueta": "Medida del diseño (guía)",
+      "valor": "300 × 150 cm"
+    },
+    {
+      "etiqueta": "Total del arte (con el margen)",
+      "valor": "306 × 156 cm"
+    },
+    {
+      "etiqueta": "Margen (dobladillo)",
+      "valor": "3 cm por lado"
+    },
+    {
+      "etiqueta": "Borde de corte",
+      "valor": "2 mm, adentro de la medida total"
+    },
+    {
+      "etiqueta": "Tiras",
+      "valor": "11 marcas en total · grosor 1 mm · color C0 M0 Y0 K100"
+    },
+    {
+      "etiqueta": "Arriba",
+      "valor": "5 marcas contando las 2 puntas, una cada 76,5 cm · marca de 3 cm",
+      "sub": true
+    },
+    {
+      "etiqueta": "Abajo",
+      "valor": "5 marcas contando las 2 puntas, una cada 76,5 cm · marca de 3 cm",
+      "sub": true
+    },
+    {
+      "etiqueta": "Izquierda",
+      "valor": "1 marca, en el medio (a 78 cm de cada punta) · marca de 3 cm",
+      "sub": true
+    }
+  ],
+  "alarmas": []
+}

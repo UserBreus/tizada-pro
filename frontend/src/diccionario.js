@@ -466,28 +466,53 @@ export const DICCIONARIO = {
   // CREAR PLANTILLA desde el paso Arte (MAPA 617): opcional, para quien no tiene la base del arte
   'arte-medida': {
     nombre: 'Medida de la pieza',
-    que: 'Este molde es a medida: se escribe el ancho y el alto en metros y el sistema arma la pieza de ese tamaño con la etiqueta, el borde y el acomodo del molde. Avisa en qué telas entra.',
+    que: 'Este molde es a medida: se escribe el ancho y el alto del DISEÑO en metros (lo de adentro del margen) y el sistema arma la pieza sumándole el margen de cada lado, con la etiqueta, el borde y el acomodo del molde. Avisa en qué telas entra y, si no entra, cuánto se pasa y cuál es lo máximo.',
     como: 'Escribí el ancho y el alto en metros.',
   },
   'arte-medida-ancho': {
     nombre: 'Ancho (m)',
-    que: 'El ancho de la pieza, en metros.',
+    que: 'El ancho del diseño (sin el margen), en metros.',
     como: 'Escribí el ancho, por ejemplo 1,50.',
   },
   'arte-medida-alto': {
     nombre: 'Alto (m)',
-    que: 'El alto de la pieza, en metros.',
+    que: 'El alto del diseño (sin el margen), en metros.',
     como: 'Escribí el alto, por ejemplo 0,90.',
   },
-  'arte-medida-armar': {
-    nombre: 'Armar a esta medida',
-    que: 'Arma el molde de este pedido con esa medida. Si la pieza no entra en ninguna tela del molde, no deja.',
-    como: 'Tocá «Armar a esta medida».',
+  'arte-medida-terminada': {
+    nombre: 'Terminada, con el margen',
+    que: 'Lo que mide la pieza de verdad: la medida del diseño más el margen de cada lado. Una bandera de 3 × 1,50 con 1 cm de margen sale de 302 × 152 cm. El borde de corte va por dentro de esa medida.',
+    como: 'Mirá la medida terminada antes de armar.',
   },
-  'arte-medida-cambiar': {
-    nombre: 'Cambiar la medida',
-    que: 'Cambia el ancho y el alto de la pieza. El arte cargado se conserva.',
-    como: 'Tocá la medida para cambiarla.',
+  'arte-medida-armar': {
+    nombre: 'Se arma sola',
+    que: 'No hay botón: el molde se arma (o cambia de medida) solo, un momento después de dejar de escribir, si la medida es válida y entra en la tela. El arte cargado se conserva.',
+    como: 'Escribí la medida y esperá un momento (o tocá Enter).',
+  },
+  'arte-tiras': {
+    nombre: 'Tiras',
+    que: 'Si esta bandera lleva tiras: marcas impresas del borde hasta la guía del diseño, una en cada esquina y las que elijas en cada lado, a distancias iguales. El visor las muestra al instante.',
+    como: 'Prendé «Lleva tiras» y elegí cuántas por lado.',
+  },
+  'arte-tiras-activo': {
+    nombre: 'Lleva tiras',
+    que: 'Prende o apaga las marcas de tiras de este pedido. Arranca como está en Ajustes del molde.',
+    como: 'Tocá el interruptor.',
+  },
+  'arte-tiras-lados': {
+    nombre: 'Tiras por lado',
+    que: 'Cuántas marcas van en cada lado de esta bandera (arriba, abajo, izquierda, derecha), contando las 2 de las puntas: con 5 van una en cada esquina y 3 en el medio, a distancias iguales. 0 = ese lado sin tiras. «Todos» pone el mismo número en los cuatro.',
+    como: 'Escribí el número en cada lado (o en «Todos»).',
+  },
+  'arte-medida-tela': {
+    nombre: 'En qué telas entra',
+    que: 'Las telas del molde en las que entra esta medida. La tela se elige como siempre, con «Asignar telas»; las que no entran no se ofrecen.',
+    como: 'Elegí la tela con «Asignar telas».',
+  },
+  'arte-medida-visor': {
+    nombre: 'Vista de la medida',
+    que: 'Muestra en vivo, a escala, la tela con su ancho, el total del arte (la medida más el margen) y, punteada, la guía del diseño (la medida que escribiste). Si la pieza no entra, sale en rojo pasándose de la tela.',
+    como: 'Mirá cómo queda la pieza en la tela mientras escribís la medida.',
   },
   'arte-dobladillo': {
     nombre: 'Línea punteada',
@@ -1335,6 +1360,46 @@ export const DICCIONARIO = {
     que: 'Hasta dónde puede llegar cada texto (texto, número…): el margen que queda libre contra el borde de la pieza. Si un texto largo no entra, se achica proporcional.',
     como: 'Entrá a «Texto y número».',
   },
+  'ajuste-tiras': {
+    nombre: 'Marcas de tiras',
+    que: 'Sólo en un molde a medida: marcas impresas para coser las tiras, del borde de la pieza hasta la guía del diseño. Se eligen cuántas van en los lados verticales y en los horizontales; además va una en cada esquina.',
+    como: 'Entrá a «Marcas de tiras».',
+  },
+  'tiras-panel': {
+    nombre: 'Marcas de tiras',
+    que: 'La configuración de las marcas de tiras de este molde a medida: si lleva, cuántas por lado, el grosor y el color.',
+    como: 'Elegí las cantidades y el color.',
+  },
+  'tiras-activo': {
+    nombre: 'Lleva marcas de tiras',
+    que: 'Prende o apaga las marcas de tiras de este molde.',
+    como: 'Tocá el interruptor.',
+  },
+  'tiras-lados': {
+    nombre: 'Tiras por lado',
+    que: 'Cuántas marcas van en cada lado (arriba, abajo, izquierda, derecha), contando las 2 de las puntas: en uno solo, en varios, en todos o en ninguno (0). La de la esquina va en diagonal del vértice de la pieza al de la guía.',
+    como: 'Escribí el número en cada lado (o en «Todos»).',
+  },
+  'tiras-grosor': {
+    nombre: 'Grosor (mm)',
+    que: 'El grosor de la línea de cada marca, en milímetros.',
+    como: 'Escribí el grosor.',
+  },
+  'tiras-color': {
+    nombre: 'Color de las marcas',
+    que: 'El color CMYK con que se imprimen las marcas. La muestra es aproximada; el valor CMYK es el exacto que va a la tizada.',
+    como: 'Escribí los porcentajes C, M, Y y K.',
+  },
+  'tiras-guardar': {
+    nombre: 'Guardar marcas',
+    que: 'Guarda las marcas de tiras de este molde. No hace falta rehacer el molde: las dibuja el motor sobre la pieza.',
+    como: 'Tocá «Guardar marcas».',
+  },
+  'tiras-visor': {
+    nombre: 'Marcas de tiras',
+    que: 'Las marcas como salen impresas: una línea del borde hasta la guía del diseño, una en cada esquina y las de cada lado a distancias iguales.',
+    como: 'Mirá dónde caen las marcas.',
+  },
   'ajuste-margen': {
     nombre: 'Margen',
     que: 'Sólo en un molde a medida: el dobladillo, la franja del borde hacia adentro que se dobla al coser (igual en todos los bordes o uno por borde). El texto y el número nunca pasan de ahí.',
@@ -1531,6 +1596,11 @@ export const DICCIONARIO = {
     nombre: 'Borde de corte',
     que: 'La línea que se imprime alrededor de cada pieza para guiar el corte. Se imprime: por eso tiene color y grosor propios.',
     como: 'Prendé o apagá el borde de corte.',
+  },
+  'borde-a-medida': {
+    nombre: 'Borde adentro de la medida',
+    que: 'En un molde a medida el borde de corte va adentro de la medida escrita: si el pedido dice 3,00 × 1,57, impresa mide exacto 3,00 × 1,57 con el borde incluido. Al guardar el borde se rehace el molde.',
+    como: 'Elegí el tamaño del borde y tocá «Guardar borde».',
   },
   'borde-color': {
     nombre: 'Color del borde',

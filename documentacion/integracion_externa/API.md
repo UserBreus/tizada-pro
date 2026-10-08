@@ -62,12 +62,31 @@ un conjunto de piezas de una prenda. Esta lista trae las variables de las prenda
 
 - Guardar la **`clave`**: es lo que va en el pedido.
 - Dos variables con distinta `planilla` no se combinan en un mismo pedido.
-- **Prenda A MEDIDA** (banderas, banners): trae `a_medida: {pieza, margen_cm: {arriba, abajo, izq, der},
-  pide}`. Es un rectángulo de una sola pieza: el pedido (y la plantilla) tienen que mandar su **medida**
-  en metros (`medida: {"ancho_m": 1.5, "alto_m": 0.9}`), no lleva talle, y TIZADA arma la pieza de ese
-  tamaño. El margen es el dobladillo: en la plantilla del diseñador sale como línea punteada (no se
-  imprime; el diseño llega hasta el borde). Si la pieza no entra en la tela elegida (ancho imprimible o
-  largo máximo de la mesa) la alarma es `tela-no-entra`.
+- **Prenda A MEDIDA** (banderas, banners): un rectángulo de una sola pieza, sin talles. Trae el bloque
+  `a_medida` con TODO lo que hace falta para pedirla completa:
+
+  ```json
+  "a_medida": {
+    "pieza": "Bandera",
+    "pide": "medida: {ancho_m, alto_m} = la del DISEÑO en metros (obligatoria) · tiras: {lleva, lados} (opcional)",
+    "medida_minima_m": 0.05, "medida_maxima_m": 50,
+    "medida_de_muestra_m": { "ancho_m": 1, "alto_m": 1 },
+    "margen_cm": { "arriba": 3, "abajo": 3, "izq": 3, "der": 3 },
+    "borde_corte_mm": 2,
+    "total": "total = medida del diseño + el margen de cada lado (el borde de corte va ADENTRO del total)",
+    "gira": true, "largo_maximo_cm": 2999.5,
+    "telas": [ { "id": "44", "nombre": "Bandera (1,60)", "ancho_mesa_cm": 157, "entra_hasta_cm": 156.7 } ],
+    "regla_entra": "entra si el lado del TOTAL que va atravesado ≤ entra_hasta_cm …",
+    "tiras": { "lleva_por_defecto": false, "lados_por_defecto": { "arriba": 0, "abajo": 0, "izq": 0, "der": 0 },
+               "grosor_mm": 1, "color_cmyk": [0, 0, 0, 1], "maximo_por_lado": 50, "regla": "…" } }
+  ```
+
+  El pedido manda la **medida del diseño** (`medida: {"ancho_m": 3, "alto_m": 1.5}`) y, si quiere,
+  las **tiras** (`tiras: {"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 1, "der": 0}}`; cada
+  número cuenta las 2 puntas). TIZADA le suma el margen (3,00 × 1,50 con 3 cm → **3,06 × 1,56**), el
+  borde de corte va adentro, y las marcas de las tiras salen impresas del color y grosor del molde. La
+  ficha técnica trae «MEDIDA Y TERMINACIÓN». Si el total no entra en la tela: `tela-no-entra` (con
+  cuánto se pasa y lo máximo). Para saberlo ANTES de mandar: `POST /a_medida/calcular`.
 - `version` cambia cuando cambia el catálogo: conviene guardar y refrescar sólo entonces.
 
 ### `GET /variables/{clave}/foto` — la silueta de sus piezas
@@ -137,6 +156,32 @@ OV-2026-00123.zip
 - `pedido.json` en la raíz del zip. Los demás archivos, en las rutas que `pedido.json` nombra.
 - Límites: **600 MB** y **400 archivos** por paquete.
 - Esquema JSON del pedido: [`esquemas/pedido.schema.json`](esquemas/pedido.schema.json).
+
+### `POST /a_medida/calcular` — molde a medida: las cuentas antes de mandar
+
+Con la variable (o `molde`), la medida del diseño y, si las tiene, la `tela` y las `tiras`, TIZADA
+contesta lo mismo que su pantalla. No guarda nada.
+
+```json
+POST { "variable": "v_cb7fd79", "ancho_m": 3, "alto_m": 1.5, "tela": "44",
+       "tiras": { "arriba": 5, "abajo": 5, "izq": 1 } }
+200 { "medida_diseno_cm": { "ancho": 300, "alto": 150 }, "total_cm": { "ancho": 306, "alto": 156 },
+      "margen_cm": { … }, "borde_corte_mm": 2, "gira": true, "largo_maximo_cm": 2999.5,
+      "telas": [ { "id": "44", "nombre": "Bandera (1,60)", "ancho_mesa_cm": 157, "entra_hasta_cm": 156.7,
+                   "entra": true, "motivo": null } ],
+      "entra_en_alguna": true,
+      "tiras": { "lleva": true, "lados": { "arriba": 5, "abajo": 5, "izq": 1, "der": 0 }, "total_marcas": 11,
+                 "grosor_mm": 1, "color_cmyk": [0, 0, 0, 1],
+                 "por_lado": [ { "lado": "arriba", "marcas": 5, "largo_del_lado_cm": 306, "cada_cm": 76.5,
+                                 "en_el_medio": false, "largo_marca_cm": 3 }, … ] },
+      "ficha": [ { "etiqueta": "Total del arte (con el margen)", "valor": "306 × 156 cm" }, … ],
+      "alarmas": [] }
+422 { "alarmas": [ { "codigo": "medida-invalida", … } ] }      (o tiras-invalidas / tiras-sin-margen)
+404 { "error": "esa variable o molde no existe" } · 422 { "error": "ese molde no es a medida" }
+```
+
+Si una tela no entra, su `motivo` dice cuánto se pasa y lo máximo («… se pasa 6,3 cm (ni girándola).
+En esta tela, lo máximo es 1,50 m de alto (sin contar el margen).»).
 
 ### `POST /pedidos/validar` — revisar sin mandar
 

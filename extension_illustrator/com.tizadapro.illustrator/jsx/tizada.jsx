@@ -29,7 +29,21 @@ function tizadaArmar(plan) {
         // que nace un documento queda en el centro del lienzo de Illustrator, así lo armado queda
         // lejos de los bordes del lienzo (pegado al borde, Illustrator falla con «PARM»).
         // (en Illustrator la «y» crece hacia arriba: arriba > abajo)
-        var doc = app.documents.add(DocumentColorSpace.CMYK, 1000, 1000);
+        // EN CENTÍMETROS (2026-10-07, pedido del usuario: «me crea los archivos en puntos, debe ser en
+        // centímetros»). `documents.add` no deja elegir unidades (nacía en puntos) y `doc.rulerUnits` es
+        // de sólo lectura: se crea con un PRESET en centímetros. Las cuentas del script siguen en puntos
+        // (el scripting de Illustrator siempre trabaja en puntos): sólo cambian las reglas y medidas que
+        // ve la persona. Si el preset falla, el documento de siempre.
+        var doc = null;
+        try {
+            var pre = new DocumentPreset();
+            pre.colorMode = DocumentColorSpace.CMYK;
+            pre.units = RulerUnits.Centimeters;
+            pre.width = 1000;
+            pre.height = 1000;
+            doc = app.documents.addDocument('Print', pre, false);
+        } catch (eu) { doc = null; }
+        if (!doc) doc = app.documents.add(DocumentColorSpace.CMYK, 1000, 1000);
         var r0 = doc.artboards[0].artboardRect;
         var L = (r0[0] + r0[2]) / 2 - plan.ancho / 2;
         var T = (r0[1] + r0[3]) / 2 + plan.alto / 2;
@@ -98,11 +112,19 @@ function tizadaArmar(plan) {
                 for (i = 0; i < hechos.length; i++) { try { hechos[i].guides = true; } catch (eg) { } }
             }
         }
+        // MOLDE A MEDIDA (MAPA 623): el dobladillo (la guía de donde va el doblez). Si plan.guias es true,
+        // se convierte en GUÍA de Illustrator (así quedan las 2 guías: contorno de corte y doblez).
         for (i = 0; i < punteados.length; i++) {
             var hp = [];
             tizadaDibujarCamino(punteados[i], capas, X, Y, hp);
             for (var j = 0; j < hp.length; j++) {
-                try { hp[j].strokeDashes = punteados[i].punteado; hp[j].name = 'dobladillo'; } catch (ed) { }
+                try {
+                    hp[j].name = punteados[i].nombre || 'dobladillo';
+                    try { hp[j].strokeDashes = punteados[i].punteado; } catch (ed1) { }
+                    if (plan.guias) {
+                        try { hp[j].guides = true; } catch (eg) { }
+                    }
+                } catch (ed) { }
             }
         }
 

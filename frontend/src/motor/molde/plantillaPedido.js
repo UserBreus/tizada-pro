@@ -195,7 +195,9 @@ export function motorPlantilla({ dets, config = 'default', tallesSel = null, lis
           const k = it.pid + '|' + (x.nombre || '#' + items.length)
           if (vistos.has(k)) continue
           vistos.add(k)
-          items.push(x.nombre && prefijo ? { ...x, nombre: prefijo + x.nombre } : x)
+          // MOLDE A MEDIDA: cada pieza lleva el margen (dobladillo) de SU molde: la guía .ai lo dibuja
+          const x2 = it.dobladillo ? { ...x, dobladillo: it.dobladillo } : x
+          items.push(x2.nombre && prefijo ? { ...x2, nombre: prefijo + x2.nombre } : x2)
         }
       }
       if (!d0 || !items.length) continue

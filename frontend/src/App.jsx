@@ -6,7 +6,7 @@ import { identificar as identificarControl, etiquetaDe as etiquetaDeControl, seP
 // La app puede colgar de una sub-ruta (…/Tizadapro/): la pantalla admin no es '/admin' pelado.
 import { esRutaAdmin, rutaApi } from './base.js';
 import { navegadorPreparaMoldes, prepararEnDosTiempos, subirPaginas, prepararMoldeAMedida } from './motor/prepararMolde.js';
-import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, cabeEnTela, talleDeMedida } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
+import { leerMetros, problemaMedida, metrosTexto, margenPorBorde, margenSobreContorno, RESERVA_DEFECTO_MM, cabeEnTela, talleDeMedida, medidaPieza, segmentosTiras } from './motor/molde/aMedida.js';   // MOLDE A MEDIDA (MAPA 623)
 import { guardarCache, leerCache, claveDe, soltarMoldesEnPc, soltarPaginasEnPc } from './motor/cache.js';   // el molde con diseño en la PC (MAPA 585)
 import { navegadorDibujaVista, abrirVista, cerrarVistas, precalentarVista, precalentarTodo, progresoVistas, calidadFoto } from './motor/vista/vista.js';
 import { previasCaminoB, previasCaminoA, cerrarMotores, validarMapeoEnNavegador, editablesEnNavegador } from './motor/arte/previa.js';
@@ -281,6 +281,14 @@ function Icon({ name, className = "", style }) {
       <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="4.5" width="18" height="15" rx="1.6" />
         <rect x="6.8" y="8.3" width="10.4" height="7.4" rx="0.8" strokeDasharray="2.4 2.4" />
+      </svg>
+    ),
+    // MARCAS DE TIRAS (molde a medida): el borde, la guía punteada y las marcas que van de uno a la otra.
+    tiras: (
+      <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4.5" width="18" height="15" rx="1.2" />
+        <rect x="7" y="8.5" width="10" height="7" strokeDasharray="2 2" strokeWidth="1.3" />
+        <path d="M3 4.5l4 4M21 4.5l-4 4M3 19.5l4-4M21 19.5l-4-4M12 4.5v4M12 19.5v-4M3 12h4M21 12h-4" />
       </svg>
     ),
     // NOMBRE Y NÚMERO: la letra entre dos topes (hasta dónde puede llegar el texto).
@@ -4393,7 +4401,7 @@ function _segmentoEdge(pathD, t, ccx, ccy, offIn, rx, ry) {
   } catch { return null; }
 }
 
-function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
+function MapeadorArteVisual({ margenAMedida = null, telaAMedida = null, tirasAMedida = null, visorReemplazo = null, canvasLayout, mapeoData,mapeoValores, setMapeoValores, onMapeoChange, selectedPiezaMapeo, setSelectedPiezaMapeo, etqNombres, bordeConfig, etiquetaConfig, talleRef, previewPiezas, onCerrar, panelIzquierdo, onCargarDiseno, titulo, acciones, objetosEditables, editablesRaw, vf, telaModo, telaColorPieza, telaSelSet, onTelaClick, onTelaVacio, panelTela, panelFijo, etqPickModo, onPickEtiqueta,
                                   nombrarModo, selNombrarB, onPiezaNombrarClick, onRubberNombrar, aviso, cargando,
                                   piezasFuera, onPiezaFuera, onPiezasFueraTodas, piezasBloqueo }) {
   // RECUADRO DE SELECCIÓN (modo nombrar, camino B): arrastrar sobre el fondo elige todas las
@@ -4637,6 +4645,7 @@ function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mape
               width: Math.abs(rubber.x1 - rubber.x0), height: Math.abs(rubber.y1 - rubber.y0),
               border: '1px dashed var(--accent)', background: 'rgba(0,216,245,0.10)' }} />;
           })()}
+          {visorReemplazo && <div style={{ position: 'absolute', inset: 0, zIndex: 4, background: '#0c0c0e' }}>{visorReemplazo}</div>}
           {canvasLayout?.layout?.length ? (() => {
             // VER VARIANTE: si viene `vf`, se muestran SOLO sus piezas y se ACOMODAN (translate por `vf.pos`,
             // el mismo orden guardado en Variables). `px/py` quedan en coords YA acomodadas (para labels y encuadre);
@@ -4681,7 +4690,16 @@ function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mape
               }
               labels.push({ p, nombre: p.nombre, ...chosen });
             }
-            const all = [...ocupados, ...labels.map(l => l.r)];
+            // MOLDE A MEDIDA (MAPA 634): la TELA alrededor de la pieza, igual que mientras se escribe la
+            // medida (`telaAlrededor`). La caja es la del TOTAL del arte: el contorno + la reserva del borde.
+            const _tm = (telaAMedida && piezas.length) ? (() => {
+              const p = piezas[0];
+              const k = p.w_cm ? p.pw / (p.w_cm * 10) : 1;
+              const rr = (Number(telaAMedida.reservaCm) || 0) * 10 * k;
+              return telaAlrededor({ x0: p.px - rr, y0: p.py - rr, w: p.pw + 2 * rr, h: p.ph + 2 * rr, k, telaCm: telaAMedida.anchoCm,
+                mgCm: telaAMedida.mgCm, girada: telaAMedida.girada, entra: telaAMedida.entra, totalCm: telaAMedida.totalCm, disenoCm: telaAMedida.disenoCm });
+            })() : null;
+            const all = [...ocupados, ...labels.map(l => l.r), ...(_tm ? [_tm.rect] : [])];
             const PAD = 6;
             // ⚠️ `Math.min()` SIN argumentos devuelve Infinity (y `Math.max()`, -Infinity). Con el
             // molde todavía sin piezas dibujadas —arte recién elegido, variable que aún no resuelve—
@@ -4718,6 +4736,7 @@ function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mape
                     Preparando las piezas de esta prenda…
                   </text>
                 )}
+                {_tm && _tm.fondo}
                 {piezasZ.map((p) => {
                   const pzName = p.nombre;
                   // En modo NOMBRAR, «seleccionada» es la del gesto de nombrar (varias a la vez);
@@ -4835,6 +4854,12 @@ function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mape
                       {/* MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) como LÍNEA PUNTEADA hacia adentro
                           del borde de corte. Es sólo una guía de pantalla: el motor no la dibuja y el
                           diseño llega igual hasta el borde (pedido del usuario 2026-10-06). */}
+                      {/* MARCAS DE TIRAS (MAPA 639): el render del motor (`pv`) ya las trae; sin él, las mismas acá */}
+                      {tirasAMedida && !pv && !telaModo && (() => {
+                        const k = p.w_cm ? p.pw / (p.w_cm * 10) : 1;
+                        const rv = (Number(tirasAMedida.reservaCm) || 0) * 10 * k;
+                        return <MarcasTirasSVG tiras={tirasAMedida} x0={ox - rv} y0={oy - rv} w={p.pw + 2 * rv} h={p.ph + 2 * rv} k={k} />;
+                      })()}
                       {margenAMedida && !telaModo && (() => {
                         const kx = p.w_cm ? p.pw / (p.w_cm * 10) : 1, ky = p.h_cm ? p.ph / (p.h_cm * 10) : 1;
                         const m = margenAMedida;
@@ -4918,6 +4943,7 @@ function MapeadorArteVisual({ margenAMedida = null, canvasLayout, mapeoData,mape
                     </g>
                   );
                 })}
+                {_tm && _tm.encima}
                 {labels.map((l) => {
                   const pzName = l.nombre;
                   // En modo NOMBRAR (camino B) el cartel sigue a la selección de nombrar y no
@@ -5279,8 +5305,10 @@ async function esperarMoldeLeido(resp, onProgreso) {
 // (`motor/molde/aMedida.js`) y entra por el alta de siempre del camino A: el servidor sólo lo guarda
 // y crea la variable (`_a_medida_variable`). Lo usan Configuración (la plantilla y su medida de
 // muestra) y el pedido (la copia a la medida que se escribe en el paso Arte).
-async function subirMoldeAMedida(pid, { anchoM, altoM, pieza }, avisar = () => {}) {
-  const prep = await prepararMoldeAMedida({ anchoM, altoM, pieza, onA: (a) => avisar(a.texto) });
+async function subirMoldeAMedida(pid, { anchoM, altoM, pieza, reservaMm, margen }, avisar = () => {}) {
+  // el borde de corte va ADENTRO de la medida (ver `RESERVA_DEFECTO_MM`): el rectángulo, esa reserva más chico
+  // la medida es la del DISEÑO: la pieza se arma con el margen alrededor (`medidaPieza`)
+  const prep = await prepararMoldeAMedida({ anchoM, altoM, pieza, reservaMm: reservaMm ?? RESERVA_DEFECTO_MM, margen: margen || null, onA: (a) => avisar(a.texto) });
   if (!prep || !prep.zipA) throw new Error('Esta computadora no pudo armar el molde.');
   const fd = new FormData();
   fd.append('pid', pid);
@@ -5341,65 +5369,189 @@ function CamposMargen({ valor, onChange }) {
     </div>
   );
 }
-/** MOLDE A MEDIDA (MAPA 623) en el paso Arte: la medida de la pieza en METROS. Dice en vivo en qué
- *  telas del molde entra (regla del usuario: si no entra, esa tela no se puede elegir). `am` = lo que
- *  publica el servidor del molde (medida, borde de corte y acomodo); `telas` = las del molde. */
-function TarjetaMedida({ am, anchoTxt, altoTxt, onAncho, onAlto, onArmar, telas, ocupado, esCopia, onCancelar }) {
+/** LA TELA ALREDEDOR DE LA PIEZA A MEDIDA (MAPA 634): lo que dibujan igual el visor del paso Arte (con el
+ *  molde armado, encima del arte real) y `VisorMedida` (mientras se escribe la medida). Recibe la caja
+ *  del TOTAL del arte en coordenadas del dibujo (`x0,y0,w,h`), cuántas unidades del dibujo es un mm
+ *  (`k`) y la tela; devuelve `{rect, fondo, encima}`: `rect` = lo que tiene que entrar en el encuadre,
+ *  `fondo` va DEBAJO de la pieza (la franja de la tela) y `encima` ARRIBA (bordes de la tela, contorno
+ *  del total y el rótulo con las tres medidas). `girada`: el ancho de la tela corre en VERTICAL. */
+function telaAlrededor({ x0, y0, w, h, k, telaCm, mgCm = 0, girada, entra = true, totalCm, disenoCm }) {
+  const T = Number(telaCm) * 10 * k, mg = (Number(mgCm) || 0) * 10 * k;
+  const t1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
+  const largo = girada ? w : h;
+  // la franja: desde un poco antes de la pieza hasta un poco después, a lo largo de la tela
+  const ext = largo * 0.08;
+  const a = (girada ? y0 : x0) - mg, b = a + T;
+  const desde = (girada ? x0 : y0) - ext, hasta = (girada ? x0 + w : y0 + h) + ext;
+  const fs = Math.max(T, girada ? h : w) * 0.045;
+  const col = entra ? 'rgba(255,255,255,0.6)' : '#fde047';
+  const linea = (v) => girada
+    ? <line x1={desde} y1={v} x2={hasta} y2={v} stroke={col} strokeWidth={entra ? 1.5 : 2.5} vectorEffect="non-scaling-stroke" />
+    : <line x1={v} y1={desde} x2={v} y2={hasta} stroke={col} strokeWidth={entra ? 1.5 : 2.5} vectorEffect="non-scaling-stroke" />;
+  const lo = Math.min(a, girada ? y0 : x0), hi = Math.max(b, girada ? y0 + h : x0 + w);
+  // rótulo de la tela en la punta de la franja; las tres medidas abajo de todo
+  const rotT = girada
+    ? { x: hasta - fs * 0.4, y: (a + b) / 2, rot: -90 }
+    : { x: (a + b) / 2, y: hasta - fs * 0.4, rot: 0 };
+  const capY = (girada ? hi : hasta) + fs * 1.6, capX = girada ? (desde + hasta) / 2 : (lo + hi) / 2;
+  const rect = girada
+    ? { x: desde, y: lo, w: hasta - desde, h: capY + fs * 0.6 - lo }
+    : { x: lo, y: desde, w: hi - lo, h: capY + fs * 0.6 - desde };
+  const fondo = girada
+    ? <rect x={desde} y={a} width={hasta - desde} height={T} fill="rgba(255,255,255,0.05)" pointerEvents="none" />
+    : <rect x={a} y={desde} width={T} height={hasta - desde} fill="rgba(255,255,255,0.05)" pointerEvents="none" />;
+  const encima = (
+    <g pointerEvents="none" data-tour="arte-medida-visor">
+      {linea(a)}{linea(b)}
+      <rect x={x0} y={y0} width={w} height={h} fill="none" stroke={entra ? '#22d3ee' : '#f87171'} strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      <text x={rotT.x} y={rotT.y} fill={col} fontSize={fs} textAnchor="middle" fontFamily="sans-serif"
+        transform={rotT.rot ? `rotate(${rotT.rot} ${rotT.x} ${rotT.y})` : undefined}>tela {t1(Number(telaCm))} cm</text>
+      <text x={capX} y={capY} fontSize={fs} textAnchor="middle" fontFamily="sans-serif" fontWeight="700">
+        <tspan fill={entra ? '#22d3ee' : '#f87171'}>total del arte {t1(totalCm.anchoCm)} × {t1(totalCm.altoCm)} cm</tspan>
+        <tspan fill="rgba(255,255,255,0.4)">{'   ·   '}</tspan>
+        <tspan fill="#fff">guía del diseño {t1(disenoCm.w)} × {t1(disenoCm.h)} cm</tspan>
+      </text>
+    </g>
+  );
+  return { rect, fondo, encima };
+}
+
+/** El VISOR DE LA MEDIDA mientras se escribe (pedido del usuario 2026-10-07): va EN EL LUGAR del visor del
+ *  paso Arte (no aparte) y dibuja lo mismo que ése con el molde armado (`telaAlrededor`): la tela, el TOTAL
+ *  del arte (medida + margen, `medidaPieza`) como lo pone el armado (girado si así entra) y adentro la
+ *  GUÍA DEL DISEÑO punteada (la medida escrita). Si no entra, en rojo pasándose de la tela. En cm reales. */
+function VisorMedida({ anchoM, altoM, margen, tela, r, gira, margenNestingMm = 0, tiras = null }) {
+  const m = margenPorBorde(margen);
+  const total = medidaPieza(anchoM, altoM, margen);
+  const { anchoCm: w, altoCm: h } = total;
+  // así la pone el armado: girada si entra girada; si no entra, del lado que se midió (con giro, el corto)
+  const girada = r ? (r.cabe ? !!r.girada : (gira && h < w)) : (gira && h < w);
+  const entra = !r || r.cabe;
+  // el dibujo va con la bandera DERECHA (como el arte): con giro, la tela corre en horizontal
+  const k = 0.1;                       // 1 mm = 0,1 unidades (el dibujo en cm)
+  const T = tela ? Number(tela.ancho_cm) || 0 : 0;
+  const ta = T ? telaAlrededor({ x0: 0, y0: 0, w, h, k, telaCm: T, mgCm: (Number(margenNestingMm) || 0) / 10, girada,
+                                 entra, totalCm: total, disenoCm: { w: anchoM * 100, h: altoM * 100 } }) : null;
+  const caja = ta ? ta.rect : { x: 0, y: 0, w, h };
+  const pad = Math.max(caja.w, caja.h) * 0.04;
+  const vb = `${caja.x - pad} ${caja.y - pad} ${caja.w + 2 * pad} ${caja.h + 2 * pad}`;
+  return (
+    <svg viewBox={vb} preserveAspectRatio="xMidYMid meet" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}>
+      {ta && ta.fondo}
+      <rect x={0} y={0} width={w} height={h} fill={entra ? 'rgba(34,211,238,0.10)' : 'rgba(248,113,113,0.14)'} />
+      {/* la guía del diseño: la misma línea punteada blanca que el visor dibuja sobre el arte */}
+      <rect x={m.izq} y={m.arriba} width={anchoM * 100} height={altoM * 100} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={3} vectorEffect="non-scaling-stroke" />
+      <rect x={m.izq} y={m.arriba} width={anchoM * 100} height={altoM * 100} fill="none" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+      <MarcasTirasSVG tiras={tiras} x0={0} y0={0} w={w} h={h} k={0.1} />
+      {ta ? ta.encima : <rect x={0} y={0} width={w} height={h} fill="none" stroke="#22d3ee" strokeWidth={2} vectorEffect="non-scaling-stroke" />}
+    </svg>
+  );
+}
+
+/** El estado de la medida que se está escribiendo (MAPA 634): lo usan el panel (`TarjetaMedida`) y el
+ *  visor del paso Arte, así los dos dicen lo mismo. `am` = lo que publica el servidor del molde a medida;
+ *  `telas` = las del molde; `telaId` = la tela elegida; `esCopia` = el molde del pedido ya armado. */
+function estadoMedida({ am, anchoTxt, altoTxt, telas, telaId, esCopia }) {
   const a = leerMetros(anchoTxt), h = leerMetros(altoTxt);
   const prob = problemaMedida(a, h);
   const n = (am && am.nesting) || {};
-  const conTela = (telas || []).map(t => ({ t, r: prob ? null : cabeEnTela({ anchoM: a, altoM: h, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
-    largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion }) }));
-  const entra = conTela.filter(x => x.r && x.r.cabe), noEntra = conTela.filter(x => x.r && !x.r.cabe);
-  const sinTelas = !prob && (telas || []).length > 0 && entra.length === 0;
+  const gira = n.rotacion === '90' || n.rotacion === 'libre';
+  const cabe = (t) => cabeEnTela({ anchoM: a, altoM: h, margen: am.margen, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
+    largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm });
+  const conTela = (telas || []).map(t => ({ t, r: prob ? null : cabe(t) }));
+  const tela = (telas || []).find(t => String(t.id) === String(telaId)) || null;
+  // la medida ya armada (copia del pedido): «Aplicar» sólo si cambió
+  const igualArmada = !!esCopia && !prob && Math.abs(a - Number(am.ancho_m)) < 1e-9 && Math.abs(h - Number(am.alto_m)) < 1e-9;
+  const rTela = tela && !prob ? cabe(tela) : null;
+  const entra = conTela.filter(x => x.r && x.r.cabe), hayTelas = (telas || []).length > 0;
+  // SE ARMA SOLA (pedido del usuario 2026-10-07: «no lo separes en 2»): con una medida válida que entra
+  // en la tela elegida (o, sin tela todavía, en alguna del molde) y distinta de la ya armada
+  const listaParaArmar = !prob && !igualArmada && (tela ? !!(rTela && rTela.cabe) : (!hayTelas || entra.length > 0));
+  return { a, h, prob, n, gira, conTela, tela, rTela, igualArmada, entra, hayTelas, listaParaArmar,
+           pz: prob ? null : medidaPieza(a, h, am && am.margen) };
+}
+
+/** MOLDE A MEDIDA (MAPA 623, 634) en el paso Arte: el PANEL de la izquierda del visor (en lugar de los
+ *  talles) con la medida del DISEÑO en metros, la TELA y la leyenda de lo que se ve en el visor (tela,
+ *  total del arte, guía del diseño). Dice en vivo en qué telas entra (regla del usuario: si no entra, esa
+ *  tela no se puede elegir) y, si no, cuánto se pasa y lo máximo. El dibujo NO va acá: es el visor del
+ *  paso (pedido del usuario 2026-10-07: «usá la misma visual, no lo separes en 2 espacios»). */
+function TarjetaMedida({ am, est, anchoTxt, altoTxt, onAncho, onAlto, onArmar, ocupado, esCopia, tiras = null, onTiras = null }) {
+  const { a, h, prob, tela, rTela, entra, hayTelas, pz, listaParaArmar } = est;
+  const sinTelas = !prob && hayTelas && entra.length === 0;
+  const puedeArmar = listaParaArmar && !ocupado;
   const m = margenPorBorde(am && am.margen);
   const igual = m.arriba === m.abajo && m.abajo === m.izq && m.izq === m.der;
+  const t1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
   const inp = (v, set) => (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1 }}>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
       <input type="text" inputMode="decimal" value={v} onChange={(e) => set(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !prob && !sinTelas && !ocupado) onArmar(a, h); }}
-        style={{ width: '100%', padding: '10px 12px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
-          color: '#fff', fontSize: 18, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' }} />
-      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>m</span>
+        onKeyDown={(e) => { if (e.key === 'Enter' && puedeArmar) onArmar(a, h); }}
+        style={{ width: '100%', minWidth: 0, padding: '7px 6px', borderRadius: 9, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
+          color: '#fff', fontSize: 15, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' }} />
+      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>m</span>
     </span>
   );
+  const sw = (c, dash) => <span style={{ width: 14, height: 9, flexShrink: 0, borderRadius: 2, border: `2px ${dash ? 'dashed' : 'solid'} ${c}` }} />;
   return (
-    <div className="card" data-tour="arte-medida" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 560 }}>
+    <div data-tour="arte-medida" style={{ width: 270, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', padding: 12,
+      display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ flex: 1, fontSize: 15, fontWeight: 800 }}>{esCopia ? 'Cambiar la medida' : 'Medida de la pieza'} · {am && am.pieza}</span>
-        <Ayuda ancho={320}>Este molde es <b>a medida</b>: escribí el <b>ancho</b> y el <b>alto</b> en metros y el sistema arma la pieza de ese
-          tamaño, con la etiqueta, el borde de corte y el acomodo del molde. En el visor, la <b>línea punteada</b> marca el margen
-          (dobladillo): lo de afuera se dobla al coser. El diseño llega igual hasta el borde de corte.</Ayuda>
+        <span style={{ flex: 1, fontSize: 12.5, fontWeight: 800 }}>Medida del diseño · {am && am.pieza}</span>
+        <Ayuda ancho={320}>Este molde es <b>a medida</b>: escribí el <b>ancho</b> y el <b>alto del diseño</b> en metros (lo que queda a la
+          vista, adentro de la línea punteada) y elegí la <b>tela</b>. La pieza se arma con el <b>margen</b> (dobladillo) alrededor: con 1 cm
+          por lado, una de 3,00 × 1,50 sale de 3,02 × 1,52. El visor muestra en vivo la tela, el total del arte y la guía del diseño; si no
+          entra, dice cuánto se pasa y lo máximo que se puede pedir en esa tela.</Ayuda>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)', width: 44 }}>Ancho</span>
-        <span data-tour="arte-medida-ancho" style={{ display: 'flex', flex: 1 }}>{inp(anchoTxt, onAncho)}</span>
-        <span style={{ color: 'var(--text-muted)', fontSize: 18 }}>×</span>
-        <span style={{ fontSize: 12, color: 'var(--text-secondary)', width: 34 }}>Alto</span>
-        <span data-tour="arte-medida-alto" style={{ display: 'flex', flex: 1 }}>{inp(altoTxt, onAlto)}</span>
-      </div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-        Margen (dobladillo): {igual ? `${String(m.arriba).replace('.', ',')} cm en todos los bordes`
-          : `arriba ${m.arriba} · abajo ${m.abajo} · izquierda ${m.izq} · derecha ${m.der} cm`.replace(/\./g, ',')}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span data-tour="arte-medida-ancho" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Ancho del diseño">{inp(anchoTxt, onAncho)}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 16 }}>×</span>
+        <span data-tour="arte-medida-alto" style={{ display: 'flex', flex: 1, minWidth: 0 }} title="Alto del diseño">{inp(altoTxt, onAlto)}</span>
       </div>
       {prob && <div style={{ fontSize: 12, color: '#fbbf24' }}>{prob}</div>}
-      {!prob && (telas || []).length > 0 && (
-        <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-          {entra.length > 0 && <div>Entra en: <b style={{ color: '#34d399' }}>{entra.map(x => x.t.nombre).join(', ')}</b></div>}
-          {noEntra.length > 0 && (
-            <div style={{ color: '#fbbf24' }}>No entra en: {noEntra.map(x => x.t.nombre).join(', ')}
-              <span style={{ color: 'var(--text-muted)' }}> — {noEntra[0].r.motivo}</span></div>
-          )}
+      {pz && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+          {tela && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('rgba(255,255,255,0.5)')}Tela: <b style={{ color: '#fff' }}>{t1(Number(tela.ancho_cm))} cm</b> de ancho</span>}
+          <span data-tour="arte-medida-terminada" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw(rTela && !rTela.cabe ? '#f87171' : '#22d3ee')}Total del arte: <b style={{ color: '#fff' }}>{t1(pz.anchoCm)} × {t1(pz.altoCm)} cm</b></span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{sw('#f0abfc', true)}Guía del diseño: <b style={{ color: '#fff' }}>{t1(a * 100)} × {t1(h * 100)} cm</b></span>
+          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Margen: {igual ? `${t1(m.arriba)} cm por lado` : `arriba ${t1(m.arriba)} · abajo ${t1(m.abajo)} · izq. ${t1(m.izq)} · der. ${t1(m.der)} cm`}</span>
         </div>
       )}
-      {sinTelas && <div style={{ fontSize: 12.5, fontWeight: 700, color: '#f87171' }}>Con esta medida la pieza no entra en ninguna tela de este molde.</div>}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn primary" data-tour="arte-medida-armar" disabled={!!prob || sinTelas || ocupado} onClick={() => onArmar(a, h)}
-          style={{ padding: '9px 16px', fontSize: 13, fontWeight: 800 }}>
-          {esCopia ? 'Cambiar a esta medida' : 'Armar a esta medida'}
-        </button>
-        {onCancelar && <button className="btn ghost" onClick={onCancelar} style={{ padding: '9px 14px', fontSize: 12.5 }}>Cancelar</button>}
-      </div>
+      {!prob && tela && rTela && (rTela.cabe
+        ? <div style={{ fontSize: 12, fontWeight: 700, color: '#34d399' }}>✓ Entra en {tela.nombre}{rTela.girada ? ' (girada)' : ''}</div>
+        : <div style={{ fontSize: 11.5, color: '#fbbf24', lineHeight: 1.45 }}>{rTela.motivo}</div>)}
+      {!prob && !tela && hayTelas && (sinTelas
+        ? <div style={{ fontSize: 12, fontWeight: 700, color: '#f87171' }}>Con esta medida no entra en ninguna tela de este molde.</div>
+        : <div data-tour="arte-medida-tela" style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>Entra en {entra.map(x => x.t.nombre).join(', ')}.
+            {esCopia ? ' Elegí la tela con «Asignar telas», como siempre.' : ''}</div>)}
+      {/* TIRAS (MAPA 640): si este pedido lleva tiras y cuántas marcas por lado; el visor las dibuja al instante */}
+      {esCopia && tiras && onTiras && (() => {
+        const sinMg = !(margenPorBorde(am && am.margen).arriba > 0 || margenPorBorde(am && am.margen).abajo > 0
+          || margenPorBorde(am && am.margen).izq > 0 || margenPorBorde(am && am.margen).der > 0);
+        const nn = (v) => Math.max(0, Math.min(50, Math.trunc(Number(String(v).replace(',', '.')) || 0)));
+        const inpT = { width: '100%', minWidth: 0, padding: '6px 6px', borderRadius: 8, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)',
+          color: '#fff', fontSize: 14, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' };
+        return (
+          <div data-tour="arte-tiras" style={{ borderTop: '1px solid var(--border-light)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button type="button" data-tour="arte-tiras-activo" onClick={() => onTiras({ activo: !tiras.activo })}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 9px', borderRadius: 9, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', color: '#fff' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700 }}>Lleva tiras</span>
+              <span style={{ width: 34, height: 20, borderRadius: 999, background: tiras.activo ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'all .2s', flexShrink: 0 }}>
+                <span style={{ position: 'absolute', top: 2, left: tiras.activo ? 16 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'all .2s' }} />
+              </span>
+            </button>
+            {tiras.activo && (
+              <LadosTiras lados={tiras.lados} ancla="arte-tiras-lados" onChange={(lados) => onTiras({ lados })} />
+            )}
+            {tiras.activo && <div style={{ fontSize: 10.5, color: sinMg ? '#fbbf24' : 'var(--text-muted)', lineHeight: 1.4 }}>
+              {sinMg ? 'Este molde no tiene margen: sin guía no hay hasta dónde llevar la marca.'
+                : 'Color y grosor: los del molde (Ajustes › Marcas de tiras).'}</div>}
+          </div>
+        );
+      })()}
+      {/* sin botón: la medida se arma SOLA al dejar de escribir (o con Enter) — ver el efecto `amAutoRef` */}
+      {listaParaArmar && <div data-tour="arte-medida-armar" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        {ocupado ? 'Aplicando la medida… (el visor ya la muestra)' : 'Se aplica sola al dejar de escribir (o con Enter).'}</div>}
     </div>
   );
 }
@@ -5431,7 +5583,7 @@ function VariablesAMedida({ prod, pidCfg, onCambio, avisar, avisarError, procesa
         body: JSON.stringify({ id: pidCfg, ancho_m: aM, alto_m: alM, ...(cambioPieza ? { pieza: piezaOk } : {}) }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'No se pudo guardar');
-      await subirMoldeAMedida(pidCfg, { anchoM: aM, altoM: alM, pieza: piezaOk }, (t) => procesando(t));
+      await subirMoldeAMedida(pidCfg, { anchoM: aM, altoM: alM, pieza: piezaOk, reservaMm: am.reserva_mm, margen: am.margen }, (t) => procesando(t));
       avisar('Molde rehecho ✓');
       await onCambio(true);
     } catch (e) { avisarError(e.message); } finally { procesando(null); setOcupado(false); }
@@ -5479,11 +5631,19 @@ function VariablesAMedida({ prod, pidCfg, onCambio, avisar, avisarError, procesa
 /** MARGEN de un molde A MEDIDA, su propia herramienta (al lado de «Nombre y número»: el texto no
  *  puede salir de él, ver `_limite_texto_de` del servidor). Cambiarlo no rehace el archivo: el margen
  *  es sólo guía (la línea punteada) y el piso del límite del texto. */
-function MargenAMedida({ prod, pidCfg, onCambio, avisar, avisarError }) {
+function MargenAMedida({ prod, pidCfg, onMargenEnVivo, onCambio, avisar, avisarError, procesando = () => {} }) {
   const am = (prod && prod.a_medida) || {};
   const [margen, setMargen] = React.useState(() => margenAForm(am.margen));
   const [ocupado, setOcupado] = React.useState(false);
-  React.useEffect(() => { setMargen(margenAForm(am.margen)); }, [pidCfg]);   // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => {
+    const f = margenAForm(am.margen);
+    setMargen(f);
+    onMargenEnVivo?.(margenDeForm(f));
+  }, [pidCfg]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMargenChange = (nuevo) => {
+    setMargen(nuevo);
+    onMargenEnVivo?.(margenDeForm(nuevo));
+  };
   const guardarMargen = async () => {
     setOcupado(true);
     try {
@@ -5491,18 +5651,201 @@ function MargenAMedida({ prod, pidCfg, onCambio, avisar, avisarError }) {
         body: JSON.stringify({ id: pidCfg, margen: margenDeForm(margen) }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'No se pudo guardar el margen');
+      // la medida es la del DISEÑO y la pieza lleva el margen alrededor (2026-10-07): cambiar el margen
+      // cambia el tamaño de la pieza → se rehace el molde de muestra (los pedidos la rehacen al armar)
+      procesando('Rehaciendo el molde con el margen nuevo…');
+      await pintarYa();
+      await subirMoldeAMedida(pidCfg, { anchoM: am.ancho_m || 1, altoM: am.alto_m || 1, pieza: am.pieza,
+        reservaMm: am.reserva_mm, margen: margenDeForm(margen) }, (t) => procesando(t));
       avisar('Margen guardado ✓');
-      await onCambio(false);
-    } catch (e) { avisarError(e.message); } finally { setOcupado(false); }
+      await onCambio(true);
+    } catch (e) { avisarError(e.message); } finally { procesando(null); setOcupado(false); }
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
         Margen del borde hacia adentro (el dobladillo). El <b>texto y el número</b> nunca pasan de esta línea.
       </div>
-      <CamposMargen valor={margen} onChange={setMargen} />
+      <CamposMargen valor={margen} onChange={handleMargenChange} />
       <button className="btn primary" data-tour="a-medida-margen-guardar" disabled={ocupado} onClick={guardarMargen}
         style={{ fontSize: 12, alignSelf: 'flex-start' }}>Guardar margen</button>
+    </div>
+  );
+}
+
+/** CMYK (0-1) → color de pantalla (aproximado; el valor exacto es el CMYK que va al PDF). */
+const cmykCss = (c) => {
+  const k = c || [0, 0, 0, 1];
+  return `rgb(${Math.round(255 * (1 - (k[0] || 0)) * (1 - (k[3] || 0)))},${Math.round(255 * (1 - (k[1] || 0)) * (1 - (k[3] || 0)))},${Math.round(255 * (1 - (k[2] || 0)) * (1 - (k[3] || 0)))})`;
+};
+/** Cuántas marcas en cada lado CONTANDO LAS PUNTAS (MAPA 641). Lo guardado con la forma vieja
+ *  (`verticales`/`horizontales` sin las puntas) se traduce como `servidor._tiras_limpias`: N + 2. */
+const ladosTiras = (t) => {
+  const x = t || {};
+  if (x.lados && typeof x.lados === 'object') {
+    return { arriba: Number(x.lados.arriba) || 0, abajo: Number(x.lados.abajo) || 0, izq: Number(x.lados.izq) || 0, der: Number(x.lados.der) || 0 };
+  }
+  const v = ('verticales' in x) ? (Number(x.verticales) || 0) + 2 : 0, h = ('horizontales' in x) ? (Number(x.horizontales) || 0) + 2 : 0;
+  return { arriba: h, abajo: h, izq: v, der: v };
+};
+const TIRAS_DEFECTO = { activo: false, lados: { arriba: 0, abajo: 0, izq: 0, der: 0 }, color: [0, 0, 0, 1], grosor_mm: 1 };
+/** Las MARCAS DE TIRAS de un molde a medida (lo guardado `a_medida.marcas_tiras` + su margen) como las
+ *  lee el motor (`servidor._tiras_de`): `{lados, color, grosor_mm, margen}` o null. */
+const tirasDeMolde = (am, marcas) => {
+  const t = marcas || (am && am.marcas_tiras);
+  if (!am || !t || !t.activo) return null;
+  const m = margenPorBorde(am.margen);
+  const lados = ladosTiras(t);
+  if (!['arriba', 'abajo', 'izq', 'der'].some(k => lados[k] > 0 && m[k] > 0)) return null;
+  return { lados, color: t.color, grosor_mm: t.grosor_mm, margen: m };
+};
+/** LOS CUATRO LADOS de las tiras (MAPA 641, pedido del usuario 2026-10-08: «tiras en un solo lado, en
+ *  varios, en ninguno o en todos; si pongo 5 en un lado son 5 contando las 2 de la punta»). Cada casilla
+ *  va en su lado del rectángulo; 0 = ese lado sin tiras. «Todos» pone el mismo número en los cuatro. */
+function LadosTiras({ lados, onChange, ancla = 'tiras-lados' }) {
+  const L = ladosTiras({ lados });
+  const nn = (v) => Math.max(0, Math.min(50, Math.trunc(Number(String(v).replace(',', '.')) || 0)));
+  const caja = (k, titulo) => (
+    <input type="number" min="0" max="50" value={L[k]} title={titulo} aria-label={titulo}
+      onChange={(e) => onChange({ ...L, [k]: nn(e.target.value) })}
+      style={{ width: 52, padding: '5px 4px', borderRadius: 7, background: 'rgba(0,0,0,0.3)', border: `1px solid ${L[k] > 0 ? 'var(--accent)' : 'var(--border-light)'}`,
+        color: '#fff', fontSize: 14, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center' }} />
+  );
+  const iguales = L.arriba === L.abajo && L.abajo === L.izq && L.izq === L.der;
+  return (
+    <div data-tour={ancla} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gridTemplateRows: 'auto auto auto', alignItems: 'center', justifyItems: 'center', gap: 4 }}>
+        <span />{caja('arriba', 'Arriba')}<span />
+        {caja('izq', 'Izquierda')}
+        <div style={{ width: '100%', minWidth: 46, height: 30, border: '1.5px solid rgba(255,255,255,0.45)', borderRadius: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9.5, color: 'var(--text-muted)' }}>lados</div>
+        {caja('der', 'Derecha')}
+        <span />{caja('abajo', 'Abajo')}<span />
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+        Todos
+        <input type="number" min="0" max="50" value={iguales ? L.arriba : ''} placeholder="—"
+          onChange={(e) => { const v = nn(e.target.value); onChange({ arriba: v, abajo: v, izq: v, der: v }); }}
+          style={{ width: 52, padding: '4px 4px', borderRadius: 7, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-light)', color: '#fff', fontSize: 13, fontFamily: 'monospace', textAlign: 'center' }} />
+        <span style={{ fontSize: 10.5, color: 'var(--text-muted)', lineHeight: 1.35 }}>Cuenta las 2 de las puntas · 0 = sin tiras en ese lado</span>
+      </label>
+    </div>
+  );
+}
+/** Las marcas de tiras en un SVG (y hacia ABAJO): `x0,y0,w,h` = la caja del TOTAL de la pieza en
+ *  unidades del dibujo y `k` = unidades por mm. La geometría es la del motor (`segmentosTiras`), así lo
+ *  que se ve es lo que se estampa. */
+function MarcasTirasSVG({ tiras, x0, y0, w, h, k }) {
+  if (!tiras) return null;
+  const mg = tiras.margen || {};
+  const m = { arriba: (mg.arriba || 0) * 10 * k, abajo: (mg.abajo || 0) * 10 * k, izq: (mg.izq || 0) * 10 * k, der: (mg.der || 0) * 10 * k };
+  const segs = segmentosTiras(w, h, m, tiras.lados);
+  if (!segs.length) return null;
+  const sw = Math.max(0.1, Number(tiras.grosor_mm) || 1) * k;
+  const col = cmykCss(tiras.color);
+  const L = segs.map(([x1, y1, x2, y2]) => [x0 + x1, y0 + h - y1, x0 + x2, y0 + h - y2]);
+  // en pantalla: un halo claro debajo (el visor es oscuro y la marca suele ser negra) y un mínimo de
+  // 1,4 px para que se vea a cualquier zoom; encima, la marca con su grosor REAL y su color
+  return (
+    <g pointerEvents="none" data-tour="tiras-visor" strokeLinecap="butt">
+      {L.map(([a, b, c, d], i) => <line key={'h' + i} x1={a} y1={b} x2={c} y2={d} stroke="rgba(255,255,255,0.75)" strokeWidth={3.4} vectorEffect="non-scaling-stroke" />)}
+      {L.map(([a, b, c, d], i) => <line key={'m' + i} x1={a} y1={b} x2={c} y2={d} stroke={col} strokeWidth={1.4} vectorEffect="non-scaling-stroke" />)}
+      {L.map(([a, b, c, d], i) => <line key={'r' + i} x1={a} y1={b} x2={c} y2={d} stroke={col} strokeWidth={sw} />)}
+    </g>
+  );
+}
+
+/** MARCAS DE TIRAS (MAPA 639, pedido del usuario 2026-10-07): sólo en un molde a medida. Cuántas marcas en
+ *  CADA LADO (arriba, abajo, izq, der; 0 = sin tiras) CONTANDO LAS DOS PUNTAS (MAPA 641), a distancias iguales;
+ *  cada una, una línea del borde hasta la guía del diseño, del color y grosor elegidos. Las
+ *  dibuja el motor sobre la pieza: no hay que rehacer el molde. `onVivo` = lo que se está editando,
+ *  para que el visor de Ajustes lo muestre al instante. */
+function TirasAMedida({ prod, pidCfg, onVivo, onCambio, avisar, avisarError }) {
+  const am = (prod && prod.a_medida) || {};
+  const inicial = () => { const t = { ...TIRAS_DEFECTO, ...(am.marcas_tiras || {}) }; return { activo: !!t.activo, lados: ladosTiras(t), color: t.color, grosor_mm: t.grosor_mm }; };
+  const [f, setF] = React.useState(inicial);
+  const [ocupado, setOcupado] = React.useState(false);
+  const [grosorTxt, setGrosorTxt] = React.useState(() => String(inicial().grosor_mm).replace('.', ','));
+  React.useEffect(() => { const v = inicial(); setF(v); setGrosorTxt(String(v.grosor_mm).replace('.', ',')); onVivo?.(v); }, [pidCfg]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const poner = (cambio) => { const v = { ...f, ...cambio }; setF(v); onVivo?.(v); };
+  const m = margenPorBorde(am.margen);
+  const sinMargen = !(m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0);
+  const lbl = { display: 'block', fontSize: 11.5, fontWeight: 700, marginBottom: 6, color: 'var(--text-secondary)' };
+  const inp = { padding: '8px 10px', borderRadius: 8, background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-light)', color: '#fff', outline: 'none', fontSize: 14, textAlign: 'center' };
+  const n = (v, max) => Math.max(0, Math.min(max, Math.trunc(Number(String(v).replace(',', '.')) || 0)));
+  const guardar = async () => {
+    setOcupado(true);
+    try {
+      const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: pidCfg, marcas_tiras: f }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'No se pudieron guardar las marcas');
+      avisar('Marcas de tiras guardadas ✓');
+      await onCambio();
+    } catch (e) { avisarError(e.message); } finally { setOcupado(false); }
+  };
+  // GROSOR como texto (MAPA 642): con el número directo, borrar para escribir «0,5» lo volvía 0,1 al instante
+  const fijarGrosor = (txt) => {
+    setGrosorTxt(txt);
+    const v = Number(String(txt).replace(',', '.'));
+    if (Number.isFinite(v) && v > 0) poner({ grosor_mm: Math.max(0.1, Math.min(10, v)) });
+  };
+  const sec = { fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--text-muted)' };
+  return (
+    <div data-tour="tiras-panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>Marcas para coser las tiras: van del <b>borde</b> hasta la <b>guía del diseño</b>.</span>
+        <Ayuda ancho={320}>Elegí cuántas marcas van en <b>cada lado</b> (arriba, abajo, izquierda, derecha): en uno solo, en varios, en
+          todos o en ninguno (0). El número <b>cuenta las dos puntas</b>: con 5 en un lado van una en cada esquina y 3 en el medio, a
+          distancias iguales. La de la esquina va en diagonal, del vértice de la pieza al de la guía; con 1, una sola en el medio.
+          Salen <b>impresas</b> en la tizada, del <b>grosor</b> y el <b>color</b> que elijas acá (valen para todos los pedidos de este
+          molde); si lleva o no y cuántas por lado se puede cambiar en cada pedido.</Ayuda>
+      </div>
+      {/* CÓMO SALEN (siempre a la vista): el grosor y el color son del molde y valen para todos sus pedidos */}
+      <div style={sec}>Cómo salen impresas</div>
+      <div>
+        <label style={lbl} data-tour="tiras-grosor">Grosor de la marca (mm)</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <input type="text" inputMode="decimal" value={grosorTxt} onChange={(e) => fijarGrosor(e.target.value)}
+            onBlur={() => setGrosorTxt(String(f.grosor_mm).replace('.', ','))} style={{ ...inp, width: 80 }} />
+          {[0.5, 1, 1.5, 2, 3].map(g => {
+            const on = Math.abs((Number(f.grosor_mm) || 0) - g) < 1e-9;
+            return (
+              <button key={g} type="button" onClick={() => fijarGrosor(String(g).replace('.', ','))}
+                style={{ padding: '6px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                  border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border-light)'), background: on ? 'rgba(0,243,255,0.12)' : 'transparent',
+                  color: on ? 'var(--accent)' : 'var(--text-muted)' }}>{String(g).replace('.', ',')}</button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <label style={lbl} data-tour="tiras-color">Color (CMYK %)</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          {['C', 'M', 'Y', 'K'].map((l, i) => (
+            <div key={l} style={{ textAlign: 'center' }}>
+              <input type="number" min="0" max="100" value={Math.round(((f.color || [])[i] || 0) * 100)}
+                onChange={(e) => { const c = [...(f.color || [0, 0, 0, 1])]; c[i] = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) / 100; poner({ color: c }); }}
+                style={{ ...inp, width: 56 }} />
+              <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 4, fontWeight: 700 }}>{l}</div>
+            </div>
+          ))}
+          <div title="Aproximación en pantalla" style={{ width: 42, height: 42, borderRadius: 9, border: '1px solid var(--border-light)', marginLeft: 6, background: cmykCss(f.color), flexShrink: 0 }} />
+        </div>
+      </div>
+      {/* POR DEFECTO EN LOS PEDIDOS: si lleva y en qué lados (cada pedido lo puede cambiar) */}
+      <div style={{ ...sec, borderTop: '1px solid var(--border-light)', paddingTop: 12 }}>Por defecto en los pedidos</div>
+      <button type="button" data-tour="tiras-activo" onClick={() => poner({ activo: !f.activo })}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 13px', borderRadius: 10, border: '1px solid var(--border-light)', background: 'rgba(255,255,255,0.02)', cursor: 'pointer', color: '#fff' }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Lleva marcas de tiras</span>
+        <span style={{ width: 40, height: 23, borderRadius: 999, background: f.activo ? 'var(--accent)' : 'rgba(255,255,255,0.16)', position: 'relative', transition: 'all .2s', flexShrink: 0 }}>
+          <span style={{ position: 'absolute', top: 2.5, left: f.activo ? 19 : 2.5, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'all .2s' }} />
+        </span>
+      </button>
+      {f.activo && sinMargen && (
+        <div style={{ fontSize: 12, color: '#fbbf24', lineHeight: 1.45 }}>Este molde no tiene margen: sin guía no hay hasta dónde llevar la marca. Poné el margen en «Margen».</div>
+      )}
+      {f.activo && <LadosTiras lados={f.lados} ancla="tiras-lados" onChange={(lados) => poner({ lados })} />}
+      <button className="btn primary" data-tour="tiras-guardar" disabled={ocupado} onClick={guardar} style={{ fontSize: 12, alignSelf: 'flex-start' }}>Guardar marcas</button>
     </div>
   );
 }
@@ -7443,7 +7786,12 @@ export default function App() {
   const [nuevoMoldeTipo, setNuevoMoldeTipo] = useState('archivo');
   // MOLDE A MEDIDA en el pedido: lo que se está escribiendo por (diseño|molde), y cuál se está cambiando
   const [amForm, setAmForm] = useState({});
-  const [amCambiar, setAmCambiar] = useState(null);
+  const amAutoRef = useRef(null);      // el paso Arte deja acá la medida escrita y si se puede armar (MAPA 636)
+  // MEDIDA INSTANTÁNEA (MAPA 638): el armado de la medida va DE FONDO, sin cartel; esto dice cuál se arma
+  const [amArmando, setAmArmando] = useState(null);
+  // TIRAS EN EL PEDIDO (MAPA 640): lo elegido en el panel por (diseño|molde), antes de que vuelva guardado
+  const [amTirasForm, setAmTirasForm] = useState({});
+  const amTirasTimer = useRef({});
   // ── CONFIRMAR / PEDIR UN TEXTO, con la UI del sistema ────────────────────────────────────────
   // Reemplazan a `confirm()`/`prompt()` del navegador, que el proyecto prohíbe (CLAUDE.md §4) y
   // que además en un webview pueden estar BLOQUEADOS: el botón no hacía nada y no había forma de
@@ -7712,6 +8060,8 @@ export default function App() {
   // Integrated workspace states
   // tabAjustesMolde: 'menu' (lista de botones) | 'molderia' | 'diseno' | 'planilla'
   const [tabAjustesMolde, setTabAjustesMolde] = useState('menu');
+  const [margenVivo, setMargenVivo] = useState(null); // margen en vivo mientras se edita en la pestaña Margen
+  const [tirasVivo, setTirasVivo] = useState(null);   // marcas de tiras en vivo mientras se editan (MAPA 639)
   // ── AYUDA GUIADA ── El tutorial pide «llevame a tal pantalla» y esto lo resuelve; así el guion
   // no sabe nada de los estados internos y se escribe en criollo (ver diccionario.js).
   const [ayudaAbierta, setAyudaAbierta] = useState(false);
@@ -11953,7 +12303,7 @@ export default function App() {
   const _prefetchTok = React.useRef(0);     // aborta una precarga vieja si cambió el contexto
   // ⚠️ La TIPOGRAFÍA elegida entra en la clave: sin ella, cambiarla devolvía el render cacheado
   // con la anterior y parecía que no pasaba nada (mismo mapeo, mismo talle → mismo hit).
-  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(_reemplDe(disenoActivo, pidCfg || productosCat.activo, reempl))}`;
+  const _pvKeyCon = (mapeo, talle, reempl) => `${productosCat.activo}|${JSON.stringify(((productosCat.productos || []).find(x => x.id === (pidCfg || productosCat.activo)) || {}).a_medida?.marcas_tiras || null)}|${disenoActivo}|${verVariante}|${talle}|${JSON.stringify(mapeo || {})}|${JSON.stringify(editorTfs || {})}|${JSON.stringify(_reemplDe(disenoActivo, pidCfg || productosCat.activo, reempl))}`;
   const _pvKeyDe = (talle) => _pvKeyCon(mapeoValores, talle);
   const _pvGuardar = (k, piezas) => {
     if (Object.keys(_pvCache.current).length > 300) _pvCache.current = {};   // tope de memoria
@@ -12668,7 +13018,9 @@ export default function App() {
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { showError(d.error || 'No se pudo generar la guía .ai'); return; }
       const bytes = await enHiloSuelto('guia_archivo', { capas_data: d.capas_data, formato: 'ai',
-        opciones: { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas: capasArteNombres(), editables: null } }, [], 'guia');
+        opciones: { config: d.config, rango: d.rango || [], titulo: d.titulo || 'Molde', capas: capasArteNombres(), editables: null,
+          // MOLDE A MEDIDA: la guía del margen (dobladillo) además del contorno
+          dobladillo: prodCfg?.a_medida ? margenSobreContorno(prodCfg.a_medida.margen, prodCfg.a_medida.reserva_mm) : null } }, [], 'guia');
       const slug = String(d.titulo || 'guia').replace(/[^A-Za-z0-9._-]/g, '_').replace(/^_+|_+$/g, '') || 'guia';
       await descargarBlob(new Blob([bytes], { type: 'application/postscript' }), `guia_${slug}.ai`, { avisar: showError });
     } catch (e) { showError('No se pudo generar la guía .ai: ' + (e.message || e)); }
@@ -12781,7 +13133,7 @@ export default function App() {
       referencia: d.referencia || 'alto', posiciones: _posVisor, talleVisor: etqData?.talle_ref || null,
       acomodoGuia: _acomodoGuardado,
       // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en la plantilla
-      dobladillo: prodCfg?.a_medida ? margenPorBorde(prodCfg.a_medida.margen) : null };
+      dobladillo: prodCfg?.a_medida ? margenSobreContorno(prodCfg.a_medida.margen, prodCfg.a_medida.reserva_mm) : null };
   };
   // ACOMODAR LAS MESAS A MANO (opcional; ver `EditorAcomodoMesas`): se guarda por VARIABLE en el
   // molde y, si está, manda sobre el acomodo automático — en la recomendación y al crear.
@@ -13587,8 +13939,8 @@ export default function App() {
     const t = (telasReg.telas || []).find(x => String(x.id) === String(telaId));
     if (!t || !am || !am.de) return null;
     const n = am.nesting || {};
-    const r = cabeEnTela({ anchoM: am.ancho_m, altoM: am.alto_m, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
-      largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion });
+    const r = cabeEnTela({ anchoM: am.ancho_m, altoM: am.alto_m, margen: am.margen, bordeMm: am.borde_mm, anchoCm: t.ancho_cm,
+      largoMaxCm: n.alto_max_cm, margenNestingMm: n.margen_mm, rotacion: n.rotacion, resolucionMm: n.resolucion_mm });
     return r.cabe ? null : { tela: t.nombre, motivo: r.motivo };
   };
   const telasNoEntranDet = (disenosPedido || []).flatMap(d => (itemsArteDe(d.id) || []).map(it => {
@@ -13863,8 +14215,23 @@ export default function App() {
         // quedaron viejos — se tiran y el paso Arte los repide con la config nueva.
         _pvCache.current = {}; setPreviewPiezas({});
         showMsg('Borde de corte guardado ✓');
+        // MOLDE A MEDIDA: el borde va adentro de la medida → el rectángulo depende de su ancho: se rehace
+        // la muestra de Configuración con la reserva nueva (los pedidos la rehacen al armar su medida)
+        if (prodCfg?.a_medida) {
+          try {
+            setProcesando('Rehaciendo el molde con el borde nuevo…');
+            await pintarYa();
+            await fetchProductos();
+            const _am = prodCfg.a_medida;
+            const _bn = await (await fetch(`/api/productos/borde_corte?pid=${pid}`)).json().catch(() => ({}));
+            const _res = _bn && _bn.activo !== false ? Math.max(0.2, Number(_bn.ancho_mm) || 2) : 2;
+            await subirMoldeAMedida(pid, { anchoM: _am.ancho_m || 1, altoM: _am.alto_m || 1, pieza: _am.pieza, reservaMm: _res, margen: _am.margen }, (t) => setProcesando(t));
+            await fetchProductos(); invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1);
+          } catch (e) { throw new Error('El borde se guardó, pero no se pudo rehacer el molde: ' + (e.message || e)); }
+          finally { setProcesando(null); }
+        }
       } else showError('No se pudo guardar el borde');
-    } catch { showError('No se pudo guardar el borde'); }
+    } catch (e) { showError((e && e.message) || 'No se pudo guardar el borde'); }
   };
   // Etiqueta de identificación del molde: cargar / guardar.
   // `pidEx` = molde EXPLÍCITO. Desde el PEDIDO el molde no es `pidCfg` (ése es el que está abierto
@@ -14554,11 +14921,12 @@ export default function App() {
       if (!p || !p.plantilla || _esConDiseno(it.moldeId)) continue;
       const key = d.id + '§' + it.moldeId + '|' + (it.clave || '');
       if (variables.some(v => v.key === key)) continue;
-      const variable = it.clave ? ((p.variantes || []).find(v => v.clave === it.clave) || null) : null;
-      variables.push({ key, pid: it.moldeId, clave: it.clave || null, label: (variable && variable.label) || it.label || p.nombre || 'Molde',
+      const variable = it.clave ? ((p.variantes || []).find(v => v.clave === it.clave) || null) : (p.a_medida ? (p.variantes || [])[0] || null : null);
+      const claveEfectiva = it.clave || (variable && variable.clave) || (p.a_medida && p.a_medida.variable) || null;
+      variables.push({ key, pid: it.moldeId, clave: claveEfectiva, label: (variable && variable.label) || it.label || p.nombre || 'Molde',
         molde: p.nombre || 'Molde', variable, acomodo: p.acomodo_illustrator || {},
         // MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en la plantilla del diseñador
-        dobladillo: p.a_medida ? margenPorBorde(p.a_medida.margen) : null });
+        dobladillo: p.a_medida ? margenSobreContorno(p.a_medida.margen, p.a_medida.reserva_mm) : null });
     }
     return { did: d.id, nombre: d.nombre || d.id, variables };
   }).filter(d => d.variables.length);
@@ -15329,28 +15697,31 @@ export default function App() {
       showError(err.message);
     }
   };
-  const armarAMedida = async (did, it, anchoM, altoM) => {
+  // `silencioso` (el armado automático, MAPA 638): sin el cartel que tapa todo — el pedido del usuario es
+  // que cambiar la medida sea INSTANTÁNEO. El visor ya muestra la medida nueva al tipear (`_layoutVivo`) y
+  // esto rehace el archivo de fondo; mientras dura, sólo se traba lo que dependería de él («A la planilla»,
+  // «Cargar arte»). Llamado a mano (Enter) va igual: el gesto es el mismo.
+  const armarAMedida = async (did, it, anchoM, altoM, { silencioso = true } = {}) => {
     const mid = it.moldeId;
     const p = moldeById(mid) || {};
     const am = p.a_medida;
     if (!am) return;
     const prob = problemaMedida(anchoM, altoM);
     if (prob) { showError(prob); return; }
-    setProcesando('Armando el molde a la medida…');
-    await pintarYa();
+    const avisar = silencioso ? () => {} : (t) => setProcesando(t);
+    setAmArmando({ clave: did + '|' + mid, a: anchoM, h: altoM });
+    if (!silencioso) { setProcesando('Armando el molde a la medida…'); await pintarYa(); }
     try {
       if (am.de) {
         const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: mid, ancho_m: anchoM, alto_m: altoM }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.error || 'No se pudo cambiar la medida');
-        await subirMoldeAMedida(mid, { anchoM, altoM, pieza: am.pieza }, (t) => setProcesando(t));
+        await subirMoldeAMedida(mid, { anchoM, altoM, pieza: am.pieza, reservaMm: am.reserva_mm, margen: am.margen }, avisar);
         _talleDetCache.current = {};                 // el dibujo del molde cambió
         invalidarNido(); setMoldeReload(v => v + 1);
         await fetchProductos();
         if (arteCargado[did + '|' + mid]) cargarMapeadorOperario(mid); else cargarMoldeOperario(mid);
-        setAmCambiar(null);
-        showMsg(`Medida cambiada a ${talleDeMedida(anchoM, altoM).replace('x', ' × ')} m ✓`);
         return;
       }
       const nombre = `${p.nombre || 'Molde'} ${talleDeMedida(anchoM, altoM)}`;
@@ -15361,20 +15732,64 @@ export default function App() {
       if (!r.ok) throw new Error(d.error || 'No se pudo armar el molde a medida');
       // del pedido YA (ver `subirMoldesConDiseno`): que el barrido de huérfanos no se lo lleve a mitad del alta
       setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now(), subiendo: true } }));
-      await subirMoldeAMedida(d.id, { anchoM, altoM, pieza: am.pieza }, (t) => setProcesando(t));
+      await subirMoldeAMedida(d.id, { anchoM, altoM, pieza: am.pieza, reservaMm: am.reserva_mm, margen: am.margen }, avisar);
       setMoldesEfimeros(m => ({ ...m, [d.id]: { nombre, creado: Date.now() } }));
       await fetchProductos();
       const nuevaClave = d.a_medida && d.a_medida.variable;
       // la copia toma el lugar de la plantilla EN ESTE DISEÑO (los otros diseños siguen con la suya)
       if (it.clave && nuevaClave) setDisenoVars(prev => ({ ...prev, [did]: (prev[did] || []).map(c => (c === it.clave ? nuevaClave : c)) }));
       setDisenoMoldes(prev => ({ ...prev, [did]: (prev[did] || []).map(m => (m === mid ? d.id : m)) }));
+      // la tela que se eligió con la medida (guardada con la plantilla) pasa a la copia
+      setTelaPrincipalPed(pp => { const v = pp[_claveTelaDis(did, mid)]; return v ? { ...pp, [_claveTelaDis(did, d.id)]: v } : pp; });
       setAmForm(f => { const n = { ...f }; delete n[did + '|' + mid]; return n; });
-      showMsg(`Molde armado a ${talleDeMedida(anchoM, altoM).replace('x', ' × ')} m ✓ — ahora cargá el arte`);
     } catch (e) {
       showError(e.message);
     } finally {
-      setProcesando(null);
+      setAmArmando(null);
+      if (!silencioso) setProcesando(null);
     }
+  };
+
+  // MOLDE A MEDIDA SIN BOTÓN (pedido del usuario 2026-10-07, MAPA 636: «no lo separes en 2, ya debería
+  // estar todo junto»): la medida escrita se arma sola cuando se deja de escribir, si es válida y entra
+  // (`estadoMedida().listaParaArmar`, que el paso Arte deja en `amAutoRef`). `amIntentoRef` evita
+  // reintentar en bucle la misma medida si el armado falla (el error ya se mostró).
+  const amIntentoRef = useRef('');
+  const amTimerRef = useRef(null);
+  // Corre en CADA render (sin dependencias): `amAutoRef` lo llena el paso Arte cuando ya tiene los datos
+  // (catálogo, telas), y eso puede ser varios renders después de entrar al paso; con dependencias fijas el
+  // efecto miraba una sola vez, antes de tiempo, y no armaba nunca (visto en el sandbox 2026-10-07).
+  // El temporizador NO se reinicia mientras la medida sea la misma (cualquier render lo postergaría).
+  useEffect(() => {
+    const st = amAutoRef.current;
+    // la PLANTILLA (molde recién elegido) se arma enseguida con la medida predeterminada: el paso Arte se ve
+    // completo de entrada (visor, «Cargar arte», «Asignar telas») — pedido del usuario 2026-10-07, MAPA 637.
+    // La copia ya armada sólo se re-arma cuando se escribe otra medida.
+    const ok = pedidoPaso === 'arte' && !procesando && !amArmando && !!st && st.lista && !(st.esCopia && !amForm[st.clave]);
+    const firma = ok ? `${st.clave}|${st.a}|${st.h}` : '';
+    if (amTimerRef.current && amTimerRef.current.firma !== firma) { clearTimeout(amTimerRef.current.t); amTimerRef.current = null; }
+    if (!ok || amIntentoRef.current === firma || amTimerRef.current) return;
+    const t = setTimeout(() => { amTimerRef.current = null; amIntentoRef.current = firma; armarAMedida(st.did, st.it, st.a, st.h); },
+      st.esCopia ? 1500 : 50);
+    amTimerRef.current = { firma, t };
+  });
+
+  // TIRAS EN EL PEDIDO (MAPA 640, pedido del usuario 2026-10-08: «no veo dónde poner si lleva o no tiras, y
+  // en el visor tendría que verlas»): se eligen en el panel de la medida y se guardan en la COPIA del pedido
+  // (no en el molde: los valores de Ajustes son el punto de partida). De fondo, medio segundo después del
+  // último toque; el visor ya las dibuja con lo elegido (`tirasAMedida`), sin esperar.
+  const guardarTirasPedido = (mid, clave, valor) => {
+    clearTimeout(amTirasTimer.current[clave]);
+    amTirasTimer.current[clave] = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/productos/a_medida', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: mid, marcas_tiras: valor }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'No se pudieron guardar las tiras');
+        await fetchProductos();
+        _pvCache.current = {}; cargarPreviewPiezas();      // el render del motor, ya con las marcas nuevas
+      } catch (e) { showError(e.message); }
+    }, 500);
   };
 
   const irANombrarB = () => {
@@ -19050,8 +19465,9 @@ export default function App() {
                 // MOLDE A MEDIDA (MAPA 623): la plantilla pide la medida; la copia del pedido ya la tiene
                 const _amIt = _amDe(_id);
                 const _amKey = disenoActivo + '|' + _id;
-                const _amF = amForm[_amKey] || (_amIt && _amIt.de
-                  ? { ancho: metrosTexto(_amIt.ancho_m), alto: metrosTexto(_amIt.alto_m) } : { ancho: '', alto: '' });
+                // sin nada escrito: la medida ya armada o, en la plantilla, la PREDETERMINADA de Ajustes (MAPA 637)
+                const _amF = amForm[_amKey] || (_amIt
+                  ? { ancho: metrosTexto(_amIt.ancho_m || 1), alto: metrosTexto(_amIt.alto_m || 1) } : { ancho: '', alto: '' });
                 // VER VARIANTE en el pedido: las variantes del sistema (las de Variables) CON piezas. Al elegir
                 // una en las tarjetas, el visor muestra SOLO sus piezas acomodadas (mismo acomodo que en Variables).
                 // VARIABLE-FIRST estricto: si hay una variable activa NUNCA se cae a dibujar el molde
@@ -19098,6 +19514,71 @@ export default function App() {
                 // MOLDE A MEDIDA (MAPA 623): una tela en la que la pieza NO entra no se ofrece
                 const _amNoEntran = (_amDe(_id) || {}).de ? _telasMol.filter(t => _amTelaNoEntra(_amDe(_id), t.id)) : [];
                 const _telasMolOk = _amNoEntran.length ? _telasMol.filter(t => !_amNoEntran.includes(t)) : _telasMol;
+                // MOLDE A MEDIDA (MAPA 634): UN SOLO LUGAR, el de siempre del paso Arte (pedido del usuario
+                // 2026-10-07: «usá la misma visual, no lo separes en 2 espacios»): el panel de la medida a la
+                // izquierda (en lugar de los talles) y el dibujo EN EL VISOR. Mientras la medida escrita no está
+                // armada (o se está cambiando) el visor la muestra en vivo (`VisorMedida`); armada, el visor real
+                // dibuja la misma tela alrededor del arte (`telaAMedida` → `telaAlrededor`).
+                const _amEst = _amIt ? estadoMedida({ am: _amIt, anchoTxt: _amF.ancho, altoTxt: _amF.alto, telas: _telasMol,
+                  telaId: _principalDe(disenoActivo, _id), esCopia: !!_amIt.de }) : null;
+                const _amVivo = !!_amIt && (!_amIt.de || !_amEst.igualArmada);
+                // TIRAS DEL PEDIDO (MAPA 640): lo elegido en el panel (si todavía no volvió guardado) o lo de la copia
+                const _amTirasGuard = _amIt ? (() => { const t = { ...TIRAS_DEFECTO, ...(_amIt.marcas_tiras || {}) };
+                  return { activo: !!t.activo, lados: ladosTiras(t), color: t.color, grosor_mm: t.grosor_mm }; })() : null;
+                const _amTiras = _amIt ? (amTirasForm[_amKey] || _amTirasGuard) : null;
+                const _amTirasPend = !!(_amIt && amTirasForm[_amKey] && JSON.stringify(amTirasForm[_amKey]) !== JSON.stringify(_amTirasGuard));
+                const _amTirasVer = _amIt ? tirasDeMolde(_amIt, _amTiras) : null;
+                // lo que mira el armado automático (efecto de `amAutoRef`): qué ítem y si la medida escrita se puede armar
+                amAutoRef.current = _amIt ? { clave: _amKey, did: disenoActivo, it: itActual, a: _amEst.a, h: _amEst.h, lista: _amEst.listaParaArmar,
+                                              esCopia: !!_amIt.de } : null;
+                const _panelMedida = _amIt ? (
+                  <TarjetaMedida am={_amIt} est={_amEst} anchoTxt={_amF.ancho} altoTxt={_amF.alto}
+                    onAncho={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, ancho: v } }))}
+                    onAlto={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, alto: v } }))}
+                    ocupado={!!procesando || (!!amArmando && amArmando.clave === _amKey)} esCopia={!!_amIt.de}
+                    tiras={_amTiras} onTiras={(cambio) => {
+                      const v = { ..._amTiras, ...cambio };
+                      setAmTirasForm(f => ({ ...f, [_amKey]: v }));
+                      guardarTirasPedido(_id, _amKey, v);
+                    }}
+                    onArmar={(a, h) => armarAMedida(disenoActivo, itActual, a, h)} />
+                ) : null;
+                const _visorMedida = _amIt ? (
+                  <div style={{ position: 'absolute', inset: 12 }}>
+                    {_amEst.pz
+                      ? <VisorMedida anchoM={_amEst.a} altoM={_amEst.h} margen={_amIt.margen} tela={_amEst.tela} r={_amEst.rTela}
+                          gira={_amEst.gira} margenNestingMm={_amEst.n.margen_mm} tiras={_amTirasVer} />
+                      : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
+                          Escribí la medida del diseño para verla en la tela</div>}
+                    {_amIt.de && _amEst.pz && (
+                      <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', fontSize: 12, fontWeight: 700, color: '#fbbf24',
+                        background: 'rgba(0,0,0,0.75)', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 8, padding: '5px 10px', whiteSpace: 'nowrap' }}>
+                        {_amEst.listaParaArmar ? 'Medida nueva · se arma sola al dejar de escribir' : 'Medida nueva · así no se puede armar'}</div>
+                    )}
+                  </div>
+                ) : null;
+                // MEDIDA INSTANTÁNEA (MAPA 638): mientras el archivo de la medida escrita no está armado (se
+                // rearma de fondo), el visor de siempre dibuja la pieza YA a la medida nueva: el mismo rectángulo,
+                // con el contorno a la medida escrita (total − la reserva del borde). Sin el render del motor
+                // de la medida vieja (sería otra medida estirada): el diseño va como el visor lo pone siempre
+                // antes de tener ese render. Cuando el armado termina, el molde real lo reemplaza (es igual).
+                const _amCont = (_amIt && _amIt.de && _amEst.pz)
+                  ? { w: _amEst.pz.anchoCm - 2 * (Number(_amIt.reserva_mm) || 0) / 10, h: _amEst.pz.altoCm - 2 * (Number(_amIt.reserva_mm) || 0) / 10 } : null;
+                const _amP0 = canvasLayout?.layout?.[0];
+                const _amDesfase = !!(_amCont && _amP0 && _amP0.w_cm && (Math.abs(_amP0.w_cm - _amCont.w) > 0.05 || Math.abs(_amP0.h_cm - _amCont.h) > 0.05));
+                const _layoutVivo = _amDesfase ? { ...canvasLayout, layout: canvasLayout.layout.map(pz => {
+                  const k = pz.w_cm ? pz.pw / (pz.w_cm * 10) : 1;
+                  const pw = _amCont.w * 10 * k, ph = _amCont.h * 10 * k;
+                  return { ...pz, pw, ph, w_cm: _amCont.w, h_cm: _amCont.h, path_svg: `M${pz.px} ${pz.py}H${pz.px + pw}V${pz.py + ph}H${pz.px}Z` };
+                }) } : null;
+                // el render del motor sólo si es de ESTA medida (uno de la medida vieja se vería estirado)
+                const _pvMedida = (_amIt && _amIt.de && previewPiezas) ? ((_amDesfase || _amTirasPend) ? null : Object.fromEntries(Object.entries(previewPiezas)
+                  .filter(([, v]) => !v || !v.w_cm || !_amP0 || (Math.abs(v.w_cm - _amP0.w_cm) <= 1.5 && Math.abs(v.h_cm - _amP0.h_cm) <= 1.5)))) : previewPiezas;
+                const _telaVisor = (_amIt && _amIt.de && _amEst.tela && _amEst.pz) ? {
+                  anchoCm: Number(_amEst.tela.ancho_cm), mgCm: (Number(_amEst.n.margen_mm) || 0) / 10,
+                  girada: _amEst.rTela ? (_amEst.rTela.cabe ? !!_amEst.rTela.girada : (_amEst.gira && _amEst.pz.altoCm < _amEst.pz.anchoCm)) : false,
+                  entra: !_amEst.rTela || _amEst.rTela.cabe, reservaCm: (Number(_amIt.reserva_mm) || 0) / 10,
+                  totalCm: _amEst.pz, disenoCm: { w: _amEst.a * 100, h: _amEst.h * 100 } } : null;
                 // SIN TELA BASE: cada pieza debe tener SÍ O SÍ una tela asignada (no hay default).
                 // `piezasArteGen` = las piezas que se VEN en el visor (misma fuente que se toca/pinta),
                 // así «asignar a todas» y el aviso de faltantes hablan exactamente de lo mismo.
@@ -19590,21 +20071,29 @@ export default function App() {
                   <input type="file" ref={fileInputArteRef} accept=".ai,.pdf" onChange={(e) => cargarDisenoWizard(e.target.files[0])} hidden />
                   {/* La navegación de arriba YA es por variable → el visor muestra solo sus piezas (vfArte). */}
                   {/* MOLDE A MEDIDA (MAPA 623): sin medida todavía (o cambiándola), la tarjeta de la medida */}
-                  {(_amIt && (!_amIt.de || amCambiar === _amKey)) ? (
-                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '24px 0 16px' }}>
-                      <TarjetaMedida am={_amIt} anchoTxt={_amF.ancho} altoTxt={_amF.alto} telas={_telasMol}
-                        onAncho={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, ancho: v } }))}
-                        onAlto={(v) => setAmForm(f => ({ ...f, [_amKey]: { ..._amF, alto: v } }))}
-                        ocupado={!!procesando} esCopia={!!_amIt.de}
-                        onCancelar={_amIt.de ? () => setAmCambiar(null) : null}
-                        onArmar={(a, h) => armarAMedida(disenoActivo, itActual, a, h)} />
+                  {(_amIt && !_amIt.de) ? (
+                    <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: colAct, flexShrink: 0 }} />
+                        <span style={{ fontSize: 15, fontWeight: 800 }}>{vObjActual?.label || _m?.nombre || 'Variable'}</span>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>· {_m?.nombre} · {disenosPedido.find(d => d.id === disenoActivo)?.nombre}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
+                        {_panelMedida}
+                        <div style={{ position: 'relative', flex: 1, minWidth: 0, background: '#0c0c0e', border: '1px solid var(--border-light)', borderRadius: 10 }}>
+                          {_visorMedida}
+                        </div>
+                      </div>
                     </div>
                   ) : _moldeListo ? (
                     /* Tarjeta única: cabecera (nombre del molde + cargar) + [ talles | molde | diseños ] */
                     <div className="card" style={{ padding: 14, flex: 1, minHeight: 0, display: 'flex' }}>
                       <MapeadorArteVisual
-                        margenAMedida={_amIt && _amIt.de ? margenPorBorde(_amIt.margen) : null}
-                        canvasLayout={canvasLayout}
+                        margenAMedida={_amIt && _amIt.de ? margenSobreContorno(_amIt.margen, _amIt.reserva_mm) : null}
+                        telaAMedida={_telaVisor}
+                        tirasAMedida={(_amIt && _amIt.de && _amTirasVer) ? { ..._amTirasVer, reservaCm: (Number(_amIt.reserva_mm) || 0) / 10 } : null}
+                        visorReemplazo={null}
+                        canvasLayout={_layoutVivo || canvasLayout}
                         mapeoData={mapeoData}
                         cargando={mapeoCargando}
                         mapeoValores={mapeoValores}
@@ -19618,7 +20107,7 @@ export default function App() {
                         bordeConfig={bordeConfig}
                         etiquetaConfig={etiquetaConfig}
                         talleRef={etqData?.talle_ref}
-                        previewPiezas={previewPiezas}
+                        previewPiezas={_pvMedida}
                         onGuardar={guardarMapeo}
                         onCerrar={null}
                         vf={_todasBOn ? _vfTodasB : vfArte}
@@ -19652,12 +20141,6 @@ export default function App() {
                               dibuja la pieza con el diseño del propio archivo. */}
                           {/* OPCIONAL: la plantilla para el diseñador, por si no la tienen (MAPA 617).
                               Sin el «?» aparte: el modal explica todo adentro. */}
-                          {_amIt && _amIt.de && (
-                            <button className="btn ghost" data-tour="arte-medida-cambiar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
-                              title="Cambiar el ancho y el alto de la pieza" onClick={() => setAmCambiar(_amKey)}>
-                              Medida {talleDeMedida(_amIt.ancho_m, _amIt.alto_m).replace('x', ' × ')} m
-                            </button>
-                          )}
                           {!_esB && (
                           <button className="btn ghost" data-tour="arte-crear-plantilla"style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }}
                             title="Crear la plantilla del arte (guía .ai, Illustrator o CorelDRAW) de las variables de todos los diseños del pedido"
@@ -19666,7 +20149,7 @@ export default function App() {
                           </button>
                           )}
                           {!_esB && (
-                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} onClick={() => fileInputArteRef.current.click()}>
+                          <button className="btn primary" data-tour="arte-cargar" style={{ padding: '8px 14px', fontSize: 12.5, borderRadius: 9 }} disabled={!!amArmando} title={amArmando ? 'Aplicando la medida nueva…' : undefined} onClick={() => fileInputArteRef.current.click()}>
                             <Icon name="upload" style={{ width: 13, height: 13 }} /> {cargadoActual ? 'Cambiar arte' : 'Cargar arte'}
                           </button>
                           )}
@@ -19697,7 +20180,7 @@ export default function App() {
                         onPiezaFuera={(gen) => togglePiezaFuera(disenoActivo, _id, gen)}
                         onPiezasFueraTodas={(gens, apagar) => piezasFueraTodas(disenoActivo, _id, gens, apagar)}
                         piezasBloqueo={_esB && _sinNombreB.length ? 'Primero nombrá todas las piezas (panel «Piezas y etiqueta»)' : null}
-                        panelIzquierdo={estado?.talles?.length > 0 ? (
+                        panelIzquierdo={(_amIt && _amIt.de) ? _panelMedida : estado?.talles?.length > 0 ? (
                           <div style={{ width: 150, flexShrink: 0, border: '1px solid var(--border-light)', borderRadius: 10, background: 'rgba(0,0,0,0.25)', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', padding: '11px 12px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span style={{ flex: 1 }}>{_esB && etqPickB ? 'Talle guía' : (term.variante === 'Talle' ? 'Talles' : term.variante)}</span>
@@ -19773,8 +20256,8 @@ export default function App() {
                     centro={<ProgresoPaso items={pasoItems} onClick={() => setProgresoOpen(true)} />}
                   aviso={textoAvisoPaso(pasoItems)}
                     siguiente={<BtnSiguiente texto="A la planilla" ancla="arte-siguiente" onClick={() => irAPlanillaDesdeArte()}
-                      disabled={!(todasArteCargadas && !telasIncompletas && !telasNoEntranDet.length && !piezasTodasFuera.length)}
-                      title={!todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela`
+                      disabled={!!amArmando || !(todasArteCargadas && !telasIncompletas && !telasNoEntranDet.length && !piezasTodasFuera.length)}
+                      title={amArmando ? 'Aplicando la medida nueva…' : !todasArteCargadas ? 'Cargá el arte de todos los moldes de todos los diseños' : (telasIncompletas ? `Faltan ${telasFaltantesTotal} pieza(s) sin tela`
                         : (telasNoEntranDet.length ? `La pieza no entra en «${telasNoEntranDet[0].tela}»` : ''))} />} />
                 </div>
                 );
@@ -21372,6 +21855,7 @@ export default function App() {
                               // MARGEN (dobladillo): sólo en un molde a medida (se saca abajo en los demás), al lado de
                               // «Texto y número» porque el texto no puede salir de él
                               { id: 'margen', icon: 'dobladillo', label: 'Margen', desc: 'El dobladillo: la franja del borde que se dobla (cm)', disabled: false },
+                              { id: 'tiras', icon: 'tiras', label: 'Marcas de tiras', desc: 'Marcas del borde a la guía para coser las tiras', disabled: false },
                               { id: 'diseno', icon: 'plantilla', label: 'Plantilla', desc: 'Medidas de cada pieza y carga del diseño', disabled: false },
                               { id: 'editable', icon: 'editable', label: 'Editable', desc: 'Mover, rotar y escalar los objetos de la capa «Editable» del diseño', disabled: false },
                               { id: 'terminologia', icon: 'nombres', label: 'Nombres', desc: `Cómo se llaman ${term.variante.toLowerCase()} y ${term.molde.toLowerCase()}`, disabled: false },
@@ -21382,7 +21866,7 @@ export default function App() {
                              // número» porque el texto no puede salir de él. Lo demás, igual que siempre.
                              .filter(item => !(prodCfg?.a_medida && item.id === 'molderia'))
                              .map(item => (prodCfg?.a_medida && item.id === 'variables') ? { ...item, desc: 'La pieza y la medida de muestra' } : item)
-                             .filter(item => item.id !== 'margen' || !!prodCfg?.a_medida);
+                             .filter(item => (item.id !== 'margen' && item.id !== 'tiras') || !!prodCfg?.a_medida);
                             })().map(item => (
                               <button
                                 key={item.id}
@@ -21764,6 +22248,14 @@ export default function App() {
                                     onChange={(e) => setBordeConfig({ ...bordeConfig, ancho_mm: parseFloat(e.target.value) || 0 })}
                                     style={{ ...bcInput, width: 130 }} />
                                 </div>
+                                {prodCfg?.a_medida ? (
+                                  // MOLDE A MEDIDA (2026-10-07, «borde por dentro»): la posición no se elige — el borde va
+                                  // ADENTRO de la medida escrita (el rectángulo se arma así de más chico)
+                                  <div data-tour="borde-a-medida" style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-secondary)', padding: '8px 10px', borderRadius: 9, border: '1px solid rgba(0,216,245,0.3)', background: 'rgba(0,216,245,0.05)' }}>
+                                    Molde a medida: el borde va <b>adentro de la medida</b>. Si el pedido dice 3,00 × 1,57, impresa mide exacto
+                                    3,00 × 1,57, borde incluido. Al guardar se rehace el molde con el borde nuevo.
+                                  </div>
+                                ) : (
                                 <div>
                                   <label style={bcLabel}>Posición <Ayuda ancho={300}>Dónde cae el borde respecto de la línea de la pieza: <b>Afuera</b> (rodea la pieza, lo de siempre), <b>Centrado</b> (mitad adentro y mitad afuera de la línea) o <b>Adentro</b> (entra sobre la pieza). El tamaño en mm es siempre el ancho visible.</Ayuda></label>
                                   <div style={{ display: 'flex', gap: 6 }}>
@@ -21779,6 +22271,7 @@ export default function App() {
                                     })}
                                   </div>
                                 </div>
+                                )}
                                 <div>
                                   <label style={bcLabel} data-tour="borde-color">Color del borde (CMYK %)</label>
                                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -22228,9 +22721,14 @@ export default function App() {
                         <VariablesAMedida prod={prodCfg} pidCfg={pidCfg} avisar={showMsg} avisarError={showError} procesando={setProcesando}
                           onCambio={async (rehecho) => { await fetchProductos(); if (rehecho) { invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1); } }} />
                       )}
+                      {tabAjustesMolde === 'tiras' && prodCfg?.a_medida && (
+                        <TirasAMedida prod={prodCfg} pidCfg={pidCfg} avisar={showMsg} avisarError={showError}
+                          onVivo={setTirasVivo} onCambio={async () => { await fetchProductos(); }} />
+                      )}
                       {tabAjustesMolde === 'margen' && prodCfg?.a_medida && (
                         <MargenAMedida prod={prodCfg} pidCfg={pidCfg} avisar={showMsg} avisarError={showError}
-                          onCambio={async () => { await fetchProductos(); }} />
+                          onMargenEnVivo={setMargenVivo} procesando={setProcesando}
+                          onCambio={async (rehecho) => { await fetchProductos(); if (rehecho) { invalidarNido(); setSembrarGen(v => v + 1); setMoldeReload(v => v + 1); } }} />
                       )}
                       {tabAjustesMolde === 'molderia' && !prodCfg?.a_medida && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -24060,6 +24558,18 @@ export default function App() {
                                 else { ancho = m ? m.ancho_cm : p.w_cm; alto = m ? m.alto_cm : p.h_cm; }
                               } else { ancho = m ? m.ancho_cm : p.w_cm; alto = m ? m.alto_cm : p.h_cm; }
                               const pxcm = p.w_cm ? (p.pw / p.w_cm) : (p.h_cm ? (p.ph / p.h_cm) : 1);
+                              // 🔴 MOLDE A MEDIDA (2026-10-07, decisión del usuario): la caja de dónde va el diseño
+                              // ES EL MARGEN (la misma línea que la herramienta «Margen»); el contorno es el tamaño
+                              // completo. Gemelo: `cajaGuia` de motor/molde/herramientas.js (guía .ai / PDF).
+                              if (prodCfg?.a_medida && p.w_cm && p.h_cm) {
+                                const mb = margenSobreContorno(prodCfg.a_medida.margen, prodCfg.a_medida.reserva_mm);
+                                const aw = p.w_cm - mb.izq - mb.der, ah = p.h_cm - mb.arriba - mb.abajo;
+                                if (aw > 0 && ah > 0) {
+                                  const rw = aw * pxcm, rh = ah * pxcm, rx0 = p.px + mb.izq * pxcm, ry0 = p.py + mb.arriba * pxcm;
+                                  return { nombrePz, ancho: Math.round(aw * 10) / 10, alto: Math.round(ah * 10) / 10, rectW: rw, rectH: rh,
+                                    cx: rx0 + rw / 2, cy: ry0 + rh / 2, rx: rx0, ry: ry0 };
+                                }
+                              }
                               const rectW = Math.max(6, ancho * pxcm), rectH = Math.max(6, alto * pxcm);
                               const cx = p.px + p.pw / 2, cy = p.py + p.ph / 2;
                               return { nombrePz, ancho, alto, rectW, rectH, cx, cy, rx: cx - rectW / 2, ry: cy - rectH / 2 };
@@ -24989,6 +25499,33 @@ export default function App() {
                                       d={p.path_svg}
                                       style={{ fill: fillCol, stroke: strokeCol, strokeWidth: spx((destacada || resaltada) ? 2 : 1.3), transition: 'fill 0.2s' }}
                                     />
+
+                                    {/* MOLDE A MEDIDA (MAPA 623): el margen (dobladillo) punteado en tiempo real */}
+                                    {prodCfg?.a_medida && (() => {
+                                      const mRaw = (tabAjustesMolde === 'margen' && margenVivo) ? margenVivo : prodCfg.a_medida.margen;
+                                      const m = margenSobreContorno(mRaw, prodCfg.a_medida.reserva_mm);
+                                      const tieneMargen = (m.arriba > 0 || m.abajo > 0 || m.izq > 0 || m.der > 0);
+                                      if (!tieneMargen) return null;
+                                      const kx = p.w_cm ? p.pw / (p.w_cm * 10) : 1;
+                                      const ky = p.h_cm ? p.ph / (p.h_cm * 10) : 1;
+                                      const x = p.px + m.izq * 10 * kx;
+                                      const y = p.py + m.arriba * 10 * ky;
+                                      const w = p.pw - (m.izq + m.der) * 10 * kx;
+                                      const h = p.ph - (m.arriba + m.abajo) * 10 * ky;
+                                      if (!(w > 0 && h > 0)) return null;
+                                      // MARCAS DE TIRAS (MAPA 639): las del motor, en vivo mientras se editan
+                                      const _rv = (Number(prodCfg.a_medida.reserva_mm) || 0) * kx;
+                                      const _tr = tirasDeMolde({ ...prodCfg.a_medida, margen: mRaw }, (tabAjustesMolde === 'tiras' && tirasVivo)
+                                        // con la herramienta abierta y apagadas, igual se ven (3 por lado, de muestra) para mirar el grosor y el color
+                                        ? (tirasVivo.activo ? tirasVivo : { ...tirasVivo, activo: true, lados: { arriba: 3, abajo: 3, izq: 3, der: 3 } }) : null);
+                                      return (
+                                        <g pointerEvents="none" data-tour="arte-dobladillo">
+                                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={spx(3)} vectorEffect="non-scaling-stroke" />
+                                          <rect x={x} y={y} width={w} height={h} fill="none" stroke="#ffffff" strokeWidth={spx(1.5)} strokeDasharray="9 6" vectorEffect="non-scaling-stroke" />
+                                          <MarcasTirasSVG tiras={_tr} x0={p.px - _rv} y0={p.py - _rv} w={p.pw + 2 * _rv} h={p.ph + 2 * _rv} k={kx} />
+                                        </g>
+                                      );
+                                    })()}
 
                                     {/* RÓTULO: sólo si hay lugar en PANTALLA para que se lea (o si la
                                         pieza está elegida/resaltada, que siempre tiene que verse).

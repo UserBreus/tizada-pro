@@ -281,7 +281,9 @@ async function armarCopiaAMedida(m, ref, plantilla, medida, slug = null) {
   const c = await apiJson(`/api/externo/robot/a_medida/${encodeURIComponent(ref)}`,
     { plantilla, ancho_m: medida.ancho_m, alto_m: medida.alto_m, slug })
   const [AM, CA, PQ] = await Promise.all([import('../molde/aMedida.js'), import('../molde/caminoA.js'), import('../paquete/armar.js')])
-  const { pdf, resumen } = AM.pdfMoldeAMedida(m.mupdf, { anchoM: c.ancho_m, altoM: c.alto_m, pieza: c.pieza })
+  // el borde de corte va ADENTRO de la medida: el rectángulo, la reserva más chico (como la pantalla)
+  const { pdf, resumen } = AM.pdfMoldeAMedida(m.mupdf, { anchoM: c.ancho_m, altoM: c.alto_m, pieza: c.pieza,
+    reservaMm: c.reserva_mm ?? AM.RESERVA_DEFECTO_MM, margen: c.margen || null })
   const doc = m.mupdf.Document.openDocument(pdf, 'application/pdf')
   let zip, sha1
   try {

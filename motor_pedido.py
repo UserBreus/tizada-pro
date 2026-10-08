@@ -4382,6 +4382,79 @@ class _DocPerezoso:
         return getattr(self.real(), nombre)
 
 
+# ════════════════ MARCAS DE TIRAS (molde a medida, MAPA 639 y 641) ════════════════
+# Pedido del usuario: marcas para coser las TIRAS, del borde de la pieza hasta la guía del diseño (el
+# margen), del color elegido. CADA LADO por separado (arriba, abajo, izquierda, derecha; 0 = ese lado sin
+# tiras) y la cantidad CUENTA LAS DOS PUNTAS (2026-10-08: «si pongo 5 en un lado son 5 contando las 2 de
+# la punta»): con 5, una en cada esquina del lado y 3 en el medio, todas a distancias iguales. La de la
+# esquina va en diagonal, del vértice de la pieza al de la guía (el ángulo lo dan los dos márgenes); si
+# los dos lados de una esquina la piden, va una sola. Con 1, una sola marca en el medio del lado.
+# Gemelos EXACTOS en `frontend/src/motor/molde/tiras.js` (`segmentosTiras`) y
+# `frontend/src/motor/pieza/base.js` (`opsTiras`): mismo orden, mismas cuentas, mismo texto.
+
+_LADOS_TIRAS = ("arriba", "abajo", "izq", "der")
+
+
+def _segmentos_tiras(W, H, m, lados):
+    """Las marcas de una pieza de `W` × `H` (origen abajo a la izquierda, y hacia ARRIBA, como el PDF),
+    con el margen `m` = {arriba, abajo, izq, der} en las mismas unidades y `lados` = cuántas marcas en
+    cada lado CONTANDO LAS PUNTAS: `[(x1, y1, x2, y2), …]` del borde hacia la guía. Primero las esquinas
+    (abajo-izq, abajo-der, arriba-der, arriba-izq), después lo de adentro de cada lado (izq, der, abajo,
+    arriba). Un lado sin margen no lleva marcas (no hay guía hasta dónde llegar)."""
+    mi, md = float(m.get("izq") or 0), float(m.get("der") or 0)
+    ma, mb = float(m.get("arriba") or 0), float(m.get("abajo") or 0)
+    lados = lados if isinstance(lados, dict) else {}
+
+    def _n(k):
+        try:
+            return max(0, int(float(lados.get(k) or 0)))
+        except (TypeError, ValueError):
+            return 0
+    n_i, n_d, n_a, n_b = _n("izq"), _n("der"), _n("arriba"), _n("abajo")
+    pide = lambda n, mg: n >= 2 and mg > 0          # con 2 o más, las puntas son del lado
+    s = []
+    for ok, sg in ((pide(n_i, mi) or pide(n_b, mb), (0.0, 0.0, mi, mb)),
+                   (pide(n_d, md) or pide(n_b, mb), (W, 0.0, W - md, mb)),
+                   (pide(n_d, md) or pide(n_a, ma), (W, H, W - md, H - ma)),
+                   (pide(n_i, mi) or pide(n_a, ma), (0.0, H, mi, H - ma))):
+        if ok and (sg[0] != sg[2] or sg[1] != sg[3]):
+            s.append(sg)
+
+    def _medio(n, L):
+        return [L / 2] if n == 1 else [L * k / (n - 1) for k in range(1, n - 1)]
+    if mi > 0:
+        for y in _medio(n_i, H):
+            s.append((0.0, y, mi, y))
+    if md > 0:
+        for y in _medio(n_d, H):
+            s.append((W, y, W - md, y))
+    if mb > 0:
+        for x in _medio(n_b, W):
+            s.append((x, 0.0, x, mb))
+    if ma > 0:
+        for x in _medio(n_a, W):
+            s.append((x, H, x, H - ma))
+    return s
+
+
+def _ops_tiras(tiras, W, H):
+    """El trazo de las marcas de tiras sobre la página de la pieza (`W` × `H` pt = el TOTAL de la pieza
+    a medida: contorno + la reserva del borde). `tiras` = lo que arma `servidor._tiras_de` (margen en cm)."""
+    if not isinstance(tiras, dict):
+        return ""
+    mg = tiras.get("margen") or {}
+    m = {k: float(mg.get(k) or 0) * CM for k in ("arriba", "abajo", "izq", "der")}
+    segs = _segmentos_tiras(W, H, m, tiras.get("lados"))
+    if not segs:
+        return ""
+    col = " ".join(f"{float(v):g}" for v in (tiras.get("color") or [0, 0, 0, 1])[:4]) + " K"
+    w = max(0.1, float(tiras.get("grosor_mm") or 1.0)) * MM
+    out = f"q\n{w:.3f} w 0 J 0 j {col}\n"
+    for x1, y1, x2, y2 in segs:
+        out += f"{x1:.3f} {y1:.3f} m {x2:.3f} {y2:.3f} l\n"
+    return out + "S\nQ\n"
+
+
 # ════════════════ NOMBRE Y NÚMERO: ALTURA Y ANCHO (2026-10-01) ════════════════
 # Pedido del usuario: «que se limite hasta dónde llega un texto en cada molde y, si supera ese
 # tamaño, se vaya achicando proporcionalmente (…) y si elijo otra fuente y es más alta que la que
@@ -5399,6 +5472,9 @@ def generar_pedido(plantilla, arte, registro, pers, prendas, carpeta_fuentes, sa
         cstream = out.make_stream(b"")
         page.Contents = cstream
         _base_stream = (f"{borde}{arte_draw}{borde_post}" if _bc_alin == "fuera" else f"{arte_draw}{borde}{borde_post}")
+        # MARCAS DE TIRAS (molde a medida, MAPA 639): encima del diseño y del borde, en toda la página
+        # (= el total de la pieza). Gemelo: `componerBase` de motor/pieza/base.js.
+        _base_stream += _ops_tiras(_bc.get("tiras"), W + 2*B, H + 2*B)
         return {"out": out, "page": page, "cstream": cstream, "base_stream": _base_stream,
                 "clip": clip, "cont": cont, "W": W, "H": H, "x0": x0, "y0": y0, "x0m": x0m,
                 "y0m": y0m, "Hp": Hp, "S": S, "mesa": mesa, "_mesa_a": _mesa_a, "info": info,

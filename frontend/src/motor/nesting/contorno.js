@@ -537,9 +537,13 @@ const claveGeo = (p, cellPt, espC, paso) => JSON.stringify([
 export function preparar(piezas, cfg) {
   const cellPt = (cfg.resolucion_mm ?? 2) / 10 * CM
   const m = cfg.margenes_cm
-  const anchoC = Math.trunc((cfg.ancho_cm - m.izq - m.der) * CM / cellPt)
-  const altoC = Math.trunc((cfg.altura_max_cm * CM - (m.sup + m.inf) * CM) / cellPt)
   const espC = Math.max(1, Math.ceil(cfg.espaciado_cm * CM / cellPt))
+  // 🔴 LA SEPARACIÓN ES ENTRE PIEZAS, NO CONTRA EL BORDE DE LA MESA (MAPA 633): la grilla se agranda
+  // `espC` de cada lado para que el aire de cada pieza pueda colgar afuera, y `colocar` corre las posiciones
+  // `espC` al devolverlas: la PIEZA nunca sale de la mesa y el borde lo decide sólo el margen. Antes una
+  // bandera de 156 cm no entraba en una mesa de 157. Gemelo: `_preparar` de nesting_contorno.py.
+  const anchoC = Math.trunc((cfg.ancho_cm - m.izq - m.der) * CM / cellPt) + 2 * espC
+  const altoC = Math.trunc((cfg.altura_max_cm * CM - (m.sup + m.inf) * CM) / cellPt) + 2 * espC
   const paso = cfg.paso_libre_grados ?? 15
   const geo = new Map()
   const cacheKey = (p) => JSON.stringify([cellPt, espC, paso, p.rotacion, p.borde_cm ?? 0])
@@ -687,7 +691,7 @@ function bboxGirado(p, ang) {
 /** `_anidar_estrategia(piezas, cfg, estrategia, orden, prep, soloAng)` → `{colocaciones, area}`.
  * `soloAng` (Set o null): sólo esos ángulos (si a una pieza no le queda ninguno, los suyos). */
 export function anidarEstrategia(piezas, cfg, estrategia, orden, prep, soloAng = null, modo = {}) {
-  const { cellPt, anchoC, altoC, paso } = prep
+  const { cellPt, anchoC, altoC, espC, paso } = prep
   // `modo.acotado`: el atajo de piezas iguales no puede alargar la mesa. `modo.repuestoTodos`: la
   // repetida que no entró al lado de su anterior prueba TODOS los ángulos (no sólo el de ésa).
   const acotado = !!modo.acotado, repuestoTodos = !!modo.repuestoTodos
@@ -726,7 +730,7 @@ export function anidarEstrategia(piezas, cfg, estrategia, orden, prep, soloAng =
     hojasSky[h] = Math.max(hojasSky[h], y + hh)
     if (p._geo_key != null) ultimo.set(p._geo_key, { h, ang, y, x, mrCol, mrTest })
     const [bw, bh] = bboxGirado(p, ang)
-    colocaciones[h].push({ pieza: p, ang, cx: (x + ww / 2) * cellPt, cy: (y + hh / 2) * cellPt, bw, bh })
+    colocaciones[h].push({ pieza: p, ang, cx: (x - espC + ww / 2) * cellPt, cy: (y - espC + hh / 2) * cellPt, bw, bh })   // la grilla empieza `espC` antes de la mesa
     areaC2 += contar(p._mask)
   }
 

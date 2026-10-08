@@ -136,10 +136,10 @@ const TAREAS = {
   },
   /** MOLDE A MEDIDA (MAPA 623): el PDF del rectángulo + su resumen (forma DXF: el nombre de la
    *  pieza viaja en `nombres` y el alta lo pone solo). */
-  async a_medida_pdf({ anchoM, altoM, pieza }) {
+  async a_medida_pdf({ anchoM, altoM, pieza, reservaMm = 0, margen = null }) {
     await cargar()
     const { pdfMoldeAMedida } = await import('./molde/aMedida.js')
-    const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza })
+    const r = pdfMoldeAMedida(mupdf, { anchoM, altoM, pieza, reservaMm, margen })
     return { valor: { pdf: r.pdf, resumen: r.resumen }, transfer: [r.pdf.buffer] }
   },
   /**

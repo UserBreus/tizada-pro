@@ -172,9 +172,9 @@ flowchart LR
   <div class="indice">
     <div><span class="n">1</span>Puesta en marcha en el servidor de TIZADA</div>
     <div><span class="n">2</span>El recorrido de un pedido</div>
-    <div><span class="n">3</span>Qué se manda y qué se recibe</div>
+    <div><span class="n">3</span>Qué se manda y qué se recibe · <b>3b</b> Cómo lee TIZADA el arte · <b>3c</b> Editables (TPU / DTF / bordado)</div>
     <div><span class="n">4</span>Cómo se conectan los JSON</div>
-    <div><span class="n">5</span>El pedido, el resultado y el aviso, campo por campo</div>
+    <div><span class="n">5</span>El pedido, el resultado y el aviso · <b>5b</b> Todos los campos de pedido.json · <b>5c</b> Moldes a medida (banderas) · <b>5d</b> Sus cuentas · <b>5e</b> Su JSON</div>
     <div><span class="n">6</span>Estados y alarmas</div>
     <div><span class="n">7</span>Todas las rutas</div>
     <div><span class="n">8</span>Probarlo, lista de control y problemas frecuentes</div>
@@ -294,6 +294,109 @@ sequenceDiagram
   <p>Por cada pedido: <b>un PDF por mesa</b> — <code>OV-2026-00123__Mesa 1 - Bandera (1,60).pdf</code>, una página lista para el RIP, como «Descargar todo» de TIZADA — y la <b>ficha técnica</b> <code>OV-2026-00123__FICHA_TECNICA.pdf</code> (tabla de talles y qué aplicar dónde). En Drive: las tizadas y <code>OV-2026-00123__resultado.json</code> en la carpeta del pedido, la ficha en la carpeta de fichas.</p>
 </section>
 
+<!-- ═══════════════════════════ 3b · EL ARTE AL DETALLE ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num a">3b</div><div><div class="kicker">El arte, capa por capa</div><h2>Cómo lee TIZADA el arte y los editables</h2></div></div>
+  <p class="lead">TIZADA no mira colores ni adivina: <b>lee los nombres</b> de las capas y de las mesas.</p>
+  <table>
+    <tr><th>Capa del arte</th><th>Para qué</th><th>Reglas</th></tr>
+    <tr><td><code>diseño</code></td><td>El dibujo de cada pieza</td><td>Sin texto vivo: todo convertido a curvas (si no, <code>arte-texto-vivo</code> y se rechaza)</td></tr>
+    <tr><td><code>guias</code></td><td>El <b>nombre de la pieza</b> de cada mesa</td><td>El nombre genérico de la pieza del molde (<code>GET /moldes/{molde}</code> → <code>piezas</code>). No importan mayúsculas, tildes, guiones ni el número del final («ESPALDA 2» = «Espalda»). <b>Una mesa con el nombre de su pieza se toma tal cual, sea del color que sea</b> (lisa, negra, rosada…).</td></tr>
+    <tr><td><code>guias</code> con <code>#</code></td><td>Arte distinto según el talle</td><td>Anteponer el talle o un rango: <code>#M Frente</code>, <code>#4XL-6XL Frente</code>. Manda el talle exacto, después el rango, después la mesa sin <code>#</code>. Si un talle queda sin mesa: <code>arte-variante-sin-cubrir</code> (aviso)</td></tr>
+    <tr><td><code>Texto</code> (o <code>Nombre</code>, <code>jugador</code>, <code>apellido</code>)</td><td>El texto que cambia en cada prenda</td><td>Se llena con la columna de rol <code>nombre</code> de la planilla. Se escribe con la tipografía del arte: si TIZADA no la tiene (<code>GET /tipografias</code>), mandarla en <code>tipografias/</code> o forzar otra con <code>tipografia_por_campo</code></td></tr>
+    <tr><td><code>Número</code> (o <code>num</code>, <code>nro</code>, <code>00</code>)</td><td>El número de cada prenda</td><td>Igual que Texto, con la columna de rol <code>numero</code>. Si la planilla trae texto/número y el arte no tiene la capa: <code>arte-campo-sin-capa</code> (aviso, no se estampa)</td></tr>
+  </table>
+
+  <h3><i class="ti ti-stack-2"></i> Objetos editables: cómo sabe TIZADA que algo es TPU, DTF o bordado</h3>
+  <div class="grilla g3">
+    <div class="tarjeta"><h4>1 · En el arte</h4><p>Cada objeto (escudo, logo, sponsor…) en <b>su propia capa</b>, con la palabra <b>Editable</b> en el nombre: <code>Editable logo</code>. Da igual dónde va la palabra o las mayúsculas («logo editable», «EDITABLE-logo»): TIZADA la saca y lo que queda es el <b>nombre del objeto</b> → <code>logo</code>.</p></div>
+    <div class="tarjeta"><h4>2 · En pedido.json</h4><p>En <b>ese molde</b> (<code>disenos[].moldes[]</code>), decir qué lleva cada objeto:<br><code>"editables": { "logo": "tpu" }</code><br>Procesos: <code>sublimado</code> · <code>tpu</code> · <code>dtf</code> · <code>bordado</code>. La clave va como el objeto (<code>"logo"</code>) o como la capa (<code>"Editable logo"</code>); mayúsculas no importan. Con varios moldes, se declara en cada uno.</p></div>
+    <div class="tarjeta"><h4>3 · Lo que hace</h4><p><code>sublimado</code>: se imprime con el diseño.<br><code>tpu</code> / <code>dtf</code> / <code>bordado</code>: <b>no se imprime</b>; va una <b>cruz de posición</b> y la ficha técnica dice qué aplicar y dónde. Sin cruz: <code>{"proceso": "bordado", "cruz": false}</code>. El resultado lo devuelve en <code>no_sublimado</code>.</p></div>
+  </div>
+  <table>
+    <tr><th>Si pasa esto…</th><th>TIZADA hace</th><th>Alarma</th></tr>
+    <tr><td>El arte tiene la capa y el pedido no la nombra</td><td>Sale <b>sublimado</b> (impreso) y avisa</td><td><code>editable-sin-declarar</code> (no frena)</td></tr>
+    <tr><td>El pedido nombra un objeto que el arte no tiene</td><td>Rechaza y dice qué objetos sí tiene el arte</td><td><code>editable-desconocido</code></td></tr>
+    <tr><td>El proceso no es uno de los cuatro</td><td>Rechaza al recibir</td><td><code>editable-proceso-invalido</code></td></tr>
+  </table>
+</section>
+
+<!-- ═══════════════════════════ 3c · EDITABLES AL DETALLE ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">3c</div><div><div class="kicker">TPU · DTF · bordado</div><h2>Los editables al detalle: cómo llegan, cómo se detectan, qué es fijo</h2></div></div>
+
+  <h3><i class="ti ti-layers-subtract"></i> A · Cómo tiene que llegar en el arte</h3>
+  <table>
+    <tr><th>Regla</th><th>Por qué</th></tr>
+    <tr><td>Cada objeto en una <b>capa de primer nivel</b> del panel Capas de Illustrator (no una subcapa ni un grupo)</td><td>Al guardar, sólo las capas de primer nivel viajan con su nombre dentro del PDF. Las subcapas se pierden</td></tr>
+    <tr><td><b>Una capa por objeto</b>: <code>Editable escudo</code>, <code>Editable sponsor</code>… (no los dos en la misma)</td><td>El proceso se elige por capa: todo lo que está en una capa lleva el mismo proceso</td></tr>
+    <tr><td>El nombre de la capa <b>contiene la palabra «editable»</b></td><td>Es lo único que mira TIZADA para saber que es editable</td></tr>
+    <tr><td>Adentro: el objeto tal cual (vectores, una imagen PNG/JPG incrustada o texto), <b>en su lugar real sobre la pieza</b></td><td>Ahí mismo va la cruz. Puede estar en una o en varias mesas: en cada mesa donde haya algo de esa capa, el objeto está en esa pieza</td></tr>
+    <tr><td>El objeto <b>no</b> se repite en la capa <code>diseño</code></td><td>Lo que está en <code>diseño</code> se imprime siempre: el TPU saldría impreso igual</td></tr>
+    <tr><td>.ai guardado con «Crear archivo compatible con PDF» (o .pdf con capas)</td><td>Sin eso el archivo no trae las capas y no se ve ningún editable</td></tr>
+  </table>
+
+  <h3><i class="ti ti-scan"></i> B · Cómo lo detecta TIZADA, paso a paso</h3>
+  <div class="grilla g2">
+    <div class="tarjeta"><p>
+      <b>1.</b> Abre el arte y lee la lista de capas del PDF.<br>
+      <b>2.</b> Una capa es editable si su nombre tiene <b>«editable»</b> en cualquier parte, con mayúsculas o minúsculas.<br>
+      <b>3.</b> El <b>nombre del objeto</b> es el nombre de la capa sin esa palabra ni los espacios, guiones, guiones bajos o puntos que la rodean.<br>
+      <b>4.</b> En cada mesa junta todo lo que hay en esa capa y mide dónde está y qué tamaño tiene.<br>
+      <b>5.</b> Busca en <code>editables</code> del pedido (en ese molde) una clave con ese nombre (sin importar mayúsculas) y aplica el proceso.</p></div>
+    <table style="margin: 0;">
+      <tr><th>Capa en el arte</th><th>Objeto (clave en el pedido)</th></tr>
+      <tr><td><code>Editable logo</code></td><td><code>logo</code></td></tr>
+      <tr><td><code>Logo editable</code></td><td><code>Logo</code></td></tr>
+      <tr><td><code>EDITABLE_Escudo</code> · <code>Editable-Escudo</code></td><td><code>Escudo</code> (el mismo)</td></tr>
+      <tr><td><code>Editables sponsor</code></td><td><code>sponsor</code></td></tr>
+      <tr><td><code>Editable TPU</code></td><td><code>TPU</code> ⚠ es sólo el nombre, ver abajo</td></tr>
+      <tr><td><code>Editable</code> (sola)</td><td><code>Editable</code></td></tr>
+    </table>
+  </div>
+
+  <h3><i class="ti ti-lock"></i> C · Lo que está fijo en TIZADA (no se configura)</h3>
+  <table>
+    <tr><th>Qué</th><th>Valor fijo</th></tr>
+    <tr><td>La palabra que marca un editable</td><td><code>editable</code> (o <code>editables</code>), en cualquier parte del nombre de la capa</td></tr>
+    <tr><td>Los procesos (valor en <code>editables</code>)</td><td><b>Sólo cuatro:</b> <code>"sublimado"</code> · <code>"tpu"</code> · <code>"dtf"</code> · <code>"bordado"</code>. Se aceptan con mayúsculas (<code>"TPU"</code>). Cualquier otra palabra («vinilo», «serigrafía», «estampado») → <code>editable-proceso-invalido</code></td></tr>
+    <tr><td>Si el objeto no se nombra en el pedido</td><td>Sale <code>sublimado</code> (impreso) + aviso <code>editable-sin-declarar</code></td></tr>
+    <tr><td>La marca en la tela (TPU, DTF, bordado)</td><td>Cruz de <b>3 cm</b> de punta a punta, trazo de 1,6 mm, <b>negra con borde blanco</b>, centrada donde estaba el objeto, con la letra del proceso: <b>T</b> = TPU · <b>D</b> = DTF · <b>B</b> = Bordado</td></tr>
+    <tr><td>Sin marca</td><td><code>{"proceso": "tpu", "cruz": false}</code>: no se imprime y no queda nada en la tela (sólo en la ficha técnica)</td></tr>
+    <tr><td>Dónde se declara</td><td>En cada molde: <code>disenos[].moldes[].editables</code></td></tr>
+  </table>
+  <div class="caja c-ojo"><div class="t"><i class="ti ti-alert-triangle"></i> El nombre de la capa NO elige el proceso</div><p>Una capa «Editable TPU» crea un objeto que se <b>llama</b> «TPU», pero si el pedido no dice <code>"editables": {"TPU": "tpu"}</code> sale <b>sublimado</b>. El proceso lo decide siempre el pedido.</p></div>
+
+  <h3><i class="ti ti-list-numbers"></i> D · Ejemplo completo</h3>
+  <div class="grilla g2">
+    <div>
+      <p class="chico"><b>El panel Capas del .ai</b> (capas de primer nivel):</p>
+      <div class="arbol"><span class="f">camiseta_jugador.ai</span>
+├── <span class="d">guias</span>             <span class="c">«Frente», «Espalda», «Manga»…</span>
+├── <span class="d">Texto</span>             <span class="c">el apellido</span>
+├── <span class="d">Número</span>            <span class="c">el número</span>
+├── <span class="d">Editable escudo</span>   <span class="c">el escudo, en el Frente</span>
+├── <span class="d">Editable sponsor</span>  <span class="c">el sponsor, en el Frente</span>
+├── <span class="d">Editable logo</span>     <span class="c">el logo de la marca, en la Manga</span>
+└── <span class="d">diseño</span>            <span class="c">todo lo demás (sin esos 3 objetos)</span></div>
+    </div>
+    <div>
+      <p class="chico"><b>En pedido.json</b>, dentro de ese molde:</p>
+<pre class="json"><span class="k">"editables"</span>: {
+  <span class="k">"escudo"</span>:  <span class="s">"bordado"</span>,
+  <span class="k">"sponsor"</span>: <span class="s">"sublimado"</span>,
+  <span class="k">"logo"</span>:    { <span class="k">"proceso"</span>: <span class="s">"tpu"</span>, <span class="k">"cruz"</span>: <span class="n">false</span> }
+}</pre>
+    </div>
+  </div>
+  <table>
+    <tr><th>Objeto</th><th>En la tizada (PDF de la mesa)</th><th>En la ficha técnica</th><th>En el resultado</th></tr>
+    <tr><td><code>escudo</code></td><td>No se imprime: cruz con <b>B</b> en el Frente</td><td>Bordado, en el Frente</td><td rowspan="3"><code>"no_sublimado": {"escudo": "bordado", "logo": "tpu"}</code></td></tr>
+    <tr><td><code>sponsor</code></td><td>Se imprime con el diseño</td><td>—</td></tr>
+    <tr><td><code>logo</code></td><td>No se imprime y <b>no queda marca</b></td><td>TPU, en la Manga</td></tr>
+  </table>
+</section>
+
 <!-- ═══════════════════════════ 4 · CÓMO SE CONECTAN ═══════════════════════════ -->
 <section class="apretada">
   <div class="seccion-titulo"><div class="num v">4</div><div><div class="kicker">El mapa de los datos</div><h2>Cómo se conectan los JSON</h2></div></div>
@@ -380,8 +483,220 @@ flowchart LR
   </div>
 </section>
 
+<!-- ═══════════════════════════ 5b · TODOS LOS CAMPOS ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num">5b</div><div><div class="kicker">Sin que falte ninguno</div><h2>Todos los campos de pedido.json</h2></div></div>
+  <p class="lead">El ejemplo de arriba usa los más comunes. Ésta es la lista <b>completa</b> de lo que TIZADA lee; cualquier otro campo se ignora.</p>
+  <h3><i class="ti ti-file-code"></i> Cabecera</h3>
+  <table>
+    <tr><th>Campo</th><th></th><th>Qué es</th></tr>
+    <tr><td><code>formato</code></td><td>obligatorio</td><td>Siempre <code>"tizadapro.pedido/1"</code></td></tr>
+    <tr><td><code>referencia</code></td><td>obligatorio</td><td>El número del pedido en el otro sistema. Único. Letras, números, punto, guion y guion bajo; hasta 64</td></tr>
+    <tr><td><code>pedido_externo</code></td><td>opcional</td><td>Objeto libre (id, sucursal, fecha…). Vuelve tal cual</td></tr>
+    <tr><td><code>cliente</code></td><td>opcional</td><td>Texto, para reconocerlo en la pantalla de TIZADA</td></tr>
+    <tr><td><code>aviso_url</code></td><td>opcional</td><td>Dónde avisar al terminar este pedido. Sólo vale si es del mismo sitio que la dirección cargada en Integraciones (si no: <code>aviso-url-no-permitida</code>)</td></tr>
+    <tr><td><code>reemplazar</code></td><td>opcional</td><td><code>true</code> para rehacer un pedido que ya salió con la misma referencia</td></tr>
+    <tr><td><code>opciones</code> · <code>mesas</code></td><td>opcional</td><td>Ver las tablas de abajo</td></tr>
+    <tr><td><code>disenos[]</code> · <code>planilla[]</code></td><td>obligatorio</td><td>Los diseños con sus moldes, y una fila por prenda</td></tr>
+  </table>
+  <h3><i class="ti ti-shirt"></i> Cada diseño (<code>disenos[]</code>) y cada molde (<code>disenos[].moldes[]</code>)</h3>
+  <table>
+    <tr><th>Campo</th><th>Dónde</th><th>Qué es</th></tr>
+    <tr><td><code>nombre</code></td><td>diseño · obligatorio</td><td>JUGADOR, GOLERO… Único. Es lo que va en <code>planilla[].diseno</code></td></tr>
+    <tr><td><code>arte</code></td><td>diseño o molde</td><td>Ruta del arte dentro del .zip. El del diseño vale para sus moldes que no traigan el suyo</td></tr>
+    <tr><td><code>tipografias</code></td><td>diseño o molde · opcional</td><td>Rutas de las .ttf/.otf que usa el texto/número y TIZADA no tiene (<code>GET /tipografias</code>)</td></tr>
+    <tr><td><code>tipografia_por_campo</code></td><td>diseño · opcional</td><td>Forzar una tipografía del catálogo para un campo: <code>{"numero": "Anton Regular", "nombre": "Bebas Neue"}</code></td></tr>
+    <tr><td><code>moldes[]</code></td><td>diseño · obligatorio</td><td>Una entrada por prenda (una variable por prenda)</td></tr>
+    <tr><td><code>variable</code></td><td>molde · obligatorio</td><td>La clave <code>v_…</code> de <code>GET /variables</code> (o su nombre, si no se repite)</td></tr>
+    <tr><td><code>molde</code></td><td>molde · opcional</td><td>Código <code>prod_…</code>. Sólo si la variable va por nombre y ese nombre está en varias prendas</td></tr>
+    <tr><td><code>tela</code> · <code>telas_por_pieza</code></td><td>molde</td><td>Id de tela principal (obligatorio) y excepciones por pieza genérica: <code>{"Cuello": "486"}</code></td></tr>
+    <tr><td><code>piezas_apagadas</code></td><td>molde · opcional</td><td>Piezas que <b>no</b> se hacen en este pedido: <code>["Tapa costura"]</code></td></tr>
+    <tr><td><code>editables</code></td><td>molde · opcional</td><td>Qué lleva cada objeto editable del arte (TPU, DTF, bordado…). <b>Ver sección 3b</b></td></tr>
+    <tr><td><code>medida</code></td><td>molde · sólo prendas a medida</td><td><code>{"ancho_m": 1.5, "alto_m": 0.9}</code> = la medida del <b>diseño</b> en metros (0,05 a 50); TIZADA le suma el margen. Lo indica <code>a_medida</code> en <code>GET /variables</code>; esa fila de la planilla no lleva talle. <b>Ver 5c</b></td></tr>
+    <tr><td><code>tiras</code></td><td>molde · a medida · opcional</td><td>Marcas para coser las tiras: <code>{"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 0, "der": 0}}</code>; cada lado cuenta las 2 puntas. Sin esto, las del molde. <b>Ver 5e</b></td></tr>
+  </table>
+  <div class="grilla g2">
+    <div>
+      <h3><i class="ti ti-adjustments"></i> <code>opciones</code></h3>
+      <table>
+        <tr><th>Campo</th><th>Valores</th><th>Si no viene</th></tr>
+        <tr><td><code>si_falta_tipografia</code></td><td><code>"rechazar"</code> · <code>"predeterminada"</code> (usa la predeterminada y avisa)</td><td>rechazar</td></tr>
+        <tr><td><code>si_texto_no_entra</code></td><td><code>"achicar"</code> (avisa) · <code>"rechazar"</code></td><td>achicar</td></tr>
+        <tr><td><code>si_piezas_en_blanco</code></td><td><code>"rechazar"</code> · <code>"seguir"</code> (salen sin diseño y avisa)</td><td>rechazar</td></tr>
+        <tr><td><code>perfil_color</code></td><td>Nombre del perfil .icc a forzar</td><td>el del sistema</td></tr>
+        <tr><td><code>carpeta</code></td><td>Subcarpeta de Drive: <code>"2026-10/OV-2026-00123"</code></td><td>la referencia</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3><i class="ti ti-layout-grid"></i> <code>mesas</code></h3>
+      <table>
+        <tr><th><code>modo</code></th><th>Qué hace</th></tr>
+        <tr><td><code>"normal"</code></td><td>Lo de siempre (por defecto)</td></tr>
+        <tr><td><code>"una_por_fila"</code></td><td>Una mesa por fila; la cantidad pasa a ser copias. Necesita columna de cantidad</td></tr>
+        <tr><td><code>"por_talles"</code></td><td>Los talles de cada grupo comparten mesa: <code>"grupos": [["S","M"],["L","XL"]]</code></td></tr>
+      </table>
+      <h3><i class="ti ti-table"></i> <code>planilla[]</code></h3>
+      <p class="chico">Claves = ids de columna del molde. Todo como texto (<code>"07"</code> con su cero). Talle tal cual el molde; opciones de la lista (<code>"Corta + Larga"</code> para varias); <code>cantidad</code> entero ≥ 1 (vacía = 1); <code>diseno</code> obligatoria si hay más de un diseño.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════ 5c · MOLDES A MEDIDA ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">5c</div><div><div class="kicker">Banderas y otros rectángulos</div><h2>Moldes a medida: qué es y qué hay que preguntar</h2></div></div>
+  <p class="lead">Un <b>molde a medida</b> es una prenda de <b>una sola pieza rectangular</b> (una bandera, un cartel) que <b>no tiene talles</b>: el tamaño lo pone cada pedido. Se reconoce porque en <code>GET /variables</code> y en <code>GET /moldes/{codigo}</code> trae el bloque <code>a_medida</code>. El otro sistema le pregunta a la persona <b>tres cosas</b> y TIZADA hace el resto.</p>
+  <div class="figura">
+    <svg viewBox="0 0 640 345" width="100%" style="max-height: 92mm; display: block;" font-family="Inter, sans-serif">
+      <!-- la tela -->
+      <rect x="20" y="70" width="600" height="220" fill="#eef6f8" stroke="none"/>
+      <line x1="20" y1="70" x2="620" y2="70" stroke="#5b6875" stroke-width="1.5"/>
+      <line x1="20" y1="290" x2="620" y2="290" stroke="#5b6875" stroke-width="1.5"/>
+      <text x="606" y="180" font-size="11" fill="#5b6875" text-anchor="middle" transform="rotate(-90 606 180)" font-weight="700">TELA · 157 cm de ancho</text>
+      <!-- el total del arte -->
+      <rect x="96" y="70.8" width="428.4" height="218.4" fill="#ffffff" stroke="#00b8d4" stroke-width="3"/>
+      <!-- el borde de corte, ADENTRO del total -->
+      <rect x="99" y="73.8" width="422.4" height="212.4" fill="none" stroke="#e0443a" stroke-width="1.2"/>
+      <!-- la guía del diseño (margen exagerado para que se vea) -->
+      <rect x="118" y="92.8" width="384.4" height="174.4" fill="#fde6f2" stroke="#d6007e" stroke-width="1.6" stroke-dasharray="7 5"/>
+      <text x="310" y="172" font-size="14" fill="#a3005f" text-anchor="middle" font-weight="800">300 × 150 cm</text>
+      <text x="310" y="190" font-size="10.5" fill="#a3005f" text-anchor="middle">guía del diseño = la medida que se pide</text>
+      <!-- las tiras: arriba 5 y abajo 5 (2 puntas + 3), izquierda 1 (en el medio), derecha 0 -->
+      <g stroke="#16202a" stroke-width="3.2" stroke-linecap="butt">
+        <line x1="96" y1="70.8" x2="118" y2="92.8"/><line x1="524.4" y1="70.8" x2="502.4" y2="92.8"/>
+        <line x1="96" y1="289.2" x2="118" y2="267.2"/><line x1="524.4" y1="289.2" x2="502.4" y2="267.2"/>
+        <line x1="203.1" y1="70.8" x2="203.1" y2="92.8"/><line x1="310.2" y1="70.8" x2="310.2" y2="92.8"/><line x1="417.3" y1="70.8" x2="417.3" y2="92.8"/>
+        <line x1="203.1" y1="289.2" x2="203.1" y2="267.2"/><line x1="310.2" y1="289.2" x2="310.2" y2="267.2"/><line x1="417.3" y1="289.2" x2="417.3" y2="267.2"/>
+        <line x1="96" y1="180" x2="118" y2="180"/>
+      </g>
+      <!-- medidas -->
+      <g stroke="#00b8d4" stroke-width="1.2">
+        <line x1="96" y1="24" x2="524.4" y2="24"/><line x1="96" y1="18" x2="96" y2="30"/><line x1="524.4" y1="18" x2="524.4" y2="30"/>
+      </g>
+      <text x="310" y="17" font-size="11" fill="#007a8f" text-anchor="middle" font-weight="700">306 cm · TOTAL del arte = 300 + 3 + 3 (lo que se imprime)</text>
+      <g stroke="#16202a" stroke-width="1">
+        <line x1="96" y1="56" x2="203.1" y2="56"/><line x1="96" y1="51" x2="96" y2="61"/><line x1="203.1" y1="51" x2="203.1" y2="61"/>
+      </g>
+      <text x="149.5" y="50" font-size="10" fill="#16202a" text-anchor="middle" font-weight="700">una cada 76,5 cm</text>
+      <text x="420" y="50" font-size="10" fill="#16202a" text-anchor="middle">arriba: 5 tiras = 2 puntas + 3</text>
+      <g stroke="#00b8d4" stroke-width="1.2">
+        <line x1="548" y1="70.8" x2="548" y2="289.2"/><line x1="542" y1="70.8" x2="554" y2="70.8"/><line x1="542" y1="289.2" x2="554" y2="289.2"/>
+      </g>
+      <text x="566" y="180" font-size="11" fill="#007a8f" text-anchor="middle" transform="rotate(-90 566 180)" font-weight="700">156 cm = 150 + 3 + 3</text>
+      <text x="58" y="176" font-size="9.5" fill="#16202a" text-anchor="middle">izquierda:</text>
+      <text x="58" y="188" font-size="9.5" fill="#16202a" text-anchor="middle">1 en el medio</text>
+      <!-- leyenda -->
+      <g font-size="10" fill="#16202a">
+        <rect x="24" y="304" width="18" height="10" fill="#fff" stroke="#00b8d4" stroke-width="2.5"/><text x="48" y="313">total del arte (medida + margen)</text>
+        <rect x="224" y="304" width="18" height="10" fill="#fde6f2" stroke="#d6007e" stroke-dasharray="4 3"/><text x="248" y="313">guía del diseño · margen 3 cm por lado</text>
+        <line x1="454" y1="309" x2="472" y2="309" stroke="#e0443a" stroke-width="1.5"/><text x="478" y="313">borde de corte (adentro)</text>
+        <line x1="24" y1="329" x2="42" y2="329" stroke="#16202a" stroke-width="3.2"/><text x="48" y="333">tira: marca del borde hasta la guía · en las esquinas, en diagonal · abajo también 5 · derecha 0</text>
+      </g>
+    </svg>
+    <div class="pie-fig">Bandera de 3,00 × 1,50 con 3 cm de margen en la tela «Bandera (1,60)»: 306 × 156 entra girada (156 ≤ 156,7). El margen está dibujado más ancho para que se vea.</div>
+  </div>
+
+  <div class="grilla g3">
+    <div class="tarjeta"><div class="ico i-c"><i class="ti ti-ruler-measure"></i></div><h4>1 · La medida del diseño</h4><p>Ancho y alto <b>del diseño</b> en metros: lo que queda a la vista, adentro del margen. Entre <code>medida_minima_m</code> y <code>medida_maxima_m</code>. TIZADA le suma el margen: 3,00 × 1,50 con 3 cm por lado sale de <b>3,06 × 1,56</b>.</p></div>
+    <div class="tarjeta"><div class="ico i-m"><i class="ti ti-ruler-2"></i></div><h4>2 · La tela</h4><p>Una de <code>a_medida.telas</code>. Entra si el lado del <b>total</b> que va atravesado ≤ <code>entra_hasta_cm</code> (si <code>gira</code>, sirve el más corto) y el otro ≤ <code>largo_maximo_cm</code>. Si no: <code>tela-no-entra</code>, con cuánto se pasa y lo máximo.</p></div>
+    <div class="tarjeta"><div class="ico i-a"><i class="ti ti-needle-thread"></i></div><h4>3 · Las tiras (opcional)</h4><p>Si lleva y cuántas marcas en <b>cada lado</b> (arriba, abajo, izq, der). El número <b>cuenta las 2 puntas</b>: 5 = 2 esquinas + 3 en el medio; 1 = una en el medio; 0 = ese lado sin tiras. Si no se manda: las del molde.</p></div>
+  </div>
+
+  <div class="caja c-bien"><div class="t"><i class="ti ti-circle-check"></i> Lo que hace TIZADA con eso</div><p>Arma la pieza del <b>total</b> (medida + margen), la acomoda en la tela (girada si así entra), imprime el diseño hasta el borde, el <b>borde de corte</b> por dentro y las <b>marcas de las tiras</b> del color y grosor del molde; en la <b>ficha técnica</b> agrega «MEDIDA Y TERMINACIÓN» con todas estas medidas.</p></div>
+</section>
+
+<!-- ═══════════════════════════ 5d · LAS CUENTAS ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">5d</div><div><div class="kicker">Molde a medida · antes de mandar</div><h2>Las cuentas, y la ruta que las hace por vos</h2></div></div>
+  <p class="lead">El otro sistema puede hacer estas cuentas solo, con lo que publica <code>a_medida</code>, para mostrarle a la persona <b>en el momento</b> si su bandera entra y hasta cuánto puede pedir. O se las puede preguntar a TIZADA: dan exactamente lo mismo.</p>
+  <h3><i class="ti ti-calculator"></i> Las cuentas</h3>
+  <table>
+    <tr><th>Qué</th><th>Cómo se calcula</th><th>En el ejemplo</th></tr>
+    <tr><td><b>Total del arte</b></td><td>ancho = ancho del diseño + margen izq + der · alto = alto del diseño + margen arriba + abajo (el borde de corte va <b>adentro</b>)</td><td>300 + 3 + 3 = <b>306</b> · 150 + 3 + 3 = <b>156</b> cm</td></tr>
+    <tr><td><b>¿Entra en la tela?</b></td><td>lado atravesado ≤ <code>entra_hasta_cm</code> y el otro ≤ <code>largo_maximo_cm</code>; si <code>gira</code>, probar también al revés</td><td>156 ≤ 156,7 ✓ (girada)</td></tr>
+    <tr><td><b>Lo máximo</b></td><td><code>entra_hasta_cm</code> − el margen de esos dos lados, redondeado al cm para abajo</td><td>156,7 − 6 → <b>1,50 m</b> de alto</td></tr>
+    <tr><td><b>Tiras de un lado</b></td><td>N marcas: una en cada punta y las demás a distancias iguales → una cada <b>largo del lado ÷ (N − 1)</b>; con 1, en el medio. Cada marca mide lo que el margen de ese lado</td><td>arriba 5: 306 ÷ 4 = <b>76,5 cm</b> · marca de 3 cm</td></tr>
+    <tr><td><b>Total de marcas</b></td><td>la suma de los lados; una esquina que piden 2 lados <b>cuenta una vez</b></td><td>arriba 5 + abajo 5 + izq 1 = <b>11</b></td></tr>
+  </table>
+  <h3><i class="ti ti-bolt"></i> <code>POST /a_medida/calcular</code> — TIZADA hace las cuentas</h3>
+<pre class="json"><span class="c">// lo que se manda (no guarda nada)</span>
+{ <span class="k">"variable"</span>: <span class="s">"v_cb7fd79"</span>, <span class="k">"ancho_m"</span>: <span class="n">3</span>, <span class="k">"alto_m"</span>: <span class="n">1.5</span>,
+  <span class="k">"tela"</span>: <span class="s">"44"</span>,                            <span class="c">← opcional: si no viene, todas las del molde</span>
+  <span class="k">"tiras"</span>: { <span class="k">"arriba"</span>: <span class="n">5</span>, <span class="k">"abajo"</span>: <span class="n">5</span>, <span class="k">"izq"</span>: <span class="n">1</span> } }   <span class="c">← opcional: si no viene, las del molde</span></pre>
+<pre class="json"><span class="c">// lo que contesta: 200 (o 422 con las alarmas si algo no sirve)</span>
+{ <span class="k">"medida_diseno_cm"</span>: { <span class="k">"ancho"</span>: <span class="n">300</span>, <span class="k">"alto"</span>: <span class="n">150</span> },
+  <span class="k">"total_cm"</span>: { <span class="k">"ancho"</span>: <span class="n">306</span>, <span class="k">"alto"</span>: <span class="n">156</span> },
+  <span class="k">"margen_cm"</span>: { <span class="c">…</span> }, <span class="k">"borde_corte_mm"</span>: <span class="n">2</span>, <span class="k">"gira"</span>: <span class="n">true</span>, <span class="k">"largo_maximo_cm"</span>: <span class="n">2999.5</span>,
+  <span class="k">"telas"</span>: [ { <span class="k">"id"</span>: <span class="s">"44"</span>, <span class="k">"nombre"</span>: <span class="s">"Bandera (1,60)"</span>, <span class="k">"entra_hasta_cm"</span>: <span class="n">156.7</span>,
+               <span class="k">"entra"</span>: <span class="n">true</span>, <span class="k">"motivo"</span>: <span class="n">null</span> } ],     <span class="c">← si no entra: motivo = cuánto se pasa y lo máximo</span>
+  <span class="k">"entra_en_alguna"</span>: <span class="n">true</span>,
+  <span class="k">"tiras"</span>: { <span class="k">"lleva"</span>: <span class="n">true</span>, <span class="k">"total_marcas"</span>: <span class="n">11</span>, <span class="k">"grosor_mm"</span>: <span class="n">1</span>, <span class="k">"color_cmyk"</span>: [ <span class="c">…</span> ],
+    <span class="k">"lados"</span>: { <span class="k">"arriba"</span>: <span class="n">5</span>, <span class="k">"abajo"</span>: <span class="n">5</span>, <span class="k">"izq"</span>: <span class="n">1</span>, <span class="k">"der"</span>: <span class="n">0</span> },
+    <span class="k">"por_lado"</span>: [ { <span class="k">"lado"</span>: <span class="s">"arriba"</span>, <span class="k">"marcas"</span>: <span class="n">5</span>, <span class="k">"cada_cm"</span>: <span class="n">76.5</span>, <span class="k">"en_el_medio"</span>: <span class="n">false</span>,
+                   <span class="k">"largo_del_lado_cm"</span>: <span class="n">306</span>, <span class="k">"largo_marca_cm"</span>: <span class="n">3</span> },
+                 { <span class="k">"lado"</span>: <span class="s">"izq"</span>, <span class="k">"marcas"</span>: <span class="n">1</span>, <span class="k">"cada_cm"</span>: <span class="n">null</span>, <span class="k">"en_el_medio"</span>: <span class="n">true</span>, <span class="c">…</span> }, <span class="c">…</span> ] },
+  <span class="k">"ficha"</span>: [ { <span class="k">"etiqueta"</span>: <span class="s">"Total del arte (con el margen)"</span>, <span class="k">"valor"</span>: <span class="s">"306 × 156 cm"</span> }, <span class="c">…</span> ],
+  <span class="k">"alarmas"</span>: [] }</pre>
+  <p class="chico">El molde va por <code>variable</code> (o <code>molde</code>). Si no es a medida: <b>422</b>; si no existe: <b>404</b>. Pide la llave como todo <code>/api/externo/v1</code>.</p>
+</section>
+
+<!-- ═══════════════════════════ 5e · EL JSON DEL MOLDE A MEDIDA ═══════════════════════════ -->
+<section class="apretada">
+  <div class="seccion-titulo"><div class="num m">5e</div><div><div class="kicker">El JSON de un molde a medida</div><h2>Qué publica TIZADA y cómo se manda el pedido</h2></div></div>
+  <div class="etapas">
+    <div class="et" style="border-color: #a9e7f2; background: var(--cian-claro);"><b>1 · leer</b><code>GET /variables</code> → bloque <code>a_medida</code></div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #f3b2d6; background: var(--magenta-claro);"><b>2 · preguntar</b>medida del diseño, tela y tiras</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #f3dc8a; background: var(--amarillo-claro);"><b>3 · calcular</b><code>POST /a_medida/calcular</code> (opcional)</div><i class="ti ti-arrow-right"></i>
+    <div class="et" style="border-color: #a6dcc4; background: var(--verde-claro);"><b>4 · mandar</b><code>POST /pedidos</code> con <code>medida</code> y <code>tiras</code></div>
+  </div>
+  <h3><i class="ti ti-download"></i> 1 · Lo que publica TIZADA</h3>
+<pre class="json"><span class="k">"a_medida"</span>: {                              <span class="c">← en GET /variables y en GET /moldes/{codigo}</span>
+  <span class="k">"pieza"</span>: <span class="s">"Bandera"</span>,
+  <span class="k">"medida_minima_m"</span>: <span class="n">0.05</span>, <span class="k">"medida_maxima_m"</span>: <span class="n">50</span>,        <span class="c">← la medida del DISEÑO, en metros</span>
+  <span class="k">"medida_de_muestra_m"</span>: { <span class="k">"ancho_m"</span>: <span class="n">1</span>, <span class="k">"alto_m"</span>: <span class="n">1</span> },
+  <span class="k">"margen_cm"</span>: { <span class="k">"arriba"</span>: <span class="n">3</span>, <span class="k">"abajo"</span>: <span class="n">3</span>, <span class="k">"izq"</span>: <span class="n">3</span>, <span class="k">"der"</span>: <span class="n">3</span> },   <span class="c">← total = medida + margen</span>
+  <span class="k">"borde_corte_mm"</span>: <span class="n">2</span>,                                 <span class="c">← va ADENTRO del total</span>
+  <span class="k">"gira"</span>: <span class="n">true</span>, <span class="k">"largo_maximo_cm"</span>: <span class="n">2999.5</span>,
+  <span class="k">"telas"</span>: [ { <span class="k">"id"</span>: <span class="s">"44"</span>, <span class="k">"nombre"</span>: <span class="s">"Bandera (1,60)"</span>, <span class="k">"ancho_mesa_cm"</span>: <span class="n">157</span>, <span class="k">"entra_hasta_cm"</span>: <span class="n">156.7</span> } ],
+  <span class="k">"tiras"</span>: { <span class="k">"lleva_por_defecto"</span>: <span class="n">false</span>, <span class="k">"maximo_por_lado"</span>: <span class="n">50</span>,
+             <span class="k">"lados_por_defecto"</span>: { <span class="k">"arriba"</span>: <span class="n">0</span>, <span class="k">"abajo"</span>: <span class="n">0</span>, <span class="k">"izq"</span>: <span class="n">0</span>, <span class="k">"der"</span>: <span class="n">0</span> },
+             <span class="k">"grosor_mm"</span>: <span class="n">1</span>, <span class="k">"color_cmyk"</span>: [ <span class="n">0</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">1</span> ] },   <span class="c">← grosor y color: los pone TIZADA</span>
+  <span class="c">… y además «total», «regla_entra» y «tiras.regla»: las reglas, en una frase</span> }</pre>
+  <div class="grilla g2">
+    <div>
+      <h3><i class="ti ti-upload"></i> 2 · El molde dentro de pedido.json</h3>
+<pre class="json">{ <span class="k">"variable"</span>: <span class="s">"v_cb7fd79"</span>,
+  <span class="k">"arte"</span>: <span class="s">"artes/bandera.ai"</span>,
+  <span class="k">"tela"</span>: <span class="s">"44"</span>,
+  <span class="k">"medida"</span>: { <span class="k">"ancho_m"</span>: <span class="n">3</span>, <span class="k">"alto_m"</span>: <span class="n">1.5</span> },
+  <span class="k">"tiras"</span>: { <span class="k">"lleva"</span>: <span class="n">true</span>,
+    <span class="k">"lados"</span>: { <span class="k">"arriba"</span>: <span class="n">5</span>, <span class="k">"abajo"</span>: <span class="n">5</span>,
+               <span class="k">"izq"</span>: <span class="n">1</span>, <span class="k">"der"</span>: <span class="n">0</span> } } }</pre>
+      <p class="chico">Va en <code>disenos[].moldes[]</code>. La fila de la <code>planilla</code> de un molde a medida <b>no lleva talle</b>.</p>
+    </div>
+    <div>
+      <h3><i class="ti ti-needle-thread"></i> Las formas de mandar <code>tiras</code></h3>
+      <table>
+        <tr><th>Si «tiras» es…</th><th>Qué hace</th></tr>
+        <tr><td><i>(no viene)</i></td><td>las del molde (<code>lados_por_defecto</code>)</td></tr>
+        <tr><td><code>false</code> · <code>true</code></td><td>no lleva · lleva las del molde</td></tr>
+        <tr><td><code>{lleva, lados}</code></td><td>la forma completa; un lado que no viene es 0</td></tr>
+        <tr><td><code>{"arriba": 5, "der": 3}</code></td><td>los lados sueltos (lleva si alguno &gt; 0)</td></tr>
+      </table>
+      <p class="chico">Lados: <code>arriba</code>, <code>abajo</code>, <code>izq</code>/<code>izquierda</code>, <code>der</code>/<code>derecha</code>; enteros de 0 a 50, <b>contando las 2 puntas</b>.</p>
+    </div>
+  </div>
+  <table>
+    <tr><th>Alarma</th><th>Cuándo</th><th>Qué hacer</th></tr>
+    <tr><td><code>medida-falta</code> · <code>medida-invalida</code></td><td>Falta <code>medida</code> o no son metros de 0,05 a 50</td><td><code>{"ancho_m": 3, "alto_m": 1.5}</code> con punto</td></tr>
+    <tr><td><code>tela-no-entra</code></td><td>El total no entra en la tela; el mensaje dice cuánto se pasa y lo máximo</td><td>Otra tela o una medida menor</td></tr>
+    <tr><td><code>tiras-invalidas</code></td><td>Un lado que no existe o un número fuera de 0 a 50</td><td>Usar arriba/abajo/izq/der con enteros</td></tr>
+    <tr><td><code>tiras-sin-margen</code></td><td>Tiras en un lado sin margen (no hay guía hasta dónde llegar)</td><td>Pedirlas en lados con <code>margen_cm</code> &gt; 0</td></tr>
+    <tr><td><code>tiras-no-a-medida</code> <span class="pill p-opc">aviso</span></td><td>Tiras en un molde que no es a medida: se ignoran</td><td>Sacarlas de ese molde</td></tr>
+  </table>
+</section>
+
 <!-- ═══════════════════════════ 6 · ESTADOS Y ALARMAS ═══════════════════════════ -->
-<section>
+<section class="apretada">
   <div class="seccion-titulo"><div class="num m">6</div><div><div class="kicker">Cuando algo no está bien</div><h2>Estados y alarmas</h2></div></div>
   <table>
     <tr><th>estado</th><th>Qué significa</th><th>Qué hace el otro sistema</th></tr>
@@ -392,7 +707,7 @@ flowchart LR
     <tr><td><code>error</code></td><td>Falla del sistema después de 3 intentos</td><td>Avisar a quien administra TIZADA</td></tr>
     <tr><td><code>cancelado</code></td><td>Lo canceló el otro sistema (<code>DELETE</code>) o una persona</td><td>—</td></tr>
   </table>
-  <p>Cada alarma: <code>{ codigo, frena, etapa, mensaje, donde: { campo, fila } }</code>. <b>frena: true</b> rechaza; <b>false</b> es un aviso. <code>donde.campo</code> dice exactamente dónde (<code>disenos[1].moldes[0].tela</code>, <code>planilla[2].talle</code>). Son <b>67</b>, con qué significan y qué hacer: <code>GET /alarmas</code> (no pide llave).</p>
+  <p>Cada alarma: <code>{ codigo, frena, etapa, mensaje, donde: { campo, fila } }</code>. <b>frena: true</b> rechaza; <b>false</b> es un aviso. <code>donde.campo</code> dice exactamente dónde (<code>disenos[1].moldes[0].tela</code>, <code>planilla[2].talle</code>). Son <b>80</b>, con qué significan y qué hacer: <code>GET /alarmas</code> (no pide llave).</p>
   <div class="etapas">
     <div class="et" style="border-color: #a9e7f2; background: var(--cian-claro);"><b>datos</b>al recibir, en el acto (lo dice /validar)</div><i class="ti ti-arrow-right"></i>
     <div class="et" style="border-color: #f3b2d6; background: var(--magenta-claro);"><b>arte</b>al abrir el arte (segundos después)</div><i class="ti ti-arrow-right"></i>
@@ -403,13 +718,15 @@ flowchart LR
     <tr><td><code>variable-desconocida</code> · <code>variable-ambigua</code></td><td><code>GET /variables</code> (mandar la clave <code>v_…</code>)</td></tr>
     <tr><td><code>molde-repetido</code></td><td>Una variable por prenda en cada diseño</td></tr>
     <tr><td><code>tela-desconocida</code> · <code>tela-no-usable</code> · <code>tela-no-permitida</code></td><td><code>GET /telas</code> (<code>usable</code>) y las <code>telas</code> del molde</td></tr>
-    <tr><td><code>medida-falta</code> · <code>medida-invalida</code> · <code>tela-no-entra</code></td><td>Prenda <b>a medida</b> (<code>a_medida</code> en <code>GET /variables</code>): <code>medida: {ancho_m, alto_m}</code> en metros, y que entre en el ancho de la tela</td></tr>
+    <tr><td><code>medida-falta</code> · <code>medida-invalida</code> · <code>tela-no-entra</code> · <code>tiras-invalidas</code> · <code>tiras-sin-margen</code></td><td>Prenda <b>a medida</b> (<code>a_medida</code> en <code>GET /variables</code>): <code>medida</code> del diseño en metros, que el total entre en la tela y las <code>tiras</code> bien escritas — o preguntar antes a <code>POST /a_medida/calcular</code> (5c a 5e)</td></tr>
     <tr><td><code>talle-inexistente</code></td><td><code>talles[]</code> del molde</td></tr>
     <tr><td><code>opcion-inexistente</code> · <code>opcion-sin-piezas</code></td><td><code>columnas[].opciones</code> · <code>opciones_de_pieza</code></td></tr>
     <tr><td><code>columna-obligatoria-vacia</code></td><td><code>columnas[].obligatoria</code></td></tr>
     <tr><td><code>pieza-desconocida</code></td><td><code>piezas[]</code> del molde</td></tr>
     <tr><td><code>referencia-ya-generada</code></td><td>La misma referencia ya está lista: <code>"reemplazar": true</code> para rehacerla</td></tr>
     <tr><td><code>piezas-en-blanco</code> · <code>arte-pieza-sin-mesa</code> · <code>editable-desconocido</code> · <code>tipografia-falta</code></td><td>El arte (etapa arte): una mesa por pieza, las capas Editable y las tipografías del paquete</td></tr>
+    <tr><td><code>editable-proceso-invalido</code> · <code>editable-sin-declarar</code></td><td>Los editables (sección 3b): proceso válido y cada capa «Editable …» nombrada</td></tr>
+    <tr><td><code>arte-ilegible</code> · <code>arte-texto-vivo</code> · <code>arte-mesa-vacia</code> · <code>arte-campo-sin-capa</code></td><td>.ai «compatible con PDF», textos en curvas, nombre de pieza en <code>guias</code>, capas Texto/Número (sección 3b)</td></tr>
   </table>
 </section>
 
@@ -425,6 +742,7 @@ flowchart LR
     <tr><td><code>GET /moldes/{codigo}/foto</code></td><td>Silueta de la prenda entera</td><td>200 · 404</td></tr>
     <tr><td><code>GET /telas</code> · <code>/tipografias</code></td><td>Telas por id · tipografías que ya tiene</td><td>200</td></tr>
     <tr><td><code>GET /alarmas</code> · <code>/formato</code></td><td>Catálogo de alarmas · formatos, límites, ejemplos (sin llave)</td><td>200</td></tr>
+    <tr><td><code>POST /a_medida/calcular</code></td><td>Molde a medida: total, si entra en cada tela (y si no, cuánto se pasa y lo máximo), tiras y ficha. No guarda nada</td><td>200 · 422 · 404</td></tr>
     <tr><td><code>POST /pedidos/validar</code></td><td>Revisar sin guardar (JSON o .zip)</td><td>200 · 422</td></tr>
     <tr><td><code>POST /pedidos</code></td><td>Mandar el pedido (.zip)</td><td>202 · 422 · 415</td></tr>
     <tr><td><code>GET /pedidos/{ref}</code></td><td>Estado y resultado</td><td>200 · 404</td></tr>

@@ -46,11 +46,37 @@ components:
         foto: { type: string }
         a_medida:
           type: object
-          description: 'Prenda A MEDIDA (rectángulo de una pieza): el pedido y la plantilla mandan `medida` en metros; no lleva talle.'
+          description: 'Prenda A MEDIDA (rectángulo de una pieza): el pedido manda `medida` (la del DISEÑO, en metros) y, opcional, `tiras`; no lleva talle.'
           properties:
             pieza: { type: string, example: Bandera }
-            margen_cm: { type: object, properties: { arriba: { type: number }, abajo: { type: number }, izq: { type: number }, der: { type: number } } }
             pide: { type: string }
+            medida_minima_m: { type: number, example: 0.05 }
+            medida_maxima_m: { type: number, example: 50 }
+            medida_de_muestra_m: { type: object, properties: { ancho_m: { type: number }, alto_m: { type: number } } }
+            margen_cm: { type: object, properties: { arriba: { type: number }, abajo: { type: number }, izq: { type: number }, der: { type: number } } }
+            borde_corte_mm: { type: number, example: 2 }
+            total: { type: string }
+            gira: { type: boolean }
+            largo_maximo_cm: { type: number, example: 2999.5 }
+            telas: { type: array, items: { type: object, properties: { id: { type: string }, nombre: { type: string }, ancho_mesa_cm: { type: number }, entra_hasta_cm: { type: number } } } }
+            regla_entra: { type: string }
+            tiras:
+              type: object
+              properties:
+                lleva_por_defecto: { type: boolean }
+                lados_por_defecto: { $ref: '#/components/schemas/LadosTiras' }
+                grosor_mm: { type: number }
+                color_cmyk: { type: array, items: { type: number } }
+                maximo_por_lado: { type: integer, example: 50 }
+                regla: { type: string }
+    LadosTiras:
+      type: object
+      description: 'Cuántas marcas de tiras en cada lado, CONTANDO LAS 2 PUNTAS (0 = sin tiras · 1 = una en el medio).'
+      properties:
+        arriba: { type: integer, minimum: 0, maximum: 50 }
+        abajo: { type: integer, minimum: 0, maximum: 50 }
+        izq: { type: integer, minimum: 0, maximum: 50 }
+        der: { type: integer, minimum: 0, maximum: 50 }
     Silueta:
       type: object
       properties:
@@ -201,6 +227,27 @@ paths:
     get:
       summary: Tipografías que TIZADA ya tiene
       responses: { '200': { description: OK } }
+  /a_medida/calcular:
+    post:
+      summary: 'Molde a medida: total, en qué telas entra (y si no, cuánto se pasa y lo máximo), tiras y filas de la ficha. No guarda nada.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ancho_m, alto_m]
+              properties:
+                variable: { type: string, example: v_cb7fd79 }
+                molde: { type: string }
+                ancho_m: { type: number, example: 3 }
+                alto_m: { type: number, example: 1.5 }
+                tela: { type: string, example: '44' }
+                tiras: { description: 'true · false · {lleva, lados} · los lados sueltos' }
+      responses:
+        '200': { description: 'Las cuentas (ver API.md)' }
+        '404': { description: Esa variable o molde no existe }
+        '422': { description: 'No es a medida, o la medida / las tiras no sirven (ver alarmas)' }
   /pedidos/validar:
     post:
       summary: Revisar un pedido SIN guardarlo (el .zip o sólo el JSON)

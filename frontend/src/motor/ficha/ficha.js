@@ -721,6 +721,30 @@ export function generarFicha(mupdf, { titulo, subtitulo, planilla, moldesGuia })
         ;[y, rest] = dibujarPiezas(ctx, pg, y, rest, A4_H - MARGEN)
       }
 
+      // ── MOLDE A MEDIDA: MEDIDA Y TERMINACIÓN (MAPA 643) ─────────────────────────────────
+      // La medida del diseño, el total con el margen, el borde y las TIRAS. Las filas vienen
+      // redactadas del servidor (`_ficha_a_medida`); acá sólo se dibujan. Gemelo de `ficha_tecnica.py`.
+      const amF = mg.a_medida || {}
+      const filasAm = amF.filas || []
+      if (filasAm.length) {
+        const notasAm = (amF.notas || []).filter(Boolean).map(String)
+        const altoAm = 22 + 13 * filasAm.length + 11 * notasAm.length
+        if (y + 16 + altoAm > A4_H - MARGEN) { pg = nuevaPagina(ctx); y = 78 } else y += 16
+        y = seccion(ctx, pg, y, 'MEDIDA Y TERMINACIÓN')
+        y += 12
+        for (const f of filasAm) {
+          const sub = verdad(f.sub)
+          const sx = sub ? 14 : 0
+          texto(ctx, pg, MARGEN + sx, y, String(f.etiqueta ?? ''), sub ? 8.5 : 9, sub ? GRIS : NEGRO, !sub, 190 - sx)
+          texto(ctx, pg, MARGEN + 200, y, String(f.valor ?? ''), 9, NEGRO, false, A4_W - 2 * MARGEN - 200)
+          y += 13
+        }
+        for (const n of notasAm) {           // una frase por renglón
+          texto(ctx, pg, MARGEN, y, n, 8, GRIS, false, A4_W - 2 * MARGEN)
+          y += 11
+        }
+      }
+
       // ── LO QUE NO SE SUBLIMA ────────────────────────────────────────────────────────────
       // Los objetos marcados como TPU / Bordado / DTF: en la tela sale sólo una cruz de 3 cm, así
       // que el taller necesita saber acá qué va en ese lugar y sobre qué pieza.

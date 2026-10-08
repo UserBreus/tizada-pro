@@ -177,6 +177,14 @@ def _preparar(piezas, cfg):
     # componer (ver `componer_pdf_contorno`). El tope real lo pone la configuración de nesting.
     alto_c = int((cfg["altura_max_cm"] * CM - (m["sup"] + m["inf"]) * CM) / cell_pt)
     esp_c = max(1, ceil(cfg["espaciado_cm"] * CM / cell_pt))  # respeta la separación, sin la celda extra de antes
+    # 🔴 LA SEPARACIÓN ES ENTRE PIEZAS, NO CONTRA EL BORDE DE LA MESA (MAPA 633): cada máscara de prueba
+    # lleva `esp_c` de aire alrededor, y con la grilla del tamaño justo de la mesa ese aire también quedaba
+    # contra el borde (8 mm por lado con 5 mm de espaciado): una bandera de 156 cm no entraba en una mesa
+    # de 157. La grilla se agranda `esp_c` de cada lado para que el aire pueda colgar afuera, y las
+    # posiciones se corren `esp_c` al devolverlas (las tres `colocaciones` de `_anidar_estrategia`): la PIEZA nunca sale de la mesa y el
+    # borde lo decide sólo el margen configurado. Gemelo: `preparar` de motor/nesting/contorno.js.
+    ancho_c += 2 * esp_c
+    alto_c += 2 * esp_c
     paso = cfg.get("paso_libre_grados", 15)
     # DEDUP por GEOMETRÍA: muchas piezas comparten silueta (mismo (pieza,talle,variante,
     # rotación,borde,grilla)). La máscara sale SOLO del contorno de corte exterior
@@ -445,8 +453,8 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep, solo_ang=None, modo
                     th = math.radians(ang_u)
                     bw = abs(p["w"] * math.cos(th)) + abs(p["h"] * math.sin(th))
                     bh = abs(p["w"] * math.sin(th)) + abs(p["h"] * math.cos(th))
-                    colocaciones[h_u].append({"pieza": p, "ang": ang_u, "cx": (xx + ww / 2) * cell_pt,
-                                              "cy": (yy + hh / 2) * cell_pt, "bw": bw, "bh": bh})
+                    colocaciones[h_u].append({"pieza": p, "ang": ang_u, "cx": (xx - esp_c + ww / 2) * cell_pt,
+                                              "cy": (yy - esp_c + hh / 2) * cell_pt, "bw": bw, "bh": bh})
                     area_piezas_c2 += int(p["_mask"].sum())
                     ultimo[p["_geo_key"]] = (h_u, ang_u, yy, xx, mr_col_u, mr_test_u)
                     colocada = True
@@ -517,8 +525,8 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep, solo_ang=None, modo
                 th = math.radians(ang)
                 bw = abs(p["w"] * math.cos(th)) + abs(p["h"] * math.sin(th))
                 bh = abs(p["w"] * math.sin(th)) + abs(p["h"] * math.cos(th))
-                cx = (x + ww / 2) * cell_pt
-                cy = (y + hh / 2) * cell_pt
+                cx = (x - esp_c + ww / 2) * cell_pt      # la grilla empieza `esp_c` antes de la mesa
+                cy = (y - esp_c + hh / 2) * cell_pt
                 colocaciones[h_idx].append({"pieza": p, "ang": ang, "cx": cx, "cy": cy,
                                             "bw": bw, "bh": bh})
                 area_piezas_c2 += int(p["_mask"].sum())
@@ -540,7 +548,7 @@ def _anidar_estrategia(piezas, cfg, estrategia, orden, prep, solo_ang=None, modo
             bw = abs(p["w"] * math.cos(th)) + abs(p["h"] * math.sin(th))
             bh = abs(p["w"] * math.sin(th)) + abs(p["h"] * math.cos(th))
             colocaciones[h_idx].append({"pieza": p, "ang": ang,
-                                        "cx": (x + ww / 2) * cell_pt, "cy": (y + hh / 2) * cell_pt,
+                                        "cx": (x - esp_c + ww / 2) * cell_pt, "cy": (y - esp_c + hh / 2) * cell_pt,
                                         "bw": bw, "bh": bh})
             area_piezas_c2 += int(p["_mask"].sum())
 

@@ -109,16 +109,18 @@ function cajaSegs(segs) {
 }
 const PT_POR_CM = 72 / 2.54
 
-/** MOLDE A MEDIDA (MAPA 623): el rectángulo del MARGEN (dobladillo) hacia adentro de la pieza, como
- *  camino PUNTEADO. No va al SVG que se vuelve guía: la extensión lo dibuja aparte, punteado. */
+/** MOLDE A MEDIDA (MAPA 623): el rectángulo del MARGEN (dobladillo) hacia adentro de la pieza, que
+ *  marca dónde va el doblez. La extensión lo dibuja y lo vuelve GUÍA de Illustrator. */
 function caminoDobladillo(segs, dobladillo, T, capa, mesa) {
   const b = cajaSegs(segs)
   if (!b || !dobladillo) return null
+  const tieneMargen = (dobladillo.izq || 0) > 0 || (dobladillo.der || 0) > 0 || (dobladillo.arriba || 0) > 0 || (dobladillo.abajo || 0) > 0
+  if (!tieneMargen) return null
   const x0 = b[0] + (dobladillo.izq || 0) * PT_POR_CM, x1 = b[2] - (dobladillo.der || 0) * PT_POR_CM
   const y0 = b[1] + (dobladillo.abajo || 0) * PT_POR_CM, y1 = b[3] - (dobladillo.arriba || 0) * PT_POR_CM
   if (!(x1 > x0 && y1 > y0)) return null
   const sub = subcaminos([['m', x0, y0], ['l', x1, y0], ['l', x1, y1], ['l', x0, y1], ['h']], T)
-  return { capa, sub, ancho: 1, color: [0, 0, 0, 100], mesa, punteado: [9, 6] }
+  return { capa, sub, ancho: 1, color: [0, 0, 0, 100], mesa, nombre: 'dobladillo', punteado: [9, 6] }
 }
 
 /** Los tramos de `segs` como sub-caminos de Illustrator: `[[x, y, izqX, izqY, derX, derY], …]`. */
@@ -348,11 +350,17 @@ export function planIllustrator(capasData, { config = 'default', rango = [], tit
       if (!subs.length) continue
       // `mesa`: de qué mesa es (Corel arma una PÁGINA por mesa; la extensión de Illustrator lo ignora)
       caminos.push({ capa: iGuias, sub: subs, ancho: 1, color: [0, 0, 0, 100], mesa: im })
+      // 🔴 LA GUÍA DEL DOBLEZ (molde a medida) va IGUAL QUE EL CONTORNO: camino sin `punteado` y en
+      // el SVG, así la extensión la vuelve GUÍA con el mismo mecanismo (2026-10-07, «a la bandera le
+      // falta una guía en Illustrator y en Corel»). Como camino `punteado` dependía de que el conector
+      // instalado supiera tratarlo: Illustrator 1.27 lo dibujaba como arte punteado (no guía) y Corel
+      // 1.4 no lo conocía. Así anda con cualquier versión instalada, sin reinstalar nada.
       const dob = dobladillo ? caminoDobladillo(it.segs, dobladillo, T, iGuias, im) : null
-      if (dob) caminos.push(dob)
+      if (dob) { delete dob.punteado; caminos.push(dob) }
       // un <path> por sub-camino: así cada uno entra a Illustrator como un trazado suelto que se
       // puede volver GUÍA (un trazado compuesto no puede)
       for (const sp of subs) svg.push(`<path d="${dSvg([sp])}"/>`)
+      if (dob) for (const sp of dob.sub) svg.push(`<path d="${dSvg([sp])}"/>`)
     }
     // el nombre de la mesa como TEXTO VIVO en «guias», arriba a la izquierda DENTRO de la mesa: es
     // lo que lee el motor para saber de qué pieza es (tiene que quedar adentro de la mesa)

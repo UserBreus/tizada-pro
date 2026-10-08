@@ -138,7 +138,8 @@ que existe en más de una prenda. **Una variable por prenda** en cada diseño.
 | `tela` | obligatorio | El **id** de la tela principal (el del sistema de telas). Vale para todas las piezas |
 | `telas_por_pieza` | opcional | Las excepciones: `{"Cuello": "486"}`. La pieza va por su nombre **genérico** (sin número) |
 | `piezas_apagadas` | opcional | Piezas que **no** se hacen en este pedido: `["Tapa costura"]` |
-| `medida` | sólo prendas **a medida** | `{"ancho_m": 1.5, "alto_m": 0.9}` — en metros (de 0,05 a 50). La variable lo dice en `GET /variables` (`a_medida`). La fila de la planilla **no lleva talle** para esa prenda. Sin medida: `medida-falta`; si no entra en la tela: `tela-no-entra` |
+| `medida` | sólo prendas **a medida** | `{"ancho_m": 1.5, "alto_m": 0.9}` — la medida del **diseño** en metros (de 0,05 a 50); TIZADA le suma el margen (`a_medida.margen_cm`) y ése es el **total** que se imprime. La variable lo dice en `GET /variables` (`a_medida`). La fila de la planilla **no lleva talle** para esa prenda. Sin medida: `medida-falta`; si el total no entra en la tela: `tela-no-entra` (dice cuánto se pasa y lo máximo) |
+| `tiras` | opcional · sólo **a medida** | Las marcas para coser las tiras: `{"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 1, "der": 0}}`. Cada número **cuenta las 2 puntas** (5 = una en cada esquina + 3 en el medio, a distancias iguales; 1 = una en el medio; 0 = ese lado sin tiras). También vale `true`/`false` (las del molde / no lleva) o los lados sueltos `{"arriba": 5}`. Sin `tiras`: las del molde. Grosor y color: los del molde. Errores: `tiras-invalidas`, `tiras-sin-margen` |
 | `editables` | opcional | Qué lleva cada objeto editable del arte. Ver abajo |
 | `tipografias` | opcional | Como en el diseño, pero sólo para este molde |
 
@@ -283,8 +284,9 @@ lo que publica cada molde:
 | `variable-falta`, `variable-desconocida`, `variable-ambigua` | `GET /variables` (mandar la clave `v_…`) |
 | `talle-inexistente` | `talles[]` del molde |
 | `talle-sin-columna` | `planilla.con_talles` (un molde con varios talles no puede ir con una planilla sin talles: lo arregla quien administra TIZADA) |
-| `medida-falta`, `medida-invalida` | `a_medida` de la variable: mandar `medida: {ancho_m, alto_m}` en metros |
-| `tela-no-entra` | `GET /telas` → `ancho_mesa_cm` (la pieza más el borde tiene que entrar en el ancho imprimible) |
+| `medida-falta`, `medida-invalida` | `a_medida` de la variable: mandar `medida: {ancho_m, alto_m}` (la del diseño) en metros |
+| `tela-no-entra` | `a_medida.telas[].entra_hasta_cm` y `largo_maximo_cm`: el total (medida + margen) tiene que entrar; o preguntar antes a `POST /a_medida/calcular` |
+| `tiras-invalidas`, `tiras-sin-margen` | `a_medida.tiras` (lados `arriba`/`abajo`/`izq`/`der`, enteros 0-50) y `a_medida.margen_cm` (sin margen en un lado, ese lado no lleva tiras) |
 | `opcion-inexistente` | `planilla.columnas[].opciones` |
 | `opcion-sin-piezas` | `opciones_de_pieza.<clave>.tiene` (por variable) |
 | `columna-obligatoria-vacia` | `planilla.columnas[].obligatoria` |

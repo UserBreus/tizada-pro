@@ -237,7 +237,8 @@ export async function generarPedidoEnNavegador(cuerpo, { rutaApi, avisar = null 
       }
       return { nombre: g.molde || md.nombre, diseno: g.diseno_nombre || 'Principal', variante: vnom ? (vnom.label || vnom.nombre) : null,
                    opciones, ejemplo: null, piezas, pdf_guia: rg.pdf, fuentes: fuentesGuia(md.pers || pers, talle, md.fuentes, resolverGuia),
-                   procesos }   // TPU/Bordado/DTF y «sin marca»: el servidor dice cuáles, el dibujo es de acá
+                   procesos,    // TPU/Bordado/DTF y «sin marca»: el servidor dice cuáles, el dibujo es de acá
+                   a_medida: g.a_medida || null }   // molde a medida: medida, margen, borde y tiras (MAPA 643)
 
     } finally {
       _tGuia += (performance.now() - _t0) / 1000

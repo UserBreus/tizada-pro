@@ -315,6 +315,11 @@ def comparar(path, extras=()):
             for t, v in py["por_talle"].items():
                 esperado[t] = v
             esperado = {k: v for k, v in esperado.items() if "error" not in v}
+            # el paquete nombra cada archivo por talle LIMPIO, igual que el servidor nombra su caché
+            # (`[^A-Za-z0-9_-]+` → «_», `paquete/armar.js`): «1,00x1,00» viaja como «1_00x1_00» y termina
+            # en el MISMO archivo de caché. Hasta los moldes a medida (MAPA 623) ningún talle tenía coma.
+            import re as _re
+            esperado = {(k if k in ("auto", "todas") else _re.sub(r"[^A-Za-z0-9_-]+", "_", k)): v for k, v in esperado.items()}
             d += diferencias(sorted(esperado), sorted(det_paq), "paquete.deteccion (archivos)")
             for k in sorted(esperado):
                 if k in det_paq:
@@ -370,6 +375,10 @@ if __name__ == "__main__":
         for caso in casos:
             p, extras = caso[0], caso[1]
             etiqueta = caso[2] if len(caso) > 2 else os.path.basename(os.path.dirname(p))
+            # un molde del pedido (copia efímera) puede borrarse mientras corre la tanda: se saltea
+            if not os.path.exists(p):
+                print(f"· {etiqueta}: ya no está (molde del pedido que se borró mientras corría): se saltea")
+                continue
             print(f"· {etiqueta} ({os.path.getsize(p) / 1e6:.1f} MB)")
             ok, txt = comparar(p, extras)
             print(txt)

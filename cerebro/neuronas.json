@@ -645,15 +645,20 @@
       ],
       "reglas": [
         "Todo cambio va en LOS DOS motores y se mide la paridad (mismas colocaciones).",
-        "Medir mesa chica Y pedido grande antes de dar un arreglo por bueno."
+        "Medir mesa chica Y pedido grande antes de dar un arreglo por bueno.",
+        "LA SEPARACIÓN ES ENTRE PIEZAS (MAPA 633): la grilla se agranda `esp_c` de cada lado (`_preparar` ↔ `preparar`) y las posiciones se devuelven corridas `esp_c` (`_anidar_estrategia` ↔ `colocar`); el borde de la mesa lo decide sólo `margenes_cm`. Cambiarlo en un motor y no en el otro rompe la paridad."
       ],
       "cicatrices": [
-        "MAPA 579: la primera versión (sólo acotado) arreglaba la mesa chica y empeoraba los pedidos grandes (25,74 → 27,53 m)."
+        "MAPA 579: la primera versión (sólo acotado) arreglaba la mesa chica y empeoraba los pedidos grandes (25,74 → 27,53 m).",
+        "2026-10-07 (MAPA 633): el aire de separación quedaba también contra el borde de la mesa (8 mm por lado): una bandera de 156 cm no entraba en una mesa de 157 y el cartel le decía al usuario que lo máximo era 1,55."
       ],
-      "contratos": [],
+      "contratos": [
+        "verificar_molde_a_medida.py"
+      ],
       "mapa": [
         158,
-        579
+        579,
+        633
       ],
       "memoria": "nesting-aprovechamiento.md",
       "conexiones": [
@@ -856,7 +861,8 @@
         "«Mesa vacía» la decide el NOMBRE, no el color: una mesa cuya guía nombra una pieza no se revisa con `mesaTieneDiseno`/`_mesa_tiene_diseno` (variación de color); sólo las mesas SIN nombre. Igual en los dos gemelos (`validar_arte_separado` ↔ `arte/mapeo.js validarArteSeparado`)."
       ],
       "cicatrices": [
-        "2026-10-07: un costadillo de relleno liso (rosa) salía «mesas vacías: [7, 8]» y el pedido externo se frenaba con `arte-mesa-vacia`; el negro «pasaba» sólo porque el borde de la miniatura de 0,04 se mezcla con el blanco del fondo y suma contraste. Arreglado: las mesas nombradas en la guía no se miden por color."
+        "2026-10-07: un costadillo de relleno liso (rosa) salía «mesas vacías: [7, 8]» y el pedido externo se frenaba con `arte-mesa-vacia`; el negro «pasaba» sólo porque el borde de la miniatura de 0,04 se mezcla con el blanco del fondo y suma contraste. Arreglado: las mesas nombradas en la guía no se miden por color.",
+        "2026-10-07: `verificar_navegador_camino_a.py` comparaba los archivos de detección del paquete contra el talle CRUDO; el paquete los nombra limpios como la caché del servidor («1,00x1,00» → «1_00x1_00», mismo archivo). Rojo recién con los moldes a medida (primer talle con coma). También saltea un molde efímero que se borra mientras corre."
       ],
       "contratos": [
         "verificar_navegador_camino_a.py",
@@ -1232,13 +1238,22 @@
       "reglas": [
         "Nunca mandar cabeceras propias al puente (CORS).",
         "El publicado no ofrece bajar la extensión.",
-        "MOLDE A MEDIDA (MAPA 623): un camino con `punteado` (el margen/dobladillo) NO va al SVG que se vuelve guía; Illustrator lo dibuja aparte con `strokeDashes` (`tizada.jsx`) y Corel con un estilo de rayas (`ArmarCorel.cs`). Conectores: Illustrator 1.27.0, CorelDRAW 1.5.0."
+        "Las 2 guías de cada pieza (MAPA 627): `planIllustrator` manda el CONTORNO y el RECUADRO de la caja del diseño, los dos como caminos SIN `punteado` y en el SVG, para que la extensión los vuelva guía; Corel no tiene guías reales: quedan como líneas en la capa «guias» bloqueada.",
+        "MOLDE A MEDIDA — LAS DOS GUÍAS (MAPA 629): el margen (dobladillo) va IGUAL que el contorno: camino SIN `punteado` y en el SVG, así la extensión vuelve guía a los dos con CUALQUIER versión instalada (Illustrator `.guides = true`; Corel, línea en «guias»). La guía .ai descargable lo dibuja también (`aiGuiaMedidas({dobladillo})` o `item.dobladillo`).",
+        "El documento de la plantilla nace en CENTÍMETROS (`DocumentPreset` con `RulerUnits.Centimeters` por `addDocument`); `documents.add` no deja elegir unidades y `rulerUnits` es de sólo lectura. Las cuentas del script siguen en puntos (MAPA 630). Conector 1.28.0."
       ],
-      "cicatrices": [],
+      "cicatrices": [
+        "2026-10-07 (MAPA 627): «Crear en Illustrator» hacía sólo el contorno; la primera versión del recuadro iba como `punteado` y se veía punteado pero NO era guía.",
+        "2026-10-07 (MAPA 628): el dobladillo punteado nunca recibía `.guides = true` en `tizada.jsx` → en Illustrator sólo existía la guía del borde.",
+        "2026-10-07 (MAPA 629): la bandera seguía saliendo con UNA guía en Illustrator y Corel: el margen viajaba como camino `punteado` y dependía del conector instalado (Illustrator 1.27 lo dejaba como arte, Corel 1.4 no lo conocía); y la guía .ai no lo traía.",
+        "2026-10-07 (MAPA 630): la plantilla se creaba en puntos."
+      ],
       "contratos": [],
       "mapa": [
         530,
-        572
+        572,
+        629,
+        630
       ],
       "memoria": "extension-illustrator.md",
       "conexiones": [
@@ -1751,7 +1766,8 @@
         "«Exportar para TIZADA PRO»: botón en la barra «TIZADA PRO» DENTRO de Corel = control propio WPF (type=wpfhost, TizadaPro.dll, BotonTizada.cs) con el ícono verde y el texto, que llama a POST /exportar-corel. El guid del ítem (712d37ec) NO se cambia: la barra ya quedó en el espacio de trabajo del usuario. Instalarlo pide administrador UNA vez; sin permiso queda el botón flotante. Ajustes de PDF fijos; restaura los del documento; nunca guarda el .cdr.",
         "Un solo flujo de exportar (FlujoExportar.Correr) para la barra, el botón flotante y el menú del ícono: SIEMPRE pregunta dónde guardar (SaveFileDialog encima de Corel, carpeta del .cdr, nombre sugerido «- para TIZADA.pdf», avisa antes de reemplazar).",
         "Íconos de instaladores: el isotipo del sistema teñido con el color de SU programa (tenir: Illustrator naranja, Corel verde); los tonos van en la huella.",
-        "MOLDE A MEDIDA (MAPA 623): un camino con `punteado` (el margen/dobladillo) NO va al SVG que se vuelve guía; Illustrator lo dibuja aparte con `strokeDashes` (`tizada.jsx`) y Corel con un estilo de rayas (`ArmarCorel.cs`). Conectores: Illustrator 1.27.0, CorelDRAW 1.5.0."
+        "MOLDE A MEDIDA — LAS DOS GUÍAS (MAPA 629): el margen (dobladillo) va IGUAL que el contorno: camino SIN `punteado` y en el SVG, así la extensión vuelve guía a los dos con CUALQUIER versión instalada (Illustrator `.guides = true`; Corel, línea en «guias»). La guía .ai descargable lo dibuja también (`aiGuiaMedidas({dobladillo})` o `item.dobladillo`).",
+        "Las reglas del documento en CENTÍMETROS (`doc.Rulers.HUnits/VUnits = 4`); `doc.Unit` sigue en mm porque todas las cuentas de ArmarCorel.cs son en mm (MAPA 630). Conector 1.6.0."
       ],
       "cicatrices": [
         "PowerShell + COM de Corel: los métodos con parámetros opcionales (SaveAs, Import, AddToPowerClip) fallan si no se pasan todos.",
@@ -1764,7 +1780,9 @@
       ],
       "contratos": [],
       "mapa": [
-        598
+        598,
+        629,
+        630
       ],
       "memoria": "corel.md",
       "conexiones": [
@@ -2452,6 +2470,18 @@
         [
           "frontend/src/motor/pdf/mesaPorArchivo.js",
           "export function mesasEnOrden"
+        ],
+        [
+          "integracion_externa.py",
+          "_tiras_del_pedido"
+        ],
+        [
+          "integracion_externa.py",
+          "v1_a_medida_calcular"
+        ],
+        [
+          "servidor.py",
+          "_entra_hasta_cm"
         ]
       ],
       "palabras": [
@@ -2493,7 +2523,8 @@
         "La documentación para programadores que no saben de ropa es `TIZADA_PRO_Explicado_para_programadores.pdf` (desde `explicado_para_programadores.html`, MAPA 621): el diccionario taller → API → analogía. Ruta, campo o alarma nueva que cambie el recorrido = actualizar ese HTML y regenerar los DOS PDF con Chrome sin ventana (rutas literales; mirar la hora del PDF).",
         "PLANILLA SIN TALLES (MAPA 622): `_columna_talle_que_lee(prod, cols)` decide si el molde lee talle (None = sin columna o apagada). Sin talle la fila no lo trae y vale el único talle del molde; con varios talles → alarma `talle-sin-columna`. `molde_publico` publica `columna_talle: null` + `con_talles`. Las columnas que van a la ficha (`normal.columnas`) llevan su `role`.",
         "MOLDE A MEDIDA (MAPA 623): el pedido manda `medida: {ancho_m, alto_m}` por molde a medida (`_medida_del_pedido`, alarmas `medida-falta`/`medida-invalida`/`tela-no-entra`) y la plantilla `{variable, medida}`; el robot arma la copia (`armarCopiaAMedida` → `/api/externo/robot/a_medida/<ref>` → `/api/plantilla` → `/listo`) y se borra al terminar.",
-        "La columna del campo nombre se rotula «Texto»; las filas pueden mandarla con el título viejo «Nombre» o con «Texto» (`por_titulo`); la tipografía por campo pasa por `clave_fuente_campo` (alias) (MAPA 624)."
+        "La columna del campo nombre se rotula «Texto»; las filas pueden mandarla con el título viejo «Nombre» o con «Texto» (`por_titulo`); la tipografía por campo pasa por `clave_fuente_campo` (alias) (MAPA 624).",
+        "MOLDE A MEDIDA DESDE EL OTRO SISTEMA (MAPA 644): `a_medida` publica todo (límites, margen, borde, telas con `entra_hasta_cm`, largo máximo, gira, tiras por defecto); el pedido manda `medida` (la del DISEÑO) y `tiras` (`_tiras_del_pedido`); `POST /a_medida/calcular` contesta lo mismo que la pantalla sin guardar. Las cuentas salen de las MISMAS funciones del servidor (`_cabe_en_tela`, `_entra_hasta_cm`, `_segmentos_tiras`, `_ficha_a_medida`)."
       ],
       "cicatrices": [
         "2026-10-02: breusplanilla@gmail.com es cuenta PERSONAL con la carpeta en su Mi unidad: la cuenta de servicio del 606 no podía guardar ahí. Se agregó OAuth de la persona. Pendiente: la app de Google sigue en «Prueba» → el permiso vence a los 7 días hasta publicarla (pide página principal + política de privacidad públicas) (MAPA 607).",
@@ -2505,7 +2536,8 @@
         "2026-10-02: el sistemita (y la API) hacían elegir el MOLDE y después un «Modelo»: en TIZADA se elige la VARIABLE directo (variable-first desde 2026-07-07). Corregido por el usuario (MAPA 612).",
         "2026-10-02: el resultado público mostraba rutas del servidor (`ruta`, `destino.carpeta`, `copia_local`) al otro sistema (MAPA 614).",
         "2026-10-06 (MAPA 624): el chequeo «sin silueta calculada → 404» es el modo «no calcula» de verdad; con el corredor apagándolo por defecto daba 200: el contrato lo prende sólo para ese chequeo.",
-        "2026-10-07 (SOL-1031, «Camiseta Goes 2026»): `arte-mesa-vacia` FRENA y salía por un falso positivo de la regla de color con costadillos lisos; en la pantalla el mismo check era sólo aviso, por eso «a mano andaba». Ahora manda el nombre de la guía (ver neurona camino-a)."
+        "2026-10-07 (SOL-1031, «Camiseta Goes 2026»): `arte-mesa-vacia` FRENA y salía por un falso positivo de la regla de color con costadillos lisos; en la pantalla el mismo check era sólo aviso, por eso «a mano andaba». Ahora manda el nombre de la guía (ver neurona camino-a).",
+        "2026-10-08 (MAPA 644): el sistemita de prueba nunca mandaba la `medida` del molde a medida (`_armar` sólo copiaba variable/tela)."
       ],
       "contratos": [
         "verificar_integracion_externa.py",
@@ -2524,7 +2556,8 @@
         614,
         619,
         620,
-        622
+        622,
+        644
       ],
       "memoria": "integracion-pedido-externo",
       "conexiones": [
@@ -2622,7 +2655,7 @@
         "Mesas que chocan: el mismo nombre de mesa para piezas distintas de variables distintas en un archivo → el arte usaría la primera para las dos; se avisa antes de crear (choquesDe), no se bloquea.",
         "La ventana son TRES PASOS numerados (diseños · cómo se adapta · crear) y en el paso 3 una tarjeta por programa con todo lo suyo (el tamaño sólo en Illustrator); ProgramasPlantillaPedido se monta sólo con la ventana abierta (usarConexion vigila cada 5 s).",
         "El cálculo vive en motor/molde/plantillaPedido.js (motorPlantilla) y lo usan la ventana Y el robot de la API (MAPA 619): un cambio ahí cambia los dos; guiasDe devuelve {archivos, fallas} (una guía que no entra no tumba nada).",
-        "MOLDE A MEDIDA (MAPA 623): un camino con `punteado` (el margen/dobladillo) NO va al SVG que se vuelve guía; Illustrator lo dibuja aparte con `strokeDashes` (`tizada.jsx`) y Corel con un estilo de rayas (`ArmarCorel.cs`). Conectores: Illustrator 1.27.0, CorelDRAW 1.5.0."
+        "MOLDE A MEDIDA — LAS DOS GUÍAS (MAPA 629): el margen (dobladillo) va IGUAL que el contorno: camino SIN `punteado` y en el SVG, así la extensión vuelve guía a los dos con CUALQUIER versión instalada (Illustrator `.guides = true`; Corel, línea en «guias»). La guía .ai descargable lo dibuja también (`aiGuiaMedidas({dobladillo})` o `item.dobladillo`)."
       ],
       "cicatrices": [
         "2026-10-05: arrancaba con sólo la variable del diseño que se estaba viendo; el usuario lo quiere general (MAPA 617, ajuste).",
@@ -2635,7 +2668,8 @@
       "mapa": [
         617,
         618,
-        619
+        619,
+        629
       ],
       "memoria": "plantilla-desde-arte.md",
       "conexiones": [
@@ -2771,6 +2805,134 @@
         [
           "frontend/src/App.jsx",
           "piezaPorDefecto"
+        ],
+        [
+          "frontend/src/motor/molde/herramientas.js",
+          "export function cajaGuia"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "medidaPieza"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "margenSobreContorno"
+        ],
+        [
+          "frontend/src/motor/molde/aMedida.js",
+          "RESERVA_DEFECTO_MM"
+        ],
+        [
+          "servidor.py",
+          "_medida_pieza"
+        ],
+        [
+          "servidor.py",
+          "_reserva_borde_mm"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "VisorMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "telaAlrededor"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "estadoMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "visorReemplazo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "amAutoRef"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "amIntentoRef"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "amTimerRef"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_layoutVivo"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "amArmando"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "_pvMedida"
+        ],
+        [
+          "motor_pedido.py",
+          "_segmentos_tiras"
+        ],
+        [
+          "motor_pedido.py",
+          "_ops_tiras"
+        ],
+        [
+          "frontend/src/motor/molde/tiras.js",
+          "segmentosTiras"
+        ],
+        [
+          "frontend/src/motor/pieza/base.js",
+          "opsTiras"
+        ],
+        [
+          "servidor.py",
+          "_tiras_de"
+        ],
+        [
+          "servidor.py",
+          "_tiras_limpias"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "TirasAMedida"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "MarcasTirasSVG"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "tirasDeMolde"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "guardarTirasPedido"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "amTirasForm"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "LadosTiras"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "ladosTiras"
+        ],
+        [
+          "servidor.py",
+          "_tiras_efectivas"
+        ],
+        [
+          "frontend/src/App.jsx",
+          "fijarGrosor"
+        ],
+        [
+          "servidor.py",
+          "_ficha_a_medida"
         ]
       ],
       "palabras": [
@@ -2785,27 +2947,71 @@
         "El TALLE de un molde a medida se llama como la medida («1,50x0,90»): gemelos `talleDeMedida` ↔ `_talle_de_medida`. Nunca lo trae la fila: `_sin_col_talle` es siempre verdadero para un molde a medida y su talle nunca es obligatorio.",
         "La variable se crea sola después de cada alta (`_a_medida_variable`) con clave FIJA por molde (`v_`+sha1(pid)[:7]): el mapeo del arte y la etiqueta (`v§pieza`) sobreviven a cambiar la medida. Al cambiar la medida, lo guardado por talle de los editables pasa al talle nuevo (`/api/productos/a_medida`).",
         "La COPIA del pedido es efímera (`crear {efimero, a_medida_de, ancho_m, alto_m}`), copia toda la config menos `_AM_NO_COPIAR` y reemplaza a la plantilla SÓLO en ese diseño (`disenoVars`/`disenoMoldes`). Las copias no se listan en el catálogo ni en «Mis artículos» ni se publican en la API.",
-        "¿Entra en la tela? Gemelos EXACTOS `cabeEnTela` (js) ↔ `_cabe_en_tela` (py): mesa de la tela y largo máximo menos el margen del nesting a cada lado; pieza + 2× borde de corte; girar 90° sólo con rotación «90»/«libre». La pantalla no ofrece una tela donde no entra y frena el paso; el plan frena 409 (cinturón); la API da `tela-no-entra`.",
-        "El margen (dobladillo) es SÓLO guía: el visor lo dibuja punteado (`margenAMedida`) y la plantilla lo lleva como camino `punteado` FUERA del SVG que se vuelve guía; el motor NO lo dibuja y el arte llega hasta el borde de corte.",
+        "¿Entra en la tela? Gemelos EXACTOS `cabeEnTela` (js) ↔ `_cabe_en_tela` (py): la pieza = medida del DISEÑO + margen (`medidaPieza` ↔ `_medida_pieza`); mesa y largo máximo menos el margen del nesting; se cuenta en celdas de `resolucion_mm` del lado SEGURO (la separación del armado es sólo entre piezas, MAPA 633) (lo que dice «entra» lo acepta el armado real; MAPA 632); girar 90° sólo con «90»/«libre». La pantalla no ofrece una tela donde no entra y frena el paso; el plan frena 409; la API da `tela-no-entra`.",
         "Las copias que hace el robot llevan `externo: <ref>` y se borran al terminar/fallar el pedido o la plantilla y con la limpieza (`_borrar_copias_a_medida`); sólo efímeras, con esa referencia y salidas de una plantilla.",
         "Un molde del catálogo SIN archivo se puede pasar a medida desde Moldería (`MolderiaSinBase` → `POST /api/productos/a_medida {convertir}`); con `plantilla.ai` ya subido, efímero o camino B → 409: nunca se pisa un molde con piezas (MAPA 624).",
         "Ajustes de un molde a medida: sin Moldería; «Variables» = nombre de la pieza + medida de muestra; «Margen» = herramienta propia al lado de «Nombre y número». El nombre y el número NUNCA salen del margen: `_limite_texto_de` sube los límites al mayor borde y agrega «*» (gemelos `pers_con_limite` ↔ `persConLimite`) (MAPA 624).",
-        "Elegir «A medida» (Moldería de un molde sin archivo, o «Crear Nuevo Molde») SÓLO GUARDA: no pide nada ahí; la pieza toma el nombre del molde (`piezaPorDefecto`), sin margen, muestra 1 × 1 m. Pieza y muestra se cambian en «Variables», el margen en «Margen» (regla del usuario 2026-10-06, MAPA 624)."
+        "Elegir «A medida» (Moldería de un molde sin archivo, o «Crear Nuevo Molde») SÓLO GUARDA: no pide nada ahí; la pieza toma el nombre del molde (`piezaPorDefecto`), sin margen, muestra 1 × 1 m. Pieza y muestra se cambian en «Variables», el margen en «Margen» (regla del usuario 2026-10-06, MAPA 624).",
+        "El margen (dobladillo) es SÓLO guía: el visor lo dibuja punteado (`margenAMedida`); en la plantilla es una GUÍA más, igual que el contorno (MAPA 629); el motor NO lo dibuja y el arte llega hasta el borde de corte.",
+        "MOLDE A MEDIDA — LAS DOS GUÍAS (MAPA 629): el margen (dobladillo) va IGUAL que el contorno: camino SIN `punteado` y en el SVG, así la extensión vuelve guía a los dos con CUALQUIER versión instalada (Illustrator `.guides = true`; Corel, línea en «guias»). La guía .ai descargable lo dibuja también (`aiGuiaMedidas({dobladillo})` o `item.dobladillo`).",
+        "La CAJA DEL DISEÑO de un molde a medida ES EL MARGEN (decisión del usuario 2026-10-07: «Sí, el margen; arte al borde»): vista «Plantilla» (`cajaDe` de App.jsx) ↔ guías .ai/PDF (`cajaGuia` de motor/molde/herramientas.js). La mesa del diseño sigue siendo la pieza entera: el arte llega al borde de corte (MAPA 629).",
+        "El cartel de «no entra» (texto GEMELO exacto py/js) dice cuánto mide la pieza con el margen, hasta cuánto entra en esa tela (descontado el aire del armado), cuánto se pasa y LO MÁXIMO que se puede pedir (sin contar el margen) — `excesoCm`, `maximoM`, `maximoLado` (MAPA 631, 632).",
+        "LA MEDIDA ES LA DEL DISEÑO y EL BORDE VA ADENTRO (decisiones del usuario 2026-10-07, MAPA 632): el talle = la medida escrita; el rectángulo del contorno = pieza − 2·reserva (`_reserva_borde_mm` ↔ `RESERVA_DEFECTO_MM`: el borde si está activo, si no 2 mm) con el borde forzado «fuera» (`_borde_de`); el margen se dibuja desde el contorno con `margenSobreContorno`. Cambiar margen o borde REARMA el molde (`subirMoldeAMedida`).",
+        "MEDIDA + TELA EN EL PASO ARTE, UN SOLO LUGAR (MAPA 634-635): título + [panel `TarjetaMedida` (en lugar de TALLES) | VISOR]. El dibujo es UNO (`telaAlrededor`): con la medida escrita sin armar, `VisorMedida` en el visor (`visorReemplazo` si ya hay molde); armada, el visor real dibuja la tela alrededor del arte (`telaAMedida`). Nunca una pantalla aparte ni un dibujo dentro del panel. SIN BOTÓN (MAPA 636): se arma sola al dejar de escribir (`amAutoRef`/`amIntentoRef`, `listaParaArmar`); la tela se elige COMO SIEMPRE con «Asignar telas», nunca con una lista propia en el panel.",
+        "DE ENTRADA, EL PASO COMPLETO (MAPA 637): el molde a medida recién elegido se arma SOLO con la medida predeterminada de Ajustes al entrar al paso Arte; la medida se cambia en el panel del paso. El efecto del armado automático corre en CADA render (`amTimerRef` no reinicia el temporizador para la misma medida).",
+        "CAMBIAR LA MEDIDA ES INSTANTÁNEO (MAPA 638): el visor dibuja la medida escrita al toque (`_layoutVivo`, sin el render viejo `_pvMedida`) y el archivo se rehace DE FONDO sin cartel (`armarAMedida` silencioso, `amArmando`); mientras tanto sólo se traban «A la planilla» y «Cargar arte». Nunca volver a poner el cartel que tapa todo para un cambio de medida.",
+        "MARCAS DE TIRAS (MAPA 639/641): sólo a medida; CADA LADO por separado (`lados` = {arriba, abajo, izq, der}, 0 = sin tiras) y el número CUENTA LAS DOS PUNTAS (N = 2 esquinas + N−2 en el medio a L·k/(N−1); 1 = una en el medio). La esquina va en diagonal (vértice de la pieza → de la guía) y una sola aunque la pidan dos lados. Gemelos EXACTOS `_segmentos_tiras`/`_ops_tiras` ↔ `segmentosTiras`/`opsTiras`; viajan con `_borde_de` (`tiras`) y se dibujan ENCIMA del diseño.",
+        "TIRAS EN EL PEDIDO (MAPA 640): «Lleva tiras» y cuántas por lado van en el panel de la medida del paso Arte; se guardan en la COPIA del pedido (nunca en la plantilla) de fondo, y el visor dibuja lo elegido al instante (sin el render viejo del motor mientras está pendiente).",
+        "GROSOR Y COLOR DE LAS MARCAS = DEL MOLDE (MAPA 642): se eligen en Ajustes › Marcas de tiras (siempre a la vista); `_tiras_efectivas` hace que la copia del pedido los tome de la plantilla AHORA. Si lleva y en qué lados, en cambio, es de cada pedido.",
+        "FICHA TÉCNICA DEL MOLDE A MEDIDA (MAPA 643): `_ficha_a_medida` redacta las filas UNA vez (medida, total, margen, borde, tiras con total y cada cuánto por lado, de `_segmentos_tiras`); las dos fichas (`ficha_tecnica.py` ↔ `ficha.js`) sólo las dibujan, idénticas. Una frase por renglón en las notas.",
+        "DESDE EL OTRO SISTEMA (MAPA 644): todo lo del molde a medida se puede pedir por la API (medida, tela, tiras) y calcular antes (`/a_medida/calcular`); documentado en la guía PDF 5c-5e."
       ],
       "cicatrices": [
         "2026-10-06 (MAPA 623): el doble de la base del entorno aislado no tenía `guardar_registro` y el molde se daba de alta con 0 piezas: se agregó al doble.",
         "2026-10-06 (MAPA 623): la limpieza de moldes que desaparecen del servidor escribía `disenoVars` con el formato viejo y la app se caía con «No se pudo cargar» (`.map is not a function`).",
         "2026-10-06: en una pestaña en segundo plano `pintarYa` (requestAnimationFrame) no avanza: un alta probada en una pestaña oculta parece colgada.",
-        "2026-10-06: el usuario se enojó porque Moldería seguía pidiendo pieza, margen y muestra al elegir «A medida» (y el modal de creación también): esos campos van en las herramientas, no en la elección."
+        "2026-10-06: el usuario se enojó porque Moldería seguía pidiendo pieza, margen y muestra al elegir «A medida» (y el modal de creación también): esos campos van en las herramientas, no en la elección.",
+        "2026-10-07 (MAPA 628): `disenosPlantillaPedido()` dejaba `variable=null` para un molde a medida sin variable elegida → la plantilla del PEDIDO salía sin dobladillo; ahora usa la variable por defecto del molde.",
+        "2026-10-07 (MAPA 628): Configuración › Moldería › Margen no dibujaba el margen punteado; ahora el visor lo muestra en vivo (`onMargenEnVivo` de `MargenAMedida`).",
+        "2026-10-07 (MAPA 629): la bandera seguía saliendo con UNA guía en Illustrator y Corel: el margen viajaba como camino `punteado` y dependía del conector instalado (Illustrator 1.27 lo dejaba como arte, Corel 1.4 no lo conocía); y la guía .ai no lo traía.",
+        "2026-10-07 (MAPA 629): la línea punteada de «Plantilla» (la caja del diseño = la bandera entera) no era la del margen; el usuario esperaba que fueran la misma.",
+        "2026-10-07 (MAPA 631): «3 × 1,57 no entra en 157» era correcto (borde de corte 2 mm fuera = 157,4) pero el cartel decía «300,4 cm de ancho» (el lado que no importa con giro) y no decía cuánto sumaba el borde.",
+        "2026-10-07 (MAPA 632): «si pongo 300 × 157 ¿por qué me pone 300,4 × 157,4?» — el borde de corte sumaba afuera de la medida; ahora va adentro y la medida es la del diseño.",
+        "2026-10-07 (MAPA 632): la regla de la tela era geométrica y prometía piezas justas que el armado rechaza (deja `espaciado` de aire contra el borde de la mesa en una grilla de 4 mm): en 157 cm entra hasta 155,1. El contrato §2 la mide ahora contra `preparar` real.",
+        "2026-10-07 (MAPA 634): la columna TALLES mostraba «1,00x1,00» (los de la plantilla: `estado.talles` es del molde activo del servidor) con la copia 3,00x1,48 armada.",
+        "2026-10-07 (MAPA 632→633): «se pasa / lo máximo» se ajustó a un defecto del armado (aire contra el borde) en vez de arreglar el armado; el usuario lo vio al primer intento.",
+        "2026-10-07 (MAPA 635): la 634 puso la medida en una pantalla aparte antes de armar y un dibujito en el panel después; el usuario: «usá la misma visual, no lo separes en 2 espacios».",
+        "2026-10-07 (MAPA 636): la 635 dejó un botón «Armar a esta medida» y un select de tela propio en el panel; el usuario: «no lo separes en 2, elegir la tela como siempre».",
+        "2026-10-07 (MAPA 637): el efecto con dependencias fijas miraba una sola vez, antes de que el paso llenara `amAutoRef`, y nunca armaba.",
+        "2026-10-07 (MAPA 638): cada cambio de medida mostraba «leyendo el archivo» (cartel de `procesando` mientras se rehacía el molde); el usuario lo quiere instantáneo.",
+        "2026-10-08 (MAPA 640): la 639 dejó las tiras sólo en Ajustes; el usuario las buscó en el pedido y no las encontró.",
+        "2026-10-08 (MAPA 641): la 639 contaba las marcas SIN las puntas y ponía las 4 esquinas siempre; el usuario las cuenta CON las puntas y quiere elegir lado por lado. Lo guardado viejo se traduce (N + 2).",
+        "2026-10-08 (MAPA 642): el grosor estaba escondido detrás de «Lleva marcas» y la casilla numérica no dejaba escribir 0,5 (se corregía a 0,1 al borrar)."
       ],
       "contratos": [
         "verificar_molde_a_medida.py",
-        "verificar_planilla_sin_talles.py"
+        "verificar_planilla_sin_talles.py",
+        "verificar_navegador_ficha.py"
       ],
       "mapa": [
         622,
         623,
-        624
+        624,
+        629,
+        631,
+        632,
+        633,
+        634,
+        635,
+        636,
+        637,
+        638,
+        639,
+        640,
+        641,
+        642,
+        643,
+        644
       ],
       "memoria": "molde-a-medida.md",
       "conexiones": [

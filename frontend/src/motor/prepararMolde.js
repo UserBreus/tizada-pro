@@ -202,12 +202,12 @@ export function subirPaginas(rutaApi, pid, zipB, onPct = null) {
  * metros con la pieza `pieza`, y lo prepara como cualquier molde del camino A. Devuelve lo mismo que
  * `prepararEnDosTiempos` (`zipA`, `archivo`, `sha1`, `caminoA: true`, `resumen`).
  */
-export async function prepararMoldeAMedida({ anchoM, altoM, pieza, onA = null }) {
+export async function prepararMoldeAMedida({ anchoM, altoM, pieza, reservaMm = 0, margen = null, onA = null }) {
   onA && onA({ texto: 'Armando el molde a la medida…' })
   const uno = crearPool(1, () => new Worker(new URL('./obrero.worker.js', import.meta.url), { type: 'module' }), 'molde a medida')
   let r
   try {
-    r = await uno.enviar('a_medida_pdf', { anchoM, altoM, pieza })
+    r = await uno.enviar('a_medida_pdf', { anchoM, altoM, pieza, reservaMm, margen })
   } finally {
     uno.cerrar()
   }

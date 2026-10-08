@@ -295,6 +295,33 @@ def generar_ficha(salida, titulo, subtitulo, planilla, moldes_guia, nombre_archi
             y += 10
             y, rest = _dibujar_piezas(doc, pg, y, rest, A4_H - MARGEN)
 
+        # ── MOLDE A MEDIDA: MEDIDA Y TERMINACIÓN (MAPA 643) ─────────────────────────────────
+        # La medida del diseño, el total con el margen, el borde y las TIRAS (cuántas, cada cuánto
+        # se cosen). Las filas vienen redactadas del servidor (`_ficha_a_medida`); acá sólo se
+        # dibujan. Gemelo: la misma sección en `motor/ficha/ficha.js`.
+        am_f = mg.get("a_medida") or {}
+        filas_am = am_f.get("filas") or []
+        if filas_am:
+            notas_am = [str(n) for n in (am_f.get("notas") or []) if n]
+            alto_am = 22 + 13 * len(filas_am) + 11 * len(notas_am)
+            if y + 16 + alto_am > A4_H - MARGEN:
+                pg = nueva_pagina(); y = 78
+            else:
+                y += 16
+            y = _seccion(pg, y, "MEDIDA Y TERMINACIÓN")
+            y += 12
+            for f in filas_am:
+                _sub = bool(f.get("sub"))
+                _sx = 14 if _sub else 0
+                _texto(pg, MARGEN + _sx, y, str(f.get("etiqueta") or ""), size=(8.5 if _sub else 9),
+                       color=(GRIS if _sub else NEGRO), bold=(not _sub), max_w=190 - _sx)
+                _texto(pg, MARGEN + 200, y, str(f.get("valor") or ""), size=9, color=NEGRO,
+                       max_w=A4_W - 2 * MARGEN - 200)
+                y += 13
+            for _n in notas_am:            # una frase por renglón
+                _texto(pg, MARGEN, y, _n, size=8, color=GRIS, max_w=A4_W - 2 * MARGEN)
+                y += 11
+
         # ── LO QUE NO SE SUBLIMA ────────────────────────────────────────────────────────────
         # Los objetos marcados como TPU / Bordado / DTF: en la tela sale sólo una cruz de 3 cm,
         # así que el taller necesita saber acá qué va en ese lugar y sobre qué pieza.

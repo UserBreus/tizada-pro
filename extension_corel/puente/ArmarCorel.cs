@@ -246,6 +246,7 @@ namespace UserPro
     {
         const double MM = 25.4 / 72.0;            // un punto en milímetros (el documento se arma en mm)
         const int CDR_MM = 3;                     // cdrMillimeter
+        const int CDR_CM = 4;                     // cdrCentimeter (las reglas que ve la persona)
         const int CDR_TOP_LEFT = 3;               // cdrReferencePoint.cdrTopLeft
         const int CDR_FALSO = 0, CDR_IZQ = 1;      // cdrTriState.cdrFalse · cdrAlignment.cdrLeftAlignment
         const int CDR_ESPANOL = 1034;             // cdrTextLanguage (el idioma del texto; no cambia el dibujo)
@@ -427,7 +428,11 @@ namespace UserPro
         {
             dynamic app = App();
             dynamic doc = app.CreateDocument();
-            doc.Unit = CDR_MM;
+            doc.Unit = CDR_MM;                     // las cuentas de este archivo van en mm (no tocar)
+            // LO QUE VE LA PERSONA, EN CENTÍMETROS (2026-10-07, pedido del usuario: «debe ser en
+            // centímetros», igual que Illustrator): las reglas del documento. Si esta versión no lo deja,
+            // quedan como vengan; el dibujo no cambia.
+            try { doc.Rulers.HUnits = CDR_CM; doc.Rulers.VUnits = CDR_CM; } catch { }
             ResultadoArmado r = new ResultadoArmado { Mesas = plan.Paginas.Count, Metodo = "ninguno" };
             bool alguno = false, todosSvg = true;
             // más rápido: Corel no redibuja mientras se arma (se restaura SIEMPRE al final)
