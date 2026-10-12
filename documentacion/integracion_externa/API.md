@@ -89,7 +89,7 @@ un conjunto de piezas de una prenda. Esta lista trae las variables de las prenda
   El pedido manda la **medida del diseño** (`medida: {"ancho_m": 3, "alto_m": 1.5}`) y, si quiere,
   las **tiras** (`tiras: {"lleva": true, "lados": {"arriba": 5, "abajo": 5, "izq": 1, "der": 0}}`; cada
   número cuenta las 2 puntas). TIZADA le suma el margen (3,00 × 1,50 con 3 cm → **3,06 × 1,56**), el
-  borde de corte va adentro, y las marcas de las tiras salen impresas del color y grosor del molde. La
+  borde de corte va adentro, y las marcas de las tiras salen impresas negras con contorno blanco, del grosor del molde. La
   ficha técnica trae «MEDIDA Y TERMINACIÓN»: las medidas, el plano de la pieza acotado (corte, guía = doblez,
   costura, tiras), el borde en corte paso a paso (dobladillo u overlock), la esquina o punta cortada y doblada, y los
   pasos para terminarla con las medidas del pedido. Si el total no entra en la tela: `tela-no-entra` (con
